@@ -3,6 +3,28 @@ require_once 'config.php';
 $db  = db();
 $id  = (int)($_GET['id'] ?? 0);
 
+// ── Folder status helpers (defined here so AJAX handler can use them) ─────
+const FOLDER_TAG_OPTIONS = [
+    'PROGRESS'     => 'PROGRESS',
+    'PROVISIONAL'  => 'PROVISIONAL',
+    'DEPOSIT'      => 'DEPOSIT',
+    'BALANCE'      => 'BALANCE',
+    'BALANCE-CASH' => 'BALANCE-CASH',
+    'FULLY PAID'   => 'PAID',
+];
+function folder_current_tag(string $name): string {
+    foreach (['BALANCE-CASH','BALANCE','DEPOSIT','PROGRESS','PROVISIONAL','PAID','CK','CANCELLED','BOOKED'] as $tag) {
+        if (str_ends_with($name, '_'.$tag)) return $tag;
+    }
+    return '';
+}
+function folder_strip_tag(string $name): string {
+    foreach (['_BALANCE-CASH','_BALANCE','_DEPOSIT','_PROGRESS','_PROVISIONAL','_PAID','_CK','_CANCELLED','_BOOKED'] as $tag) {
+        if (str_ends_with($name, $tag)) return substr($name, 0, -strlen($tag));
+    }
+    return $name;
+}
+
 // ── AJAX: cancel payment ──────────────────────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     header('Content-Type: application/json');
@@ -140,29 +162,6 @@ $payments->execute([$id]); $payments = $payments->fetchAll();
 
 $pageTitle = $inv['invoice_number'];
 include 'includes/header.php';
-
-// ── Folder status helpers ─────────────────────────────────────────────────
-const FOLDER_TAG_OPTIONS = [
-    'PROGRESS'     => 'PROGRESS',
-    'PROVISIONAL'  => 'PROVISIONAL',
-    'DEPOSIT'      => 'DEPOSIT',
-    'BALANCE'      => 'BALANCE',
-    'BALANCE-CASH' => 'BALANCE-CASH',
-    'FULLY PAID'   => 'PAID',
-];
-
-function folder_current_tag(string $name): string {
-    foreach (['BALANCE-CASH','BALANCE','DEPOSIT','PROGRESS','PROVISIONAL','PAID','CK','CANCELLED','BOOKED'] as $tag) {
-        if (str_ends_with($name, '_'.$tag)) return $tag;
-    }
-    return '';
-}
-function folder_strip_tag(string $name): string {
-    foreach (['_BALANCE-CASH','_BALANCE','_DEPOSIT','_PROGRESS','_PROVISIONAL','_PAID','_CK','_CANCELLED','_BOOKED'] as $tag) {
-        if (str_ends_with($name, $tag)) return substr($name, 0, -strlen($tag));
-    }
-    return $name;
-}
 
 // ── Load linked request (for folder status) ───────────────────────────────
 $linkedRequest = null;
