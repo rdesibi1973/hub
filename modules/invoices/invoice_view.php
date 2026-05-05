@@ -63,6 +63,46 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         echo json_encode(['ok'=>true, 'warning'=>$warning]); exit;
     }
 
+    if ($action === 'update_folder') {
+        $invId    = (int)($_POST['invoice_id'] ?? 0);
+        $newLabel = trim($_POST['folder_status'] ?? '');
+        $tagMap   = ['PROGRESS'=>'PROGRESS','PROVISIONAL'=>'PROVISIONAL','DEPOSIT'=>'DEPOSIT',
+                     'BALANCE'=>'BALANCE','BALANCE-CASH'=>'BALANCE-CASH','FULLY PAID'=>'PAID'];
+        if (!array_key_exists($newLabel, $tagMap)) {
+            echo json_encode(['ok'=>false,'error'=>'Invalid status selected.']); exit;
+        }
+        $dbTag = $tagMap[$newLabel];
+        try {
+            $reqRow = $db->prepare(
+                "SELECT r.id, r.practice_code, r.dropbox_url
+                 FROM invoices i JOIN requests r ON r.id = i.request_id WHERE i.id = ?"
+            );
+            $reqRow->execute([$invId]);
+            $req = $reqRow->fetch();
+            if (!$req || !$req['practice_code']) {
+                echo json_encode(['ok'=>false,'error'=>'No linked Dropbox folder found.']); exit;
+            }
+            require_once __DIR__ . '/../leads/dropbox_helper.php';
+            $oldName  = $req['practice_code'];
+            $baseName = folder_strip_tag($oldName);
+            $newName  = $baseName . '_' . $dbTag;
+            $oldUrl   = $req['dropbox_url'] ?? '';
+            $urlBase  = 'https://www.dropbox.com/home';
+            $oldPath  = str_starts_with($oldUrl, $urlBase)
+                ? urldecode(substr($oldUrl, strlen($urlBase))) : '/' . $oldName;
+            $dir      = dirname($oldPath);
+            $newPath  = rtrim($dir, '/') . '/' . $newName;
+            $token    = dropbox_get_access_token();
+            dropbox_move_folder($token, $oldPath, $newPath);
+            $newUrl   = $urlBase . str_replace('%2F', '/', rawurlencode($newPath));
+            $db->prepare("UPDATE requests SET practice_code=?, dropbox_url=? WHERE id=?")
+               ->execute([$newName, $newUrl, (int)$req['id']]);
+            echo json_encode(['ok'=>true,'new_name'=>$newName,'new_tag'=>$dbTag,'new_url'=>$newUrl]); exit;
+        } catch (Exception $e) {
+            echo json_encode(['ok'=>false,'error'=>$e->getMessage()]); exit;
+        }
+    }
+
     echo json_encode(['ok'=>false,'error'=>'Unknown action']); exit;
 }
 
@@ -81,49 +121,7 @@ if (isset($_POST['add_payment'])) {
         $db->prepare("INSERT INTO invoice_payments (invoice_id,payment_date,amount,method,reference,notes) VALUES (?,?,?,?,?,?)")
            ->execute([$id,$payDate,$amount,$method,$ref?:null,$notes?:null]);
         recalculate_invoice($db, $id);
-
-        // ── Optional: rename Dropbox folder ──────────────────────────────
-        $newTag = trim($_POST['folder_status'] ?? '');
-        if ($newTag !== '' && array_key_exists($newTag, FOLDER_TAG_OPTIONS)) {
-            $dbTag = FOLDER_TAG_OPTIONS[$newTag]; // e.g. 'FULLY PAID' → 'PAID'
-            try {
-                $reqRow = $db->prepare(
-                    "SELECT r.id, r.practice_code, r.dropbox_url
-                     FROM invoices i JOIN requests r ON r.id = i.request_id
-                     WHERE i.id = ?"
-                );
-                $reqRow->execute([$id]);
-                $req = $reqRow->fetch();
-                if ($req && $req['practice_code']) {
-                    require_once __DIR__ . '/../leads/dropbox_helper.php';
-                    $oldName  = $req['practice_code'];
-                    $baseName = folder_strip_tag($oldName);
-                    $newName  = $baseName . '_' . $dbTag;
-                    // Extract Dropbox path from URL
-                    $oldUrl  = $req['dropbox_url'] ?? '';
-                    $urlBase = 'https://www.dropbox.com/home';
-                    $oldPath = str_starts_with($oldUrl, $urlBase)
-                        ? urldecode(substr($oldUrl, strlen($urlBase)))
-                        : '/' . $oldName;
-                    $dir     = dirname($oldPath);
-                    $newPath = rtrim($dir, '/') . '/' . $newName;
-                    // Rename in Dropbox
-                    $token = dropbox_get_access_token();
-                    dropbox_move_folder($token, $oldPath, $newPath);
-                    // Update DB
-                    $newUrl = $urlBase . str_replace('%2F', '/', rawurlencode($newPath));
-                    $db->prepare("UPDATE requests SET practice_code=?, dropbox_url=? WHERE id=?")
-                       ->execute([$newName, $newUrl, (int)$req['id']]);
-                    flash("Payment recorded. Folder renamed to \"{$newName}\".");
-                } else {
-                    flash("Payment of " . fmt_money($amount, '') . " recorded. (No linked folder found.)");
-                }
-            } catch (Exception $e) {
-                flash("Payment recorded, but folder rename failed: " . $e->getMessage(), 'error');
-            }
-        } else {
-            flash("Payment of " . fmt_money($amount, '') . " recorded.");
-        }
+        flash("Payment of " . fmt_money($amount, '') . " recorded.");
         header("Location: invoice_view.php?id=$id"); exit;
     }
 }
@@ -357,7 +355,7 @@ $sym = $inv['currency'] === 'EUR' ? '€' : '$';
 <?php if ($inv['status'] !== 'Cancelled'): ?>
 <div class="table-wrap" style="max-width:860px;padding:20px 24px;">
   <div style="font-size:.8rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--grey-dk);margin-bottom:16px;">Record Payment</div>
-  <form id="payment-form" method="POST" style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;">
+  <form method="POST" style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;">
     <input type="hidden" name="add_payment" value="1">
     <div class="form-group" style="gap:4px">
       <label style="font-size:.7rem">Date</label>
@@ -388,33 +386,60 @@ $sym = $inv['currency'] === 'EUR' ? '€' : '$';
   <?php if ($linkedRequest && $linkedRequest['practice_code']): ?>
   <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--grey-lt);">
     <div style="font-size:.8rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--grey-dk);margin-bottom:12px;">Dropbox Folder Status</div>
-    <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
-      <div style="font-size:.83rem;color:var(--grey-dk);">
-        Current folder: <code style="background:var(--off-white);padding:2px 6px;border-radius:4px;font-size:.8rem"><?= h($linkedRequest['practice_code']) ?></code>
-        <?php if ($currentTag): ?>
-          &nbsp;<span style="background:var(--amber-lt);color:var(--amber);padding:2px 8px;border-radius:12px;font-size:.7rem;font-weight:700"><?= h($currentTag) ?></span>
-        <?php else: ?>
-          &nbsp;<span style="background:var(--grey-lt);color:var(--grey-mid);padding:2px 8px;border-radius:12px;font-size:.7rem;font-weight:700">No tag</span>
-        <?php endif; ?>
-      </div>
-      <div style="display:flex;align-items:center;gap:8px;">
-        <label style="font-size:.7rem;font-weight:700;color:var(--grey-dk);white-space:nowrap">Update status to:</label>
-        <select name="folder_status" form="payment-form" style="padding:7px 10px;border:1.5px solid var(--grey-lt);border-radius:6px;font-family:inherit;font-size:.83rem">
-          <option value="">— No change —</option>
-          <?php foreach (FOLDER_TAG_OPTIONS as $label => $tag): ?>
-            <option value="<?= h($label) ?>"><?= h($label) ?></option>
-          <?php endforeach; ?>
-        </select>
-      </div>
+    <div style="font-size:.83rem;color:var(--grey-dk);margin-bottom:12px;">
+      Current folder: <code id="folderName" style="background:var(--off-white);padding:2px 6px;border-radius:4px;font-size:.8rem"><?= h($linkedRequest['practice_code']) ?></code>
+      &nbsp;<span id="folderTagBadge" style="background:var(--amber-lt);color:var(--amber);padding:2px 8px;border-radius:12px;font-size:.7rem;font-weight:700;display:<?= $currentTag ? 'inline' : 'none' ?>"><?= h($currentTag ?: '') ?></span>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+      <label style="font-size:.7rem;font-weight:700;color:var(--grey-dk);white-space:nowrap">Update status to:</label>
+      <select id="folderStatusSelect" style="padding:7px 10px;border:1.5px solid var(--grey-lt);border-radius:6px;font-family:inherit;font-size:.83rem">
+        <option value="">— Select new status —</option>
+        <?php foreach (FOLDER_TAG_OPTIONS as $label => $tag): ?>
+          <option value="<?= h($label) ?>" <?= $currentTag === $tag ? 'selected' : '' ?>><?= h($label) ?></option>
+        <?php endforeach; ?>
+      </select>
+      <button class="btn btn-outline" onclick="updateFolderStatus()" type="button">Update Folder</button>
+      <span id="folderMsg" style="font-size:.8rem;display:none"></span>
     </div>
     <?php if ($linkedRequest['dropbox_url']): ?>
       <div style="margin-top:8px;font-size:.72rem;color:var(--grey-mid)">
-        <a href="<?= h($linkedRequest['dropbox_url']) ?>" target="_blank" style="color:var(--blue)">Open Dropbox folder ↗</a>
+        <a id="folderLink" href="<?= h($linkedRequest['dropbox_url']) ?>" target="_blank" style="color:var(--blue)">Open Dropbox folder ↗</a>
       </div>
     <?php endif; ?>
   </div>
   <?php endif; ?>
 </div>
+
+<script>
+async function updateFolderStatus() {
+  var sel = document.getElementById('folderStatusSelect');
+  var newLabel = sel.value;
+  if (!newLabel) { alert('Please select a status.'); return; }
+  var msg = document.getElementById('folderMsg');
+  msg.style.display = 'inline'; msg.style.color = 'var(--grey-mid)'; msg.textContent = 'Updating…';
+  var fd = new FormData();
+  fd.append('action','update_folder');
+  fd.append('invoice_id','<?= $id ?>');
+  fd.append('folder_status', newLabel);
+  try {
+    var r = await fetch('', {method:'POST', body:fd});
+    var d = await r.json();
+    if (d.ok) {
+      document.getElementById('folderName').textContent = d.new_name;
+      var badge = document.getElementById('folderTagBadge');
+      badge.textContent = d.new_tag; badge.style.display = 'inline';
+      var link = document.getElementById('folderLink');
+      if (link) link.href = d.new_url;
+      msg.style.color = 'var(--green)'; msg.textContent = '✓ Folder renamed successfully';
+      setTimeout(function(){ msg.style.display='none'; }, 3000);
+    } else {
+      msg.style.color = 'var(--red)'; msg.textContent = '✗ ' + d.error;
+    }
+  } catch(e) {
+    msg.style.color = 'var(--red)'; msg.textContent = '✗ Network error';
+  }
+}
+</script>
 <?php endif; ?>
 <?php endif; // not cancelled ?>
 
