@@ -27,6 +27,7 @@ function folder_strip_tag(string $name): string {
 
 // ── AJAX: cancel payment ──────────────────────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
+    ob_start();
     header('Content-Type: application/json');
     $action = $_POST['action'];
 
@@ -34,26 +35,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $pid    = (int)($_POST['payment_id'] ?? 0);
         $invId  = (int)($_POST['invoice_id'] ?? 0);
         $reason = trim($_POST['reason'] ?? '');
-        if (!$pid || !$reason) { echo json_encode(['ok'=>false,'error'=>'Missing data']); exit; }
+        if (!$pid || !$reason) { ob_end_clean(); echo json_encode(['ok'=>false,'error'=>'Missing data']); exit; }
         try {
             $db->prepare("UPDATE invoice_payments SET cancelled_at=NOW(), cancellation_reason=? WHERE id=? AND invoice_id=?")
                ->execute([$reason, $pid, $invId]);
             recalculate_invoice($db, $invId);
-            echo json_encode(['ok'=>true]);
-        } catch (Exception $e) { echo json_encode(['ok'=>false,'error'=>$e->getMessage()]); }
+            ob_end_clean(); echo json_encode(['ok'=>true]);
+        } catch (Exception $e) { ob_end_clean(); echo json_encode(['ok'=>false,'error'=>$e->getMessage()]); }
         exit;
     }
 
     if ($action === 'mark_sent') {
         $invId = (int)($_POST['invoice_id'] ?? 0);
         $db->prepare("UPDATE invoices SET status='New', updated_at=NOW() WHERE id=?")->execute([$invId]);
-        echo json_encode(['ok'=>true]); exit;
+        ob_end_clean(); echo json_encode(['ok'=>true]); exit;
     }
 
     if ($action === 'cancel_invoice') {
         $invId = (int)($_POST['invoice_id'] ?? 0);
         $db->prepare("UPDATE invoices SET status='Cancelled', updated_at=NOW() WHERE id=?")->execute([$invId]);
-        echo json_encode(['ok'=>true]); exit;
+        ob_end_clean(); echo json_encode(['ok'=>true]); exit;
     }
 
     if ($action === 'restore_invoice') {
@@ -64,14 +65,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $warning = $finalStatus !== 'New'
             ? "Invoice has recorded payments — status has been set to \"$finalStatus\" instead of New. To revert to New, cancel all payments first."
             : null;
-        echo json_encode(['ok'=>true, 'warning'=>$warning]); exit;
+        ob_end_clean(); echo json_encode(['ok'=>true, 'warning'=>$warning]); exit;
     }
 
     if ($action === 'set_status') {
         $invId   = (int)($_POST['invoice_id'] ?? 0);
         $nstatus = $_POST['new_status'] ?? '';
         if (!in_array($nstatus, ['New', 'Cancelled'])) {
-            echo json_encode(['ok'=>false,'error'=>'This status is set automatically by the payment system.']); exit;
+            ob_end_clean(); echo json_encode(['ok'=>false,'error'=>'This status is set automatically by the payment system.']); exit;
         }
         $db->prepare("UPDATE invoices SET status=?, updated_at=NOW() WHERE id=?")->execute([$nstatus, $invId]);
         $warning = null;
@@ -82,7 +83,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 $warning = "Invoice has recorded payments — status has been set to \"$finalStatus\" instead of New. To revert to New, cancel all payments first.";
             }
         }
-        echo json_encode(['ok'=>true, 'warning'=>$warning]); exit;
+        ob_end_clean(); echo json_encode(['ok'=>true, 'warning'=>$warning]); exit;
     }
 
     if ($action === 'update_folder') {
@@ -91,7 +92,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $tagMap   = ['PROGRESS'=>'PROGRESS','PROVISIONAL'=>'PROVISIONAL','DEPOSIT'=>'DEPOSIT',
                      'BALANCE'=>'BALANCE','BALANCE-CASH'=>'BALANCE-CASH','FULLY PAID'=>'PAID'];
         if (!array_key_exists($newLabel, $tagMap)) {
-            echo json_encode(['ok'=>false,'error'=>'Invalid status selected.']); exit;
+            ob_end_clean(); echo json_encode(['ok'=>false,'error'=>'Invalid status selected.']); exit;
         }
         $dbTag = $tagMap[$newLabel];
         try {
@@ -102,7 +103,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             $reqRow->execute([$invId]);
             $req = $reqRow->fetch();
             if (!$req || !$req['practice_code']) {
-                echo json_encode(['ok'=>false,'error'=>'No linked Dropbox folder found.']); exit;
+                ob_end_clean(); echo json_encode(['ok'=>false,'error'=>'No linked Dropbox folder found.']); exit;
             }
             require_once __DIR__ . '/../leads/dropbox_helper.php';
             $oldName  = $req['practice_code'];
@@ -119,13 +120,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             $newUrl   = $urlBase . str_replace('%2F', '/', rawurlencode($newPath));
             $db->prepare("UPDATE requests SET practice_code=?, dropbox_url=? WHERE id=?")
                ->execute([$newName, $newUrl, (int)$req['id']]);
-            echo json_encode(['ok'=>true,'new_name'=>$newName,'new_tag'=>$dbTag,'new_url'=>$newUrl]); exit;
+            ob_end_clean(); echo json_encode(['ok'=>true,'new_name'=>$newName,'new_tag'=>$dbTag,'new_url'=>$newUrl]); exit;
         } catch (Exception $e) {
-            echo json_encode(['ok'=>false,'error'=>$e->getMessage()]); exit;
+            ob_end_clean(); echo json_encode(['ok'=>false,'error'=>$e->getMessage()]); exit;
         }
     }
 
-    echo json_encode(['ok'=>false,'error'=>'Unknown action']); exit;
+    ob_end_clean(); echo json_encode(['ok'=>false,'error'=>'Unknown action']); exit;
 }
 
 // ── Add payment (form POST redirect) ─────────────────────────────────────
@@ -416,10 +417,7 @@ async function updateFolderStatus() {
   fd.append('invoice_id','<?= $id ?>');
   fd.append('folder_status', newLabel);
   try {
-    var r = await fetch('', {method:'POST', body:fd});
-    var d = await r.json();
-    if (d.ok) {
-      document.getElementById('folderName').textContent = d.new_name;
+    var r = await fetch('invoice_view.php?id=<?= $id ?>', {method:'POST', body:fd});
       var badge = document.getElementById('folderTagBadge');
       badge.textContent = d.new_tag; badge.style.display = 'inline';
       msg.style.color = 'var(--green)'; msg.textContent = '✓ Folder renamed successfully';
