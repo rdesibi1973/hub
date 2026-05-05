@@ -4,11 +4,12 @@ $pageTitle = 'Invoices';
 $db = db();
 
 // ── Filters ───────────────────────────────────────────────────────────────
-$search  = trim($_GET['q']       ?? '');
-$fstatus = $_GET['status']       ?? '';
-$fissuer = $_GET['issuer']       ?? '';
-$fyear   = (int)($_GET['year']   ?? date('Y'));
-$fcurr   = $_GET['currency']     ?? '';
+$search    = trim($_GET['q']          ?? '');
+$fstatus   = $_GET['status']          ?? '';
+$fissuer   = $_GET['issuer']          ?? '';
+$fyear     = (int)($_GET['year']      ?? date('Y'));
+$fcurr     = $_GET['currency']        ?? '';
+$freqid    = (int)($_GET['request_id'] ?? 0);
 
 $where  = ['1=1']; $params = [];
 if ($search)  { $where[] = '(i.invoice_number LIKE ? OR i.bill_to_name LIKE ?)'; $params[] = "%$search%"; $params[] = "%$search%"; }
@@ -16,6 +17,7 @@ if ($fstatus && array_key_exists($fstatus, INV_STATUSES)) { $where[] = 'i.status
 if ($fissuer && in_array($fissuer, INV_ISSUERS))           { $where[] = 'i.issuer = ?'; $params[] = $fissuer; }
 if ($fyear > 0) { $where[] = 'YEAR(i.issue_date) = ?'; $params[] = $fyear; }
 if ($fcurr && in_array($fcurr, INV_CURRENCIES))            { $where[] = 'i.currency = ?'; $params[] = $fcurr; }
+if ($freqid)                                               { $where[] = 'i.request_id = ?'; $params[] = $freqid; }
 
 $sql = "SELECT i.*, u.full_name AS created_by_name
         FROM invoices i
@@ -44,9 +46,29 @@ include 'includes/header.php';
     <div class="sub"><?= count($rows) ?> invoice<?= count($rows)!==1?'s':'' ?></div>
   </div>
   <div class="gap-8">
-    <a href="invoice_add.php" class="btn btn-red">+ New Invoice</a>
+    <?php if ($freqid): ?>
+      <a href="invoices.php" class="btn btn-grey">✕ Clear filter</a>
+      <a href="invoice_add.php?request_id=<?= $freqid ?>" class="btn btn-red">+ New Invoice for this request</a>
+    <?php else: ?>
+      <a href="invoice_add.php" class="btn btn-red">+ New Invoice</a>
+    <?php endif; ?>
   </div>
 </div>
+
+<?php if ($freqid): ?>
+  <?php
+    $reqInfo = $db->prepare('SELECT customer_name, practice_code FROM requests WHERE id = ?');
+    $reqInfo->execute([$freqid]);
+    $reqRow = $reqInfo->fetch();
+  ?>
+  <?php if ($reqRow): ?>
+    <div style="background:#E8F5E9;border:1px solid #A5D6A7;border-radius:8px;padding:10px 16px;margin-bottom:18px;font-size:.83rem;color:#1A6B3A;">
+      Showing invoices for <strong><?= h($reqRow['customer_name']) ?></strong>
+      <?= $reqRow['practice_code'] ? '— <code>'.h($reqRow['practice_code']).'</code>' : '' ?>
+      &nbsp;·&nbsp; <a href="../leads/request_view.php?id=<?= $freqid ?>" style="color:#1A6B3A;">View request</a>
+    </div>
+  <?php endif; ?>
+<?php endif; ?>
 
 <!-- STATS -->
 <div class="stat-grid">

@@ -249,15 +249,15 @@ include 'includes/header.php';
                  title="<?= h($r['invoice_number']) ?>"
                  style="text-decoration:none;font-size:1rem;">🧾</a>
             <?php elseif ((int)$r['invoice_count'] > 1): ?>
-              <a href="../invoices/invoices.php"
+              <a href="../invoices/invoices.php?request_id=<?= $r['id'] ?>"
                  title="<?= (int)$r['invoice_count'] ?> invoices"
                  style="text-decoration:none;font-size:.8rem;font-weight:700;color:#C0211B;">
                 🧾<?= (int)$r['invoice_count'] ?>
               </a>
-            <?php else: ?>
+            <?php elseif ($r['status'] === 'Booked'): ?>
               <a href="../invoices/invoice_add.php?request_id=<?= $r['id'] ?>"
                  title="Create invoice"
-                 style="text-decoration:none;font-size:1rem;opacity:.2;filter:grayscale(1);">🧾</a>
+                 style="text-decoration:none;font-size:.75rem;font-weight:700;color:#C0211B;white-space:nowrap;border:1px solid #C0211B;border-radius:4px;padding:2px 7px;">+ Invoice</a>
             <?php endif; ?>
           </td>
           <?php endif; ?>
