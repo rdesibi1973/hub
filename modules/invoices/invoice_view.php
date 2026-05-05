@@ -113,6 +113,7 @@ $sym = $inv['currency'] === 'EUR' ? '€' : '$';
       <select id="statusSelect" onchange="setStatus(this.value)"
               style="padding:6px 10px;border:1.5px solid var(--grey-lt);border-radius:6px;font-size:.82rem;cursor:pointer;background:#fff;">
         <?php foreach (INV_STATUSES as $s => $cls): ?>
+          <?php if ($s === 'Partially Paid') continue; // set automatically by payments ?>
           <option value="<?= h($s) ?>" <?= $inv['status'] === $s ? 'selected' : '' ?>><?= h($s) ?></option>
         <?php endforeach; ?>
       </select>
