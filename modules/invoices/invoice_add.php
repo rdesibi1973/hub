@@ -72,8 +72,18 @@ if ($requestId) {
     }
 }
 
-// ── Customers for autocomplete ────────────────────────────────────────────
-$customers = $db->query("SELECT id, name, type, address, city, country FROM customers WHERE active=1 ORDER BY name")->fetchAll();
+// ── Bill To: merge customers + agencies for autocomplete ─────────────────
+$billToList = $db->query("
+    SELECT id, name, 'customer' AS source_type,
+           CONCAT_WS(', ', NULLIF(address,''), NULLIF(city,''), NULLIF(country,'')) AS addr,
+           '' AS vat
+    FROM customers WHERE active = 1
+    UNION ALL
+    SELECT id, nome AS name, 'agency' AS source_type,
+           '' AS addr, '' AS vat
+    FROM agencies WHERE attiva = 1
+    ORDER BY name ASC
+")->fetchAll();
 
 // ── Handle POST ───────────────────────────────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -147,7 +157,8 @@ include 'includes/header.php';
 <form method="POST" id="invForm">
 
 <!-- Hidden fields -->
-<input type="hidden" name="customer_id" id="customerId" value="">
+<input type="hidden" name="bill_to_source_type" id="billToSourceType" value="">
+<input type="hidden" name="bill_to_source_id"   id="billToSourceId"   value="">
 <input type="hidden" name="request_id"  value="<?= (int)($prefill['request_id'] ?? 0) ?>">
 
 <div class="form-card">
@@ -196,20 +207,65 @@ include 'includes/header.php';
   <div class="form-section" style="margin-top:28px;">Bill To</div>
   <div class="form-grid">
     <div class="form-group full">
-      <label>Customer / Select from list</label>
-      <input type="text" id="customerSearch" placeholder="Type to search saved customers…" autocomplete="off"
-             value="<?= h($prefill['bill_to_name'] ?? '') ?>"
-             style="margin-bottom:6px">
-      <div id="customerDrop" style="display:none;position:absolute;z-index:100;background:#fff;border:1.5px solid var(--grey-lt);border-radius:7px;box-shadow:0 4px 16px rgba(0,0,0,.12);max-height:220px;overflow-y:auto;min-width:340px;"></div>
+      <label>Bill To *
+        <span style="font-weight:400;font-size:.72rem;margin-left:8px;">
+          <a href="#" id="addBillToLink" onclick="toggleAddBillTo();return false;"
+             style="color:var(--red);text-decoration:none;">+ Add new customer / agency</a>
+        </span>
+      </label>
+      <div style="position:relative;">
+        <input type="text" id="billToSearch" name="bill_to_name" required autocomplete="off"
+               value="<?= h($prefill['bill_to_name'] ?? '') ?>"
+               placeholder="Type to search customers & agencies…">
+        <div id="billToDrop"></div>
+      </div>
+      <input type="hidden" id="billToSourceType" name="bill_to_source_type" value="">
+      <input type="hidden" id="billToSourceId"   name="bill_to_source_id"   value="">
     </div>
-    <div class="form-group full">
-      <label>Bill To Name *</label>
-      <input type="text" name="bill_to_name" id="billToName" required
-             value="<?= h($prefill['bill_to_name'] ?? '') ?>" placeholder="Name as it appears on the invoice">
+
+    <!-- Add new inline panel (hidden by default) -->
+    <div class="form-group full" id="addBillToPanel" style="display:none;background:var(--off-white);border:1.5px solid var(--grey-lt);border-radius:8px;padding:16px 18px;">
+      <div style="font-weight:700;font-size:.8rem;margin-bottom:12px;color:var(--grey-dk);">New Customer / Agency</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 14px;">
+        <div>
+          <label style="font-size:.75rem">Name *</label>
+          <input type="text" id="newBtName" placeholder="Full name">
+        </div>
+        <div>
+          <label style="font-size:.75rem">Type *</label>
+          <select id="newBtType">
+            <option value="individual">Individual</option>
+            <option value="company">Company</option>
+            <option value="agency">Agency</option>
+          </select>
+        </div>
+        <div>
+          <label style="font-size:.75rem">Address</label>
+          <input type="text" id="newBtAddress" placeholder="Street address">
+        </div>
+        <div>
+          <label style="font-size:.75rem">City</label>
+          <input type="text" id="newBtCity" placeholder="City">
+        </div>
+        <div>
+          <label style="font-size:.75rem">Country</label>
+          <input type="text" id="newBtCountry" placeholder="Country">
+        </div>
+        <div>
+          <label style="font-size:.75rem">Email</label>
+          <input type="email" id="newBtEmail" placeholder="email@example.com">
+        </div>
+      </div>
+      <div style="margin-top:12px;display:flex;gap:8px;">
+        <button type="button" onclick="saveNewBillTo()" class="btn btn-red btn-sm">Save &amp; Select</button>
+        <button type="button" onclick="toggleAddBillTo()" class="btn btn-grey btn-sm">Cancel</button>
+        <span id="newBtStatus" style="font-size:.75rem;color:var(--grey-mid);line-height:2.2;"></span>
+      </div>
     </div>
+
     <div class="form-group full">
-      <label>Bill To Address</label>
-      <textarea name="bill_to_address" rows="3" placeholder="Address, City, Country"></textarea>
+      <label>Address</label>
+      <textarea name="bill_to_address" id="billToAddress" rows="3" placeholder="Auto-filled from selection, or enter manually"></textarea>
     </div>
   </div>
 
@@ -260,54 +316,94 @@ include 'includes/header.php';
 </form>
 
 <style>
-#customerSearch { width:100%;padding:9px 13px;border:1.5px solid var(--grey-lt);border-radius:7px;font-family:inherit;font-size:.85rem; }
-#customerSearch:focus { outline:none;border-color:var(--red); }
-.cust-drop-item { padding:9px 14px;cursor:pointer;font-size:.85rem;border-bottom:1px solid var(--grey-lt); }
-.cust-drop-item:last-child { border-bottom:none; }
-.cust-drop-item:hover { background:var(--off-white); }
-.cust-drop-sub { font-size:.72rem;color:var(--grey-mid); }
+#billToSearch { width:100%;padding:9px 13px;border:1.5px solid var(--grey-lt);border-radius:7px;font-family:inherit;font-size:.85rem; }
+#billToSearch:focus { outline:none;border-color:var(--red); }
+#billToDrop { display:none;position:absolute;z-index:100;background:#fff;border:1.5px solid var(--grey-lt);border-radius:7px;box-shadow:0 4px 16px rgba(0,0,0,.12);max-height:240px;overflow-y:auto;width:100%;top:100%;left:0; }
+.bt-drop-item { padding:9px 14px;cursor:pointer;font-size:.85rem;border-bottom:1px solid var(--grey-lt); }
+.bt-drop-item:last-child { border-bottom:none; }
+.bt-drop-item:hover { background:var(--off-white); }
+.bt-drop-sub { font-size:.72rem;color:var(--grey-mid); }
+.bt-badge { display:inline-block;font-size:.65rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;padding:1px 6px;border-radius:4px;margin-right:6px;vertical-align:middle; }
+.bt-badge.customer { background:#E8F0FE;color:#1D6FA4; }
+.bt-badge.agency   { background:#EDE7F6;color:#6A1B9A; }
+#addBillToPanel input, #addBillToPanel select { width:100%;padding:7px 10px;border:1.5px solid var(--grey-lt);border-radius:6px;font-family:inherit;font-size:.82rem; }
 </style>
 
 <script>
-// ── Customer data ─────────────────────────────────────────────────────────
-var customers = <?= json_encode(array_map(fn($c)=>['id'=>$c['id'],'name'=>$c['name'],'type'=>$c['type'],
-  'addr'=>implode(', ',array_filter([$c['address'],$c['city'],$c['country']]))], $customers)) ?>;
+// ── Bill To unified search (customers + agencies) ────────────────────────
+var billToData = <?= json_encode(array_map(fn($r) => [
+    'id'   => $r['id'],
+    'name' => $r['name'],
+    'type' => $r['source_type'],
+    'addr' => $r['addr'],
+], $billToList)) ?>;
 
-var customerSearch = document.getElementById('customerSearch');
-var customerDrop   = document.getElementById('customerDrop');
+var btSearch = document.getElementById('billToSearch');
+var btDrop   = document.getElementById('billToDrop');
 
-customerSearch.addEventListener('input', function() {
-  var q = this.value.toLowerCase();
-  if (!q) { customerDrop.style.display='none'; return; }
-  var matches = customers.filter(function(c){ return c.name.toLowerCase().includes(q); }).slice(0,8);
-  if (!matches.length) { customerDrop.style.display='none'; return; }
-  customerDrop.innerHTML = matches.map(function(c) {
-    return '<div class="cust-drop-item" onclick="selectCustomer('+c.id+',\''+escJs(c.name)+'\',\''+escJs(c.addr)+'\')">'
-         + '<div>'+escHtml(c.name)+'</div>'
-         + '<div class="cust-drop-sub">'+ucfirst(c.type)+(c.addr?' · '+escHtml(c.addr):'')+'</div></div>';
+btSearch.addEventListener('input', function() {
+  var q = this.value.toLowerCase().trim();
+  if (!q) { btDrop.style.display='none'; return; }
+  var matches = billToData.filter(function(c){ return c.name.toLowerCase().includes(q); }).slice(0,10);
+  if (!matches.length) { btDrop.style.display='none'; return; }
+  btDrop.innerHTML = matches.map(function(c) {
+    var badge = '<span class="bt-badge '+c.type+'">'+(c.type==='agency'?'Agency':'Customer')+'</span>';
+    return '<div class="bt-drop-item" onclick="selectBillTo('+c.id+',\''+escJs(c.name)+'\',\''+escJs(c.addr)+'\',\''+c.type+'\')">'
+         + '<div>'+badge+escHtml(c.name)+'</div>'
+         + (c.addr ? '<div class="bt-drop-sub">'+escHtml(c.addr)+'</div>' : '')
+         + '</div>';
   }).join('');
-  customerDrop.style.display = 'block';
-  positionDrop();
+  btDrop.style.display = 'block';
 });
 
-function positionDrop() {
-  var rect = customerSearch.getBoundingClientRect();
-  customerDrop.style.left  = rect.left + window.scrollX + 'px';
-  customerDrop.style.top   = (rect.bottom + window.scrollY) + 'px';
-  customerDrop.style.width = rect.width + 'px';
-  customerDrop.style.position = 'fixed';
+function selectBillTo(id, name, addr, type) {
+  btSearch.value = name;
+  document.getElementById('billToSourceId').value   = id;
+  document.getElementById('billToSourceType').value = type;
+  document.getElementById('billToAddress').value    = addr;
+  btDrop.style.display = 'none';
 }
 
-function selectCustomer(id, name, addr) {
-  document.getElementById('customerId').value     = id;
-  document.getElementById('billToName').value     = name;
-  document.querySelector('[name="bill_to_address"]').value = addr;
-  customerSearch.value = name;
-  customerDrop.style.display = 'none';
-}
 document.addEventListener('click', function(e){
-  if (!customerDrop.contains(e.target) && e.target !== customerSearch) customerDrop.style.display='none';
+  if (!btDrop.contains(e.target) && e.target !== btSearch) btDrop.style.display='none';
 });
+
+// ── Add new customer / agency ────────────────────────────────────────────
+function toggleAddBillTo() {
+  var p = document.getElementById('addBillToPanel');
+  p.style.display = p.style.display === 'none' ? '' : 'none';
+}
+
+function saveNewBillTo() {
+  var name    = document.getElementById('newBtName').value.trim();
+  var type    = document.getElementById('newBtType').value;
+  var address = document.getElementById('newBtAddress').value.trim();
+  var city    = document.getElementById('newBtCity').value.trim();
+  var country = document.getElementById('newBtCountry').value.trim();
+  var email   = document.getElementById('newBtEmail').value.trim();
+  var status  = document.getElementById('newBtStatus');
+
+  if (!name) { status.textContent = 'Name is required.'; status.style.color='#C0211B'; return; }
+  status.textContent = 'Saving…'; status.style.color = 'var(--grey-mid)';
+
+  fetch('ajax_save_bill_to.php', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({name: name, type: type, address: address, city: city, country: country, email: email})
+  })
+  .then(function(r){ return r.json(); })
+  .then(function(d) {
+    if (!d.success) { status.textContent = d.message || 'Error saving.'; status.style.color='#C0211B'; return; }
+    var addr = [address, city, country].filter(Boolean).join(', ');
+    billToData.unshift({id: d.id, name: name, type: d.source_type, addr: addr});
+    selectBillTo(d.id, name, addr, d.source_type);
+    document.getElementById('addBillToPanel').style.display = 'none';
+    status.textContent = '';
+    ['newBtName','newBtAddress','newBtCity','newBtCountry','newBtEmail'].forEach(function(id){ document.getElementById(id).value=''; });
+    document.getElementById('newBtType').value = 'individual';
+  })
+  .catch(function(){ status.textContent = 'Network error.'; status.style.color='#C0211B'; });
+}
 
 // ── Invoice number preview ────────────────────────────────────────────────
 function updateInvNum() {
