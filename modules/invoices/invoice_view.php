@@ -105,6 +105,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             if (!$req || !$req['practice_code']) {
                 ob_end_clean(); echo json_encode(['ok'=>false,'error'=>'No linked Dropbox folder found.']); exit;
             }
+            require_once __DIR__ . '/../../includes/config.php';
             require_once __DIR__ . '/../leads/dropbox_helper.php';
             if (!function_exists('dropbox_move_folder')) {
                 ob_end_clean(); echo json_encode(['ok'=>false,'error'=>'dropbox_helper.php on server is outdated — please re-upload modules/leads/dropbox_helper.php']); exit;
