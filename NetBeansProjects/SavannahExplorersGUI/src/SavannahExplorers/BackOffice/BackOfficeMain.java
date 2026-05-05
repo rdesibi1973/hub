@@ -2949,7 +2949,22 @@ public class BackOfficeMain extends javax.swing.JFrame {
      * email and lets the user edit all fields before sending via SMTP.
      */
     private void showSafariBookingEmailDialog(String folderName) {
-        String agentEmail = deriveAgentEmail(extractAgentFromFolder(folderName));
+        // Try to get the agent email from the DB via API first.
+        // Falls back to the local name→email map if the API call fails or returns nothing.
+        String agentEmail = "";
+        if (USE_API && AppSession.isLoggedIn()) {
+            try {
+                String body = "{\"folder_name\":\"" + escJsonStatic(folderName) + "\"}";
+                String resp = postApiDirect("api_get_agent_email.php", body);
+                if (resp != null && resp.contains("\"success\":true")) {
+                    String extracted = ApiClient.jsonGetString(resp, "email");
+                    if (extracted != null && !extracted.isBlank()) agentEmail = extracted;
+                }
+            } catch (Exception ignored) {}
+        }
+        if (agentEmail.isEmpty()) {
+            agentEmail = deriveAgentEmail(extractAgentFromFolder(folderName));
+        }
         buildAndShowEmailDialog(folderName, agentEmail);
     }
 
