@@ -111,6 +111,41 @@ function dropbox_upload_text(string $token, string $path, string $content): arra
 }
 
 /**
+ * Move/rename a folder in Dropbox.
+ * @param  string $token      Access token from dropbox_get_access_token()
+ * @param  string $from_path  Full Dropbox path, e.g. '/2026/SmithJohn(BTG-Roberto)_DEPOSIT'
+ * @param  string $to_path    New full Dropbox path
+ * @return array              Dropbox metadata response
+ * @throws RuntimeException on API error
+ */
+function dropbox_move_folder(string $token, string $from_path, string $to_path): array {
+    $ch = curl_init('https://api.dropboxapi.com/2/files/move_v2');
+    curl_setopt_array($ch, [
+        CURLOPT_POST           => true,
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_HTTPHEADER     => [
+            'Authorization: Bearer ' . $token,
+            'Content-Type: application/json',
+        ],
+        CURLOPT_POSTFIELDS => json_encode([
+            'from_path'  => $from_path,
+            'to_path'    => $to_path,
+            'autorename' => false,
+        ]),
+    ]);
+    $body = curl_exec($ch);
+    $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+
+    $data = json_decode($body, true) ?? [];
+    if ($code !== 200) {
+        $errSummary = $data['error_summary'] ?? $body;
+        throw new RuntimeException("Dropbox move_v2 failed (HTTP $code): $errSummary");
+    }
+    return $data;
+}
+
+/**
  * Delete a file or folder in Dropbox (moves to trash).
  * Uses files/delete_v2 — the item is moved to Dropbox trash, not permanently erased.
  *
