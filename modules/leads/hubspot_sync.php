@@ -18,7 +18,7 @@ if (!defined('DB_HOST'))       define('DB_HOST',       'localhost');
 if (!defined('DB_NAME'))       define('DB_NAME',       'savannp5_savannah_leads');
 if (!defined('DB_USER'))       define('DB_USER',       'savannp5_rdesibi');
 if (!defined('DB_PASS'))       define('DB_PASS',       'Savannah2026');
-if (!defined('HUBSPOT_TOKEN')) define('HUBSPOT_TOKEN', 'pat-na1-a84e3308-ece4-49d2-8207-137c768befd5');
+if (!defined('HUBSPOT_TOKEN')) define('HUBSPOT_TOKEN', 'pat-na1-2f454fbe-b51b-4615-9d7e-ec24923cd31e');
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ── Shared library functions (available when included as HS_INCLUDED)  ──────

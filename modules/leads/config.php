@@ -54,4 +54,4 @@ function getStaffAgentId(): int {
 }
 
 // ── HubSpot Private App token (used by hubspot_sync.php) ─────────────────────
-define('HUBSPOT_TOKEN', 'pat-na1-a84e3308-ece4-49d2-8207-137c768befd5');
+define('HUBSPOT_TOKEN', 'pat-na1-2f454fbe-b51b-4615-9d7e-ec24923cd31e');

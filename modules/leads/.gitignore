@@ -1,0 +1,3 @@
+# Exclude files containing API keys and secrets
+config.php
+hs_test.php
