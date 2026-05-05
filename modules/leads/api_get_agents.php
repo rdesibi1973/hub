@@ -15,5 +15,11 @@ if (($_SERVER['HTTP_X_API_KEY'] ?? '') !== API_KEY) {
 }
 
 $db   = db();
-$stmt = $db->query('SELECT id, name FROM agents WHERE active = 1 ORDER BY name ASC');
+$stmt = $db->query(
+    'SELECT DISTINCT a.id, a.name
+     FROM agents a
+     JOIN users u ON u.agent_id = a.id
+     WHERE a.active = 1 AND u.is_active = 1
+     ORDER BY a.name ASC'
+);
 echo json_encode($stmt->fetchAll());

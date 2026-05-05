@@ -61,6 +61,7 @@ public class StatusReportDialog extends JDialog {
     // ── Fields ────────────────────────────────────────────────────────────────
     private final String           safariPath;
     private final Consumer<String> onFolderSelected;
+    private final List<String>     dbAgentNames;     // from DB (active users); may be empty
     private JComboBox<String>      reportCombo;
     private JComboBox<String>      monthCombo;
     private JComboBox<String>      statusCombo;
@@ -71,13 +72,15 @@ public class StatusReportDialog extends JDialog {
     private boolean                suppressRefresh = false;
 
     // ── Constructor ───────────────────────────────────────────────────────────
-    public StatusReportDialog(Frame parent, String safariPath, Consumer<String> onFolderSelected) {
+    public StatusReportDialog(Frame parent, String safariPath,
+                              Consumer<String> onFolderSelected, List<String> dbAgentNames) {
         super(parent, "Status Reports", false);
         this.safariPath       = safariPath;
         this.onFolderSelected = onFolderSelected;
+        this.dbAgentNames     = dbAgentNames != null ? dbAgentNames : new ArrayList<>();
         buildUI();
-        setSize(820, 660);
-        setMinimumSize(new Dimension(600, 420));
+        setSize(940, 680);
+        setMinimumSize(new Dimension(680, 420));
         setLocationRelativeTo(parent);
     }
 
@@ -202,9 +205,15 @@ public class StatusReportDialog extends JDialog {
 
             List<String> agentItems = new ArrayList<>();
             agentItems.add("All");
-            List<String> sortedAgents = new ArrayList<>(agentSet);
-            Collections.sort(sortedAgents);
-            agentItems.addAll(sortedAgents);
+            if (!dbAgentNames.isEmpty()) {
+                // Use DB list (active users only), already sorted alphabetically
+                agentItems.addAll(dbAgentNames);
+            } else {
+                // Fallback: extract unique agents from scanned folder names
+                List<String> sortedAgents = new ArrayList<>(agentSet);
+                Collections.sort(sortedAgents);
+                agentItems.addAll(sortedAgents);
+            }
 
             List<String> statusItems = new ArrayList<>();
             statusItems.add("All");

@@ -2686,6 +2686,49 @@ public class BackOfficeMain extends javax.swing.JFrame {
     // Derives the URL from LEADS_LOOKUP_URL (replaces "lookup.php").
     // Returns the raw response body as a String.
     // -------------------------------------------------------------------------
+    private static String getApiDirect(String endpoint) throws Exception {
+        String base = LEADS_LOOKUP_URL;
+        int lastSlash = base.lastIndexOf('/');
+        String endpointUrl = (lastSlash >= 0 ? base.substring(0, lastSlash + 1) : base + "/") + endpoint;
+        java.net.URL url = new java.net.URL(endpointUrl);
+        java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
+        conn.setRequestMethod("GET");
+        conn.setConnectTimeout(10_000);
+        conn.setReadTimeout(15_000);
+        conn.setRequestProperty("X-API-Key", API_KEY_VALUE);
+        int code = conn.getResponseCode();
+        java.io.InputStream is = (code >= 200 && code < 300) ? conn.getInputStream() : conn.getErrorStream();
+        if (is == null) return "[]";
+        try (BufferedReader br = new BufferedReader(
+                new InputStreamReader(is, java.nio.charset.StandardCharsets.UTF_8))) {
+            StringBuilder sb = new StringBuilder();
+            String line;
+            while ((line = br.readLine()) != null) sb.append(line);
+            return sb.toString();
+        } finally { conn.disconnect(); }
+    }
+
+    /** Returns sorted list of active agent names from DB, or empty list on failure. */
+    private java.util.List<String> fetchActiveAgentNames() {
+        java.util.List<String> names = new java.util.ArrayList<>();
+        if (!USE_API || !AppSession.isLoggedIn()) return names;
+        try {
+            String resp = getApiDirect("api_get_agents.php");
+            int i = 0;
+            while (true) {
+                int nameStart = resp.indexOf("\"name\"", i);
+                if (nameStart < 0) break;
+                int colon = resp.indexOf(':', nameStart);
+                int q1    = resp.indexOf('"', colon + 1);
+                int q2    = resp.indexOf('"', q1 + 1);
+                if (q1 < 0 || q2 < 0) break;
+                names.add(resp.substring(q1 + 1, q2));
+                i = q2 + 1;
+            }
+        } catch (Exception ignored) {}
+        return names;
+    }
+
     private static String postApiDirect(String endpoint, String jsonBody) throws Exception {
         // Build URL: strip "lookup.php" from the end and append endpoint
         String base = LEADS_LOOKUP_URL;
@@ -3399,10 +3442,12 @@ public class BackOfficeMain extends javax.swing.JFrame {
         }
         // Reuse existing dialog if still open, otherwise create a new one
         if (statusReportDialog == null || !statusReportDialog.isDisplayable()) {
+            java.util.List<String> agents = fetchActiveAgentNames();
             statusReportDialog = new StatusReportDialog(
                 this,
                 base + "\\001_Safari",
-                folderName -> jTextField1.setText(folderName)
+                folderName -> jTextField1.setText(folderName),
+                agents
             );
         }
         statusReportDialog.toFront();
