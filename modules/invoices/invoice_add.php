@@ -25,17 +25,14 @@ if ($requestId) {
         // Primary: _START{dd}{MMM}_END{dd}{MMM}{yyyy} in confirmed folder name
         $startStr = ''; $endStr = '';
         if (preg_match('/_START(\d{1,2})([A-Z]{3})_END(\d{1,2})([A-Z]{3})(\d{4})/i', $folder, $dm)) {
-            $year     = (int)$dm[5];
-            $startMon = $monthMap[strtoupper($dm[2])] ?? 0;
-            $endMon   = $monthMap[strtoupper($dm[4])] ?? 0;
-            if ($startMon) $startStr = date('d M Y', mktime(0,0,0,$startMon,(int)$dm[1],$year));
-            if ($endMon)   $endStr   = date('d M Y', mktime(0,0,0,$endMon,  (int)$dm[3],$year));
+            $year = (int)$dm[5];
+            $startStr = sprintf('%02d-%s-%d', (int)$dm[1], strtoupper($dm[2]), $year);
+            $endStr   = sprintf('%02d-%s-%d', (int)$dm[3], strtoupper($dm[4]), $year);
         }
         // Fallback: requests.period (e.g. "11 Jun - 18 Jun 2026")
         if ((!$startStr || !$endStr) && !empty($req['period'])) {
             $period = $req['period'];
             if (preg_match('/(\d{1,2}\s+\w+\s*[-–]\s*\d{1,2}\s+\w+\s+\d{4})/i', $period, $pm)) {
-                // Split on dash/en-dash
                 $parts = preg_split('/\s*[-–]\s*/', $pm[1], 2);
                 if (count($parts) === 2) {
                     $startStr = trim($parts[0]);
@@ -45,6 +42,7 @@ if ($requestId) {
         }
 
         // ── 2. Destination ────────────────────────────────────────────────────
+        // TREK in folder → always Tanzania (it's a Kilimanjaro trek, billed as Tanzania)
         $dest = trim($req['destination'] ?? '');
         if ($dest === '' || strcasecmp($dest, 'TREK') === 0) {
             $destTokens = [
