@@ -146,10 +146,10 @@ include 'includes/header.php';
         <th>Bill To</th>
         <th>Issuer</th>
         <th>Curr.</th>
-        <th class="text-right">Total</th>
-        <th class="text-right">Paid</th>
-        <th class="text-right">Balance</th>
-        <th>Status</th>
+        <th style="text-align:right;min-width:110px">Total</th>
+        <th style="text-align:right;min-width:110px">Paid</th>
+        <th style="text-align:right;min-width:110px">Balance</th>
+        <th style="min-width:110px">Status</th>
         <th>Date</th>
         <th></th>
       </tr>
@@ -174,7 +174,8 @@ include 'includes/header.php';
           <td class="text-right <?= (float)$r['balance_due'] > 0 ? 'text-amber' : 'text-green' ?>">
             <?= fmt_money((float)$r['balance_due'], $r['currency']) ?>
           </td>
-          <td><span class="badge <?= INV_STATUSES[$r['status']] ?? '' ?>"><?= h($r['status']) ?></span></td>
+          <td><?php $sc = INV_STATUSES[$r['status']] ?? ''; ?>
+            <span class="badge <?= $sc ?>" <?= !$sc ? 'style="background:var(--grey-lt);color:var(--grey-dk)"' : '' ?>><?= $r['status'] ? h($r['status']) : '—' ?></span></td>
           <td class="text-muted" style="white-space:nowrap"><?= date('d M Y', strtotime($r['issue_date'])) ?></td>
           <td>
             <div class="gap-8">
