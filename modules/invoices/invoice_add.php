@@ -42,9 +42,10 @@ if ($requestId) {
         }
 
         // ── 2. Destination ────────────────────────────────────────────────────
-        // TREK in folder → always Tanzania (it's a Kilimanjaro trek, billed as Tanzania)
+        // These destination values all mean Tanzania for invoice purposes
         $dest = trim($req['destination'] ?? '');
-        if ($dest === '' || strcasecmp($dest, 'TREK') === 0) {
+        $tanzaniaValues = ['', 'trek', 'safari', 'safari+beach', 'beach', 'zanzibar safari'];
+        if (in_array(strtolower($dest), $tanzaniaValues)) {
             $destTokens = [
                 'TZ-KENYA'    => 'Tanzania & Kenya',
                 'SOUTHAFRICA' => 'South Africa',
