@@ -43,44 +43,32 @@ if (empty($folderName)) {
 try {
     $email = null;
 
-    // Primary: practice_code → agents → users (exact match)
+    // Primary: request → agent_id → users.agent_id (direct FK join)
     $s = $pdo->prepare(
         "SELECT u.email
          FROM requests r
-         JOIN agents a ON a.id = r.agent_id
-         JOIN users u  ON REPLACE(LOWER(u.display_name), ' ', '') = REPLACE(LOWER(a.name), ' ', '')
+         JOIN users u ON u.agent_id = r.agent_id
          WHERE r.practice_code = :folder
            AND u.email IS NOT NULL AND u.email <> ''
-         LIMIT 1"
+         ORDER BY u.id ASC LIMIT 1"
     );
     $s->execute([':folder' => $folderName]);
     $row = $s->fetch(PDO::FETCH_ASSOC);
     if ($row) $email = $row['email'];
 
-    // Fallback: extract agent name from folder name and match users directly
-    // Folder format: MM_DDMON_Customer(AgentName-...  or  (Agency-AgentName-...
+    // Fallback: try with dropbox_url if practice_code doesn't match
     if (!$email) {
-        // Extract token inside first parenthesis pair
-        if (preg_match('/\(([^)]+)\)/', $folderName, $m)) {
-            $parts = explode('-', $m[1]);
-            // For agency bookings: (Agency-AgentName-...), agent is parts[1]
-            // For direct: (AgentName-Drct), agent is parts[0]
-            $candidates = array_unique([$parts[0] ?? '', $parts[1] ?? '']);
-            foreach ($candidates as $candidate) {
-                $candidate = trim($candidate);
-                if (empty($candidate) || strlen($candidate) < 2) continue;
-                $nl = strtolower($candidate);
-                $s2 = $pdo->prepare(
-                    "SELECT email FROM users
-                     WHERE (REPLACE(LOWER(display_name), ' ', '') = :nl OR username = :nl)
-                       AND email IS NOT NULL AND email <> ''
-                     ORDER BY id ASC LIMIT 1"
-                );
-                $s2->execute([':nl' => $nl]);
-                $row2 = $s2->fetch(PDO::FETCH_ASSOC);
-                if ($row2) { $email = $row2['email']; break; }
-            }
-        }
+        $s = $pdo->prepare(
+            "SELECT u.email
+             FROM requests r
+             JOIN users u ON u.agent_id = r.agent_id
+             WHERE r.dropbox_url LIKE :url
+               AND u.email IS NOT NULL AND u.email <> ''
+             ORDER BY u.id ASC LIMIT 1"
+        );
+        $s->execute([':url' => '%/' . rawurlencode($folderName) . '%']);
+        $row = $s->fetch(PDO::FETCH_ASSOC);
+        if ($row) $email = $row['email'];
     }
 
     echo json_encode($email
