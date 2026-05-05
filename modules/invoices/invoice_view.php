@@ -263,7 +263,7 @@ $sym = $inv['currency'] === 'EUR' ? '€' : '$';
 </div>
 
 <!-- Add payment form -->
-<?php if (in_array($inv['status'], ['New','Partially Paid'])): ?>
+<?php if ($inv['status'] !== 'Cancelled'): ?>
 <div class="table-wrap" style="max-width:860px;padding:20px 24px;">
   <div style="font-size:.8rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--grey-dk);margin-bottom:16px;">Record Payment</div>
   <form method="POST" style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;">
