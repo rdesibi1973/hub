@@ -43,9 +43,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     if ($action === 'set_status') {
         $invId   = (int)($_POST['invoice_id'] ?? 0);
         $nstatus = $_POST['new_status'] ?? '';
-        if (array_key_exists($nstatus, INV_STATUSES)) {
-            $db->prepare("UPDATE invoices SET status=?, updated_at=NOW() WHERE id=?")->execute([$nstatus, $invId]);
+        // Only New and Cancelled are allowed as manual status changes
+        if (!in_array($nstatus, ['New', 'Cancelled'])) {
+            echo json_encode(['ok'=>false,'error'=>'This status is set automatically by the payment system.']); exit;
         }
+        // If trying to set New but active payments exist, reject
+        if ($nstatus === 'New') {
+            $activePaid = (float)$db->prepare("SELECT COALESCE(SUM(amount),0) FROM invoice_payments WHERE invoice_id=? AND cancelled_at IS NULL")->execute([$invId]) ? $db->query("SELECT COALESCE(SUM(amount),0) FROM invoice_payments WHERE invoice_id=$invId AND cancelled_at IS NULL")->fetchColumn() : 0;
+            if ($activePaid > 0) {
+                $bal = (float)$db->query("SELECT balance_due FROM invoices WHERE id=$invId")->fetchColumn();
+                $suggest = $bal <= 0 ? 'Fully Paid' : 'Partially Paid';
+                echo json_encode(['ok'=>false,'warning'=>true,'error'=>"Cannot set to New: this invoice has active payments recorded. Status should be \"$suggest\". Cancel all payments first if you want to revert to New."]); exit;
+            }
+        }
+        $db->prepare("UPDATE invoices SET status=?, updated_at=NOW() WHERE id=?")->execute([$nstatus, $invId]);
         echo json_encode(['ok'=>true]); exit;
     }
 
@@ -113,7 +124,7 @@ $sym = $inv['currency'] === 'EUR' ? '€' : '$';
       <select id="statusSelect" onchange="setStatus(this.value)"
               style="padding:6px 10px;border:1.5px solid var(--grey-lt);border-radius:6px;font-size:.82rem;cursor:pointer;background:#fff;">
         <?php foreach (INV_STATUSES as $s => $cls): ?>
-          <?php if ($s === 'Partially Paid') continue; // set automatically by payments ?>
+          <?php if (!in_array($s, ['New', 'Cancelled'])) continue; // Partially Paid and Fully Paid are set automatically ?>
           <option value="<?= h($s) ?>" <?= $inv['status'] === $s ? 'selected' : '' ?>><?= h($s) ?></option>
         <?php endforeach; ?>
       </select>
@@ -319,7 +330,14 @@ async function setStatus(newStatus) {
   fd.append('action','set_status');
   fd.append('invoice_id','<?= $id ?>');
   fd.append('new_status', newStatus);
-  await fetch('', {method:'POST', body:fd});
+  var r = await fetch('', {method:'POST', body:fd});
+  var d = await r.json();
+  if (!d.ok) {
+    alert(d.error);
+    // revert dropdown to current status
+    document.getElementById('statusSelect').value = '<?= h($inv['status']) ?>';
+    return;
+  }
   location.reload();
 }
 
