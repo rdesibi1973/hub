@@ -140,7 +140,7 @@ include 'includes/header.php';
       </div>
       <div class="form-group" style="margin:0">
         <label>Address</label>
-        <input type="text" name="address" placeholder="e.g. Via Roma 1, Milan">
+        <textarea name="address" placeholder="e.g. Via Roma 1, Milan" rows="5" style="width:100%;padding:7px 10px;border:1.5px solid var(--grey-lt);border-radius:6px;font-size:.85rem;font-family:inherit;resize:vertical;"></textarea>
       </div>
       <button type="submit" class="btn btn-red" style="height:38px;white-space:nowrap;">+ Add</button>
     </div>
@@ -195,7 +195,7 @@ include 'includes/header.php';
             <input type="hidden" name="id" value="<?= $ag['id'] ?>">
             <input type="text" name="nome" value="<?= h($ag['nome']) ?>" required style="width:160px;padding:5px 8px;border:1.5px solid var(--grey-lt);border-radius:5px;font-size:.85rem;">
             <input type="text" name="short_name" value="<?= h($ag['short_name'] ?? '') ?>" style="width:120px;padding:5px 8px;border:1.5px solid var(--grey-lt);border-radius:5px;font-size:.85rem;" placeholder="Short name">
-            <input type="text" name="address" value="<?= h($ag['address'] ?? '') ?>" style="width:200px;padding:5px 8px;border:1.5px solid var(--grey-lt);border-radius:5px;font-size:.85rem;" placeholder="Address">
+            <textarea name="address" rows="5" style="width:260px;padding:5px 8px;border:1.5px solid var(--grey-lt);border-radius:5px;font-size:.85rem;font-family:inherit;resize:vertical;" placeholder="Address"><?= h($ag['address'] ?? '') ?></textarea>
             <label style="display:flex;align-items:center;gap:4px;font-size:.82rem;cursor:pointer;white-space:nowrap;"><input type="radio" name="type" value="savannah" <?= $agType==='savannah'?'checked':'' ?>> Savannah</label>
             <label style="display:flex;align-items:center;gap:4px;font-size:.82rem;cursor:pointer;white-space:nowrap;"><input type="radio" name="type" value="promoservice" <?= $agType==='promoservice'?'checked':'' ?>> Promo (-PS)</label>
             <label style="display:flex;align-items:center;gap:4px;font-size:.82rem;cursor:pointer;white-space:nowrap;"><input type="radio" name="type" value="lamprati" <?= $agType==='lamprati'?'checked':'' ?>> Lamprati (-LAM)</label>

@@ -731,8 +731,8 @@ public class NewRequestDialog extends JDialog {
     private void showNewAgencyDialog() {
         JDialog dlg = new JDialog(this, "New Agency", true);
         dlg.setLayout(new BorderLayout(8, 8));
-        dlg.setSize(460, 340);
-        dlg.setMinimumSize(new Dimension(400, 320));
+        dlg.setSize(460, 440);
+        dlg.setMinimumSize(new Dimension(400, 400));
         dlg.setLocationRelativeTo(this);
         dlg.setResizable(true);
 
@@ -769,11 +769,18 @@ public class NewRequestDialog extends JDialog {
         form.add(radioPanel, gc);
 
         // Row 3 – Address
-        gc.gridx = 0; gc.gridy = 3; gc.gridwidth = 1; gc.fill = GridBagConstraints.NONE; gc.weightx = 0;
+        gc.gridx = 0; gc.gridy = 3; gc.gridwidth = 1; gc.fill = GridBagConstraints.NORTHWEST; gc.weightx = 0;
         form.add(new JLabel("Address:"), gc);
-        gc.gridx = 1; gc.fill = GridBagConstraints.HORIZONTAL; gc.weightx = 1;
-        JTextField addressField = new JTextField(24);
-        form.add(addressField, gc);
+        gc.gridx = 1; gc.fill = GridBagConstraints.BOTH; gc.weightx = 1; gc.weighty = 1;
+        JTextArea addressField = new JTextArea(5, 24);
+        addressField.setLineWrap(true);
+        addressField.setWrapStyleWord(true);
+        addressField.setFont(new Font("SansSerif", Font.PLAIN, 13));
+        addressField.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createLineBorder(new Color(200, 200, 200)),
+            BorderFactory.createEmptyBorder(4, 6, 4, 6)));
+        form.add(new JScrollPane(addressField), gc);
+        gc.weighty = 0;
 
         // Auto-update short name — includes -PS suffix for Promoservice/Lamprati
         // so the short_name in DB is self-contained (e.g. "Zucchitours-PS").
