@@ -37,27 +37,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     if ($action === 'restore_invoice') {
         $invId = (int)($_POST['invoice_id'] ?? 0);
         $db->prepare("UPDATE invoices SET status='New', updated_at=NOW() WHERE id=? AND status='Cancelled'")->execute([$invId]);
-        echo json_encode(['ok'=>true]); exit;
+        recalculate_invoice($db, $invId);
+        $finalStatus = $db->query("SELECT status FROM invoices WHERE id=$invId")->fetchColumn();
+        $warning = $finalStatus !== 'New'
+            ? "Invoice has recorded payments — status has been set to \"$finalStatus\" instead of New. To revert to New, cancel all payments first."
+            : null;
+        echo json_encode(['ok'=>true, 'warning'=>$warning]); exit;
     }
 
     if ($action === 'set_status') {
         $invId   = (int)($_POST['invoice_id'] ?? 0);
         $nstatus = $_POST['new_status'] ?? '';
-        // Only New and Cancelled are allowed as manual status changes
         if (!in_array($nstatus, ['New', 'Cancelled'])) {
             echo json_encode(['ok'=>false,'error'=>'This status is set automatically by the payment system.']); exit;
         }
-        // If trying to set New but active payments exist, reject
+        $db->prepare("UPDATE invoices SET status=?, updated_at=NOW() WHERE id=?")->execute([$nstatus, $invId]);
+        $warning = null;
         if ($nstatus === 'New') {
-            $activePaid = (float)$db->prepare("SELECT COALESCE(SUM(amount),0) FROM invoice_payments WHERE invoice_id=? AND cancelled_at IS NULL")->execute([$invId]) ? $db->query("SELECT COALESCE(SUM(amount),0) FROM invoice_payments WHERE invoice_id=$invId AND cancelled_at IS NULL")->fetchColumn() : 0;
-            if ($activePaid > 0) {
-                $bal = (float)$db->query("SELECT balance_due FROM invoices WHERE id=$invId")->fetchColumn();
-                $suggest = $bal <= 0 ? 'Fully Paid' : 'Partially Paid';
-                echo json_encode(['ok'=>false,'warning'=>true,'error'=>"Cannot set to New: this invoice has active payments recorded. Status should be \"$suggest\". Cancel all payments first if you want to revert to New."]); exit;
+            recalculate_invoice($db, $invId);
+            $finalStatus = $db->query("SELECT status FROM invoices WHERE id=$invId")->fetchColumn();
+            if ($finalStatus !== 'New') {
+                $warning = "Invoice has recorded payments — status has been set to \"$finalStatus\" instead of New. To revert to New, cancel all payments first.";
             }
         }
-        $db->prepare("UPDATE invoices SET status=?, updated_at=NOW() WHERE id=?")->execute([$nstatus, $invId]);
-        echo json_encode(['ok'=>true]); exit;
+        echo json_encode(['ok'=>true, 'warning'=>$warning]); exit;
     }
 
     echo json_encode(['ok'=>false,'error'=>'Unknown action']); exit;
@@ -334,10 +337,10 @@ async function setStatus(newStatus) {
   var d = await r.json();
   if (!d.ok) {
     alert(d.error);
-    // revert dropdown to current status
     document.getElementById('statusSelect').value = '<?= h($inv['status']) ?>';
     return;
   }
+  if (d.warning) alert('⚠️ ' + d.warning);
   location.reload();
 }
 
@@ -346,7 +349,9 @@ async function restoreInvoice() {
   if (!ok) return;
   var fd = new FormData();
   fd.append('action','restore_invoice'); fd.append('invoice_id','<?= $id ?>');
-  await fetch('', {method:'POST', body:fd});
+  var r = await fetch('', {method:'POST', body:fd});
+  var d = await r.json();
+  if (d.warning) alert('⚠️ ' + d.warning);
   location.reload();
 }
 
