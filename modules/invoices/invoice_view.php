@@ -400,11 +400,6 @@ $sym = $inv['currency'] === 'EUR' ? '€' : '$';
       <button class="btn btn-outline" onclick="updateFolderStatus()" type="button">Update Folder</button>
       <span id="folderMsg" style="font-size:.8rem;display:none"></span>
     </div>
-    <?php if ($linkedRequest['dropbox_url']): ?>
-      <div style="margin-top:8px;font-size:.72rem;color:var(--grey-mid)">
-        <a id="folderLink" href="<?= h($linkedRequest['dropbox_url']) ?>" target="_blank" style="color:var(--blue)">Open Dropbox folder ↗</a>
-      </div>
-    <?php endif; ?>
   </div>
   <?php endif; ?>
 </div>
@@ -427,8 +422,6 @@ async function updateFolderStatus() {
       document.getElementById('folderName').textContent = d.new_name;
       var badge = document.getElementById('folderTagBadge');
       badge.textContent = d.new_tag; badge.style.display = 'inline';
-      var link = document.getElementById('folderLink');
-      if (link) link.href = d.new_url;
       msg.style.color = 'var(--green)'; msg.textContent = '✓ Folder renamed successfully';
       setTimeout(function(){ msg.style.display='none'; }, 3000);
     } else {
