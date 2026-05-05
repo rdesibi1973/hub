@@ -418,6 +418,9 @@ async function updateFolderStatus() {
   fd.append('folder_status', newLabel);
   try {
     var r = await fetch('invoice_view.php?id=<?= $id ?>', {method:'POST', body:fd});
+    var d = await r.json();
+    if (d.ok) {
+      document.getElementById('folderName').textContent = d.new_name;
       var badge = document.getElementById('folderTagBadge');
       badge.textContent = d.new_tag; badge.style.display = 'inline';
       msg.style.color = 'var(--green)'; msg.textContent = '✓ Folder renamed successfully';
@@ -426,7 +429,7 @@ async function updateFolderStatus() {
       msg.style.color = 'var(--red)'; msg.textContent = '✗ ' + d.error;
     }
   } catch(e) {
-    msg.style.color = 'var(--red)'; msg.textContent = '✗ Network error';
+    msg.style.color = 'var(--red)'; msg.textContent = '✗ ' + e.message;
   }
 }
 </script>
