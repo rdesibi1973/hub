@@ -41,7 +41,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                ->execute([$reason, $pid, $invId]);
             recalculate_invoice($db, $invId);
             ob_end_clean(); echo json_encode(['ok'=>true]);
-        } catch (Exception $e) { ob_end_clean(); echo json_encode(['ok'=>false,'error'=>$e->getMessage()]); }
+        } catch (\Throwable $e) { ob_end_clean(); echo json_encode(['ok'=>false,'error'=>$e->getMessage()]); }
         exit;
     }
 
@@ -124,7 +124,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             $db->prepare("UPDATE requests SET practice_code=?, dropbox_url=? WHERE id=?")
                ->execute([$newName, $newUrl, (int)$req['id']]);
             ob_end_clean(); echo json_encode(['ok'=>true,'new_name'=>$newName,'new_tag'=>$dbTag,'new_url'=>$newUrl]); exit;
-        } catch (Exception $e) {
+        } catch (\Throwable $e) {
             ob_end_clean(); echo json_encode(['ok'=>false,'error'=>$e->getMessage()]); exit;
         }
     }
