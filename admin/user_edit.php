@@ -11,6 +11,8 @@ $edited_user->execute([$id]);
 $edited_user = $edited_user->fetch();
 if (!$edited_user) redirect(BASE_URL . '/admin/users.php');
 
+$agents = $pdo->query('SELECT id, name FROM agents ORDER BY name')->fetchAll();
+
 $roles  = $pdo->query('SELECT * FROM roles ORDER BY name')->fetchAll();
 $form   = [];
 
@@ -20,6 +22,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $form['full_name'] = trim($_POST['full_name'] ?? '');
     $form['email']     = trim($_POST['email']     ?? '');
     $form['role_id']   = (int)($_POST['role_id']  ?? 0);
+    $form['agent_id']  = (int)($_POST['agent_id'] ?? 0) ?: null;
     $form['is_active'] = isset($_POST['is_active']) ? 1 : 0;
     $password          = $_POST['password']  ?? '';
     $password2         = $_POST['password2'] ?? '';
@@ -37,11 +40,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } else {
         $hash = $password ? password_hash($password, PASSWORD_BCRYPT) : $edited_user['password_hash'];
         $pdo->prepare('
-            UPDATE users SET full_name=?, email=?, role_id=?, is_active=?, password_hash=? WHERE id=?
+            UPDATE users SET full_name=?, email=?, role_id=?, agent_id=?, is_active=?, password_hash=? WHERE id=?
         ')->execute([
             $form['full_name'],
             $form['email'] ?: null,
             $form['role_id'],
+            $form['agent_id'],
             $form['is_active'],
             $hash,
             $id,
@@ -95,6 +99,22 @@ include __DIR__ . '/../includes/layout_header.php';
               </option>
               <?php endforeach; ?>
             </select>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Agent (for sales staff)</label>
+            <?php $curAgent = $form['agent_id'] ?? $edited_user['agent_id'] ?? null; ?>
+            <select class="form-control" name="agent_id">
+              <option value="">— None —</option>
+              <?php foreach ($agents as $a): ?>
+              <option value="<?= (int)$a['id'] ?>" <?= $curAgent == $a['id'] ? 'selected' : '' ?>>
+                <?= e($a['name']) ?>
+              </option>
+              <?php endforeach; ?>
+            </select>
+            <div class="form-hint">Required for agents to appear in the New Request dropdown.</div>
           </div>
         </div>
 

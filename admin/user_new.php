@@ -4,6 +4,7 @@ require_once __DIR__ . '/../includes/auth.php';
 require_admin();
 
 $roles  = $pdo->query('SELECT * FROM roles ORDER BY name')->fetchAll();
+$agents = $pdo->query('SELECT id, name FROM agents ORDER BY name')->fetchAll();
 $errors = [];
 $form   = [];
 
@@ -14,6 +15,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $form['full_name'] = trim($_POST['full_name'] ?? '');
     $form['email']     = trim($_POST['email']     ?? '');
     $form['role_id']   = (int)($_POST['role_id']  ?? 0);
+    $form['agent_id']  = (int)($_POST['agent_id'] ?? 0) ?: null;
     $form['is_active'] = isset($_POST['is_active']) ? 1 : 0;
     $password          = $_POST['password']  ?? '';
     $password2         = $_POST['password2'] ?? '';
@@ -35,14 +37,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if (!$errors) {
         $pdo->prepare('
-            INSERT INTO users (username, password_hash, full_name, email, role_id, is_active, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, NOW())
+            INSERT INTO users (username, password_hash, full_name, email, role_id, agent_id, is_active, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, NOW())
         ')->execute([
             $form['username'],
             password_hash($password, PASSWORD_BCRYPT),
             $form['full_name'],
             $form['email'] ?: null,
             $form['role_id'],
+            $form['agent_id'],
             $form['is_active'],
         ]);
 
@@ -87,13 +90,27 @@ include __DIR__ . '/../includes/layout_header.php';
             <input class="form-control" type="email" name="email"
                    value="<?= e($form['email'] ?? '') ?>" placeholder="optional">
           </div>
+        </div>
+
+        <div class="form-row">
+            <select class="form-control" name="agent_id">
+              <option value="">— None (admin / accountant / non-sales) —</option>
+              <?php foreach ($agents as $a): ?>
+              <option value="<?= (int)$a['id'] ?>"
+                <?= (isset($form['agent_id']) && $form['agent_id'] == $a['id']) ? 'selected' : '' ?>>
+                <?= e($a['name']) ?>
+              </option>
+              <?php endforeach; ?>
+            </select>
+            <div class="form-hint">Link this user to a sales agent. Required for agents to appear in the New Request dropdown.</div>
+          </div>
           <div class="form-group">
             <label class="form-label">Role *</label>
             <select class="form-control" name="role_id" required>
               <option value="">— Select role —</option>
               <?php foreach ($roles as $r): ?>
               <option value="<?= (int)$r['id'] ?>"
-                <?= (isset($form['role_id']) && $form['role_id'] == $r['id']) ? 'selected' : '' ?>>
+                <?= (isset($form['role_id']) && $form['role_id'] == $r['id']) ? 'selected' : '' ?>>\
                 <?= e($r['name']) ?><?= $r['description'] ? ' — ' . e($r['description']) : '' ?>
               </option>
               <?php endforeach; ?>
