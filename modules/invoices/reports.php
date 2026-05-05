@@ -26,7 +26,7 @@ $stats = $db->query("
         COALESCE(SUM(balance_due),0) AS total_outstanding,
         SUM(status='Paid') AS fully_paid,
         SUM(status='Partially Paid') AS partially_paid,
-        SUM(status IN ('Sent','Draft')) AS open_count
+        SUM(status IN ('New','Partially Paid')) AS open_count
     FROM invoices
     WHERE $baseWhere
 ")->fetch();

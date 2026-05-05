@@ -162,7 +162,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             (invoice_number, request_id, customer_id, bill_to_name, bill_to_address,
              issuer, currency, issue_date, due_date, terms, notes, terms_conditions,
              status, created_by)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'Draft',?)")
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'New',?)")
            ->execute([$invNum,$reqId,$customerId,$billToName,$billToAddr?:null,
                       $issuer,$currency,$issueDate,$dueDate,$terms,
                       $notes?:null,$tc?:null,$uid]);

@@ -24,13 +24,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($action === 'mark_sent') {
         $invId = (int)($_POST['invoice_id'] ?? 0);
-        $db->prepare("UPDATE invoices SET status='Sent', updated_at=NOW() WHERE id=? AND status='Draft'")->execute([$invId]);
+        $db->prepare("UPDATE invoices SET status='New', updated_at=NOW() WHERE id=?")->execute([$invId]);
         echo json_encode(['ok'=>true]); exit;
     }
 
     if ($action === 'cancel_invoice') {
         $invId = (int)($_POST['invoice_id'] ?? 0);
         $db->prepare("UPDATE invoices SET status='Cancelled', updated_at=NOW() WHERE id=?")->execute([$invId]);
+        echo json_encode(['ok'=>true]); exit;
+    }
+
+    if ($action === 'restore_invoice') {
+        $invId = (int)($_POST['invoice_id'] ?? 0);
+        $db->prepare("UPDATE invoices SET status='New', updated_at=NOW() WHERE id=? AND status='Cancelled'")->execute([$invId]);
+        echo json_encode(['ok'=>true]); exit;
+    }
+
+    if ($action === 'set_status') {
+        $invId   = (int)($_POST['invoice_id'] ?? 0);
+        $nstatus = $_POST['new_status'] ?? '';
+        if (array_key_exists($nstatus, INV_STATUSES)) {
+            $db->prepare("UPDATE invoices SET status=?, updated_at=NOW() WHERE id=?")->execute([$nstatus, $invId]);
+        }
         echo json_encode(['ok'=>true]); exit;
     }
 
@@ -89,13 +104,19 @@ $sym = $inv['currency'] === 'EUR' ? '€' : '$';
     </div>
   </div>
   <div class="gap-8">
-    <?php if ($inv['status'] === 'Draft' && isInvoiceAdmin()): ?>
-      <button class="btn btn-amber" onclick="markSent()">✉ Mark as Sent</button>
-    <?php endif; ?>
     <a href="invoice_edit.php?id=<?= $id ?>" class="btn btn-outline">Edit</a>
     <a href="invoice_pdf.php?id=<?= $id ?>" class="btn btn-outline" target="_blank">🖨 PDF</a>
+    <?php if ($inv['status'] === 'Cancelled' && isInvoiceAdmin()): ?>
+      <button class="btn btn-outline" onclick="restoreInvoice()">↩ Restore</button>
+    <?php endif; ?>
     <?php if ($inv['status'] !== 'Cancelled' && isInvoiceAdmin()): ?>
-      <button class="btn btn-danger" onclick="cancelInvoice()">Cancel Invoice</button>
+      <select id="statusSelect" onchange="setStatus(this.value)"
+              style="padding:6px 10px;border:1.5px solid var(--grey-lt);border-radius:6px;font-size:.82rem;cursor:pointer;background:#fff;">
+        <?php foreach (INV_STATUSES as $s => $cls): ?>
+          <option value="<?= h($s) ?>" <?= $inv['status'] === $s ? 'selected' : '' ?>><?= h($s) ?></option>
+        <?php endforeach; ?>
+      </select>
+      <button class="btn btn-danger" onclick="cancelInvoice()">Cancel</button>
     <?php endif; ?>
   </div>
 </div>
@@ -241,7 +262,7 @@ $sym = $inv['currency'] === 'EUR' ? '€' : '$';
 </div>
 
 <!-- Add payment form -->
-<?php if (in_array($inv['status'], ['Draft','Sent','Partially Paid'])): ?>
+<?php if (in_array($inv['status'], ['New','Partially Paid'])): ?>
 <div class="table-wrap" style="max-width:860px;padding:20px 24px;">
   <div style="font-size:.8rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--grey-dk);margin-bottom:16px;">Record Payment</div>
   <form method="POST" style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;">
@@ -292,6 +313,24 @@ async function markSent() {
   fd.append('action','mark_sent'); fd.append('invoice_id','<?= $id ?>');
   fetch('invoice_view.php', {method:'POST',body:fd}).then(function(r){return r.json();}).then(function(d){ if(d.ok) location.reload(); });
 }
+async function setStatus(newStatus) {
+  var fd = new FormData();
+  fd.append('action','set_status');
+  fd.append('invoice_id','<?= $id ?>');
+  fd.append('new_status', newStatus);
+  await fetch('', {method:'POST', body:fd});
+  location.reload();
+}
+
+async function restoreInvoice() {
+  var ok = await seConfirm('Restore Invoice', 'Restore invoice <?= h($inv['invoice_number']) ?> to New status?');
+  if (!ok) return;
+  var fd = new FormData();
+  fd.append('action','restore_invoice'); fd.append('invoice_id','<?= $id ?>');
+  await fetch('', {method:'POST', body:fd});
+  location.reload();
+}
+
 async function cancelInvoice() {
   var ok = await seConfirm('Cancel Invoice', 'Cancel invoice <?= h($inv['invoice_number']) ?>?\n\nThis will mark it as Cancelled. Existing payments are not affected.');
   if (!ok) return;

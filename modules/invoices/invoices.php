@@ -85,7 +85,7 @@ include 'includes/header.php';
   <div class="stat-card amber">
     <div class="stat-label">Outstanding</div>
     <div class="stat-value amber"><?= $sym.number_format($balAmt,2) ?></div>
-    <div class="stat-sub"><?= count(array_filter($rows, fn($r)=>in_array($r['status'],['Sent','Partially Paid']))) ?> open</div>
+    <div class="stat-sub"><?= count(array_filter($rows, fn($r)=>in_array($r['status'],['New','Partially Paid']))) ?> open</div>
   </div>
   <div class="stat-card red">
     <div class="stat-label">Cancelled</div>

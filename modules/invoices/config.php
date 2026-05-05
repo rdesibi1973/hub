@@ -31,10 +31,9 @@ if (!function_exists('getFlash')) {
 function h(mixed $v): string { return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'); }
 
 const INV_STATUSES = [
-    'Draft'          => 'inv-draft',
-    'Sent'           => 'inv-sent',
+    'New'            => 'inv-draft',
     'Partially Paid' => 'inv-partial',
-    'Paid'           => 'inv-paid',
+    'Fully Paid'     => 'inv-paid',
     'Cancelled'      => 'inv-cancelled',
 ];
 
@@ -78,9 +77,9 @@ function recalculate_invoice(PDO $db, int $id): void {
     $newStatus = $cur;
     if ($cur !== 'Cancelled') {
         if ($paid > 0.001) {
-            $newStatus = ($balance <= 0.001) ? 'Paid' : 'Partially Paid';
-        } elseif (in_array($cur, ['Partially Paid', 'Paid'])) {
-            $newStatus = 'Sent'; // all payments were cancelled
+            $newStatus = ($balance <= 0.001) ? 'Fully Paid' : 'Partially Paid';
+        } elseif (in_array($cur, ['Partially Paid', 'Fully Paid'])) {
+            $newStatus = 'New'; // all payments were cancelled
         }
     }
 
