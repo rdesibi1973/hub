@@ -4,9 +4,9 @@ $db  = db();
 $id  = (int)($_GET['id'] ?? 0);
 
 // ── AJAX: cancel payment ──────────────────────────────────────────────────
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     header('Content-Type: application/json');
-    $action = $_POST['action'] ?? '';
+    $action = $_POST['action'];
 
     if ($action === 'cancel_payment') {
         $pid    = (int)($_POST['payment_id'] ?? 0);
