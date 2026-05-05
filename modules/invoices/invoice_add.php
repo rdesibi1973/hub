@@ -249,60 +249,15 @@ include 'includes/header.php';
   <div class="form-section" style="margin-top:28px;">Bill To</div>
   <div class="form-grid">
     <div class="form-group full">
-      <label>Bill To *
-        <span style="font-weight:400;font-size:.72rem;margin-left:8px;">
-          <a href="#" id="addBillToLink" onclick="toggleAddBillTo();return false;"
-             style="color:var(--red);text-decoration:none;">+ Add new customer / agency</a>
-        </span>
-      </label>
+      <label>Bill To *</label>
       <div style="position:relative;">
         <input type="text" id="billToSearch" name="bill_to_name" required autocomplete="off"
                value="<?= h($prefill['bill_to_name'] ?? '') ?>"
-               placeholder="Type to search customers & agencies…">
+               placeholder="Type to search agencies, or enter name manually…">
         <div id="billToDrop"></div>
       </div>
-      <input type="hidden" id="billToSourceType" name="bill_to_source_type" value="">
-      <input type="hidden" id="billToSourceId"   name="bill_to_source_id"   value="">
-    </div>
-
-    <!-- Add new inline panel (hidden by default) -->
-    <div class="form-group full" id="addBillToPanel" style="display:none;background:var(--off-white);border:1.5px solid var(--grey-lt);border-radius:8px;padding:16px 18px;">
-      <div style="font-weight:700;font-size:.8rem;margin-bottom:12px;color:var(--grey-dk);">New Customer / Agency</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 14px;">
-        <div>
-          <label style="font-size:.75rem">Name *</label>
-          <input type="text" id="newBtName" placeholder="Full name">
-        </div>
-        <div>
-          <label style="font-size:.75rem">Type *</label>
-          <select id="newBtType">
-            <option value="individual">Individual</option>
-            <option value="company">Company</option>
-            <option value="agency">Agency</option>
-          </select>
-        </div>
-        <div>
-          <label style="font-size:.75rem">Address</label>
-          <input type="text" id="newBtAddress" placeholder="Street address">
-        </div>
-        <div>
-          <label style="font-size:.75rem">City</label>
-          <input type="text" id="newBtCity" placeholder="City">
-        </div>
-        <div>
-          <label style="font-size:.75rem">Country</label>
-          <input type="text" id="newBtCountry" placeholder="Country">
-        </div>
-        <div>
-          <label style="font-size:.75rem">Email</label>
-          <input type="email" id="newBtEmail" placeholder="email@example.com">
-        </div>
-      </div>
-      <div style="margin-top:12px;display:flex;gap:8px;">
-        <button type="button" onclick="saveNewBillTo()" class="btn btn-red btn-sm">Save &amp; Select</button>
-        <button type="button" onclick="toggleAddBillTo()" class="btn btn-grey btn-sm">Cancel</button>
-        <span id="newBtStatus" style="font-size:.75rem;color:var(--grey-mid);line-height:2.2;"></span>
-      </div>
+      <input type="hidden" id="billToSourceType" name="bill_to_source_type" value="<?= h($prefill['bill_to_type'] ?? '') ?>">
+      <input type="hidden" id="billToSourceId"   name="bill_to_source_id"   value="<?= h($prefill['bill_to_id'] ?? '') ?>">
     </div>
 
     <div class="form-group full">
@@ -368,7 +323,7 @@ include 'includes/header.php';
 .bt-badge { display:inline-block;font-size:.65rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;padding:1px 6px;border-radius:4px;margin-right:6px;vertical-align:middle; }
 .bt-badge.customer { background:#E8F0FE;color:#1D6FA4; }
 .bt-badge.agency   { background:#EDE7F6;color:#6A1B9A; }
-#addBillToPanel input, #addBillToPanel select { width:100%;padding:7px 10px;border:1.5px solid var(--grey-lt);border-radius:6px;font-family:inherit;font-size:.82rem; }
+#addBillToPanel input, #addBillToPanel select { display:none; }
 </style>
 
 <script>
@@ -409,43 +364,6 @@ function selectBillTo(id, name, addr, type) {
 document.addEventListener('click', function(e){
   if (!btDrop.contains(e.target) && e.target !== btSearch) btDrop.style.display='none';
 });
-
-// ── Add new customer / agency ────────────────────────────────────────────
-function toggleAddBillTo() {
-  var p = document.getElementById('addBillToPanel');
-  p.style.display = p.style.display === 'none' ? '' : 'none';
-}
-
-function saveNewBillTo() {
-  var name    = document.getElementById('newBtName').value.trim();
-  var type    = document.getElementById('newBtType').value;
-  var address = document.getElementById('newBtAddress').value.trim();
-  var city    = document.getElementById('newBtCity').value.trim();
-  var country = document.getElementById('newBtCountry').value.trim();
-  var email   = document.getElementById('newBtEmail').value.trim();
-  var status  = document.getElementById('newBtStatus');
-
-  if (!name) { status.textContent = 'Name is required.'; status.style.color='#C0211B'; return; }
-  status.textContent = 'Saving…'; status.style.color = 'var(--grey-mid)';
-
-  fetch('ajax_save_bill_to.php', {
-    method: 'POST',
-    headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({name: name, type: type, address: address, city: city, country: country, email: email})
-  })
-  .then(function(r){ return r.json(); })
-  .then(function(d) {
-    if (!d.success) { status.textContent = d.message || 'Error saving.'; status.style.color='#C0211B'; return; }
-    var addr = [address, city, country].filter(Boolean).join(', ');
-    billToData.unshift({id: d.id, name: name, type: d.source_type, addr: addr});
-    selectBillTo(d.id, name, addr, d.source_type);
-    document.getElementById('addBillToPanel').style.display = 'none';
-    status.textContent = '';
-    ['newBtName','newBtAddress','newBtCity','newBtCountry','newBtEmail'].forEach(function(id){ document.getElementById(id).value=''; });
-    document.getElementById('newBtType').value = 'individual';
-  })
-  .catch(function(){ status.textContent = 'Network error.'; status.style.color='#C0211B'; });
-}
 
 // ── Invoice number preview ────────────────────────────────────────────────
 function updateInvNum() {
