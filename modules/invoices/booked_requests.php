@@ -9,7 +9,22 @@
  * Accessible to: accountant, admin, manager
  */
 require_once 'config.php';
-require_once __DIR__ . '/../../modules/leads/config.php'; // for STATUSES
+
+// STATUSES is defined in leads/config.php — load it if not already defined
+if (!defined('STATUSES')) {
+    $leadsConfig = dirname(__DIR__) . '/leads/config.php';
+    if (file_exists($leadsConfig)) require_once $leadsConfig;
+}
+// Fallback: define inline in case leads config can't be loaded
+if (!defined('STATUSES')) {
+    define('STATUSES', [
+        'Inquiry'   => 'status-inquiry',
+        'Quoted'    => 'status-quoted',
+        'Booked'    => 'status-booked',
+        'Cancelled' => 'status-cancelled',
+        'Lost'      => 'status-lost',
+    ]);
+}
 
 $pageTitle = 'Requests';
 $db = db();
