@@ -12,26 +12,15 @@ import javax.swing.border.*;
 /**
  * StatusReportDialog — non-modal popup for Bookings/Payments status reports.
  *
- * Reads folders from 001_Safari (sub-folders starting with 01–12_),
- * groups them by month and status (and optionally by agent),
+ * Reads folders from 001_Safari, groups them by month and status,
  * and lets the user double-click a folder name to load it into the
  * Customer File field on the main window.
  *
- * Report types:
- *   Bookings        — all booking statuses (PROGRESS, PROVISIONAL, DEPOSIT, BALANCE, BALANCE-CASH, CANCELLED)
- *   Payments        — payment statuses only (DEPOSIT, BALANCE, BALANCE-CASH)
- *
- * Group by options:
- *   Month + Status          — month header → status group → folders
- *   Month + Status + Agent  — month header → status group → agent group → folders
- *   Status                  — status group → folders (no month)
- *   Status + Agent          — status group → agent group → folders
+ * Filters: Report · Month · Status · Agent  (each supports "All")
  */
 public class StatusReportDialog extends JDialog {
 
     // ── Status lists ──────────────────────────────────────────────────────────
-    // IMPORTANT: BALANCE-CASH must come BEFORE BALANCE so the longer token matches first.
-    // CK = confirmed/checked (no separate payment tag yet).
     private static final String[] BOOKING_STATUSES  = {
         "PROGRESS", "PROVISIONAL", "DEPOSIT", "BALANCE-CASH", "BALANCE", "CANCELLED", "CK"
     };
@@ -54,7 +43,6 @@ public class StatusReportDialog extends JDialog {
         STATUS_BG.put("BALANCE-CASH", new Color(0xFFEBEE));
         STATUS_BG.put("CANCELLED",    new Color(0xF5F5F5));
         STATUS_BG.put("CK",           new Color(0xE8F5E9));
-
         STATUS_FG.put("PROGRESS",     new Color(0x1D6FA4));
         STATUS_FG.put("PROVISIONAL",  new Color(0xB45309));
         STATUS_FG.put("DEPOSIT",      new Color(0x6A1B9A));
@@ -71,22 +59,25 @@ public class StatusReportDialog extends JDialog {
     private static final Color FOLDER_HOVER_BG = new Color(0xE3F2FD);
 
     // ── Fields ────────────────────────────────────────────────────────────────
-    private final String                 safariPath;
-    private final Consumer<String>       onFolderSelected; // called on double-click
-    private JComboBox<String>            reportCombo;
-    private JComboBox<String>            groupCombo;
-    private JPanel                       resultsPanel;
-    private JScrollPane                  scroll;
-    private JLabel                       footerLabel;
+    private final String           safariPath;
+    private final Consumer<String> onFolderSelected;
+    private JComboBox<String>      reportCombo;
+    private JComboBox<String>      monthCombo;
+    private JComboBox<String>      statusCombo;
+    private JComboBox<String>      agentCombo;
+    private JPanel                 resultsPanel;
+    private JScrollPane            scroll;
+    private JLabel                 footerLabel;
+    private boolean                suppressRefresh = false;
 
     // ── Constructor ───────────────────────────────────────────────────────────
     public StatusReportDialog(Frame parent, String safariPath, Consumer<String> onFolderSelected) {
-        super(parent, "Status Reports", false);  // non-modal
+        super(parent, "Status Reports", false);
         this.safariPath       = safariPath;
         this.onFolderSelected = onFolderSelected;
         buildUI();
-        setSize(760, 640);
-        setMinimumSize(new Dimension(560, 400));
+        setSize(820, 660);
+        setMinimumSize(new Dimension(600, 420));
         setLocationRelativeTo(parent);
     }
 
@@ -98,35 +89,26 @@ public class StatusReportDialog extends JDialog {
         JPanel toolbar = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 8));
         toolbar.setBackground(new Color(0x1A1A2E));
 
-        JLabel reportLbl = new JLabel("Report:");
-        reportLbl.setFont(new Font("SansSerif", Font.BOLD, 12));
-        reportLbl.setForeground(Color.WHITE);
-
         reportCombo = new JComboBox<>(new String[]{ "Bookings", "Payments" });
-        reportCombo.setFont(new Font("SansSerif", Font.PLAIN, 12));
-        reportCombo.setPreferredSize(new Dimension(140, 26));
+        monthCombo  = new JComboBox<>(buildMonthItems());
+        statusCombo = new JComboBox<>(new String[]{ "All" });   // populated after scan
+        agentCombo  = new JComboBox<>(new String[]{ "All" });   // populated after scan
 
-        JLabel groupLbl = new JLabel("Group by:");
-        groupLbl.setFont(new Font("SansSerif", Font.BOLD, 12));
-        groupLbl.setForeground(Color.WHITE);
+        for (JComboBox<String> cb : new JComboBox[]{ reportCombo, monthCombo, statusCombo, agentCombo }) {
+            cb.setFont(new Font("SansSerif", Font.PLAIN, 12));
+            cb.setPreferredSize(new Dimension(cb == reportCombo ? 130 : 150, 26));
+        }
 
-        groupCombo = new JComboBox<>(new String[]{
-            "Month + Status",
-            "Month + Status + Agent",
-            "Status",
-            "Status + Agent"
-        });
-        groupCombo.setFont(new Font("SansSerif", Font.PLAIN, 12));
-        groupCombo.setPreferredSize(new Dimension(200, 26));
-
-        toolbar.add(reportLbl);
-        toolbar.add(reportCombo);
-        toolbar.add(Box.createHorizontalStrut(12));
-        toolbar.add(groupLbl);
-        toolbar.add(groupCombo);
+        toolbar.add(makeLabel("Report:"));  toolbar.add(reportCombo);
+        toolbar.add(Box.createHorizontalStrut(6));
+        toolbar.add(makeLabel("Month:"));   toolbar.add(monthCombo);
+        toolbar.add(Box.createHorizontalStrut(6));
+        toolbar.add(makeLabel("Status:"));  toolbar.add(statusCombo);
+        toolbar.add(Box.createHorizontalStrut(6));
+        toolbar.add(makeLabel("Agent:"));   toolbar.add(agentCombo);
         add(toolbar, BorderLayout.NORTH);
 
-        // ── Results panel (scrollable) ────────────────────────────────────────
+        // ── Results ───────────────────────────────────────────────────────────
         resultsPanel = new JPanel();
         resultsPanel.setLayout(new BoxLayout(resultsPanel, BoxLayout.Y_AXIS));
         resultsPanel.setBackground(Color.WHITE);
@@ -141,7 +123,6 @@ public class StatusReportDialog extends JDialog {
         footer.setBorder(BorderFactory.createCompoundBorder(
             BorderFactory.createMatteBorder(1, 0, 0, 0, new Color(0xDDDDDD)),
             BorderFactory.createEmptyBorder(6, 10, 6, 10)));
-
         footerLabel = new JLabel(" ");
         footerLabel.setFont(new Font("SansSerif", Font.ITALIC, 11));
         footerLabel.setForeground(new Color(0x666666));
@@ -149,31 +130,52 @@ public class StatusReportDialog extends JDialog {
 
         JPanel btnPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 6, 0));
         btnPanel.setOpaque(false);
-
         JButton refreshBtn = new JButton("\u21BB  Refresh");
         refreshBtn.setFont(new Font("SansSerif", Font.PLAIN, 12));
         refreshBtn.addActionListener(e -> refresh());
-
         JButton saveBtn = new JButton("\uD83D\uDCBE  Save as RTF");
         saveBtn.setFont(new Font("SansSerif", Font.PLAIN, 12));
         saveBtn.addActionListener(e -> saveAsRtf());
-
         JButton closeBtn = new JButton("Close");
         closeBtn.setFont(new Font("SansSerif", Font.PLAIN, 12));
         closeBtn.addActionListener(e -> dispose());
-
-        btnPanel.add(refreshBtn);
-        btnPanel.add(saveBtn);
-        btnPanel.add(closeBtn);
+        btnPanel.add(refreshBtn); btnPanel.add(saveBtn); btnPanel.add(closeBtn);
         footer.add(btnPanel, BorderLayout.EAST);
         add(footer, BorderLayout.SOUTH);
 
         // ── Listeners ─────────────────────────────────────────────────────────
-        reportCombo.addActionListener(e -> refresh());
-        groupCombo.addActionListener(e  -> refresh());
+        ActionListener filterListener = e -> { if (!suppressRefresh) refresh(); };
+        reportCombo.addActionListener(e -> {
+            if (!suppressRefresh) {
+                // When report changes, reset status filter and reload
+                suppressRefresh = true;
+                statusCombo.setSelectedItem("All");
+                suppressRefresh = false;
+                refresh();
+            }
+        });
+        monthCombo.addActionListener(filterListener);
+        statusCombo.addActionListener(filterListener);
+        agentCombo.addActionListener(filterListener);
 
-        // Initial load
         refresh();
+    }
+
+    private JLabel makeLabel(String text) {
+        JLabel l = new JLabel(text);
+        l.setFont(new Font("SansSerif", Font.BOLD, 12));
+        l.setForeground(Color.WHITE);
+        return l;
+    }
+
+    private String[] buildMonthItems() {
+        String[] items = new String[14];
+        items[0] = "All";
+        for (int i = 1; i <= 12; i++) {
+            items[i] = String.format("%02d – %s", i, MONTH_NAMES[i]);
+        }
+        items[13] = "No month";
+        return items;
     }
 
     // ── Refresh ───────────────────────────────────────────────────────────────
@@ -183,75 +185,114 @@ public class StatusReportDialog extends JDialog {
         resultsPanel.repaint();
 
         boolean payments  = reportCombo.getSelectedIndex() == 1;
-        String  groupMode = (String) groupCombo.getSelectedItem();
         String[] statuses = payments ? PAYMENT_STATUSES : BOOKING_STATUSES;
 
+        String selMonth  = (String) monthCombo.getSelectedItem();
+        String selStatus = (String) statusCombo.getSelectedItem();
+        String selAgent  = (String) agentCombo.getSelectedItem();
+
         new Thread(() -> {
-            List<String[]> folders = scanFolders(statuses);
+            List<String[]> allFolders = scanFolders(statuses);
+
+            // Populate agent and status combos from scanned data (preserve selection)
+            Set<String> agentSet  = new LinkedHashSet<>();
+            Set<String> statusSet = new LinkedHashSet<>();
+            for (String s : statuses) statusSet.add(s);   // ordered
+            for (String[] f : allFolders) agentSet.add(extractAgent(f[0]));
+
+            List<String> agentItems = new ArrayList<>();
+            agentItems.add("All");
+            List<String> sortedAgents = new ArrayList<>(agentSet);
+            Collections.sort(sortedAgents);
+            agentItems.addAll(sortedAgents);
+
+            List<String> statusItems = new ArrayList<>();
+            statusItems.add("All");
+            statusItems.addAll(statusSet);
+
             SwingUtilities.invokeLater(() -> {
-                buildResults(folders, statuses, groupMode);
+                // Update status combo
+                suppressRefresh = true;
+                String curStatus = (String) statusCombo.getSelectedItem();
+                statusCombo.removeAllItems();
+                for (String s : statusItems) statusCombo.addItem(s);
+                if (curStatus != null && statusItems.contains(curStatus)) statusCombo.setSelectedItem(curStatus);
+                else statusCombo.setSelectedItem("All");
+
+                // Update agent combo
+                String curAgent = (String) agentCombo.getSelectedItem();
+                agentCombo.removeAllItems();
+                for (String a : agentItems) agentCombo.addItem(a);
+                if (curAgent != null && agentItems.contains(curAgent)) agentCombo.setSelectedItem(curAgent);
+                else agentCombo.setSelectedItem("All");
+                suppressRefresh = false;
+
+                // Apply filters
+                String monthFilter  = (String) monthCombo.getSelectedItem();
+                String statusFilter = (String) statusCombo.getSelectedItem();
+                String agentFilter  = (String) agentCombo.getSelectedItem();
+
+                List<String[]> filtered = new ArrayList<>();
+                for (String[] f : allFolders) {
+                    if (!"All".equals(monthFilter)) {
+                        if ("No month".equals(monthFilter) && !f[2].isEmpty()) continue;
+                        if (!"No month".equals(monthFilter)) {
+                            String mm = monthFilter.substring(0, 2);
+                            if (!f[2].equals(mm)) continue;
+                        }
+                    }
+                    if (!"All".equals(statusFilter) && !statusFilter.equals(f[1])) continue;
+                    if (!"All".equals(agentFilter)  && !agentFilter.equals(extractAgent(f[0]))) continue;
+                    filtered.add(f);
+                }
+
+                buildResults(filtered, statuses, monthFilter, agentFilter);
+
                 String reportName = payments ? "Payments" : "Bookings";
-                footerLabel.setText(reportName + "  ·  " + groupMode + "  ·  " + folders.size() + " folders");
+                footerLabel.setText(reportName + "  ·  " + filtered.size() + " of " + allFolders.size() + " folders");
             });
         }, "status-scan").start();
     }
 
-    /**
-     * Scan 001_Safari for booking folders.
-     *
-     * Booking folders are DIRECT children of 001_Safari, e.g.:
-     *   04_03APR_HanWu(Agustin-Drct)_START03APR_END11APR2026_CK
-     *   06_07JUN_RupeshRane(Micky-Drct)_START07JUN_END13JUN2026_PROGRESS
-     *
-     * Status is detected from the folder name suffix:
-     *   - Folder names use underscore:  _BALANCE_CASH  (not hyphen)
-     *     so we normalise _BALANCE_CASH -> _BALANCE-CASH before matching.
-     *   - BALANCE-CASH must be checked BEFORE BALANCE (handled by array order).
-     *   - CK alone (no payment status) is a valid status.
-     *
-     * Returns list of String[3]: [folderName, status, month (01-12)]
-     */
+    // ── Scan folders ──────────────────────────────────────────────────────────
     private List<String[]> scanFolders(String[] statuses) {
         List<String[]> result = new ArrayList<>();
         File base = new File(safariPath);
         if (!base.isDirectory()) return result;
 
-        // Booking folders start with MM_ (month 01-12) directly inside 001_Safari
         File[] subs = base.listFiles(
             f -> f.isDirectory() && f.getName().matches("^(0[1-9]|1[0-2])_.*"));
         if (subs == null) return result;
 
         for (File sub : subs) {
-            String rawName = sub.getName();
-            // Normalise underscore-separated BALANCE_CASH to hyphenated form for matching
+            String rawName   = sub.getName();
             String normalised = rawName.toUpperCase().replace("_BALANCE_CASH", "_BALANCE-CASH");
-
-            String matched = null;
+            String matched   = null;
             for (String s : statuses) {
-                if (normalised.contains("_" + s)) {
-                    matched = s;
-                    break;  // statuses array ordered by priority; first hit wins
-                }
+                if (normalised.contains("_" + s)) { matched = s; break; }
             }
             if (matched != null) {
                 String month = rawName.substring(0, 2);
                 result.add(new String[]{ rawName, matched, month });
             }
         }
-
         result.sort(Comparator.comparing((String[] a) -> a[2]).thenComparing(a -> a[0]));
         return result;
     }
 
-    // ── Build UI from data ────────────────────────────────────────────────────
-    private void buildResults(List<String[]> folders, String[] statuses, String groupMode) {
+    // ── Build results ─────────────────────────────────────────────────────────
+    private void buildResults(List<String[]> folders, String[] statuses,
+                              String monthFilter, String agentFilter) {
         resultsPanel.removeAll();
 
-        boolean byMonth  = groupMode.startsWith("Month");
-        boolean byAgent  = groupMode.endsWith("Agent");
+        boolean singleMonth = !"All".equals(monthFilter) && !"No month".equals(monthFilter);
+        boolean singleAgent = !"All".equals(agentFilter);
 
-        if (byMonth) {
-            // Group by month first, then status (then agent)
+        if (singleMonth) {
+            // No month header needed — jump straight to status groups
+            addStatusGroups(folders, statuses, !singleAgent);
+        } else {
+            // Group by month
             Map<String, List<String[]>> byMonthMap = new LinkedHashMap<>();
             for (String[] f : folders) {
                 byMonthMap.computeIfAbsent(f[2], k -> new ArrayList<>()).add(f);
@@ -261,17 +302,15 @@ public class StatusReportDialog extends JDialog {
                 int m = 0;
                 try { m = Integer.parseInt(month); } catch (Exception ignored) {}
                 String monthLabel = String.format("%s  —  %s  (%d)",
-                    month, m > 0 && m < MONTH_NAMES.length ? MONTH_NAMES[m] : "?", me.getValue().size());
+                    month, m > 0 && m < MONTH_NAMES.length ? MONTH_NAMES[m] : "?",
+                    me.getValue().size());
                 resultsPanel.add(makeMonthHeader(monthLabel));
-                addStatusGroups(me.getValue(), statuses, byAgent);
+                addStatusGroups(me.getValue(), statuses, !singleAgent);
             }
-        } else {
-            // No month grouping — straight to status (then agent)
-            addStatusGroups(folders, statuses, byAgent);
         }
 
         if (folders.isEmpty()) {
-            JLabel empty = new JLabel("  No folders found in " + safariPath);
+            JLabel empty = new JLabel("  No folders match the selected filters");
             empty.setFont(new Font("SansSerif", Font.ITALIC, 12));
             empty.setForeground(new Color(0x888888));
             empty.setBorder(BorderFactory.createEmptyBorder(20, 16, 20, 16));
@@ -295,8 +334,7 @@ public class StatusReportDialog extends JDialog {
             if (byAgent) {
                 Map<String, List<String[]>> byAgentMap = new LinkedHashMap<>();
                 for (String[] f : inStatus) {
-                    String agent = extractAgent(f[0]);
-                    byAgentMap.computeIfAbsent(agent, k -> new ArrayList<>()).add(f);
+                    byAgentMap.computeIfAbsent(extractAgent(f[0]), k -> new ArrayList<>()).add(f);
                 }
                 for (Map.Entry<String, List<String[]>> ae : byAgentMap.entrySet()) {
                     resultsPanel.add(makeAgentHeader(ae.getKey(), ae.getValue().size()));
@@ -354,28 +392,21 @@ public class StatusReportDialog extends JDialog {
         p.setBackground(Color.WHITE);
         p.setMaximumSize(new Dimension(Integer.MAX_VALUE, 22));
         p.setBorder(BorderFactory.createEmptyBorder(2, 44, 2, 12));
-
         JLabel lbl = new JLabel("\uD83D\uDCC1  " + folderName);
         lbl.setFont(new Font("Monospaced", Font.PLAIN, 11));
         lbl.setForeground(FOLDER_FG);
         p.add(lbl, BorderLayout.WEST);
-
-        // Hover highlight
         p.addMouseListener(new MouseAdapter() {
             @Override public void mouseEntered(MouseEvent e) { p.setBackground(FOLDER_HOVER_BG); }
             @Override public void mouseExited (MouseEvent e) { p.setBackground(Color.WHITE); }
             @Override public void mouseClicked(MouseEvent e) {
-                if (e.getClickCount() == 2) {
-                    onFolderSelected.accept(folderName);
-                    dispose();
-                }
+                if (e.getClickCount() == 2) { onFolderSelected.accept(folderName); dispose(); }
             }
         });
         return p;
     }
 
     // ── Agent extraction ──────────────────────────────────────────────────────
-    /** Extract agent name from folder like CustomerName(Agency-Agent-TREK)_START... */
     private static final String[] DEST_SUFFIXES_SD = {
         "-TZ-KENYA", "-SOUTHAFRICA", "-MADAGASCAR", "-BOTSWANA",
         "-NAMIBIA", "-UGANDA", "-RWANDA", "-KENYA", "-TREK", "-ZNZ"
@@ -405,16 +436,12 @@ public class StatusReportDialog extends JDialog {
         fc.setSelectedFile(new File("StatusReport.rtf"));
         fc.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter("RTF files (*.rtf)", "rtf"));
         if (fc.showSaveDialog(this) != JFileChooser.APPROVE_OPTION) return;
-
         File out = fc.getSelectedFile();
         if (!out.getName().toLowerCase().endsWith(".rtf")) out = new File(out.getAbsolutePath() + ".rtf");
 
-        // Collect current component labels
         StringBuilder sb = new StringBuilder();
-        sb.append("{\\rtf1\\ansi\\deff0\n");
-        sb.append("{\\fonttbl{\\f0 Arial;}}\n");
+        sb.append("{\\rtf1\\ansi\\deff0\n{\\fonttbl{\\f0 Arial;}}\n");
         sb.append("{\\colortbl;\\red26\\green26\\blue46;\\red26\\green107\\blue58;\\red29\\green111\\blue164;\\red100\\green100\\blue100;}\n");
-
         for (Component c : resultsPanel.getComponents()) {
             if (!(c instanceof JPanel)) continue;
             JPanel row = (JPanel) c;
@@ -422,25 +449,15 @@ public class StatusReportDialog extends JDialog {
             for (Component child : row.getComponents()) {
                 if (!(child instanceof JLabel)) continue;
                 String text = ((JLabel) child).getText()
-                    .replace("📁 ", "").replace("▸  ", "")
-                    .trim();
+                    .replace("📁 ", "").replace("▸  ", "").trim();
                 if (text.isEmpty()) continue;
-                // Month header
-                if (bg.equals(MONTH_HEADER_BG)) {
-                    sb.append("\\pard\\sb120\\b\\cf1\\f0\\fs22 ").append(rtfEsc(text)).append("\\b0\\par\n");
-                } else if (bg.equals(AGENT_HEADER_BG)) {
-                    sb.append("\\pard\\li600\\sb40\\b\\cf2\\f0\\fs18 ").append(rtfEsc(text)).append("\\b0\\par\n");
-                } else if (!bg.equals(Color.WHITE)) {
-                    // Status header
-                    sb.append("\\pard\\li200\\sb80\\b\\cf3\\f0\\fs20 ").append(rtfEsc(text)).append("\\b0\\par\n");
-                } else {
-                    // Folder row
-                    sb.append("\\pard\\li1000\\cf4\\f0\\fs18 ").append(rtfEsc(text)).append("\\par\n");
-                }
+                if      (bg.equals(MONTH_HEADER_BG)) sb.append("\\pard\\sb120\\b\\cf1\\f0\\fs22 ").append(rtfEsc(text)).append("\\b0\\par\n");
+                else if (bg.equals(AGENT_HEADER_BG)) sb.append("\\pard\\li600\\sb40\\b\\cf2\\f0\\fs18 ").append(rtfEsc(text)).append("\\b0\\par\n");
+                else if (!bg.equals(Color.WHITE))     sb.append("\\pard\\li200\\sb80\\b\\cf3\\f0\\fs20 ").append(rtfEsc(text)).append("\\b0\\par\n");
+                else                                  sb.append("\\pard\\li1000\\cf4\\f0\\fs18 ").append(rtfEsc(text)).append("\\par\n");
             }
         }
         sb.append("}");
-
         try (BufferedWriter w = new BufferedWriter(new FileWriter(out))) {
             w.write(sb.toString());
             JOptionPane.showMessageDialog(this, "Saved to:\n" + out.getAbsolutePath(), "Saved", JOptionPane.INFORMATION_MESSAGE);
@@ -452,7 +469,7 @@ public class StatusReportDialog extends JDialog {
     private static String rtfEsc(String s) {
         StringBuilder sb = new StringBuilder();
         for (char c : s.toCharArray()) {
-            if (c > 127) sb.append("\\u").append((int) c).append('?');
+            if      (c > 127)  sb.append("\\u").append((int) c).append('?');
             else if (c == '\\') sb.append("\\\\");
             else if (c == '{')  sb.append("\\{");
             else if (c == '}')  sb.append("\\}");
