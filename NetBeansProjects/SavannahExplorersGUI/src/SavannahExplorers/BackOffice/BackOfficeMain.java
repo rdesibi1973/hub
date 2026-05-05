@@ -1208,13 +1208,13 @@ public class BackOfficeMain extends javax.swing.JFrame {
                     if (resp == null || !resp.contains("\"success\":true")) {
                         javax.swing.SwingUtilities.invokeLater(() ->
                             javax.swing.JOptionPane.showMessageDialog(this,
-                                "Folder renamed on disk.\nDB update warning: " + resp,
+                                "File renamed but NO corresponding request found.",
                                 "Rename", javax.swing.JOptionPane.WARNING_MESSAGE));
                     }
                 } catch (Exception ex) {
                     javax.swing.SwingUtilities.invokeLater(() ->
                         javax.swing.JOptionPane.showMessageDialog(this,
-                            "Folder renamed on disk.\nDB update failed: " + ex.getMessage(),
+                            "File renamed but NO corresponding request found.",
                             "Rename", javax.swing.JOptionPane.WARNING_MESSAGE));
                 }
             }).start();
@@ -1337,13 +1337,13 @@ public class BackOfficeMain extends javax.swing.JFrame {
                         if (resp == null || !resp.contains("\"success\":true")) {
                             javax.swing.SwingUtilities.invokeLater(() ->
                                 javax.swing.JOptionPane.showMessageDialog(this,
-                                    "Folder renamed on disk.\nDB update warning: " + resp,
+                                    "File renamed but NO corresponding request found.",
                                     "Rename", javax.swing.JOptionPane.WARNING_MESSAGE));
                         }
                     } catch (Exception ex) {
                         javax.swing.SwingUtilities.invokeLater(() ->
                             javax.swing.JOptionPane.showMessageDialog(this,
-                                "Folder renamed on disk.\nDB update failed: " + ex.getMessage(),
+                                "File renamed but NO corresponding request found.",
                                 "Rename", javax.swing.JOptionPane.WARNING_MESSAGE));
                     }
                 }).start();
