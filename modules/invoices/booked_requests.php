@@ -10,12 +10,7 @@
  */
 require_once 'config.php';
 
-// STATUSES is defined in leads/config.php — load it if not already defined
-if (!defined('STATUSES')) {
-    $leadsConfig = dirname(__DIR__) . '/leads/config.php';
-    if (file_exists($leadsConfig)) require_once $leadsConfig;
-}
-// Fallback: define inline in case leads config can't be loaded
+// STATUSES defined inline — avoids loading leads/config.php which redefines db() and h()
 if (!defined('STATUSES')) {
     define('STATUSES', [
         'Inquiry'   => 'status-inquiry',
