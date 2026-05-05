@@ -1678,10 +1678,16 @@ public class BackOfficeMain extends javax.swing.JFrame {
                 pr2.waitFor(); // exit code ignored — 'sleep' not found on Windows causes exit 1 even on success
 
                 // Verify by checking the destination folder exists in 001_Safari
-                File destFolder = new File(dropboxHome + "\\001_Safari\\" + newFolder);
-                if (!destFolder.exists() || !destFolder.isDirectory()) {
+                // cfolders.bat may place the folder directly in 001_Safari OR inside
+                // the yearly sub-folder 001_Safari\00_YEAR — accept either.
+                File destFolder       = new File(dropboxHome + "\\001_Safari\\" + newFolder);
+                File destFolderYearly = new File(dropboxHome + "\\001_Safari\\00_" + reqYear + "\\" + newFolder);
+                boolean destOk = (destFolder.exists()       && destFolder.isDirectory())
+                              || (destFolderYearly.exists() && destFolderYearly.isDirectory());
+                if (!destOk) {
                     return "ERROR_MOVE:Folder not found in 001_Safari after cfolders.bat.\nExpected: "
                            + destFolder.getAbsolutePath()
+                           + "\n  or: " + destFolderYearly.getAbsolutePath()
                            + (bat2.length() > 0 ? "\n\nScript output:\n" + bat2 : "");
                 }
                 if (bat2.length() > 0) log.append(bat2);

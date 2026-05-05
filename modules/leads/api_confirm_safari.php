@@ -54,9 +54,45 @@ $stmt = $db->prepare(
 $stmt->execute([$oldFolderName]);
 $row = $stmt->fetch(PDO::FETCH_ASSOC);
 
+// Fallback 1: strip known status suffix (e.g. _PROGRESS) and retry.
+$statusTags = ['_PROGRESS','_PROVISIONAL','_DEPOSIT','_BALANCE-CASH','_BALANCE','_CANCELLED','_CK','_PAID'];
+$baseName   = $oldFolderName;
+foreach ($statusTags as $tag) {
+    if (str_ends_with($baseName, $tag)) {
+        $baseName = substr($baseName, 0, -strlen($tag));
+        break;
+    }
+}
+if (!$row && $baseName !== $oldFolderName) {
+    $stmt->execute([$baseName]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+}
+
+// Fallback 2: strip confirmed-folder date wrapper to get bare customer name.
+// Confirmed folder format: {prog}_{date}_{customer}_START{date}_END{date}{year}
+// e.g. "08_11AUG_TZ260810(STOGranTour-Roberto)_START11AUG_END18AUG2026"
+//   → bare customer name "TZ260810(STOGranTour-Roberto)"
+$bare = '';
 if (!$row) {
-    // Not found — return a warning but not a hard error
-    // (the file rename on disk already happened; don't block the user)
+    $bare = preg_replace('/^\d+_\d+[A-Z]+_/i', '', $baseName); // strip leading prognum_date_
+    $bare = preg_replace('/_START.+$/i',        '', $bare);     // strip trailing _START...
+    if ($bare !== '' && $bare !== $baseName) {
+        $stmt->execute([$bare]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    }
+}
+
+// Fallback 3: match by dropbox_url (created at request creation, always set).
+if (!$row) {
+    $searchName = ($bare !== '' && $bare !== $baseName) ? $bare : $baseName;
+    $stmt2 = $db->prepare(
+        'SELECT id, customer_name FROM requests WHERE dropbox_url LIKE ? ORDER BY id DESC LIMIT 1'
+    );
+    $stmt2->execute(['%/' . rawurlencode($searchName) . '%']);
+    $row = $stmt2->fetch(PDO::FETCH_ASSOC);
+}
+
+if (!$row) {
     http_response_code(404);
     echo json_encode([
         'success' => false,

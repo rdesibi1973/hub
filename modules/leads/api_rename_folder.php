@@ -51,11 +51,10 @@ $stmt = $db->prepare(
 $stmt->execute([$oldFolderName]);
 $row = $stmt->fetch(PDO::FETCH_ASSOC);
 
-// Fallback: if exact match fails, strip known status suffixes and try base name.
-// Handles cases where practice_code in DB was saved before a previous rename.
+// Fallback 1: strip known status suffixes and try base name.
 if (!$row) {
-    $statusTags = ['_PROGRESS','_PROVISIONAL','_DEPOSIT','_BALANCE','_BALANCE-CASH','_CANCELLED'];
-    $baseName = $oldFolderName;
+    $statusTags = ['_PROGRESS','_PROVISIONAL','_DEPOSIT','_BALANCE-CASH','_BALANCE','_CANCELLED','_CK','_PAID'];
+    $baseName   = $oldFolderName;
     foreach ($statusTags as $tag) {
         if (str_ends_with($baseName, $tag)) {
             $baseName = substr($baseName, 0, -strlen($tag));
@@ -66,6 +65,34 @@ if (!$row) {
         $stmt->execute([$baseName]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
     }
+} else {
+    $baseName = $oldFolderName;
+}
+
+// Fallback 2: strip confirmed-folder date wrapper to get bare customer name.
+// Confirmed folder format: {prog}_{date}_{customer}_START{date}_END{date}{year}
+// e.g. "08_11AUG_TZ260810(STOGranTour-Roberto)_START11AUG_END18AUG2026"
+//   → bare customer name "TZ260810(STOGranTour-Roberto)"
+$bare = '';
+if (!$row) {
+    $bare = preg_replace('/^\d+_\d+[A-Z]+_/i', '', $baseName); // strip leading prognum_date_
+    $bare = preg_replace('/_START.+$/i',        '', $bare);     // strip trailing _START...
+    if ($bare !== '' && $bare !== $baseName) {
+        $stmt->execute([$bare]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    }
+}
+
+// Fallback 3: search by dropbox_url.
+if (!$row) {
+    $searchName = ($bare !== '' && $bare !== $baseName) ? $bare
+                : ($baseName !== $oldFolderName ? $baseName : $oldFolderName);
+    $stmt2 = $db->prepare(
+        'SELECT id, customer_name, status, dropbox_url
+         FROM requests WHERE dropbox_url LIKE ? ORDER BY id DESC LIMIT 1'
+    );
+    $stmt2->execute(['%/' . rawurlencode($searchName) . '%']);
+    $row = $stmt2->fetch(PDO::FETCH_ASSOC);
 }
 
 if (!$row) {
