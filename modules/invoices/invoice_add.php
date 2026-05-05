@@ -15,11 +15,60 @@ if ($requestId) {
     if ($req) {
         $prefill['bill_to_name'] = $req['customer_name'];
         $prefill['request_id']   = $requestId;
-        $prefill['item_desc']    = $req['customer_name'] . ' Safari'
-                                 . ($req['period'] ? ' — ' . $req['period'] : '')
-                                 . ($req['pax']    ? ' (' . $req['pax'] . ' pax)' : '');
         $prefill['item_qty']     = $req['pax'] ?: 1;
         $prefill['item_price']   = $req['value_usd'] && $req['pax'] ? round($req['value_usd'] / $req['pax'], 2) : '';
+
+        // ── Build smart description ──────────────────────────────────────────
+        // Format: "{customer} {pax} pax trip in {destination} from {start} to {end}"
+        $folder    = $req['practice_code'] ?? '';
+        $monthMap  = ['JAN'=>1,'FEB'=>2,'MAR'=>3,'APR'=>4,'MAY'=>5,'JUN'=>6,
+                      'JUL'=>7,'AUG'=>8,'SEP'=>9,'OCT'=>10,'NOV'=>11,'DEC'=>12];
+
+        // 1. Dates: extract _START{dd}{MMM}_END{dd}{MMM}{yyyy} from folder name
+        $startStr = ''; $endStr = '';
+        if (preg_match('/_START(\d{1,2})([A-Z]{3})_END(\d{1,2})([A-Z]{3})(\d{4})/i', $folder, $dm)) {
+            $year     = (int)$dm[5];
+            $startMon = $monthMap[strtoupper($dm[2])] ?? 0;
+            $endMon   = $monthMap[strtoupper($dm[4])] ?? 0;
+            if ($startMon) $startStr = date('d M Y', mktime(0,0,0,$startMon,(int)$dm[1],$year));
+            if ($endMon)   $endStr   = date('d M Y', mktime(0,0,0,$endMon,  (int)$dm[3],$year));
+        }
+
+        // 2. Destination: use requests.destination field, else extract from
+        //    inside parentheses of folder (agency short name suffixes), else Tanzania
+        $dest = trim($req['destination'] ?? '');
+        if ($dest === '' || strcasecmp($dest, 'TREK') === 0) {
+            // Try to extract from inside parens: e.g. (STO-TZ-KENYA-Roberto)
+            // Known destination tokens (order matters — check longer first)
+            $destTokens = [
+                'TZ-KENYA'    => 'Tanzania & Kenya',
+                'SOUTHAFRICA' => 'South Africa',
+                'MADAGASCAR'  => 'Madagascar',
+                'BOTSWANA'    => 'Botswana',
+                'NAMIBIA'     => 'Namibia',
+                'UGANDA'      => 'Uganda',
+                'RWANDA'      => 'Rwanda',
+                'KENYA'       => 'Kenya',
+                'ZNZ'         => 'Zanzibar',
+            ];
+            $innerDest = '';
+            if (preg_match('/\(([^)]+)\)/', $folder, $pm)) {
+                $inner = strtoupper($pm[1]);
+                foreach ($destTokens as $token => $label) {
+                    if (strpos($inner, $token) !== false) { $innerDest = $label; break; }
+                }
+            }
+            $dest = $innerDest ?: 'Tanzania';
+        }
+
+        // 3. Assemble description
+        $desc  = $req['customer_name'];
+        $desc .= $req['pax'] ? ' ' . $req['pax'] . ' pax' : '';
+        $desc .= ' trip in ' . $dest;
+        if ($startStr && $endStr) $desc .= ' from ' . $startStr . ' to ' . $endStr;
+        elseif ($startStr)        $desc .= ' from ' . $startStr;
+
+        $prefill['item_desc'] = $desc;
     }
 }
 
