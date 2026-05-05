@@ -18,7 +18,17 @@ if (!defined('DB_HOST'))       define('DB_HOST',       'localhost');
 if (!defined('DB_NAME'))       define('DB_NAME',       'savannp5_savannah_leads');
 if (!defined('DB_USER'))       define('DB_USER',       'savannp5_rdesibi');
 if (!defined('DB_PASS'))       define('DB_PASS',       'Savannah2026');
-// HUBSPOT_TOKEN is defined in config.php — do not hardcode here
+// ── HubSpot token ────────────────────────────────────────────────────────────
+// When running as web request, config.php is loaded first by the caller.
+// When running as CLI (cron), load config.php directly from this file.
+if (!defined('HUBSPOT_TOKEN')) {
+    $cfgFile = __DIR__ . '/config.php';
+    if (file_exists($cfgFile)) require_once $cfgFile;
+}
+if (!defined('HUBSPOT_TOKEN')) {
+    fwrite(STDERR, "ERROR: HUBSPOT_TOKEN not defined. Check config.php.\n");
+    exit(1);
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ── Shared library functions (available when included as HS_INCLUDED)  ──────
