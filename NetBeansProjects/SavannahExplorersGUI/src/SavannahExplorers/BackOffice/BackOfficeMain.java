@@ -2949,8 +2949,8 @@ public class BackOfficeMain extends javax.swing.JFrame {
      * email and lets the user edit all fields before sending via SMTP.
      */
     private void showSafariBookingEmailDialog(String folderName) {
-        // Try to get the agent email from the DB via API first.
-        // Falls back to the local name→email map if the API call fails or returns nothing.
+        // Get the agent email from the DB via API.
+        // If the API returns nothing, the CC field is left empty — no auto-generation.
         String agentEmail = "";
         if (USE_API && AppSession.isLoggedIn()) {
             try {
@@ -2961,9 +2961,6 @@ public class BackOfficeMain extends javax.swing.JFrame {
                     if (extracted != null && !extracted.isBlank()) agentEmail = extracted;
                 }
             } catch (Exception ignored) {}
-        }
-        if (agentEmail.isEmpty()) {
-            agentEmail = deriveAgentEmail(extractAgentFromFolder(folderName));
         }
         buildAndShowEmailDialog(folderName, agentEmail);
     }
