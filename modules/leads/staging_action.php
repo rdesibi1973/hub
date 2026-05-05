@@ -163,9 +163,9 @@ if ($action === 'approve') {
     } catch (RuntimeException $e) {
         $msg = $e->getMessage();
         if (strpos($msg, 'already exists') !== false) {
-            flash("La cartella Dropbox esiste già: <strong>{$folderName}</strong><br>Controlla se è un duplicato prima di procedere.", 'error');
+            flash("Dropbox folder already exists: {$folderName} — Check for duplicates before proceeding.", 'error');
         } else {
-            flash("Errore Dropbox: {$msg}", 'error');
+            flash("Dropbox error: {$msg}", 'error');
         }
         header('Location: staging.php'); exit;
     }
@@ -203,8 +203,8 @@ if ($action === 'approve') {
         (int)$newId, $lead['customer_name'], $folderName, $doNotify
     );
 
-    flash("Lead approvato — Request #{$newId} creata. Cartella Dropbox: <strong>{$folderName}</strong>"
-        . ($notif['sent'] ? " — ✉ Notifica inviata all'agente." : ''));
+    flash("Lead approved — Request #{$newId} created. Dropbox folder: {$folderName}"
+        . ($notif['sent'] ? " — ✉ Notification sent to agent." : ''));
     if ($notif['error']) flash('⚠ ' . htmlspecialchars($notif['error']), 'error');
 
     header("Location: request_view.php?id=$newId"); exit;
