@@ -50,7 +50,7 @@ body {
 
 /* Print button */
 .print-bar {
-  background: #1A6B3A;
+  background: #C0211B;
   padding: 12px 52px;
   display: flex;
   align-items: center;
@@ -60,7 +60,7 @@ body {
 .print-bar span { color: rgba(255,255,255,.8); font-size: 12px; }
 .print-btn {
   background: #fff;
-  color: #1A6B3A;
+  color: #C0211B;
   border: none;
   padding: 8px 22px;
   border-radius: 5px;

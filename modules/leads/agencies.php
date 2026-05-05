@@ -40,8 +40,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
 
             try {
-                $db->prepare('INSERT INTO agencies (nome, short_name, attiva) VALUES (?, ?, ?)')
-                   ->execute([$nome, $short, $attiva]);
+                $address = trim($_POST['address'] ?? '');
+                $db->prepare('INSERT INTO agencies (nome, short_name, attiva, address) VALUES (?, ?, ?, ?)')
+                   ->execute([$nome, $short, $attiva, $address ?: null]);
                 $success = "Agency \"$nome\" added.";
             } catch (PDOException $e) {
                 $errors[] = 'Duplicate name or database error.';
@@ -66,8 +67,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             } elseif ($type === 'lamprati') {
                 $short .= '-LAM';
             }
-            $db->prepare('UPDATE agencies SET nome=?, short_name=?, type=?, attiva=? WHERE id=?')
-               ->execute([$nome, $short ?: null, $type, $attiva, $id]);
+            $address = trim($_POST['address'] ?? '');
+            $db->prepare('UPDATE agencies SET nome=?, short_name=?, type=?, attiva=?, address=? WHERE id=?')
+               ->execute([$nome, $short ?: null, $type, $attiva, $address ?: null, $id]);
             $success = "Agency updated.";
         }
     }
@@ -127,7 +129,7 @@ include 'includes/header.php';
     <input type="hidden" name="action" value="add">
     <div class="form-section-title" style="margin-top:0">Add Agency</div>
     
-    <div class="form-grid" style="grid-template-columns:1fr 1fr auto;align-items:end;gap:12px;">
+    <div class="form-grid" style="grid-template-columns:1fr 1fr 1fr auto;align-items:end;gap:12px;">
       <div class="form-group" style="margin:0">
         <label>Agency Name *</label>
         <input type="text" name="nome" placeholder="e.g. BTG" required>
@@ -135,6 +137,10 @@ include 'includes/header.php';
       <div class="form-group" style="margin:0">
         <label>Short Name <span style="font-weight:400;color:var(--grey-mid)">(suffix will be added)</span></label>
         <input type="text" name="short_name" placeholder="e.g. BTG">
+      </div>
+      <div class="form-group" style="margin:0">
+        <label>Address</label>
+        <input type="text" name="address" placeholder="e.g. Via Roma 1, Milan">
       </div>
       <button type="submit" class="btn btn-red" style="height:38px;white-space:nowrap;">+ Add</button>
     </div>
@@ -187,8 +193,9 @@ include 'includes/header.php';
           <form method="POST" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
             <input type="hidden" name="action" value="edit">
             <input type="hidden" name="id" value="<?= $ag['id'] ?>">
-            <input type="text" name="nome" value="<?= h($ag['nome']) ?>" required style="width:200px;padding:5px 8px;border:1.5px solid var(--grey-lt);border-radius:5px;font-size:.85rem;">
-            <input type="text" name="short_name" value="<?= h($ag['short_name'] ?? '') ?>" style="width:140px;padding:5px 8px;border:1.5px solid var(--grey-lt);border-radius:5px;font-size:.85rem;">
+            <input type="text" name="nome" value="<?= h($ag['nome']) ?>" required style="width:160px;padding:5px 8px;border:1.5px solid var(--grey-lt);border-radius:5px;font-size:.85rem;">
+            <input type="text" name="short_name" value="<?= h($ag['short_name'] ?? '') ?>" style="width:120px;padding:5px 8px;border:1.5px solid var(--grey-lt);border-radius:5px;font-size:.85rem;" placeholder="Short name">
+            <input type="text" name="address" value="<?= h($ag['address'] ?? '') ?>" style="width:200px;padding:5px 8px;border:1.5px solid var(--grey-lt);border-radius:5px;font-size:.85rem;" placeholder="Address">
             <label style="display:flex;align-items:center;gap:4px;font-size:.82rem;cursor:pointer;white-space:nowrap;"><input type="radio" name="type" value="savannah" <?= $agType==='savannah'?'checked':'' ?>> Savannah</label>
             <label style="display:flex;align-items:center;gap:4px;font-size:.82rem;cursor:pointer;white-space:nowrap;"><input type="radio" name="type" value="promoservice" <?= $agType==='promoservice'?'checked':'' ?>> Promo (-PS)</label>
             <label style="display:flex;align-items:center;gap:4px;font-size:.82rem;cursor:pointer;white-space:nowrap;"><input type="radio" name="type" value="lamprati" <?= $agType==='lamprati'?'checked':'' ?>> Lamprati (-LAM)</label>
