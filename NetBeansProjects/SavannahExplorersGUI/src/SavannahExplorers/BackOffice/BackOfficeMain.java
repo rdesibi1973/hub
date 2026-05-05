@@ -3009,7 +3009,13 @@ public class BackOfficeMain extends javax.swing.JFrame {
         boolean addNuruLine = addNuruToTo || nuruInCc;
 
         // ── Subject ──────────────────────────────────────────────────────────
-        String subject = folderName + " safari bookings";
+        // Extract customer name: strip leading {prog}_{date}_ and trailing _START...
+        // e.g. "06_09JUN_EleonoraDrago(Oniva-Roberto)_START09JUN_END14JUN2026_CK"
+        //   →  "EleonoraDrago(Oniva-Roberto)"
+        String customerPart = folderName
+            .replaceFirst("^\\d+_\\d+[A-Za-z]+_", "")   // strip leading 06_09JUN_
+            .replaceFirst("_START.+$", "");               // strip trailing _START...
+        String subject = customerPart + " safari bookings";
 
         // ── Body ─────────────────────────────────────────────────────────────
         String agentDisplay = agentName.equalsIgnoreCase("RobertoCapri") ? "Roberto Capri" : agentName;
