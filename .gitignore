@@ -1,0 +1,5 @@
+
+# NetBeans build artifacts
+NetBeansProjects/*/build/
+NetBeansProjects/*/dist/
+NetBeansProjects/*/nbproject/private/
