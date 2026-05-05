@@ -329,6 +329,16 @@ async function markSent() {
   fetch('invoice_view.php', {method:'POST',body:fd}).then(function(r){return r.json();}).then(function(d){ if(d.ok) location.reload(); });
 }
 async function setStatus(newStatus) {
+  var messages = {
+    'New':       'Reset this invoice to New?\n\nIf there are recorded payments, the status will be corrected automatically.',
+    'Cancelled': 'Cancel this invoice?\n\nExisting payments will not be affected, but no new payments can be added.'
+  };
+  var msg = messages[newStatus] || ('Change status to "' + newStatus + '"?');
+  var ok = await seConfirm('Change Status', msg);
+  if (!ok) {
+    document.getElementById('statusSelect').value = '<?= h($inv['status']) ?>';
+    return;
+  }
   var fd = new FormData();
   fd.append('action','set_status');
   fd.append('invoice_id','<?= $id ?>');
