@@ -23,14 +23,12 @@ if ($name === '') {
 $db = db();
 
 if ($type === 'agency') {
-    // Save into agencies table
     $db->prepare(
-        "INSERT INTO agencies (nome, attiva, created_at) VALUES (?, 1, NOW())"
-    )->execute([$name]);
+        "INSERT INTO agencies (nome, attiva, address, created_at) VALUES (?, 1, ?, NOW())"
+    )->execute([$name, $address ?: null]);
     $id = (int)$db->lastInsertId();
     echo json_encode(['success' => true, 'id' => $id, 'source_type' => 'agency']);
 } else {
-    // Save into customers table
     $db->prepare(
         "INSERT INTO customers (name, type, address, city, country, email, active, created_at)
          VALUES (?, ?, ?, ?, ?, ?, 1, NOW())"

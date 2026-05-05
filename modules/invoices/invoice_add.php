@@ -80,7 +80,8 @@ $billToList = $db->query("
     FROM customers WHERE active = 1
     UNION ALL
     SELECT id, nome AS name, 'agency' AS source_type,
-           '' AS addr, '' AS vat
+           COALESCE(address, '') AS addr,
+           '' AS vat
     FROM agencies WHERE attiva = 1
     ORDER BY name ASC
 ")->fetchAll();
