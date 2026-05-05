@@ -13,18 +13,16 @@ if ($requestId) {
     $s->execute([$requestId]);
     $req = $s->fetch();
     if ($req) {
-        $prefill['bill_to_name'] = $req['customer_name'];
-        $prefill['request_id']   = $requestId;
-        $prefill['item_qty']     = $req['pax'] ?: 1;
-        $prefill['item_price']   = $req['value_usd'] && $req['pax'] ? round($req['value_usd'] / $req['pax'], 2) : '';
+        $prefill['request_id'] = $requestId;
+        $prefill['item_qty']   = $req['pax'] ?: 1;
+        $prefill['item_price'] = $req['value_usd'] && $req['pax'] ? round($req['value_usd'] / $req['pax'], 2) : '';
 
-        // ── Build smart description ──────────────────────────────────────────
-        // Format: "{customer} {pax} pax trip in {destination} from {start} to {end}"
-        $folder    = $req['practice_code'] ?? '';
-        $monthMap  = ['JAN'=>1,'FEB'=>2,'MAR'=>3,'APR'=>4,'MAY'=>5,'JUN'=>6,
-                      'JUL'=>7,'AUG'=>8,'SEP'=>9,'OCT'=>10,'NOV'=>11,'DEC'=>12];
+        $folder   = $req['practice_code'] ?? '';
+        $monthMap = ['JAN'=>1,'FEB'=>2,'MAR'=>3,'APR'=>4,'MAY'=>5,'JUN'=>6,
+                     'JUL'=>7,'AUG'=>8,'SEP'=>9,'OCT'=>10,'NOV'=>11,'DEC'=>12];
 
-        // 1. Dates: extract _START{dd}{MMM}_END{dd}{MMM}{yyyy} from folder name
+        // ── 1. Dates ──────────────────────────────────────────────────────────
+        // Primary: _START{dd}{MMM}_END{dd}{MMM}{yyyy} in confirmed folder name
         $startStr = ''; $endStr = '';
         if (preg_match('/_START(\d{1,2})([A-Z]{3})_END(\d{1,2})([A-Z]{3})(\d{4})/i', $folder, $dm)) {
             $year     = (int)$dm[5];
@@ -33,13 +31,22 @@ if ($requestId) {
             if ($startMon) $startStr = date('d M Y', mktime(0,0,0,$startMon,(int)$dm[1],$year));
             if ($endMon)   $endStr   = date('d M Y', mktime(0,0,0,$endMon,  (int)$dm[3],$year));
         }
+        // Fallback: requests.period (e.g. "11 Jun - 18 Jun 2026")
+        if ((!$startStr || !$endStr) && !empty($req['period'])) {
+            $period = $req['period'];
+            if (preg_match('/(\d{1,2}\s+\w+\s*[-–]\s*\d{1,2}\s+\w+\s+\d{4})/i', $period, $pm)) {
+                // Split on dash/en-dash
+                $parts = preg_split('/\s*[-–]\s*/', $pm[1], 2);
+                if (count($parts) === 2) {
+                    $startStr = trim($parts[0]);
+                    $endStr   = trim($parts[1]);
+                }
+            }
+        }
 
-        // 2. Destination: use requests.destination field, else extract from
-        //    inside parentheses of folder (agency short name suffixes), else Tanzania
+        // ── 2. Destination ────────────────────────────────────────────────────
         $dest = trim($req['destination'] ?? '');
         if ($dest === '' || strcasecmp($dest, 'TREK') === 0) {
-            // Try to extract from inside parens: e.g. (STO-TZ-KENYA-Roberto)
-            // Known destination tokens (order matters — check longer first)
             $destTokens = [
                 'TZ-KENYA'    => 'Tanzania & Kenya',
                 'SOUTHAFRICA' => 'South Africa',
@@ -61,14 +68,48 @@ if ($requestId) {
             $dest = $innerDest ?: 'Tanzania';
         }
 
-        // 3. Assemble description
+        // ── 3. Description ────────────────────────────────────────────────────
         $desc  = $req['customer_name'];
         $desc .= $req['pax'] ? ' ' . $req['pax'] . ' pax' : '';
         $desc .= ' trip in ' . $dest;
         if ($startStr && $endStr) $desc .= ' from ' . $startStr . ' to ' . $endStr;
         elseif ($startStr)        $desc .= ' from ' . $startStr;
-
         $prefill['item_desc'] = $desc;
+
+        // ── 4. Bill To: try to find agency from folder parentheses ────────────
+        // Folder format: CustomerName(AgencyShortName-AgentName)
+        // Strip status suffix and date wrapper first to get to the base name
+        $baseName = preg_replace('/_START.+$/i', '', $folder);
+        $baseName = preg_replace('/^\d+_\d+[A-Z]+_/i', '', $baseName);
+        $prefill['bill_to_name']    = '';
+        $prefill['bill_to_id']      = '';
+        $prefill['bill_to_type']    = '';
+        $prefill['bill_to_address'] = '';
+        if (preg_match('/\(([^)]+)\)/', $baseName, $pm)) {
+            $inner = $pm[1];
+            // First token before '-' is the agency short name
+            $parts = explode('-', $inner);
+            $agencyToken = trim($parts[0]);
+            if ($agencyToken && !in_array(strtoupper($agencyToken), ['DRCT','SB'])) {
+                // Look up agency by short_name (strip -PS/-LAM suffixes)
+                $cleanToken = preg_replace('/-PS$|-LAM$/i', '', $agencyToken);
+                $agRow = $db->prepare(
+                    "SELECT id, nome, COALESCE(address,'') AS address
+                     FROM agencies
+                     WHERE REPLACE(LOWER(short_name),'-','') = REPLACE(LOWER(?),'-','')
+                        OR REPLACE(LOWER(nome),'-','') = REPLACE(LOWER(?),'-','')
+                     LIMIT 1"
+                );
+                $agRow->execute([$cleanToken, $cleanToken]);
+                $agency = $agRow->fetch();
+                if ($agency) {
+                    $prefill['bill_to_name']    = $agency['nome'];
+                    $prefill['bill_to_id']      = $agency['id'];
+                    $prefill['bill_to_type']    = 'agency';
+                    $prefill['bill_to_address'] = $agency['address'];
+                }
+            }
+        }
     }
 }
 
@@ -158,8 +199,8 @@ include 'includes/header.php';
 <form method="POST" id="invForm">
 
 <!-- Hidden fields -->
-<input type="hidden" name="bill_to_source_type" id="billToSourceType" value="">
-<input type="hidden" name="bill_to_source_id"   id="billToSourceId"   value="">
+<input type="hidden" name="bill_to_source_type" id="billToSourceType" value="<?= h($prefill['bill_to_type'] ?? '') ?>">
+<input type="hidden" name="bill_to_source_id"   id="billToSourceId"   value="<?= h($prefill['bill_to_id'] ?? '') ?>">
 <input type="hidden" name="request_id"  value="<?= (int)($prefill['request_id'] ?? 0) ?>">
 
 <div class="form-card">
@@ -266,7 +307,7 @@ include 'includes/header.php';
 
     <div class="form-group full">
       <label>Address</label>
-      <textarea name="bill_to_address" id="billToAddress" rows="3" placeholder="Auto-filled from selection, or enter manually"></textarea>
+      <textarea name="bill_to_address" id="billToAddress" rows="3" placeholder="Auto-filled from selection, or enter manually"><?= h($prefill['bill_to_address'] ?? '') ?></textarea>
     </div>
   </div>
 
