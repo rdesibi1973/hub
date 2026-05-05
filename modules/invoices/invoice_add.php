@@ -383,11 +383,11 @@ function addItem(desc, qty, price) {
   var i = itemIdx++;
   var tr = document.createElement('tr');
   tr.innerHTML =
-    '<td style="padding:4px 4px 4px 0"><input type="text" class="desc-input" name="items['+i+'][description]" value="'+escHtml(desc)+'" placeholder="Description" required></td>'
-   +'<td><input type="number" class="qty-input" name="items['+i+'][quantity]" value="'+qty+'" step="0.01" min="0.01"></td>'
-   +'<td><input type="number" class="price-input" name="items['+i+'][unit_price]" value="'+price+'" step="0.01" placeholder="Neg. for discount"></td>'
-   +'<td class="total-cell" data-val="'+(qty*(price||0))+'">'+fmtAmt(qty*(price||0))+'</td>'
-   +'<td style="text-align:center"><button type="button" onclick="removeItem(this)" class="btn btn-danger btn-sm" title="Remove">✕</button></td>';
+    '<td style="padding:4px 4px 4px 0;vertical-align:top"><textarea class="desc-input" name="items['+i+'][description]" rows="2" placeholder="Description" required style="width:100%;resize:vertical;min-height:38px;">'+escHtml(desc)+'</textarea></td>'
+   +'<td style="vertical-align:top"><input type="number" class="qty-input" name="items['+i+'][quantity]" value="'+qty+'" step="0.01" min="0.01"></td>'
+   +'<td style="vertical-align:top"><input type="number" class="price-input" name="items['+i+'][unit_price]" value="'+price+'" step="0.01" placeholder="Neg. for discount"></td>'
+   +'<td class="total-cell" style="vertical-align:top" data-val="'+(qty*(price||0))+'">'+fmtAmt(qty*(price||0))+'</td>'
+   +'<td style="text-align:center;vertical-align:top"><button type="button" onclick="removeItem(this)" class="btn btn-danger btn-sm" title="Remove">✕</button></td>';
   tr.querySelector('.qty-input').addEventListener('input', calcRow);
   tr.querySelector('.price-input').addEventListener('input', calcRow);
   tbody.appendChild(tr);
@@ -412,7 +412,11 @@ function removeItem(btn) {
 
 function recalcAll() {
   var total = 0;
-  document.querySelectorAll('#itemsBody .total-cell').forEach(function(c){ total += parseFloat(c.dataset.val)||0; });
+  document.querySelectorAll('#itemsBody .total-cell').forEach(function(c){
+    var val = parseFloat(c.dataset.val) || 0;
+    total += val;
+    c.textContent = fmtAmt(val); // refresh symbol on currency change
+  });
   document.getElementById('subtotalDisplay').textContent = fmtAmt(total);
   document.getElementById('totalDisplay').textContent    = fmtAmt(total);
 }
