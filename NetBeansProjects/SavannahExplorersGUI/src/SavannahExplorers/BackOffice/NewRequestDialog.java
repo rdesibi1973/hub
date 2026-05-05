@@ -731,8 +731,8 @@ public class NewRequestDialog extends JDialog {
     private void showNewAgencyDialog() {
         JDialog dlg = new JDialog(this, "New Agency", true);
         dlg.setLayout(new BorderLayout(8, 8));
-        dlg.setSize(460, 300);
-        dlg.setMinimumSize(new Dimension(400, 280));
+        dlg.setSize(460, 340);
+        dlg.setMinimumSize(new Dimension(400, 320));
         dlg.setLocationRelativeTo(this);
         dlg.setResizable(true);
 
@@ -767,6 +767,13 @@ public class NewRequestDialog extends JDialog {
         bg.add(rbSav); bg.add(rbPro); bg.add(rbLamp);
         radioPanel.add(rbSav); radioPanel.add(rbPro); radioPanel.add(rbLamp);
         form.add(radioPanel, gc);
+
+        // Row 3 – Address
+        gc.gridx = 0; gc.gridy = 3; gc.gridwidth = 1; gc.fill = GridBagConstraints.NONE; gc.weightx = 0;
+        form.add(new JLabel("Address:"), gc);
+        gc.gridx = 1; gc.fill = GridBagConstraints.HORIZONTAL; gc.weightx = 1;
+        JTextField addressField = new JTextField(24);
+        form.add(addressField, gc);
 
         // Auto-update short name — includes -PS suffix for Promoservice/Lamprati
         // so the short_name in DB is self-contained (e.g. "Zucchitours-PS").
@@ -812,15 +819,17 @@ public class NewRequestDialog extends JDialog {
                          :                       "savannah";
         if (nome.isEmpty()) return;
 
-        final String finalNome  = nome;
-        final String finalShort = shortName;
-        final String finalType  = type;
+        final String finalNome    = nome;
+        final String finalShort   = shortName;
+        final String finalType    = type;
+        final String finalAddress = addressField.getText().trim();
         new Thread(() -> {
             try {
                 String body = "{"
-                    + "\"nome\":\"" + escJson(finalNome) + "\"," 
-                    + "\"short_name\":\"" + escJson(finalShort) + "\"," 
-                    + "\"type\":\"" + finalType + "\"" 
+                    + "\"nome\":\""       + escJson(finalNome)    + "\","
+                    + "\"short_name\":\"" + escJson(finalShort)   + "\","
+                    + "\"type\":\""       + finalType             + "\","
+                    + "\"address\":\""    + escJson(finalAddress) + "\""
                     + "}";
                 String resp = api.post("api_create_agency.php", body);
                 boolean ok2  = ApiClient.jsonGetBool(resp, "success");
