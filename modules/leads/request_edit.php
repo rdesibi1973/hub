@@ -265,7 +265,6 @@ include 'includes/header.php';
         <input type="number" name="pax" value="<?= h($v['pax']) ?>" min="1">
       </div>
 
-      <?php if (!$isRestricted): ?>
       <div class="form-group">
         <label>Status</label>
         <select name="status">
@@ -274,17 +273,8 @@ include 'includes/header.php';
           <?php endforeach; ?>
         </select>
       </div>
-      <?php else: ?>
-      <div class="form-group">
-        <label>Status</label>
-        <select name="status">
-          <?php foreach (STATUSES as $s => $_): ?>
-            <option value="<?= h($s) ?>" <?= $v['status']===$s?'selected':'' ?>><?= h($s) ?></option>
-          <?php endforeach; ?>
-        </select>
-      </div>
-      <?php endif; ?>
 
+      <?php if (!$isRestricted): ?>
       <div class="form-group">
         <label>Dropbox Folder</label>
         <input type="text" name="practice_code" value="<?= h($v['practice_code']) ?>"
