@@ -225,8 +225,8 @@ include 'includes/header.php';
       <strong>⚠️ Ready to import <?= count($toInsert) ?> record<?= count($toInsert)!==1?'s':'' ?> into Requests.</strong><br>
       <span style="font-size:.8rem;color:var(--grey-dk);">Make sure you have downloaded the backup above before proceeding.</span>
     </div>
-    <button type="button" class="btn btn-red"
-            onclick="if(confirm('Import <?= count($toInsert) ?> records into Requests?\n\nThis cannot be undone without the backup.')) document.getElementById(\'executeForm\').submit();">
+    <button type="submit" class="btn btn-red"
+            onclick="return confirm('Import <?= count($toInsert) ?> records into Requests?\n\nMake sure you downloaded the backup first.');">
       ✅ Execute Import
     </button>
   </div>
