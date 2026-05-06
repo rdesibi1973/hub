@@ -134,6 +134,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 $toPath     = $parentPath . '/' . $newName;
             }
 
+            require_once __DIR__ . '/../../modules/leads/dropbox_constants.php';
             require_once __DIR__ . '/../../modules/leads/dropbox_helper.php';
             $token = dropbox_get_access_token();
             dropbox_move_folder($token, $fromPath, $toPath);
