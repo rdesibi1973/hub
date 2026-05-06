@@ -55,61 +55,57 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!$v['customer_name']) $errors[] = 'Customer name is required.';
     if (!$isRestricted && !$v['date_received']) $errors[] = 'Date received is required.';
 
-    // ── Dropbox folder rename when customer name changes (admin/manager only) ──
+    // ── Dropbox folder rename when practice_code changes (admin/manager only) ──
+    // Triggered by ANY change to the Dropbox Folder field (including when driven by
+    // a customer-name edit via JS). Uses old DB value → new POST value as from/to.
+    $dropboxRenamed = false;
     if (!$errors && !$isRestricted) {
-        $oldCustomerName = trim($req['customer_name']);
-        $newCustomerName = trim($v['customer_name']);
-        $practiceCode    = trim($req['practice_code'] ?? '');
+        $oldFolder = trim($req['practice_code'] ?? '');
+        $newFolder = trim($v['practice_code']  ?? '');
 
-        if ($oldCustomerName !== $newCustomerName && $practiceCode !== '') {
-            // Build new folder name: replace the customer-name prefix (everything before
-            // the first '(' ), keeping the agency/agent suffix intact.
-            $parenPos  = strpos($practiceCode, '(');
-            $suffix    = ($parenPos !== false) ? substr($practiceCode, $parenPos) : '';
-            $newFolder = $newCustomerName . $suffix;
-
+        if ($oldFolder !== '' && $newFolder !== '' && $oldFolder !== $newFolder) {
             // Derive the full Dropbox API paths from the stored dropbox_url.
             // URL format: https://www.dropbox.com/home/2026/FolderName
             //              → API path: /2026/FolderName
-            $fromPath = '';
-            $toPath   = '';
-            $oldUrl   = trim($req['dropbox_url'] ?? '');
+            $oldUrl        = trim($req['dropbox_url'] ?? '');
             $dropboxPrefix = 'https://www.dropbox.com/home';
+            $fromPath      = '';
+            $toPath        = '';
 
             if (str_starts_with($oldUrl, $dropboxPrefix)) {
-                $apiPath   = urldecode(substr($oldUrl, strlen($dropboxPrefix)));  // e.g. /2026/FolderName
+                $apiPath   = urldecode(substr($oldUrl, strlen($dropboxPrefix)));
                 $lastSlash = strrpos($apiPath, '/');
                 if ($lastSlash !== false) {
-                    $parentPath = substr($apiPath, 0, $lastSlash);          // e.g. /2026
+                    $parentPath = substr($apiPath, 0, $lastSlash);
                     $fromPath   = $apiPath;
                     $toPath     = $parentPath . '/' . $newFolder;
                 }
             }
 
-            // Fallback: guess parent from status when no URL available
+            // Fallback: guess parent from status when dropbox_url is missing
             if ($fromPath === '') {
                 $parentPath = ($req['status'] === 'Booked') ? '/001_Safari' : '/2026';
-                $fromPath   = $parentPath . '/' . $practiceCode;
+                $fromPath   = $parentPath . '/' . $oldFolder;
                 $toPath     = $parentPath . '/' . $newFolder;
             }
 
-            require_once 'dropbox_constants.php';
             require_once 'dropbox_helper.php';
             try {
                 $token = dropbox_get_access_token();
                 dropbox_move_folder($token, $fromPath, $toPath);
 
-                // Success — update practice_code and rebuild dropbox_url for the DB write
-                $v['practice_code'] = $newFolder;
+                // Success — rebuild dropbox_url to match the renamed folder
                 if ($oldUrl !== '') {
                     $lastSlash        = strrpos($oldUrl, '/');
                     $v['dropbox_url'] = substr($oldUrl, 0, $lastSlash + 1) . rawurlencode($newFolder);
                 }
+                $dropboxRenamed = true;
             } catch (RuntimeException $e) {
                 $msg = $e->getMessage();
+                error_log("[request_edit] Dropbox rename failed: from=$fromPath to=$toPath — $msg");
                 if (str_contains($msg, 'not_found')) {
-                    $errors[] = "Dropbox folder not found: the folder \"$practiceCode\" does not exist"
-                              . " in Dropbox. Please update the Dropbox Folder field manually if needed.";
+                    $errors[] = "Dropbox folder not found: \"$oldFolder\" does not exist in Dropbox."
+                              . " Update the Dropbox Folder field to match the actual folder name, then save again.";
                 } else {
                     $errors[] = "Dropbox rename failed — the request has not been saved."
                               . " Error: " . htmlspecialchars($msg);
@@ -170,7 +166,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $id,
             ]);
         }
-        flash('Request updated successfully.');
+        $flashMsg = $dropboxRenamed ? 'Request updated and Dropbox folder renamed successfully.' : 'Request updated successfully.';
+        flash($flashMsg);
         header("Location: request_view.php?id=" . $id);
         exit;
     }
@@ -369,6 +366,23 @@ function calcComm() {
     hidden.value = '';
   }
 }
+<?php endif; ?>
+
+
+<?php if (!$isRestricted): ?>
+// ── Auto-update Dropbox Folder when customer name changes ────────────────
+(function(){
+  const nameField   = document.getElementById('customer_name');
+  const folderField = document.querySelector('input[name="practice_code"]');
+  if (!nameField || !folderField) return;
+
+  nameField.addEventListener('input', function(){
+    const folder   = folderField.value;
+    const parenIdx = folder.indexOf('(');
+    const suffix   = parenIdx >= 0 ? folder.substring(parenIdx) : '';
+    folderField.value = this.value.trimStart() + suffix;
+  });
+})();
 <?php endif; ?>
 
 // ── Duplicate detection ──────────────────────────────────────────
