@@ -101,7 +101,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $dbTag = $tagMap[$newLabel];
         try {
             $reqRow = $db->prepare(
-                "SELECT r.id, r.practice_code, r.dropbox_url
+                "SELECT r.id, r.practice_code, r.dropbox_url, r.status
                  FROM invoices i JOIN requests r ON r.id = i.request_id WHERE i.id = ?"
             );
             $reqRow->execute([$invId]);
@@ -109,27 +109,44 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             if (!$req || !$req['practice_code']) {
                 ob_end_clean(); echo json_encode(['ok'=>false,'error'=>'No linked Dropbox folder found.']); exit;
             }
-            require_once __DIR__ . '/../../includes/config.php';
+
             $oldName  = $req['practice_code'];
             $baseName = folder_strip_tag($oldName);
             $newName  = $baseName . '_' . $dbTag;
-            // Delegate to api_rename_folder.php — same as Java BackOffice
-            $apiUrl  = BASE_URL . '/modules/leads/api_rename_folder.php';
-            $ch = curl_init($apiUrl);
-            curl_setopt_array($ch, [
-                CURLOPT_POST           => true,
-                CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_HTTPHEADER     => ['Content-Type: application/json', 'X-API-Key: e4c831819c65a1b0ee3f018c4425b84748d1a4e337f0acd8'],
-                CURLOPT_POSTFIELDS     => json_encode(['old_folder_name'=>$oldName,'new_folder_name'=>$newName]),
-                CURLOPT_TIMEOUT        => 30,
-            ]);
-            $body = curl_exec($ch); $curlErr = curl_error($ch); $code = curl_getinfo($ch, CURLINFO_HTTP_CODE); curl_close($ch);
-            if ($curlErr) throw new \RuntimeException("Curl error: $curlErr");
-            $result = json_decode($body, true);
-            if (!($result['success'] ?? false)) throw new \RuntimeException($result['message'] ?? "Rename failed (HTTP $code): $body");
-            $newUrl = $result['dropbox_url'] ?? '';
+
+            // ── Rename folder in Dropbox ───────────────────────────────────
+            $dropboxPrefix = 'https://www.dropbox.com/home';
+            $oldUrl        = $req['dropbox_url'] ?? '';
+            $fromPath = $toPath = '';
+
+            if (str_starts_with($oldUrl, $dropboxPrefix)) {
+                $apiPath   = urldecode(substr($oldUrl, strlen($dropboxPrefix)));
+                $lastSlash = strrpos($apiPath, '/');
+                if ($lastSlash !== false) {
+                    $parentPath = substr($apiPath, 0, $lastSlash);
+                    $fromPath   = $apiPath;
+                    $toPath     = $parentPath . '/' . $newName;
+                }
+            }
+            if ($fromPath === '') {
+                $parentPath = ($req['status'] === 'Booked') ? '/001_Safari' : '/2026';
+                $fromPath   = $parentPath . '/' . $oldName;
+                $toPath     = $parentPath . '/' . $newName;
+            }
+
+            require_once __DIR__ . '/../../modules/leads/dropbox_helper.php';
+            $token = dropbox_get_access_token();
+            dropbox_move_folder($token, $fromPath, $toPath);
+
+            // ── Update DB ──────────────────────────────────────────────────
+            $newUrl = '';
+            if ($oldUrl !== '') {
+                $lastSlash = strrpos($oldUrl, '/');
+                $newUrl    = substr($oldUrl, 0, $lastSlash + 1) . rawurlencode($newName);
+            }
             $db->prepare("UPDATE requests SET practice_code=?, dropbox_url=? WHERE id=?")
                ->execute([$newName, $newUrl, (int)$req['id']]);
+
             ob_end_clean(); echo json_encode(['ok'=>true,'new_name'=>$newName,'new_tag'=>$dbTag,'new_url'=>$newUrl]); exit;
         } catch (\Throwable $e) {
             ob_end_clean(); echo json_encode(['ok'=>false,'error'=>$e->getMessage()]); exit;
