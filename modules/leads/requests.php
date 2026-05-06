@@ -20,7 +20,7 @@ if (isset($_GET['clear'])) {
 // If any filter param is present in URL → save to session; otherwise restore
 $filter_submitted = array_key_exists('q', $_GET) || array_key_exists('status', $_GET)
                  || array_key_exists('agent', $_GET) || array_key_exists('year', $_GET)
-                 || array_key_exists('no_folder', $_GET);
+                 || array_key_exists('no_folder', $_GET) || array_key_exists('sort', $_GET);
 
 if ($filter_submitted) {
     $_SESSION['req_filters'] = [
@@ -29,6 +29,7 @@ if ($filter_submitted) {
         'agent'     => (int)($_GET['agent'] ?? 0),
         'year'      => (int)($_GET['year']  ?? date('Y')),
         'no_folder' => !empty($_GET['no_folder']),
+        'sort'      => $_GET['sort'] ?? 'date_desc',
     ];
 }
 
@@ -38,6 +39,13 @@ $status    = $f['status']    ?? '';
 $agent     = (int)($f['agent']    ?? 0);
 $year      = (int)($f['year']     ?? date('Y'));
 $no_folder = !empty($f['no_folder']);
+$sort      = $f['sort']      ?? 'date_desc';
+
+$allowedSorts = [
+    'date_desc' => 'r.date_received DESC, r.id DESC',
+    'date_asc'  => 'r.date_received ASC,  r.id ASC',
+];
+$orderBy = $allowedSorts[$sort] ?? $allowedSorts['date_desc'];
 
 // Build query
 $where  = ['1=1'];
@@ -78,7 +86,7 @@ $sql = "
     FROM requests r
     LEFT JOIN agents a ON a.id = r.agent_id
     WHERE " . implode(' AND ', $where) . "
-    ORDER BY r.date_received DESC, r.id DESC
+    ORDER BY {$orderBy}
 ";
 $stmt = $db->prepare($sql);
 $stmt->execute($params);
@@ -182,7 +190,25 @@ include 'includes/header.php';
         <?php if (!$isStaff): ?><th style="text-align:center;width:48px;">Inv</th><?php endif; ?>
         <?php if (!$isStaff): ?><th class="text-right">Value (USD)</th><?php endif; ?>
         <?php if (!$isStaff): ?><th>Agent</th><?php endif; ?>
-        <th>Date</th>
+        <?php
+          $nextSort  = $sort === 'date_desc' ? 'date_asc' : 'date_desc';
+          $sortArrow = $sort === 'date_desc' ? '↓' : '↑';
+          // Build sort URL preserving current filters
+          $sortParams = http_build_query(array_filter([
+            'q'         => $search,
+            'status'    => $status,
+            'agent'     => $agent ?: null,
+            'year'      => $year  ?: null,
+            'no_folder' => $no_folder ? 1 : null,
+            'sort'      => $nextSort,
+          ], fn($v) => $v !== null && $v !== '' && $v !== 0));
+        ?>
+        <th style="white-space:nowrap;">
+          <a href="requests.php?<?= $sortParams ?>"
+             style="text-decoration:none;color:inherit;display:inline-flex;align-items:center;gap:4px;">
+            Date <span style="color:var(--red);font-size:.85em;"><?= $sortArrow ?></span>
+          </a>
+        </th>
         <th>Dropbox Folder</th>
         <th>Source</th>
       </tr>
