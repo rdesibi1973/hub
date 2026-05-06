@@ -179,7 +179,7 @@ include 'includes/header.php';
 $linkedRequest = null;
 $currentTag    = '';
 if ($inv['request_id']) {
-    $rs = $db->prepare("SELECT id, practice_code, dropbox_url FROM requests WHERE id=?");
+    $rs = $db->prepare("SELECT id, practice_code, dropbox_url, email, customer_name FROM requests WHERE id=?");
     $rs->execute([$inv['request_id']]);
     $linkedRequest = $rs->fetch();
     if ($linkedRequest && $linkedRequest['practice_code']) {
@@ -205,6 +205,7 @@ $sym = $inv['currency'] === 'EUR' ? '€' : '$';
   </div>
   <div class="gap-8">
     <a href="invoice_edit.php?id=<?= $id ?>" class="btn btn-outline">Edit</a>
+    <button class="btn btn-outline" onclick="openMailModal()" type="button">✉ Mail</button>
     <a href="invoice_pdf.php?id=<?= $id ?>" class="btn btn-outline" target="_blank">🖨 PDF</a>
     <?php if ($inv['status'] === 'Cancelled' && isInvoiceAdmin()): ?>
       <button class="btn btn-outline" onclick="restoreInvoice()">↩ Restore</button>
@@ -506,6 +507,138 @@ async function cancelInvoice() {
   var fd = new FormData();
   fd.append('action','cancel_invoice'); fd.append('invoice_id','<?= $id ?>');
   fetch('invoice_view.php', {method:'POST',body:fd}).then(function(r){return r.json();}).then(function(d){ if(d.ok) location.reload(); });
+}
+</script>
+
+<?php
+// ── Prepare mail modal defaults ───────────────────────────────────────────────
+$mailTo      = ($linkedRequest['email'] ?? '') ?: '';
+$mailSubject = h($inv['bill_to_name']) . ' trip with Savannah Explorers';
+$mailBody    = "Greetings from Savannah Explorers.\r\nKindly find your attached receipt and note that your money was successfully received into our bank account,\r\nWe wish you all the best for your upcoming safari/trip,\r\nRegards with thanks,\r\nEsther\r\n--\r\nSavannah Explorers Ltd\r\nEngosheraton - P.O. Box 16726\r\nArusha - Tanzania\r\nOffice +255 768 900 199\r\nEmergency Mobile Tanzania: +255 768 900 199 and +255 747 777 315\r\nEmail: accountant@savannahexplorers.com\r\nWebsite: savannahexplorers.net";
+?>
+
+<!-- ── MAIL MODAL ─────────────────────────────────────────────────────────── -->
+<div id="mailModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9998;align-items:center;justify-content:center;">
+  <div style="background:#fff;border-radius:12px;padding:28px 32px;max-width:640px;width:94%;box-shadow:0 10px 40px rgba(0,0,0,.25);font-family:'Open Sans',sans-serif;max-height:92vh;overflow-y:auto;">
+
+    <div style="font-family:'Merriweather',serif;font-size:1.05rem;font-weight:700;color:#A01A14;margin-bottom:20px;">
+      ✉ Send Invoice by Email
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:14px;">
+
+      <div>
+        <label style="font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#888;display:block;margin-bottom:4px;">To</label>
+        <input id="mailTo" type="email" value="<?= h($mailTo) ?>"
+               style="width:100%;padding:9px 12px;border:1.5px solid #E8E8E8;border-radius:7px;font-family:inherit;font-size:.85rem;outline:none;"
+               onfocus="this.style.borderColor='#C0211B'" onblur="this.style.borderColor='#E8E8E8'">
+      </div>
+
+      <div>
+        <label style="font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#888;display:block;margin-bottom:4px;">CC <span style="font-weight:400;font-style:italic;">(optional)</span></label>
+        <input id="mailCc" type="text" placeholder="e.g. agent@example.com"
+               style="width:100%;padding:9px 12px;border:1.5px solid #E8E8E8;border-radius:7px;font-family:inherit;font-size:.85rem;outline:none;"
+               onfocus="this.style.borderColor='#C0211B'" onblur="this.style.borderColor='#E8E8E8'">
+      </div>
+
+      <div>
+        <label style="font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#888;display:block;margin-bottom:4px;">Subject</label>
+        <input id="mailSubject" type="text" value="<?= h($mailSubject) ?>"
+               style="width:100%;padding:9px 12px;border:1.5px solid #E8E8E8;border-radius:7px;font-family:inherit;font-size:.85rem;outline:none;"
+               onfocus="this.style.borderColor='#C0211B'" onblur="this.style.borderColor='#E8E8E8'">
+      </div>
+
+      <div>
+        <label style="font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#888;display:block;margin-bottom:4px;">Body</label>
+        <textarea id="mailBody" rows="12"
+                  style="width:100%;padding:9px 12px;border:1.5px solid #E8E8E8;border-radius:7px;font-family:inherit;font-size:.82rem;line-height:1.6;resize:vertical;outline:none;"
+                  onfocus="this.style.borderColor='#C0211B'" onblur="this.style.borderColor='#E8E8E8'"><?= h($mailBody) ?></textarea>
+      </div>
+
+      <div style="font-size:.75rem;color:#888;padding:8px 12px;background:#F7F5F2;border-radius:6px;">
+        📎 Invoice <strong><?= h($inv['invoice_number']) ?></strong> will be attached as a PDF.
+      </div>
+
+      <div id="mailStatus" style="display:none;font-size:.83rem;padding:9px 14px;border-radius:7px;"></div>
+
+    </div>
+
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:22px;border-top:1px solid #E8E8E8;padding-top:18px;">
+      <button type="button" onclick="closeMailModal()"
+              style="padding:9px 22px;border-radius:7px;border:1.5px solid #E8E8E8;background:#fff;font-family:inherit;font-size:.83rem;font-weight:600;cursor:pointer;">
+        Cancel
+      </button>
+      <button type="button" id="mailSendBtn" onclick="sendInvoiceMail()"
+              style="padding:9px 22px;border-radius:7px;border:none;background:#C0211B;color:#fff;font-family:inherit;font-size:.83rem;font-weight:700;cursor:pointer;">
+        Send Email
+      </button>
+    </div>
+
+  </div>
+</div>
+
+<script>
+function openMailModal() {
+  document.getElementById('mailModal').style.display = 'flex';
+  document.getElementById('mailStatus').style.display = 'none';
+  document.getElementById('mailSendBtn').disabled = false;
+  document.getElementById('mailSendBtn').textContent = 'Send Email';
+}
+function closeMailModal() {
+  document.getElementById('mailModal').style.display = 'none';
+}
+document.getElementById('mailModal').addEventListener('click', function(e) {
+  if (e.target === this) closeMailModal();
+});
+
+async function sendInvoiceMail() {
+  var to      = document.getElementById('mailTo').value.trim();
+  var cc      = document.getElementById('mailCc').value.trim();
+  var subject = document.getElementById('mailSubject').value.trim();
+  var body    = document.getElementById('mailBody').value.trim();
+  var status  = document.getElementById('mailStatus');
+  var btn     = document.getElementById('mailSendBtn');
+
+  if (!to)      { showMailStatus('Please enter a To address.', false); return; }
+  if (!subject) { showMailStatus('Please enter a Subject.', false); return; }
+  if (!body)    { showMailStatus('Please enter the email body.', false); return; }
+
+  btn.disabled = true;
+  btn.textContent = 'Sending…';
+  showMailStatus('Generating PDF and sending…', null);
+
+  var fd = new FormData();
+  fd.append('invoice_id', '<?= $id ?>');
+  fd.append('to',      to);
+  fd.append('cc',      cc);
+  fd.append('subject', subject);
+  fd.append('body',    body);
+
+  try {
+    var r = await fetch('api_send_invoice_email.php', { method: 'POST', body: fd });
+    var d = await r.json();
+    if (d.ok) {
+      showMailStatus('✓ Email sent successfully.', true);
+      btn.textContent = 'Sent ✓';
+    } else {
+      showMailStatus('✗ ' + (d.error || 'Unknown error'), false);
+      btn.disabled = false;
+      btn.textContent = 'Send Email';
+    }
+  } catch(e) {
+    showMailStatus('✗ Network error: ' + e.message, false);
+    btn.disabled = false;
+    btn.textContent = 'Send Email';
+  }
+}
+
+function showMailStatus(msg, ok) {
+  var el = document.getElementById('mailStatus');
+  el.textContent = msg;
+  el.style.display = 'block';
+  if (ok === true)  { el.style.background = '#D6EDD9'; el.style.color = '#1A6B3A'; }
+  else if (ok === false) { el.style.background = '#FAE8E7'; el.style.color = '#A01A14'; }
+  else              { el.style.background = '#F7F5F2'; el.style.color = '#888'; }
 }
 </script>
 
