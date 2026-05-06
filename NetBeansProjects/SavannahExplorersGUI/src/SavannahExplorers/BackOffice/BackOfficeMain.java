@@ -1058,7 +1058,7 @@ public class BackOfficeMain extends javax.swing.JFrame {
                 "All confirmed safaris have CK. Nothing missing.",
                 "Missing CK", javax.swing.JOptionPane.INFORMATION_MESSAGE);
         } else {
-            showResultsPopup("Missing CK — " + missing.size() + " folder(s)", missing);
+            showResultsPopup("Missing CK — " + missing.size() + " folder(s)", missing, true);
         }
     }//GEN-LAST:event_jMenuItem1ActionPerformed
 
@@ -2613,6 +2613,186 @@ public class BackOfficeMain extends javax.swing.JFrame {
         dialog.add(scrollPane, java.awt.BorderLayout.CENTER);
         dialog.add(hint, java.awt.BorderLayout.SOUTH);
         dialog.setVisible(true);
+    }
+
+    // -------------------------------------------------------------------------
+    /** showResultsPopup with optional Word export button (used by Missing CK) */
+    private void showResultsPopup(String title, java.util.List<String> results, boolean showExport) {
+        if (!showExport) { showResultsPopup(title, results); return; }
+
+        if (results.isEmpty()) {
+            javax.swing.JOptionPane.showMessageDialog(
+                this, "No results found.", title,
+                javax.swing.JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+
+        javax.swing.JDialog dialog = new javax.swing.JDialog(this, title, true);
+        dialog.setSize(520, 420);
+        dialog.setLocationRelativeTo(this);
+        dialog.setLayout(new java.awt.BorderLayout(0, 4));
+
+        javax.swing.DefaultListModel<String> model = new javax.swing.DefaultListModel<>();
+        for (String r : results) model.addElement(r);
+
+        javax.swing.JList<String> list = new javax.swing.JList<>(model);
+        list.setSelectionMode(javax.swing.ListSelectionModel.SINGLE_SELECTION);
+        list.setFont(new java.awt.Font("Monospaced", java.awt.Font.PLAIN, 13));
+
+        list.addMouseListener(new java.awt.event.MouseAdapter() {
+            @Override
+            public void mouseClicked(java.awt.event.MouseEvent e) {
+                if (e.getClickCount() == 2) {
+                    String selected = list.getSelectedValue();
+                    if (selected != null) {
+                        String result;
+                        java.io.File f = new java.io.File(selected);
+                        if (f.isAbsolute()) {
+                            String folderPath = f.isDirectory() ? selected : f.getParent();
+                            if (folderPath == null) folderPath = selected;
+                            String marker = "001_safari";
+                            int idx = folderPath.toLowerCase().indexOf(marker);
+                            if (idx >= 0) {
+                                folderPath = folderPath.substring(idx + marker.length());
+                                if (folderPath.startsWith("\\") || folderPath.startsWith("/"))
+                                    folderPath = folderPath.substring(1);
+                            }
+                            result = folderPath;
+                        } else {
+                            result = selected;
+                        }
+                        jTextField1.setText(result);
+                        dialog.dispose();
+                    }
+                }
+            }
+        });
+
+        javax.swing.JScrollPane scrollPane = new javax.swing.JScrollPane(list);
+        scrollPane.setBorder(javax.swing.BorderFactory.createEmptyBorder(4, 6, 4, 6));
+
+        javax.swing.JLabel hint = new javax.swing.JLabel(
+            "  Double-click to select and populate Customer File");
+        hint.setFont(hint.getFont().deriveFont(java.awt.Font.ITALIC, 11f));
+
+        javax.swing.JButton exportBtn = new javax.swing.JButton("⬇  Download as Word (.docx)");
+        exportBtn.addActionListener(ev -> {
+            javax.swing.JFileChooser fc = new javax.swing.JFileChooser();
+            fc.setDialogTitle("Save Missing CK list");
+            fc.setSelectedFile(new java.io.File("Missing_CK_" +
+                new java.text.SimpleDateFormat("yyyyMMdd").format(new java.util.Date()) + ".docx"));
+            fc.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter("Word Document (*.docx)", "docx"));
+            if (fc.showSaveDialog(dialog) == javax.swing.JFileChooser.APPROVE_OPTION) {
+                java.io.File out = fc.getSelectedFile();
+                if (!out.getName().toLowerCase().endsWith(".docx"))
+                    out = new java.io.File(out.getAbsolutePath() + ".docx");
+                try {
+                    exportMissingCKDocx(title, results, out);
+                    javax.swing.JOptionPane.showMessageDialog(dialog,
+                        "File saved:\n" + out.getAbsolutePath(),
+                        "Export complete", javax.swing.JOptionPane.INFORMATION_MESSAGE);
+                } catch (Exception ex) {
+                    javax.swing.JOptionPane.showMessageDialog(dialog,
+                        "Export failed: " + ex.getMessage(),
+                        "Error", javax.swing.JOptionPane.ERROR_MESSAGE);
+                }
+            }
+        });
+
+        javax.swing.JPanel south = new javax.swing.JPanel(new java.awt.BorderLayout(6, 4));
+        south.setBorder(javax.swing.BorderFactory.createEmptyBorder(2, 6, 8, 6));
+        south.add(hint, java.awt.BorderLayout.CENTER);
+        south.add(exportBtn, java.awt.BorderLayout.EAST);
+
+        dialog.add(scrollPane, java.awt.BorderLayout.CENTER);
+        dialog.add(south, java.awt.BorderLayout.SOUTH);
+        dialog.setVisible(true);
+    }
+
+    // -------------------------------------------------------------------------
+    /** Generates a minimal .docx (ZIP + XML) with the Missing CK folder list.
+     *  No external libraries required — uses java.util.zip only. */
+    private void exportMissingCKDocx(String title, java.util.List<String> items, java.io.File dest)
+            throws java.io.IOException {
+
+        // Build the <w:body> paragraphs
+        StringBuilder body = new StringBuilder();
+
+        // Title paragraph
+        body.append("<w:p><w:pPr><w:pStyle w:val=\"Heading1\"/></w:pPr>")
+            .append("<w:r><w:t>").append(xmlEscape(title)).append("</w:t></w:r></w:p>");
+
+        // Date subtitle
+        String dateStr = new java.text.SimpleDateFormat("dd MMMM yyyy", java.util.Locale.ENGLISH)
+            .format(new java.util.Date());
+        body.append("<w:p><w:pPr><w:jc w:val=\"left\"/></w:pPr>")
+            .append("<w:r><w:rPr><w:color w:val=\"888888\"/><w:sz w:val=\"20\"/></w:rPr>")
+            .append("<w:t>Generated: ").append(xmlEscape(dateStr)).append("</w:t></w:r></w:p>");
+
+        // Spacer
+        body.append("<w:p><w:r><w:t></w:t></w:r></w:p>");
+
+        // One paragraph per folder
+        for (int i = 0; i < items.size(); i++) {
+            body.append("<w:p>")
+                .append("<w:r><w:rPr><w:rFonts w:ascii=\"Courier New\" w:hAnsi=\"Courier New\"/>")
+                .append("<w:sz w:val=\"20\"/></w:rPr>")
+                .append("<w:t xml:space=\"preserve\">").append(i + 1).append(".  ")
+                .append(xmlEscape(items.get(i))).append("</w:t></w:r></w:p>");
+        }
+
+        // Final empty paragraph
+        body.append("<w:p><w:r><w:t></w:t></w:r></w:p>");
+
+        // Full document.xml
+        String documentXml =
+            "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>" +
+            "<w:document xmlns:wpc=\"http://schemas.microsoft.com/office/word/2010/wordprocessingCanvas\" " +
+            "xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" " +
+            "xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\">" +
+            "<w:body>" + body + "</w:body></w:document>";
+
+        String contentTypes =
+            "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>" +
+            "<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">" +
+            "<Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/>" +
+            "<Default Extension=\"xml\" ContentType=\"application/xml\"/>" +
+            "<Override PartName=\"/word/document.xml\" " +
+            "ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml\"/>" +
+            "</Types>";
+
+        String relsMain =
+            "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>" +
+            "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">" +
+            "<Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument\" " +
+            "Target=\"word/document.xml\"/>" +
+            "</Relationships>";
+
+        String wordRels =
+            "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>" +
+            "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">" +
+            "</Relationships>";
+
+        try (java.util.zip.ZipOutputStream zos =
+                new java.util.zip.ZipOutputStream(new java.io.FileOutputStream(dest))) {
+            putZipEntry(zos, "[Content_Types].xml", contentTypes);
+            putZipEntry(zos, "_rels/.rels", relsMain);
+            putZipEntry(zos, "word/document.xml", documentXml);
+            putZipEntry(zos, "word/_rels/document.xml.rels", wordRels);
+        }
+    }
+
+    private void putZipEntry(java.util.zip.ZipOutputStream zos, String name, String content)
+            throws java.io.IOException {
+        zos.putNextEntry(new java.util.zip.ZipEntry(name));
+        zos.write(content.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        zos.closeEntry();
+    }
+
+    private String xmlEscape(String s) {
+        if (s == null) return "";
+        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                .replace("\"", "&quot;").replace("'", "&apos;");
     }
 
     // -------------------------------------------------------------------------
