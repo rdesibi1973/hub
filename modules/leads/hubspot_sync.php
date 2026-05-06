@@ -223,6 +223,9 @@ function hs_fetch_contacts(int $since): array {
         // Standard HubSpot
         'firstname', 'lastname', 'email', 'phone', 'mobilephone',
         'createdate', 'hs_analytics_source', 'hs_latest_source',
+        // Form reconversion tracking
+        'recent_conversion_event_name',  // Name of the last form submitted
+        'recent_conversion_date',        // Timestamp of last form submission
         // iBot — English (primary)
         'contact_name',           // Full name from iBot
         'whatsapp_phone_number',  // WhatsApp number
@@ -243,6 +246,8 @@ function hs_fetch_contacts(int $since): array {
         // Form / legacy
         'numero_di_persone', 'periodo', 'message', 'destinazioni', 'destinations',
     ];
+
+    // ── Pass 1: brand-new contacts (createdate >= $since) ────────────────────
     $contacts = []; $after = null;
     do {
         $body = [
@@ -262,6 +267,35 @@ function hs_fetch_contacts(int $since): array {
         $contacts = array_merge($contacts, $data['results'] ?? []);
         $after    = $data['paging']['next']['after'] ?? null;
     } while ($after);
+
+    // ── Pass 2: reconversions — existing contacts who submitted a form since $since ──
+    // (contacts whose createdate predates $since but recent_conversion_date >= $since)
+    $newIds = array_flip(array_column($contacts, 'id'));
+    $after  = null;
+    do {
+        $body2 = [
+            'filterGroups' => [[
+                'filters' => [[
+                    'propertyName' => 'recent_conversion_date',
+                    'operator'     => 'GTE',
+                    'value'        => (string)$since,
+                ]],
+            ]],
+            'properties' => $props,
+            'sorts'      => [['propertyName' => 'recent_conversion_date', 'direction' => 'ASCENDING']],
+            'limit'      => 100,
+        ];
+        if ($after) $body2['after'] = $after;
+        $data = hs_curl('https://api.hubapi.com/crm/v3/objects/contacts/search', $body2);
+        foreach ($data['results'] ?? [] as $c) {
+            if (!isset($newIds[$c['id']])) {
+                $c['_is_reconversion'] = true; // flag for hs_contact_to_lead()
+                $contacts[] = $c;
+            }
+        }
+        $after = $data['paging']['next']['after'] ?? null;
+    } while ($after);
+
     return $contacts;
 }
 
@@ -388,6 +422,7 @@ function hs_fetch_tickets(int $since): array {
 function hs_contact_to_lead(array $contact): ?array {
     $p    = $contact['properties'];
     $hsId = $contact['id'];
+    $isReconversion = !empty($contact['_is_reconversion']);
 
     // Name — iBot contact_name field first, then firstname+lastname
     $contactNameRaw = trim($p['contact_name'] ?? $p['nome_cognome'] ?? '');
@@ -418,6 +453,40 @@ function hs_contact_to_lead(array $contact): ?array {
     $message   = trim($p['message'] ?? '');
 
     $pax = ($rawPax !== '' && (float)$rawPax > 0) ? (int)round((float)$rawPax) : null;
+
+    // ── Reconversion: existing contact submitted a new form ──────────────────
+    if ($isReconversion) {
+        $reconvMs      = hs_parse_ms($p['recent_conversion_date'] ?? 0);
+        $formName      = trim($p['recent_conversion_event_name'] ?? 'Website Form');
+        // Unique hubspot_id per reconversion event: f_{contactId}_{ms}
+        $reconvHsId    = 'f_' . $hsId . '_' . $reconvMs;
+
+        $lines = ['--- HubSpot Form (Reconversion) ---'];
+        $lines[] = "Form: $formName";
+        if ($name)    $lines[] = "Name: $name";
+        if ($email)   $lines[] = "Email: $email";
+        if ($phone)   $lines[] = "WhatsApp/Phone: $phone";
+        if ($pax)     $lines[] = "Number of People: $pax";
+        if ($period)  $lines[] = "Period: $period";
+        if ($destRaw) $lines[] = "Destinations: " . str_replace(';', ', ', $destRaw);
+        if ($message) { $lines[] = ''; $lines[] = 'Other Info/Requests:'; $lines[] = $message; }
+
+        return [
+            'hubspot_id'      => $reconvHsId,
+            'contact_id'      => $hsId,
+            'source'          => 'Form',
+            'customer_name'   => $name,
+            'email'           => $email,
+            'phone'           => $phone,
+            'pax'             => $pax,
+            'period'          => $period,
+            'destination'     => $destRaw ? hs_map_destination(explode(';', $destRaw)[0]) : '',
+            'initial_request' => implode("\n", $lines),
+            'notes'           => "HubSpot Reconversion | Contact: $hsId | Form: $formName",
+            'raw_data'        => $p,
+            'date_created_ms' => $reconvMs ?: hs_parse_ms($p['createdate'] ?? 0),
+        ];
+    }
 
     // Source: iBot fields present → iBot; only message → Form
     $hasIbotFields = $destRaw || $period || $activities || $duration || $accomLevel || $contactNameRaw;
@@ -610,9 +679,12 @@ if (!defined('HS_INCLUDED')) {
         if ($debugMode) {
             // Debug: show raw contacts first, then tickets
             $contacts = hs_fetch_contacts($since);
-            echo "[DEBUG] " . count($contacts) . " contacts found\n\n";
+            $newCount   = count(array_filter($contacts, fn($c) => empty($c['_is_reconversion'])));
+            $reconvCount= count(array_filter($contacts, fn($c) => !empty($c['_is_reconversion'])));
+            echo "[DEBUG] " . count($contacts) . " contacts found ($newCount new, $reconvCount reconversions)\n\n";
             foreach ($contacts as $c) {
-                echo "--- CONTACT {$c['id']} ---\n";
+                $tag = !empty($c['_is_reconversion']) ? ' [RECONVERSION]' : '';
+                echo "--- CONTACT {$c['id']}$tag ---\n";
                 foreach ($c['properties'] as $k => $v) {
                     if ($v !== null && $v !== '') echo "  $k = $v\n";
                 }
