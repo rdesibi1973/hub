@@ -189,7 +189,7 @@ include __DIR__ . '/includes/layout_header.php';
   <div class="section-label dot-navy group-spacer">Tools</div>
   <div class="links-grid">
 
-    <a class="link-card lc-navy" href="https://operators.intermundial.es/" target="_blank">
+    <a class="link-card lc-navy" href="https://safer.intermundial.com/login?lang=it" target="_blank">
       <div class="lc-icon emoji">🧭</div>
       <div><div class="lc-label">Intermundial</div><div class="lc-sub">Operator Portal</div></div>
     </a>
