@@ -199,8 +199,6 @@ include 'includes/header.php';
 <form method="POST" id="invForm">
 
 <!-- Hidden fields -->
-<input type="hidden" name="bill_to_source_type" id="billToSourceType" value="<?= h($prefill['bill_to_type'] ?? '') ?>">
-<input type="hidden" name="bill_to_source_id"   id="billToSourceId"   value="<?= h($prefill['bill_to_id'] ?? '') ?>">
 <input type="hidden" name="request_id"  value="<?= (int)($prefill['request_id'] ?? 0) ?>">
 
 <div class="form-card">
