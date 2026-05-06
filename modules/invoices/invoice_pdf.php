@@ -207,9 +207,13 @@ body {
 
     <!-- Header -->
     <div class="inv-header">
-      <img class="inv-logo"
-           src="https://www.savannahexplorers.net/img/logo-savannah-explorers.png"
-           alt="<?= htmlspecialchars($inv['issuer']) ?>">
+      <?php if ($inv['issuer'] === 'Savannah Holidays Ltd'): ?>
+        <img class="inv-logo" src="assets/logo_sh.png" alt="Savannah Holidays Ltd"
+             style="height:90px;width:auto;object-fit:contain;">
+      <?php else: ?>
+        <img class="inv-logo" src="assets/logo_se.png" alt="Savannah Explorers Ltd"
+             style="height:90px;width:auto;object-fit:contain;">
+      <?php endif; ?>
       <div class="inv-title-block">
         <h1>Invoice</h1>
         <div class="inv-number"># <?= htmlspecialchars($inv['invoice_number']) ?></div>
@@ -224,7 +228,7 @@ body {
       <?php if ($inv['issuer'] === 'Savannah Explorers Ltd'): ?>
         <div class="issuer-addr">Arusha, P.O. Box 16726<br>Tanzania</div>
       <?php else: ?>
-        <div class="issuer-addr">Savannah Holidays Ltd<br>Tanzania</div>
+        <div class="issuer-addr">Port Louis, Mauritius</div>
       <?php endif; ?>
     </div>
 

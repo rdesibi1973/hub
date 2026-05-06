@@ -141,9 +141,18 @@ function buildInvoiceHtml(array $inv, array $items, array $payments): string
     $d       = fn(string $s) => date('d M Y', strtotime($s));
     $e       = fn(mixed $s)  => htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8');
 
+    // Logo — file:// paths work with dompdf even when isRemoteEnabled=false
+    $logoFile = $inv['issuer'] === 'Savannah Holidays Ltd'
+        ? __DIR__ . '/assets/logo_sh.png'
+        : __DIR__ . '/assets/logo_se.png';
+    $logoSrc  = file_exists($logoFile) ? 'file://' . $logoFile : '';
+    $logoHtml = $logoSrc
+        ? "<img src=\"{$logoSrc}\" style='height:80px;width:auto;'>"
+        : "<div style='font-size:18px;font-weight:700;color:#C0211B;'>" . $e($inv['issuer']) . "</div>";
+
     $issuerAddr = $inv['issuer'] === 'Savannah Explorers Ltd'
         ? "Arusha, P.O. Box 16726<br>Tanzania"
-        : "Savannah Holidays Ltd<br>Tanzania";
+        : "Port Louis, Mauritius";
 
     // Line items rows
     $itemRows = '';
@@ -193,7 +202,7 @@ function buildInvoiceHtml(array $inv, array $items, array $payments): string
     $invNum     = $e($inv['invoice_number']);
     $billName   = $e($inv['bill_to_name']);
     $billAddr   = $inv['bill_to_address'] ? '<br><span style="font-size:11px;color:#666;">' . nl2br($e($inv['bill_to_address'])) . '</span>' : '';
-    $issuerName = $e($inv['issuer']);
+
     $issueDate  = $d($inv['issue_date']);
     $dueDate    = $inv['due_date'] ? $d($inv['due_date']) : '—';
     $terms      = $inv['terms'] ? $e($inv['terms']) : '—';
@@ -218,9 +227,8 @@ function buildInvoiceHtml(array $inv, array $items, array $payments): string
   <table width="100%" style="margin-bottom:32px;">
     <tr>
       <td style="vertical-align:top;">
-        <div style="font-size:20px;font-weight:700;color:#C0211B;">SAVANNAH EXPLORERS</div>
-        <div style="font-size:12px;color:#666;margin-top:2px;">{$issuerName}</div>
-        <div style="font-size:11px;color:#888;margin-top:4px;line-height:1.5;">{$issuerAddr}</div>
+        {$logoHtml}
+        <div style="font-size:11px;color:#888;margin-top:6px;line-height:1.5;">{$issuerAddr}</div>
       </td>
       <td style="text-align:right;vertical-align:top;">
         <div style="font-size:26px;font-weight:300;color:#333;letter-spacing:1px;">INVOICE</div>
