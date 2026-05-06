@@ -40,6 +40,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             $db->prepare("UPDATE invoice_payments SET cancelled_at=NOW(), cancellation_reason=? WHERE id=? AND invoice_id=?")
                ->execute([$reason, $pid, $invId]);
             recalculate_invoice($db, $invId);
+            sync_request_value($db, $invId);
             ob_end_clean(); echo json_encode(['ok'=>true]);
         } catch (\Throwable $e) { ob_end_clean(); echo json_encode(['ok'=>false,'error'=>$e->getMessage()]); }
         exit;
@@ -54,6 +55,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     if ($action === 'cancel_invoice') {
         $invId = (int)($_POST['invoice_id'] ?? 0);
         $db->prepare("UPDATE invoices SET status='Cancelled', updated_at=NOW() WHERE id=?")->execute([$invId]);
+        sync_request_value($db, $invId);
         ob_end_clean(); echo json_encode(['ok'=>true]); exit;
     }
 
@@ -61,6 +63,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $invId = (int)($_POST['invoice_id'] ?? 0);
         $db->prepare("UPDATE invoices SET status='New', updated_at=NOW() WHERE id=? AND status='Cancelled'")->execute([$invId]);
         recalculate_invoice($db, $invId);
+        sync_request_value($db, $invId);
         $finalStatus = $db->query("SELECT status FROM invoices WHERE id=$invId")->fetchColumn();
         $warning = $finalStatus !== 'New'
             ? "Invoice has recorded payments — status has been set to \"$finalStatus\" instead of New. To revert to New, cancel all payments first."
@@ -78,6 +81,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $warning = null;
         if ($nstatus === 'New') {
             recalculate_invoice($db, $invId);
+            sync_request_value($db, $invId);
             $finalStatus = $db->query("SELECT status FROM invoices WHERE id=$invId")->fetchColumn();
             if ($finalStatus !== 'New') {
                 $warning = "Invoice has recorded payments — status has been set to \"$finalStatus\" instead of New. To revert to New, cancel all payments first.";
@@ -150,6 +154,7 @@ if (isset($_POST['add_payment'])) {
         $db->prepare("INSERT INTO invoice_payments (invoice_id,payment_date,amount,method,reference,notes) VALUES (?,?,?,?,?,?)")
            ->execute([$id,$payDate,$amount,$method,$ref?:null,$notes?:null]);
         recalculate_invoice($db, $id);
+        sync_request_value($db, $id);
         flash("Payment of " . fmt_money($amount, '') . " recorded.");
         header("Location: invoice_view.php?id=$id"); exit;
     }

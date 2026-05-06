@@ -87,6 +87,29 @@ function recalculate_invoice(PDO $db, int $id): void {
        ->execute([round($subtotal,2), round($subtotal,2), round($paid,2), $balance, $newStatus, $id]);
 }
 
+// ── Sync request value_usd from linked invoice totals ────────────────────────
+// Sums the `total` of all non-Cancelled invoices linked to the same request
+// and writes the result to requests.value_usd.
+// Pass either the invoice id (most callers) or 0 with an explicit $requestId.
+function sync_request_value(PDO $db, int $invoice_id, int $request_id = 0): void {
+    if (!$request_id) {
+        $s = $db->prepare("SELECT request_id FROM invoices WHERE id = ?");
+        $s->execute([$invoice_id]);
+        $request_id = (int)$s->fetchColumn();
+    }
+    if (!$request_id) return;
+
+    $db->prepare(
+        "UPDATE requests
+            SET value_usd = (
+                SELECT COALESCE(SUM(total), 0)
+                FROM invoices
+                WHERE request_id = ? AND status != 'Cancelled'
+            )
+         WHERE id = ?"
+    )->execute([$request_id, $request_id]);
+}
+
 // ── Format monetary amount ────────────────────────────────────────────────────
 function fmt_money(float $amount, string $currency): string {
     $sym = ($currency === 'EUR') ? '€' : '$';

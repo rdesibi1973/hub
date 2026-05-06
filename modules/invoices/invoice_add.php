@@ -175,6 +175,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                ->execute([$invId,$sort++,$item['description'],$item['quantity'],$item['unit_price'],$item['line_total']]);
         }
         recalculate_invoice($db, $invId);
+        sync_request_value($db, $invId);
 
         flash("Invoice {$invNum} created.");
         header("Location: invoice_view.php?id=$invId"); exit;

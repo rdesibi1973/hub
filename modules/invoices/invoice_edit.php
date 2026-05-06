@@ -56,6 +56,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                ->execute([$id,$sort++,$item['description'],$item['quantity'],$item['unit_price'],$item['line_total']]);
         }
         recalculate_invoice($db, $id);
+        sync_request_value($db, $id);
 
         flash("Invoice {$inv['invoice_number']} updated.");
         header("Location: invoice_view.php?id=$id"); exit;
