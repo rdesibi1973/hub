@@ -2673,16 +2673,21 @@ public class BackOfficeMain extends javax.swing.JFrame {
             for (String r : results) model.addElement(r);
         };
 
-        // Rebuild model — grouped by agent
-        Runnable buildGrouped = () -> {
+        // Cache for the agent→folder map fetched by the SwingWorker
+        // (single-element array trick to allow mutation inside lambdas)
+        @SuppressWarnings("unchecked")
+        final java.util.Map<String, String>[] agentMapRef = new java.util.Map[]{null};
+
+        // Helper: populate model from agent→folders map (must run on EDT)
+        java.util.function.Consumer<java.util.Map<String, String>> applyGrouped = (folderAgentMap) -> {
+            agentMapRef[0] = folderAgentMap;
             headerRows.clear();
             model.clear();
             java.util.LinkedHashMap<String, java.util.List<String>> byAgent = new java.util.LinkedHashMap<>();
             for (String r : results) {
-                String agent = extractAgent(r);
+                String agent = folderAgentMap.getOrDefault(r, "Unknown");
                 byAgent.computeIfAbsent(agent, k -> new java.util.ArrayList<>()).add(r);
             }
-            // Sort agents alphabetically
             java.util.List<String> agentsSorted = new java.util.ArrayList<>(byAgent.keySet());
             java.util.Collections.sort(agentsSorted, String.CASE_INSENSITIVE_ORDER);
             int idx = 0;
@@ -2695,6 +2700,33 @@ public class BackOfficeMain extends javax.swing.JFrame {
                     idx++;
                 }
             }
+        };
+
+        // Rebuild model — grouped by agent via API lookup
+        Runnable buildGrouped = () -> {
+            // Show loading placeholder on EDT
+            headerRows.clear();
+            model.clear();
+            model.addElement("  Loading agent data…");
+
+            new javax.swing.SwingWorker<java.util.Map<String, String>, Void>() {
+                @Override
+                protected java.util.Map<String, String> doInBackground() {
+                    return fetchFolderAgents(results);
+                }
+                @Override
+                protected void done() {
+                    try {
+                        java.util.Map<String, String> map = get();
+                        applyGrouped.accept(map);
+                    } catch (Exception ex) {
+                        // Fallback: string parsing
+                        java.util.Map<String, String> fallback = new java.util.HashMap<>();
+                        for (String r : results) fallback.put(r, extractAgent(r));
+                        applyGrouped.accept(fallback);
+                    }
+                }
+            }.execute();
         };
 
         list.addMouseListener(new java.awt.event.MouseAdapter() {
@@ -2766,7 +2798,7 @@ public class BackOfficeMain extends javax.swing.JFrame {
                 if (!out.getName().toLowerCase().endsWith(".docx"))
                     out = new java.io.File(out.getAbsolutePath() + ".docx");
                 try {
-                    exportMissingCKDocx(title, results, groupChk.isSelected(), out);
+                    exportMissingCKDocx(title, results, groupChk.isSelected(), agentMapRef[0], out);
                     javax.swing.JOptionPane.showMessageDialog(dialog,
                         "File saved:\n" + out.getAbsolutePath(),
                         "Export complete", javax.swing.JOptionPane.INFORMATION_MESSAGE);
@@ -2802,7 +2834,7 @@ public class BackOfficeMain extends javax.swing.JFrame {
     }
 
     // -------------------------------------------------------------------------
-    /** Extracts the agent name from a Dropbox folder name.
+    /** Extracts the agent name from a Dropbox folder name (fallback — string parsing).
      *  Convention: MM_CustomerName(AgentFirstName-...) — first token inside () */
     private String extractAgent(String folderName) {
         int open  = folderName.indexOf('(');
@@ -2815,11 +2847,59 @@ public class BackOfficeMain extends javax.swing.JFrame {
     }
 
     // -------------------------------------------------------------------------
+    /** Calls api_folder_agents.php with a list of folder names (practice_code)
+     *  and returns a map { folderName -> agentName } from the DB.
+     *  Folders not found in DB are absent from the map (caller uses "Unknown"). */
+    private java.util.Map<String, String> fetchFolderAgents(java.util.List<String> folders) {
+        java.util.Map<String, String> result = new java.util.HashMap<>();
+        if (folders == null || folders.isEmpty()) return result;
+        try {
+            // Build JSON body: {"folders":["name1","name2",...]}
+            StringBuilder json = new StringBuilder("{\"folders\":[");
+            for (int i = 0; i < folders.size(); i++) {
+                if (i > 0) json.append(',');
+                json.append('"').append(jsonStringEscape(folders.get(i))).append('"');
+            }
+            json.append("]}");
+
+            String resp = postApiDirect("api_folder_agents.php", json.toString());
+            // Parse simple flat JSON object: {"key":"value","key2":"value2",...}
+            // Using indexOf — no external JSON lib needed
+            int i = 0;
+            while (true) {
+                int q1 = resp.indexOf('"', i);
+                if (q1 < 0) break;
+                int q2 = resp.indexOf('"', q1 + 1);
+                if (q2 < 0) break;
+                String key = resp.substring(q1 + 1, q2);
+                int colon = resp.indexOf(':', q2 + 1);
+                if (colon < 0) break;
+                int q3 = resp.indexOf('"', colon + 1);
+                if (q3 < 0) break;
+                int q4 = resp.indexOf('"', q3 + 1);
+                if (q4 < 0) break;
+                String value = resp.substring(q3 + 1, q4);
+                if (!key.isEmpty()) result.put(key, value);
+                i = q4 + 1;
+            }
+        } catch (Exception ignored) {}
+        return result;
+    }
+
+    /** Escapes a string for embedding inside a JSON double-quoted value. */
+    private String jsonStringEscape(String s) {
+        if (s == null) return "";
+        return s.replace("\\", "\\\\").replace("\"", "\\\"")
+                .replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t");
+    }
+
+    // -------------------------------------------------------------------------
     /** Generates a minimal .docx (ZIP + XML) with the Missing CK folder list.
      *  No external libraries required — uses java.util.zip only.
      *  When grouped=true, items are sorted and printed under agent headings. */
     private void exportMissingCKDocx(String title, java.util.List<String> items,
-                                     boolean grouped, java.io.File dest)
+                                     boolean grouped, java.util.Map<String, String> agentMap,
+                                     java.io.File dest)
             throws java.io.IOException {
 
         StringBuilder body = new StringBuilder();
@@ -2851,7 +2931,8 @@ public class BackOfficeMain extends javax.swing.JFrame {
             // ── Grouped by agent ───────────────────────────────────────────
             java.util.LinkedHashMap<String, java.util.List<String>> byAgent = new java.util.LinkedHashMap<>();
             for (String r : items) {
-                String agent = extractAgent(r);
+                String agent = (agentMap != null && agentMap.containsKey(r))
+                    ? agentMap.get(r) : extractAgent(r);
                 byAgent.computeIfAbsent(agent, k -> new java.util.ArrayList<>()).add(r);
             }
             java.util.List<String> agentsSorted = new java.util.ArrayList<>(byAgent.keySet());
