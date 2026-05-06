@@ -537,6 +537,7 @@ $mailBody    = "Greetings from Savannah Explorers.\r\nKindly find your attached 
       <div>
         <label style="font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#888;display:block;margin-bottom:4px;">CC <span style="font-weight:400;font-style:italic;">(optional)</span></label>
         <input id="mailCc" type="text" placeholder="e.g. agent@example.com"
+               value="accountant@savannahexplorers.com"
                style="width:100%;padding:9px 12px;border:1.5px solid #E8E8E8;border-radius:7px;font-family:inherit;font-size:.85rem;outline:none;"
                onfocus="this.style.borderColor='#C0211B'" onblur="this.style.borderColor='#E8E8E8'">
       </div>
