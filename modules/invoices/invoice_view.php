@@ -619,8 +619,7 @@ async function sendInvoiceMail() {
     var r = await fetch('api_send_invoice_email.php', { method: 'POST', body: fd });
     var d = await r.json();
     if (d.ok) {
-      showMailStatus('✓ Email sent successfully.', true);
-      btn.textContent = 'Sent ✓';
+      closeMailModal();
     } else {
       showMailStatus('✗ ' + (d.error || 'Unknown error'), false);
       btn.disabled = false;
