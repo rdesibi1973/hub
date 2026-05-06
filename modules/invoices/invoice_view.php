@@ -205,7 +205,7 @@ $sym = $inv['currency'] === 'EUR' ? '€' : '$';
   </div>
   <div class="gap-8">
     <a href="invoice_edit.php?id=<?= $id ?>" class="btn btn-outline">Edit</a>
-    <button class="btn btn-outline" onclick="openMailModal()" type="button">✉ Mail</button>
+    <a href="#" class="btn btn-outline" onclick="openMailModal();return false;">✉ Mail</a>
     <a href="invoice_pdf.php?id=<?= $id ?>" class="btn btn-outline" target="_blank">🖨 PDF</a>
     <?php if ($inv['status'] === 'Cancelled' && isInvoiceAdmin()): ?>
       <button class="btn btn-outline" onclick="restoreInvoice()">↩ Restore</button>
