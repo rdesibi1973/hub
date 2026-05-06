@@ -2628,9 +2628,12 @@ public class BackOfficeMain extends javax.swing.JFrame {
         }
 
         javax.swing.JDialog dialog = new javax.swing.JDialog(this, title, true);
-        dialog.setSize(520, 420);
+        dialog.setSize(560, 460);
         dialog.setLocationRelativeTo(this);
         dialog.setLayout(new java.awt.BorderLayout(0, 4));
+
+        // Track which row indices are agent-header rows (non-selectable)
+        final java.util.Set<Integer> headerRows = new java.util.HashSet<>();
 
         javax.swing.DefaultListModel<String> model = new javax.swing.DefaultListModel<>();
         for (String r : results) model.addElement(r);
@@ -2639,42 +2642,118 @@ public class BackOfficeMain extends javax.swing.JFrame {
         list.setSelectionMode(javax.swing.ListSelectionModel.SINGLE_SELECTION);
         list.setFont(new java.awt.Font("Monospaced", java.awt.Font.PLAIN, 13));
 
+        // Custom renderer: agent headers get bold + tinted background, folder rows get indent
+        list.setCellRenderer(new javax.swing.DefaultListCellRenderer() {
+            @Override
+            public java.awt.Component getListCellRendererComponent(
+                    javax.swing.JList<?> l, Object value, int index,
+                    boolean isSelected, boolean cellHasFocus) {
+                super.getListCellRendererComponent(l, value, index, isSelected, cellHasFocus);
+                if (headerRows.contains(index)) {
+                    setFont(new java.awt.Font("SansSerif", java.awt.Font.BOLD, 12));
+                    setBackground(new java.awt.Color(220, 235, 220));
+                    setForeground(new java.awt.Color(30, 90, 30));
+                    setBorder(javax.swing.BorderFactory.createEmptyBorder(3, 6, 3, 6));
+                } else {
+                    setFont(new java.awt.Font("Monospaced", java.awt.Font.PLAIN, 13));
+                    if (!isSelected) {
+                        setBackground(java.awt.Color.WHITE);
+                        setForeground(java.awt.Color.BLACK);
+                    }
+                    setBorder(javax.swing.BorderFactory.createEmptyBorder(1, 18, 1, 6));
+                }
+                return this;
+            }
+        });
+
+        // Rebuild model — flat view
+        Runnable buildFlat = () -> {
+            headerRows.clear();
+            model.clear();
+            for (String r : results) model.addElement(r);
+        };
+
+        // Rebuild model — grouped by agent
+        Runnable buildGrouped = () -> {
+            headerRows.clear();
+            model.clear();
+            java.util.LinkedHashMap<String, java.util.List<String>> byAgent = new java.util.LinkedHashMap<>();
+            for (String r : results) {
+                String agent = extractAgent(r);
+                byAgent.computeIfAbsent(agent, k -> new java.util.ArrayList<>()).add(r);
+            }
+            // Sort agents alphabetically
+            java.util.List<String> agentsSorted = new java.util.ArrayList<>(byAgent.keySet());
+            java.util.Collections.sort(agentsSorted, String.CASE_INSENSITIVE_ORDER);
+            int idx = 0;
+            for (String agent : agentsSorted) {
+                java.util.List<String> folders = byAgent.get(agent);
+                model.addElement("── " + agent + " (" + folders.size() + ")");
+                headerRows.add(idx++);
+                for (String f : folders) {
+                    model.addElement(f);
+                    idx++;
+                }
+            }
+        };
+
         list.addMouseListener(new java.awt.event.MouseAdapter() {
             @Override
             public void mouseClicked(java.awt.event.MouseEvent e) {
                 if (e.getClickCount() == 2) {
+                    int row = list.getSelectedIndex();
+                    if (row < 0 || headerRows.contains(row)) return; // skip headers
                     String selected = list.getSelectedValue();
-                    if (selected != null) {
-                        String result;
-                        java.io.File f = new java.io.File(selected);
-                        if (f.isAbsolute()) {
-                            String folderPath = f.isDirectory() ? selected : f.getParent();
-                            if (folderPath == null) folderPath = selected;
-                            String marker = "001_safari";
-                            int idx = folderPath.toLowerCase().indexOf(marker);
-                            if (idx >= 0) {
-                                folderPath = folderPath.substring(idx + marker.length());
-                                if (folderPath.startsWith("\\") || folderPath.startsWith("/"))
-                                    folderPath = folderPath.substring(1);
-                            }
-                            result = folderPath;
-                        } else {
-                            result = selected;
+                    if (selected == null) return;
+                    // Strip leading indent spaces added in flat/grouped modes
+                    selected = selected.trim();
+                    String result;
+                    java.io.File f = new java.io.File(selected);
+                    if (f.isAbsolute()) {
+                        String folderPath = f.isDirectory() ? selected : f.getParent();
+                        if (folderPath == null) folderPath = selected;
+                        String marker = "001_safari";
+                        int idx = folderPath.toLowerCase().indexOf(marker);
+                        if (idx >= 0) {
+                            folderPath = folderPath.substring(idx + marker.length());
+                            if (folderPath.startsWith("\\") || folderPath.startsWith("/"))
+                                folderPath = folderPath.substring(1);
                         }
-                        jTextField1.setText(result);
-                        dialog.dispose();
+                        result = folderPath;
+                    } else {
+                        result = selected;
                     }
+                    jTextField1.setText(result);
+                    dialog.dispose();
                 }
+            }
+        });
+
+        // Prevent selection of header rows
+        list.addListSelectionListener(e -> {
+            if (!e.getValueIsAdjusting()) {
+                int row = list.getSelectedIndex();
+                if (row >= 0 && headerRows.contains(row))
+                    list.clearSelection();
             }
         });
 
         javax.swing.JScrollPane scrollPane = new javax.swing.JScrollPane(list);
         scrollPane.setBorder(javax.swing.BorderFactory.createEmptyBorder(4, 6, 4, 6));
 
-        javax.swing.JLabel hint = new javax.swing.JLabel(
-            "  Double-click to select and populate Customer File");
+        // ── Checkbox ──────────────────────────────────────────────────────────
+        javax.swing.JCheckBox groupChk = new javax.swing.JCheckBox("Grouped by Agent");
+        groupChk.setFont(groupChk.getFont().deriveFont(12f));
+        groupChk.addItemListener(e -> {
+            if (e.getStateChange() == java.awt.event.ItemEvent.SELECTED) buildGrouped.run();
+            else buildFlat.run();
+        });
+
+        // ── Hint label ────────────────────────────────────────────────────────
+        javax.swing.JLabel hint = new javax.swing.JLabel("  Double-click to select and populate Customer File");
         hint.setFont(hint.getFont().deriveFont(java.awt.Font.ITALIC, 11f));
 
+        // ── Export button ─────────────────────────────────────────────────────
         javax.swing.JButton exportBtn = new javax.swing.JButton("⬇  Download as Word (.docx)");
         exportBtn.addActionListener(ev -> {
             javax.swing.JFileChooser fc = new javax.swing.JFileChooser();
@@ -2687,7 +2766,7 @@ public class BackOfficeMain extends javax.swing.JFrame {
                 if (!out.getName().toLowerCase().endsWith(".docx"))
                     out = new java.io.File(out.getAbsolutePath() + ".docx");
                 try {
-                    exportMissingCKDocx(title, results, out);
+                    exportMissingCKDocx(title, results, groupChk.isSelected(), out);
                     javax.swing.JOptionPane.showMessageDialog(dialog,
                         "File saved:\n" + out.getAbsolutePath(),
                         "Export complete", javax.swing.JOptionPane.INFORMATION_MESSAGE);
@@ -2699,10 +2778,23 @@ public class BackOfficeMain extends javax.swing.JFrame {
             }
         });
 
-        javax.swing.JPanel south = new javax.swing.JPanel(new java.awt.BorderLayout(6, 4));
-        south.setBorder(javax.swing.BorderFactory.createEmptyBorder(2, 6, 8, 6));
-        south.add(hint, java.awt.BorderLayout.CENTER);
-        south.add(exportBtn, java.awt.BorderLayout.EAST);
+        // ── South panel: 3 rows ───────────────────────────────────────────────
+        javax.swing.JPanel south = new javax.swing.JPanel();
+        south.setLayout(new java.awt.GridLayout(3, 1, 0, 2));
+        south.setBorder(javax.swing.BorderFactory.createEmptyBorder(2, 8, 8, 8));
+
+        javax.swing.JPanel row1 = new javax.swing.JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
+        row1.add(groupChk);
+
+        javax.swing.JPanel row2 = new javax.swing.JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
+        row2.add(hint);
+
+        javax.swing.JPanel row3 = new javax.swing.JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.RIGHT, 0, 0));
+        row3.add(exportBtn);
+
+        south.add(row1);
+        south.add(row2);
+        south.add(row3);
 
         dialog.add(scrollPane, java.awt.BorderLayout.CENTER);
         dialog.add(south, java.awt.BorderLayout.SOUTH);
@@ -2710,41 +2802,89 @@ public class BackOfficeMain extends javax.swing.JFrame {
     }
 
     // -------------------------------------------------------------------------
+    /** Extracts the agent name from a Dropbox folder name.
+     *  Convention: MM_CustomerName(AgentFirstName-...) — first token inside () */
+    private String extractAgent(String folderName) {
+        int open  = folderName.indexOf('(');
+        int close = folderName.lastIndexOf(')');
+        if (open < 0 || close <= open) return "Unknown";
+        String inside = folderName.substring(open + 1, close).trim();
+        int dash = inside.indexOf('-');
+        String first = (dash >= 0 ? inside.substring(0, dash) : inside).trim();
+        return first.isEmpty() ? "Unknown" : first;
+    }
+
+    // -------------------------------------------------------------------------
     /** Generates a minimal .docx (ZIP + XML) with the Missing CK folder list.
-     *  No external libraries required — uses java.util.zip only. */
-    private void exportMissingCKDocx(String title, java.util.List<String> items, java.io.File dest)
+     *  No external libraries required — uses java.util.zip only.
+     *  When grouped=true, items are sorted and printed under agent headings. */
+    private void exportMissingCKDocx(String title, java.util.List<String> items,
+                                     boolean grouped, java.io.File dest)
             throws java.io.IOException {
 
-        // Build the <w:body> paragraphs
         StringBuilder body = new StringBuilder();
 
-        // Title paragraph
+        // ── Title ──────────────────────────────────────────────────────────
         body.append("<w:p><w:pPr><w:pStyle w:val=\"Heading1\"/></w:pPr>")
             .append("<w:r><w:t>").append(xmlEscape(title)).append("</w:t></w:r></w:p>");
 
-        // Date subtitle
+        // ── Date subtitle ──────────────────────────────────────────────────
         String dateStr = new java.text.SimpleDateFormat("dd MMMM yyyy", java.util.Locale.ENGLISH)
             .format(new java.util.Date());
-        body.append("<w:p><w:pPr><w:jc w:val=\"left\"/></w:pPr>")
+        body.append("<w:p>")
             .append("<w:r><w:rPr><w:color w:val=\"888888\"/><w:sz w:val=\"20\"/></w:rPr>")
             .append("<w:t>Generated: ").append(xmlEscape(dateStr)).append("</w:t></w:r></w:p>");
 
-        // Spacer
+        // ── Spacer ─────────────────────────────────────────────────────────
         body.append("<w:p><w:r><w:t></w:t></w:r></w:p>");
 
-        // One paragraph per folder
-        for (int i = 0; i < items.size(); i++) {
-            body.append("<w:p>")
-                .append("<w:r><w:rPr><w:rFonts w:ascii=\"Courier New\" w:hAnsi=\"Courier New\"/>")
-                .append("<w:sz w:val=\"20\"/></w:rPr>")
-                .append("<w:t xml:space=\"preserve\">").append(i + 1).append(".  ")
-                .append(xmlEscape(items.get(i))).append("</w:t></w:r></w:p>");
+        if (!grouped) {
+            // ── Flat list ──────────────────────────────────────────────────
+            for (int i = 0; i < items.size(); i++) {
+                body.append("<w:p>")
+                    .append("<w:r><w:rPr><w:rFonts w:ascii=\"Courier New\" w:hAnsi=\"Courier New\"/>")
+                    .append("<w:sz w:val=\"20\"/></w:rPr>")
+                    .append("<w:t xml:space=\"preserve\">").append(i + 1).append(".  ")
+                    .append(xmlEscape(items.get(i))).append("</w:t></w:r></w:p>");
+            }
+        } else {
+            // ── Grouped by agent ───────────────────────────────────────────
+            java.util.LinkedHashMap<String, java.util.List<String>> byAgent = new java.util.LinkedHashMap<>();
+            for (String r : items) {
+                String agent = extractAgent(r);
+                byAgent.computeIfAbsent(agent, k -> new java.util.ArrayList<>()).add(r);
+            }
+            java.util.List<String> agentsSorted = new java.util.ArrayList<>(byAgent.keySet());
+            java.util.Collections.sort(agentsSorted, String.CASE_INSENSITIVE_ORDER);
+
+            for (String agent : agentsSorted) {
+                java.util.List<String> folders = byAgent.get(agent);
+
+                // Agent heading (Heading2 style, green shade)
+                body.append("<w:p><w:pPr><w:pStyle w:val=\"Heading2\"/>")
+                    .append("<w:shd w:val=\"clear\" w:color=\"auto\" w:fill=\"DCEEDD\"/></w:pPr>")
+                    .append("<w:r><w:t xml:space=\"preserve\">")
+                    .append(xmlEscape(agent))
+                    .append("  (").append(folders.size()).append(")")
+                    .append("</w:t></w:r></w:p>");
+
+                // Folders under this agent
+                for (int i = 0; i < folders.size(); i++) {
+                    body.append("<w:p>")
+                        .append("<w:pPr><w:ind w:left=\"360\"/></w:pPr>")
+                        .append("<w:r><w:rPr><w:rFonts w:ascii=\"Courier New\" w:hAnsi=\"Courier New\"/>")
+                        .append("<w:sz w:val=\"20\"/></w:rPr>")
+                        .append("<w:t xml:space=\"preserve\">").append(i + 1).append(".  ")
+                        .append(xmlEscape(folders.get(i))).append("</w:t></w:r></w:p>");
+                }
+                // Small spacer between groups
+                body.append("<w:p><w:r><w:t></w:t></w:r></w:p>");
+            }
         }
 
-        // Final empty paragraph
+        // ── Final empty paragraph ──────────────────────────────────────────
         body.append("<w:p><w:r><w:t></w:t></w:r></w:p>");
 
-        // Full document.xml
         String documentXml =
             "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>" +
             "<w:document xmlns:wpc=\"http://schemas.microsoft.com/office/word/2010/wordprocessingCanvas\" " +
