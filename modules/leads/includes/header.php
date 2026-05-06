@@ -115,7 +115,7 @@ header {
   <?php if (!empty($currentUser)): ?>
   <div class="header-user">
     <div>
-      <strong><?= h($currentUser['name'] ?? $currentUser['username'] ?? '') ?></strong>
+      <strong><?= h($currentUser['full_name'] ?? $currentUser['username'] ?? '') ?></strong>
       <?= h(ucfirst($currentUser['role'] ?? '')) ?>
     </div>
   </div>

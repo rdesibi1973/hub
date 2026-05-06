@@ -1,5 +1,4 @@
 <?php
-if (session_status() === PHP_SESSION_NONE) session_start();
-session_destroy();
-header('Location: login.php');
-exit;
+require_once 'config.php';
+logout_user();
+redirect(BASE_URL . '/login.php');
