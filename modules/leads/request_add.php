@@ -5,6 +5,8 @@ require_once 'notifications.php';
 $pageTitle = 'New Request';
 $db = db();
 
+$isRestricted = isLeadsRestricted();   // true = staff, false = admin/manager
+
 $agents   = $db->query("SELECT * FROM agents WHERE active=1 ORDER BY name")->fetchAll();
 $agencies = $db->query("SELECT * FROM agencies ORDER BY nome")->fetchAll();
 
@@ -38,8 +40,15 @@ function toCamelCaseRa(string $name): string {
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
+    $dropboxSkip = !empty($_POST['dropbox_skip']);
+
     foreach ($v as $k => $_) {
         $v[$k] = trim($_POST[$k] ?? '');
+    }
+
+    // Staff cannot set status — always force Inquiry
+    if ($isRestricted) {
+        $v['status'] = 'Inquiry';
     }
 
     if ($v['value_usd'] !== '' && $v['commission_pct'] !== '') {
@@ -49,7 +58,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // ── Validate ──────────────────────────────────────────────────────────────
     if (!$v['customer_name'])   $errors[] = 'Customer name is required.';
     if (!$v['date_received'])   $errors[] = 'Date received is required.';
-    if (!$v['initial_request']) $errors[] = 'Initial Request is required.';
+    if (!$dropboxSkip && !$v['initial_request']) $errors[] = 'Initial Request is required.';
     if (!$v['agent_id'])        $errors[] = 'Please select an agent.';
     if (!array_key_exists($v['status'], STATUSES)) $errors[] = 'Invalid status.';
     if ($v['channel'] === 'agency' && !$v['agency_id']) $errors[] = 'Please select an agency.';
@@ -84,7 +93,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $dropboxPath   = DROPBOX_BASE_PATH . '/' . $folderName;
         $dropboxWebUrl = 'https://www.dropbox.com/home' . $dropboxPath;
 
-        // ── Create Dropbox folder ─────────────────────────────────────────────
+        // ── Create Dropbox folder (unless "already exists" flag is set) ─────
+        if (!$dropboxSkip) {
         try {
             $token = dropbox_get_access_token();
             dropbox_create_folder($token, $dropboxPath, true); // throwOnConflict=true
@@ -115,6 +125,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $errors[] = "Dropbox error: {$msg}";
             }
         }
+        } // end !$dropboxSkip
     }
 
     if (!$errors) {
@@ -142,7 +153,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $v['commission_pct']  !== '' ? $v['commission_pct'] : null,
             $v['commission_usd']  !== '' ? $v['commission_usd'] : null,
             $v['date_paid']       ?: null,
-            $v['initial_request'] ?: null,
+            $dropboxSkip ? null : ($v['initial_request'] ?: null),
             $dropboxWebUrl,
             $v['notes']           ?: null,
         ]);
@@ -157,6 +168,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         );
 
         $flashMsg = "Request created. 📁 Folder: {$folderName}"
+                  . ($dropboxSkip ? " — Dropbox folder skipped (already exists)." : '')
                   . ($notif['sent'] ? " — ✉ Notification sent to agent." : '');
         flash($flashMsg);
         if ($notif['error']) flash('⚠ ' . htmlspecialchars($notif['error']), 'error');
@@ -284,11 +296,16 @@ include 'includes/header.php';
 
       <div class="form-group">
         <label for="status">Status</label>
+        <?php if ($isRestricted): ?>
+          <input type="hidden" name="status" value="Inquiry">
+          <input type="text" value="Inquiry" disabled style="background:var(--grey-lt);color:var(--grey-mid)">
+        <?php else: ?>
         <select id="status" name="status">
           <?php foreach (STATUSES as $s => $_): ?>
             <option value="<?= h($s) ?>" <?= $v['status']===$s?'selected':'' ?>><?= h($s) ?></option>
           <?php endforeach; ?>
         </select>
+        <?php endif; ?>
       </div>
 
       <!-- Folder preview — auto-generated, read-only -->
@@ -298,6 +315,15 @@ include 'includes/header.php';
              style="background:#F0FDF4;border:1px solid #86EFAC;border-radius:6px;
                     padding:8px 12px;font-family:monospace;font-size:.85rem;
                     color:#166534;word-break:break-all;"></div>
+        <div style="margin-top:8px;">
+          <label style="display:flex;align-items:center;gap:8px;font-weight:500;cursor:pointer;font-size:.85rem;color:var(--grey-dk);">
+            <input type="checkbox" id="dropbox_skip" name="dropbox_skip" value="1"
+                   onchange="onDropboxSkipChange()"
+                   style="width:14px;height:14px;cursor:pointer;"
+                   <?= !empty($_POST['dropbox_skip']) ? 'checked' : '' ?>>
+            Dropbox folder already exists — skip creation
+          </label>
+        </div>
       </div>
 
     </div>
@@ -339,8 +365,8 @@ include 'includes/header.php';
     <div class="form-grid">
 
       <div class="form-group full">
-        <label for="initial_request">Initial Request *</label>
-        <textarea id="initial_request" name="initial_request" class="tall" required
+        <label for="initial_request" id="initial_request_label">Initial Request *</label>
+        <textarea id="initial_request" name="initial_request" class="tall"
                   placeholder="Paste the original email, form submission, or WhatsApp message here…"><?= h($v['initial_request']) ?></textarea>
       </div>
 
@@ -472,8 +498,27 @@ function calcComm() {
   function esc(s){ const d=document.createElement('div'); d.appendChild(document.createTextNode(s)); return d.innerHTML; }
 })();
 
-// Init on load (after a POST error, restore channel state)
+// ── Dropbox skip toggle ───────────────────────────────────────────────────────
+function onDropboxSkipChange() {
+  const skip = document.getElementById('dropbox_skip').checked;
+  const ta   = document.getElementById('initial_request');
+  const lbl  = document.getElementById('initial_request_label');
+  if (skip) {
+    ta.removeAttribute('required');
+    ta.style.opacity = '0.45';
+    ta.style.background = '#F3F4F6';
+    lbl.textContent = 'Initial Request (not saved when skipping Dropbox)';
+  } else {
+    ta.setAttribute('required', '');
+    ta.style.opacity = '';
+    ta.style.background = '';
+    lbl.textContent = 'Initial Request *';
+  }
+}
+
+// Init on load (after a POST error, restore skip state)
 updateChannel();
+onDropboxSkipChange();
 </script>
 
 <?php include 'includes/footer.php'; ?>
