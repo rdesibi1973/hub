@@ -59,7 +59,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // Triggered by ANY change to the Dropbox Folder field (including when driven by
     // a customer-name edit via JS). Uses old DB value → new POST value as from/to.
     $dropboxRenamed = false;
-    if (!$errors && !$isRestricted) {
+    $dropboxSkip    = !empty($_POST['dropbox_skip']);
+
+    if (!$errors && !$isRestricted && !$dropboxSkip) {
         $oldFolder = trim($req['practice_code'] ?? '');
         $newFolder = trim($v['practice_code']  ?? '');
 
@@ -279,6 +281,14 @@ include 'includes/header.php';
         <label>Dropbox Folder</label>
         <input type="text" name="practice_code" value="<?= h($v['practice_code']) ?>"
                placeholder="e.g. JohnBrown(GoWorld-PS-Roberto)">
+        <div style="margin-top:6px;">
+          <label style="display:flex;align-items:center;gap:8px;font-weight:500;cursor:pointer;font-size:.82rem;color:var(--grey-dk);">
+            <input type="checkbox" name="dropbox_skip" value="1"
+                   style="width:14px;height:14px;cursor:pointer;"
+                   <?= !empty($_POST['dropbox_skip']) ? 'checked' : '' ?>>
+            Skip Dropbox rename — update DB only
+          </label>
+        </div>
       </div>
       <?php endif; ?>
 
