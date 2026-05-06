@@ -343,7 +343,11 @@ btSearch.addEventListener('input', function() {
   if (!matches.length) { btDrop.style.display='none'; return; }
   btDrop.innerHTML = matches.map(function(c) {
     var badge = '<span class="bt-badge '+c.type+'">'+(c.type==='agency'?'Agency':'Customer')+'</span>';
-    return '<div class="bt-drop-item" onclick="selectBillTo('+c.id+',\''+escJs(c.name)+'\',\''+escJs(c.addr)+'\',\''+c.type+'\')">'
+    return '<div class="bt-drop-item"'
+         + ' data-id="'   + c.id + '"'
+         + ' data-name="' + escAttr(c.name) + '"'
+         + ' data-addr="' + escAttr(c.addr) + '"'
+         + ' data-type="' + c.type + '">'
          + '<div>'+badge+escHtml(c.name)+'</div>'
          + (c.addr ? '<div class="bt-drop-sub">'+escHtml(c.addr)+'</div>' : '')
          + '</div>';
@@ -351,7 +355,21 @@ btSearch.addEventListener('input', function() {
   btDrop.style.display = 'block';
 });
 
+btDrop.addEventListener('mousedown', function(e) {
+  // mousedown fires before blur; we use it so the input doesn't lose focus
+  // before we can read the click target
+  var item = e.target.closest('.bt-drop-item');
+  if (!item) return;
+  e.preventDefault();
+  btSearch.value = item.dataset.name;
+  document.getElementById('billToSourceId').value   = item.dataset.id;
+  document.getElementById('billToSourceType').value = item.dataset.type;
+  document.getElementById('billToAddress').value    = item.dataset.addr;
+  btDrop.style.display = 'none';
+});
+
 function selectBillTo(id, name, addr, type) {
+  // kept for any legacy calls; normally handled via mousedown above
   btSearch.value = name;
   document.getElementById('billToSourceId').value   = id;
   document.getElementById('billToSourceType').value = type;
@@ -424,8 +442,9 @@ function fmtAmt(n) {
   return sym + parseFloat(n).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
 }
 
-function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
-function escJs(s)   { return String(s).replace(/'/g,"\\'").replace(/\n/g,' '); }
+function escHtml(s)  { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function escAttr(s)  { return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/\n/g,' '); }
+function escJs(s)    { return String(s).replace(/'/g,"\\'").replace(/\n/g,' '); }
 function ucfirst(s) { return s.charAt(0).toUpperCase()+s.slice(1); }
 
 // Pre-populate if coming from a request
