@@ -2,6 +2,29 @@
 require_once 'config.php';
 
 $id  = (int)($_GET['id'] ?? 0);
+$db  = db();
+
+// ── Inline status update ────────────────────────────────────────────────────
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['quick_status'])) {
+    $newStatus    = trim($_POST['quick_status']);
+    $staffAgentId = isLeadsRestricted() ? getStaffAgentId() : 0;
+
+    if (!array_key_exists($newStatus, STATUSES)) {
+        flash('Invalid status.', 'error');
+    } else {
+        if (isLeadsRestricted()) {
+            // Staff: only their own requests
+            $db->prepare("UPDATE requests SET status=? WHERE id=? AND agent_id=?")
+               ->execute([$newStatus, $id, $staffAgentId]);
+        } else {
+            $db->prepare("UPDATE requests SET status=? WHERE id=?")
+               ->execute([$newStatus, $id]);
+        }
+        flash('Status updated to ' . $newStatus . '.');
+    }
+    header('Location: request_view.php?id=' . $id);
+    exit;
+}
 $stmt = db()->prepare("
     SELECT r.*, a.name AS agent_name
     FROM requests r
@@ -127,7 +150,19 @@ include 'includes/header.php';
 
     <div class="detail-label">Status</div>
     <div class="detail-value">
-      <span class="badge <?= STATUSES[$r['status']] ?? '' ?>"><?= h($r['status']) ?></span>
+      <?php if ($canEdit): ?>
+        <form method="POST" style="display:inline-flex;align-items:center;gap:8px;">
+          <select name="quick_status" onchange="this.form.submit()"
+                  style="font-size:.82rem;padding:3px 6px;border:1px solid var(--grey-lt);border-radius:5px;cursor:pointer;">
+            <?php foreach (STATUSES as $s => $_): ?>
+              <option value="<?= h($s) ?>" <?= $r['status']===$s?'selected':'' ?>><?= h($s) ?></option>
+            <?php endforeach; ?>
+          </select>
+          <noscript><button type="submit" class="btn btn-outline" style="font-size:.78rem;padding:3px 8px;">Update</button></noscript>
+        </form>
+      <?php else: ?>
+        <span class="badge <?= STATUSES[$r['status']] ?? '' ?>"><?= h($r['status']) ?></span>
+      <?php endif; ?>
     </div>
 
     <div class="detail-label">Dropbox Folder Link</div>

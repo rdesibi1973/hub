@@ -33,9 +33,9 @@ $fullFields = ['practice_code','date_received','customer_name','email','whatsapp
                'destination','period','pax','status','value_usd','commission_pct','commission_usd',
                'date_paid','initial_request','dropbox_url','notes'];
 
-// Fields editable by staff (restricted set — no financials, no status, no agent reassignment)
+// Fields editable by staff (restricted set — no financials, no agent reassignment)
 $staffFields = ['customer_name','email','whatsapp','source','destination','period','pax',
-                'initial_request','dropbox_url','notes'];
+                'status','initial_request','dropbox_url','notes'];
 
 $editableFields = $isRestricted ? $staffFields : $fullFields;
 
@@ -116,11 +116,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if (!$errors) {
         if ($isRestricted) {
-            // Staff: update only their allowed fields
+            // Staff: update only their allowed fields (including status)
             $db->prepare("
                 UPDATE requests SET
                   customer_name=?, email=?, whatsapp=?, source=?, destination=?, period=?,
-                  pax=?, initial_request=?, dropbox_url=?, notes=?
+                  pax=?, status=?, initial_request=?, dropbox_url=?, notes=?
                 WHERE id=? AND agent_id=?
             ")->execute([
                 $v['customer_name'],
@@ -130,6 +130,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $v['destination']     ?: null,
                 $v['period']          ?: null,
                 $v['pax']             ?: null,
+                $v['status'],
                 $v['initial_request'] ?: null,
                 $v['dropbox_url']     ?: null,
                 $v['notes']           ?: null,
@@ -273,6 +274,16 @@ include 'includes/header.php';
           <?php endforeach; ?>
         </select>
       </div>
+      <?php else: ?>
+      <div class="form-group">
+        <label>Status</label>
+        <select name="status">
+          <?php foreach (STATUSES as $s => $_): ?>
+            <option value="<?= h($s) ?>" <?= $v['status']===$s?'selected':'' ?>><?= h($s) ?></option>
+          <?php endforeach; ?>
+        </select>
+      </div>
+      <?php endif; ?>
 
       <div class="form-group">
         <label>Dropbox Folder</label>
