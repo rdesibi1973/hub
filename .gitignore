@@ -4,3 +4,13 @@ NetBeansProjects/*/build/
 NetBeansProjects/*/dist/
 NetBeansProjects/*/nbproject/private/
 SavannahExplorersGUI/
+
+# Server-only config (contains live DB credentials — never commit)
+includes/config.php
+
+# PHP error logs (server-generated, not source files)
+error_log
+**/error_log
+
+# Conflicted copies (Dropbox sync artifacts)
+**/*conflicted copy*.php
