@@ -28,6 +28,34 @@ function require_login(): void {
         header('Location: ' . BASE_URL . '/login.php' . ($next ? "?next=$next" : ''));
         exit;
     }
+    // If session is stale (role_name missing), reload user data from DB
+    if (empty($_SESSION['role_name'])) {
+        global $pdo;
+        $stmt = $pdo->prepare('
+            SELECT u.*, r.name AS role_name
+            FROM   users u
+            JOIN   roles r ON u.role_id = r.id
+            WHERE  u.id = ? AND u.is_active = 1
+            LIMIT  1
+        ');
+        $stmt->execute([$_SESSION['user_id']]);
+        $user = $stmt->fetch();
+        if (!$user) {
+            // User no longer valid — force re-login
+            $_SESSION = [];
+            session_destroy();
+            $next = urlencode($_SERVER['REQUEST_URI'] ?? '');
+            header('Location: ' . BASE_URL . '/login.php' . ($next ? "?next=$next" : ''));
+            exit;
+        }
+        $ps = $pdo->prepare('SELECT module FROM role_permissions WHERE role_id = ?');
+        $ps->execute([$user['role_id']]);
+        $_SESSION['username']    = $user['username'];
+        $_SESSION['full_name']   = $user['full_name'];
+        $_SESSION['role_name']   = $user['role_name'];
+        $_SESSION['role_id']     = $user['role_id'];
+        $_SESSION['permissions'] = $ps->fetchAll(PDO::FETCH_COLUMN);
+    }
 }
 
 function has_permission(string $module): bool {
