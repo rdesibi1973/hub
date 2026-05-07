@@ -3761,7 +3761,7 @@ public class BackOfficeMain extends javax.swing.JFrame {
             private void filter() {
                 String q = searchField.getText().toLowerCase().trim();
                 listModel.clear();
-                for (java.io.File f : allFiles) {
+                for (java.io.File f : new java.util.ArrayList<>(allFiles)) {
                     if (q.isEmpty() || f.getName().toLowerCase().contains(q)) {
                         listModel.addElement(f);
                     }
