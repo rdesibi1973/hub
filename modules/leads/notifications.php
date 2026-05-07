@@ -79,6 +79,15 @@ function notify_agent_new_request(
     $pax         = $req['pax']             ?? '—';
     $initReq     = $req['initial_request'] ?? '';
 
+    // Extract form name from initial_request if present (line starting with "Form: ")
+    $formName = '';
+    foreach (explode("\n", $initReq) as $line) {
+        if (str_starts_with(trim($line), 'Form: ')) {
+            $formName = trim(substr(trim($line), 6));
+            break;
+        }
+    }
+
     $subject = "New request assigned to you – {$customerName}";
     $body    =
         "Hi {$agent['name']},\n\n"
@@ -88,6 +97,7 @@ function notify_agent_new_request(
       . "Folder:      {$practiceCode}\n"
       . "Request ID:  #{$requestId}\n"
       . "Source:      {$source}\n"
+      . ($formName ? "Form:        {$formName}\n" : '')
       . "Type:        {$destination}\n"
       . "Period:      {$period}\n"
       . "Pax:         {$pax}\n"

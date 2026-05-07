@@ -497,7 +497,9 @@ function hs_contact_to_lead(array $contact): ?array {
     $destNorm = $destRaw ? hs_map_destination(explode(';', $destRaw)[0]) : '';
 
     // Build initial_request
+    $formName = trim($p['recent_conversion_event_name'] ?? '');
     $lines = ["--- HubSpot $source ---"];
+    if ($formName)   $lines[] = "Form: $formName";
     if ($name)       $lines[] = "Name: $name";
     if ($email)      $lines[] = "Email: $email";
     if ($phone)      $lines[] = "WhatsApp/Phone: $phone";
