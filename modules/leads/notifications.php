@@ -53,7 +53,7 @@ function notify_agent_new_request(
     $s->execute([$assignedAgentId]);
     $agent = $s->fetch(PDO::FETCH_ASSOC);
 
-    // Notification was requested but agent has no email → surface as error
+    // Notification was requested but agent has no email — surface as error
     if (!$agent || empty($agent['email'])) {
         $name = $agent['name'] ?? 'Unknown agent';
         error_log("[notify] SKIP — agent_id={$assignedAgentId} ({$name}) has no email. creator_user={$creatorUserId}");
@@ -63,48 +63,65 @@ function notify_agent_new_request(
         ];
     }
 
-    $hubUrl  = 'https://hub.savannahexplorers.com/modules/leads/request_view.php?id=' . $requestId;
+    $hubUrl = 'https://hub.savannahexplorers.com/modules/leads/request_view.php?id=' . $requestId;
 
-    // Fetch full request details for the email body
+    // Fetch full request details
     $s = $db->prepare(
-        'SELECT source, destination, period, pax, initial_request
+        'SELECT source, destination, period, pax, email, whatsapp, initial_request
          FROM requests WHERE id = ? LIMIT 1'
     );
     $s->execute([$requestId]);
     $req = $s->fetch(PDO::FETCH_ASSOC) ?: [];
 
-    $source      = $req['source']          ?? '—';
-    $destination = $req['destination']     ?? '—';
-    $period      = $req['period']          ?? '—';
-    $pax         = $req['pax']             ?? '—';
+    $source      = $req['source']      ?? '';
+    $destination = $req['destination'] ?? '';
+    $period      = $req['period']      ?? '';
+    $pax         = $req['pax']         ?? '';
+    $custEmail   = $req['email']       ?? '';
+    $whatsapp    = $req['whatsapp']    ?? '';
     $initReq     = $req['initial_request'] ?? '';
 
-    // Extract form name from initial_request if present (line starting with "Form: ")
-    $formName = '';
+    // Extract specific fields from initial_request lines
+    $formName   = '';
+    $activities = '';
+    $duration   = '';
+    $accomLevel = '';
+    $otherInfo  = '';
+    $inOther    = false;
     foreach (explode("\n", $initReq) as $line) {
-        if (str_starts_with(trim($line), 'Form: ')) {
-            $formName = trim(substr(trim($line), 6));
-            break;
-        }
+        $t = trim($line);
+        if      (str_starts_with($t, 'Form: '))               { $formName   = substr($t, 6); }
+        elseif  (str_starts_with($t, 'Activities: '))         { $activities = substr($t, 12); }
+        elseif  (str_starts_with($t, 'Duration: '))           { $duration   = substr($t, 10); }
+        elseif  (str_starts_with($t, 'Accommodation Level: ')){ $accomLevel = substr($t, 21); }
+        elseif  ($t === 'Other Info/Requests:')                { $inOther = true; }
+        elseif  ($inOther && $t !== '')                       { $otherInfo .= ($otherInfo ? "\n             " : '') . $t; }
     }
 
-    $subject = "New request assigned to you – {$customerName}";
-    $body    =
+    // Build email — show only fields that have a value
+    $div  = "────────────────────────────────\n";
+    $subject = "New request assigned to you - {$customerName}";
+    $body =
         "Hi {$agent['name']},\n\n"
       . "A new request has been created and assigned to you.\n\n"
-      . "────────────────────────────────\n"
+      . $div
       . "Customer:    {$customerName}\n"
-      . "Folder:      {$practiceCode}\n"
+      . ($custEmail   ? "Email:       {$custEmail}\n"    : '')
+      . ($whatsapp    ? "WhatsApp:    {$whatsapp}\n"     : '')
+      . $div
       . "Request ID:  #{$requestId}\n"
-      . "Source:      {$source}\n"
-      . ($formName ? "Form:        {$formName}\n" : '')
-      . "Type:        {$destination}\n"
-      . "Period:      {$period}\n"
-      . "Pax:         {$pax}\n"
-      . "────────────────────────────────\n"
-      . ($initReq ? "\nInitial Request:\n{$initReq}\n\n" : '')
+      . ($source      ? "Source:      {$source}\n"       : '')
+      . ($formName    ? "Form:        {$formName}\n"     : '')
+      . ($destination ? "Destination: {$destination}\n"  : '')
+      . ($period      ? "Period:      {$period}\n"       : '')
+      . ($pax         ? "Pax:         {$pax}\n"          : '')
+      . ($activities  ? "Activities:  {$activities}\n"   : '')
+      . ($duration    ? "Duration:    {$duration}\n"     : '')
+      . ($accomLevel  ? "Accom.:      {$accomLevel}\n"   : '')
+      . ($otherInfo   ? "Notes:       {$otherInfo}\n"    : '')
+      . $div
       . "View in Hub:\n{$hubUrl}\n\n"
-      . "— Savannah Explorers Hub";
+      . "- Savannah Explorers Hub";
 
     $headers =
         "From: noreply@savannahexplorers.com\r\n"
