@@ -254,6 +254,18 @@ include __DIR__ . '/includes/layout_header.php';
       </div>
       <div><div class="lc-label">Brevo</div><div class="lc-sub">app.brevo.com</div></div>
     </a>
+    <?php if ($_cu['role_name'] === 'admin'): ?>
+    <a class="link-card lc-orange" href="https://savannahexplorers.com:2083/" target="_blank">
+      <div class="lc-icon" style="background:none;padding:0;">
+        <svg viewBox="0 0 36 36" xmlns="http://www.w3.org/2000/svg" width="36" height="36">
+          <rect width="36" height="36" rx="8" fill="#FF6C2C"/>
+          <text x="18" y="23" font-family="Arial,sans-serif" font-size="10" font-weight="900" fill="white" text-anchor="middle" letter-spacing="-0.3">cPanel</text>
+        </svg>
+      </div>
+      <div><div class="lc-label">cPanel</div><div class="lc-sub">savannahexplorers.com</div></div>
+    </a>
+    <?php endif; // admin only: cPanel ?>
+
     <?php endif; // admin_or_manager: BlueHost + Brevo ?>
 
   </div>
