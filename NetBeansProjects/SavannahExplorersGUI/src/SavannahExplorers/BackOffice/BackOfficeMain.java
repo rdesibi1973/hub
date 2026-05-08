@@ -3244,7 +3244,18 @@ public class BackOfficeMain extends javax.swing.JFrame {
                 if (reqYear    == null) reqYear      = "2026";
                 StringBuilder log = new StringBuilder();
 
-                String src     = dropboxHome + "\\" + reqYear + "\\" + custname;
+                // Look for the folder in REQ_YEAR first, then in 001_Safari root
+                // (it may already be confirmed and sitting in 001_Safari)
+                String srcYear   = dropboxHome + "\\" + reqYear + "\\" + custname;
+                String srcSafari = dropboxHome + "\\001_Safari\\" + custname;
+                String src;
+                if (new java.io.File(srcYear).exists()) {
+                    src = srcYear;
+                } else if (new java.io.File(srcSafari).exists()) {
+                    src = srcSafari;
+                } else {
+                    return "ERROR:Folder not found:\n  " + srcYear + "\n  " + srcSafari;
+                }
                 String dstPar  = dropboxHome + "\\001_Safari\\" + grpMainFolder;
                 ProcessBuilder pb = new ProcessBuilder("cmd", "/c", "move", src, dstPar);
                 pb.redirectErrorStream(true);
