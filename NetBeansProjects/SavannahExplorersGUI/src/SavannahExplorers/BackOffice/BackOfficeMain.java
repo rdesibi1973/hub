@@ -1457,6 +1457,44 @@ public class BackOfficeMain extends javax.swing.JFrame {
         if (grpAction == null) grpAction = "NONE";
         String grpCode   = (grpCodeField != null) ? grpCodeField.getText().trim() : "";
         final String grpOrigCustname = custname;  // before any GRP modification
+
+        // ── ADD GRP: no dates needed — move folder directly into existing GRP ─
+        if ("ADD".equals(grpAction)) {
+            if (grpCode.isEmpty()) {
+                JOptionPane.showMessageDialog(null,
+                    "Enter a GRP code (DDMM) to search for the GRP folder.",
+                    "GRP Error", JOptionPane.ERROR_MESSAGE);
+                return;
+            }
+            String dh0 = System.getenv("DROPBOX_HOME");
+            if (dh0 == null) dh0 = "";
+            java.util.List<String> found = runDirCommand(
+                "dir /b \"" + dh0 + "\\001_Safari\\\"*GRP" + grpCode + "*");
+            found.removeIf(f -> !f.toUpperCase().contains("GRP" + grpCode.toUpperCase()));
+            if (found.isEmpty()) {
+                JOptionPane.showMessageDialog(null,
+                    "No GRP folder found for code " + grpCode + " in 001_Safari.",
+                    "GRP Not Found", JOptionPane.WARNING_MESSAGE);
+                return;
+            }
+            String chosen;
+            if (found.size() == 1) {
+                chosen = found.get(0);
+            } else {
+                javax.swing.JList<String> jl = new javax.swing.JList<>(found.toArray(new String[0]));
+                jl.setSelectionMode(javax.swing.ListSelectionModel.SINGLE_SELECTION);
+                jl.setSelectedIndex(0);
+                jl.setFont(new java.awt.Font("Monospaced", java.awt.Font.PLAIN, 12));
+                int res = JOptionPane.showConfirmDialog(this,
+                    new javax.swing.JScrollPane(jl), "Select GRP folder",
+                    JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
+                if (res != JOptionPane.OK_OPTION || jl.getSelectedValue() == null) return;
+                chosen = jl.getSelectedValue();
+            }
+            launchAddGrpWorker(custname, chosen);
+            return;
+        }
+
         String startdatein=jTextField2.getText();
         String startdate=startdatein.toUpperCase();
         String intdatein=jTextField10.getText();
@@ -1637,44 +1675,8 @@ public class BackOfficeMain extends javax.swing.JFrame {
             }
         }
 
-        // ── ADD GRP: find existing GRP folder in 001_Safari ──────────────────
-        final String grpMainFolder;
-        if ("ADD".equals(grpAction)) {
-            if (grpCode.isEmpty()) {
-                JOptionPane.showMessageDialog(null,
-                    "Enter a GRP code (DDMM) to search for the GRP folder.",
-                    "GRP Error", JOptionPane.ERROR_MESSAGE);
-                return;
-            }
-            String dh0 = System.getenv("DROPBOX_HOME");
-            if (dh0 == null) dh0 = "";
-            java.util.List<String> found = runDirCommand(
-                "dir /b \"" + dh0 + "\\001_Safari\\\"*GRP" + grpCode + "*");
-            found.removeIf(f -> !f.toUpperCase().contains("GRP" + grpCode.toUpperCase()));
-            if (found.isEmpty()) {
-                JOptionPane.showMessageDialog(null,
-                    "No GRP folder found for code " + grpCode + " in 001_Safari.",
-                    "GRP Not Found", JOptionPane.WARNING_MESSAGE);
-                return;
-            }
-            String chosen;
-            if (found.size() == 1) {
-                chosen = found.get(0);
-            } else {
-                javax.swing.JList<String> jl = new javax.swing.JList<>(found.toArray(new String[0]));
-                jl.setSelectionMode(javax.swing.ListSelectionModel.SINGLE_SELECTION);
-                jl.setSelectedIndex(0);
-                jl.setFont(new java.awt.Font("Monospaced", java.awt.Font.PLAIN, 12));
-                int res = JOptionPane.showConfirmDialog(this,
-                    new javax.swing.JScrollPane(jl), "Select GRP folder",
-                    JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
-                if (res != JOptionPane.OK_OPTION || jl.getSelectedValue() == null) return;
-                chosen = jl.getSelectedValue();
-            }
-            grpMainFolder = chosen;
-        } else {
-            grpMainFolder = "";
-        }
+        // ADD is handled as an early return above — never reaches here
+        final String grpMainFolder = "";
 
         // confirmedfolder is now set — run all heavy work off the EDT
         // For CREATE the folder-to-rename on disk is still the original name (before _GRP suffix)
@@ -1827,31 +1829,6 @@ public class BackOfficeMain extends javax.swing.JFrame {
                     log.append("✔ Subfolder created: ").append(grpOrigFinal).append("\n");
                 }
 
-                // ── Step 3b (ADD GRP): move confirmed folder into GRP parent ──
-                if ("ADD".equals(grpActionFinal) && !grpMainFolder.isEmpty()) {
-                    java.io.File srcDir    = new java.io.File(dropboxHome + "\\001_Safari\\" + newFolder);
-                    java.io.File grpParent = new java.io.File(dropboxHome + "\\001_Safari\\" + grpMainFolder);
-                    if (!grpParent.exists()) {
-                        log.append("⚠ GRP folder not found: ").append(grpMainFolder).append("\n");
-                    } else {
-                        ProcessBuilder pbAdd = new ProcessBuilder(
-                            "cmd", "/c", "move", srcDir.getAbsolutePath(), grpParent.getAbsolutePath());
-                        pbAdd.redirectErrorStream(true);
-                        Process prAdd = pbAdd.start();
-                        try (BufferedReader ra = new BufferedReader(
-                                new InputStreamReader(prAdd.getInputStream()))) {
-                            String ln;
-                            while ((ln = ra.readLine()) != null)
-                                if (!ln.isBlank()) log.append(ln).append("\n");
-                        }
-                        prAdd.waitFor();
-                        java.io.File destCheck = new java.io.File(grpParent, newFolder);
-                        log.append(destCheck.exists()
-                            ? "✔ Moved into GRP: " + grpMainFolder + "\n"
-                            : "⚠ Move to GRP may have failed — check manually.\n");
-                    }
-                }
-
                 // ── Step 4: update DB via API ─────────────────────────────────
                 if (USE_API && AppSession.isLoggedIn()) {
                     try {
@@ -1861,9 +1838,6 @@ public class BackOfficeMain extends javax.swing.JFrame {
                         if ("CREATE".equals(grpActionFinal)) {
                             bodyBld.append(",\"grp_action\":\"CREATE\"")
                                    .append(",\"grp_subfolder\":\"").append(escJson(grpOrigFinal)).append("\"");
-                        } else if ("ADD".equals(grpActionFinal) && !grpMainFolder.isEmpty()) {
-                            bodyBld.append(",\"grp_action\":\"ADD\"")
-                                   .append(",\"grp_main_folder\":\"").append(escJson(grpMainFolder)).append("\"");
                         }
                         bodyBld.append("}");
                         String resp = postApiDirect("api_confirm_safari.php", bodyBld.toString());
@@ -3216,6 +3190,121 @@ public class BackOfficeMain extends javax.swing.JFrame {
     // a number, finds the maximum, and sets Prog Number to max+1.
     // Searches 2026/ first; if not found there, tries 001_Safari/.
     // Only updates the field if the user hasn't manually overridden it
+    // ── ADD GRP worker: move customer folder from REQ_YEAR into GRP parent ──────
+    private void launchAddGrpWorker(String custname, String grpMainFolder) {
+        jButton11.setEnabled(false);
+        jButton11.setText("Working…");
+
+        javax.swing.JDialog dlg = new javax.swing.JDialog(this, "Add to GRP", false);
+        dlg.setLayout(new java.awt.BorderLayout());
+        javax.swing.JPanel hdr = new javax.swing.JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 14, 10));
+        hdr.setBackground(new java.awt.Color(0x1A1A2E));
+        javax.swing.JLabel hdrLbl = new javax.swing.JLabel("Add to GRP — " + grpMainFolder);
+        hdrLbl.setFont(new java.awt.Font("SansSerif", java.awt.Font.BOLD, 13));
+        hdrLbl.setForeground(java.awt.Color.WHITE);
+        hdr.add(hdrLbl);
+        dlg.add(hdr, java.awt.BorderLayout.NORTH);
+
+        javax.swing.JPanel body = new javax.swing.JPanel(new java.awt.BorderLayout(8, 8));
+        body.setBorder(javax.swing.BorderFactory.createEmptyBorder(16, 16, 8, 16));
+        body.setBackground(java.awt.Color.WHITE);
+        javax.swing.JProgressBar bar = new javax.swing.JProgressBar();
+        bar.setIndeterminate(true);
+        bar.setPreferredSize(new java.awt.Dimension(460, 18));
+        javax.swing.JTextArea detail = new javax.swing.JTextArea();
+        detail.setEditable(false);
+        detail.setFont(new java.awt.Font("Monospaced", java.awt.Font.PLAIN, 12));
+        detail.setBackground(new java.awt.Color(245, 245, 245));
+        javax.swing.JScrollPane detailScroll = new javax.swing.JScrollPane(detail);
+        detailScroll.setPreferredSize(new java.awt.Dimension(460, 120));
+        detailScroll.setVisible(false);
+        body.add(bar,         java.awt.BorderLayout.CENTER);
+        body.add(detailScroll, java.awt.BorderLayout.SOUTH);
+        dlg.add(body, java.awt.BorderLayout.CENTER);
+
+        javax.swing.JPanel foot = new javax.swing.JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.RIGHT, 10, 8));
+        foot.setBackground(new java.awt.Color(0xF5F5F5));
+        javax.swing.JButton closeBtn = new javax.swing.JButton("Close");
+        closeBtn.setFont(new java.awt.Font("SansSerif", java.awt.Font.BOLD, 12));
+        closeBtn.setEnabled(false);
+        closeBtn.addActionListener(ev -> dlg.dispose());
+        foot.add(closeBtn);
+        dlg.add(foot, java.awt.BorderLayout.SOUTH);
+        dlg.setSize(500, 200);
+        dlg.setLocationRelativeTo(this);
+        dlg.setDefaultCloseOperation(javax.swing.JDialog.DO_NOTHING_ON_CLOSE);
+        dlg.setVisible(true);
+
+        new SwingWorker<String, Void>() {
+            @Override
+            protected String doInBackground() throws Exception {
+                String dropboxHome = System.getenv("DROPBOX_HOME");
+                String reqYear     = System.getenv("REQ_YEAR");
+                if (dropboxHome == null) dropboxHome = "";
+                if (reqYear    == null) reqYear      = "2026";
+                StringBuilder log = new StringBuilder();
+
+                String src     = dropboxHome + "\\" + reqYear + "\\" + custname;
+                String dstPar  = dropboxHome + "\\001_Safari\\" + grpMainFolder;
+                ProcessBuilder pb = new ProcessBuilder("cmd", "/c", "move", src, dstPar);
+                pb.redirectErrorStream(true);
+                Process pr = pb.start();
+                try (BufferedReader r = new BufferedReader(new InputStreamReader(pr.getInputStream()))) {
+                    String ln; while ((ln = r.readLine()) != null) if (!ln.isBlank()) log.append(ln).append("\n");
+                }
+                int exit = pr.waitFor();
+                if (exit != 0)
+                    return "ERROR:Move failed (exit " + exit + ")" + (log.length() > 0 ? ":\n" + log : "");
+                log.append("✔ Moved to ").append(grpMainFolder).append("\n");
+
+                Thread.sleep(10_000);
+
+                java.io.File dst = new java.io.File(dstPar + "\\" + custname);
+                if (!dst.exists())
+                    return "ERROR:Folder not found at destination: " + dst.getAbsolutePath();
+                log.append("✔ Verified at destination\n");
+
+                if (USE_API && AppSession.isLoggedIn()) {
+                    try {
+                        String body2 = "{\"old_folder_name\":\"" + escJsonS(custname)
+                                     + "\",\"new_folder_name\":\"" + escJsonS(custname)
+                                     + "\",\"grp_action\":\"ADD\""
+                                     + ",\"grp_main_folder\":\"" + escJsonS(grpMainFolder) + "\"}";
+                        String resp = postApiDirect("api_confirm_safari.php", body2);
+                        log.append(resp != null && resp.contains("\"success\":true")
+                            ? "✔ DB updated: status → Booked\n"
+                            : "⚠ DB update: " + resp + "\n");
+                    } catch (Exception ex) {
+                        log.append("⚠ DB update error: ").append(ex.getMessage()).append("\n");
+                    }
+                }
+                return "OK:" + log;
+            }
+
+            @Override
+            protected void done() {
+                jButton11.setEnabled(true);
+                jButton11.setText("Confirm Safari");
+                bar.setIndeterminate(false); bar.setValue(100);
+                detailScroll.setVisible(true);
+                closeBtn.setEnabled(true);
+                dlg.setDefaultCloseOperation(javax.swing.JDialog.DISPOSE_ON_CLOSE);
+                try {
+                    String res = get();
+                    detail.setText(res.startsWith("OK:") ? res.substring(3)
+                                 : res.startsWith("ERROR:") ? res.substring(6) : res);
+                } catch (Exception ex) { detail.setText("Error: " + ex.getMessage()); }
+                dlg.setSize(500, 320);
+                dlg.revalidate(); dlg.repaint();
+            }
+        }.execute();
+    }
+
+    private static String escJsonS(String s) {
+        if (s == null) return "";
+        return s.replace("\\", "\\\\").replace("\"", "\\\"");
+    }
+
     // (we never overwrite a value the user has explicitly typed — we only
     //  auto-fill when the field still shows its last auto-computed value).
     // -------------------------------------------------------------------------
