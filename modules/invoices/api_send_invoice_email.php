@@ -141,14 +141,16 @@ function buildInvoiceHtml(array $inv, array $items, array $payments): string
     $d       = fn(string $s) => date('d M Y', strtotime($s));
     $e       = fn(mixed $s)  => htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8');
 
-    // Logo — file:// paths work with dompdf even when isRemoteEnabled=false
+    // Logo — embed as base64 to avoid dompdf file path restrictions
     $logoFile = $inv['issuer'] === 'Savannah Holidays Ltd'
         ? __DIR__ . '/assets/logo_sh.png'
         : __DIR__ . '/assets/logo_se.png';
-    $logoSrc  = file_exists($logoFile) ? 'file://' . $logoFile : '';
-    $logoHtml = $logoSrc
-        ? "<img src=\"{$logoSrc}\" style='height:80px;width:auto;'>"
-        : "<div style='font-size:18px;font-weight:700;color:#C0211B;'>" . $e($inv['issuer']) . "</div>";
+    if (file_exists($logoFile)) {
+        $logoSrc = 'data:image/png;base64,' . base64_encode(file_get_contents($logoFile));
+        $logoHtml = "<img src=\"{$logoSrc}\" style='height:80px;width:auto;'>";
+    } else {
+        $logoHtml = "<div style='font-size:18px;font-weight:700;color:#C0211B;'>" . $e($inv['issuer']) . "</div>";
+    }
 
     $issuerAddr = $inv['issuer'] === 'Savannah Explorers Ltd'
         ? "Arusha, P.O. Box 16726<br>Tanzania"
