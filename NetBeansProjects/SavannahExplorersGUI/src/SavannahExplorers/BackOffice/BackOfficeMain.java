@@ -801,6 +801,26 @@ public class BackOfficeMain extends javax.swing.JFrame {
         // row 3: End Date
         addC(datesPanel, jLabel6, gc, 0,3); addC(datesPanel, jTextField3, gc, 1,3);
 
+        // row 4: GRP
+        grpActionCombo = new javax.swing.JComboBox<>(new String[]{"NONE","CREATE","ADD"});
+        grpActionCombo.setFont(base);
+        grpActionCombo.setPreferredSize(new java.awt.Dimension(110, 28));
+        grpCodeField = new javax.swing.JTextField(6);
+        grpCodeField.setFont(base);
+        grpCodeField.setPreferredSize(new java.awt.Dimension(80, 28));
+        grpCodeField.setEnabled(false);
+        grpCodeField.setToolTipText("DDMM — e.g. 2306 = June 23");
+        grpActionCombo.addActionListener(e -> {
+            boolean active = !"NONE".equals(grpActionCombo.getSelectedItem());
+            grpCodeField.setEnabled(active);
+            if (!active) grpCodeField.setText("");
+        });
+        javax.swing.JLabel grpLabel = new javax.swing.JLabel("GRP:");
+        setLbl(grpLabel, bold);
+        addC(datesPanel, grpLabel,       gc, 0, 4);
+        addC(datesPanel, grpActionCombo, gc, 1, 4);
+        addC(datesPanel, grpCodeField,   gc, 2, 4);
+
         jPanel1.add(datesPanel);
         jPanel1.add(javax.swing.Box.createVerticalStrut(10));
         jPanel1.add(sep());
@@ -864,10 +884,16 @@ public class BackOfficeMain extends javax.swing.JFrame {
         setBtn(jButton4, bold, new java.awt.Dimension(130, 28));
         jLabel9.setFont(base);
         jTextField4.setFont(base); jTextField4.setPreferredSize(new java.awt.Dimension(46, 26));
+        jButtonRefreshProg = new javax.swing.JButton("↻");
+        jButtonRefreshProg.setFont(bold);
+        jButtonRefreshProg.setToolTipText("Re-scan folder to update prog number");
+        jButtonRefreshProg.setPreferredSize(new java.awt.Dimension(36, 26));
+        jButtonRefreshProg.addActionListener(e -> autoScanProgNumber());
         addC(cbPanel, jButton5, cc, 0, cbRow);
         addC(cbPanel, jButton4, cc, 1, cbRow);
         addC(cbPanel, jLabel9,  cc, 2, cbRow);
-        addC(cbPanel, jTextField4, cc, 3, cbRow);
+        addC(cbPanel, jTextField4,        cc, 3, cbRow);
+        addC(cbPanel, jButtonRefreshProg, cc, 4, cbRow);
 
         jPanel1.add(javax.swing.Box.createVerticalStrut(6));
         jPanel1.add(cbPanel);
@@ -1403,6 +1429,10 @@ public class BackOfficeMain extends javax.swing.JFrame {
         // Safari is confirmed with Start Date, End Date and other info
         // Generate the new safari folder and move to confirmed safari folder %DROPBOX_HOME%\\001_Safari
         String custname=jTextField1.getText();
+        String grpAction = (grpActionCombo != null) ? (String)grpActionCombo.getSelectedItem() : "NONE";
+        if (grpAction == null) grpAction = "NONE";
+        String grpCode   = (grpCodeField != null) ? grpCodeField.getText().trim() : "";
+        final String grpOrigCustname = custname;  // before any GRP modification
         String startdatein=jTextField2.getText();
         String startdate=startdatein.toUpperCase();
         String intdatein=jTextField10.getText();
@@ -1415,6 +1445,21 @@ public class BackOfficeMain extends javax.swing.JFrame {
         String endmonth = "00";
         String confirmedfolder = "00";
                 
+        // ── CREATE GRP: validate DDMM code and append _GRP suffix to folder name
+        if ("CREATE".equals(grpAction)) {
+            if (!grpCode.matches("\\d{4}")
+                    || Integer.parseInt(grpCode.substring(0,2)) < 1
+                    || Integer.parseInt(grpCode.substring(0,2)) > 31
+                    || Integer.parseInt(grpCode.substring(2))   < 1
+                    || Integer.parseInt(grpCode.substring(2))   > 12) {
+                JOptionPane.showMessageDialog(null,
+                    "GRP Code must be 4 digits DDMM (e.g. 2306 = June 23).",
+                    "GRP Error", JOptionPane.ERROR_MESSAGE);
+                return;
+            }
+            custname = custname + "_GRP" + grpCode;
+        }
+
         if (startdate.matches("(?i).*JAN.*"))
         {
             month="01";
@@ -1568,9 +1613,51 @@ public class BackOfficeMain extends javax.swing.JFrame {
             }
         }
 
+        // ── ADD GRP: find existing GRP folder in 001_Safari ──────────────────
+        final String grpMainFolder;
+        if ("ADD".equals(grpAction)) {
+            if (grpCode.isEmpty()) {
+                JOptionPane.showMessageDialog(null,
+                    "Enter a GRP code (DDMM) to search for the GRP folder.",
+                    "GRP Error", JOptionPane.ERROR_MESSAGE);
+                return;
+            }
+            String dh0 = System.getenv("DROPBOX_HOME");
+            if (dh0 == null) dh0 = "";
+            java.util.List<String> found = runDirCommand(
+                "dir /b \"" + dh0 + "\\001_Safari\\\"*GRP" + grpCode + "*");
+            found.removeIf(f -> !f.toUpperCase().contains("GRP" + grpCode.toUpperCase()));
+            if (found.isEmpty()) {
+                JOptionPane.showMessageDialog(null,
+                    "No GRP folder found for code " + grpCode + " in 001_Safari.",
+                    "GRP Not Found", JOptionPane.WARNING_MESSAGE);
+                return;
+            }
+            String chosen;
+            if (found.size() == 1) {
+                chosen = found.get(0);
+            } else {
+                javax.swing.JList<String> jl = new javax.swing.JList<>(found.toArray(new String[0]));
+                jl.setSelectionMode(javax.swing.ListSelectionModel.SINGLE_SELECTION);
+                jl.setSelectedIndex(0);
+                jl.setFont(new java.awt.Font("Monospaced", java.awt.Font.PLAIN, 12));
+                int res = JOptionPane.showConfirmDialog(this,
+                    new javax.swing.JScrollPane(jl), "Select GRP folder",
+                    JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
+                if (res != JOptionPane.OK_OPTION || jl.getSelectedValue() == null) return;
+                chosen = jl.getSelectedValue();
+            }
+            grpMainFolder = chosen;
+        } else {
+            grpMainFolder = "";
+        }
+
         // confirmedfolder is now set — run all heavy work off the EDT
-        final String oldFolder = custname;
+        // For CREATE the folder-to-rename on disk is still the original name (before _GRP suffix)
+        final String oldFolder = "CREATE".equals(grpAction) ? grpOrigCustname : custname;
         final String newFolder = confirmedfolder;
+        final String grpActionFinal = grpAction;
+        final String grpOrigFinal   = grpOrigCustname;
 
         jButton11.setEnabled(false);
         jButton11.setText("Working…");
@@ -1693,12 +1780,69 @@ public class BackOfficeMain extends javax.swing.JFrame {
                 if (bat2.length() > 0) log.append(bat2);
                 log.append("✔ Moved to 001_Safari\n");
 
-                // ── Step 4: update DB via API (when API is configured) ────────
+                // ── Step 3b (CREATE GRP): create subfolder, move files into it ─
+                if ("CREATE".equals(grpActionFinal) && !grpOrigFinal.isEmpty()) {
+                    java.io.File grpMain = new java.io.File(dropboxHome + "\\001_Safari\\" + newFolder);
+                    java.io.File grpSub  = new java.io.File(grpMain, grpOrigFinal);
+                    if (!grpSub.exists()) grpSub.mkdir();
+                    java.io.File[] items = grpMain.listFiles(f -> f.isFile()
+                        && !f.getName().toLowerCase().endsWith(".xlsx")
+                        && !f.getName().toLowerCase().endsWith(".xls"));
+                    if (items != null) {
+                        for (java.io.File item : items) {
+                            try {
+                                java.nio.file.Files.move(item.toPath(),
+                                    grpSub.toPath().resolve(item.getName()),
+                                    java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                            } catch (Exception ex) {
+                                log.append("⚠ Move ").append(item.getName())
+                                   .append(": ").append(ex.getMessage()).append("\n");
+                            }
+                        }
+                    }
+                    log.append("✔ Subfolder created: ").append(grpOrigFinal).append("\n");
+                }
+
+                // ── Step 3b (ADD GRP): move confirmed folder into GRP parent ──
+                if ("ADD".equals(grpActionFinal) && !grpMainFolder.isEmpty()) {
+                    java.io.File srcDir    = new java.io.File(dropboxHome + "\\001_Safari\\" + newFolder);
+                    java.io.File grpParent = new java.io.File(dropboxHome + "\\001_Safari\\" + grpMainFolder);
+                    if (!grpParent.exists()) {
+                        log.append("⚠ GRP folder not found: ").append(grpMainFolder).append("\n");
+                    } else {
+                        ProcessBuilder pbAdd = new ProcessBuilder(
+                            "cmd", "/c", "move", srcDir.getAbsolutePath(), grpParent.getAbsolutePath());
+                        pbAdd.redirectErrorStream(true);
+                        Process prAdd = pbAdd.start();
+                        try (BufferedReader ra = new BufferedReader(
+                                new InputStreamReader(prAdd.getInputStream()))) {
+                            String ln;
+                            while ((ln = ra.readLine()) != null)
+                                if (!ln.isBlank()) log.append(ln).append("\n");
+                        }
+                        prAdd.waitFor();
+                        java.io.File destCheck = new java.io.File(grpParent, newFolder);
+                        log.append(destCheck.exists()
+                            ? "✔ Moved into GRP: " + grpMainFolder + "\n"
+                            : "⚠ Move to GRP may have failed — check manually.\n");
+                    }
+                }
+
+                // ── Step 4: update DB via API ─────────────────────────────────
                 if (USE_API && AppSession.isLoggedIn()) {
                     try {
-                        String body = "{\"old_folder_name\":\"" + escJson(oldFolder)
-                                    + "\",\"new_folder_name\":\"" + escJson(newFolder) + "\"}";
-                        String resp = postApiDirect("api_confirm_safari.php", body);
+                        StringBuilder bodyBld = new StringBuilder();
+                        bodyBld.append("{\"old_folder_name\":\"").append(escJson(oldFolder))
+                               .append("\",\"new_folder_name\":\"").append(escJson(newFolder)).append("\"");
+                        if ("CREATE".equals(grpActionFinal)) {
+                            bodyBld.append(",\"grp_action\":\"CREATE\"")
+                                   .append(",\"grp_subfolder\":\"").append(escJson(grpOrigFinal)).append("\"");
+                        } else if ("ADD".equals(grpActionFinal) && !grpMainFolder.isEmpty()) {
+                            bodyBld.append(",\"grp_action\":\"ADD\"")
+                                   .append(",\"grp_main_folder\":\"").append(escJson(grpMainFolder)).append("\"");
+                        }
+                        bodyBld.append("}");
+                        String resp = postApiDirect("api_confirm_safari.php", bodyBld.toString());
                         if (resp != null && resp.contains("\"success\":true")) {
                             log.append("✔ DB updated: status → Booked\n");
                         } else {
@@ -2236,11 +2380,20 @@ public class BackOfficeMain extends javax.swing.JFrame {
 
     private void jButton3ActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_jButton3ActionPerformed
         jTextField1.setText("");
+        resetDatesAndGrp();
+    }//GEN-LAST:event_jButton3ActionPerformed
+
+    private void resetDatesAndGrp() {
         jTextField2.setText("NA");
         jTextField3.setText("NA");
         jTextField10.setText("NA");
         jTextField10b.setText("NA");
-    }//GEN-LAST:event_jButton3ActionPerformed
+        if (grpActionCombo != null) {
+            grpActionCombo.setSelectedIndex(0);
+            grpCodeField.setText("");
+            grpCodeField.setEnabled(false);
+        }
+    }
 
     private void jButton2ActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_jButton2ActionPerformed
 
@@ -2458,6 +2611,7 @@ public class BackOfficeMain extends javax.swing.JFrame {
                 loadDir.run();
             } else {
                 jTextField1.setText(name);
+                resetDatesAndGrp();
                 dialog.dispose();
             }
         };
@@ -2476,6 +2630,7 @@ public class BackOfficeMain extends javax.swing.JFrame {
             if (sel == null) return;
             String name = sel.startsWith("\uD83D\uDCC1 ") ? sel.substring(3).trim() : sel.trim();
             jTextField1.setText(name);
+            resetDatesAndGrp();
             dialog.dispose();
         });
 
@@ -2596,6 +2751,7 @@ public class BackOfficeMain extends javax.swing.JFrame {
                             result = selected;
                         }
                         jTextField1.setText(result);
+                        resetDatesAndGrp();
                         dialog.dispose();
                     }
                 }
@@ -3965,5 +4121,8 @@ public class BackOfficeMain extends javax.swing.JFrame {
     private javax.swing.JTextField jTextField9;
     private javax.swing.JCheckBox machame;
     private javax.swing.JCheckBox machame6;
+    private javax.swing.JComboBox<String> grpActionCombo;
+    private javax.swing.JTextField grpCodeField;
+    private javax.swing.JButton jButtonRefreshProg;
     // End of variables declaration//GEN-END:variables
 }
