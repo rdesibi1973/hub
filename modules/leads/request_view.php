@@ -101,9 +101,20 @@ include 'includes/header.php';
 <div class="table-wrap" style="max-width:860px;margin-bottom:20px">
   <div class="detail-grid">
 
+    <?php if (!empty($r['group_folder'])): ?>
+    <div class="detail-label">GRP Folder</div>
+    <div class="detail-value" style="font-size:.82rem;">
+      <?= h($r['group_folder']) ?>
+    </div>
+    <?php endif; ?>
+
     <div class="detail-label">Dropbox Folder</div>
     <div class="detail-value">
-      <?= $r['practice_code'] ? h($r['practice_code']) : '<span class="text-muted">—</span>' ?>
+      <?php if (!empty($r['group_folder']) && $r['practice_code']): ?>
+        <span style="color:var(--grey-mid);font-size:.78rem;"><?= h($r['group_folder']) ?>/</span><?= h($r['practice_code']) ?>
+      <?php else: ?>
+        <?= $r['practice_code'] ? h($r['practice_code']) : '<span class="text-muted">—</span>' ?>
+      <?php endif; ?>
     </div>
 
     <div class="detail-label">Date Received</div>
@@ -167,8 +178,17 @@ include 'includes/header.php';
 
     <div class="detail-label">Dropbox Folder Link</div>
     <div class="detail-value">
-      <?php if ($r['dropbox_url']): ?>
-        <a href="<?= h($r['dropbox_url']) ?>" target="_blank">📁 Open Dropbox Folder</a>
+      <?php
+        // For GRP requests build the URL from group_folder + practice_code
+        if (!empty($r['group_folder']) && $r['practice_code']) {
+            $dbxUrl = 'https://www.dropbox.com/home/001_Safari/'
+                    . rawurlencode($r['group_folder']) . '/' . rawurlencode($r['practice_code']);
+        } else {
+            $dbxUrl = $r['dropbox_url'] ?? '';
+        }
+      ?>
+      <?php if ($dbxUrl): ?>
+        <a href="<?= h($dbxUrl) ?>" target="_blank">📁 Open Dropbox Folder</a>
       <?php else: ?>
         <span class="text-muted">— not set yet</span>
       <?php endif; ?>
