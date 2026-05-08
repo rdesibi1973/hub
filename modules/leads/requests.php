@@ -70,7 +70,7 @@ if ($isStaff && $staffAgentId) {
     $where[]  = 'r.agent_id = ?';
     $params[] = $agent;
 }
-if ($year > 0) {
+if ($year > 0 && !$search) {
     $where[]  = 'YEAR(r.date_received) = ?';
     $params[] = $year;
 }
