@@ -58,6 +58,12 @@ public class BackOfficeMain extends javax.swing.JFrame {
         setMinimumSize(new java.awt.Dimension(1300, 860));
         setSize(1440, 960);
 
+        // Set window icon (taskbar + title bar)
+        java.net.URL iconUrl = getClass().getResource("logo_se.png");
+        if (iconUrl != null) {
+            setIconImage(new ImageIcon(iconUrl).getImage());
+        }
+
         // Hide Browse buttons (replaced by Search with results popup)
         jSearch.setVisible(false);
         jSearchSafari.setVisible(false);
@@ -733,6 +739,24 @@ public class BackOfficeMain extends javax.swing.JFrame {
         jPanel1.setLayout(new javax.swing.BoxLayout(jPanel1, javax.swing.BoxLayout.Y_AXIS));
         jPanel1.setBorder(javax.swing.BorderFactory.createEmptyBorder(8, 14, 14, 14));
         jPanel1.setBackground(new java.awt.Color(236, 236, 236));
+
+        // ── Logo header ──────────────────────────────────────────────────────
+        java.net.URL logoUrl = getClass().getResource("logo_se.png");
+        if (logoUrl != null) {
+            javax.swing.JPanel headerRow = new javax.swing.JPanel(
+                new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 10, 2));
+            headerRow.setOpaque(false);
+            headerRow.setAlignmentX(java.awt.Component.LEFT_ALIGNMENT);
+            Image scaledImg = new ImageIcon(logoUrl).getImage()
+                                  .getScaledInstance(52, 52, Image.SCALE_SMOOTH);
+            headerRow.add(new javax.swing.JLabel(new ImageIcon(scaledImg)));
+            javax.swing.JLabel titleLbl = new javax.swing.JLabel("Savannah Explorers  —  BackOffice");
+            titleLbl.setFont(new java.awt.Font("SansSerif", java.awt.Font.BOLD, 17));
+            titleLbl.setForeground(new java.awt.Color(0xC0211B));
+            headerRow.add(titleLbl);
+            jPanel1.add(headerRow);
+            jPanel1.add(javax.swing.Box.createVerticalStrut(6));
+        }
 
         // ── NEW REQUEST ──────────────────────────────────────────────────────
         jButton1.setFont(big);
