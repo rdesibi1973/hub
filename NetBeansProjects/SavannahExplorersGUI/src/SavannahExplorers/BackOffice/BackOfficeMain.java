@@ -55,8 +55,8 @@ public class BackOfficeMain extends javax.swing.JFrame {
         jTextField6.setPreferredSize(fixedRename);  jTextField6.setMaximumSize(fixedRename);
         jTextField7.setPreferredSize(fixedRename);  jTextField7.setMaximumSize(fixedRename);
         // Set minimum window size (wider for readability)
-        setMinimumSize(new java.awt.Dimension(1300, 860));
-        setSize(1440, 960);
+        setMinimumSize(new java.awt.Dimension(1300, 940));
+        setSize(1440, 1040);
 
         // Set window icon (taskbar + title bar)
         java.net.URL iconUrl = getClass().getResource("logo_se.png");
