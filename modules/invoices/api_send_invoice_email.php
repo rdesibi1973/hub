@@ -180,6 +180,37 @@ function buildInvoiceHtml(array $inv, array $items, array $payments): string
 
     $balColor = (float)$inv['balance_due'] <= 0 ? '#1A6B3A' : '#1A1A1A';
 
+    // Bank details — Savannah Holidays only, per currency
+    $bankHtml = '';
+    if ($inv['issuer'] === 'Savannah Holidays Ltd') {
+        if ($inv['currency'] === 'USD') {
+            $bankIban   = 'MU55AFBL2501138053000000013USD';
+            $bankAcct   = '138053000000013';
+            $bankCcy    = 'USD';
+        } else {
+            $bankIban   = 'MU40AFBL2501138053000000024EUR';
+            $bankAcct   = '138053000000024';
+            $bankCcy    = 'EUR';
+        }
+        $bankHtml = "
+        <table width='100%' style='margin-top:28px;border-collapse:collapse;'>
+          <tr>
+            <td style='padding:12px 16px;background:#f9f9f9;border-left:3px solid #C0211B;'>
+              <div style='font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#888;margin-bottom:8px;'>Bank Details for Payment</div>
+              <table style='border-collapse:collapse;font-size:12px;'>
+                <tr><td style='color:#888;padding:2px 0;width:150px;'>Beneficiary Bank:</td><td style='font-weight:600;color:#1A1A1A;padding:2px 0 2px 8px;'>AfrAsia Bank Ltd</td></tr>
+                <tr><td style='color:#888;padding:2px 0;'>Bank Address:</td><td style='font-weight:600;color:#1A1A1A;padding:2px 0 2px 8px;'>Bowen Square, 10, Dr Ferriere Street, Port Louis, Mauritius</td></tr>
+                <tr><td style='color:#888;padding:2px 0;'>Account Name:</td><td style='font-weight:600;color:#1A1A1A;padding:2px 0 2px 8px;'>SAVANNAH HOLIDAYS LTD</td></tr>
+                <tr><td style='color:#888;padding:2px 0;'>IBAN:</td><td style='font-weight:600;color:#1A1A1A;padding:2px 0 2px 8px;'>{$bankIban}</td></tr>
+                <tr><td style='color:#888;padding:2px 0;'>Account Number:</td><td style='font-weight:600;color:#1A1A1A;padding:2px 0 2px 8px;'>{$bankAcct}</td></tr>
+                <tr><td style='color:#888;padding:2px 0;'>Currency:</td><td style='font-weight:600;color:#1A1A1A;padding:2px 0 2px 8px;'>{$bankCcy}</td></tr>
+                <tr><td style='color:#888;padding:2px 0;'>Swift Code:</td><td style='font-weight:600;color:#1A1A1A;padding:2px 0 2px 8px;'>AFBLMUMU</td></tr>
+              </table>
+            </td>
+          </tr>
+        </table>";
+    }
+
     // Optional notes / T&C
     $footerHtml = '';
     if ($inv['notes'] || $inv['terms_conditions']) {
@@ -297,6 +328,8 @@ function buildInvoiceHtml(array $inv, array $items, array $payments): string
       </td>
     </tr>
   </table>
+
+  {$bankHtml}
 
   {$footerHtml}
 
