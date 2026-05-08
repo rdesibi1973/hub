@@ -39,6 +39,9 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 $body          = json_decode(file_get_contents('php://input'), true) ?? [];
 $oldFolderName = trim($body['old_folder_name'] ?? '');
 $newFolderName = trim($body['new_folder_name'] ?? '');
+$grpAction     = trim($body['grp_action']     ?? 'NONE');  // NONE | CREATE | ADD
+$grpSubfolder  = trim($body['grp_subfolder']  ?? '');      // CREATE: individual subfolder name
+$grpMainFolder = trim($body['grp_main_folder'] ?? '');     // ADD: main GRP folder name
 
 if ($oldFolderName === '' || $newFolderName === '') {
     http_response_code(400);
@@ -104,33 +107,65 @@ if (!$row) {
 
 $id = (int) $row['id'];
 
-// ── Ensure confirmation_date column exists (safe ALTER) ───────────────────────
-// This column should already exist (used by ajax_set_confirmation_date.php).
-// The try/catch below is a safety net in case the DB is missing it.
-try {
-    $db->exec("ALTER TABLE requests ADD COLUMN confirmation_date DATE NULL DEFAULT NULL");
-} catch (PDOException $ignored) {
-    // Column already exists — ignore duplicate column error
-}
+// ── Ensure columns exist (safe ALTER — ignored if already present) ────────────
+try { $db->exec("ALTER TABLE requests ADD COLUMN confirmation_date DATE NULL DEFAULT NULL");
+} catch (PDOException $ignored) {}
+try { $db->exec("ALTER TABLE requests ADD COLUMN group_folder VARCHAR(255) NULL DEFAULT NULL");
+} catch (PDOException $ignored) {}
 
 // ── Update ────────────────────────────────────────────────────────────────────
-// After Confirm Safari, the folder is moved from /2026/ to /001_Safari/
-$newDropboxUrl = 'https://www.dropbox.com/home/001_Safari/' . rawurlencode($newFolderName);
+if ($grpAction === 'CREATE' && $grpSubfolder !== '') {
+    // CREATE GRP: practice_code = individual subfolder, group_folder = main GRP folder
+    $newDropboxUrl = 'https://www.dropbox.com/home/001_Safari/'
+                   . rawurlencode($newFolderName) . '/' . rawurlencode($grpSubfolder);
+    $update = $db->prepare(
+        "UPDATE requests
+         SET practice_code     = ?,
+             group_folder      = ?,
+             dropbox_url       = ?,
+             status            = 'Booked',
+             confirmation_date = CURDATE()
+         WHERE id = ?"
+    );
+    $update->execute([$grpSubfolder, $newFolderName, $newDropboxUrl, $id]);
+    $responseFolder = $grpSubfolder;
 
-$update = $db->prepare(
-    "UPDATE requests
-     SET practice_code      = ?,
-         dropbox_url        = ?,
-         status             = 'Booked',
-         confirmation_date  = CURDATE()
-     WHERE id = ?"
-);
-$update->execute([$newFolderName, $newDropboxUrl, $id]);
+} elseif ($grpAction === 'ADD' && $grpMainFolder !== '') {
+    // ADD GRP: practice_code = customer folder (unchanged), group_folder = main GRP folder
+    $newDropboxUrl = 'https://www.dropbox.com/home/001_Safari/'
+                   . rawurlencode($grpMainFolder) . '/' . rawurlencode($newFolderName);
+    $update = $db->prepare(
+        "UPDATE requests
+         SET practice_code     = ?,
+             group_folder      = ?,
+             dropbox_url       = ?,
+             status            = 'Booked',
+             confirmation_date = CURDATE()
+         WHERE id = ?"
+    );
+    $update->execute([$newFolderName, $grpMainFolder, $newDropboxUrl, $id]);
+    $responseFolder = $newFolderName;
+
+} else {
+    // Normal (NONE): standard confirm safari flow
+    $newDropboxUrl = 'https://www.dropbox.com/home/001_Safari/' . rawurlencode($newFolderName);
+    $update = $db->prepare(
+        "UPDATE requests
+         SET practice_code     = ?,
+             dropbox_url       = ?,
+             status            = 'Booked',
+             confirmation_date = CURDATE()
+         WHERE id = ?"
+    );
+    $update->execute([$newFolderName, $newDropboxUrl, $id]);
+    $responseFolder = $newFolderName;
+}
 
 echo json_encode([
     'success'       => true,
     'request_id'    => $id,
     'customer_name' => $row['customer_name'],
-    'new_folder'    => $newFolderName,
+    'new_folder'    => $responseFolder,
+    'grp_action'    => $grpAction,
     'message'       => 'Status set to Booked, confirmation_date = today',
 ]);
