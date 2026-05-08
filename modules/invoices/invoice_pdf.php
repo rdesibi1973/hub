@@ -184,6 +184,19 @@ body {
 .footer-label { font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: .08em; margin-bottom: 5px; }
 .footer-text  { font-size: 12px; color: #555; line-height: 1.65; }
 
+/* Bank details */
+.bank-details {
+  margin-top: 32px;
+  padding: 16px 20px;
+  background: #f9f9f9;
+  border-left: 3px solid #C0211B;
+  border-radius: 2px;
+}
+.bank-details table { border-collapse: collapse; width: 100%; max-width: 480px; }
+.bank-details td { padding: 3px 0; font-size: 12px; }
+.bank-details td:first-child { color: #888; width: 160px; }
+.bank-details td:last-child { font-weight: 600; color: #1A1A1A; }
+
 /* ── PRINT ── */
 @media print {
   body { background: #fff; }
@@ -326,6 +339,27 @@ body {
         <div class="footer-text"><?= nl2br(htmlspecialchars($inv['terms_conditions'])) ?></div>
       </div>
       <?php endif; ?>
+    </div>
+    <?php endif; ?>
+
+    <?php if ($inv['issuer'] === 'Savannah Holidays Ltd'): ?>
+    <div class="bank-details">
+      <div class="footer-label">Bank Details for Payment</div>
+      <table>
+        <tr><td>Beneficiary Bank:</td><td>AfrAsia Bank Ltd</td></tr>
+        <tr><td>Bank Address:</td><td>Bowen Square, 10, Dr Ferriere Street, Port Louis, Mauritius</td></tr>
+        <tr><td>Account Name:</td><td>SAVANNAH HOLIDAYS LTD</td></tr>
+        <?php if ($inv['currency'] === 'USD'): ?>
+        <tr><td>IBAN:</td><td>MU55AFBL2501138053000000013USD</td></tr>
+        <tr><td>Account Number:</td><td>138053000000013</td></tr>
+        <tr><td>Currency:</td><td>USD</td></tr>
+        <?php else: ?>
+        <tr><td>IBAN:</td><td>MU40AFBL2501138053000000024EUR</td></tr>
+        <tr><td>Account Number:</td><td>138053000000024</td></tr>
+        <tr><td>Currency:</td><td>EUR</td></tr>
+        <?php endif; ?>
+        <tr><td>Swift Code:</td><td>AFBLMUMU</td></tr>
+      </table>
     </div>
     <?php endif; ?>
 
