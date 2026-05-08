@@ -26,25 +26,35 @@ if ($deleteDropbox) {
 
         $placeholders = implode(',', array_fill(0, count($ids), '?'));
         $rows = $db->prepare(
-            "SELECT id, practice_code, status, group_folder FROM requests WHERE id IN ($placeholders)"
+            "SELECT id, practice_code, status, group_folder, dropbox_url, date_received FROM requests WHERE id IN ($placeholders)"
         );
         $rows->execute(array_values($ids));
 
         foreach ($rows->fetchAll(PDO::FETCH_ASSOC) as $row) {
             $folder    = $row['practice_code'] ?? '';
             $grpFolder = $row['group_folder']  ?? '';
-            if ($folder === '') {
+            $dbxUrl    = $row['dropbox_url']   ?? '';
+
+            // Derive path from stored dropbox_url (most reliable — exact location).
+            // URL format: https://www.dropbox.com/home/001_Safari/FolderName
+            // → strip the web prefix and URL-decode to get the API path.
+            if ($dbxUrl) {
+                $dbxPath = rawurldecode(
+                    preg_replace('#^https://www\.dropbox\.com/home#i', '', $dbxUrl)
+                );
+            } elseif ($folder !== '') {
+                // Fallback: construct from practice_code (GRP-aware, year from date_received)
+                if ($row['status'] === 'Booked') {
+                    $dbxPath = $grpFolder
+                        ? '/001_Safari/' . $grpFolder . '/' . $folder
+                        : '/001_Safari/' . $folder;
+                } else {
+                    $year    = date('Y', strtotime($row['date_received'] ?? 'now'));
+                    $dbxPath = '/' . $year . '/' . $folder;
+                }
+            } else {
                 $dropboxResults[$row['id']] = 'skipped (no folder name)';
                 continue;
-            }
-
-            // Booked → /001_Safari/; GRP requests nest inside group_folder
-            if ($row['status'] === 'Booked') {
-                $dbxPath = $grpFolder
-                    ? '/001_Safari/' . $grpFolder . '/' . $folder
-                    : '/001_Safari/' . $folder;
-            } else {
-                $dbxPath = '/2026/' . $folder;
             }
 
             try {
