@@ -228,7 +228,7 @@ include 'includes/header.php';
               <a href="request_edit.php?id=<?= $r['id'] ?>"  class="btn btn-outline btn-sm">Edit</a>
               <?php endif; ?>
               <?php if (!$isStaff): ?>
-              <button class="btn btn-outline btn-sm btn-danger" onclick="deleteRequest(<?= $r['id'] ?>, '<?= addslashes(h($r['customer_name'])) ?>', '<?= addslashes(h($r['practice_code'] ?? '')) ?>', '<?= addslashes(h($r['status'] ?? '')) ?>', null)">Delete</button>
+              <button class="btn btn-outline btn-sm btn-danger" onclick="deleteRequest(<?= $r['id'] ?>, <?= htmlspecialchars(json_encode($r['customer_name'])) ?>, <?= htmlspecialchars(json_encode($r['practice_code'] ?? '')) ?>, <?= htmlspecialchars(json_encode($r['status'] ?? '')) ?>, null, <?= htmlspecialchars(json_encode($r['group_folder'] ?? '')) ?>)">Delete</button>
               <?php endif; ?>
             </div>
           </td>

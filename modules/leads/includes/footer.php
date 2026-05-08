@@ -41,15 +41,18 @@ function seConfirm(title, message) {
  * deleteRequest(id, name, folder, status, redirect)
  * Used by requests.php (list) and request_view.php (detail).
  */
-async function deleteRequest(id, name, folder, status, redirect) {
+async function deleteRequest(id, name, folder, status, redirect, grpFolder) {
   if (!confirm('Delete request for "' + name + '"?\n\nThis action cannot be undone.')) return;
 
   var deleteDropbox = false;
   if (folder) {
     var dbxDir = (status === 'Booked') ? '001_Safari' : '2026';
+    var dbxDisplay = (grpFolder && status === 'Booked')
+      ? dbxDir + '/' + grpFolder + '/' + folder
+      : dbxDir + '/' + folder;
     deleteDropbox = await seConfirm(
       'Delete Dropbox folder?',
-      'Also delete the Dropbox folder?\n\n' + dbxDir + '/' + folder
+      'Also delete the Dropbox folder?\n\n' + dbxDisplay
     );
   }
 
