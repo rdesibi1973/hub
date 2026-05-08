@@ -88,7 +88,7 @@ include 'includes/header.php';
     <?php endif; ?>
     <?php if (!isLeadsRestricted()): ?>
       <button type="button"
-              onclick="deleteRequest(<?= $r['id'] ?>, '<?= addslashes(h($r['customer_name'])) ?>', '<?= addslashes(h($r['practice_code'] ?? '')) ?>', '<?= addslashes(h($r['status'] ?? '')) ?>', 'requests.php')"
+              onclick="deleteRequest(<?= $r['id'] ?>, <?= htmlspecialchars(json_encode($r['customer_name'])) ?>, <?= htmlspecialchars(json_encode($r['practice_code'] ?? '')) ?>, <?= htmlspecialchars(json_encode($r['status'] ?? '')) ?>, 'requests.php', <?= htmlspecialchars(json_encode($r['group_folder'] ?? '')) ?>)"
               class="btn btn-outline"
               style="color:#C0211B;border-color:#C0211B;">🗑 Delete</button>
     <?php endif; ?>

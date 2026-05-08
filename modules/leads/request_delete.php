@@ -26,21 +26,26 @@ if ($deleteDropbox) {
 
         $placeholders = implode(',', array_fill(0, count($ids), '?'));
         $rows = $db->prepare(
-            "SELECT id, practice_code, status FROM requests WHERE id IN ($placeholders)"
+            "SELECT id, practice_code, status, group_folder FROM requests WHERE id IN ($placeholders)"
         );
         $rows->execute(array_values($ids));
 
         foreach ($rows->fetchAll(PDO::FETCH_ASSOC) as $row) {
-            $folder = $row['practice_code'] ?? '';
+            $folder    = $row['practice_code'] ?? '';
+            $grpFolder = $row['group_folder']  ?? '';
             if ($folder === '') {
                 $dropboxResults[$row['id']] = 'skipped (no folder name)';
                 continue;
             }
 
-            // Booked → moved to /001_Safari/; everything else → /2026/
-            $dbxPath = ($row['status'] === 'Booked')
-                ? '/001_Safari/' . $folder
-                : '/2026/' . $folder;
+            // Booked → /001_Safari/; GRP requests nest inside group_folder
+            if ($row['status'] === 'Booked') {
+                $dbxPath = $grpFolder
+                    ? '/001_Safari/' . $grpFolder . '/' . $folder
+                    : '/001_Safari/' . $folder;
+            } else {
+                $dbxPath = '/2026/' . $folder;
+            }
 
             try {
                 dropbox_delete_folder($token, $dbxPath);
