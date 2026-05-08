@@ -1519,7 +1519,12 @@ public class BackOfficeMain extends javax.swing.JFrame {
                     "GRP Error", JOptionPane.ERROR_MESSAGE);
                 return;
             }
-            custname = custname + "_GRP" + grpCode;
+            int paren = custname.indexOf('(');
+            if (paren >= 0) {
+                custname = custname.substring(0, paren) + "_GRP" + grpCode + custname.substring(paren);
+            } else {
+                custname = custname + "_GRP" + grpCode;
+            }
         }
 
         if (startdate.matches("(?i).*JAN.*"))
