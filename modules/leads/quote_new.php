@@ -15,10 +15,9 @@ if (!$requestId) {
 
 // Load request — enforce staff ownership
 $stmt = $db->prepare("
-    SELECT r.*, a.name AS agent_name, a.id AS agent_id_val, ag.name AS agency_name
+    SELECT r.*, a.name AS agent_name
     FROM   requests r
-    LEFT JOIN agents   a  ON a.id  = r.agent_id
-    LEFT JOIN agencies ag ON ag.id = a.agency_id
+    LEFT JOIN agents a ON a.id = r.agent_id
     WHERE  r.id = ?
 ");
 $stmt->execute([$requestId]);
@@ -32,10 +31,17 @@ if ($isStaff && (int)$req['agent_id'] !== $staffAgentId) {
 $prefill = json_encode([
     'customer' => $req['customer_name'] ?? '',
     'agent'    => $req['agent_name']    ?? '',
-    'agency'   => $req['agency_name']   ?? '',
+    'agency'   => '',
     'pax'      => $req['pax']           ?? '',
     'period'   => $req['period']        ?? '',
 ]);
+
+// CSRF token — compatible with both leads config and main auth.php
+if (session_status() === PHP_SESSION_NONE) session_start();
+if (empty($_SESSION['csrf_token'])) {
+    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+}
+$csrfToken = $_SESSION['csrf_token'];
 
 include 'includes/header.php';
 ?>
@@ -661,7 +667,7 @@ function saveQuote() {
   btn.disabled = true; btn.textContent = 'Saving…';
 
   var payload = {
-    csrf:       '<?= csrf_token() ?>',
+    csrf:       '<?= $csrfToken ?>',
     request_id: REQ_ID,
     customer_name: v('fName'),
     agent_name:    v('fAgent'),

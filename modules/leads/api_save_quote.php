@@ -19,7 +19,9 @@ $body = json_decode($raw, true);
 if (!$body) fail('Invalid JSON body.');
 
 // CSRF
-if (empty($body['csrf']) || $body['csrf'] !== csrf_token()) fail('Invalid CSRF token.', 403);
+if (session_status() === PHP_SESSION_NONE) session_start();
+$expectedCsrf = $_SESSION['csrf_token'] ?? '';
+if (empty($body['csrf']) || !hash_equals($expectedCsrf, $body['csrf'])) fail('Invalid CSRF token.', 403);
 
 // Validate required fields
 $requestId    = (int)($body['request_id']   ?? 0);
@@ -63,8 +65,7 @@ if ($adults + $teens + $children < 1) fail('At least 1 participant required.');
 $agentId = (int)$req['agent_id'];
 
 // Current user (created_by)
-$cu = current_user();
-$createdBy = (int)($cu['id'] ?? 0);
+$createdBy = (int)($_SESSION['user_id'] ?? 0);
 
 $db->beginTransaction();
 try {
