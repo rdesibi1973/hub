@@ -38,6 +38,19 @@ public class BackOfficeMain extends javax.swing.JFrame {
     private static String LEADS_LOOKUP_URL = "https://hub.savannahexplorers.com/modules/leads/lookup.php";
     /** API key loaded from config.properties — used for direct HTTP calls that need a longer timeout */
     private static String API_KEY_VALUE = "";
+    /** Year for request folders — read from config.properties (req.year) or env REQ_YEAR. */
+    private static String CONFIG_YEAR = null;
+
+    /**
+     * Returns the active request year.
+     * Priority: REQ_YEAR env var → req.year in config.properties → "2026".
+     */
+    private static String getReqYear() {
+        String y = System.getenv("REQ_YEAR");
+        if (y != null && !y.isEmpty()) return y;
+        if (CONFIG_YEAR != null && !CONFIG_YEAR.isEmpty()) return CONFIG_YEAR;
+        return "2026";
+    }
 
     /**
      * Creates new form BackOfficeMain
@@ -1154,7 +1167,7 @@ public class BackOfficeMain extends javax.swing.JFrame {
 
     private void jSearchActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_jSearchActionPerformed
         String dropbox_home = System.getenv("DROPBOX_HOME");
-        String req_year = System.getenv("REQ_YEAR");
+        String req_year = getReqYear();
         String path = dropbox_home + "\\" + req_year;
         showBrowsePopup("Browse " + req_year, path);
     }//GEN-LAST:event_jSearchActionPerformed
@@ -1214,10 +1227,11 @@ public class BackOfficeMain extends javax.swing.JFrame {
         }
         String dropboxHome = System.getenv("DROPBOX_HOME");
         if (dropboxHome == null) dropboxHome = "";
-        String reqYear = System.getenv("REQ_YEAR");
-        if (reqYear == null || reqYear.isEmpty()) reqYear = "2026";
+        String reqYear = getReqYear();
+        String prevYear = null;
+        try { prevYear = String.valueOf(Integer.parseInt(reqYear) - 1); } catch (NumberFormatException ignored) {}
 
-        // Search in 001_Safari first, then in the year folder
+        // Search in 001_Safari first, then current year, then previous year
         String base001    = dropboxHome + "\\001_Safari\\";
         String baseYear   = dropboxHome + "\\" + reqYear + "\\";
         java.io.File oldIn001  = new java.io.File(base001  + folderName);
@@ -1228,6 +1242,8 @@ public class BackOfficeMain extends javax.swing.JFrame {
             base = base001;
         } else if (oldInYear.exists()) {
             base = baseYear;
+        } else if (prevYear != null && new java.io.File(dropboxHome + "\\" + prevYear + "\\" + folderName).exists()) {
+            base = dropboxHome + "\\" + prevYear + "\\";
         } else {
             javax.swing.JOptionPane.showMessageDialog(this,
                 "Folder not found in 001_Safari or " + reqYear + ":\n" + folderName,
@@ -1335,9 +1351,10 @@ public class BackOfficeMain extends javax.swing.JFrame {
     private void jButton17ActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_jButton17ActionPerformed
         String mytext1 = jTextField8.getText();
         String mytext = mytext1.replaceAll("\\s", "");
-        String mycmd = "dir /b \"%DROPBOX_HOME%\\%REQ_YEAR%\\\"*" + mytext + "*";
+        String dh17 = System.getenv("DROPBOX_HOME"); if (dh17 == null) dh17 = "";
+        String mycmd = "dir /b \"" + dh17 + "\\" + getReqYear() + "\\\"*" + mytext + "*";
         java.util.List<String> results = runDirCommand(mycmd);
-        showResultsPopup("Search 2026 Folder — " + mytext, results);
+        showResultsPopup("Search " + getReqYear() + " Folder — " + mytext, results);
     }//GEN-LAST:event_jButton17ActionPerformed
 
     private void jTextField8ActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_jTextField8ActionPerformed
@@ -1759,14 +1776,25 @@ public class BackOfficeMain extends javax.swing.JFrame {
             @Override
             protected String doInBackground() throws Exception {
                 String dropboxHome = System.getenv("DROPBOX_HOME");
-                String reqYear     = System.getenv("REQ_YEAR");
+                String reqYear     = getReqYear();
                 if (dropboxHome == null) dropboxHome = "";
-                if (reqYear    == null) reqYear      = "2026";
                 StringBuilder log = new StringBuilder();
+
+                // Find the year folder that actually contains oldFolder.
+                // When REQ_YEAR advances to 2027, requests created in 2026 still
+                // live in the 2026 folder — fall back to prevYear if not found.
+                String sourceYear = reqYear;
+                if (!new File(dropboxHome + "\\" + reqYear + "\\" + oldFolder).exists()) {
+                    try {
+                        String prevYear = String.valueOf(Integer.parseInt(reqYear) - 1);
+                        if (new File(dropboxHome + "\\" + prevYear + "\\" + oldFolder).exists())
+                            sourceYear = prevYear;
+                    } catch (NumberFormatException ignored) {}
+                }
 
                 // ── Step 1: rename folder in year directory ──────────────────
                 ProcessBuilder pb1 = new ProcessBuilder("cmd", "/c", "rename", oldFolder, newFolder);
-                pb1.directory(new File(dropboxHome + "\\" + reqYear));
+                pb1.directory(new File(dropboxHome + "\\" + sourceYear));
                 pb1.redirectErrorStream(true);
                 Process pr1 = pb1.start();
                 try (BufferedReader r1 = new BufferedReader(new InputStreamReader(pr1.getInputStream()))) {
@@ -2405,7 +2433,8 @@ public class BackOfficeMain extends javax.swing.JFrame {
             // set customer name, i.e. folder
             String custnamein=jTextField1.getText();
             String custname=custnamein.replaceAll("\\s", "");;
-            String newcust="cmd /c explorer.exe \"%DROPBOX_HOME%\\%REQ_YEAR%\\\"" + custname;
+            String dh = System.getenv("DROPBOX_HOME"); if (dh == null) dh = "";
+            String newcust="cmd /c explorer.exe \"" + dh + "\\" + getReqYear() + "\\\"" + custname;
             System.out.println(newcust);
             Runtime rn=Runtime.getRuntime();
             Process pr=rn.exec(newcust);
@@ -3244,22 +3273,29 @@ public class BackOfficeMain extends javax.swing.JFrame {
             @Override
             protected String doInBackground() throws Exception {
                 String dropboxHome = System.getenv("DROPBOX_HOME");
-                String reqYear     = System.getenv("REQ_YEAR");
+                String reqYear     = getReqYear();
                 if (dropboxHome == null) dropboxHome = "";
-                if (reqYear    == null) reqYear      = "2026";
                 StringBuilder log = new StringBuilder();
 
-                // Look for the folder in REQ_YEAR first, then in 001_Safari root
-                // (it may already be confirmed and sitting in 001_Safari)
+                // Look for the folder: current year → previous year → 001_Safari
                 String srcYear   = dropboxHome + "\\" + reqYear + "\\" + custname;
+                String srcPrev   = null;
+                try {
+                    String prevYear = String.valueOf(Integer.parseInt(reqYear) - 1);
+                    srcPrev = dropboxHome + "\\" + prevYear + "\\" + custname;
+                } catch (NumberFormatException ignored) {}
                 String srcSafari = dropboxHome + "\\001_Safari\\" + custname;
                 String src;
                 if (new java.io.File(srcYear).exists()) {
                     src = srcYear;
+                } else if (srcPrev != null && new java.io.File(srcPrev).exists()) {
+                    src = srcPrev;
                 } else if (new java.io.File(srcSafari).exists()) {
                     src = srcSafari;
                 } else {
-                    return "ERROR:Folder not found:\n  " + srcYear + "\n  " + srcSafari;
+                    return "ERROR:Folder not found:\n  " + srcYear
+                         + (srcPrev != null ? "\n  " + srcPrev : "")
+                         + "\n  " + srcSafari;
                 }
                 String dstPar  = dropboxHome + "\\001_Safari\\" + grpMainFolder;
                 ProcessBuilder pb = new ProcessBuilder("cmd", "/c", "move", src, dstPar);
@@ -3331,12 +3367,18 @@ public class BackOfficeMain extends javax.swing.JFrame {
         if (folderName.isEmpty()) return;
 
         String dropboxHome = System.getenv("DROPBOX_HOME");
-        String reqYear     = System.getenv("REQ_YEAR");
+        String reqYear     = getReqYear();
         if (dropboxHome == null) return;
-        if (reqYear    == null) reqYear = "2026";
 
-        // Try year folder first, then 001_Safari
+        // Try year folder first, then prevYear, then 001_Safari
         java.io.File folder = new java.io.File(dropboxHome + "\\" + reqYear + "\\" + folderName);
+        if (!folder.exists() || !folder.isDirectory()) {
+            try {
+                String prevYear = String.valueOf(Integer.parseInt(reqYear) - 1);
+                java.io.File prevFolder = new java.io.File(dropboxHome + "\\" + prevYear + "\\" + folderName);
+                if (prevFolder.exists() && prevFolder.isDirectory()) folder = prevFolder;
+            } catch (NumberFormatException ignored) {}
+        }
         if (!folder.exists() || !folder.isDirectory()) {
             folder = new java.io.File(dropboxHome + "\\001_Safari\\" + folderName);
         }
@@ -3600,6 +3642,10 @@ public class BackOfficeMain extends javax.swing.JFrame {
             System.out.println("config.properties not found — running without API (" + e.getMessage() + ")");
             return false;
         }
+        // Always read req.year regardless of use.api — used for folder lookups.
+        String cfgYear = props.getProperty("req.year", "").trim();
+        if (!cfgYear.isEmpty()) CONFIG_YEAR = cfgYear;
+
         boolean useApi = "true".equalsIgnoreCase(props.getProperty("use.api", "false"));
         if (!useApi) return false;
 
