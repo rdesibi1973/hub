@@ -129,6 +129,7 @@ header {
   <a href="dashboard.php" class="<?= $cur==='dashboard.php' ? 'active':'' ?>">Dashboard</a>
   <?php endif; ?>
   <a href="requests.php"  class="<?= in_array($cur,['requests.php','request_add.php','request_edit.php','request_view.php']) ? 'active':'' ?>"><?= isLeadsRestricted() ? 'My Requests' : 'Requests' ?></a>
+  <a href="quotes.php"   class="<?= in_array($cur,['quotes.php','quote_new.php','quote_view.php']) ? 'active':'' ?>">Quotes</a>
   <?php if (!isLeadsRestricted()): ?>
   <a href="reports.php"   class="<?= $cur==='reports.php' ? 'active':'' ?>">Reports</a>
   <a href="agents.php"    class="<?= $cur==='agents.php' ? 'active':'' ?>">Agents</a>

@@ -1,5 +1,0 @@
-[23-Apr-2026 05:20:11 America/Boise] PHP Fatal error:  Uncaught PDOException: SQLSTATE[42000]: Syntax error or access violation: 1064 You have an error in your SQL syntax; check the manual that corresponds to your MySQL server version for the right syntax to use near '2>/dev/null' at line 1 in /home4/savannp5/public_html/hub/setup/init_hub.php:13
-Stack trace:
-#0 /home4/savannp5/public_html/hub/setup/init_hub.php(13): PDO->query('SELECT COUNT(*)...')
-#1 {main}
-  thrown in /home4/savannp5/public_html/hub/setup/init_hub.php on line 13

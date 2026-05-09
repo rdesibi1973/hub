@@ -50,6 +50,11 @@ $invCountStmt = db()->prepare("SELECT COUNT(*) FROM invoices WHERE request_id = 
 $invCountStmt->execute([$id]);
 $invCount = (int)$invCountStmt->fetchColumn();
 
+// Load quotes for this request
+$qStmt = db()->prepare("SELECT id, quote_number, customer_name, total_price, status, created_at FROM quotes WHERE request_id = ? ORDER BY id DESC");
+$qStmt->execute([$id]);
+$linkedQuotes = $qStmt->fetchAll();
+
 $pageTitle = $r['customer_name'];
 include 'includes/header.php';
 ?>
@@ -92,6 +97,17 @@ include 'includes/header.php';
               class="btn btn-outline"
               style="color:#C0211B;border-color:#C0211B;">🗑 Delete</button>
     <?php endif; ?>
+    <?php
+      $quoteCount = count($linkedQuotes);
+      if ($quoteCount === 0): ?>
+        <a href="quote_new.php?request_id=<?= $r['id'] ?>" class="btn btn-outline">📋 New Quote</a>
+      <?php elseif ($quoteCount === 1): ?>
+        <a href="quote_view.php?id=<?= $linkedQuotes[0]['id'] ?>" class="btn btn-outline">📋 <?= h($linkedQuotes[0]['quote_number']) ?></a>
+        <a href="quote_new.php?request_id=<?= $r['id'] ?>" class="btn btn-outline">+ Quote</a>
+      <?php else: ?>
+        <a href="quotes.php" class="btn btn-outline">📋 <?= $quoteCount ?> Quotes</a>
+        <a href="quote_new.php?request_id=<?= $r['id'] ?>" class="btn btn-outline">+ Quote</a>
+      <?php endif; ?>
     <a href="request_add.php" class="btn btn-outline">+ New Request</a>
   </div>
 </div>
@@ -238,6 +254,46 @@ include 'includes/header.php';
 <div class="section-label">Internal Notes</div>
 <div class="table-wrap" style="max-width:860px;margin-bottom:20px">
   <div style="padding:20px 22px;font-size:.85rem;line-height:1.7;white-space:pre-wrap;color:var(--grey-dk)"><?= h($r['notes']) ?></div>
+</div>
+<?php endif; ?>
+
+<!-- QUOTES -->
+<?php if (!empty($linkedQuotes)): ?>
+<div class="section-label">Quotes</div>
+<div class="table-wrap" style="max-width:860px;margin-bottom:20px">
+  <table style="width:100%;border-collapse:collapse;font-size:.85rem;">
+    <thead>
+      <tr style="background:#f9fafb;">
+        <th style="padding:8px 14px;text-align:left;font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#6b7280;">#</th>
+        <th style="padding:8px 14px;text-align:left;font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#6b7280;">Customer</th>
+        <th style="padding:8px 14px;text-align:right;font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#6b7280;">Total Price</th>
+        <th style="padding:8px 14px;text-align:left;font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#6b7280;">Status</th>
+        <th style="padding:8px 14px;text-align:left;font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#6b7280;">Date</th>
+        <th style="padding:8px 14px;"></th>
+      </tr>
+    </thead>
+    <tbody>
+      <?php foreach ($linkedQuotes as $lq): ?>
+      <tr style="border-bottom:1px solid #f3f4f6;">
+        <td style="padding:8px 14px;font-weight:700;color:var(--green);font-family:monospace;"><?= h($lq['quote_number']) ?></td>
+        <td style="padding:8px 14px;font-weight:600;"><a href="quote_view.php?id=<?= $lq['id'] ?>" style="color:var(--black);text-decoration:none;"><?= h($lq['customer_name']) ?></a></td>
+        <td style="padding:8px 14px;text-align:right;font-family:monospace;font-weight:700;">$<?= number_format((float)$lq['total_price'], 0, '.', ',') ?></td>
+        <td style="padding:8px 14px;">
+          <?php if ($lq['status'] === 'final'): ?>
+            <span style="background:#dcfce7;color:#166534;border-radius:4px;padding:2px 8px;font-size:.72rem;font-weight:700;">Final</span>
+          <?php else: ?>
+            <span style="background:#fef3c7;color:#92400e;border-radius:4px;padding:2px 8px;font-size:.72rem;font-weight:700;">Draft</span>
+          <?php endif; ?>
+        </td>
+        <td style="padding:8px 14px;color:var(--grey-mid);font-size:.8rem;"><?= date('d M Y', strtotime($lq['created_at'])) ?></td>
+        <td style="padding:8px 14px;display:flex;gap:8px;">
+          <a href="quote_view.php?id=<?= $lq['id'] ?>" class="btn btn-outline" style="font-size:.75rem;padding:4px 10px;">View</a>
+          <a href="api_export_quote.php?id=<?= $lq['id'] ?>" class="btn btn-outline" style="font-size:.75rem;padding:4px 10px;">⬇ Excel</a>
+        </td>
+      </tr>
+      <?php endforeach; ?>
+    </tbody>
+  </table>
 </div>
 <?php endif; ?>
 

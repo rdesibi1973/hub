@@ -1,6 +1,0 @@
-Options -Indexes
-
-<FilesMatch "(config\.php|db\.php|auth\.php)$">
-    Order Allow,Deny
-    Deny from all
-</FilesMatch>
