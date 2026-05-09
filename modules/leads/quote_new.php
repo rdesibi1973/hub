@@ -156,7 +156,7 @@ include 'includes/header.php';
   </div>
   <div class="wiz-nav">
     <div></div>
-    <button class="btn-next" id="btnStep1Next" disabled onclick="goTo(2)">Avanti →</button>
+    <button class="btn-next" id="btnStep1Next" disabled onclick="goTo(2)">Next →</button>
   </div>
 </div>
 
@@ -181,8 +181,8 @@ include 'includes/header.php';
     </div>
   </div>
   <div class="wiz-nav">
-    <button class="btn-back" onclick="goTo(1)">← Indietro</button>
-    <button class="btn-next" id="btnStep2Next" onclick="goTo(3)">Avanti →</button>
+    <button class="btn-back" onclick="goTo(1)">← Back</button>
+    <button class="btn-next" id="btnStep2Next" onclick="goTo(3)">Next →</button>
   </div>
 </div>
 
@@ -194,8 +194,8 @@ include 'includes/header.php';
   </div>
   <div class="day-list" id="dayList"></div>
   <div class="wiz-nav">
-    <button class="btn-back" onclick="goTo(2)">← Indietro</button>
-    <button class="btn-next" id="btnStep3Next" onclick="goTo(4)">Avanti →</button>
+    <button class="btn-back" onclick="goTo(2)">← Back</button>
+    <button class="btn-next" id="btnStep3Next" onclick="goTo(4)">Next →</button>
   </div>
 </div>
 
@@ -243,7 +243,7 @@ include 'includes/header.php';
   </div>
 
   <div class="wiz-nav">
-    <button class="btn-back" onclick="goTo(3)">← Indietro</button>
+    <button class="btn-back" onclick="goTo(3)">← Back</button>
   </div>
 </div>
 
@@ -273,8 +273,8 @@ const PARK_FEES = {
   none:       {l:'—',          ppp:0,   fx:0},
   tarangire:  {l:'Tarangire',  ppp:69,  fx:0},
   manyara:    {l:'Manyara',    ppp:60,  fx:0},
-  serengeti1: {l:'Serengeti 1° gg', ppp:179, fx:0},
-  serengeti2: {l:'Serengeti 2° gg', ppp:96,  fx:0},
+  serengeti1: {l:'Serengeti Day 1', ppp:179, fx:0},
+  serengeti2: {l:'Serengeti Day 2', ppp:96,  fx:0},
   crater:     {l:'Ngorongoro Crater', ppp:83, fx:295},
   custom:     {l:'Custom',     ppp:0,   fx:0},
 };
@@ -285,7 +285,7 @@ const FLIGHTS = {
 };
 const TEMPLATES = {
   simba: {
-    name:'Simba Safari', icon:'🦁', desc:'6 giorni · Safari Tanzania',
+    name:'Simba Safari', icon:'🦁', desc:'6 days · Safari Tanzania',
     days:[
       {loc:'Kili-Arusha',   lodge:'Arusha Explorers HB', jeep:'half', park:'none',       flight:'none', items:[{d:'Emergency',t:'p',a:'30'}],      drinks:true},
       {loc:'Tarangire',     lodge:'Marera View Lodge',   jeep:'full', park:'tarangire',  flight:'none', items:[{d:'Lunch boxes',t:'p',a:'10'}],    drinks:true},
@@ -296,7 +296,7 @@ const TEMPLATES = {
     ]
   },
   beachkiboko: {
-    name:'Beach Kiboko', icon:'🏖️', desc:'14 giorni · Safari + Zanzibar',
+    name:'Beach Kiboko', icon:'🏖️', desc:'14 days · Safari + Zanzibar',
     days:[
       {loc:'Kili-Arusha',   lodge:'Arusha Explorers HB', jeep:'half', park:'none',       flight:'none', items:[{d:'Emergency',t:'p',a:'30'}],              drinks:true},
       {loc:'Tarangire',     lodge:'Marera View Lodge',   jeep:'full', park:'tarangire',  flight:'none', items:[{d:'Lunch boxes',t:'p',a:'10'}],            drinks:true},
@@ -466,7 +466,7 @@ function buildDayCard(d, idx) {
   if (sd) {
     var dt = new Date(sd + 'T00:00:00');
     dt.setDate(dt.getDate() + idx);
-    dateStr = dt.toLocaleDateString('it-IT',{day:'2-digit',month:'short'});
+    dateStr = dt.toLocaleDateString('en-GB',{day:'2-digit',month:'short'});
   }
 
   var wrap = document.createElement('div');
