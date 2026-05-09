@@ -43,6 +43,63 @@ if (empty($_SESSION['csrf_token'])) {
 }
 $csrfToken = $_SESSION['csrf_token'];
 
+// Load lodge pricing data for wizard (graceful fallback if tables don't exist yet)
+$pricingJson = '{"lodges":[],"parks":[],"routes":[]}';
+try {
+    $wLodges = $db->query("SELECT id, name, location, default_meal_plan FROM lodges WHERE active=1 ORDER BY name")->fetchAll(PDO::FETCH_ASSOC);
+    if ($wLodges) {
+        $wIds = array_map('intval', array_column($wLodges, 'id'));
+        $wIn  = implode(',', array_fill(0, count($wIds), '?'));
+
+        $st = $db->prepare("SELECT id, lodge_id, name, max_pax FROM lodge_room_types WHERE lodge_id IN ($wIn) ORDER BY lodge_id, sort_order, name");
+        $st->execute($wIds); $wRTs = [];
+        foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) { $r['id']=(int)$r['id']; $r['lodge_id']=(int)$r['lodge_id']; $r['max_pax']=(int)$r['max_pax']; $wRTs[$r['lodge_id']][] = $r; }
+
+        $st = $db->prepare("SELECT id, lodge_id, name FROM lodge_seasons WHERE lodge_id IN ($wIn) ORDER BY lodge_id, sort_order, id");
+        $st->execute($wIds); $wSeasons = []; $wSids = [];
+        foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $s) { $s['id']=(int)$s['id']; $s['lodge_id']=(int)$s['lodge_id']; $wSeasons[$s['lodge_id']][] = $s; $wSids[] = $s['id']; }
+
+        $wPeriods = []; $wPrices = [];
+        if ($wSids) {
+            $wIn2 = implode(',', array_fill(0, count($wSids), '?'));
+            $st = $db->prepare("SELECT season_id, year, start_mmdd, end_mmdd FROM lodge_season_periods WHERE season_id IN ($wIn2) ORDER BY season_id, year IS NULL DESC, start_mmdd");
+            $st->execute($wSids);
+            foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $p) { $p['year'] = $p['year'] !== null ? (int)$p['year'] : null; $wPeriods[(int)$p['season_id']][] = $p; }
+
+            $wRtIds = [];
+            foreach ($wRTs as $rows) foreach ($rows as $r) $wRtIds[] = $r['id'];
+            if ($wRtIds) {
+                $wIn3 = implode(',', array_fill(0, count($wRtIds), '?'));
+                $wIn4 = implode(',', array_fill(0, count($wSids), '?'));
+                $st   = $db->prepare("SELECT room_type_id, season_id, meal_plan, price_basis, pax_1, pax_2, pax_3, pax_4, pax_5 FROM lodge_prices WHERE room_type_id IN ($wIn3) AND season_id IN ($wIn4)");
+                $st->execute(array_merge($wRtIds, $wSids));
+                foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $p) {
+                    for ($i = 1; $i <= 5; $i++) $p["pax_$i"] = $p["pax_$i"] !== null ? (float)$p["pax_$i"] : null;
+                    $wPrices[(int)$p['room_type_id']][(int)$p['season_id']] = $p;
+                }
+            }
+        }
+
+        $st = $db->prepare("SELECT lodge_id, name, start_mmdd, end_mmdd, year, amount_adult, amount_child FROM lodge_supplements WHERE lodge_id IN ($wIn) ORDER BY lodge_id, start_mmdd");
+        $st->execute($wIds); $wSups = [];
+        foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $s) { $s['year']=$s['year']!==null?(int)$s['year']:null; $s['amount_adult']=(float)$s['amount_adult']; $s['amount_child']=(float)$s['amount_child']; $wSups[(int)$s['lodge_id']][] = $s; }
+
+        foreach ($wLodges as &$wL) {
+            $lid = (int)$wL['id']; $wL['id'] = $lid;
+            $sArr = $wSeasons[$lid] ?? [];
+            foreach ($sArr as &$s) { $s['periods'] = $wPeriods[$s['id']] ?? []; } unset($s);
+            $rtArr = $wRTs[$lid] ?? [];
+            foreach ($rtArr as &$rt) {
+                $rt['seasons'] = [];
+                foreach ($sArr as $s) { $rt['seasons'][] = ['id'=>$s['id'],'name'=>$s['name'],'periods'=>$s['periods'],'prices'=>$wPrices[$rt['id']][$s['id']]??null]; }
+            } unset($rt);
+            $wL['room_types']  = $rtArr;
+            $wL['supplements'] = $wSups[$lid] ?? [];
+        } unset($wL);
+        $pricingJson = json_encode(['lodges' => $wLodges, 'parks' => [], 'routes' => []]);
+    }
+} catch (\Throwable $e) { /* pricing tables not yet created — wizard still works without lodge prices */ }
+
 include 'includes/header.php';
 ?>
 
@@ -266,8 +323,7 @@ include 'includes/header.php';
 
 <script>
 // ── Data constants ────────────────────────────────────────────────────────────
-const LODGES = ['Arusha Explorers HB','Marera View Lodge','Kifaru','Mvuvi Deluxe HB'];
-const LODGE_PPP = {'Arusha Explorers HB':105,'Marera View Lodge':125,'Kifaru':263.5,'Mvuvi Deluxe HB':140};
+const PRICING_DATA = <?= $pricingJson ?>;
 
 const PARK_FEES = {
   none:       {l:'—',          ppp:0,   fx:0},
@@ -287,31 +343,31 @@ const TEMPLATES = {
   simba: {
     name:'Simba Safari', icon:'🦁', desc:'6 days · Safari Tanzania',
     days:[
-      {loc:'Kili-Arusha',   lodge:'Arusha Explorers HB', jeep:'half', park:'none',       flight:'none', items:[{d:'Emergency',t:'p',a:'30'}],      drinks:true},
-      {loc:'Tarangire',     lodge:'Marera View Lodge',   jeep:'full', park:'tarangire',  flight:'none', items:[{d:'Lunch boxes',t:'p',a:'10'}],    drinks:true},
-      {loc:'Serengeti',     lodge:'Kifaru',              jeep:'full', park:'serengeti1', flight:'none', items:[],                                   drinks:true},
-      {loc:'Serengeti',     lodge:'Kifaru',              jeep:'full', park:'serengeti2', flight:'none', items:[],                                   drinks:true},
-      {loc:'Crater-Karatu', lodge:'Marera View Lodge',   jeep:'full', park:'crater',     flight:'none', items:[{d:'MEDIVAC',t:'p',a:'5'}],          drinks:true},
-      {loc:'Karatu-JRO',    lodge:'',                   jeep:'full', park:'none',       flight:'none', items:[{d:'Natural Walk',t:'f',a:'20'}],    drinks:true},
+      {loc:'Kili-Arusha',   lodge_id:0, room_type_id:0, jeep:'half', park:'none',       flight:'none', items:[{d:'Emergency',t:'p',a:'30'}],   drinks:true},
+      {loc:'Tarangire',     lodge_id:0, room_type_id:0, jeep:'full', park:'tarangire',  flight:'none', items:[{d:'Lunch boxes',t:'p',a:'10'}], drinks:true},
+      {loc:'Serengeti',     lodge_id:0, room_type_id:0, jeep:'full', park:'serengeti1', flight:'none', items:[],                               drinks:true},
+      {loc:'Serengeti',     lodge_id:0, room_type_id:0, jeep:'full', park:'serengeti2', flight:'none', items:[],                               drinks:true},
+      {loc:'Crater-Karatu', lodge_id:0, room_type_id:0, jeep:'full', park:'crater',     flight:'none', items:[{d:'MEDIVAC',t:'p',a:'5'}],      drinks:true},
+      {loc:'Karatu-JRO',    lodge_id:0, room_type_id:0, jeep:'full', park:'none',       flight:'none', items:[{d:'Natural Walk',t:'f',a:'20'}],drinks:true},
     ]
   },
   beachkiboko: {
     name:'Beach Kiboko', icon:'🏖️', desc:'14 days · Safari + Zanzibar',
     days:[
-      {loc:'Kili-Arusha',   lodge:'Arusha Explorers HB', jeep:'half', park:'none',       flight:'none', items:[{d:'Emergency',t:'p',a:'30'}],              drinks:true},
-      {loc:'Tarangire',     lodge:'Marera View Lodge',   jeep:'full', park:'tarangire',  flight:'none', items:[{d:'Lunch boxes',t:'p',a:'10'}],            drinks:true},
-      {loc:'Manyara',       lodge:'Marera View Lodge',   jeep:'full', park:'manyara',    flight:'none', items:[],                                            drinks:true},
-      {loc:'Serengeti',     lodge:'Kifaru',              jeep:'full', park:'serengeti1', flight:'none', items:[],                                            drinks:true},
-      {loc:'Serengeti',     lodge:'Kifaru',              jeep:'full', park:'serengeti2', flight:'none', items:[],                                            drinks:true},
-      {loc:'Crater-Karatu', lodge:'Marera View Lodge',   jeep:'full', park:'crater',     flight:'none', items:[{d:'MEDIVAC',t:'p',a:'5'}],                  drinks:true},
-      {loc:'Karatu-ZNZ',    lodge:'Mvuvi Deluxe HB',    jeep:'full', park:'none',       flight:'znz',  items:[{d:'NatWalk+Transfer',t:'f',a:'80'}],        drinks:true},
-      {loc:'Zanzibar',      lodge:'Mvuvi Deluxe HB',    jeep:'none', park:'none',       flight:'none', items:[], drinks:false},
-      {loc:'Zanzibar',      lodge:'Mvuvi Deluxe HB',    jeep:'none', park:'none',       flight:'none', items:[], drinks:false},
-      {loc:'Zanzibar',      lodge:'Mvuvi Deluxe HB',    jeep:'none', park:'none',       flight:'none', items:[], drinks:false},
-      {loc:'Zanzibar',      lodge:'Mvuvi Deluxe HB',    jeep:'none', park:'none',       flight:'none', items:[], drinks:false},
-      {loc:'Zanzibar',      lodge:'Mvuvi Deluxe HB',    jeep:'none', park:'none',       flight:'none', items:[], drinks:false},
-      {loc:'Zanzibar',      lodge:'Mvuvi Deluxe HB',    jeep:'none', park:'none',       flight:'none', items:[], drinks:false},
-      {loc:'ZNZ-Home',      lodge:'',                   jeep:'none', park:'none',       flight:'none', items:[{d:'Transfer',t:'f',a:'60'}],                drinks:false},
+      {loc:'Kili-Arusha',   lodge_id:0, room_type_id:0, jeep:'half', park:'none',       flight:'none', items:[{d:'Emergency',t:'p',a:'30'}],          drinks:true},
+      {loc:'Tarangire',     lodge_id:0, room_type_id:0, jeep:'full', park:'tarangire',  flight:'none', items:[{d:'Lunch boxes',t:'p',a:'10'}],        drinks:true},
+      {loc:'Manyara',       lodge_id:0, room_type_id:0, jeep:'full', park:'manyara',    flight:'none', items:[],                                        drinks:true},
+      {loc:'Serengeti',     lodge_id:0, room_type_id:0, jeep:'full', park:'serengeti1', flight:'none', items:[],                                        drinks:true},
+      {loc:'Serengeti',     lodge_id:0, room_type_id:0, jeep:'full', park:'serengeti2', flight:'none', items:[],                                        drinks:true},
+      {loc:'Crater-Karatu', lodge_id:0, room_type_id:0, jeep:'full', park:'crater',     flight:'none', items:[{d:'MEDIVAC',t:'p',a:'5'}],              drinks:true},
+      {loc:'Karatu-ZNZ',    lodge_id:0, room_type_id:0, jeep:'full', park:'none',       flight:'znz',  items:[{d:'NatWalk+Transfer',t:'f',a:'80'}],    drinks:true},
+      {loc:'Zanzibar',      lodge_id:0, room_type_id:0, jeep:'none', park:'none',       flight:'none', items:[], drinks:false},
+      {loc:'Zanzibar',      lodge_id:0, room_type_id:0, jeep:'none', park:'none',       flight:'none', items:[], drinks:false},
+      {loc:'Zanzibar',      lodge_id:0, room_type_id:0, jeep:'none', park:'none',       flight:'none', items:[], drinks:false},
+      {loc:'Zanzibar',      lodge_id:0, room_type_id:0, jeep:'none', park:'none',       flight:'none', items:[], drinks:false},
+      {loc:'Zanzibar',      lodge_id:0, room_type_id:0, jeep:'none', park:'none',       flight:'none', items:[], drinks:false},
+      {loc:'Zanzibar',      lodge_id:0, room_type_id:0, jeep:'none', park:'none',       flight:'none', items:[], drinks:false},
+      {loc:'ZNZ-Home',      lodge_id:0, room_type_id:0, jeep:'none', park:'none',       flight:'none', items:[{d:'Transfer',t:'f',a:'60'}],            drinks:false},
     ]
   }
 };
@@ -347,10 +403,64 @@ function show(id) { el(id).style.display = ''; }
 function hide(id) { el(id).style.display = 'none'; }
 function qs(sel)  { return document.querySelector(sel); }
 
-function calcDay(d) {
+// ── Pricing DB helpers ────────────────────────────────────────────────────────
+function getDayDate(idx) {
+  var sd = v('fDate');
+  if (!sd) return null;
+  var dt = new Date(sd + 'T00:00:00');
+  dt.setDate(dt.getDate() + idx);
+  var y=dt.getFullYear(), m=dt.getMonth()+1, d=dt.getDate();
+  return y+'-'+String(m).padStart(2,'0')+'-'+String(d).padStart(2,'0');
+}
+function mmddOf(s) { return s ? s.slice(5,7)+'-'+s.slice(8,10) : null; }
+function dateInPeriod(dateStr, period) {
+  if (!dateStr) return false;
+  var md=mmddOf(dateStr), yr=parseInt(dateStr.slice(0,4));
+  if (period.year !== null && period.year !== undefined && parseInt(period.year) !== yr) return false;
+  var s=period.start_mmdd, e=period.end_mmdd;
+  return s<=e ? (md>=s && md<=e) : (md>=s || md<=e);
+}
+function getLodgePrice(lodge_id, room_type_id, dateStr, paxCount) {
+  var lodge=(PRICING_DATA.lodges||[]).find(function(l){return l.id==lodge_id;});
+  if (!lodge) return 0;
+  var rt=lodge.room_types.find(function(r){return r.id==room_type_id;});
+  if (!rt) return 0;
+  for (var si=0;si<rt.seasons.length;si++) {
+    var s=rt.seasons[si]; if(!s.prices) continue;
+    for (var pi=0;pi<s.periods.length;pi++) {
+      if (dateInPeriod(dateStr,s.periods[pi])) {
+        var key='pax_'+Math.min(Math.max(paxCount,1),5);
+        return parseFloat(s.prices[key])||0;
+      }
+    }
+  }
+  return 0;
+}
+function getLodgeSupplements(lodge_id, dateStr, adults) {
+  var lodge=(PRICING_DATA.lodges||[]).find(function(l){return l.id==lodge_id;});
+  if (!lodge||!lodge.supplements||!lodge.supplements.length) return 0;
+  var total=0;
+  lodge.supplements.forEach(function(sup){
+    if (dateInPeriod(dateStr,{year:sup.year,start_mmdd:sup.start_mmdd,end_mmdd:sup.end_mmdd}))
+      total+=parseFloat(sup.amount_adult||0)*adults;
+  });
+  return total;
+}
+function getLodgeName(lodge_id) {
+  var lodge=(PRICING_DATA.lodges||[]).find(function(l){return l.id==lodge_id;});
+  return lodge?lodge.name:'';
+}
+
+function calcDay(d, idx) {
   var p = pax(), j = jeeps(), t = 0;
-  if (LODGE_PPP[d.lodge]) t += LODGE_PPP[d.lodge] * p;
-  else if (d.lodge === 'Custom') t += +d.lodgeCust || 0;
+  var adults = +v('fAdults') || 0;
+  if (d.lodge_id > 0 && d.room_type_id > 0) {
+    var dateStr = getDayDate(idx || 0);
+    t += getLodgePrice(d.lodge_id, d.room_type_id, dateStr, p);
+    t += getLodgeSupplements(d.lodge_id, dateStr, adults);
+  } else if (d.lodge_id === -1) {
+    t += +d.lodge_custom_total || 0;
+  }
   if (d.jeep === 'full') t += 250 * j;
   if (d.jeep === 'half') t += 125 * j;
   if (d.drinks) t += 4 * p;
@@ -363,18 +473,11 @@ function calcDay(d) {
 }
 
 function calcTotals() {
-  var costs = state.days.reduce(function(s,d){ return s + calcDay(d); }, 0) + BANK;
+  var costs = state.days.reduce(function(s,d,i){ return s + calcDay(d,i); }, 0) + BANK;
   var mk = mkPct();
   var price = costs * (1 + mk);
   var p = pax();
-  return {
-    costs:  costs,
-    price:  price,
-    ppp:    p > 0 ? price / p : 0,
-    pppTo:  p > 0 ? costs * 1.18 / p : 0,
-    deposit: price * 0.3,
-    mk: mk,
-  };
+  return { costs:costs, price:price, ppp:p>0?price/p:0, pppTo:p>0?costs*1.18/p:0, deposit:price*0.3, mk:mk };
 }
 
 // ── Step navigation ───────────────────────────────────────────────────────────
@@ -416,7 +519,8 @@ function selectTemplate(key) {
   Object.keys(TEMPLATES).forEach(function(k){ el('tpl_'+k).className = 'tpl-card' + (k===key?' selected':''); });
   state.program = key;
   state.days = TEMPLATES[key].days.map(function(t){
-    return {id:uid(), loc:t.loc, lodge:t.lodge, lodgeCust:'', jeep:t.jeep,
+    return {id:uid(), loc:t.loc, lodge_id:t.lodge_id||0, room_type_id:t.room_type_id||0,
+            lodge_custom_total:0, jeep:t.jeep,
             park:t.park, parkCust:'', flight:t.flight, flightCust:'',
             items:t.items.map(function(a){return {id:uid(),d:a.d,t:a.t,a:a.a};}),
             drinks:t.drinks};
@@ -445,7 +549,7 @@ function updatePaxBar() {
 
 // ── Step 3: Day cards ─────────────────────────────────────────────────────────
 function addDay() {
-  state.days.push({id:uid(),loc:'',lodge:'',lodgeCust:'',jeep:'full',
+  state.days.push({id:uid(),loc:'',lodge_id:0,room_type_id:0,lodge_custom_total:0,jeep:'full',
                    park:'none',parkCust:'',flight:'none',flightCust:'',items:[],drinks:true});
   renderDays();
 }
@@ -472,10 +576,32 @@ function buildDayCard(d, idx) {
   var wrap = document.createElement('div');
   wrap.className = 'day-card'; wrap.id = 'dc_'+d.id;
 
-  // Build lodge options
-  var lodgeOpts = '<option value="">— None</option>';
-  LODGES.forEach(function(l){ lodgeOpts += '<option value="'+l+'"'+(d.lodge===l?' selected':'')+'>'+l+' · $'+LODGE_PPP[l]+'/pax</option>'; });
-  lodgeOpts += '<option value="Custom"'+(d.lodge==='Custom'?' selected':'')+'>🔧 Custom (fixed total)</option>';
+  // Build lodge options from DB
+  var date = getDayDate(idx);
+  var lodgeOpts = '<option value="0">— None</option>';
+  (PRICING_DATA.lodges||[]).forEach(function(l){
+    lodgeOpts += '<option value="'+l.id+'"'+(d.lodge_id==l.id?' selected':'')+'>'+esc(l.name)+(l.location?' · '+esc(l.location):'')+'</option>';
+  });
+  lodgeOpts += '<option value="-1"'+(d.lodge_id==-1?' selected':'')+'>🔧 Custom (fixed total)</option>';
+
+  // Room type select (only when a DB lodge is selected)
+  var roomTypeHtml = '';
+  if (d.lodge_id > 0) {
+    var selLodge = (PRICING_DATA.lodges||[]).find(function(l){return l.id==d.lodge_id;});
+    if (selLodge && selLodge.room_types.length) {
+      var rtOpts = '<option value="0">— Select room type</option>';
+      selLodge.room_types.forEach(function(rt){
+        var price = getLodgePrice(d.lodge_id, rt.id, date, pax());
+        var priceLabel = price ? ' — $'+Math.round(price) : '';
+        rtOpts += '<option value="'+rt.id+'"'+(d.room_type_id==rt.id?' selected':'')+'>'+esc(rt.name)+priceLabel+'</option>';
+      });
+      roomTypeHtml = '<div><label class="f-lbl">Room Type</label><select class="f-inp" onchange="updDay(\''+d.id+'\',\'room_type_id\',parseInt(this.value))">'+rtOpts+'</select></div>';
+    } else if (selLodge) {
+      roomTypeHtml = '<div style="font-size:.75rem;color:#9ca3af;padding-top:20px">No room types defined for this lodge.</div>';
+    }
+  } else if (d.lodge_id === -1) {
+    roomTypeHtml = '<div><label class="f-lbl">Custom Lodge Total ($)</label><input class="f-inp" type="number" min="0" placeholder="Fixed total" value="'+esc(d.lodge_custom_total||'')+'" oninput="updDay(\''+d.id+'\',\'lodge_custom_total\',parseFloat(this.value)||0)"></div>';
+  }
 
   // Park options
   var parkOpts = '';
@@ -512,7 +638,7 @@ function buildDayCard(d, idx) {
       +'<div class="day-num">'+(idx+1)+'</div>'
       +(dateStr?'<div style="font-size:.72rem;color:#9ca3af;width:40px;flex-shrink:0">'+dateStr+'</div>':'')
       +'<div class="day-loc">'+(d.loc||'<span style="color:#9ca3af">— New destination</span>')+'</div>'
-      +'<div class="day-lodge">'+esc(d.lodge)+'</div>'
+      +'<div class="day-lodge">'+(d.lodge_id>0?esc(getLodgeName(d.lodge_id)):d.lodge_id===-1?'Custom':'—')+'</div>'
       +'<div class="day-total">'+fmt(dc)+'</div>'
       +'<div class="day-chevron" id="chev_'+d.id+'">▼</div>'
     +'</div>'
@@ -532,9 +658,9 @@ function buildDayCard(d, idx) {
             +'<option value="n"'+(!d.drinks?' selected':'')+'>No</option>'
           +'</select></div>'
         +'<div style="grid-column:1/span 2"><label class="f-lbl">Lodge</label>'
-          +'<select class="f-inp" onchange="updDay(\''+d.id+'\',\'lodge\',this.value)">'+lodgeOpts+'</select>'
-          +(d.lodge==='Custom'?'<input class="f-inp" type="number" style="margin-top:6px" placeholder="Fixed total $" value="'+esc(d.lodgeCust)+'" oninput="updDay(\''+d.id+'\',\'lodgeCust\',this.value)">':'')
+          +'<select class="f-inp" onchange="updDay(\''+d.id+'\',\'lodge_id\',parseInt(this.value))">'+lodgeOpts+'</select>'
         +'</div>'
+        +roomTypeHtml
         +'<div><label class="f-lbl">Park Fees</label>'
           +'<select class="f-inp" onchange="updDay(\''+d.id+'\',\'park\',this.value)">'+parkOpts+'</select>'
           +(d.park==='custom'?'<input class="f-inp" type="number" style="margin-top:6px" placeholder="Total fees $" value="'+esc(d.parkCust)+'" oninput="updDay(\''+d.id+'\',\'parkCust\',this.value)">':'')
@@ -569,6 +695,7 @@ function updDay(did, field, val) {
   var d = state.days.find(function(x){return x.id===did;});
   if (!d) return;
   d[field] = val;
+  if (field === 'lodge_id') d.room_type_id = 0; // reset room type when lodge changes
   // Re-render only this card to pick up conditional fields (custom inputs)
   var old = el('dc_'+did);
   var idx = state.days.indexOf(d);
@@ -617,11 +744,12 @@ function renderSummary() {
   var tot = calcTotals();
   var rows = '';
   state.days.forEach(function(d, i) {
-    var dc = calcDay(d);
+    var dc = calcDay(d, i);
+    var lodgeLabel = d.lodge_id>0 ? getLodgeName(d.lodge_id) : (d.lodge_id===-1 ? 'Custom' : '—');
     rows += '<tr>'
       +'<td>'+(i+1)+'</td>'
       +'<td style="font-weight:500">'+(d.loc||'—')+'</td>'
-      +'<td style="color:#6b7280">'+(d.lodge||'—')+'</td>'
+      +'<td style="color:#6b7280">'+esc(lodgeLabel)+'</td>'
       +'<td style="text-align:right;font-family:monospace;font-weight:500">'+fmt(dc)+'</td>'
       +'</tr>';
   });
@@ -680,18 +808,20 @@ function saveQuote() {
     markup_type:   state.markup,
     markup_pct:    mkPct() * 100,
     bank_commission: BANK,
-    days: state.days.map(function(d){
+    days: state.days.map(function(d,i){
       return {
-        location:     d.loc,
-        lodge:        d.lodge,
-        lodge_custom: +d.lodgeCust||0,
-        jeep:         d.jeep,
-        drinks:       d.drinks ? 1 : 0,
-        park:         d.park,
-        park_custom:  +d.parkCust||0,
-        flight:       d.flight,
-        flight_custom:+d.flightCust||0,
-        day_total:    calcDay(d),
+        location:      d.loc,
+        lodge:         d.lodge_id>0 ? getLodgeName(d.lodge_id) : (d.lodge_id===-1 ? 'Custom' : ''),
+        lodge_id:      d.lodge_id>0 ? d.lodge_id : null,
+        room_type_id:  d.room_type_id>0 ? d.room_type_id : null,
+        lodge_custom:  d.lodge_id===-1 ? (+d.lodge_custom_total||0) : 0,
+        jeep:          d.jeep,
+        drinks:        d.drinks ? 1 : 0,
+        park:          d.park,
+        park_custom:   +d.parkCust||0,
+        flight:        d.flight,
+        flight_custom: +d.flightCust||0,
+        day_total:     calcDay(d,i),
         items: d.items.map(function(a){ return {description:a.d, item_type:a.t==='p'?'pax':'fixed', amount:+a.a||0}; })
       };
     })

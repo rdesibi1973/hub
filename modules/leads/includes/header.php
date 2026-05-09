@@ -146,6 +146,9 @@ header {
   </a>
   <?php endif; ?>
   <?php endif; // !isLeadsRestricted ?>
+  <?php if (!isLeadsRestricted()): ?>
+  <a href="pricing.php" class="<?= in_array($cur,['pricing.php','pricing_lodge.php']) ? 'active':'' ?>">Pricing</a>
+  <?php endif; ?>
   <a href="logout.php"    class="sub-nav-logout">Logout</a>
 </nav>
 

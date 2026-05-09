@@ -88,9 +88,9 @@ try {
     // Insert days
     $insDayStmt = $db->prepare("
         INSERT INTO quote_days
-          (quote_id, day_number, location, lodge, lodge_custom, jeep, drinks,
-           park, park_custom, flight, flight_custom, day_total)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+          (quote_id, day_number, location, lodge, lodge_id, room_type_id,
+           lodge_custom, jeep, drinks, park, park_custom, flight, flight_custom, day_total)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     ");
     $insItemStmt = $db->prepare("
         INSERT INTO quote_day_items (quote_day_id, description, item_type, amount)
@@ -107,11 +107,15 @@ try {
         $park   = in_array($d['park']   ?? '', $validPark)   ? $d['park']   : 'none';
         $flight = in_array($d['flight'] ?? '', $validFlight) ? $d['flight'] : 'none';
 
+        $lodgeId2    = (int)($d['lodge_id']     ?? 0) ?: null;
+        $roomTypeId2 = (int)($d['room_type_id'] ?? 0) ?: null;
         $insDayStmt->execute([
             $quoteId,
             $dayNum + 1,
             substr(trim($d['location'] ?? ''), 0, 200),
             substr(trim($d['lodge']    ?? ''), 0, 200),
+            $lodgeId2,
+            $roomTypeId2,
             max(0, (float)($d['lodge_custom']  ?? 0)),
             $jeep,
             (int)($d['drinks'] ?? 1),
