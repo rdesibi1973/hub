@@ -280,7 +280,7 @@ include 'includes/header.php';
         <td style="padding:8px 14px;text-align:right;font-family:monospace;font-weight:700;">$<?= number_format((float)$lq['total_price'], 0, '.', ',') ?></td>
         <td style="padding:8px 14px;">
           <?php if ($lq['status'] === 'final'): ?>
-            <span style="background:#dcfce7;color:#166534;border-radius:4px;padding:2px 8px;font-size:.72rem;font-weight:700;">Final</span>
+            <span style="background:#fee2e2;color:#C0211B;border-radius:4px;padding:2px 8px;font-size:.72rem;font-weight:700;">Final</span>
           <?php else: ?>
             <span style="background:#fef3c7;color:#92400e;border-radius:4px;padding:2px 8px;font-size:.72rem;font-weight:700;">Draft</span>
           <?php endif; ?>

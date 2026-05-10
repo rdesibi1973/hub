@@ -202,8 +202,8 @@ include 'includes/header.php';
 .card-pad{padding:18px}
 .flbl{display:block;font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#6b7280;margin-bottom:4px}
 .finp{width:100%;padding:7px 9px;border:1px solid #d1d5db;border-radius:6px;font-size:.85rem;box-sizing:border-box}
-.finp:focus{outline:none;border-color:#166534;box-shadow:0 0 0 2px rgba(22,101,52,.12)}
-.btn-g{padding:8px 18px;border:none;border-radius:8px;background:#166534;color:#fff;cursor:pointer;font-size:.85rem;font-weight:700}
+.finp:focus{outline:none;border-color:#C0211B;box-shadow:0 0 0 2px rgba(192,33,27,.12)}
+.btn-g{padding:8px 18px;border:none;border-radius:8px;background:#C0211B;color:#fff;cursor:pointer;font-size:.85rem;font-weight:700}
 .btn-sm{padding:4px 10px;border-radius:5px;font-size:.72rem;font-weight:600;cursor:pointer;border:1px solid #d1d5db;background:#fff;color:#374151}
 .btn-del{border:none;background:none;cursor:pointer;color:#ef4444;font-size:.78rem;padding:2px 6px}
 .stbl{width:100%;border-collapse:collapse;font-size:.82rem}
@@ -217,7 +217,7 @@ include 'includes/header.php';
 .pax-row{display:flex;align-items:center;gap:6px;margin-bottom:4px}
 .pax-lbl{font-size:.65rem;color:#9ca3af;width:24px;flex-shrink:0;font-weight:600}
 .pax-inp{width:70px;padding:4px 6px;border:1px solid #d1d5db;border-radius:4px;font-size:.8rem;text-align:right}
-.pax-inp:focus{outline:none;border-color:#166534}
+.pax-inp:focus{outline:none;border-color:#C0211B}
 .pill{display:inline-block;padding:1px 7px;border-radius:4px;font-size:.72rem;font-weight:600;background:#f3f4f6;color:#374151;margin:1px}
 </style>
 
@@ -241,7 +241,7 @@ include 'includes/header.php';
       <div><span style="color:#6b7280;font-size:.75rem;font-weight:600;text-transform:uppercase;letter-spacing:.05em">Name</span><br><strong><?= h($lodge['name']) ?></strong></div>
       <div><span style="color:#6b7280;font-size:.75rem;font-weight:600;text-transform:uppercase;letter-spacing:.05em">Location</span><br><?= h($lodge['location'] ?: '—') ?></div>
       <div><span style="color:#6b7280;font-size:.75rem;font-weight:600;text-transform:uppercase;letter-spacing:.05em">Meal Plan</span><br><?= h($lodge['default_meal_plan']) ?></div>
-      <div><span style="color:#6b7280;font-size:.75rem;font-weight:600;text-transform:uppercase;letter-spacing:.05em">Status</span><br><?= $lodge['active'] ? '<span style="color:#166534;font-weight:700">Active</span>' : '<span style="color:#9ca3af">Inactive</span>' ?></div>
+      <div><span style="color:#6b7280;font-size:.75rem;font-weight:600;text-transform:uppercase;letter-spacing:.05em">Status</span><br><?= $lodge['active'] ? '<span style="color:#C0211B;font-weight:700">Active</span>' : '<span style="color:#9ca3af">Inactive</span>' ?></div>
     </div>
     <?php if ($lodge['notes']): ?>
       <div style="margin-top:10px;font-size:.82rem;color:#6b7280"><?= h($lodge['notes']) ?></div>
@@ -318,7 +318,7 @@ include 'includes/header.php';
           <label class="flbl">Year (blank = every year)</label>
           <input class="finp" name="year" type="number" min="2024" max="2099" placeholder="e.g. 2026" style="width:100px">
         </div>
-        <button type="submit" class="btn-sm" style="background:#f0fdf4;color:#166534;border-color:#bbf7d0">+ Add Range</button>
+        <button type="submit" class="btn-sm" style="background:#fef2f2;color:#C0211B;border-color:#fecaca">+ Add Range</button>
       </form>
     </div>
   <?php endforeach; ?>

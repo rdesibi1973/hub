@@ -197,8 +197,8 @@ $stylesXml = '<?xml version="1.0" encoding="UTF-8"?>'
 .'<fills count="4">'
   .'<fill><patternFill patternType="none"/></fill>'
   .'<fill><patternFill patternType="gray125"/></fill>'
-  .'<fill><patternFill patternType="solid"><fgColor rgb="FF1A6B3A"/></patternFill></fill>'  // green
-  .'<fill><patternFill patternType="solid"><fgColor rgb="FFF0FDF4"/></patternFill></fill>'  // lt green
+  .'<fill><patternFill patternType="solid"><fgColor rgb="FFC0211B"/></patternFill></fill>'  // green
+  .'<fill><patternFill patternType="solid"><fgColor rgb="FFFEF2F2"/></patternFill></fill>'  // lt green
 .'</fills>'
 .'<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>'
 .'<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
