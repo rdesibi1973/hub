@@ -284,6 +284,14 @@ include 'includes/header.php';
     <div style="font-size:.88rem;font-weight:600;color:#111827;" id="itinTitle">Itinerary</div>
     <button onclick="addDay()" style="background:#C0211B;color:#fff;border:none;border-radius:8px;padding:7px 14px;cursor:pointer;font-size:.82rem;font-weight:700;">+ Add Day</button>
   </div>
+
+  <!-- Default Room Template — global config auto-applied to each day -->
+  <div class="wiz-card" style="border:1px solid #fecaca;margin-bottom:12px;">
+    <h3>Default Rooms <span class="rate-db">(auto-applied per day when a lodge is selected — overridable)</span></h3>
+    <div id="defaultRoomsList"></div>
+    <button class="btn-add-item" onclick="addDefaultRoom()" style="margin-top:6px;">+ Add room type</button>
+  </div>
+
   <!-- Safari Fixed Costs (Emergency, Medivac, etc.) — once per safari -->
   <div class="safari-card">
     <h3>Safari Fixed Costs <span class="rate-db">(once per safari, not per day)</span></h3>
@@ -432,7 +440,7 @@ const PRE    = <?= $prefill ?>;
 const BANK   = 100;
 const REQ_ID = <?= $req['id'] ?>;
 
-var state = { step:1, program:null, days:[], safariItems:[], markup:'standard', custMk:25 };
+var state = { step:1, program:null, days:[], safariItems:[], defaultRooms:[], markup:'standard', custMk:25 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function fmt(n)   { return '$' + Math.round(n).toLocaleString('en-US'); }
@@ -478,6 +486,44 @@ function dayLodgeLabel(d){
   var name=getLodgeName(d.lodge_id);
   var parts=(d.rooms||[]).filter(function(r){return r.room_type_id>0;}).map(function(r){return(r.qty||1)+'×'+getRoomTypeName(d.lodge_id,r.room_type_id);});
   return name+(parts.length?' ('+parts.join(', ')+')':'');
+}
+
+// ── Default room template ─────────────────────────────────────────────────────
+function mkDefaultRoom(o) { return Object.assign({id:uid(),label:'',qty:1},o||{}); }
+function renderDefaultRooms() {
+  var html='';
+  state.defaultRooms.forEach(function(dr){
+    html+='<div class="item-row" id="ddr_'+dr.id+'">'
+      +'<input class="f-inp" style="flex:3" placeholder="Room type label (e.g. Double)" value="'+esc(dr.label)+'" oninput="updDefaultRoom(\''+dr.id+'\',\'label\',this.value)">'
+      +'<input class="f-inp" type="number" min="1" step="1" style="width:60px;text-align:center" value="'+esc(dr.qty)+'" oninput="updDefaultRoom(\''+dr.id+'\',\'qty\',+this.value||1)" placeholder="1">'
+      +'<button class="btn-rm" onclick="rmDefaultRoom(\''+dr.id+'\')">×</button>'
+    +'</div>';
+  });
+  el('defaultRoomsList').innerHTML=html;
+}
+function addDefaultRoom() {
+  state.defaultRooms.push(mkDefaultRoom());
+  renderDefaultRooms();
+}
+function rmDefaultRoom(drid) {
+  state.defaultRooms=state.defaultRooms.filter(function(x){return x.id!==drid;});
+  renderDefaultRooms();
+}
+function updDefaultRoom(drid,field,val) {
+  var dr=state.defaultRooms.find(function(x){return x.id===drid;});
+  if(dr) dr[field]=val;
+}
+function applyDefaultRoomsToDay(d) {
+  d.rooms=[];
+  if(!state.defaultRooms.length||d.lodge_id<=0) return;
+  var lodge=(PRICING_DATA.lodges||[]).find(function(l){return l.id==d.lodge_id;});
+  if(!lodge) return;
+  state.defaultRooms.forEach(function(dr){
+    if(!dr.label) return;
+    var lbl=dr.label.toLowerCase();
+    var rt=(lodge.room_types||[]).find(function(t){return t.name.toLowerCase().indexOf(lbl)!==-1;});
+    d.rooms.push(mkRoom({room_type_id:rt?rt.id:0,qty:+dr.qty||1}));
+  });
 }
 
 // ── Lodge/pricing DB helpers ──────────────────────────────────────────────────
@@ -633,7 +679,7 @@ function goTo(step) {
     el(id).className='wiz-prog-bar'+(i+1<step?' done':i+1===step?' active':'');
     el('lbl'+(i+1)).className='wiz-prog-lbl'+(i+1===step?' active':'');
   });
-  if(step===3){renderDays();renderSafariItems();}
+  if(step===3){renderDefaultRooms();renderDays();renderSafariItems();}
   if(step===4) renderSummary();
 }
 
@@ -880,7 +926,7 @@ function toggleDay(id) {
 function updDay(did,field,val) {
   var d=state.days.find(function(x){return x.id===did;}); if(!d)return;
   d[field]=val;
-  if(field==='lodge_id') d.rooms=[];
+  if(field==='lodge_id') applyDefaultRoomsToDay(d);
   if(field==='jeep') d.jeep_rate_custom=null;
   if(field==='flight_route_id') d.flight_custom='';
   if(field==='transfer_rate_id') d.transfer_custom='';
