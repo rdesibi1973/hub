@@ -288,6 +288,7 @@ include 'includes/header.php';
         <td style="padding:8px 14px;color:var(--grey-mid);font-size:.8rem;"><?= date('d M Y', strtotime($lq['created_at'])) ?></td>
         <td style="padding:8px 14px;display:flex;gap:8px;">
           <a href="quote_view.php?id=<?= $lq['id'] ?>" class="btn btn-outline" style="font-size:.75rem;padding:4px 10px;">View</a>
+          <a href="quote_new.php?request_id=<?= $req['id'] ?>&edit=<?= $lq['id'] ?>" class="btn btn-outline" style="font-size:.75rem;padding:4px 10px;">✏️ Edit</a>
           <a href="api_export_quote.php?id=<?= $lq['id'] ?>" class="btn btn-outline" style="font-size:.75rem;padding:4px 10px;">⬇ Excel</a>
         </td>
       </tr>
