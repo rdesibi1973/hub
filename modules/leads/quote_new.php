@@ -483,9 +483,11 @@ function getRoomUnitPrice(lodge_id,rt_id,dateStr){
 function dayLodgeLabel(d){
   if(!d.lodge_id||d.lodge_id===0)return'—';
   if(d.lodge_id===-1)return'Custom';
-  var name=getLodgeName(d.lodge_id);
+  var lodge=(PRICING_DATA.lodges||[]).find(function(l){return l.id==d.lodge_id;});
+  var name=lodge?lodge.name:'';
+  var mp=lodge&&lodge.default_meal_plan?' ['+lodge.default_meal_plan+']':'';
   var parts=(d.rooms||[]).filter(function(r){return r.room_type_id>0;}).map(function(r){return(r.qty||1)+'×'+getRoomTypeName(d.lodge_id,r.room_type_id);});
-  return name+(parts.length?' ('+parts.join(', ')+')':'');
+  return name+mp+(parts.length?' ('+parts.join(', ')+')':'');
 }
 
 // ── Default room template ─────────────────────────────────────────────────────
@@ -763,7 +765,11 @@ function buildDayCard(d, idx) {
 
   // Lodge options
   var lodgeOpts='<option value="0">— None</option>';
-  (PRICING_DATA.lodges||[]).forEach(function(l){lodgeOpts+='<option value="'+l.id+'"'+(d.lodge_id==l.id?' selected':'')+'>'+esc(l.name)+(l.location?' · '+esc(l.location):'')+'</option>';});
+  (PRICING_DATA.lodges||[]).forEach(function(l){
+    var mp=l.default_meal_plan?'['+l.default_meal_plan+'] ':'';
+    lodgeOpts+='<option value="'+l.id+'"'+(d.lodge_id==l.id?' selected':'')+'>'
+      +mp+esc(l.name)+(l.location?' · '+esc(l.location):'')+'</option>';
+  });
   lodgeOpts+='<option value="-1"'+(d.lodge_id==-1?' selected':'')+'>🔧 Custom (fixed total)</option>';
 
   // Rooms list (multi-room per day)
@@ -788,9 +794,11 @@ function buildDayCard(d, idx) {
         +'<button class="btn-rm" onclick="rmRoom(\''+d.id+'\',\''+r.id+'\')">×</button>'
         +'</div>';
     });
+    var mpLabel=selLodge&&selLodge.default_meal_plan
+      ?'<span style="background:#fef3c7;color:#92400e;border-radius:4px;padding:1px 7px;font-size:.7rem;font-weight:700;margin-left:8px">'+esc(selLodge.default_meal_plan)+'</span>':'';
     roomsListHtml='<div class="day-items" style="margin-top:8px">'
       +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">'
-      +'<div class="day-items-lbl" style="margin-bottom:0">Rooms</div>'
+      +'<div class="day-items-lbl" style="margin-bottom:0">Rooms'+mpLabel+'</div>'
       +'</div>'
       +roomRowsHtml
       +'<button class="btn-add-item" onclick="addRoom(\''+d.id+'\')">+ Add room</button>'
@@ -987,23 +995,26 @@ function updRoom(did,rid,field,val){
 
 function addItem(did) {
   var d=state.days.find(function(x){return x.id===did;});
-  if(d){d.items.push({id:uid(),d:'',t:'f',a:''});updDay(did,'route',d.route);}
+  if(d){d.items.push({id:uid(),d:'',t:'f',a:''});rebuildDay(did);}
 }
 function addItemFromCatalog(did,sel) {
   var rid=parseInt(sel.value); if(!rid){return;}
   var r=getActivityRate(rid); if(!r){sel.value='';return;}
   var d=state.days.find(function(x){return x.id===did;});
-  if(d){d.items.push({id:uid(),d:r.name,t:r.item_type==='pax'?'p':'f',a:String(r.rate)});updDay(did,'route',d.route);}
-  sel.value='';
+  if(d){d.items.push({id:uid(),d:r.name,t:r.item_type==='pax'?'p':'f',a:String(r.rate)});rebuildDay(did);}
 }
 function updItem(did,iid,field,val) {
   var d=state.days.find(function(x){return x.id===did;}); if(!d)return;
   var item=d.items.find(function(x){return x.id===iid;}); if(item)item[field]=val;
-  el('dc_'+did).querySelector('.day-total').textContent=fmt(calcDay(d,state.days.indexOf(d)));
+  var di=state.days.indexOf(d),dc=calcDay(d,di),card=el('dc_'+did);
+  if(card){
+    card.querySelector('.day-total').textContent=fmt(dc);
+    var ft=card.querySelector('[data-dft]'); if(ft) ft.textContent='Day total: '+fmt(dc);
+  }
 }
 function rmItem(did,iid) {
   var d=state.days.find(function(x){return x.id===did;});
-  if(d){d.items=d.items.filter(function(x){return x.id!==iid;});updDay(did,'route',d.route);}
+  if(d){d.items=d.items.filter(function(x){return x.id!==iid;});rebuildDay(did);}
 }
 function removeDay(did) {
   state.days=state.days.filter(function(d){return d.id!==did;}); renderDays();
