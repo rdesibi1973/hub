@@ -122,6 +122,12 @@ try {
     $pricingJson = json_encode(array_merge($decoded, ['jeep_rates'=>[],'activity_rates'=>[],'flight_routes'=>[]]));
 }
 
+// Next available quote number for display in wizard
+$nextQuoteNum = '01';
+try {
+    $nextQuoteNum = $db->query("SELECT LPAD(COALESCE(MAX(CAST(quote_number AS UNSIGNED)), 0) + 1, 2, '0') FROM quotes")->fetchColumn() ?: '01';
+} catch (\Throwable $e) {}
+
 include 'includes/header.php';
 ?>
 
@@ -331,10 +337,12 @@ include 'includes/header.php';
   <!-- Save -->
   <div class="wiz-card" id="saveCard">
     <h3>Save Quote</h3>
-    <div style="font-size:.82rem;color:#6b7280;margin-bottom:8px;">
-      File name: <span id="fnamePreview" style="font-family:monospace;color:#166534;"></span>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
+      <label class="f-lbl" style="margin:0;white-space:nowrap">Quote #</label>
+      <input class="f-inp" id="fQuoteNum" value="<?= h($nextQuoteNum) ?>" style="width:72px;font-family:monospace;font-weight:700" placeholder="01" oninput="updateFnamePreview()">
+      <span style="font-size:.82rem;color:#6b7280">_<span id="fnameCustomer" style="color:#166534;font-family:monospace;font-weight:600"></span>.xlsx</span>
     </div>
-    <div style="font-size:.78rem;color:#9ca3af;margin-bottom:16px;" id="fnameNote"></div>
+    <div style="font-size:.78rem;color:#9ca3af;margin-bottom:16px;">Number auto-assigned if blank; you can override it manually.</div>
     <button class="btn-save" id="btnSave" onclick="saveQuote()">💾 Save &amp; Generate Excel</button>
   </div>
 
@@ -378,7 +386,7 @@ function mkDay(o) {
   return Object.assign({
     id:uid(), route:'', attraction:'',
     lodge_id:0, room_type_id:0, lodge_custom_total:0,
-    jeep:'full', jeep_rate_custom:null,
+    jeep:'full', jeep_count:null, jeep_rate_custom:null,
     park:'none', parkCust:'',
     flight_route_id:0, flight_custom:'',
     transfer_rate_id:0, transfer_custom:'',
@@ -500,7 +508,7 @@ function getLodgeName(lodge_id) {
 }
 
 function calcDay(d, idx) {
-  var p=pax(), j=jeeps(), t=0, dateStr=getDayDate(idx||0), adults=+v('fAdults')||0;
+  var p=pax(), j=d.jeep_count!==null?+d.jeep_count:jeeps(), t=0, dateStr=getDayDate(idx||0), adults=+v('fAdults')||0;
   // Lodge
   if (d.lodge_id>0&&d.room_type_id>0) {
     t+=getLodgePrice(d.lodge_id,d.room_type_id,dateStr,p);
@@ -709,6 +717,12 @@ function buildDayCard(d, idx) {
     ?'<div><label class="f-lbl">$/Jeep <span class="rate-db">(DB: $'+jeepDbRate+')</span></label><input class="f-inp" type="number" min="0" value="'+esc(jeepRateVal)+'" placeholder="'+jeepDbRate+'" oninput="updDay(\''+d.id+'\',\'jeep_rate_custom\',this.value===\'\'?null:+this.value)"></div>'
     :'<div></div>';
 
+  // Jeep count input
+  var jeepAuto=jeeps(), jeepCntVal=d.jeep_count!==null?d.jeep_count:jeepAuto;
+  var jeepCountHtml=d.jeep!=='none'
+    ?'<div><label class="f-lbl">Jeeps <span class="rate-db">(auto: '+jeepAuto+')</span></label><input class="f-inp" type="number" min="1" step="1" value="'+esc(jeepCntVal)+'" placeholder="'+jeepAuto+'" oninput="updDay(\''+d.id+'\',\'jeep_count\',this.value===\'\'?null:+this.value)"></div>'
+    :'<div></div>';
+
   // Park
   var parkOpts='';
   Object.keys(PARK_FEES).forEach(function(k){var pf=PARK_FEES[k];parkOpts+='<option value="'+k+'"'+(d.park===k?' selected':'')+'>'+pf.l+(k!=='none'&&k!=='custom'?' ('+(pf.fx?'$'+pf.fx+'+':'')+'$'+pf.ppp+'/pax)':'')+'</option>';});
@@ -762,15 +776,16 @@ function buildDayCard(d, idx) {
         +'<div><label class="f-lbl">Route</label><input class="f-inp" value="'+esc(d.route)+'" placeholder="e.g. Kili-Arusha" oninput="updDay(\''+d.id+'\',\'route\',this.value)"></div>'
         +'<div><label class="f-lbl">Destination</label><input class="f-inp" value="'+esc(d.attraction)+'" placeholder="e.g. Tarangire NP" oninput="updDay(\''+d.id+'\',\'attraction\',this.value)"></div>'
       +'</div>'
-      // JEEP + RATE + DRINKS
-      +'<div class="day-fields" style="grid-template-columns:1fr 1fr 1fr;margin-top:8px">'
+      // JEEP + COUNT + RATE + DRINKS
+      +'<div class="day-fields" style="grid-template-columns:1fr 1fr 1fr 1fr;margin-top:8px">'
         +'<div><label class="f-lbl">Jeep</label><select class="f-inp" onchange="updDay(\''+d.id+'\',\'jeep\',this.value)">'
           +'<option value="none"'+(d.jeep==='none'?' selected':'')+'>— None</option>'
           +'<option value="half"'+(d.jeep==='half'?' selected':'')+'>Half day</option>'
           +'<option value="full"'+(d.jeep==='full'?' selected':'')+'>Full day</option>'
-          +'<option value="double"'+(d.jeep==='double'?' selected':'')+'>Double (2 jeeps)</option>'
+          +'<option value="double"'+(d.jeep==='double'?' selected':'')+'>Double</option>'
           +'<option value="contribution"'+(d.jeep==='contribution'?' selected':'')+'>Contribution</option>'
         +'</select></div>'
+        +jeepCountHtml
         +jeepRateHtml
         +'<div><label class="f-lbl">Drinks &amp; Snacks</label><select class="f-inp" onchange="updDay(\''+d.id+'\',\'drinks\',this.value===\'y\')">'
           +'<option value="y"'+(d.drinks?' selected':'')+'>Yes ($4/pax)</option>'
@@ -808,7 +823,7 @@ function buildDayCard(d, idx) {
       +'</div>'
       // Footer
       +'<div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px">'
-        +'<div style="font-size:.8rem;color:#166534;font-weight:600">Day total: '+fmt(dc)+'</div>'
+        +'<div style="font-size:.8rem;color:#166534;font-weight:600" data-dft>Day total: '+fmt(dc)+'</div>'
         +'<button onclick="removeDay(\''+d.id+'\')" style="font-size:.78rem;color:#ef4444;background:none;border:none;cursor:pointer;">🗑 Remove</button>'
       +'</div>'
     +'</div>';
@@ -827,10 +842,27 @@ function updDay(did,field,val) {
   if(field==='jeep') d.jeep_rate_custom=null;
   if(field==='flight_route_id') d.flight_custom='';
   if(field==='transfer_rate_id') d.transfer_custom='';
-  var old=el('dc_'+did),idx=state.days.indexOf(d),newCard=buildDayCard(d,idx);
-  var wasOpen=el('db_'+did)&&el('db_'+did).style.display!=='none';
-  old.replaceWith(newCard);
-  if(!wasOpen) el('db_'+did).style.display='none';
+  var di=state.days.indexOf(d);
+  // Only rebuild the card DOM for structural changes (show/hide sub-fields)
+  var structural=['lodge_id','jeep','park','flight_route_id','transfer_rate_id'];
+  if(structural.indexOf(field)!==-1){
+    var old=el('dc_'+did),newCard=buildDayCard(d,di);
+    var wasOpen=el('db_'+did)&&el('db_'+did).style.display!=='none';
+    old.replaceWith(newCard);
+    if(!wasOpen) el('db_'+did).style.display='none';
+  } else {
+    // Non-structural: update totals in existing DOM (preserves focus)
+    var dc=calcDay(d,di),card=el('dc_'+did);
+    if(card){
+      card.querySelector('.day-total').textContent=fmt(dc);
+      var ft=card.querySelector('[data-dft]');
+      if(ft) ft.textContent='Day total: '+fmt(dc);
+      if(field==='route'||field==='attraction'){
+        var loc=card.querySelector('.day-loc');
+        if(loc) loc.innerHTML=(d.route||'<span style="color:#9ca3af">— New route</span>')+(d.attraction?'<span style="font-size:.73rem;color:#6b7280;margin-left:7px">'+esc(d.attraction)+'</span>':'');
+      }
+    }
+  }
 }
 
 function addItem(did) {
@@ -906,9 +938,11 @@ function renderSummary() {
   el('sumFoot').innerHTML=foot;
   var single=state.program==='beachkiboko'?'$650':'$250';
   el('kpiGrid').innerHTML=kpiBox('Price p.p. (rack)',fmt(tot.ppp),true)+kpiBox('Price p.p. (T.O.)',fmt(tot.pppTo),false)+kpiBox('Single supplement',single,false)+kpiBox('Deposit (30%)',fmt(tot.deposit),false);
+  updateFnamePreview();
+}
+function updateFnamePreview() {
   var custClean=(v('fName')||'Customer').replace(/\s+/g,'');
-  el('fnamePreview').textContent='??_'+custClean+'.xlsx';
-  el('fnameNote').textContent='The quote number will be assigned automatically (next available).';
+  var el2=el('fnameCustomer'); if(el2) el2.textContent=custClean;
 }
 function kpiBox(lbl, val, hi) {
   return '<div class="kpi'+(hi?' hi':'')+'"><div class="kpi-lbl">'+lbl+'</div><div class="kpi-val">'+val+'</div></div>';
@@ -922,6 +956,7 @@ function saveQuote() {
   var payload = {
     csrf:       '<?= $csrfToken ?>',
     request_id: REQ_ID,
+    quote_number:    v('fQuoteNum'),
     customer_name:   v('fName'),
     agent_name:      v('fAgent'),
     agency_name:     v('fAgency'),
@@ -946,6 +981,7 @@ function saveQuote() {
         room_type_id:     d.room_type_id>0?d.room_type_id:null,
         lodge_custom:     d.lodge_id===-1?(+d.lodge_custom_total||0):0,
         jeep:             d.jeep,
+        jeep_count:       d.jeep_count!==null?+d.jeep_count:null,
         jeep_rate_custom: (d.jeep_rate_custom!==null&&d.jeep_rate_custom!=='')?+d.jeep_rate_custom:null,
         drinks:           d.drinks?1:0,
         park:             d.park,
