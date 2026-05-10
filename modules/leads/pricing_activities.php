@@ -108,15 +108,15 @@ include 'includes/header.php';
 .pa-wrap{max-width:1100px;margin:0 auto;}
 .pa-tabs{display:flex;gap:0;border-bottom:2px solid #e5e7eb;margin-bottom:20px;}
 .pa-tab{padding:10px 22px;cursor:pointer;font-size:.85rem;font-weight:600;color:#6b7280;border-bottom:3px solid transparent;margin-bottom:-2px;transition:all .15s;}
-.pa-tab.active{color:#166534;border-bottom-color:#166534;}
+.pa-tab.active{color:#C0211B;border-bottom-color:#C0211B;}
 .pa-panel{display:none;}
 .pa-panel.active{display:block;}
 .pt{width:100%;border-collapse:collapse;font-size:.84rem;}
 .pt th{background:#f9fafb;padding:8px 12px;text-align:left;font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#6b7280;border-bottom:1px solid #e5e7eb;}
 .pt td{padding:8px 12px;border-bottom:1px solid #f3f4f6;vertical-align:middle;}
 .pt tr:hover td{background:#fafafa;}
-.btn-add{padding:8px 18px;background:#166534;color:#fff;border:none;border-radius:7px;cursor:pointer;font-size:.83rem;font-weight:700;}
-.btn-edit{padding:4px 10px;background:#f0fdf4;border:1px solid #86efac;color:#166534;border-radius:5px;cursor:pointer;font-size:.78rem;}
+.btn-add{padding:8px 18px;background:#C0211B;color:#fff;border:none;border-radius:7px;cursor:pointer;font-size:.83rem;font-weight:700;}
+.btn-edit{padding:4px 10px;background:#fef2f2;border:1px solid #fca5a5;color:#C0211B;border-radius:5px;cursor:pointer;font-size:.78rem;}
 .btn-del{padding:4px 10px;background:#fff1f2;border:1px solid #fca5a5;color:#dc2626;border-radius:5px;cursor:pointer;font-size:.78rem;}
 .card{background:#fff;border-radius:10px;box-shadow:0 1px 5px rgba(0,0,0,.07);padding:18px 20px;margin-bottom:16px;}
 .fg{display:grid;gap:10px;}
@@ -124,21 +124,21 @@ include 'includes/header.php';
 .fg-3{grid-template-columns:1fr 1fr 1fr;}
 .fl{display:block;font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#6b7280;margin-bottom:3px;}
 .fi{width:100%;padding:7px 9px;border:1px solid #d1d5db;border-radius:6px;font-size:.86rem;box-sizing:border-box;}
-.fi:focus{outline:none;border-color:#166534;}
+.fi:focus{outline:none;border-color:#C0211B;}
 .badge{display:inline-block;padding:2px 7px;border-radius:4px;font-size:.7rem;font-weight:700;}
 .badge-act{background:#dbeafe;color:#1d4ed8;}
 .badge-tr{background:#fef9c3;color:#a16207;}
 .badge-sf{background:#fce7f3;color:#be185d;}
-.badge-pax{background:#f0fdf4;color:#166534;}
+.badge-pax{background:#fef2f2;color:#C0211B;}
 .badge-fix{background:#f9fafb;color:#6b7280;}
-.badge-on{background:#dcfce7;color:#166534;}
+.badge-on{background:#fee2e2;color:#C0211B;}
 .badge-off{background:#fee2e2;color:#dc2626;}
 </style>
 
 <div class="pa-wrap">
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
     <h2 style="font-size:1.1rem;font-weight:700;color:#111827;">Pricing — Jeep, Activities &amp; Flights</h2>
-    <a href="pricing_lodge.php" style="font-size:.8rem;color:#166534;">Lodge Pricing →</a>
+    <a href="pricing_lodge.php" style="font-size:.8rem;color:#C0211B;">Lodge Pricing →</a>
   </div>
 
   <div class="pa-tabs">
@@ -162,7 +162,7 @@ include 'includes/header.php';
           <td><strong><?= h(ucfirst($r['type'])) ?></strong></td>
           <td><?= h($r['valid_from']) ?></td>
           <td><?= $r['valid_to'] ? h($r['valid_to']) : '<span style="color:#9ca3af">open</span>' ?></td>
-          <td style="font-weight:700;color:#166534;">$<?= number_format($r['rate'],2) ?></td>
+          <td style="font-weight:700;color:#C0211B;">$<?= number_format($r['rate'],2) ?></td>
           <td style="color:#6b7280;font-size:.78rem;"><?= h($r['notes']) ?></td>
           <td style="white-space:nowrap;">
             <button class="btn-edit" onclick="openJeep(<?= json_encode($r) ?>)">Edit</button>
@@ -197,7 +197,7 @@ include 'includes/header.php';
           <td><span class="badge <?= $r['item_type']==='pax'?'badge-pax':'badge-fix' ?>"><?= $r['item_type']==='pax'?'$/pax':'Fixed' ?></span></td>
           <td><?= h($r['valid_from']) ?></td>
           <td><?= $r['valid_to'] ? h($r['valid_to']) : '<span style="color:#9ca3af">open</span>' ?></td>
-          <td style="font-weight:700;color:#166534;">$<?= number_format($r['rate'],2) ?></td>
+          <td style="font-weight:700;color:#C0211B;">$<?= number_format($r['rate'],2) ?></td>
           <td><span class="badge <?= $r['active']?'badge-on':'badge-off' ?>"><?= $r['active']?'Active':'Off' ?></span></td>
           <td style="white-space:nowrap;">
             <button class="btn-edit" onclick="openActivity(<?= json_encode($r) ?>)">Edit</button>
@@ -229,7 +229,7 @@ include 'includes/header.php';
           <td><?= h($r['airline']) ?></td>
           <td><?= h($r['valid_from']) ?></td>
           <td><?= $r['valid_to'] ? h($r['valid_to']) : '<span style="color:#9ca3af">open</span>' ?></td>
-          <td style="font-weight:700;color:#166534;">$<?= number_format($r['rate_pax'],2) ?></td>
+          <td style="font-weight:700;color:#C0211B;">$<?= number_format($r['rate_pax'],2) ?></td>
           <td><span class="badge <?= $r['active']?'badge-on':'badge-off' ?>"><?= $r['active']?'Active':'Off' ?></span></td>
           <td style="white-space:nowrap;">
             <button class="btn-edit" onclick="openFlight(<?= json_encode($r) ?>)">Edit</button>
@@ -254,7 +254,7 @@ include 'includes/header.php';
     <div id="modalBody"></div>
     <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:18px;">
       <button onclick="closeModal()" style="padding:8px 18px;border:1px solid #d1d5db;border-radius:7px;background:#fff;cursor:pointer;font-size:.84rem;">Cancel</button>
-      <button id="modalSave" style="padding:8px 20px;background:#166534;color:#fff;border:none;border-radius:7px;cursor:pointer;font-size:.84rem;font-weight:700;">Save</button>
+      <button id="modalSave" style="padding:8px 20px;background:#C0211B;color:#fff;border:none;border-radius:7px;cursor:pointer;font-size:.84rem;font-weight:700;">Save</button>
     </div>
   </div>
 </div>

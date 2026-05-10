@@ -134,17 +134,17 @@ include 'includes/header.php';
 <style>
 /* ── Wizard Chrome ── */
 .wiz-wrap{max-width:900px;margin:0 auto;}
-.wiz-header{background:linear-gradient(135deg,#14532d,#166534);color:#fff;border-radius:12px;padding:16px 22px;margin-bottom:18px;display:flex;align-items:center;gap:14px;}
+.wiz-header{background:linear-gradient(135deg,#A01A14,#C0211B);color:#fff;border-radius:12px;padding:16px 22px;margin-bottom:18px;display:flex;align-items:center;gap:14px;}
 .wiz-header-icon{font-size:2.2rem;}
 .wiz-header h2{font-family:'Merriweather',serif;font-size:1.15rem;font-weight:700;line-height:1.2;}
 .wiz-header p{font-size:.75rem;opacity:.75;margin-top:2px;}
 .wiz-prog{display:flex;gap:6px;margin-bottom:18px;}
 .wiz-prog-step{flex:1;text-align:center;}
 .wiz-prog-bar{height:4px;border-radius:2px;margin-bottom:5px;background:#d1d5db;transition:background .3s;}
-.wiz-prog-bar.done{background:#166534;}
-.wiz-prog-bar.active{background:#4ade80;}
+.wiz-prog-bar.done{background:#C0211B;}
+.wiz-prog-bar.active{background:#f87171;}
 .wiz-prog-lbl{font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:#9ca3af;}
-.wiz-prog-lbl.active{color:#166534;}
+.wiz-prog-lbl.active{color:#C0211B;}
 
 /* ── Cards & Fields ── */
 .wiz-card{background:#fff;border-radius:12px;padding:20px 22px;margin-bottom:14px;box-shadow:0 1px 6px rgba(0,0,0,.07);}
@@ -154,14 +154,14 @@ include 'includes/header.php';
 .field-grid-3{grid-template-columns:1fr 1fr 1fr;}
 .f-lbl{display:block;font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#6b7280;margin-bottom:4px;}
 .f-inp{width:100%;padding:8px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:.88rem;box-sizing:border-box;background:#fff;}
-.f-inp:focus{outline:none;border-color:#166534;box-shadow:0 0 0 2px rgba(22,101,52,.15);}
-.pax-bar{margin-top:12px;padding:10px 14px;background:#f0fdf4;border-radius:8px;font-size:.82rem;color:#166534;display:flex;gap:16px;flex-wrap:wrap;}
+.f-inp:focus{outline:none;border-color:#C0211B;box-shadow:0 0 0 2px rgba(192,33,27,.15);}
+.pax-bar{margin-top:12px;padding:10px 14px;background:#fef2f2;border-radius:8px;font-size:.82rem;color:#C0211B;display:flex;gap:16px;flex-wrap:wrap;}
 
 /* ── Template picker ── */
 .tpl-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px;}
 .tpl-card{background:#fff;border-radius:12px;padding:18px;cursor:pointer;box-shadow:0 1px 6px rgba(0,0,0,.07);border:2px solid transparent;transition:border-color .15s;}
-.tpl-card:hover{border-color:#166534;}
-.tpl-card.selected{border-color:#166534;background:#f0fdf4;}
+.tpl-card:hover{border-color:#C0211B;}
+.tpl-card.selected{border-color:#C0211B;background:#fef2f2;}
 .tpl-icon{font-size:2.4rem;margin-bottom:6px;}
 .tpl-name{font-weight:700;font-size:.95rem;color:#111827;}
 .tpl-desc{font-size:.78rem;color:#6b7280;margin-top:3px;}
@@ -170,10 +170,10 @@ include 'includes/header.php';
 .day-list{margin-bottom:12px;}
 .day-card{background:#fff;border-radius:10px;margin-bottom:6px;box-shadow:0 1px 4px rgba(0,0,0,.07);overflow:hidden;}
 .day-head{display:flex;align-items:center;padding:10px 14px;cursor:pointer;gap:10px;user-select:none;}
-.day-num{background:#166534;color:#fff;border-radius:5px;padding:3px 7px;font-size:.72rem;font-weight:700;min-width:24px;text-align:center;}
+.day-num{background:#C0211B;color:#fff;border-radius:5px;padding:3px 7px;font-size:.72rem;font-weight:700;min-width:24px;text-align:center;}
 .day-loc{flex:1;font-weight:600;font-size:.88rem;}
 .day-lodge{font-size:.78rem;color:#6b7280;}
-.day-total{font-weight:700;font-size:.88rem;color:#166534;}
+.day-total{font-weight:700;font-size:.88rem;color:#C0211B;}
 .day-chevron{font-size:.7rem;color:#9ca3af;margin-left:4px;}
 .day-body{padding:0 14px 14px;border-top:1px solid #f3f4f6;}
 .day-fields{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;padding-top:12px;}
@@ -181,32 +181,32 @@ include 'includes/header.php';
 .day-items-lbl{font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#6b7280;margin-bottom:6px;}
 .item-row{display:flex;gap:6px;margin-bottom:5px;align-items:center;}
 .item-row .f-inp{font-size:.82rem;}
-.btn-add-item{font-size:.78rem;color:#166534;background:none;border:none;cursor:pointer;padding:0;}
+.btn-add-item{font-size:.78rem;color:#C0211B;background:none;border:none;cursor:pointer;padding:0;}
 .btn-rm{background:none;border:none;cursor:pointer;color:#ef4444;font-size:1.1rem;padding:0 4px;line-height:1;}
 
 /* ── Summary table ── */
 .sum-table{width:100%;border-collapse:collapse;font-size:.85rem;}
 .sum-table th{background:#f9fafb;padding:8px 12px;text-align:left;font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#6b7280;}
 .sum-table td{padding:8px 12px;border-bottom:1px solid #f3f4f6;}
-.sum-total-row{background:#166534;color:#fff;font-weight:700;font-size:1rem;}
+.sum-total-row{background:#C0211B;color:#fff;font-weight:700;font-size:1rem;}
 .sum-total-row td{padding:12px;}
 .kpi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:14px;}
 .kpi{background:#f9fafb;border-radius:8px;padding:10px 12px;border:1px solid #e5e7eb;}
-.kpi.hi{background:#f0fdf4;border-color:#bbf7d0;}
+.kpi.hi{background:#fef2f2;border-color:#fecaca;}
 .kpi-lbl{font-size:.65rem;text-transform:uppercase;letter-spacing:.05em;color:#6b7280;margin-bottom:3px;}
 .kpi-val{font-weight:700;font-size:1.1rem;color:#111827;}
-.kpi.hi .kpi-val{color:#166534;}
+.kpi.hi .kpi-val{color:#C0211B;}
 
 /* ── Nav buttons ── */
 .wiz-nav{display:flex;justify-content:space-between;margin-top:18px;gap:10px;}
 .btn-back{padding:10px 20px;border-radius:8px;border:1px solid #d1d5db;background:#fff;cursor:pointer;font-size:.88rem;color:#374151;}
-.btn-next{padding:10px 24px;border-radius:8px;border:none;background:#166534;color:#fff;cursor:pointer;font-size:.88rem;font-weight:700;margin-left:auto;}
+.btn-next{padding:10px 24px;border-radius:8px;border:none;background:#C0211B;color:#fff;cursor:pointer;font-size:.88rem;font-weight:700;margin-left:auto;}
 .btn-next:disabled{background:#9ca3af;cursor:not-allowed;}
-.btn-save{padding:12px 28px;border-radius:8px;border:none;background:#166534;color:#fff;cursor:pointer;font-size:.95rem;font-weight:700;width:100%;}
+.btn-save{padding:12px 28px;border-radius:8px;border:none;background:#C0211B;color:#fff;cursor:pointer;font-size:.95rem;font-weight:700;width:100%;}
 
 .markup-btns{display:flex;gap:8px;flex-wrap:wrap;align-items:center;}
 .mkbtn{padding:8px 16px;border-radius:8px;border:2px solid #d1d5db;background:#fff;cursor:pointer;font-size:.82rem;color:#374151;}
-.mkbtn.active{border-color:#166534;background:#f0fdf4;font-weight:700;color:#166534;}
+.mkbtn.active{border-color:#C0211B;background:#fef2f2;font-weight:700;color:#C0211B;}
 
 /* ── Safari items ── */
 .safari-card{background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:14px 16px;margin-bottom:12px;}
@@ -282,7 +282,7 @@ include 'includes/header.php';
 <div id="step3" style="display:none">
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
     <div style="font-size:.88rem;font-weight:600;color:#111827;" id="itinTitle">Itinerary</div>
-    <button onclick="addDay()" style="background:#166534;color:#fff;border:none;border-radius:8px;padding:7px 14px;cursor:pointer;font-size:.82rem;font-weight:700;">+ Add Day</button>
+    <button onclick="addDay()" style="background:#C0211B;color:#fff;border:none;border-radius:8px;padding:7px 14px;cursor:pointer;font-size:.82rem;font-weight:700;">+ Add Day</button>
   </div>
   <!-- Safari Fixed Costs (Emergency, Medivac, etc.) — once per safari -->
   <div class="safari-card">
@@ -340,7 +340,7 @@ include 'includes/header.php';
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
       <label class="f-lbl" style="margin:0;white-space:nowrap">Quote #</label>
       <input class="f-inp" id="fQuoteNum" value="<?= h($nextQuoteNum) ?>" style="width:72px;font-family:monospace;font-weight:700" placeholder="01" oninput="updateFnamePreview()">
-      <span style="font-size:.82rem;color:#6b7280">_<span id="fnameCustomer" style="color:#166534;font-family:monospace;font-weight:600"></span>.xlsx</span>
+      <span style="font-size:.82rem;color:#6b7280">_<span id="fnameCustomer" style="color:#C0211B;font-family:monospace;font-weight:600"></span>.xlsx</span>
     </div>
     <div style="font-size:.78rem;color:#9ca3af;margin-bottom:16px;">Number auto-assigned if blank; you can override it manually.</div>
     <button class="btn-save" id="btnSave" onclick="saveQuote()">💾 Save &amp; Generate Excel</button>
@@ -352,15 +352,15 @@ include 'includes/header.php';
 </div>
 
 <!-- Saved confirmation -->
-<div id="savedBox" style="display:none;background:#f0fdf4;border:1px solid #86efac;border-radius:12px;padding:28px;text-align:center;max-width:900px;margin:0 auto;">
+<div id="savedBox" style="display:none;background:#fef2f2;border:1px solid #86efac;border-radius:12px;padding:28px;text-align:center;max-width:900px;margin:0 auto;">
   <div style="font-size:2.5rem;margin-bottom:8px;">✅</div>
-  <div style="font-weight:700;color:#166534;font-size:1.1rem;margin-bottom:4px;">Quote saved!</div>
+  <div style="font-weight:700;color:#C0211B;font-size:1.1rem;margin-bottom:4px;">Quote saved!</div>
   <div id="savedFilename" style="font-size:.85rem;color:#6b7280;margin-bottom:16px;font-family:monospace;"></div>
   <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;">
     <button onclick="location.href='quote_view.php?id='+window._savedId"
-      style="padding:9px 20px;border-radius:8px;border:none;background:#166534;color:#fff;cursor:pointer;font-size:.88rem;font-weight:700;">View Quote</button>
+      style="padding:9px 20px;border-radius:8px;border:none;background:#C0211B;color:#fff;cursor:pointer;font-size:.88rem;font-weight:700;">View Quote</button>
     <button onclick="window.open('api_export_quote.php?id='+window._savedId,'_blank')"
-      style="padding:9px 20px;border-radius:8px;border:1px solid #166534;background:#fff;color:#166534;cursor:pointer;font-size:.88rem;font-weight:700;">⬇ Download Excel</button>
+      style="padding:9px 20px;border-radius:8px;border:1px solid #C0211B;background:#fff;color:#C0211B;cursor:pointer;font-size:.88rem;font-weight:700;">⬇ Download Excel</button>
     <a href="request_view.php?id=<?= $req['id'] ?>"
       style="padding:9px 20px;border-radius:8px;border:1px solid #d1d5db;background:#fff;color:#374151;cursor:pointer;font-size:.88rem;text-decoration:none;">Back to Request</a>
   </div>
@@ -823,7 +823,7 @@ function buildDayCard(d, idx) {
       +'</div>'
       // Footer
       +'<div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px">'
-        +'<div style="font-size:.8rem;color:#166534;font-weight:600" data-dft>Day total: '+fmt(dc)+'</div>'
+        +'<div style="font-size:.8rem;color:#C0211B;font-weight:600" data-dft>Day total: '+fmt(dc)+'</div>'
         +'<button onclick="removeDay(\''+d.id+'\')" style="font-size:.78rem;color:#ef4444;background:none;border:none;cursor:pointer;">🗑 Remove</button>'
       +'</div>'
     +'</div>';
@@ -929,7 +929,7 @@ function renderSummary() {
   var foot='<tr style="font-weight:700;background:#f9fafb">'
     +'<td colspan="3" style="text-align:right;padding:9px 12px">Net Total Costs</td>'
     +'<td style="text-align:right;font-family:monospace;padding:9px 12px">'+fmt(tot.costs)+'</td></tr>'
-    +'<tr style="color:#166534">'
+    +'<tr style="color:#C0211B">'
     +'<td colspan="3" style="text-align:right;font-size:.82rem;padding:7px 12px">Markup ('+(tot.mk*100).toFixed(0)+'%)</td>'
     +'<td style="text-align:right;font-family:monospace;font-size:.82rem;padding:7px 12px">+ '+fmt(tot.costs*tot.mk)+'</td></tr>'
     +'<tr class="sum-total-row">'

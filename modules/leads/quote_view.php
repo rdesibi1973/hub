@@ -49,7 +49,7 @@ include 'includes/header.php';
 
 <style>
 .qv-wrap{max-width:900px;margin:0 auto;}
-.qv-header{background:linear-gradient(135deg,#14532d,#166534);color:#fff;border-radius:12px;padding:16px 22px;margin-bottom:18px;display:flex;align-items:center;gap:14px;}
+.qv-header{background:linear-gradient(135deg,#A01A14,#C0211B);color:#fff;border-radius:12px;padding:16px 22px;margin-bottom:18px;display:flex;align-items:center;gap:14px;}
 .qv-header h2{font-family:'Merriweather',serif;font-size:1.15rem;font-weight:700;}
 .qv-header p{font-size:.75rem;opacity:.75;margin-top:2px;}
 .qv-card{background:#fff;border-radius:12px;padding:20px 22px;margin-bottom:14px;box-shadow:0 1px 6px rgba(0,0,0,.07);}
@@ -59,14 +59,14 @@ include 'includes/header.php';
 .info-cell .val{font-size:.9rem;font-weight:600;color:#111827;}
 .day-row:hover{background:#fbf8f5;}
 .day-row td{padding:8px 12px;border-bottom:1px solid #f3f4f6;font-size:.85rem;}
-.badge-final{background:#dcfce7;color:#166534;border-radius:4px;padding:2px 8px;font-size:.72rem;font-weight:700;}
+.badge-final{background:#fee2e2;color:#C0211B;border-radius:4px;padding:2px 8px;font-size:.72rem;font-weight:700;}
 .badge-draft{background:#fef3c7;color:#92400e;border-radius:4px;padding:2px 8px;font-size:.72rem;font-weight:700;}
 .kpi-row{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:14px;}
 .kpi{background:#f9fafb;border-radius:8px;padding:10px 12px;border:1px solid #e5e7eb;}
-.kpi.hi{background:#f0fdf4;border-color:#bbf7d0;}
+.kpi.hi{background:#fef2f2;border-color:#fecaca;}
 .kpi .lbl{font-size:.65rem;text-transform:uppercase;letter-spacing:.05em;color:#6b7280;margin-bottom:3px;}
 .kpi .val{font-weight:700;font-size:1.05rem;color:#111827;}
-.kpi.hi .val{color:#166534;}
+.kpi.hi .val{color:#C0211B;}
 </style>
 
 <div class="qv-wrap">
@@ -152,7 +152,7 @@ include 'includes/header.php';
           <td></td>
           <td colspan="5" style="padding:2px 12px 10px;">
             <?php foreach ($dayItems as $it): ?>
-              <span style="display:inline-block;background:#f0fdf4;color:#166534;border-radius:4px;padding:1px 8px;font-size:.72rem;margin:2px 3px 0 0;">
+              <span style="display:inline-block;background:#fef2f2;color:#C0211B;border-radius:4px;padding:1px 8px;font-size:.72rem;margin:2px 3px 0 0;">
                 <?= h($it['description']) ?>
                 (<?= $it['item_type'] === 'pax' ? '$'.$it['amount'].'/pax' : '$'.$it['amount'].' fixed' ?>)
               </span>
@@ -171,11 +171,11 @@ include 'includes/header.php';
           <td colspan="5" style="padding:9px 12px;text-align:right;">Net Total Costs</td>
           <td style="padding:9px 12px;text-align:right;font-family:monospace;">$<?= number_format((float)$quote['total_costs'], 0, '.', ',') ?></td>
         </tr>
-        <tr style="color:#166534;">
+        <tr style="color:#C0211B;">
           <td colspan="5" style="padding:7px 12px;text-align:right;font-size:.82rem;">Markup (<?= number_format($quote['markup_pct'], 0) ?>%)</td>
           <td style="padding:7px 12px;text-align:right;font-family:monospace;font-size:.82rem;">+ $<?= number_format((float)$quote['total_costs'] * $mk, 0, '.', ',') ?></td>
         </tr>
-        <tr style="background:#166534;color:#fff;font-weight:700;font-size:1rem;">
+        <tr style="background:#C0211B;color:#fff;font-weight:700;font-size:1rem;">
           <td colspan="5" style="padding:13px 12px;text-align:right;">TOTAL PRICE</td>
           <td style="padding:13px 12px;text-align:right;font-family:monospace;">$<?= number_format((float)$quote['total_price'], 0, '.', ',') ?></td>
         </tr>

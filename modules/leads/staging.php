@@ -266,7 +266,7 @@ select:focus,input:focus{outline:none;border-color:#C0211B;box-shadow:0 0 0 2px 
         <!-- Folder preview -->
         <div id="folderPreviewRow" style="margin-bottom:10px;display:none;">
           <label style="font-size:.75rem;font-weight:600;display:block;margin-bottom:4px">📁 Cartella Dropbox</label>
-          <div id="folderPreviewBox" style="background:#F0FDF4;border:1px solid #86EFAC;border-radius:6px;padding:8px 12px;font-family:monospace;font-size:.82rem;color:#166534;word-break:break-all;"></div>
+          <div id="folderPreviewBox" style="background:#fef2f2;border:1px solid #fecaca;border-radius:6px;padding:8px 12px;font-family:monospace;font-size:.82rem;color:#C0211B;word-break:break-all;"></div>
         </div>
         <!-- Notify agent checkbox -->
         <div style="margin:6px 0 12px;">
