@@ -297,7 +297,7 @@ foreach ($lodgesDef as $ld) {
                 if (!$dry) {
                     $db->prepare("
                         INSERT INTO lodge_prices (room_type_id, season_id, meal_plan, price_basis, $paxCol)
-                        VALUES (?,?,?,'per_room',?)
+                        VALUES (?,?,?,'per_person',?)
                         ON DUPLICATE KEY UPDATE $paxCol = VALUES($paxCol)
                     ")->execute([$rtInfo['id'], $seasonId, $mealPlan, $amount]);
                 }
