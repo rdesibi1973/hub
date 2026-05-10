@@ -35,6 +35,11 @@ $rStmt2->execute([$id]);
 $roomsByDay = [];
 foreach ($rStmt2->fetchAll() as $rm) $roomsByDay[$rm['quote_day_id']][] = $rm;
 
+// Load safari fixed items (Emergency, Medivac, etc.)
+$siStmt = $db->prepare("SELECT * FROM quote_safari_items WHERE quote_id = ? ORDER BY id");
+$siStmt->execute([$id]);
+$safariItems = $siStmt->fetchAll();
+
 // Load request
 $rStmt = $db->prepare("SELECT id, practice_code, customer_name FROM requests WHERE id = ?");
 $rStmt->execute([$quote['request_id']]);
@@ -140,6 +145,38 @@ include 'includes/header.php';
         </tr>
       </thead>
       <tbody>
+        <?php
+        // ── Safari fixed costs (Emergency, Medivac…) ──────────────────────────
+        if ($safariItems):
+            $safariTotal = 0;
+            foreach ($safariItems as $si) {
+                $safariTotal += $si['item_type'] === 'pax'
+                    ? (float)$si['amount'] * $pax
+                    : (float)$si['amount'];
+            }
+        ?>
+        <tr style="background:#fffbeb;">
+          <td colspan="7" style="padding:7px 12px;font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#92400e;">Safari Fixed Costs</td>
+        </tr>
+        <?php foreach ($safariItems as $si):
+          $siTotal = $si['item_type'] === 'pax'
+              ? (float)$si['amount'] * $pax
+              : (float)$si['amount'];
+          $siNote  = $si['item_type'] === 'pax'
+              ? '$'.(float)$si['amount'].' × '.$pax.' pax'
+              : 'fixed';
+        ?>
+        <tr style="background:#fffbeb;">
+          <td style="padding:6px 12px;"></td>
+          <td colspan="5" style="padding:6px 12px;font-size:.82rem;color:#92400e;">
+            <?= h($si['description']) ?>
+            <span style="font-size:.72rem;color:#b45309;margin-left:6px;">(<?= $siNote ?>)</span>
+          </td>
+          <td style="padding:6px 12px;text-align:right;font-family:monospace;color:#92400e;">$<?= number_format($siTotal, 0) ?></td>
+        </tr>
+        <?php endforeach; ?>
+        <?php endif; ?>
+
         <?php foreach ($days as $d):
           $dayItems = $itemsByDay[$d['id']] ?? [];
           $dayRooms = $roomsByDay[$d['id']] ?? [];
@@ -177,20 +214,26 @@ include 'includes/header.php';
         <?php endforeach; ?>
       </tbody>
       <tfoot>
+        <?php if (!empty($safariItems)): ?>
         <tr style="border-top:2px solid #e5e7eb;">
-          <td colspan="5" style="padding:9px 12px;text-align:right;color:#6b7280;font-size:.82rem;">Bank Commission</td>
-          <td style="padding:9px 12px;text-align:right;font-family:monospace;color:#6b7280;">$<?= number_format((float)$quote['bank_commission'], 0) ?></td>
+          <td colspan="6" style="padding:7px 12px;text-align:right;color:#b45309;font-size:.82rem;">Safari Fixed Total</td>
+          <td style="padding:7px 12px;text-align:right;font-family:monospace;color:#b45309;">$<?= number_format($safariTotal ?? 0, 0) ?></td>
         </tr>
-        <tr style="font-weight:700;background:#f9fafb;">
-          <td colspan="5" style="padding:9px 12px;text-align:right;">Net Total Costs</td>
+        <?php endif; ?>
+        <tr <?= empty($safariItems) ? 'style="border-top:2px solid #e5e7eb;"' : '' ?>>
+          <td colspan="6" style="padding:7px 12px;text-align:right;color:#6b7280;font-size:.82rem;">Bank Commission</td>
+          <td style="padding:7px 12px;text-align:right;font-family:monospace;color:#6b7280;">$<?= number_format((float)$quote['bank_commission'], 0) ?></td>
+        </tr>
+        <tr style="font-weight:700;background:#f9fafb;border-top:2px solid #e5e7eb;">
+          <td colspan="6" style="padding:9px 12px;text-align:right;">Net Total Costs</td>
           <td style="padding:9px 12px;text-align:right;font-family:monospace;">$<?= number_format((float)$quote['total_costs'], 0, '.', ',') ?></td>
         </tr>
         <tr style="color:#C0211B;">
-          <td colspan="5" style="padding:7px 12px;text-align:right;font-size:.82rem;">Markup (<?= number_format($quote['markup_pct'], 0) ?>%)</td>
+          <td colspan="6" style="padding:7px 12px;text-align:right;font-size:.82rem;">Markup (<?= number_format($quote['markup_pct'], 0) ?>%)</td>
           <td style="padding:7px 12px;text-align:right;font-family:monospace;font-size:.82rem;">+ $<?= number_format((float)$quote['total_costs'] * $mk, 0, '.', ',') ?></td>
         </tr>
         <tr style="background:#C0211B;color:#fff;font-weight:700;font-size:1rem;">
-          <td colspan="5" style="padding:13px 12px;text-align:right;">TOTAL PRICE</td>
+          <td colspan="6" style="padding:13px 12px;text-align:right;">TOTAL PRICE</td>
           <td style="padding:13px 12px;text-align:right;font-family:monospace;">$<?= number_format((float)$quote['total_price'], 0, '.', ',') ?></td>
         </tr>
       </tfoot>
