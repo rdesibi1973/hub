@@ -85,45 +85,71 @@ try {
     ]);
     $quoteId = (int)$db->lastInsertId();
 
+    $validJeep = ['none','half','full','double','contribution'];
+    $validPark = ['none','tarangire','manyara','serengeti1','serengeti2','crater','custom'];
+    $validType = ['pax','fixed'];
+
+    // Insert safari-level fixed items (Emergency, Medivac, etc.)
+    $insSafariStmt = $db->prepare("
+        INSERT INTO quote_safari_items (quote_id, activity_rate_id, description, item_type, amount)
+        VALUES (?,?,?,?,?)
+    ");
+    foreach (($body['safari_items'] ?? []) as $si) {
+        $iType = in_array($si['item_type'] ?? '', $validType) ? $si['item_type'] : 'pax';
+        $insSafariStmt->execute([
+            $quoteId,
+            (int)($si['activity_rate_id'] ?? 0) ?: null,
+            substr(trim($si['description'] ?? ''), 0, 500),
+            $iType,
+            max(0, (float)($si['amount'] ?? 0)),
+        ]);
+    }
+
     // Insert days
     $insDayStmt = $db->prepare("
         INSERT INTO quote_days
-          (quote_id, day_number, location, lodge, lodge_id, room_type_id,
-           lodge_custom, jeep, drinks, park, park_custom, flight, flight_custom, day_total)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+          (quote_id, day_number, route, attraction, lodge, lodge_id, room_type_id,
+           lodge_custom, jeep, jeep_rate_custom, drinks, park, park_custom,
+           flight, flight_route_id, flight_custom,
+           transfer_rate_id, transfer_custom, day_total)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     ");
     $insItemStmt = $db->prepare("
         INSERT INTO quote_day_items (quote_day_id, description, item_type, amount)
         VALUES (?,?,?,?)
     ");
 
-    $validJeep   = ['none','half','full'];
-    $validPark   = ['none','tarangire','manyara','serengeti1','serengeti2','crater','custom'];
-    $validFlight = ['none','znz','custom'];
-    $validType   = ['pax','fixed'];
-
     foreach ($days as $dayNum => $d) {
-        $jeep   = in_array($d['jeep']   ?? '', $validJeep)   ? $d['jeep']   : 'full';
-        $park   = in_array($d['park']   ?? '', $validPark)   ? $d['park']   : 'none';
-        $flight = in_array($d['flight'] ?? '', $validFlight) ? $d['flight'] : 'none';
+        $jeep = in_array($d['jeep'] ?? '', $validJeep) ? $d['jeep'] : 'full';
+        $park = in_array($d['park'] ?? '', $validPark)  ? $d['park'] : 'none';
 
-        $lodgeId2    = (int)($d['lodge_id']     ?? 0) ?: null;
-        $roomTypeId2 = (int)($d['room_type_id'] ?? 0) ?: null;
+        $lodgeId2        = (int)($d['lodge_id']        ?? 0) ?: null;
+        $roomTypeId2     = (int)($d['room_type_id']    ?? 0) ?: null;
+        $flightRouteId   = (int)($d['flight_route_id'] ?? 0) ?: null;
+        $transferRateId  = (int)($d['transfer_rate_id']?? 0) ?: null;
+        $jeepRateCustom  = isset($d['jeep_rate_custom']) && $d['jeep_rate_custom'] !== null
+                           ? max(0, (float)$d['jeep_rate_custom']) : null;
+
         $insDayStmt->execute([
             $quoteId,
             $dayNum + 1,
-            substr(trim($d['location'] ?? ''), 0, 200),
-            substr(trim($d['lodge']    ?? ''), 0, 200),
+            substr(trim($d['route']      ?? $d['location'] ?? ''), 0, 200),
+            substr(trim($d['attraction'] ?? ''), 0, 200),
+            substr(trim($d['lodge']      ?? ''), 0, 200),
             $lodgeId2,
             $roomTypeId2,
-            max(0, (float)($d['lodge_custom']  ?? 0)),
+            max(0, (float)($d['lodge_custom']   ?? 0)),
             $jeep,
+            $jeepRateCustom,
             (int)($d['drinks'] ?? 1),
             $park,
-            max(0, (float)($d['park_custom']   ?? 0)),
-            $flight,
-            max(0, (float)($d['flight_custom'] ?? 0)),
-            max(0, (float)($d['day_total']     ?? 0)),
+            max(0, (float)($d['park_custom']    ?? 0)),
+            'none',  // legacy flight column
+            $flightRouteId,
+            max(0, (float)($d['flight_custom']  ?? 0)),
+            $transferRateId,
+            max(0, (float)($d['transfer_custom']?? 0)),
+            max(0, (float)($d['day_total']      ?? 0)),
         ]);
         $dayId = (int)$db->lastInsertId();
 
