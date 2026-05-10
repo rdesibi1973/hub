@@ -100,6 +100,28 @@ try {
     }
 } catch (\Throwable $e) { /* pricing tables not yet created — wizard still works without lodge prices */ }
 
+// Load v2 pricing tables (graceful fallback if not yet migrated)
+try {
+    $jeepRates = $db->query("SELECT id, type, valid_from, valid_to, rate FROM jeep_rates ORDER BY type, valid_from DESC")->fetchAll(PDO::FETCH_ASSOC);
+    foreach ($jeepRates as &$r) { $r['id']=(int)$r['id']; $r['rate']=(float)$r['rate']; } unset($r);
+
+    $activityRates = $db->query("SELECT id, name, category, item_type, valid_from, valid_to, rate FROM activity_rates WHERE active=1 ORDER BY category, name")->fetchAll(PDO::FETCH_ASSOC);
+    foreach ($activityRates as &$r) { $r['id']=(int)$r['id']; $r['rate']=(float)$r['rate']; } unset($r);
+
+    $flightRoutes = $db->query("SELECT id, route_name, origin, destination, airline, valid_from, valid_to, rate_pax FROM flight_routes WHERE active=1 ORDER BY route_name, airline")->fetchAll(PDO::FETCH_ASSOC);
+    foreach ($flightRoutes as &$r) { $r['id']=(int)$r['id']; $r['rate_pax']=(float)$r['rate_pax']; } unset($r);
+
+    $decoded = json_decode($pricingJson, true) ?? [];
+    $pricingJson = json_encode(array_merge($decoded, [
+        'jeep_rates'     => $jeepRates,
+        'activity_rates' => $activityRates,
+        'flight_routes'  => $flightRoutes,
+    ]));
+} catch (\Throwable $e) {
+    $decoded = json_decode($pricingJson, true) ?? ['lodges'=>[],'parks'=>[],'routes'=>[]];
+    $pricingJson = json_encode(array_merge($decoded, ['jeep_rates'=>[],'activity_rates'=>[],'flight_routes'=>[]]));
+}
+
 include 'includes/header.php';
 ?>
 
@@ -179,6 +201,13 @@ include 'includes/header.php';
 .markup-btns{display:flex;gap:8px;flex-wrap:wrap;align-items:center;}
 .mkbtn{padding:8px 16px;border-radius:8px;border:2px solid #d1d5db;background:#fff;cursor:pointer;font-size:.82rem;color:#374151;}
 .mkbtn.active{border-color:#166534;background:#f0fdf4;font-weight:700;color:#166534;}
+
+/* ── Safari items ── */
+.safari-card{background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:14px 16px;margin-bottom:12px;}
+.safari-card h3{font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.09em;color:#92400e;margin-bottom:10px;}
+.safari-total{font-size:.78rem;color:#92400e;font-weight:600;margin-top:8px;}
+/* ── Rate badge next to inputs ── */
+.rate-db{font-size:.68rem;color:#9ca3af;font-weight:400;}
 </style>
 
 <div class="wiz-wrap">
@@ -249,6 +278,16 @@ include 'includes/header.php';
     <div style="font-size:.88rem;font-weight:600;color:#111827;" id="itinTitle">Itinerary</div>
     <button onclick="addDay()" style="background:#166534;color:#fff;border:none;border-radius:8px;padding:7px 14px;cursor:pointer;font-size:.82rem;font-weight:700;">+ Add Day</button>
   </div>
+  <!-- Safari Fixed Costs (Emergency, Medivac, etc.) — once per safari -->
+  <div class="safari-card">
+    <h3>Safari Fixed Costs <span class="rate-db">(once per safari, not per day)</span></h3>
+    <div id="safariItemsList"></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;">
+      <button class="btn-add-item" onclick="addSafariItem()">+ Add item</button>
+      <div class="safari-total">Safari total: <span id="safariItemsTotal">$0</span></div>
+    </div>
+  </div>
+
   <div class="day-list" id="dayList"></div>
   <div class="wiz-nav">
     <button class="btn-back" onclick="goTo(2)">← Back</button>
@@ -280,7 +319,7 @@ include 'includes/header.php';
     <table class="sum-table">
       <thead>
         <tr>
-          <th>Day</th><th>Location</th><th>Lodge</th><th style="text-align:right">Cost</th>
+          <th>Day</th><th>Route / Destination</th><th>Lodge</th><th style="text-align:right">Cost</th>
         </tr>
       </thead>
       <tbody id="sumRows"></tbody>
@@ -322,7 +361,7 @@ include 'includes/header.php';
 </div><!-- .wiz-wrap -->
 
 <script>
-// ── Data constants ────────────────────────────────────────────────────────────
+// ── Data ──────────────────────────────────────────────────────────────────────
 const PRICING_DATA = <?= $pricingJson ?>;
 
 const PARK_FEES = {
@@ -334,76 +373,85 @@ const PARK_FEES = {
   crater:     {l:'Ngorongoro Crater', ppp:83, fx:295},
   custom:     {l:'Custom',     ppp:0,   fx:0},
 };
-const FLIGHTS = {
-  none:   {l:'—',                      ppp:0},
-  znz:    {l:'Arusha → Zanzibar',      ppp:210},
-  custom: {l:'Custom',                  ppp:0},
-};
+// Default day object factory
+function mkDay(o) {
+  return Object.assign({
+    id:uid(), route:'', attraction:'',
+    lodge_id:0, room_type_id:0, lodge_custom_total:0,
+    jeep:'full', jeep_rate_custom:null,
+    park:'none', parkCust:'',
+    flight_route_id:0, flight_custom:'',
+    transfer_rate_id:0, transfer_custom:'',
+    items:[], drinks:true
+  }, o||{});
+}
+
 const TEMPLATES = {
   simba: {
     name:'Simba Safari', icon:'🦁', desc:'6 days · Safari Tanzania',
     days:[
-      {loc:'Kili-Arusha',   lodge_id:0, room_type_id:0, jeep:'half', park:'none',       flight:'none', items:[{d:'Emergency',t:'p',a:'30'}],   drinks:true},
-      {loc:'Tarangire',     lodge_id:0, room_type_id:0, jeep:'full', park:'tarangire',  flight:'none', items:[{d:'Lunch boxes',t:'p',a:'10'}], drinks:true},
-      {loc:'Serengeti',     lodge_id:0, room_type_id:0, jeep:'full', park:'serengeti1', flight:'none', items:[],                               drinks:true},
-      {loc:'Serengeti',     lodge_id:0, room_type_id:0, jeep:'full', park:'serengeti2', flight:'none', items:[],                               drinks:true},
-      {loc:'Crater-Karatu', lodge_id:0, room_type_id:0, jeep:'full', park:'crater',     flight:'none', items:[{d:'MEDIVAC',t:'p',a:'5'}],      drinks:true},
-      {loc:'Karatu-JRO',    lodge_id:0, room_type_id:0, jeep:'full', park:'none',       flight:'none', items:[{d:'Natural Walk',t:'f',a:'20'}],drinks:true},
+      {route:'Kili-Arusha',   attraction:'',                  jeep:'half', park:'none'},
+      {route:'Tarangire',     attraction:'Tarangire NP',      jeep:'full', park:'tarangire',  items:[{d:'Lunch boxes',t:'p',a:'10'}]},
+      {route:'Serengeti',     attraction:'Serengeti NP',      jeep:'full', park:'serengeti1'},
+      {route:'Serengeti',     attraction:'Serengeti NP',      jeep:'full', park:'serengeti2'},
+      {route:'Crater-Karatu', attraction:'Ngorongoro Crater', jeep:'full', park:'crater'},
+      {route:'Karatu-JRO',    attraction:'',                  jeep:'full', park:'none',       items:[{d:'Natural Walk',t:'f',a:'20'}]},
     ]
   },
   beachkiboko: {
     name:'Beach Kiboko', icon:'🏖️', desc:'14 days · Safari + Zanzibar',
     days:[
-      {loc:'Kili-Arusha',   lodge_id:0, room_type_id:0, jeep:'half', park:'none',       flight:'none', items:[{d:'Emergency',t:'p',a:'30'}],          drinks:true},
-      {loc:'Tarangire',     lodge_id:0, room_type_id:0, jeep:'full', park:'tarangire',  flight:'none', items:[{d:'Lunch boxes',t:'p',a:'10'}],        drinks:true},
-      {loc:'Manyara',       lodge_id:0, room_type_id:0, jeep:'full', park:'manyara',    flight:'none', items:[],                                        drinks:true},
-      {loc:'Serengeti',     lodge_id:0, room_type_id:0, jeep:'full', park:'serengeti1', flight:'none', items:[],                                        drinks:true},
-      {loc:'Serengeti',     lodge_id:0, room_type_id:0, jeep:'full', park:'serengeti2', flight:'none', items:[],                                        drinks:true},
-      {loc:'Crater-Karatu', lodge_id:0, room_type_id:0, jeep:'full', park:'crater',     flight:'none', items:[{d:'MEDIVAC',t:'p',a:'5'}],              drinks:true},
-      {loc:'Karatu-ZNZ',    lodge_id:0, room_type_id:0, jeep:'full', park:'none',       flight:'znz',  items:[{d:'NatWalk+Transfer',t:'f',a:'80'}],    drinks:true},
-      {loc:'Zanzibar',      lodge_id:0, room_type_id:0, jeep:'none', park:'none',       flight:'none', items:[], drinks:false},
-      {loc:'Zanzibar',      lodge_id:0, room_type_id:0, jeep:'none', park:'none',       flight:'none', items:[], drinks:false},
-      {loc:'Zanzibar',      lodge_id:0, room_type_id:0, jeep:'none', park:'none',       flight:'none', items:[], drinks:false},
-      {loc:'Zanzibar',      lodge_id:0, room_type_id:0, jeep:'none', park:'none',       flight:'none', items:[], drinks:false},
-      {loc:'Zanzibar',      lodge_id:0, room_type_id:0, jeep:'none', park:'none',       flight:'none', items:[], drinks:false},
-      {loc:'Zanzibar',      lodge_id:0, room_type_id:0, jeep:'none', park:'none',       flight:'none', items:[], drinks:false},
-      {loc:'ZNZ-Home',      lodge_id:0, room_type_id:0, jeep:'none', park:'none',       flight:'none', items:[{d:'Transfer',t:'f',a:'60'}],            drinks:false},
+      {route:'Kili-Arusha',   attraction:'',                  jeep:'half', park:'none'},
+      {route:'Tarangire',     attraction:'Tarangire NP',      jeep:'full', park:'tarangire',  items:[{d:'Lunch boxes',t:'p',a:'10'}]},
+      {route:'Manyara',       attraction:'Lake Manyara NP',   jeep:'full', park:'manyara'},
+      {route:'Serengeti',     attraction:'Serengeti NP',      jeep:'full', park:'serengeti1'},
+      {route:'Serengeti',     attraction:'Serengeti NP',      jeep:'full', park:'serengeti2'},
+      {route:'Crater-Karatu', attraction:'Ngorongoro Crater', jeep:'full', park:'crater'},
+      {route:'Karatu-ZNZ',    attraction:'',                  jeep:'full', park:'none',       items:[{d:'NatWalk+Transfer',t:'f',a:'80'}]},
+      {route:'Zanzibar', attraction:'', jeep:'none', park:'none', drinks:false},
+      {route:'Zanzibar', attraction:'', jeep:'none', park:'none', drinks:false},
+      {route:'Zanzibar', attraction:'', jeep:'none', park:'none', drinks:false},
+      {route:'Zanzibar', attraction:'', jeep:'none', park:'none', drinks:false},
+      {route:'Zanzibar', attraction:'', jeep:'none', park:'none', drinks:false},
+      {route:'Zanzibar', attraction:'', jeep:'none', park:'none', drinks:false},
+      {route:'ZNZ-Home', attraction:'', jeep:'none', park:'none', drinks:false, items:[{d:'Transfer',t:'f',a:'60'}]},
     ]
   }
 };
 
 // ── State ─────────────────────────────────────────────────────────────────────
-const PRE     = <?= $prefill ?>;
-const BANK    = 100;
-const REQ_ID  = <?= $req['id'] ?>;
+const PRE    = <?= $prefill ?>;
+const BANK   = 100;
+const REQ_ID = <?= $req['id'] ?>;
 
-var state = {
-  step:    1,
-  program: null,
-  days:    [],
-  markup:  'standard',
-  custMk:  25,
-};
+var state = { step:1, program:null, days:[], safariItems:[], markup:'standard', custMk:25 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-function fmt(v) { return '$' + Math.round(v).toLocaleString('en-US'); }
-function uid()  { return Math.random().toString(36).slice(2); }
-
-function pax()   { return (+v('fAdults')||0) + (+v('fTeens')||0) + (+v('fChildren')||0); }
-function jeeps() { var p = pax(); return p > 7 ? Math.ceil(p/7) : 1; }
-function mkPct() {
-  if (state.markup === 'standard') return 0.25;
-  if (state.markup === 'to')       return 0.18;
-  return (+v('custMkVal') / 100) || 0.25;
-}
-
-function v(id)    { var el = document.getElementById(id); return el ? el.value : ''; }
+function fmt(n)   { return '$' + Math.round(n).toLocaleString('en-US'); }
+function uid()    { return Math.random().toString(36).slice(2); }
+function pax()    { return (+v('fAdults')||0)+(+v('fTeens')||0)+(+v('fChildren')||0); }
+function jeeps()  { var p=pax(); return p>7?Math.ceil(p/7):1; }
+function mkPct()  { if(state.markup==='standard')return 0.25; if(state.markup==='to')return 0.18; return(+v('custMkVal')/100)||0.25; }
+function v(id)    { var e=document.getElementById(id); return e?e.value:''; }
 function el(id)   { return document.getElementById(id); }
-function show(id) { el(id).style.display = ''; }
-function hide(id) { el(id).style.display = 'none'; }
-function qs(sel)  { return document.querySelector(sel); }
+function show(id) { el(id).style.display=''; }
+function hide(id) { el(id).style.display='none'; }
+function esc(s)   { return String(s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
 
-// ── Pricing DB helpers ────────────────────────────────────────────────────────
+// ── v2 pricing helpers ────────────────────────────────────────────────────────
+function getJeepRate(type, dateStr) {
+  var DEFAULTS={half:125,full:250,double:500,contribution:80};
+  var rates=(PRICING_DATA.jeep_rates||[]).filter(function(r){
+    if(r.type!==type)return false;
+    if(dateStr){if(r.valid_from&&dateStr<r.valid_from)return false; if(r.valid_to&&dateStr>r.valid_to)return false;}
+    return true;
+  });
+  return rates.length?parseFloat(rates[0].rate):(DEFAULTS[type]||0);
+}
+function getFlightRoute(id){return(PRICING_DATA.flight_routes||[]).find(function(r){return r.id==id;});}
+function getActivityRate(id){return(PRICING_DATA.activity_rates||[]).find(function(r){return r.id==id;});}
+
+// ── Lodge/pricing DB helpers ──────────────────────────────────────────────────
 function getDayDate(idx) {
   var sd = v('fDate');
   if (!sd) return null;
@@ -452,45 +500,110 @@ function getLodgeName(lodge_id) {
 }
 
 function calcDay(d, idx) {
-  var p = pax(), j = jeeps(), t = 0;
-  var adults = +v('fAdults') || 0;
-  if (d.lodge_id > 0 && d.room_type_id > 0) {
-    var dateStr = getDayDate(idx || 0);
-    t += getLodgePrice(d.lodge_id, d.room_type_id, dateStr, p);
-    t += getLodgeSupplements(d.lodge_id, dateStr, adults);
-  } else if (d.lodge_id === -1) {
-    t += +d.lodge_custom_total || 0;
+  var p=pax(), j=jeeps(), t=0, dateStr=getDayDate(idx||0), adults=+v('fAdults')||0;
+  // Lodge
+  if (d.lodge_id>0&&d.room_type_id>0) {
+    t+=getLodgePrice(d.lodge_id,d.room_type_id,dateStr,p);
+    t+=getLodgeSupplements(d.lodge_id,dateStr,adults);
+  } else if (d.lodge_id===-1) { t+=+d.lodge_custom_total||0; }
+  // Jeep (DB rate or user override)
+  if (d.jeep!=='none') {
+    var jr=(d.jeep_rate_custom!==null&&d.jeep_rate_custom!=='')?+d.jeep_rate_custom:getJeepRate(d.jeep,dateStr);
+    t+=jr*j;
   }
-  if (d.jeep === 'full') t += 250 * j;
-  if (d.jeep === 'half') t += 125 * j;
-  if (d.drinks) t += 4 * p;
-  if (d.park === 'custom') t += +d.parkCust || 0;
-  else { var pk = PARK_FEES[d.park]; if (pk) t += pk.fx + pk.ppp * p; }
-  if (d.flight === 'custom') t += +d.flightCust || 0;
-  else { var fl = FLIGHTS[d.flight]; if (fl) t += fl.ppp * p; }
-  d.items.forEach(function(a) { t += a.t === 'p' ? (+a.a||0) * p : (+a.a||0); });
+  // Drinks
+  if (d.drinks) t+=4*p;
+  // Park
+  if (d.park==='custom') t+=+d.parkCust||0;
+  else { var pk=PARK_FEES[d.park]; if(pk) t+=pk.fx+pk.ppp*p; }
+  // Flight (DB route or custom fixed)
+  if (d.flight_route_id>0) {
+    var flr=getFlightRoute(d.flight_route_id);
+    var flRate=(d.flight_custom!==''&&d.flight_custom!==null)?+d.flight_custom:(flr?parseFloat(flr.rate_pax):0);
+    t+=flRate*p;
+  } else if (d.flight_route_id===-1) { t+=+d.flight_custom||0; }
+  // Transfer (DB rate or custom)
+  if (d.transfer_rate_id>0) {
+    var tra=getActivityRate(d.transfer_rate_id);
+    var trRate=(d.transfer_custom!==''&&d.transfer_custom!==null)?+d.transfer_custom:(tra?parseFloat(tra.rate):0);
+    t+=tra&&tra.item_type==='pax'?trRate*p:trRate;
+  } else if (d.transfer_rate_id===-1) { t+=+d.transfer_custom||0; }
+  // Activity items
+  d.items.forEach(function(a){ t+=a.t==='p'?(+a.a||0)*p:(+a.a||0); });
   return t;
 }
 
+// ── Safari fixed costs (Emergency, Medivac…) ─────────────────────────────────
+function initSafariItems() {
+  var dateStr=v('fDate')||new Date().toISOString().slice(0,10);
+  state.safariItems=(PRICING_DATA.activity_rates||[])
+    .filter(function(r){
+      if(r.category!=='safari_fixed')return false;
+      if(r.valid_from&&dateStr<r.valid_from)return false;
+      if(r.valid_to&&dateStr>r.valid_to)return false;
+      return true;
+    })
+    .map(function(r){return{id:uid(),activity_rate_id:r.id,description:r.name,item_type:r.item_type,amount:r.rate};});
+  // Fallback: hardcoded defaults when DB is empty
+  if(!state.safariItems.length) {
+    state.safariItems=[
+      {id:uid(),activity_rate_id:null,description:'Emergency',item_type:'pax',amount:30},
+      {id:uid(),activity_rate_id:null,description:'Medivac',  item_type:'pax',amount:5},
+    ];
+  }
+}
+function calcSafariCost() {
+  var p=pax();
+  return state.safariItems.reduce(function(s,si){return s+(si.item_type==='pax'?(+si.amount||0)*p:(+si.amount||0));},0);
+}
+function renderSafariItems() {
+  var p=pax(), html='';
+  state.safariItems.forEach(function(si){
+    var tot=si.item_type==='pax'?(+si.amount||0)*p:(+si.amount||0);
+    html+='<div class="item-row" id="sir_'+si.id+'">'
+      +'<input class="f-inp" style="flex:2" placeholder="Description" value="'+esc(si.description)+'" oninput="updSafariItem(\''+si.id+'\',\'description\',this.value)">'
+      +'<select class="f-inp" style="flex:1" onchange="updSafariItem(\''+si.id+'\',\'item_type\',this.value)">'
+        +'<option value="pax"'+(si.item_type==='pax'?' selected':'')+'>$/pax</option>'
+        +'<option value="fixed"'+(si.item_type==='fixed'?' selected':'')+'>Fixed</option>'
+      +'</select>'
+      +'<input class="f-inp" type="number" style="width:64px" placeholder="$" value="'+esc(si.amount)+'" oninput="updSafariItem(\''+si.id+'\',\'amount\',this.value)">'
+      +'<span style="font-size:.72rem;color:#92400e;min-width:52px;text-align:right;font-weight:600">'+fmt(tot)+'</span>'
+      +'<button class="btn-rm" onclick="rmSafariItem(\''+si.id+'\')">×</button>'
+    +'</div>';
+  });
+  el('safariItemsList').innerHTML=html;
+  el('safariItemsTotal').textContent=fmt(calcSafariCost());
+}
+function addSafariItem() {
+  state.safariItems.push({id:uid(),activity_rate_id:null,description:'',item_type:'pax',amount:0});
+  renderSafariItems();
+}
+function updSafariItem(sid,field,val) {
+  var si=state.safariItems.find(function(x){return x.id===sid;});
+  if(si){si[field]=val; el('safariItemsTotal').textContent=fmt(calcSafariCost());}
+}
+function rmSafariItem(sid) {
+  state.safariItems=state.safariItems.filter(function(x){return x.id!==sid;});
+  renderSafariItems();
+}
+
 function calcTotals() {
-  var costs = state.days.reduce(function(s,d,i){ return s + calcDay(d,i); }, 0) + BANK;
-  var mk = mkPct();
-  var price = costs * (1 + mk);
-  var p = pax();
-  return { costs:costs, price:price, ppp:p>0?price/p:0, pppTo:p>0?costs*1.18/p:0, deposit:price*0.3, mk:mk };
+  var costs=state.days.reduce(function(s,d,i){return s+calcDay(d,i);},0)+calcSafariCost()+BANK;
+  var mk=mkPct(), price=costs*(1+mk), p=pax();
+  return{costs,price,ppp:p>0?price/p:0,pppTo:p>0?costs*1.18/p:0,deposit:price*0.3,mk};
 }
 
 // ── Step navigation ───────────────────────────────────────────────────────────
 function goTo(step) {
-  ['step1','step2','step3','step4'].forEach(function(id,i){ el(id).style.display = i+1===step?'':'none'; });
-  el('savedBox').style.display = 'none';
-  state.step = step;
+  ['step1','step2','step3','step4'].forEach(function(id,i){el(id).style.display=i+1===step?'':'none';});
+  el('savedBox').style.display='none';
+  state.step=step;
   ['bar1','bar2','bar3','bar4'].forEach(function(id,i){
-    el(id).className = 'wiz-prog-bar' + (i+1 < step ? ' done' : i+1 === step ? ' active' : '');
-    el('lbl'+(i+1)).className = 'wiz-prog-lbl' + (i+1 === step ? ' active' : '');
+    el(id).className='wiz-prog-bar'+(i+1<step?' done':i+1===step?' active':'');
+    el('lbl'+(i+1)).className='wiz-prog-lbl'+(i+1===step?' active':'');
   });
-  if (step === 3) renderDays();
-  if (step === 4) renderSummary();
+  if(step===3){renderDays();renderSafariItems();}
+  if(step===4) renderSummary();
 }
 
 // ── Step 1: Template picker ───────────────────────────────────────────────────
@@ -516,18 +629,22 @@ function goTo(step) {
 })();
 
 function selectTemplate(key) {
-  Object.keys(TEMPLATES).forEach(function(k){ el('tpl_'+k).className = 'tpl-card' + (k===key?' selected':''); });
-  state.program = key;
-  state.days = TEMPLATES[key].days.map(function(t){
-    return {id:uid(), loc:t.loc, lodge_id:t.lodge_id||0, room_type_id:t.room_type_id||0,
-            lodge_custom_total:0, jeep:t.jeep,
-            park:t.park, parkCust:'', flight:t.flight, flightCust:'',
-            items:t.items.map(function(a){return {id:uid(),d:a.d,t:a.t,a:a.a};}),
-            drinks:t.drinks};
+  Object.keys(TEMPLATES).forEach(function(k){el('tpl_'+k).className='tpl-card'+(k===key?' selected':'');});
+  state.program=key;
+  state.days=TEMPLATES[key].days.map(function(t){
+    return mkDay({
+      route:t.route||'', attraction:t.attraction||'',
+      lodge_id:t.lodge_id||0, room_type_id:t.room_type_id||0,
+      jeep:t.jeep||'full', park:t.park||'none',
+      flight_route_id:t.flight_route_id||0, transfer_rate_id:t.transfer_rate_id||0,
+      items:(t.items||[]).map(function(a){return{id:uid(),d:a.d,t:a.t,a:a.a};}),
+      drinks:t.drinks!==undefined?t.drinks:true,
+    });
   });
-  el('btnStep1Next').disabled = false;
-  el('progBadge').style.display = '';
-  el('progBadge').textContent = TEMPLATES[key].icon + ' ' + TEMPLATES[key].name;
+  initSafariItems();
+  el('btnStep1Next').disabled=false;
+  el('progBadge').style.display='';
+  el('progBadge').textContent=TEMPLATES[key].icon+' '+TEMPLATES[key].name;
 }
 
 // ── Step 2: Client data ───────────────────────────────────────────────────────
@@ -549,185 +666,196 @@ function updatePaxBar() {
 
 // ── Step 3: Day cards ─────────────────────────────────────────────────────────
 function addDay() {
-  state.days.push({id:uid(),loc:'',lodge_id:0,room_type_id:0,lodge_custom_total:0,jeep:'full',
-                   park:'none',parkCust:'',flight:'none',flightCust:'',items:[],drinks:true});
+  state.days.push(mkDay());
   renderDays();
 }
 
 function renderDays() {
-  var p = pax();
-  el('itinTitle').textContent = 'Itinerary — ' + state.days.length + ' days · ' + p + ' PAX';
-  var list = el('dayList');
-  list.innerHTML = '';
-  state.days.forEach(function(d, idx) { list.appendChild(buildDayCard(d, idx)); });
-  el('btnStep3Next').disabled = state.days.length === 0;
+  var p=pax();
+  el('itinTitle').textContent='Itinerary — '+state.days.length+' days · '+p+' PAX';
+  var list=el('dayList'); list.innerHTML='';
+  state.days.forEach(function(d,idx){list.appendChild(buildDayCard(d,idx));});
+  el('btnStep3Next').disabled=state.days.length===0;
+  renderSafariItems();
 }
 
 function buildDayCard(d, idx) {
-  var dc = calcDay(d);
-  var dateStr = '';
-  var sd = v('fDate');
-  if (sd) {
-    var dt = new Date(sd + 'T00:00:00');
-    dt.setDate(dt.getDate() + idx);
-    dateStr = dt.toLocaleDateString('en-GB',{day:'2-digit',month:'short'});
-  }
+  var dc=calcDay(d,idx), date=getDayDate(idx), dateStr='', sd=v('fDate');
+  if(sd){var dt=new Date(sd+'T00:00:00');dt.setDate(dt.getDate()+idx);dateStr=dt.toLocaleDateString('en-GB',{day:'2-digit',month:'short'});}
+  var wrap=document.createElement('div'); wrap.className='day-card'; wrap.id='dc_'+d.id;
 
-  var wrap = document.createElement('div');
-  wrap.className = 'day-card'; wrap.id = 'dc_'+d.id;
+  // Lodge options
+  var lodgeOpts='<option value="0">— None</option>';
+  (PRICING_DATA.lodges||[]).forEach(function(l){lodgeOpts+='<option value="'+l.id+'"'+(d.lodge_id==l.id?' selected':'')+'>'+esc(l.name)+(l.location?' · '+esc(l.location):'')+'</option>';});
+  lodgeOpts+='<option value="-1"'+(d.lodge_id==-1?' selected':'')+'>🔧 Custom (fixed total)</option>';
 
-  // Build lodge options from DB
-  var date = getDayDate(idx);
-  var lodgeOpts = '<option value="0">— None</option>';
-  (PRICING_DATA.lodges||[]).forEach(function(l){
-    lodgeOpts += '<option value="'+l.id+'"'+(d.lodge_id==l.id?' selected':'')+'>'+esc(l.name)+(l.location?' · '+esc(l.location):'')+'</option>';
-  });
-  lodgeOpts += '<option value="-1"'+(d.lodge_id==-1?' selected':'')+'>🔧 Custom (fixed total)</option>';
-
-  // Room type select (only when a DB lodge is selected)
-  var roomTypeHtml = '';
-  if (d.lodge_id > 0) {
-    var selLodge = (PRICING_DATA.lodges||[]).find(function(l){return l.id==d.lodge_id;});
-    if (selLodge && selLodge.room_types.length) {
-      var rtOpts = '<option value="0">— Select room type</option>';
-      selLodge.room_types.forEach(function(rt){
-        var price = getLodgePrice(d.lodge_id, rt.id, date, pax());
-        var priceLabel = price ? ' — $'+Math.round(price) : '';
-        rtOpts += '<option value="'+rt.id+'"'+(d.room_type_id==rt.id?' selected':'')+'>'+esc(rt.name)+priceLabel+'</option>';
-      });
-      roomTypeHtml = '<div><label class="f-lbl">Room Type</label><select class="f-inp" onchange="updDay(\''+d.id+'\',\'room_type_id\',parseInt(this.value))">'+rtOpts+'</select></div>';
-    } else if (selLodge) {
-      roomTypeHtml = '<div style="font-size:.75rem;color:#9ca3af;padding-top:20px">No room types defined for this lodge.</div>';
+  // Room type
+  var roomTypeHtml='<div></div>';
+  if(d.lodge_id>0){
+    var selLodge=(PRICING_DATA.lodges||[]).find(function(l){return l.id==d.lodge_id;});
+    if(selLodge&&selLodge.room_types.length){
+      var rtOpts='<option value="0">— Room type</option>';
+      selLodge.room_types.forEach(function(rt){var price=getLodgePrice(d.lodge_id,rt.id,date,pax());rtOpts+='<option value="'+rt.id+'"'+(d.room_type_id==rt.id?' selected':'')+'>'+esc(rt.name)+(price?' — $'+Math.round(price):'')+'</option>';});
+      roomTypeHtml='<div><label class="f-lbl">Room Type</label><select class="f-inp" onchange="updDay(\''+d.id+'\',\'room_type_id\',parseInt(this.value))">'+rtOpts+'</select></div>';
     }
-  } else if (d.lodge_id === -1) {
-    roomTypeHtml = '<div><label class="f-lbl">Custom Lodge Total ($)</label><input class="f-inp" type="number" min="0" placeholder="Fixed total" value="'+esc(d.lodge_custom_total||'')+'" oninput="updDay(\''+d.id+'\',\'lodge_custom_total\',parseFloat(this.value)||0)"></div>';
+  } else if(d.lodge_id===-1){
+    roomTypeHtml='<div><label class="f-lbl">Custom Lodge Total ($)</label><input class="f-inp" type="number" min="0" placeholder="Fixed total" value="'+esc(d.lodge_custom_total||'')+'" oninput="updDay(\''+d.id+'\',\'lodge_custom_total\',parseFloat(this.value)||0)"></div>';
   }
 
-  // Park options
-  var parkOpts = '';
-  Object.keys(PARK_FEES).forEach(function(k){
-    var pf = PARK_FEES[k];
-    var lbl = pf.l + (k!=='none'&&k!=='custom' ? ' ('+(pf.fx?'$'+pf.fx+'+':'')+'$'+pf.ppp+'/pax)' : '');
-    parkOpts += '<option value="'+k+'"'+(d.park===k?' selected':'')+'>'+lbl+'</option>';
-  });
+  // Jeep rate
+  var jeepDbRate=d.jeep!=='none'?getJeepRate(d.jeep,date):0;
+  var jeepRateVal=(d.jeep_rate_custom!==null&&d.jeep_rate_custom!=='')?d.jeep_rate_custom:jeepDbRate;
+  var jeepRateHtml=d.jeep!=='none'
+    ?'<div><label class="f-lbl">$/Jeep <span class="rate-db">(DB: $'+jeepDbRate+')</span></label><input class="f-inp" type="number" min="0" value="'+esc(jeepRateVal)+'" placeholder="'+jeepDbRate+'" oninput="updDay(\''+d.id+'\',\'jeep_rate_custom\',this.value===\'\'?null:+this.value)"></div>'
+    :'<div></div>';
 
-  // Flight options
-  var flOpts = '';
-  Object.keys(FLIGHTS).forEach(function(k){
-    var fl = FLIGHTS[k];
-    var lbl = fl.l + (k!=='none'&&k!=='custom' ? ' ($'+fl.ppp+'/pax)' : '');
-    flOpts += '<option value="'+k+'"'+(d.flight===k?' selected':'')+'>'+lbl+'</option>';
-  });
+  // Park
+  var parkOpts='';
+  Object.keys(PARK_FEES).forEach(function(k){var pf=PARK_FEES[k];parkOpts+='<option value="'+k+'"'+(d.park===k?' selected':'')+'>'+pf.l+(k!=='none'&&k!=='custom'?' ('+(pf.fx?'$'+pf.fx+'+':'')+'$'+pf.ppp+'/pax)':'')+'</option>';});
+  var parkCustomHtml=d.park==='custom'?'<input class="f-inp" type="number" style="margin-top:5px" placeholder="Total $" value="'+esc(d.parkCust)+'" oninput="updDay(\''+d.id+'\',\'parkCust\',this.value)">':'';
 
-  // Items rows
-  var itemsHtml = '';
-  d.items.forEach(function(a){
-    itemsHtml += '<div class="item-row" id="ir_'+a.id+'">'
-      +'<input class="f-inp" style="flex:2" placeholder="Description" value="'+esc(a.d)+'" oninput="updItem(\''+d.id+'\',\''+a.id+'\',\'d\',this.value)">'
-      +'<select class="f-inp" style="flex:1" onchange="updItem(\''+d.id+'\',\''+a.id+'\',\'t\',this.value)">'
-        +'<option value="p"'+(a.t==='p'?' selected':'')+'>$/pax</option>'
-        +'<option value="f"'+(a.t==='f'?' selected':'')+'>Fixed</option>'
-      +'</select>'
-      +'<input class="f-inp" type="number" style="width:64px" placeholder="$" value="'+esc(a.a)+'" oninput="updItem(\''+d.id+'\',\''+a.id+'\',\'a\',this.value)">'
-      +'<button class="btn-rm" onclick="rmItem(\''+d.id+'\',\''+a.id+'\')">×</button>'
-    +'</div>';
-  });
+  // Activity catalog
+  var actCat=(PRICING_DATA.activity_rates||[]).filter(function(r){return r.category==='activity';});
+  var actCatSel=actCat.length?'<select style="font-size:.74rem;padding:3px 6px;border:1px solid #d1d5db;border-radius:4px" onchange="addItemFromCatalog(\''+d.id+'\',this)"><option value="">+ From catalog</option>'+actCat.map(function(r){return'<option value="'+r.id+'">'+esc(r.name)+' ($'+r.rate+(r.item_type==='pax'?'/pax':'')+')</option>';}).join('')+'</select>':'';
 
-  wrap.innerHTML =
+  // Items
+  var itemsHtml='';
+  d.items.forEach(function(a){itemsHtml+='<div class="item-row" id="ir_'+a.id+'">'
+    +'<input class="f-inp" style="flex:2" placeholder="Description" value="'+esc(a.d)+'" oninput="updItem(\''+d.id+'\',\''+a.id+'\',\'d\',this.value)">'
+    +'<select class="f-inp" style="flex:1" onchange="updItem(\''+d.id+'\',\''+a.id+'\',\'t\',this.value)"><option value="p"'+(a.t==='p'?' selected':'')+'>$/pax</option><option value="f"'+(a.t==='f'?' selected':'')+'>Fixed</option></select>'
+    +'<input class="f-inp" type="number" style="width:64px" placeholder="$" value="'+esc(a.a)+'" oninput="updItem(\''+d.id+'\',\''+a.id+'\',\'a\',this.value)">'
+    +'<button class="btn-rm" onclick="rmItem(\''+d.id+'\',\''+a.id+'\')">×</button></div>';});
+
+  // Flight
+  var flOpts='<option value="0"'+(d.flight_route_id===0?' selected':'')+'>— None</option>';
+  (PRICING_DATA.flight_routes||[]).forEach(function(r){flOpts+='<option value="'+r.id+'"'+(d.flight_route_id==r.id?' selected':'')+'>'+esc(r.route_name)+(r.airline?' — '+esc(r.airline):'')+'  ($'+r.rate_pax+'/pax)</option>';});
+  flOpts+='<option value="-1"'+(d.flight_route_id===-1?' selected':'')+'>🔧 Custom (fixed $)</option>';
+  var flRateHtml='<div></div>';
+  if(d.flight_route_id>0){var flr=getFlightRoute(d.flight_route_id),flDb=flr?flr.rate_pax:0,flVal=(d.flight_custom!==''&&d.flight_custom!==null)?d.flight_custom:flDb;flRateHtml='<div><label class="f-lbl">$/pax <span class="rate-db">(DB: $'+flDb+')</span></label><input class="f-inp" type="number" min="0" value="'+esc(flVal)+'" oninput="updDay(\''+d.id+'\',\'flight_custom\',this.value)"></div>';}
+  else if(d.flight_route_id===-1){flRateHtml='<div><label class="f-lbl">Fixed Total $</label><input class="f-inp" type="number" min="0" value="'+esc(d.flight_custom)+'" oninput="updDay(\''+d.id+'\',\'flight_custom\',this.value)"></div>';}
+
+  // Transfer
+  var trRates=(PRICING_DATA.activity_rates||[]).filter(function(r){return r.category==='transfer';});
+  var trOpts='<option value="0"'+(d.transfer_rate_id===0?' selected':'')+'>— None</option>';
+  trRates.forEach(function(r){trOpts+='<option value="'+r.id+'"'+(d.transfer_rate_id==r.id?' selected':'')+'>'+esc(r.name)+' ('+( r.item_type==='pax'?'$/pax':'fixed')+') — $'+r.rate+'</option>';});
+  trOpts+='<option value="-1"'+(d.transfer_rate_id===-1?' selected':'')+'>🔧 Custom</option>';
+  var trRateHtml='<div></div>';
+  if(d.transfer_rate_id>0){var tra=getActivityRate(d.transfer_rate_id),trDb=tra?tra.rate:0,trType=tra?tra.item_type:'fixed',trVal=(d.transfer_custom!==''&&d.transfer_custom!==null)?d.transfer_custom:trDb;trRateHtml='<div><label class="f-lbl">'+(trType==='pax'?'$/pax':'Fixed $')+' <span class="rate-db">(DB: $'+trDb+')</span></label><input class="f-inp" type="number" min="0" value="'+esc(trVal)+'" oninput="updDay(\''+d.id+'\',\'transfer_custom\',this.value)"></div>';}
+  else if(d.transfer_rate_id===-1){trRateHtml='<div><label class="f-lbl">Amount $</label><input class="f-inp" type="number" min="0" value="'+esc(d.transfer_custom||'')+'" oninput="updDay(\''+d.id+'\',\'transfer_custom\',this.value)"></div>';}
+
+  wrap.innerHTML=
+    // ── Head ──
     '<div class="day-head" onclick="toggleDay(\''+d.id+'\')">'
       +'<div class="day-num">'+(idx+1)+'</div>'
       +(dateStr?'<div style="font-size:.72rem;color:#9ca3af;width:40px;flex-shrink:0">'+dateStr+'</div>':'')
-      +'<div class="day-loc">'+(d.loc||'<span style="color:#9ca3af">— New destination</span>')+'</div>'
+      +'<div class="day-loc">'+(d.route||'<span style="color:#9ca3af">— New route</span>')
+        +(d.attraction?'<span style="font-size:.73rem;color:#6b7280;margin-left:7px">'+esc(d.attraction)+'</span>':'')
+      +'</div>'
       +'<div class="day-lodge">'+(d.lodge_id>0?esc(getLodgeName(d.lodge_id)):d.lodge_id===-1?'Custom':'—')+'</div>'
       +'<div class="day-total">'+fmt(dc)+'</div>'
       +'<div class="day-chevron" id="chev_'+d.id+'">▼</div>'
     +'</div>'
+    // ── Body ──
     +'<div class="day-body" id="db_'+d.id+'" style="display:'+(idx<2?'block':'none')+'">'
-      +'<div class="day-fields">'
-        +'<div><label class="f-lbl">Location</label>'
-          +'<input class="f-inp" value="'+esc(d.loc)+'" placeholder="e.g. Serengeti" oninput="updDay(\''+d.id+'\',\'loc\',this.value)"></div>'
-        +'<div><label class="f-lbl">Jeep</label>'
-          +'<select class="f-inp" onchange="updDay(\''+d.id+'\',\'jeep\',this.value)">'
-            +'<option value="none"'+(d.jeep==='none'?' selected':'')+'>— None</option>'
-            +'<option value="half"'+(d.jeep==='half'?' selected':'')+'>Half day ($125)</option>'
-            +'<option value="full"'+(d.jeep==='full'?' selected':'')+'>Full day ($250)</option>'
-          +'</select></div>'
-        +'<div><label class="f-lbl">Drinks &amp; Snacks</label>'
-          +'<select class="f-inp" onchange="updDay(\''+d.id+'\',\'drinks\',this.value===\'y\')">'
-            +'<option value="y"'+(d.drinks?' selected':'')+'>Yes ($4/pax)</option>'
-            +'<option value="n"'+(!d.drinks?' selected':'')+'>No</option>'
-          +'</select></div>'
-        +'<div style="grid-column:1/span 2"><label class="f-lbl">Lodge</label>'
-          +'<select class="f-inp" onchange="updDay(\''+d.id+'\',\'lodge_id\',parseInt(this.value))">'+lodgeOpts+'</select>'
-        +'</div>'
-        +roomTypeHtml
-        +'<div><label class="f-lbl">Park Fees</label>'
-          +'<select class="f-inp" onchange="updDay(\''+d.id+'\',\'park\',this.value)">'+parkOpts+'</select>'
-          +(d.park==='custom'?'<input class="f-inp" type="number" style="margin-top:6px" placeholder="Total fees $" value="'+esc(d.parkCust)+'" oninput="updDay(\''+d.id+'\',\'parkCust\',this.value)">':'')
-        +'</div>'
-        +'<div style="grid-column:1/span 2"><label class="f-lbl">Internal Flight</label>'
-          +'<select class="f-inp" onchange="updDay(\''+d.id+'\',\'flight\',this.value)">'+flOpts+'</select>'
-          +(d.flight==='custom'?'<input class="f-inp" type="number" style="margin-top:6px" placeholder="Total flight $" value="'+esc(d.flightCust)+'" oninput="updDay(\''+d.id+'\',\'flightCust\',this.value)">':'')
-        +'</div>'
+      // ROUTE + DESTINATION
+      +'<div class="day-fields" style="grid-template-columns:1fr 1fr">'
+        +'<div><label class="f-lbl">Route</label><input class="f-inp" value="'+esc(d.route)+'" placeholder="e.g. Kili-Arusha" oninput="updDay(\''+d.id+'\',\'route\',this.value)"></div>'
+        +'<div><label class="f-lbl">Destination</label><input class="f-inp" value="'+esc(d.attraction)+'" placeholder="e.g. Tarangire NP" oninput="updDay(\''+d.id+'\',\'attraction\',this.value)"></div>'
       +'</div>'
-      +'<div class="day-items">'
-        +'<div class="day-items-lbl">Activities &amp; Extras</div>'
+      // JEEP + RATE + DRINKS
+      +'<div class="day-fields" style="grid-template-columns:1fr 1fr 1fr;margin-top:8px">'
+        +'<div><label class="f-lbl">Jeep</label><select class="f-inp" onchange="updDay(\''+d.id+'\',\'jeep\',this.value)">'
+          +'<option value="none"'+(d.jeep==='none'?' selected':'')+'>— None</option>'
+          +'<option value="half"'+(d.jeep==='half'?' selected':'')+'>Half day</option>'
+          +'<option value="full"'+(d.jeep==='full'?' selected':'')+'>Full day</option>'
+          +'<option value="double"'+(d.jeep==='double'?' selected':'')+'>Double (2 jeeps)</option>'
+          +'<option value="contribution"'+(d.jeep==='contribution'?' selected':'')+'>Contribution</option>'
+        +'</select></div>'
+        +jeepRateHtml
+        +'<div><label class="f-lbl">Drinks &amp; Snacks</label><select class="f-inp" onchange="updDay(\''+d.id+'\',\'drinks\',this.value===\'y\')">'
+          +'<option value="y"'+(d.drinks?' selected':'')+'>Yes ($4/pax)</option>'
+          +'<option value="n"'+(!d.drinks?' selected':'')+'>No</option>'
+        +'</select></div>'
+      +'</div>'
+      // PARK FEES
+      +'<div style="margin-top:8px"><label class="f-lbl">Park Fees</label>'
+        +'<select class="f-inp" onchange="updDay(\''+d.id+'\',\'park\',this.value)">'+parkOpts+'</select>'
+        +parkCustomHtml
+      +'</div>'
+      // ACTIVITIES
+      +'<div class="day-items" style="margin-top:10px">'
+        +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">'
+          +'<div class="day-items-lbl" style="margin-bottom:0">Activities</div>'
+          +actCatSel
+        +'</div>'
         +itemsHtml
-        +'<button class="btn-add-item" onclick="addItem(\''+d.id+'\')">+ Add item</button>'
+        +'<button class="btn-add-item" onclick="addItem(\''+d.id+'\')">+ Add custom</button>'
       +'</div>'
-      +'<div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px;">'
+      // FLIGHT
+      +'<div style="display:flex;gap:8px;margin-top:10px">'
+        +'<div style="flex:2"><label class="f-lbl">Flight</label><select class="f-inp" onchange="updDay(\''+d.id+'\',\'flight_route_id\',parseInt(this.value))">'+flOpts+'</select></div>'
+        +flRateHtml
+      +'</div>'
+      // TRANSFER
+      +'<div style="display:flex;gap:8px;margin-top:8px">'
+        +'<div style="flex:2"><label class="f-lbl">Transfer</label><select class="f-inp" onchange="updDay(\''+d.id+'\',\'transfer_rate_id\',parseInt(this.value))">'+trOpts+'</select></div>'
+        +trRateHtml
+      +'</div>'
+      // LODGE + ROOM TYPE
+      +'<div class="day-fields" style="grid-template-columns:1fr 1fr;margin-top:10px">'
+        +'<div><label class="f-lbl">Lodge</label><select class="f-inp" onchange="updDay(\''+d.id+'\',\'lodge_id\',parseInt(this.value))">'+lodgeOpts+'</select></div>'
+        +roomTypeHtml
+      +'</div>'
+      // Footer
+      +'<div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px">'
         +'<div style="font-size:.8rem;color:#166534;font-weight:600">Day total: '+fmt(dc)+'</div>'
         +'<button onclick="removeDay(\''+d.id+'\')" style="font-size:.78rem;color:#ef4444;background:none;border:none;cursor:pointer;">🗑 Remove</button>'
       +'</div>'
     +'</div>';
-
   return wrap;
 }
 
 function toggleDay(id) {
-  var body = el('db_'+id), chev = el('chev_'+id);
-  var open = body.style.display !== 'none';
-  body.style.display = open ? 'none' : '';
-  chev.textContent   = open ? '▼' : '▲';
+  var body=el('db_'+id),chev=el('chev_'+id),open=body.style.display!=='none';
+  body.style.display=open?'none':''; chev.textContent=open?'▼':'▲';
 }
 
-function updDay(did, field, val) {
-  var d = state.days.find(function(x){return x.id===did;});
-  if (!d) return;
-  d[field] = val;
-  if (field === 'lodge_id') d.room_type_id = 0; // reset room type when lodge changes
-  // Re-render only this card to pick up conditional fields (custom inputs)
-  var old = el('dc_'+did);
-  var idx = state.days.indexOf(d);
-  var newCard = buildDayCard(d, idx);
-  // Preserve open/close state
-  var wasOpen = el('db_'+did) && el('db_'+did).style.display !== 'none';
+function updDay(did,field,val) {
+  var d=state.days.find(function(x){return x.id===did;}); if(!d)return;
+  d[field]=val;
+  if(field==='lodge_id') d.room_type_id=0;
+  if(field==='jeep') d.jeep_rate_custom=null;
+  if(field==='flight_route_id') d.flight_custom='';
+  if(field==='transfer_rate_id') d.transfer_custom='';
+  var old=el('dc_'+did),idx=state.days.indexOf(d),newCard=buildDayCard(d,idx);
+  var wasOpen=el('db_'+did)&&el('db_'+did).style.display!=='none';
   old.replaceWith(newCard);
-  if (!wasOpen) el('db_'+did).style.display = 'none';
+  if(!wasOpen) el('db_'+did).style.display='none';
 }
 
 function addItem(did) {
-  var d = state.days.find(function(x){return x.id===did;});
-  if (d) { d.items.push({id:uid(),d:'',t:'f',a:''}); updDay(did,'loc',d.loc); }
+  var d=state.days.find(function(x){return x.id===did;});
+  if(d){d.items.push({id:uid(),d:'',t:'f',a:''});updDay(did,'route',d.route);}
 }
-function updItem(did, iid, field, val) {
-  var d = state.days.find(function(x){return x.id===did;});
-  if (!d) return;
-  var item = d.items.find(function(x){return x.id===iid;});
-  if (item) item[field] = val;
-  // Update just the day total display without full re-render
-  el('dc_'+did).querySelector('.day-total').textContent = fmt(calcDay(d));
+function addItemFromCatalog(did,sel) {
+  var rid=parseInt(sel.value); if(!rid){return;}
+  var r=getActivityRate(rid); if(!r){sel.value='';return;}
+  var d=state.days.find(function(x){return x.id===did;});
+  if(d){d.items.push({id:uid(),d:r.name,t:r.item_type==='pax'?'p':'f',a:String(r.rate)});updDay(did,'route',d.route);}
+  sel.value='';
 }
-function rmItem(did, iid) {
-  var d = state.days.find(function(x){return x.id===did;});
-  if (d) { d.items = d.items.filter(function(x){return x.id!==iid;}); updDay(did,'loc',d.loc); }
+function updItem(did,iid,field,val) {
+  var d=state.days.find(function(x){return x.id===did;}); if(!d)return;
+  var item=d.items.find(function(x){return x.id===iid;}); if(item)item[field]=val;
+  el('dc_'+did).querySelector('.day-total').textContent=fmt(calcDay(d,state.days.indexOf(d)));
+}
+function rmItem(did,iid) {
+  var d=state.days.find(function(x){return x.id===did;});
+  if(d){d.items=d.items.filter(function(x){return x.id!==iid;});updDay(did,'route',d.route);}
 }
 function removeDay(did) {
-  state.days = state.days.filter(function(d){return d.id!==did;});
-  renderDays();
+  state.days=state.days.filter(function(d){return d.id!==did;}); renderDays();
 }
-
-function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
 
 // ── Step 4: Summary ───────────────────────────────────────────────────────────
 function setMarkup(type) {
@@ -741,49 +869,46 @@ function setMarkup(type) {
 }
 
 function renderSummary() {
-  var tot = calcTotals();
-  var rows = '';
-  state.days.forEach(function(d, i) {
-    var dc = calcDay(d, i);
-    var lodgeLabel = d.lodge_id>0 ? getLodgeName(d.lodge_id) : (d.lodge_id===-1 ? 'Custom' : '—');
-    rows += '<tr>'
-      +'<td>'+(i+1)+'</td>'
-      +'<td style="font-weight:500">'+(d.loc||'—')+'</td>'
+  var tot=calcTotals(), p=pax(), rows='';
+  // Safari fixed items block
+  if(state.safariItems.length){
+    rows+='<tr><td colspan="4" style="font-size:.72rem;font-weight:700;text-transform:uppercase;color:#92400e;padding:10px 12px 3px;background:#fffbeb">Safari Fixed</td></tr>';
+    state.safariItems.forEach(function(si){
+      var t=si.item_type==='pax'?(+si.amount||0)*p:(+si.amount||0);
+      rows+='<tr style="background:#fffbeb"><td></td><td style="color:#374151">'+esc(si.description)+'</td>'
+        +'<td style="color:#6b7280;font-size:.78rem">'+(si.item_type==='pax'?'$'+si.amount+'×'+p+' pax':'fixed')+'</td>'
+        +'<td style="text-align:right;font-family:monospace">'+fmt(t)+'</td></tr>';
+    });
+  }
+  // Days
+  rows+='<tr><td colspan="4" style="font-size:.72rem;font-weight:700;text-transform:uppercase;color:#6b7280;padding:10px 12px 3px">Days</td></tr>';
+  state.days.forEach(function(d,i){
+    var dc=calcDay(d,i),lodgeLabel=d.lodge_id>0?getLodgeName(d.lodge_id):(d.lodge_id===-1?'Custom':'—');
+    rows+='<tr><td>'+(i+1)+'</td>'
+      +'<td style="font-weight:500">'+(d.route||'—')+(d.attraction?'<br><span style="font-size:.72rem;color:#6b7280">'+esc(d.attraction)+'</span>':'')+'</td>'
       +'<td style="color:#6b7280">'+esc(lodgeLabel)+'</td>'
-      +'<td style="text-align:right;font-family:monospace;font-weight:500">'+fmt(dc)+'</td>'
-      +'</tr>';
+      +'<td style="text-align:right;font-family:monospace;font-weight:500">'+fmt(dc)+'</td></tr>';
   });
-  rows += '<tr style="border-top:2px solid #e5e7eb">'
+  rows+='<tr style="border-top:2px solid #e5e7eb">'
     +'<td colspan="3" style="text-align:right;color:#6b7280;font-size:.8rem">Bank Commission</td>'
-    +'<td style="text-align:right;font-family:monospace;color:#6b7280">'+fmt(BANK)+'</td>'
-    +'</tr>';
-  el('sumRows').innerHTML = rows;
+    +'<td style="text-align:right;font-family:monospace;color:#6b7280">'+fmt(BANK)+'</td></tr>';
+  el('sumRows').innerHTML=rows;
 
-  var foot = '<tr style="font-weight:700;background:#f9fafb">'
+  var foot='<tr style="font-weight:700;background:#f9fafb">'
     +'<td colspan="3" style="text-align:right;padding:9px 12px">Net Total Costs</td>'
-    +'<td style="text-align:right;font-family:monospace;padding:9px 12px">'+fmt(tot.costs)+'</td>'
-    +'</tr>'
+    +'<td style="text-align:right;font-family:monospace;padding:9px 12px">'+fmt(tot.costs)+'</td></tr>'
     +'<tr style="color:#166534">'
     +'<td colspan="3" style="text-align:right;font-size:.82rem;padding:7px 12px">Markup ('+(tot.mk*100).toFixed(0)+'%)</td>'
-    +'<td style="text-align:right;font-family:monospace;font-size:.82rem;padding:7px 12px">+ '+fmt(tot.costs*tot.mk)+'</td>'
-    +'</tr>'
+    +'<td style="text-align:right;font-family:monospace;font-size:.82rem;padding:7px 12px">+ '+fmt(tot.costs*tot.mk)+'</td></tr>'
     +'<tr class="sum-total-row">'
     +'<td colspan="3" style="text-align:right;padding:12px">TOTAL PRICE</td>'
-    +'<td style="text-align:right;font-family:monospace;padding:12px">'+fmt(tot.price)+'</td>'
-    +'</tr>';
-  el('sumFoot').innerHTML = foot;
-
-  var single = state.program === 'beachkiboko' ? '$650' : '$250';
-  el('kpiGrid').innerHTML =
-    kpiBox('Price p.p. (rack)', fmt(tot.ppp), true)
-   +kpiBox('Price p.p. (T.O.)', fmt(tot.pppTo), false)
-   +kpiBox('Single supplement', single, false)
-   +kpiBox('Deposit (30%)', fmt(tot.deposit), false);
-
-  // Filename preview
-  var custClean = (v('fName')||'Customer').replace(/\s+/g,'');
-  el('fnamePreview').textContent = '??_'+custClean+'.xlsx';
-  el('fnameNote').textContent    = 'The quote number will be assigned automatically (next available).';
+    +'<td style="text-align:right;font-family:monospace;padding:12px">'+fmt(tot.price)+'</td></tr>';
+  el('sumFoot').innerHTML=foot;
+  var single=state.program==='beachkiboko'?'$650':'$250';
+  el('kpiGrid').innerHTML=kpiBox('Price p.p. (rack)',fmt(tot.ppp),true)+kpiBox('Price p.p. (T.O.)',fmt(tot.pppTo),false)+kpiBox('Single supplement',single,false)+kpiBox('Deposit (30%)',fmt(tot.deposit),false);
+  var custClean=(v('fName')||'Customer').replace(/\s+/g,'');
+  el('fnamePreview').textContent='??_'+custClean+'.xlsx';
+  el('fnameNote').textContent='The quote number will be assigned automatically (next available).';
 }
 function kpiBox(lbl, val, hi) {
   return '<div class="kpi'+(hi?' hi':'')+'"><div class="kpi-lbl">'+lbl+'</div><div class="kpi-val">'+val+'</div></div>';
@@ -797,32 +922,40 @@ function saveQuote() {
   var payload = {
     csrf:       '<?= $csrfToken ?>',
     request_id: REQ_ID,
-    customer_name: v('fName'),
-    agent_name:    v('fAgent'),
-    agency_name:   v('fAgency'),
-    start_date:    v('fDate'),
-    adults:        +v('fAdults')||0,
-    teens:         +v('fTeens')||0,
-    children:      +v('fChildren')||0,
-    program:       state.program,
-    markup_type:   state.markup,
-    markup_pct:    mkPct() * 100,
+    customer_name:   v('fName'),
+    agent_name:      v('fAgent'),
+    agency_name:     v('fAgency'),
+    start_date:      v('fDate'),
+    adults:          +v('fAdults')||0,
+    teens:           +v('fTeens') ||0,
+    children:        +v('fChildren')||0,
+    program:         state.program,
+    markup_type:     state.markup,
+    markup_pct:      mkPct()*100,
     bank_commission: BANK,
+    safari_items: state.safariItems.map(function(si){
+      return {activity_rate_id:si.activity_rate_id||null, description:si.description,
+              item_type:si.item_type, amount:+si.amount||0};
+    }),
     days: state.days.map(function(d,i){
       return {
-        location:      d.loc,
-        lodge:         d.lodge_id>0 ? getLodgeName(d.lodge_id) : (d.lodge_id===-1 ? 'Custom' : ''),
-        lodge_id:      d.lodge_id>0 ? d.lodge_id : null,
-        room_type_id:  d.room_type_id>0 ? d.room_type_id : null,
-        lodge_custom:  d.lodge_id===-1 ? (+d.lodge_custom_total||0) : 0,
-        jeep:          d.jeep,
-        drinks:        d.drinks ? 1 : 0,
-        park:          d.park,
-        park_custom:   +d.parkCust||0,
-        flight:        d.flight,
-        flight_custom: +d.flightCust||0,
-        day_total:     calcDay(d,i),
-        items: d.items.map(function(a){ return {description:a.d, item_type:a.t==='p'?'pax':'fixed', amount:+a.a||0}; })
+        route:            d.route,
+        attraction:       d.attraction,
+        lodge:            d.lodge_id>0?getLodgeName(d.lodge_id):(d.lodge_id===-1?'Custom':''),
+        lodge_id:         d.lodge_id>0?d.lodge_id:null,
+        room_type_id:     d.room_type_id>0?d.room_type_id:null,
+        lodge_custom:     d.lodge_id===-1?(+d.lodge_custom_total||0):0,
+        jeep:             d.jeep,
+        jeep_rate_custom: (d.jeep_rate_custom!==null&&d.jeep_rate_custom!=='')?+d.jeep_rate_custom:null,
+        drinks:           d.drinks?1:0,
+        park:             d.park,
+        park_custom:      +d.parkCust||0,
+        flight_route_id:  d.flight_route_id>0?d.flight_route_id:null,
+        flight_custom:    +d.flight_custom||0,
+        transfer_rate_id: d.transfer_rate_id>0?d.transfer_rate_id:null,
+        transfer_custom:  +d.transfer_custom||0,
+        day_total:        calcDay(d,i),
+        items: d.items.map(function(a){return{description:a.d,item_type:a.t==='p'?'pax':'fixed',amount:+a.a||0};})
       };
     })
   };

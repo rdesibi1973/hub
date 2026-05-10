@@ -115,7 +115,7 @@ foreach ($days as $d) {
     $rows[] = [
         cStr((string)$d['day_number']),
         cStr($dateStr),
-        cStr($d['location'] ?? ''),
+        cStr($d['route'] ?? $d['location'] ?? ''),
         cStr($d['lodge']    ?? ''),
         cStr(ucfirst($d['jeep'])),
         cStr($d['park'] !== 'none' ? ucfirst($d['park']) : '—'),

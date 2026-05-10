@@ -139,7 +139,7 @@ include 'includes/header.php';
         ?>
         <tr class="day-row">
           <td style="font-weight:700;color:var(--green);"><?= (int)$d['day_number'] ?></td>
-          <td style="font-weight:600;"><?= h($d['location'] ?? '—') ?></td>
+          <td style="font-weight:600;"><?= h($d['route'] ?? $d['location'] ?? '—') ?></td>
           <td style="color:#6b7280;"><?= h($d['lodge'] ?? '—') ?></td>
           <td><?= ucfirst(h($d['jeep'])) ?></td>
           <td style="font-size:.8rem;color:#6b7280;"><?= h($d['park']) ?></td>
