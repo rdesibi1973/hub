@@ -530,16 +530,23 @@ function hs_contact_to_lead(array $contact): ?array {
 
 /**
  * Fetches all new leads (contacts + tickets) since $since ms.
- * Contacts and tickets are kept separate — a ticket = a new iBot inquiry
- * even if the contact already submitted a form before.
+ * Tickets take priority: if iBot creates both a contact and a ticket for the
+ * same person, only the ticket lead is returned (richer data, avoids duplicates).
  */
 function hs_fetch_all(int $since): array {
     $leads = [];
+
+    // Fetch tickets first so we know which contacts they already cover
+    $ticketLeads = hs_fetch_tickets($since);
+    $contactsCoveredByTicket = array_flip(array_column($ticketLeads, 'contact_id'));
+
     foreach (hs_fetch_contacts($since) as $contact) {
+        // Skip contacts already represented by a ticket (prevents contact+ticket duplicates)
+        if (isset($contactsCoveredByTicket[$contact['id']])) continue;
         $lead = hs_contact_to_lead($contact);
         if ($lead) $leads[] = $lead;
     }
-    foreach (hs_fetch_tickets($since) as $lead) {
+    foreach ($ticketLeads as $lead) {
         $leads[] = $lead;
     }
     return $leads;
@@ -708,7 +715,7 @@ if (!defined('HS_INCLUDED')) {
 
     if (empty($allLeads)) {
         echo "[" . date('Y-m-d H:i:s') . "] No new leads.\n";
-        if (!$dryRun) file_put_contents($syncFile, $runStart);
+        if (!$dryRun) file_put_contents($syncFile, $runStart - 300000);
         exit(0);
     }
 
@@ -733,6 +740,9 @@ if (!defined('HS_INCLUDED')) {
         };
     }
 
-    if (!$dryRun) file_put_contents($syncFile, $runStart);
+    // Save with 5-minute overlap so the next run re-checks contacts that may
+    // have been created just before $runStart but not yet indexed by HubSpot.
+    // hs_insert_lead handles re-encounters safely via hubspot_id uniqueness.
+    if (!$dryRun) file_put_contents($syncFile, $runStart - 300000);
     echo "[" . date('Y-m-d H:i:s') . "] Done — staged: $staged | skipped: $skipped | errors: $errors\n";
 }
