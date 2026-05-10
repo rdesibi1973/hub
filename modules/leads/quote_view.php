@@ -129,6 +129,7 @@ include 'includes/header.php';
           <th style="padding:8px 12px;text-align:left;font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#6b7280;">Location</th>
           <th style="padding:8px 12px;text-align:left;font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#6b7280;">Lodge</th>
           <th style="padding:8px 12px;text-align:left;font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#6b7280;">Jeep</th>
+          <th style="padding:8px 12px;text-align:center;font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#6b7280;">#</th>
           <th style="padding:8px 12px;text-align:left;font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#6b7280;">Park</th>
           <th style="padding:8px 12px;text-align:right;font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#6b7280;">Day Total</th>
         </tr>
@@ -142,6 +143,7 @@ include 'includes/header.php';
           <td style="font-weight:600;"><?= h($d['route'] ?? $d['location'] ?? '—') ?></td>
           <td style="color:#6b7280;"><?= h($d['lodge'] ?? '—') ?></td>
           <td><?= ucfirst(h($d['jeep'])) ?></td>
+          <td style="text-align:center;font-size:.8rem;color:#6b7280;"><?= (int)($d['jeep_count'] ?? ($pax > 7 ? ceil($pax / 7) : 1)) ?></td>
           <td style="font-size:.8rem;color:#6b7280;"><?= h($d['park']) ?></td>
           <td style="text-align:right;font-family:monospace;font-weight:600;">$<?= number_format((float)$d['day_total'], 0, '.', ',') ?></td>
         </tr>

@@ -37,11 +37,19 @@ $req = $rStmt->fetch();
 if (!$req) fail('Request not found.', 404);
 if ($isStaff && (int)$req['agent_id'] !== $staffAgentId) fail('Access denied.', 403);
 
-// Generate next quote number (global sequential, zero-padded to 2 digits)
-$nextNum = $db->query("
-    SELECT LPAD(COALESCE(MAX(CAST(quote_number AS UNSIGNED)), 0) + 1, 2, '0')
-    FROM quotes
-")->fetchColumn();
+// Quote number — use provided override or auto-assign
+$quoteNumOverride = trim($body['quote_number'] ?? '');
+if ($quoteNumOverride !== '' && preg_match('/^\d+$/', $quoteNumOverride)) {
+    $chk = $db->prepare("SELECT id FROM quotes WHERE quote_number = ?");
+    $chk->execute([$quoteNumOverride]);
+    if ($chk->fetch()) fail('Quote number "' . $quoteNumOverride . '" is already in use. Please choose another number.');
+    $nextNum = str_pad($quoteNumOverride, 2, '0', STR_PAD_LEFT);
+} else {
+    $nextNum = $db->query("
+        SELECT LPAD(COALESCE(MAX(CAST(quote_number AS UNSIGNED)), 0) + 1, 2, '0')
+        FROM quotes
+    ")->fetchColumn();
+}
 
 // Sanitise and extract fields
 $agentName     = substr(trim($body['agent_name']   ?? ''), 0, 150);
@@ -109,10 +117,10 @@ try {
     $insDayStmt = $db->prepare("
         INSERT INTO quote_days
           (quote_id, day_number, route, attraction, lodge, lodge_id, room_type_id,
-           lodge_custom, jeep, jeep_rate_custom, drinks, park, park_custom,
+           lodge_custom, jeep, jeep_count, jeep_rate_custom, drinks, park, park_custom,
            flight, flight_route_id, flight_custom,
            transfer_rate_id, transfer_custom, day_total)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     ");
     $insItemStmt = $db->prepare("
         INSERT INTO quote_day_items (quote_day_id, description, item_type, amount)
@@ -129,6 +137,8 @@ try {
         $transferRateId  = (int)($d['transfer_rate_id']?? 0) ?: null;
         $jeepRateCustom  = isset($d['jeep_rate_custom']) && $d['jeep_rate_custom'] !== null
                            ? max(0, (float)$d['jeep_rate_custom']) : null;
+        $jeepCount       = isset($d['jeep_count']) && $d['jeep_count'] !== null
+                           ? max(1, (int)$d['jeep_count']) : null;
 
         $insDayStmt->execute([
             $quoteId,
@@ -140,6 +150,7 @@ try {
             $roomTypeId2,
             max(0, (float)($d['lodge_custom']   ?? 0)),
             $jeep,
+            $jeepCount,
             $jeepRateCustom,
             (int)($d['drinks'] ?? 1),
             $park,
