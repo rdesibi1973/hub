@@ -385,7 +385,7 @@ const PARK_FEES = {
 function mkDay(o) {
   return Object.assign({
     id:uid(), route:'', attraction:'',
-    lodge_id:0, room_type_id:0, lodge_custom_total:0,
+    lodge_id:0, rooms:[], lodge_custom_total:0,
     jeep:'full', jeep_count:null, jeep_rate_custom:null,
     park:'none', parkCust:'',
     flight_route_id:0, flight_custom:'',
@@ -459,6 +459,27 @@ function getJeepRate(type, dateStr) {
 function getFlightRoute(id){return(PRICING_DATA.flight_routes||[]).find(function(r){return r.id==id;});}
 function getActivityRate(id){return(PRICING_DATA.activity_rates||[]).find(function(r){return r.id==id;});}
 
+// ── Room helpers ──────────────────────────────────────────────────────────────
+function mkRoom(o) { return Object.assign({id:uid(),room_type_id:0,qty:1},o||{}); }
+function getRoomTypeName(lodge_id,rt_id){
+  var l=(PRICING_DATA.lodges||[]).find(function(x){return x.id==lodge_id;});
+  if(!l)return'';var r=l.room_types.find(function(x){return x.id==rt_id;});return r?r.name:'';
+}
+function getRoomMaxPax(lodge_id,rt_id){
+  var l=(PRICING_DATA.lodges||[]).find(function(x){return x.id==lodge_id;});
+  if(!l)return 2;var r=l.room_types.find(function(x){return x.id==rt_id;});return r?+(r.max_pax||2):2;
+}
+function getRoomUnitPrice(lodge_id,rt_id,dateStr){
+  return getLodgePrice(lodge_id,rt_id,dateStr,getRoomMaxPax(lodge_id,rt_id));
+}
+function dayLodgeLabel(d){
+  if(!d.lodge_id||d.lodge_id===0)return'—';
+  if(d.lodge_id===-1)return'Custom';
+  var name=getLodgeName(d.lodge_id);
+  var parts=(d.rooms||[]).filter(function(r){return r.room_type_id>0;}).map(function(r){return(r.qty||1)+'×'+getRoomTypeName(d.lodge_id,r.room_type_id);});
+  return name+(parts.length?' ('+parts.join(', ')+')':'');
+}
+
 // ── Lodge/pricing DB helpers ──────────────────────────────────────────────────
 function getDayDate(idx) {
   var sd = v('fDate');
@@ -509,9 +530,11 @@ function getLodgeName(lodge_id) {
 
 function calcDay(d, idx) {
   var p=pax(), j=d.jeep_count!==null?+d.jeep_count:jeeps(), t=0, dateStr=getDayDate(idx||0), adults=+v('fAdults')||0;
-  // Lodge
-  if (d.lodge_id>0&&d.room_type_id>0) {
-    t+=getLodgePrice(d.lodge_id,d.room_type_id,dateStr,p);
+  // Lodge — sum all room rows
+  if (d.lodge_id>0) {
+    (d.rooms||[]).forEach(function(r){
+      if(r.room_type_id>0) t+=getRoomUnitPrice(d.lodge_id,r.room_type_id,dateStr)*(+r.qty||1);
+    });
     t+=getLodgeSupplements(d.lodge_id,dateStr,adults);
   } else if (d.lodge_id===-1) { t+=+d.lodge_custom_total||0; }
   // Jeep (DB rate or user override)
@@ -697,17 +720,38 @@ function buildDayCard(d, idx) {
   (PRICING_DATA.lodges||[]).forEach(function(l){lodgeOpts+='<option value="'+l.id+'"'+(d.lodge_id==l.id?' selected':'')+'>'+esc(l.name)+(l.location?' · '+esc(l.location):'')+'</option>';});
   lodgeOpts+='<option value="-1"'+(d.lodge_id==-1?' selected':'')+'>🔧 Custom (fixed total)</option>';
 
-  // Room type
-  var roomTypeHtml='<div></div>';
+  // Rooms list (multi-room per day)
+  var selLodge=(PRICING_DATA.lodges||[]).find(function(l){return l.id==d.lodge_id;});
+  var roomsListHtml='';
   if(d.lodge_id>0){
-    var selLodge=(PRICING_DATA.lodges||[]).find(function(l){return l.id==d.lodge_id;});
-    if(selLodge&&selLodge.room_types.length){
-      var rtOpts='<option value="0">— Room type</option>';
-      selLodge.room_types.forEach(function(rt){var price=getLodgePrice(d.lodge_id,rt.id,date,pax());rtOpts+='<option value="'+rt.id+'"'+(d.room_type_id==rt.id?' selected':'')+'>'+esc(rt.name)+(price?' — $'+Math.round(price):'')+'</option>';});
-      roomTypeHtml='<div><label class="f-lbl">Room Type</label><select class="f-inp" onchange="updDay(\''+d.id+'\',\'room_type_id\',parseInt(this.value))">'+rtOpts+'</select></div>';
-    }
+    var roomRowsHtml='';
+    (d.rooms||[]).forEach(function(r){
+      var rRtOpts='<option value="0">— Room type</option>';
+      if(selLodge){selLodge.room_types.forEach(function(rt){
+        var up=getRoomUnitPrice(d.lodge_id,rt.id,date);
+        var sel=rt.id==r.room_type_id?' selected':'';
+        rRtOpts+='<option value="'+rt.id+'"'+sel+'>'+esc(rt.name)+' (max '+rt.max_pax+'pax'+(up?' — $'+Math.round(up):'')+')</option>';
+      });}
+      var up=r.room_type_id>0?getRoomUnitPrice(d.lodge_id,r.room_type_id,date):0;
+      var qty=+r.qty||1;
+      roomRowsHtml+='<div class="item-row">'
+        +'<select class="f-inp" style="flex:3" onchange="updRoom(\''+d.id+'\',\''+r.id+'\',\'room_type_id\',parseInt(this.value))">'+rRtOpts+'</select>'
+        +'<input class="f-inp" type="number" min="1" step="1" style="width:52px;text-align:center" value="'+qty+'" oninput="updRoom(\''+d.id+'\',\''+r.id+'\',\'qty\',+this.value||1)" placeholder="1">'
+        +(up?'<span style="font-size:.71rem;color:#9ca3af;white-space:nowrap;min-width:58px;text-align:right">$'+Math.round(up)+'/rm</span>':'<span style="min-width:58px"></span>')
+        +(up?'<span style="font-size:.72rem;font-weight:600;min-width:62px;text-align:right">'+fmt(up*qty)+'</span>':'<span style="min-width:62px"></span>')
+        +'<button class="btn-rm" onclick="rmRoom(\''+d.id+'\',\''+r.id+'\')">×</button>'
+        +'</div>';
+    });
+    roomsListHtml='<div class="day-items" style="margin-top:8px">'
+      +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">'
+      +'<div class="day-items-lbl" style="margin-bottom:0">Rooms</div>'
+      +'</div>'
+      +roomRowsHtml
+      +'<button class="btn-add-item" onclick="addRoom(\''+d.id+'\')">+ Add room</button>'
+      +'</div>';
   } else if(d.lodge_id===-1){
-    roomTypeHtml='<div><label class="f-lbl">Custom Lodge Total ($)</label><input class="f-inp" type="number" min="0" placeholder="Fixed total" value="'+esc(d.lodge_custom_total||'')+'" oninput="updDay(\''+d.id+'\',\'lodge_custom_total\',parseFloat(this.value)||0)"></div>';
+    roomsListHtml='<div style="margin-top:8px"><label class="f-lbl">Custom Lodge Total ($)</label>'
+      +'<input class="f-inp" type="number" min="0" placeholder="Fixed total" value="'+esc(d.lodge_custom_total||'')+'" oninput="updDay(\''+d.id+'\',\'lodge_custom_total\',parseFloat(this.value)||0)"></div>';
   }
 
   // Jeep rate
@@ -765,7 +809,7 @@ function buildDayCard(d, idx) {
       +'<div class="day-loc">'+(d.route||'<span style="color:#9ca3af">— New route</span>')
         +(d.attraction?'<span style="font-size:.73rem;color:#6b7280;margin-left:7px">'+esc(d.attraction)+'</span>':'')
       +'</div>'
-      +'<div class="day-lodge">'+(d.lodge_id>0?esc(getLodgeName(d.lodge_id)):d.lodge_id===-1?'Custom':'—')+'</div>'
+      +'<div class="day-lodge">'+esc(dayLodgeLabel(d))+'</div>'
       +'<div class="day-total">'+fmt(dc)+'</div>'
       +'<div class="day-chevron" id="chev_'+d.id+'">▼</div>'
     +'</div>'
@@ -816,11 +860,9 @@ function buildDayCard(d, idx) {
         +'<div style="flex:2"><label class="f-lbl">Transfer</label><select class="f-inp" onchange="updDay(\''+d.id+'\',\'transfer_rate_id\',parseInt(this.value))">'+trOpts+'</select></div>'
         +trRateHtml
       +'</div>'
-      // LODGE + ROOM TYPE
-      +'<div class="day-fields" style="grid-template-columns:1fr 1fr;margin-top:10px">'
-        +'<div><label class="f-lbl">Lodge</label><select class="f-inp" onchange="updDay(\''+d.id+'\',\'lodge_id\',parseInt(this.value))">'+lodgeOpts+'</select></div>'
-        +roomTypeHtml
-      +'</div>'
+      // LODGE + ROOMS
+      +'<div style="margin-top:10px"><label class="f-lbl">Lodge</label><select class="f-inp" onchange="updDay(\''+d.id+'\',\'lodge_id\',parseInt(this.value))">'+lodgeOpts+'</select></div>'
+      +roomsListHtml
       // Footer
       +'<div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px">'
         +'<div style="font-size:.8rem;color:#C0211B;font-weight:600" data-dft>Day total: '+fmt(dc)+'</div>'
@@ -838,7 +880,7 @@ function toggleDay(id) {
 function updDay(did,field,val) {
   var d=state.days.find(function(x){return x.id===did;}); if(!d)return;
   d[field]=val;
-  if(field==='lodge_id') d.room_type_id=0;
+  if(field==='lodge_id') d.rooms=[];
   if(field==='jeep') d.jeep_rate_custom=null;
   if(field==='flight_route_id') d.flight_custom='';
   if(field==='transfer_rate_id') d.transfer_custom='';
@@ -861,6 +903,38 @@ function updDay(did,field,val) {
         var loc=card.querySelector('.day-loc');
         if(loc) loc.innerHTML=(d.route||'<span style="color:#9ca3af">— New route</span>')+(d.attraction?'<span style="font-size:.73rem;color:#6b7280;margin-left:7px">'+esc(d.attraction)+'</span>':'');
       }
+    }
+  }
+}
+
+// ── Room rows (mixed room types per day) ─────────────────────────────────────
+function rebuildDay(did){
+  var d=state.days.find(function(x){return x.id===did;}); if(!d)return;
+  var di=state.days.indexOf(d),old=el('dc_'+did),newCard=buildDayCard(d,di);
+  var wasOpen=el('db_'+did)&&el('db_'+did).style.display!=='none';
+  old.replaceWith(newCard);
+  if(!wasOpen) el('db_'+did).style.display='none';
+}
+function addRoom(did){
+  var d=state.days.find(function(x){return x.id===did;}); if(!d)return;
+  d.rooms.push(mkRoom()); rebuildDay(did);
+}
+function rmRoom(did,rid){
+  var d=state.days.find(function(x){return x.id===did;}); if(!d)return;
+  d.rooms=d.rooms.filter(function(r){return r.id!==rid;}); rebuildDay(did);
+}
+function updRoom(did,rid,field,val){
+  var d=state.days.find(function(x){return x.id===did;}); if(!d)return;
+  var r=d.rooms.find(function(x){return x.id===rid;}); if(!r)return;
+  r[field]=val;
+  if(field==='room_type_id'){
+    rebuildDay(did);
+  } else {
+    // qty change — just update totals in DOM
+    var di=state.days.indexOf(d),dc=calcDay(d,di),card=el('dc_'+did);
+    if(card){
+      card.querySelector('.day-total').textContent=fmt(dc);
+      var ft=card.querySelector('[data-dft]'); if(ft) ft.textContent='Day total: '+fmt(dc);
     }
   }
 }
@@ -915,7 +989,7 @@ function renderSummary() {
   // Days
   rows+='<tr><td colspan="4" style="font-size:.72rem;font-weight:700;text-transform:uppercase;color:#6b7280;padding:10px 12px 3px">Days</td></tr>';
   state.days.forEach(function(d,i){
-    var dc=calcDay(d,i),lodgeLabel=d.lodge_id>0?getLodgeName(d.lodge_id):(d.lodge_id===-1?'Custom':'—');
+    var dc=calcDay(d,i),lodgeLabel=dayLodgeLabel(d);
     rows+='<tr><td>'+(i+1)+'</td>'
       +'<td style="font-weight:500">'+(d.route||'—')+(d.attraction?'<br><span style="font-size:.72rem;color:#6b7280">'+esc(d.attraction)+'</span>':'')+'</td>'
       +'<td style="color:#6b7280">'+esc(lodgeLabel)+'</td>'
@@ -978,8 +1052,11 @@ function saveQuote() {
         attraction:       d.attraction,
         lodge:            d.lodge_id>0?getLodgeName(d.lodge_id):(d.lodge_id===-1?'Custom':''),
         lodge_id:         d.lodge_id>0?d.lodge_id:null,
-        room_type_id:     d.room_type_id>0?d.room_type_id:null,
         lodge_custom:     d.lodge_id===-1?(+d.lodge_custom_total||0):0,
+        rooms: d.lodge_id>0?(d.rooms||[]).filter(function(r){return r.room_type_id>0;}).map(function(r){
+          var dateStr=getDayDate(i),up=getRoomUnitPrice(d.lodge_id,r.room_type_id,dateStr);
+          return{room_type_id:r.room_type_id,room_type_name:getRoomTypeName(d.lodge_id,r.room_type_id),qty:+r.qty||1,unit_price:up,total_price:up*(+r.qty||1)};
+        }):[],
         jeep:             d.jeep,
         jeep_count:       d.jeep_count!==null?+d.jeep_count:null,
         jeep_rate_custom: (d.jeep_rate_custom!==null&&d.jeep_rate_custom!=='')?+d.jeep_rate_custom:null,

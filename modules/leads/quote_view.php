@@ -30,6 +30,11 @@ $allItems = $iStmt->fetchAll();
 $itemsByDay = [];
 foreach ($allItems as $item) $itemsByDay[$item['quote_day_id']][] = $item;
 
+$rStmt2 = $db->prepare("SELECT * FROM quote_day_rooms WHERE quote_day_id IN (SELECT id FROM quote_days WHERE quote_id = ?) ORDER BY quote_day_id, id");
+$rStmt2->execute([$id]);
+$roomsByDay = [];
+foreach ($rStmt2->fetchAll() as $rm) $roomsByDay[$rm['quote_day_id']][] = $rm;
+
 // Load request
 $rStmt = $db->prepare("SELECT id, practice_code, customer_name FROM requests WHERE id = ?");
 $rStmt->execute([$quote['request_id']]);
@@ -137,13 +142,22 @@ include 'includes/header.php';
       <tbody>
         <?php foreach ($days as $d):
           $dayItems = $itemsByDay[$d['id']] ?? [];
+          $dayRooms = $roomsByDay[$d['id']] ?? [];
+          $dayJeeps = (int)($d['jeep_count'] ?? ($pax > 7 ? ceil($pax / 7) : 1));
         ?>
         <tr class="day-row">
-          <td style="font-weight:700;color:var(--green);"><?= (int)$d['day_number'] ?></td>
+          <td style="font-weight:700;color:var(--red);"><?= (int)$d['day_number'] ?></td>
           <td style="font-weight:600;"><?= h($d['route'] ?? $d['location'] ?? '—') ?></td>
-          <td style="color:#6b7280;"><?= h($d['lodge'] ?? '—') ?></td>
+          <td style="color:#6b7280;">
+            <?= h($d['lodge'] ?? '—') ?>
+            <?php if ($dayRooms): ?>
+              <div style="font-size:.72rem;color:#9ca3af;margin-top:2px;">
+                <?= implode(', ', array_map(fn($r) => (int)$r['qty'].'×'.h($r['room_type_name']), $dayRooms)) ?>
+              </div>
+            <?php endif; ?>
+          </td>
           <td><?= ucfirst(h($d['jeep'])) ?></td>
-          <td style="text-align:center;font-size:.8rem;color:#6b7280;"><?= (int)($d['jeep_count'] ?? ($pax > 7 ? ceil($pax / 7) : 1)) ?></td>
+          <td style="text-align:center;font-size:.8rem;color:#6b7280;"><?= $dayJeeps ?></td>
           <td style="font-size:.8rem;color:#6b7280;"><?= h($d['park']) ?></td>
           <td style="text-align:right;font-family:monospace;font-weight:600;">$<?= number_format((float)$d['day_total'], 0, '.', ',') ?></td>
         </tr>

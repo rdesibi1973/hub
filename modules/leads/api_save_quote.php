@@ -126,13 +126,16 @@ try {
         INSERT INTO quote_day_items (quote_day_id, description, item_type, amount)
         VALUES (?,?,?,?)
     ");
+    $insRoomStmt = $db->prepare("
+        INSERT INTO quote_day_rooms (quote_day_id, room_type_id, room_type_name, qty, unit_price, total_price)
+        VALUES (?,?,?,?,?,?)
+    ");
 
     foreach ($days as $dayNum => $d) {
         $jeep = in_array($d['jeep'] ?? '', $validJeep) ? $d['jeep'] : 'full';
         $park = in_array($d['park'] ?? '', $validPark)  ? $d['park'] : 'none';
 
         $lodgeId2        = (int)($d['lodge_id']        ?? 0) ?: null;
-        $roomTypeId2     = (int)($d['room_type_id']    ?? 0) ?: null;
         $flightRouteId   = (int)($d['flight_route_id'] ?? 0) ?: null;
         $transferRateId  = (int)($d['transfer_rate_id']?? 0) ?: null;
         $jeepRateCustom  = isset($d['jeep_rate_custom']) && $d['jeep_rate_custom'] !== null
@@ -147,7 +150,7 @@ try {
             substr(trim($d['attraction'] ?? ''), 0, 200),
             substr(trim($d['lodge']      ?? ''), 0, 200),
             $lodgeId2,
-            $roomTypeId2,
+            null,  // room_type_id legacy — now stored in quote_day_rooms
             max(0, (float)($d['lodge_custom']   ?? 0)),
             $jeep,
             $jeepCount,
@@ -163,6 +166,18 @@ try {
             max(0, (float)($d['day_total']      ?? 0)),
         ]);
         $dayId = (int)$db->lastInsertId();
+
+        // Insert room rows
+        foreach (($d['rooms'] ?? []) as $rm) {
+            $insRoomStmt->execute([
+                $dayId,
+                (int)($rm['room_type_id'] ?? 0) ?: null,
+                substr(trim($rm['room_type_name'] ?? ''), 0, 200),
+                max(1, (int)($rm['qty'] ?? 1)),
+                max(0, (float)($rm['unit_price']  ?? 0)),
+                max(0, (float)($rm['total_price'] ?? 0)),
+            ]);
+        }
 
         foreach (($d['items'] ?? []) as $item) {
             $iType = in_array($item['item_type'] ?? '', $validType) ? $item['item_type'] : 'fixed';
