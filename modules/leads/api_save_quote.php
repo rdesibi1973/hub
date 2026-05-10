@@ -30,6 +30,18 @@ if (!$requestId || !$customerName) fail('Missing required fields.');
 
 $db = db();
 
+// Edit mode: verify existing quote ownership
+$editQuoteId = (int)($body['quote_id'] ?? 0);
+$isEdit      = $editQuoteId > 0;
+$existingQ   = null;
+if ($isEdit) {
+    $eChk = $db->prepare("SELECT id, agent_id, quote_number FROM quotes WHERE id = ?");
+    $eChk->execute([$editQuoteId]);
+    $existingQ = $eChk->fetch();
+    if (!$existingQ) fail('Quote not found.', 404);
+    if ($isStaff && (int)$existingQ['agent_id'] !== $staffAgentId) fail('Access denied.', 403);
+}
+
 // Verify request exists and access is permitted
 $rStmt = $db->prepare("SELECT id, agent_id, customer_name FROM requests WHERE id = ?");
 $rStmt->execute([$requestId]);
@@ -40,10 +52,16 @@ if ($isStaff && (int)$req['agent_id'] !== $staffAgentId) fail('Access denied.', 
 // Quote number — use provided override or auto-assign
 $quoteNumOverride = trim($body['quote_number'] ?? '');
 if ($quoteNumOverride !== '' && preg_match('/^\d+$/', $quoteNumOverride)) {
-    $chk = $db->prepare("SELECT id FROM quotes WHERE quote_number = ?");
-    $chk->execute([$quoteNumOverride]);
+    // Allow same number when editing; check collision only with other quotes
+    $dupSql = $isEdit
+        ? "SELECT id FROM quotes WHERE quote_number = ? AND id != ?"
+        : "SELECT id FROM quotes WHERE quote_number = ?";
+    $chk = $db->prepare($dupSql);
+    $chk->execute($isEdit ? [$quoteNumOverride, $editQuoteId] : [$quoteNumOverride]);
     if ($chk->fetch()) fail('Quote number "' . $quoteNumOverride . '" is already in use. Please choose another number.');
     $nextNum = str_pad($quoteNumOverride, 2, '0', STR_PAD_LEFT);
+} elseif ($isEdit) {
+    $nextNum = $existingQ['quote_number']; // keep existing number
 } else {
     $nextNum = $db->query("
         SELECT LPAD(COALESCE(MAX(CAST(quote_number AS UNSIGNED)), 0) + 1, 2, '0')
@@ -77,21 +95,50 @@ $createdBy = (int)($_SESSION['user_id'] ?? 0);
 
 $db->beginTransaction();
 try {
-    // Insert quote
-    $ins = $db->prepare("
-        INSERT INTO quotes
-          (quote_number, request_id, agent_id, customer_name, agent_name, agency_name,
-           start_date, adults, teens, children, program, markup_type, markup_pct,
-           bank_commission, total_costs, total_price, status, created_by)
-        VALUES
-          (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'draft',?)
-    ");
-    $ins->execute([
-        $nextNum, $requestId, $agentId, $customerName, $agentName, $agencyName,
-        $startDate, $adults, $teens, $children, $program, $markupType, $markupPct,
-        $bankComm, $totalCosts, $totalPrice, $createdBy,
-    ]);
-    $quoteId = (int)$db->lastInsertId();
+    if ($isEdit) {
+        // ── UPDATE existing quote ─────────────────────────────────────────────
+        $db->prepare("
+            UPDATE quotes SET
+              quote_number=?, customer_name=?, agent_name=?, agency_name=?,
+              start_date=?, adults=?, teens=?, children=?, program=?,
+              markup_type=?, markup_pct=?, bank_commission=?, total_costs=?, total_price=?
+            WHERE id=?
+        ")->execute([
+            $nextNum, $customerName, $agentName, $agencyName,
+            $startDate, $adults, $teens, $children, $program,
+            $markupType, $markupPct, $bankComm, $totalCosts, $totalPrice,
+            $editQuoteId,
+        ]);
+        $quoteId = $editQuoteId;
+
+        // Delete old day data
+        $oldDayIds = $db->prepare("SELECT id FROM quote_days WHERE quote_id = ?");
+        $oldDayIds->execute([$quoteId]);
+        $dids = $oldDayIds->fetchAll(PDO::FETCH_COLUMN);
+        if ($dids) {
+            $ph = implode(',', array_fill(0, count($dids), '?'));
+            $db->prepare("DELETE FROM quote_day_rooms WHERE quote_day_id IN ($ph)")->execute($dids);
+            $db->prepare("DELETE FROM quote_day_items WHERE quote_day_id IN ($ph)")->execute($dids);
+        }
+        $db->prepare("DELETE FROM quote_days WHERE quote_id = ?")->execute([$quoteId]);
+        $db->prepare("DELETE FROM quote_safari_items WHERE quote_id = ?")->execute([$quoteId]);
+    } else {
+        // ── INSERT new quote ──────────────────────────────────────────────────
+        $ins = $db->prepare("
+            INSERT INTO quotes
+              (quote_number, request_id, agent_id, customer_name, agent_name, agency_name,
+               start_date, adults, teens, children, program, markup_type, markup_pct,
+               bank_commission, total_costs, total_price, status, created_by)
+            VALUES
+              (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'draft',?)
+        ");
+        $ins->execute([
+            $nextNum, $requestId, $agentId, $customerName, $agentName, $agencyName,
+            $startDate, $adults, $teens, $children, $program, $markupType, $markupPct,
+            $bankComm, $totalCosts, $totalPrice, $createdBy,
+        ]);
+        $quoteId = (int)$db->lastInsertId();
+    }
 
     $validJeep = ['none','half','full','double','contribution'];
     $validPark = ['none','tarangire','manyara','serengeti1','serengeti2','crater','custom'];

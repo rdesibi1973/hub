@@ -128,6 +128,95 @@ try {
     $nextQuoteNum = $db->query("SELECT LPAD(COALESCE(MAX(CAST(quote_number AS UNSIGNED)), 0) + 1, 2, '0') FROM quotes")->fetchColumn() ?: '01';
 } catch (\Throwable $e) {}
 
+// ── Edit mode: load existing quote ───────────────────────────────────────────
+$editQuoteId = (int)($_GET['edit'] ?? 0);
+$editJson    = 'null';
+$isEditMode  = false;
+
+if ($editQuoteId) {
+    $eStmt = $db->prepare("SELECT * FROM quotes WHERE id = ?");
+    $eStmt->execute([$editQuoteId]);
+    $eQuote = $eStmt->fetch();
+
+    if ($eQuote && (!$isStaff || (int)$eQuote['agent_id'] === $staffAgentId)) {
+        $isEditMode   = true;
+        $nextQuoteNum = $eQuote['quote_number']; // pre-fill existing number
+
+        // Load days
+        $eDStmt = $db->prepare("SELECT * FROM quote_days WHERE quote_id = ? ORDER BY day_number");
+        $eDStmt->execute([$editQuoteId]);
+        $eDays = $eDStmt->fetchAll();
+        $eDayIds = array_map('intval', array_column($eDays, 'id'));
+
+        $eRoomsByDay = []; $eItemsByDay = [];
+        if ($eDayIds) {
+            $eIn = implode(',', array_fill(0, count($eDayIds), '?'));
+            $eRSt = $db->prepare("SELECT * FROM quote_day_rooms WHERE quote_day_id IN ($eIn) ORDER BY id");
+            $eRSt->execute($eDayIds);
+            foreach ($eRSt->fetchAll() as $r) $eRoomsByDay[(int)$r['quote_day_id']][] = $r;
+            $eISt = $db->prepare("SELECT * FROM quote_day_items WHERE quote_day_id IN ($eIn) ORDER BY id");
+            $eISt->execute($eDayIds);
+            foreach ($eISt->fetchAll() as $it) $eItemsByDay[(int)$it['quote_day_id']][] = $it;
+        }
+
+        // Load safari items
+        $eSiSt = $db->prepare("SELECT * FROM quote_safari_items WHERE quote_id = ? ORDER BY id");
+        $eSiSt->execute([$editQuoteId]);
+        $eSafariItems = $eSiSt->fetchAll();
+
+        // Build days array for JS
+        $eDaysArr = [];
+        foreach ($eDays as $ed) {
+            $did  = (int)$ed['id'];
+            $lid  = $ed['lodge_id'] !== null ? (int)$ed['lodge_id'] : 0;
+            $lc   = (float)($ed['lodge_custom'] ?? 0);
+            $jsL  = $lid > 0 ? $lid : ($lc > 0 ? -1 : 0);
+            $frid = $ed['flight_route_id'] !== null ? (int)$ed['flight_route_id'] : 0;
+            $fc   = (float)($ed['flight_custom'] ?? 0);
+            $jsF  = $frid > 0 ? $frid : ($fc > 0 ? -1 : 0);
+            $trid = $ed['transfer_rate_id'] !== null ? (int)$ed['transfer_rate_id'] : 0;
+            $tc   = (float)($ed['transfer_custom'] ?? 0);
+            $jsT  = $trid > 0 ? $trid : ($tc > 0 ? -1 : 0);
+            $eDaysArr[] = [
+                'route'           => $ed['route'] ?? '',
+                'attraction'      => $ed['attraction'] ?? '',
+                'lodge_id'        => $jsL,
+                'lodge_custom'    => $lc,
+                'rooms'           => array_map(fn($r) => ['room_type_id' => (int)$r['room_type_id'], 'qty' => (int)$r['qty']], $eRoomsByDay[$did] ?? []),
+                'jeep'            => $ed['jeep'] ?? 'full',
+                'jeep_count'      => $ed['jeep_count'] !== null ? (int)$ed['jeep_count'] : null,
+                'jeep_rate_custom'=> $ed['jeep_rate_custom'] !== null ? (float)$ed['jeep_rate_custom'] : null,
+                'drinks'          => (int)($ed['drinks'] ?? 1),
+                'park'            => $ed['park'] ?? 'none',
+                'park_custom'     => (float)($ed['park_custom'] ?? 0),
+                'flight_route_id' => $jsF,
+                'flight_custom'   => $fc,
+                'transfer_rate_id'=> $jsT,
+                'transfer_custom' => $tc,
+                'items'           => array_map(fn($it) => ['description' => $it['description'], 'item_type' => $it['item_type'], 'amount' => (float)$it['amount']], $eItemsByDay[$did] ?? []),
+            ];
+        }
+
+        $editData = [
+            'id'           => $editQuoteId,
+            'quote_number' => $eQuote['quote_number'],
+            'customer_name'=> $eQuote['customer_name'],
+            'agent_name'   => $eQuote['agent_name']  ?? '',
+            'agency_name'  => $eQuote['agency_name'] ?? '',
+            'start_date'   => $eQuote['start_date']  ?? '',
+            'adults'       => (int)$eQuote['adults'],
+            'teens'        => (int)$eQuote['teens'],
+            'children'     => (int)$eQuote['children'],
+            'program'      => $eQuote['program'] ?? 'simba',
+            'markup_type'  => $eQuote['markup_type'] ?? 'standard',
+            'markup_pct'   => (float)$eQuote['markup_pct'],
+            'safari_items' => array_map(fn($si) => ['activity_rate_id' => $si['activity_rate_id'], 'description' => $si['description'], 'item_type' => $si['item_type'], 'amount' => (float)$si['amount']], $eSafariItems),
+            'days'         => $eDaysArr,
+        ];
+        $editJson = json_encode($editData);
+    }
+}
+
 include 'includes/header.php';
 ?>
 
@@ -222,9 +311,13 @@ include 'includes/header.php';
 <div class="wiz-header">
   <div class="wiz-header-icon">🐘</div>
   <div>
-    <h2>New Quote — <?= h($req['customer_name']) ?></h2>
+    <h2><?= $isEditMode ? 'Edit Quote #'.h($editData['quote_number']) : 'New Quote' ?> — <?= h($req['customer_name']) ?></h2>
     <p>Request #<?= h($req['practice_code'] ?? $req['id']) ?> &nbsp;·&nbsp;
-       <a href="request_view.php?id=<?= $req['id'] ?>" style="color:rgba(255,255,255,.8);text-decoration:none;">← Back to request</a>
+       <?php if ($isEditMode): ?>
+         <a href="quote_view.php?id=<?= $editQuoteId ?>" style="color:rgba(255,255,255,.8);text-decoration:none;">← Back to quote</a>
+       <?php else: ?>
+         <a href="request_view.php?id=<?= $req['id'] ?>" style="color:rgba(255,255,255,.8);text-decoration:none;">← Back to request</a>
+       <?php endif; ?>
     </p>
   </div>
   <div id="progBadge" style="margin-left:auto;background:rgba(255,255,255,.15);border-radius:6px;padding:4px 12px;font-size:.82rem;display:none;"></div>
@@ -379,6 +472,7 @@ include 'includes/header.php';
 <script>
 // ── Data ──────────────────────────────────────────────────────────────────────
 const PRICING_DATA = <?= $pricingJson ?>;
+const EDIT_DATA    = <?= $editJson ?>;
 
 const PARK_FEES = {
   none:       {l:'—',          ppp:0,   fx:0},
@@ -554,8 +648,10 @@ function getLodgePrice(lodge_id, room_type_id, dateStr, paxCount) {
     var s=rt.seasons[si]; if(!s.prices) continue;
     for (var pi=0;pi<s.periods.length;pi++) {
       if (dateInPeriod(dateStr,s.periods[pi])) {
-        var key='pax_'+Math.min(Math.max(paxCount,1),5);
-        return parseFloat(s.prices[key])||0;
+        var n=Math.min(Math.max(paxCount,1),5);
+        var raw=parseFloat(s.prices['pax_'+n])||0;
+        // per_person: stored value is per-person rate; multiply by pax count to get room total
+        return s.prices.price_basis==='per_person' ? raw*n : raw;
       }
     }
   }
@@ -1087,6 +1183,7 @@ function saveQuote() {
   var payload = {
     csrf:       '<?= $csrfToken ?>',
     request_id: REQ_ID,
+    quote_id:        window._editQuoteId || null,
     quote_number:    v('fQuoteNum'),
     customer_name:   v('fName'),
     agent_name:      v('fAgent'),
@@ -1145,14 +1242,86 @@ function saveQuote() {
     window._savedId = res.id;
     var custClean = (v('fName')||'Customer').replace(/\s+/g,'');
     el('savedFilename').textContent = res.quote_number + '_' + custClean + '.xlsx';
+    if (window._editQuoteId) {
+      el('savedBox').querySelector('div:nth-child(2)').textContent = 'Quote updated!';
+    }
     el('step4').style.display = 'none';
     el('savedBox').style.display = '';
   })
   .catch(function(e){ alert('Network error: '+e); btn.disabled=false; btn.textContent='💾 Save & Generate Excel'; });
 }
 
+// ── Edit mode: load existing quote into wizard ────────────────────────────────
+function loadEditData(data) {
+  // Reconstruct state from saved quote
+  state.program = data.program || 'simba';
+  state.markup  = data.markup_type || 'standard';
+  state.custMk  = data.markup_pct || 25;
+
+  state.safariItems = (data.safari_items || []).map(function(si) {
+    return {id:uid(), activity_rate_id:si.activity_rate_id||null,
+            description:si.description, item_type:si.item_type, amount:si.amount};
+  });
+  if (!state.safariItems.length) initSafariItems();
+
+  state.days = (data.days || []).map(function(d) {
+    return mkDay({
+      route:            d.route || '',
+      attraction:       d.attraction || '',
+      lodge_id:         +d.lodge_id || 0,
+      lodge_custom_total: +d.lodge_custom || 0,
+      rooms:            (d.rooms || []).map(function(r){ return mkRoom({room_type_id:+r.room_type_id||0, qty:+r.qty||1}); }),
+      jeep:             d.jeep || 'full',
+      jeep_count:       d.jeep_count !== null ? +d.jeep_count : null,
+      jeep_rate_custom: d.jeep_rate_custom !== null ? +d.jeep_rate_custom : null,
+      drinks:           d.drinks !== 0,
+      park:             d.park || 'none',
+      parkCust:         String(d.park_custom || ''),
+      flight_route_id:  +d.flight_route_id || 0,
+      flight_custom:    String(d.flight_custom || ''),
+      transfer_rate_id: +d.transfer_rate_id || 0,
+      transfer_custom:  String(d.transfer_custom || ''),
+      items: (d.items || []).map(function(it){
+        return {id:uid(), d:it.description, t:it.item_type==='pax'?'p':'f', a:String(it.amount)};
+      }),
+    });
+  });
+
+  // Pre-fill step 2 fields
+  el('fName').value    = data.customer_name || '';
+  el('fAgent').value   = data.agent_name    || '';
+  el('fAgency').value  = data.agency_name   || '';
+  if (data.start_date) el('fDate').value = data.start_date;
+  el('fAdults').value   = data.adults   || 0;
+  el('fTeens').value    = data.teens    || 0;
+  el('fChildren').value = data.children || 0;
+  updatePaxBar();
+
+  // Pre-fill step 4 markup
+  setMarkup(data.markup_type || 'standard');
+  if (data.markup_type === 'custom') {
+    el('custMkVal').value = data.markup_pct || 25;
+  }
+
+  // Mark template selected
+  if (data.program && el('tpl_'+data.program)) {
+    el('tpl_'+data.program).className = 'tpl-card selected';
+  }
+  el('btnStep1Next').disabled = false;
+  el('progBadge').style.display = '';
+  el('progBadge').textContent = '✏️ Editing #' + data.quote_number;
+
+  // Store edit id for save
+  window._editQuoteId = data.id;
+}
+
 // ── Init ──────────────────────────────────────────────────────────────────────
-goTo(1);
+if (EDIT_DATA) {
+  loadEditData(EDIT_DATA);
+  goTo(3); // skip template & client steps, open itinerary directly
+} else {
+  goTo(1);
+}
 </script>
 
 <?php include 'includes/footer.php'; ?>

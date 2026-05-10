@@ -105,6 +105,10 @@ include 'includes/header.php';
     <?php else: ?>
       <span class="badge-draft">Draft</span>
     <?php endif; ?>
+    <a href="quote_new.php?request_id=<?= $quote['request_id'] ?>&edit=<?= $id ?>"
+       style="padding:8px 16px;border-radius:8px;border:1px solid rgba(255,255,255,.4);color:#fff;text-decoration:none;font-size:.82rem;font-weight:700;">
+      ✏️ Edit
+    </a>
     <a href="api_export_quote.php?id=<?= $id ?>"
        style="padding:8px 16px;border-radius:8px;border:1px solid rgba(255,255,255,.4);color:#fff;text-decoration:none;font-size:.82rem;font-weight:700;">
       ⬇ <?= h($xlsxName) ?>
