@@ -669,16 +669,23 @@ function getLodgePrice(lodge_id, room_type_id, dateStr, paxCount) {
   if (!lodge) return 0;
   var rt=lodge.room_types.find(function(r){return r.id==room_type_id;});
   if (!rt) return 0;
+  var firstPrices=null;
   for (var si=0;si<rt.seasons.length;si++) {
     var s=rt.seasons[si]; if(!s.prices) continue;
+    if (!firstPrices) firstPrices=s.prices;
+    if (!s.periods||!s.periods.length) { firstPrices=s.prices; continue; }
     for (var pi=0;pi<s.periods.length;pi++) {
       if (dateInPeriod(dateStr,s.periods[pi])) {
         var n=Math.min(Math.max(paxCount,1),5);
         var raw=parseFloat(s.prices['pax_'+n])||0;
-        // per_person: stored value is per-person rate; multiply by pax count to get room total
         return s.prices.price_basis==='per_person' ? raw*n : raw;
       }
     }
+  }
+  if (firstPrices) {
+    var n=Math.min(Math.max(paxCount,1),5);
+    var raw=parseFloat(firstPrices['pax_'+n])||0;
+    return firstPrices.price_basis==='per_person' ? raw*n : raw;
   }
   return 0;
 }

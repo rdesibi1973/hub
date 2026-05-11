@@ -68,24 +68,38 @@ foreach ($allLodgePrices as $lp) {
 /**
  * Mirror of JS getLodgePrice — returns unit price for one room.
  * Uses max_pax for the room type to pick the pax_N column.
+ * Falls back to first available price if no season period matches the date.
  */
 function getRoomUnitPricePHP(int $roomTypeId, string $dateStr, array $periodsBySeason, array $lodgePriceMap): float {
-    if (!$dateStr || !isset($lodgePriceMap[$roomTypeId])) return 0;
+    if (!isset($lodgePriceMap[$roomTypeId])) return 0;
     $md = substr($dateStr, 5, 2) . '-' . substr($dateStr, 8, 2); // MM-DD
     $yr = (int)substr($dateStr, 0, 4);
+
+    $firstRow = null;
     foreach ($lodgePriceMap[$roomTypeId] as $seasonId => $priceRow) {
+        if ($firstRow === null) $firstRow = $priceRow; // keep as fallback
         $periods = $periodsBySeason[$seasonId] ?? [];
+        // If season has no periods defined → treat as year-round
+        if (empty($periods)) {
+            $firstRow = $priceRow; // prefer season with no periods (most specific)
+            continue;
+        }
         foreach ($periods as $p) {
-            // Year filter
             if ($p['year'] !== null && (int)$p['year'] !== $yr) continue;
             $s = $p['start_mmdd']; $e = $p['end_mmdd'];
             $inRange = ($s <= $e) ? ($md >= $s && $md <= $e) : ($md >= $s || $md <= $e);
             if (!$inRange) continue;
-            // Found the season — pick pax column using max_pax
-            $n    = min(max((int)($priceRow['rt_max_pax'] ?? 2), 1), 5);
-            $raw  = (float)($priceRow['pax_' . $n] ?? 0);
+            // Matched season — compute price
+            $n   = min(max((int)($priceRow['rt_max_pax'] ?? 2), 1), 5);
+            $raw = (float)($priceRow['pax_' . $n] ?? 0);
             return ($priceRow['price_basis'] === 'per_person') ? $raw * $n : $raw;
         }
+    }
+    // Fallback: no period matched — use first available price
+    if ($firstRow) {
+        $n   = min(max((int)($firstRow['rt_max_pax'] ?? 2), 1), 5);
+        $raw = (float)($firstRow['pax_' . $n] ?? 0);
+        return ($firstRow['price_basis'] === 'per_person') ? $raw * $n : $raw;
     }
     return 0;
 }
