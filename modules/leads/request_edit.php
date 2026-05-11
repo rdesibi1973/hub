@@ -390,8 +390,28 @@ function calcComm() {
   nameField.addEventListener('input', function(){
     const folder   = folderField.value;
     const parenIdx = folder.indexOf('(');
-    const suffix   = parenIdx >= 0 ? folder.substring(parenIdx) : '';
-    folderField.value = this.value.trimStart() + suffix;
+
+    // New name: strip all spaces  e.g. "Han Wu" → "HanWu"
+    const newName  = this.value.replace(/\s+/g, '');
+    if (!newName) return;
+
+    if (parenIdx < 0) {
+      // No parenthesis at all — replace entire folder
+      folderField.value = newName;
+      return;
+    }
+
+    // Everything from '(' onwards is preserved untouched
+    // e.g. "(Agustin-Drct)_START03APR_MIDT08APR_END11APR2026_CK"
+    const fromParen   = folder.substring(parenIdx);
+
+    // The part before '(' may have a prefix like "04_03APR_"
+    // We keep everything up to and including the last '_' before '('
+    const beforeParen = folder.substring(0, parenIdx);
+    const lastUS      = beforeParen.lastIndexOf('_');
+    const prefix      = lastUS >= 0 ? beforeParen.substring(0, lastUS + 1) : '';
+
+    folderField.value = prefix + newName + fromParen;
   });
 })();
 
