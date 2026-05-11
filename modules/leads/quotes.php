@@ -107,11 +107,13 @@ include 'includes/header.php';
             <?php endif; ?>
           </td>
           <td style="padding:10px 14px;color:var(--grey-mid);font-size:.8rem;"><?= date('d M Y', strtotime($q['created_at'])) ?></td>
-          <td style="padding:10px 14px;text-align:right;">
+          <td style="padding:10px 14px;text-align:right;white-space:nowrap;">
             <a href="quote_new.php?edit=<?= $q['id'] ?>&request_id=<?= $q['request_id'] ?>"
                style="font-size:.75rem;padding:4px 10px;border:1px solid var(--red);border-radius:5px;color:var(--red-dk);text-decoration:none;margin-right:4px;">Edit</a>
             <a href="quote_view.php?id=<?= $q['id'] ?>"
-               style="font-size:.75rem;padding:4px 10px;border:1px solid var(--grey-lt);border-radius:5px;color:var(--grey-dk);text-decoration:none;">View</a>
+               style="font-size:.75rem;padding:4px 10px;border:1px solid var(--grey-lt);border-radius:5px;color:var(--grey-dk);text-decoration:none;margin-right:4px;">View</a>
+            <button onclick="deleteQuote(<?= $q['id'] ?>, '<?= h($q['quote_number']) ?>')"
+                    style="font-size:.75rem;padding:4px 10px;border:1px solid #fca5a5;border-radius:5px;background:#fff;color:#dc2626;cursor:pointer;">Delete</button>
           </td>
         </tr>
         <?php endforeach; ?>
@@ -120,4 +122,18 @@ include 'includes/header.php';
   </div>
 <?php endif; ?>
 
+<script>
+function deleteQuote(id, num) {
+  if (!confirm('Delete quote ' + num + '?\n\nThis will permanently remove the quote and all its days. This cannot be undone.')) return;
+  var fd = new FormData();
+  fd.append('id', id);
+  fetch('api_delete_quote.php', {method:'POST', body:fd})
+    .then(function(r){ return r.json(); })
+    .then(function(data){
+      if (data.success) { location.reload(); }
+      else { alert('Error: ' + data.message); }
+    })
+    .catch(function(){ alert('Request failed'); });
+}
+</script>
 <?php include 'includes/footer.php'; ?>

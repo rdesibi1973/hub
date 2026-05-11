@@ -291,6 +291,8 @@ include 'includes/header.php';
         <td style="padding:8px 14px;display:flex;gap:8px;">
           <a href="quote_view.php?id=<?= $lq['id'] ?>" class="btn btn-outline" style="font-size:.75rem;padding:4px 10px;">View</a>
           <a href="quote_new.php?request_id=<?= $r['id'] ?>&edit=<?= $lq['id'] ?>" class="btn btn-outline" style="font-size:.75rem;padding:4px 10px;">✏️ Edit</a>
+          <button onclick="deleteQuote(<?= $lq['id'] ?>, '<?= h($lq['quote_number']) ?>')"
+                  class="btn" style="font-size:.75rem;padding:4px 10px;background:#fff;color:#dc2626;border:1px solid #fca5a5;">Delete</button>
           <a href="api_export_quote.php?id=<?= $lq['id'] ?>" class="btn btn-outline" style="font-size:.75rem;padding:4px 10px;">⬇ Excel</a>
         </td>
       </tr>
@@ -307,4 +309,18 @@ include 'includes/header.php';
   Updated <?= date('d M Y H:i', strtotime($r['updated_at'])) ?>
 </div>
 
+<script>
+function deleteQuote(id, num) {
+  if (!confirm('Delete quote ' + num + '?\n\nThis will permanently remove the quote and all its days. This cannot be undone.')) return;
+  var fd = new FormData();
+  fd.append('id', id);
+  fetch('api_delete_quote.php', {method:'POST', body:fd})
+    .then(function(r){ return r.json(); })
+    .then(function(data){
+      if (data.success) { location.reload(); }
+      else { alert('Error: ' + data.message); }
+    })
+    .catch(function(){ alert('Request failed'); });
+}
+</script>
 <?php include 'includes/footer.php'; ?>
