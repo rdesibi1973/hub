@@ -30,13 +30,91 @@ $allItems = $iStmt->fetchAll();
 $itemsByDay = [];
 foreach ($allItems as $item) $itemsByDay[$item['quote_day_id']][] = $item;
 
-$rStmt2 = $db->prepare("SELECT * FROM quote_day_rooms WHERE quote_day_id IN (SELECT id FROM quote_days WHERE quote_id = ?) ORDER BY quote_day_id, id");
+$rStmt2 = $db->prepare("SELECT qdr.*, lrt.max_pax AS rt_max_pax
+    FROM quote_day_rooms qdr
+    LEFT JOIN lodge_room_types lrt ON lrt.id = qdr.room_type_id
+    WHERE qdr.quote_day_id IN (SELECT id FROM quote_days WHERE quote_id = ?)
+    ORDER BY qdr.quote_day_id, qdr.id");
 $rStmt2->execute([$id]);
-$roomsByDay = [];
-$roomTotalByDay = [];
+$roomsByDay    = [];
+$roomTotalByDay= [];
 foreach ($rStmt2->fetchAll() as $rm) {
     $roomsByDay[$rm['quote_day_id']][] = $rm;
-    $roomTotalByDay[$rm['quote_day_id']] = ($roomTotalByDay[$rm['quote_day_id']] ?? 0) + (float)$rm['total_price'];
+}
+
+// ── Lodge pricing data for PHP recalculation ──────────────────────────────────
+// Load all season periods keyed by season_id
+$allPeriods = $db->query(
+    "SELECT lsp.season_id, lsp.year, lsp.start_mmdd, lsp.end_mmdd, ls.lodge_id
+     FROM lodge_season_periods lsp
+     JOIN lodge_seasons ls ON ls.id = lsp.season_id"
+)->fetchAll();
+$periodsBySeason = [];
+foreach ($allPeriods as $p) {
+    $periodsBySeason[(int)$p['season_id']][] = $p;
+}
+
+// Load all lodge prices
+$allLodgePrices = $db->query(
+    "SELECT lp.*, lrt.lodge_id, lrt.max_pax AS rt_max_pax
+     FROM lodge_prices lp
+     JOIN lodge_room_types lrt ON lrt.id = lp.room_type_id"
+)->fetchAll();
+$lodgePriceMap = []; // [room_type_id][season_id] => price row
+foreach ($allLodgePrices as $lp) {
+    $lodgePriceMap[(int)$lp['room_type_id']][(int)$lp['season_id']] = $lp;
+}
+
+/**
+ * Mirror of JS getLodgePrice — returns unit price for one room.
+ * Uses max_pax for the room type to pick the pax_N column.
+ */
+function getRoomUnitPricePHP(int $roomTypeId, string $dateStr, array $periodsBySeason, array $lodgePriceMap): float {
+    if (!$dateStr || !isset($lodgePriceMap[$roomTypeId])) return 0;
+    $md = substr($dateStr, 5, 2) . '-' . substr($dateStr, 8, 2); // MM-DD
+    $yr = (int)substr($dateStr, 0, 4);
+    foreach ($lodgePriceMap[$roomTypeId] as $seasonId => $priceRow) {
+        $periods = $periodsBySeason[$seasonId] ?? [];
+        foreach ($periods as $p) {
+            // Year filter
+            if ($p['year'] !== null && (int)$p['year'] !== $yr) continue;
+            $s = $p['start_mmdd']; $e = $p['end_mmdd'];
+            $inRange = ($s <= $e) ? ($md >= $s && $md <= $e) : ($md >= $s || $md <= $e);
+            if (!$inRange) continue;
+            // Found the season — pick pax column using max_pax
+            $n    = min(max((int)($priceRow['rt_max_pax'] ?? 2), 1), 5);
+            $raw  = (float)($priceRow['pax_' . $n] ?? 0);
+            return ($priceRow['price_basis'] === 'per_person') ? $raw * $n : $raw;
+        }
+    }
+    return 0;
+}
+
+// Pre-compute room totals per day using live DB prices
+$startDate = $quote['start_date'] ?? null;
+foreach ($days as $d) {
+    $dayNum  = (int)$d['day_number'];
+    $dayDate = null;
+    if ($startDate) {
+        $dt = new DateTime($startDate);
+        $dt->modify('+' . ($dayNum - 1) . ' days');
+        $dayDate = $dt->format('Y-m-d');
+    }
+    $total = 0;
+    foreach ($roomsByDay[$d['id']] ?? [] as &$rm) {
+        $storedTotal = (float)$rm['total_price'];
+        $liveUnit    = $dayDate && $rm['room_type_id']
+                       ? getRoomUnitPricePHP((int)$rm['room_type_id'], $dayDate, $periodsBySeason, $lodgePriceMap)
+                       : 0;
+        // Use live price if stored is 0 and live price is available
+        $effectiveUnit  = ($storedTotal == 0 && $liveUnit > 0) ? $liveUnit : $storedTotal / max((int)$rm['qty'], 1);
+        $effectiveTotal = $effectiveUnit * max((int)$rm['qty'], 1);
+        $rm['_unit_price_display'] = $effectiveUnit;
+        $rm['_total_display']      = $effectiveTotal;
+        $total += $effectiveTotal;
+    }
+    unset($rm);
+    $roomTotalByDay[$d['id']] = $total;
 }
 
 // Load jeep rates for display
@@ -279,7 +357,7 @@ include 'includes/header.php';
               <div style="font-size:.72rem;color:#9ca3af;margin-top:2px;">
                 <?php foreach ($dayRooms as $r): ?>
                   <span><?= (int)$r['qty'] ?>×<?= h($r['room_type_name']) ?>
-                    <span style="color:#d1d5db;">$<?= number_format((float)$r['total_price'], 0) ?></span>
+                    <span style="color:#d1d5db;">$<?= number_format((float)$r['_total_display'], 0) ?></span>
                   </span>&nbsp;
                 <?php endforeach; ?>
                 <?php if ($cLodge > 0): ?>
