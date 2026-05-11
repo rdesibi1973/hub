@@ -33,7 +33,15 @@ foreach ($allItems as $item) $itemsByDay[$item['quote_day_id']][] = $item;
 $rStmt2 = $db->prepare("SELECT * FROM quote_day_rooms WHERE quote_day_id IN (SELECT id FROM quote_days WHERE quote_id = ?) ORDER BY quote_day_id, id");
 $rStmt2->execute([$id]);
 $roomsByDay = [];
-foreach ($rStmt2->fetchAll() as $rm) $roomsByDay[$rm['quote_day_id']][] = $rm;
+$roomTotalByDay = [];
+foreach ($rStmt2->fetchAll() as $rm) {
+    $roomsByDay[$rm['quote_day_id']][] = $rm;
+    $roomTotalByDay[$rm['quote_day_id']] = ($roomTotalByDay[$rm['quote_day_id']] ?? 0) + (float)$rm['total_price'];
+}
+
+// Load jeep rates for display
+$jeepRates = $db->query("SELECT type, rate, valid_from, valid_to FROM jeep_rates ORDER BY type, valid_from DESC")->fetchAll();
+$jeepRateDefaults = ['half'=>125, 'full'=>250, 'double'=>500, 'contribution'=>80];
 
 // Load safari fixed items (Emergency, Medivac, etc.)
 $siStmt = $db->prepare("SELECT * FROM quote_safari_items WHERE quote_id = ? ORDER BY id");
@@ -48,6 +56,17 @@ $req = $rStmt->fetch();
 $pax   = (int)$quote['adults'] + (int)$quote['teens'] + (int)$quote['children'];
 $jeeps = $pax > 7 ? ceil($pax / 7) : 1;
 $mk    = (float)$quote['markup_pct'] / 100;
+
+// ── Jeep rate lookup (mirrors JS getJeepRate) ─────────────────────────────────
+function getJeepRatePHP(array $jeepRates, array $defaults, string $type, string $dateStr): float {
+    foreach ($jeepRates as $r) {
+        if (strtolower($r['type']) !== strtolower($type)) continue;
+        if ($r['valid_from'] && $dateStr < $r['valid_from']) continue;
+        if ($r['valid_to']   && $dateStr > $r['valid_to'])   continue;
+        return (float)$r['rate'];
+    }
+    return (float)($defaults[$type] ?? 0);
+}
 
 $pageTitle = $quote['quote_number'] . ' — ' . $quote['customer_name'];
 
@@ -182,9 +201,16 @@ include 'includes/header.php';
         <?php endif; ?>
 
         <?php foreach ($days as $d):
-          $dayItems = $itemsByDay[$d['id']] ?? [];
-          $dayRooms = $roomsByDay[$d['id']] ?? [];
-          $dayJeeps = (int)($d['jeep_count'] ?? ($pax > 7 ? ceil($pax / 7) : 1));
+          $dayItems   = $itemsByDay[$d['id']] ?? [];
+          $dayRooms   = $roomsByDay[$d['id']] ?? [];
+          $dayJeeps   = (int)($d['jeep_count'] ?? ($pax > 7 ? ceil($pax / 7) : 1));
+          // Jeep rate: custom override or DB lookup
+          $startDate  = $quote['start_date'] ?? date('Y-m-d');
+          $jeepRate   = ($d['jeep_rate_custom'] !== null && $d['jeep_rate_custom'] !== '')
+                        ? (float)$d['jeep_rate_custom']
+                        : getJeepRatePHP($jeepRates, $jeepRateDefaults, $d['jeep'] ?? 'full', $startDate);
+          $jeepTotal  = ($d['jeep'] !== 'none') ? $jeepRate * $dayJeeps : 0;
+          $roomTotal  = $roomTotalByDay[$d['id']] ?? 0;
         ?>
         <tr class="day-row">
           <td style="font-weight:700;color:var(--red);"><?= (int)$d['day_number'] ?></td>
@@ -193,11 +219,28 @@ include 'includes/header.php';
             <?= h($d['lodge'] ?? '—') ?>
             <?php if ($dayRooms): ?>
               <div style="font-size:.72rem;color:#9ca3af;margin-top:2px;">
-                <?= implode(', ', array_map(fn($r) => (int)$r['qty'].'×'.h($r['room_type_name']), $dayRooms)) ?>
+                <?php foreach ($dayRooms as $r): ?>
+                  <span><?= (int)$r['qty'] ?>×<?= h($r['room_type_name']) ?></span>
+                  <span style="color:#d1d5db;margin-left:3px;">$<?= number_format((float)$r['total_price'], 0) ?></span><?= !$loop_last ? ' &nbsp;' : '' ?>
+                <?php endforeach; ?>
+                <?php if ($roomTotal > 0): ?>
+                  <span style="margin-left:4px;color:#6b7280;font-weight:600;">= $<?= number_format($roomTotal, 0) ?></span>
+                <?php endif; ?>
               </div>
             <?php endif; ?>
           </td>
-          <td><?= ucfirst(h($d['jeep'])) ?></td>
+          <td>
+            <?= ucfirst(h($d['jeep'])) ?>
+            <?php if ($d['jeep'] !== 'none'): ?>
+              <div style="font-size:.72rem;color:#6b7280;margin-top:2px;">
+                $<?= number_format($jeepRate, 0) ?><?= $dayJeeps > 1 ? ' × '.$dayJeeps : '' ?>
+                <?php if ($d['jeep_rate_custom'] !== null && $d['jeep_rate_custom'] !== ''): ?>
+                  <span style="color:#b45309;" title="Custom rate">✎</span>
+                <?php endif; ?>
+                = <strong>$<?= number_format($jeepTotal, 0) ?></strong>
+              </div>
+            <?php endif; ?>
+          </td>
           <td style="text-align:center;font-size:.8rem;color:#6b7280;"><?= $dayJeeps ?></td>
           <td style="font-size:.8rem;color:#6b7280;"><?= h($d['park']) ?></td>
           <td style="text-align:right;font-family:monospace;font-weight:600;">$<?= number_format((float)$d['day_total'], 0, '.', ',') ?></td>
