@@ -1166,11 +1166,70 @@ function renderSummary() {
   // Days
   rows+='<tr><td colspan="4" style="font-size:.72rem;font-weight:700;text-transform:uppercase;color:#6b7280;padding:10px 12px 3px">Days</td></tr>';
   state.days.forEach(function(d,i){
-    var dc=calcDay(d,i),lodgeLabel=dayLodgeLabel(d);
-    rows+='<tr><td>'+(i+1)+'</td>'
-      +'<td style="font-weight:500">'+(d.route||'—')+(d.attraction?'<br><span style="font-size:.72rem;color:#6b7280">'+esc(d.attraction)+'</span>':'')+'</td>'
-      +'<td style="color:#6b7280">'+esc(lodgeLabel)+'</td>'
-      +'<td style="text-align:right;font-family:monospace;font-weight:500">'+fmt(dc)+'</td></tr>';
+    var dc=calcDay(d,i), date=getDayDate(i), p=pax();
+    var j=d.jeep_count!==null?+d.jeep_count:jeeps();
+
+    // Component breakdown
+    var parts=[];
+
+    // Lodge
+    var lodgeLabel=dayLodgeLabel(d);
+    var lodgeCost=0;
+    if(d.lodge_id>0){
+      (d.rooms||[]).forEach(function(r){
+        if(r.room_type_id>0) lodgeCost+=getRoomUnitPrice(d.lodge_id,r.room_type_id,date)*(+r.qty||1);
+      });
+      lodgeCost+=getLodgeSupplements(d.lodge_id,date,+v('fAdults')||0);
+    } else if(d.lodge_id===-1){ lodgeCost=+d.lodge_custom_total||0; }
+    if(lodgeCost) parts.push('Lodge $'+Math.round(lodgeCost));
+
+    // Jeep
+    if(d.jeep!=='none'){
+      var jr=(d.jeep_rate_custom!==null&&d.jeep_rate_custom!=='')?+d.jeep_rate_custom:getJeepRate(d.jeep,date);
+      var jc=jr*j;
+      parts.push(d.jeep.charAt(0).toUpperCase()+d.jeep.slice(1)+' jeep $'+Math.round(jr)+(j>1?'×'+j:'')+'=$'+Math.round(jc));
+    }
+
+    // Park
+    if(d.park==='custom'&&+d.parkCust){ parts.push('Park $'+Math.round(+d.parkCust)); }
+    else if(d.park&&d.park!=='none'&&PARK_FEES[d.park]){
+      var pf=PARK_FEES[d.park]; var pc=pf.fx+pf.ppp*p;
+      parts.push('Park $'+Math.round(pc));
+    }
+
+    // Drinks
+    if(d.drinks) parts.push('Drinks $'+Math.round(4*p));
+
+    // Flight
+    if(d.flight_route_id>0){
+      var flr=getFlightRoute(d.flight_route_id);
+      var flRate=(d.flight_custom!==''&&d.flight_custom!==null)?+d.flight_custom:(flr?parseFloat(flr.rate_pax):0);
+      if(flRate) parts.push('✈ $'+Math.round(flRate*p));
+    } else if(d.flight_route_id===-1&&+d.flight_custom){ parts.push('✈ $'+Math.round(+d.flight_custom)); }
+
+    // Transfer
+    if(d.transfer_rate_id>0){
+      var tra=getActivityRate(d.transfer_rate_id);
+      var trRate=(d.transfer_custom!==''&&d.transfer_custom!==null)?+d.transfer_custom:(tra?parseFloat(tra.rate):0);
+      var tc=tra&&tra.item_type==='pax'?trRate*p:trRate;
+      if(tc) parts.push('Transfer $'+Math.round(tc));
+    } else if(d.transfer_rate_id===-1&&+d.transfer_custom){ parts.push('Transfer $'+Math.round(+d.transfer_custom)); }
+
+    // Activity items
+    d.items.forEach(function(a){
+      var ac=a.t==='p'?(+a.a||0)*p:(+a.a||0);
+      if(ac) parts.push(esc(a.d)+' $'+Math.round(ac));
+    });
+
+    var detailHtml=parts.length
+      ?'<div style="font-size:.7rem;color:#9ca3af;margin-top:2px;line-height:1.6">'+parts.join(' &nbsp;·&nbsp; ')+'</div>'
+      :'';
+
+    rows+='<tr><td style="vertical-align:top">'+(i+1)+'</td>'
+      +'<td style="font-weight:500;vertical-align:top">'+(d.route||'—')
+        +(d.attraction?'<br><span style="font-size:.72rem;color:#6b7280">'+esc(d.attraction)+'</span>':'')+'</td>'
+      +'<td style="color:#6b7280;vertical-align:top">'+esc(lodgeLabel)+detailHtml+'</td>'
+      +'<td style="text-align:right;font-family:monospace;font-weight:500;vertical-align:top">'+fmt(dc)+'</td></tr>';
   });
   rows+='<tr style="border-top:2px solid #e5e7eb">'
     +'<td colspan="3" style="text-align:right;color:#6b7280;font-size:.8rem">Bank Commission</td>'
