@@ -108,6 +108,8 @@ include 'includes/header.php';
           </td>
           <td style="padding:10px 14px;color:var(--grey-mid);font-size:.8rem;"><?= date('d M Y', strtotime($q['created_at'])) ?></td>
           <td style="padding:10px 14px;text-align:right;">
+            <a href="quote_new.php?edit=<?= $q['id'] ?>&request_id=<?= $q['request_id'] ?>"
+               style="font-size:.75rem;padding:4px 10px;border:1px solid var(--red);border-radius:5px;color:var(--red-dk);text-decoration:none;margin-right:4px;">Edit</a>
             <a href="quote_view.php?id=<?= $q['id'] ?>"
                style="font-size:.75rem;padding:4px 10px;border:1px solid var(--grey-lt);border-radius:5px;color:var(--grey-dk);text-decoration:none;">View</a>
           </td>

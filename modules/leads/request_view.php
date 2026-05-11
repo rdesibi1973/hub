@@ -104,6 +104,7 @@ include 'includes/header.php';
         <a href="quote_new.php?request_id=<?= $r['id'] ?>" class="btn btn-outline">📋 New Quote</a>
       <?php elseif ($quoteCount === 1): ?>
         <a href="quote_view.php?id=<?= $linkedQuotes[0]['id'] ?>" class="btn btn-outline">📋 <?= h($linkedQuotes[0]['quote_number']) ?></a>
+        <a href="quote_new.php?edit=<?= $linkedQuotes[0]['id'] ?>&request_id=<?= $r['id'] ?>" class="btn btn-outline">✏️ Edit Quote</a>
         <a href="quote_new.php?request_id=<?= $r['id'] ?>" class="btn btn-outline">+ Quote</a>
       <?php else: ?>
         <a href="quotes.php" class="btn btn-outline">📋 <?= $quoteCount ?> Quotes</a>
