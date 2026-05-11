@@ -623,6 +623,37 @@ public class NewRequestDialog extends JDialog {
         }
 
         String folderPreview = folderPreviewLabel.getText();
+
+        // ── Email duplicate check before proceeding ───────────────────────────
+        String emailToCheck = emailField.getText().trim();
+        if (!emailToCheck.isEmpty() && emailToCheck.contains("@")) {
+            try {
+                String dupResp = api.get("check_duplicate.php", "email=" + urlEncode(emailToCheck));
+                if (dupResp.contains("\"id\"")) {
+                    // Build list of duplicates for the message
+                    StringBuilder dupList = new StringBuilder();
+                    java.util.regex.Matcher mName = java.util.regex.Pattern
+                        .compile("\"name\"\\s*:\\s*\"([^\"]+)\"").matcher(dupResp);
+                    java.util.regex.Matcher mId = java.util.regex.Pattern
+                        .compile("\"id\"\\s*:\\s*(\\d+)").matcher(dupResp);
+                    while (mName.find() && mId.find()) {
+                        dupList.append("  • \"").append(mName.group(1))
+                               .append("\"  (Request #").append(mId.group(1)).append(")\n");
+                    }
+                    int choice = JOptionPane.showConfirmDialog(this,
+                        "⚠  WARNING — Email already on file!\n\n"
+                        + "This email address is associated with:\n"
+                        + dupList.toString()
+                        + "\nDo you want to create a NEW request anyway?",
+                        "Duplicate Email",
+                        JOptionPane.YES_NO_OPTION,
+                        JOptionPane.WARNING_MESSAGE);
+                    if (choice != JOptionPane.YES_OPTION) return;
+                }
+            } catch (IOException ex) { /* network error — proceed anyway */ }
+        }
+        // ─────────────────────────────────────────────────────────────────────
+
         int confirm = JOptionPane.showConfirmDialog(this,
             "The following folder will be created:\n  " + folderPreview + "\n\nConfirm?",
             "Confirm", JOptionPane.YES_NO_OPTION);

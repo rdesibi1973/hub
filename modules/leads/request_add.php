@@ -193,7 +193,7 @@ include 'includes/header.php';
 <?php endif; ?>
 
 <div class="form-card">
-  <form method="POST">
+  <form method="POST" id="request-form">
 
     <div class="form-section-title" style="margin-top:0">Request Details</div>
     <div class="form-grid">
@@ -499,32 +499,90 @@ function calcComm() {
   function esc(s){ const d=document.createElement('div'); d.appendChild(document.createTextNode(s)); return d.innerHTML; }
 })();
 
-// ── Email duplicate detection ─────────────────────────────────────────────────
+// ── Email duplicate detection + submit guard ──────────────────────────────────
 (function(){
   const emailField = document.getElementById('email');
   const emailWarn  = document.getElementById('email-dup-warning');
+  const form       = document.getElementById('request-form');
   if (!emailField) return;
 
+  // Cache of duplicate matches found for the current email value
+  let emailDupMatches = [];
+  let lastCheckedEmail = '';
+
+  // Check on blur (visual feedback while filling form)
   emailField.addEventListener('blur', function(){
     const val = this.value.trim();
-    emailWarn.style.display = 'none';
-    if (!val || !val.includes('@')) return;
-    fetch('check_duplicate.php?email=' + encodeURIComponent(val)
-        + (<?= json_encode((int)($v['id'] ?? 0)) ?> ? '&exclude_id=' + <?= json_encode((int)($v['id'] ?? 0)) ?> : ''))
-      .then(r => r.json()).then(renderEmailWarning).catch(() => {});
+    if (!val || !val.includes('@')) {
+      emailDupMatches = [];
+      lastCheckedEmail = '';
+      emailWarn.style.display = 'none';
+      return;
+    }
+    if (val === lastCheckedEmail) return; // already checked
+    fetchEmailDups(val);
   });
+
+  function fetchEmailDups(email) {
+    const excludeId = <?= json_encode((int)($v['id'] ?? 0)) ?>;
+    const url = 'check_duplicate.php?email=' + encodeURIComponent(email)
+              + (excludeId ? '&exclude_id=' + excludeId : '');
+    return fetch(url).then(r => r.json()).then(matches => {
+      emailDupMatches  = matches;
+      lastCheckedEmail = email;
+      renderEmailWarning(matches);
+      return matches;
+    }).catch(() => []);
+  }
 
   function renderEmailWarning(matches) {
     if (!matches.length) { emailWarn.style.display='none'; return; }
     let html = '<div style="background:#FEE2E2;border:1px solid #C0211B;border-radius:6px;padding:8px 12px;font-size:.8rem;">';
     html += '<strong>🔴 Same email already on file</strong><ul style="margin:4px 0 0 16px;padding:0">';
     matches.forEach(m => {
-      html += `<li style="margin:2px 0"><a href="request_view.php?id=${m.id}" target="_blank" style="color:#991B1B;font-weight:600">${esc(m.name)}</a> <span style="color:#6B7280">— ID #${m.id}</span></li>`;
+      html += `<li style="margin:2px 0"><a href="request_view.php?id=${m.id}" target="_blank" style="color:#991B1B;font-weight:600">${esc(m.name)}</a> <span style="color:#6B7280">— Request #${m.id}</span></li>`;
     });
     html += '</ul></div>';
     emailWarn.innerHTML = html;
     emailWarn.style.display = '';
   }
+
+  // Intercept submit: if email has duplicates, ask for confirmation
+  form.addEventListener('submit', function(e) {
+    const currentEmail = emailField.value.trim();
+    if (!currentEmail || !currentEmail.includes('@')) return; // no email, proceed
+
+    // If we haven't checked this email yet (user never left the field), check now
+    if (currentEmail !== lastCheckedEmail) {
+      e.preventDefault();
+      fetchEmailDups(currentEmail).then(matches => {
+        if (!matches.length) {
+          form.submit(); // clean — submit normally
+          return;
+        }
+        const names = matches.map(m => `"${m.name}" (Request #${m.id})`).join(', ');
+        const ok = confirm(
+          '⚠ WARNING — Email already on file!\n\n' +
+          'This email address is associated with:\n' + names + '\n\n' +
+          'Do you want to create a NEW request anyway?'
+        );
+        if (ok) form.submit();
+      });
+      return;
+    }
+
+    // Email was already checked and duplicates found — ask confirmation
+    if (emailDupMatches.length) {
+      e.preventDefault();
+      const names = emailDupMatches.map(m => `"${m.name}" (Request #${m.id})`).join(', ');
+      const ok = confirm(
+        '⚠ WARNING — Email already on file!\n\n' +
+        'This email address is associated with:\n' + names + '\n\n' +
+        'Do you want to create a NEW request anyway?'
+      );
+      if (ok) form.submit();
+    }
+  });
 
   function esc(s){ const d=document.createElement('div'); d.appendChild(document.createTextNode(s)); return d.innerHTML; }
 })();
