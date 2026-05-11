@@ -43,6 +43,12 @@ foreach ($rStmt2->fetchAll() as $rm) {
 $jeepRates = $db->query("SELECT type, rate, valid_from, valid_to FROM jeep_rates ORDER BY type, valid_from DESC")->fetchAll();
 $jeepRateDefaults = ['half'=>125, 'full'=>250, 'double'=>500, 'contribution'=>80];
 
+// Load flight routes and activity rates for day total recalculation
+$flightRoutes = $db->query("SELECT id, rate_pax FROM flight_routes WHERE active=1")->fetchAll(PDO::FETCH_KEY_PAIR);
+$activityRates = $db->query("SELECT id, rate, item_type FROM activity_rates WHERE active=1")->fetchAll();
+$actRateMap = [];
+foreach ($activityRates as $ar) $actRateMap[(int)$ar['id']] = $ar;
+
 // Load safari fixed items (Emergency, Medivac, etc.)
 $siStmt = $db->prepare("SELECT * FROM quote_safari_items WHERE quote_id = ? ORDER BY id");
 $siStmt->execute([$id]);
@@ -67,6 +73,15 @@ function getJeepRatePHP(array $jeepRates, array $defaults, string $type, string 
     }
     return (float)($defaults[$type] ?? 0);
 }
+
+// ── Park fees (mirrors JS PARK_FEES) ──────────────────────────────────────────
+$PARK_FEES = [
+    'tarangire'  => ['ppp' => 69,  'fx' => 0],
+    'manyara'    => ['ppp' => 45,  'fx' => 0],
+    'serengeti1' => ['ppp' => 179, 'fx' => 0],
+    'serengeti2' => ['ppp' => 96,  'fx' => 0],
+    'crater'     => ['ppp' => 83,  'fx' => 295],
+];
 
 $pageTitle = $quote['quote_number'] . ' — ' . $quote['customer_name'];
 
@@ -169,6 +184,7 @@ include 'includes/header.php';
       </thead>
       <tbody>
         <?php
+        $recalcGrandTotal = 0;
         // ── Safari fixed costs (Emergency, Medivac…) ──────────────────────────
         if ($safariItems):
             $safariTotal = 0;
@@ -204,13 +220,55 @@ include 'includes/header.php';
           $dayItems   = $itemsByDay[$d['id']] ?? [];
           $dayRooms   = $roomsByDay[$d['id']] ?? [];
           $dayJeeps   = (int)($d['jeep_count'] ?? ($pax > 7 ? ceil($pax / 7) : 1));
-          // Jeep rate: custom override or DB lookup
           $startDate  = $quote['start_date'] ?? date('Y-m-d');
-          $jeepRate   = ($d['jeep_rate_custom'] !== null && $d['jeep_rate_custom'] !== '')
-                        ? (float)$d['jeep_rate_custom']
-                        : getJeepRatePHP($jeepRates, $jeepRateDefaults, $d['jeep'] ?? 'full', $startDate);
-          $jeepTotal  = ($d['jeep'] !== 'none') ? $jeepRate * $dayJeeps : 0;
-          $roomTotal  = $roomTotalByDay[$d['id']] ?? 0;
+
+          // ── Recalculate day total from stored components ──────────────────
+          $cLodge    = $roomTotalByDay[$d['id']] ?? 0;
+          if ($cLodge == 0 && ($d['lodge_id'] ?? 0) == -1)
+              $cLodge = (float)($d['lodge_custom_total'] ?? 0);
+
+          $jeepRate  = ($d['jeep_rate_custom'] !== null && $d['jeep_rate_custom'] !== '')
+                       ? (float)$d['jeep_rate_custom']
+                       : getJeepRatePHP($jeepRates, $jeepRateDefaults, $d['jeep'] ?? 'full', $startDate);
+          $cJeep     = ($d['jeep'] !== 'none') ? $jeepRate * $dayJeeps : 0;
+
+          $cDrinks   = ($d['drinks'] ?? 0) ? 4 * $pax : 0;
+
+          $cPark = 0;
+          if (($d['park'] ?? 'none') === 'custom') {
+              $cPark = (float)($d['park_custom'] ?? 0);
+          } elseif (isset($PARK_FEES[$d['park']])) {
+              $pf    = $PARK_FEES[$d['park']];
+              $cPark = $pf['fx'] + $pf['ppp'] * $pax;
+          }
+
+          $cFlight = 0;
+          if (($d['flight_route_id'] ?? 0) > 0) {
+              $rPax    = (float)($flightRoutes[(int)$d['flight_route_id']] ?? 0);
+              $cFlight = ($d['flight_custom'] !== null && $d['flight_custom'] !== '')
+                         ? (float)$d['flight_custom'] : $rPax * $pax;
+          } elseif (($d['flight_route_id'] ?? 0) == -1) {
+              $cFlight = (float)($d['flight_custom'] ?? 0);
+          }
+
+          $cTransfer = 0;
+          if (($d['transfer_rate_id'] ?? 0) > 0) {
+              $ar = $actRateMap[(int)$d['transfer_rate_id']] ?? null;
+              if ($ar) {
+                  $trRate    = ($d['transfer_custom'] !== null && $d['transfer_custom'] !== '')
+                               ? (float)$d['transfer_custom'] : (float)$ar['rate'];
+                  $cTransfer = ($ar['item_type'] === 'pax') ? $trRate * $pax : $trRate;
+              }
+          } elseif (($d['transfer_rate_id'] ?? 0) == -1) {
+              $cTransfer = (float)($d['transfer_custom'] ?? 0);
+          }
+
+          $cItems = 0;
+          foreach ($dayItems as $it)
+              $cItems += ($it['item_type'] === 'pax') ? (float)$it['amount'] * $pax : (float)$it['amount'];
+
+          $dayCalc = $cLodge + $cJeep + $cDrinks + $cPark + $cFlight + $cTransfer + $cItems;
+          $recalcGrandTotal += $dayCalc;
         ?>
         <tr class="day-row">
           <td style="font-weight:700;color:var(--red);"><?= (int)$d['day_number'] ?></td>
@@ -220,11 +278,12 @@ include 'includes/header.php';
             <?php if ($dayRooms): ?>
               <div style="font-size:.72rem;color:#9ca3af;margin-top:2px;">
                 <?php foreach ($dayRooms as $r): ?>
-                  <span><?= (int)$r['qty'] ?>×<?= h($r['room_type_name']) ?></span>
-                  <span style="color:#d1d5db;margin-left:3px;">$<?= number_format((float)$r['total_price'], 0) ?></span><?= !$loop_last ? ' &nbsp;' : '' ?>
+                  <span><?= (int)$r['qty'] ?>×<?= h($r['room_type_name']) ?>
+                    <span style="color:#d1d5db;">$<?= number_format((float)$r['total_price'], 0) ?></span>
+                  </span>&nbsp;
                 <?php endforeach; ?>
-                <?php if ($roomTotal > 0): ?>
-                  <span style="margin-left:4px;color:#6b7280;font-weight:600;">= $<?= number_format($roomTotal, 0) ?></span>
+                <?php if ($cLodge > 0): ?>
+                  <strong style="color:#6b7280;">= $<?= number_format($cLodge, 0) ?></strong>
                 <?php endif; ?>
               </div>
             <?php endif; ?>
@@ -237,13 +296,31 @@ include 'includes/header.php';
                 <?php if ($d['jeep_rate_custom'] !== null && $d['jeep_rate_custom'] !== ''): ?>
                   <span style="color:#b45309;" title="Custom rate">✎</span>
                 <?php endif; ?>
-                = <strong>$<?= number_format($jeepTotal, 0) ?></strong>
+                = <strong>$<?= number_format($cJeep, 0) ?></strong>
               </div>
             <?php endif; ?>
           </td>
           <td style="text-align:center;font-size:.8rem;color:#6b7280;"><?= $dayJeeps ?></td>
-          <td style="font-size:.8rem;color:#6b7280;"><?= h($d['park']) ?></td>
-          <td style="text-align:right;font-family:monospace;font-weight:600;">$<?= number_format((float)$d['day_total'], 0, '.', ',') ?></td>
+          <td style="font-size:.8rem;color:#6b7280;">
+            <?= h($d['park']) ?>
+            <?php if ($cPark > 0): ?>
+              <div style="font-size:.72rem;color:#9ca3af;">$<?= number_format($cPark, 0) ?></div>
+            <?php endif; ?>
+            <?php if ($cFlight > 0): ?>
+              <div style="font-size:.72rem;color:#6b7280;">✈ $<?= number_format($cFlight, 0) ?></div>
+            <?php endif; ?>
+            <?php if ($cTransfer > 0): ?>
+              <div style="font-size:.72rem;color:#6b7280;">🚐 $<?= number_format($cTransfer, 0) ?></div>
+            <?php endif; ?>
+          </td>
+          <td style="text-align:right;font-family:monospace;font-weight:600;">
+            $<?= number_format($dayCalc, 0, '.', ',') ?>
+            <?php if (abs($dayCalc - (float)$d['day_total']) > 1): ?>
+              <div style="font-size:.65rem;color:#9ca3af;text-decoration:line-through;">
+                saved: $<?= number_format((float)$d['day_total'], 0) ?>
+              </div>
+            <?php endif; ?>
+          </td>
         </tr>
         <?php if (!empty($dayItems)): ?>
         <tr>
@@ -271,25 +348,34 @@ include 'includes/header.php';
           <td colspan="6" style="padding:7px 12px;text-align:right;color:#6b7280;font-size:.82rem;">Bank Commission</td>
           <td style="padding:7px 12px;text-align:right;font-family:monospace;color:#6b7280;">$<?= number_format((float)$quote['bank_commission'], 0) ?></td>
         </tr>
+        <?php
+          $calcSafari   = $safariTotal ?? 0;
+          $calcNetTotal = $recalcGrandTotal + $calcSafari + (float)$quote['bank_commission'];
+          $calcPrice    = $calcNetTotal * (1 + $mk);
+        ?>
         <tr style="font-weight:700;background:#f9fafb;border-top:2px solid #e5e7eb;">
           <td colspan="6" style="padding:9px 12px;text-align:right;">Net Total Costs</td>
-          <td style="padding:9px 12px;text-align:right;font-family:monospace;">$<?= number_format((float)$quote['total_costs'], 0, '.', ',') ?></td>
+          <td style="padding:9px 12px;text-align:right;font-family:monospace;">$<?= number_format($calcNetTotal, 0, '.', ',') ?>
+            <?php if (abs($calcNetTotal - (float)$quote['total_costs']) > 1): ?>
+              <div style="font-size:.65rem;color:#9ca3af;text-decoration:line-through;">saved: $<?= number_format((float)$quote['total_costs'], 0) ?></div>
+            <?php endif; ?>
+          </td>
         </tr>
         <tr style="color:#C0211B;">
           <td colspan="6" style="padding:7px 12px;text-align:right;font-size:.82rem;">Markup (<?= number_format($quote['markup_pct'], 0) ?>%)</td>
-          <td style="padding:7px 12px;text-align:right;font-family:monospace;font-size:.82rem;">+ $<?= number_format((float)$quote['total_costs'] * $mk, 0, '.', ',') ?></td>
+          <td style="padding:7px 12px;text-align:right;font-family:monospace;font-size:.82rem;">+ $<?= number_format($calcNetTotal * $mk, 0, '.', ',') ?></td>
         </tr>
         <tr style="background:#C0211B;color:#fff;font-weight:700;font-size:1rem;">
           <td colspan="6" style="padding:13px 12px;text-align:right;">TOTAL PRICE</td>
-          <td style="padding:13px 12px;text-align:right;font-family:monospace;">$<?= number_format((float)$quote['total_price'], 0, '.', ',') ?></td>
+          <td style="padding:13px 12px;text-align:right;font-family:monospace;">$<?= number_format($calcPrice, 0, '.', ',') ?></td>
         </tr>
       </tfoot>
     </table>
   </div>
 
   <?php
-    $ppp    = $pax > 0 ? (float)$quote['total_price'] / $pax : 0;
-    $pppTo  = $pax > 0 ? (float)$quote['total_costs'] * 1.18 / $pax : 0;
+    $ppp    = $pax > 0 ? $calcPrice / $pax : 0;
+    $pppTo  = $pax > 0 ? $calcNetTotal * 1.18 / $pax : 0;
     $single = ($quote['program'] === 'beachkiboko') ? 650 : 250;
     $dep    = (float)$quote['total_price'] * 0.3;
   ?>
