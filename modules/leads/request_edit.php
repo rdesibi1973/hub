@@ -394,6 +394,64 @@ function calcComm() {
     folderField.value = this.value.trimStart() + suffix;
   });
 })();
+
+// ── Auto-update Dropbox Folder when agent changes ─────────────────────────
+(function(){
+  const agentSelect = document.querySelector('select[name="agent_id"]');
+  const folderField = document.querySelector('input[name="practice_code"]');
+  if (!agentSelect || !folderField) return;
+
+  // Map: agent_id (string) → display name
+  const agentMap = <?= json_encode(array_column($agents, 'name', 'id'), JSON_UNESCAPED_UNICODE) ?>;
+
+  // Track which agent_id is currently reflected in the folder name.
+  // Starts as the value already saved in the DB.
+  let currentAgentId = '<?= addslashes((string)($req['agent_id'] ?? '')) ?>';
+
+  // Convert agent display name to the folder-name format (spaces stripped, CamelCase).
+  // "Roberto Capri" → "RobertoCapri", "Anderson" → "Anderson"
+  function toFolderName(name) {
+    if (!name) return '';
+    return name.split(/[\s]+/).map(function(p){
+      return p ? p.charAt(0).toUpperCase() + p.slice(1) : '';
+    }).join('');
+  }
+
+  agentSelect.addEventListener('change', function(){
+    const newAgentId = this.value;
+    if (newAgentId === currentAgentId) return;
+
+    const folder   = folderField.value.trim();
+    const parenIdx = folder.indexOf('(');
+    if (parenIdx < 0) { currentAgentId = newAgentId; return; } // no suffix — nothing to update
+
+    const basePart   = folder.substring(0, parenIdx);          // e.g. "LauraManiscalchi"
+    const suffixPart = folder.substring(parenIdx);             // e.g. "(Anderson-Drct)"
+
+    const oldName    = agentMap[currentAgentId] || '';
+    const newName    = agentMap[newAgentId]     || '';
+    const oldFolder  = toFolderName(oldName);
+    const newFolder  = toFolderName(newName);
+
+    if (!newFolder) { currentAgentId = newAgentId; return; }   // unknown agent — leave folder alone
+
+    let newSuffix = suffixPart;
+    if (oldFolder && suffixPart.includes(oldFolder)) {
+      // Replace only the first exact occurrence (avoid replacing agency short-name by accident)
+      newSuffix = suffixPart.replace(oldFolder, newFolder);
+    } else {
+      // Old agent name not found in suffix (folder was manually edited or blank).
+      // Replace the last dash-delimited token before the closing ')'.
+      // e.g. "(DiamanteBlu-PS-OldAgent)" → "(DiamanteBlu-PS-NewAgent)"
+      //      "(OldAgent-Drct)"           → "(NewAgent-Drct)"
+      newSuffix = suffixPart.replace(/([(-])([^(-]+)(\)|-)([^)]*\))$/,
+        function(match, pre, _old, sep, rest){ return pre + newFolder + sep + rest; });
+    }
+
+    folderField.value = basePart + newSuffix;
+    currentAgentId = newAgentId;
+  });
+})();
 <?php endif; ?>
 
 // ── Duplicate detection ──────────────────────────────────────────
