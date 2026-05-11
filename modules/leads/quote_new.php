@@ -304,6 +304,7 @@ include 'includes/header.php';
 .safari-total{font-size:.78rem;color:#92400e;font-weight:600;margin-top:8px;}
 /* ── Rate badge next to inputs ── */
 .rate-db{font-size:.68rem;color:#9ca3af;font-weight:400;}
+.cost-badge{display:inline-block;font-size:.72rem;font-weight:700;background:#f0fdf4;color:#166534;border-radius:4px;padding:1px 7px;margin-left:6px;font-family:monospace;}
 </style>
 
 <div class="wiz-wrap">
@@ -928,6 +929,15 @@ function buildDayCard(d, idx) {
       +'<input class="f-inp" type="number" min="0" placeholder="Fixed total" value="'+esc(d.lodge_custom_total||'')+'" oninput="updDay(\''+d.id+'\',\'lodge_custom_total\',parseFloat(this.value)||0)"></div>';
   }
 
+  // Lodge total cost badge
+  var lodgeCost=0;
+  if(d.lodge_id>0){
+    (d.rooms||[]).forEach(function(r){if(r.room_type_id>0)lodgeCost+=getRoomUnitPrice(d.lodge_id,r.room_type_id,date)*(+r.qty||1);});
+    lodgeCost+=getLodgeSupplements(d.lodge_id,date,+v('fAdults')||0);
+  } else if(d.lodge_id===-1){lodgeCost=+d.lodge_custom_total||0;}
+  var lodgeBadge=lodgeCost?'<span class="cost-badge" style="background:#d1fae5;color:#065f46;">🏠 '+fmt(lodgeCost)+'</span>':
+    (d.lodge_id>0?'<span class="cost-badge" style="background:#fee2e2;color:#991b1b;" title="No pricing in DB — enter custom rate">🏠 $?</span>':'');
+
   // Jeep rate
   var jeepDbRate=d.jeep!=='none'?getJeepRate(d.jeep,date):0;
   var jeepRateVal=(d.jeep_rate_custom!==null&&d.jeep_rate_custom!=='')?d.jeep_rate_custom:jeepDbRate;
@@ -941,10 +951,14 @@ function buildDayCard(d, idx) {
     ?'<div><label class="f-lbl">Jeeps <span class="rate-db">(auto: '+jeepAuto+')</span></label><input class="f-inp" type="number" min="1" step="1" value="'+esc(jeepCntVal)+'" placeholder="'+jeepAuto+'" oninput="updDay(\''+d.id+'\',\'jeep_count\',this.value===\'\'?null:+this.value)"></div>'
     :'<div></div>';
 
-  // Park
+  // Park — compute cost for badge
   var parkOpts='';
   Object.keys(PARK_FEES).forEach(function(k){var pf=PARK_FEES[k];parkOpts+='<option value="'+k+'"'+(d.park===k?' selected':'')+'>'+pf.l+(k!=='none'&&k!=='custom'?' ('+(pf.fx?'$'+pf.fx+'+':'')+'$'+pf.ppp+'/pax)':'')+'</option>';});
   var parkCustomHtml=d.park==='custom'?'<input class="f-inp" type="number" style="margin-top:5px" placeholder="Total $" value="'+esc(d.parkCust)+'" oninput="updDay(\''+d.id+'\',\'parkCust\',this.value)">':'';
+  var parkCost=0;
+  if(d.park==='custom') parkCost=+d.parkCust||0;
+  else if(d.park&&d.park!=='none'&&PARK_FEES[d.park]){var pf=PARK_FEES[d.park];parkCost=pf.fx+pf.ppp*pax();}
+  var parkBadge=parkCost?'<span class="cost-badge">'+fmt(parkCost)+'</span>':'';
 
   // Activity catalog
   var actCat=(PRICING_DATA.activity_rates||[]).filter(function(r){return r.category==='activity';});
@@ -963,8 +977,10 @@ function buildDayCard(d, idx) {
   (PRICING_DATA.flight_routes||[]).forEach(function(r){flOpts+='<option value="'+r.id+'"'+(d.flight_route_id==r.id?' selected':'')+'>'+esc(r.route_name)+(r.airline?' — '+esc(r.airline):'')+'  ($'+r.rate_pax+'/pax)</option>';});
   flOpts+='<option value="-1"'+(d.flight_route_id===-1?' selected':'')+'>🔧 Custom (fixed $)</option>';
   var flRateHtml='<div></div>';
-  if(d.flight_route_id>0){var flr=getFlightRoute(d.flight_route_id),flDb=flr?flr.rate_pax:0,flVal=(d.flight_custom!==''&&d.flight_custom!==null)?d.flight_custom:flDb;flRateHtml='<div><label class="f-lbl">$/pax <span class="rate-db">(DB: $'+flDb+')</span></label><input class="f-inp" type="number" min="0" value="'+esc(flVal)+'" oninput="updDay(\''+d.id+'\',\'flight_custom\',this.value)"></div>';}
-  else if(d.flight_route_id===-1){flRateHtml='<div><label class="f-lbl">Fixed Total $</label><input class="f-inp" type="number" min="0" value="'+esc(d.flight_custom)+'" oninput="updDay(\''+d.id+'\',\'flight_custom\',this.value)"></div>';}
+  var flCost=0;
+  if(d.flight_route_id>0){var flr=getFlightRoute(d.flight_route_id),flDb=flr?flr.rate_pax:0,flVal=(d.flight_custom!==''&&d.flight_custom!==null)?d.flight_custom:flDb;flRateHtml='<div><label class="f-lbl">$/pax <span class="rate-db">(DB: $'+flDb+')</span></label><input class="f-inp" type="number" min="0" value="'+esc(flVal)+'" oninput="updDay(\''+d.id+'\',\'flight_custom\',this.value)"></div>';flCost=parseFloat(flVal)*pax();}
+  else if(d.flight_route_id===-1){flRateHtml='<div><label class="f-lbl">Fixed Total $</label><input class="f-inp" type="number" min="0" value="'+esc(d.flight_custom)+'" oninput="updDay(\''+d.id+'\',\'flight_custom\',this.value)"></div>';flCost=+d.flight_custom||0;}
+  var flBadge=flCost?'<span class="cost-badge">✈ '+fmt(flCost)+'</span>':'';
 
   // Transfer
   var trRates=(PRICING_DATA.activity_rates||[]).filter(function(r){return r.category==='transfer';});
@@ -974,6 +990,9 @@ function buildDayCard(d, idx) {
   var trRateHtml='<div></div>';
   if(d.transfer_rate_id>0){var tra=getActivityRate(d.transfer_rate_id),trDb=tra?tra.rate:0,trType=tra?tra.item_type:'fixed',trVal=(d.transfer_custom!==''&&d.transfer_custom!==null)?d.transfer_custom:trDb;trRateHtml='<div><label class="f-lbl">'+(trType==='pax'?'$/pax':'Fixed $')+' <span class="rate-db">(DB: $'+trDb+')</span></label><input class="f-inp" type="number" min="0" value="'+esc(trVal)+'" oninput="updDay(\''+d.id+'\',\'transfer_custom\',this.value)"></div>';}
   else if(d.transfer_rate_id===-1){trRateHtml='<div><label class="f-lbl">Amount $</label><input class="f-inp" type="number" min="0" value="'+esc(d.transfer_custom||'')+'" oninput="updDay(\''+d.id+'\',\'transfer_custom\',this.value)"></div>';}
+  var trCost=0;
+  if(d.transfer_rate_id>0){var _tra=getActivityRate(d.transfer_rate_id);if(_tra){var _trVal=(d.transfer_custom!==''&&d.transfer_custom!==null)?+d.transfer_custom:+_tra.rate;trCost=_tra.item_type==='pax'?_trVal*pax():_trVal;}}else if(d.transfer_rate_id===-1){trCost=+d.transfer_custom||0;}
+  var trBadge=trCost?'<span class="cost-badge">🚐 '+fmt(trCost)+'</span>':'';
 
   wrap.innerHTML=
     // ── Head ──
@@ -1011,7 +1030,7 @@ function buildDayCard(d, idx) {
         +'</select></div>'
       +'</div>'
       // PARK FEES
-      +'<div style="margin-top:8px"><label class="f-lbl">Park Fees</label>'
+      +'<div style="margin-top:8px"><label class="f-lbl">Park Fees '+parkBadge+'</label>'
         +'<select class="f-inp" onchange="updDay(\''+d.id+'\',\'park\',this.value)">'+parkOpts+'</select>'
         +parkCustomHtml
       +'</div>'
@@ -1025,17 +1044,17 @@ function buildDayCard(d, idx) {
         +'<button class="btn-add-item" onclick="addItem(\''+d.id+'\')">+ Add custom</button>'
       +'</div>'
       // FLIGHT
-      +'<div style="display:flex;gap:8px;margin-top:10px">'
-        +'<div style="flex:2"><label class="f-lbl">Flight</label><select class="f-inp" onchange="updDay(\''+d.id+'\',\'flight_route_id\',parseInt(this.value))">'+flOpts+'</select></div>'
+      +'<div style="display:flex;gap:8px;margin-top:10px;align-items:flex-end">'
+        +'<div style="flex:2"><label class="f-lbl">Flight '+flBadge+'</label><select class="f-inp" onchange="updDay(\''+d.id+'\',\'flight_route_id\',parseInt(this.value))">'+flOpts+'</select></div>'
         +flRateHtml
       +'</div>'
       // TRANSFER
-      +'<div style="display:flex;gap:8px;margin-top:8px">'
-        +'<div style="flex:2"><label class="f-lbl">Transfer</label><select class="f-inp" onchange="updDay(\''+d.id+'\',\'transfer_rate_id\',parseInt(this.value))">'+trOpts+'</select></div>'
+      +'<div style="display:flex;gap:8px;margin-top:8px;align-items:flex-end">'
+        +'<div style="flex:2"><label class="f-lbl">Transfer '+trBadge+'</label><select class="f-inp" onchange="updDay(\''+d.id+'\',\'transfer_rate_id\',parseInt(this.value))">'+trOpts+'</select></div>'
         +trRateHtml
       +'</div>'
       // LODGE + ROOMS
-      +'<div style="margin-top:10px"><label class="f-lbl">Lodge</label><select class="f-inp" onchange="updDay(\''+d.id+'\',\'lodge_id\',parseInt(this.value))">'+lodgeOpts+'</select></div>'
+      +'<div style="margin-top:10px"><label class="f-lbl">Lodge '+lodgeBadge+'</label><select class="f-inp" onchange="updDay(\''+d.id+'\',\'lodge_id\',parseInt(this.value))">'+lodgeOpts+'</select></div>'
       +roomsListHtml
       // Footer
       +'<div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px">'
