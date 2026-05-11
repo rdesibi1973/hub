@@ -3,7 +3,33 @@ require_once 'config.php';
 header('Content-Type: application/json');
 
 $name       = trim($_GET['name']       ?? '');
+$email      = trim($_GET['email']      ?? '');
 $exclude_id = (int)($_GET['exclude_id'] ?? 0);
+
+// ── Email-only check ─────────────────────────────────────────────────────────
+if ($email !== '' && $name === '') {
+    if (!filter_var($email, FILTER_VALIDATE_EMAIL)) { echo json_encode([]); exit; }
+    $db = db();
+    $sql = $exclude_id
+        ? "SELECT id, customer_name, email FROM requests WHERE LOWER(email) = LOWER(?) AND id != ?"
+        : "SELECT id, customer_name, email FROM requests WHERE LOWER(email) = LOWER(?)";
+    $params = $exclude_id ? [$email, $exclude_id] : [$email];
+    $stmt = $db->prepare($sql);
+    $stmt->execute($params);
+    $rows = $stmt->fetchAll();
+    $results = [];
+    foreach ($rows as $row) {
+        $results[] = [
+            'id'     => $row['id'],
+            'name'   => $row['customer_name'],
+            'email'  => $row['email'],
+            'level'  => 'email',
+            'reason' => 'Same email address',
+        ];
+    }
+    echo json_encode($results);
+    exit;
+}
 
 if (strlen($name) < 2) { echo json_encode([]); exit; }
 

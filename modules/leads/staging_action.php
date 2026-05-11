@@ -197,6 +197,20 @@ if ($action === 'approve') {
     $newId = $db->lastInsertId();
     $db->prepare("DELETE FROM lead_staging WHERE id = ?")->execute([$stagingId]);
 
+    // ── Check for email duplicate (warn only, request already created) ────────
+    $emailWarnMsg = '';
+    if (!empty($lead['email'])) {
+        $dupCheck = $db->prepare(
+            "SELECT id, customer_name FROM requests WHERE LOWER(email) = LOWER(?) AND id != ? LIMIT 3"
+        );
+        $dupCheck->execute([$lead['email'], $newId]);
+        $dupRows = $dupCheck->fetchAll();
+        if ($dupRows) {
+            $names = implode(', ', array_map(fn($r) => "{$r['customer_name']} (#{$r['id']})", $dupRows));
+            $emailWarnMsg = " — ⚠ Email already on file: {$names}";
+        }
+    }
+
     // ── Agent notification ────────────────────────────────────────────────
     $notif = notify_agent_new_request(
         $db, $agentId, (int)($currentUser['id'] ?? 0),
@@ -204,7 +218,10 @@ if ($action === 'approve') {
     );
 
     flash("Lead approved — Request #{$newId} created. Dropbox folder: {$folderName}"
-        . ($notif['sent'] ? " — ✉ Notification sent to agent." : ''));
+        . ($notif['sent'] ? " — ✉ Notification sent to agent." : '')
+        . $emailWarnMsg);
+    if ($notif['error']) flash('⚠ ' . htmlspecialchars($notif['error']), 'error');
+    if ($emailWarnMsg)   flash(htmlspecialchars($emailWarnMsg), 'error');
     if ($notif['error']) flash('⚠ ' . htmlspecialchars($notif['error']), 'error');
 
     header("Location: request_view.php?id=$newId"); exit;

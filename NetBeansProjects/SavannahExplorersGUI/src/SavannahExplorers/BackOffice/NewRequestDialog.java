@@ -220,6 +220,16 @@ public class NewRequestDialog extends JDialog {
             public void removeUpdate(DocumentEvent e)  { onNameChanged(); }
             public void changedUpdate(DocumentEvent e) {}
         });
+        emailField.addFocusListener(new java.awt.event.FocusAdapter() {
+            @Override
+            public void focusLost(java.awt.event.FocusEvent e) {
+                String email = emailField.getText().trim();
+                if (!email.isEmpty() && email.contains("@")) {
+                    if (pendingDupCheck != null) pendingDupCheck.cancel(false);
+                    pendingDupCheck = scheduler.schedule(() -> checkDuplicateByEmail(email), 200, TimeUnit.MILLISECONDS);
+                }
+            }
+        });
         channelCombo.addActionListener(e -> {
             boolean isAgency = channelCombo.getSelectedIndex() == 0;
             agencyCombo.setEnabled(isAgency);
@@ -544,6 +554,41 @@ public class NewRequestDialog extends JDialog {
                         dupWarningLabel.setText(msg);
                     });
                 }
+            }
+        } catch (IOException ex) { /* silent */ }
+    }
+
+    private void checkDuplicateByEmail(String email) {
+        try {
+            String resp = api.get("check_duplicate.php", "email=" + urlEncode(email));
+            if (resp.contains("\"id\"")) {
+                // Parse first match
+                java.util.regex.Matcher m = java.util.regex.Pattern
+                    .compile("\"name\"\\s*:\\s*\"([^\"]+)\"").matcher(resp);
+                java.util.regex.Matcher mId = java.util.regex.Pattern
+                    .compile("\"id\"\\s*:\\s*(\\d+)").matcher(resp);
+                if (m.find() && mId.find()) {
+                    String dupName = m.group(1);
+                    String dupId   = mId.group(1);
+                    // Count total matches
+                    int count = 0;
+                    java.util.regex.Matcher mc = java.util.regex.Pattern.compile("\"id\"").matcher(resp);
+                    while (mc.find()) count++;
+                    final String msg = "\uD83D\uDCE7 EMAIL already on file: \"" + dupName + "\" (#" + dupId + ")"
+                        + (count > 1 ? " +" + (count-1) + " more" : "");
+                    SwingUtilities.invokeLater(() -> {
+                        dupWarningLabel.setForeground(Color.RED);
+                        dupWarningLabel.setText(msg);
+                    });
+                }
+            } else {
+                // Clear any previous email warning only if name check is also clean
+                SwingUtilities.invokeLater(() -> {
+                    String cur = dupWarningLabel.getText();
+                    if (cur != null && cur.startsWith("\uD83D\uDCE7")) {
+                        dupWarningLabel.setText(" ");
+                    }
+                });
             }
         } catch (IOException ex) { /* silent */ }
     }

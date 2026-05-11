@@ -30,6 +30,28 @@ $leads = $db->prepare("SELECT * FROM lead_staging $whereSql ORDER BY
 $leads->execute($params);
 $leads = $leads->fetchAll();
 
+// ── Email duplicate lookup against requests table ─────────────────────────────
+$emailMatchMap = []; // email (lower) => [['id'=>...,'name'=>...], ...]
+$stagedEmails  = array_filter(array_column($leads, 'email'));
+if ($stagedEmails) {
+    $lower   = array_map('strtolower', $stagedEmails);
+    $pholds  = implode(',', array_fill(0, count($lower), '?'));
+    $emRows  = $db->prepare(
+        "SELECT id, customer_name, email FROM requests WHERE LOWER(email) IN ($pholds) ORDER BY id DESC"
+    );
+    $emRows->execute($lower);
+    foreach ($emRows->fetchAll() as $r) {
+        $key = strtolower($r['email']);
+        $emailMatchMap[$key][] = ['id' => $r['id'], 'name' => $r['customer_name']];
+    }
+}
+// Attach email_matches to each lead
+foreach ($leads as &$lead) {
+    $key = strtolower($lead['email'] ?? '');
+    $lead['email_matches'] = ($key && isset($emailMatchMap[$key])) ? $emailMatchMap[$key] : [];
+}
+unset($lead);
+
 $agents = $db->query("SELECT * FROM agents WHERE active=1 ORDER BY name")->fetchAll();
 
 include 'includes/header.php';
@@ -212,6 +234,9 @@ select:focus,input:focus{outline:none;border-color:#C0211B;box-shadow:0 0 0 2px 
         <span class="dup-pill dup-<?= $df ?>">
           <?= $df==='definite'?'🔴 Definite':($df==='possible'?'🟡 Possible':'🟢 Clean') ?>
         </span>
+        <?php if (!empty($lead['email_matches'])): ?>
+          <span class="dup-pill dup-definite" title="Same email already in Requests">📧 Email</span>
+        <?php endif; ?>
       </td>
     </tr>
     <?php endforeach; ?>
@@ -375,11 +400,11 @@ function openDrawer(id) {
   html += row('Received', esc(l.date_received));
   html += '</dl>';
 
-  // Duplicate warnings
+  // Duplicate warnings (name-based)
   if (l.dup_flag !== 'clean' && l.dup_refs) {
     const refs = JSON.parse(l.dup_refs);
     if (refs && refs.length) {
-      html += '<div class="drawer-section">Duplicate Matches</div>';
+      html += '<div class="drawer-section">Duplicate Matches (Name)</div>';
       refs.forEach(r => {
         const cls = r.level==='definite' ? 'dup-match-def' : 'dup-match-poss';
         const lbl = r.level==='definite' ? '🔴' : '🟡';
@@ -390,6 +415,17 @@ function openDrawer(id) {
         </div>`;
       });
     }
+  }
+
+  // Email duplicate warnings
+  if (l.email_matches && l.email_matches.length) {
+    html += '<div class="drawer-section" style="color:#991B1B;">⚠ Same Email Already on File</div>';
+    l.email_matches.forEach(m => {
+      html += `<div class="dup-match dup-match-def">
+        🔴 <strong>${esc(m.name)}</strong>
+        <a href="request_view.php?id=${m.id}" target="_blank" style="margin-left:8px;font-size:.75rem;color:#991B1B;">View Request #${m.id} →</a>
+      </div>`;
+    });
   }
 
   // Initial request
