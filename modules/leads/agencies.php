@@ -41,8 +41,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             try {
                 $address = trim($_POST['address'] ?? '');
-                $db->prepare('INSERT INTO agencies (nome, short_name, attiva, address) VALUES (?, ?, ?, ?)')
-                   ->execute([$nome, $short, $attiva, $address ?: null]);
+                $db->prepare('INSERT INTO agencies (nome, short_name, type, attiva, address) VALUES (?, ?, ?, ?, ?)')
+                   ->execute([$nome, $short, $type, $attiva, $address ?: null]);
                 $success = "Agency \"$nome\" added.";
             } catch (PDOException $e) {
                 $errors[] = 'Duplicate name or database error.';
