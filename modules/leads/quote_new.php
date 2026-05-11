@@ -198,20 +198,21 @@ if ($editQuoteId) {
         }
 
         $editData = [
-            'id'           => $editQuoteId,
-            'quote_number' => $eQuote['quote_number'],
-            'customer_name'=> $eQuote['customer_name'],
-            'agent_name'   => $eQuote['agent_name']  ?? '',
-            'agency_name'  => $eQuote['agency_name'] ?? '',
-            'start_date'   => $eQuote['start_date']  ?? '',
-            'adults'       => (int)$eQuote['adults'],
-            'teens'        => (int)$eQuote['teens'],
-            'children'     => (int)$eQuote['children'],
-            'program'      => $eQuote['program'] ?? 'simba',
-            'markup_type'  => $eQuote['markup_type'] ?? 'standard',
-            'markup_pct'   => (float)$eQuote['markup_pct'],
-            'safari_items' => array_map(fn($si) => ['activity_rate_id' => $si['activity_rate_id'], 'description' => $si['description'], 'item_type' => $si['item_type'], 'amount' => (float)$si['amount']], $eSafariItems),
-            'days'         => $eDaysArr,
+            'id'            => $editQuoteId,
+            'quote_number'  => $eQuote['quote_number'],
+            'customer_name' => $eQuote['customer_name'],
+            'agent_name'    => $eQuote['agent_name']  ?? '',
+            'agency_name'   => $eQuote['agency_name'] ?? '',
+            'start_date'    => $eQuote['start_date']  ?? '',
+            'adults'        => (int)$eQuote['adults'],
+            'teens'         => (int)$eQuote['teens'],
+            'children'      => (int)$eQuote['children'],
+            'default_rooms' => json_decode($eQuote['default_rooms'] ?? '[]', true) ?: [],
+            'program'       => $eQuote['program'] ?? 'simba',
+            'markup_type'   => $eQuote['markup_type'] ?? 'standard',
+            'markup_pct'    => (float)$eQuote['markup_pct'],
+            'safari_items'  => array_map(fn($si) => ['activity_rate_id' => $si['activity_rate_id'], 'description' => $si['description'], 'item_type' => $si['item_type'], 'amount' => (float)$si['amount']], $eSafariItems),
+            'days'          => $eDaysArr,
         ];
         $editJson = json_encode($editData);
     }
@@ -382,7 +383,14 @@ include 'includes/header.php';
   <div class="wiz-card" style="border:1px solid #fecaca;margin-bottom:12px;">
     <h3>Default Rooms <span class="rate-db">(auto-applied per day when a lodge is selected — overridable)</span></h3>
     <div id="defaultRoomsList"></div>
-    <button class="btn-add-item" onclick="addDefaultRoom()" style="margin-top:6px;">+ Add room type</button>
+    <div style="display:flex;gap:8px;margin-top:6px;flex-wrap:wrap;">
+      <button class="btn-add-item" onclick="addDefaultRoom()">+ Add room type</button>
+      <button class="btn-add-item" onclick="applyDefaultRoomsToAllDays()"
+              style="background:#fef3c7;color:#92400e;border-color:#fcd34d;"
+              title="Re-apply default rooms to every day that has a lodge selected">
+        ↺ Apply to all days
+      </button>
+    </div>
   </div>
 
   <!-- Safari Fixed Costs (Emergency, Medivac, etc.) — once per safari -->
@@ -620,6 +628,22 @@ function applyDefaultRoomsToDay(d) {
     var rt=(lodge.room_types||[]).find(function(t){return t.name.toLowerCase().indexOf(lbl)!==-1;});
     d.rooms.push(mkRoom({room_type_id:rt?rt.id:0,qty:+dr.qty||1}));
   });
+}
+
+function applyDefaultRoomsToAllDays() {
+  if (!state.defaultRooms.length) {
+    alert('No default rooms defined — add at least one room type first.');
+    return;
+  }
+  var applied = 0;
+  state.days.forEach(function(d) {
+    if (d.lodge_id > 0) {
+      applyDefaultRoomsToDay(d);
+      applied++;
+    }
+  });
+  renderItinerary();
+  if (applied === 0) alert('No days with a lodge selected — set a lodge on each day first.');
 }
 
 // ── Lodge/pricing DB helpers ──────────────────────────────────────────────────
@@ -1192,6 +1216,7 @@ function saveQuote() {
     adults:          +v('fAdults')||0,
     teens:           +v('fTeens') ||0,
     children:        +v('fChildren')||0,
+    default_rooms: state.defaultRooms.map(function(dr){ return {label:dr.label, qty:+dr.qty||1}; }),
     program:         state.program,
     markup_type:     state.markup,
     markup_pct:      mkPct()*100,
@@ -1264,6 +1289,24 @@ function loadEditData(data) {
   });
   if (!state.safariItems.length) initSafariItems();
 
+  // Restore default rooms (saved in DB since this fix)
+  // Fallback: infer from first day that has rooms
+  if (data.default_rooms && data.default_rooms.length) {
+    state.defaultRooms = data.default_rooms.map(function(dr){
+      return mkDefaultRoom({label: dr.label || '', qty: +dr.qty || 1});
+    });
+  } else {
+    // Infer default rooms from the first day that has rooms
+    var firstDayWithRooms = (data.days || []).find(function(d){ return d.rooms && d.rooms.length; });
+    if (firstDayWithRooms) {
+      state.defaultRooms = firstDayWithRooms.rooms.map(function(r){
+        var lodge = (PRICING_DATA.lodges||[]).find(function(l){return l.id==firstDayWithRooms.lodge_id;});
+        var rt    = lodge ? (lodge.room_types||[]).find(function(t){return t.id==r.room_type_id;}) : null;
+        return mkDefaultRoom({label: rt ? rt.name : '', qty: +r.qty || 1});
+      });
+    }
+  }
+
   state.days = (data.days || []).map(function(d) {
     return mkDay({
       route:            d.route || '',
@@ -1313,6 +1356,8 @@ function loadEditData(data) {
 
   // Store edit id for save
   window._editQuoteId = data.id;
+  // Render restored default rooms
+  renderDefaultRooms();
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────

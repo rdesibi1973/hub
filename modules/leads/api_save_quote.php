@@ -76,6 +76,7 @@ $startDate     = preg_match('/^\d{4}-\d{2}-\d{2}$/', $body['start_date'] ?? '') 
 $adults        = max(0, (int)($body['adults']   ?? 0));
 $teens         = max(0, (int)($body['teens']    ?? 0));
 $children      = max(0, (int)($body['children'] ?? 0));
+$defaultRooms  = json_encode($body['default_rooms'] ?? []);
 $program       = substr(trim($body['program']   ?? ''), 0, 100);
 $markupType    = in_array($body['markup_type'] ?? '', ['standard','to','custom']) ? $body['markup_type'] : 'standard';
 $markupPct     = min(max(0, (float)($body['markup_pct'] ?? 25)), 100);
@@ -100,12 +101,12 @@ try {
         $db->prepare("
             UPDATE quotes SET
               quote_number=?, customer_name=?, agent_name=?, agency_name=?,
-              start_date=?, adults=?, teens=?, children=?, program=?,
+              start_date=?, adults=?, teens=?, children=?, default_rooms=?, program=?,
               markup_type=?, markup_pct=?, bank_commission=?, total_costs=?, total_price=?
             WHERE id=?
         ")->execute([
             $nextNum, $customerName, $agentName, $agencyName,
-            $startDate, $adults, $teens, $children, $program,
+            $startDate, $adults, $teens, $children, $defaultRooms, $program,
             $markupType, $markupPct, $bankComm, $totalCosts, $totalPrice,
             $editQuoteId,
         ]);
@@ -127,14 +128,14 @@ try {
         $ins = $db->prepare("
             INSERT INTO quotes
               (quote_number, request_id, agent_id, customer_name, agent_name, agency_name,
-               start_date, adults, teens, children, program, markup_type, markup_pct,
+               start_date, adults, teens, children, default_rooms, program, markup_type, markup_pct,
                bank_commission, total_costs, total_price, status, created_by)
             VALUES
-              (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'draft',?)
+              (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'draft',?)
         ");
         $ins->execute([
             $nextNum, $requestId, $agentId, $customerName, $agentName, $agencyName,
-            $startDate, $adults, $teens, $children, $program, $markupType, $markupPct,
+            $startDate, $adults, $teens, $children, $defaultRooms, $program, $markupType, $markupPct,
             $bankComm, $totalCosts, $totalPrice, $createdBy,
         ]);
         $quoteId = (int)$db->lastInsertId();
