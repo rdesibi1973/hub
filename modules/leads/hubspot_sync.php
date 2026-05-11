@@ -245,6 +245,8 @@ function hs_fetch_contacts(int $since): array {
         'livello_sistemazione',
         // Form / legacy
         'numero_di_persone', 'periodo', 'message', 'destinazioni', 'destinations',
+        // Booking Form EN custom fields
+        'name', 'surname', 'number_of_people', 'period', 'other_info_and_requests',
     ];
 
     // ── Pass 1: brand-new contacts (createdate >= $since) ────────────────────
@@ -424,13 +426,14 @@ function hs_contact_to_lead(array $contact): ?array {
     $hsId = $contact['id'];
     $isReconversion = !empty($contact['_is_reconversion']);
 
-    // Name — iBot contact_name field first, then firstname+lastname
+    // Name — iBot contact_name field first, then firstname+lastname,
+    // then Booking Form EN custom fields (name / surname)
     $contactNameRaw = trim($p['contact_name'] ?? $p['nome_cognome'] ?? '');
     if ($contactNameRaw) {
         $name = $contactNameRaw;
     } else {
-        $first = trim($p['firstname'] ?? '');
-        $last  = trim($p['lastname']  ?? '');
+        $first = trim($p['firstname'] ?? $p['name']    ?? '');
+        $last  = trim($p['lastname']  ?? $p['surname'] ?? '');
         $name  = trim("$first $last");
     }
     if (!$name) $name = trim($p['email'] ?? '');
@@ -443,14 +446,14 @@ function hs_contact_to_lead(array $contact): ?array {
         $p['phone']                 ?? $p['mobilephone']     ?? ''
     );
 
-    // iBot-specific fields (EN then IT fallback)
+    // iBot-specific fields (EN then IT fallback), plus Booking Form EN custom fields
     $destRaw   = trim($p['ibotdestinations']    ?? $p['ibotdestinazioni']    ?? $p['destinazioni'] ?? $p['destinations'] ?? '');
-    $rawPax    = trim($p['pax']                 ?? $p['numero_di_persone']   ?? '');
-    $period    = trim($p['ibotperiod']          ?? $p['ibotperiodo']         ?? $p['periodo']      ?? '');
+    $rawPax    = trim($p['pax']                 ?? $p['numero_di_persone']   ?? $p['number_of_people'] ?? '');
+    $period    = trim($p['ibotperiod']          ?? $p['ibotperiodo']         ?? $p['periodo']      ?? $p['period'] ?? '');
     $activities= trim($p['activities']          ?? $p['attivita']            ?? '');
     $duration  = trim($p['duration']            ?? $p['durata']              ?? '');
     $accomLevel= trim($p['accommodation_level'] ?? $p['livello_sistemazione']?? '');
-    $message   = trim($p['message'] ?? '');
+    $message   = trim($p['message'] ?? $p['other_info_and_requests'] ?? '');
 
     $pax = ($rawPax !== '' && (float)$rawPax > 0) ? (int)round((float)$rawPax) : null;
 
@@ -659,8 +662,60 @@ if (!defined('HS_INCLUDED')) {
     $dryRun    = in_array('--dry-run', $argv, true);
     $resetSync = in_array('--reset',   $argv, true);
     $sinceArg  = null;
+    $emailArg  = null;
     foreach ($argv as $arg) {
-        if (preg_match('/^--since=(\d+)$/', $arg, $m)) { $sinceArg = (int)$m[1]; break; }
+        if (preg_match('/^--since=(\d+)$/', $arg, $m)) { $sinceArg = (int)$m[1]; }
+        if (preg_match('/^--email=(.+)$/',  $arg, $m)) { $emailArg = trim($m[1]); }
+    }
+
+    // ── --email mode: fetch a single contact by email and stage it ────────────
+    if ($emailArg !== null) {
+        echo "[EMAIL] Fetching contact for: $emailArg\n";
+        $searchBody = [
+            'filterGroups' => [[
+                'filters' => [[
+                    'propertyName' => 'email',
+                    'operator'     => 'EQ',
+                    'value'        => $emailArg,
+                ]],
+            ]],
+            'properties' => [
+                'firstname','lastname','email','phone','mobilephone',
+                'createdate','recent_conversion_event_name','recent_conversion_date',
+                'contact_name','whatsapp_phone_number',
+                'ibotdestinations','pax','ibotperiod','activities','duration','accommodation_level',
+                'nome_cognome','numero_whatsapp','ibotdestinazioni','ibotperiodo',
+                'attivita','durata','livello_sistemazione',
+                'numero_di_persone','periodo','message','destinazioni','destinations',
+                'number_of_people','period','other_info_and_requests','surname','name',
+            ],
+            'limit' => 1,
+        ];
+        $data     = hs_curl('https://api.hubapi.com/crm/v3/objects/contacts/search', $searchBody);
+        $contacts = $data['results'] ?? [];
+        if (empty($contacts)) {
+            die("[EMAIL] No contact found with email: $emailArg\n");
+        }
+        $contact = $contacts[0];
+        echo "[EMAIL] Found contact ID: {$contact['id']}\n";
+        echo "[EMAIL] Properties set:\n";
+        foreach ($contact['properties'] as $k => $v) {
+            if ($v !== null && $v !== '') echo "  $k = $v\n";
+        }
+        // Try to normalise and stage
+        $lead = hs_contact_to_lead($contact, false);
+        if (!$lead) {
+            die("[EMAIL] Could not normalise contact (name/email empty?)\n");
+        }
+        echo "[EMAIL] Normalised lead: {$lead['customer_name']} | {$lead['email']} | source={$lead['source']}\n";
+        if ($dryRun) {
+            echo "[EMAIL] Dry-run — not staging.\n";
+        } else {
+            $db  = db();
+            $res = hs_insert_lead($db, $lead, false);
+            echo "[EMAIL] Stage result: {$res['status']} — {$res['message']}\n";
+        }
+        exit(0);
     }
 
     $syncFile = __DIR__ . '/hubspot_last_sync.txt';
