@@ -1,5 +1,6 @@
 <?php
 require_once 'config.php';
+requireLogin();   // ← must run before any access checks
 
 $id  = (int)($_GET['id'] ?? 0);
 $db  = db();
