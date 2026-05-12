@@ -257,8 +257,8 @@ $extra_css  = '
 .copy-btn:hover { border-color:var(--wetu); color:var(--wetu); }
 .copy-btn.copied { border-color:var(--green); color:var(--green); }
 
-.btn-wetu { background:var(--wetu); color:var(--white) !important; }
-.btn-wetu:hover { background:#163d63; }
+.btn-wetu { background:#1E4D7B !important; color:#fff !important; }
+.btn-wetu:hover { background:#163d63 !important; }
 ';
 include __DIR__ . '/includes/header.php';
 ?>
@@ -314,7 +314,7 @@ include __DIR__ . '/includes/header.php';
         </div>
 
         <div class="form-actions" style="border:none;padding-top:0;margin-top:0;">
-          <button type="submit" class="btn btn-primary" style="background:var(--wetu);">
+          <button type="submit" class="btn btn-primary" style="background:#1E4D7B;color:#fff;border-radius:6px;padding:10px 22px;font-size:.85rem;">
             🔓 Connect to Wetu
           </button>
         </div>
@@ -383,7 +383,7 @@ include __DIR__ . '/includes/header.php';
 
     <div class="form-actions" style="margin-top:16px;">
       <?php if ($created['edit_url']): ?>
-      <a href="<?= h($created['edit_url']) ?>" target="_blank" class="btn btn-primary btn-wetu">✏️ Continue in Wetu</a>
+      <a href="<?= h($created['edit_url']) ?>" target="_blank" class="btn btn-wetu">✏️ Continue in Wetu</a>
       <?php endif; ?>
       <a href="wetu.php" class="btn btn-secondary">＋ Create Another</a>
     </div>
@@ -492,7 +492,7 @@ include __DIR__ . '/includes/header.php';
       </div>
 
       <div class="form-actions">
-        <button type="submit" class="btn btn-primary btn-wetu" id="submit-btn"
+        <button type="submit" class="btn btn-wetu" id="submit-btn"
                 <?= empty($samples) ? 'disabled' : '' ?>>
           🗺️ Create Personal Itinerary
         </button>
