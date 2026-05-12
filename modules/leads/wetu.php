@@ -1,13 +1,20 @@
 <?php
+// Temporary: log errors to file for debugging
+@ini_set('log_errors', '1');
+@ini_set('error_log', dirname(__DIR__, 2) . '/wetu_errors.log');
+
 require_once 'config.php';
 requireLogin();
 
 /* ═══════════════════════════════════════════════════════════════
    WETU SOAP HELPER
 ═══════════════════════════════════════════════════════════════ */
-define('WETU_WSDL', 'https://wetu.com/api/itineraryservicev8.asmx?WSDL');
+if (!defined('WETU_WSDL')) {
+    define('WETU_WSDL', 'https://wetu.com/api/itineraryservicev8.asmx?WSDL');
+}
 
-function wetu_client(): SoapClient {
+if (!function_exists('wetu_client')) {
+function wetu_client() {
     return new SoapClient(WETU_WSDL, [
         'exceptions' => true,
         'trace'      => false,
@@ -15,10 +22,12 @@ function wetu_client(): SoapClient {
         'encoding'   => 'UTF-8',
     ]);
 }
+}
 
 /* ═══════════════════════════════════════════════════════════════
    LANGUAGE INFERENCE (Wetu JSON List has no language field)
 ═══════════════════════════════════════════════════════════════ */
+if (!function_exists('infer_language')) {
 function infer_language(string $name, array $s): string {
     $api = trim($s['language'] ?? ($s['Language'] ?? ($s['lang'] ?? '')));
     if ($api !== '') return $api;
@@ -28,6 +37,7 @@ function infer_language(string $name, array $s): string {
     if (strpos($n, 'GERMAN')   !== false || strpos($n, 'TEDESCO')  !== false || strpos($n, 'DEUTSCH') !== false) return 'German';
     if (strpos($n, 'SPANISH')  !== false || strpos($n, 'ESPANOL')  !== false || strpos($n, 'SPAGNOLO') !== false) return 'Spanish';
     return 'English';
+}
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -64,6 +74,7 @@ if ($action === 'wetu_logout') {
 /* ═══════════════════════════════════════════════════════════════
    HELPER: fetch ALL Sample itineraries via JSON REST (paginated)
 ═══════════════════════════════════════════════════════════════ */
+if (!function_exists('wetu_json_get')) {
 function wetu_json_get(string $url): ?array {
     if (function_exists('curl_init')) {
         $ch = curl_init($url);
@@ -93,7 +104,9 @@ function wetu_json_get(string $url): ?array {
     }
     return $decoded;
 }
+}
 
+if (!function_exists('wetu_fetch_samples')) {
 function wetu_fetch_samples(string $u, string $p): array {
     $all      = [];
     $pageSize = 200;
@@ -117,6 +130,7 @@ function wetu_fetch_samples(string $u, string $p): array {
     }
 
     return $all;
+}
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -148,7 +162,9 @@ if ($action === 'wetu_login') {
                 $wetu_error = 'Authentication failed — please check your credentials.';
             }
         } catch (SoapFault $e) {
-            $wetu_error = 'Connection error: ' . h($e->getMessage());
+            $wetu_error = 'SOAP error: ' . h($e->getMessage());
+        } catch (Throwable $e) {
+            $wetu_error = 'Error (' . get_class($e) . '): ' . h($e->getMessage()) . ' [line ' . $e->getLine() . ']';
         }
     }
 }
