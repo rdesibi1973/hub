@@ -74,32 +74,60 @@ if ($action === 'wetu_login') {
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   LOAD SAMPLE ITINERARIES via JSON REST (avoids SOAP encoding issues)
+   LOAD SAMPLE ITINERARIES via JSON REST
 ═══════════════════════════════════════════════════════════════ */
+$wetu_debug = '';
 if ($token && !$created) {
     $wetu_u = $_SESSION['wetu_user'] ?? '';
     $wetu_p = $_SESSION['wetu_pass'] ?? '';
-    $list_url = 'https://wetu.com/API/Itinerary/V8/List?'
-        . http_build_query([
-            'username' => $wetu_u,
-            'password' => $wetu_p,
-            'type'     => 'Sample',
-            'results'  => 200,
-            'sort'     => 'ItineraryNameAsc',
+    $list_url = 'https://wetu.com/API/Itinerary/V8/List?' . http_build_query([
+        'username' => $wetu_u,
+        'password' => $wetu_p,
+        'type'     => 'Sample',
+        'results'  => 200,
+        'sort'     => 'ItineraryNameAsc',
+    ]);
+
+    if (function_exists('curl_init')) {
+        $ch = curl_init($list_url);
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT        => 20,
+            CURLOPT_SSL_VERIFYPEER => true,
+            CURLOPT_FOLLOWLOCATION => true,
         ]);
-    $ctx = stream_context_create(['http' => [
-        'timeout'        => 15,
-        'ignore_errors'  => true,
-    ]]);
-    $raw_json = @file_get_contents($list_url, false, $ctx);
-    if ($raw_json === false) {
-        $wetu_error = 'Could not connect to Wetu API. Check server network access.';
-    } else {
-        $decoded = json_decode($raw_json, true);
-        if (is_array($decoded)) {
-            $samples = $decoded;   // array of assoc arrays (snake_case keys)
+        $raw_json  = curl_exec($ch);
+        $curl_err  = curl_error($ch);
+        $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        if ($raw_json === false || $curl_err) {
+            $wetu_error = 'Could not connect to Wetu API: ' . h($curl_err);
+        } elseif ($http_code !== 200) {
+            $wetu_error = "Wetu API returned HTTP $http_code.";
+            $wetu_debug = h(substr($raw_json, 0, 400));
         } else {
-            $wetu_error = 'Unexpected response from Wetu: ' . h(substr($raw_json, 0, 200));
+            $decoded = json_decode($raw_json, true);
+            if (is_array($decoded)) {
+                $samples = $decoded;
+            } else {
+                $wetu_error = 'Unexpected Wetu response (not JSON array).';
+                $wetu_debug = h(substr($raw_json, 0, 400));
+            }
+        }
+    } else {
+        $ctx = stream_context_create(['http' => ['timeout' => 20, 'ignore_errors' => true]]);
+        $raw_json = @file_get_contents($list_url, false, $ctx);
+        if ($raw_json === false) {
+            $wetu_error = 'Could not connect to Wetu API (curl unavailable).';
+        } else {
+            $decoded = json_decode($raw_json, true);
+            if (is_array($decoded)) {
+                $samples = $decoded;
+            } else {
+                $wetu_error = 'Unexpected Wetu response.';
+                $wetu_debug = h(substr($raw_json, 0, 400));
+            }
         }
     }
 }
@@ -177,20 +205,21 @@ if ($action === 'create_personal' && $token) {
     }
 }
 
-/* ─── Build JS samples array (JSON REST returns snake_case) ─── */
+/* ─── Build JS samples array + language list ─── */
 $samples_js_arr = [];
+$lang_set = [];
 foreach ($samples as $s) {
-    $sid   = $s['identifier']   ?? ($s['itinerary_id'] ?? '');
-    $sname = $s['name']         ?? ($s['itinerary_name'] ?? 'Unnamed');
-    $sdays = intval($s['days']  ?? 0);
-    $slang = strtolower(trim($s['language'] ?? ''));
-    if ($sid) $samples_js_arr[] = [
-        'id'   => $sid,
-        'name' => $sname,
-        'days' => $sdays,
-        'lang' => $slang,
-    ];
+    $sid   = $s['identifier']    ?? ($s['itinerary_id']   ?? '');
+    $sname = $s['name']          ?? ($s['itinerary_name'] ?? 'Unnamed');
+    $sdays = intval($s['days']   ?? 0);
+    $slang = trim($s['language'] ?? '');          // keep original (e.g. "English", "Italian")
+    if ($sid) {
+        $samples_js_arr[] = ['id' => $sid, 'name' => $sname, 'days' => $sdays, 'lang' => $slang];
+        if ($slang) $lang_set[$slang] = true;
+    }
 }
+ksort($lang_set);
+$languages    = array_keys($lang_set);            // e.g. ["English","French","Italian",...]
 $samples_json = json_encode($samples_js_arr, JSON_HEX_APOS | JSON_HEX_QUOT | JSON_UNESCAPED_UNICODE);
 
 /* ─── Page header ─── */
@@ -264,6 +293,22 @@ $extra_css  = '
 
 .btn-wetu { background:#1E4D7B !important; color:#fff !important; }
 .btn-wetu:hover { background:#163d63 !important; }
+
+/* Ensure anchor .btn elements look like buttons, not links */
+a.btn { text-decoration: none !important; }
+a.btn-secondary { color: var(--grey-dk) !important; }
+a.btn-wetu      { color: #fff !important; }
+
+/* Disconnect button */
+.btn-disconnect {
+  font-family: inherit; font-size: .75rem; font-weight: 700;
+  letter-spacing: .04em; text-transform: uppercase;
+  padding: 5px 14px; border-radius: 5px; cursor: pointer;
+  background: #fff; color: #C0211B;
+  border: 1.5px solid #C0211B;
+  transition: background .15s;
+}
+.btn-disconnect:hover { background: #FAE8E7; }
 ';
 include __DIR__ . '/includes/header.php';
 ?>
@@ -281,7 +326,9 @@ include __DIR__ . '/includes/header.php';
 </div>
 
 <?php if ($wetu_error): ?>
-<div class="wetu-alert wetu-alert-error">⚠️ <?= $wetu_error ?></div>
+<div class="wetu-alert wetu-alert-error">⚠️ <?= $wetu_error ?>
+<?php if ($wetu_debug): ?><br><small style="font-family:monospace;font-weight:400;"><?= $wetu_debug ?></small><?php endif; ?>
+</div>
 <?php endif; ?>
 
 <?php if ($wetu_success && !$created): ?>
@@ -342,7 +389,7 @@ include __DIR__ . '/includes/header.php';
   <?php if ($wetu_op): ?><span class="sep">|</span><?= h($wetu_op) ?><?php endif; ?>
   <form method="POST" action="wetu.php" style="margin-left:auto;">
     <input type="hidden" name="action" value="wetu_logout">
-    <button type="submit" class="btn btn-secondary btn-sm">Disconnect</button>
+    <button type="submit" class="btn-disconnect">⏏ Disconnect</button>
   </form>
 </div>
 
@@ -406,7 +453,7 @@ include __DIR__ . '/includes/header.php';
   <?php if ($wetu_op): ?><span class="sep">|</span><?= h($wetu_op) ?><?php endif; ?>
   <form method="POST" action="wetu.php" style="margin-left:auto;">
     <input type="hidden" name="action" value="wetu_logout">
-    <button type="submit" class="btn btn-secondary btn-sm">Disconnect</button>
+    <button type="submit" class="btn-disconnect">⏏ Disconnect</button>
   </form>
 </div>
 
@@ -432,10 +479,11 @@ include __DIR__ . '/includes/header.php';
 
           <!-- Filter row -->
           <div style="display:flex;gap:10px;margin-bottom:8px;">
-            <select id="filter_lang" class="form-control" style="max-width:110px;" onchange="filterSamples()">
+            <select id="filter_lang" class="form-control" style="max-width:140px;" onchange="filterSamples()">
               <option value="">All languages</option>
-              <option value="en">EN</option>
-              <option value="it">IT</option>
+              <?php foreach ($languages as $lang): ?>
+              <option value="<?= h($lang) ?>"><?= h($lang) ?></option>
+              <?php endforeach; ?>
             </select>
             <input type="text" id="search_sample" class="form-control"
                    placeholder="Search by name…" oninput="filterSamples()"
@@ -542,7 +590,7 @@ function filterSamples() {
 
     let count = 0;
     allSamples.forEach(s => {
-        if (lang   && s.lang !== lang)                  return;
+        if (lang   && s.lang.toLowerCase() !== lang.toLowerCase()) return;
         if (search && !s.name.toLowerCase().includes(search)) return;
         const opt = document.createElement('option');
         opt.value = s.id;
