@@ -39,7 +39,7 @@ $prefill_date = trim($_GET['start_date']  ?? '');
    ACTION: WETU LOGOUT
 ═══════════════════════════════════════════════════════════════ */
 if ($action === 'wetu_logout') {
-    unset($_SESSION['wetu_token'], $_SESSION['wetu_user'], $_SESSION['wetu_operator']);
+    unset($_SESSION['wetu_token'], $_SESSION['wetu_user'], $_SESSION['wetu_operator'], $_SESSION['wetu_pass']);
     header('Location: wetu.php');
     exit;
 }
@@ -59,6 +59,7 @@ if ($action === 'wetu_login') {
             if ($sess && !empty($sess->SessionToken)) {
                 $_SESSION['wetu_token']    = $sess->SessionToken;
                 $_SESSION['wetu_user']     = $u;
+                $_SESSION['wetu_pass']     = $p;   // kept server-side for JSON REST API
                 $_SESSION['wetu_operator'] = $sess->OperatorName ?? '';
                 $token    = $sess->SessionToken;
                 $wetu_user = $u;
@@ -73,35 +74,32 @@ if ($action === 'wetu_login') {
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   LOAD SAMPLE ITINERARIES (when logged in)
+   LOAD SAMPLE ITINERARIES via JSON REST (avoids SOAP encoding issues)
 ═══════════════════════════════════════════════════════════════ */
 if ($token && !$created) {
-    try {
-        $res = wetu_client()->LoadItineraries([
-            'ResultsPerPage'     => 200,
-            'PageStart'          => 0,
-            'TypeFilter'         => 'Sample',
-            'OwnItinerariesOnly' => false,
-            'SearchText'         => '',
-            'sort'               => 'ItineraryNameAsc',
-            'SessionToken'       => $token,
+    $wetu_u = $_SESSION['wetu_user'] ?? '';
+    $wetu_p = $_SESSION['wetu_pass'] ?? '';
+    $list_url = 'https://wetu.com/API/Itinerary/V8/List?'
+        . http_build_query([
+            'username' => $wetu_u,
+            'password' => $wetu_p,
+            'type'     => 'Sample',
+            'results'  => 200,
+            'sort'     => 'ItineraryNameAsc',
         ]);
-        $raw     = $res->LoadItinerariesResult->BrowseableItineraryPage ?? [];
-        $samples = is_array($raw) ? $raw : [$raw];
-    } catch (SoapFault $e) {
-        $msg = $e->getMessage();
-        $expired = (
-            stripos($msg, 'session')  !== false ||
-            stripos($msg, 'auth')     !== false ||
-            stripos($msg, 'expired')  !== false ||
-            stripos($msg, 'invalid')  !== false
-        );
-        if ($expired) {
-            unset($_SESSION['wetu_token'], $_SESSION['wetu_user'], $_SESSION['wetu_operator']);
-            $token = null;
-            $wetu_error = 'Your Wetu session has expired. Please log in again.';
+    $ctx = stream_context_create(['http' => [
+        'timeout'        => 15,
+        'ignore_errors'  => true,
+    ]]);
+    $raw_json = @file_get_contents($list_url, false, $ctx);
+    if ($raw_json === false) {
+        $wetu_error = 'Could not connect to Wetu API. Check server network access.';
+    } else {
+        $decoded = json_decode($raw_json, true);
+        if (is_array($decoded)) {
+            $samples = $decoded;   // array of assoc arrays (snake_case keys)
         } else {
-            $wetu_error = 'Could not load Sample itineraries: ' . h($msg);
+            $wetu_error = 'Unexpected response from Wetu: ' . h(substr($raw_json, 0, 200));
         }
     }
 }
@@ -179,14 +177,21 @@ if ($action === 'create_personal' && $token) {
     }
 }
 
-/* ─── Sample days lookup for JS ─── */
-$samples_js = [];
+/* ─── Build JS samples array (JSON REST returns snake_case) ─── */
+$samples_js_arr = [];
 foreach ($samples as $s) {
-    $sid  = $s->Identifier ?? ($s->ItineraryId ?? '');
-    $sdays = intval($s->Days ?? 0);
-    if ($sid) $samples_js[$sid] = $sdays;
+    $sid   = $s['identifier']   ?? ($s['itinerary_id'] ?? '');
+    $sname = $s['name']         ?? ($s['itinerary_name'] ?? 'Unnamed');
+    $sdays = intval($s['days']  ?? 0);
+    $slang = strtolower(trim($s['language'] ?? ''));
+    if ($sid) $samples_js_arr[] = [
+        'id'   => $sid,
+        'name' => $sname,
+        'days' => $sdays,
+        'lang' => $slang,
+    ];
 }
-$samples_json = json_encode($samples_js, JSON_HEX_APOS | JSON_HEX_QUOT);
+$samples_json = json_encode($samples_js_arr, JSON_HEX_APOS | JSON_HEX_QUOT | JSON_UNESCAPED_UNICODE);
 
 /* ─── Page header ─── */
 $pageTitle  = 'Wetu Itinerary Builder';
@@ -270,7 +275,7 @@ include __DIR__ . '/includes/header.php';
   🗺️ Wetu Itinerary Builder
   <?php if ($token): ?>
     <span class="sample-count" style="margin-left:auto;font-size:.75rem;">
-      <?= count($samples) ?> sample<?= count($samples) !== 1 ? 's' : '' ?> available
+      <?= count($samples_js_arr) ?> sample<?= count($samples_js_arr) !== 1 ? 's' : '' ?> available
     </span>
   <?php endif; ?>
 </div>
@@ -314,7 +319,7 @@ include __DIR__ . '/includes/header.php';
         </div>
 
         <div class="form-actions" style="border:none;padding-top:0;margin-top:0;">
-          <button type="submit" class="btn btn-primary" style="background:#1E4D7B;color:#fff;border-radius:6px;padding:10px 22px;font-size:.85rem;">
+          <button type="submit" class="btn btn-primary">
             🔓 Connect to Wetu
           </button>
         </div>
@@ -414,27 +419,36 @@ include __DIR__ . '/includes/header.php';
     <form method="POST" action="wetu.php" id="create-form">
       <input type="hidden" name="action" value="create_personal">
 
-      <!-- Sample -->
+      <!-- Sample filter + dropdown -->
       <div class="form-group">
-        <label class="form-label" for="sample_id">Base Sample Programme <span style="color:var(--red)">*</span></label>
-        <?php if (empty($samples)): ?>
-          <select class="form-control" id="sample_id" name="sample_id" disabled>
+        <label class="form-label">Base Sample Programme <span style="color:var(--red)">*</span></label>
+
+        <?php if (empty($samples_js_arr)): ?>
+          <select class="form-control" name="sample_id" disabled>
             <option>No Sample itineraries found</option>
           </select>
           <div class="field-hint">No samples returned from Wetu — check your account permissions.</div>
         <?php else: ?>
-          <select class="form-control" id="sample_id" name="sample_id" required onchange="onSampleChange(this)">
+
+          <!-- Filter row -->
+          <div style="display:flex;gap:10px;margin-bottom:8px;">
+            <select id="filter_lang" class="form-control" style="max-width:110px;" onchange="filterSamples()">
+              <option value="">All languages</option>
+              <option value="en">EN</option>
+              <option value="it">IT</option>
+            </select>
+            <input type="text" id="search_sample" class="form-control"
+                   placeholder="Search by name…" oninput="filterSamples()"
+                   autocomplete="off">
+          </div>
+
+          <!-- Main dropdown (populated by JS) -->
+          <select class="form-control" id="sample_id" name="sample_id" required
+                  onchange="onSampleChange(this)" size="1">
             <option value="">— Select a Sample —</option>
-            <?php foreach ($samples as $s):
-              $sid   = h($s->Identifier ?? ($s->ItineraryId ?? ''));
-              $sname = h($s->Name ?? ($s->ItineraryName ?? 'Unnamed'));
-              $sdays = intval($s->Days ?? 0);
-            ?>
-            <option value="<?= $sid ?>" data-days="<?= $sdays ?>">
-              <?= $sname ?><?= $sdays ? " ({$sdays}d)" : '' ?>
-            </option>
-            <?php endforeach; ?>
           </select>
+          <div class="field-hint" id="sample_count_hint"></div>
+
         <?php endif; ?>
       </div>
 
@@ -493,7 +507,7 @@ include __DIR__ . '/includes/header.php';
 
       <div class="form-actions">
         <button type="submit" class="btn btn-wetu" id="submit-btn"
-                <?= empty($samples) ? 'disabled' : '' ?>>
+                <?= empty($samples_js_arr) ? 'disabled' : '' ?>>
           🗺️ Create Personal Itinerary
         </button>
         <a href="wetu.php" class="btn btn-secondary">Reset</a>
@@ -510,12 +524,45 @@ include __DIR__ . '/includes/header.php';
 <?php include __DIR__ . '/includes/footer.php'; ?>
 
 <script>
-const sampleDays = <?= $samples_json ?>;
+const allSamples = <?= $samples_json ?>;
+
+/* ── Populate dropdown on load ── */
+document.addEventListener('DOMContentLoaded', function() {
+    filterSamples();
+});
+
+function filterSamples() {
+    const lang   = (document.getElementById('filter_lang')   ?.value || '').toLowerCase();
+    const search = (document.getElementById('search_sample') ?.value || '').toLowerCase().trim();
+    const sel    = document.getElementById('sample_id');
+    if (!sel) return;
+
+    const prev = sel.value;
+    sel.innerHTML = '<option value="">— Select a Sample —</option>';
+
+    let count = 0;
+    allSamples.forEach(s => {
+        if (lang   && s.lang !== lang)                  return;
+        if (search && !s.name.toLowerCase().includes(search)) return;
+        const opt = document.createElement('option');
+        opt.value = s.id;
+        opt.dataset.days = s.days;
+        opt.textContent  = s.name + (s.days ? ` (${s.days}d)` : '');
+        if (s.id === prev) opt.selected = true;
+        sel.appendChild(opt);
+        count++;
+    });
+
+    const hint = document.getElementById('sample_count_hint');
+    if (hint) hint.textContent = count === allSamples.length
+        ? `${count} samples available`
+        : `${count} of ${allSamples.length} samples shown`;
+}
 
 function onSampleChange(sel) {
-    const days = parseInt(sel.options[sel.selectedIndex].getAttribute('data-days') || '0', 10);
+    const days = parseInt(sel.options[sel.selectedIndex]?.dataset.days || '0', 10);
     const d = document.getElementById('days');
-    if (days > 0) d.value = days;
+    if (d && days > 0) d.value = days;
 }
 
 function copyLink(elId, btn) {
