@@ -593,15 +593,48 @@ include __DIR__ . '/includes/header.php';
 <script>
 const allSamples = <?= $samples_json ?>;
 
+/* Language display names for the filter LOV */
+const langNames = {
+    en:'English', it:'Italian', de:'German', es:'Spanish', fr:'French',
+    english:'English', italian:'Italian', german:'German', spanish:'Spanish', french:'French'
+};
+
+/* ── Build language LOV dynamically from actual sample data ── */
+function buildLangLOV() {
+    const sel = document.getElementById('filter_lang');
+    if (!sel || allSamples.length === 0) return;
+
+    // Collect unique raw lang values
+    const seen = {};
+    allSamples.forEach(s => { if (s.lang) seen[s.lang] = true; });
+
+    // Sort by display name
+    const langs = Object.keys(seen).sort((a, b) => {
+        return (langNames[a.toLowerCase()] || a).localeCompare(langNames[b.toLowerCase()] || b);
+    });
+
+    // Rebuild options (keep current selection)
+    const prev = sel.value;
+    sel.innerHTML = '<option value="">All languages</option>';
+    langs.forEach(raw => {
+        const opt = document.createElement('option');
+        opt.value = raw;                                      // exact value from API
+        opt.textContent = langNames[raw.toLowerCase()] || raw;
+        if (raw === prev) opt.selected = true;
+        sel.appendChild(opt);
+    });
+}
+
 /* ── Populate dropdown on load ── */
 document.addEventListener('DOMContentLoaded', function() {
+    buildLangLOV();
     filterSamples();
 });
 
 function filterSamples() {
-    const lang   = (document.getElementById('filter_lang')   ?.value || '').toLowerCase();
-    const search = (document.getElementById('search_sample') ?.value || '').toLowerCase().trim();
-    const sel    = document.getElementById('sample_id');
+    const langRaw = document.getElementById('filter_lang')?.value || '';
+    const search  = (document.getElementById('search_sample')?.value || '').toLowerCase().trim();
+    const sel     = document.getElementById('sample_id');
     if (!sel) return;
 
     const prev = sel.value;
@@ -609,11 +642,15 @@ function filterSamples() {
 
     let count = 0;
     allSamples.forEach(s => {
-        if (lang   && s.lang.toLowerCase() !== lang.toLowerCase()) return;
+        // Language filter: exact match on raw value from API
+        if (langRaw && s.lang !== langRaw) return;
+        // Name filter: case-insensitive contains
         if (search && !s.name.toLowerCase().includes(search)) return;
+
         const opt = document.createElement('option');
         opt.value = s.id;
         opt.dataset.days = s.days;
+        opt.dataset.lang = s.lang;
         opt.textContent  = s.name + (s.days ? ` (${s.days}d)` : '');
         if (s.id === prev) opt.selected = true;
         sel.appendChild(opt);
@@ -632,13 +669,10 @@ function onSampleChange(sel) {
     const d    = document.getElementById('days');
     if (d && days > 0) d.value = days;
 
-    // Auto-set hidden language from sample (e.g. "English" → "en")
-    const id  = opt?.value || '';
-    const s   = allSamples.find(x => x.id === id);
-    const raw = (s?.lang || 'en').toLowerCase();
-    // map full names to 2-char codes
+    // Auto-set hidden language from sample
+    const raw  = (opt?.dataset.lang || 'en').toLowerCase();
     const langMap = {english:'en', italian:'it', german:'de', spanish:'es', french:'fr'};
-    const lang = langMap[raw] || raw.substring(0,2) || 'en';
+    const lang = langMap[raw] || (raw.length === 2 ? raw : raw.substring(0,2)) || 'en';
     const hl   = document.getElementById('hidden_language');
     if (hl) hl.value = lang;
 }
