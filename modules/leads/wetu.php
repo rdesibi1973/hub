@@ -39,13 +39,52 @@ $prefill_date = trim($_GET['start_date']  ?? '');
    ACTION: WETU LOGOUT
 ═══════════════════════════════════════════════════════════════ */
 if ($action === 'wetu_logout') {
-    unset($_SESSION['wetu_token'], $_SESSION['wetu_user'], $_SESSION['wetu_operator'], $_SESSION['wetu_pass']);
+    unset($_SESSION['wetu_token'], $_SESSION['wetu_user'], $_SESSION['wetu_operator'], $_SESSION['wetu_pass'], $_SESSION['wetu_samples']);
     header('Location: wetu.php');
     exit;
 }
 
 /* ═══════════════════════════════════════════════════════════════
    ACTION: WETU LOGIN
+═══════════════════════════════════════════════════════════════ */
+/* ═══════════════════════════════════════════════════════════════
+   HELPER: fetch Sample itineraries via JSON REST
+═══════════════════════════════════════════════════════════════ */
+function wetu_fetch_samples(string $u, string $p): array {
+    $url = 'https://wetu.com/API/Itinerary/V8/List?' . http_build_query([
+        'username' => $u, 'password' => $p,
+        'type' => 'Sample', 'results' => 200, 'sort' => 'ItineraryNameAsc',
+    ]);
+    $raw = false;
+    if (function_exists('curl_init')) {
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 20,
+            CURLOPT_SSL_VERIFYPEER => true, CURLOPT_FOLLOWLOCATION => true,
+        ]);
+        $raw  = curl_exec($ch);
+        $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $err  = curl_error($ch);
+        curl_close($ch);
+        if ($raw === false || $err || $code !== 200) return [];
+    } else {
+        $ctx = stream_context_create(['http' => ['timeout' => 20, 'ignore_errors' => true]]);
+        $raw = @file_get_contents($url, false, $ctx);
+        if ($raw === false) return [];
+    }
+    $decoded = json_decode($raw, true);
+    if (!is_array($decoded)) return [];
+    // Direct array
+    if (isset($decoded[0])) return $decoded;
+    // Wrapper object — try common keys
+    foreach (['Itineraries','itineraries','Items','items','Results','results'] as $k) {
+        if (!empty($decoded[$k])) return $decoded[$k];
+    }
+    return $decoded; // return as-is and let caller decide
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   ACTION: WETU LOGIN  — fetch samples immediately, cache in session
 ═══════════════════════════════════════════════════════════════ */
 if ($action === 'wetu_login') {
     $u = trim($_POST['wetu_username'] ?? '');
@@ -57,13 +96,18 @@ if ($action === 'wetu_login') {
             $res  = wetu_client()->AuthenticateUser(['username' => $u, 'password' => $p]);
             $sess = $res->AuthenticateUserResult ?? null;
             if ($sess && !empty($sess->SessionToken)) {
+                $fetched = wetu_fetch_samples($u, $p);
                 $_SESSION['wetu_token']    = $sess->SessionToken;
                 $_SESSION['wetu_user']     = $u;
-                $_SESSION['wetu_pass']     = $p;   // kept server-side for JSON REST API
                 $_SESSION['wetu_operator'] = $sess->OperatorName ?? '';
+                $_SESSION['wetu_samples']  = $fetched;   // cached — no password stored
                 $token    = $sess->SessionToken;
                 $wetu_user = $u;
                 $wetu_op   = $sess->OperatorName ?? '';
+                $samples   = $fetched;
+                if (empty($fetched)) {
+                    $wetu_error = 'Logged in, but no Sample itineraries were returned by Wetu.';
+                }
             } else {
                 $wetu_error = 'Authentication failed — please check your credentials.';
             }
@@ -74,86 +118,13 @@ if ($action === 'wetu_login') {
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   LOAD SAMPLE ITINERARIES via JSON REST
+   LOAD SAMPLES FROM SESSION CACHE
 ═══════════════════════════════════════════════════════════════ */
 $wetu_debug = '';
-// If session has no stored password (old session before this feature), force reconnect
-if ($token && empty($_SESSION['wetu_pass'])) {
-    unset($_SESSION['wetu_token'], $_SESSION['wetu_user'], $_SESSION['wetu_operator'], $_SESSION['wetu_pass']);
-    $token     = null;
-    $wetu_error = 'Session refreshed — please sign in again to load Sample itineraries.';
-}
-if ($token && !$created) {
-    $wetu_u = $_SESSION['wetu_user'] ?? '';
-    $wetu_p = $_SESSION['wetu_pass'] ?? '';
-    $list_url = 'https://wetu.com/API/Itinerary/V8/List?' . http_build_query([
-        'username' => $wetu_u,
-        'password' => $wetu_p,
-        'type'     => 'Sample',
-        'results'  => 200,
-        'sort'     => 'ItineraryNameAsc',
-    ]);
-
-    if (function_exists('curl_init')) {
-        $ch = curl_init($list_url);
-        curl_setopt_array($ch, [
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_TIMEOUT        => 20,
-            CURLOPT_SSL_VERIFYPEER => true,
-            CURLOPT_FOLLOWLOCATION => true,
-        ]);
-        $raw_json  = curl_exec($ch);
-        $curl_err  = curl_error($ch);
-        $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
-
-        if ($raw_json === false || $curl_err) {
-            $wetu_error = 'Could not connect to Wetu API: ' . h($curl_err);
-        } elseif ($http_code !== 200) {
-            $wetu_error = "Wetu API returned HTTP $http_code.";
-            $wetu_debug = h(substr($raw_json, 0, 600));
-        } else {
-            $wetu_debug = h(substr($raw_json, 0, 600)); // always store for debug
-            $decoded = json_decode($raw_json, true);
-            if (is_array($decoded) && isset($decoded[0])) {
-                // Direct array of itineraries
-                $samples = $decoded;
-            } elseif (is_array($decoded) && empty($decoded)) {
-                // Empty array — API auth likely OK but no results
-                $wetu_error = 'Wetu returned 0 samples. API response shown below.';
-            } elseif (is_array($decoded)) {
-                // Might be a wrapper object — try common keys
-                $samples = $decoded['Itineraries']
-                    ?? $decoded['itineraries']
-                    ?? $decoded['Items']
-                    ?? $decoded['items']
-                    ?? $decoded['Results']
-                    ?? $decoded['results']
-                    ?? [];
-                if (empty($samples)) {
-                    $wetu_error = 'Unexpected Wetu response structure. Raw response shown below.';
-                }
-            } else {
-                $wetu_error = 'Unexpected Wetu response (not JSON).';
-            }
-        }
-    } else {
-        $ctx = stream_context_create(['http' => ['timeout' => 20, 'ignore_errors' => true]]);
-        $raw_json = @file_get_contents($list_url, false, $ctx);
-        if ($raw_json === false) {
-            $wetu_error = 'Could not connect to Wetu API (curl unavailable).';
-        } else {
-            $wetu_debug = h(substr($raw_json, 0, 600));
-            $decoded = json_decode($raw_json, true);
-            if (is_array($decoded) && isset($decoded[0])) {
-                $samples = $decoded;
-            } elseif (is_array($decoded) && !empty($decoded)) {
-                $samples = $decoded['Itineraries'] ?? $decoded['itineraries'] ?? $decoded['Items'] ?? $decoded['items'] ?? [];
-                if (empty($samples)) $wetu_error = 'Unexpected Wetu response structure. Raw response shown below.';
-            } else {
-                $wetu_error = 'Unexpected Wetu response.';
-            }
-        }
+if ($token && !$created && $action !== 'wetu_login') {
+    $samples = $_SESSION['wetu_samples'] ?? [];
+    if (empty($samples) && $token) {
+        $wetu_error = 'No samples in session — please disconnect and sign in again.';
     }
 }
 
@@ -167,7 +138,8 @@ if ($action === 'create_personal' && $token) {
     $start_date  = trim($_POST['start_date']  ?? '');
     $days        = max(1, intval($_POST['days'] ?? 1));
     $pax         = max(1, intval($_POST['pax']  ?? 1));
-    $language    = in_array($_POST['language'] ?? '', ['en','it']) ? $_POST['language'] : 'en';
+    $language    = trim($_POST['language'] ?? 'en');
+    if (!preg_match('/^[a-z]{2}$/', $language)) $language = 'en';
 
     if (!$sample_id)   $wetu_error = 'Please select a Sample itinerary.';
     elseif (!$client_name) $wetu_error = 'Client Name is required.';
