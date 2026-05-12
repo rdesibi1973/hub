@@ -111,14 +111,30 @@ if ($token && !$created) {
             $wetu_error = 'Could not connect to Wetu API: ' . h($curl_err);
         } elseif ($http_code !== 200) {
             $wetu_error = "Wetu API returned HTTP $http_code.";
-            $wetu_debug = h(substr($raw_json, 0, 400));
+            $wetu_debug = h(substr($raw_json, 0, 600));
         } else {
+            $wetu_debug = h(substr($raw_json, 0, 600)); // always store for debug
             $decoded = json_decode($raw_json, true);
-            if (is_array($decoded)) {
+            if (is_array($decoded) && isset($decoded[0])) {
+                // Direct array of itineraries
                 $samples = $decoded;
+            } elseif (is_array($decoded) && empty($decoded)) {
+                // Empty array — API auth likely OK but no results
+                $wetu_error = 'Wetu returned 0 samples. API response shown below.';
+            } elseif (is_array($decoded)) {
+                // Might be a wrapper object — try common keys
+                $samples = $decoded['Itineraries']
+                    ?? $decoded['itineraries']
+                    ?? $decoded['Items']
+                    ?? $decoded['items']
+                    ?? $decoded['Results']
+                    ?? $decoded['results']
+                    ?? [];
+                if (empty($samples)) {
+                    $wetu_error = 'Unexpected Wetu response structure. Raw response shown below.';
+                }
             } else {
-                $wetu_error = 'Unexpected Wetu response (not JSON array).';
-                $wetu_debug = h(substr($raw_json, 0, 400));
+                $wetu_error = 'Unexpected Wetu response (not JSON).';
             }
         }
     } else {
@@ -127,12 +143,15 @@ if ($token && !$created) {
         if ($raw_json === false) {
             $wetu_error = 'Could not connect to Wetu API (curl unavailable).';
         } else {
+            $wetu_debug = h(substr($raw_json, 0, 600));
             $decoded = json_decode($raw_json, true);
-            if (is_array($decoded)) {
+            if (is_array($decoded) && isset($decoded[0])) {
                 $samples = $decoded;
+            } elseif (is_array($decoded) && !empty($decoded)) {
+                $samples = $decoded['Itineraries'] ?? $decoded['itineraries'] ?? $decoded['Items'] ?? $decoded['items'] ?? [];
+                if (empty($samples)) $wetu_error = 'Unexpected Wetu response structure. Raw response shown below.';
             } else {
                 $wetu_error = 'Unexpected Wetu response.';
-                $wetu_debug = h(substr($raw_json, 0, 400));
             }
         }
     }
@@ -441,7 +460,7 @@ include __DIR__ . '/includes/header.php';
 
     <div class="form-actions" style="margin-top:16px;">
       <?php if ($created['edit_url']): ?>
-      <a href="<?= h($created['edit_url']) ?>" target="_blank" style="font-family:inherit;font-size:.82rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;padding:9px 18px;border-radius:6px;background:#1E4D7B;color:#fff;text-decoration:none;display:inline-block;">✏️ Continue in Wetu</a>
+      <a href="<?= h($created['edit_url']) ?>" target="_blank" style="font-family:inherit;font-size:.82rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;padding:9px 18px;border-radius:6px;background:#C0211B;color:#fff;text-decoration:none;display:inline-block;">✏️ Continue in Wetu</a>
       <?php endif; ?>
       <a href="wetu.php" style="font-family:inherit;font-size:.82rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;padding:9px 18px;border-radius:6px;background:#E8E8E8;color:#444;text-decoration:none;display:inline-block;">＋ Create Another</a>
     </div>
@@ -496,8 +515,13 @@ include __DIR__ . '/includes/header.php';
           <option value=""><?= empty($samples_js_arr) ? '— No samples loaded —' : '— Select a Sample —' ?></option>
         </select>
         <div class="field-hint" id="sample_count_hint">
-          <?php if (empty($samples_js_arr)): ?>
-            No samples returned from Wetu — try disconnecting and reconnecting.
+          <?php if (empty($samples_js_arr) && $wetu_debug): ?>
+            <details style="margin-top:6px;">
+              <summary style="cursor:pointer;color:#C0211B;font-weight:700;">▶ Show Wetu API response (debug)</summary>
+              <pre style="font-size:.68rem;background:#f5f5f5;padding:8px;border-radius:4px;margin-top:4px;white-space:pre-wrap;word-break:break-all;"><?= $wetu_debug ?></pre>
+            </details>
+          <?php elseif (empty($samples_js_arr)): ?>
+            No samples returned — try disconnecting and reconnecting.
           <?php endif; ?>
         </div>
       </div>
@@ -558,7 +582,7 @@ include __DIR__ . '/includes/header.php';
       <div class="form-actions">
         <button type="submit" id="submit-btn"
                 <?= empty($samples_js_arr) ? 'disabled' : '' ?>
-                style="font-family:inherit;font-size:.85rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;padding:10px 22px;border:none;border-radius:6px;cursor:pointer;background:#1E4D7B;color:#fff;transition:background .15s;">
+                style="font-family:inherit;font-size:.85rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;padding:10px 22px;border:none;border-radius:6px;cursor:pointer;background:#C0211B;color:#fff;transition:background .15s;">
           🗺️ Create Personal Itinerary
         </button>
         <a href="wetu.php" style="font-family:inherit;font-size:.85rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;padding:10px 20px;border-radius:6px;background:#E8E8E8;color:#444;text-decoration:none;display:inline-block;">Reset</a>
