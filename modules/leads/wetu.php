@@ -227,18 +227,31 @@ if ($action === 'create_personal' && $token) {
 /* ─── Build JS samples array + language list ─── */
 $samples_js_arr = [];
 $lang_set = [];
+
+// Debug: capture first sample raw keys to show in UI
+$first_sample_debug = !empty($samples) ? json_encode(array_keys($samples[0]), JSON_PRETTY_PRINT) : '(no samples)';
+$first_sample_raw   = !empty($samples) ? json_encode($samples[0], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE) : '';
+
 foreach ($samples as $s) {
-    $sid   = $s['identifier']    ?? ($s['itinerary_id']   ?? '');
-    $sname = $s['name']          ?? ($s['itinerary_name'] ?? 'Unnamed');
-    $sdays = intval($s['days']   ?? 0);
-    $slang = trim($s['language'] ?? '');          // keep original (e.g. "English", "Italian")
+    $sid   = $s['identifier']    ?? ($s['itinerary_id']   ?? ($s['Identifier'] ?? ''));
+    $sname = $s['name']          ?? ($s['itinerary_name'] ?? ($s['Name'] ?? ($s['ItineraryName'] ?? 'Unnamed')));
+    $sdays = intval($s['days']   ?? ($s['Days'] ?? 0));
+    // Try every possible field name Wetu might use
+    $slang = trim(
+        $s['language']      ??
+        $s['Language']      ??
+        $s['lang']          ??
+        $s['language_code'] ??
+        $s['LanguageCode']  ??
+        ''
+    );
     if ($sid) {
         $samples_js_arr[] = ['id' => $sid, 'name' => $sname, 'days' => $sdays, 'lang' => $slang];
         if ($slang) $lang_set[$slang] = true;
     }
 }
 ksort($lang_set);
-$languages    = array_keys($lang_set);            // e.g. ["English","French","Italian",...]
+$languages    = array_keys($lang_set);
 $samples_json = json_encode($samples_js_arr, JSON_HEX_APOS | JSON_HEX_QUOT | JSON_UNESCAPED_UNICODE);
 
 /* ─── Page header ─── */
@@ -348,6 +361,13 @@ include __DIR__ . '/includes/header.php';
 <div class="wetu-alert wetu-alert-error">⚠️ <?= $wetu_error ?>
 <?php if ($wetu_debug): ?><br><small style="font-family:monospace;font-weight:400;"><?= $wetu_debug ?></small><?php endif; ?>
 </div>
+<?php endif; ?>
+
+<?php if ($token && !empty($first_sample_raw)): ?>
+<details style="margin-bottom:16px;font-size:.75rem;">
+  <summary style="cursor:pointer;color:#888;font-weight:600;">🔍 Debug: first sample fields (<?= count($samples) ?> total, <?= count($languages) ?> languages found)</summary>
+  <pre style="background:#f5f5f5;padding:10px;border-radius:6px;margin-top:6px;white-space:pre-wrap;word-break:break-all;font-size:.7rem;max-height:200px;overflow:auto;"><?= htmlspecialchars($first_sample_raw) ?></pre>
+</details>
 <?php endif; ?>
 
 <?php if ($wetu_success && !$created): ?>
