@@ -77,6 +77,12 @@ if ($action === 'wetu_login') {
    LOAD SAMPLE ITINERARIES via JSON REST
 ═══════════════════════════════════════════════════════════════ */
 $wetu_debug = '';
+// If session has no stored password (old session before this feature), force reconnect
+if ($token && empty($_SESSION['wetu_pass'])) {
+    unset($_SESSION['wetu_token'], $_SESSION['wetu_user'], $_SESSION['wetu_operator'], $_SESSION['wetu_pass']);
+    $token     = null;
+    $wetu_error = 'Session refreshed — please sign in again to load Sample itineraries.';
+}
 if ($token && !$created) {
     $wetu_u = $_SESSION['wetu_user'] ?? '';
     $wetu_p = $_SESSION['wetu_pass'] ?? '';
@@ -366,7 +372,7 @@ include __DIR__ . '/includes/header.php';
         </div>
 
         <div class="form-actions" style="border:none;padding-top:0;margin-top:0;">
-          <button type="submit" class="btn btn-primary">
+          <button type="submit" style="font-family:inherit;font-size:.85rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;padding:10px 22px;border:none;border-radius:6px;cursor:pointer;background:#C0211B;color:#fff;transition:background .15s;">
             🔓 Connect to Wetu
           </button>
         </div>
@@ -435,9 +441,9 @@ include __DIR__ . '/includes/header.php';
 
     <div class="form-actions" style="margin-top:16px;">
       <?php if ($created['edit_url']): ?>
-      <a href="<?= h($created['edit_url']) ?>" target="_blank" class="btn btn-wetu">✏️ Continue in Wetu</a>
+      <a href="<?= h($created['edit_url']) ?>" target="_blank" style="font-family:inherit;font-size:.82rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;padding:9px 18px;border-radius:6px;background:#1E4D7B;color:#fff;text-decoration:none;display:inline-block;">✏️ Continue in Wetu</a>
       <?php endif; ?>
-      <a href="wetu.php" class="btn btn-secondary">＋ Create Another</a>
+      <a href="wetu.php" style="font-family:inherit;font-size:.82rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;padding:9px 18px;border-radius:6px;background:#E8E8E8;color:#444;text-decoration:none;display:inline-block;">＋ Create Another</a>
     </div>
 
   </div>
@@ -468,36 +474,32 @@ include __DIR__ . '/includes/header.php';
 
       <!-- Sample filter + dropdown -->
       <div class="form-group">
-        <label class="form-label">Base Sample Programme <span style="color:var(--red)">*</span></label>
+        <label class="form-label">Base Sample Programme <span style="color:#C0211B">*</span></label>
 
-        <?php if (empty($samples_js_arr)): ?>
-          <select class="form-control" name="sample_id" disabled>
-            <option>No Sample itineraries found</option>
+        <!-- Filter row — always visible -->
+        <div style="display:flex;gap:10px;margin-bottom:8px;">
+          <select id="filter_lang" class="form-control" style="max-width:150px;flex-shrink:0;" onchange="filterSamples()">
+            <option value="">All languages</option>
+            <?php foreach ($languages as $lng): ?>
+            <option value="<?= h($lng) ?>"><?= h($lng) ?></option>
+            <?php endforeach; ?>
           </select>
-          <div class="field-hint">No samples returned from Wetu — check your account permissions.</div>
-        <?php else: ?>
+          <input type="text" id="search_sample" class="form-control"
+                 placeholder="Search by name…" oninput="filterSamples()"
+                 autocomplete="off">
+        </div>
 
-          <!-- Filter row -->
-          <div style="display:flex;gap:10px;margin-bottom:8px;">
-            <select id="filter_lang" class="form-control" style="max-width:140px;" onchange="filterSamples()">
-              <option value="">All languages</option>
-              <?php foreach ($languages as $lang): ?>
-              <option value="<?= h($lang) ?>"><?= h($lang) ?></option>
-              <?php endforeach; ?>
-            </select>
-            <input type="text" id="search_sample" class="form-control"
-                   placeholder="Search by name…" oninput="filterSamples()"
-                   autocomplete="off">
-          </div>
-
-          <!-- Main dropdown (populated by JS) -->
-          <select class="form-control" id="sample_id" name="sample_id" required
-                  onchange="onSampleChange(this)" size="1">
-            <option value="">— Select a Sample —</option>
-          </select>
-          <div class="field-hint" id="sample_count_hint"></div>
-
-        <?php endif; ?>
+        <!-- Main dropdown (populated by JS) -->
+        <select class="form-control" id="sample_id" name="sample_id"
+                <?= empty($samples_js_arr) ? 'disabled' : 'required' ?>
+                onchange="onSampleChange(this)">
+          <option value=""><?= empty($samples_js_arr) ? '— No samples loaded —' : '— Select a Sample —' ?></option>
+        </select>
+        <div class="field-hint" id="sample_count_hint">
+          <?php if (empty($samples_js_arr)): ?>
+            No samples returned from Wetu — try disconnecting and reconnecting.
+          <?php endif; ?>
+        </div>
       </div>
 
       <!-- Client Name + Reference -->
@@ -554,11 +556,12 @@ include __DIR__ . '/includes/header.php';
       </div>
 
       <div class="form-actions">
-        <button type="submit" class="btn btn-wetu" id="submit-btn"
-                <?= empty($samples_js_arr) ? 'disabled' : '' ?>>
+        <button type="submit" id="submit-btn"
+                <?= empty($samples_js_arr) ? 'disabled' : '' ?>
+                style="font-family:inherit;font-size:.85rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;padding:10px 22px;border:none;border-radius:6px;cursor:pointer;background:#1E4D7B;color:#fff;transition:background .15s;">
           🗺️ Create Personal Itinerary
         </button>
-        <a href="wetu.php" class="btn btn-secondary">Reset</a>
+        <a href="wetu.php" style="font-family:inherit;font-size:.85rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;padding:10px 20px;border-radius:6px;background:#E8E8E8;color:#444;text-decoration:none;display:inline-block;">Reset</a>
       </div>
 
     </form>
