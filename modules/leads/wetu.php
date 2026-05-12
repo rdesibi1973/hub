@@ -499,9 +499,11 @@ include __DIR__ . '/includes/header.php';
         <div style="display:flex;gap:10px;margin-bottom:8px;">
           <select id="filter_lang" class="form-control" style="max-width:150px;flex-shrink:0;" onchange="filterSamples()">
             <option value="">All languages</option>
-            <?php foreach ($languages as $lng): ?>
-            <option value="<?= h($lng) ?>"><?= h($lng) ?></option>
-            <?php endforeach; ?>
+            <option value="English">English</option>
+            <option value="Italian">Italian</option>
+            <option value="German">German</option>
+            <option value="Spanish">Spanish</option>
+            <option value="French">French</option>
           </select>
           <input type="text" id="search_sample" class="form-control"
                  placeholder="Search by name…" oninput="filterSamples()"
@@ -566,18 +568,8 @@ include __DIR__ . '/includes/header.php';
         </div>
       </div>
 
-      <!-- Language -->
-      <div class="form-group" style="max-width:200px;">
-        <label class="form-label">Output Language <span style="color:var(--red)">*</span></label>
-        <div class="lang-toggle">
-          <input type="radio" id="lang_en" name="language" value="en"
-                 <?= (($_POST['language'] ?? 'en') === 'en') ? 'checked' : '' ?>>
-          <label for="lang_en">EN</label>
-          <input type="radio" id="lang_it" name="language" value="it"
-                 <?= (($_POST['language'] ?? '') === 'it') ? 'checked' : '' ?>>
-          <label for="lang_it">IT</label>
-        </div>
-      </div>
+      <!-- Language: auto-set from selected Sample -->
+      <input type="hidden" name="language" id="hidden_language" value="en">
 
       <div class="form-actions">
         <button type="submit" id="submit-btn"
@@ -635,9 +627,20 @@ function filterSamples() {
 }
 
 function onSampleChange(sel) {
-    const days = parseInt(sel.options[sel.selectedIndex]?.dataset.days || '0', 10);
-    const d = document.getElementById('days');
+    const opt  = sel.options[sel.selectedIndex];
+    const days = parseInt(opt?.dataset.days || '0', 10);
+    const d    = document.getElementById('days');
     if (d && days > 0) d.value = days;
+
+    // Auto-set hidden language from sample (e.g. "English" → "en")
+    const id  = opt?.value || '';
+    const s   = allSamples.find(x => x.id === id);
+    const raw = (s?.lang || 'en').toLowerCase();
+    // map full names to 2-char codes
+    const langMap = {english:'en', italian:'it', german:'de', spanish:'es', french:'fr'};
+    const lang = langMap[raw] || raw.substring(0,2) || 'en';
+    const hl   = document.getElementById('hidden_language');
+    if (hl) hl.value = lang;
 }
 
 function copyLink(elId, btn) {
