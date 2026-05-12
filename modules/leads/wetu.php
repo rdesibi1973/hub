@@ -28,8 +28,8 @@ function wetu_client() {
    LANGUAGE INFERENCE (Wetu JSON List has no language field)
 ═══════════════════════════════════════════════════════════════ */
 if (!function_exists('infer_language')) {
-function infer_language(string $name, array $s): string {
-    $api = trim($s['language'] ?? ($s['Language'] ?? ($s['lang'] ?? '')));
+function infer_language(string $name, $s): string {
+    $api = is_array($s) ? trim($s['language'] ?? ($s['Language'] ?? ($s['lang'] ?? ''))) : '';
     if ($api !== '') return $api;
     $n = strtoupper($name);
     if (strpos($n, 'ITALIANO') !== false || strpos($n, 'ITALIAN') !== false) return 'Italian';
@@ -262,6 +262,7 @@ $lang_set = [];
 $first_sample_raw = !empty($samples) ? json_encode($samples[0], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE) : '';
 
 foreach ($samples as $s) {
+    if (!is_array($s)) continue;  // skip wrapper fields (total, page, etc.)
     $sid   = $s['identifier']  ?? ($s['itinerary_id'] ?? ($s['Identifier'] ?? ''));
     $sname = $s['name']        ?? ($s['itinerary_name'] ?? ($s['Name'] ?? ($s['ItineraryName'] ?? 'Unnamed')));
     $sdays = intval($s['days'] ?? ($s['Days'] ?? 0));
