@@ -110,6 +110,8 @@ include 'includes/header.php';
         <a href="quotes.php" class="btn btn-outline">📋 <?= $quoteCount ?> Quotes</a>
         <a href="quote_new.php?request_id=<?= $r['id'] ?>" class="btn btn-outline">+ Quote</a>
       <?php endif; ?>
+    <a href="wetu.php?client_name=<?= urlencode($r['customer_name']) ?>&ref_number=<?= urlencode($r['practice_code'] ?? '') ?>"
+       class="btn btn-outline" style="color:var(--wetu,#1E4D7B);border-color:var(--wetu,#1E4D7B);">🗺️ Wetu</a>
     <a href="request_add.php" class="btn btn-outline">+ New Request</a>
   </div>
 </div>

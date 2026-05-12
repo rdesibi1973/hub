@@ -148,6 +148,7 @@ header {
   <?php endif; // !isLeadsRestricted ?>
   <?php if (!isLeadsRestricted()): ?>
   <a href="pricing.php" class="<?= in_array($cur,['pricing.php','pricing_lodge.php']) ? 'active':'' ?>">Pricing</a>
+  <a href="wetu.php" class="<?= $cur==='wetu.php' ? 'active':'' ?>">🗺️ Wetu</a>
   <?php endif; ?>
   <a href="logout.php"    class="sub-nav-logout">Logout</a>
 </nav>

@@ -239,6 +239,10 @@ include 'includes/header.php';
        style="padding:8px 16px;border-radius:8px;border:1px solid rgba(255,255,255,.4);color:#fff;text-decoration:none;font-size:.82rem;font-weight:700;">
       ⬇ <?= h($xlsxName) ?>
     </a>
+    <a href="wetu.php?client_name=<?= urlencode($quote['customer_name']) ?>&ref_number=<?= urlencode($quote['quote_number']) ?>&pax=<?= $pax ?>&days=<?= count($days) ?><?= $quote['start_date'] ? '&start_date='.urlencode($quote['start_date']) : '' ?>"
+       style="padding:8px 16px;border-radius:8px;border:1px solid rgba(255,255,255,.4);color:#fff;text-decoration:none;font-size:.82rem;font-weight:700;">
+      🗺️ Wetu
+    </a>
   </div>
 </div>
 
