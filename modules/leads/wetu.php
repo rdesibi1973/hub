@@ -228,26 +228,31 @@ if ($action === 'create_personal' && $token) {
 $samples_js_arr = [];
 $lang_set = [];
 
+// Language inference from name (Wetu List endpoint does not include language field)
+function infer_language(string $name, array $s): string {
+    // Try API field first (just in case some responses do include it)
+    $api = trim($s['language'] ?? ($s['Language'] ?? ($s['lang'] ?? '')));
+    if ($api !== '') return $api;
+    // Infer from name
+    $n = strtoupper($name);
+    if (strpos($n, 'ITALIANO') !== false || strpos($n, 'ITALIAN') !== false) return 'Italian';
+    if (strpos($n, 'FRENCH')   !== false || strpos($n, 'FRANCESE') !== false || strpos($n, 'FRANÇAIS') !== false) return 'French';
+    if (strpos($n, 'GERMAN')   !== false || strpos($n, 'TEDESCO')  !== false || strpos($n, 'DEUTSCH')  !== false) return 'German';
+    if (strpos($n, 'SPANISH')  !== false || strpos($n, 'ESPANOL')  !== false || strpos($n, 'SPAGNOLO') !== false) return 'Spanish';
+    return 'English';
+}
+
 // Debug: capture first sample raw keys to show in UI
-$first_sample_debug = !empty($samples) ? json_encode(array_keys($samples[0]), JSON_PRETTY_PRINT) : '(no samples)';
-$first_sample_raw   = !empty($samples) ? json_encode($samples[0], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE) : '';
+$first_sample_raw = !empty($samples) ? json_encode($samples[0], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE) : '';
 
 foreach ($samples as $s) {
-    $sid   = $s['identifier']    ?? ($s['itinerary_id']   ?? ($s['Identifier'] ?? ''));
-    $sname = $s['name']          ?? ($s['itinerary_name'] ?? ($s['Name'] ?? ($s['ItineraryName'] ?? 'Unnamed')));
-    $sdays = intval($s['days']   ?? ($s['Days'] ?? 0));
-    // Try every possible field name Wetu might use
-    $slang = trim(
-        $s['language']      ??
-        $s['Language']      ??
-        $s['lang']          ??
-        $s['language_code'] ??
-        $s['LanguageCode']  ??
-        ''
-    );
+    $sid   = $s['identifier']  ?? ($s['itinerary_id'] ?? ($s['Identifier'] ?? ''));
+    $sname = $s['name']        ?? ($s['itinerary_name'] ?? ($s['Name'] ?? ($s['ItineraryName'] ?? 'Unnamed')));
+    $sdays = intval($s['days'] ?? ($s['Days'] ?? 0));
+    $slang = infer_language((string)$sname, $s);
     if ($sid) {
         $samples_js_arr[] = ['id' => $sid, 'name' => $sname, 'days' => $sdays, 'lang' => $slang];
-        if ($slang) $lang_set[$slang] = true;
+        $lang_set[$slang] = true;
     }
 }
 ksort($lang_set);
