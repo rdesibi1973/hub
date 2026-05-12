@@ -48,39 +48,61 @@ if ($action === 'wetu_logout') {
    ACTION: WETU LOGIN
 ═══════════════════════════════════════════════════════════════ */
 /* ═══════════════════════════════════════════════════════════════
-   HELPER: fetch Sample itineraries via JSON REST
+   HELPER: fetch ALL Sample itineraries via JSON REST (paginated)
 ═══════════════════════════════════════════════════════════════ */
-function wetu_fetch_samples(string $u, string $p): array {
-    $url = 'https://wetu.com/API/Itinerary/V8/List?' . http_build_query([
-        'username' => $u, 'password' => $p,
-        'type' => 'Sample', 'results' => 200, 'sort' => 'ItineraryNameAsc',
-    ]);
-    $raw = false;
+function wetu_json_get(string $url): ?array {
     if (function_exists('curl_init')) {
         $ch = curl_init($url);
         curl_setopt_array($ch, [
-            CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 20,
-            CURLOPT_SSL_VERIFYPEER => true, CURLOPT_FOLLOWLOCATION => true,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT        => 20,
+            CURLOPT_SSL_VERIFYPEER => true,
+            CURLOPT_FOLLOWLOCATION => true,
         ]);
         $raw  = curl_exec($ch);
         $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         $err  = curl_error($ch);
         curl_close($ch);
-        if ($raw === false || $err || $code !== 200) return [];
+        if ($raw === false || $err || $code !== 200) return null;
     } else {
         $ctx = stream_context_create(['http' => ['timeout' => 20, 'ignore_errors' => true]]);
         $raw = @file_get_contents($url, false, $ctx);
-        if ($raw === false) return [];
+        if ($raw === false) return null;
     }
     $decoded = json_decode($raw, true);
-    if (!is_array($decoded)) return [];
+    if (!is_array($decoded)) return null;
     // Direct array
-    if (isset($decoded[0])) return $decoded;
+    if (empty($decoded) || isset($decoded[0])) return $decoded;
     // Wrapper object — try common keys
     foreach (['Itineraries','itineraries','Items','items','Results','results'] as $k) {
-        if (!empty($decoded[$k])) return $decoded[$k];
+        if (isset($decoded[$k]) && is_array($decoded[$k])) return $decoded[$k];
     }
-    return $decoded; // return as-is and let caller decide
+    return $decoded;
+}
+
+function wetu_fetch_samples(string $u, string $p): array {
+    $all      = [];
+    $pageSize = 200;
+    $start    = 0;
+    $maxPages = 10;   // safety cap: max 2000 samples
+
+    for ($page = 0; $page < $maxPages; $page++) {
+        $url = 'https://wetu.com/API/Itinerary/V8/List?' . http_build_query([
+            'username' => $u,
+            'password' => $p,
+            'type'     => 'Sample',
+            'results'  => $pageSize,
+            'start'    => $start,
+            'sort'     => 'ItineraryNameAsc',
+        ]);
+        $batch = wetu_json_get($url);
+        if ($batch === null || empty($batch)) break;
+        $all   = array_merge($all, $batch);
+        $start += $pageSize;
+        if (count($batch) < $pageSize) break;   // last page — done
+    }
+
+    return $all;
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -100,7 +122,7 @@ if ($action === 'wetu_login') {
                 $_SESSION['wetu_token']    = $sess->SessionToken;
                 $_SESSION['wetu_user']     = $u;
                 $_SESSION['wetu_operator'] = $sess->OperatorName ?? '';
-                $_SESSION['wetu_samples']  = $fetched;   // cached — no password stored
+                $_SESSION['wetu_samples']  = $fetched;
                 $token    = $sess->SessionToken;
                 $wetu_user = $u;
                 $wetu_op   = $sess->OperatorName ?? '';
