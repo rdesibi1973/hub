@@ -49,8 +49,6 @@ include 'includes/header.php';
     <?php if ($freqid): ?>
       <a href="invoices.php" class="btn btn-grey">✕ Clear filter</a>
       <a href="invoice_add.php?request_id=<?= $freqid ?>" class="btn btn-red">+ New Invoice for this request</a>
-    <?php else: ?>
-      <a href="invoice_add.php" class="btn btn-red">+ New Invoice</a>
     <?php endif; ?>
   </div>
 </div>
@@ -182,6 +180,9 @@ include 'includes/header.php';
               <a href="invoice_view.php?id=<?= $r['id'] ?>" class="btn btn-outline btn-sm">View</a>
               <a href="invoice_edit.php?id=<?= $r['id'] ?>" class="btn btn-outline btn-sm">Edit</a>
               <a href="invoice_pdf.php?id=<?= $r['id'] ?>"  class="btn btn-outline btn-sm" target="_blank">PDF</a>
+              <?php if ($r['request_id']): ?>
+                <a href="invoice_add.php?request_id=<?= $r['request_id'] ?>" class="btn btn-red btn-sm">+ Invoice</a>
+              <?php endif; ?>
             </div>
           </td>
         </tr>
