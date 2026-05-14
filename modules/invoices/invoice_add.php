@@ -79,8 +79,8 @@ if ($requestId) {
         $desc  = $req['customer_name'];
         $desc .= $req['pax'] ? ' ' . $req['pax'] . ' pax' : '';
         $desc .= ' trip in ' . $dest;
-        if ($startStr && $endStr) $desc .= ' ' . $startStr . ' to ' . $endStr;
-        elseif ($startStr)        $desc .= ' ' . $startStr;
+        if ($startStr && $endStr) $desc .= ' from ' . $startStr . ' until ' . $endStr;
+        elseif ($startStr)        $desc .= ' from ' . $startStr;
         $prefill['item_desc'] = $desc;
 
         // ── 4. Bill To: try to find agency from folder parentheses ────────────
