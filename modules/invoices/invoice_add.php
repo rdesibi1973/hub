@@ -29,15 +29,23 @@ if ($requestId) {
             $startStr = sprintf('%02d-%s-%d', (int)$dm[1], strtoupper($dm[2]), $year);
             $endStr   = sprintf('%02d-%s-%d', (int)$dm[3], strtoupper($dm[4]), $year);
         }
-        // Fallback: requests.period (e.g. "11 Jun - 18 Jun 2026")
+        // Fallback: requests.period
         if ((!$startStr || !$endStr) && !empty($req['period'])) {
-            $period = $req['period'];
-            if (preg_match('/(\d{1,2}\s+\w+\s*[-–]\s*\d{1,2}\s+\w+\s+\d{4})/i', $period, $pm)) {
-                $parts = preg_split('/\s*[-–]\s*/', $pm[1], 2);
-                if (count($parts) === 2) {
-                    $startStr = trim($parts[0]);
-                    $endStr   = trim($parts[1]);
-                }
+            $period = trim($req['period']);
+            // Pattern A: "11 Jun - 18 Jun 2026"  or  "11 Jun – 18 Jun 2026"
+            if (preg_match('/(\d{1,2})\s+([A-Za-z]+)\s*[-–]\s*(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})/i', $period, $pm)) {
+                $startStr = sprintf('%02d %s', (int)$pm[1], ucfirst(strtolower($pm[2])));
+                $endStr   = sprintf('%02d %s %s', (int)$pm[3], ucfirst(strtolower($pm[4])), $pm[5]);
+            }
+            // Pattern B: "11-18 Jun 2026"
+            elseif (preg_match('/(\d{1,2})\s*[-–]\s*(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})/i', $period, $pm)) {
+                $startStr = sprintf('%02d %s', (int)$pm[1], ucfirst(strtolower($pm[3])));
+                $endStr   = sprintf('%02d %s %s', (int)$pm[2], ucfirst(strtolower($pm[3])), $pm[4]);
+            }
+            // Pattern C: use the period string as-is if it has any content
+            elseif ($period !== '') {
+                $startStr = $period;
+                $endStr   = '';
             }
         }
 
@@ -71,8 +79,8 @@ if ($requestId) {
         $desc  = $req['customer_name'];
         $desc .= $req['pax'] ? ' ' . $req['pax'] . ' pax' : '';
         $desc .= ' trip in ' . $dest;
-        if ($startStr && $endStr) $desc .= ' from ' . $startStr . ' to ' . $endStr;
-        elseif ($startStr)        $desc .= ' from ' . $startStr;
+        if ($startStr && $endStr) $desc .= ' ' . $startStr . ' to ' . $endStr;
+        elseif ($startStr)        $desc .= ' ' . $startStr;
         $prefill['item_desc'] = $desc;
 
         // ── 4. Bill To: try to find agency from folder parentheses ────────────
