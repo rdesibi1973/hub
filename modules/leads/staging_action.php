@@ -114,6 +114,9 @@ if ($action === 'approve') {
     $doNotify   = !empty($_POST['notify_agent']); // checkbox
     if (!$agentId) { flash('Please select an agent.','error'); header('Location: staging.php'); exit; }
 
+    // Allow overriding the customer name and folder name from the form
+    $customerName = trim($_POST['customer_name_override'] ?? '') ?: $lead['customer_name'];
+
     $dest = trim($_POST['destination'] ?? '') ?: $lead['destination'];
 
     // Get agent
@@ -130,7 +133,7 @@ if ($action === 'approve') {
             preg_split('/[\s\-]+/', $name))));
     }
     $agentName  = str_replace(' ', '', $agent['name']); // e.g. "RobertoCapri"
-    $folderName = toCamelCaseSt($lead['customer_name']) . "({$agentName}-Drct)";
+    $folderName = trim($_POST['folder_name_override'] ?? '') ?: toCamelCaseSt($customerName) . "({$agentName}-Drct)";
     $folderPath = DROPBOX_BASE_PATH . '/' . $folderName;
 
     // Create Dropbox folder — block on conflict (folder already exists)
@@ -180,7 +183,7 @@ if ($action === 'approve') {
         VALUES (?,?,?,?,?,?,?,?,?,'Inquiry',?,?,?,?,NOW())
     ")->execute([
         $lead['date_received'],
-        $lead['customer_name'],
+        $customerName,
         $lead['email']          ?: null,
         $lead['phone']          ?: null,
         $lead['source'],
@@ -214,7 +217,7 @@ if ($action === 'approve') {
     // ── Agent notification ────────────────────────────────────────────────
     $notif = notify_agent_new_request(
         $db, $agentId, (int)($currentUser['id'] ?? 0),
-        (int)$newId, $lead['customer_name'], $folderName, $doNotify
+        (int)$newId, $customerName, $folderName, $doNotify
     );
 
     flash("Lead approved — Request #{$newId} created. Dropbox folder: {$folderName}"

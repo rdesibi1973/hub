@@ -268,6 +268,14 @@ select:focus,input:focus{outline:none;border-color:#C0211B;box-shadow:0 0 0 2px 
       <form method="POST" action="staging_action.php">
         <input type="hidden" name="action" value="approve">
         <input type="hidden" name="staging_id" id="approveId">
+        <!-- Editable customer name -->
+        <div class="form-row full" style="margin-bottom:10px;">
+          <div>
+            <label style="font-size:.75rem;font-weight:600;display:block;margin-bottom:4px">👤 Customer Name</label>
+            <input type="text" name="customer_name_override" id="customerNameInput"
+                   placeholder="Customer name" oninput="onCustomerNameInput()">
+          </div>
+        </div>
         <div class="form-row">
           <div>
             <label style="font-size:.75rem;font-weight:600;display:block;margin-bottom:4px">Assign Agent *</label>
@@ -288,10 +296,12 @@ select:focus,input:focus{outline:none;border-color:#C0211B;box-shadow:0 0 0 2px 
             </select>
           </div>
         </div>
-        <!-- Folder preview -->
+        <!-- Editable folder name -->
         <div id="folderPreviewRow" style="margin-bottom:10px;display:none;">
-          <label style="font-size:.75rem;font-weight:600;display:block;margin-bottom:4px">📁 Cartella Dropbox</label>
-          <div id="folderPreviewBox" style="background:#fef2f2;border:1px solid #fecaca;border-radius:6px;padding:8px 12px;font-family:monospace;font-size:.82rem;color:#C0211B;word-break:break-all;"></div>
+          <label style="font-size:.75rem;font-weight:600;display:block;margin-bottom:4px">📁 Dropbox Folder Name</label>
+          <input type="text" name="folder_name_override" id="folderNameInput"
+                 style="font-family:monospace;font-size:.82rem;color:#C0211B;"
+                 oninput="folderUserEdited=true" placeholder="Folder name">
         </div>
         <!-- Notify agent checkbox -->
         <div style="margin:6px 0 12px;">
@@ -354,16 +364,23 @@ function buildFolderName(customerName, agentName) {
 }
 
 let currentLeadName = '';
+let folderUserEdited = false;
 
 function updateFolderPreview() {
     const sel = document.getElementById('approveAgent');
     const opt = sel.options[sel.selectedIndex];
     const row = document.getElementById('folderPreviewRow');
-    const box = document.getElementById('folderPreviewBox');
-    if (!sel.value || !currentLeadName) { row.style.display = 'none'; return; }
-    const folder = buildFolderName(currentLeadName, opt.dataset.name || opt.text);
-    box.textContent = folder;
+    const inp = document.getElementById('folderNameInput');
+    const name = document.getElementById('customerNameInput').value.trim();
+    if (!sel.value || !name) { row.style.display = 'none'; return; }
     row.style.display = 'block';
+    if (!folderUserEdited) {
+        inp.value = buildFolderName(name, opt.dataset.name || opt.text);
+    }
+}
+
+function onCustomerNameInput() {
+    if (!folderUserEdited) updateFolderPreview();
 }
 
 function openDrawer(id) {
@@ -375,10 +392,13 @@ function openDrawer(id) {
   document.getElementById('mergeId').value    = id;
   document.getElementById('dismissId').value  = id;
 
-  // Store name for folder preview; reset agent selection and preview
+  // Populate editable name; reset folder state
   currentLeadName = l.customer_name;
+  folderUserEdited = false;
+  document.getElementById('customerNameInput').value = l.customer_name;
   document.getElementById('approveAgent').value = '';
   document.getElementById('folderPreviewRow').style.display = 'none';
+  document.getElementById('folderNameInput').value = '';
 
   // Pre-select destination if already set
   const ds = document.getElementById('approveDest');
