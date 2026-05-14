@@ -24,7 +24,7 @@ if ($requestId) {
         // ── 1. Dates ──────────────────────────────────────────────────────────
         // Primary: _START{dd}{MMM}_END{dd}{MMM}{yyyy} in confirmed folder name
         $startStr = ''; $endStr = '';
-        if (preg_match('/_START(\d{1,2})([A-Z]{3})_END(\d{1,2})([A-Z]{3})(\d{4})/i', $folder, $dm)) {
+        if (preg_match('/_START(\d{1,2})([A-Z]{3})(?:_MIDT\d{1,2}[A-Z]{3})?_END(\d{1,2})([A-Z]{3})(\d{4})/i', $folder, $dm)) {
             $year = (int)$dm[5];
             $startStr = sprintf('%02d-%s-%d', (int)$dm[1], strtoupper($dm[2]), $year);
             $endStr   = sprintf('%02d-%s-%d', (int)$dm[3], strtoupper($dm[4]), $year);
