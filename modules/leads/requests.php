@@ -60,11 +60,7 @@ if ($status && array_key_exists($status, STATUSES)) {
     $where[]  = 'r.status = ?';
     $params[] = $status;
 }
-if ($isStaff && $staffAgentId) {
-    // Staff always see only their own requests — ignore any agent filter from session
-    $where[]  = 'r.agent_id = ?';
-    $params[] = $staffAgentId;
-} elseif ($agent === -1) {
+if ($agent === -1) {
     $where[]  = 'r.agent_id IS NULL';
 } elseif ($agent > 0) {
     $where[]  = 'r.agent_id = ?';
@@ -106,7 +102,7 @@ include 'includes/header.php';
   <div style="display:flex;align-items:center;gap:12px;">
     <a href="<?= defined('BASE_URL') ? BASE_URL.'/hub.php' : '../../hub.php' ?>" class="btn btn-outline btn-sm" style="font-size:.72rem;">&#8592; Hub</a>
     <div>
-    <h2><?= $isStaff ? 'My Requests' : 'Requests' ?></h2>
+    <h2>Requests</h2>
     <div class="sub"><?= count($rows) ?> result<?= count($rows)!==1?'s':'' ?><?php if ($no_folder): ?> &nbsp;<span style="background:#FAE8E7;color:#C0211B;font-size:.7rem;font-weight:700;padding:2px 8px;border-radius:10px;">No folder</span><?php endif; ?></div>
     </div>
   </div>
@@ -137,7 +133,6 @@ include 'includes/header.php';
       <?php endforeach; ?>
     </select>
   </div>
-  <?php if (!$isStaff): ?>
   <div>
     <label>Agent</label>
     <select name="agent">
@@ -148,7 +143,7 @@ include 'includes/header.php';
       <?php endforeach; ?>
     </select>
   </div>
-  <?php endif; ?>
+  
   <div>
     <label>Year</label>
     <select name="year">
@@ -189,7 +184,7 @@ include 'includes/header.php';
         <th>Status</th>
         <?php if (!$isStaff): ?><th style="text-align:center;width:48px;">Inv</th><?php endif; ?>
         <?php if (!$isStaff): ?><th class="text-right">Value (USD)</th><?php endif; ?>
-        <?php if (!$isStaff): ?><th>Agent</th><?php endif; ?>
+        <th>Agent</th>
         <?php
           $nextSort  = $sort === 'date_desc' ? 'date_asc' : 'date_desc';
           $sortArrow = $sort === 'date_desc' ? '↓' : '↑';
@@ -288,7 +283,7 @@ include 'includes/header.php';
           </td>
           <?php endif; ?>
           <?php if (!$isStaff): ?><td class="text-right"><?= $r['value_usd'] ? '$'.number_format($r['value_usd'],0) : '—' ?></td><?php endif; ?>
-          <?php if (!$isStaff): ?><td><?= h($r['agent_name'] ?? '—') ?></td><?php endif; ?>
+          <td><?= h($r['agent_name'] ?? '—') ?></td>
           <td class="text-muted" style="white-space:nowrap"><?= date('d M Y', strtotime($r['date_received'])) ?></td>
           <td style="font-size:.75rem;color:var(--grey-mid)">
             <?php if ($r['practice_code']): ?>
@@ -301,7 +296,7 @@ include 'includes/header.php';
         </tr>
         <?php endforeach; ?>
       <?php else: ?>
-        <tr><td colspan="<?= $isStaff ? 10 : 14 ?>">
+        <tr><td colspan="<?= $isStaff ? 11 : 14 ?>">
           <div class="empty-state">
             <div class="icon">🔍</div>
             <p>No requests found<?= ($search||$status||$agent)?' for the selected filters.':' yet.' ?></p>
