@@ -29,7 +29,8 @@ $search    = trim($_GET['q']      ?? '');
 $fstatus   = $_GET['status']      ?? 'Booked';   // default Booked
 $fagent    = (int)($_GET['agent'] ?? 0);
 $fyear     = (int)($_GET['year']  ?? 0);
-$finvoice  = $_GET['invoice']     ?? '';          // '' | 'yes' | 'no'
+// '' | 'none' | 'New' | 'Partially Paid' | 'Fully Paid'
+$finvoice  = $_GET['invoice']     ?? '';
 
 $where   = ['1=1']; $params = [];
 if ($search) {
@@ -41,14 +42,19 @@ if ($fstatus && array_key_exists($fstatus, STATUSES)) {
 }
 if ($fagent > 0) { $where[] = 'r.agent_id = ?'; $params[] = $fagent; }
 if ($fyear  > 0) { $where[] = 'YEAR(r.date_received) = ?'; $params[] = $fyear; }
-if ($finvoice === 'yes') { $where[] = '(SELECT COUNT(*) FROM invoices i WHERE i.request_id = r.id) > 0'; }
-if ($finvoice === 'no')  { $where[] = '(SELECT COUNT(*) FROM invoices i WHERE i.request_id = r.id) = 0'; }
+if ($finvoice === 'none') {
+    $where[] = '(SELECT COUNT(*) FROM invoices i WHERE i.request_id = r.id) = 0';
+} elseif (array_key_exists($finvoice, INV_STATUSES)) {
+    $where[]  = '(SELECT COUNT(*) FROM invoices i WHERE i.request_id = r.id AND i.status = ?) > 0';
+    $params[] = $finvoice;
+}
 
 $sql = "
     SELECT r.*, a.name AS agent_name,
            (SELECT COUNT(*) FROM invoices inv WHERE inv.request_id = r.id) AS invoice_count,
            (SELECT id   FROM invoices inv WHERE inv.request_id = r.id ORDER BY id LIMIT 1) AS invoice_id,
-           (SELECT invoice_number FROM invoices inv WHERE inv.request_id = r.id ORDER BY id LIMIT 1) AS invoice_number
+           (SELECT invoice_number FROM invoices inv WHERE inv.request_id = r.id ORDER BY id LIMIT 1) AS invoice_number,
+           (SELECT status FROM invoices inv WHERE inv.request_id = r.id ORDER BY id LIMIT 1) AS invoice_status
     FROM requests r
     LEFT JOIN agents a ON a.id = r.agent_id
     WHERE " . implode(' AND ', $where) . "
@@ -110,8 +116,10 @@ include 'includes/header.php';
     <label>Invoice</label>
     <select name="invoice">
       <option value="">All</option>
-      <option value="yes" <?= $finvoice === 'yes' ? 'selected' : '' ?>>Has invoice</option>
-      <option value="no"  <?= $finvoice === 'no'  ? 'selected' : '' ?>>No invoice yet</option>
+      <option value="none"         <?= $finvoice === 'none'          ? 'selected' : '' ?>>No invoice</option>
+      <option value="New"          <?= $finvoice === 'New'           ? 'selected' : '' ?>>New</option>
+      <option value="Partially Paid" <?= $finvoice === 'Partially Paid' ? 'selected' : '' ?>>Partially paid</option>
+      <option value="Fully Paid"   <?= $finvoice === 'Fully Paid'    ? 'selected' : '' ?>>Fully paid</option>
     </select>
   </div>
   <div>
@@ -176,11 +184,23 @@ include 'includes/header.php';
           <td style="text-align:center">
             <?php $ic = (int)$r['invoice_count']; ?>
             <?php if ($ic === 1): ?>
+              <?php
+                $invStatusClass = [
+                    'New'           => 'color:#888;',
+                    'Partially Paid'=> 'color:#E87722;',
+                    'Fully Paid'    => 'color:#1A6B3A;',
+                ][$r['invoice_status']] ?? '';
+              ?>
               <a href="invoice_view.php?id=<?= $r['invoice_id'] ?>"
                  title="<?= h($r['invoice_number']) ?>"
                  style="text-decoration:none;font-size:.78rem;font-weight:700;color:#1A6B3A;">
                 🧾 <?= h($r['invoice_number']) ?>
               </a>
+              <?php if ($r['invoice_status']): ?>
+                <div style="font-size:.68rem;font-weight:600;margin-top:2px;<?= $invStatusClass ?>">
+                  <?= h($r['invoice_status']) ?>
+                </div>
+              <?php endif; ?>
             <?php elseif ($ic > 1): ?>
               <a href="invoices.php?request_id=<?= $r['id'] ?>"
                  style="text-decoration:none;font-size:.78rem;font-weight:700;color:#C0211B;">
