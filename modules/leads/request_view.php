@@ -36,12 +36,7 @@ $stmt->execute([$id]);
 $r = $stmt->fetch();
 if (!$r) { flash('Request not found.', 'error'); header('Location: requests.php'); exit; }
 
-// Staff can only view their own requests
-if (isLeadsRestricted() && (int)$r['agent_id'] !== getStaffAgentId()) {
-    flash('Access denied.', 'error');
-    header('Location: requests.php');
-    exit;
-}
+
 
 // Check for existing invoices on this request
 $invStmt = db()->prepare("SELECT id, invoice_number, status FROM invoices WHERE request_id = ? ORDER BY id LIMIT 1");
