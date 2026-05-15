@@ -114,6 +114,7 @@ if ($requestId) {
                     $prefill['bill_to_id']      = $agency['id'];
                     $prefill['bill_to_type']    = 'agency';
                     $prefill['bill_to_address'] = $agency['address'];
+                    $prefill['tc']              = INV_AGENCY_TC;
                 }
             }
         }
@@ -305,8 +306,11 @@ include 'includes/header.php';
       <textarea name="notes"><?= h(INV_DEFAULT_NOTES) ?></textarea>
     </div>
     <div class="form-group full">
-      <label>Terms &amp; Conditions</label>
-      <textarea name="terms_conditions" class="tall"><?= h(INV_DEFAULT_TC) ?></textarea>
+      <label>
+        Terms &amp; Conditions
+        <span id="tcBadge" style="display:none;margin-left:8px;font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.07em;padding:2px 8px;border-radius:4px;background:#EDE7F6;color:#6A1B9A;vertical-align:middle;">Agency — 45 days</span>
+      </label>
+      <textarea name="terms_conditions" id="tcTextarea" class="tall"><?= h($prefill['tc'] ?? INV_DEFAULT_TC) ?></textarea>
     </div>
   </div>
 
@@ -333,6 +337,10 @@ include 'includes/header.php';
 </style>
 
 <script>
+// ── T&C constants ─────────────────────────────────────────────────────────
+var TC_DEFAULT = <?= json_encode(INV_DEFAULT_TC) ?>;
+var TC_AGENCY  = <?= json_encode(INV_AGENCY_TC)  ?>;
+
 // ── Bill To unified search (customers + agencies) ────────────────────────
 var billToData = <?= json_encode(array_map(fn($r) => [
     'id'   => $r['id'],
@@ -374,6 +382,7 @@ btDrop.addEventListener('mousedown', function(e) {
   document.getElementById('billToSourceType').value = item.dataset.type;
   document.getElementById('billToAddress').value    = item.dataset.addr;
   btDrop.style.display = 'none';
+  applyTcForType(item.dataset.type);
 });
 
 function selectBillTo(id, name, addr, type) {
@@ -383,6 +392,19 @@ function selectBillTo(id, name, addr, type) {
   document.getElementById('billToSourceType').value = type;
   document.getElementById('billToAddress').value    = addr;
   btDrop.style.display = 'none';
+  applyTcForType(type);
+}
+
+function applyTcForType(type) {
+  var tc    = document.getElementById('tcTextarea');
+  var badge = document.getElementById('tcBadge');
+  if (type === 'agency') {
+    tc.value = TC_AGENCY;
+    badge.style.display = 'inline-block';
+  } else {
+    tc.value = TC_DEFAULT;
+    badge.style.display = 'none';
+  }
 }
 
 document.addEventListener('click', function(e){
@@ -454,6 +476,12 @@ function escHtml(s)  { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;
 function escAttr(s)  { return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/\n/g,' '); }
 function escJs(s)    { return String(s).replace(/'/g,"\\'").replace(/\n/g,' '); }
 function ucfirst(s) { return s.charAt(0).toUpperCase()+s.slice(1); }
+
+// Init TC badge if page was pre-filled with an agency
+(function() {
+  var t = document.getElementById('billToSourceType').value;
+  if (t) applyTcForType(t);
+})();
 
 // Pre-populate if coming from a request
 <?php if (!empty($prefill['item_desc'])): ?>

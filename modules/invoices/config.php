@@ -43,6 +43,7 @@ const INV_METHODS     = ['Bank Transfer', 'Credit Card', 'Cash', 'Other'];
 const INV_TERMS_OPTS  = ['Due on Receipt', 'Net 7', 'Net 15', 'Net 30', 'Net 60'];
 
 const INV_DEFAULT_TC    = '30% deposit at the time of booking, balance within 60 days before the trip starts';
+const INV_AGENCY_TC     = '30% deposit at the time of booking, balance within 45 days before the trip starts';
 const INV_DEFAULT_NOTES = 'Thanks for your business.';
 
 // ── Invoice number: SE-2026-0001 / SH-2026-0001 ──────────────────────────────
