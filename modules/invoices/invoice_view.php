@@ -147,6 +147,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 echo json_encode(['ok'=>false,'error'=>'Cannot build Dropbox path. dropbox_url in DB: ' . $oldUrl]);
                 exit;
             }
+
+            // Resolve the real Dropbox path by searching for the folder name,
+            // because the stored dropbox_url may have wrong case or subfolder.
+            $realFromPath = dropbox_find_folder($token, $oldName);
+            if ($realFromPath !== null) {
+                // Derive toPath from real parent
+                $realParent = substr($realFromPath, 0, strrpos($realFromPath, '/'));
+                $toPath     = $realParent . '/' . $newName;
+                $fromPath   = $realFromPath;
+            }
+
             try {
                 dropbox_move_folder($token, $fromPath, $toPath);
             } catch (\Throwable $dbx) {

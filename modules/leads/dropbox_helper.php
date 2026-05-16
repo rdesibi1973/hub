@@ -228,3 +228,42 @@ function dropbox_delete_folder(string $token, string $path): array {
     }
     return $data;
 }
+
+/**
+ * Find a folder's actual Dropbox path by searching for its name.
+ * Returns the full path string (e.g. '/001_Safari/07_15JUL_...') or null if not found.
+ */
+function dropbox_find_folder(string $token, string $folderName): ?string {
+    $ch = curl_init('https://api.dropboxapi.com/2/files/search_v2');
+    curl_setopt_array($ch, [
+        CURLOPT_POST           => true,
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_HTTPHEADER     => [
+            'Authorization: Bearer ' . $token,
+            'Content-Type: application/json',
+        ],
+        CURLOPT_POSTFIELDS => json_encode([
+            'query'   => $folderName,
+            'options' => [
+                'file_categories'    => ['folder'],
+                'filename_only'      => true,
+                'max_results'        => 5,
+            ],
+        ]),
+    ]);
+    $body = curl_exec($ch);
+    curl_close($ch);
+    $data = json_decode($body, true) ?? [];
+    foreach ($data['matches'] ?? [] as $match) {
+        $meta = $match['metadata']['metadata'] ?? [];
+        if (($meta['.tag'] ?? '') === 'folder') {
+            $name = $meta['name'] ?? '';
+            // Exact name match (case-insensitive)
+            if (strcasecmp($name, $folderName) === 0) {
+                return $meta['path_display'] ?? null;
+            }
+        }
+    }
+    return null;
+}
+
