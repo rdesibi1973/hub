@@ -10,21 +10,67 @@ if (isLeadsRestricted() && !in_array(current_user()['role_name'], ['accountant']
 
 $db = db();
 
-// ── Helper: extract customer name from a Dropbox folder name ─────────────────
-// "08_11AUG_LuciaRossi(Amisano-Roberto)_START…" → "LuciaRossi"
-// "LuciaRossi(Amisano-Roberto)_PROGRESS"        → "LuciaRossi"
-// "LaSala"  (GRP sub)                           → "LaSala"
+// ── Helpers (top-level so they're always available) ──────────────────────────
+
 function reconcile_extractName(string $folder): string {
-    $s = preg_replace('/^\d+_/', '', $folder);        // strip leading sequence "08_"
-    $s = preg_replace('/^\d{2}[A-Z]{3}_/i', '', $s); // strip date "11AUG_"
+    $s = preg_replace('/^\d+_/', '', $folder);
+    $s = preg_replace('/^\d{2}[A-Z]{3}_/i', '', $s);
     if (preg_match('/^([^(_]+)/', $s, $m)) return trim($m[1]);
     return trim($s);
 }
 
-// ── Helper: normalise for comparison ─────────────────────────────────────────
 function reconcile_norm(string $s): string {
     return strtolower(preg_replace('/[\s\'\-\.]+/', '', $s));
 }
+
+function reconcile_match(string $folderName, array $byPC, array $byName): array {
+    if (isset($byPC[strtolower($folderName)])) {
+        return ['exact' => true, 'confidence' => 'exact', 'matches' => [$byPC[strtolower($folderName)]]];
+    }
+    $custPart = reconcile_extractName($folderName);
+    $normCust = reconcile_norm($custPart);
+    if (isset($byName[$normCust])) {
+        return ['exact' => false, 'confidence' => 'high', 'matches' => $byName[$normCust]];
+    }
+    $candidates = [];
+    if (strlen($normCust) >= 4) {
+        foreach ($byName as $norm => $reqs) {
+            if (str_contains($norm, $normCust) || str_contains($normCust, $norm)) {
+                foreach ($reqs as $r) $candidates[] = $r;
+            }
+        }
+    }
+    if ($candidates) {
+        return ['exact' => false, 'confidence' => 'medium', 'matches' => array_values($candidates)];
+    }
+    return ['exact' => false, 'confidence' => 'none', 'matches' => []];
+}
+
+function reconcile_match(string $folderName, array $byPC, array $byName): array {
+    if (isset($byPC[strtolower($folderName)])) {
+        return ['exact' => true, 'confidence' => 'exact', 'matches' => [$byPC[strtolower($folderName)]]];
+    }
+    $custPart = reconcile_extractName($folderName);
+    $normCust = reconcile_norm($custPart);
+
+    if (isset($byName[$normCust])) {
+        return ['exact' => false, 'confidence' => 'high', 'matches' => $byName[$normCust]];
+    }
+    $candidates = [];
+    if (strlen($normCust) >= 4) {
+        foreach ($byName as $norm => $reqs) {
+            if (str_contains($norm, $normCust) || str_contains($normCust, $norm)) {
+                foreach ($reqs as $r) $candidates[] = $r;
+            }
+        }
+    }
+    if ($candidates) {
+        return ['exact' => false, 'confidence' => 'medium', 'matches' => array_values($candidates)];
+    }
+    return ['exact' => false, 'confidence' => 'none', 'matches' => []];
+}
+
+
 
 // ── APPLY action ─────────────────────────────────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'apply') {
@@ -49,8 +95,7 @@ $countExact = 0; // exact matches skipped
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'scan') {
     $scanned = true;
-
-    // Load all active requests into memory
+    set_time_limit(120);
     $allReqs = $db->query(
         "SELECT id, customer_name, practice_code, group_folder, status, agent_id
          FROM requests WHERE status NOT IN ('Cancelled','Lost')"
@@ -69,37 +114,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'scan'
     foreach ($allReqs as $r) {
         $norm = reconcile_norm($r['customer_name']);
         $byName[$norm][] = $r;
-    }
-
-    // Match a folder name → returns ['exact'=>bool, 'confidence'=>str, 'matches'=>[]]
-    function reconcile_match(string $folderName, array $byPC, array $byName): array {
-        // Exact match (practice_code already correct) → skip
-        if (isset($byPC[strtolower($folderName)])) {
-            return ['exact' => true, 'confidence' => 'exact', 'matches' => [$byPC[strtolower($folderName)]]];
-        }
-
-        $custPart  = reconcile_extractName($folderName);
-        $normCust  = reconcile_norm($custPart);
-
-        // High: full normalised name match
-        if (isset($byName[$normCust])) {
-            return ['exact' => false, 'confidence' => 'high', 'matches' => $byName[$normCust]];
-        }
-
-        // Medium: one is a substring of the other (min 4 chars to avoid false positives)
-        $candidates = [];
-        if (strlen($normCust) >= 4) {
-            foreach ($byName as $norm => $reqs) {
-                if (str_contains($norm, $normCust) || str_contains($normCust, $norm)) {
-                    foreach ($reqs as $r) $candidates[] = $r;
-                }
-            }
-        }
-        if ($candidates) {
-            return ['exact' => false, 'confidence' => 'medium', 'matches' => array_values($candidates)];
-        }
-
-        return ['exact' => false, 'confidence' => 'none', 'matches' => []];
     }
 
     require_once 'dropbox_helper.php';
@@ -131,7 +145,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'scan'
                             'matches'    => $m['matches'],
                         ];
                     }
-                } catch (RuntimeException) { /* skip unreadable GRP */ }
+                } catch (RuntimeException $e) { /* skip unreadable GRP subfolder */ }
             } else {
                 $m = reconcile_match($dirName, $byPC, $byName);
                 if ($m['exact']) { $countExact++; continue; }
