@@ -254,36 +254,46 @@ function readFile(file){
         empColors[empName]=PALETTE[idx%PALETTE.length];
         activeEmps[empName]=true;
       });
-      document.getElementById('fileBadge').textContent='• '+file.name;
-      document.getElementById('fileBadge').style.display='inline-block';
-      document.getElementById('uploadSection').style.display='none';
-      document.getElementById('calendarSection').style.display='block';
-      document.getElementById('controlsBar').style.display='flex';
-      // Persist to localStorage — serialize Date objects as timestamps
-      try {
-        const serialized = employees.map(emp => ({
-          ...emp,
+      // Serialize leaves as YYYY-MM-DD strings for the DB
+      const payload = {
+        fileName,
+        employees: employees.map((emp, idx) => ({
+          name:         emp.name,
+          paletteIndex: idx,
+          balance:      emp.balance,
           leaves: emp.leaves.map(l => ({
-            ...l,
-            start: l.start ? l.start.getTime() : null,
-            end:   l.end   ? l.end.getTime()   : null,
+            leaveType: l.leaveType,
+            start: l.start ? l.start.toISOString().slice(0,10) : null,
+            end:   l.end   ? l.end.toISOString().slice(0,10)   : null,
           }))
-        }));
-        localStorage.setItem('leaveData_v1', JSON.stringify({
-          employees: serialized,
-          fileName:  file.name,
-        }));
-      } catch(e) { /* quota exceeded — ignore */ }
+        }))
+      };
+      fetch('save_leaves.php', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload)
+      }).then(r => r.json()).then(res => {
+        if (!res.success) console.warn('Leave save error:', res.error);
+      }).catch(err => console.warn('Leave save failed:', err));
+
+      showCalendar(file.name);
       buildLegend();renderCalendar();renderOverview();renderBalances();
     }catch(err){showError('Error reading file: '+err.message);}
   };
   r.readAsArrayBuffer(file);
 }
 
+function showCalendar(fileName) {
+  document.getElementById('fileBadge').textContent = '• ' + (fileName || '');
+  document.getElementById('fileBadge').style.display = 'inline-block';
+  document.getElementById('uploadSection').style.display = 'none';
+  document.getElementById('calendarSection').style.display = 'block';
+  document.getElementById('controlsBar').style.display = 'flex';
+}
+
 function showError(msg){const b=document.getElementById('errorBox');b.textContent='⚠ '+msg;b.style.display='block';}
 function resetApp(){
   employees=[];empColors={};activeEmps={};
-  localStorage.removeItem('leaveData_v1');
   document.getElementById('uploadSection').style.display='block';
   document.getElementById('calendarSection').style.display='none';
   document.getElementById('controlsBar').style.display='none';
@@ -432,34 +442,32 @@ function renderBalances(){
   });
 }
 
-// ── Restore from localStorage on page load ────────────────────────────────
-(function restoreFromStorage() {
-  try {
-    const raw = localStorage.getItem('leaveData_v1');
-    if (!raw) return;
-    const saved = JSON.parse(raw);
-    if (!saved || !Array.isArray(saved.employees) || saved.employees.length === 0) return;
-    employees = saved.employees.map(emp => ({
-      ...emp,
-      leaves: emp.leaves.map(l => ({
-        ...l,
-        start: l.start ? new Date(l.start) : null,
-        end:   l.end   ? new Date(l.end)   : null,
-      }))
-    }));
-    employees.forEach((emp, idx) => {
-      empColors[emp.name]  = PALETTE[idx % PALETTE.length];
-      activeEmps[emp.name] = true;
-    });
-    document.getElementById('fileBadge').textContent = '• ' + (saved.fileName || 'saved file');
-    document.getElementById('fileBadge').style.display = 'inline-block';
-    document.getElementById('uploadSection').style.display = 'none';
-    document.getElementById('calendarSection').style.display = 'block';
-    document.getElementById('controlsBar').style.display = 'flex';
-    buildLegend(); renderCalendar(); renderOverview(); renderBalances();
-  } catch(e) {
-    localStorage.removeItem('leaveData_v1');
-  }
+// ── Load saved data from DB on page load ─────────────────────────────────
+(function loadFromDb() {
+  fetch('get_leaves.php')
+    .then(r => r.json())
+    .then(res => {
+      if (!res.success || !res.employees || res.employees.length === 0) return;
+      employees = res.employees.map(emp => ({
+        ...emp,
+        leaves: emp.leaves.map(l => ({
+          ...l,
+          // DB returns YYYY-MM-DD strings — parse as local dates
+          start: l.start ? (function(s){const p=s.split('-');return new Date(+p[0],+p[1]-1,+p[2]);}) (l.start) : null,
+          end:   l.end   ? (function(s){const p=s.split('-');return new Date(+p[0],+p[1]-1,+p[2]);}) (l.end)   : null,
+        }))
+      }));
+      employees.forEach((emp, idx) => {
+        empColors[emp.name]  = PALETTE[emp.paletteIndex !== undefined ? emp.paletteIndex % PALETTE.length : idx % PALETTE.length];
+        activeEmps[emp.name] = true;
+      });
+      const label = res.fileName
+        ? res.fileName + (res.lastImport ? ' — loaded ' + res.lastImport : '')
+        : (res.lastImport ? 'Last import: ' + res.lastImport : 'saved data');
+      showCalendar(label);
+      buildLegend(); renderCalendar(); renderOverview(); renderBalances();
+    })
+    .catch(err => console.warn('Could not load leave data:', err));
 })();
 </script>
 
