@@ -294,7 +294,7 @@ include 'includes/header.php';
     <select id="quickAddSel" onchange="quickAdd(this)"
             style="font-size:.78rem;padding:5px 10px;border:1px solid var(--grey-lt);border-radius:6px;cursor:pointer;color:var(--grey-dk);">
       <option value="">⚡ Quick add…</option>
-      <option value="safari">Safari</option>
+      <option value="single_supplement">Single Supplement</option>
       <option value="zanzibar">Zanzibar airport transfers</option>
       <option value="teenager">Teenager discount</option>
       <option value="child">Child discount</option>
@@ -436,7 +436,7 @@ function quickAdd(sel) {
   var v = sel.value;
   sel.value = '';           // reset dropdown
   if (!v) return;
-  if (v === 'safari')    { addItem('Safari', 1, ''); return; }
+  if (v === 'single_supplement') { addItem('Single Supplement', 1, ''); return; }
   if (v === 'zanzibar')  { addItem('Zanzibar airport transfers', 1, ''); return; }
   if (v === 'teenager')  { addItem('Teenager discount', 1, ''); return; }
   if (v === 'child')     { addItem('Child discount',    1, ''); return; }
