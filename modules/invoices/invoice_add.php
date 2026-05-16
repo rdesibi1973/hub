@@ -158,6 +158,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     foreach ($_POST['items'] ?? [] as $item) {
         $desc  = trim($item['description'] ?? '');
         $qty   = (float)($item['quantity']   ?? 1);
+        if ($qty == (int)$qty) $qty = (int)$qty;
         $price = (float)($item['unit_price'] ?? 0);
         if ($desc) $items[] = ['description'=>$desc,'quantity'=>$qty,'unit_price'=>$price,'line_total'=>round($qty*$price,2)];
     }
@@ -288,7 +289,16 @@ include 'includes/header.php';
     <tbody id="itemsBody"></tbody>
   </table>
 
-  <button type="button" onclick="addItem()" class="btn btn-outline btn-sm" style="margin-bottom:20px">+ Add Line</button>
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:20px;flex-wrap:wrap;">
+    <button type="button" onclick="addItem()" class="btn btn-outline btn-sm">+ Add Line</button>
+    <select id="quickAddSel" onchange="quickAdd(this)"
+            style="font-size:.78rem;padding:5px 10px;border:1px solid var(--grey-lt);border-radius:6px;cursor:pointer;color:var(--grey-dk);">
+      <option value="">⚡ Quick add…</option>
+      <option value="safari">Safari</option>
+      <option value="teenager">Teenager discount</option>
+      <option value="child">Child discount</option>
+    </select>
+  </div>
 
   <!-- ── Totals ── -->
   <div style="display:flex;justify-content:flex-end;margin-bottom:28px;">
@@ -421,17 +431,32 @@ updateInvNum();
 // ── Items table ───────────────────────────────────────────────────────────
 var itemIdx = 0;
 
-function addItem(desc, qty, price) {
+function quickAdd(sel) {
+  var v = sel.value;
+  sel.value = '';           // reset dropdown
+  if (!v) return;
+  if (v === 'safari')    { addItem('Safari', 1, ''); return; }
+  if (v === 'teenager')  { addItem('Teenager discount', 1, '', true); return; }
+  if (v === 'child')     { addItem('Child discount',    1, '', true); return; }
+}
+
+function addItem(desc, qty, price, lockQty) {
   desc  = desc  !== undefined ? desc  : '';
   qty   = qty   !== undefined ? qty   : 1;
   price = price !== undefined ? price : '';
+  lockQty = lockQty || false;
   var tbody = document.getElementById('itemsBody');
   var i = itemIdx++;
   var tr = document.createElement('tr');
+  var qtyAttrs = lockQty
+    ? 'value="1" step="1" min="1" max="1" readonly style="width:48px;background:var(--off-white);color:var(--grey-mid);"'
+    : 'value="'+qty+'" step="1" min="1"';
+  var pricePlaceholder = lockQty ? 'Neg. amount' : 'Neg. for discount';
+  var priceStyle = lockQty ? 'color:#C0211B;' : '';
   tr.innerHTML =
     '<td style="padding:4px 4px 4px 0;vertical-align:top"><textarea class="desc-input" name="items['+i+'][description]" rows="2" placeholder="Description" required style="width:100%;resize:vertical;min-height:38px;">'+escHtml(desc)+'</textarea></td>'
-   +'<td style="vertical-align:top"><input type="number" class="qty-input" name="items['+i+'][quantity]" value="'+qty+'" step="0.01" min="0.01"></td>'
-   +'<td style="vertical-align:top"><input type="number" class="price-input" name="items['+i+'][unit_price]" value="'+price+'" step="0.01" placeholder="Neg. for discount"></td>'
+   +'<td style="vertical-align:top"><input type="number" class="qty-input" name="items['+i+'][quantity]" '+qtyAttrs+'></td>'
+   +'<td style="vertical-align:top"><input type="number" class="price-input" name="items['+i+'][unit_price]" value="'+price+'" step="0.01" placeholder="'+pricePlaceholder+'" style="'+priceStyle+'"></td>'
    +'<td class="total-cell" style="vertical-align:top" data-val="'+(qty*(price||0))+'">'+fmtAmt(qty*(price||0))+'</td>'
    +'<td style="text-align:center;vertical-align:top"><button type="button" onclick="removeItem(this)" class="btn btn-danger btn-sm" title="Remove">✕</button></td>';
   tr.querySelector('.qty-input').addEventListener('input', calcRow);
