@@ -360,10 +360,14 @@ include 'includes/header.php';
         <label>GRP Folder <span style="font-size:.72rem;color:var(--grey-mid);font-weight:400;">(parent group folder — renames all requests in the group)</span></label>
 
         <?php
-        // Extract current status tag from group_folder for the dropdown
-        $grpStatusTags = ['PROGRESS','PROVISIONAL','DEPOSIT','BALANCE','BALANCE-CASH','CK','PAID','CANCELLED'];
-        $currentGrpTag = '';
-        foreach ($grpStatusTags as $t) {
+        // Extract current mutable status tag from group_folder for the dropdown.
+        // CK is a document marker, not a payment status — excluded from dropdown.
+        $grpMutableTags = ['PROGRESS','PROVISIONAL','DEPOSIT','BALANCE','BALANCE-CASH','PAID','CANCELLED'];
+        $currentGrpTag  = '';
+        // Check longest first to avoid BALANCE matching inside BALANCE-CASH
+        $sortedTags = $grpMutableTags;
+        usort($sortedTags, fn($a,$b) => strlen($b) - strlen($a));
+        foreach ($sortedTags as $t) {
             if (str_contains($v['group_folder'], '_' . $t)) { $currentGrpTag = $t; break; }
         }
         ?>
@@ -372,7 +376,7 @@ include 'includes/header.php';
           <label style="font-size:.78rem;font-weight:700;color:var(--grey-dk);white-space:nowrap;margin:0;">Folder Status:</label>
           <select id="grp_status_select" style="font-size:.82rem;padding:4px 8px;border:1px solid var(--grey-lt);border-radius:6px;background:var(--white);">
             <option value="">— no tag —</option>
-            <?php foreach ($grpStatusTags as $t): ?>
+            <?php foreach ($grpMutableTags as $t): ?>
               <option value="<?= h($t) ?>" <?= $currentGrpTag === $t ? 'selected' : '' ?>><?= h($t) ?></option>
             <?php endforeach; ?>
           </select>
@@ -575,30 +579,48 @@ function calcComm() {
   const input  = document.getElementById('grp_folder_input');
   if (!sel || !input) return;
 
-  const ALL_TAGS = ['PROGRESS','PROVISIONAL','DEPOSIT','BALANCE-CASH','BALANCE','CK','PAID','CANCELLED'];
+  // CK is a document-status marker — never stripped or replaced by this dropdown.
+  // Only payment/progress tags are managed here.
+  const MUTABLE_TAGS = ['PROGRESS','PROVISIONAL','DEPOSIT','BALANCE-CASH','BALANCE','PAID','CANCELLED'];
 
-  // Strip any existing tag from a folder name
-  function stripTag(name) {
-    let s = name;
-    ALL_TAGS.forEach(t => { s = s.replace('_' + t, ''); });
-    return s;
+  // Find which mutable tag is currently in the folder name (longest-first to avoid
+  // BALANCE matching inside BALANCE-CASH).
+  function detectTag(name) {
+    let found = '';
+    [...MUTABLE_TAGS].sort((a,b) => b.length - a.length).forEach(t => {
+      if (!found && name.includes('_' + t)) found = t;
+    });
+    return found;
   }
 
-  // When dropdown changes → update the folder name field
+  // Store what tag the dropdown currently reflects so we know what to replace.
+  sel.dataset.prev = sel.value;
+
+  // Dropdown changes → replace only the old mutable tag with the new one.
+  // CK and any other non-mutable suffix stay untouched.
   sel.addEventListener('change', function(){
-    const base = stripTag(input.value.trim());
-    input.value = this.value ? base + '_' + this.value : base;
+    const oldTag = sel.dataset.prev;
+    const newTag = this.value;
+    let name = input.value.trim();
+
+    if (oldTag && name.includes('_' + oldTag)) {
+      // Simple targeted replace: _DEPOSIT → _BALANCE (keeps _CK etc.)
+      name = name.replace('_' + oldTag, newTag ? '_' + newTag : '');
+    } else if (newTag) {
+      // No known old tag in the string — strip all mutable tags then append.
+      [...MUTABLE_TAGS].sort((a,b) => b.length - a.length)
+        .forEach(t => { name = name.replace('_' + t, ''); });
+      name += '_' + newTag;
+    }
+    input.value = name;
+    sel.dataset.prev = newTag;
   });
 
-  // When folder field is edited manually → sync the dropdown
+  // Manual folder edit → sync the dropdown.
   input.addEventListener('input', function(){
-    const v = this.value;
-    let found = '';
-    // Check longest tags first to avoid BALANCE matching inside BALANCE-CASH
-    [...ALL_TAGS].sort((a,b) => b.length - a.length).forEach(t => {
-      if (!found && v.includes('_' + t)) found = t;
-    });
-    sel.value = found;
+    const tag = detectTag(this.value);
+    sel.value = tag;
+    sel.dataset.prev = tag;
   });
 })();
 
