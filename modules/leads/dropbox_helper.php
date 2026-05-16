@@ -146,7 +146,58 @@ function dropbox_move_folder(string $token, string $from_path, string $to_path):
 }
 
 /**
- * Delete a file or folder in Dropbox (moves to trash).
+ * List all sub-folders (one level deep) inside a Dropbox path.
+ * Handles pagination automatically.
+ *
+ * @param  string $token  Access token from dropbox_get_access_token()
+ * @param  string $path   Full Dropbox path, e.g. '/001_Safari'
+ * @return string[]       Array of folder names (not full paths)
+ * @throws RuntimeException on API error
+ */
+function dropbox_list_folder(string $token, string $path): array {
+    $names  = [];
+    $cursor = null;
+
+    do {
+        if ($cursor) {
+            $url     = 'https://api.dropboxapi.com/2/files/list_folder/continue';
+            $payload = json_encode(['cursor' => $cursor]);
+        } else {
+            $url     = 'https://api.dropboxapi.com/2/files/list_folder';
+            $payload = json_encode(['path' => $path, 'recursive' => false]);
+        }
+
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_POST           => true,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_HTTPHEADER     => [
+                'Authorization: Bearer ' . $token,
+                'Content-Type: application/json',
+            ],
+            CURLOPT_POSTFIELDS => $payload,
+        ]);
+        $body = curl_exec($ch);
+        $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        if ($code !== 200) {
+            throw new RuntimeException("Dropbox list_folder failed (HTTP $code): $body");
+        }
+        $data = json_decode($body, true);
+        foreach ($data['entries'] ?? [] as $entry) {
+            if ($entry['.tag'] === 'folder') {
+                $names[] = $entry['name'];
+            }
+        }
+        $cursor  = $data['cursor']   ?? null;
+        $hasMore = $data['has_more'] ?? false;
+    } while ($hasMore && $cursor);
+
+    return $names;
+}
+
+ (moves to trash).
  * Uses files/delete_v2 — the item is moved to Dropbox trash, not permanently erased.
  *
  * @param  string $token  Access token from dropbox_get_access_token()

@@ -144,6 +144,7 @@ header {
       <span style="background:#C0211B;color:#fff;border-radius:10px;padding:1px 7px;font-size:.68rem;font-weight:700;line-height:1.6"><?= $stagingCount ?></span>
     <?php endif; ?>
   </a>
+  <a href="reconcile.php" class="<?= $cur==='reconcile.php'?'active':'' ?>">🔗 Reconcile</a>
   <?php endif; ?>
   <?php endif; // !isLeadsRestricted ?>
   <?php if (!isLeadsRestricted()): ?>
