@@ -10,7 +10,7 @@ if (isLeadsRestricted() && !in_array(current_user()['role_name'], ['accountant']
 
 $db = db();
 
-// ── Helpers (top-level so they're always available) ──────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 function reconcile_extractName(string $folder): string {
     $s = preg_replace('/^\d+_/', '', $folder);
@@ -46,33 +46,8 @@ function reconcile_match(string $folderName, array $byPC, array $byName): array 
     return ['exact' => false, 'confidence' => 'none', 'matches' => []];
 }
 
-function reconcile_match(string $folderName, array $byPC, array $byName): array {
-    if (isset($byPC[strtolower($folderName)])) {
-        return ['exact' => true, 'confidence' => 'exact', 'matches' => [$byPC[strtolower($folderName)]]];
-    }
-    $custPart = reconcile_extractName($folderName);
-    $normCust = reconcile_norm($custPart);
+// ── APPLY ─────────────────────────────────────────────────────────────────────
 
-    if (isset($byName[$normCust])) {
-        return ['exact' => false, 'confidence' => 'high', 'matches' => $byName[$normCust]];
-    }
-    $candidates = [];
-    if (strlen($normCust) >= 4) {
-        foreach ($byName as $norm => $reqs) {
-            if (str_contains($norm, $normCust) || str_contains($normCust, $norm)) {
-                foreach ($reqs as $r) $candidates[] = $r;
-            }
-        }
-    }
-    if ($candidates) {
-        return ['exact' => false, 'confidence' => 'medium', 'matches' => array_values($candidates)];
-    }
-    return ['exact' => false, 'confidence' => 'none', 'matches' => []];
-}
-
-
-
-// ── APPLY action ─────────────────────────────────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'apply') {
     $applied = 0;
     foreach ($_POST['sel'] ?? [] as $encoded) {
@@ -87,29 +62,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'apply
     exit;
 }
 
-// ── SCAN action ───────────────────────────────────────────────────────────────
+// ── SCAN ──────────────────────────────────────────────────────────────────────
+
 $results    = [];
 $scanError  = '';
 $scanned    = false;
-$countExact = 0; // exact matches skipped
+$countExact = 0;
+$scanPath   = $_POST['scan_path'] ?? '001_Safari'; // default
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'scan') {
-    $scanned = true;
+    $scanned  = true;
     set_time_limit(120);
+
     $allReqs = $db->query(
-        "SELECT id, customer_name, practice_code, group_folder, status, agent_id
+        "SELECT id, customer_name, practice_code, group_folder, status
          FROM requests WHERE status NOT IN ('Cancelled','Lost')"
     )->fetchAll();
 
-    // Index: lowercase(practice_code) → request  (for exact-match detection)
     $byPC = [];
     foreach ($allReqs as $r) {
         if ($r['practice_code'] !== null && $r['practice_code'] !== '') {
             $byPC[strtolower($r['practice_code'])] = $r;
         }
     }
-
-    // Index: normalised(customer_name) → [requests]
     $byName = [];
     foreach ($allReqs as $r) {
         $norm = reconcile_norm($r['customer_name']);
@@ -121,70 +96,46 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'scan'
     try {
         $token = dropbox_get_access_token();
 
-        // ── 001_Safari ──────────────────────────────────────────────────────
-        $safariDirs = dropbox_list_folder($token, '/001_Safari');
-        sort($safariDirs);
-
-        foreach ($safariDirs as $dirName) {
-            $isGrp = stripos($dirName, 'GRP') !== false;
-
-            if ($isGrp) {
-                // Scan subfolders (each subfolder = one request's practice_code)
-                try {
-                    $subs = dropbox_list_folder($token, '/001_Safari/' . $dirName);
-                    sort($subs);
-                    foreach ($subs as $subName) {
-                        $m = reconcile_match($subName, $byPC, $byName);
-                        if ($m['exact']) { $countExact++; continue; }
-                        $results[] = [
-                            'source'     => '001_Safari',
-                            'folder'     => $subName,
-                            'parent'     => $dirName,
-                            'is_grp'     => true,
-                            'confidence' => $m['confidence'],
-                            'matches'    => $m['matches'],
-                        ];
-                    }
-                } catch (RuntimeException $e) { /* skip unreadable GRP subfolder */ }
-            } else {
+        if ($scanPath === '001_Safari') {
+            $dirs = dropbox_list_folder($token, '/001_Safari');
+            sort($dirs);
+            foreach ($dirs as $dirName) {
+                $isGrp = stripos($dirName, 'GRP') !== false;
+                if ($isGrp) {
+                    try {
+                        $subs = dropbox_list_folder($token, '/001_Safari/' . $dirName);
+                        sort($subs);
+                        foreach ($subs as $subName) {
+                            $m = reconcile_match($subName, $byPC, $byName);
+                            if ($m['exact']) { $countExact++; continue; }
+                            $results[] = ['source'=>'001_Safari','folder'=>$subName,
+                                          'parent'=>$dirName,'is_grp'=>true,
+                                          'confidence'=>$m['confidence'],'matches'=>$m['matches']];
+                        }
+                    } catch (RuntimeException $e) { /* skip */ }
+                } else {
+                    $m = reconcile_match($dirName, $byPC, $byName);
+                    if ($m['exact']) { $countExact++; continue; }
+                    $results[] = ['source'=>'001_Safari','folder'=>$dirName,
+                                  'parent'=>null,'is_grp'=>false,
+                                  'confidence'=>$m['confidence'],'matches'=>$m['matches']];
+                }
+            }
+        } else {
+            $dirs = dropbox_list_folder($token, '/2026');
+            sort($dirs);
+            foreach ($dirs as $dirName) {
                 $m = reconcile_match($dirName, $byPC, $byName);
                 if ($m['exact']) { $countExact++; continue; }
-                $results[] = [
-                    'source'     => '001_Safari',
-                    'folder'     => $dirName,
-                    'parent'     => null,
-                    'is_grp'     => false,
-                    'confidence' => $m['confidence'],
-                    'matches'    => $m['matches'],
-                ];
+                $results[] = ['source'=>'2026','folder'=>$dirName,
+                              'parent'=>null,'is_grp'=>false,
+                              'confidence'=>$m['confidence'],'matches'=>$m['matches']];
             }
-        }
-
-        // ── 2026 ────────────────────────────────────────────────────────────
-        $dirs2026 = dropbox_list_folder($token, '/2026');
-        sort($dirs2026);
-
-        foreach ($dirs2026 as $dirName) {
-            $m = reconcile_match($dirName, $byPC, $byName);
-            if ($m['exact']) { $countExact++; continue; }
-            $results[] = [
-                'source'     => '2026',
-                'folder'     => $dirName,
-                'parent'     => null,
-                'is_grp'     => false,
-                'confidence' => $m['confidence'],
-                'matches'    => $m['matches'],
-            ];
         }
 
     } catch (RuntimeException $e) {
         $scanError = $e->getMessage();
     }
-}
-
-$agentMap = [];
-foreach ($db->query("SELECT id, name FROM agents") as $ag) {
-    $agentMap[$ag['id']] = $ag['name'];
 }
 
 include 'includes/header.php';
@@ -199,21 +150,14 @@ include 'includes/header.php';
 }
 .rc-section-hdr::before {
   content:''; display:inline-block;
-  width:7px; height:7px; border-radius:50%;
-  background:var(--red);
+  width:7px; height:7px; border-radius:50%; background:var(--red);
 }
 .badge-high   { background:#D1FAE5; color:#065F46; }
 .badge-medium { background:#FEF9C3; color:#854D0E; }
 .badge-none   { background:#F3F4F6; color:#6B7280; }
-.rc-grp-tag {
-  font-size:.68rem; background:var(--red-lt); color:var(--red-dk);
-  border-radius:4px; padding:1px 6px; font-weight:700;
-}
-.rc-folder {
-  font-family: 'Courier New', monospace;
-  font-size:.78rem; word-break:break-all;
-}
-.rc-parent { font-size:.68rem; color:var(--grey-mid); margin-top:2px; }
+.rc-grp-tag   { font-size:.68rem; background:var(--red-lt); color:var(--red-dk); border-radius:4px; padding:1px 6px; font-weight:700; }
+.rc-folder    { font-family:'Courier New',monospace; font-size:.78rem; word-break:break-all; }
+.rc-parent    { font-size:.68rem; color:var(--grey-mid); margin-top:2px; }
 .match-select { font-size:.78rem; max-width:340px; padding:3px 6px; }
 </style>
 
@@ -230,15 +174,23 @@ include 'includes/header.php';
 
 <?php if (!$scanned): ?>
 
-  <div class="form-card" style="max-width:560px;">
-    <p style="margin-bottom:16px;font-size:.88rem;color:var(--grey-dk);">
-      Scans <strong>/001_Safari/</strong> then <strong>/2026/</strong> in Dropbox.
-      Folders whose name already matches <code>practice_code</code> in the DB are skipped.
-      Only mismatches are shown for review.
+  <div class="form-card" style="max-width:520px;">
+    <p style="margin-bottom:18px;font-size:.88rem;color:var(--grey-dk);">
+      Scans one Dropbox folder at a time. Folders whose name already matches
+      <code>practice_code</code> in the DB are skipped — only mismatches shown.
     </p>
     <form method="POST">
       <input type="hidden" name="action" value="scan">
-      <button type="submit" class="btn btn-red">🔍 Scan Dropbox</button>
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+        <label style="font-weight:700;font-size:.85rem;">Scan:</label>
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:.85rem;">
+          <input type="radio" name="scan_path" value="001_Safari" checked> /001_Safari
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:.85rem;">
+          <input type="radio" name="scan_path" value="2026"> /2026
+        </label>
+        <button type="submit" class="btn btn-red">🔍 Scan</button>
+      </div>
     </form>
   </div>
 
@@ -248,94 +200,71 @@ include 'includes/header.php';
   $countHigh   = count(array_filter($results, fn($r) => $r['confidence'] === 'high'));
   $countMedium = count(array_filter($results, fn($r) => $r['confidence'] === 'medium'));
   $countNone   = count(array_filter($results, fn($r) => $r['confidence'] === 'none'));
-  $total       = count($results);
   ?>
 
-  <div style="display:flex;gap:20px;flex-wrap:wrap;margin-bottom:20px;font-size:.82rem;">
-    <span>✅ Exact match (skipped): <strong><?= $countExact ?></strong></span>
-    <span style="color:#065F46;">🟢 High confidence: <strong><?= $countHigh ?></strong></span>
-    <span style="color:#854D0E;">🟡 Needs review: <strong><?= $countMedium ?></strong></span>
-    <span style="color:var(--grey-mid);">⚪ No match: <strong><?= $countNone ?></strong></span>
+  <div style="display:flex;gap:20px;flex-wrap:wrap;margin-bottom:16px;font-size:.82rem;align-items:center;">
+    <strong style="font-size:.85rem;">📁 /<?= h($scanPath) ?></strong>
+    <span>✅ Exact (skipped): <strong><?= $countExact ?></strong></span>
+    <span style="color:#065F46;">🟢 High: <strong><?= $countHigh ?></strong></span>
+    <span style="color:#854D0E;">🟡 Review: <strong><?= $countMedium ?></strong></span>
+    <span style="color:var(--grey-mid);">⚪ None: <strong><?= $countNone ?></strong></span>
+    <a href="reconcile.php" class="btn btn-outline btn-sm" style="margin-left:auto;">↺ New Scan</a>
   </div>
 
-  <?php if ($total === 0 && !$scanError): ?>
-    <div class="flash flash-success">All Dropbox folders already match DB records. Nothing to reconcile.</div>
+  <?php if (count($results) === 0 && !$scanError): ?>
+    <div class="flash flash-success">All folders already match. Nothing to reconcile.</div>
   <?php else: ?>
 
   <form method="POST">
     <input type="hidden" name="action" value="apply">
 
-    <div style="display:flex;gap:10px;align-items:center;margin-bottom:16px;">
-      <button type="submit" class="btn btn-red" onclick="return confirm('Update practice_code for all checked rows?')">
-        ✔ Apply Selected
-      </button>
+    <div style="display:flex;gap:10px;align-items:center;margin-bottom:14px;flex-wrap:wrap;">
+      <button type="submit" class="btn btn-red"
+              onclick="return confirm('Update practice_code for all checked rows?')">✔ Apply Selected</button>
       <button type="button" class="btn btn-outline btn-sm"
-              onclick="document.querySelectorAll('.row-sel').forEach(c=>c.checked=true)">
-        Select all with match
-      </button>
+              onclick="document.querySelectorAll('.row-sel').forEach(c=>c.checked=true)">Select all with match</button>
       <button type="button" class="btn btn-grey btn-sm"
-              onclick="document.querySelectorAll('.row-sel').forEach(c=>c.checked=false)">
-        Clear
-      </button>
-      <a href="reconcile.php" class="btn btn-outline btn-sm">↺ Re-scan</a>
+              onclick="document.querySelectorAll('.row-sel').forEach(c=>c.checked=false)">Clear</button>
     </div>
 
-    <?php
-    // Split by source for display
-    $bySrc = ['001_Safari' => [], '2026' => []];
-    foreach ($results as $r) $bySrc[$r['source']][] = $r;
-
-    foreach (['001_Safari', '2026'] as $src):
-      $rows = $bySrc[$src];
-      if (!$rows) continue;
-    ?>
-
-    <div class="rc-section-hdr"><?= h($src) ?> &nbsp;(<?= count($rows) ?> mismatch<?= count($rows)!==1?'es':'' ?>)</div>
-
-    <div class="table-wrap" style="margin-bottom:24px;">
+    <div class="table-wrap">
     <table class="table">
       <thead>
         <tr>
           <th style="width:32px;"></th>
           <th>Dropbox Folder</th>
-          <th>Match</th>
-          <th style="width:120px;">Confidence</th>
-          <th style="width:200px;">Link to Request</th>
+          <th>Matched Request</th>
+          <th style="width:110px;">Confidence</th>
+          <th style="width:210px;">Link to</th>
         </tr>
       </thead>
       <tbody>
-      <?php foreach ($rows as $row):
-        $hasMatch   = !empty($row['matches']);
-        $bestMatch  = $hasMatch ? $row['matches'][0] : null;
-        $confidence = $row['confidence'];
-        $badgeCls   = match($confidence) {
+      <?php foreach ($results as $idx => $row):
+        $hasMatch  = !empty($row['matches']);
+        $bestMatch = $hasMatch ? $row['matches'][0] : null;
+        $badgeCls  = match($row['confidence']) {
           'high'   => 'badge-high',
           'medium' => 'badge-medium',
           default  => 'badge-none',
         };
-        $badgeLbl = match($confidence) {
+        $badgeLbl = match($row['confidence']) {
           'high'   => '🟢 High',
           'medium' => '🟡 Review',
           default  => '⚪ None',
         };
-
-        // Build the hidden value for apply: folder_name + request_id (from the select)
-        $selectId  = 'sel_' . md5($row['folder'] . $row['source'] . ($row['parent'] ?? ''));
-        $applyId   = 'apply_' . $selectId;
-        $checkId   = 'chk_' . $selectId;
-
-        // Default selected request_id
-        $defaultReqId = $bestMatch ? $bestMatch['id'] : '';
-        $encodedVal   = base64_encode(json_encode([
+        $uid      = 'r' . $idx;
+        $defReqId = $bestMatch['id'] ?? '';
+        $encoded  = base64_encode(json_encode([
           'folder_name' => $row['folder'],
-          'request_id'  => $defaultReqId,
+          'request_id'  => $defReqId,
         ]));
       ?>
       <tr>
         <td>
           <?php if ($hasMatch): ?>
-            <input type="checkbox" class="row-sel" id="<?= $checkId ?>" style="width:14px;height:14px;">
-            <input type="hidden" name="sel[]" id="<?= $applyId ?>" value="<?= h($encodedVal) ?>"
+            <input type="checkbox" class="row-sel" id="chk_<?= $uid ?>" style="width:14px;height:14px;">
+            <input type="hidden" name="sel[]" id="apl_<?= $uid ?>"
+                   value="<?= h($encoded) ?>"
                    data-folder="<?= h($row['folder']) ?>">
           <?php endif; ?>
         </td>
@@ -344,58 +273,42 @@ include 'includes/header.php';
           <div class="rc-folder"><?= h($row['folder']) ?></div>
           <?php if ($row['is_grp']): ?>
             <div class="rc-parent"><span class="rc-grp-tag">GRP</span> in <?= h($row['parent']) ?></div>
-          <?php elseif ($row['parent']): ?>
-            <div class="rc-parent">📁 <?= h($row['parent']) ?></div>
           <?php endif; ?>
         </td>
 
         <td style="font-size:.78rem;">
           <?php if (!$hasMatch): ?>
-            <span style="color:var(--grey-mid);">No request found</span>
-          <?php elseif (count($row['matches']) === 1): ?>
+            <span style="color:var(--grey-mid);">No match</span>
+          <?php else: ?>
             <a href="request_view.php?id=<?= $bestMatch['id'] ?>" target="_blank" style="font-weight:600;">
               <?= h($bestMatch['customer_name']) ?>
             </a>
             <?php if ($bestMatch['practice_code']): ?>
               <div style="color:var(--grey-mid);font-size:.72rem;margin-top:2px;">
-                DB: <code><?= h($bestMatch['practice_code']) ?></code>
+                DB now: <code><?= h($bestMatch['practice_code']) ?></code>
               </div>
             <?php else: ?>
-              <div style="color:var(--grey-mid);font-size:.72rem;margin-top:2px;">DB: <em>no practice_code</em></div>
-            <?php endif; ?>
-          <?php else: ?>
-            <div style="color:var(--grey-mid);font-size:.72rem;margin-bottom:4px;">Multiple candidates:</div>
-            <?php if ($bestMatch): ?>
-              <a href="request_view.php?id=<?= $bestMatch['id'] ?>" target="_blank" style="font-weight:600;">
-                <?= h($bestMatch['customer_name']) ?>
-              </a>
-              <?php if ($bestMatch['practice_code']): ?>
-                <div style="color:var(--grey-mid);font-size:.72rem;margin-top:2px;">
-                  DB: <code><?= h($bestMatch['practice_code']) ?></code>
-                </div>
-              <?php endif; ?>
+              <div style="color:var(--grey-mid);font-size:.72rem;margin-top:2px;"><em>no practice_code set</em></div>
             <?php endif; ?>
           <?php endif; ?>
         </td>
 
-        <td>
-          <span class="badge <?= $badgeCls ?>"><?= $badgeLbl ?></span>
-        </td>
+        <td><span class="badge <?= $badgeCls ?>"><?= $badgeLbl ?></span></td>
 
         <td>
           <?php if (count($row['matches']) > 1): ?>
-            <select class="match-select" id="<?= $selectId ?>"
-                    onchange="updateApply('<?= $applyId ?>', '<?= addslashes($row['folder']) ?>', this.value, '<?= $checkId ?>')">
+            <select class="match-select"
+                    onchange="updateSel('apl_<?= $uid ?>','<?= addslashes(h($row['folder'])) ?>',this.value,'chk_<?= $uid ?>')">
               <option value="">— choose —</option>
               <?php foreach ($row['matches'] as $m): ?>
-                <option value="<?= $m['id'] ?>" <?= $m['id'] === $defaultReqId ? 'selected' : '' ?>>
+                <option value="<?= $m['id'] ?>" <?= $m['id'] == $defReqId ? 'selected' : '' ?>>
                   #<?= $m['id'] ?> <?= h($m['customer_name']) ?>
-                  <?= $m['practice_code'] ? ' ['.h(substr($m['practice_code'],0,20)).']' : '' ?>
+                  <?= $m['practice_code'] ? ' ['.h(substr($m['practice_code'],0,22)).']' : '' ?>
                 </option>
               <?php endforeach; ?>
             </select>
           <?php elseif ($hasMatch): ?>
-            <span style="font-size:.75rem;color:var(--grey-mid);">#<?= $bestMatch['id'] ?> auto-linked</span>
+            <span style="font-size:.75rem;color:var(--grey-mid);">#<?= $bestMatch['id'] ?> auto</span>
           <?php endif; ?>
         </td>
       </tr>
@@ -404,12 +317,9 @@ include 'includes/header.php';
     </table>
     </div>
 
-    <?php endforeach; ?>
-
-    <div style="margin-top:8px;">
-      <button type="submit" class="btn btn-red" onclick="return confirm('Update practice_code for all checked rows?')">
-        ✔ Apply Selected
-      </button>
+    <div style="margin-top:12px;">
+      <button type="submit" class="btn btn-red"
+              onclick="return confirm('Update practice_code for all checked rows?')">✔ Apply Selected</button>
     </div>
   </form>
 
@@ -417,11 +327,10 @@ include 'includes/header.php';
 <?php endif; ?>
 
 <script>
-function updateApply(applyId, folderName, requestId, checkId) {
-  const encoded = btoa(JSON.stringify({ folder_name: folderName, request_id: requestId ? parseInt(requestId) : '' }));
-  document.getElementById(applyId).value = encoded;
-  // Auto-check when a request is selected
-  if (requestId) document.getElementById(checkId).checked = true;
+function updateSel(aplId, folderName, requestId, chkId) {
+  var enc = btoa(JSON.stringify({folder_name: folderName, request_id: requestId ? parseInt(requestId) : ''}));
+  document.getElementById(aplId).value = enc;
+  if (requestId) document.getElementById(chkId).checked = true;
 }
 </script>
 
