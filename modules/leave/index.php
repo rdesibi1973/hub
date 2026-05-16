@@ -256,7 +256,7 @@ function readFile(file){
       });
       // Serialize leaves as YYYY-MM-DD strings for the DB
       const payload = {
-        fileName,
+        fileName: file.name,
         employees: employees.map((emp, idx) => ({
           name:         emp.name,
           paletteIndex: idx,
