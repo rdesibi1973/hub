@@ -72,7 +72,7 @@ $scanPath   = $_POST['scan_path'] ?? '001_Safari'; // default
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'scan') {
     $scanned  = true;
-    set_time_limit(120);
+    @set_time_limit(120); // suppressed — may be disabled on shared hosting
 
     $allReqs = $db->query(
         "SELECT id, customer_name, practice_code, group_folder, status
@@ -197,9 +197,9 @@ include 'includes/header.php';
 <?php else: ?>
 
   <?php
-  $countHigh   = count(array_filter($results, fn($r) => $r['confidence'] === 'high'));
-  $countMedium = count(array_filter($results, fn($r) => $r['confidence'] === 'medium'));
-  $countNone   = count(array_filter($results, fn($r) => $r['confidence'] === 'none'));
+  $countHigh   = count(array_filter($results, function($r){ return $r['confidence'] === 'high'; }));
+  $countMedium = count(array_filter($results, function($r){ return $r['confidence'] === 'medium'; }));
+  $countNone   = count(array_filter($results, function($r){ return $r['confidence'] === 'none'; }));
   ?>
 
   <div style="display:flex;gap:20px;flex-wrap:wrap;margin-bottom:16px;font-size:.82rem;align-items:center;">
@@ -242,16 +242,9 @@ include 'includes/header.php';
       <?php foreach ($results as $idx => $row):
         $hasMatch  = !empty($row['matches']);
         $bestMatch = $hasMatch ? $row['matches'][0] : null;
-        $badgeCls  = match($row['confidence']) {
-          'high'   => 'badge-high',
-          'medium' => 'badge-medium',
-          default  => 'badge-none',
-        };
-        $badgeLbl = match($row['confidence']) {
-          'high'   => '🟢 High',
-          'medium' => '🟡 Review',
-          default  => '⚪ None',
-        };
+        $conf     = $row['confidence'];
+        $badgeCls = $conf === 'high' ? 'badge-high' : ($conf === 'medium' ? 'badge-medium' : 'badge-none');
+        $badgeLbl = $conf === 'high' ? '🟢 High'    : ($conf === 'medium' ? '🟡 Review'   : '⚪ None');
         $uid      = 'r' . $idx;
         $defReqId = $bestMatch['id'] ?? '';
         $encoded  = base64_encode(json_encode([
