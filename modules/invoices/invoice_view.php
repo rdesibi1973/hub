@@ -142,7 +142,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             require_once __DIR__ . '/../../modules/leads/dropbox_constants.php';
             require_once __DIR__ . '/../../modules/leads/dropbox_helper.php';
             $token = dropbox_get_access_token();
-            dropbox_move_folder($token, $fromPath, $toPath);
+            if ($fromPath === '' || $toPath === '') {
+                ob_end_clean();
+                echo json_encode(['ok'=>false,'error'=>'Cannot build Dropbox path. dropbox_url in DB: ' . $oldUrl]);
+                exit;
+            }
+            try {
+                dropbox_move_folder($token, $fromPath, $toPath);
+            } catch (\Throwable $dbx) {
+                ob_end_clean();
+                echo json_encode(['ok'=>false,'error'=>$dbx->getMessage() . ' | from: ' . $fromPath . ' | to: ' . $toPath]);
+                exit;
+            }
 
             // ── Update DB ──────────────────────────────────────────────────
             $newUrl = '';
