@@ -6,10 +6,10 @@ $db = db();
 $id = (int)($_GET['id'] ?? 0);
 
 // ── Access control ─────────────────────────────────────────────────────────
-// Admin/manager: full edit.
+// Admin/manager/accountant: full edit.
 // Staff: can edit only their own requests (limited fields).
 // Others: redirect to view.
-$isRestricted = isLeadsRestricted();
+$isRestricted = isLeadsRestricted() && !in_array(current_user()['role_name'], ['accountant'], true);
 $staffAgentId = $isRestricted ? getStaffAgentId() : 0;
 
 $row = $db->prepare("SELECT * FROM requests WHERE id = ?");
@@ -29,7 +29,7 @@ $agents = $db->query("SELECT * FROM agents WHERE active=1 ORDER BY name")->fetch
 $errors = [];
 
 // Fields editable by admin/manager (full set)
-$fullFields = ['practice_code','date_received','customer_name','email','whatsapp','source','agent_id',
+$fullFields = ['practice_code','group_folder','date_received','customer_name','email','whatsapp','source','agent_id',
                'destination','period','pax','status','value_usd','commission_pct','commission_usd',
                'date_paid','initial_request','dropbox_url','notes'];
 
@@ -116,6 +116,80 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
+    // ── GRP (parent) folder rename when group_folder changes (admin/manager/accountant only) ──
+    $grpRenamed = false;
+    $grpSkip    = !empty($_POST['grp_skip']);
+
+    if (!$errors && !$isRestricted && !empty($req['group_folder'])) {
+        $oldGrpFolder = trim($req['group_folder'] ?? '');
+        $newGrpFolder = trim($v['group_folder']   ?? '');
+
+        if ($oldGrpFolder !== '' && $newGrpFolder !== '' && $oldGrpFolder !== $newGrpFolder) {
+            if (!$grpSkip) {
+                // Derive GRP folder's Dropbox path from dropbox_url.
+                // URL format for GRP: …/home/001_Safari/GRP_FOLDER/SUBFOLDER
+                // → remove last segment → /001_Safari/GRP_FOLDER
+                $grpUrl       = trim($req['dropbox_url'] ?? '');
+                $dropboxPfx   = 'https://www.dropbox.com/home';
+                $grpFromPath  = '';
+                $grpToPath    = '';
+
+                if (str_starts_with($grpUrl, $dropboxPfx)) {
+                    $apiPath      = urldecode(substr($grpUrl, strlen($dropboxPfx)));
+                    $lastSl       = strrpos($apiPath, '/');
+                    if ($lastSl !== false) {
+                        $grpParent    = substr($apiPath, 0, $lastSl);            // /001_Safari/OLD_GRP
+                        $grandParent  = substr($grpParent, 0, strrpos($grpParent, '/')); // /001_Safari
+                        $grpFromPath  = $grpParent;
+                        $grpToPath    = $grandParent . '/' . $newGrpFolder;
+                    }
+                }
+                // Fallback: assume always under /001_Safari
+                if ($grpFromPath === '') {
+                    $grpFromPath = '/001_Safari/' . $oldGrpFolder;
+                    $grpToPath   = '/001_Safari/' . $newGrpFolder;
+                }
+
+                require_once 'dropbox_helper.php';
+                try {
+                    $token = dropbox_get_access_token();
+                    dropbox_move_folder($token, $grpFromPath, $grpToPath);
+                    $grpRenamed = true;
+                } catch (RuntimeException $e) {
+                    $msg = $e->getMessage();
+                    error_log("[request_edit] GRP folder rename failed: from=$grpFromPath to=$grpToPath — $msg");
+                    if (str_contains($msg, 'not_found')) {
+                        $errors[] = "GRP Dropbox folder not found: \"$oldGrpFolder\" does not exist."
+                                  . " Check the folder name or tick 'Skip Dropbox rename — update DB only'.";
+                    } else {
+                        $errors[] = "GRP folder rename failed — request not saved. Error: " . htmlspecialchars($msg);
+                    }
+                }
+            }
+
+            if (!$errors) {
+                // Update ALL requests in this group: replace group_folder + fix dropbox_url
+                $db->prepare("
+                    UPDATE requests
+                    SET    group_folder = ?,
+                           dropbox_url  = REPLACE(dropbox_url, ?, ?)
+                    WHERE  group_folder = ?
+                ")->execute([
+                    $newGrpFolder,
+                    rawurlencode($oldGrpFolder), rawurlencode($newGrpFolder),
+                    $oldGrpFolder,
+                ]);
+
+                // Also fix $v['dropbox_url'] so the main UPDATE below stays consistent
+                $v['dropbox_url'] = str_replace(
+                    rawurlencode($oldGrpFolder),
+                    rawurlencode($newGrpFolder),
+                    $v['dropbox_url']
+                );
+            }
+        }
+    }
+
     if (!$errors) {
         if ($isRestricted) {
             // Staff: update only their allowed fields (including status)
@@ -140,15 +214,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $staffAgentId,
             ]);
         } else {
-            // Admin/manager: full update
+            // Admin/manager/accountant: full update
             $db->prepare("
                 UPDATE requests SET
-                  practice_code=?, date_received=?, customer_name=?, email=?, whatsapp=?, source=?, agent_id=?,
+                  practice_code=?, group_folder=?, date_received=?, customer_name=?, email=?, whatsapp=?, source=?, agent_id=?,
                   destination=?, period=?, pax=?, status=?, value_usd=?, commission_pct=?, commission_usd=?,
                   date_paid=?, initial_request=?, dropbox_url=?, notes=?
                 WHERE id=?
             ")->execute([
                 $v['practice_code']   ?: null,
+                $v['group_folder']    ?: null,
                 $v['date_received'],
                 $v['customer_name'],
                 $v['email']           ?: null,
@@ -169,8 +244,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $id,
             ]);
         }
-        $flashMsg = $dropboxRenamed ? 'Request updated and Dropbox folder renamed successfully.' : 'Request updated successfully.';
-        flash($flashMsg);
+        $flashParts = ['Request updated successfully.'];
+        if ($dropboxRenamed) $flashParts[] = 'Dropbox folder renamed.';
+        if ($grpRenamed)     $flashParts[] = 'GRP folder renamed (all group members updated).';
+        flash(implode(' ', $flashParts));
         header("Location: request_view.php?id=" . $id);
         exit;
     }
@@ -297,6 +374,22 @@ include 'includes/header.php';
         <input type="url" name="dropbox_url" value="<?= h($v['dropbox_url']) ?>"
                placeholder="https://www.dropbox.com/home/…">
       </div>
+
+      <?php if (!$isRestricted && !empty($req['group_folder'])): ?>
+      <div class="form-group full">
+        <label>GRP Folder <span style="font-size:.72rem;color:var(--grey-mid);font-weight:400;">(parent group folder — renames all requests in the group)</span></label>
+        <input type="text" name="group_folder" value="<?= h($v['group_folder']) ?>"
+               placeholder="e.g. 10_20OCT_LaSala_GRP2010(Agency-PS-Agent)_START…">
+        <div style="margin-top:6px;">
+          <label style="display:flex;align-items:center;gap:8px;font-weight:500;cursor:pointer;font-size:.82rem;color:var(--grey-dk);">
+            <input type="checkbox" name="grp_skip" value="1"
+                   style="width:14px;height:14px;cursor:pointer;"
+                   <?= !empty($_POST['grp_skip']) ? 'checked' : '' ?>>
+            Skip Dropbox rename — update DB only
+          </label>
+        </div>
+      </div>
+      <?php endif; ?>
 
     </div>
 

@@ -81,8 +81,10 @@ include 'includes/header.php';
       </a>
     <?php endif; ?>
     <?php
-      // Show Edit button if: admin/manager, OR staff viewing their own request
-      $canEdit = !isLeadsRestricted() || ((int)$r['agent_id'] === getStaffAgentId());
+      // Show Edit button if: admin/manager/accountant, OR staff viewing their own request
+      $canEdit = !isLeadsRestricted()
+              || in_array(current_user()['role_name'], ['accountant'], true)
+              || ((int)$r['agent_id'] === getStaffAgentId());
     ?>
     <?php if ($canEdit): ?>
       <a href="request_edit.php?id=<?= $r['id'] ?>" class="btn btn-red">Edit</a>
