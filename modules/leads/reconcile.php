@@ -107,7 +107,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'scan'
                         sort($subs);
                         foreach ($subs as $subName) {
                             $m = reconcile_match($subName, $byPC, $byName);
-                            if ($m['exact']) { $countExact++; continue; }
+                            if ($m['exact'] || $m['confidence'] === 'none') { if ($m['exact']) $countExact++; continue; }
                             $results[] = ['source'=>'001_Safari','folder'=>$subName,
                                           'parent'=>$dirName,'is_grp'=>true,
                                           'confidence'=>$m['confidence'],'matches'=>$m['matches']];
@@ -116,6 +116,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'scan'
                 } else {
                     $m = reconcile_match($dirName, $byPC, $byName);
                     if ($m['exact']) { $countExact++; continue; }
+                    if ($m['confidence'] === 'none') continue;
                     $results[] = ['source'=>'001_Safari','folder'=>$dirName,
                                   'parent'=>null,'is_grp'=>false,
                                   'confidence'=>$m['confidence'],'matches'=>$m['matches']];
@@ -127,6 +128,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'scan'
             foreach ($dirs as $dirName) {
                 $m = reconcile_match($dirName, $byPC, $byName);
                 if ($m['exact']) { $countExact++; continue; }
+                if ($m['confidence'] === 'none') continue;
                 $results[] = ['source'=>'2026','folder'=>$dirName,
                               'parent'=>null,'is_grp'=>false,
                               'confidence'=>$m['confidence'],'matches'=>$m['matches']];
@@ -199,7 +201,6 @@ include 'includes/header.php';
   <?php
   $countHigh   = count(array_filter($results, function($r){ return $r['confidence'] === 'high'; }));
   $countMedium = count(array_filter($results, function($r){ return $r['confidence'] === 'medium'; }));
-  $countNone   = count(array_filter($results, function($r){ return $r['confidence'] === 'none'; }));
   ?>
 
   <div style="display:flex;gap:20px;flex-wrap:wrap;margin-bottom:16px;font-size:.82rem;align-items:center;">
@@ -207,7 +208,6 @@ include 'includes/header.php';
     <span>✅ Exact (skipped): <strong><?= $countExact ?></strong></span>
     <span style="color:#065F46;">🟢 High: <strong><?= $countHigh ?></strong></span>
     <span style="color:#854D0E;">🟡 Review: <strong><?= $countMedium ?></strong></span>
-    <span style="color:var(--grey-mid);">⚪ None: <strong><?= $countNone ?></strong></span>
     <a href="reconcile.php" class="btn btn-outline btn-sm" style="margin-left:auto;">↺ New Scan</a>
   </div>
 
