@@ -438,8 +438,8 @@ function quickAdd(sel) {
   if (!v) return;
   if (v === 'safari')    { addItem('Safari', 1, ''); return; }
   if (v === 'zanzibar')  { addItem('Zanzibar airport transfers', 1, ''); return; }
-  if (v === 'teenager')  { addItem('Teenager discount', 1, '', true); return; }
-  if (v === 'child')     { addItem('Child discount',    1, '', true); return; }
+  if (v === 'teenager')  { addItem('Teenager discount', 1, ''); return; }
+  if (v === 'child')     { addItem('Child discount',    1, ''); return; }
 }
 
 function addItem(desc, qty, price, lockQty) {
