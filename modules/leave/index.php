@@ -259,6 +259,21 @@ function readFile(file){
       document.getElementById('uploadSection').style.display='none';
       document.getElementById('calendarSection').style.display='block';
       document.getElementById('controlsBar').style.display='flex';
+      // Persist to localStorage — serialize Date objects as timestamps
+      try {
+        const serialized = employees.map(emp => ({
+          ...emp,
+          leaves: emp.leaves.map(l => ({
+            ...l,
+            start: l.start ? l.start.getTime() : null,
+            end:   l.end   ? l.end.getTime()   : null,
+          }))
+        }));
+        localStorage.setItem('leaveData_v1', JSON.stringify({
+          employees: serialized,
+          fileName:  file.name,
+        }));
+      } catch(e) { /* quota exceeded — ignore */ }
       buildLegend();renderCalendar();renderOverview();renderBalances();
     }catch(err){showError('Error reading file: '+err.message);}
   };
@@ -268,266 +283,7 @@ function readFile(file){
 function showError(msg){const b=document.getElementById('errorBox');b.textContent='⚠ '+msg;b.style.display='block';}
 function resetApp(){
   employees=[];empColors={};activeEmps={};
-  document.getElementById('uploadSection').style.display='block';
-  document.getElementById('calendarSection').style.display='none';
-  document.getElementById('controlsBar').style.display='none';
-  document.getElementById('fileBadge').style.display='none';
-  document.getElementById('fileInput').value='';
-}
-
-function buildLegend(){
-  const row=document.getElementById('legendRow');
-  row.innerHTML='<span class="legend-lbl">Employees:</span>';
-  employees.forEach(emp=>{
-    const c=empColors[emp.name];
-    const chip=document.createElement('div');
-    chip.className='leg-chip';
-    chip.style.cssText=`background:${c.bg};border-color:${c.border};color:${c.text}`;
-    chip.innerHTML=`<span style="width:9px;height:9px;border-radius:50%;background:${c.border};display:inline-block;flex-shrink:0"></span>${emp.name}&nbsp;<span style="font-weight:400;opacity:.65">${emp.leaves.length}</span>`;
-    chip.onclick=()=>{activeEmps[emp.name]=!activeEmps[emp.name];chip.classList.toggle('inactive',!activeEmps[emp.name]);renderCalendar();renderOverview();renderBalances();};
-    row.appendChild(chip);
-  });
-}
-
-function changeMonth(d){
-  viewMonth+=d;
-  if(viewMonth<0){viewMonth=11;viewYear--;}
-  if(viewMonth>11){viewMonth=0;viewYear++;}
-  renderCalendar();renderOverview();
-}
-
-function getDays(y,m){return new Date(y,m+1,0).getDate();}
-
-function getLeavesForDay(date){
-  const res=[];
-  employees.forEach(emp=>{
-    if(!activeEmps[emp.name])return;
-    emp.leaves.forEach(l=>{if(date>=l.start&&date<=l.end)res.push({employee:emp.name,leaveType:l.leaveType,color:empColors[emp.name]});});
-  });
-  return res;
-}
-
-function renderCalendar(){
-  document.getElementById('monthTitle').textContent=MONTHS[viewMonth]+' '+viewYear;
-  const body=document.getElementById('calBody');body.innerHTML='';
-  const dim=getDays(viewYear,viewMonth);
-  const firstDow=new Date(viewYear,viewMonth,1).getDay();
-  for(let i=0;i<firstDow;i++){const c=document.createElement('div');c.className='cal-cell empty';body.appendChild(c);}
-  for(let d=1;d<=dim;d++){
-    const date=new Date(viewYear,viewMonth,d);
-    const isWknd=date.getDay()===0||date.getDay()===6;
-    const isTdy=date.getTime()===today.getTime();
-    const leaves=getLeavesForDay(date);
-    const cell=document.createElement('div');
-    cell.className='cal-cell'+(isWknd?' weekend':'')+(leaves.length?' has-leave':'');
-    const num=document.createElement('div');
-    num.className='day-num'+(isTdy?' today':'');
-    num.textContent=d;cell.appendChild(num);
-    leaves.slice(0,4).forEach(l=>{
-      const tag=document.createElement('div');tag.className='leave-tag';
-      tag.style.cssText=`background:${l.color.bg};border:1px solid ${l.color.border};color:${l.color.text}`;
-      tag.textContent=l.employee.split(' ')[0];cell.appendChild(tag);
-    });
-    if(leaves.length>4){const m=document.createElement('div');m.style.cssText='font-size:.6rem;color:var(--grey-mid);padding:1px 4px';m.textContent=`+${leaves.length-4} more`;cell.appendChild(m);}
-    if(leaves.length)cell.onclick=()=>showModal(d,leaves);
-    body.appendChild(cell);
-  }
-}
-
-function showModal(day,leaves){
-  const date=new Date(viewYear,viewMonth,day);
-  document.getElementById('modalTitle').textContent=DAY_FULL[date.getDay()]+', '+MONTHS[viewMonth]+' '+day+', '+viewYear;
-  const body=document.getElementById('modalBody');body.innerHTML='';
-  leaves.forEach(l=>{
-    const d=document.createElement('div');d.className='modal-leave';
-    d.style.cssText=`background:${l.color.bg};border-color:${l.color.border}`;
-    d.innerHTML=`<div class="modal-dot" style="background:${l.color.border}"></div><div><div class="modal-emp" style="color:${l.color.text}">${l.employee}</div><div class="modal-type">${l.leaveType}</div></div>`;
-    body.appendChild(d);
-  });
-  document.getElementById('modalOverlay').classList.add('open');
-}
-function closeModal(){document.getElementById('modalOverlay').classList.remove('open');}
-
-function renderOverview(){
-  const el=document.getElementById('overviewWrap');el.innerHTML='';
-  const cols='130px '+Array(12).fill('1fr').join(' ');
-  const hdr=document.createElement('div');
-  hdr.className='month-labels-row';
-  hdr.style.cssText=`display:grid;grid-template-columns:${cols};gap:3px`;
-  hdr.innerHTML='<div></div>'+MSHORT.map(m=>`<div class="mlbl">${m}</div>`).join('');
-  el.appendChild(hdr);
-  employees.filter(e=>activeEmps[e.name]).forEach(emp=>{
-    const c=empColors[emp.name];
-    const row=document.createElement('div');
-    row.className='ov-row';
-    row.style.cssText=`display:grid;grid-template-columns:${cols};gap:3px`;
-    const nameEl=document.createElement('div');nameEl.className='ov-name';nameEl.textContent=emp.name;
-    row.appendChild(nameEl);
-    for(let m=0;m<12;m++){
-      const dim=getDays(viewYear,m);
-      let days=0;
-      const mStart=new Date(viewYear,m,1),mEnd=new Date(viewYear,m+1,0);
-      // Collect overlapping leaves for tooltip
-      const overlapping=emp.leaves.filter(l=>l.end>=mStart&&l.start<=mEnd);
-      for(let d=1;d<=dim;d++){
-        const dt=new Date(viewYear,m,d);
-        if(emp.leaves.some(l=>dt>=l.start&&dt<=l.end))days++;
-      }
-      const cell=document.createElement('div');cell.className='ov-cell';
-      const isCur=m===viewMonth;
-      cell.style.cssText=`background:${days>0?c.bg:'var(--grey-lt)'};border:${isCur?'2px':'1px'} solid ${days>0?c.border:(isCur?'var(--red)':'var(--grey-lt)')};`;
-      // Rich tooltip with dates
-      let tip=`${MONTHS[m]}: ${days} day${days!==1?'s':''} away`;
-      overlapping.forEach(l=>{
-        tip+=`\n  ${l.leaveType}: ${fmtDate(l.start)} – ${fmtDate(l.end)}`;
-      });
-      cell.title=tip;
-      cell.onclick=()=>{viewMonth=m;renderCalendar();renderOverview();};
-      row.appendChild(cell);
-    }
-    el.appendChild(row);
-  });
-}
-
-function renderBalances(){
-  const tbody=document.getElementById('balanceBody');tbody.innerHTML='';
-  function fmt(v){
-    if(v===''||v===null||v===undefined)return '<span style="color:var(--grey-mid)">—</span>';
-    const n=Number(v);
-    if(isNaN(n))return v;
-    const cls=n<0?'neg':n>0?'pos':'';
-    return cls?`<span class="${cls}">${n}</span>`:String(n);
-  }
-  employees.filter(e=>activeEmps[e.name]).forEach(emp=>{
-    const b=emp.balance||{};
-    const c=empColors[emp.name];
-    const tr=document.createElement('tr');
-    tr.innerHTML=`
-      <td style="border-left:3px solid ${c.border};padding-left:10px">${emp.name}</td>
-      <td>${fmt(b.open)}</td>
-      <td>${fmt(b.alloc1)}</td>
-      <td>${fmt(b.used1)}</td>
-      <td>${fmt(b.bal1)}</td>
-      <td>${fmt(b.alloc2)}</td>
-      <td>${fmt(b.used2)}</td>
-      <td>${fmt(b.bal2)}</td>
-      <td style="font-weight:700">${fmt(b.remaining)}</td>`;
-    tbody.appendChild(tr);
-  });
-}
-</script>
-
-<script>
-
-const MONTHS=['January','February','March','April','May','June','July','August','September','October','November','December'];
-const MSHORT=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-const DAY_FULL=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
-const PALETTE=[
-  {bg:'#FAE8E7',border:'#C0211B',text:'#A01A14'},
-  {bg:'#D6EDD9',border:'#2E6B3E',text:'#1E4A2A'},
-  {bg:'#E8F0FA',border:'#1A4D8A',text:'#0D3060'},
-  {bg:'#FFF8E1',border:'#C47A0A',text:'#7A4A00'},
-  {bg:'#EDE8F8',border:'#5C3AB0',text:'#3A1F80'},
-  {bg:'#E8F8F4',border:'#1A8A65',text:'#0D5A40'},
-  {bg:'#FCE8F4',border:'#A01A7A',text:'#6B0050'},
-  {bg:'#E8F4F8',border:'#1A6A8A',text:'#0D3F5A'},
-  {bg:'#F8F0E8',border:'#8A5A1A',text:'#5A3500'},
-  {bg:'#F0F8E8',border:'#5A8A1A',text:'#355A00'},
-  {bg:'#FEF2F2',border:'#DC2626',text:'#991B1B'},
-  {bg:'#F0FDF4',border:'#16A34A',text:'#14532D'},
-  {bg:'#EFF6FF',border:'#2563EB',text:'#1E3A8A'},
-  {bg:'#FEFCE8',border:'#CA8A04',text:'#713F12'},
-  {bg:'#FDF4FF',border:'#9333EA',text:'#581C87'},
-];
-
-let employees=[], empColors={}, activeEmps={};
-let viewYear=new Date().getFullYear(), viewMonth=new Date().getMonth();
-const today=new Date(); today.setHours(0,0,0,0);
-
-function parseExcelDate(v){
-  if(!v)return null;
-  if(v instanceof Date){let d=new Date(v.getFullYear(),v.getMonth(),v.getDate());return isNaN(d)?null:d;}
-  if(typeof v==='number'){let d=new Date(Math.round((v-25569)*86400*1000));return new Date(d.getUTCFullYear(),d.getUTCMonth(),d.getUTCDate());}
-  if(typeof v==='string'){
-    const m=v.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-    if(m)return new Date(parseInt(m[3]),parseInt(m[2])-1,parseInt(m[1]));
-    const d=new Date(v.split(' ')[0]);if(!isNaN(d))return new Date(d.getFullYear(),d.getMonth(),d.getDate());
-  }
-  return null;
-}
-
-function fmtDate(d){return MSHORT[d.getMonth()]+' '+d.getDate();}
-
-function handleDragOver(e){e.preventDefault();document.getElementById('uploadZone').classList.add('drag');}
-function handleDragLeave(){document.getElementById('uploadZone').classList.remove('drag');}
-function handleDrop(e){e.preventDefault();handleDragLeave();readFile(e.dataTransfer.files[0]);}
-function handleFileInput(e){readFile(e.target.files[0]);}
-
-function readFile(file){
-  if(!file)return;
-  document.getElementById('errorBox').style.display='none';
-  const r=new FileReader();
-  r.onload=e=>{
-    try{
-      const wb=XLSX.read(e.target.result,{type:'array'});
-      employees=[];empColors={};activeEmps={};
-      wb.SheetNames.forEach((sheetName,idx)=>{
-        const ws=wb.Sheets[sheetName];
-        const raw=XLSX.utils.sheet_to_json(ws,{header:1,defval:null});
-
-        // Balance data from row 2 (index 2)
-        const bRow=raw[2]||[];
-        const balance={
-          open:   bRow[1]!==null&&bRow[1]!==undefined ? bRow[1] : '',
-          alloc1: bRow[2]!==null&&bRow[2]!==undefined ? bRow[2] : '',
-          used1:  bRow[3]!==null&&bRow[3]!==undefined ? bRow[3] : '',
-          bal1:   bRow[4]!==null&&bRow[4]!==undefined ? bRow[4] : '',
-          alloc2: bRow[5]!==null&&bRow[5]!==undefined ? bRow[5] : '',
-          used2:  bRow[6]!==null&&bRow[6]!==undefined ? bRow[6] : '',
-          bal2:   bRow[7]!==null&&bRow[7]!==undefined ? bRow[7] : '',
-          remaining: bRow[8]!==null&&bRow[8]!==undefined ? bRow[8] : ''
-        };
-
-        // Find header row (LEAVE TYPE)
-        let headerRow=-1;
-        for(let i=0;i<raw.length;i++){
-          const c=raw[i]&&raw[i][0];
-          if(c&&String(c).replace(/\s/g,'').toUpperCase().includes('LEAVETYPE')){headerRow=i;break;}
-        }
-
-        const leaves=[];
-        if(headerRow>=0){
-          for(let i=headerRow+1;i<raw.length;i++){
-            const row=raw[i];if(!row)continue;
-            const col0=row[0]?String(row[0]).trim():'';
-            if(col0.toUpperCase().startsWith('TOTAL'))continue;
-            const start=parseExcelDate(row[1]);if(!start)continue;
-            const end=parseExcelDate(row[2])||start;
-            leaves.push({leaveType:col0||'Leave',start,end});
-          }
-        }
-
-        let empName=sheetName;
-        if(raw[2]&&raw[2][0]&&String(raw[2][0]).trim())empName=String(raw[2][0]).trim();
-
-        employees.push({name:empName,leaves,balance});
-        empColors[empName]=PALETTE[idx%PALETTE.length];
-        activeEmps[empName]=true;
-      });
-      document.getElementById('fileBadge').textContent='• '+file.name;
-      document.getElementById('fileBadge').style.display='inline-block';
-      document.getElementById('uploadSection').style.display='none';
-      document.getElementById('calendarSection').style.display='block';
-      document.getElementById('controlsBar').style.display='flex';
-      buildLegend();renderCalendar();renderOverview();renderBalances();
-    }catch(err){showError('Error reading file: '+err.message);}
-  };
-  r.readAsArrayBuffer(file);
-}
-
-function showError(msg){const b=document.getElementById('errorBox');b.textContent='⚠ '+msg;b.style.display='block';}
-function resetApp(){
-  employees=[];empColors={};activeEmps={};
+  localStorage.removeItem('leaveData_v1');
   document.getElementById('uploadSection').style.display='block';
   document.getElementById('calendarSection').style.display='none';
   document.getElementById('controlsBar').style.display='none';
@@ -676,6 +432,35 @@ function renderBalances(){
   });
 }
 
+// ── Restore from localStorage on page load ────────────────────────────────
+(function restoreFromStorage() {
+  try {
+    const raw = localStorage.getItem('leaveData_v1');
+    if (!raw) return;
+    const saved = JSON.parse(raw);
+    if (!saved || !Array.isArray(saved.employees) || saved.employees.length === 0) return;
+    employees = saved.employees.map(emp => ({
+      ...emp,
+      leaves: emp.leaves.map(l => ({
+        ...l,
+        start: l.start ? new Date(l.start) : null,
+        end:   l.end   ? new Date(l.end)   : null,
+      }))
+    }));
+    employees.forEach((emp, idx) => {
+      empColors[emp.name]  = PALETTE[idx % PALETTE.length];
+      activeEmps[emp.name] = true;
+    });
+    document.getElementById('fileBadge').textContent = '• ' + (saved.fileName || 'saved file');
+    document.getElementById('fileBadge').style.display = 'inline-block';
+    document.getElementById('uploadSection').style.display = 'none';
+    document.getElementById('calendarSection').style.display = 'block';
+    document.getElementById('controlsBar').style.display = 'flex';
+    buildLegend(); renderCalendar(); renderOverview(); renderBalances();
+  } catch(e) {
+    localStorage.removeItem('leaveData_v1');
+  }
+})();
 </script>
 
 <?php include __DIR__ . '/../../includes/layout_footer.php'; ?>
