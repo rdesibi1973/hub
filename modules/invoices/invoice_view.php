@@ -13,6 +13,8 @@ const FOLDER_TAG_OPTIONS = [
     'FULLY PAID'   => 'PAID',
 ];
 function folder_current_tag(string $name): string {
+    // If the folder ends with _CK, look at the status tag that precedes it
+    if (str_ends_with($name, '_CK')) $name = substr($name, 0, -3);
     foreach (['BALANCE-CASH','BALANCE','DEPOSIT','PROGRESS','PROVISIONAL','PAID','CK','CANCELLED','BOOKED'] as $tag) {
         if (str_ends_with($name, '_'.$tag)) return $tag;
     }
@@ -111,8 +113,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             }
 
             $oldName  = $req['practice_code'];
-            $baseName = folder_strip_tag($oldName);
-            $newName  = $baseName . '_' . $dbTag;
+            // Preserve _CK suffix: strip it before removing the status tag,
+            // then re-append it after the new status tag (e.g. _DEPOSIT_CK → _BALANCE_CK)
+            $hasCK    = str_ends_with($oldName, '_CK');
+            $baseName = folder_strip_tag($hasCK ? substr($oldName, 0, -3) : $oldName);
+            $newName  = $baseName . '_' . $dbTag . ($hasCK ? '_CK' : '');
 
             // ── Rename folder in Dropbox ───────────────────────────────────
             $dropboxPrefix = 'https://www.dropbox.com/home';
