@@ -12,7 +12,16 @@ if (!$inv) { flash('Invoice not found.','error'); header('Location: invoices.php
 $items = $db->prepare("SELECT * FROM invoice_items WHERE invoice_id=? ORDER BY sort_order,id");
 $items->execute([$id]); $items = $items->fetchAll();
 
-$customers = $db->query("SELECT id, name, type, address, city, country FROM customers WHERE active=1 ORDER BY name")->fetchAll();
+$billToList = $db->query("
+    SELECT id, name, 'customer' AS source_type,
+           CONCAT_WS(', ', NULLIF(address,''), NULLIF(city,''), NULLIF(country,'')) AS addr
+    FROM customers WHERE active = 1
+    UNION ALL
+    SELECT id, nome AS name, 'agency' AS source_type,
+           COALESCE(address, '') AS addr
+    FROM agencies WHERE attiva = 1
+    ORDER BY name ASC
+")->fetchAll();
 
 // ── Handle POST ───────────────────────────────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -125,18 +134,18 @@ include 'includes/header.php';
   <div class="form-section" style="margin-top:28px;">Bill To</div>
   <div class="form-grid">
     <div class="form-group full">
-      <label>Customer / Select from list</label>
-      <input type="text" id="customerSearch" placeholder="Type to search saved customers…" autocomplete="off"
-             value="<?= h($inv['bill_to_name']) ?>" style="margin-bottom:6px">
-      <div id="customerDrop" style="display:none;position:fixed;z-index:100;background:#fff;border:1.5px solid var(--grey-lt);border-radius:7px;box-shadow:0 4px 16px rgba(0,0,0,.12);max-height:220px;overflow-y:auto;"></div>
-    </div>
-    <div class="form-group full">
-      <label>Bill To Name *</label>
-      <input type="text" name="bill_to_name" id="billToName" required value="<?= h($inv['bill_to_name']) ?>">
+      <label>Bill To *</label>
+      <div style="position:relative;">
+        <input type="text" id="billToSearch" name="bill_to_name" required autocomplete="off"
+               value="<?= h($inv['bill_to_name']) ?>"
+               placeholder="Type to search agencies or customers…">
+        <div id="billToDrop"></div>
+      </div>
+      <input type="hidden" id="billToSourceType" name="bill_to_source_type" value="">
     </div>
     <div class="form-group full">
       <label>Bill To Address</label>
-      <textarea name="bill_to_address" rows="3"><?= h($inv['bill_to_address'] ?? '') ?></textarea>
+      <textarea name="bill_to_address" id="billToAddress" rows="3"><?= h($inv['bill_to_address'] ?? '') ?></textarea>
     </div>
   </div>
 
@@ -183,43 +192,62 @@ include 'includes/header.php';
 </form>
 
 <style>
-#customerSearch { width:100%;padding:9px 13px;border:1.5px solid var(--grey-lt);border-radius:7px;font-family:inherit;font-size:.85rem; }
-.cust-drop-item { padding:9px 14px;cursor:pointer;font-size:.85rem;border-bottom:1px solid var(--grey-lt); }
-.cust-drop-item:last-child { border-bottom:none; }
-.cust-drop-item:hover { background:var(--off-white); }
-.cust-drop-sub { font-size:.72rem;color:var(--grey-mid); }
+.bt-drop-item { padding:9px 14px;cursor:pointer;font-size:.85rem;border-bottom:1px solid var(--grey-lt); }
+.bt-drop-item:last-child { border-bottom:none; }
+.bt-drop-item:hover { background:var(--off-white); }
+.bt-drop-sub { font-size:.72rem;color:var(--grey-mid); }
+.bt-badge { display:inline-block;font-size:.65rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;padding:1px 6px;border-radius:4px;margin-right:6px;vertical-align:middle; }
+.bt-badge.customer { background:#E8F0FE;color:#1D6FA4; }
+.bt-badge.agency   { background:#EDE7F6;color:#6A1B9A; }
+#billToDrop { display:none;position:absolute;left:0;right:0;top:100%;z-index:100;background:#fff;border:1.5px solid var(--grey-lt);border-radius:7px;box-shadow:0 4px 16px rgba(0,0,0,.12);max-height:240px;overflow-y:auto; }
 </style>
 <script>
-var customers = <?= json_encode(array_map(fn($c)=>['id'=>$c['id'],'name'=>$c['name'],'type'=>$c['type'],
-  'addr'=>implode(', ',array_filter([$c['address'],$c['city'],$c['country']]))], $customers)) ?>;
+var billToData = <?= json_encode(array_map(fn($r) => [
+    'id'   => $r['id'],
+    'name' => $r['name'],
+    'type' => $r['source_type'],
+    'addr' => $r['addr'],
+], $billToList)) ?>;
 
-var customerSearch = document.getElementById('customerSearch');
-var customerDrop   = document.getElementById('customerDrop');
+var btSearch = document.getElementById('billToSearch');
+var btDrop   = document.getElementById('billToDrop');
 
-customerSearch.addEventListener('input', function() {
-  var q = this.value.toLowerCase();
-  if (!q) { customerDrop.style.display='none'; return; }
-  var matches = customers.filter(function(c){ return c.name.toLowerCase().includes(q); }).slice(0,8);
-  if (!matches.length) { customerDrop.style.display='none'; return; }
-  var rect = customerSearch.getBoundingClientRect();
-  customerDrop.style.left  = rect.left+'px';
-  customerDrop.style.top   = rect.bottom+'px';
-  customerDrop.style.width = rect.width+'px';
-  customerDrop.innerHTML = matches.map(function(c) {
-    return '<div class="cust-drop-item" onclick="selectCustomer('+c.id+',\''+escJs(c.name)+'\',\''+escJs(c.addr)+'\')">'
-         + '<div>'+escHtml(c.name)+'</div><div class="cust-drop-sub">'+c.type+(c.addr?' · '+escHtml(c.addr):'')+'</div></div>';
+function escAttr(s){ return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;'); }
+
+btSearch.addEventListener('input', function() {
+  var q = this.value.toLowerCase().trim();
+  if (!q) { btDrop.style.display='none'; return; }
+  var matches = billToData.filter(function(c){ return c.name.toLowerCase().includes(q); }).slice(0,10);
+  if (!matches.length) { btDrop.style.display='none'; return; }
+  btDrop.innerHTML = matches.map(function(c) {
+    var badge = '<span class="bt-badge '+c.type+'">'+(c.type==='agency'?'Agency':'Customer')+'</span>';
+    return '<div class="bt-drop-item"'
+         + ' data-id="'   + c.id   + '"'
+         + ' data-name="' + escAttr(c.name) + '"'
+         + ' data-addr="' + escAttr(c.addr) + '"'
+         + ' data-type="' + c.type + '">'
+         + '<div>'+badge+escHtml(c.name)+'</div>'
+         + (c.addr ? '<div class="bt-drop-sub">'+escHtml(c.addr)+'</div>' : '')
+         + '</div>';
   }).join('');
-  customerDrop.style.display='block';
+  btDrop.style.display = 'block';
 });
 
-function selectCustomer(id, name, addr) {
-  document.getElementById('customerId').value = id;
-  document.getElementById('billToName').value = name;
-  document.querySelector('[name="bill_to_address"]').value = addr;
-  customerSearch.value = name;
-  customerDrop.style.display='none';
-}
-document.addEventListener('click', function(e){ if (!customerDrop.contains(e.target) && e.target!==customerSearch) customerDrop.style.display='none'; });
+btDrop.addEventListener('mousedown', function(e) {
+  var item = e.target.closest('.bt-drop-item');
+  if (!item) return;
+  e.preventDefault();
+  btSearch.value = item.dataset.name;
+  document.getElementById('billToAddress').value   = item.dataset.addr;
+  document.getElementById('billToSourceType').value = item.dataset.type;
+  // customer_id: set only for customer records, clear for agency
+  document.getElementById('customerId').value = item.dataset.type === 'customer' ? item.dataset.id : 0;
+  btDrop.style.display = 'none';
+});
+
+document.addEventListener('click', function(e){
+  if (!btDrop.contains(e.target) && e.target !== btSearch) btDrop.style.display='none';
+});
 
 // Items
 var itemIdx = 0;
