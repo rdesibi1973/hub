@@ -197,7 +197,8 @@ function dropbox_list_folder(string $token, string $path): array {
     return $names;
 }
 
- (moves to trash).
+/**
+ * Delete a file or folder in Dropbox (moves to trash).
  * Uses files/delete_v2 — the item is moved to Dropbox trash, not permanently erased.
  *
  * @param  string $token  Access token from dropbox_get_access_token()
