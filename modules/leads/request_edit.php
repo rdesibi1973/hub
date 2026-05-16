@@ -126,29 +126,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if ($oldGrpFolder !== '' && $newGrpFolder !== '' && $oldGrpFolder !== $newGrpFolder) {
             if (!$grpSkip) {
-                // Derive GRP folder's Dropbox path from dropbox_url.
-                // URL format for GRP: …/home/001_Safari/GRP_FOLDER/SUBFOLDER
-                // → remove last segment → /001_Safari/GRP_FOLDER
-                $grpUrl       = trim($req['dropbox_url'] ?? '');
-                $dropboxPfx   = 'https://www.dropbox.com/home';
-                $grpFromPath  = '';
-                $grpToPath    = '';
-
-                if (str_starts_with($grpUrl, $dropboxPfx)) {
-                    $apiPath      = urldecode(substr($grpUrl, strlen($dropboxPfx)));
-                    $lastSl       = strrpos($apiPath, '/');
-                    if ($lastSl !== false) {
-                        $grpParent    = substr($apiPath, 0, $lastSl);            // /001_Safari/OLD_GRP
-                        $grandParent  = substr($grpParent, 0, strrpos($grpParent, '/')); // /001_Safari
-                        $grpFromPath  = $grpParent;
-                        $grpToPath    = $grandParent . '/' . $newGrpFolder;
-                    }
-                }
-                // Fallback: assume always under /001_Safari
-                if ($grpFromPath === '') {
-                    $grpFromPath = '/001_Safari/' . $oldGrpFolder;
-                    $grpToPath   = '/001_Safari/' . $newGrpFolder;
-                }
+                // GRP folders are always directly under /001_Safari/ — build path directly.
+                $grpFromPath = '/001_Safari/' . $oldGrpFolder;
+                $grpToPath   = '/001_Safari/' . $newGrpFolder;
 
                 require_once 'dropbox_helper.php';
                 try {
@@ -378,8 +358,30 @@ include 'includes/header.php';
       <?php if (!$isRestricted && !empty($req['group_folder'])): ?>
       <div class="form-group full">
         <label>GRP Folder <span style="font-size:.72rem;color:var(--grey-mid);font-weight:400;">(parent group folder — renames all requests in the group)</span></label>
-        <input type="text" name="group_folder" value="<?= h($v['group_folder']) ?>"
+
+        <?php
+        // Extract current status tag from group_folder for the dropdown
+        $grpStatusTags = ['PROGRESS','PROVISIONAL','DEPOSIT','BALANCE','BALANCE-CASH','CK','PAID','CANCELLED'];
+        $currentGrpTag = '';
+        foreach ($grpStatusTags as $t) {
+            if (str_contains($v['group_folder'], '_' . $t)) { $currentGrpTag = $t; break; }
+        }
+        ?>
+
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+          <label style="font-size:.78rem;font-weight:700;color:var(--grey-dk);white-space:nowrap;margin:0;">Folder Status:</label>
+          <select id="grp_status_select" style="font-size:.82rem;padding:4px 8px;border:1px solid var(--grey-lt);border-radius:6px;background:var(--white);">
+            <option value="">— no tag —</option>
+            <?php foreach ($grpStatusTags as $t): ?>
+              <option value="<?= h($t) ?>" <?= $currentGrpTag === $t ? 'selected' : '' ?>><?= h($t) ?></option>
+            <?php endforeach; ?>
+          </select>
+          <span style="font-size:.72rem;color:var(--grey-mid);">← changes the tag in the folder name below</span>
+        </div>
+
+        <input type="text" id="grp_folder_input" name="group_folder" value="<?= h($v['group_folder']) ?>"
                placeholder="e.g. 10_20OCT_LaSala_GRP2010(Agency-PS-Agent)_START…">
+
         <div style="margin-top:6px;">
           <label style="display:flex;align-items:center;gap:8px;font-weight:500;cursor:pointer;font-size:.82rem;color:var(--grey-dk);">
             <input type="checkbox" name="grp_skip" value="1"
@@ -567,7 +569,40 @@ function calcComm() {
 })();
 <?php endif; ?>
 
-// ── Duplicate detection ──────────────────────────────────────────
+// ── GRP folder status tag selector ──────────────────────────────────────────
+(function(){
+  const sel    = document.getElementById('grp_status_select');
+  const input  = document.getElementById('grp_folder_input');
+  if (!sel || !input) return;
+
+  const ALL_TAGS = ['PROGRESS','PROVISIONAL','DEPOSIT','BALANCE-CASH','BALANCE','CK','PAID','CANCELLED'];
+
+  // Strip any existing tag from a folder name
+  function stripTag(name) {
+    let s = name;
+    ALL_TAGS.forEach(t => { s = s.replace('_' + t, ''); });
+    return s;
+  }
+
+  // When dropdown changes → update the folder name field
+  sel.addEventListener('change', function(){
+    const base = stripTag(input.value.trim());
+    input.value = this.value ? base + '_' + this.value : base;
+  });
+
+  // When folder field is edited manually → sync the dropdown
+  input.addEventListener('input', function(){
+    const v = this.value;
+    let found = '';
+    // Check longest tags first to avoid BALANCE matching inside BALANCE-CASH
+    [...ALL_TAGS].sort((a,b) => b.length - a.length).forEach(t => {
+      if (!found && v.includes('_' + t)) found = t;
+    });
+    sel.value = found;
+  });
+})();
+
+
 (function(){
   const EXCLUDE_ID = <?= $id ?>;
   const COLORS = {
