@@ -7,9 +7,10 @@ $db = db();
 $search    = trim($_GET['q']          ?? '');
 $fstatus   = $_GET['status']          ?? '';
 $fissuer   = $_GET['issuer']          ?? '';
-$fyear     = (int)($_GET['year']      ?? date('Y'));
-$fcurr     = $_GET['currency']        ?? '';
 $freqid    = (int)($_GET['request_id'] ?? 0);
+// When filtering by request, default to all years; otherwise default to current year
+$fyear     = (int)($_GET['year'] ?? ($freqid ? 0 : date('Y')));
+$fcurr     = $_GET['currency']        ?? '';
 
 $where  = ['1=1']; $params = [];
 if ($search)  { $where[] = '(i.invoice_number LIKE ? OR i.bill_to_name LIKE ?)'; $params[] = "%$search%"; $params[] = "%$search%"; }
