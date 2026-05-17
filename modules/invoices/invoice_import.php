@@ -527,8 +527,8 @@ include 'includes/header.php';
       <?php foreach ($parsed['items'] ?? [] as $it): ?>
       <tr class="item-row">
         <td style="padding:4px 6px"><input type="text"   name="item_desc[]"  value="<?= h($it['description']) ?>" style="width:100%"></td>
-        <td style="padding:4px 6px"><input type="number" name="item_qty[]"   value="<?= h($it['quantity'])    ?>" step="0.01" style="width:100%;text-align:right" onchange="rcRow(this)"></td>
-        <td style="padding:4px 6px"><input type="number" name="item_price[]" value="<?= h($it['unit_price'])  ?>" step="0.01" style="width:100%;text-align:right" onchange="rcRow(this)"></td>
+        <td style="padding:4px 6px"><input type="number" name="item_qty[]"   value="<?= h($it['quantity'])    ?>" step="0.01" style="width:100%;text-align:right" oninput="rcRow(this)"></td>
+        <td style="padding:4px 6px"><input type="number" name="item_price[]" value="<?= h($it['unit_price'])  ?>" step="0.01" style="width:100%;text-align:right" oninput="rcRow(this)"></td>
         <td style="padding:4px 6px;text-align:right;font-weight:600" class="row-total"><?= number_format($it['line_total'],2) ?></td>
         <td style="text-align:center;padding:4px"><button type="button" onclick="delRow(this)" style="background:none;border:none;cursor:pointer;color:var(--grey-mid)">✕</button></td>
       </tr>
@@ -536,8 +536,8 @@ include 'includes/header.php';
       <?php if (!$hasItems): ?>
       <tr class="item-row">
         <td style="padding:4px 6px"><input type="text"   name="item_desc[]"  placeholder="Description" style="width:100%"></td>
-        <td style="padding:4px 6px"><input type="number" name="item_qty[]"   value="1" step="0.01" style="width:100%;text-align:right" onchange="rcRow(this)"></td>
-        <td style="padding:4px 6px"><input type="number" name="item_price[]" value="0" step="0.01" style="width:100%;text-align:right" onchange="rcRow(this)"></td>
+        <td style="padding:4px 6px"><input type="number" name="item_qty[]"   value="1" step="0.01" style="width:100%;text-align:right" oninput="rcRow(this)"></td>
+        <td style="padding:4px 6px"><input type="number" name="item_price[]" value="0" step="0.01" style="width:100%;text-align:right" oninput="rcRow(this)"></td>
         <td style="padding:4px 6px;text-align:right;font-weight:600" class="row-total">0.00</td>
         <td style="text-align:center;padding:4px"><button type="button" onclick="delRow(this)" style="background:none;border:none;cursor:pointer;color:var(--grey-mid)">✕</button></td>
       </tr>
@@ -722,8 +722,11 @@ document.addEventListener('click',e=>{
 
 /* Items */
 function rcRow(inp){
-  const tr=inp.closest('tr'),ns=tr.querySelectorAll('input[type=number]');
-  ns[2]&&(tr.querySelector('.row-total').textContent=((parseFloat(ns[0].value)||0)*(parseFloat(ns[1].value)||0)).toFixed(2));
+  const tr=inp.closest('tr');
+  const ns=tr.querySelectorAll('input[type=number]');
+  const td=tr.querySelector('.row-total');
+  if(td&&ns[0]&&ns[1])
+    td.textContent=((parseFloat(ns[0].value)||0)*(parseFloat(ns[1].value)||0)).toFixed(2);
   reTotal();
 }
 function reTotal(){
@@ -734,8 +737,8 @@ function delRow(btn){btn.closest('tr').remove();reTotal();}
 function addRow(){
   const tr=document.createElement('tr'); tr.className='item-row';
   tr.innerHTML=`<td style="padding:4px 6px"><input type="text" name="item_desc[]" placeholder="Description" style="width:100%"></td>
-    <td style="padding:4px 6px"><input type="number" name="item_qty[]" value="1" step="0.01" style="width:100%;text-align:right" onchange="rcRow(this)"></td>
-    <td style="padding:4px 6px"><input type="number" name="item_price[]" value="0" step="0.01" style="width:100%;text-align:right" onchange="rcRow(this)"></td>
+    <td style="padding:4px 6px"><input type="number" name="item_qty[]" value="1" step="0.01" style="width:100%;text-align:right" oninput="rcRow(this)"></td>
+    <td style="padding:4px 6px"><input type="number" name="item_price[]" value="0" step="0.01" style="width:100%;text-align:right" oninput="rcRow(this)"></td>
     <td style="padding:4px 6px;text-align:right;font-weight:600" class="row-total">0.00</td>
     <td style="text-align:center;padding:4px"><button type="button" onclick="delRow(this)" style="background:none;border:none;cursor:pointer;color:var(--grey-mid)">✕</button></td>`;
   document.getElementById('itemsTbody').appendChild(tr);
