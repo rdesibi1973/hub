@@ -228,6 +228,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save'
     if (empty($items)) $errors[] = 'At least one line item is required.';
 
     if (!$errors) {
+        // Debug: log all POST keys
+        error_log('invoice_import save: '.json_encode(['request_id'=>$_POST['request_id']??null,'bill_to'=>$billToName,'issue_date'=>$issueDate,'items_count'=>count($items)]));
         try {
             $db->beginTransaction();
             $issuer   = $_POST['issuer']   ?? INV_ISSUERS[0];
@@ -290,7 +292,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save'
             }
         } catch (Exception $e) {
             if ($db->inTransaction()) $db->rollBack();
-            $saveError = $e->getMessage();
+            $saveError = $e->getMessage().' (Code: '.$e->getCode().')\nPOST request_id='.($_POST['request_id']??'missing').', bill_to='.($_POST['bill_to_name']??'missing').', issue_date='.($_POST['issue_date']??'missing');
         }
     } else {
         $saveError = implode(' ', $errors);
@@ -739,6 +741,11 @@ function addRow(){
 </div>
 <?php if ($uploadError): ?>
 <div style="background:#fff0f0;border:1.5px solid var(--red);border-radius:8px;padding:12px 16px;margin-bottom:20px;color:var(--red);font-size:.85rem"><?= h($uploadError) ?></div>
+<?php endif; ?>
+<?php if ($saveError): ?>
+<div style="background:#fff0f0;border:1.5px solid var(--red);border-radius:8px;padding:12px 16px;margin-bottom:20px;color:var(--red);font-size:.88rem">
+  <strong>Save failed:</strong> <?= h($saveError) ?>
+</div>
 <?php endif; ?>
 <div class="form-card">
   <form method="post" action="invoice_import.php" enctype="multipart/form-data">
