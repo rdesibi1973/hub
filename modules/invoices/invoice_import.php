@@ -318,7 +318,7 @@ if ($parsed !== null) {
         SELECT r.id, r.practice_code, r.customer_name, r.date_received, r.status,
                r.pax, a.name AS agent_name
         FROM   requests r LEFT JOIN agents a ON r.agent_id = a.id
-        ORDER  BY r.date_received DESC LIMIT 500")->fetchAll();
+        ORDER  BY r.date_received DESC")->fetchAll();
 
     $billToSources = $db->query("
         SELECT id, nome AS name, 'agency' AS source_type, COALESCE(address,'') AS address
@@ -629,10 +629,28 @@ function skipReq(){
   document.getElementById('reqLinked').style.display='block';
   document.getElementById('reqSearchBox').style.display='none';
 }
-/* Auto-trigger search on page load with pre-filled name */
+/* Auto-trigger search + normalise row totals on page load */
 document.addEventListener('DOMContentLoaded', function(){
+  // Auto-search request
   const q = document.getElementById('reqQ');
   if(q && q.value.trim().length >= 2) filterReq(q.value, true);
+
+  // Normalise line items: if qty*price doesn't match displayed total,
+  // set qty=1 and unit_price=total so the row is self-consistent.
+  document.querySelectorAll('#itemsTbody .item-row').forEach(function(tr){
+    const ns  = tr.querySelectorAll('input[type=number]');
+    const td  = tr.querySelector('.row-total');
+    if(!ns[0]||!ns[1]||!td) return;
+    const qty   = parseFloat(ns[0].value) || 0;
+    const price = parseFloat(ns[1].value) || 0;
+    const total = parseFloat(td.textContent.replace(/,/g,'')) || 0;
+    if(total > 0 && Math.abs(qty * price - total) > 0.01){
+      // qty/price from PDF are unreliable — keep total, set qty=1
+      ns[0].value = 1;
+      ns[1].value = total.toFixed(2);
+    }
+  });
+  reTotal();
 });
 
 /* Bill To search */
