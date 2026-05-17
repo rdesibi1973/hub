@@ -72,7 +72,7 @@ include 'includes/header.php';
       <?php elseif ($invCount === 1): ?>
         <a href="../invoices/invoice_view.php?id=<?= $existingInv['id'] ?>" class="btn btn-outline">🧾 <?= h($existingInv['invoice_number']) ?></a>
       <?php else: ?>
-        <a href="../invoices/invoices.php" class="btn btn-outline">🧾 <?= $invCount ?> Invoices</a>
+        <a href="../invoices/invoices.php?request_id=<?= $r['id'] ?>" class="btn btn-outline">🧾 <?= $invCount ?> Invoices</a>
       <?php endif; ?>
     <?php endif; ?>
     <?php if ($r['dropbox_url']): ?>
