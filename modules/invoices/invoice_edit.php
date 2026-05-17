@@ -12,6 +12,21 @@ if (!$inv) { flash('Invoice not found.','error'); header('Location: invoices.php
 $items = $db->prepare("SELECT * FROM invoice_items WHERE invoice_id=? ORDER BY sort_order,id");
 $items->execute([$id]); $items = $items->fetchAll();
 
+$requests = $db->query("
+    SELECT r.id, r.practice_code, r.customer_name, r.date_received, r.status,
+           r.pax, a.name AS agent_name
+    FROM   requests r LEFT JOIN agents a ON r.agent_id = a.id
+    ORDER  BY r.date_received DESC")->fetchAll();
+
+// Current linked request info
+$linkedReq = null;
+if ($inv['request_id']) {
+    $rs = $db->prepare("SELECT r.id, r.customer_name, r.practice_code, r.date_received, r.status, a.name AS agent_name
+                        FROM requests r LEFT JOIN agents a ON r.agent_id=a.id WHERE r.id=?");
+    $rs->execute([$inv['request_id']]);
+    $linkedReq = $rs->fetch();
+}
+
 $billToList = $db->query("
     SELECT id, name, 'customer' AS source_type,
            CONCAT_WS(', ', NULLIF(address,''), NULLIF(city,''), NULLIF(country,'')) AS addr
@@ -89,7 +104,30 @@ include 'includes/header.php';
 
 <form method="POST" id="invForm">
 <input type="hidden" name="customer_id" id="customerId" value="<?= (int)($inv['customer_id'] ?? 0) ?>">
-<input type="hidden" name="request_id"  value="<?= (int)($inv['request_id'] ?? 0) ?>">
+<input type="hidden" name="request_id" id="hidReqId" value="<?= (int)($inv['request_id'] ?? 0) ?>">
+
+<!-- Link to request -->
+<div class="form-card" style="margin-bottom:20px">
+  <div class="section-label" style="margin-bottom:16px">Linked request</div>
+
+  <div id="reqLinked" style="<?= $linkedReq ? '' : 'display:none' ?>;background:#eef6ff;border:1.5px solid #b3d4f7;border-radius:8px;padding:10px 14px;margin-bottom:10px">
+    <div style="display:flex;align-items:center;justify-content:space-between">
+      <div>
+        <strong id="reqLinkedName" style="font-size:.9rem"><?= $linkedReq ? h($linkedReq['customer_name'].($linkedReq['practice_code']?' · '.$linkedReq['practice_code']:'')) : '' ?></strong>
+        <div id="reqLinkedSub" style="font-size:.75rem;color:var(--grey-mid)"><?= $linkedReq ? h(implode(' · ', array_filter([$linkedReq['date_received'],$linkedReq['status'],$linkedReq['agent_name']?'Agent: '.$linkedReq['agent_name']:'']))) : '' ?></div>
+      </div>
+      <button type="button" onclick="clearReq()" style="background:none;border:none;cursor:pointer;color:var(--grey-mid);font-size:1.1rem">✕</button>
+    </div>
+  </div>
+
+  <div id="reqSearchBox" style="<?= $linkedReq ? 'display:none' : '' ?>">
+    <input type="text" id="reqQ" placeholder="Search by customer name or practice code…"
+           oninput="filterReq(this.value)" autocomplete="off"
+           style="width:100%;padding:9px 12px;border:1.5px solid var(--grey-lt);border-radius:7px;font-size:.88rem">
+    <div id="reqDrop" style="display:none;position:absolute;left:0;right:0;background:#fff;border:1.5px solid var(--grey-lt);border-radius:0 0 8px 8px;z-index:200;max-height:220px;overflow-y:auto;box-shadow:0 4px 16px rgba(0,0,0,.1)"></div>
+    <div style="margin-top:6px;font-size:.75rem;color:var(--grey-mid)">Leave empty to save without linking.</div>
+  </div>
+</div>
 
 <div class="form-card">
 
@@ -286,4 +324,42 @@ addItem(<?= json_encode($item['description']) ?>, <?= (float)$item['quantity'] ?
 <?php endforeach; ?>
 </script>
 
+
+<script>
+const REQUESTS_EDIT = <?= json_encode($requests) ?>;
+function escH(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');}
+function filterReq(q){
+  const drop=document.getElementById('reqDrop');
+  if(q.trim().length<2){drop.style.display='none';return;}
+  const ql=q.trim().toLowerCase();
+  const ms=REQUESTS_EDIT.filter(r=>
+    r.customer_name.toLowerCase().includes(ql)||(r.practice_code||'').toLowerCase().includes(ql)
+  ).slice(0,25);
+  if(ms.length===1){selReq(ms[0]);return;}
+  drop.innerHTML=ms.length
+    ?ms.map(r=>`<div onclick='selReq(${JSON.stringify(r)})' style="padding:9px 14px;cursor:pointer;border-bottom:1px solid var(--grey-lt);font-size:.85rem" onmouseenter="this.style.background='var(--off-white)'" onmouseleave="this.style.background=''">
+        <strong>${escH(r.customer_name)}</strong>${r.practice_code?' <span style="color:var(--grey-mid)">· '+escH(r.practice_code)+'</span>':''}
+        <div style="font-size:.75rem;color:var(--grey-mid)">${[r.date_received,r.status,r.agent_name?'Agent: '+r.agent_name:''].filter(Boolean).join(' · ')}</div>
+      </div>`).join('')
+    :'<div style="padding:10px 14px;font-size:.82rem;color:var(--grey-mid)">No results</div>';
+  drop.style.display='block';
+}
+function selReq(r){
+  document.getElementById('hidReqId').value=r.id;
+  document.getElementById('reqLinkedName').textContent=r.customer_name+(r.practice_code?' · '+r.practice_code:'');
+  document.getElementById('reqLinkedSub').textContent=[r.date_received,r.status,r.agent_name?'Agent: '+r.agent_name:''].filter(Boolean).join(' · ');
+  document.getElementById('reqLinked').style.display='block';
+  document.getElementById('reqSearchBox').style.display='none';
+  document.getElementById('reqDrop').style.display='none';
+}
+function clearReq(){
+  document.getElementById('hidReqId').value='';
+  document.getElementById('reqLinked').style.display='none';
+  document.getElementById('reqSearchBox').style.display='';
+  document.getElementById('reqQ').value='';
+}
+document.addEventListener('click',e=>{
+  if(!e.target.closest('#reqSearchBox'))document.getElementById('reqDrop').style.display='none';
+});
+</script>
 <?php include 'includes/footer.php'; ?>
