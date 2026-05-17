@@ -253,6 +253,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save'
                 trim($_POST['terms'] ?? 'Due on Receipt'),
                 trim($_POST['notes'] ?? '') ?: INV_DEFAULT_NOTES,
                 trim($_POST['terms_conditions'] ?? '') ?: INV_DEFAULT_TC,
+                $uid,
             ]);
             $invId = (int)$db->lastInsertId();
 
