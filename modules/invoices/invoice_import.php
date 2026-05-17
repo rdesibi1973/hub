@@ -262,13 +262,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save'
             foreach ($items as $it)
                 $ist->execute([$invId, $sort++, $it['description'], $it['quantity'], $it['unit_price'], $it['line_total']]);
 
-            $payAmt = round((float)($_POST['payment_amount'] ?? 0), 2);
-            if ($payAmt > 0) {
-                $pm = $_POST['payment_method'] ?? 'Bank Transfer';
-                if (!in_array($pm, INV_METHODS)) $pm = 'Bank Transfer';
-                $db->prepare("INSERT INTO invoice_payments (invoice_id,payment_date,amount,method,reference,notes) VALUES (?,?,?,?,?,?)")
-                   ->execute([$invId, $_POST['payment_date'] ?: $issueDate, $payAmt, $pm,
-                              trim($_POST['payment_ref'] ?? '') ?: null, 'Imported from Zoho PDF']);
+            if (isset($_POST['has_payment'])) {
+                $payAmt = round((float)($_POST['payment_amount'] ?? 0), 2);
+                // If checkbox ticked but amount is 0, use the invoice total
+                if ($payAmt <= 0) {
+                    $s = $db->prepare("SELECT COALESCE(SUM(line_total),0) FROM invoice_items WHERE invoice_id=?");
+                    $s->execute([$invId]);
+                    $payAmt = round((float)$s->fetchColumn(), 2);
+                }
+                if ($payAmt > 0) {
+                    $pm = $_POST['payment_method'] ?? 'Bank Transfer';
+                    if (!in_array($pm, INV_METHODS)) $pm = 'Bank Transfer';
+                    $db->prepare("INSERT INTO invoice_payments (invoice_id,payment_date,amount,method,reference,notes) VALUES (?,?,?,?,?,?)")
+                       ->execute([$invId, $_POST['payment_date'] ?: $issueDate, $payAmt, $pm,
+                                  trim($_POST['payment_ref'] ?? '') ?: null, 'Imported from Zoho PDF']);
+                }
             }
 
             recalculate_invoice($db, $invId);
