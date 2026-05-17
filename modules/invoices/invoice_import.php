@@ -697,7 +697,7 @@ function rcRow(inp){
   reTotal();
 }
 function reTotal(){
-  let s=0; document.querySelectorAll('.row-total').forEach(td=>s+=parseFloat(td.textContent)||0);
+  let s=0; document.querySelectorAll('.row-total').forEach(td=>s+=parseFloat(td.textContent.replace(/,/g,''))||0);
   document.getElementById('grandTotal').textContent=s.toFixed(2);
 }
 function delRow(btn){btn.closest('tr').remove();reTotal();}
