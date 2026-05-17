@@ -431,11 +431,15 @@ include 'includes/header.php';
   </div>
 
   <div id="reqSearchBox">
-    <input type="text" id="reqQ" placeholder="Search by customer name or practice code…"
+    <input type="text" id="reqQ" placeholder="Type customer name or practice code…"
            value="<?= h($parsed['bill_to_name'] ?? '') ?>"
            oninput="filterReq(this.value)" autocomplete="off"
            style="width:100%;padding:9px 12px;border:1.5px solid var(--grey-lt);border-radius:7px;font-size:.88rem">
     <div id="reqDrop" style="display:none;position:absolute;left:0;right:0;background:#fff;border:1.5px solid var(--grey-lt);border-radius:0 0 8px 8px;z-index:200;max-height:220px;overflow-y:auto;box-shadow:0 4px 16px rgba(0,0,0,.1)"></div>
+    <div style="margin-top:8px;font-size:.78rem;color:var(--grey-mid)">
+      Tip: try surname only, or the practice code. &nbsp;·&nbsp;
+      <a href="#" onclick="skipReq();return false;" style="color:var(--grey-mid)">Skip — save without linking a request</a>
+    </div>
   </div>
 </div>
 
@@ -581,25 +585,28 @@ const REQUESTS = <?= json_encode($requests) ?>;
 const BT_SOURCES = <?= json_encode($billToSources) ?>;
 function escH(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');}
 
-/* Request search */
-function filterReq(q){
+/* Request search — fuzzy: every word in the query must appear somewhere in name or code */
+function fuzzyMatch(r, q) {
+  const haystack = (r.customer_name + ' ' + (r.practice_code||'')).toLowerCase();
+  return q.trim().toLowerCase().split(/\s+/).every(word => haystack.includes(word));
+}
+function filterReq(q, autoOpen){
   const drop=document.getElementById('reqDrop');
-  if(q.length<2){drop.style.display='none';return;}
-  const ql=q.toLowerCase();
-  const ms=REQUESTS.filter(r=>r.customer_name.toLowerCase().includes(ql)||(r.practice_code||'').toLowerCase().includes(ql)).slice(0,20);
-  drop.innerHTML=ms.length
+  if(q.trim().length < 2){ drop.style.display='none'; return; }
+  const ms = REQUESTS.filter(r => fuzzyMatch(r, q)).slice(0, 25);
+  const noRes = '<div style="padding:10px 14px;font-size:.82rem;color:var(--grey-mid)">No matching request — you can leave this unlinked.</div>';
+  drop.innerHTML = ms.length
     ? ms.map(r=>`<div onclick='selReq(${JSON.stringify(r)})' style="padding:9px 14px;cursor:pointer;border-bottom:1px solid var(--grey-lt);font-size:.85rem" onmouseenter="this.style.background='var(--off-white)'" onmouseleave="this.style.background=''">
         <strong>${escH(r.customer_name)}</strong>${r.practice_code?' <span style="color:var(--grey-mid)">· '+escH(r.practice_code)+'</span>':''}
-        <div style="font-size:.75rem;color:var(--grey-mid)">${[r.date_received,r.status,r.agent_name?'Agent: '+r.agent_name:''].filter(Boolean).join(' · ')}</div>
+        <div style="font-size:.75rem;color:var(--grey-mid)">${[r.date_received,r.status,r.pax?r.pax+' pax':'',r.agent_name?'Agent: '+r.agent_name:''].filter(Boolean).join(' · ')}</div>
       </div>`).join('')
-    : '<div style="padding:10px 14px;font-size:.82rem;color:var(--grey-mid)">No results</div>';
-  drop.style.display='block';
+    : noRes;
+  drop.style.display = 'block';
 }
 function selReq(r){
   document.getElementById('hidReqId').value=r.id;
   document.getElementById('reqLinkedName').textContent=r.customer_name+(r.practice_code?' · '+r.practice_code:'');
   document.getElementById('reqLinkedSub').textContent=[r.date_received,r.status,r.agent_name?'Agent: '+r.agent_name:''].filter(Boolean).join(' · ');
-  // Pre-fill pax from request
   document.getElementById('reqPax').value=r.pax||'';
   document.getElementById('reqLinked').style.display='block';
   document.getElementById('reqSearchBox').style.display='none';
@@ -611,6 +618,22 @@ function clearReq(){
   document.getElementById('reqSearchBox').style.display='';
   document.getElementById('reqQ').value='';
 }
+function skipReq(){
+  document.getElementById('hidReqId').value='';
+  document.getElementById('reqDrop').style.display='none';
+  document.getElementById('reqQ').value='';
+  // Show a "not linked" badge
+  document.getElementById('reqLinkedName').textContent='Not linked to any request';
+  document.getElementById('reqLinkedSub').textContent='Invoice will be saved without a request link — you can add it later from invoice_view.php';
+  document.getElementById('reqPax').closest('div').style.display='none';
+  document.getElementById('reqLinked').style.display='block';
+  document.getElementById('reqSearchBox').style.display='none';
+}
+/* Auto-trigger search on page load with pre-filled name */
+document.addEventListener('DOMContentLoaded', function(){
+  const q = document.getElementById('reqQ');
+  if(q && q.value.trim().length >= 2) filterReq(q.value, true);
+});
 
 /* Bill To search */
 function filterBT(q){
