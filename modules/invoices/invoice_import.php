@@ -278,7 +278,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save'
             if ($reqId) sync_request_value($db, $invId);
 
             $db->commit();
-            $saved = ['id' => $invId, 'number' => $invNum];
+            $saved = ['id' => $invId, 'number' => $invNum, 'request_id' => $reqId];
+            // Fetch request name for success message
+            if($reqId){
+                $rs = $db->prepare("SELECT customer_name, practice_code FROM requests WHERE id=?");
+                $rs->execute([$reqId]);
+                $saved['request_name'] = $rs->fetchColumn();
+                $rs2 = $db->prepare("SELECT practice_code FROM requests WHERE id=?");
+                $rs2->execute([$reqId]);
+                $saved['practice_code'] = $rs2->fetchColumn();
+            }
         } catch (Exception $e) {
             if ($db->inTransaction()) $db->rollBack();
             $saveError = $e->getMessage();
@@ -342,7 +351,14 @@ include 'includes/header.php';
 <div class="form-card" style="text-align:center;padding:48px 32px">
   <div style="font-size:3rem;margin-bottom:16px">✓</div>
   <h3 style="font-family:'Merriweather',serif;font-size:1.2rem;margin-bottom:8px">Invoice <?= h($saved['number']) ?> created</h3>
-  <p style="color:var(--grey-mid);font-size:.88rem;margin-bottom:28px">The invoice has been saved and is ready to view.</p>
+  <p style="color:var(--grey-mid);font-size:.88rem;margin-bottom:<?= $saved['request_id'] ? '8' : '28' ?>px">The invoice has been saved and is ready to view.</p>
+  <?php if($saved['request_id']): ?>
+  <p style="font-size:.85rem;margin-bottom:28px;color:var(--grey-dk)">
+    🔗 Linked to request <strong><?= h($saved['request_name']) ?></strong><?= $saved['practice_code'] ? ' &middot; '.h($saved['practice_code']) : '' ?>
+  </p>
+  <?php else: ?>
+  <p style="font-size:.82rem;color:var(--amber);margin-bottom:28px">⚠ Not linked to any request — you can link it from the invoice page.</p>
+  <?php endif; ?>
   <div style="display:flex;gap:12px;justify-content:center">
     <a href="invoice_view.php?id=<?= $saved['id'] ?>" class="btn btn-red">View Invoice</a>
     <a href="invoice_import.php" class="btn btn-outline">Import Another</a>
@@ -595,6 +611,9 @@ function filterReq(q, autoOpen){
   if(q.trim().length < 2){ drop.style.display='none'; return; }
   const ms = REQUESTS.filter(r => fuzzyMatch(r, q)).slice(0, 25);
   const noRes = '<div style="padding:10px 14px;font-size:.82rem;color:var(--grey-mid)">No matching request — you can leave this unlinked.</div>';
+  // Auto-select when exactly 1 match
+  if(ms.length === 1){ selReq(ms[0]); return; }
+
   drop.innerHTML = ms.length
     ? ms.map(r=>`<div onclick='selReq(${JSON.stringify(r)})' style="padding:9px 14px;cursor:pointer;border-bottom:1px solid var(--grey-lt);font-size:.85rem" onmouseenter="this.style.background='var(--off-white)'" onmouseleave="this.style.background=''">
         <strong>${escH(r.customer_name)}</strong>${r.practice_code?' <span style="color:var(--grey-mid)">· '+escH(r.practice_code)+'</span>':''}
