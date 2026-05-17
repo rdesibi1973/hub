@@ -36,6 +36,7 @@ $currentUser = current_user();
   <a href="invoices.php"         class="<?= in_array($cur,['invoices.php','invoice_add.php','invoice_edit.php','invoice_view.php']) ? 'active':'' ?>">Invoices</a>
   <a href="customers.php"        class="<?= $cur==='customers.php'       ? 'active':'' ?>">Customers</a>
   <a href="reports.php"          class="<?= $cur==='reports.php'         ? 'active':'' ?>">Reports</a>
+  <a href="invoice_import.php"  class="<?= $cur==='invoice_import.php'  ? 'active':'' ?>">Import PDF</a>
   <a href="<?= defined('BASE_URL') ? BASE_URL.'/logout.php' : '../../logout.php' ?>" class="nav-logout" style="margin-left:auto;">Logout</a>
 </nav>
 
