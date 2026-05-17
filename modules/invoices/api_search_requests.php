@@ -12,15 +12,16 @@
  */
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Headers: Content-Type, X-Hub-Token');
-header('Access-Control-Allow-Methods: GET, OPTIONS');
+header('Access-Control-Max-Age: 86400');
+header('Access-Control-Allow-Headers: Content-Type, X-Hub-Token, Authorization');
+header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { exit; }
 
 require_once __DIR__ . '/../../includes/config.php';
 require_once __DIR__ . '/../../includes/db.php';
 
 // Auth
-$token = $_SERVER['HTTP_X_HUB_TOKEN'] ?? ($_GET['api_key'] ?? '');
+$token = $_GET['api_key'] ?? ($_SERVER['HTTP_X_HUB_TOKEN'] ?? '');
 $validKey = defined('API_IMPORT_KEY') ? API_IMPORT_KEY : '';
 if (!$validKey || $token !== $validKey) {
     http_response_code(401);

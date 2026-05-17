@@ -32,7 +32,8 @@
  */
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Headers: Content-Type, X-Hub-Token');
+header('Access-Control-Max-Age: 86400');
+header('Access-Control-Allow-Headers: Content-Type, X-Hub-Token, Authorization');
 header('Access-Control-Allow-Methods: POST, OPTIONS');
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { exit; }
 
@@ -41,7 +42,7 @@ require_once __DIR__ . '/../../includes/db.php';
 require_once __DIR__ . '/config.php';   // generate_invoice_number, recalculate_invoice, sync_request_value
 
 // Auth
-$token = $_SERVER['HTTP_X_HUB_TOKEN'] ?? '';
+$token = $_GET['api_key'] ?? ($_SERVER['HTTP_X_HUB_TOKEN'] ?? '');
 $validKey = defined('API_IMPORT_KEY') ? API_IMPORT_KEY : '';
 if (!$validKey || $token !== $validKey) {
     http_response_code(401);
