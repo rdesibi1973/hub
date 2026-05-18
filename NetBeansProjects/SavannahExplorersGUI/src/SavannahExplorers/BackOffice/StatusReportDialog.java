@@ -22,7 +22,7 @@ public class StatusReportDialog extends JDialog {
 
     // ── Status lists ──────────────────────────────────────────────────────────
     private static final String[] BOOKING_STATUSES  = {
-        "PROGRESS", "PROVISIONAL", "DEPOSIT", "BALANCE-CASH", "BALANCE", "CANCELLED", "CK"
+        "PROGRESS", "PROVISIONAL", "DEPOSIT", "BALANCE-CASH", "BALANCE", "PAID", "CANCELLED"
     };
     private static final String[] PAYMENT_STATUSES  = {
         "DEPOSIT", "BALANCE-CASH", "BALANCE"
@@ -41,15 +41,15 @@ public class StatusReportDialog extends JDialog {
         STATUS_BG.put("DEPOSIT",      new Color(0xEDE7F6));
         STATUS_BG.put("BALANCE",      new Color(0xFFF8E1));
         STATUS_BG.put("BALANCE-CASH", new Color(0xFFEBEE));
+        STATUS_BG.put("PAID",         new Color(0xE8F5E9));
         STATUS_BG.put("CANCELLED",    new Color(0xF5F5F5));
-        STATUS_BG.put("CK",           new Color(0xE8F5E9));
         STATUS_FG.put("PROGRESS",     new Color(0x1D6FA4));
         STATUS_FG.put("PROVISIONAL",  new Color(0xB45309));
         STATUS_FG.put("DEPOSIT",      new Color(0x6A1B9A));
         STATUS_FG.put("BALANCE",      new Color(0xD97706));
         STATUS_FG.put("BALANCE-CASH", new Color(0xC0211B));
+        STATUS_FG.put("PAID",         new Color(0x1A6B3A));
         STATUS_FG.put("CANCELLED",    new Color(0x6B7280));
-        STATUS_FG.put("CK",           new Color(0x1A6B3A));
     }
     private static final Color MONTH_HEADER_BG = new Color(0x1A1A2E);
     private static final Color MONTH_HEADER_FG = Color.WHITE;
