@@ -95,6 +95,23 @@ if (!$row) {
     $row = $stmt2->fetch(PDO::FETCH_ASSOC);
 }
 
+// Fallback 4: GRP parent folder — search by group_folder column.
+// For group bookings the practice_code is the subfolder, but the rename
+// is performed on the parent (group_folder).  When found this way we must
+// update group_folder instead of practice_code.
+$matchedViaGroupFolder = false;
+if (!$row) {
+    $stmtGrp = $db->prepare(
+        'SELECT id, customer_name, status, dropbox_url
+         FROM requests WHERE group_folder = ? ORDER BY id DESC LIMIT 1'
+    );
+    $stmtGrp->execute([$oldFolderName]);
+    $row = $stmtGrp->fetch(PDO::FETCH_ASSOC);
+    if ($row) {
+        $matchedViaGroupFolder = true;
+    }
+}
+
 if (!$row) {
     http_response_code(404);
     echo json_encode([
@@ -123,10 +140,18 @@ if ($newDropboxUrl === '') {
 }
 
 // ── Update ────────────────────────────────────────────────────────────────────
-$update = $db->prepare(
-    'UPDATE requests SET practice_code = ?, dropbox_url = ? WHERE id = ?'
-);
-$update->execute([$newFolderName, $newDropboxUrl, (int)$row['id']]);
+if ($matchedViaGroupFolder) {
+    // GRP parent folder rename: update group_folder, leave practice_code untouched
+    $update = $db->prepare(
+        'UPDATE requests SET group_folder = ?, dropbox_url = ? WHERE id = ?'
+    );
+    $update->execute([$newFolderName, $newDropboxUrl, (int)$row['id']]);
+} else {
+    $update = $db->prepare(
+        'UPDATE requests SET practice_code = ?, dropbox_url = ? WHERE id = ?'
+    );
+    $update->execute([$newFolderName, $newDropboxUrl, (int)$row['id']]);
+}
 
 echo json_encode([
     'success'       => true,
@@ -134,5 +159,6 @@ echo json_encode([
     'customer_name' => $row['customer_name'],
     'old_folder'    => $oldFolderName,
     'new_folder'    => $newFolderName,
+    'updated_field' => $matchedViaGroupFolder ? 'group_folder' : 'practice_code',
     'dropbox_url'   => $newDropboxUrl,
 ]);
