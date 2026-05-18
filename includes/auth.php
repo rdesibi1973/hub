@@ -28,10 +28,19 @@ function require_login(): void {
         header('Location: ' . BASE_URL . '/login.php' . ($next ? "?next=$next" : ''));
         exit;
     }
-    // If session is stale (role_name missing), reload user data from DB
+    // If session is stale (role_name missing), reload user data from DB.
+    // Use $pdo global (hub pages) or db() function (leads module) — whichever is available.
     if (empty($_SESSION['role_name'])) {
-        global $pdo;
-        $stmt = $pdo->prepare('
+        $conn = $GLOBALS['pdo'] ?? (function_exists('db') ? db() : null);
+        if ($conn === null) {
+            // No DB connection available — force re-login
+            $_SESSION = [];
+            session_destroy();
+            $next = urlencode($_SERVER['REQUEST_URI'] ?? '');
+            header('Location: ' . BASE_URL . '/login.php' . ($next ? "?next=$next" : ''));
+            exit;
+        }
+        $stmt = $conn->prepare('
             SELECT u.*, r.name AS role_name
             FROM   users u
             JOIN   roles r ON u.role_id = r.id
@@ -48,7 +57,7 @@ function require_login(): void {
             header('Location: ' . BASE_URL . '/login.php' . ($next ? "?next=$next" : ''));
             exit;
         }
-        $ps = $pdo->prepare('SELECT module FROM role_permissions WHERE role_id = ?');
+        $ps = $conn->prepare('SELECT module FROM role_permissions WHERE role_id = ?');
         $ps->execute([$user['role_id']]);
         $_SESSION['username']    = $user['username'];
         $_SESSION['full_name']   = $user['full_name'];
