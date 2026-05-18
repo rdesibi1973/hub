@@ -48,7 +48,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     // Staff cannot set status — always force Inquiry
     if ($isRestricted) {
-        $v['status'] = 'Inquiry';
+        $v['status']         = 'Inquiry';
+        $v['value_usd']      = '';
+        $v['commission_pct'] = '';
+        $v['commission_usd'] = '';
+        $v['date_paid']      = '';
     }
 
     if ($v['value_usd'] !== '' && $v['commission_pct'] !== '') {
@@ -329,6 +333,7 @@ include 'includes/header.php';
 
     </div>
 
+    <?php if (!$isRestricted): ?>
     <div class="form-section-title">Financials</div>
     <div class="form-grid">
 
@@ -361,6 +366,7 @@ include 'includes/header.php';
       </div>
 
     </div>
+    <?php endif; ?>
 
     <div class="form-section-title">Notes</div>
     <div class="form-grid">
