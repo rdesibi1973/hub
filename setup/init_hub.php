@@ -67,10 +67,11 @@ try {
 
     // ── Seed roles ─────────────────────────────────────────────
     $roles = [
-        ['admin',       'Full access to all modules including user management', ['hub','operations','leave','leads','admin']],
-        ['manager',     'Access to hub, operations and leave calendar',         ['hub','operations','leave']],
-        ['staff',       'Access to hub and operations only',                    ['hub','operations']],
-        ['accountant',  'Full edit access to leads for financial management',   ['hub','leads']],
+        ['admin',       'Full access to all modules including user management',       ['hub','operations','leave','leads','admin']],
+        ['manager',     'Access to hub, operations hub and leave calendar',          ['hub','operations','leave']],
+        ['operations',  'Access to Operations Hub (Arrivals & Departures) only',     ['hub','operations']],
+        ['staff',       'Access to hub only (no Operations Hub)',                    ['hub']],
+        ['accountant',  'Full edit access to leads for financial management',        ['hub','leads']],
     ];
 
     $ins_role = $pdo->prepare('INSERT IGNORE INTO roles (name, description) VALUES (?, ?)');
