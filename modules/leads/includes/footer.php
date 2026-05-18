@@ -44,6 +44,12 @@ function seConfirm(title, message) {
 async function deleteRequest(id, name, folder, status, redirect, grpFolder) {
   if (!confirm('Delete request for "' + name + '"?\n\nThis action cannot be undone.')) return;
 
+  // Confirmed bookings cannot be deleted — status changes are done via the Java GUI
+  if (status === 'Booked') {
+    alert('Cannot delete a confirmed booking (Booked).\n\nTo cancel, change the folder status to CANCELLED manually via the Java GUI.');
+    return;
+  }
+
   var deleteDropbox = false;
   if (folder) {
     var dbxDir = (status === 'Booked') ? '001_Safari' : '2026';
@@ -85,6 +91,13 @@ async function deleteSelectedRequests(folderMap, statusMap) {
   if (!ids.length) { alert('No requests selected.'); return; }
 
   if (!confirm('Delete ' + ids.length + ' selected request' + (ids.length > 1 ? 's' : '') + '?\n\nThis action cannot be undone.')) return;
+
+  // Block if any selected request is Booked
+  var bookedNames = ids.filter(function(id) { return statusMap[id] === 'Booked'; });
+  if (bookedNames.length) {
+    alert('Cannot delete confirmed (Booked) requests.\n\nTo cancel a booking, change the folder status to CANCELLED manually via the Java GUI.');
+    return;
+  }
 
   var hasFolders = ids.some(function(id) { return folderMap[id]; });
   var deleteDropbox = false;

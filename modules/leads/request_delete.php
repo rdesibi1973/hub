@@ -19,6 +19,26 @@ if (!$ids) {
 $db = db();
 $dropboxResults = [];
 
+// ── Block deletion of Booked requests ────────────────────────────────────────
+// Confirmed bookings (status = Booked) live in 001_Safari and must not be
+// deleted from the hub.  Status changes (e.g. BALANCE → CANCELLED) are done
+// manually via the Java GUI.
+$placeholders = implode(',', array_fill(0, count($ids), '?'));
+$bookedRows = $db->prepare(
+    "SELECT id, customer_name FROM requests WHERE id IN ($placeholders) AND status = 'Booked'"
+);
+$bookedRows->execute(array_values($ids));
+$booked = $bookedRows->fetchAll(PDO::FETCH_ASSOC);
+if ($booked) {
+    $names = implode(', ', array_column($booked, 'customer_name'));
+    echo json_encode([
+        'error'  => 'Cannot delete confirmed (Booked) requests: ' . $names
+                  . '. To cancel a booking, change the folder status to CANCELLED manually via the Java GUI.',
+        'booked' => array_column($booked, 'id'),
+    ]);
+    exit;
+}
+
 // ── Optional: delete Dropbox folder(s) first ─────────────────────────────────
 if ($deleteDropbox) {
     try {
