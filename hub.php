@@ -199,6 +199,7 @@ include __DIR__ . '/includes/layout_header.php';
       <div><div class="lc-label">Age Calculator</div><div class="lc-sub">calculator.net</div></div>
     </a>
 
+    <?php if (!in_array($_cu['role_name'], ['staff', 'operations'])): ?>
     <a class="link-card lc-orange" href="https://invoice.zoho.com/app/800553733#/home/dashboard" target="_blank">
       <div class="lc-icon" style="background:none;padding:0;">
         <svg viewBox="0 0 36 36" xmlns="http://www.w3.org/2000/svg" width="36" height="36">
@@ -208,6 +209,7 @@ include __DIR__ . '/includes/layout_header.php';
       </div>
       <div><div class="lc-label">Zoho</div><div class="lc-sub">Invoice Dashboard</div></div>
     </a>
+    <?php endif; ?>
 
     <a class="link-card lc-navy" href="https://www.xe.com/currencyconverter/" target="_blank">
       <div class="lc-icon" style="background:none;padding:0;">
