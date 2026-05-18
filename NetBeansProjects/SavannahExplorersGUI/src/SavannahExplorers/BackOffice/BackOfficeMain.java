@@ -1192,29 +1192,35 @@ public class BackOfficeMain extends javax.swing.JFrame {
         String newFolderName;
 
         if ("PAID".equals(fromStatus)) {
-            // FROM=PAID: folder must not already contain any status tag
-            String[] allStatuses = {"PROGRESS","PROVISIONAL","DEPOSIT","BALANCE","BALANCE-CASH","CANCELLED"};
-            String foundTag = null;
-            for (String s : allStatuses) {
-                if (folderName.contains("_" + s)) { foundTag = s; break; }
+            // FROM=PAID: folder may have _PAID tag (normal) or no tag (legacy folders marked paid without tag)
+            if (folderName.contains("_PAID")) {
+                // Normal: replace _PAID with _toStatus
+                newFolderName = folderName.replace("_PAID", "_" + toStatus);
+            } else {
+                // Legacy: no tag present — make sure there is no other status tag either
+                String[] allStatuses = {"PROGRESS","PROVISIONAL","DEPOSIT","BALANCE","BALANCE-CASH","CANCELLED"};
+                String foundTag = null;
+                for (String s : allStatuses) {
+                    if (folderName.contains("_" + s)) { foundTag = s; break; }
+                }
+                if (foundTag != null) {
+                    javax.swing.JOptionPane.showMessageDialog(this,
+                        "The folder already contains the status \"_" + foundTag + "\":\n" + folderName,
+                        "Rename", javax.swing.JOptionPane.WARNING_MESSAGE);
+                    return;
+                }
+                // Safe to append
+                newFolderName = folderName + "_" + toStatus;
             }
-            if (foundTag != null) {
-                javax.swing.JOptionPane.showMessageDialog(this,
-                    "The folder already contains the status \"_" + foundTag + "\":\n" + folderName,
-                    "Rename", javax.swing.JOptionPane.WARNING_MESSAGE);
-                return;
-            }
-            // Safe to append
-            newFolderName = folderName + "_" + toStatus;
         } else if ("PAID".equals(toStatus)) {
-            // TO=PAID: remove _FROM tag, nothing added
+            // TO=PAID: replace _fromStatus with _PAID
             if (!folderName.contains("_" + fromStatus)) {
                 javax.swing.JOptionPane.showMessageDialog(this,
                     "The string \"_" + fromStatus + "\" was not found in:\n" + folderName,
                     "Rename", javax.swing.JOptionPane.WARNING_MESSAGE);
                 return;
             }
-            newFolderName = folderName.replace("_" + fromStatus, "");
+            newFolderName = folderName.replace("_" + fromStatus, "_PAID");
         } else {
             // Normal case: replace _FROM with _TO
             if (!folderName.contains("_" + fromStatus)) {
