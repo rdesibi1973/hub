@@ -35,23 +35,26 @@ if ($deleteDropbox) {
             $grpFolder = $row['group_folder']  ?? '';
             $dbxUrl    = $row['dropbox_url']   ?? '';
 
-            // Derive path from stored dropbox_url (most reliable — exact location).
-            // URL format: https://www.dropbox.com/home/001_Safari/FolderName
-            // → strip the web prefix and URL-decode to get the API path.
-            if ($dbxUrl) {
+            // Derive the Dropbox API path to delete.
+            //
+            // GRP bookings: the physical folder on Dropbox is the PARENT group
+            // folder (group_folder), not the subfolder stored in practice_code.
+            // dropbox_url may point to the subfolder only, so we must build the
+            // path explicitly when group_folder is present.
+            $year = date('Y', strtotime($row['date_received'] ?? 'now'));
+            $dir  = ($row['status'] === 'Booked') ? '001_Safari' : $year;
+
+            if ($grpFolder !== '') {
+                // GRP: delete the parent folder (contains all sub-folders for the group)
+                $dbxPath = '/' . $dir . '/' . $grpFolder;
+            } elseif ($dbxUrl) {
+                // Non-GRP with stored URL: strip web prefix and URL-decode
                 $dbxPath = rawurldecode(
                     preg_replace('#^https://www\.dropbox\.com/home#i', '', $dbxUrl)
                 );
             } elseif ($folder !== '') {
-                // Fallback: construct from practice_code (GRP-aware, year from date_received)
-                if ($row['status'] === 'Booked') {
-                    $dbxPath = $grpFolder
-                        ? '/001_Safari/' . $grpFolder . '/' . $folder
-                        : '/001_Safari/' . $folder;
-                } else {
-                    $year    = date('Y', strtotime($row['date_received'] ?? 'now'));
-                    $dbxPath = '/' . $year . '/' . $folder;
-                }
+                // Non-GRP fallback: construct from practice_code
+                $dbxPath = '/' . $dir . '/' . $folder;
             } else {
                 $dropboxResults[$row['id']] = 'skipped (no folder name)';
                 continue;
