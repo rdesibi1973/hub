@@ -66,10 +66,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if (!$errors) {
         $db->prepare("UPDATE invoices SET
-            customer_id=?, bill_to_name=?, bill_to_address=?, issuer=?, currency=?,
+            customer_id=?, request_id=?, bill_to_name=?, bill_to_address=?, issuer=?, currency=?,
             issue_date=?, due_date=?, terms=?, notes=?, terms_conditions=?, updated_at=NOW()
             WHERE id=?")
-           ->execute([$customerId,$billToName,$billToAddr?:null,$issuer,$currency,
+           ->execute([$customerId,$reqId,$billToName,$billToAddr?:null,$issuer,$currency,
                       $issueDate,$dueDate,$terms,$notes?:null,$tc?:null,$id]);
 
         // Replace items
