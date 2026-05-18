@@ -1,7 +1,4 @@
 <?php
-ini_set('display_errors', '1');
-ini_set('display_startup_errors', '1');
-error_reporting(E_ALL);
 require_once 'config.php';
 $pageTitle = 'Incoming Leads';
 $db = db();
@@ -37,7 +34,7 @@ $leads = $leads->fetchAll();
 $emailMatchMap = []; // email (lower) => [['id'=>...,'name'=>...], ...]
 $stagedEmails  = array_filter(array_column($leads, 'email'));
 if ($stagedEmails) {
-    $lower   = array_map('strtolower', $stagedEmails);
+    $lower   = array_values(array_map('strtolower', $stagedEmails));
     $pholds  = implode(',', array_fill(0, count($lower), '?'));
     $emRows  = $db->prepare(
         "SELECT id, customer_name, email FROM requests WHERE LOWER(email) IN ($pholds) ORDER BY id DESC"
