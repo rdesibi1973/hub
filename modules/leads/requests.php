@@ -11,7 +11,12 @@ $staffAgentId = $isStaff ? getStaffAgentId() : 0;
 if (session_status() === PHP_SESSION_NONE) session_start();
 
 // Default agent: current user's linked agent (if any), so "My Requests" opens pre-filtered
-$myAgentId = (int)($_SESSION['agent_id'] ?? $GLOBALS['_cu']['agent_id'] ?? 0);
+$myAgentId = 0;
+if (!empty($_SESSION['user_id'])) {
+    $agStmt = $db->prepare('SELECT agent_id FROM users WHERE id = ? LIMIT 1');
+    $agStmt->execute([(int)$_SESSION['user_id']]);
+    $myAgentId = (int)($agStmt->fetchColumn() ?: 0);
+}
 
 // Clear filters → restore personal defaults
 if (isset($_GET['clear'])) {
