@@ -124,11 +124,13 @@ $extra_css = '
 
   <!-- Drop zone -->
   <div class="drop-zone" id="dropZone" onclick="document.getElementById('fileInput').click()">
-    <div class="dz-icon">🦁</div>
+    <div style="font-size:2.2rem;margin-bottom:10px;">📂</div>
     <h3>Drop Safari Calc file here</h3>
     <p>or click to browse — accepts .xlsx / .xls</p>
     <input type="file" id="fileInput" accept=".xlsx,.xls">
   </div>
+
+  <div id="sheet-error" style="display:none;margin-top:16px;" class="flash error"></div>
 
   <!-- Preview section (hidden until parsed) -->
   <div id="preview-section">
@@ -251,6 +253,47 @@ $extra_css = '
   </div>
 </div>
 
+<!-- ── Edit Traveler Modal ──────────────────────────────────────────────────── -->
+<div class="modal-overlay" id="edit-modal">
+  <div class="modal-box">
+    <h3>✏️ Edit Traveler</h3>
+    <input type="hidden" id="edit-id">
+    <div class="form-row" style="margin-bottom:16px;">
+      <div class="form-group" style="margin-bottom:0;">
+        <label class="form-label">Full Name</label>
+        <input type="text" class="form-control" id="edit-name">
+      </div>
+      <div class="form-group" style="margin-bottom:0;">
+        <label class="form-label">Title</label>
+        <select class="form-control" id="edit-title">
+          <option value="">—</option>
+          <option value="MR">MR</option>
+          <option value="MRS">MRS</option>
+          <option value="MS">MS</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-row" style="margin-bottom:16px;">
+      <div class="form-group" style="margin-bottom:0;">
+        <label class="form-label">Date of Birth</label>
+        <input type="date" class="form-control" id="edit-dob">
+      </div>
+      <div class="form-group" style="margin-bottom:0;">
+        <label class="form-label">Passport #</label>
+        <input type="text" class="form-control" id="edit-passport">
+      </div>
+    </div>
+    <div class="form-group" style="margin-bottom:20px;">
+      <label class="form-label">Country / Nationality</label>
+      <input type="text" class="form-control" id="edit-country">
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeEditModal()">Cancel</button>
+      <button class="btn btn-primary" id="edit-save-btn" onclick="saveEditModal()">💾 Save</button>
+    </div>
+  </div>
+</div>
+
 <!-- Toast -->
 <div class="toast" id="toast"></div>
 
@@ -311,12 +354,17 @@ function handleFile(file) {
 }
 
 function selectSheet(wb) {
+    document.getElementById('sheet-error').style.display = 'none';
     if (wb.SheetNames.length === 1) return wb.Sheets[wb.SheetNames[0]];
-    const recapIdx = wb.SheetNames.findIndex(n => n.toUpperCase().includes("RECAP"));
+    const recapIdx = wb.SheetNames.findIndex(n => n.toUpperCase().includes('RECAP'));
     if (recapIdx >= 0) return wb.Sheets[wb.SheetNames[recapIdx]];
-    const confIdx  = wb.SheetNames.findIndex(n => n.toUpperCase().includes("CONF"));
+    const confIdx  = wb.SheetNames.findIndex(n => n.toUpperCase().includes('CONF'));
     if (confIdx  >= 0) return wb.Sheets[wb.SheetNames[confIdx]];
-    showToast("Multiple sheets found but none named RECAP or CONF. Rename a sheet and retry.", "error");
+    const names = wb.SheetNames.join(', ');
+    const el = document.getElementById('sheet-error');
+    el.textContent = `This file has multiple sheets (${names}) but none is named RECAP or CONF. Please rename the correct sheet and try again.`;
+    el.style.display = 'block';
+    el.scrollIntoView({behavior: 'smooth', block: 'center'});
     return null;
 }
 
@@ -646,16 +694,17 @@ function renderGroups(groups) {
     container.innerHTML = groups.map(g => {
         const dateRange = [fmtDisplay(g.coverage_start), fmtDisplay(g.coverage_end)].filter(Boolean).join(" → ");
         const travelerRows = g.travelers.map(t => `
-            <tr>
+            <tr id="tr-${t.id}">
               <td class="td-name">${esc(t.full_name)}</td>
               <td>${esc(t.title)}</td>
               <td>${fmtDisplay(t.dob)}</td>
-              <td>${esc(t.passport_number || "—")}</td>
-              <td>${esc(t.country || "—")}</td>
-              <td>
-                <button class="btn btn-danger btn-sm" onclick="deleteTraveler(${t.id}, this)">✕</button>
+              <td>${esc(t.passport_number || '—')}</td>
+              <td>${esc(t.country || '—')}</td>
+              <td style="white-space:nowrap;">
+                <button class="btn btn-secondary btn-sm" onclick='openEditModal(${JSON.stringify(t)})'>✏️</button>
+                <button class="btn btn-danger btn-sm" onclick="deleteTraveler(${t.id}, this)" style="margin-left:4px;">✕</button>
               </td>
-            </tr>`).join("");
+            </tr>`).join('');
 
         return `
         <div class="group-card">
@@ -740,6 +789,60 @@ function downloadReport() {
     if (!from || !to) { showToast("Please select both From and To dates.", "error"); return; }
     if (from > to)    { showToast("From date must be before To date.", "error"); return; }
     window.location.href = `api/medivac_report.php?from=${from}&to=${to}`;
+}
+
+// ── Edit Modal ────────────────────────────────────────────────────────────────
+function openEditModal(t) {
+    document.getElementById('edit-id').value       = t.id;
+    document.getElementById('edit-name').value     = t.full_name    || '';
+    document.getElementById('edit-title').value    = t.title        || '';
+    document.getElementById('edit-dob').value      = t.dob          || '';
+    document.getElementById('edit-passport').value = t.passport_number || '';
+    document.getElementById('edit-country').value  = t.country      || '';
+    document.getElementById('edit-modal').classList.add('open');
+}
+
+function closeEditModal() {
+    document.getElementById('edit-modal').classList.remove('open');
+}
+
+async function saveEditModal() {
+    const id = parseInt(document.getElementById('edit-id').value);
+    const payload = {
+        id,
+        full_name:       document.getElementById('edit-name').value.trim(),
+        title:           document.getElementById('edit-title').value,
+        dob:             document.getElementById('edit-dob').value || null,
+        passport_number: document.getElementById('edit-passport').value.trim(),
+        country:         document.getElementById('edit-country').value.trim(),
+    };
+    if (!payload.full_name) { showToast('Name is required.', 'error'); return; }
+
+    const btn = document.getElementById('edit-save-btn');
+    btn.disabled = true; btn.textContent = 'Saving…';
+    try {
+        const r    = await fetch('api/medivac_update.php', {
+            method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)
+        });
+        const data = await r.json();
+        if (data.ok) {
+            // Update the row in the DOM
+            const tr = document.getElementById('tr-' + id);
+            if (tr) {
+                const cells = tr.querySelectorAll('td');
+                cells[0].textContent = payload.full_name;
+                cells[1].textContent = payload.title;
+                cells[2].textContent = fmtDisplay(payload.dob);
+                cells[3].textContent = payload.passport_number || '—';
+                cells[4].textContent = payload.country || '—';
+            }
+            closeEditModal();
+            showToast('Traveler updated.', 'success');
+        } else {
+            showToast('Error: ' + (data.error || ''), 'error');
+        }
+    } catch(ex) { showToast('Network error.', 'error'); }
+    finally { btn.disabled = false; btn.textContent = '💾 Save'; }
 }
 
 // ── Toast / Utilities ─────────────────────────────────────────────────────────
