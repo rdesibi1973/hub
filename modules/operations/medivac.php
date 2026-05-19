@@ -207,6 +207,10 @@ $extra_css = '
     </div>
     <button class="btn btn-primary btn-sm" onclick="loadRecords()">🔍 Search</button>
     <button class="btn btn-secondary btn-sm" onclick="clearRecordFilters()">Reset</button>
+    <label style="display:flex;align-items:center;gap:7px;font-size:.78rem;font-weight:600;color:var(--grey-dk);cursor:pointer;padding:6px 0;">
+      <input type="checkbox" id="rec-archive" onchange="loadRecords()" style="width:16px;height:16px;accent-color:var(--amber);cursor:pointer;">
+      Search in Archive
+    </label>
     <button class="btn btn-secondary btn-sm" id="btn-archive-expired"
             onclick="archiveExpired()"
             style="margin-left:auto;background:var(--amber-lt);color:#7A4F01;border:1px solid #E87722;"
@@ -672,36 +676,40 @@ let _recordsTimer = null;
 function debounceRecords() { clearTimeout(_recordsTimer); _recordsTimer = setTimeout(loadRecords, 400); }
 
 async function loadRecords() {
-    const from   = document.getElementById("rec-from").value;
-    const to     = document.getElementById("rec-to").value;
-    const search = document.getElementById("rec-search").value.trim();
+    const from    = document.getElementById("rec-from").value;
+    const to      = document.getElementById("rec-to").value;
+    const search  = document.getElementById("rec-search").value.trim();
+    const archive = document.getElementById("rec-archive").checked;
 
     const params = new URLSearchParams();
-    if (from)   params.set("from",   from);
-    if (to)     params.set("to",     to);
-    if (search) params.set("q",      search);
+    if (from)    params.set("from",    from);
+    if (to)      params.set("to",      to);
+    if (search)  params.set("q",       search);
+    if (archive) params.set("archive", "1");
 
     const container = document.getElementById("records-container");
-    container.innerHTML = "<div class=\"empty-state\"><div class=\"es-icon\">⏳</div><p>Loading…</p></div>";
+    const label = archive ? "Searching archive…" : "Loading…";
+    container.innerHTML = `<div class="empty-state"><div class="es-icon">⏳</div><p>${label}</p></div>`;
 
     try {
         const r    = await fetch("api/medivac_list.php?" + params);
         const data = await r.json();
-        renderGroups(data.groups || []);
+        renderGroups(data.groups || [], archive);
     } catch(ex) {
         container.innerHTML = `<div class="flash error">Error loading records: ${ex.message}</div>`;
     }
 }
 
 function clearRecordFilters() {
-    document.getElementById("rec-from").value   = "";
-    document.getElementById("rec-to").value     = "";
-    document.getElementById("rec-search").value = "";
+    document.getElementById("rec-from").value    = "";
+    document.getElementById("rec-to").value      = "";
+    document.getElementById("rec-search").value  = "";
+    document.getElementById("rec-archive").checked = false;
     document.getElementById("records-container").innerHTML =
         "<div class=\"empty-state\"><div class=\"es-icon\">🔍</div><p>Use the filters above to search records.</p></div>";
 }
 
-function renderGroups(groups) {
+function renderGroups(groups, isArchive) {
     const container = document.getElementById("records-container");
     if (!groups.length) {
         container.innerHTML = "<div class=\"empty-state\"><div class=\"es-icon\">📭</div><p>No records found.</p></div>";
@@ -717,8 +725,8 @@ function renderGroups(groups) {
               <td>${esc(t.passport_number || '—')}</td>
               <td>${esc(t.country || '—')}</td>
               <td style="white-space:nowrap;">
-                <button class="btn btn-secondary btn-sm" onclick='openEditModal(${JSON.stringify(t)})'>✏️</button>
-                <button class="btn btn-danger btn-sm" onclick="deleteTraveler(${t.id}, this)" style="margin-left:4px;">✕</button>
+                ${isArchive ? '' : `<button class="btn btn-secondary btn-sm" onclick='openEditModal(${JSON.stringify(t)})'>✏️</button>
+                <button class="btn btn-danger btn-sm" onclick="deleteTraveler(${t.id}, this)" style="margin-left:4px;">✕</button>`}
               </td>
             </tr>`).join('');
 
@@ -744,11 +752,14 @@ function renderGroups(groups) {
               <tbody>${travelerRows}</tbody>
             </table>
             <div class="gc-foot">
-              <button class="btn btn-danger btn-sm" onclick="deleteGroup('${esc(g.group_ref)}', this)">🗑 Delete Entire Group</button>
-              <button class="btn btn-secondary btn-sm" onclick="archiveGroup('${esc(g.group_ref)}', this)"
-                      style="background:var(--amber-lt);color:#7A4F01;border:1px solid #E87722;">
-                📦 Archive Group
-              </button>
+              ${isArchive
+                ? '<span style="font-size:.75rem;color:var(--grey-mid);">📦 Archived record — read only</span>'
+                : `<button class="btn btn-danger btn-sm" onclick="deleteGroup('${esc(g.group_ref)}', this)">🗑 Delete Entire Group</button>
+                   <button class="btn btn-secondary btn-sm" onclick="archiveGroup('${esc(g.group_ref)}', this)"
+                           style="background:var(--amber-lt);color:#7A4F01;border:1px solid #E87722;">
+                     📦 Archive Group
+                   </button>`
+              }
             </div>
           </div>
         </div>`;

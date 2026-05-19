@@ -5,9 +5,12 @@ require_permission('operations');
 
 header('Content-Type: application/json');
 
-$from   = $_GET['from']   ?? null;
-$to     = $_GET['to']     ?? null;
-$search = trim($_GET['q'] ?? '');
+$from    = $_GET['from']    ?? null;
+$to      = $_GET['to']     ?? null;
+$search  = trim($_GET['q'] ?? '');
+$archive = !empty($_GET['archive']);
+
+$table  = $archive ? 'medivac_travelers_archive' : 'medivac_travelers';
 
 $where  = [];
 $params = [];
@@ -24,7 +27,7 @@ if ($search) {
     $params[] = '%'.strtolower($search).'%';
 }
 
-$sql = 'SELECT * FROM medivac_travelers';
+$sql = "SELECT * FROM `$table`";
 if ($where) $sql .= ' WHERE ' . implode(' AND ', $where);
 $sql .= ' ORDER BY coverage_start DESC, group_ref, full_name';
 
