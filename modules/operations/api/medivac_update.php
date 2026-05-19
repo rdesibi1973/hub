@@ -18,6 +18,8 @@ $title           = in_array($body['title'] ?? '', ['MR','MRS','MS','']) ? ($body
 $dob             = $body['dob'] ?? null;
 $passport_number = trim($body['passport_number'] ?? '');
 $country         = trim($body['country']         ?? '');
+$insurance_name  = trim($body['insurance_name']  ?? '');
+$policy_number   = trim($body['policy_number']   ?? '');
 
 if (!$dob || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $dob)) $dob = null;
 if (!$full_name) { echo json_encode(['error' => 'Name is required']); exit; }
@@ -25,9 +27,11 @@ if (!$full_name) { echo json_encode(['error' => 'Name is required']); exit; }
 try {
     $pdo->prepare(
         'UPDATE medivac_travelers
-         SET full_name=?, title=?, dob=?, passport_number=?, country=?, updated_at=NOW()
+         SET full_name=?, title=?, dob=?, passport_number=?, country=?,
+             insurance_name=?, policy_number=?, updated_at=NOW()
          WHERE id=?'
-    )->execute([$full_name, $title, $dob, $passport_number ?: null, $country ?: null, $id]);
+    )->execute([$full_name, $title, $dob, $passport_number ?: null, $country ?: null,
+                $insurance_name ?: null, $policy_number ?: null, $id]);
 
     echo json_encode(['ok' => true]);
 } catch (Exception $e) {

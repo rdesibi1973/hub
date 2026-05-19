@@ -287,6 +287,16 @@ $extra_css = '
       <label class="form-label">Country / Nationality</label>
       <input type="text" class="form-control" id="edit-country">
     </div>
+    <div class="form-row" style="margin-bottom:20px;">
+      <div class="form-group" style="margin-bottom:0;">
+        <label class="form-label">Insurance Name</label>
+        <input type="text" class="form-control" id="edit-insurance" placeholder="e.g. Arusha Medivac">
+      </div>
+      <div class="form-group" style="margin-bottom:0;">
+        <label class="form-label">Policy #</label>
+        <input type="text" class="form-control" id="edit-policy" placeholder="Policy number">
+      </div>
+    </div>
     <div class="modal-actions">
       <button class="btn btn-secondary" onclick="closeEditModal()">Cancel</button>
       <button class="btn btn-primary" id="edit-save-btn" onclick="saveEditModal()">💾 Save</button>
@@ -799,6 +809,8 @@ function openEditModal(t) {
     document.getElementById('edit-dob').value      = t.dob          || '';
     document.getElementById('edit-passport').value = t.passport_number || '';
     document.getElementById('edit-country').value  = t.country      || '';
+    document.getElementById('edit-insurance').value = t.insurance_name || '';
+    document.getElementById('edit-policy').value   = t.policy_number  || '';
     document.getElementById('edit-modal').classList.add('open');
 }
 
@@ -815,6 +827,8 @@ async function saveEditModal() {
         dob:             document.getElementById('edit-dob').value || null,
         passport_number: document.getElementById('edit-passport').value.trim(),
         country:         document.getElementById('edit-country').value.trim(),
+        insurance_name:  document.getElementById('edit-insurance').value.trim(),
+        policy_number:   document.getElementById('edit-policy').value.trim(),
     };
     if (!payload.full_name) { showToast('Name is required.', 'error'); return; }
 
