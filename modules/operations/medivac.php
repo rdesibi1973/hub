@@ -725,8 +725,8 @@ function renderGroups(groups, isArchive) {
               <td>${esc(t.passport_number || '—')}</td>
               <td>${esc(t.country || '—')}</td>
               <td style="white-space:nowrap;">
-                ${isArchive ? '' : `<button class="btn btn-secondary btn-sm" onclick='openEditModal(${JSON.stringify(t)})'>✏️</button>
-                <button class="btn btn-danger btn-sm" onclick="deleteTraveler(${t.id}, this)" style="margin-left:4px;">✕</button>`}
+                ${isArchive ? '' : `<button class="btn btn-secondary btn-sm" onclick='openEditModal(${JSON.stringify(t)})'>✏️</button>`}
+                <button class="btn btn-danger btn-sm" onclick="deleteTraveler(${t.id}, this, ${isArchive})" style="margin-left:4px;">✕</button>
               </td>
             </tr>`).join('');
 
@@ -753,8 +753,8 @@ function renderGroups(groups, isArchive) {
             </table>
             <div class="gc-foot">
               ${isArchive
-                ? '<span style="font-size:.75rem;color:var(--grey-mid);">📦 Archived record — read only</span>'
-                : `<button class="btn btn-danger btn-sm" onclick="deleteGroup('${esc(g.group_ref)}', this)">🗑 Delete Entire Group</button>
+                ? `<button class="btn btn-danger btn-sm" onclick="deleteGroup('${esc(g.group_ref)}', this, true)">🗑 Delete from Archive</button>`
+                : `<button class="btn btn-danger btn-sm" onclick="deleteGroup('${esc(g.group_ref)}', this, false)">🗑 Delete Entire Group</button>
                    <button class="btn btn-secondary btn-sm" onclick="archiveGroup('${esc(g.group_ref)}', this)"
                            style="background:var(--amber-lt);color:#7A4F01;border:1px solid #E87722;">
                      📦 Archive Group
@@ -773,14 +773,14 @@ function toggleGroup(head) {
     toggle.classList.toggle("open");
 }
 
-async function deleteTraveler(id, btn) {
+async function deleteTraveler(id, btn, isArchive) {
     if (!confirm("Delete this traveler?")) return;
     btn.disabled = true;
     try {
         const r = await fetch("api/medivac_delete.php", {
             method:"POST",
             headers:{"Content-Type":"application/json"},
-            body: JSON.stringify({mode:"traveler", id})
+            body: JSON.stringify({mode:"traveler", id, archive: !!isArchive})
         });
         const data = await r.json();
         if (data.ok) {
@@ -793,14 +793,14 @@ async function deleteTraveler(id, btn) {
     finally { btn.disabled = false; }
 }
 
-async function deleteGroup(groupRef, btn) {
+async function deleteGroup(groupRef, btn, isArchive) {
     if (!confirm("Delete ALL travelers in this group? This cannot be undone.")) return;
     btn.disabled = true;
     try {
         const r = await fetch("api/medivac_delete.php", {
             method:"POST",
             headers:{"Content-Type":"application/json"},
-            body: JSON.stringify({mode:"group", group_ref: groupRef})
+            body: JSON.stringify({mode:"group", group_ref: groupRef, archive: !!isArchive})
         });
         const data = await r.json();
         if (data.ok) {
