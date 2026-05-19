@@ -259,6 +259,7 @@ include __DIR__ . '/../../includes/layout_header.php';
   <?php endif; ?>
   <button class="tab-btn <?= $_isOpsStaff ? 'active' : '' ?>" onclick="switchTab('audit',this)">🔍 Audit Excel</button>
   <button class="tab-btn"           onclick="switchTab('conflicts',this)">🔀 Fix Conflicts</button>
+  <a class="tab-btn" href="medivac.php" style="text-decoration:none;">🏥 Medivac</a>
 </div>
 
 <!-- ═══ TAB 1: DAILY MOVEMENTS ═══ -->
