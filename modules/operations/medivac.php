@@ -345,32 +345,27 @@ function extractTravelers(rows) {
 }
 
 function extractDates(rows, sheet) {
-    let coverageStart = "", coverageEnd = "";
-
-    // Try SheetJS cell-level date extraction for ARRIVAL/DEPARTURE rows
-    const ref = XLSX.utils.decode_range(sheet["!ref"] || "A1:A1");
-
-    for (let i = 0; i <= ref.e.r; i++) {
-        const colA = String(rows[i]?.[0] || "").toUpperCase();
-        if (colA.includes("ARRIVAL") && !coverageStart) {
-            for (let j = i+1; j < Math.min(i+6, rows.length); j++) {
-                const raw = rows[j]?.[0];
-                if (!raw && raw !== 0) continue;
-                const d = parseFlexDate(raw);
-                if (d) { coverageStart = d; break; }
-            }
+    // Find row with "DATE" header in col A, then collect all dates below it
+    let dateColRow = -1;
+    for (let i = 0; i < rows.length; i++) {
+        if (String(rows[i][0] || '').trim().toUpperCase() === 'DATE') {
+            dateColRow = i;
+            break;
         }
-        if (colA.includes("DEPARTURE") && !coverageEnd) {
-            for (let j = i+1; j < Math.min(i+6, rows.length); j++) {
-                const raw = rows[j]?.[0];
-                if (!raw && raw !== 0) continue;
-                const d = parseFlexDate(raw);
-                if (d) { coverageEnd = d; break; }
-            }
-        }
-        if (coverageStart && coverageEnd) break;
     }
-    return {coverageStart, coverageEnd};
+    if (dateColRow < 0) return {coverageStart: '', coverageEnd: ''};
+
+    const dates = [];
+    for (let i = dateColRow + 1; i < rows.length; i++) {
+        const raw = rows[i][0];
+        if (!raw && raw !== 0) continue;
+        const d = parseFlexDate(raw);
+        if (d) dates.push(d);
+        else if (dates.length) break; // stop at first non-date after we've collected some
+    }
+    if (!dates.length) return {coverageStart: '', coverageEnd: ''};
+    dates.sort();
+    return {coverageStart: dates[0], coverageEnd: dates[dates.length - 1]};
 }
 
 // ── Date / text helpers ───────────────────────────────────────────────────────
