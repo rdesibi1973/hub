@@ -207,6 +207,12 @@ $extra_css = '
     </div>
     <button class="btn btn-primary btn-sm" onclick="loadRecords()">🔍 Search</button>
     <button class="btn btn-secondary btn-sm" onclick="clearRecordFilters()">Reset</button>
+    <button class="btn btn-secondary btn-sm" id="btn-archive-expired"
+            onclick="archiveExpired()"
+            style="margin-left:auto;background:var(--amber-lt);color:#7A4F01;border:1px solid #E87722;"
+            title="Move all groups whose coverage end date has passed to archive">
+      📦 Archive Expired Groups
+    </button>
   </div>
 
   <div id="records-container">
@@ -739,6 +745,10 @@ function renderGroups(groups) {
             </table>
             <div class="gc-foot">
               <button class="btn btn-danger btn-sm" onclick="deleteGroup('${esc(g.group_ref)}', this)">🗑 Delete Entire Group</button>
+              <button class="btn btn-secondary btn-sm" onclick="archiveGroup('${esc(g.group_ref)}', this)"
+                      style="background:var(--amber-lt);color:#7A4F01;border:1px solid #E87722;">
+                📦 Archive Group
+              </button>
             </div>
           </div>
         </div>`;
@@ -799,6 +809,46 @@ function downloadReport() {
     if (!from || !to) { showToast("Please select both From and To dates.", "error"); return; }
     if (from > to)    { showToast("From date must be before To date.", "error"); return; }
     window.location.href = `api/medivac_report.php?from=${from}&to=${to}`;
+}
+
+// ── Archive ───────────────────────────────────────────────────────────────────
+async function archiveExpired() {
+    if (!confirm('Move all groups with a past coverage end date to the archive? They will no longer appear in Records.')) return;
+    const btn = document.getElementById('btn-archive-expired');
+    btn.disabled = true; btn.textContent = 'Archiving…';
+    try {
+        const r    = await fetch('api/medivac_archive.php', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({mode: 'expired'})
+        });
+        const data = await r.json();
+        if (data.ok) {
+            showToast(`📦 ${data.archived} traveler${data.archived !== 1 ? 's' : ''} archived.`, 'success');
+            loadRecords();
+        } else {
+            showToast('Error: ' + (data.error || ''), 'error');
+        }
+    } catch(ex) { showToast('Network error.', 'error'); }
+    finally { btn.disabled = false; btn.textContent = '📦 Archive Expired Groups'; }
+}
+
+async function archiveGroup(groupRef, btn) {
+    if (!confirm('Archive this group? It will be moved out of the active records.')) return;
+    btn.disabled = true;
+    try {
+        const r    = await fetch('api/medivac_archive.php', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({mode: 'group', group_ref: groupRef})
+        });
+        const data = await r.json();
+        if (data.ok) {
+            btn.closest('.group-card').remove();
+            showToast(`📦 Group archived (${data.archived} traveler${data.archived !== 1 ? 's' : ''}).`, 'success');
+        } else {
+            showToast('Error: ' + (data.error || ''), 'error');
+        }
+    } catch(ex) { showToast('Network error.', 'error'); }
+    finally { btn.disabled = false; }
 }
 
 // ── Edit Modal ────────────────────────────────────────────────────────────────
