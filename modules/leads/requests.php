@@ -10,7 +10,10 @@ $staffAgentId = $isStaff ? getStaffAgentId() : 0;
 // ── Session-based filter persistence ────────────────────────────
 if (session_status() === PHP_SESSION_NONE) session_start();
 
-// Clear filters
+// Default agent: current user's linked agent (if any), so "My Requests" opens pre-filtered
+$myAgentId = (int)($_SESSION['agent_id'] ?? $GLOBALS['_cu']['agent_id'] ?? 0);
+
+// Clear filters → restore personal defaults
 if (isset($_GET['clear'])) {
     unset($_SESSION['req_filters']);
     header('Location: requests.php');
@@ -27,25 +30,41 @@ if ($filter_submitted) {
         'q'         => trim($_GET['q']      ?? ''),
         'status'    => $_GET['status']      ?? '',
         'agent'     => (int)($_GET['agent'] ?? 0),
-        'year'      => (int)($_GET['year']  ?? date('Y')),
+        'year'      => (int)($_GET['year']  ?? 0),
         'no_folder' => !empty($_GET['no_folder']),
-        'sort'      => $_GET['sort'] ?? 'date_desc',
+        'sort'      => $_GET['sort'] ?? 'id_desc',
     ];
 }
 
-$f         = $_SESSION['req_filters'] ?? [];
+// Build effective filter set — on first visit (no session) apply personal defaults
+$f         = $_SESSION['req_filters'] ?? null;
+$isFirstVisit = ($f === null);
+if ($isFirstVisit) {
+    $f = [
+        'q'         => '',
+        'status'    => '',
+        'agent'     => $myAgentId,   // pre-select current user's agent
+        'year'      => 0,            // all years
+        'no_folder' => false,
+        'sort'      => 'id_desc',    // newest assignment first
+    ];
+    $_SESSION['req_filters'] = $f;
+}
+
 $search    = $f['q']         ?? '';
 $status    = $f['status']    ?? '';
 $agent     = (int)($f['agent']    ?? 0);
-$year      = (int)($f['year']     ?? date('Y'));
+$year      = (int)($f['year']     ?? 0);
 $no_folder = !empty($f['no_folder']);
-$sort      = $f['sort']      ?? 'date_desc';
+$sort      = $f['sort']      ?? 'id_desc';
 
 $allowedSorts = [
+    'id_desc'   => 'r.id DESC',
+    'id_asc'    => 'r.id ASC',
     'date_desc' => 'r.date_received DESC, r.id DESC',
     'date_asc'  => 'r.date_received ASC,  r.id ASC',
 ];
-$orderBy = $allowedSorts[$sort] ?? $allowedSorts['date_desc'];
+$orderBy = $allowedSorts[$sort] ?? $allowedSorts['id_desc'];
 
 // Build query
 $where  = ['1=1'];
@@ -147,7 +166,7 @@ include 'includes/header.php';
   <div>
     <label>Year</label>
     <select name="year">
-      <option value="0">All years</option>
+      <option value="0" <?= $year===0?'selected':'' ?>>All years</option>
       <?php foreach ($years as $y): ?>
         <option value="<?= $y ?>" <?= $year===(int)$y?'selected':'' ?>><?= $y ?></option>
       <?php endforeach; ?>
@@ -186,8 +205,16 @@ include 'includes/header.php';
         <?php if (!$isStaff): ?><th class="text-right">Value (USD)</th><?php endif; ?>
         <th>Agent</th>
         <?php
-          $nextSort  = $sort === 'date_desc' ? 'date_asc' : 'date_desc';
-          $sortArrow = $sort === 'date_desc' ? '↓' : '↑';
+          // Sort cycle: id_desc → date_desc → date_asc → id_desc
+          $sortCycle = ['id_desc' => 'date_desc', 'date_desc' => 'date_asc', 'date_asc' => 'id_desc'];
+          $nextSort  = $sortCycle[$sort] ?? 'id_desc';
+          $sortLabel = match($sort) {
+              'id_desc'   => 'Assignment ↓',
+              'id_asc'    => 'Assignment ↑',
+              'date_desc' => 'Date ↓',
+              'date_asc'  => 'Date ↑',
+              default     => 'Sort',
+          };
           // Build sort URL preserving current filters
           $sortParams = http_build_query(array_filter([
             'q'         => $search,
@@ -201,7 +228,7 @@ include 'includes/header.php';
         <th style="white-space:nowrap;">
           <a href="requests.php?<?= $sortParams ?>"
              style="text-decoration:none;color:inherit;display:inline-flex;align-items:center;gap:4px;">
-            Date <span style="color:var(--red);font-size:.85em;"><?= $sortArrow ?></span>
+            <span style="color:var(--red);font-size:.85em;"><?= $sortLabel ?></span>
           </a>
         </th>
         <th>Dropbox Folder</th>
