@@ -3,8 +3,7 @@
  * api_rename_folder.php
  *
  * Called by the Java BackOffice after a status rename (e.g. PROGRESS → DEPOSIT).
- * Updates practice_code and dropbox_url in the requests table.
- * Does NOT touch status or confirmation_date — those are managed separately.
+ * Updates practice_code, dropbox_url, and status in the requests table.
  *
  * POST JSON body:
  *   old_folder_name  string  – current practice_code value in DB
@@ -139,18 +138,54 @@ if ($newDropboxUrl === '') {
     $newDropboxUrl = 'https://www.dropbox.com/home/' . $dir . '/' . rawurlencode($newFolderName);
 }
 
+// ── Derive new DB status from folder name suffix ──────────────────────────────
+// Map folder status tag → requests.status value.
+// 'Booked' is intentionally excluded: that transition is handled by api_confirm_safari.php
+// which also sets confirmation_date. Renaming TO _PAID from a non-confirmed folder is
+// treated as Paid (edge case). If no recognised tag is found, status is left unchanged.
+$statusTagMap = [
+    '_CANCELLED'    => 'Cancelled',
+    '_BALANCE-CASH' => 'Balance',
+    '_BALANCE'      => 'Balance',
+    '_DEPOSIT'      => 'Deposit',
+    '_PROVISIONAL'  => 'Provisional',
+    '_PROGRESS'     => 'Inquiry',
+    '_PAID'         => 'Paid',
+];
+$newDbStatus = null;
+foreach ($statusTagMap as $tag => $dbValue) {
+    if (str_ends_with(strtoupper($newFolderName), $tag)) {
+        $newDbStatus = $dbValue;
+        break;
+    }
+}
+
 // ── Update ────────────────────────────────────────────────────────────────────
 if ($matchedViaGroupFolder) {
     // GRP parent folder rename: update group_folder, leave practice_code untouched
-    $update = $db->prepare(
-        'UPDATE requests SET group_folder = ?, dropbox_url = ? WHERE id = ?'
-    );
-    $update->execute([$newFolderName, $newDropboxUrl, (int)$row['id']]);
+    if ($newDbStatus !== null) {
+        $update = $db->prepare(
+            'UPDATE requests SET group_folder = ?, dropbox_url = ?, status = ? WHERE id = ?'
+        );
+        $update->execute([$newFolderName, $newDropboxUrl, $newDbStatus, (int)$row['id']]);
+    } else {
+        $update = $db->prepare(
+            'UPDATE requests SET group_folder = ?, dropbox_url = ? WHERE id = ?'
+        );
+        $update->execute([$newFolderName, $newDropboxUrl, (int)$row['id']]);
+    }
 } else {
-    $update = $db->prepare(
-        'UPDATE requests SET practice_code = ?, dropbox_url = ? WHERE id = ?'
-    );
-    $update->execute([$newFolderName, $newDropboxUrl, (int)$row['id']]);
+    if ($newDbStatus !== null) {
+        $update = $db->prepare(
+            'UPDATE requests SET practice_code = ?, dropbox_url = ?, status = ? WHERE id = ?'
+        );
+        $update->execute([$newFolderName, $newDropboxUrl, $newDbStatus, (int)$row['id']]);
+    } else {
+        $update = $db->prepare(
+            'UPDATE requests SET practice_code = ?, dropbox_url = ? WHERE id = ?'
+        );
+        $update->execute([$newFolderName, $newDropboxUrl, (int)$row['id']]);
+    }
 }
 
 echo json_encode([
@@ -161,4 +196,5 @@ echo json_encode([
     'new_folder'    => $newFolderName,
     'updated_field' => $matchedViaGroupFolder ? 'group_folder' : 'practice_code',
     'dropbox_url'   => $newDropboxUrl,
+    'new_status'    => $newDbStatus,
 ]);
