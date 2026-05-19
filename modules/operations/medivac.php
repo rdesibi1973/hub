@@ -300,7 +300,7 @@ function handleFile(file) {
             const {coverageStart, coverageEnd} = extractDates(rows, sheet);
             const {groupName, tourAgent} = parseFilename(file.name);
 
-            showPreview(travelers, groupName, tourAgent, coverageStart, coverageEnd, file.name);
+            showPreview(travelers, groupName, 'Savannah Explorers', '', '', file.name);
         } catch(ex) {
             showToast("Error reading file: " + ex.message, "error");
         }
