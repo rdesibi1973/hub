@@ -300,7 +300,7 @@ function handleFile(file) {
             const {coverageStart, coverageEnd} = extractDates(rows, sheet);
             const {groupName, tourAgent} = parseFilename(file.name);
 
-            showPreview(travelers, groupName, 'Savannah Explorers', '', '', file.name);
+            showPreview(travelers, groupName, 'Savannah Explorers', coverageStart, coverageEnd, file.name);
         } catch(ex) {
             showToast("Error reading file: " + ex.message, "error");
         }
@@ -395,11 +395,22 @@ function parseFlexDate(val) {
     m = str.match(/^(\d{1,2})-(\d{1,2})-(\d{2,4})/);
     if (m) return buildIso(m[3], m[2], m[1]);
 
-    // d Mon yyyy  (e.g. 7 Jun 2026)
+    // d Mon yyyy  (e.g. 7 Jun 2026) — anchored at start
     m = str.match(/^(\d{1,2})[\s\/\-]([A-Za-z]+)[\s\/\-](\d{2,4})/);
     if (m) {
         const mo = {jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12}[m[2].toLowerCase().substring(0,3)];
         if (mo) return buildIso(m[3], mo, m[1]);
+    }
+
+    // Scan anywhere in string for DD MON [YYYY] — e.g. "JRO KILI 01 JUN 20,00 PM"
+    m = str.match(/(\d{1,2})\s+([A-Za-z]{3,9})(?:\s+(\d{4}))?/);
+    if (m) {
+        const moMap = {jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12};
+        const mo = moMap[m[2].toLowerCase().substring(0,3)];
+        if (mo) {
+            const year = m[3] ? parseInt(m[3]) : inferYear(mo);
+            return buildIso(year, mo, m[1]);
+        }
     }
 
     // Try JS Date parsing as last resort
@@ -407,6 +418,13 @@ function parseFlexDate(val) {
     if (!isNaN(dt) && dt.getFullYear() > 1970) return fmtIso(dt);
 
     return "";
+}
+
+function inferYear(month) {
+    const now = new Date();
+    const y = now.getFullYear();
+    // If the month is already past this year, assume next year
+    return month < now.getMonth() + 1 ? y + 1 : y;
 }
 
 function buildIso(y, m, d) {
