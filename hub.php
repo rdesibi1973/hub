@@ -194,6 +194,13 @@ include __DIR__ . '/includes/layout_header.php';
       <div><div class="lc-label">Intermundial</div><div class="lc-sub">Operator Portal</div></div>
     </a>
 
+    <a class="link-card lc-teal" href="https://theorangicollection.resrequest.com/public/" target="_blank">
+      <div class="lc-icon" style="background:#fff;padding:3px;">
+        <img src="https://www.google.com/s2/favicons?domain=resrequest.com&sz=64" alt="ResRequest">
+      </div>
+      <div><div class="lc-label">ResRequest</div><div class="lc-sub">The Orangi Collection</div></div>
+    </a>
+
     <a class="link-card lc-grey" href="https://www.calculator.net/age-calculator.html" target="_blank">
       <div class="lc-icon emoji">🎂</div>
       <div><div class="lc-label">Age Calculator</div><div class="lc-sub">calculator.net</div></div>
