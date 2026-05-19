@@ -254,7 +254,8 @@ $extra_css = '
 <!-- Toast -->
 <div class="toast" id="toast"></div>
 
-<?php $extra_js = '<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script><script>
+<?php $extra_js = <<<'JSEOF'
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script><script>
 /* ════════════════════════════════════════════════════════
    MEDIVAC — Client-side logic
    ════════════════════════════════════════════════════════ */
@@ -740,5 +741,7 @@ function esc(s) {
     if (!s) return "";
     return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
 }
-</script>'; ?>
+</script>
+JSEOF;
+?>
 <?php include __DIR__ . '/../../includes/layout_footer.php'; ?>
