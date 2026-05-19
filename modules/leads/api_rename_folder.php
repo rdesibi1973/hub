@@ -149,7 +149,7 @@ $statusTagMap = [
     '_BALANCE'      => 'Balance',
     '_DEPOSIT'      => 'Deposit',
     '_PROVISIONAL'  => 'Provisional',
-    '_PROGRESS'     => 'Inquiry',
+    '_PROGRESS'     => 'Booked',
     '_PAID'         => 'Paid',
 ];
 $newDbStatus = null;
