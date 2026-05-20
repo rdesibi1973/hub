@@ -14,6 +14,7 @@ $clientName   = trim($body['client_name']   ?? '');
 $safariDate   = $body['safari_date']   ?? null;
 $travelers    = isset($body['travelers'])    && $body['travelers'] !== null ? (int)$body['travelers']    : null;
 $jeeps        = isset($body['jeeps'])        && $body['jeeps']    !== null ? (int)$body['jeeps']        : null;
+$guide        = trim($body['guide']         ?? '') ?: null;
 $extraDetails = trim($body['extra_details'] ?? '') ?: null;
 $folderName   = trim($body['folder_name']   ?? '') ?: null;
 $notes        = trim($body['notes']         ?? '') ?: null;
@@ -26,11 +27,11 @@ $dateSql = ($safariDate && preg_match('/^\d{4}-\d{2}-\d{2}$/', $safariDate)) ? $
 try {
     $stmt = $pdo->prepare(
         'UPDATE lunch_boxes
-         SET client_name=?, safari_date=?, travelers=?, jeeps=?,
+         SET client_name=?, safari_date=?, travelers=?, jeeps=?, guide=?,
              extra_details=?, folder_name=?, notes=?
          WHERE id=?'
     );
-    $stmt->execute([$clientName, $dateSql, $travelers, $jeeps, $extraDetails, $folderName, $notes, $id]);
+    $stmt->execute([$clientName, $dateSql, $travelers, $jeeps, $guide, $extraDetails, $folderName, $notes, $id]);
     echo json_encode(['ok' => true, 'affected' => $stmt->rowCount()]);
 } catch (Exception $e) {
     echo json_encode(['error' => $e->getMessage()]);

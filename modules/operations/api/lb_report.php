@@ -62,7 +62,7 @@ $xlRows[] = [cB()];
 
 // Column headers
 $xlRows[] = array_map(fn($h) => cS($h, 2), [
-    'Safari Date', 'Client Name', 'Travelers (Pax)', 'Jeeps',
+    'Safari Date', 'Client Name', 'Lunch Boxes', 'Guide',
     'Extra Details', 'Folder Name', 'Notes', 'Source File'
 ]);
 
@@ -77,7 +77,7 @@ foreach ($rows as $r) {
         cS(fmtDate($r['safari_date']),   $st),
         cS($r['client_name']      ?? '', $st),
         $travelers !== '' ? cN($travelers, $st) : cS('', $st),
-        $jeeps     !== '' ? cN($jeeps,     $st) : cS('', $st),
+        cS($r['guide']            ?? '', $st),
         cS($r['extra_details']    ?? '', $st),
         cS($r['folder_name']      ?? '', $st),
         cS($r['notes']            ?? '', $st),
@@ -90,7 +90,7 @@ $xlRows[] = [cB()];
 $xlRows[] = [cS('Total entries: ' . count($rows), 1)];
 
 // ── Column widths ─────────────────────────────────────────────────────────────
-$colWidths = [16, 30, 18, 12, 50, 30, 25, 35];
+$colWidths = [16, 30, 14, 20, 50, 30, 25, 35];
 
 // ── Generate XML ──────────────────────────────────────────────────────────────
 $colsXml = '';

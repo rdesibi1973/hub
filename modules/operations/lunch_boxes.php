@@ -131,6 +131,10 @@ textarea.mf-ctrl{resize:vertical;min-height:90px;}
           <input type="number" id="ph-travelers" min="1" max="999" placeholder="—">
         </div>
         <div class="ph-field">
+          <label>Guide</label>
+          <input type="text" id="ph-guide" placeholder="—">
+        </div>
+        <div class="ph-field">
           <label>Safari Date</label>
           <input type="date" id="ph-date">
         </div>
@@ -251,6 +255,10 @@ textarea.mf-ctrl{resize:vertical;min-height:90px;}
         <input type="number" class="mf-ctrl" id="edit-travelers" min="1" max="999">
       </div>
       <div>
+        <label class="mf-label">Guide</label>
+        <input type="text" class="mf-ctrl" id="edit-guide">
+      </div>
+      <div>
         <label class="mf-label">Safari Date</label>
         <input type="date" class="mf-ctrl" id="edit-date">
       </div>
@@ -344,9 +352,9 @@ function selectSheet(wb) {
 
 // ── Core extraction ───────────────────────────────────────────────────────────
 function parseLunchBox(rows) {
-    const result = {travelers: null, jeeps: null, safariDate: null, extraDetails: null, parseFlags: []};
+    const result = {travelers: null, jeeps: null, guide: null, safariDate: null, extraDetails: null, parseFlags: []};
 
-    // --- 1. TOT PAX and Number of Jeeps: label in col A, value in col B ------
+    // --- 1. TOT PAX, Number of Jeeps, Guide: label in col A, value in col B --
     for (let i = 0; i < rows.length; i++) {
         const colA = String(rows[i][0] || "").toLowerCase().trim();
         const colB = rows[i][1];
@@ -359,8 +367,11 @@ function parseLunchBox(rows) {
             const v = parseFloat(colB);
             if (!isNaN(v) && v > 0) { result.jeeps = Math.round(v); result.parseFlags.push("jeep:auto"); }
         }
-        // Stop scanning once both found
-        if (result.travelers !== null && result.jeeps !== null) break;
+        if (result.guide === null && colA === "guide") {
+            const v = String(colB || "").trim();
+            if (v) { result.guide = v; result.parseFlags.push("guide:auto"); }
+        }
+        if (result.travelers !== null && result.jeeps !== null && result.guide !== null) break;
     }
 
     // --- 2. Park fees date ---------------------------------------------------
@@ -500,6 +511,7 @@ function showPreview(extracted, clientName, folderName, filename) {
     document.getElementById("ph-date").value      = extracted.safariDate || "";
     const lunchBoxes = (extracted.travelers || 0) + (extracted.jeeps || 0);
     document.getElementById("ph-travelers").value = lunchBoxes > 0 ? lunchBoxes : "";
+    document.getElementById("ph-guide").value     = extracted.guide || "";
     document.getElementById("ph-extra").value     = extracted.extraDetails || "";
     document.getElementById("ph-folder").value    = folderName;
     document.getElementById("ph-notes").value     = "";
@@ -535,6 +547,7 @@ async function saveRecord() {
         client_name:   client,
         safari_date:   document.getElementById("ph-date").value || null,
         travelers:     parseInt(document.getElementById("ph-travelers").value) || null,
+        guide:         document.getElementById("ph-guide").value.trim() || null,
         jeeps:         null,
         extra_details: document.getElementById("ph-extra").value.trim() || null,
         folder_name:   document.getElementById("ph-folder").value.trim() || null,
@@ -653,6 +666,7 @@ function renderTable(records, container, isHistory) {
           <td><strong>${esc(r.client_name)}</strong>${histBadge ? '<br>' + histBadge : ''}
               ${r.folder_name ? '<br><small style="color:var(--grey-mid)">' + esc(r.folder_name) + '</small>' : ''}</td>
           <td>${r.travelers !== null ? `<span class="badge-pax">🍱 ${r.travelers}</span>` : '—'}</td>
+          <td>${r.guide ? esc(r.guide) : '—'}</td>
           <td>${extra}</td>
           <td>${r.notes ? '<small>' + esc(r.notes) + '</small>' : '—'}</td>
           <td>${actions}</td>
@@ -664,8 +678,9 @@ function renderTable(records, container, isHistory) {
       <table class="lb-table">
         <thead><tr>
           <th style="width:110px">Safari Date</th>
-          <th style="width:200px">Client</th>
+          <th style="width:180px">Client</th>
           <th style="width:100px">Lunch Boxes</th>
+          <th style="width:110px">Guide</th>
           <th>Extra Details</th>
           <th style="width:120px">Notes</th>
           <th style="width:140px"></th>
@@ -722,6 +737,7 @@ function openEditModal(r) {
     document.getElementById("edit-date").value      = r.safari_date  || "";
     document.getElementById("edit-folder").value    = r.folder_name  || "";
     document.getElementById("edit-travelers").value = r.travelers !== null ? r.travelers : "";
+    document.getElementById("edit-guide").value     = r.guide || "";
     document.getElementById("edit-extra").value     = r.extra_details || "";
     document.getElementById("edit-notes").value     = r.notes || "";
     document.getElementById("edit-modal").classList.add("open");
@@ -739,6 +755,7 @@ async function saveEdit() {
         safari_date:   document.getElementById("edit-date").value || null,
         folder_name:   document.getElementById("edit-folder").value.trim() || null,
         travelers:     parseInt(document.getElementById("edit-travelers").value) || null,
+        guide:         document.getElementById("edit-guide").value.trim() || null,
         jeeps:         null,
         extra_details: document.getElementById("edit-extra").value.trim() || null,
         notes:         document.getElementById("edit-notes").value.trim() || null,
@@ -758,9 +775,10 @@ async function saveEdit() {
                 cells[1].innerHTML = `<strong>${esc(payload.client_name)}</strong>` +
                     (payload.folder_name ? `<br><small style="color:var(--grey-mid)">${esc(payload.folder_name)}</small>` : "");
                 cells[2].innerHTML = payload.travelers ? `<span class="badge-pax">🍱 ${payload.travelers}</span>` : "—";
-                cells[3].innerHTML = payload.extra_details
+                cells[3].textContent = payload.guide || "—";
+                cells[4].innerHTML = payload.extra_details
                     ? `<div class="extra-cell">${esc(payload.extra_details.substring(0,200))}</div>` : '<span style="color:var(--grey-lt)">—</span>';
-                cells[4].innerHTML = payload.notes ? `<small>${esc(payload.notes)}</small>` : "—";
+                cells[5].innerHTML = payload.notes ? `<small>${esc(payload.notes)}</small>` : "—";
             }
             closeEditModal();
             showToast("Record updated.", "success");

@@ -13,6 +13,7 @@ $clientName   = trim($body['client_name']   ?? '');
 $safariDate   = $body['safari_date']   ?? null;
 $travelers    = isset($body['travelers'])    && $body['travelers'] !== null ? (int)$body['travelers']    : null;
 $jeeps        = isset($body['jeeps'])        && $body['jeeps']    !== null ? (int)$body['jeeps']        : null;
+$guide        = trim($body['guide']         ?? '') ?: null;
 $extraDetails = trim($body['extra_details'] ?? '') ?: null;
 $folderName   = trim($body['folder_name']   ?? '') ?: null;
 $notes        = trim($body['notes']         ?? '') ?: null;
@@ -27,11 +28,11 @@ $groupRef = uniqid('lb_', true);
 try {
     $pdo->prepare(
         'INSERT INTO lunch_boxes
-         (group_ref, client_name, safari_date, travelers, jeeps,
+         (group_ref, client_name, safari_date, travelers, jeeps, guide,
           extra_details, folder_name, notes, source_file, created_by)
-         VALUES (?,?,?,?,?,?,?,?,?,?)'
+         VALUES (?,?,?,?,?,?,?,?,?,?,?)'
     )->execute([
-        $groupRef, $clientName, $dateSql, $travelers, $jeeps,
+        $groupRef, $clientName, $dateSql, $travelers, $jeeps, $guide,
         $extraDetails, $folderName, $notes, $sourceFile, $userId
     ]);
 
