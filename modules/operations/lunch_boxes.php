@@ -442,21 +442,29 @@ function parseLunchBox(rows) {
 
 // ── Client name + folder name from filename ───────────────────────────────────
 function suggestFromFilename(filename) {
-    let base = filename.replace(/\.[^.]+$/, "");
-    base = base.replace(/__.*$/, "")
-               .replace(/_(RECAP|CONF|recap|conf).*$/i, "")
-               .replace(/_?\d{4}[-_]\d{2}[-_]\d{2}.*$/, "");
+    const base = filename.replace(/\.[^.]+$/, "");
 
-    // Folder name = NomeCognome(Agent-Type) pattern intact
-    const folderMatch = base.match(/^([A-Za-zÀ-ÿ]+\([^)]+\))/);
-    const folderName  = folderMatch ? folderMatch[1] : base.replace(/_/g, " ").trim();
+    // Find the NomeCognome(Something) pattern anywhere in the filename
+    // e.g. "01 GRP0206 ManuelaOgnibene(TerreDiPianura-Roberto) SimbaGRP Calc"
+    //   →  folderName = "ManuelaOgnibene(TerreDiPianura-Roberto)"
+    //   →  clientName = "Manuela Ognibene"
+    const folderMatch = base.match(/([A-Za-zÀ-ÿ]+\([^)]+\))/);
 
-    // Client name = part before parenthesis, CamelCase split
-    const parMatch  = base.match(/^([^(]+)\(/);
-    let clientPart  = parMatch ? parMatch[1].trim() : base;
-    clientPart = clientPart.replace(/^[\d_]+/, "").replace(/_/g, " ").trim();
-    const clientName = clientPart.replace(/([a-z])([A-Z])/g, "$1 $2")
-                                  .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2").trim();
+    let folderName, clientName;
+
+    if (folderMatch) {
+        folderName = folderMatch[1];
+        // Client name = word(s) before the parenthesis, split CamelCase
+        const namePart = folderName.replace(/\(.*$/, "").trim();
+        clientName = namePart.replace(/([a-z])([A-Z])/g, "$1 $2")
+                             .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2").trim();
+    } else {
+        // No parenthesis pattern — leave folder blank, suggest from cleaned filename
+        folderName = "";
+        let clean = base.replace(/^[\d\s_GRP]+/i, "").replace(/_/g, " ").trim();
+        clientName = clean.replace(/([a-z])([A-Z])/g, "$1 $2").trim();
+    }
+
     return { clientName, folderName };
 }
 
