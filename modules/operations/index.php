@@ -1380,30 +1380,30 @@ function cfCompare(){
 }
 function cfApply(discs){
   const base=cfWBs[cfBaseIdx];
-  // Deep-copy the entire workbook (all sheets, styles, formulas)
-  const wb={SheetNames:[...base.wb.SheetNames],Sheets:{}};
-  base.wb.SheetNames.forEach(sn=>{
-    const src=base.wb.Sheets[sn];
-    const dst={};
-    Object.keys(src).forEach(k=>{dst[k]=typeof src[k]==='object'&&src[k]!==null?Object.assign({},src[k]):src[k];});
-    wb.Sheets[sn]=dst;
-  });
-  // Apply conflict resolutions to the target sheet only
-  const sheet=wb.Sheets[base.sname];
-  discs.forEach((d,i)=>{
-    const val=document.getElementById('cfs-'+i)?.value??'';
-    const addr=XLSX.utils.encode_cell({r:d.row,c:d.col});
-    if(val===''){delete sheet[addr];}
-    else{
-      const orig=sheet[addr]||{};
-      // Keep formula if present; just update the cached value
-      sheet[addr]=Object.assign({},orig,{v:val,w:val});
-      // Remove formula override if user is manually setting a value
-      if(orig.f) delete sheet[addr].f;
-    }
-  });
-  const stem=base.filename.replace(/\s*\([^)]*conflicted copy[^)]*\)/i,'').replace(/\.xlsx$/i,'').trim();
-  XLSX.writeFile(wb,stem+'_FIXED.xlsx',{cellStyles:true});
+  const changes=discs.map((d,i)=>({
+    addr: XLSX.utils.encode_cell({r:d.row,c:d.col}),
+    value: document.getElementById('cfs-'+i)?.value??''
+  }));
+  const fd=new FormData();
+  fd.append('file',base.file);
+  fd.append('sheet',base.sname);
+  fd.append('filename',base.filename);
+  fd.append('changes',JSON.stringify(changes));
+  const btn=document.getElementById('cfApplyBtn');
+  btn.disabled=true;btn.textContent='Processing…';
+  fetch('api/fix_conflicts_apply.php',{method:'POST',body:fd})
+    .then(r=>{
+      if(!r.ok)return r.text().then(t=>{throw new Error(t);});
+      return r.blob();
+    })
+    .then(blob=>{
+      const stem=base.filename.replace(/\s*\([^)]*conflicted copy[^)]*\)/i,'').replace(/\.xlsx$/i,'').trim();
+      const url=URL.createObjectURL(blob);
+      const a=document.createElement('a');a.href=url;a.download=stem+'_FIXED.xlsx';a.click();
+      URL.revokeObjectURL(url);
+    })
+    .catch(err=>showToast('Error: '+err.message,'error'))
+    .finally(()=>{btn.disabled=false;btn.textContent='Apply & Download Fixed File';});
 }
 function colLtr(n){let s='';n++;while(n>0){s=String.fromCharCode(64+(n%26||26))+s;n=Math.floor((n-1)/26);}return s;}
 </script>
