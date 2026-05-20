@@ -354,86 +354,47 @@ function selectSheet(wb) {
 function parseLunchBox(rows) {
     const result = {travelers: null, jeeps: null, safariDate: null, extraDetails: null, parseFlags: []};
 
-    // --- 1. Scan all cells for labeled values (PAX, JEEP) --------------------
-    for (let i = 0; i < Math.min(rows.length, 60); i++) {
-        for (let j = 0; j < rows[i].length; j++) {
-            const cell = String(rows[i][j] || "").toLowerCase().trim();
+    // --- 1. TOT PAX and Number of Jeeps: label in col A, value in col B ------
+    for (let i = 0; i < rows.length; i++) {
+        const colA = String(rows[i][0] || "").toLowerCase().trim();
+        const colB = rows[i][1];
 
-            if (result.travelers === null) {
-                if (cell === "pax" || cell === "guests" || cell === "travelers" || cell === "travellers") {
-                    // value in next column or same column below
-                    const rightVal = parseFloat(rows[i][j+1]);
-                    if (!isNaN(rightVal) && rightVal > 0 && rightVal < 100) {
-                        result.travelers = Math.round(rightVal);
-                        result.parseFlags.push("pax:auto");
-                    } else {
-                        const belowVal = parseFloat((rows[i+1] || [])[j]);
-                        if (!isNaN(belowVal) && belowVal > 0 && belowVal < 100) {
-                            result.travelers = Math.round(belowVal);
-                            result.parseFlags.push("pax:auto");
-                        }
-                    }
-                }
-                // "pax: 4" or "guests: 2" in same cell
-                if (cell.match(/^(pax|guests?|travelers?)\s*[:\-]\s*(\d+)/)) {
-                    const m = cell.match(/(\d+)/); if (m) { result.travelers = parseInt(m[1]); result.parseFlags.push("pax:auto"); }
-                }
-                // "N° PAX" pattern
-                if (cell.match(/n[°o]?\s*pax/) || cell.match(/pax\s*n[°o]/)) {
-                    const rightVal = parseFloat(rows[i][j+1]);
-                    if (!isNaN(rightVal) && rightVal > 0 && rightVal < 100) { result.travelers = Math.round(rightVal); result.parseFlags.push("pax:auto"); }
-                }
-            }
-
-            if (result.jeeps === null) {
-                if (cell === "jeep" || cell === "jeeps" || cell === "vehicles" || cell === "n° jeep" || cell === "nr jeep") {
-                    const rightVal = parseFloat(rows[i][j+1]);
-                    if (!isNaN(rightVal) && rightVal > 0 && rightVal < 20) {
-                        result.jeeps = Math.round(rightVal);
-                        result.parseFlags.push("jeep:auto");
-                    } else {
-                        const belowVal = parseFloat((rows[i+1] || [])[j]);
-                        if (!isNaN(belowVal) && belowVal > 0 && belowVal < 20) { result.jeeps = Math.round(belowVal); result.parseFlags.push("jeep:auto"); }
-                    }
-                }
-                if (cell.match(/^(jeeps?|vehicles?)\s*[:\-]\s*(\d+)/)) {
-                    const m = cell.match(/(\d+)/); if (m) { result.jeeps = parseInt(m[1]); result.parseFlags.push("jeep:auto"); }
-                }
-            }
+        if (result.travelers === null && colA === "tot pax") {
+            const v = parseFloat(colB);
+            if (!isNaN(v) && v > 0) { result.travelers = Math.round(v); result.parseFlags.push("pax:auto"); }
         }
+        if (result.jeeps === null && colA.includes("number of jeep")) {
+            const v = parseFloat(colB);
+            if (!isNaN(v) && v > 0) { result.jeeps = Math.round(v); result.parseFlags.push("jeep:auto"); }
+        }
+        // Stop scanning once both found
+        if (result.travelers !== null && result.jeeps !== null) break;
     }
 
     // --- 2. Park fees date ---------------------------------------------------
-    // Find column header with "PARK" and column with "DATE", then first row
-    // where park col is non-empty.
-    let dateCol = -1, parkCol = -1;
-    let headerRowIdx = -1;
+    // Find header row containing "DATE" col and "PARK" col, then first data row
+    // where the PARK column has a non-empty / non-zero value.
+    let dateCol = -1, parkCol = -1, headerRowIdx = -1;
 
     for (let i = 0; i < rows.length; i++) {
-        let foundDate = false, foundPark = false;
         for (let j = 0; j < rows[i].length; j++) {
             const c = String(rows[i][j] || "").toLowerCase().trim();
-            if (c === "date" && dateCol < 0) { dateCol = j; foundDate = true; }
-            if (c.includes("park") && parkCol < 0) { parkCol = j; foundPark = true; }
+            if (c === "date" && dateCol < 0) dateCol = j;
+            if (c.includes("park") && parkCol < 0) parkCol = j;
         }
-        if (foundDate || foundPark) {
-            if (dateCol >= 0 && parkCol >= 0 && headerRowIdx < 0) headerRowIdx = i;
-        }
-        if (dateCol >= 0 && parkCol >= 0 && headerRowIdx >= 0) break;
+        if (dateCol >= 0 && parkCol >= 0 && headerRowIdx < 0) { headerRowIdx = i; break; }
     }
 
     if (dateCol >= 0 && parkCol >= 0 && headerRowIdx >= 0) {
         for (let i = headerRowIdx + 1; i < rows.length; i++) {
             const parkVal = rows[i][parkCol];
             const dateVal = rows[i][dateCol];
-            // park fee present and non-zero
             if (parkVal !== "" && parkVal !== null && parkVal !== undefined) {
                 const numVal = parseFloat(parkVal);
-                if (!isNaN(numVal) && numVal > 0) {
-                    const d = parseFlexDate(dateVal);
-                    if (d) { result.safariDate = d; result.parseFlags.push("date:auto"); break; }
-                } else if (String(parkVal).trim() && !String(parkVal).trim().toLowerCase().includes("park")) {
-                    // Non-numeric non-empty (text value)
+                const hasValue = (!isNaN(numVal) && numVal > 0) ||
+                                 (isNaN(numVal) && String(parkVal).trim() &&
+                                  !String(parkVal).trim().toLowerCase().includes("park"));
+                if (hasValue) {
                     const d = parseFlexDate(dateVal);
                     if (d) { result.safariDate = d; result.parseFlags.push("date:auto"); break; }
                 }
@@ -441,7 +402,7 @@ function parseLunchBox(rows) {
         }
     }
 
-    // Fallback: first date found in date column if park col not found
+    // Fallback: first date in date column
     if (!result.safariDate && dateCol >= 0 && headerRowIdx >= 0) {
         for (let i = headerRowIdx + 1; i < rows.length; i++) {
             const d = parseFlexDate(rows[i][dateCol]);
@@ -449,26 +410,24 @@ function parseLunchBox(rows) {
         }
     }
 
-    // --- 3. EXTRA details ----------------------------------------------------
+    // --- 3. EXTRA DETAILS — col A header, content below, stop at "NAME" -----
     let extraRowIdx = -1;
     for (let i = 0; i < rows.length; i++) {
-        for (let j = 0; j < rows[i].length; j++) {
-            const c = String(rows[i][j] || "").toLowerCase().trim();
-            if (c === "extra" || c === "extra details" || c === "extras" ||
-                c.startsWith("extra detail") || c === "additional details") {
-                extraRowIdx = i;
-                break;
-            }
+        const colA = String(rows[i][0] || "").toLowerCase().trim();
+        if (colA.startsWith("extra detail") || colA === "extra" || colA === "extras") {
+            extraRowIdx = i;
+            break;
         }
-        if (extraRowIdx >= 0) break;
     }
 
     if (extraRowIdx >= 0) {
         const parts = [];
-        for (let i = extraRowIdx + 1; i < Math.min(extraRowIdx + 30, rows.length); i++) {
-            // Stop if we hit another major section header
-            const firstCell = String(rows[i][0] || "").trim();
-            if (firstCell.toUpperCase() === firstCell && firstCell.length > 2 && firstCell.match(/^[A-Z\s]+$/)) break;
+        for (let i = extraRowIdx + 1; i < rows.length; i++) {
+            const firstCell = String(rows[i][0] || "").toLowerCase().trim();
+            // Stop when we hit "NAME" row (traveler list begins)
+            if (firstCell === "name" || firstCell.startsWith("name (")) break;
+            // Also stop at other known section headers
+            if (firstCell === "date" || firstCell === "tot pax") break;
             const rowText = rows[i].filter(c => c !== "" && c !== null && c !== undefined)
                                    .map(c => String(c).trim()).filter(Boolean).join("  ");
             if (rowText) parts.push(rowText);
