@@ -85,6 +85,9 @@ input[type=date]::-webkit-calendar-picker-indicator{filter:invert(1);}
 .mov-modal-overlay.open{display:flex;}
 .mov-modal{background:var(--white);border-radius:12px;padding:26px;width:min(700px,95vw);max-height:90vh;overflow-y:auto;box-shadow:0 8px 40px rgba(0,0,0,.25);}
 .mov-modal h3{font-family:"Merriweather",serif;font-size:1rem;color:var(--red-dk);margin-bottom:18px;}
+.mov-modal input[type=date]{color:var(--black);background:var(--white);border:1.5px solid var(--grey-lt);}
+.mov-modal input[type=date]:focus{border-color:var(--red);}
+.mov-modal input[type=date]::-webkit-calendar-picker-indicator{filter:none;}
 
 
 /* ── EXCEL ACTION BAR (tabs 2+) ── */
