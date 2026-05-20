@@ -127,20 +127,16 @@ textarea.mf-ctrl{resize:vertical;min-height:90px;}
           <input type="text" id="ph-client" placeholder="e.g. Cinzia Biaggi">
         </div>
         <div class="ph-field">
+          <label>Lunch Boxes <small style="text-transform:none;font-weight:400;">(pax + jeeps)</small></label>
+          <input type="number" id="ph-travelers" min="1" max="999" placeholder="—">
+        </div>
+        <div class="ph-field">
           <label>Safari Date</label>
           <input type="date" id="ph-date">
         </div>
-        <div class="ph-field">
+        <div class="ph-field" style="grid-column:1/3;">
           <label>Folder Name</label>
           <input type="text" id="ph-folder" placeholder="e.g. CinziaBiaggi(Samwel-Drct)">
-        </div>
-        <div class="ph-field">
-          <label>Travelers (Pax)</label>
-          <input type="number" id="ph-travelers" min="1" max="99" placeholder="—">
-        </div>
-        <div class="ph-field">
-          <label>Jeeps</label>
-          <input type="number" id="ph-jeeps" min="1" max="20" placeholder="—">
         </div>
         <div class="ph-field ph-full">
           <label>Extra Details</label>
@@ -251,20 +247,16 @@ textarea.mf-ctrl{resize:vertical;min-height:90px;}
         <input type="text" class="mf-ctrl" id="edit-client">
       </div>
       <div>
+        <label class="mf-label">Lunch Boxes <small style="font-weight:400;text-transform:none;">(pax + jeeps)</small></label>
+        <input type="number" class="mf-ctrl" id="edit-travelers" min="1" max="999">
+      </div>
+      <div>
         <label class="mf-label">Safari Date</label>
         <input type="date" class="mf-ctrl" id="edit-date">
       </div>
       <div>
         <label class="mf-label">Folder Name</label>
         <input type="text" class="mf-ctrl" id="edit-folder">
-      </div>
-      <div>
-        <label class="mf-label">Travelers (Pax)</label>
-        <input type="number" class="mf-ctrl" id="edit-travelers" min="1" max="99">
-      </div>
-      <div>
-        <label class="mf-label">Jeeps</label>
-        <input type="number" class="mf-ctrl" id="edit-jeeps" min="1" max="20">
       </div>
       <div class="modal-full">
         <label class="mf-label">Extra Details</label>
@@ -506,8 +498,8 @@ let currentFilename = "";
 function showPreview(extracted, clientName, folderName, filename) {
     document.getElementById("ph-client").value    = clientName;
     document.getElementById("ph-date").value      = extracted.safariDate || "";
-    document.getElementById("ph-travelers").value = extracted.travelers !== null ? extracted.travelers : "";
-    document.getElementById("ph-jeeps").value     = extracted.jeeps !== null ? extracted.jeeps : "";
+    const lunchBoxes = (extracted.travelers || 0) + (extracted.jeeps || 0);
+    document.getElementById("ph-travelers").value = lunchBoxes > 0 ? lunchBoxes : "";
     document.getElementById("ph-extra").value     = extracted.extraDetails || "";
     document.getElementById("ph-folder").value    = folderName;
     document.getElementById("ph-notes").value     = "";
@@ -543,7 +535,7 @@ async function saveRecord() {
         client_name:   client,
         safari_date:   document.getElementById("ph-date").value || null,
         travelers:     parseInt(document.getElementById("ph-travelers").value) || null,
-        jeeps:         parseInt(document.getElementById("ph-jeeps").value) || null,
+        jeeps:         null,
         extra_details: document.getElementById("ph-extra").value.trim() || null,
         folder_name:   document.getElementById("ph-folder").value.trim() || null,
         notes:         document.getElementById("ph-notes").value.trim() || null,
@@ -660,8 +652,7 @@ function renderTable(records, container, isHistory) {
           <td>${fmtDisplay(r.safari_date)}</td>
           <td><strong>${esc(r.client_name)}</strong>${histBadge ? '<br>' + histBadge : ''}
               ${r.folder_name ? '<br><small style="color:var(--grey-mid)">' + esc(r.folder_name) + '</small>' : ''}</td>
-          <td>${r.travelers !== null ? `<span class="badge-pax">👥 ${r.travelers} pax</span>` : '—'}</td>
-          <td>${r.jeeps !== null ? `<span class="badge-jeep">🚙 ${r.jeeps}</span>` : '—'}</td>
+          <td>${r.travelers !== null ? `<span class="badge-pax">🍱 ${r.travelers}</span>` : '—'}</td>
           <td>${extra}</td>
           <td>${r.notes ? '<small>' + esc(r.notes) + '</small>' : '—'}</td>
           <td>${actions}</td>
@@ -674,8 +665,7 @@ function renderTable(records, container, isHistory) {
         <thead><tr>
           <th style="width:110px">Safari Date</th>
           <th style="width:200px">Client</th>
-          <th style="width:90px">Travelers</th>
-          <th style="width:80px">Jeeps</th>
+          <th style="width:100px">Lunch Boxes</th>
           <th>Extra Details</th>
           <th style="width:120px">Notes</th>
           <th style="width:140px"></th>
@@ -732,7 +722,6 @@ function openEditModal(r) {
     document.getElementById("edit-date").value      = r.safari_date  || "";
     document.getElementById("edit-folder").value    = r.folder_name  || "";
     document.getElementById("edit-travelers").value = r.travelers !== null ? r.travelers : "";
-    document.getElementById("edit-jeeps").value     = r.jeeps !== null ? r.jeeps : "";
     document.getElementById("edit-extra").value     = r.extra_details || "";
     document.getElementById("edit-notes").value     = r.notes || "";
     document.getElementById("edit-modal").classList.add("open");
@@ -750,7 +739,7 @@ async function saveEdit() {
         safari_date:   document.getElementById("edit-date").value || null,
         folder_name:   document.getElementById("edit-folder").value.trim() || null,
         travelers:     parseInt(document.getElementById("edit-travelers").value) || null,
-        jeeps:         parseInt(document.getElementById("edit-jeeps").value) || null,
+        jeeps:         null,
         extra_details: document.getElementById("edit-extra").value.trim() || null,
         notes:         document.getElementById("edit-notes").value.trim() || null,
     };
@@ -768,11 +757,10 @@ async function saveEdit() {
                 cells[0].textContent = fmtDisplay(payload.safari_date);
                 cells[1].innerHTML = `<strong>${esc(payload.client_name)}</strong>` +
                     (payload.folder_name ? `<br><small style="color:var(--grey-mid)">${esc(payload.folder_name)}</small>` : "");
-                cells[2].innerHTML = payload.travelers ? `<span class="badge-pax">👥 ${payload.travelers} pax</span>` : "—";
-                cells[3].innerHTML = payload.jeeps     ? `<span class="badge-jeep">🚙 ${payload.jeeps}</span>` : "—";
-                cells[4].innerHTML = payload.extra_details
+                cells[2].innerHTML = payload.travelers ? `<span class="badge-pax">🍱 ${payload.travelers}</span>` : "—";
+                cells[3].innerHTML = payload.extra_details
                     ? `<div class="extra-cell">${esc(payload.extra_details.substring(0,200))}</div>` : '<span style="color:var(--grey-lt)">—</span>';
-                cells[5].innerHTML = payload.notes ? `<small>${esc(payload.notes)}</small>` : "—";
+                cells[4].innerHTML = payload.notes ? `<small>${esc(payload.notes)}</small>` : "—";
             }
             closeEditModal();
             showToast("Record updated.", "success");
