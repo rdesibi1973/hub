@@ -66,11 +66,17 @@ $xlRows[] = array_map(fn($h) => cS($h, 2), [
     'Extra Details', 'Folder Name', 'Notes', 'Source File'
 ]);
 
-// Data rows
-$toggle = false;
+// Data rows — alternate fill per date group
+$lastDate = null;
+$toggle   = false;  // false=white(style 0), true=amber(style 7)
+
 foreach ($rows as $r) {
-    $toggle = !$toggle;
-    $st = $toggle ? 7 : 0;
+    $date = $r['safari_date'] ?? '';
+    if ($date !== $lastDate) {
+        $toggle   = !$toggle;
+        $lastDate = $date;
+    }
+    $st       = $toggle ? 7 : 0;
     $travelers = $r['travelers'] !== null ? (int)$r['travelers'] : '';
     $jeeps     = $r['jeeps']     !== null ? (int)$r['jeeps']     : '';
     $xlRows[] = [
