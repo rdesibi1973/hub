@@ -193,6 +193,12 @@ textarea.mf-ctrl{resize:vertical;min-height:90px;}
     </div>
     <button class="btn btn-primary btn-sm" onclick="loadRecords()">🔍 Search</button>
     <button class="btn btn-secondary btn-sm" onclick="clearRecordFilters()">Reset</button>
+    <button class="btn btn-secondary btn-sm" id="btn-archive-expired"
+            onclick="archiveExpired()"
+            style="margin-left:auto;background:var(--amber-lt);color:#7A4F01;border:1px solid #E87722;"
+            title="Move all records with safari date before today to History">
+      📦 Archive Expired
+    </button>
   </div>
 
   <div id="records-container">
@@ -758,6 +764,26 @@ async function stageToHistory(id, btn) {
         }
     } catch(ex) { showToast("Network error.", "error"); }
     finally { btn.disabled = false; }
+}
+
+async function archiveExpired() {
+    if (!confirm('Move all lunch boxes with a safari date before today to History?')) return;
+    const btn = document.getElementById('btn-archive-expired');
+    btn.disabled = true; btn.textContent = 'Archiving…';
+    try {
+        const r    = await fetch('api/lb_history.php', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({mode: 'expired'})
+        });
+        const data = await r.json();
+        if (data.ok) {
+            showToast(`📦 ${data.archived} record${data.archived !== 1 ? 's' : ''} archived.`, 'success');
+            loadRecords();
+        } else {
+            showToast('Error: ' + (data.error || ''), 'error');
+        }
+    } catch(ex) { showToast('Network error.', 'error'); }
+    finally { btn.disabled = false; btn.textContent = '📦 Archive Expired'; }
 }
 
 // ── Edit Modal ────────────────────────────────────────────────────────────────
