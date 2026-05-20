@@ -326,8 +326,8 @@ function handleFile(file) {
             if (!sheet) return;
             const rows = XLSX.utils.sheet_to_json(sheet, {header: 1, defval: "", raw: true});
             const extracted = parseLunchBox(rows);
-            const suggested = suggestClientName(file.name);
-            showPreview(extracted, suggested, file.name);
+            const { clientName, folderName } = suggestFromFilename(file.name);
+            showPreview(extracted, clientName, folderName, file.name);
         } catch(ex) {
             showToast("Error reading file: " + ex.message, "error");
         }
@@ -372,15 +372,14 @@ function parseLunchBox(rows) {
     }
 
     // --- 2. Park fees date ---------------------------------------------------
-    // Find header row containing "DATE" col and "PARK" col, then first data row
-    // where the PARK column has a non-empty / non-zero value.
+    // Column "DATA" or "DATE" + column "PARK FEES" (exact or containing both words)
     let dateCol = -1, parkCol = -1, headerRowIdx = -1;
 
     for (let i = 0; i < rows.length; i++) {
         for (let j = 0; j < rows[i].length; j++) {
             const c = String(rows[i][j] || "").toLowerCase().trim();
-            if (c === "date" && dateCol < 0) dateCol = j;
-            if (c.includes("park") && parkCol < 0) parkCol = j;
+            if ((c === "data" || c === "date") && dateCol < 0) dateCol = j;
+            if ((c === "park fees" || c === "park fee" || (c.includes("park") && c.includes("fee"))) && parkCol < 0) parkCol = j;
         }
         if (dateCol >= 0 && parkCol >= 0 && headerRowIdx < 0) { headerRowIdx = i; break; }
     }
@@ -438,24 +437,24 @@ function parseLunchBox(rows) {
     return result;
 }
 
-// ── Client name from filename ─────────────────────────────────────────────────
-function suggestClientName(filename) {
-    // Remove extension
-    let name = filename.replace(/\.[^.]+$/, "");
-    // Remove common suffixes like __lodge__, _RECAP, _CONF, date patterns
-    name = name.replace(/__.*$/, "").replace(/_(RECAP|CONF|recap|conf).*$/, "");
-    name = name.replace(/_?\d{4}[-_]\d{2}[-_]\d{2}.*$/, "");
+// ── Client name + folder name from filename ───────────────────────────────────
+function suggestFromFilename(filename) {
+    let base = filename.replace(/\.[^.]+$/, "");
+    base = base.replace(/__.*$/, "")
+               .replace(/_(RECAP|CONF|recap|conf).*$/i, "")
+               .replace(/_?\d{4}[-_]\d{2}[-_]\d{2}.*$/, "");
 
-    // Try to extract NomeCognome from patterns like NomeCognome(Agent-Drct) or NomeCognome_Agent
-    const parMatch = name.match(/^([^(]+)\(/);
-    if (parMatch) name = parMatch[1].trim();
+    // Folder name = NomeCognome(Agent-Type) pattern intact
+    const folderMatch = base.match(/^([A-Za-zÀ-ÿ]+\([^)]+\))/);
+    const folderName  = folderMatch ? folderMatch[1] : base.replace(/_/g, " ").trim();
 
-    // Split CamelCase
-    name = name.replace(/([a-z])([A-Z])/g, "$1 $2");
-    // Remove leading digits and underscores
-    name = name.replace(/^[\d_]+/, "").replace(/_/g, " ").trim();
-
-    return name;
+    // Client name = part before parenthesis, CamelCase split
+    const parMatch  = base.match(/^([^(]+)\(/);
+    let clientPart  = parMatch ? parMatch[1].trim() : base;
+    clientPart = clientPart.replace(/^[\d_]+/, "").replace(/_/g, " ").trim();
+    const clientName = clientPart.replace(/([a-z])([A-Z])/g, "$1 $2")
+                                  .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2").trim();
+    return { clientName, folderName };
 }
 
 // ── Date helpers ──────────────────────────────────────────────────────────────
@@ -504,13 +503,13 @@ function fmtDisplay(isoStr) {
 // ── Preview ───────────────────────────────────────────────────────────────────
 let currentFilename = "";
 
-function showPreview(extracted, clientName, filename) {
+function showPreview(extracted, clientName, folderName, filename) {
     document.getElementById("ph-client").value    = clientName;
     document.getElementById("ph-date").value      = extracted.safariDate || "";
     document.getElementById("ph-travelers").value = extracted.travelers !== null ? extracted.travelers : "";
     document.getElementById("ph-jeeps").value     = extracted.jeeps !== null ? extracted.jeeps : "";
     document.getElementById("ph-extra").value     = extracted.extraDetails || "";
-    document.getElementById("ph-folder").value    = "";
+    document.getElementById("ph-folder").value    = folderName;
     document.getElementById("ph-notes").value     = "";
     document.getElementById("parsed-from-label").textContent = "Parsed from: " + filename;
 
