@@ -70,19 +70,28 @@ $xlRows[] = array_map(fn($h) => cS($h, 2), [
     'Group Name', 'Insurance Name', 'Policy #'
 ]);
 
-// Data rows
+// Data rows — alternate fill per group
+$lastGroup   = null;
+$groupToggle = false;  // false=white(style 0), true=light-blue(style 7)
+
 foreach ($rows as $r) {
+    $grp = $r['group_name'] ?? '';
+    if ($grp !== $lastGroup) {
+        $groupToggle = !$groupToggle;
+        $lastGroup   = $grp;
+    }
+    $st = $groupToggle ? 7 : 0;   // 7=light-blue fill, 0=white
     $xlRows[] = [
-        cS($r['full_name']       ?? ''),
-        cS(fmtDate($r['dob'])),
-        cS($r['country']         ?? ''),
-        cS($r['passport_number'] ?? ''),
-        cS($r['tour_agent']      ?? ''),
-        cS(fmtDate($r['coverage_start'])),
-        cS(fmtDate($r['coverage_end'])),
-        cS($r['group_name']      ?? ''),
-        cS($r['insurance_name']  ?? ''),
-        cS($r['policy_number']   ?? ''),
+        cS($r['full_name']       ?? '', $st),
+        cS(fmtDate($r['dob']),          $st),
+        cS($r['country']         ?? '', $st),
+        cS($r['passport_number'] ?? '', $st),
+        cS($r['tour_agent']      ?? '', $st),
+        cS(fmtDate($r['coverage_start']), $st),
+        cS(fmtDate($r['coverage_end']),   $st),
+        cS($r['group_name']      ?? '', $st),
+        cS($r['insurance_name']  ?? '', $st),
+        cS($r['policy_number']   ?? '', $st),
     ];
 }
 
@@ -135,11 +144,12 @@ $stylesXml = '<?xml version="1.0" encoding="UTF-8"?>'
   .'<font><sz val="14"/><b/><name val="Calibri"/></font>'
   .'<font><sz val="10"/><color rgb="FF888888"/><name val="Calibri"/></font>'
 .'</fonts>'
-.'<fills count="4">'
+.'<fills count="5">'
   .'<fill><patternFill patternType="none"/></fill>'
   .'<fill><patternFill patternType="gray125"/></fill>'
   .'<fill><patternFill patternType="solid"><fgColor rgb="FF1A1A2E"/></patternFill></fill>'
   .'<fill><patternFill patternType="solid"><fgColor rgb="FFF0F0F0"/></patternFill></fill>'
+  .'<fill><patternFill patternType="solid"><fgColor rgb="FFD6E8F7"/></patternFill></fill>'  // light blue group alt
 .'</fills>'
 .'<borders count="2">'
   .'<border><left/><right/><top/><bottom/><diagonal/></border>'
@@ -151,14 +161,15 @@ $stylesXml = '<?xml version="1.0" encoding="UTF-8"?>'
   .'</border>'
 .'</borders>'
 .'<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
-.'<cellXfs count="7">'
-  .'<xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0"/>'                          // 0 normal+border
+.'<cellXfs count="8">'
+  .'<xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0"/>'                          // 0 normal+border (white)
   .'<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0"/>'                          // 1 bold
   .'<xf numFmtId="0" fontId="2" fillId="2" borderId="0" xfId="0"><alignment horizontal="center"/></xf>' // 2 dark-header white bold
   .'<xf numFmtId="0" fontId="4" fillId="3" borderId="0" xfId="0"><alignment horizontal="center"/></xf>' // 3 subheader grey italic
-  .'<xf numFmtId="0" fontId="0" fillId="3" borderId="1" xfId="0"/>'                          // 4 data-alt
+  .'<xf numFmtId="0" fontId="0" fillId="3" borderId="1" xfId="0"/>'                          // 4 data-alt (unused)
   .'<xf numFmtId="0" fontId="3" fillId="0" borderId="0" xfId="0"/>'                          // 5 title
   .'<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0"/>'                          // 6 label-bold
+  .'<xf numFmtId="0" fontId="0" fillId="4" borderId="1" xfId="0"/>'                          // 7 light-blue group alt
 .'</cellXfs>'
 .'</styleSheet>';
 
