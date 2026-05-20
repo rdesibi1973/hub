@@ -84,6 +84,10 @@ textarea.mf-ctrl{resize:vertical;min-height:90px;}
 .toast.error{background:var(--red);color:var(--white);}
 .toast.warning{background:var(--amber);color:var(--white);}
 
+.badge-type{display:inline-block;border-radius:10px;padding:1px 9px;font-size:.72rem;font-weight:700;white-space:nowrap;}
+.badge-hump{background:#E8F0FE;color:#1A56DB;}
+.badge-lb{background:var(--red-lt);color:var(--red-dk);}
+
 .empty-state{text-align:center;padding:48px 24px;color:var(--grey-mid);}
 .empty-state .es-icon{font-size:2.5rem;margin-bottom:12px;}
 .empty-state p{font-size:.85rem;}
@@ -133,6 +137,13 @@ textarea.mf-ctrl{resize:vertical;min-height:90px;}
         <div class="ph-field">
           <label>Guide</label>
           <input type="text" id="ph-guide" placeholder="—">
+        </div>
+        <div class="ph-field">
+          <label>Type</label>
+          <select id="ph-boxtype" style="width:100%;padding:8px 12px;border:1.5px solid var(--grey-lt);border-radius:6px;font-family:'Open Sans',sans-serif;font-size:.88rem;color:var(--black);">
+            <option value="HUMPERS" selected>HUMPERS</option>
+            <option value="LUNCH BOXES">LUNCH BOXES</option>
+          </select>
         </div>
         <div class="ph-field">
           <label>Safari Date</label>
@@ -257,6 +268,13 @@ textarea.mf-ctrl{resize:vertical;min-height:90px;}
       <div>
         <label class="mf-label">Guide</label>
         <input type="text" class="mf-ctrl" id="edit-guide">
+      </div>
+      <div>
+        <label class="mf-label">Type</label>
+        <select class="mf-ctrl" id="edit-boxtype">
+          <option value="HUMPERS">HUMPERS</option>
+          <option value="LUNCH BOXES">LUNCH BOXES</option>
+        </select>
       </div>
       <div>
         <label class="mf-label">Safari Date</label>
@@ -556,6 +574,7 @@ async function saveRecord() {
         safari_date:   document.getElementById("ph-date").value || null,
         travelers:     parseInt(document.getElementById("ph-travelers").value) || null,
         guide:         document.getElementById("ph-guide").value.trim() || null,
+        box_type:      document.getElementById("ph-boxtype").value,
         jeeps:         null,
         extra_details: document.getElementById("ph-extra").value.trim() || null,
         folder_name:   document.getElementById("ph-folder").value.trim() || null,
@@ -676,7 +695,10 @@ function renderTable(records, container, isHistory) {
           <td>${r.travelers !== null ? `<span class="badge-pax">🍱 ${r.travelers}</span>` : '—'}</td>
           <td>${r.guide ? esc(r.guide) : '—'}</td>
           <td>${extra}</td>
-          <td>${r.notes ? '<small>' + esc(r.notes) + '</small>' : '—'}</td>
+          <td>
+            <span class="badge-type ${r.box_type === 'LUNCH BOXES' ? 'badge-lb' : 'badge-hump'}">${esc(r.box_type || 'HUMPERS')}</span>
+            ${r.notes ? `<br><small>${esc(r.notes)}</small>` : ''}
+          </td>
           <td>${actions}</td>
         </tr>`;
     }).join("");
@@ -690,7 +712,7 @@ function renderTable(records, container, isHistory) {
           <th style="width:100px">Lunch Boxes</th>
           <th style="width:110px">Guide</th>
           <th>Extra Details</th>
-          <th style="width:120px">Notes</th>
+          <th style="width:140px">Type / Notes</th>
           <th style="width:140px"></th>
         </tr></thead>
         <tbody>${rows}</tbody>
@@ -746,6 +768,7 @@ function openEditModal(r) {
     document.getElementById("edit-folder").value    = r.folder_name  || "";
     document.getElementById("edit-travelers").value = r.travelers !== null ? r.travelers : "";
     document.getElementById("edit-guide").value     = r.guide || "";
+    document.getElementById("edit-boxtype").value   = r.box_type || "HUMPERS";
     document.getElementById("edit-extra").value     = r.extra_details || "";
     document.getElementById("edit-notes").value     = r.notes || "";
     document.getElementById("edit-modal").classList.add("open");
@@ -764,6 +787,7 @@ async function saveEdit() {
         folder_name:   document.getElementById("edit-folder").value.trim() || null,
         travelers:     parseInt(document.getElementById("edit-travelers").value) || null,
         guide:         document.getElementById("edit-guide").value.trim() || null,
+        box_type:      document.getElementById("edit-boxtype").value,
         jeeps:         null,
         extra_details: document.getElementById("edit-extra").value.trim() || null,
         notes:         document.getElementById("edit-notes").value.trim() || null,
@@ -786,7 +810,9 @@ async function saveEdit() {
                 cells[3].textContent = payload.guide || "—";
                 cells[4].innerHTML = payload.extra_details
                     ? `<div class="extra-cell">${esc(payload.extra_details.substring(0,200))}</div>` : '<span style="color:var(--grey-lt)">—</span>';
-                cells[5].innerHTML = payload.notes ? `<small>${esc(payload.notes)}</small>` : "—";
+                const typeCls = payload.box_type === 'LUNCH BOXES' ? 'badge-lb' : 'badge-hump';
+                cells[5].innerHTML = `<span class="badge-type ${typeCls}">${esc(payload.box_type)}</span>` +
+                    (payload.notes ? `<br><small>${esc(payload.notes)}</small>` : '');
             }
             closeEditModal();
             showToast("Record updated.", "success");
