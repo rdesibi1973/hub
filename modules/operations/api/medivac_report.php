@@ -85,7 +85,7 @@ foreach ($rows as $r) {
         cS($r['full_name']       ?? '', $st),
         cS(fmtDate($r['dob']),          $st),
         cS($r['country']         ?? '', $st),
-        cS($r['passport_number'] ?? '', $st),
+        cS('', $st),
         cS($r['tour_agent']      ?? '', $st),
         cS(fmtDate($r['coverage_start']), $st),
         cS(fmtDate($r['coverage_end']),   $st),
