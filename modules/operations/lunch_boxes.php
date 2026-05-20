@@ -458,7 +458,13 @@ function parseLunchBox(rows) {
                                    .map(c => String(c).trim()).filter(Boolean).join("  ");
             if (rowText) parts.push(rowText);
         }
-        if (parts.length) { result.extraDetails = parts.join("\n"); result.parseFlags.push("extra:auto"); }
+        if (parts.length) {
+            const joined = parts.join("\n").trim();
+            if (joined.toLowerCase() !== 'na') {
+                result.extraDetails = joined;
+                result.parseFlags.push("extra:auto");
+            }
+        }
     }
 
     return result;
