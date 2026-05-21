@@ -367,26 +367,9 @@ body {
 </div><!-- /page-wrap -->
 
 <?php if (!empty($_GET['download'])): ?>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"
-        integrity="sha512-GsLlZN/3F2ErC5ifS5QtgpiJtWd43JWSuIgh7mbzZ8zBps+dvLusV+eNQATqgA/HdeKFVgA5v3S/cIrLF7QnQ=="
-        crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 <script>
 window.addEventListener('load', function () {
-  var bar = document.querySelector('.print-bar');
-  if (bar) bar.style.display = 'none';
-
-  var element = document.querySelector('.invoice-body');
-  var filename = 'Invoice_<?= preg_replace('/[^A-Za-z0-9_-]/', '_', $inv['invoice_number']) ?>.pdf';
-
-  html2pdf().set({
-    margin:      [8, 8, 8, 8],
-    filename:    filename,
-    image:       { type: 'jpeg', quality: 0.98 },
-    html2canvas: { scale: 2, useCORS: true, logging: false },
-    jsPDF:       { unit: 'mm', format: 'a4', orientation: 'portrait' }
-  }).from(element).save().then(function () {
-    window.close();
-  });
+  window.print();
 });
 </script>
 <?php endif; ?>
