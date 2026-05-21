@@ -6,12 +6,14 @@
 //   require_once __DIR__ . '/hubspot_sync.php';
 //   // then call hs_fetch_all($since), hs_insert_lead($db, $lead), etc.
 //
-// CLI commands:
+// CLI commands (Pass 1: search by createdate, Pass 2: search by recent_conversion_date, Pass 3: CRM list fallback for index lag):
 //   php hubspot_sync.php               normal run
 //   php hubspot_sync.php --dry-run     shows what would be staged, inserts nothing
 //   php hubspot_sync.php --reset       look back 24h ignoring saved timestamp
 //   php hubspot_sync.php --since=7     look back N days
 //   php hubspot_sync.php --debug       dump raw contacts + tickets, inserts nothing
+//   php hubspot_sync.php --email=a@b.c  stage one contact by email
+//   php hubspot_sync.php --contact=ID   stage one contact by HubSpot numeric ID
 
 // ── Credentials (safe to define here — skipped if already defined by config.php) ──
 if (!defined('DB_HOST'))       define('DB_HOST',       'localhost');
@@ -293,9 +295,37 @@ function hs_fetch_contacts(int $since): array {
             if (!isset($newIds[$c['id']])) {
                 $c['_is_reconversion'] = true; // flag for hs_contact_to_lead()
                 $contacts[] = $c;
+                $newIds[$c['id']] = true;
             }
         }
         $after = $data['paging']['next']['after'] ?? null;
+    } while ($after);
+
+    // ── Pass 3: CRM-list fallback — catches contacts missed by search-index delay ──
+    // The /search endpoint indexes asynchronously; freshly created contacts can be
+    // invisible there for up to ~60 min.  The basic CRM list endpoint reads live
+    // storage and has no indexing lag.  We walk it newest-first and stop as soon as
+    // we see a contact older than $since.
+    $foundIds = array_flip(array_column($contacts, 'id'));
+    $propsQS  = implode(',', $props);
+    $after    = null;
+    do {
+        $url  = 'https://api.hubapi.com/crm/v3/objects/contacts?limit=100'
+              . '&sort=-createdate'
+              . '&properties=' . urlencode($propsQS);
+        if ($after) $url .= '&after=' . urlencode($after);
+        $data    = hs_curl($url);          // GET — bypasses search index
+        $results = $data['results'] ?? [];
+        $stop    = false;
+        foreach ($results as $c) {
+            $cMs = hs_parse_ms($c['properties']['createdate'] ?? 0);
+            if ($cMs < $since) { $stop = true; break; }   // older than window — done
+            if (!isset($foundIds[$c['id']])) {
+                $contacts[]         = $c;                  // no _is_reconversion flag
+                $foundIds[$c['id']] = true;
+            }
+        }
+        $after = ($stop || empty($results)) ? null : ($data['paging']['next']['after'] ?? null);
     } while ($after);
 
     return $contacts;
@@ -663,9 +693,11 @@ if (!defined('HS_INCLUDED')) {
     $resetSync = in_array('--reset',   $argv, true);
     $sinceArg  = null;
     $emailArg  = null;
+    $contactArg = null;
     foreach ($argv as $arg) {
         if (preg_match('/^--since=(\d+)$/', $arg, $m)) { $sinceArg = (int)$m[1]; }
         if (preg_match('/^--email=(.+)$/',  $arg, $m)) { $emailArg = trim($m[1]); }
+        if (preg_match('/^--contact=(\d+)$/', $arg, $m)) { $contactArg = trim($m[1]); }
     }
 
     // ── --email mode: fetch a single contact by email and stage it ────────────
@@ -703,7 +735,7 @@ if (!defined('HS_INCLUDED')) {
             if ($v !== null && $v !== '') echo "  $k = $v\n";
         }
         // Try to normalise and stage
-        $lead = hs_contact_to_lead($contact, false);
+        $lead = hs_contact_to_lead($contact);
         if (!$lead) {
             die("[EMAIL] Could not normalise contact (name/email empty?)\n");
         }
@@ -711,9 +743,56 @@ if (!defined('HS_INCLUDED')) {
         if ($dryRun) {
             echo "[EMAIL] Dry-run — not staging.\n";
         } else {
-            $db  = db();
+            $db  = hs_db();
             $res = hs_insert_lead($db, $lead, false);
             echo "[EMAIL] Stage result: {$res['status']} — {$res['message']}\n";
+        }
+        exit(0);
+    }
+
+    // ── --contact=ID mode: fetch a single contact by HubSpot ID and stage it ─
+    // Useful when a contact exists in HubSpot but wasn't picked up by the sync
+    // (e.g. search-index delay, missing recent_conversion_date).
+    // Usage: php hubspot_sync.php --contact=12345678
+    if ($contactArg !== null) {
+        echo "[CONTACT] Fetching contact ID: $contactArg\n";
+        $propsQS = implode(',', [
+            'firstname','lastname','email','phone','mobilephone',
+            'createdate','recent_conversion_event_name','recent_conversion_date',
+            'contact_name','whatsapp_phone_number',
+            'ibotdestinations','pax','ibotperiod','activities','duration','accommodation_level',
+            'nome_cognome','numero_whatsapp','ibotdestinazioni','ibotperiodo',
+            'attivita','durata','livello_sistemazione',
+            'numero_di_persone','periodo','message','destinazioni','destinations',
+            'number_of_people','period','other_info_and_requests','surname','name',
+        ]);
+        try {
+            $contact = hs_curl(
+                'https://api.hubapi.com/crm/v3/objects/contacts/' . $contactArg
+                . '?properties=' . urlencode($propsQS)
+            );
+        } catch (RuntimeException $e) {
+            die("[CONTACT] HubSpot API error: " . $e->getMessage() . "\n");
+        }
+        if (empty($contact['id'])) {
+            die("[CONTACT] Contact $contactArg not found.\n");
+        }
+        echo "[CONTACT] Found: {$contact['id']}\n";
+        echo "[CONTACT] Properties set:\n";
+        foreach ($contact['properties'] as $k => $v) {
+            if ($v !== null && $v !== '') echo "  $k = $v\n";
+        }
+        $lead = hs_contact_to_lead($contact);
+        if (!$lead) {
+            die("[CONTACT] Could not normalise contact (name/email empty?)\n");
+        }
+        echo "[CONTACT] Normalised: {$lead['customer_name']} | {$lead['email']} | source={$lead['source']}\n";
+        if ($dryRun) {
+            echo "[CONTACT] Dry-run — not staging.\n";
+        } else {
+            $db  = hs_db();
+            $res = hs_insert_lead($db, $lead, false);
+            echo "[CONTACT] Stage result: {$res['status']} — {$res['message']}\n";
         }
         exit(0);
     }
