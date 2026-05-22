@@ -193,6 +193,7 @@ textarea.mf-ctrl{resize:vertical;min-height:90px;}
     </div>
     <button class="btn btn-primary btn-sm" onclick="loadRecords()">🔍 Search</button>
     <button class="btn btn-secondary btn-sm" onclick="clearRecordFilters()">Reset</button>
+    <button class="btn btn-primary btn-sm" onclick="openAddModal()" style="background:var(--green,#2d7a3a);border-color:var(--green,#2d7a3a);">➕ Add Record</button>
     <button class="btn btn-secondary btn-sm" id="btn-archive-expired"
             onclick="archiveExpired()"
             style="margin-left:auto;background:var(--amber-lt);color:#7A4F01;border:1px solid #E87722;"
@@ -260,7 +261,7 @@ textarea.mf-ctrl{resize:vertical;min-height:90px;}
 <!-- ── Edit Modal ── -->
 <div class="modal-overlay" id="edit-modal">
   <div class="modal-box">
-    <h3>✏️ Edit Lunch Box Entry</h3>
+    <h3 id="modal-title-text">✏️ Edit Lunch Box Entry</h3>
     <input type="hidden" id="edit-id">
     <div class="modal-grid">
       <div class="modal-full">
@@ -692,6 +693,7 @@ function renderTable(records, container, isHistory) {
                </div>`
             : `<div class="action-btns">
                  <button class="btn btn-secondary btn-sm" onclick='openEditModal(${JSON.stringify(r)})'>✏️ Edit</button>
+                 <button class="btn btn-secondary btn-sm" onclick='openDuplicateModal(${JSON.stringify(r)})' title="Duplicate this record">📋</button>
                  <button class="btn btn-secondary btn-sm"
                          onclick="stageToHistory(${r.id}, this)"
                          style="background:var(--amber-lt);color:#7A4F01;border:1px solid #E87722;"
@@ -792,9 +794,9 @@ async function archiveExpired() {
     finally { btn.disabled = false; btn.textContent = '📦 Archive Expired'; }
 }
 
-// ── Edit Modal ────────────────────────────────────────────────────────────────
-function openEditModal(r) {
-    document.getElementById("edit-id").value        = r.id;
+// ── Edit / Add / Duplicate Modal ──────────────────────────────────────────────
+function _fillModal(r, id) {
+    document.getElementById("edit-id").value        = id;
     document.getElementById("edit-client").value    = r.client_name  || "";
     document.getElementById("edit-date").value      = r.safari_date  || "";
     document.getElementById("edit-folder").value    = r.folder_name  || "";
@@ -803,7 +805,27 @@ function openEditModal(r) {
     document.getElementById("edit-boxtype").value   = r.box_type || "HUMPERS";
     document.getElementById("edit-extra").value     = r.extra_details || "";
     document.getElementById("edit-notes").value     = r.notes || "";
+}
+
+function openEditModal(r) {
+    document.getElementById("modal-title-text").textContent = "✏️ Edit Lunch Box Entry";
+    _fillModal(r, r.id);
     document.getElementById("edit-modal").classList.add("open");
+}
+
+function openAddModal() {
+    document.getElementById("modal-title-text").textContent = "➕ Add Lunch Box Entry";
+    _fillModal({ client_name:"", safari_date:"", folder_name:"", travelers:null,
+                 guide:"", box_type:"HUMPERS", extra_details:"", notes:"" }, 0);
+    document.getElementById("edit-modal").classList.add("open");
+    document.getElementById("edit-client").focus();
+}
+
+function openDuplicateModal(r) {
+    document.getElementById("modal-title-text").textContent = "📋 Duplicate Lunch Box Entry";
+    _fillModal(r, 0);                       // id=0 → save as new
+    document.getElementById("edit-modal").classList.add("open");
+    document.getElementById("edit-client").focus();
 }
 
 function closeEditModal() { document.getElementById("edit-modal").classList.remove("open"); }
@@ -812,8 +834,9 @@ async function saveEdit() {
     const client = document.getElementById("edit-client").value.trim();
     if (!client) { showToast("Client name is required.", "error"); return; }
 
+    const editId = parseInt(document.getElementById("edit-id").value) || 0;
     const payload = {
-        id:            parseInt(document.getElementById("edit-id").value),
+        id:            editId,
         client_name:   client,
         safari_date:   document.getElementById("edit-date").value || null,
         folder_name:   document.getElementById("edit-folder").value.trim() || null,
@@ -828,9 +851,17 @@ async function saveEdit() {
     const btn = document.getElementById("edit-save-btn");
     btn.disabled = true; btn.textContent = "Saving…";
     try {
-        const r    = await fetch("api/lb_update.php", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload)});
+        const isNew = (editId === 0);
+        const endpoint = isNew ? "api/lb_save.php" : "api/lb_update.php";
+        const r    = await fetch(endpoint, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload)});
         const data = await r.json();
         if (data.ok) {
+            if (isNew) {
+                // New record: just reload the table
+                closeEditModal();
+                showToast("Record added.", "success");
+                loadRecords();
+            } else {
             // Update DOM row
             const tr = document.getElementById("lb-row-" + payload.id);
             if (tr) {
@@ -848,6 +879,7 @@ async function saveEdit() {
             }
             closeEditModal();
             showToast("Record updated.", "success");
+            } // end else (edit)
         } else {
             showToast("Error: " + (data.error || ""), "error");
         }
