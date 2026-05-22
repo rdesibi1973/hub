@@ -28,7 +28,8 @@ if (isset($_GET['clear'])) {
 // If any filter param is present in URL → save to session; otherwise restore
 $filter_submitted = array_key_exists('q', $_GET) || array_key_exists('status', $_GET)
                  || array_key_exists('agent', $_GET) || array_key_exists('year', $_GET)
-                 || array_key_exists('no_folder', $_GET) || array_key_exists('sort', $_GET);
+                 || array_key_exists('no_folder', $_GET) || array_key_exists('sort', $_GET)
+                 || array_key_exists('date_from', $_GET) || array_key_exists('date_to', $_GET);
 
 if ($filter_submitted) {
     $_SESSION['req_filters'] = [
@@ -38,6 +39,8 @@ if ($filter_submitted) {
         'year'      => (int)($_GET['year']  ?? 0),
         'no_folder' => !empty($_GET['no_folder']),
         'sort'      => $_GET['sort'] ?? 'id_desc',
+        'date_from' => $_GET['date_from']   ?? '',
+        'date_to'   => $_GET['date_to']     ?? '',
     ];
 }
 
@@ -52,6 +55,8 @@ if ($isFirstVisit) {
         'year'      => 0,            // all years
         'no_folder' => false,
         'sort'      => 'id_desc',    // newest assignment first
+        'date_from' => '',
+        'date_to'   => '',
     ];
     $_SESSION['req_filters'] = $f;
 }
@@ -62,6 +67,8 @@ $agent     = (int)($f['agent']    ?? 0);
 $year      = (int)($f['year']     ?? 0);
 $no_folder = !empty($f['no_folder']);
 $sort      = $f['sort']      ?? 'id_desc';
+$date_from = $f['date_from'] ?? '';
+$date_to   = $f['date_to']   ?? '';
 
 $allowedSorts = [
     'id_desc'   => 'r.id DESC',
@@ -93,6 +100,14 @@ if ($agent === -1) {
 if ($year > 0 && !$search) {
     $where[]  = 'YEAR(r.date_received) = ?';
     $params[] = $year;
+}
+if ($date_from !== '') {
+    $where[]  = 'r.date_received >= ?';
+    $params[] = $date_from;
+}
+if ($date_to !== '') {
+    $where[]  = 'r.date_received <= ?';
+    $params[] = $date_to;
 }
 if ($no_folder) {
     $where[] = "(r.practice_code IS NULL OR r.practice_code = '')";
@@ -141,6 +156,22 @@ include 'includes/header.php';
   </div>
 </div>
 
+
+<?php if ($date_from || $date_to): ?>
+<div style="background:#fff8e1;border:1px solid #ffe082;border-radius:6px;padding:10px 14px;margin-bottom:12px;display:flex;align-items:center;gap:12px;font-size:.88rem;">
+  <span style="color:#b45309;">📅 Filtered by date:
+    <?php if ($date_from && $date_to): ?>
+      <strong><?= h($date_from) ?></strong> → <strong><?= h($date_to) ?></strong>
+    <?php elseif ($date_from): ?>
+      from <strong><?= h($date_from) ?></strong>
+    <?php else: ?>
+      until <strong><?= h($date_to) ?></strong>
+    <?php endif; ?>
+    <?php if ($status): ?> · status <strong><?= h($status) ?></strong><?php endif; ?>
+  </span>
+  <a href="requests.php?clear=1" style="margin-left:auto;color:var(--red);text-decoration:none;font-weight:600;">✕ Clear</a>
+</div>
+<?php endif; ?>
 
 <!-- FILTERS -->
 <form method="GET" class="filters">
@@ -228,6 +259,8 @@ include 'includes/header.php';
             'year'      => $year  ?: null,
             'no_folder' => $no_folder ? 1 : null,
             'sort'      => $nextSort,
+            'date_from' => $date_from ?: null,
+            'date_to'   => $date_to   ?: null,
           ], fn($v) => $v !== null && $v !== '' && $v !== 0));
         ?>
         <th style="white-space:nowrap;">

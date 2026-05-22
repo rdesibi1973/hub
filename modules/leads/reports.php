@@ -360,7 +360,8 @@ include 'includes/header.php';
     <div class="stat-label">Total Requests</div>
     <div class="stat-value"><?= $totals['total'] ?></div>
   </div>
-  <div class="stat-card green">
+  <div class="stat-card green" style="cursor:pointer"
+       onclick="location.href='requests.php?<?= h(http_build_query(['status'=>'Booked','agent'=>0,'date_from'=>$report_from,'date_to'=>$report_to,'year'=>0])) ?>'">
     <div class="stat-label">Confirmed</div>
     <div class="stat-value green"><?= $totals['confirmed'] ?></div>
   </div>
@@ -434,8 +435,18 @@ include 'includes/header.php';
         </td>
         <td class="text-right"><?= $r['total'] ?></td>
         <td class="text-right">
-          <?php if ($r['confirmed'] > 0): ?>
-            <span class="badge status-booked"><?= $r['confirmed'] ?></span>
+          <?php if ($r['confirmed'] > 0):
+            $booked_url = 'requests.php?' . http_build_query([
+                'status'    => 'Booked',
+                'agent'     => $r['agent_id'],
+                'date_from' => $report_from,
+                'date_to'   => $report_to,
+                'year'      => 0,
+            ]); ?>
+            <a href="<?= h($booked_url) ?>" onclick="event.stopPropagation()"
+               style="text-decoration:none">
+              <span class="badge status-booked" style="cursor:pointer" title="View booked requests"><?= $r['confirmed'] ?></span>
+            </a>
           <?php else: ?>
             <span class="text-muted">0</span>
           <?php endif; ?>
@@ -460,7 +471,16 @@ include 'includes/header.php';
         <td>TOTAL</td>
         <td class="text-right"><?= $totals['total'] ?></td>
         <td class="text-right">
-          <span class="badge status-booked"><?= $totals['confirmed'] ?></span>
+          <?php $all_booked_url = 'requests.php?' . http_build_query([
+              'status'    => 'Booked',
+              'agent'     => 0,
+              'date_from' => $report_from,
+              'date_to'   => $report_to,
+              'year'      => 0,
+          ]); ?>
+          <a href="<?= h($all_booked_url) ?>" style="text-decoration:none">
+            <span class="badge status-booked" style="cursor:pointer" title="View all booked requests"><?= $totals['confirmed'] ?></span>
+          </a>
         </td>
         <td class="text-right" style="color:var(--green)"><?= $totals['rate'] ?>%</td>
         <td class="text-right text-green" style="font-weight:700">$<?= number_format($totals['sales_amount'],0) ?></td>
