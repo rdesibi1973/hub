@@ -80,11 +80,11 @@ include __DIR__ . '/includes/layout_header.php';
     <?php endif; ?>
 
     <?php if (is_admin()): ?>
-    <a class="link-card lc-amber" href="<?= BASE_URL ?>/booked.php">
+    <a class="link-card lc-amber" href="<?= BASE_URL ?>/modules/leads/booked.php">
       <div class="lc-icon emoji">✈️</div>
       <div><div class="lc-label">Booked Requests</div><div class="lc-sub">Sorted by arrival date</div></div>
     </a>
-    <a class="link-card lc-navy" href="<?= BASE_URL ?>/email_templates.php">
+    <a class="link-card lc-navy" href="<?= BASE_URL ?>/modules/leads/email_templates.php">
       <div class="lc-icon emoji">📧</div>
       <div><div class="lc-label">Email Templates</div><div class="lc-sub">Manage client email templates</div></div>
     </a>

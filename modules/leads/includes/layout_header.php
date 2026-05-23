@@ -403,13 +403,11 @@ if ($_in_leads): ?>
   _nav_link('agencies.php',               'Agencies',    $_cur==='agencies.php');
   _nav_link('requests_import_list.php',   'Hist. Requests', in_array($_cur,['requests_import_list.php','request_import_edit.php']));
   _nav_link('reports_import.php',         'Hist. Reports',  $_cur==='reports_import.php');
-  <?php if (is_admin()): ?>
-  <span style="display:inline-block;width:1px;background:var(--grey-lt);margin:8px 6px;align-self:stretch;"></span>
-  <?php
-  _nav_link(BASE_URL.'/booked.php',          'Booked',          $_cur==='booked.php');
-  _nav_link(BASE_URL.'/email_templates.php', 'Email Templates', $_cur==='email_templates.php');
-  ?>
-  <?php endif; ?>
+  if (is_admin()) {
+      echo '<span style="display:inline-block;width:1px;background:var(--grey-lt);margin:8px 6px;align-self:stretch;"></span>';
+      _nav_link('booked.php',          'Booked',           $_cur==='booked.php');
+      _nav_link('email_templates.php', 'Email Templates',  $_cur==='email_templates.php');
+  }
   ?>
   <a href="logout.php" style="margin-left:auto;font-size:.8rem;font-weight:600;color:#aaa;text-decoration:none;padding:10px 16px;">Logout</a>
 </nav>
