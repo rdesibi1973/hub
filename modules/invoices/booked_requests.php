@@ -15,6 +15,7 @@ if (!defined('STATUSES')) {
     define('STATUSES', [
         'Inquiry'   => 'status-inquiry',
         'Quoted'    => 'status-quoted',
+        'Hot'       => 'status-hot',
         'Booked'    => 'status-booked',
         'Cancelled' => 'status-cancelled',
         'Lost'      => 'status-lost',

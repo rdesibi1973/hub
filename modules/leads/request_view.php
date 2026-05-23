@@ -8,23 +8,26 @@ $db  = db();
 // ── Inline status update ────────────────────────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['quick_status'])) {
     $newStatus    = trim($_POST['quick_status']);
+    $isXhr        = ($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '') === 'XMLHttpRequest';
     $staffAgentId = isLeadsRestricted() ? getStaffAgentId() : 0;
 
     if (!array_key_exists($newStatus, STATUSES)) {
+        if ($isXhr) { header('Content-Type: application/json');
+                      echo json_encode(['ok'=>false,'message'=>'Invalid status']); exit; }
         flash('Invalid status.', 'error');
     } else {
         if (isLeadsRestricted()) {
-            // Staff: only their own requests
             $db->prepare("UPDATE requests SET status=? WHERE id=? AND agent_id=?")
                ->execute([$newStatus, $id, $staffAgentId]);
         } else {
             $db->prepare("UPDATE requests SET status=? WHERE id=?")
                ->execute([$newStatus, $id]);
         }
+        if ($isXhr) { header('Content-Type: application/json');
+                      echo json_encode(['ok'=>true]); exit; }
         flash('Status updated to ' . $newStatus . '.');
     }
-    header('Location: request_view.php?id=' . $id);
-    exit;
+    if (!$isXhr) { header('Location: request_view.php?id=' . $id); exit; }
 }
 $stmt = db()->prepare("
     SELECT r.*, a.name AS agent_name

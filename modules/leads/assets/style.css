@@ -210,6 +210,7 @@ main {
 }
 .status-inquiry   { background: var(--blue-lt);   color: var(--blue); }
 .status-quoted    { background: var(--amber-lt);  color: var(--amber); }
+.status-hot       { background: #FFF0E0;           color: #C45000; }
 .status-booked    { background: var(--green-lt);  color: var(--green); }
 .status-cancelled { background: var(--red-lt);    color: var(--red-dk); }
 .status-lost      { background: var(--grey-lt);   color: var(--grey-dk); }

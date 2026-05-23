@@ -16,7 +16,7 @@
  *   { "success": false, "message": "..." }
  *
  * Valid status values (must match STATUSES in config.php):
- *   Inquiry | Quoted | Booked | Cancelled | Lost
+ *   Inquiry | Quoted | Hot | Booked | Cancelled | Lost
  */
 
 require_once 'config.php';
