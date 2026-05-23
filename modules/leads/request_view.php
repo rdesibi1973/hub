@@ -493,7 +493,7 @@ function deleteQuote(id, num) {
 .todo-del { background:none; border:none; cursor:pointer; color:#aaa; font-size:1rem; padding:2px 4px; }
 .todo-del:hover { color:var(--red); }
 .todo-add-form {
-  display:flex; gap:8px; flex-wrap:wrap; align-items:flex-end;
+  display:flex; gap:10px; align-items:stretch;
   max-width:860px; margin-top:12px;
   padding:14px; background:#f9f9f9; border-radius:8px; border:1.5px dashed var(--grey-lt);
 }
@@ -502,9 +502,14 @@ function deleteQuote(id, num) {
   font-size:.82rem; font-family:inherit; background:#fff;
 }
 .todo-add-form input:focus, .todo-add-form textarea:focus { outline:none; border-color:var(--blue); }
-.todo-add-form .tf-title { flex:2; min-width:180px; resize:vertical; min-height:58px; align-self:stretch; }
-.todo-add-form .tf-due   { width:190px; }
-.todo-add-form .tf-email { flex:1; min-width:160px; }
+.todo-add-form .tf-title {
+  flex:1; resize:vertical; min-height:90px; align-self:stretch;
+}
+.todo-add-form .tf-right {
+  display:flex; flex-direction:column; gap:6px; min-width:200px; justify-content:space-between;
+}
+.todo-add-form .tf-due   { width:100%; }
+.todo-add-form .tf-email { width:100%; }
 </style>
 
 <a id="notes"></a>
@@ -651,16 +656,18 @@ function deleteQuote(id, num) {
 <!-- Add To-Do form -->
 <form method="post" class="todo-add-form">
   <input type="hidden" name="action_todo" value="add">
-  <textarea class="tf-title" name="todo_title" placeholder="What to do…" rows="2" required></textarea>
-  <input class="tf-due" type="datetime-local" name="todo_due" required
-         value="<?= date('Y-m-d\TH:i', strtotime('+1 day')) ?>">
-  <input class="tf-email" type="text" name="todo_email"
-         placeholder="email1, email2, …"
-         value="<?= h($cuEmail) ?>"
-         title="One or more addresses separated by commas">
-  <button type="submit" class="btn btn-outline" style="white-space:nowrap;padding:7px 16px">
-    + Add to-do
-  </button>
+  <textarea class="tf-title" name="todo_title" placeholder="What to do…" rows="4" required></textarea>
+  <div class="tf-right">
+    <input class="tf-due" type="datetime-local" name="todo_due" required
+           value="<?= date('Y-m-d\TH:i', strtotime('+1 day')) ?>">
+    <input class="tf-email" type="text" name="todo_email"
+           placeholder="email1, email2, …"
+           value="<?= h($cuEmail) ?>"
+           title="One or more addresses separated by commas">
+    <button type="submit" class="btn btn-outline" style="white-space:nowrap;padding:7px 16px">
+      + Add to-do
+    </button>
+  </div>
 </form>
 <p style="font-size:.7rem;color:var(--grey-mid);margin-top:6px;max-width:860px">
   💡 A reminder email is sent to the address above when the deadline is reached (checked every 15 min).
