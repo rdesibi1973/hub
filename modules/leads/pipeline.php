@@ -16,7 +16,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'
     header('Content-Type: application/json');
     $id  = (int)($_POST['id']  ?? 0);
     $col = trim($_POST['col'] ?? '');
-    $allowed = ['new','wip','quoted','hot','booked'];
+    $allowed = ['new','wip','quoted','hot'];
     if (!$id || !in_array($col, $allowed, true)) {
         echo json_encode(['ok'=>false,'message'=>'Invalid params']); exit;
     }
@@ -60,11 +60,10 @@ $columns = [
     'wip'    => ['label'=>'WIP',     'icon'=>'⚙️', 'cls'=>'col-wip',    'default_statuses'=>[]],
     'quoted' => ['label'=>'QUOTED',  'icon'=>'💬', 'cls'=>'col-quoted', 'default_statuses'=>['Quoted']],
     'hot'    => ['label'=>'HOT',     'icon'=>'🔥', 'cls'=>'col-hot',    'default_statuses'=>['Hot']],
-    'booked' => ['label'=>'CONFIRMED','icon'=>'✅', 'cls'=>'col-booked', 'default_statuses'=>['Booked']],
 ];
 
 // ── Fetch all pipeline-visible requests ────────────────────────────────────
-$where  = ["r.status IN ('Inquiry','Quoted','Hot','Booked')"];
+$where  = ["r.status IN ('Inquiry','Quoted','Hot')"];
 $params = [];
 
 if ($isStaff && $staffAgentId) {
