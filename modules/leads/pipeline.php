@@ -49,7 +49,7 @@ $columns = [
     'wip'    => ['label'=>'WIP',     'icon'=>'⚙️', 'cls'=>'col-wip',    'default_statuses'=>[]],
     'quoted' => ['label'=>'QUOTED',  'icon'=>'💬', 'cls'=>'col-quoted', 'default_statuses'=>['Quoted']],
     'hot'    => ['label'=>'HOT',     'icon'=>'🔥', 'cls'=>'col-hot',    'default_statuses'=>['Hot']],
-    'booked' => ['label'=>'BOOKED',  'icon'=>'✅', 'cls'=>'col-booked', 'default_statuses'=>['Booked']],
+    'booked' => ['label'=>'CONFIRMED','icon'=>'✅', 'cls'=>'col-booked', 'default_statuses'=>['Booked']],
 ];
 
 // ── Fetch all pipeline-visible requests ────────────────────────────────────
@@ -329,7 +329,8 @@ async function moveCard(id, from, to) {
     });
     const data = await res.json();
     if (!data.ok) throw new Error(data.message || 'Error');
-    showToast('✓  ' + card.querySelector('.card-name').textContent.trim() + '  →  ' + to.toUpperCase());
+    const labels = {new:'NEW', wip:'WIP', quoted:'QUOTED', hot:'HOT', booked:'CONFIRMED'};
+    showToast('✓  ' + card.querySelector('.card-name').textContent.trim() + '  →  ' + (labels[to]||to.toUpperCase()));
   } catch (err) {
     // Roll back
     card.dataset.col = from;
