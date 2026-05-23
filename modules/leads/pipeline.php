@@ -5,6 +5,10 @@ requireLogin();
 $isStaff      = isLeadsRestricted();
 $staffAgentId = $isStaff ? getStaffAgentId() : 0;
 $db           = db();
+$currentUser  = current_user();
+$myRole       = $currentUser['role_name'] ?? '';
+$myAgentId    = (int)($currentUser['agent_id'] ?? 0);
+$canSeeAll    = in_array($myRole, ['admin','manager']);
 
 // ── AJAX: move card (updates pipeline_column only, status unchanged) ───────
 if ($_SERVER['REQUEST_METHOD'] === 'POST'
@@ -29,8 +33,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'
 
 // ── Filters ────────────────────────────────────────────────────────────────
 $pageTitle   = 'Pipeline';
-$filterAgent = (int)($_GET['agent'] ?? 0);
 $filterYear  = (int)($_GET['year']  ?? 0);
+
+// Default agent filter: own agent. Admin/manager can override to another or All (0).
+if ($canSeeAll) {
+    $filterAgent = isset($_GET['agent']) ? (int)$_GET['agent'] : $myAgentId;
+} else {
+    // Non-admin/manager: always locked to their own agent
+    $filterAgent = $myAgentId ?: ($isStaff ? $staffAgentId : 0);
+}
 
 $agents = $db->query(
     "SELECT a.id, a.name FROM agents a
@@ -203,9 +214,9 @@ include 'includes/header.php';
 <div class="pipeline-wrap">
   <form method="get" class="pipeline-toolbar">
     <h2>🔥 Pipeline</h2>
-    <?php if (!$isStaff): ?>
+    <?php if ($canSeeAll): ?>
     <select name="agent" onchange="this.form.submit()">
-      <option value="0">All agents</option>
+      <option value="0" <?= $filterAgent===0?'selected':'' ?>>All agents</option>
       <?php foreach ($agents as $ag): ?>
       <option value="<?= $ag['id'] ?>" <?= $filterAgent==$ag['id']?'selected':'' ?>>
         <?= h($ag['name']) ?>
@@ -220,6 +231,9 @@ include 'includes/header.php';
       <?php endforeach; ?>
     </select>
     <span style="font-size:.78rem;color:var(--grey-mid)"><?= count($rows) ?> requests</span>
+    <button type="submit" class="btn btn-outline btn-sm" style="margin-left:auto;display:flex;align-items:center;gap:6px;">
+      ↺ Refresh
+    </button>
   </form>
 
   <div class="pipeline-board" id="board">
