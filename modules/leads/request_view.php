@@ -39,6 +39,59 @@ $stmt->execute([$id]);
 $r = $stmt->fetch();
 if (!$r) { flash('Request not found.', 'error'); header('Location: requests.php'); exit; }
 
+$cu = current_user();
+
+// ── Notes POST ──────────────────────────────────────────────────────────────
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action_note'])) {
+    $note = trim($_POST['note_text'] ?? '');
+    if ($note !== '') {
+        $db->prepare("INSERT INTO request_notes (request_id, user_id, note) VALUES (?,?,?)")
+           ->execute([$id, (int)$cu['id'], $note]);
+    }
+    header("Location: request_view.php?id=$id#notes"); exit;
+}
+
+// ── To-Do POST ──────────────────────────────────────────────────────────────
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action_todo'])) {
+    $action = $_POST['action_todo'];
+    if ($action === 'add') {
+        $title    = trim($_POST['todo_title']   ?? '');
+        $due      = trim($_POST['todo_due']     ?? '');
+        $email_to = trim($_POST['todo_email']   ?? '');
+        if ($title && $due) {
+            $db->prepare(
+                "INSERT INTO request_todos (request_id, user_id, title, due_at, email_to) VALUES (?,?,?,?,?)"
+            )->execute([$id, (int)$cu['id'], $title, $due, $email_to ?: null]);
+        }
+    } elseif ($action === 'done') {
+        $tid = (int)($_POST['todo_id'] ?? 0);
+        if ($tid) $db->prepare("UPDATE request_todos SET done=1-done WHERE id=? AND request_id=?")
+                     ->execute([$tid, $id]);
+    } elseif ($action === 'delete') {
+        $tid = (int)($_POST['todo_id'] ?? 0);
+        if ($tid) $db->prepare("DELETE FROM request_todos WHERE id=? AND request_id=?")
+                     ->execute([$tid, $id]);
+    }
+    header("Location: request_view.php?id=$id#todos"); exit;
+}
+
+// ── Load notes & todos ──────────────────────────────────────────────────────
+$notes = $db->prepare(
+    "SELECT n.*, u.full_name AS author FROM request_notes n
+     LEFT JOIN users u ON u.id = n.user_id
+     WHERE n.request_id = ? ORDER BY n.created_at ASC"
+);
+$notes->execute([$id]);
+$notes = $notes->fetchAll();
+
+$todos = $db->prepare(
+    "SELECT t.*, u.full_name AS author FROM request_todos t
+     LEFT JOIN users u ON u.id = t.user_id
+     WHERE t.request_id = ? ORDER BY t.done ASC, t.due_at ASC"
+);
+$todos->execute([$id]);
+$todos = $todos->fetchAll();
+
 
 
 // Check for existing invoices on this request
@@ -325,4 +378,158 @@ function deleteQuote(id, num) {
     .catch(function(){ alert('Request failed'); });
 }
 </script>
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+<!-- NOTES -->
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+<style>
+.notes-thread { max-width:860px; margin-bottom:24px; }
+.note-item {
+  display:flex; gap:12px; padding:12px 0;
+  border-bottom:1px solid var(--grey-lt);
+}
+.note-item:last-child { border-bottom:none; }
+.note-avatar {
+  width:32px; height:32px; border-radius:50%;
+  background:var(--blue-lt); color:var(--blue);
+  display:flex; align-items:center; justify-content:center;
+  font-weight:700; font-size:.75rem; flex-shrink:0;
+}
+.note-body { flex:1; min-width:0; }
+.note-meta { font-size:.72rem; color:var(--grey-mid); margin-bottom:4px; }
+.note-meta strong { color:var(--grey-dk); }
+.note-text { font-size:.84rem; line-height:1.6; white-space:pre-wrap; color:var(--grey-dk); }
+.note-add-form { display:flex; gap:8px; align-items:flex-end; max-width:860px; margin-top:12px; }
+.note-add-form textarea {
+  flex:1; padding:9px 12px; border:1.5px solid var(--grey-lt); border-radius:8px;
+  font-size:.84rem; font-family:inherit; resize:vertical; min-height:60px;
+  transition:border-color .15s;
+}
+.note-add-form textarea:focus { outline:none; border-color:var(--blue); }
+
+/* To-Dos */
+.todos-list { max-width:860px; margin-bottom:16px; }
+.todo-item {
+  display:flex; align-items:center; gap:10px;
+  padding:10px 14px; border-radius:8px; margin-bottom:6px;
+  border:1.5px solid var(--grey-lt); background:#fff;
+  transition:opacity .15s;
+}
+.todo-item.done-item { opacity:.5; background:#fafafa; }
+.todo-item.overdue { border-color:#fca5a5; background:#fff5f5; }
+.todo-check { width:18px; height:18px; cursor:pointer; flex-shrink:0; accent-color:var(--green); }
+.todo-title { flex:1; font-size:.84rem; font-weight:600; color:var(--grey-dk); }
+.todo-item.done-item .todo-title { text-decoration:line-through; color:var(--grey-mid); }
+.todo-due {
+  font-size:.72rem; font-weight:700; padding:2px 8px;
+  border-radius:4px; background:var(--blue-lt); color:var(--blue); white-space:nowrap;
+}
+.todo-item.overdue .todo-due   { background:#fee2e2; color:#C0211B; }
+.todo-item.done-item .todo-due { background:var(--grey-lt); color:var(--grey-mid); }
+.todo-email { font-size:.7rem; color:var(--grey-mid); }
+.todo-del { background:none; border:none; cursor:pointer; color:#ddd; font-size:1rem; padding:2px 4px; }
+.todo-del:hover { color:var(--red); }
+.todo-add-form {
+  display:flex; gap:8px; flex-wrap:wrap; align-items:flex-end;
+  max-width:860px; margin-top:12px;
+  padding:14px; background:#f9f9f9; border-radius:8px; border:1.5px dashed var(--grey-lt);
+}
+.todo-add-form input, .todo-add-form select {
+  padding:7px 10px; border:1.5px solid var(--grey-lt); border-radius:6px;
+  font-size:.82rem; font-family:inherit; background:#fff;
+}
+.todo-add-form input:focus { outline:none; border-color:var(--blue); }
+.todo-add-form .tf-title { flex:2; min-width:180px; }
+.todo-add-form .tf-due   { width:190px; }
+.todo-add-form .tf-email { flex:1; min-width:160px; }
+</style>
+
+<a id="notes"></a>
+<div class="section-label" style="margin-top:28px">📝 Notes</div>
+<div class="notes-thread">
+  <?php if (empty($notes)): ?>
+  <p style="color:var(--grey-mid);font-size:.83rem;padding:8px 0">No notes yet.</p>
+  <?php else: ?>
+  <?php foreach ($notes as $n):
+    $initials = implode('', array_map(fn($w)=>strtoupper($w[0]),
+                array_filter(explode(' ', $n['author'] ?? 'U'))));
+    $initials = substr($initials, 0, 2);
+  ?>
+  <div class="note-item">
+    <div class="note-avatar"><?= h($initials) ?></div>
+    <div class="note-body">
+      <div class="note-meta">
+        <strong><?= h($n['author'] ?? 'Unknown') ?></strong>
+        &nbsp;·&nbsp; <?= date('d M Y H:i', strtotime($n['created_at'])) ?>
+      </div>
+      <div class="note-text"><?= h($n['note']) ?></div>
+    </div>
+  </div>
+  <?php endforeach; ?>
+  <?php endif; ?>
+</div>
+<form method="post" class="note-add-form">
+  <textarea name="note_text" placeholder="Add a note…" rows="2"></textarea>
+  <input type="hidden" name="action_note" value="1">
+  <button type="submit" class="btn btn-outline" style="white-space:nowrap;padding:8px 16px">
+    + Add note
+  </button>
+</form>
+
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+<!-- TO-DOS -->
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+<a id="todos"></a>
+<div class="section-label" style="margin-top:32px">✅ To-Dos & Reminders</div>
+<div class="todos-list">
+  <?php if (empty($todos)): ?>
+  <p style="color:var(--grey-mid);font-size:.83rem;padding:8px 0">No to-dos yet.</p>
+  <?php else: ?>
+  <?php foreach ($todos as $t):
+    $overdue = !$t['done'] && strtotime($t['due_at']) < time();
+    $cls = $t['done'] ? 'done-item' : ($overdue ? 'overdue' : '');
+  ?>
+  <div class="todo-item <?= $cls ?>">
+    <!-- Toggle done -->
+    <form method="post" style="display:contents">
+      <input type="hidden" name="action_todo" value="done">
+      <input type="hidden" name="todo_id" value="<?= $t['id'] ?>">
+      <input type="checkbox" class="todo-check" onchange="this.form.submit()" <?= $t['done']?'checked':'' ?>>
+    </form>
+    <span class="todo-title"><?= h($t['title']) ?></span>
+    <span class="todo-due">
+      <?= $overdue ? '⚠ ' : '' ?><?= date('d M Y H:i', strtotime($t['due_at'])) ?>
+    </span>
+    <?php if ($t['email_to']): ?>
+    <span class="todo-email">✉ <?= h($t['email_to']) ?></span>
+    <?php endif; ?>
+    <!-- Delete -->
+    <form method="post" style="display:contents"
+          onsubmit="return confirm('Delete this to-do?')">
+      <input type="hidden" name="action_todo" value="delete">
+      <input type="hidden" name="todo_id" value="<?= $t['id'] ?>">
+      <button type="submit" class="todo-del" title="Delete">✕</button>
+    </form>
+  </div>
+  <?php endforeach; ?>
+  <?php endif; ?>
+</div>
+
+<!-- Add To-Do form -->
+<form method="post" class="todo-add-form">
+  <input type="hidden" name="action_todo" value="add">
+  <input class="tf-title" name="todo_title" placeholder="What to do…" required>
+  <input class="tf-due" type="datetime-local" name="todo_due" required
+         value="<?= date('Y-m-d\TH:i', strtotime('+1 day')) ?>">
+  <input class="tf-email" type="email" name="todo_email"
+         placeholder="Reminder email"
+         value="<?= h($cu['email'] ?? '') ?>">
+  <button type="submit" class="btn btn-outline" style="white-space:nowrap;padding:7px 16px">
+    + Add to-do
+  </button>
+</form>
+<p style="font-size:.7rem;color:var(--grey-mid);margin-top:6px;max-width:860px">
+  💡 A reminder email is sent to the address above when the deadline is reached (checked every 15 min).
+  Leave blank to skip the email.
+</p>
+
 <?php include 'includes/footer.php'; ?>
