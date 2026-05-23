@@ -79,6 +79,17 @@ include __DIR__ . '/includes/layout_header.php';
     </a>
     <?php endif; ?>
 
+    <?php if (is_admin()): ?>
+    <a class="link-card lc-amber" href="<?= BASE_URL ?>/booked.php">
+      <div class="lc-icon emoji">✈️</div>
+      <div><div class="lc-label">Booked Requests</div><div class="lc-sub">Sorted by arrival date</div></div>
+    </a>
+    <a class="link-card lc-navy" href="<?= BASE_URL ?>/email_templates.php">
+      <div class="lc-icon emoji">📧</div>
+      <div><div class="lc-label">Email Templates</div><div class="lc-sub">Manage client email templates</div></div>
+    </a>
+    <?php endif; ?>
+
     <a class="link-card lc-orange"
        href="https://app.hubspot.com/contacts/7793801/objects/0-5/views/all/list?prefetch="
        target="_blank">
