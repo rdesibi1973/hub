@@ -215,24 +215,19 @@ public class StatusReportDialog extends JDialog {
             List<String> agentItems = new ArrayList<>();
             agentItems.add("All");
             if (!folderCodeToName.isEmpty()) {
-                // Use DB list (active users, sorted alphabetically by display name)
-                // Only add agents whose folder code appears in the scanned folders
+                // Show only DB-registered agents whose folder code appears in scanned folders.
+                // Unrecognised codes (e.g. destination suffixes, old aliases) are silently skipped.
                 Set<String> seenCodes = new LinkedHashSet<>();
                 for (String[] f : allFolders) seenCodes.add(extractAgent(f[0]));
-                // Add all DB agents that have at least one matching folder, in DB order
                 Set<String> addedNames = new LinkedHashSet<>();
                 for (Map.Entry<String, String> e : folderCodeToName.entrySet()) {
                     if (seenCodes.contains(e.getKey())) addedNames.add(e.getValue());
-                }
-                // Also add any folder codes not in the DB map (fallback)
-                for (String code : seenCodes) {
-                    if (!folderCodeToName.containsKey(code)) addedNames.add(code);
                 }
                 List<String> sortedNames = new ArrayList<>(addedNames);
                 Collections.sort(sortedNames);
                 agentItems.addAll(sortedNames);
             } else {
-                // Fallback: extract unique agents from scanned folder names
+                // No DB map available: extract unique codes from folder names directly
                 List<String> sortedAgents = new ArrayList<>(agentSet);
                 Collections.sort(sortedAgents);
                 agentItems.addAll(sortedAgents);
