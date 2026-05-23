@@ -16,7 +16,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'
     header('Content-Type: application/json');
     $id  = (int)($_POST['id']  ?? 0);
     $col = trim($_POST['col'] ?? '');
-    $allowed = ['new','wip','quoted','hot'];
+    $allowed = ['new','wip','quoted','hot','booked'];
     if (!$id || !in_array($col, $allowed, true)) {
         echo json_encode(['ok'=>false,'message'=>'Invalid params']); exit;
     }
@@ -56,14 +56,15 @@ $years = $db->query(
 // ── Column definitions (key = pipeline_column value stored in DB) ──────────
 // default_statuses: which status values map here when pipeline_column IS NULL
 $columns = [
-    'new'    => ['label'=>'NEW',     'icon'=>'📥', 'cls'=>'col-new',    'default_statuses'=>['Inquiry']],
-    'wip'    => ['label'=>'WIP',     'icon'=>'⚙️', 'cls'=>'col-wip',    'default_statuses'=>[]],
-    'quoted' => ['label'=>'QUOTED',  'icon'=>'💬', 'cls'=>'col-quoted', 'default_statuses'=>['Quoted']],
-    'hot'    => ['label'=>'HOT',     'icon'=>'🔥', 'cls'=>'col-hot',    'default_statuses'=>['Hot']],
+    'new'    => ['label'=>'NEW',      'icon'=>'📥', 'cls'=>'col-new',    'default_statuses'=>['Inquiry']],
+    'wip'    => ['label'=>'WIP',      'icon'=>'⚙️', 'cls'=>'col-wip',    'default_statuses'=>[]],
+    'quoted' => ['label'=>'QUOTED',   'icon'=>'💬', 'cls'=>'col-quoted', 'default_statuses'=>['Quoted']],
+    'hot'    => ['label'=>'HOT',      'icon'=>'🔥', 'cls'=>'col-hot',    'default_statuses'=>['Hot']],
+    'booked' => ['label'=>'CONFIRMED','icon'=>'✅', 'cls'=>'col-booked', 'default_statuses'=>[]],
 ];
 
 // ── Fetch all pipeline-visible requests ────────────────────────────────────
-$where  = ["r.status IN ('Inquiry','Quoted','Hot')"];
+$where  = ["(r.status IN ('Inquiry','Quoted','Hot') OR r.pipeline_column = 'booked')"];
 $params = [];
 
 if ($isStaff && $staffAgentId) {
