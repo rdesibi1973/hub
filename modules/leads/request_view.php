@@ -95,6 +95,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action_todo'])) {
                 "INSERT INTO request_todos (request_id, user_id, title, due_at, email_to) VALUES (?,?,?,?,?)"
             )->execute([$id, (int)$cu['id'], $title, $due, $email_to ?: null]);
         }
+    } elseif ($action === 'edit') {
+        $tid      = (int)($_POST['todo_id']    ?? 0);
+        $title    = trim($_POST['todo_title']  ?? '');
+        $due      = trim($_POST['todo_due']    ?? '');
+        $email_to = trim($_POST['todo_email']  ?? '');
+        if ($tid && $title && $due) {
+            $db->prepare(
+                "UPDATE request_todos SET title=?, due_at=?, email_to=?, reminder_sent=0 WHERE id=? AND request_id=?"
+            )->execute([$title, $due, $email_to ?: null, $tid, $id]);
+        }
     } elseif ($action === 'done') {
         $tid = (int)($_POST['todo_id'] ?? 0);
         if ($tid) $db->prepare("UPDATE request_todos SET done=1-done WHERE id=? AND request_id=?")
@@ -562,6 +572,28 @@ function deleteQuote(id, num) {
 <!-- ════════════════════════════════════════════════════════════════════════ -->
 <!-- TO-DOS -->
 <!-- ════════════════════════════════════════════════════════════════════════ -->
+<style>
+.todo-edit-btn {
+  background:none; border:none; cursor:pointer; font-size:.8rem;
+  opacity:0; transition:opacity .15s; padding:2px 4px; color:var(--grey-mid);
+}
+.todo-item:hover .todo-edit-btn { opacity:1; }
+.todo-item:hover .todo-del      { color:#bbb; }
+.todo-inline-edit {
+  display:none; flex-wrap:wrap; gap:6px; align-items:center;
+  padding:10px 12px; background:#f9f9f9;
+  border:1.5px solid var(--blue); border-radius:8px; margin-bottom:6px;
+}
+.todo-inline-edit input {
+  padding:6px 9px; border:1.5px solid var(--grey-lt); border-radius:6px;
+  font-size:.82rem; font-family:inherit; background:#fff;
+}
+.todo-inline-edit input:focus { outline:none; border-color:var(--blue); }
+.todo-inline-edit .tf-title { flex:2; min-width:160px; }
+.todo-inline-edit .tf-due   { width:185px; }
+.todo-inline-edit .tf-email { flex:1; min-width:140px; }
+</style>
+
 <a id="todos"></a>
 <div class="section-label" style="margin-top:32px">✅ To-Dos & Reminders</div>
 <div class="todos-list">
@@ -569,10 +601,27 @@ function deleteQuote(id, num) {
   <p style="color:var(--grey-mid);font-size:.83rem;padding:8px 0">No to-dos yet.</p>
   <?php else: ?>
   <?php foreach ($todos as $t):
-    $overdue = !$t['done'] && strtotime($t['due_at']) < time();
-    $cls = $t['done'] ? 'done-item' : ($overdue ? 'overdue' : '');
+    $overdue  = !$t['done'] && strtotime($t['due_at']) < time();
+    $cls      = $t['done'] ? 'done-item' : ($overdue ? 'overdue' : '');
+    $dueFmt   = date('Y-m-d\TH:i', strtotime($t['due_at']));
   ?>
-  <div class="todo-item <?= $cls ?>">
+
+  <!-- Inline edit form (hidden until ✏️ clicked) -->
+  <form method="post" class="todo-inline-edit" id="todo-edit-<?= $t['id'] ?>">
+    <input type="hidden" name="action_todo" value="edit">
+    <input type="hidden" name="todo_id"    value="<?= $t['id'] ?>">
+    <input class="tf-title" name="todo_title" value="<?= h($t['title']) ?>" placeholder="What to do…" required>
+    <input class="tf-due" type="datetime-local" name="todo_due" value="<?= $dueFmt ?>" required>
+    <input class="tf-email" type="text" name="todo_email"
+           value="<?= h($t['email_to'] ?? '') ?>" placeholder="email1, email2, …">
+    <button type="submit" class="btn btn-outline btn-sm">Save</button>
+    <button type="button" class="btn btn-sm"
+            onclick="todoCancel(<?= $t['id'] ?>)"
+            style="background:#fff;border:1.5px solid var(--grey-lt);color:var(--grey-dk)">Cancel</button>
+  </form>
+
+  <!-- Normal row -->
+  <div class="todo-item <?= $cls ?>" id="todo-row-<?= $t['id'] ?>">
     <!-- Toggle done -->
     <form method="post" style="display:contents">
       <input type="hidden" name="action_todo" value="done">
@@ -586,6 +635,8 @@ function deleteQuote(id, num) {
     <?php if ($t['email_to']): ?>
     <span class="todo-email">✉ <?= h($t['email_to']) ?></span>
     <?php endif; ?>
+    <!-- Edit -->
+    <button type="button" class="todo-edit-btn" title="Edit" onclick="todoEdit(<?= $t['id'] ?>)">✏️</button>
     <!-- Delete -->
     <form method="post" style="display:contents"
           onsubmit="return confirm('Delete this to-do?')">
@@ -616,5 +667,18 @@ function deleteQuote(id, num) {
   💡 A reminder email is sent to the address above when the deadline is reached (checked every 15 min).
   Leave blank to skip the email.
 </p>
+
+<script>
+function todoEdit(id) {
+  document.getElementById('todo-row-'  + id).style.display = 'none';
+  const form = document.getElementById('todo-edit-' + id);
+  form.style.display = 'flex';
+  form.querySelector('.tf-title').focus();
+}
+function todoCancel(id) {
+  document.getElementById('todo-edit-' + id).style.display = 'none';
+  document.getElementById('todo-row-'  + id).style.display = 'flex';
+}
+</script>
 
 <?php include 'includes/footer.php'; ?>
