@@ -117,7 +117,9 @@ $sql = "
     SELECT r.*, a.name AS agent_name,
            (SELECT COUNT(*) FROM invoices inv WHERE inv.request_id = r.id) AS invoice_count,
            (SELECT id   FROM invoices inv WHERE inv.request_id = r.id ORDER BY id LIMIT 1) AS invoice_id,
-           (SELECT invoice_number FROM invoices inv WHERE inv.request_id = r.id ORDER BY id LIMIT 1) AS invoice_number
+           (SELECT invoice_number FROM invoices inv WHERE inv.request_id = r.id ORDER BY id LIMIT 1) AS invoice_number,
+           (SELECT COUNT(*) FROM request_todos td WHERE td.request_id = r.id AND td.done = 0) AS pending_todos,
+           (SELECT COUNT(*) FROM request_todos td WHERE td.request_id = r.id AND td.done = 0 AND td.due_at < NOW()) AS overdue_todos
     FROM requests r
     LEFT JOIN agents a ON a.id = r.agent_id
     WHERE " . implode(' AND ', $where) . "
@@ -295,7 +297,15 @@ include 'includes/header.php';
           <td>
             <a href="request_view.php?id=<?= $r['id'] ?>" style="font-weight:600;color:var(--black);text-decoration:none">
               <?= h($r['customer_name']) ?>
-            </a>
+            </a><?php if ($r['overdue_todos'] > 0): ?>
+            <a href="request_view.php?id=<?= $r['id'] ?>#todos"
+               title="<?= $r['overdue_todos'] ?> overdue to-do<?= $r['overdue_todos']>1?'s':'' ?>"
+               style="margin-left:6px;text-decoration:none;font-size:.8rem"
+               >⚠️</a><?php elseif ($r['pending_todos'] > 0): ?>
+            <a href="request_view.php?id=<?= $r['id'] ?>#todos"
+               title="<?= $r['pending_todos'] ?> pending to-do<?= $r['pending_todos']>1?'s':'' ?>"
+               style="margin-left:6px;text-decoration:none;font-size:.8rem"
+               >✅</a><?php endif; ?>
             <?php if ($r['destination']): ?>
               <div style="font-size:.7rem;color:var(--grey-mid)"><?= h($r['destination']) ?><?= $r['period'] ? ' · '.h($r['period']) : '' ?></div>
             <?php endif; ?>
