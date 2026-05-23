@@ -17,11 +17,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['quick_status'])) {
         flash('Invalid status.', 'error');
     } else {
         if (isLeadsRestricted()) {
-            $db->prepare("UPDATE requests SET status=? WHERE id=? AND agent_id=?")
-               ->execute([$newStatus, $id, $staffAgentId]);
+            $db->prepare("UPDATE requests SET status=?, pipeline_column=IF(?='Booked',NULL,pipeline_column) WHERE id=? AND agent_id=?")
+               ->execute([$newStatus, $newStatus, $id, $staffAgentId]);
         } else {
-            $db->prepare("UPDATE requests SET status=? WHERE id=?")
-               ->execute([$newStatus, $id]);
+            $db->prepare("UPDATE requests SET status=?, pipeline_column=IF(?='Booked',NULL,pipeline_column) WHERE id=?")
+               ->execute([$newStatus, $newStatus, $id]);
         }
         if ($isXhr) { header('Content-Type: application/json');
                       echo json_encode(['ok'=>true]); exit; }

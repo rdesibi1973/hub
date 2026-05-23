@@ -198,7 +198,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $db->prepare("
                 UPDATE requests SET
                   customer_name=?, email=?, whatsapp=?, source=?, destination=?, period=?,
-                  pax=?, status=?, initial_request=?, dropbox_url=?, notes=?
+                  pax=?, status=?, initial_request=?, dropbox_url=?, notes=?,
+                  pipeline_column=IF(?='Booked',NULL,pipeline_column)
                 WHERE id=? AND agent_id=?
             ")->execute([
                 $v['customer_name'],
@@ -212,6 +213,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $v['initial_request'] ?: null,
                 $v['dropbox_url']     ?: null,
                 $v['notes']           ?: null,
+                $v['status'],
                 $id,
                 $staffAgentId,
             ]);
@@ -221,7 +223,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 UPDATE requests SET
                   practice_code=?, group_folder=?, date_received=?, customer_name=?, email=?, whatsapp=?, source=?, agent_id=?,
                   destination=?, period=?, pax=?, status=?, value_usd=?, commission_pct=?, commission_usd=?,
-                  date_paid=?, initial_request=?, dropbox_url=?, notes=?
+                  date_paid=?, initial_request=?, dropbox_url=?, notes=?,
+                  pipeline_column=IF(?='Booked',NULL,pipeline_column)
                 WHERE id=?
             ")->execute([
                 $v['practice_code']   ?: null,
@@ -243,6 +246,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $v['initial_request'] ?: null,
                 $v['dropbox_url']     ?: null,
                 $v['notes']           ?: null,
+                $v['status'],
                 $id,
             ]);
         }
