@@ -54,10 +54,31 @@ if (!empty($cu['id'])) {
 
 // ── Notes POST ──────────────────────────────────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action_note'])) {
-    $note = trim($_POST['note_text'] ?? '');
-    if ($note !== '') {
-        $db->prepare("INSERT INTO request_notes (request_id, user_id, note) VALUES (?,?,?)")
-           ->execute([$id, (int)$cu['id'], $note]);
+    $action = $_POST['action_note'];
+    $isAdmin = in_array($cu['role_name'] ?? '', ['admin','manager']);
+
+    if ($action === 'add') {
+        $note = trim($_POST['note_text'] ?? '');
+        if ($note !== '') {
+            $db->prepare("INSERT INTO request_notes (request_id, user_id, note) VALUES (?,?,?)")
+               ->execute([$id, (int)$cu['id'], $note]);
+        }
+    } elseif ($action === 'edit') {
+        $nid  = (int)($_POST['note_id']   ?? 0);
+        $note = trim($_POST['note_text'] ?? '');
+        if ($nid && $note !== '') {
+            // Only author or admin/manager can edit
+            $clause = $isAdmin ? "id=? AND request_id=?" : "id=? AND request_id=? AND user_id=?";
+            $params = $isAdmin ? [$note, $nid, $id] : [$note, $nid, $id, (int)$cu['id']];
+            $db->prepare("UPDATE request_notes SET note=? WHERE $clause")->execute($params);
+        }
+    } elseif ($action === 'delete') {
+        $nid = (int)($_POST['note_id'] ?? 0);
+        if ($nid) {
+            $clause = $isAdmin ? "id=? AND request_id=?" : "id=? AND request_id=? AND user_id=?";
+            $params = $isAdmin ? [$nid, $id] : [$nid, $id, (int)$cu['id']];
+            $db->prepare("DELETE FROM request_notes WHERE $clause")->execute($params);
+        }
     }
     header("Location: request_view.php?id=$id#notes"); exit;
 }
@@ -376,6 +397,17 @@ include 'includes/header.php';
 </div>
 
 <script>
+function noteEdit(id) {
+  document.getElementById('note-text-' + id).style.display = 'none';
+  document.getElementById('note-edit-' + id).style.display = 'block';
+  document.querySelector('#note-edit-' + id + ' textarea').focus();
+}
+function noteCancel(id) {
+  document.getElementById('note-edit-' + id).style.display = 'none';
+  document.getElementById('note-text-' + id).style.display = '';
+}
+</script>
+<script>
 function deleteQuote(id, num) {
   if (!confirm('Delete quote ' + num + '?\n\nThis will permanently remove the quote and all its days. This cannot be undone.')) return;
   var fd = new FormData();
@@ -416,6 +448,17 @@ function deleteQuote(id, num) {
   transition:border-color .15s;
 }
 .note-add-form textarea:focus { outline:none; border-color:var(--blue); }
+.note-actions { margin-left:8px; }
+.note-btn-edit, .note-btn-del {
+  background:none; border:none; cursor:pointer; font-size:.8rem;
+  opacity:0; transition:opacity .15s; padding:1px 3px;
+}
+.note-item:hover .note-btn-edit,
+.note-item:hover .note-btn-del { opacity:1; }
+.note-edit-form textarea {
+  width:100%; padding:8px 10px; border:1.5px solid var(--blue); border-radius:6px;
+  font-size:.84rem; font-family:inherit; resize:vertical; box-sizing:border-box;
+}
 
 /* To-Dos */
 .todos-list { max-width:860px; margin-bottom:16px; }
@@ -460,19 +503,49 @@ function deleteQuote(id, num) {
   <?php if (empty($notes)): ?>
   <p style="color:var(--grey-mid);font-size:.83rem;padding:8px 0">No notes yet.</p>
   <?php else: ?>
+  <?php
+    $cuIsAdmin = in_array($cu['role_name'] ?? '', ['admin','manager']);
+  ?>
   <?php foreach ($notes as $n):
     $initials = implode('', array_map(fn($w)=>strtoupper($w[0]),
                 array_filter(explode(' ', $n['author'] ?? 'U'))));
     $initials = substr($initials, 0, 2);
+    $canEdit  = $cuIsAdmin || ((int)$n['user_id'] === (int)$cu['id']);
   ?>
-  <div class="note-item">
+  <div class="note-item" id="note-<?= $n['id'] ?>">
     <div class="note-avatar"><?= h($initials) ?></div>
     <div class="note-body">
       <div class="note-meta">
         <strong><?= h($n['author'] ?? 'Unknown') ?></strong>
         &nbsp;·&nbsp; <?= date('d M Y H:i', strtotime($n['created_at'])) ?>
+        <?php if ($canEdit): ?>
+        <span class="note-actions">
+          <button type="button" class="note-btn-edit" onclick="noteEdit(<?= $n['id'] ?>)"
+                  title="Edit">✏️</button>
+          <form method="post" style="display:inline"
+                onsubmit="return confirm('Delete this note?')">
+            <input type="hidden" name="action_note" value="delete">
+            <input type="hidden" name="note_id"    value="<?= $n['id'] ?>">
+            <button type="submit" class="note-btn-del" title="Delete">🗑</button>
+          </form>
+        </span>
+        <?php endif; ?>
       </div>
-      <div class="note-text"><?= h($n['note']) ?></div>
+      <!-- Read view -->
+      <div class="note-text" id="note-text-<?= $n['id'] ?>"><?= h($n['note']) ?></div>
+      <!-- Edit view (hidden) -->
+      <?php if ($canEdit): ?>
+      <form method="post" class="note-edit-form" id="note-edit-<?= $n['id'] ?>" style="display:none">
+        <input type="hidden" name="action_note" value="edit">
+        <input type="hidden" name="note_id"    value="<?= $n['id'] ?>">
+        <textarea name="note_text" rows="3"><?= h($n['note']) ?></textarea>
+        <div style="display:flex;gap:6px;margin-top:5px">
+          <button type="submit" class="btn btn-outline btn-sm">Save</button>
+          <button type="button" class="btn btn-sm" onclick="noteCancel(<?= $n['id'] ?>)"
+                  style="background:#fff;border:1.5px solid var(--grey-lt);color:var(--grey-dk)">Cancel</button>
+        </div>
+      </form>
+      <?php endif; ?>
     </div>
   </div>
   <?php endforeach; ?>
@@ -480,7 +553,7 @@ function deleteQuote(id, num) {
 </div>
 <form method="post" class="note-add-form">
   <textarea name="note_text" placeholder="Add a note…" rows="2"></textarea>
-  <input type="hidden" name="action_note" value="1">
+  <input type="hidden" name="action_note" value="add">
   <button type="submit" class="btn btn-outline" style="white-space:nowrap;padding:8px 16px">
     + Add note
   </button>
