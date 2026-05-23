@@ -2895,7 +2895,7 @@ public class BackOfficeMain extends javax.swing.JFrame {
             model.clear();
             java.util.LinkedHashMap<String, java.util.List<String>> byAgent = new java.util.LinkedHashMap<>();
             for (String r : results) {
-                String agent = folderAgentMap.getOrDefault(r, "Unknown");
+                String agent = folderAgentMap.getOrDefault(r, extractAgent(r));
                 byAgent.computeIfAbsent(agent, k -> new java.util.ArrayList<>()).add(r);
             }
             java.util.List<String> agentsSorted = new java.util.ArrayList<>(byAgent.keySet());
@@ -3051,10 +3051,29 @@ public class BackOfficeMain extends javax.swing.JFrame {
         int open  = folderName.indexOf('(');
         int close = folderName.lastIndexOf(')');
         if (open < 0 || close <= open) return "Unknown";
-        String inside = folderName.substring(open + 1, close).trim();
-        int dash = inside.indexOf('-');
-        String first = (dash >= 0 ? inside.substring(0, dash) : inside).trim();
-        return first.isEmpty() ? "Unknown" : first;
+        String inner = folderName.substring(open + 1, close).trim();
+        // Strip destination suffixes (e.g. -TREK, -ZNZ, -KENYA) added during confirm
+        String upper = inner.toUpperCase();
+        String[] destSuf = { "-TZ-KENYA","-SOUTHAFRICA","-MADAGASCAR","-BOTSWANA",
+                             "-NAMIBIA","-UGANDA","-RWANDA","-KENYA","-TREK","-ZNZ" };
+        for (String s : destSuf) {
+            if (upper.endsWith(s)) { inner = inner.substring(0, inner.length() - s.length()); break; }
+        }
+        // Agent is the last dash-separated token unless it is a channel suffix (Drct/SB/PS/LAM)
+        int dash = inner.lastIndexOf('-');
+        if (dash >= 0) {
+            String after = inner.substring(dash + 1);
+            if (after.equalsIgnoreCase("Drct") || after.equalsIgnoreCase("SB")
+                    || after.equalsIgnoreCase("PS") || after.equalsIgnoreCase("LAM")) {
+                // Channel suffix — agent is the token immediately before it
+                String before = inner.substring(0, dash);
+                int d2 = before.lastIndexOf('-');
+                String agent = (d2 >= 0) ? before.substring(d2 + 1) : before;
+                return agent.isEmpty() ? "Unknown" : agent;
+            }
+            return after.isEmpty() ? "Unknown" : after;
+        }
+        return inner.isEmpty() ? "Unknown" : inner;
     }
 
     // -------------------------------------------------------------------------

@@ -38,21 +38,75 @@ if (empty($folders)) {
 
 $db = db();
 
-$placeholders = implode(',', array_fill(0, count($folders), '?'));
+// For each requested folder name, also try a version with status suffixes stripped,
+// since the on-disk name may have _CK, _BALANCE_CK etc. appended after the DB value.
+$statusTags = ['_BALANCE-CASH','_BALANCE_CASH','_BALANCE','_PROGRESS','_PROVISIONAL',
+               '_DEPOSIT','_CANCELLED','_PAID','_CK'];
+
+// Build a map: lookup_key → original folder name (one lookup can match multiple originals)
+$lookupMap = [];   // lookup_name => [original_names]
+foreach ($folders as $orig) {
+    $base = $orig;
+    // Strip status suffixes from the right
+    $changed = true;
+    while ($changed) {
+        $changed = false;
+        foreach ($statusTags as $tag) {
+            if (str_ends_with(strtoupper($base), strtoupper($tag))) {
+                $base    = substr($base, 0, strlen($base) - strlen($tag));
+                $changed = true;
+                break;
+            }
+        }
+    }
+    $lookupMap[$base][]  = $orig;
+    if ($base !== $orig) {
+        $lookupMap[$orig][] = $orig; // also try exact match
+    }
+}
+
+$allKeys      = array_unique(array_keys($lookupMap));
+$placeholders = implode(',', array_fill(0, count($allKeys), '?'));
 $stmt = $db->prepare(
     "SELECT r.practice_code, a.name AS agent_name
      FROM requests r
      LEFT JOIN agents a ON a.id = r.agent_id
      WHERE r.practice_code IN ($placeholders)"
 );
-$stmt->execute($folders);
+$stmt->execute(array_values($allKeys));
 $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-$result = [];
+// Build practice_code → agent_name from DB results
+$dbMap = [];
 foreach ($rows as $row) {
-    $folder = $row['practice_code'];
-    $agent  = $row['agent_name'] ?? 'Unknown';
-    $result[$folder] = $agent;
+    $dbMap[$row['practice_code']] = $row['agent_name'] ?? 'Unknown';
+}
+
+// Map each original folder name to its agent
+$result = [];
+foreach ($folders as $orig) {
+    // Try exact match first
+    if (isset($dbMap[$orig])) {
+        $result[$orig] = $dbMap[$orig];
+        continue;
+    }
+    // Try stripped base
+    $base = $orig;
+    $changed = true;
+    while ($changed) {
+        $changed = false;
+        foreach ($statusTags as $tag) {
+            if (str_ends_with(strtoupper($base), strtoupper($tag))) {
+                $base    = substr($base, 0, strlen($base) - strlen($tag));
+                $changed = true;
+                break;
+            }
+        }
+    }
+    if ($base !== $orig && isset($dbMap[$base])) {
+        $result[$orig] = $dbMap[$base];
+    }
+    // Not found — omit from result (caller uses extractAgent fallback)
 }
 
 echo json_encode($result);
