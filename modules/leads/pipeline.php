@@ -30,7 +30,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'
 // ── Filters ────────────────────────────────────────────────────────────────
 $pageTitle   = 'Pipeline';
 $filterAgent = (int)($_GET['agent'] ?? 0);
-$filterYear  = (int)($_GET['year']  ?? date('Y'));
+$filterYear  = (int)($_GET['year']  ?? 0);
 
 $agents = $db->query(
     "SELECT a.id, a.name FROM agents a
@@ -214,6 +214,7 @@ include 'includes/header.php';
     </select>
     <?php endif; ?>
     <select name="year" onchange="this.form.submit()">
+      <option value="0" <?= $filterYear===0?'selected':'' ?>>All years</option>
       <?php foreach ($years as $y): ?>
       <option value="<?= $y ?>" <?= $filterYear==$y?'selected':'' ?>><?= $y ?></option>
       <?php endforeach; ?>
