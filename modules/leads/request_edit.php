@@ -104,13 +104,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $dropboxRenamed = true;
             } catch (RuntimeException $e) {
                 $msg = $e->getMessage();
-                error_log("[request_edit] Dropbox rename failed: from=$fromPath to=$toPath — $msg");
+                // If not_found, try swapping /2026/ ↔ /001_Safari/ (folder may have been confirmed)
+                $retried = false;
                 if (str_contains($msg, 'not_found')) {
-                    $errors[] = "Dropbox folder not found: \"$oldFolder\" does not exist in Dropbox."
-                              . " Update the Dropbox Folder field to match the actual folder name, then save again.";
-                } else {
-                    $errors[] = "Dropbox rename failed — the request has not been saved."
-                              . " Error: " . htmlspecialchars($msg);
+                    $altFrom = null; $altTo = null;
+                    if (str_starts_with($fromPath, '/2026/')) {
+                        $altFrom = '/001_Safari/' . $oldFolder;
+                        $altTo   = '/001_Safari/' . $newFolder;
+                    } elseif (str_starts_with($fromPath, '/001_Safari/')) {
+                        $altFrom = '/2026/' . $oldFolder;
+                        $altTo   = '/2026/'  . $newFolder;
+                    }
+                    if ($altFrom !== null) {
+                        try {
+                            dropbox_move_folder($token, $altFrom, $altTo);
+                            $v['dropbox_url'] = 'https://www.dropbox.com/home' . $altTo;
+                            $dropboxRenamed   = true;
+                            $retried          = true;
+                        } catch (RuntimeException $ignored) {}
+                    }
+                }
+                if (!$retried) {
+                    error_log("[request_edit] Dropbox rename failed: from=$fromPath to=$toPath — $msg");
+                    if (str_contains($msg, 'not_found')) {
+                        $errors[] = "Dropbox folder not found: \"$oldFolder\" does not exist in Dropbox."
+                                  . " Update the Dropbox Folder field to match the actual folder name, then save again.";
+                    } else {
+                        $errors[] = "Dropbox rename failed — the request has not been saved."
+                                  . " Error: " . htmlspecialchars($msg);
+                    }
                 }
             }
         }

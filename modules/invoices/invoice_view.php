@@ -161,14 +161,43 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             try {
                 dropbox_move_folder($token, $fromPath, $toPath);
             } catch (\Throwable $dbx) {
-                ob_end_clean();
-                echo json_encode(['ok'=>false,'error'=>$dbx->getMessage() . ' | from: ' . $fromPath . ' | to: ' . $toPath]);
-                exit;
+                // If folder not found, the stored dropbox_url parent is stale (e.g. folder was
+                // confirmed into 001_Safari but DB still says /2026/).
+                // Retry by swapping /2026/ ↔ /001_Safari/ before giving up.
+                $retried = false;
+                if (str_contains($dbx->getMessage(), 'not_found')) {
+                    $altFrom = null;
+                    if (str_starts_with($fromPath, '/2026/')) {
+                        $altFrom = '/001_Safari/' . $oldName;
+                        $altTo   = '/001_Safari/' . $newName;
+                    } elseif (str_starts_with($fromPath, '/001_Safari/')) {
+                        $altFrom = '/2026/' . $oldName;
+                        $altTo   = '/2026/'  . $newName;
+                    }
+                    if ($altFrom !== null) {
+                        try {
+                            dropbox_move_folder($token, $altFrom, $altTo);
+                            // Use the alternate paths for the URL rebuild below
+                            $fromPath = $altFrom;
+                            $toPath   = $altTo;
+                            $retried  = true;
+                        } catch (\Throwable $ignored) {}
+                    }
+                }
+                if (!$retried) {
+                    ob_end_clean();
+                    echo json_encode(['ok'=>false,'error'=>$dbx->getMessage() . ' | from: ' . $fromPath . ' | to: ' . $toPath]);
+                    exit;
+                }
             }
 
             // ── Update DB ──────────────────────────────────────────────────
+            // Rebuild dropbox_url from the path that actually succeeded ($toPath),
+            // so stale /2026/ URLs get corrected to /001_Safari/ after a retry.
             $newUrl = '';
-            if ($oldUrl !== '') {
+            if ($toPath !== '') {
+                $newUrl = 'https://www.dropbox.com/home' . $toPath;
+            } elseif ($oldUrl !== '') {
                 $lastSlash = strrpos($oldUrl, '/');
                 $newUrl    = substr($oldUrl, 0, $lastSlash + 1) . rawurlencode($newName);
             }
