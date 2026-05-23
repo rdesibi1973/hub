@@ -386,7 +386,8 @@ $_cur = basename($_SERVER['PHP_SELF']);
 $_in_leads = in_array($_cur, [
     'dashboard.php','requests.php','request_add.php','request_edit.php','request_view.php',
     'reports.php','agents.php','agencies.php',
-    'requests_import_list.php','request_import_edit.php','reports_import.php'
+    'requests_import_list.php','request_import_edit.php','reports_import.php',
+    'booked.php','email_templates.php'
 ]);
 if ($_in_leads): ?>
 <nav style="background:var(--white);border-bottom:1px solid var(--grey-lt);padding:0 40px;display:flex;align-items:center;gap:4px;">
@@ -404,6 +405,11 @@ if ($_in_leads): ?>
   _nav_link('agencies.php',               'Agencies',    $_cur==='agencies.php');
   _nav_link('requests_import_list.php',   'Hist. Requests', in_array($_cur,['requests_import_list.php','request_import_edit.php']));
   _nav_link('reports_import.php',         'Hist. Reports',  $_cur==='reports_import.php');
+  if (is_admin()) {
+      echo '<span style="display:inline-block;width:1px;background:var(--grey-lt);margin:8px 8px;align-self:stretch;"></span>';
+      _nav_link('booked.php',          'Booked',           $_cur==='booked.php');
+      _nav_link('email_templates.php', 'Email Templates',  $_cur==='email_templates.php');
+  }
   ?>
   <a href="logout.php" style="margin-left:auto;font-size:.8rem;font-weight:600;color:#aaa;text-decoration:none;padding:10px 16px;">Logout</a>
 </nav>
