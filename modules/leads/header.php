@@ -148,6 +148,11 @@ header {
   </a>
   <?php endif; ?>
   <?php endif; // !isLeadsStaff ?>
+  <?php if (in_array($currentUser['role_name'] ?? '', ['admin'])): ?>
+  <span style="display:inline-block;width:1px;background:rgba(255,255,255,.3);margin:8px 4px;align-self:stretch;"></span>
+  <a href="<?= BASE_URL ?>/booked.php" class="<?= $cur==='booked.php'?'active':'' ?>">✈ Booked</a>
+  <a href="<?= BASE_URL ?>/email_templates.php" class="<?= $cur==='email_templates.php'?'active':'' ?>">📧 Email Templates</a>
+  <?php endif; ?>
   <a href="logout.php"    class="sub-nav-logout">Logout</a>
 </nav>
 
