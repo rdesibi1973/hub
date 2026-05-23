@@ -41,6 +41,17 @@ if (!$r) { flash('Request not found.', 'error'); header('Location: requests.php'
 
 $cu = current_user();
 
+// Fetch email from DB (not in session)
+$cuEmail = '';
+if (!empty($cu['id'])) {
+    $cuEmail = (string)($db->prepare("SELECT email FROM users WHERE id = ? LIMIT 1")
+                          ->execute([(int)$cu['id']])
+                       ?: null);
+    $stmt2 = $db->prepare("SELECT email FROM users WHERE id = ? LIMIT 1");
+    $stmt2->execute([(int)$cu['id']]);
+    $cuEmail = (string)($stmt2->fetchColumn() ?: '');
+}
+
 // ── Notes POST ──────────────────────────────────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action_note'])) {
     $note = trim($_POST['note_text'] ?? '');
@@ -522,7 +533,7 @@ function deleteQuote(id, num) {
          value="<?= date('Y-m-d\TH:i', strtotime('+1 day')) ?>">
   <input class="tf-email" type="email" name="todo_email"
          placeholder="Reminder email"
-         value="<?= h($cu['email'] ?? '') ?>">
+         value="<?= h($cuEmail) ?>">
   <button type="submit" class="btn btn-outline" style="white-space:nowrap;padding:7px 16px">
     + Add to-do
   </button>
