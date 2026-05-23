@@ -497,12 +497,12 @@ function deleteQuote(id, num) {
   max-width:860px; margin-top:12px;
   padding:14px; background:#f9f9f9; border-radius:8px; border:1.5px dashed var(--grey-lt);
 }
-.todo-add-form input, .todo-add-form select {
+.todo-add-form input, .todo-add-form textarea, .todo-add-form select {
   padding:7px 10px; border:1.5px solid var(--grey-lt); border-radius:6px;
   font-size:.82rem; font-family:inherit; background:#fff;
 }
-.todo-add-form input:focus { outline:none; border-color:var(--blue); }
-.todo-add-form .tf-title { flex:2; min-width:180px; }
+.todo-add-form input:focus, .todo-add-form textarea:focus { outline:none; border-color:var(--blue); }
+.todo-add-form .tf-title { flex:2; min-width:180px; resize:vertical; min-height:58px; align-self:stretch; }
 .todo-add-form .tf-due   { width:190px; }
 .todo-add-form .tf-email { flex:1; min-width:160px; }
 </style>
@@ -583,12 +583,12 @@ function deleteQuote(id, num) {
   padding:10px 12px; background:#f9f9f9;
   border:1.5px solid var(--blue); border-radius:8px; margin-bottom:6px;
 }
-.todo-inline-edit input {
+.todo-inline-edit input, .todo-inline-edit textarea {
   padding:6px 9px; border:1.5px solid var(--grey-lt); border-radius:6px;
   font-size:.82rem; font-family:inherit; background:#fff;
 }
-.todo-inline-edit input:focus { outline:none; border-color:var(--blue); }
-.todo-inline-edit .tf-title { flex:2; min-width:160px; }
+.todo-inline-edit input:focus, .todo-inline-edit textarea:focus { outline:none; border-color:var(--blue); }
+.todo-inline-edit .tf-title { flex:2; min-width:160px; resize:vertical; min-height:52px; align-self:stretch; }
 .todo-inline-edit .tf-due   { width:185px; }
 .todo-inline-edit .tf-email { flex:1; min-width:140px; }
 </style>
@@ -609,7 +609,7 @@ function deleteQuote(id, num) {
   <form method="post" class="todo-inline-edit" id="todo-edit-<?= $t['id'] ?>">
     <input type="hidden" name="action_todo" value="edit">
     <input type="hidden" name="todo_id"    value="<?= $t['id'] ?>">
-    <input class="tf-title" name="todo_title" value="<?= h($t['title']) ?>" placeholder="What to do…" required>
+    <textarea class="tf-title" name="todo_title" placeholder="What to do…" rows="2" required><?= h($t['title']) ?></textarea>
     <input class="tf-due" type="datetime-local" name="todo_due" value="<?= $dueFmt ?>" required>
     <input class="tf-email" type="text" name="todo_email"
            value="<?= h($t['email_to'] ?? '') ?>" placeholder="email1, email2, …">
@@ -651,7 +651,7 @@ function deleteQuote(id, num) {
 <!-- Add To-Do form -->
 <form method="post" class="todo-add-form">
   <input type="hidden" name="action_todo" value="add">
-  <input class="tf-title" name="todo_title" placeholder="What to do…" required>
+  <textarea class="tf-title" name="todo_title" placeholder="What to do…" rows="2" required></textarea>
   <input class="tf-due" type="datetime-local" name="todo_due" required
          value="<?= date('Y-m-d\TH:i', strtotime('+1 day')) ?>">
   <input class="tf-email" type="text" name="todo_email"
