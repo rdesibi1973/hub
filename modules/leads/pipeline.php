@@ -261,7 +261,8 @@ include 'includes/header.php';
                    'Booked' =>'#EBF5EE','Lost'  =>'#F0F0F0','Cancelled'=>'#FAE8E7'];
           $sco  = ['Inquiry'=>'#0062B1','Quoted'=>'#E87722','Hot'=>'#C45000',
                    'Booked' =>'#1A6B3A','Lost'  =>'#888',   'Cancelled'=>'#C0211B'];
-          $st   = $r['status'];
+          $st      = $r['status'];
+          $stLabel = ($st === 'Booked') ? 'Confirmed' : $st;
         ?>
         <div class="pipeline-card"
              draggable="true"
@@ -282,7 +283,7 @@ include 'includes/header.php';
           <div class="card-footer">
             <span class="card-status-badge"
                   style="background:<?= $sbg[$st]??'#eee' ?>;color:<?= $sco[$st]??'#444' ?>">
-              <?= h($st) ?>
+              <?= h($stLabel) ?>
             </span>
             <?php if (!$isStaff && $r['agent_name']): ?>
             <span class="card-agent"><?= h($r['agent_name']) ?></span>
