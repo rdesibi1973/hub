@@ -45,7 +45,9 @@ $sent = 0; $failed = 0;
 $baseUrl = defined('BASE_URL') ? BASE_URL : 'https://hub.savannahexplorers.com';
 
 foreach ($due as $t) {
-    $to      = $t['email_to'];
+    $recipients = array_filter(array_map('trim', explode(',', $t['email_to'])));
+    if (empty($recipients)) { continue; }
+    $to = implode(', ', $recipients);
     $subject = "⏰ Reminder: " . $t['title'];
 
     $dueFormatted = date('d M Y H:i', strtotime($t['due_at']));

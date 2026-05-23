@@ -531,9 +531,10 @@ function deleteQuote(id, num) {
   <input class="tf-title" name="todo_title" placeholder="What to do…" required>
   <input class="tf-due" type="datetime-local" name="todo_due" required
          value="<?= date('Y-m-d\TH:i', strtotime('+1 day')) ?>">
-  <input class="tf-email" type="email" name="todo_email"
-         placeholder="Reminder email"
-         value="<?= h($cuEmail) ?>">
+  <input class="tf-email" type="text" name="todo_email"
+         placeholder="email1, email2, …"
+         value="<?= h($cuEmail) ?>"
+         title="One or more addresses separated by commas">
   <button type="submit" class="btn btn-outline" style="white-space:nowrap;padding:7px 16px">
     + Add to-do
   </button>
