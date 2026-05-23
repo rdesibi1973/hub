@@ -460,11 +460,11 @@ function deleteQuote(id, num) {
 .note-add-form textarea:focus { outline:none; border-color:var(--blue); }
 .note-actions { margin-left:8px; }
 .note-btn-edit, .note-btn-del {
-  background:none; border:none; cursor:pointer; font-size:.8rem;
-  opacity:0; transition:opacity .15s; padding:1px 3px;
+  background:none; border:none; cursor:pointer; font-size:1rem;
+  opacity:.55; transition:opacity .15s; padding:1px 4px;
 }
-.note-item:hover .note-btn-edit,
-.note-item:hover .note-btn-del { opacity:1; }
+.note-btn-edit:hover { opacity:1; }
+.note-btn-del:hover  { opacity:1; }
 .note-edit-form textarea {
   width:100%; padding:8px 10px; border:1.5px solid var(--blue); border-radius:6px;
   font-size:.84rem; font-family:inherit; resize:vertical; box-sizing:border-box;
@@ -490,7 +490,7 @@ function deleteQuote(id, num) {
 .todo-item.overdue .todo-due   { background:#fee2e2; color:#C0211B; }
 .todo-item.done-item .todo-due { background:var(--grey-lt); color:var(--grey-mid); }
 .todo-email { font-size:.7rem; color:var(--grey-mid); }
-.todo-del { background:none; border:none; cursor:pointer; color:#ddd; font-size:1rem; padding:2px 4px; }
+.todo-del { background:none; border:none; cursor:pointer; color:#aaa; font-size:1rem; padding:2px 4px; }
 .todo-del:hover { color:var(--red); }
 .todo-add-form {
   display:flex; gap:8px; flex-wrap:wrap; align-items:flex-end;
@@ -574,11 +574,10 @@ function deleteQuote(id, num) {
 <!-- ════════════════════════════════════════════════════════════════════════ -->
 <style>
 .todo-edit-btn {
-  background:none; border:none; cursor:pointer; font-size:.8rem;
-  opacity:0; transition:opacity .15s; padding:2px 4px; color:var(--grey-mid);
+  background:none; border:none; cursor:pointer; font-size:1rem;
+  opacity:.55; transition:opacity .15s; padding:2px 4px; color:var(--grey-mid);
 }
-.todo-item:hover .todo-edit-btn { opacity:1; }
-.todo-item:hover .todo-del      { color:#bbb; }
+.todo-edit-btn:hover { opacity:1; }
 .todo-inline-edit {
   display:none; flex-wrap:wrap; gap:6px; align-items:center;
   padding:10px 12px; background:#f9f9f9;
