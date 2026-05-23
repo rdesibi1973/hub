@@ -206,6 +206,16 @@ include __DIR__ . '/includes/layout_header.php';
       <div><div class="lc-label">Age Calculator</div><div class="lc-sub">calculator.net</div></div>
     </a>
 
+    <a class="link-card lc-green" href="https://web.whatsapp.com/" target="_blank">
+      <div class="lc-icon" style="background:none;padding:0;">
+        <svg viewBox="0 0 36 36" xmlns="http://www.w3.org/2000/svg" width="36" height="36">
+          <rect width="36" height="36" rx="8" fill="#25D366"/>
+          <path d="M18 7C12.477 7 8 11.477 8 17c0 1.74.45 3.37 1.23 4.79L8 29l7.39-1.22A9.953 9.953 0 0018 28c5.523 0 10-4.477 10-10S23.523 7 18 7zm0 18.5a8.47 8.47 0 01-4.35-1.2l-.31-.19-3.22.53.55-3.14-.2-.32A8.452 8.452 0 019.5 17c0-4.69 3.81-8.5 8.5-8.5S26.5 12.31 26.5 17 22.69 25.5 18 25.5zm4.66-6.34c-.25-.13-1.5-.74-1.73-.82-.23-.08-.4-.13-.57.13-.17.25-.65.82-.8 1-.14.17-.29.19-.54.06-.25-.13-1.06-.39-2.02-1.24-.74-.66-1.25-1.48-1.39-1.73-.15-.25-.02-.38.11-.51.12-.11.25-.29.38-.44.13-.14.17-.25.25-.41.08-.17.04-.31-.02-.44-.06-.13-.57-1.37-.78-1.87-.21-.49-.42-.42-.57-.43h-.49c-.17 0-.44.06-.67.31-.23.25-.87.85-.87 2.07 0 1.22.89 2.4 1.01 2.57.13.17 1.75 2.67 4.24 3.74.59.26 1.06.41 1.42.52.6.19 1.14.16 1.57.1.48-.07 1.5-.61 1.71-1.21.21-.59.21-1.1.15-1.21-.07-.1-.24-.16-.49-.28z" fill="white"/>
+        </svg>
+      </div>
+      <div><div class="lc-label">WhatsApp Web</div><div class="lc-sub">web.whatsapp.com</div></div>
+    </a>
+
     <?php if (!in_array($_cu['role_name'], ['staff', 'operations'])): ?>
     <a class="link-card lc-orange" href="https://invoice.zoho.com/app/800553733#/home/dashboard" target="_blank">
       <div class="lc-icon" style="background:none;padding:0;">

@@ -3442,25 +3442,47 @@ public class BackOfficeMain extends javax.swing.JFrame {
         } finally { conn.disconnect(); }
     }
 
-    /** Returns sorted list of active agent names from DB, or empty list on failure. */
-    private java.util.List<String> fetchActiveAgentNames() {
-        java.util.List<String> names = new java.util.ArrayList<>();
-        if (!USE_API || !AppSession.isLoggedIn()) return names;
+    /** Returns list of [folderCode, displayName] pairs for active agents from DB.
+     *  folderCode = codice_cartella (what appears inside folder parentheses).
+     *  Falls back to [name, name] when codice_cartella is empty. */
+    private java.util.List<String[]> fetchActiveAgentNames() {
+        java.util.List<String[]> result = new java.util.ArrayList<>();
+        if (!USE_API || !AppSession.isLoggedIn()) return result;
         try {
             String resp = getApiDirect("api_get_agents.php");
+            // Parse JSON array: [{"id":1,"name":"Micky","code":"Micky"}, ...]
             int i = 0;
             while (true) {
-                int nameStart = resp.indexOf("\"name\"", i);
-                if (nameStart < 0) break;
-                int colon = resp.indexOf(':', nameStart);
-                int q1    = resp.indexOf('"', colon + 1);
-                int q2    = resp.indexOf('"', q1 + 1);
-                if (q1 < 0 || q2 < 0) break;
-                names.add(resp.substring(q1 + 1, q2));
-                i = q2 + 1;
+                int obj = resp.indexOf('{', i);
+                if (obj < 0) break;
+                int end = resp.indexOf('}', obj);
+                if (end < 0) break;
+                String chunk = resp.substring(obj, end + 1);
+                String name = jsonGetField(chunk, "name");
+                String code = jsonGetField(chunk, "code");
+                if (name != null && !name.isEmpty()) {
+                    // If code is blank, fall back to name itself (most agents match)
+                    String resolvedCode = (code != null && !code.isEmpty()) ? code : name;
+                    result.add(new String[]{ resolvedCode, name });
+                }
+                i = end + 1;
             }
         } catch (Exception ignored) {}
-        return names;
+        return result;
+    }
+
+    /** Extracts a JSON string field value from a simple flat JSON object snippet. */
+    private static String jsonGetField(String json, String field) {
+        String key = "\"" + field + "\"";
+        int k = json.indexOf(key);
+        if (k < 0) return null;
+        int colon = json.indexOf(':', k + key.length());
+        if (colon < 0) return null;
+        int q1 = json.indexOf('"', colon + 1);
+        if (q1 < 0) return null;
+        int q2 = json.indexOf('"', q1 + 1);
+        if (q2 < 0) return null;
+        return json.substring(q1 + 1, q2);
     }
 
     private static String postApiDirect(String endpoint, String jsonBody) throws Exception {
@@ -3772,10 +3794,17 @@ public class BackOfficeMain extends javax.swing.JFrame {
             "operations@savannahexplorers.com"
         ));
         // Add Nuru to To when agent is Roberto, RobertoCapri, Alessia, Daniela
+        // Also check AppSession.fullName in case folder code differs from DB name (e.g. Roberto Capri uses "EleonoraOngaro" as folder code)
+        String sessionFullName = (AppSession.isLoggedIn() && AppSession.fullName != null) ? AppSession.fullName : "";
         boolean addNuruToTo = agentName.equalsIgnoreCase("Roberto")
                            || agentName.equalsIgnoreCase("RobertoCapri")
+                           || agentName.equalsIgnoreCase("EleonoraOngaro")
                            || agentName.equalsIgnoreCase("Alessia")
-                           || agentName.equalsIgnoreCase("Daniela");
+                           || agentName.equalsIgnoreCase("Daniela")
+                           || sessionFullName.equalsIgnoreCase("Roberto")
+                           || sessionFullName.equalsIgnoreCase("Roberto Capri")
+                           || sessionFullName.equalsIgnoreCase("Alessia")
+                           || sessionFullName.equalsIgnoreCase("Daniela");
         if (addNuruToTo) toList.add("nuru@savannahexplorers.com");
 
         // ── Build CC ─────────────────────────────────────────────────────────
@@ -3799,7 +3828,11 @@ public class BackOfficeMain extends javax.swing.JFrame {
         String subject = customerPart + " safari bookings";
 
         // ── Body ─────────────────────────────────────────────────────────────
-        String agentDisplay = agentName.equalsIgnoreCase("RobertoCapri") ? "Roberto Capri" : agentName;
+        // Signature: always use the logged-in user's full name (most accurate).
+        // Fall back to folder-extracted name with known alias mapping.
+        String agentDisplay = !sessionFullName.isEmpty() ? sessionFullName
+            : agentName.equalsIgnoreCase("RobertoCapri") || agentName.equalsIgnoreCase("EleonoraOngaro")
+                ? "Roberto Capri" : agentName;
         StringBuilder body = new StringBuilder();
         body.append("Hi Glady/Lydia,\n");
         body.append("         you can book for this safari as in the excel file\n\n");
@@ -4180,7 +4213,7 @@ public class BackOfficeMain extends javax.swing.JFrame {
         }
         // Reuse existing dialog if still open, otherwise create a new one
         if (statusReportDialog == null || !statusReportDialog.isDisplayable()) {
-            java.util.List<String> agents = fetchActiveAgentNames();
+            java.util.List<String[]> agents = fetchActiveAgentNames();
             statusReportDialog = new StatusReportDialog(
                 this,
                 base + "\\001_Safari",

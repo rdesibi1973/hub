@@ -61,7 +61,7 @@ public class StatusReportDialog extends JDialog {
     // ── Fields ────────────────────────────────────────────────────────────────
     private final String           safariPath;
     private final Consumer<String> onFolderSelected;
-    private final List<String>     dbAgentNames;     // from DB (active users); may be empty
+    private final java.util.Map<String, String> folderCodeToName; // folderCode → displayName
     private JComboBox<String>      reportCombo;
     private JComboBox<String>      monthCombo;
     private JComboBox<String>      statusCombo;
@@ -73,11 +73,19 @@ public class StatusReportDialog extends JDialog {
 
     // ── Constructor ───────────────────────────────────────────────────────────
     public StatusReportDialog(Frame parent, String safariPath,
-                              Consumer<String> onFolderSelected, List<String> dbAgentNames) {
+                              Consumer<String> onFolderSelected, List<String[]> dbAgents) {
         super(parent, "Status Reports", false);
         this.safariPath       = safariPath;
         this.onFolderSelected = onFolderSelected;
-        this.dbAgentNames     = dbAgentNames != null ? dbAgentNames : new ArrayList<>();
+        // Build folderCode → displayName map from the [code, name] pairs
+        this.folderCodeToName = new java.util.LinkedHashMap<>();
+        if (dbAgents != null) {
+            for (String[] pair : dbAgents) {
+                if (pair.length >= 2 && pair[0] != null && pair[1] != null && !pair[1].isEmpty()) {
+                    folderCodeToName.put(pair[0], pair[1]);
+                }
+            }
+        }
         buildUI();
         setSize(940, 680);
         setMinimumSize(new Dimension(680, 420));
@@ -93,6 +101,7 @@ public class StatusReportDialog extends JDialog {
         toolbar.setBackground(new Color(0x1A1A2E));
 
         reportCombo = new JComboBox<>(new String[]{ "Bookings", "Payments" });
+        reportCombo.setSelectedIndex(1);  // default to Payments
         monthCombo  = new JComboBox<>(buildMonthItems());
         statusCombo = new JComboBox<>(new String[]{ "All" });   // populated after scan
         agentCombo  = new JComboBox<>(new String[]{ "All" });   // populated after scan
@@ -205,9 +214,23 @@ public class StatusReportDialog extends JDialog {
 
             List<String> agentItems = new ArrayList<>();
             agentItems.add("All");
-            if (!dbAgentNames.isEmpty()) {
-                // Use DB list (active users only), already sorted alphabetically
-                agentItems.addAll(dbAgentNames);
+            if (!folderCodeToName.isEmpty()) {
+                // Use DB list (active users, sorted alphabetically by display name)
+                // Only add agents whose folder code appears in the scanned folders
+                Set<String> seenCodes = new LinkedHashSet<>();
+                for (String[] f : allFolders) seenCodes.add(extractAgent(f[0]));
+                // Add all DB agents that have at least one matching folder, in DB order
+                Set<String> addedNames = new LinkedHashSet<>();
+                for (Map.Entry<String, String> e : folderCodeToName.entrySet()) {
+                    if (seenCodes.contains(e.getKey())) addedNames.add(e.getValue());
+                }
+                // Also add any folder codes not in the DB map (fallback)
+                for (String code : seenCodes) {
+                    if (!folderCodeToName.containsKey(code)) addedNames.add(code);
+                }
+                List<String> sortedNames = new ArrayList<>(addedNames);
+                Collections.sort(sortedNames);
+                agentItems.addAll(sortedNames);
             } else {
                 // Fallback: extract unique agents from scanned folder names
                 List<String> sortedAgents = new ArrayList<>(agentSet);
@@ -251,7 +274,11 @@ public class StatusReportDialog extends JDialog {
                         }
                     }
                     if (!"All".equals(statusFilter) && !statusFilter.equals(f[1])) continue;
-                    if (!"All".equals(agentFilter)  && !agentFilter.equals(extractAgent(f[0]))) continue;
+                    if (!"All".equals(agentFilter)) {
+                        String code = extractAgent(f[0]);
+                        String displayName = folderCodeToName.getOrDefault(code, code);
+                        if (!agentFilter.equals(displayName)) continue;
+                    }
                     filtered.add(f);
                 }
 
@@ -343,7 +370,9 @@ public class StatusReportDialog extends JDialog {
             if (byAgent) {
                 Map<String, List<String[]>> byAgentMap = new LinkedHashMap<>();
                 for (String[] f : inStatus) {
-                    byAgentMap.computeIfAbsent(extractAgent(f[0]), k -> new ArrayList<>()).add(f);
+                    String code = extractAgent(f[0]);
+                    String displayName = folderCodeToName.getOrDefault(code, code);
+                    byAgentMap.computeIfAbsent(displayName, k -> new ArrayList<>()).add(f);
                 }
                 for (Map.Entry<String, List<String[]>> ae : byAgentMap.entrySet()) {
                     resultsPanel.add(makeAgentHeader(ae.getKey(), ae.getValue().size()));
