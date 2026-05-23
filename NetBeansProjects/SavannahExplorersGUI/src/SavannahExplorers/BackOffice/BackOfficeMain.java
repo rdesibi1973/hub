@@ -248,6 +248,7 @@ public class BackOfficeMain extends javax.swing.JFrame {
         jTextField11 = new javax.swing.JTextField();
         jButtonClearRename = new javax.swing.JButton();
         jButtonToCustomerFile = new javax.swing.JButton();
+        jButtonCopyToCurrentName = new javax.swing.JButton();
         jCheckBox9 = new javax.swing.JCheckBox();
         jMenuBar1 = new javax.swing.JMenuBar();
         jMenu1 = new javax.swing.JMenu();
@@ -803,6 +804,21 @@ public class BackOfficeMain extends javax.swing.JFrame {
         rowFolders.add(javax.swing.Box.createHorizontalStrut(10));
         rowFolders.add(jButton7);
         jPanel1.add(rowFolders);
+        jPanel1.add(javax.swing.Box.createVerticalStrut(4));
+
+        // ── Copy Customer Request → Current Name ──────────────────────────────
+        jButtonCopyToCurrentName.setText("\u2192  Copy to \"Current name\"");
+        jButtonCopyToCurrentName.setToolTipText("Copies the Customer Request field into the Current name rename field");
+        jButtonCopyToCurrentName.setFont(bold);
+        jButtonCopyToCurrentName.addActionListener(e -> {
+            String val = jTextField1.getText().trim();
+            if (!val.isEmpty()) {
+                jTextField6.setText(val);
+            }
+        });
+        javax.swing.JPanel rowCopyToCurrentName = row();
+        rowCopyToCurrentName.add(jButtonCopyToCurrentName);
+        jPanel1.add(rowCopyToCurrentName);
         jPanel1.add(javax.swing.Box.createVerticalStrut(8));
 
         // ── Dates + Buttons ──────────────────────────────────────────────────
@@ -1351,7 +1367,7 @@ public class BackOfficeMain extends javax.swing.JFrame {
         String mytext = mytext1.replaceAll("\\s", "");
         String mycmd = "dir /b \"%DROPBOX_HOME%\\001_Safari\\\"*" + mytext + "*";
         java.util.List<String> results = runDirCommand(mycmd);
-        showResultsPopup("Search 001_Safari Folder — " + mytext, results);
+        showResultsPopup("Search 001_Safari Folder — " + mytext, results, true);
     }//GEN-LAST:event_jButton18ActionPerformed
 
     private void jButton17ActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_jButton17ActionPerformed
@@ -1360,7 +1376,7 @@ public class BackOfficeMain extends javax.swing.JFrame {
         String dh17 = System.getenv("DROPBOX_HOME"); if (dh17 == null) dh17 = "";
         String mycmd = "dir /b \"" + dh17 + "\\" + getReqYear() + "\\\"*" + mytext + "*";
         java.util.List<String> results = runDirCommand(mycmd);
-        showResultsPopup("Search " + getReqYear() + " Folder — " + mytext, results);
+        showResultsPopup("Search " + getReqYear() + " Folder — " + mytext, results, true);
     }//GEN-LAST:event_jButton17ActionPerformed
 
     private void jTextField8ActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_jTextField8ActionPerformed
@@ -2983,8 +2999,9 @@ public class BackOfficeMain extends javax.swing.JFrame {
         javax.swing.JButton exportBtn = new javax.swing.JButton("⬇  Download as Word (.docx)");
         exportBtn.addActionListener(ev -> {
             javax.swing.JFileChooser fc = new javax.swing.JFileChooser();
-            fc.setDialogTitle("Save Missing CK list");
-            fc.setSelectedFile(new java.io.File("Missing_CK_" +
+            fc.setDialogTitle("Save as Word document");
+            String safeName = title.replaceAll("[^A-Za-z0-9_\\-]", "_").replaceAll("_+", "_");
+            fc.setSelectedFile(new java.io.File(safeName + "_" +
                 new java.text.SimpleDateFormat("yyyyMMdd").format(new java.util.Date()) + ".docx"));
             fc.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter("Word Document (*.docx)", "docx"));
             if (fc.showSaveDialog(dialog) == javax.swing.JFileChooser.APPROVE_OPTION) {
@@ -4258,6 +4275,7 @@ public class BackOfficeMain extends javax.swing.JFrame {
     private javax.swing.JButton jButtonRename;
     private javax.swing.JButton jButtonClearRename;
     private javax.swing.JButton jButtonToCustomerFile;
+    private javax.swing.JButton jButtonCopyToCurrentName;
     private javax.swing.JCheckBox jCheckBox1;
     private javax.swing.JCheckBox jCheckBox11;
     private javax.swing.JCheckBox jCheckBox12;
