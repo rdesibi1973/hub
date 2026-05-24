@@ -13,9 +13,24 @@ if (!defined('WETU_WSDL')) {
     define('WETU_WSDL', 'https://wetu.com/api/itineraryservicev8.asmx?WSDL');
 }
 
+/* Custom SoapClient that sanitizes the raw XML response BEFORE libxml parses it.
+   Wetu's itinerary XML may contain invalid UTF-8 bytes (legacy CP1252 content)
+   which would cause "SOAP-ERROR: Encoding: string not valid utf-8" during parsing. */
+if (!class_exists('WetuSoapClient')) {
+class WetuSoapClient extends SoapClient {
+    public function __doRequest($request, $location, $action, $version, $oneWay = 0): ?string {
+        $response = parent::__doRequest($request, $location, $action, $version, $oneWay);
+        if (is_string($response)) {
+            $response = wetu_utf8_sanitize($response);
+        }
+        return $response;
+    }
+}
+}
+
 if (!function_exists('wetu_client')) {
 function wetu_client() {
-    return new SoapClient(WETU_WSDL, [
+    return new WetuSoapClient(WETU_WSDL, [
         'exceptions' => true,
         'trace'      => false,
         'cache_wsdl' => WSDL_CACHE_DISK,
