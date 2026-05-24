@@ -240,7 +240,7 @@ if ($action === 'wetu_login') {
             $sess = $res->AuthenticateUserResult ?? null;
             if ($sess && !empty($sess->SessionToken)) {
                 $fetched = wetu_fetch_samples($u, $p);
-                $_SESSION['wetu_token']    = $sess->SessionToken;
+                $_SESSION['wetu_token']    = wetu_utf8_sanitize($sess->SessionToken);
                 $_SESSION['wetu_user']     = $u;
                 $_SESSION['wetu_pass']     = $p;
                 $_SESSION['wetu_operator'] = $sess->OperatorName ?? '';
@@ -413,6 +413,14 @@ if ($action === 'create_personal' && $token) {
     else {
         try {
             $c = wetu_client();
+
+            /* Ensure session token is valid UTF-8 — old sessions may have raw bytes.
+               If not, force reconnect rather than sending a corrupted token to Wetu. */
+            if (!mb_check_encoding($token, 'UTF-8')) {
+                unset($_SESSION['wetu_token'], $_SESSION['wetu_user'], $_SESSION['wetu_operator'],
+                      $_SESSION['wetu_pass'], $_SESSION['wetu_samples']);
+                throw new Exception('Wetu session token contains invalid characters. Please disconnect and sign in again.');
+            }
 
             /* 1 — Load the full Sample */
             $loaded    = $c->LoadItinerary(['identifier' => $sample_id, 'sessionToken' => $token]);
