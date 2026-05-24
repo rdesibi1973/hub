@@ -13,15 +13,20 @@ if (!defined('WETU_WSDL')) {
     define('WETU_WSDL', 'https://wetu.com/api/itineraryservicev8.asmx?WSDL');
 }
 
-/* Custom SoapClient: makes HTTP call via cURL (bypassing PHP's internal
-   SoapClient HTTP layer which throws on invalid UTF-8 before we can intervene),
-   sanitizes the raw XML bytes, then returns clean UTF-8 to the SOAP parser. */
+/* Custom SoapClient: uses cURL + UTF-8 sanitize for itinerary calls,
+   parent::__doRequest for auth calls (to preserve token bytes intact). */
 if (!class_exists('WetuSoapClient')) {
 class WetuSoapClient extends SoapClient {
     public function __doRequest($request, $location, $action, $version, $oneWay = 0): ?string {
+        /* AuthenticateUser: use parent so the session token is not modified */
+        if (strpos($action, 'AuthenticateUser') !== false) {
+            return parent::__doRequest($request, $location, $action, $version, $oneWay);
+        }
+        /* All other calls: fetch via cURL and sanitize response before XML parsing */
         $ch = curl_init($location);
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_ENCODING       => '',        // handle gzip/deflate transparently
             CURLOPT_POST           => true,
             CURLOPT_POSTFIELDS     => $request,
             CURLOPT_HTTPHEADER     => [
@@ -36,7 +41,6 @@ class WetuSoapClient extends SoapClient {
         $response = curl_exec($ch);
         curl_close($ch);
         if ($response === false || $response === '') return null;
-        // Sanitize raw bytes BEFORE the SOAP XML parser sees them
         return wetu_utf8_sanitize($response);
     }
 }
@@ -240,7 +244,7 @@ if ($action === 'wetu_login') {
             $sess = $res->AuthenticateUserResult ?? null;
             if ($sess && !empty($sess->SessionToken)) {
                 $fetched = wetu_fetch_samples($u, $p);
-                $_SESSION['wetu_token']    = wetu_utf8_sanitize($sess->SessionToken);
+                $_SESSION['wetu_token']    = $sess->SessionToken;
                 $_SESSION['wetu_user']     = $u;
                 $_SESSION['wetu_pass']     = $p;
                 $_SESSION['wetu_operator'] = $sess->OperatorName ?? '';
@@ -413,14 +417,6 @@ if ($action === 'create_personal' && $token) {
     else {
         try {
             $c = wetu_client();
-
-            /* Ensure session token is valid UTF-8 — old sessions may have raw bytes.
-               If not, force reconnect rather than sending a corrupted token to Wetu. */
-            if (!mb_check_encoding($token, 'UTF-8')) {
-                unset($_SESSION['wetu_token'], $_SESSION['wetu_user'], $_SESSION['wetu_operator'],
-                      $_SESSION['wetu_pass'], $_SESSION['wetu_samples']);
-                throw new Exception('Wetu session token contains invalid characters. Please disconnect and sign in again.');
-            }
 
             /* 1 — Load the full Sample */
             $loaded    = $c->LoadItinerary(['identifier' => $sample_id, 'sessionToken' => $token]);
