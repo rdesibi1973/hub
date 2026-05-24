@@ -914,9 +914,10 @@ function filterSamples() {
         const opt = document.createElement('option');
         opt.value = s.id;
         opt.dataset.days = s.days;
-        opt.dataset.lang = s.lang;
-        const tag = langTag[s.lang.toLowerCase()] || s.lang.substring(0,2).toUpperCase();
-        opt.textContent  = `[${tag}] ` + s.name + (s.days ? ` (${s.days}d)` : '');
+        opt.dataset.lang = s.lang || '';
+        const rawLang = (s.lang || '').toLowerCase();
+        const tag = rawLang ? (langTag[rawLang] || rawLang.substring(0,2).toUpperCase()) : '';
+        opt.textContent = (tag ? `[${tag}] ` : '') + s.name + (s.days ? ` (${s.days}d)` : '');
         if (s.id === prev) opt.selected = true;
         sel.appendChild(opt);
         count++;
