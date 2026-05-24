@@ -509,7 +509,7 @@ if ($action === 'create_personal' && $token) {
 
             $view_url = 'https://wetu.com/Itinerary/' . ($short_id ?: $new_id)
                       . ($cons_key ? '?key=' . urlencode($cons_key) : '');
-            $edit_url = 'https://dashboard.wetu.com/ItineraryBuilder/Personal/' . ($short_id ?: $new_id);
+            $edit_url = 'https://dashboard.wetu.com/ItineraryBuilder/Personal';
 
             $created = [
                 'name'         => $client_name,
@@ -806,7 +806,7 @@ include __DIR__ . '/includes/header.php';
     <?php if ($created['edit_url']): ?>
     <div class="result-link-row">
       <span class="lbl">✏️ Edit in Wetu</span>
-      <a href="<?= h($created['edit_url']) ?>" target="_blank" id="edit-link">Open Wetu Editor</a>
+      <a href="<?= h($created['edit_url']) ?>" target="_blank" id="edit-link">Open Wetu Personal List</a>
       <button class="copy-btn" onclick="copyLink('edit-link',this)">Copy</button>
     </div>
     <?php endif; ?>
@@ -821,7 +821,7 @@ include __DIR__ . '/includes/header.php';
 
     <div class="form-actions" style="margin-top:16px;">
       <?php if ($created['edit_url']): ?>
-      <a href="<?= h($created['edit_url']) ?>" target="_blank" style="font-family:inherit;font-size:.82rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;padding:9px 18px;border-radius:6px;background:#C0211B;color:#fff;text-decoration:none;display:inline-block;">✏️ Continue in Wetu</a>
+      <a href="<?= h($created['edit_url']) ?>" target="_blank" style="font-family:inherit;font-size:.82rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;padding:9px 18px;border-radius:6px;background:#C0211B;color:#fff;text-decoration:none;display:inline-block;">✏️ Open in Wetu</a>
       <?php endif; ?>
       <a href="wetu.php" style="font-family:inherit;font-size:.82rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;padding:9px 18px;border-radius:6px;background:#E8E8E8;color:#444;text-decoration:none;display:inline-block;">＋ Create Another</a>
     </div>
