@@ -63,7 +63,7 @@ $prefill_date = trim($_GET['start_date']  ?? '');
    ACTION: WETU LOGOUT
 ═══════════════════════════════════════════════════════════════ */
 if ($action === 'wetu_logout') {
-    unset($_SESSION['wetu_token'], $_SESSION['wetu_user'], $_SESSION['wetu_operator'], $_SESSION['wetu_pass'], $_SESSION['wetu_samples']);
+    unset($_SESSION['wetu_token'], $_SESSION['wetu_user'], $_SESSION['wetu_operator'], $_SESSION['wetu_pass'], $_SESSION['wetu_samples'], $_SESSION['wetu_search_query'], $_SESSION['wetu_search_results']);
     header('Location: wetu.php');
     exit;
 }
@@ -133,6 +133,23 @@ function wetu_fetch_samples(string $u, string $p): array {
 }
 }
 
+/* ── Search: call V8/List with a search term (single page, no pagination needed) ── */
+if (!function_exists('wetu_search_samples')) {
+function wetu_search_samples(string $u, string $p, string $search): array {
+    $url = 'https://wetu.com/API/Itinerary/V8/List?' . http_build_query([
+        'username' => $u,
+        'password' => $p,
+        'type'     => 'Sample',
+        'results'  => 200,
+        'start'    => 0,
+        'sort'     => 'ItineraryNameAsc',
+        'search'   => $search,
+    ]);
+    $batch = wetu_json_get($url);
+    return is_array($batch) ? $batch : [];
+}
+}
+
 /* ═══════════════════════════════════════════════════════════════
    ACTION: WETU LOGIN  — fetch samples immediately, cache in session
 ═══════════════════════════════════════════════════════════════ */
@@ -196,12 +213,64 @@ if ($action === 'wetu_refresh' && $token) {
     }
 }
 
-if ($token && !$created && !in_array($action, ['wetu_login', 'wetu_refresh'])) {
+if ($token && !$created && !in_array($action, ['wetu_login', 'wetu_refresh', 'wetu_search', 'wetu_clear_search'])) {
     $samples = $_SESSION['wetu_samples'] ?? [];
     if (empty($samples) && $token) {
         $wetu_error = 'No samples in session — please disconnect and sign in again.';
     }
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   ACTION: SEARCH WETU (server-side, uses stored credentials)
+═══════════════════════════════════════════════════════════════ */
+if ($action === 'wetu_search' && $token) {
+    $q = trim($_POST['wetu_search_query'] ?? '');
+    $u = $_SESSION['wetu_user'] ?? '';
+    $p = $_SESSION['wetu_pass'] ?? '';
+    if (!$q) {
+        $wetu_error = 'Please enter a search term.';
+        $samples = $_SESSION['wetu_samples'] ?? [];
+    } elseif (!$u || !$p) {
+        $wetu_error = 'Session expired — please disconnect and sign in again.';
+        $samples = $_SESSION['wetu_samples'] ?? [];
+    } else {
+        try {
+            $found = wetu_search_samples($u, $p, $q);
+            $_SESSION['wetu_search_query']   = $q;
+            $_SESSION['wetu_search_results'] = $found;
+            $samples = $found;
+            if (empty($found)) {
+                $wetu_success = 'No samples found matching "' . h($q) . '".';
+            } else {
+                $wetu_success = count($found) . ' sample' . (count($found) !== 1 ? 's' : '') . ' found for "' . h($q) . '".';
+            }
+        } catch (Throwable $e) {
+            $wetu_error = 'Search error: ' . h($e->getMessage());
+            $samples = $_SESSION['wetu_samples'] ?? [];
+        }
+    }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   ACTION: CLEAR SEARCH — restore full sample list
+═══════════════════════════════════════════════════════════════ */
+if ($action === 'wetu_clear_search') {
+    unset($_SESSION['wetu_search_query'], $_SESSION['wetu_search_results']);
+    header('Location: wetu.php');
+    exit;
+}
+
+/* ── Load from session: search results take priority over full list ── */
+if ($token && empty($samples)) {
+    if (isset($_SESSION['wetu_search_results'])) {
+        $samples = $_SESSION['wetu_search_results'];
+    } elseif (!in_array($action, ['wetu_login', 'wetu_refresh', 'wetu_search'])) {
+        $samples = $_SESSION['wetu_samples'] ?? [];
+    }
+}
+
+$wetu_search_active = isset($_SESSION['wetu_search_query']) && $_SESSION['wetu_search_query'] !== '';
+$wetu_search_query  = $_SESSION['wetu_search_query'] ?? '';
 
 /* ═══════════════════════════════════════════════════════════════
    ACTION: CREATE PERSONAL ITINERARY
@@ -594,6 +663,29 @@ include __DIR__ . '/includes/header.php';
   <div class="card-body">
     <form method="POST" action="wetu.php" id="create-form">
       <input type="hidden" name="action" value="create_personal">
+
+      <!-- Wetu server-side search -->
+      <div class="form-group" style="margin-bottom:14px;">
+        <label class="form-label">Search in Wetu</label>
+        <form method="post" action="wetu.php" style="display:flex;gap:8px;align-items:center;" id="wetu-search-form">
+          <input type="hidden" name="action" value="wetu_search">
+          <input type="text" name="wetu_search_query" id="wetu_search_query"
+                 class="form-control" style="max-width:340px;"
+                 placeholder="e.g. Serengeti, 10 days, beach…"
+                 value="<?= h($wetu_search_active ? $wetu_search_query : '') ?>"
+                 autocomplete="off">
+          <button type="submit" style="padding:8px 18px;background:#C0211B;color:#fff;border:none;border-radius:6px;font-weight:700;cursor:pointer;white-space:nowrap;">🔍 Search Wetu</button>
+          <?php if ($wetu_search_active): ?>
+            <a href="wetu.php?action=wetu_clear_search" style="padding:8px 14px;background:#f0f0f0;color:#444;border-radius:6px;font-size:.82rem;font-weight:600;text-decoration:none;white-space:nowrap;">✕ Show all</a>
+          <?php endif; ?>
+        </form>
+        <?php if ($wetu_search_active): ?>
+          <div style="margin-top:6px;font-size:.8rem;color:#1E4D7B;font-weight:600;">
+            Showing <?= count($samples_js_arr) ?> result<?= count($samples_js_arr) !== 1 ? 's' : '' ?> for: <em>"<?= h($wetu_search_query) ?>"</em>
+            — <a href="wetu.php?action=wetu_clear_search" style="color:#C0211B;">show all samples</a>
+          </div>
+        <?php endif; ?>
+      </div>
 
       <!-- Sample filter + dropdown -->
       <div class="form-group">
