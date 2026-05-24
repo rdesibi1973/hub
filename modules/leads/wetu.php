@@ -797,33 +797,11 @@ include __DIR__ . '/includes/header.php';
       <div><div class="meta-lbl">Language</div><div class="meta-val"><?= $created['language'] ?></div></div>
     </div>
 
-    <div class="result-link-row">
-      <span class="lbl">🖥️ Client View</span>
-      <a href="<?= h($created['view_url']) ?>" target="_blank" id="view-link"><?= h($created['view_url']) ?></a>
-      <button class="copy-btn" onclick="copyLink('view-link',this)">Copy</button>
-    </div>
-
-    <?php if ($created['edit_url']): ?>
-    <div class="result-link-row">
-      <span class="lbl">✏️ Edit in Wetu</span>
-      <a href="<?= h($created['edit_url']) ?>" target="_blank" id="edit-link">Open Wetu Personal List</a>
-      <button class="copy-btn" onclick="copyLink('edit-link',this)">Copy</button>
-    </div>
-    <?php endif; ?>
-
-    <?php if ($created['short_id']): ?>
-    <div class="result-link-row">
-      <span class="lbl">🔑 Identifier</span>
-      <a href="#" id="id-val"><?= h($created['short_id']) ?></a>
-      <button class="copy-btn" onclick="copyText('<?= h($created['short_id']) ?>',this)">Copy</button>
-    </div>
-    <?php endif; ?>
-
     <div class="form-actions" style="margin-top:16px;">
       <?php if ($created['edit_url']): ?>
-      <a href="<?= h($created['edit_url']) ?>" target="_blank" style="font-family:inherit;font-size:.82rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;padding:9px 18px;border-radius:6px;background:#C0211B;color:#fff;text-decoration:none;display:inline-block;">✏️ Open in Wetu</a>
+      <a href="<?= h($created['edit_url']) ?>" target="_blank" style="font-family:inherit;font-size:.85rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;padding:9px 18px;border-radius:6px;background:#C0211B;color:#fff;text-decoration:none;display:inline-block;">🗺️ OPEN WETU</a>
       <?php endif; ?>
-      <a href="wetu.php" style="font-family:inherit;font-size:.82rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;padding:9px 18px;border-radius:6px;background:#E8E8E8;color:#444;text-decoration:none;display:inline-block;">＋ Create Another</a>
+      <a href="wetu.php" style="font-family:inherit;font-size:.85rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;padding:9px 18px;border-radius:6px;background:#E8E8E8;color:#444;text-decoration:none;display:inline-block;">＋ Create Another</a>
     </div>
 
   </div>
@@ -882,13 +860,14 @@ include __DIR__ . '/includes/header.php';
             </select>
           </div>
 
-          <!-- Row 2: Text search + button -->
-          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          <!-- Row 2: Text search + button — full width to match sample dropdown -->
+          <div style="display:flex;gap:8px;align-items:center;">
             <input type="text" name="wetu_search_query" id="wetu_search_query"
                    class="form-control"
                    placeholder="e.g. Serengeti, 10 days, beach…"
                    value="<?= h($wetu_search_query) ?>"
-                   autocomplete="off">
+                   autocomplete="off"
+                   style="flex:1;">
             <button type="submit" style="padding:8px 20px;background:#C0211B;color:#fff;border:none;border-radius:6px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0;">🔍 Search Wetu</button>
           </div>
         </form>
