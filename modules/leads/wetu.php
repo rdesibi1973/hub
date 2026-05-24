@@ -254,7 +254,7 @@ if ($action === 'wetu_search' && $token) {
                 $base = wetu_search_samples($u, $p, $q, '');
             }
 
-            /* PHP filters */
+            /* PHP filters: title match and language (both modes) */
             $ql = strtolower($q);
             $found = array_values(array_filter($base, function($s) use ($ql, $lang, $title_only) {
                 if (!is_array($s)) return false;
@@ -265,9 +265,8 @@ if ($action === 'wetu_search' && $token) {
                         if (strpos($name, $word) === false) return false;
                     }
                 }
-                /* Language filter — skipped in title-only mode (infer_language is unreliable
-                   for programs that don't include the language name in their title) */
-                if (!$title_only && $lang !== '') {
+                /* Language filter — applied in both modes */
+                if ($lang !== '') {
                     $slang = infer_language(
                         (string)($s['name'] ?? $s['Name'] ?? $s['itinerary_name'] ?? $s['ItineraryName'] ?? ''),
                         $s
@@ -284,13 +283,15 @@ if ($action === 'wetu_search' && $token) {
             $samples = $found;
 
             $label_parts = [];
-            if ($lang && !$title_only) $label_parts[] = ucfirst(strtolower($lang));
-            if ($q)                    $label_parts[] = '"' . $q . '"';
-            if ($title_only)           $label_parts[] = 'title only';
+            if ($lang)       $label_parts[] = ucfirst(strtolower($lang));
+            if ($q)          $label_parts[] = '"' . $q . '"';
+            if ($title_only) $label_parts[] = 'title only';
             $label = implode(', ', $label_parts);
+            $base_count = count(array_filter($base, 'is_array'));
 
             $wetu_success = count($found) . ' sample' . (count($found) !== 1 ? 's' : '') . ' found'
-                          . ($label ? ' for ' . h($label) : '') . '.';
+                          . ($label ? ' for ' . h($label) : '')
+                          . ' (searched in ' . $base_count . ' samples).';
         } catch (Throwable $e) {
             $wetu_error = 'Search error: ' . h($e->getMessage());
             $samples = $_SESSION['wetu_samples'] ?? [];
@@ -908,11 +909,13 @@ function filterSamples() {
         // Name filter: case-insensitive contains
         if (search && !s.name.toLowerCase().includes(search)) return;
 
+        const langTag = {'english':'EN','italian':'IT','german':'DE','spanish':'ES','french':'FR'};
         const opt = document.createElement('option');
         opt.value = s.id;
         opt.dataset.days = s.days;
         opt.dataset.lang = s.lang;
-        opt.textContent  = s.name + (s.days ? ` (${s.days}d)` : '');
+        const tag = langTag[s.lang.toLowerCase()] || s.lang.substring(0,2).toUpperCase();
+        opt.textContent  = `[${tag}] ` + s.name + (s.days ? ` (${s.days}d)` : '');
         if (s.id === prev) opt.selected = true;
         sel.appendChild(opt);
         count++;
