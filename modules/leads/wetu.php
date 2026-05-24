@@ -75,9 +75,16 @@ if ($action === 'wetu_logout') {
 if (!function_exists('wetu_utf8_sanitize')) {
 function wetu_utf8_sanitize($data) {
     if (is_string($data)) {
-        $clean = @iconv('UTF-8', 'UTF-8//IGNORE', $data);
-        if ($clean === false) $clean = mb_convert_encoding($data, 'UTF-8', 'Latin-1');
-        return $clean;
+        // First try: strip any byte that makes the string invalid UTF-8 via regex
+        // The /u modifier causes preg_replace to return null on invalid UTF-8 input
+        $clean = preg_replace('/[^\x{0009}\x{000A}\x{000D}\x{0020}-\x{D7FF}\x{E000}-\x{FFFD}]/u', '', $data);
+        if ($clean !== null) return $clean;
+        // Fallback: treat as Windows-1252 (covers Latin-1, ISO-8859-1, CP1252)
+        // and convert to UTF-8, replacing unmappable characters
+        $clean = @iconv('Windows-1252', 'UTF-8//TRANSLIT//IGNORE', $data);
+        if ($clean !== false && $clean !== '') return $clean;
+        // Last resort: strip any byte > 0x7F
+        return preg_replace('/[\x80-\xFF]/', '', $data);
     }
     if (is_array($data))  return array_map('wetu_utf8_sanitize', $data);
     if (is_object($data)) {
