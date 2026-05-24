@@ -115,8 +115,7 @@ if (!$access_token) {
 $shared_url = dropbox_get_public_link($access_token, $path);
 
 if ($shared_url) {
-    // Ensure it opens folder view (not download)
-    $shared_url = preg_replace('/[?&]dl=\d/', '', $shared_url) . '?dl=0';
+    // Use URL as-is (new Dropbox links contain rlkey and must not be modified)
     header('Location: ' . $shared_url);
     exit;
 } else {
