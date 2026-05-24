@@ -245,15 +245,11 @@ include 'includes/header.php';
             </span>
           <?php else: ?>—<?php endif; ?>
         </td>
-        <td style="text-align:center" onclick="event.stopPropagation()">
-          <?php if ($r['email']): ?>
-            <button class="btn btn-outline btn-sm"
-                    onclick="openSend(<?= $r['id'] ?>, '<?= addslashes(h($r['customer_name'])) ?>', '<?= addslashes(h($r['email'])) ?>')">
-              ✉ Send
-            </button>
-          <?php else: ?>
-            <span style="color:var(--grey-lt);font-size:.72rem">no email</span>
-          <?php endif; ?>
+        <td style="text-align:center">
+          <button class="btn btn-outline btn-sm"
+                  onclick="event.stopPropagation();openSend(<?= $r['id'] ?>, '<?= addslashes(h($r['customer_name'])) ?>', '<?= addslashes(h($r['email'] ?? '')) ?>')">
+            ✉ Send
+          </button>
         </td>
       </tr>
     <?php endforeach; ?>

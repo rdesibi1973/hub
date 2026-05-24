@@ -204,7 +204,7 @@ include 'includes/header.php';
     <div class="modal-body">
       <input type="hidden" id="f_id">
 
-      <div style="display:grid;grid-template-columns:1fr 1fr <?= $is_admin ? '130px ' : '' ?>120px 80px;gap:16px;margin-bottom:20px;align-items:start">
+      <div style="display:grid;grid-template-columns:1fr 1fr <?= $is_admin ? '130px ' : '' ?>120px;gap:16px;margin-bottom:20px;align-items:start">
         <div class="form-group">
           <label>Name <span style="color:var(--red)">*</span></label>
           <input type="text" id="f_name">
@@ -231,12 +231,12 @@ include 'includes/header.php';
           <label>Order</label>
           <input type="number" id="f_sort_order" value="0">
         </div>
-        <div class="form-group" style="justify-content:flex-end;padding-bottom:2px">
-          <label>&nbsp;</label>
-          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:.82rem;font-weight:400;padding:9px 0">
-            <input type="checkbox" id="f_active" checked> Active
-          </label>
-        </div>
+      </div>
+
+      <div style="margin-bottom:18px">
+        <label style="display:inline-flex;align-items:center;gap:8px;cursor:pointer;font-size:.82rem">
+          <input type="checkbox" id="f_active" checked> Active
+        </label>
       </div>
 
       <div class="form-group" style="margin-bottom:18px">
