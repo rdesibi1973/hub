@@ -272,7 +272,11 @@ include 'includes/header.php';
       <?php endif; ?>
     <?php endif; ?>
     <?php if ($r['dropbox_url']): ?>
-      <a href="<?= h($r['dropbox_url']) ?>" target="_blank" class="btn btn-outline">
+      <?php
+        preg_match('#dropbox\.com/home(/.*)?$#i', $r['dropbox_url'], $m);
+        $hdrDbxPath = urldecode($m[1] ?? '');
+      ?>
+      <a href="dropbox_open.php?path=<?= rawurlencode($hdrDbxPath) ?>" target="_blank" class="btn btn-outline">
         📁 Open Dropbox Folder
       </a>
     <?php endif; ?>
@@ -396,16 +400,19 @@ include 'includes/header.php';
     <div class="detail-label">Dropbox Folder Link</div>
     <div class="detail-value">
       <?php
-        // For GRP requests build the URL from group_folder + practice_code
+        // Build the Dropbox path (without full URL, just the path portion)
         if (!empty($r['group_folder']) && $r['practice_code']) {
-            $dbxUrl = 'https://www.dropbox.com/home/001_Safari/'
-                    . rawurlencode($r['group_folder']) . '/' . rawurlencode($r['practice_code']);
+            $dbxPath = '/001_Safari/' . $r['group_folder'] . '/' . $r['practice_code'];
+        } elseif (!empty($r['dropbox_url'])) {
+            // Extract path from https://www.dropbox.com/home/PATH
+            preg_match('#dropbox\.com/home(/.*)?$#i', $r['dropbox_url'], $m);
+            $dbxPath = urldecode($m[1] ?? '');
         } else {
-            $dbxUrl = $r['dropbox_url'] ?? '';
+            $dbxPath = '';
         }
       ?>
-      <?php if ($dbxUrl): ?>
-        <a href="<?= h($dbxUrl) ?>" target="_blank">📁 Open Dropbox Folder</a>
+      <?php if ($dbxPath): ?>
+        <a href="dropbox_open.php?path=<?= rawurlencode($dbxPath) ?>" target="_blank">📁 Open Dropbox Folder</a>
       <?php else: ?>
         <span class="text-muted">— not set yet</span>
       <?php endif; ?>
