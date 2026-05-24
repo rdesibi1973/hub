@@ -4,7 +4,6 @@ require_once 'config.php';
 require_once 'includes/folder_parser.php';
 require_once 'includes/mail_helper.php';
 requireLogin();
-if (!in_array(current_user()['role_name'] ?? '', ['admin'])) { http_response_code(403); exit('Access denied'); }
 
 $cu          = current_user();
 $stmt = db()->prepare("SELECT agent_id FROM users WHERE id=?");
