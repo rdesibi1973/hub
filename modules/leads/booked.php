@@ -294,16 +294,10 @@ include 'includes/header.php';
       </div>
 
       <label class="m-label">Body</label>
-      <div class="tabs">
-        <button class="tab-btn active" onclick="sendTab('edit',this)">Edit</button>
-        <button class="tab-btn" onclick="sendTab('preview',this)">Preview</button>
+      <div style="border:1.5px solid var(--grey-lt);border-radius:6px;overflow:hidden">
+        <div id="send-quill" style="min-height:200px;font-size:.88rem;font-family:'Open Sans',sans-serif"></div>
       </div>
-      <div class="tab-pane active" id="spane-edit" style="border:1.5px solid var(--grey-lt);border-top:none;border-radius:0 0 6px 6px">
-        <textarea id="send_body" style="width:100%;min-height:220px;font-family:monospace;font-size:.78rem;border:none;padding:12px;resize:vertical;outline:none;box-sizing:border-box"></textarea>
-      </div>
-      <div class="tab-pane" id="spane-preview" style="border:1.5px solid var(--grey-lt);border-top:none;border-radius:0 0 6px 6px;padding:16px;min-height:220px;font-size:.85rem">
-        <div id="send_preview"></div>
-      </div>
+      <textarea id="send_body" style="display:none"></textarea>
 
       <div style="margin-top:14px">
         <label class="m-label">📎 Attachments</label>
@@ -332,9 +326,24 @@ include 'includes/header.php';
   </div>
 </div>
 
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/quill/1.3.7/quill.snow.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/quill/1.3.7/quill.min.js"></script>
 <script>
 const TODAY_TS = <?= $today_ts ?>;
 let attachedFiles = [];
+
+// ── Quill for send modal ──────────────────────────────────────────────────────
+var sendQuill = new Quill('#send-quill', {
+  theme: 'snow',
+  modules: {
+    toolbar: [
+      ['bold','italic','underline'],
+      [{'list':'ordered'},{'list':'bullet'}],
+      ['link','clean'],
+      [{'color':[]},{'align':[]}]
+    ]
+  }
+});
 
 function updateTable() {
   const agent    = document.getElementById('filterAgent').value;
@@ -377,10 +386,11 @@ function openSend(id, customer, to) {
   document.getElementById('sendAlert').style.display  = 'none';
   document.getElementById('btnSend').disabled         = false;
   document.getElementById('btnSend').textContent      = '✉ Send Email';
+  sendQuill.root.innerHTML = '';
+  document.getElementById('send_body').value = '';
   attachedFiles = [];
   document.getElementById('attachList').innerHTML = '';
   document.getElementById('attach_input').value   = '';
-  sendTab('edit', document.querySelector('#sendOverlay .tab-btn'));
   document.getElementById('sendOverlay').style.display = 'flex';
 }
 function closeSend()  { document.getElementById('sendOverlay').style.display = 'none'; }
@@ -396,7 +406,8 @@ function loadTemplate() {
   }).then(r=>r.json()).then(d => {
     if (!d.ok) { alert(d.msg); return; }
     document.getElementById('send_subject').value = d.subject;
-    document.getElementById('send_body').value    = d.body;
+    sendQuill.root.innerHTML = d.body || '';
+    document.getElementById('send_body').value = d.body || '';
   });
 }
 
@@ -412,7 +423,7 @@ function doSend() {
   fd.append('request_id', document.getElementById('send_req_id').value);
   fd.append('to',         document.getElementById('send_to').value);
   fd.append('subject',    document.getElementById('send_subject').value);
-  fd.append('body',       document.getElementById('send_body').value);
+  fd.append('body',       sendQuill.root.innerHTML);
   attachedFiles.forEach(function(f) { fd.append('attachments[]', f); });
 
   fetch('booked.php', {method:'POST', body:fd})
@@ -437,16 +448,6 @@ function doSend() {
     });
 }
 
-function sendTab(tab, btn) {
-  document.querySelectorAll('#sendOverlay .tab-btn').forEach(function(b) { b.classList.remove('active'); });
-  document.querySelectorAll('#sendOverlay .tab-pane').forEach(function(p) { p.classList.remove('active'); });
-  if (btn) btn.classList.add('active');
-  document.getElementById('spane-' + tab).classList.add('active');
-  if (tab === 'preview') {
-    document.getElementById('send_preview').innerHTML =
-      document.getElementById('send_body').value || '<em style="color:var(--grey-mid)">Nothing to preview.</em>';
-  }
-}
 
 function handleFiles(input) {
   Array.from(input.files).forEach(function(f) {
