@@ -13,17 +13,31 @@ if (!defined('WETU_WSDL')) {
     define('WETU_WSDL', 'https://wetu.com/api/itineraryservicev8.asmx?WSDL');
 }
 
-/* Custom SoapClient that sanitizes the raw XML response BEFORE libxml parses it.
-   Wetu's itinerary XML may contain invalid UTF-8 bytes (legacy CP1252 content)
-   which would cause "SOAP-ERROR: Encoding: string not valid utf-8" during parsing. */
+/* Custom SoapClient: makes HTTP call via cURL (bypassing PHP's internal
+   SoapClient HTTP layer which throws on invalid UTF-8 before we can intervene),
+   sanitizes the raw XML bytes, then returns clean UTF-8 to the SOAP parser. */
 if (!class_exists('WetuSoapClient')) {
 class WetuSoapClient extends SoapClient {
     public function __doRequest($request, $location, $action, $version, $oneWay = 0): ?string {
-        $response = parent::__doRequest($request, $location, $action, $version, $oneWay);
-        if (is_string($response)) {
-            $response = wetu_utf8_sanitize($response);
-        }
-        return $response;
+        $ch = curl_init($location);
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_POST           => true,
+            CURLOPT_POSTFIELDS     => $request,
+            CURLOPT_HTTPHEADER     => [
+                'Content-Type: text/xml; charset=utf-8',
+                'SOAPAction: "' . $action . '"',
+                'Content-Length: ' . strlen($request),
+            ],
+            CURLOPT_TIMEOUT        => 30,
+            CURLOPT_SSL_VERIFYPEER => true,
+            CURLOPT_FOLLOWLOCATION => true,
+        ]);
+        $response = curl_exec($ch);
+        curl_close($ch);
+        if ($response === false || $response === '') return null;
+        // Sanitize raw bytes BEFORE the SOAP XML parser sees them
+        return wetu_utf8_sanitize($response);
     }
 }
 }
