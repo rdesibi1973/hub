@@ -287,8 +287,8 @@ if ($action === 'create_personal' && $token) {
     $client_name = trim($_POST['client_name'] ?? '');
     $ref_number  = trim($_POST['ref_number']  ?? '');
     $start_date  = trim($_POST['start_date']  ?? '');
-    $days        = max(1, intval($_POST['days'] ?? 1));
-    $pax         = max(1, intval($_POST['pax']  ?? 1));
+    $days        = max(1, intval($_POST['days'] ?? 0));   // kept for Wetu API (uses sample days if 0 → default 1)
+    $pax         = intval($_POST['pax'] ?? 0);
     $language    = trim($_POST['language'] ?? 'en');
     if (!preg_match('/^[a-z]{2}$/', $language)) $language = 'en';
 
@@ -757,26 +757,19 @@ include __DIR__ . '/includes/header.php';
         </div>
       </div>
 
-      <!-- Start Date + Days + Pax -->
-      <div class="form-row" style="grid-template-columns:1fr 1fr 1fr;">
+      <!-- Start Date + Pax -->
+      <div class="form-row" style="grid-template-columns:1fr 1fr;">
         <div class="form-group">
           <label class="form-label" for="start_date">Start Date</label>
           <input class="form-control" type="date" id="start_date" name="start_date"
                  value="<?= h($_POST['start_date'] ?? $prefill_date) ?>">
         </div>
         <div class="form-group">
-          <label class="form-label" for="days">Duration (days) <span style="color:var(--red)">*</span></label>
-          <input class="form-control" type="number" id="days" name="days"
-                 min="1" max="60"
-                 value="<?= intval($_POST['days'] ?? $prefill_days) ?: '' ?>"
-                 placeholder="Auto from Sample" required>
-          <div class="field-hint">Auto-filled when Sample is selected</div>
-        </div>
-        <div class="form-group">
-          <label class="form-label" for="pax">Pax <span style="color:var(--red)">*</span></label>
+          <label class="form-label" for="pax">Pax</label>
           <input class="form-control" type="number" id="pax" name="pax"
                  min="1" max="99"
-                 value="<?= intval($_POST['pax'] ?? $prefill_pax) ?>" required>
+                 value="<?= intval($_POST['pax'] ?? $prefill_pax) ?: '' ?>"
+                 placeholder="Optional">
         </div>
       </div>
 
@@ -886,9 +879,6 @@ function filterSamples() {
 function onSampleChange(sel) {
     const opt  = sel.options[sel.selectedIndex];
     const days = parseInt(opt?.dataset.days || '0', 10);
-    const d    = document.getElementById('days');
-    if (d && days > 0) d.value = days;
-
     // Auto-set hidden language from sample
     const raw  = (opt?.dataset.lang || 'en').toLowerCase();
     const langMap = {english:'en', italian:'it', german:'de', spanish:'es', french:'fr'};
