@@ -116,9 +116,17 @@ foreach ($rows as &$row) {
 unset($row);
 usort($rows, fn($a,$b) => $a['start_ts'] <=> $b['start_ts']);
 
-$templates = $pdo->query(
-    "SELECT id, name, category FROM email_templates WHERE active=1 ORDER BY sort_order, name"
-)->fetchAll(PDO::FETCH_ASSOC);
+$cu          = current_user();
+$my_agent_id = (int)($cu['agent_id'] ?? 0);
+
+// Templates: public ones + current user's private ones
+$stmt = $pdo->prepare(
+    "SELECT id, name, category FROM email_templates
+     WHERE active=1 AND (visibility='public' OR (visibility='private' AND agent_id=?))
+     ORDER BY visibility ASC, sort_order ASC, name ASC"
+);
+$stmt->execute([$my_agent_id]);
+$templates = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 // Group templates by category for the select
 $tpl_by_cat = [];
