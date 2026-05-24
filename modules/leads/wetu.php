@@ -422,12 +422,20 @@ if ($action === 'create_personal' && $token) {
             /* Sanitize pass 1: byte-by-byte (handles mixed encoding strings) */
             $itinerary = wetu_utf8_sanitize($itinerary);
 
-            /* Sanitize pass 2: JSON round-trip — JSON_INVALID_UTF8_SUBSTITUTE
-               replaces any remaining invalid UTF-8 bytes with U+FFFD before
-               SoapClient tries to serialize the object for SaveItinerary */
-            $json = json_encode($itinerary, JSON_INVALID_UTF8_SUBSTITUTE | JSON_UNESCAPED_UNICODE);
-            if ($json !== false) {
-                $itinerary = json_decode($json);
+            /* Sanitize pass 2: JSON round-trip with increased depth.
+               JSON_INVALID_UTF8_SUBSTITUTE replaces remaining invalid bytes with U+FFFD.
+               If json_encode fails for any reason, we stay with pass-1 result. */
+            $json = json_encode($itinerary, JSON_INVALID_UTF8_SUBSTITUTE, 2048);
+            if ($json !== false && $json !== 'null') {
+                $clean = json_decode($json, false, 2048);
+                if ($clean !== null) {
+                    $itinerary = $clean;
+                } else {
+                    // json_decode failed — log reason and continue with pass-1 result
+                    $wetu_debug = 'json_decode failed after encode (json_last_error: ' . json_last_error() . ')';
+                }
+            } else {
+                $wetu_debug = 'json_encode failed (json_last_error: ' . json_last_error() . ' — ' . json_last_error_msg() . ')';
             }
 
             /* 2 — Rewrite for Personal */
