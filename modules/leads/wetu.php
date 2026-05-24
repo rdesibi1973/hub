@@ -388,9 +388,9 @@ if ($action === 'create_personal' && $token) {
             $wetu_success = 'Personal itinerary created successfully.';
 
         } catch (SoapFault $e) {
-            $wetu_error = 'Wetu API error: ' . h($e->getMessage());
+            $wetu_error = 'Wetu API error: ' . h($e->getMessage()) . ' &nbsp;<small style="color:#888">[identifier sent: <code>' . h($sample_id) . '</code>]</small>';
         } catch (Exception $e) {
-            $wetu_error = h($e->getMessage());
+            $wetu_error = h($e->getMessage()) . ' &nbsp;<small style="color:#888">[identifier sent: <code>' . h($sample_id) . '</code>]</small>';
         }
     }
 }
@@ -404,7 +404,10 @@ $first_sample_raw = !empty($samples) ? json_encode($samples[0], JSON_PRETTY_PRIN
 
 foreach ($samples as $s) {
     if (!is_array($s)) continue;  // skip wrapper fields (total, page, etc.)
-    $sid   = $s['identifier']  ?? ($s['itinerary_id'] ?? ($s['Identifier'] ?? ''));
+    $sid   = $s['identifier']  ?? ($s['Identifier']  ??
+             ($s['itinerary_id'] ?? ($s['ItineraryId'] ??
+             ($s['id']           ?? ($s['Id']          ??
+             ($s['short_id']     ?? ($s['ShortId']     ?? '')))))));
     $sname = $s['name']        ?? ($s['itinerary_name'] ?? ($s['Name'] ?? ($s['ItineraryName'] ?? 'Unnamed')));
     $sdays = intval($s['days'] ?? ($s['Days'] ?? 0));
     $slang = infer_language((string)$sname, $s);
@@ -546,7 +549,7 @@ include __DIR__ . '/includes/header.php';
 
 <?php if ($token && !empty($first_sample_raw)): ?>
 <details style="margin-bottom:16px;font-size:.75rem;">
-  <summary style="cursor:pointer;color:#888;font-weight:600;">🔍 Debug: first sample fields (<?= count($samples) ?> total, <?= count($languages) ?> languages found)</summary>
+  <summary style="cursor:pointer;color:#888;font-weight:600;">🔍 Debug: first sample fields (<?= count($samples) ?> total, <?= count($languages) ?> languages found) — identifier keys found: <?= implode(', ', array_filter(['identifier'=>isset($samples[0]['identifier']), 'Identifier'=>isset($samples[0]['Identifier']), 'itinerary_id'=>isset($samples[0]['itinerary_id']), 'id'=>isset($samples[0]['id']), 'short_id'=>isset($samples[0]['short_id'])], fn($v)=>$v, ARRAY_FILTER_USE_BOTH)) ?></summary>
   <pre style="background:#f5f5f5;padding:10px;border-radius:6px;margin-top:6px;white-space:pre-wrap;word-break:break-all;font-size:.7rem;max-height:200px;overflow:auto;"><?= htmlspecialchars($first_sample_raw) ?></pre>
 </details>
 <?php endif; ?>
