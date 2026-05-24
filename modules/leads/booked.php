@@ -258,7 +258,7 @@ include 'includes/header.php';
 </div>
 
 <!-- ── Send Email Modal ────────────────────────────────────────────────────── -->
-<div class="modal-overlay hidden" id="sendOverlay">
+<div class="modal-overlay hidden" id="sendOverlay" style="display:none">
   <div class="modal-box" style="max-width:820px">
     <div class="modal-header">
       <h3>✉ Send Email — <span id="sendCustomer"></span></h3>
@@ -322,7 +322,7 @@ include 'includes/header.php';
 </div>
 
 <!-- ── Notes Modal ────────────────────────────────────────────────────────── -->
-<div class="modal-overlay hidden" id="notesOverlay">
+<div class="modal-overlay hidden" id="notesOverlay" style="display:none">
   <div class="modal-box" style="max-width:660px">
     <div class="modal-header">
       <h3>Notes — <span id="notesCustomer"></span></h3>
@@ -381,10 +381,10 @@ function openSend(id, customer, to) {
   document.getElementById('attachList').innerHTML = '';
   document.getElementById('attach_input').value   = '';
   sendTab('edit', document.querySelector('#sendOverlay .tab-btn'));
-  document.getElementById('sendOverlay').classList.remove('hidden');
+  document.getElementById('sendOverlay').style.display = 'flex';
 }
-function closeSend()  { document.getElementById('sendOverlay').classList.add('hidden'); }
-function closeNotes() { document.getElementById('notesOverlay').classList.add('hidden'); }
+function closeSend()  { document.getElementById('sendOverlay').style.display = 'none'; }
+function closeNotes() { document.getElementById('notesOverlay').style.display = 'none'; }
 
 function loadTemplate() {
   const tpl_id = document.getElementById('send_tpl').value;
@@ -468,7 +468,7 @@ function renderAttachments() {
 function viewNotes(id, customer) {
   document.getElementById('notesCustomer').textContent = customer;
   document.getElementById('notesBody').innerHTML = '<p style="color:var(--grey-mid);text-align:center;padding:24px">Loading…</p>';
-  document.getElementById('notesOverlay').classList.remove('hidden');
+  document.getElementById('notesOverlay').style.display = 'flex';
   fetch('booked.php', {
     method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'},
     body:'action=get_notes&request_id=' + id

@@ -195,7 +195,7 @@ include 'includes/header.php';
 </div>
 
 <!-- ── Modal ─────────────────────────────────────────────────────────────── -->
-<div class="modal-overlay hidden" id="tplOverlay">
+<div class="modal-overlay hidden" id="tplOverlay" style="display:none">
   <div class="modal-box" style="max-width:960px">
     <div class="modal-header">
       <h3 id="modalTitle">New Template</h3>
@@ -329,10 +329,10 @@ function openModal(id) {
       if (IS_ADMIN) document.getElementById('f_visibility').value = d.visibility || 'public';
     });
   }
-  document.getElementById('tplOverlay').classList.remove('hidden');
+  document.getElementById('tplOverlay').style.display = 'flex';
 }
 
-function closeModal() { document.getElementById('tplOverlay').classList.add('hidden'); }
+function closeModal() { document.getElementById('tplOverlay').style.display = 'none'; }
 
 document.getElementById('tplOverlay').addEventListener('click', function(e) {
   if (e.target === this) closeModal();
