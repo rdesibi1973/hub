@@ -386,6 +386,8 @@ function updateTable() {
   document.getElementById(id).addEventListener('click', function(e) {
     if (e.target === this) { id === 'sendOverlay' ? closeSend() : closeNotes(); }
   });
+  var box = document.querySelector('#' + id + ' .modal-box');
+  if (box) box.addEventListener('click', function(e) { e.stopPropagation(); });
 });
 
 function openSend(id, customer, to) {

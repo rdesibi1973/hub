@@ -436,6 +436,9 @@ function closeModal() { document.getElementById('tplOverlay').style.display = 'n
 document.getElementById('tplOverlay').addEventListener('click', function(e) {
   if (e.target === this) closeModal();
 });
+document.querySelector('#tplOverlay .modal-box').addEventListener('click', function(e) {
+  e.stopPropagation();
+});
 
 // ── Save ─────────────────────────────────────────────────────────────────────
 function saveTemplate() {
