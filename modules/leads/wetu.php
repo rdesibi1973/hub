@@ -507,8 +507,9 @@ if ($action === 'create_personal' && $token) {
 
             if (!$new_id) throw new Exception('Itinerary saved but no identifier returned by Wetu.');
 
-            $view_url = 'https://wetu.com/Itinerary/' . ($short_id ?: $new_id);
-            $edit_url = $view_url;  // edit controls visible when logged in to Wetu
+            $base_url = 'https://wetu.com/Itinerary/' . ($short_id ?: $new_id);
+            $view_url = $cons_key ? $base_url . '?key=' . urlencode($cons_key) : $base_url;
+            $edit_url = $view_url;
 
             $created = [
                 'name'         => $client_name,
