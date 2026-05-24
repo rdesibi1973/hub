@@ -71,19 +71,40 @@ if ($action === 'wetu_logout') {
 /* ═══════════════════════════════════════════════════════════════
    ACTION: WETU LOGIN
 ═══════════════════════════════════════════════════════════════ */
-/* ── Recursively sanitize all strings in a SOAP object to valid UTF-8 ── */
+/* ── Recursively sanitize all strings in a SOAP object to valid UTF-8 ──
+   Processes byte-by-byte: valid UTF-8 sequences pass through unchanged;
+   any invalid byte is treated as CP1252 and converted to UTF-8.
+   This handles mixed-encoding strings (partly UTF-8, partly legacy). ── */
 if (!function_exists('wetu_utf8_sanitize')) {
 function wetu_utf8_sanitize($data) {
     if (is_string($data)) {
-        // Already valid UTF-8 — nothing to do
-        if (mb_check_encoding($data, 'UTF-8')) return $data;
-        // Try common legacy encodings in order
-        foreach (['CP1252', 'Windows-1252', 'ISO-8859-1', 'ISO-8859-15'] as $enc) {
-            $clean = @iconv($enc, 'UTF-8//TRANSLIT//IGNORE', $data);
-            if ($clean !== false && mb_check_encoding($clean, 'UTF-8')) return $clean;
+        if (mb_check_encoding($data, 'UTF-8')) return $data; // fast path
+        $out = '';
+        $len = strlen($data);
+        for ($i = 0; $i < $len; ) {
+            $b = ord($data[$i]);
+            if ($b < 0x80) {                          // ASCII — always valid
+                $out .= $data[$i++];
+                continue;
+            }
+            // Determine expected UTF-8 sequence length
+            if    ($b >= 0xF0 && $b <= 0xF4) $seq = 4;
+            elseif ($b >= 0xE0 && $b <= 0xEF) $seq = 3;
+            elseif ($b >= 0xC2 && $b <= 0xDF) $seq = 2;
+            else                               $seq = 0; // invalid lead byte
+            if ($seq > 0 && $i + $seq <= $len) {
+                $valid = true;
+                for ($j = 1; $j < $seq; $j++) {
+                    if ((ord($data[$i + $j]) & 0xC0) !== 0x80) { $valid = false; break; }
+                }
+                if ($valid) { $out .= substr($data, $i, $seq); $i += $seq; continue; }
+            }
+            // Invalid byte — convert as CP1252 character
+            $conv = @iconv('CP1252', 'UTF-8//IGNORE', $data[$i]);
+            if ($conv !== false) $out .= $conv;
+            $i++;
         }
-        // Last resort: strip every byte > 0x7F
-        return preg_replace('/[\x80-\xFF]/', '', $data);
+        return $out;
     }
     if (is_array($data))  return array_map('wetu_utf8_sanitize', $data);
     if (is_object($data)) {
