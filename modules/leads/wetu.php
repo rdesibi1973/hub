@@ -710,10 +710,8 @@ include __DIR__ . '/includes/header.php';
     <span style="font-size:.75rem;color:var(--grey-mid);">Copy a Sample as Personal and customise it for the client</span>
   </div>
   <div class="card-body">
-    <form method="POST" action="wetu.php" id="create-form">
-      <input type="hidden" name="action" value="create_personal">
 
-      <!-- Wetu server-side filter -->
+      <!-- FILTER WETU SAMPLE PROGRAMS — standalone form (must not be nested inside create-form) -->
       <div class="form-group" style="margin-bottom:14px;">
         <label class="form-label" style="font-weight:700;letter-spacing:.04em;">FILTER WETU SAMPLE PROGRAMS</label>
         <form method="post" action="wetu.php" style="display:flex;flex-direction:column;gap:8px;" id="wetu-search-form">
@@ -766,6 +764,9 @@ include __DIR__ . '/includes/header.php';
           </div>
         <?php endif; ?>
       </div>
+
+    <form method="POST" action="wetu.php" id="create-form">
+      <input type="hidden" name="action" value="create_personal">
 
       <!-- Sample dropdown -->
       <div class="form-group">
