@@ -1,8 +1,9 @@
 <?php
 /**
- * Parse start/end dates from Savannah Dropbox folder names.
+ * Parse start/end dates from a Savannah Dropbox folder/practice_code name.
+ * Format: 04_12APR_CustomerName_..._START12APR_END17APR2026_CK
  *
- * Format: 04_12APR_CustomerName_GRP1204(AGENCY-CH-Agent)_START12APR_END17APR2026_CK
+ * Accepts group_folder OR practice_code — same format, same parser.
  *
  * @return array ['start_date'=>'YYYY-MM-DD'|null, 'end_date'=>'YYYY-MM-DD'|null, 'start_ts'=>int|null]
  */
@@ -13,12 +14,12 @@ function parse_folder_dates(string $folder): array {
     ];
 
     $result = ['start_date'=>null, 'end_date'=>null, 'start_ts'=>null];
+    if (!$folder) return $result;
+
     $f = strtoupper($folder);
 
     // END must be present — it carries the year
-    if (!preg_match('/_END(\d{1,2})([A-Z]{3})(\d{4})/', $f, $em)) {
-        return $result;
-    }
+    if (!preg_match('/_END(\d{1,2})([A-Z]{3})(\d{4})/', $f, $em)) return $result;
     $end_day = (int)$em[1];
     $end_mon = $months[$em[2]] ?? null;
     $end_yr  = (int)$em[3];
@@ -26,17 +27,24 @@ function parse_folder_dates(string $folder): array {
 
     $result['end_date'] = sprintf('%04d-%02d-%02d', $end_yr, $end_mon, $end_day);
 
-    // START
     if (preg_match('/_START(\d{1,2})([A-Z]{3})/', $f, $sm)) {
         $start_day = (int)$sm[1];
         $start_mon = $months[$sm[2]] ?? null;
         if ($start_mon) {
-            // If start month is significantly after end month, trip spans a year boundary
             $start_yr = ($start_mon > $end_mon + 1) ? $end_yr - 1 : $end_yr;
             $result['start_date'] = sprintf('%04d-%02d-%02d', $start_yr, $start_mon, $start_day);
             $result['start_ts']   = mktime(0, 0, 0, $start_mon, $start_day, $start_yr);
         }
     }
-
     return $result;
+}
+
+/**
+ * Get the best folder name for date parsing:
+ * use group_folder if set, otherwise practice_code.
+ */
+function get_date_folder(array $row): string {
+    $gf = trim($row['group_folder'] ?? '');
+    if ($gf) return $gf;
+    return trim($row['practice_code'] ?? '');
 }
