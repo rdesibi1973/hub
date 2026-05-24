@@ -226,7 +226,10 @@ if ($token && !$created && !in_array($action, ['wetu_login', 'wetu_refresh', 'we
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   ACTION: SEARCH / FILTER  (fetch full list from Wetu, filter in PHP)
+   ACTION: SEARCH / FILTER
+   - Text query  → Wetu full-text search (finds matches in content too)
+   - Language    → PHP filter on results (infer_language is reliable)
+   - No query, no lang → restore full cached list
 ═══════════════════════════════════════════════════════════════ */
 if ($action === 'wetu_search' && $token) {
     $q    = trim($_POST['wetu_search_query'] ?? '');
@@ -238,31 +241,31 @@ if ($action === 'wetu_search' && $token) {
         $samples = $_SESSION['wetu_samples'] ?? [];
     } else {
         try {
-            /* Use cached full list; re-fetch only if cache is empty */
-            $all = $_SESSION['wetu_samples'] ?? [];
-            if (empty($all)) {
-                $all = wetu_fetch_samples($u, $p);
-                $_SESSION['wetu_samples'] = $all;
+            if ($q !== '') {
+                /* Wetu full-text search: finds matches in name AND content */
+                $base = wetu_search_samples($u, $p, $q, '');
+            } else {
+                /* No text query: use cached full list */
+                $base = $_SESSION['wetu_samples'] ?? [];
+                if (empty($base)) {
+                    $base = wetu_fetch_samples($u, $p);
+                    $_SESSION['wetu_samples'] = $base;
+                }
             }
 
-            /* Apply PHP-side filters */
-            $ql = strtolower($q);
-            $found = array_values(array_filter($all, function($s) use ($ql, $lang) {
-                if (!is_array($s)) return false;
-                $name = strtolower((string)($s['name'] ?? $s['itinerary_name'] ?? $s['Name'] ?? $s['ItineraryName'] ?? ''));
-                /* Name filter: every word in query must appear in name */
-                if ($ql !== '') {
-                    foreach (preg_split('/\s+/', $ql, -1, PREG_SPLIT_NO_EMPTY) as $word) {
-                        if (strpos($name, $word) === false) return false;
-                    }
-                }
-                /* Language filter */
-                if ($lang !== '') {
-                    $slang = infer_language((string)($s['name'] ?? $s['Name'] ?? ''), $s);
-                    if (strcasecmp($slang, $lang) !== 0) return false;
-                }
-                return true;
-            }));
+            /* Apply PHP language filter on top of Wetu results */
+            if ($lang !== '') {
+                $found = array_values(array_filter($base, function($s) use ($lang) {
+                    if (!is_array($s)) return false;
+                    $slang = infer_language(
+                        (string)($s['name'] ?? $s['Name'] ?? $s['itinerary_name'] ?? $s['ItineraryName'] ?? ''),
+                        $s
+                    );
+                    return strcasecmp($slang, $lang) === 0;
+                }));
+            } else {
+                $found = array_values(array_filter($base, 'is_array'));
+            }
 
             $_SESSION['wetu_search_query']   = $q;
             $_SESSION['wetu_search_lang']    = $lang;
