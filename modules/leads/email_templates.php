@@ -2,8 +2,8 @@
 require_once 'config.php';
 requireLogin();
 
-$cu         = current_user();
-$is_admin   = in_array($cu['role_name'] ?? '', ['admin']);
+$cu          = current_user();
+$is_admin    = in_array($cu['role_name'] ?? '', ['admin']);
 $my_agent_id = (int)($cu['agent_id'] ?? 0);
 
 // ── AJAX handlers ─────────────────────────────────────────────────────────────
@@ -11,10 +11,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     header('Content-Type: application/json');
     $action = $_POST['action'];
 
-    // Helper: can the current user edit this template?
-    $can_edit = function(int $id) use ($pdo, $is_admin, $my_agent_id): bool {
+    $can_edit = function(int $id) use ($is_admin, $my_agent_id): bool {
         if ($is_admin) return true;
-        $r = $pdo->prepare("SELECT visibility, agent_id FROM email_templates WHERE id=?");
+        $r = db()->prepare("SELECT visibility, agent_id FROM email_templates WHERE id=?");
         $r->execute([$id]);
         $t = $r->fetch(PDO::FETCH_ASSOC);
         return $t && $t['visibility'] === 'private' && (int)$t['agent_id'] === $my_agent_id;
@@ -29,20 +28,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $active     = isset($_POST['active']) ? 1 : 0;
         $sort_order = (int)($_POST['sort_order'] ?? 0);
         $visibility = $is_admin ? ($_POST['visibility'] ?? 'public') : 'private';
-        $agent_id   = $is_admin
-            ? ($visibility === 'private' ? ($cu['agent_id'] ?? null) : null)
-            : $my_agent_id;
+        $agent_id   = ($visibility === 'private') ? ($cu['agent_id'] ?? null) : null;
 
         if (!$name || !$subject || !$body_html) {
             echo json_encode(['ok'=>false,'msg'=>'Name, subject and body are required.']); exit;
         }
         if ($id) {
             if (!$can_edit($id)) { echo json_encode(['ok'=>false,'msg'=>'Not allowed.']); exit; }
-            $pdo->prepare("UPDATE email_templates SET name=?,category=?,subject=?,body_html=?,active=?,sort_order=?,visibility=?,agent_id=? WHERE id=?")
-                ->execute([$name,$category,$subject,$body_html,$active,$sort_order,$visibility,$agent_id,$id]);
+            db()->prepare("UPDATE email_templates SET name=?,category=?,subject=?,body_html=?,active=?,sort_order=?,visibility=?,agent_id=? WHERE id=?")
+               ->execute([$name,$category,$subject,$body_html,$active,$sort_order,$visibility,$agent_id,$id]);
         } else {
-            $pdo->prepare("INSERT INTO email_templates (name,category,subject,body_html,active,sort_order,visibility,agent_id) VALUES (?,?,?,?,?,?,?,?)")
-                ->execute([$name,$category,$subject,$body_html,$active,$sort_order,$visibility,$agent_id]);
+            db()->prepare("INSERT INTO email_templates (name,category,subject,body_html,active,sort_order,visibility,agent_id) VALUES (?,?,?,?,?,?,?,?)")
+               ->execute([$name,$category,$subject,$body_html,$active,$sort_order,$visibility,$agent_id]);
         }
         echo json_encode(['ok'=>true]); exit;
     }
@@ -50,12 +47,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     if ($action === 'delete') {
         $id = (int)$_POST['id'];
         if (!$can_edit($id)) { echo json_encode(['ok'=>false,'msg'=>'Not allowed.']); exit; }
-        $pdo->prepare("DELETE FROM email_templates WHERE id=?")->execute([$id]);
+        db()->prepare("DELETE FROM email_templates WHERE id=?")->execute([$id]);
         echo json_encode(['ok'=>true]); exit;
     }
 
     if ($action === 'get') {
-        $s = $pdo->prepare("SELECT * FROM email_templates WHERE id=?");
+        $s = db()->prepare("SELECT * FROM email_templates WHERE id=?");
         $s->execute([(int)$_POST['id']]);
         echo json_encode($s->fetch(PDO::FETCH_ASSOC) ?: []); exit;
     }
@@ -63,27 +60,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     if ($action === 'toggle_active') {
         $id = (int)$_POST['id'];
         if (!$can_edit($id)) { echo json_encode(['ok'=>false,'msg'=>'Not allowed.']); exit; }
-        $pdo->prepare("UPDATE email_templates SET active=1-active WHERE id=?")->execute([$id]);
+        db()->prepare("UPDATE email_templates SET active=1-active WHERE id=?")->execute([$id]);
         echo json_encode(['ok'=>true]); exit;
     }
 
     echo json_encode(['ok'=>false,'msg'=>'Unknown action']); exit;
 }
 
-// ── Fetch templates ───────────────────────────────────────────────────────────
-// Admin: all templates. Agent: public + own private.
+// ── Data ──────────────────────────────────────────────────────────────────────
 if ($is_admin) {
-    $templates = $pdo->query(
+    $templates = db()->query(
         "SELECT t.*, a.name AS agent_name
-         FROM email_templates t
-         LEFT JOIN agents a ON a.id = t.agent_id
+         FROM email_templates t LEFT JOIN agents a ON a.id = t.agent_id
          ORDER BY t.visibility ASC, t.sort_order ASC, t.name ASC"
     )->fetchAll(PDO::FETCH_ASSOC);
 } else {
-    $stmt = $pdo->prepare(
+    $stmt = db()->prepare(
         "SELECT t.*, a.name AS agent_name
-         FROM email_templates t
-         LEFT JOIN agents a ON a.id = t.agent_id
+         FROM email_templates t LEFT JOIN agents a ON a.id = t.agent_id
          WHERE t.visibility='public' OR (t.visibility='private' AND t.agent_id=?)
          ORDER BY t.visibility ASC, t.sort_order ASC, t.name ASC"
     );
@@ -95,213 +89,214 @@ $categories = array_values(array_unique(array_filter(array_column($templates, 'c
 sort($categories);
 
 $page_title = 'Email Templates';
-$extra_css = '
-.tpl-modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:1000;display:flex;align-items:flex-start;justify-content:center;padding:40px 16px;overflow-y:auto}
-.tpl-modal-overlay.hidden{display:none}
-.tpl-modal-box{background:var(--white);border-radius:10px;box-shadow:0 8px 40px rgba(0,0,0,.2);width:100%;max-width:980px}
-.tpl-modal-header{padding:16px 24px;border-bottom:1px solid var(--grey-lt);display:flex;align-items:center;justify-content:space-between}
-.tpl-modal-header h3{font-family:"Merriweather",serif;font-size:1rem;font-weight:700;color:var(--black);margin:0}
-.tpl-modal-body{padding:24px}
-.tpl-modal-footer{padding:16px 24px;border-top:1px solid var(--grey-lt);display:flex;justify-content:flex-end;gap:12px}
-.tpl-modal-close{background:none;border:none;font-size:1.4rem;cursor:pointer;color:var(--grey-mid);line-height:1}
-.tpl-two-col{display:grid;grid-template-columns:1fr 340px;gap:24px}
-.var-panel{background:var(--off-white);border-radius:8px;border:1px solid var(--grey-lt);padding:16px;height:fit-content}
-.var-panel h4{font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--grey-dk);margin-bottom:12px}
-.var-tag{display:inline-block;font-family:monospace;font-size:.75rem;background:var(--navy-lt);color:var(--navy);padding:2px 8px;border-radius:4px;cursor:pointer;margin-bottom:4px}
+$pageTitle  = 'Email Templates';
+$extra_css  = '
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:200;display:flex;align-items:flex-start;justify-content:center;padding:40px 16px;overflow-y:auto}
+.modal-overlay.hidden{display:none}
+.modal-box{background:#fff;border-radius:10px;box-shadow:0 8px 40px rgba(0,0,0,.2);width:100%}
+.modal-header{padding:15px 24px;border-bottom:1px solid var(--grey-lt);display:flex;align-items:center;justify-content:space-between}
+.modal-header h3{font-family:"Merriweather",serif;font-size:.95rem;font-weight:700;margin:0;color:var(--black)}
+.modal-body{padding:22px 24px}
+.modal-footer{padding:14px 24px;border-top:1px solid var(--grey-lt);display:flex;justify-content:flex-end;gap:10px}
+.modal-close{background:none;border:none;font-size:1.3rem;cursor:pointer;color:var(--grey-mid);line-height:1;padding:0}
+.tpl-grid{display:grid;grid-template-columns:1fr 340px;gap:24px}
+.var-panel{background:var(--off-white);border-radius:8px;border:1px solid var(--grey-lt);padding:16px}
+.var-panel-title{font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.12em;color:var(--grey-mid);margin-bottom:12px}
+.var-tag{display:inline-block;font-family:monospace;font-size:.75rem;background:var(--navy-lt,#e8eef5);color:var(--navy,#1a3a5c);padding:2px 8px;border-radius:4px;cursor:pointer;margin:2px 2px 4px 0;border:none;font-family:monospace}
 .var-tag:hover{background:#cfe0f5}
-.var-row{margin-bottom:6px;font-size:.8rem}
-.var-desc{color:var(--grey-mid);font-size:.75rem}
-.preview-box{margin-top:12px;border:1px solid var(--grey-lt);border-radius:6px;padding:12px;background:var(--white);min-height:80px;font-size:.82rem;max-height:260px;overflow-y:auto}
-.vis-badge{display:inline-block;padding:2px 10px;border-radius:20px;font-size:.65rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em}
-.vis-public{background:#e8f5e9;color:#2e7d32}
-.vis-private{background:#fff3e0;color:#e65100}
-.active-badge{display:inline-block;padding:2px 10px;border-radius:20px;font-size:.65rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;cursor:pointer}
-.active-yes{background:var(--green-lt);color:var(--green)}
-.active-no{background:var(--grey-lt);color:var(--grey-mid)}
-.tabs{display:flex;gap:0;border-bottom:2px solid var(--grey-lt);margin-bottom:0}
-.tab-btn{background:none;border:none;padding:8px 18px;font-size:.78rem;font-weight:600;cursor:pointer;color:var(--grey-mid);border-bottom:2px solid transparent;margin-bottom:-2px}
+.var-desc{font-size:.72rem;color:var(--grey-mid)}
+.tabs{display:flex;border-bottom:2px solid var(--grey-lt)}
+.tab-btn{background:none;border:none;padding:7px 16px;font-size:.75rem;font-weight:700;cursor:pointer;color:var(--grey-mid);border-bottom:2px solid transparent;margin-bottom:-2px;font-family:"Open Sans",sans-serif}
 .tab-btn.active{color:var(--red);border-bottom-color:var(--red)}
 .tab-pane{display:none}.tab-pane.active{display:block}
-.section-sep{padding:8px 16px;background:var(--off-white);border-bottom:1px solid var(--grey-lt);font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--grey-mid)}
+.section-sep td{background:var(--off-white);font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--grey-mid);padding:8px 16px;border-bottom:1px solid var(--grey-lt)}
+.vis-badge{display:inline-block;padding:2px 9px;border-radius:20px;font-size:.65rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em}
+.vis-public{background:#e8f5e9;color:#2e7d32}
+.vis-private{background:#fff3e0;color:#c45000}
+.toggle-active{cursor:pointer}
 ';
 include 'includes/header.php';
 ?>
 
-<main>
-  <div class="page-title">
-    📧 Email Templates
-    <button class="btn btn-primary btn-sm ml-auto" onclick="openModal(0)">+ New Template</button>
-  </div>
+<div class="page-header">
+  <h2>📧 Email Templates</h2>
+  <button class="btn btn-red btn-sm" onclick="openModal(0)">+ New Template</button>
+</div>
 
-  <div class="card">
-    <div style="overflow-x:auto">
-      <table class="data-table" id="tplTable">
-        <thead>
-          <tr>
-            <th>#</th><th>Name</th><th>Category</th><th>Visibility</th>
-            <?php if ($is_admin): ?><th>Agent</th><?php endif; ?>
-            <th>Subject</th>
-            <th class="text-center">Active</th>
-            <?php if ($is_admin): ?><th class="text-center">Order</th><?php endif; ?>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-        <?php
-        $last_vis = null;
-        foreach ($templates as $t):
-            $editable = $is_admin || ($t['visibility'] === 'private' && (int)$t['agent_id'] === $my_agent_id);
-            if ($is_admin && $t['visibility'] !== $last_vis):
-                $last_vis = $t['visibility'];
-        ?>
-          <tr>
-            <td colspan="8" class="section-sep">
-              <?= $t['visibility'] === 'public' ? '🌐 Public Templates' : '🔒 Private Templates' ?>
-            </td>
-          </tr>
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Category</th>
+        <th>Visibility</th>
+        <?php if ($is_admin): ?><th>Agent</th><?php endif; ?>
+        <th>Subject</th>
+        <th style="text-align:center">Active</th>
+        <?php if ($is_admin): ?><th style="text-align:center">Order</th><?php endif; ?>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+    <?php if (!$templates): ?>
+      <tr><td colspan="7" style="text-align:center;color:var(--grey-mid);padding:32px">No templates yet.</td></tr>
+    <?php endif; ?>
+    <?php
+    $last_vis = null;
+    foreach ($templates as $t):
+        $editable = $is_admin || ($t['visibility'] === 'private' && (int)$t['agent_id'] === $my_agent_id);
+        if ($is_admin && $t['visibility'] !== $last_vis):
+            $last_vis = $t['visibility'];
+    ?>
+      <tr class="section-sep">
+        <td colspan="<?= $is_admin ? '8' : '6' ?>">
+          <?= $t['visibility'] === 'public' ? '🌐 Public Templates' : '🔒 Private Templates' ?>
+        </td>
+      </tr>
+    <?php endif; ?>
+      <tr style="<?= $t['active'] ? '' : 'opacity:.5' ?>">
+        <td style="font-weight:600"><?= h($t['name']) ?></td>
+        <td><?= h($t['category'] ?? '') ?></td>
+        <td><span class="vis-badge vis-<?= $t['visibility'] ?>"><?= $t['visibility'] === 'public' ? '🌐 Public' : '🔒 Private' ?></span></td>
+        <?php if ($is_admin): ?>
+        <td style="color:var(--grey-mid)"><?= h($t['agent_name'] ?? '—') ?></td>
         <?php endif; ?>
-          <tr style="<?= $t['active'] ? '' : 'color:var(--grey-mid)' ?>">
-            <td style="font-size:.75rem;color:var(--grey-mid)"><?= $t['id'] ?></td>
-            <td class="td-name" style="<?= $t['active'] ? '' : 'color:var(--grey-mid);font-weight:400' ?>"><?= e($t['name']) ?></td>
-            <td style="font-size:.78rem"><?= e($t['category'] ?? '') ?></td>
-            <td>
-              <span class="vis-badge vis-<?= $t['visibility'] ?>">
-                <?= $t['visibility'] === 'public' ? '🌐 Public' : '🔒 Private' ?>
-              </span>
-            </td>
-            <?php if ($is_admin): ?>
-            <td style="font-size:.78rem;color:var(--grey-mid)"><?= e($t['agent_name'] ?? '—') ?></td>
-            <?php endif; ?>
-            <td style="font-size:.78rem;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><?= e($t['subject']) ?></td>
-            <td style="text-align:center">
-              <?php if ($editable): ?>
-              <span class="active-badge <?= $t['active'] ? 'active-yes' : 'active-no' ?>"
-                    onclick="toggleActive(<?= $t['id'] ?>)">
-                <?= $t['active'] ? 'Yes' : 'No' ?>
-              </span>
-              <?php else: ?>
-              <span class="active-badge <?= $t['active'] ? 'active-yes' : 'active-no' ?>">
-                <?= $t['active'] ? 'Yes' : 'No' ?>
-              </span>
-              <?php endif; ?>
-            </td>
-            <?php if ($is_admin): ?>
-            <td style="text-align:center;font-size:.8rem"><?= $t['sort_order'] ?></td>
-            <?php endif; ?>
-            <td>
-              <div style="display:flex;gap:6px">
-                <?php if ($editable): ?>
-                <button class="btn btn-secondary btn-sm" onclick="openModal(<?= $t['id'] ?>)">Edit</button>
-                <button class="btn btn-danger btn-sm" onclick="deleteTpl(<?= $t['id'] ?>, '<?= addslashes(e($t['name'])) ?>')">Delete</button>
-                <?php else: ?>
-                <span style="font-size:.75rem;color:var(--grey-mid)">read-only</span>
-                <?php endif; ?>
-              </div>
-            </td>
-          </tr>
-        <?php endforeach; ?>
-        <?php if (!$templates): ?>
-          <tr><td colspan="8" style="text-align:center;color:var(--grey-mid);padding:32px">No templates yet.</td></tr>
+        <td style="max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--grey-dk)"><?= h($t['subject']) ?></td>
+        <td style="text-align:center">
+          <?php if ($editable): ?>
+            <span class="badge toggle-active <?= $t['active'] ? 'status-booked' : '' ?>"
+                  style="<?= $t['active'] ? '' : 'background:var(--grey-lt);color:var(--grey-mid)' ?>"
+                  onclick="toggleActive(<?= $t['id'] ?>)">
+              <?= $t['active'] ? 'Yes' : 'No' ?>
+            </span>
+          <?php else: ?>
+            <span class="badge" style="background:var(--<?= $t['active']?'green':'grey' ?>-lt);color:var(--<?= $t['active']?'green':'grey-mid' ?>)">
+              <?= $t['active'] ? 'Yes' : 'No' ?>
+            </span>
+          <?php endif; ?>
+        </td>
+        <?php if ($is_admin): ?>
+        <td style="text-align:center;color:var(--grey-mid)"><?= $t['sort_order'] ?></td>
         <?php endif; ?>
-        </tbody>
-      </table>
-    </div>
-  </div>
-</main>
+        <td>
+          <?php if ($editable): ?>
+          <div style="display:flex;gap:6px">
+            <button class="btn btn-outline btn-sm" onclick="openModal(<?= $t['id'] ?>)">Edit</button>
+            <button class="btn btn-danger btn-sm" onclick="deleteTpl(<?= $t['id'] ?>, '<?= addslashes(h($t['name'])) ?>')">Delete</button>
+          </div>
+          <?php else: ?>
+          <span style="font-size:.72rem;color:var(--grey-lt)">read-only</span>
+          <?php endif; ?>
+        </td>
+      </tr>
+    <?php endforeach; ?>
+    </tbody>
+  </table>
+</div>
 
 <!-- ── Modal ─────────────────────────────────────────────────────────────── -->
-<div class="tpl-modal-overlay hidden" id="tplOverlay">
-  <div class="tpl-modal-box">
-    <div class="tpl-modal-header">
+<div class="modal-overlay hidden" id="tplOverlay">
+  <div class="modal-box" style="max-width:960px">
+    <div class="modal-header">
       <h3 id="modalTitle">New Template</h3>
-      <button class="tpl-modal-close" onclick="closeModal()">&times;</button>
+      <button class="modal-close" onclick="closeModal()">&times;</button>
     </div>
-    <div class="tpl-modal-body">
+    <div class="modal-body">
       <input type="hidden" id="f_id">
 
-      <div style="display:grid;grid-template-columns:1fr 1fr <?= $is_admin ? '140px' : '' ?> 140px 100px;gap:16px;margin-bottom:20px">
-        <div>
-          <label class="form-label">Name <span style="color:var(--red)">*</span></label>
-          <input type="text" id="f_name" class="form-control">
+      <div style="display:grid;grid-template-columns:1fr 1fr <?= $is_admin ? '130px ' : '' ?>120px 80px;gap:16px;margin-bottom:20px;align-items:start">
+        <div class="form-group">
+          <label>Name <span style="color:var(--red)">*</span></label>
+          <input type="text" id="f_name">
         </div>
-        <div>
-          <label class="form-label">Category</label>
-          <input type="text" id="f_category" class="form-control" list="cat_list" placeholder="Visa, Insurance…">
+        <div class="form-group">
+          <label>Category</label>
+          <input type="text" id="f_category" list="cat_list" placeholder="Visa, Insurance…">
           <datalist id="cat_list">
-            <?php foreach ($categories as $c): ?>
-              <option value="<?= e($c) ?>">
-            <?php endforeach; ?>
+            <?php foreach ($categories as $c): ?><option value="<?= h($c) ?>"><?php endforeach; ?>
             <option value="Visa"><option value="Insurance"><option value="Travel Info">
             <option value="Health"><option value="Payment"><option value="General">
           </datalist>
         </div>
         <?php if ($is_admin): ?>
-        <div>
-          <label class="form-label">Visibility</label>
-          <select id="f_visibility" class="form-control">
+        <div class="form-group">
+          <label>Visibility</label>
+          <select id="f_visibility">
             <option value="public">🌐 Public</option>
             <option value="private">🔒 Private</option>
           </select>
         </div>
         <?php endif; ?>
-        <div>
-          <label class="form-label">Order</label>
-          <input type="number" id="f_sort_order" class="form-control" value="0">
+        <div class="form-group">
+          <label>Order</label>
+          <input type="number" id="f_sort_order" value="0">
         </div>
-        <div style="padding-top:28px">
-          <label class="form-check">
-            <input type="checkbox" id="f_active" checked>
-            <span>Active</span>
+        <div class="form-group" style="justify-content:flex-end;padding-bottom:2px">
+          <label>&nbsp;</label>
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:.82rem;font-weight:400;padding:9px 0">
+            <input type="checkbox" id="f_active" checked> Active
           </label>
         </div>
       </div>
 
-      <div class="form-group">
-        <label class="form-label">Subject <span style="color:var(--red)">*</span></label>
-        <input type="text" id="f_subject" class="form-control">
+      <div class="form-group" style="margin-bottom:18px">
+        <label>Subject <span style="color:var(--red)">*</span></label>
+        <input type="text" id="f_subject">
       </div>
 
-      <div class="tpl-two-col">
+      <div class="tpl-grid">
         <div>
-          <label class="form-label">Body (HTML) <span style="color:var(--red)">*</span></label>
+          <div style="font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--grey-dk);margin-bottom:6px">
+            Body (HTML) <span style="color:var(--red)">*</span>
+          </div>
           <div class="tabs">
             <button class="tab-btn active" onclick="switchTab('edit',this)">Edit</button>
             <button class="tab-btn" onclick="switchTab('preview',this)">Preview</button>
           </div>
-          <div class="tab-pane active" id="pane-edit" style="border:1.5px solid var(--grey-lt);border-top:none;border-radius:0 0 6px 6px">
-            <textarea id="f_body_html" style="width:100%;min-height:300px;font-family:monospace;font-size:.78rem;border:none;padding:12px;resize:vertical;outline:none;border-radius:0 0 6px 6px"></textarea>
+          <div class="tab-pane active" id="pane-edit" style="border:1.5px solid var(--grey-lt);border-top:none;border-radius:0 0 7px 7px">
+            <textarea id="f_body_html" style="width:100%;min-height:320px;font-family:monospace;font-size:.78rem;border:none;padding:12px;resize:vertical;outline:none;box-sizing:border-box"></textarea>
           </div>
-          <div class="tab-pane" id="pane-preview">
-            <div class="preview-box" id="previewContent" style="min-height:300px"></div>
+          <div class="tab-pane" id="pane-preview" style="border:1.5px solid var(--grey-lt);border-top:none;border-radius:0 0 7px 7px;padding:16px;min-height:320px;font-size:.85rem">
+            <div id="previewContent"></div>
           </div>
         </div>
+
         <div class="var-panel">
-          <h4>Available Variables</h4>
-          <p style="font-size:.75rem;color:var(--grey-mid);margin-bottom:10px">Click to insert at cursor:</p>
+          <div class="var-panel-title">Available Variables</div>
+          <p style="font-size:.75rem;color:var(--grey-mid);margin-bottom:12px">Click to insert at cursor:</p>
           <?php
           $vars = [
             '{{customer_name}}' => 'Customer name',
             '{{destination}}'   => 'Destination',
             '{{period}}'        => 'Period (text)',
-            '{{pax}}'           => 'Number of pax',
+            '{{pax}}'           => 'Pax count',
             '{{start_date}}'    => 'Arrival date',
             '{{end_date}}'      => 'Departure date',
             '{{agent_name}}'    => 'Agent name',
             '{{agent_email}}'   => 'Agent email',
           ];
           foreach ($vars as $var => $desc): ?>
-          <div class="var-row">
-            <span class="var-tag" onclick="insertVar('<?= $var ?>')"><?= $var ?></span>
+          <div style="margin-bottom:8px">
+            <button class="var-tag" onclick="insertVar('<?= $var ?>')"><?= $var ?></button>
             <span class="var-desc"> — <?= $desc ?></span>
           </div>
           <?php endforeach; ?>
+
+          <div style="border-top:1px solid var(--grey-lt);margin-top:16px;padding-top:14px">
+            <div class="var-panel-title">Tips</div>
+            <p style="font-size:.72rem;color:var(--grey-mid);line-height:1.6">
+              Use standard HTML for formatting.<br>
+              Variables are substituted when you click <strong>Load</strong> in the send dialog.
+            </p>
+          </div>
         </div>
       </div>
-      <div id="saveAlert" style="margin-top:12px;padding:10px 14px;border-radius:6px;display:none;font-size:.82rem"></div>
+
+      <div id="saveAlert" style="display:none;margin-top:14px;padding:10px 14px;border-radius:6px;font-size:.82rem"></div>
     </div>
-    <div class="tpl-modal-footer">
-      <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
-      <button class="btn btn-primary" onclick="saveTemplate()">Save Template</button>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-red" onclick="saveTemplate()">Save Template</button>
     </div>
   </div>
 </div>
@@ -312,18 +307,18 @@ const IS_ADMIN = <?= $is_admin ? 'true' : 'false' ?>;
 function openModal(id) {
   document.getElementById('f_id').value = id || 0;
   document.getElementById('modalTitle').textContent = id ? 'Edit Template' : 'New Template';
-  ['f_name','f_category','f_subject','f_body_html'].forEach(k => document.getElementById(k).value = '');
+  ['f_name','f_category','f_subject','f_body_html'].forEach(function(k) { document.getElementById(k).value = ''; });
   document.getElementById('f_sort_order').value = 0;
   document.getElementById('f_active').checked = true;
   if (IS_ADMIN) document.getElementById('f_visibility').value = 'public';
   document.getElementById('saveAlert').style.display = 'none';
-  switchTab('edit', document.querySelector('.tab-btn'));
+  switchTab('edit', document.querySelector('#tplOverlay .tab-btn'));
 
   if (id) {
     fetch('email_templates.php', {
       method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'},
-      body:`action=get&id=${id}`
-    }).then(r=>r.json()).then(d => {
+      body:'action=get&id='+id
+    }).then(function(r){return r.json();}).then(function(d) {
       if (!d) return;
       document.getElementById('f_name').value       = d.name       || '';
       document.getElementById('f_category').value   = d.category   || '';
@@ -339,13 +334,13 @@ function openModal(id) {
 
 function closeModal() { document.getElementById('tplOverlay').classList.add('hidden'); }
 
-document.getElementById('tplOverlay').addEventListener('click', e => {
-  if (e.target.id === 'tplOverlay') closeModal();
+document.getElementById('tplOverlay').addEventListener('click', function(e) {
+  if (e.target === this) closeModal();
 });
 
 function saveTemplate() {
-  const alrt = document.getElementById('saveAlert');
-  const params = {
+  var alrt = document.getElementById('saveAlert');
+  var body = new URLSearchParams({
     action:     'save',
     id:         document.getElementById('f_id').value,
     name:       document.getElementById('f_name').value,
@@ -355,43 +350,46 @@ function saveTemplate() {
     sort_order: document.getElementById('f_sort_order').value,
     active:     document.getElementById('f_active').checked ? '1' : '',
     visibility: IS_ADMIN ? document.getElementById('f_visibility').value : 'private',
-  };
-  fetch('email_templates.php', {method:'POST', body: new URLSearchParams(params)})
-    .then(r=>r.json()).then(d => {
+  });
+  fetch('email_templates.php', {method:'POST', body:body})
+    .then(function(r){return r.json();})
+    .then(function(d) {
       if (d.ok) { location.reload(); }
       else {
-        alrt.style.cssText = 'display:block;background:var(--red-lt);color:var(--red-dk);margin-top:12px;padding:10px 14px;border-radius:6px;font-size:.82rem';
+        alrt.style.cssText = 'display:block;background:#ffebee;color:#c62828;margin-top:14px;padding:10px 14px;border-radius:6px;font-size:.82rem';
         alrt.textContent = d.msg;
       }
     });
 }
 
 function deleteTpl(id, name) {
-  if (!confirm(`Delete template "${name}"?`)) return;
+  if (!confirm('Delete template "' + name + '"?')) return;
   fetch('email_templates.php', {
     method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'},
-    body:`action=delete&id=${id}`
-  }).then(r=>r.json()).then(d => { if (d.ok) location.reload(); else alert(d.msg); });
+    body:'action=delete&id='+id
+  }).then(function(r){return r.json();}).then(function(d) {
+    if (d.ok) location.reload(); else alert(d.msg);
+  });
 }
 
 function toggleActive(id) {
   fetch('email_templates.php', {
     method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'},
-    body:`action=toggle_active&id=${id}`
-  }).then(() => location.reload());
+    body:'action=toggle_active&id='+id
+  }).then(function() { location.reload(); });
 }
 
 function insertVar(v) {
-  const ta = document.getElementById('f_body_html');
-  const s = ta.selectionStart, end = ta.selectionEnd;
-  ta.value = ta.value.substring(0,s) + v + ta.value.substring(end);
+  var ta = document.getElementById('f_body_html');
+  var s = ta.selectionStart, e = ta.selectionEnd;
+  ta.value = ta.value.substring(0,s) + v + ta.value.substring(e);
   ta.selectionStart = ta.selectionEnd = s + v.length;
   ta.focus();
 }
 
 function switchTab(tab, btn) {
-  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-  document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('#tplOverlay .tab-btn').forEach(function(b) { b.classList.remove('active'); });
+  document.querySelectorAll('#tplOverlay .tab-pane').forEach(function(p) { p.classList.remove('active'); });
   if (btn) btn.classList.add('active');
   document.getElementById('pane-' + tab).classList.add('active');
   if (tab === 'preview') {
