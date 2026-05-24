@@ -1,7 +1,7 @@
 <?php
 /**
  * dropbox_open.php
- * Converts a Dropbox /home/PATH URL to a shared link and redirects.
+ * Converts a Dropbox path/URL to a public shared link and redirects.
  * Usage: dropbox_open.php?path=/2026/FolderName
  *        dropbox_open.php?url=https://www.dropbox.com/home/2026/FolderName
  */
@@ -13,8 +13,7 @@ $path = '';
 if (!empty($_GET['path'])) {
     $path = '/' . ltrim(urldecode($_GET['path']), '/');
 } elseif (!empty($_GET['url'])) {
-    $url  = urldecode($_GET['url']);
-    // Extract path from https://www.dropbox.com/home/PATH
+    $url = urldecode($_GET['url']);
     if (preg_match('#dropbox\.com/home(/.*)?$#i', $url, $m)) {
         $path = $m[1] ?? '/';
     }
@@ -24,7 +23,7 @@ if (!$path) {
     die('Missing path parameter.');
 }
 
-// ── Get Dropbox access token using refresh token ──────────────────────────────
+// ── Get access token ──────────────────────────────────────────────────────────
 function dropbox_get_access_token(): string {
     $ch = curl_init('https://api.dropbox.com/oauth2/token');
     curl_setopt_array($ch, [
@@ -42,20 +41,23 @@ function dropbox_get_access_token(): string {
     return $res['access_token'] ?? '';
 }
 
-// ── Create or get shared link ─────────────────────────────────────────────────
-function dropbox_get_shared_link(string $access_token, string $path): string {
-    // Try creating first
+// ── Create or get a PUBLIC shared link ───────────────────────────────────────
+function dropbox_get_public_link(string $token, string $path): string {
+
+    $headers = [
+        'Authorization: Bearer ' . $token,
+        'Content-Type: application/json',
+    ];
+
+    // 1. Try creating a public link
     $ch = curl_init('https://api.dropboxapi.com/2/sharing/create_shared_link_with_settings');
     curl_setopt_array($ch, [
         CURLOPT_POST           => true,
         CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_HTTPHEADER     => [
-            'Authorization: Bearer ' . $access_token,
-            'Content-Type: application/json',
-        ],
-        CURLOPT_POSTFIELDS => json_encode([
+        CURLOPT_HTTPHEADER     => $headers,
+        CURLOPT_POSTFIELDS     => json_encode([
             'path'     => $path,
-            'settings' => ['requested_visibility' => 'team_only'],
+            'settings' => ['requested_visibility' => 'public'],
         ]),
     ]);
     $res = json_decode(curl_exec($ch), true);
@@ -63,25 +65,43 @@ function dropbox_get_shared_link(string $access_token, string $path): string {
 
     if (!empty($res['url'])) return $res['url'];
 
-    // If link already exists, fetch it
+    // 2. Link already exists — get it
     if (($res['error']['.tag'] ?? '') === 'shared_link_already_exists') {
-        $existing = $res['error']['shared_link_already_exists']['metadata']['url'] ?? '';
-        if ($existing) return $existing;
+        // Try to read URL from the error payload first (faster)
+        $existing_url = $res['error']['shared_link_already_exists']['metadata']['url'] ?? '';
 
-        // Fallback: list existing links
-        $ch2 = curl_init('https://api.dropboxapi.com/2/sharing/list_shared_links');
-        curl_setopt_array($ch2, [
-            CURLOPT_POST           => true,
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_HTTPHEADER     => [
-                'Authorization: Bearer ' . $access_token,
-                'Content-Type: application/json',
-            ],
-            CURLOPT_POSTFIELDS => json_encode(['path' => $path, 'direct_only' => true]),
-        ]);
-        $res2 = json_decode(curl_exec($ch2), true);
-        curl_close($ch2);
-        return $res2['links'][0]['url'] ?? '';
+        if (!$existing_url) {
+            // Fallback: list existing links for this path
+            $ch2 = curl_init('https://api.dropboxapi.com/2/sharing/list_shared_links');
+            curl_setopt_array($ch2, [
+                CURLOPT_POST           => true,
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_HTTPHEADER     => $headers,
+                CURLOPT_POSTFIELDS     => json_encode(['path' => $path, 'direct_only' => true]),
+            ]);
+            $res2 = json_decode(curl_exec($ch2), true);
+            curl_close($ch2);
+            $existing_url = $res2['links'][0]['url'] ?? '';
+        }
+
+        if ($existing_url) {
+            // If the existing link is team_only, update it to public
+            $ch3 = curl_init('https://api.dropboxapi.com/2/sharing/modify_shared_link_settings');
+            curl_setopt_array($ch3, [
+                CURLOPT_POST           => true,
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_HTTPHEADER     => $headers,
+                CURLOPT_POSTFIELDS     => json_encode([
+                    'url'      => $existing_url,
+                    'settings' => ['requested_visibility' => 'public'],
+                ]),
+            ]);
+            $updated = json_decode(curl_exec($ch3), true);
+            curl_close($ch3);
+
+            // Return updated URL if available, else original
+            return $updated['url'] ?? $existing_url;
+        }
     }
 
     return '';
@@ -89,18 +109,18 @@ function dropbox_get_shared_link(string $access_token, string $path): string {
 
 $access_token = dropbox_get_access_token();
 if (!$access_token) {
-    die('Could not authenticate with Dropbox. Check API credentials.');
+    die('Could not authenticate with Dropbox. Check API credentials in config.php.');
 }
 
-$shared_url = dropbox_get_shared_link($access_token, $path);
+$shared_url = dropbox_get_public_link($access_token, $path);
 
 if ($shared_url) {
-    // Convert dl=0 to ?dl=0 and ensure it opens folder view
-    $shared_url = preg_replace('/\?dl=\d$/', '', $shared_url) . '?dl=0';
+    // Ensure it opens folder view (not download)
+    $shared_url = preg_replace('/[?&]dl=\d/', '', $shared_url) . '?dl=0';
     header('Location: ' . $shared_url);
     exit;
 } else {
-    // Fallback: open Dropbox web with direct path
+    // Last resort: direct Dropbox web path (requires login, but at least it opens something)
     header('Location: https://www.dropbox.com/home' . $path);
     exit;
 }
