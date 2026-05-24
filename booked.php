@@ -3,7 +3,8 @@ require_once __DIR__ . '/includes/config.php';
 require_once __DIR__ . '/includes/auth.php';
 require_once __DIR__ . '/includes/folder_parser.php';
 require_once __DIR__ . '/includes/mail_helper.php';
-require_admin();
+require_login();
+if (!is_admin()) { include __DIR__ . '/errors/403.php'; exit; }
 
 // ── AJAX handlers ─────────────────────────────────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
