@@ -419,9 +419,16 @@ if ($action === 'create_personal' && $token) {
             $itinerary = $loaded->LoadItineraryResult;
             if (!$itinerary) throw new Exception('Sample itinerary could not be loaded from Wetu.');
 
-            /* Sanitize: itinerary content may contain non-UTF-8 bytes (Latin-1 etc.)
-               which SoapClient cannot re-encode as XML UTF-8 */
+            /* Sanitize pass 1: byte-by-byte (handles mixed encoding strings) */
             $itinerary = wetu_utf8_sanitize($itinerary);
+
+            /* Sanitize pass 2: JSON round-trip — JSON_INVALID_UTF8_SUBSTITUTE
+               replaces any remaining invalid UTF-8 bytes with U+FFFD before
+               SoapClient tries to serialize the object for SaveItinerary */
+            $json = json_encode($itinerary, JSON_INVALID_UTF8_SUBSTITUTE | JSON_UNESCAPED_UNICODE);
+            if ($json !== false) {
+                $itinerary = json_decode($json);
+            }
 
             /* 2 — Rewrite for Personal */
             unset($itinerary->Identifier);
