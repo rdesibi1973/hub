@@ -382,7 +382,6 @@ function openSend(id, customer, to) {
   document.getElementById('send_tpl').value           = '';
   document.getElementById('send_subject').value       = '';
   document.getElementById('send_body').value          = '';
-  document.getElementById('send_preview').innerHTML   = '';
   document.getElementById('sendAlert').style.display  = 'none';
   document.getElementById('btnSend').disabled         = false;
   document.getElementById('btnSend').textContent      = '✉ Send Email';
