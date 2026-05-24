@@ -254,18 +254,17 @@ if ($action === 'wetu_search' && $token) {
                 $base = wetu_search_samples($u, $p, $q, '');
             }
 
-            /* PHP filters: title match and language (both modes) */
+            /* PHP filters: language + AND word match on name (both modes) */
             $ql = strtolower($q);
-            $found = array_values(array_filter($base, function($s) use ($ql, $lang, $title_only) {
+            $words = $ql !== '' ? preg_split('/\s+/', $ql, -1, PREG_SPLIT_NO_EMPTY) : [];
+            $found = array_values(array_filter($base, function($s) use ($words, $lang) {
                 if (!is_array($s)) return false;
-                /* Title filter */
-                if ($title_only && $ql !== '') {
-                    $name = strtolower((string)($s['name'] ?? $s['Name'] ?? $s['itinerary_name'] ?? $s['ItineraryName'] ?? ''));
-                    foreach (preg_split('/\s+/', $ql, -1, PREG_SPLIT_NO_EMPTY) as $word) {
-                        if (strpos($name, $word) === false) return false;
-                    }
+                $name = strtolower((string)($s['name'] ?? $s['Name'] ?? $s['itinerary_name'] ?? $s['ItineraryName'] ?? ''));
+                /* AND: every word must appear in the name */
+                foreach ($words as $word) {
+                    if (strpos($name, $word) === false) return false;
                 }
-                /* Language filter — applied in both modes */
+                /* Language filter */
                 if ($lang !== '') {
                     $slang = infer_language(
                         (string)($s['name'] ?? $s['Name'] ?? $s['itinerary_name'] ?? $s['ItineraryName'] ?? ''),
@@ -550,9 +549,9 @@ include __DIR__ . '/includes/header.php';
 <?php endif; ?>
 
 <?php if ($token && !empty($first_sample_raw)): ?>
-<details style="margin-bottom:16px;font-size:.75rem;">
-  <summary style="cursor:pointer;color:#888;font-weight:600;">🔍 Debug: first sample fields (<?= count($samples) ?> total, <?= count($languages) ?> languages found) — identifier keys found: <?= implode(', ', array_filter(['identifier'=>isset($samples[0]['identifier']), 'Identifier'=>isset($samples[0]['Identifier']), 'itinerary_id'=>isset($samples[0]['itinerary_id']), 'id'=>isset($samples[0]['id']), 'short_id'=>isset($samples[0]['short_id'])], fn($v)=>$v, ARRAY_FILTER_USE_BOTH)) ?></summary>
-  <pre style="background:#f5f5f5;padding:10px;border-radius:6px;margin-top:6px;white-space:pre-wrap;word-break:break-all;font-size:.7rem;max-height:200px;overflow:auto;"><?= htmlspecialchars($first_sample_raw) ?></pre>
+<details open style="margin-bottom:16px;font-size:.75rem;">
+  <summary style="cursor:pointer;color:#888;font-weight:600;">🔍 Debug: first sample fields (<?= count($samples) ?> total) — keys: <?= implode(', ', array_keys(is_array($samples[0]) ? $samples[0] : [])) ?></summary>
+  <pre style="background:#f5f5f5;padding:10px;border-radius:6px;margin-top:6px;white-space:pre-wrap;word-break:break-all;font-size:.7rem;max-height:300px;overflow:auto;"><?= htmlspecialchars($first_sample_raw) ?></pre>
 </details>
 <?php endif; ?>
 
@@ -751,7 +750,7 @@ include __DIR__ . '/includes/header.php';
             <input type="checkbox" name="title_only" id="title_only" value="1"
                    <?= (!empty($_SESSION['wetu_search_title_only']) ? 'checked' : '') ?>
                    style="width:15px;height:15px;cursor:pointer;accent-color:#1E4D7B;">
-            <label for="title_only" style="font-size:.8rem;color:#555;cursor:pointer;margin:0;">Search in title only</label>
+            <label for="title_only" style="font-size:.8rem;color:#555;cursor:pointer;margin:0;">Title only (skip Wetu content search)</label>
           </div>
         </form>
 
