@@ -40,41 +40,51 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     }
 
     if ($action === 'send_email') {
-        $req_id  = (int)$_POST['request_id'];
-        $to      = trim($_POST['to']      ?? '');
-        $subject = trim($_POST['subject'] ?? '');
-        $body    = trim($_POST['body']    ?? '');
-        if (!$to || !$subject || !$body) {
-            echo json_encode(['ok'=>false,'msg'=>'Missing required fields.']); exit;
-        }
-        $req = db()->prepare("SELECT r.*, a.name AS agent_name, u.email AS agent_email
-            FROM requests r
-            LEFT JOIN agents a ON a.id = r.agent_id
-            LEFT JOIN users  u ON u.agent_id = r.agent_id
-            WHERE r.id = ?");
-        $req->execute([$req_id]);
-        $row = $req->fetch(PDO::FETCH_ASSOC);
-        if (!$row) { echo json_encode(['ok'=>false,'msg'=>'Request not found.']); exit; }
-        $from_name  = $row['agent_name']  ?? 'Savannah Explorers';
-        $from_email = $row['agent_email'] ?? '';
-        if (!$from_email) {
-            echo json_encode(['ok'=>false,'msg'=>'No email address found for the agent linked to this request.']); exit;
-        }
-        $attachments = []; $attachment_names = [];
-        if (!empty($_FILES['attachments']['name'][0])) {
-            foreach ($_FILES['attachments']['name'] as $i => $name) {
-                if ($_FILES['attachments']['error'][$i] === UPLOAD_ERR_OK) {
-                    $attachments[]      = ['tmp_path' => $_FILES['attachments']['tmp_name'][$i], 'name' => $name];
-                    $attachment_names[] = $name;
+        ob_start();
+        set_time_limit(60);
+        try {
+            $req_id  = (int)$_POST['request_id'];
+            $to      = trim($_POST['to']      ?? '');
+            $subject = trim($_POST['subject'] ?? '');
+            $body    = trim($_POST['body']    ?? '');
+            if (!$to || !$subject || !$body) {
+                ob_end_clean();
+                echo json_encode(['ok'=>false,'msg'=>'Missing required fields.']); exit;
+            }
+            $req = db()->prepare("SELECT r.*, a.name AS agent_name, u.email AS agent_email
+                FROM requests r
+                LEFT JOIN agents a ON a.id = r.agent_id
+                LEFT JOIN users  u ON u.agent_id = r.agent_id
+                WHERE r.id = ?");
+            $req->execute([$req_id]);
+            $row = $req->fetch(PDO::FETCH_ASSOC);
+            if (!$row) { ob_end_clean(); echo json_encode(['ok'=>false,'msg'=>'Request not found.']); exit; }
+            $from_name  = $row['agent_name']  ?? 'Savannah Explorers';
+            $from_email = $row['agent_email'] ?? '';
+            if (!$from_email) {
+                ob_end_clean();
+                echo json_encode(['ok'=>false,'msg'=>'No email address found for the agent linked to this request.']); exit;
+            }
+            $attachments = []; $attachment_names = [];
+            if (!empty($_FILES['attachments']['name'][0])) {
+                foreach ($_FILES['attachments']['name'] as $i => $name) {
+                    if ($_FILES['attachments']['error'][$i] === UPLOAD_ERR_OK) {
+                        $attachments[]      = ['tmp_path' => $_FILES['attachments']['tmp_name'][$i], 'name' => $name];
+                        $attachment_names[] = $name;
+                    }
                 }
             }
-        }
-        $sent = send_hub_email($to, $subject, $body, $from_name, $from_email, $from_email, $attachments);
-        if ($sent) {
-            log_email_note(db(), $req_id, $cu['id'] ?? null, $subject, $body, $attachment_names);
-            echo json_encode(['ok'=>true]);
-        } else {
-            echo json_encode(['ok'=>false,'msg'=>'Send failed. Check server mail configuration.']);
+            $sent = send_hub_email($to, $subject, $body, $from_name, $from_email, $from_email, $attachments);
+            ob_end_clean();
+            if ($sent) {
+                log_email_note(db(), $req_id, $cu['id'] ?? null, $subject, $body, $attachment_names);
+                echo json_encode(['ok'=>true]);
+            } else {
+                echo json_encode(['ok'=>false,'msg'=>'Send failed. Check server mail configuration.']);
+            }
+        } catch (Throwable $e) {
+            ob_end_clean();
+            echo json_encode(['ok'=>false,'msg'=>'Error: ' . $e->getMessage()]);
         }
         exit;
     }
