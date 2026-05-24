@@ -403,12 +403,12 @@ $first_sample_raw = !empty($samples) ? json_encode($samples[0], JSON_PRETTY_PRIN
 
 foreach ($samples as $s) {
     if (!is_array($s)) continue;  // skip wrapper fields (total, page, etc.)
-    /* LoadItinerary expects the short alphanumeric key, NOT the UUID.
-       Priority: short_id → ShortId → identifier → Identifier → id fallbacks */
-    $sid   = $s['short_id']    ?? ($s['ShortId']     ??
-             ($s['identifier']  ?? ($s['Identifier']  ??
-             ($s['itinerary_id'] ?? ($s['ItineraryId'] ??
-             ($s['id']           ?? ($s['Id']          ?? '')))))));
+    /* LoadItinerary expects the short alphanumeric key (identifier_key),
+       NOT the UUID (identifier field which is the internal DB id) */
+    $sid   = $s['identifier_key'] ?? ($s['IdentifierKey'] ??
+             ($s['short_id']      ?? ($s['ShortId']       ??
+             ($s['identifier']    ?? ($s['Identifier']    ??
+             ($s['itinerary_id']  ?? ($s['id']            ?? '')))))));
     $sname = $s['name']        ?? ($s['itinerary_name'] ?? ($s['Name'] ?? ($s['ItineraryName'] ?? 'Unnamed')));
     $sdays = intval($s['days'] ?? ($s['Days'] ?? 0));
     $slang = infer_language((string)$sname, $s);
