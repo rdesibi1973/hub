@@ -246,17 +246,35 @@ include 'includes/header.php';
 
       <div class="tpl-grid">
         <div>
-          <div style="font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--grey-dk);margin-bottom:6px">
-            Body (HTML) <span style="color:var(--red)">*</span>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+            <div style="font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--grey-dk)">
+              Body <span style="color:var(--red)">*</span>
+            </div>
+            <div class="tabs" style="border:none;margin:0">
+              <button class="tab-btn active" id="tabVisual" onclick="switchEditorTab('visual',this)">Visual</button>
+              <?php if ($is_admin): ?>
+              <button class="tab-btn" id="tabHtml" onclick="switchEditorTab('html',this)">HTML</button>
+              <?php endif; ?>
+              <button class="tab-btn" id="tabPreview" onclick="switchEditorTab('preview',this)">Preview</button>
+            </div>
           </div>
-          <div class="tabs">
-            <button class="tab-btn active" onclick="switchTab('edit',this)">Edit</button>
-            <button class="tab-btn" onclick="switchTab('preview',this)">Preview</button>
+
+          <!-- Visual (Quill) -->
+          <div id="pane-visual" style="border:1.5px solid var(--grey-lt);border-radius:7px;overflow:hidden">
+            <div id="quill-editor" style="min-height:300px;font-size:.88rem;font-family:'Open Sans',sans-serif"></div>
           </div>
-          <div class="tab-pane active" id="pane-edit" style="border:1.5px solid var(--grey-lt);border-top:none;border-radius:0 0 7px 7px">
+
+          <!-- HTML (admin only) -->
+          <?php if ($is_admin): ?>
+          <div id="pane-html" style="display:none;border:1.5px solid var(--grey-lt);border-radius:7px;overflow:hidden">
             <textarea id="f_body_html" style="width:100%;min-height:320px;font-family:monospace;font-size:.78rem;border:none;padding:12px;resize:vertical;outline:none;box-sizing:border-box"></textarea>
           </div>
-          <div class="tab-pane" id="pane-preview" style="border:1.5px solid var(--grey-lt);border-top:none;border-radius:0 0 7px 7px;padding:16px;min-height:320px;font-size:.85rem">
+          <?php else: ?>
+          <textarea id="f_body_html" style="display:none"></textarea>
+          <?php endif; ?>
+
+          <!-- Preview -->
+          <div id="pane-preview" style="display:none;border:1.5px solid var(--grey-lt);border-radius:7px;padding:16px;min-height:320px;font-size:.88rem">
             <div id="previewContent"></div>
           </div>
         </div>
@@ -301,18 +319,98 @@ include 'includes/header.php';
   </div>
 </div>
 
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/quill/1.3.7/quill.snow.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/quill/1.3.7/quill.min.js"></script>
 <script>
 const IS_ADMIN = <?= $is_admin ? 'true' : 'false' ?>;
 
+// ── Quill init ────────────────────────────────────────────────────────────────
+var quill = new Quill('#quill-editor', {
+  theme: 'snow',
+  modules: {
+    toolbar: [
+      ['bold','italic','underline'],
+      [{'list':'ordered'},{'list':'bullet'}],
+      ['link','clean'],
+      [{'color':[]},{'background':[]}],
+      [{'align':[]}]
+    ]
+  }
+});
+
+// Keep hidden textarea in sync (for fallback and HTML tab)
+quill.on('text-change', function() {
+  document.getElementById('f_body_html').value = quill.root.innerHTML;
+});
+
+function getBodyHtml() {
+  if (document.getElementById('pane-visual').style.display !== 'none') {
+    return quill.root.innerHTML;
+  }
+  return document.getElementById('f_body_html').value;
+}
+
+function setBodyHtml(html) {
+  // Set Quill
+  quill.root.innerHTML = html || '';
+  // Set textarea (admin HTML mode)
+  document.getElementById('f_body_html').value = html || '';
+}
+
+// ── Editor tab switching ──────────────────────────────────────────────────────
+function switchEditorTab(tab, btn) {
+  document.querySelectorAll('#tplOverlay .tab-btn').forEach(function(b) { b.classList.remove('active'); });
+  if (btn) btn.classList.add('active');
+
+  document.getElementById('pane-visual').style.display   = 'none';
+  if (IS_ADMIN) document.getElementById('pane-html').style.display = 'none';
+  document.getElementById('pane-preview').style.display  = 'none';
+
+  if (tab === 'visual') {
+    document.getElementById('pane-visual').style.display = 'block';
+    // Sync from HTML textarea if switching from HTML tab
+    if (IS_ADMIN) {
+      var html = document.getElementById('f_body_html').value;
+      if (html !== quill.root.innerHTML) quill.root.innerHTML = html;
+    }
+  } else if (tab === 'html') {
+    document.getElementById('pane-html').style.display = 'block';
+    // Sync textarea from Quill
+    document.getElementById('f_body_html').value = quill.root.innerHTML;
+  } else if (tab === 'preview') {
+    document.getElementById('pane-preview').style.display = 'block';
+    document.getElementById('previewContent').innerHTML =
+      getBodyHtml() || '<em style="color:var(--grey-mid)">Nothing to preview.</em>';
+  }
+}
+
+// ── Insert variable at Quill cursor ──────────────────────────────────────────
+function insertVar(v) {
+  var paneHtmlVisible = IS_ADMIN && document.getElementById('pane-html').style.display !== 'none';
+  if (paneHtmlVisible) {
+    var ta = document.getElementById('f_body_html');
+    var s = ta.selectionStart, e = ta.selectionEnd;
+    ta.value = ta.value.substring(0,s) + v + ta.value.substring(e);
+    ta.selectionStart = ta.selectionEnd = s + v.length;
+    ta.focus();
+  } else {
+    var range = quill.getSelection(true);
+    quill.insertText(range ? range.index : quill.getLength(), v, 'user');
+    quill.focus();
+  }
+}
+
+// ── Modal open/close ─────────────────────────────────────────────────────────
 function openModal(id) {
   document.getElementById('f_id').value = id || 0;
   document.getElementById('modalTitle').textContent = id ? 'Edit Template' : 'New Template';
-  ['f_name','f_category','f_subject','f_body_html'].forEach(function(k) { document.getElementById(k).value = ''; });
+  ['f_name','f_category','f_subject'].forEach(function(k) { document.getElementById(k).value = ''; });
   document.getElementById('f_sort_order').value = 0;
   document.getElementById('f_active').checked = true;
   if (IS_ADMIN) document.getElementById('f_visibility').value = 'public';
   document.getElementById('saveAlert').style.display = 'none';
-  switchTab('edit', document.querySelector('#tplOverlay .tab-btn'));
+  setBodyHtml('');
+  switchEditorTab('visual', document.getElementById('tabVisual'));
 
   if (id) {
     fetch('email_templates.php', {
@@ -323,10 +421,10 @@ function openModal(id) {
       document.getElementById('f_name').value       = d.name       || '';
       document.getElementById('f_category').value   = d.category   || '';
       document.getElementById('f_subject').value    = d.subject    || '';
-      document.getElementById('f_body_html').value  = d.body_html  || '';
       document.getElementById('f_sort_order').value = d.sort_order || 0;
       document.getElementById('f_active').checked   = d.active == 1;
       if (IS_ADMIN) document.getElementById('f_visibility').value = d.visibility || 'public';
+      setBodyHtml(d.body_html || '');
     });
   }
   document.getElementById('tplOverlay').style.display = 'flex';
@@ -338,6 +436,7 @@ document.getElementById('tplOverlay').addEventListener('click', function(e) {
   if (e.target === this) closeModal();
 });
 
+// ── Save ─────────────────────────────────────────────────────────────────────
 function saveTemplate() {
   var alrt = document.getElementById('saveAlert');
   var body = new URLSearchParams({
@@ -346,7 +445,7 @@ function saveTemplate() {
     name:       document.getElementById('f_name').value,
     category:   document.getElementById('f_category').value,
     subject:    document.getElementById('f_subject').value,
-    body_html:  document.getElementById('f_body_html').value,
+    body_html:  getBodyHtml(),
     sort_order: document.getElementById('f_sort_order').value,
     active:     document.getElementById('f_active').checked ? '1' : '',
     visibility: IS_ADMIN ? document.getElementById('f_visibility').value : 'private',
@@ -377,25 +476,6 @@ function toggleActive(id) {
     method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'},
     body:'action=toggle_active&id='+id
   }).then(function() { location.reload(); });
-}
-
-function insertVar(v) {
-  var ta = document.getElementById('f_body_html');
-  var s = ta.selectionStart, e = ta.selectionEnd;
-  ta.value = ta.value.substring(0,s) + v + ta.value.substring(e);
-  ta.selectionStart = ta.selectionEnd = s + v.length;
-  ta.focus();
-}
-
-function switchTab(tab, btn) {
-  document.querySelectorAll('#tplOverlay .tab-btn').forEach(function(b) { b.classList.remove('active'); });
-  document.querySelectorAll('#tplOverlay .tab-pane').forEach(function(p) { p.classList.remove('active'); });
-  if (btn) btn.classList.add('active');
-  document.getElementById('pane-' + tab).classList.add('active');
-  if (tab === 'preview') {
-    document.getElementById('previewContent').innerHTML =
-      document.getElementById('f_body_html').value || '<em style="color:var(--grey-mid)">Nothing to preview.</em>';
-  }
 }
 </script>
 
