@@ -254,19 +254,20 @@ if ($action === 'wetu_search' && $token) {
                 $base = wetu_search_samples($u, $p, $q, '');
             }
 
-            /* PHP filters: title match and/or language */
+            /* PHP filters */
             $ql = strtolower($q);
             $found = array_values(array_filter($base, function($s) use ($ql, $lang, $title_only) {
                 if (!is_array($s)) return false;
-                /* Title filter (always applied in title_only mode) */
+                /* Title filter */
                 if ($title_only && $ql !== '') {
                     $name = strtolower((string)($s['name'] ?? $s['Name'] ?? $s['itinerary_name'] ?? $s['ItineraryName'] ?? ''));
                     foreach (preg_split('/\s+/', $ql, -1, PREG_SPLIT_NO_EMPTY) as $word) {
                         if (strpos($name, $word) === false) return false;
                     }
                 }
-                /* Language filter */
-                if ($lang !== '') {
+                /* Language filter — skipped in title-only mode (infer_language is unreliable
+                   for programs that don't include the language name in their title) */
+                if (!$title_only && $lang !== '') {
                     $slang = infer_language(
                         (string)($s['name'] ?? $s['Name'] ?? $s['itinerary_name'] ?? $s['ItineraryName'] ?? ''),
                         $s
@@ -283,9 +284,9 @@ if ($action === 'wetu_search' && $token) {
             $samples = $found;
 
             $label_parts = [];
-            if ($lang)       $label_parts[] = ucfirst(strtolower($lang));
-            if ($q)          $label_parts[] = '"' . $q . '"';
-            if ($title_only) $label_parts[] = 'title only';
+            if ($lang && !$title_only) $label_parts[] = ucfirst(strtolower($lang));
+            if ($q)                    $label_parts[] = '"' . $q . '"';
+            if ($title_only)           $label_parts[] = 'title only';
             $label = implode(', ', $label_parts);
 
             $wetu_success = count($found) . ' sample' . (count($found) !== 1 ? 's' : '') . ' found'
