@@ -763,30 +763,19 @@ include __DIR__ . '/includes/header.php';
                    value="<?= h($wetu_search_query) ?>"
                    autocomplete="off">
             <button type="submit" style="padding:8px 20px;background:#C0211B;color:#fff;border:none;border-radius:6px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0;">🔍 Search Wetu</button>
-            <?php if ($wetu_search_active): ?>
-              <a href="wetu.php?action=wetu_clear_search" style="padding:8px 14px;background:#f0f0f0;color:#444;border-radius:6px;font-size:.82rem;font-weight:600;text-decoration:none;white-space:nowrap;flex-shrink:0;">✕ Show all</a>
-            <?php endif; ?>
-          </div>
-          <!-- Title-only toggle -->
-          <div style="margin-top:6px;display:flex;align-items:center;gap:6px;">
-            <input type="checkbox" name="title_only" id="title_only" value="1"
-                   <?= (!empty($_SESSION['wetu_search_title_only']) ? 'checked' : '') ?>
-                   style="width:15px;height:15px;cursor:pointer;accent-color:#1E4D7B;">
-            <label for="title_only" style="font-size:.8rem;color:#555;cursor:pointer;margin:0;">Title only (skip Wetu content search)</label>
           </div>
         </form>
 
         <?php if ($wetu_search_active): ?>
           <?php
             $badge_parts = [];
-            if ($wetu_search_lang) $badge_parts[] = ucfirst(strtolower($wetu_search_lang));
+            if ($wetu_search_lang)  $badge_parts[] = ucfirst(strtolower($wetu_search_lang));
             if ($wetu_search_query) $badge_parts[] = '"' . h($wetu_search_query) . '"';
             $badge_label = implode(', ', $badge_parts);
           ?>
           <div style="margin-top:6px;font-size:.8rem;color:#1E4D7B;font-weight:600;">
             Showing <?= count($samples_js_arr) ?> result<?= count($samples_js_arr) !== 1 ? 's' : '' ?>
             <?= $badge_label ? 'for: <em>' . $badge_label . '</em>' : '' ?>
-            — <a href="wetu.php?action=wetu_clear_search" style="color:#C0211B;">show all samples</a>
           </div>
         <?php endif; ?>
       </div>
