@@ -63,7 +63,7 @@ $prefill_date = trim($_GET['start_date']  ?? '');
    ACTION: WETU LOGOUT
 ═══════════════════════════════════════════════════════════════ */
 if ($action === 'wetu_logout') {
-    unset($_SESSION['wetu_token'], $_SESSION['wetu_user'], $_SESSION['wetu_operator'], $_SESSION['wetu_pass'], $_SESSION['wetu_samples'], $_SESSION['wetu_search_query'], $_SESSION['wetu_search_results']);
+    unset($_SESSION['wetu_token'], $_SESSION['wetu_user'], $_SESSION['wetu_operator'], $_SESSION['wetu_pass'], $_SESSION['wetu_samples'], $_SESSION['wetu_search_query'], $_SESSION['wetu_search_lang'], $_SESSION['wetu_search_title_only'], $_SESSION['wetu_search_results']);
     header('Location: wetu.php');
     exit;
 }
@@ -232,8 +232,9 @@ if ($token && !$created && !in_array($action, ['wetu_login', 'wetu_refresh', 'we
    - No query, no lang → restore full cached list
 ═══════════════════════════════════════════════════════════════ */
 if ($action === 'wetu_search' && $token) {
-    $q    = trim($_POST['wetu_search_query'] ?? '');
-    $lang = trim($_POST['wetu_search_lang']  ?? '');
+    $q          = trim($_POST['wetu_search_query'] ?? '');
+    $lang       = trim($_POST['wetu_search_lang']  ?? '');
+    $title_only = !empty($_POST['title_only']);
     $u    = $_SESSION['wetu_user'] ?? '';
     $p    = $_SESSION['wetu_pass'] ?? '';
     if (!$u || !$p) {
@@ -241,48 +242,54 @@ if ($action === 'wetu_search' && $token) {
         $samples = $_SESSION['wetu_samples'] ?? [];
     } else {
         try {
-            if ($q !== '') {
-                /* Wetu full-text search: finds matches in name AND content */
-                $base = wetu_search_samples($u, $p, $q, '');
-            } else {
-                /* No text query: use cached full list */
+            if ($title_only || $q === '') {
+                /* Title search or no query: filter the full cached list in PHP */
                 $base = $_SESSION['wetu_samples'] ?? [];
                 if (empty($base)) {
                     $base = wetu_fetch_samples($u, $p);
                     $_SESSION['wetu_samples'] = $base;
                 }
+            } else {
+                /* Full-text search: let Wetu search content + name */
+                $base = wetu_search_samples($u, $p, $q, '');
             }
 
-            /* Apply PHP language filter on top of Wetu results */
-            if ($lang !== '') {
-                $found = array_values(array_filter($base, function($s) use ($lang) {
-                    if (!is_array($s)) return false;
+            /* PHP filters: title match and/or language */
+            $ql = strtolower($q);
+            $found = array_values(array_filter($base, function($s) use ($ql, $lang, $title_only) {
+                if (!is_array($s)) return false;
+                /* Title filter (always applied in title_only mode) */
+                if ($title_only && $ql !== '') {
+                    $name = strtolower((string)($s['name'] ?? $s['Name'] ?? $s['itinerary_name'] ?? $s['ItineraryName'] ?? ''));
+                    foreach (preg_split('/\s+/', $ql, -1, PREG_SPLIT_NO_EMPTY) as $word) {
+                        if (strpos($name, $word) === false) return false;
+                    }
+                }
+                /* Language filter */
+                if ($lang !== '') {
                     $slang = infer_language(
                         (string)($s['name'] ?? $s['Name'] ?? $s['itinerary_name'] ?? $s['ItineraryName'] ?? ''),
                         $s
                     );
-                    return strcasecmp($slang, $lang) === 0;
-                }));
-            } else {
-                $found = array_values(array_filter($base, 'is_array'));
-            }
+                    if (strcasecmp($slang, $lang) !== 0) return false;
+                }
+                return true;
+            }));
 
-            $_SESSION['wetu_search_query']   = $q;
-            $_SESSION['wetu_search_lang']    = $lang;
-            $_SESSION['wetu_search_results'] = $found;
+            $_SESSION['wetu_search_query']      = $q;
+            $_SESSION['wetu_search_lang']       = $lang;
+            $_SESSION['wetu_search_title_only'] = $title_only;
+            $_SESSION['wetu_search_results']    = $found;
             $samples = $found;
 
             $label_parts = [];
-            if ($lang) $label_parts[] = ucfirst(strtolower($lang));
-            if ($q)    $label_parts[] = '"' . $q . '"';
+            if ($lang)       $label_parts[] = ucfirst(strtolower($lang));
+            if ($q)          $label_parts[] = '"' . $q . '"';
+            if ($title_only) $label_parts[] = 'title only';
             $label = implode(', ', $label_parts);
 
-            if (empty($found)) {
-                $wetu_success = 'No samples found' . ($label ? ' for ' . h($label) : '') . '.';
-            } else {
-                $wetu_success = count($found) . ' sample' . (count($found) !== 1 ? 's' : '') . ' found'
-                              . ($label ? ' for ' . h($label) : '') . '.';
-            }
+            $wetu_success = count($found) . ' sample' . (count($found) !== 1 ? 's' : '') . ' found'
+                          . ($label ? ' for ' . h($label) : '') . '.';
         } catch (Throwable $e) {
             $wetu_error = 'Search error: ' . h($e->getMessage());
             $samples = $_SESSION['wetu_samples'] ?? [];
@@ -294,7 +301,7 @@ if ($action === 'wetu_search' && $token) {
    ACTION: CLEAR SEARCH — restore full sample list
 ═══════════════════════════════════════════════════════════════ */
 if ($action === 'wetu_clear_search') {
-    unset($_SESSION['wetu_search_query'], $_SESSION['wetu_search_lang'], $_SESSION['wetu_search_results']);
+    unset($_SESSION['wetu_search_query'], $_SESSION['wetu_search_lang'], $_SESSION['wetu_search_title_only'], $_SESSION['wetu_search_results']);
     header('Location: wetu.php');
     exit;
 }
@@ -723,7 +730,7 @@ include __DIR__ . '/includes/header.php';
           </div>
 
           <!-- Row 2: Text search + button -->
-          <div style="display:flex;gap:8px;align-items:center;">
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
             <input type="text" name="wetu_search_query" id="wetu_search_query"
                    class="form-control"
                    placeholder="e.g. Serengeti, 10 days, beach…"
@@ -733,6 +740,13 @@ include __DIR__ . '/includes/header.php';
             <?php if ($wetu_search_active): ?>
               <a href="wetu.php?action=wetu_clear_search" style="padding:8px 14px;background:#f0f0f0;color:#444;border-radius:6px;font-size:.82rem;font-weight:600;text-decoration:none;white-space:nowrap;flex-shrink:0;">✕ Show all</a>
             <?php endif; ?>
+          </div>
+          <!-- Title-only toggle -->
+          <div style="margin-top:6px;display:flex;align-items:center;gap:6px;">
+            <input type="checkbox" name="title_only" id="title_only" value="1"
+                   <?= (!empty($_SESSION['wetu_search_title_only']) ? 'checked' : '') ?>
+                   style="width:15px;height:15px;cursor:pointer;accent-color:#1E4D7B;">
+            <label for="title_only" style="font-size:.8rem;color:#555;cursor:pointer;margin:0;">Search in title only</label>
           </div>
         </form>
 
