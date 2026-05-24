@@ -418,9 +418,15 @@ if ($action === 'create_personal' && $token) {
         try {
             $c = wetu_client();
 
+            /* Safe token for SOAP: SoapClient rejects binary bytes as invalid UTF-8.
+               Wetu server uses ToByteArray(hexString) — it expects hex, not binary.
+               If the stored token is raw binary (base64Binary decoded by PHP SoapClient),
+               convert to hex so SoapClient can serialize it and Wetu can parse it. */
+            $soap_token = mb_check_encoding($token, 'UTF-8') ? $token : bin2hex($token);
+
             /* 1 — Load the full Sample */
             try {
-                $loaded    = $c->LoadItinerary(['identifier' => $sample_id, 'sessionToken' => $token]);
+                $loaded = $c->LoadItinerary(['identifier' => $sample_id, 'sessionToken' => $soap_token]);
             } catch (SoapFault $sf) {
                 if (strpos($sf->getMessage(), 'not a valid utf-8') !== false) {
                     throw new Exception('TOKEN_UTF8_ERROR: ' . $sf->getMessage());
@@ -473,7 +479,7 @@ if ($action === 'create_personal' && $token) {
             /* 3 — Save (with fallback minimal save on UTF-8 encoding errors) */
             $save_warning = '';
             try {
-                $save_res = $c->SaveItinerary(['itinerary' => $itinerary, 'sessionToken' => $token]);
+                $save_res = $c->SaveItinerary(['itinerary' => $itinerary, 'sessionToken' => $soap_token]);
             } catch (SoapFault $sf) {
                 if (strpos($sf->getMessage(), 'not a valid utf-8') !== false) {
                     /* Fallback: save a clean minimal itinerary shell without day content */
@@ -487,7 +493,7 @@ if ($action === 'create_personal' && $token) {
                         if ($ts) $min->StartDate = date('Y-m-d\TH:i:s', $ts);
                     }
                     if ($pax > 0) $min->Summary = 'Pax: ' . $pax;
-                    $save_res = $c->SaveItinerary(['itinerary' => $min, 'sessionToken' => $token]);
+                    $save_res = $c->SaveItinerary(['itinerary' => $min, 'sessionToken' => $soap_token]);
                     $save_warning = 'Note: sample content could not be copied due to special characters in the itinerary text. An empty personal itinerary was created — please add content manually in Wetu.';
                 } else {
                     throw $sf;
