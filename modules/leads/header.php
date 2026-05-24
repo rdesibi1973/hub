@@ -116,7 +116,7 @@ header {
   <div class="header-user">
     <div>
       <strong><?= h($currentUser['name'] ?? $currentUser['username'] ?? '') ?></strong>
-      <?= h(ucfirst($currentUser['role'] ?? '')) ?>
+      <?= h(ucfirst($currentUser['role_name'] ?? '')) ?>
     </div>
   </div>
   <?php endif; ?>
@@ -128,12 +128,12 @@ header {
   <?php if (!isLeadsRestricted()): ?>
   <a href="dashboard.php" class="<?= $cur==='dashboard.php' ? 'active':'' ?>">Dashboard</a>
   <?php endif; ?>
-  <a href="requests.php"  class="<?= in_array($cur,['requests.php','request_add.php','request_edit.php','request_view.php']) ? 'active':'' ?>"><?= isLeadsRestricted() ? 'My Requests' : 'Requests' ?></a>
+  <a href="requests.php" class="<?= in_array($cur,['requests.php','request_add.php','request_edit.php','request_view.php']) ? 'active':'' ?>"><?= isLeadsRestricted() ? 'My Requests' : 'Requests' ?></a>
   <a href="quotes.php"   class="<?= in_array($cur,['quotes.php','quote_new.php','quote_view.php']) ? 'active':'' ?>">Quotes</a>
   <?php if (!isLeadsRestricted()): ?>
-  <a href="reports.php"   class="<?= $cur==='reports.php' ? 'active':'' ?>">Reports</a>
-  <a href="agents.php"    class="<?= $cur==='agents.php' ? 'active':'' ?>">Agents</a>
-  <a href="agencies.php"  class="<?= $cur==='agencies.php' ? 'active':'' ?>">Agencies</a>
+  <a href="reports.php"  class="<?= $cur==='reports.php' ? 'active':'' ?>">Reports</a>
+  <a href="agents.php"   class="<?= $cur==='agents.php' ? 'active':'' ?>">Agents</a>
+  <a href="agencies.php" class="<?= $cur==='agencies.php' ? 'active':'' ?>">Agencies</a>
   <a href="requests_import_list.php" class="<?= in_array($cur,['requests_import_list.php','request_import_edit.php','reports_import.php']) ? 'active':'' ?>">Historical</a>
   <?php
   // Incoming tab — admin/manager only
@@ -147,13 +147,13 @@ header {
     <?php endif; ?>
   </a>
   <?php endif; ?>
-  <?php endif; // !isLeadsStaff ?>
-  <?php if (in_array($currentUser['role'] ?? $currentUser['role_name'] ?? '', ['admin'])): ?>
-  <span style="display:inline-block;width:1px;background:rgba(255,255,255,.3);margin:8px 4px;align-self:stretch;"></span>
-  <a href="<?= BASE_URL ?>/booked.php" class="<?= $cur==='booked.php'?'active':'' ?>">✈ Booked</a>
-  <a href="<?= BASE_URL ?>/email_templates.php" class="<?= $cur==='email_templates.php'?'active':'' ?>">📧 Email Templates</a>
+  <?php endif; // !isLeadsRestricted ?>
+  <?php if (in_array($currentUser['role_name'] ?? '', ['admin'])): ?>
+  <span style="display:inline-block;width:1px;background:#E8E8E8;margin:8px 4px;align-self:stretch;"></span>
+  <a href="<?= BASE_URL ?>/booked.php"          class="<?= $cur==='booked.php'?'active':'' ?>">✈ Booked</a>
+  <a href="<?= BASE_URL ?>/email_templates.php" class="<?= $cur==='email_templates.php'?'active':'' ?>">📧 Templates</a>
   <?php endif; ?>
-  <a href="logout.php"    class="sub-nav-logout">Logout</a>
+  <a href="logout.php" class="sub-nav-logout">Logout</a>
 </nav>
 
 <main>
