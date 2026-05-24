@@ -438,6 +438,14 @@ if ($action === 'create_personal' && $token) {
                 $wetu_debug = 'json_encode failed (json_last_error: ' . json_last_error() . ' — ' . json_last_error_msg() . ')';
             }
 
+            /* Debug: list available SOAP methods (shown once in debug panel) */
+            if (empty($wetu_debug)) {
+                try {
+                    $fns = $c->__getFunctions();
+                    $wetu_debug = 'SOAP methods: ' . implode(' | ', array_slice($fns, 0, 20));
+                } catch (Throwable $ignored) {}
+            }
+
             /* 2 — Rewrite for Personal */
             unset($itinerary->Identifier);
             $itinerary->Type            = 'Personal';
@@ -449,10 +457,32 @@ if ($action === 'create_personal' && $token) {
                 if ($ts) $itinerary->StartDate = date('Y-m-d\TH:i:s', $ts);
             }
             $prev = trim($itinerary->Summary ?? '');
-            $itinerary->Summary = 'Pax: ' . $pax . ($prev ? "\n" . $prev : '');
+            $itinerary->Summary = ($pax > 0 ? 'Pax: ' . $pax . "\n" : '') . $prev;
 
-            /* 3 — Save */
-            $save_res = $c->SaveItinerary(['itinerary' => $itinerary, 'sessionToken' => $token]);
+            /* 3 — Save (with fallback minimal save on UTF-8 encoding errors) */
+            $save_warning = '';
+            try {
+                $save_res = $c->SaveItinerary(['itinerary' => $itinerary, 'sessionToken' => $token]);
+            } catch (SoapFault $sf) {
+                if (strpos($sf->getMessage(), 'not a valid utf-8') !== false) {
+                    /* Fallback: save a clean minimal itinerary shell without day content */
+                    $min = new stdClass();
+                    $min->Type            = 'Personal';
+                    $min->Name            = $client_name;
+                    $min->ReferenceNumber = $ref_number;
+                    $min->Language        = $language;
+                    if ($start_date) {
+                        $ts = strtotime($start_date);
+                        if ($ts) $min->StartDate = date('Y-m-d\TH:i:s', $ts);
+                    }
+                    if ($pax > 0) $min->Summary = 'Pax: ' . $pax;
+                    $save_res = $c->SaveItinerary(['itinerary' => $min, 'sessionToken' => $token]);
+                    $save_warning = 'Note: sample content could not be copied due to special characters in the itinerary text. An empty personal itinerary was created — please add content manually in Wetu.';
+                } else {
+                    throw $sf;
+                }
+            }
+
             $summary  = $save_res->SaveItineraryResult;
             $new_id   = $summary->Identifier    ?? null;
             $short_id = $summary->IdentifierKey ?? null;
@@ -466,17 +496,20 @@ if ($action === 'create_personal' && $token) {
                 : 'https://wetu.com/App/#/itinerary/' . $new_id;
 
             $created = [
-                'name'       => $client_name,
-                'ref'        => $ref_number,
-                'pax'        => $pax,
-                'days'       => $days,
-                'language'   => strtoupper($language),
-                'start_date' => $start_date,
-                'view_url'   => $view_url,
-                'edit_url'   => $edit_url,
-                'short_id'   => $short_id,
+                'name'         => $client_name,
+                'ref'          => $ref_number,
+                'pax'          => $pax,
+                'days'         => $days,
+                'language'     => strtoupper($language),
+                'start_date'   => $start_date,
+                'view_url'     => $view_url,
+                'edit_url'     => $edit_url,
+                'short_id'     => $short_id,
+                'save_warning' => $save_warning,
             ];
-            $wetu_success = 'Personal itinerary created successfully.';
+            $wetu_success = $save_warning
+                ? '⚠️ Personal itinerary created (empty shell — content not copied).'
+                : 'Personal itinerary created successfully.';
 
         } catch (SoapFault $e) {
             $wetu_error = 'Wetu API error: ' . h($e->getMessage()) . ' &nbsp;<small style="color:#888">[identifier sent: <code>' . h($sample_id) . '</code>]</small>';
@@ -727,7 +760,13 @@ include __DIR__ . '/includes/header.php';
     <span style="font-size:1.3rem;">✅</span>
     <h3>Personal Itinerary Created</h3>
   </div>
-  <div class="result-card-bd">
+    <div class="result-card-bd">
+
+    <?php if (!empty($created['save_warning'])): ?>
+    <div style="background:#fff3cd;border:1px solid #ffc107;border-radius:6px;padding:10px 14px;margin-bottom:14px;font-size:.82rem;color:#856404;">
+      ⚠️ <?= h($created['save_warning']) ?>
+    </div>
+    <?php endif; ?>
 
     <div class="result-meta">
       <div><div class="meta-lbl">Client Name</div><div class="meta-val"><?= h($created['name']) ?></div></div>
