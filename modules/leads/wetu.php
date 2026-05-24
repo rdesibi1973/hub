@@ -510,7 +510,7 @@ if ($action === 'create_personal' && $token) {
             $view_url = 'https://wetu.com/Itinerary/' . ($short_id ?: $new_id);
             $edit_url = $cons_key
                 ? 'https://wetu.com/App?consultantKey=' . urlencode($cons_key) . '#/itinerary/' . $new_id
-                : 'https://wetu.com/App/#/itinerary/' . $new_id;
+                : 'https://wetu.com/App#/itinerary/' . $new_id;
 
             $created = [
                 'name'         => $client_name,
