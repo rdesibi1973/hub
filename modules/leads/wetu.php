@@ -444,7 +444,6 @@ if ($action === 'create_personal' && $token) {
             $itinerary->Name            = $client_name;
             $itinerary->ReferenceNumber = $ref_number;
             $itinerary->Language        = $language;
-            $itinerary->Days            = $days;
             if ($start_date) {
                 $ts = strtotime($start_date);
                 if ($ts) $itinerary->StartDate = date('Y-m-d\TH:i:s', $ts);
