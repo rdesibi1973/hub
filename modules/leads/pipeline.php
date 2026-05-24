@@ -7,7 +7,9 @@ $staffAgentId = $isStaff ? getStaffAgentId() : 0;
 $db           = db();
 $currentUser  = current_user();
 $myRole       = $currentUser['role_name'] ?? '';
-$myAgentId    = (int)($currentUser['agent_id'] ?? 0);
+$stmt = db()->prepare("SELECT agent_id FROM users WHERE id=?");
+$stmt->execute([$currentUser['id']]);
+$myAgentId = (int)($stmt->fetchColumn() ?: 0);
 $canSeeAll    = in_array($myRole, ['admin','manager']);
 
 // ── AJAX: move card (updates pipeline_column only, status unchanged) ───────

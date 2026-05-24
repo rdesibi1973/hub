@@ -7,7 +7,9 @@ requireLogin();
 if (!in_array(current_user()['role_name'] ?? '', ['admin'])) { http_response_code(403); exit('Access denied'); }
 
 $cu          = current_user();
-$my_agent_id = (int)($cu['agent_id'] ?? 0);
+$stmt = db()->prepare("SELECT agent_id FROM users WHERE id=?");
+$stmt->execute([$cu['id']]);
+$my_agent_id = (int)($stmt->fetchColumn() ?: 0);
 
 // ── AJAX handlers ─────────────────────────────────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
