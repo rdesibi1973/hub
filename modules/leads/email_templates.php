@@ -209,7 +209,7 @@ include 'includes/header.php';
       <div style="display:grid;grid-template-columns:1fr 1fr <?= $is_admin ? '130px ' : '' ?>120px;gap:16px;margin-bottom:20px;align-items:start">
         <div class="form-group">
           <label>Name <span style="color:var(--red)">*</span></label>
-          <input type="text" id="f_name">
+          <input type="text" id="f_name" autocomplete="off">
         </div>
         <div class="form-group">
           <label>Category</label>
@@ -433,9 +433,8 @@ function openModal(id) {
 
 function closeModal() { document.getElementById('tplOverlay').style.display = 'none'; }
 
-document.getElementById('tplOverlay').addEventListener('click', function(e) {
-  if (e.target === this) closeModal();
-});
+// Modal closes only via X button or Cancel — not on overlay click
+// (browser autocomplete clicks outside the DOM would trigger close otherwise)
 document.querySelector('#tplOverlay .modal-box').addEventListener('click', function(e) {
   e.stopPropagation();
 });
