@@ -1,9 +1,92 @@
 <?php
+ob_start();
 require_once 'config.php';
-requireLogin();   // ← must run before any access checks
+require_once 'includes/folder_parser.php';
+require_once 'includes/mail_helper.php';
+requireLogin();
 
 $id  = (int)($_GET['id'] ?? 0);
 $db  = db();
+$cu  = current_user();
+
+// ── Send email AJAX ──────────────────────────────────────────────────────────
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
+    ob_end_clean();
+    header('Content-Type: application/json');
+    $action = $_POST['action'];
+
+    if ($action === 'preview_email') {
+        $req_id = (int)$_POST['request_id'];
+        $tpl_id = (int)$_POST['template_id'];
+        $req = $db->prepare("SELECT r.*, a.name AS agent_name, u.email AS agent_email
+            FROM requests r
+            LEFT JOIN agents a ON a.id = r.agent_id
+            LEFT JOIN users  u ON u.agent_id = r.agent_id
+            WHERE r.id = ?");
+        $req->execute([$req_id]);
+        $row = $req->fetch(PDO::FETCH_ASSOC);
+        $tpl = $db->prepare("SELECT * FROM email_templates WHERE id=? AND active=1");
+        $tpl->execute([$tpl_id]);
+        $t = $tpl->fetch(PDO::FETCH_ASSOC);
+        if (!$row || !$t) { echo json_encode(['ok'=>false,'msg'=>'Not found']); exit; }
+        $dates       = parse_folder_dates(get_date_folder($row));
+        $agent_name  = $row['agent_name']  ?? 'Savannah Explorers';
+        $agent_email = $row['agent_email'] ?? '';
+        echo json_encode([
+            'ok'      => true,
+            'subject' => substitute_vars($t['subject'],   $row, $dates, $agent_name, $agent_email),
+            'body'    => substitute_vars($t['body_html'], $row, $dates, $agent_name, $agent_email),
+            'to'      => $row['email'] ?? '',
+        ]);
+        exit;
+    }
+
+    if ($action === 'send_email') {
+        try {
+            $req_id  = (int)$_POST['request_id'];
+            $to      = trim($_POST['to']      ?? '');
+            $subject = trim($_POST['subject'] ?? '');
+            $body    = trim($_POST['body']    ?? '');
+            if (!$to || !$subject || !$body) {
+                echo json_encode(['ok'=>false,'msg'=>'Missing required fields.']); exit;
+            }
+            $req = $db->prepare("SELECT r.*, a.name AS agent_name, u.email AS agent_email
+                FROM requests r
+                LEFT JOIN agents a ON a.id = r.agent_id
+                LEFT JOIN users  u ON u.agent_id = r.agent_id
+                WHERE r.id = ?");
+            $req->execute([$req_id]);
+            $row = $req->fetch(PDO::FETCH_ASSOC);
+            if (!$row) { echo json_encode(['ok'=>false,'msg'=>'Request not found.']); exit; }
+            $from_name  = $row['agent_name']  ?? 'Savannah Explorers';
+            $from_email = $row['agent_email'] ?? '';
+            if (!$from_email) {
+                echo json_encode(['ok'=>false,'msg'=>'No email for agent linked to this request.']); exit;
+            }
+            $attachments = []; $attachment_names = [];
+            if (!empty($_FILES['attachments']['name'][0])) {
+                foreach ($_FILES['attachments']['name'] as $i => $name) {
+                    if ($_FILES['attachments']['error'][$i] === UPLOAD_ERR_OK) {
+                        $attachments[]      = ['tmp_path'=>$_FILES['attachments']['tmp_name'][$i],'name'=>$name];
+                        $attachment_names[] = $name;
+                    }
+                }
+            }
+            $sent = send_hub_email($to, $subject, $body, $from_name, $from_email, $from_email, $attachments);
+            if ($sent) {
+                log_email_note($db, $req_id, $cu['id'] ?? null, $subject, $body, $attachment_names);
+                echo json_encode(['ok'=>true]);
+            } else {
+                echo json_encode(['ok'=>false,'msg'=>'Send failed.']);
+            }
+        } catch (Throwable $e) {
+            echo json_encode(['ok'=>false,'msg'=>'Error: '.$e->getMessage()]);
+        }
+        exit;
+    }
+
+    echo json_encode(['ok'=>false,'msg'=>'Unknown action']); exit;
+}
 
 // ── Inline status update ────────────────────────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['quick_status'])) {
@@ -149,7 +232,22 @@ $qStmt = db()->prepare("SELECT id, quote_number, customer_name, total_price, sta
 $qStmt->execute([$id]);
 $linkedQuotes = $qStmt->fetchAll();
 
-$pageTitle = $r['customer_name'];
+$pageTitle  = $r['customer_name'];
+$extra_css  = '
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:200;display:flex;align-items:flex-start;justify-content:center;padding:40px 16px;overflow-y:auto}
+.modal-overlay.hidden{display:none}
+.modal-box{background:#fff;border-radius:10px;box-shadow:0 8px 40px rgba(0,0,0,.2);width:100%}
+.modal-header{padding:15px 24px;border-bottom:1px solid var(--grey-lt);display:flex;align-items:center;justify-content:space-between}
+.modal-header h3{font-family:"Merriweather",serif;font-size:.95rem;font-weight:700;margin:0;color:var(--black)}
+.modal-body{padding:22px 24px}
+.modal-footer{padding:14px 24px;border-top:1px solid var(--grey-lt);display:flex;justify-content:flex-end;gap:10px}
+.modal-close{background:none;border:none;font-size:1.3rem;cursor:pointer;color:var(--grey-mid);line-height:1;padding:0}
+.m-label{font-size:.72rem;font-weight:700;color:var(--grey-dk);display:block;margin-bottom:4px}
+.m-input{width:100%;padding:7px 10px;border:1.5px solid var(--grey-lt);border-radius:6px;font-family:"Open Sans",sans-serif;font-size:.82rem;color:var(--black)}
+.m-input:focus{outline:none;border-color:var(--red)}
+.attach-chip{display:inline-flex;align-items:center;gap:4px;background:var(--off-white);border:1px solid var(--grey-lt);border-radius:4px;padding:2px 8px;font-size:.72rem;margin:2px}
+.attach-chip button{background:none;border:none;cursor:pointer;color:var(--red);font-size:.9rem;line-height:1;padding:0 1px}
+';
 include 'includes/header.php';
 ?>
 
@@ -242,8 +340,12 @@ include 'includes/header.php';
     <div class="detail-value"><?= h($r['agent_name'] ?? '—') ?></div>
 
     <div class="detail-label">Email</div>
-    <div class="detail-value">
+    <div class="detail-value" style="display:flex;align-items:center;gap:10px">
       <?= $r['email'] ? '<a href="mailto:'.h($r['email']).'">'.h($r['email']).'</a>' : '<span class="text-muted">—</span>' ?>
+      <button type="button" class="btn btn-outline btn-sm"
+              onclick="openSend(<?= $r['id'] ?>, '<?= addslashes(h($r['customer_name'])) ?>', '<?= addslashes(h($r['email'] ?? '')) ?>')">
+        ✉ Send
+      </button>
     </div>
 
     <div class="detail-label">WhatsApp</div>
@@ -686,5 +788,16 @@ function todoCancel(id) {
   document.getElementById('todo-row-'  + id).style.display = 'flex';
 }
 </script>
+
+<?php
+$rv_stmt = $db->prepare("SELECT agent_id FROM users WHERE id=?");
+$rv_stmt->execute([$cu['id']]);
+$rv_my_agent_id = (int)($rv_stmt->fetchColumn() ?: 0);
+$stmt = $db->prepare("SELECT id, name, category FROM email_templates WHERE active=1 AND (visibility='public' OR (visibility='private' AND agent_id=?)) ORDER BY visibility ASC, sort_order ASC, name ASC");
+$stmt->execute([$rv_my_agent_id]);
+$templates = $stmt->fetchAll(PDO::FETCH_ASSOC);
+$send_ajax_url = 'request_view.php?id=' . $r['id'];
+include 'includes/send_modal.php';
+?>
 
 <?php include 'includes/footer.php'; ?>
