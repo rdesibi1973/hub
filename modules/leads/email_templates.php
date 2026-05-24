@@ -30,7 +30,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $active     = isset($_POST['active']) ? 1 : 0;
         $sort_order = (int)($_POST['sort_order'] ?? 0);
         $visibility = $is_admin ? ($_POST['visibility'] ?? 'public') : 'private';
-        $agent_id   = ($visibility === 'private') ? ($cu['agent_id'] ?? null) : null;
+        if ($visibility === 'private') {
+            $aid_stmt = db()->prepare("SELECT agent_id FROM users WHERE id=?");
+            $aid_stmt->execute([$cu['id']]);
+            $agent_id = $aid_stmt->fetchColumn() ?: null;
+        } else {
+            $agent_id = null;
+        }
 
         if (!$name || !$subject || !$body_html) {
             echo json_encode(['ok'=>false,'msg'=>'Name, subject and body are required.']); exit;
