@@ -1,4 +1,5 @@
 <?php
+ob_start(); // capture any warnings/notices from includes
 require_once 'config.php';
 require_once 'includes/folder_parser.php';
 require_once 'includes/mail_helper.php';
@@ -10,6 +11,7 @@ $my_agent_id = (int)($cu['agent_id'] ?? 0);
 
 // ── AJAX handlers ─────────────────────────────────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
+    ob_end_clean(); // discard any stray output before JSON
     header('Content-Type: application/json');
     $action = $_POST['action'];
 

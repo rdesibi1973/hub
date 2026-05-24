@@ -1,4 +1,5 @@
 <?php
+ob_start();
 require_once 'config.php';
 requireLogin();
 
@@ -8,6 +9,7 @@ $my_agent_id = (int)($cu['agent_id'] ?? 0);
 
 // ── AJAX handlers ─────────────────────────────────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
+    ob_end_clean();
     header('Content-Type: application/json');
     $action = $_POST['action'];
 
