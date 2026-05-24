@@ -351,9 +351,8 @@ function getBodyHtml() {
 }
 
 function setBodyHtml(html) {
-  // Set Quill
-  quill.root.innerHTML = html || '';
-  // Set textarea (admin HTML mode)
+  quill.root.innerHTML = '';
+  if (html) quill.clipboard.dangerouslyPasteHTML(0, html);
   document.getElementById('f_body_html').value = html || '';
 }
 

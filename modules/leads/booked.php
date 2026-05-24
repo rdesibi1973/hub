@@ -405,8 +405,8 @@ function loadTemplate() {
   }).then(r=>r.json()).then(d => {
     if (!d.ok) { alert(d.msg); return; }
     document.getElementById('send_subject').value = d.subject;
-    sendQuill.root.innerHTML = d.body || '';
-    document.getElementById('send_body').value = d.body || '';
+    sendQuill.root.innerHTML = '';
+    sendQuill.clipboard.dangerouslyPasteHTML(0, d.body || '');
   });
 }
 
