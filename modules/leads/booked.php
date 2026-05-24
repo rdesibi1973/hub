@@ -111,7 +111,7 @@ $rows = db()->query(
     "SELECT r.id, r.customer_name, r.email, r.destination, r.pax,
             r.group_folder, r.practice_code, r.period, r.status, r.agent_id,
             a.name AS agent_name,
-            (SELECT COUNT(*) FROM request_notes rn WHERE rn.request_id = r.id) AS note_count
+            (SELECT COUNT(*) FROM request_notes rn WHERE rn.request_id = r.id AND rn.note_type='email_sent') AS note_count
      FROM requests r
      LEFT JOIN agents a ON a.id = r.agent_id
      WHERE r.status IN ('Booked','Paid','Balance','Deposit')
@@ -218,7 +218,7 @@ include 'includes/header.php';
         <th style="text-align:center">Pax</th>
         <th>Agent</th>
         <th style="text-align:center">Status</th>
-        <th style="text-align:center">Notes</th>
+        <th style="text-align:center">Sent</th>
         <th style="text-align:center">Action</th>
       </tr>
     </thead>
