@@ -133,18 +133,21 @@ function wetu_fetch_samples(string $u, string $p): array {
 }
 }
 
-/* ── Search: call V8/List with a search term (single page, no pagination needed) ── */
+/* ── Search: call V8/List with a search term + optional language ── */
 if (!function_exists('wetu_search_samples')) {
-function wetu_search_samples(string $u, string $p, string $search): array {
-    $url = 'https://wetu.com/API/Itinerary/V8/List?' . http_build_query([
+function wetu_search_samples(string $u, string $p, string $search, string $lang = ''): array {
+    $params = [
         'username' => $u,
         'password' => $p,
         'type'     => 'Sample',
         'results'  => 200,
         'start'    => 0,
         'sort'     => 'ItineraryNameAsc',
-        'search'   => $search,
-    ]);
+    ];
+    if ($search !== '') $params['search']   = $search;
+    if ($lang   !== '') $params['language'] = $lang;
+
+    $url   = 'https://wetu.com/API/Itinerary/V8/List?' . http_build_query($params);
     $batch = wetu_json_get($url);
     return is_array($batch) ? $batch : [];
 }
@@ -166,6 +169,7 @@ if ($action === 'wetu_login') {
                 $fetched = wetu_fetch_samples($u, $p);
                 $_SESSION['wetu_token']    = $sess->SessionToken;
                 $_SESSION['wetu_user']     = $u;
+                $_SESSION['wetu_pass']     = $p;
                 $_SESSION['wetu_operator'] = $sess->OperatorName ?? '';
                 $_SESSION['wetu_samples']  = $fetched;
                 $token    = $sess->SessionToken;
@@ -201,6 +205,7 @@ if ($action === 'wetu_refresh' && $token) {
         try {
             $fetched = wetu_fetch_samples($u, $p);
             if ($fetched !== null && !empty($fetched)) {
+                $_SESSION['wetu_pass']    = $p;
                 $_SESSION['wetu_samples'] = $fetched;
                 $samples = $fetched;
                 $wetu_success = count($fetched) . ' samples refreshed successfully.';
@@ -224,25 +229,26 @@ if ($token && !$created && !in_array($action, ['wetu_login', 'wetu_refresh', 'we
    ACTION: SEARCH WETU (server-side, uses stored credentials)
 ═══════════════════════════════════════════════════════════════ */
 if ($action === 'wetu_search' && $token) {
-    $q = trim($_POST['wetu_search_query'] ?? '');
-    $u = $_SESSION['wetu_user'] ?? '';
-    $p = $_SESSION['wetu_pass'] ?? '';
-    if (!$q) {
-        $wetu_error = 'Please enter a search term.';
-        $samples = $_SESSION['wetu_samples'] ?? [];
-    } elseif (!$u || !$p) {
+    $q    = trim($_POST['wetu_search_query'] ?? '');
+    $lang = trim($_POST['wetu_search_lang']  ?? '');
+    $u    = $_SESSION['wetu_user'] ?? '';
+    $p    = $_SESSION['wetu_pass'] ?? '';
+    if (!$u || !$p) {
         $wetu_error = 'Session expired — please disconnect and sign in again.';
         $samples = $_SESSION['wetu_samples'] ?? [];
     } else {
         try {
-            $found = wetu_search_samples($u, $p, $q);
+            $found = wetu_search_samples($u, $p, $q, $lang);
             $_SESSION['wetu_search_query']   = $q;
+            $_SESSION['wetu_search_lang']    = $lang;
             $_SESSION['wetu_search_results'] = $found;
             $samples = $found;
+            $label   = trim(($lang ? ucfirst(strtolower($lang)) . ', ' : '') . ($q ?: ''));
             if (empty($found)) {
-                $wetu_success = 'No samples found matching "' . h($q) . '".';
+                $wetu_success = 'No samples found' . ($label ? ' for "' . h($label) . '"' : '') . '.';
             } else {
-                $wetu_success = count($found) . ' sample' . (count($found) !== 1 ? 's' : '') . ' found for "' . h($q) . '".';
+                $wetu_success = count($found) . ' sample' . (count($found) !== 1 ? 's' : '') . ' found'
+                              . ($label ? ' for "' . h($label) . '"' : '') . '.';
             }
         } catch (Throwable $e) {
             $wetu_error = 'Search error: ' . h($e->getMessage());
@@ -255,7 +261,7 @@ if ($action === 'wetu_search' && $token) {
    ACTION: CLEAR SEARCH — restore full sample list
 ═══════════════════════════════════════════════════════════════ */
 if ($action === 'wetu_clear_search') {
-    unset($_SESSION['wetu_search_query'], $_SESSION['wetu_search_results']);
+    unset($_SESSION['wetu_search_query'], $_SESSION['wetu_search_lang'], $_SESSION['wetu_search_results']);
     header('Location: wetu.php');
     exit;
 }
@@ -269,8 +275,9 @@ if ($token && empty($samples)) {
     }
 }
 
-$wetu_search_active = isset($_SESSION['wetu_search_query']) && $_SESSION['wetu_search_query'] !== '';
+$wetu_search_active = isset($_SESSION['wetu_search_query']) || isset($_SESSION['wetu_search_lang']);
 $wetu_search_query  = $_SESSION['wetu_search_query'] ?? '';
+$wetu_search_lang   = $_SESSION['wetu_search_lang']  ?? '';
 
 /* ═══════════════════════════════════════════════════════════════
    ACTION: CREATE PERSONAL ITINERARY
@@ -664,47 +671,56 @@ include __DIR__ . '/includes/header.php';
     <form method="POST" action="wetu.php" id="create-form">
       <input type="hidden" name="action" value="create_personal">
 
-      <!-- Wetu server-side search -->
+      <!-- Wetu server-side filter -->
       <div class="form-group" style="margin-bottom:14px;">
-        <label class="form-label">Search in Wetu</label>
-        <form method="post" action="wetu.php" style="display:flex;gap:8px;align-items:center;" id="wetu-search-form">
+        <label class="form-label" style="font-weight:700;letter-spacing:.04em;">FILTER WETU SAMPLE PROGRAMS</label>
+        <form method="post" action="wetu.php" style="display:flex;flex-direction:column;gap:8px;" id="wetu-search-form">
           <input type="hidden" name="action" value="wetu_search">
-          <input type="text" name="wetu_search_query" id="wetu_search_query"
-                 class="form-control" style="max-width:340px;"
-                 placeholder="e.g. Serengeti, 10 days, beach…"
-                 value="<?= h($wetu_search_active ? $wetu_search_query : '') ?>"
-                 autocomplete="off">
-          <button type="submit" style="padding:8px 18px;background:#C0211B;color:#fff;border:none;border-radius:6px;font-weight:700;cursor:pointer;white-space:nowrap;">🔍 Search Wetu</button>
-          <?php if ($wetu_search_active): ?>
-            <a href="wetu.php?action=wetu_clear_search" style="padding:8px 14px;background:#f0f0f0;color:#444;border-radius:6px;font-size:.82rem;font-weight:600;text-decoration:none;white-space:nowrap;">✕ Show all</a>
-          <?php endif; ?>
+
+          <!-- Row 1: Language -->
+          <div style="display:flex;gap:8px;align-items:center;">
+            <select name="wetu_search_lang" id="wetu_search_lang" class="form-control" style="max-width:200px;">
+              <option value="">All languages</option>
+              <option value="English"  <?= ($wetu_search_lang === 'English'  ? 'selected' : '') ?>>English</option>
+              <option value="Italian"  <?= ($wetu_search_lang === 'Italian'  ? 'selected' : '') ?>>Italian</option>
+              <option value="German"   <?= ($wetu_search_lang === 'German'   ? 'selected' : '') ?>>German</option>
+              <option value="Spanish"  <?= ($wetu_search_lang === 'Spanish'  ? 'selected' : '') ?>>Spanish</option>
+              <option value="French"   <?= ($wetu_search_lang === 'French'   ? 'selected' : '') ?>>French</option>
+            </select>
+          </div>
+
+          <!-- Row 2: Text search + button -->
+          <div style="display:flex;gap:8px;align-items:center;">
+            <input type="text" name="wetu_search_query" id="wetu_search_query"
+                   class="form-control"
+                   placeholder="e.g. Serengeti, 10 days, beach…"
+                   value="<?= h($wetu_search_query) ?>"
+                   autocomplete="off">
+            <button type="submit" style="padding:8px 20px;background:#C0211B;color:#fff;border:none;border-radius:6px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0;">🔍 Search Wetu</button>
+            <?php if ($wetu_search_active): ?>
+              <a href="wetu.php?action=wetu_clear_search" style="padding:8px 14px;background:#f0f0f0;color:#444;border-radius:6px;font-size:.82rem;font-weight:600;text-decoration:none;white-space:nowrap;flex-shrink:0;">✕ Show all</a>
+            <?php endif; ?>
+          </div>
         </form>
+
         <?php if ($wetu_search_active): ?>
+          <?php
+            $badge_parts = [];
+            if ($wetu_search_lang) $badge_parts[] = ucfirst(strtolower($wetu_search_lang));
+            if ($wetu_search_query) $badge_parts[] = '"' . h($wetu_search_query) . '"';
+            $badge_label = implode(', ', $badge_parts);
+          ?>
           <div style="margin-top:6px;font-size:.8rem;color:#1E4D7B;font-weight:600;">
-            Showing <?= count($samples_js_arr) ?> result<?= count($samples_js_arr) !== 1 ? 's' : '' ?> for: <em>"<?= h($wetu_search_query) ?>"</em>
+            Showing <?= count($samples_js_arr) ?> result<?= count($samples_js_arr) !== 1 ? 's' : '' ?>
+            <?= $badge_label ? 'for: <em>' . $badge_label . '</em>' : '' ?>
             — <a href="wetu.php?action=wetu_clear_search" style="color:#C0211B;">show all samples</a>
           </div>
         <?php endif; ?>
       </div>
 
-      <!-- Sample filter + dropdown -->
+      <!-- Sample dropdown -->
       <div class="form-group">
         <label class="form-label">Base Sample Programme <span style="color:#C0211B">*</span></label>
-
-        <!-- Filter row — always visible -->
-        <div style="display:flex;gap:10px;margin-bottom:8px;">
-          <select id="filter_lang" class="form-control" style="max-width:150px;flex-shrink:0;" onchange="filterSamples()">
-            <option value="">All languages</option>
-            <option value="English">English</option>
-            <option value="Italian">Italian</option>
-            <option value="German">German</option>
-            <option value="Spanish">Spanish</option>
-            <option value="French">French</option>
-          </select>
-          <input type="text" id="search_sample" class="form-control"
-                 placeholder="Search by name…" oninput="filterSamples()"
-                 autocomplete="off">
-        </div>
 
         <!-- Main dropdown (populated by JS) -->
         <select class="form-control" id="sample_id" name="sample_id"
