@@ -97,7 +97,7 @@ header {
 }
 .sub-nav .sub-nav-logout:hover { color: #C0211B; }
 </style>
-<?= $extra_css ?? '' ?>
+<?php if (!empty($extra_css)): ?><style><?= $extra_css ?></style><?php endif; ?>
 </head>
 <body>
 
