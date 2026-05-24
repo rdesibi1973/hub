@@ -419,7 +419,14 @@ if ($action === 'create_personal' && $token) {
             $c = wetu_client();
 
             /* 1 — Load the full Sample */
-            $loaded    = $c->LoadItinerary(['identifier' => $sample_id, 'sessionToken' => $token]);
+            try {
+                $loaded    = $c->LoadItinerary(['identifier' => $sample_id, 'sessionToken' => $token]);
+            } catch (SoapFault $sf) {
+                if (strpos($sf->getMessage(), 'not a valid utf-8') !== false) {
+                    throw new Exception('TOKEN_UTF8_ERROR: ' . $sf->getMessage());
+                }
+                throw $sf;
+            }
             $itinerary = $loaded->LoadItineraryResult;
             if (!$itinerary) throw new Exception('Sample itinerary could not be loaded from Wetu.');
 
@@ -516,7 +523,9 @@ if ($action === 'create_personal' && $token) {
                 : 'Personal itinerary created successfully.';
 
         } catch (SoapFault $e) {
-            $wetu_error = 'Wetu API error: ' . h($e->getMessage()) . ' &nbsp;<small style="color:#888">[identifier sent: <code>' . h($sample_id) . '</code>]</small>';
+            $tok_info = ' token-hex:' . bin2hex(substr($token ?? '', 0, 16)) . ' utf8:' . (mb_check_encoding($token ?? '', 'UTF-8') ? 'ok' : 'BAD');
+            $wetu_error = 'Wetu API error: ' . h($e->getMessage()) . ' &nbsp;<small style="color:#888">[identifier: <code>' . h($sample_id) . '</code>' . h($tok_info) . ']</small>';
+
         } catch (Exception $e) {
             $wetu_error = h($e->getMessage()) . ' &nbsp;<small style="color:#888">[identifier sent: <code>' . h($sample_id) . '</code>]</small>';
         }
