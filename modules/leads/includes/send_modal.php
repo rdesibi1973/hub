@@ -68,12 +68,32 @@ ksort($tpl_by_cat);
   </div>
 </div>
 
+<!-- ── Parameters Modal ───────────────────────────────────────────────────── -->
+<div id="paramsOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:300;align-items:center;justify-content:center">
+  <div style="background:#fff;border-radius:10px;box-shadow:0 8px 40px rgba(0,0,0,.25);width:100%;max-width:420px;margin:0 16px">
+    <div style="padding:16px 22px;border-bottom:1px solid var(--grey-lt);display:flex;align-items:center;justify-content:space-between">
+      <div>
+        <div style="font-family:'Merriweather',serif;font-size:.95rem;font-weight:700;color:var(--black)" id="paramsTplName"></div>
+        <div style="font-size:.75rem;color:var(--grey-mid);margin-top:2px">Enter the values for the following placeholders.</div>
+      </div>
+    </div>
+    <div class="modal-body" id="paramsFields"></div>
+    <div style="padding:14px 22px;border-top:1px solid var(--grey-lt);display:flex;justify-content:flex-end;gap:10px">
+      <button type="button" class="btn btn-outline" onclick="paramsCancel()">Cancel</button>
+      <button type="button" class="btn btn-red" onclick="paramsOk()">OK</button>
+    </div>
+  </div>
+</div>
+
 <script src="https://cdnjs.cloudflare.com/ajax/libs/quill/1.3.7/quill.min.js"></script>
 <script>
 (function() {
   var SEND_URL = <?= json_encode($send_ajax_url) ?>;
   var attachedFiles = [];
   var sendQuill;
+  var _pendingSubject = '';
+  var _pendingBody    = '';
+  var _paramNames     = [];
 
   // Init Quill after DOM ready
   document.addEventListener('DOMContentLoaded', function() {
@@ -88,13 +108,73 @@ ksort($tpl_by_cat);
         ]
       }
     });
+    // Prevent params overlay clicks from bubbling
+    document.querySelector('#paramsOverlay > div').addEventListener('click', function(e) {
+      e.stopPropagation();
+    });
   });
 
-  // Prevent modal box clicks from closing overlay
+  // Prevent send modal box clicks from closing overlay
   document.querySelector('#sendOverlay .modal-box').addEventListener('click', function(e) {
     e.stopPropagation();
   });
 
+  // ── Extract unique $[ParamName] from text ───────────────────────────────────
+  function extractParams(text) {
+    var re = /\$\[([^\]]+)\]/g, m, seen = {}, result = [];
+    while ((m = re.exec(text)) !== null) {
+      if (!seen[m[1]]) { seen[m[1]] = true; result.push(m[1]); }
+    }
+    return result;
+  }
+
+  function substituteParams(text, values) {
+    return text.replace(/\$\[([^\]]+)\]/g, function(_, name) {
+      return values[name] !== undefined ? values[name] : '';
+    });
+  }
+
+  // ── Params modal ────────────────────────────────────────────────────────────
+  function showParamsModal(tplName, subject, body, params) {
+    _pendingSubject = subject;
+    _pendingBody    = body;
+    _paramNames     = params;
+    document.getElementById('paramsTplName').textContent = tplName;
+    var html = '';
+    params.forEach(function(p) {
+      html += '<div style="margin-bottom:14px">' +
+        '<label style="font-size:.75rem;font-weight:700;color:var(--grey-dk);display:block;margin-bottom:4px">' + escH(p) + '</label>' +
+        '<input type="text" autocomplete="off" id="param_' + escAttr(p) + '" class="m-input" style="width:100%;padding:7px 10px;border:1.5px solid var(--grey-lt);border-radius:6px;font-size:.85rem;box-sizing:border-box">' +
+      '</div>';
+    });
+    document.getElementById('paramsFields').innerHTML = html;
+    document.getElementById('paramsOverlay').style.display = 'flex';
+    // Focus first field
+    var first = document.getElementById('param_' + escAttr(params[0]));
+    if (first) setTimeout(function(){ first.focus(); }, 50);
+  }
+
+  window.paramsOk = function() {
+    var values = {};
+    _paramNames.forEach(function(p) {
+      var el = document.getElementById('param_' + escAttr(p));
+      values[p] = el ? el.value : '';
+    });
+    document.getElementById('paramsOverlay').style.display = 'none';
+    var finalSubject = substituteParams(_pendingSubject, values);
+    var finalBody    = substituteParams(_pendingBody, values);
+    document.getElementById('send_subject').value = finalSubject;
+    if (sendQuill) {
+      sendQuill.root.innerHTML = '';
+      sendQuill.clipboard.dangerouslyPasteHTML(0, finalBody);
+    }
+  };
+
+  window.paramsCancel = function() {
+    document.getElementById('paramsOverlay').style.display = 'none';
+  };
+
+  // ── Open/close send modal ───────────────────────────────────────────────────
   window.openSend = function(id, customer, to) {
     document.getElementById('send_req_id').value        = id;
     document.getElementById('sendCustomer').textContent = customer;
@@ -115,8 +195,11 @@ ksort($tpl_by_cat);
     document.getElementById('sendOverlay').style.display = 'none';
   };
 
+  // ── Load template with params detection ────────────────────────────────────
   window.loadTemplate = function() {
-    var tpl_id = document.getElementById('send_tpl').value;
+    var sel    = document.getElementById('send_tpl');
+    var tpl_id = sel.value;
+    var tpl_name = sel.options[sel.selectedIndex] ? sel.options[sel.selectedIndex].text : '';
     var req_id = document.getElementById('send_req_id').value;
     if (!tpl_id) { alert('Select a template first.'); return; }
     fetch(SEND_URL, {
@@ -124,10 +207,17 @@ ksort($tpl_by_cat);
       body:'action=preview_email&request_id='+req_id+'&template_id='+tpl_id
     }).then(function(r){return r.json();}).then(function(d) {
       if (!d.ok) { alert(d.msg); return; }
-      document.getElementById('send_subject').value = d.subject;
-      if (sendQuill) {
-        sendQuill.root.innerHTML = '';
-        sendQuill.clipboard.dangerouslyPasteHTML(0, d.body || '');
+      // Check for $[...] params in subject + body
+      var combined = d.subject + ' ' + d.body;
+      var params   = extractParams(combined);
+      if (params.length > 0) {
+        showParamsModal(tpl_name, d.subject, d.body, params);
+      } else {
+        document.getElementById('send_subject').value = d.subject;
+        if (sendQuill) {
+          sendQuill.root.innerHTML = '';
+          sendQuill.clipboard.dangerouslyPasteHTML(0, d.body || '');
+        }
       }
     });
   };
@@ -192,6 +282,7 @@ ksort($tpl_by_cat);
     }).join('');
   }
 
-  function escH(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  function escH(s)    { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  function escAttr(s) { return String(s).replace(/[^a-zA-Z0-9_-]/g,'_'); }
 })();
 </script>
