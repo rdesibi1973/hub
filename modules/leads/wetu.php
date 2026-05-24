@@ -316,7 +316,8 @@ if ($token && empty($samples)) {
     }
 }
 
-$wetu_search_active = isset($_SESSION['wetu_search_query']) || isset($_SESSION['wetu_search_lang']);
+$wetu_search_active = (isset($_SESSION['wetu_search_query']) && $_SESSION['wetu_search_query'] !== '')
+                   || (isset($_SESSION['wetu_search_lang'])  && $_SESSION['wetu_search_lang']  !== '');
 $wetu_search_query  = $_SESSION['wetu_search_query'] ?? '';
 $wetu_search_lang   = $_SESSION['wetu_search_lang']  ?? '';
 
@@ -341,7 +342,7 @@ if ($action === 'create_personal' && $token) {
             $c = wetu_client();
 
             /* 1 — Load the full Sample */
-            $loaded    = $c->LoadItinerary(['Identifier' => $sample_id, 'SessionToken' => $token]);
+            $loaded    = $c->LoadItinerary(['identifier' => $sample_id, 'sessionToken' => $token]);
             $itinerary = $loaded->LoadItineraryResult;
             if (!$itinerary) throw new Exception('Sample itinerary could not be loaded from Wetu.');
 
@@ -360,7 +361,7 @@ if ($action === 'create_personal' && $token) {
             $itinerary->Summary = 'Pax: ' . $pax . ($prev ? "\n" . $prev : '');
 
             /* 3 — Save */
-            $save_res = $c->SaveItinerary(['Itinerary' => $itinerary, 'SessionToken' => $token]);
+            $save_res = $c->SaveItinerary(['itinerary' => $itinerary, 'sessionToken' => $token]);
             $summary  = $save_res->SaveItineraryResult;
             $new_id   = $summary->Identifier    ?? null;
             $short_id = $summary->IdentifierKey ?? null;
