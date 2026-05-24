@@ -259,7 +259,7 @@ include 'includes/header.php';
           <?php else: ?>—<?php endif; ?>
         </td>
         <td style="text-align:center">
-          <button class="btn btn-outline btn-sm"
+          <button type="button" class="btn btn-outline btn-sm"
                   onclick="event.stopPropagation();openSend(<?= $r['id'] ?>, '<?= addslashes(h($r['customer_name'])) ?>', '<?= addslashes(h($r['email'] ?? '')) ?>')">
             ✉ Send
           </button>
@@ -275,7 +275,7 @@ include 'includes/header.php';
   <div class="modal-box" style="max-width:820px">
     <div class="modal-header">
       <h3>✉ Send Email — <span id="sendCustomer"></span></h3>
-      <button class="modal-close" onclick="closeSend()">&times;</button>
+      <button type="button" class="modal-close" onclick="closeSend()">&times;</button>
     </div>
     <div class="modal-body">
       <input type="hidden" id="send_req_id">
@@ -298,7 +298,7 @@ include 'includes/header.php';
             <?php endforeach; ?>
           </select>
         </div>
-        <button class="btn btn-outline btn-sm" style="white-space:nowrap" onclick="loadTemplate()">Load</button>
+        <button type="button" class="btn btn-outline btn-sm" style="white-space:nowrap" onclick="loadTemplate()">Load</button>
       </div>
 
       <div style="margin-bottom:14px">
@@ -315,15 +315,15 @@ include 'includes/header.php';
       <div style="margin-top:14px">
         <label class="m-label">📎 Attachments</label>
         <input type="file" id="attach_input" multiple style="display:none" onchange="handleFiles(this)">
-        <button class="btn btn-outline btn-sm" type="button" onclick="document.getElementById('attach_input').click()">+ Add attachment</button>
+        <button type="button" class="btn btn-outline btn-sm" type="button" onclick="document.getElementById('attach_input').click()">+ Add attachment</button>
         <div id="attachList" style="margin-top:8px;display:flex;flex-wrap:wrap;gap:4px"></div>
       </div>
 
       <div id="sendAlert" style="display:none;margin-top:12px;padding:10px 14px;border-radius:6px;font-size:.82rem"></div>
     </div>
     <div class="modal-footer">
-      <button class="btn btn-outline" onclick="closeSend()">Cancel</button>
-      <button class="btn btn-red" id="btnSend" onclick="doSend()">✉ Send Email</button>
+      <button type="button" class="btn btn-outline" onclick="closeSend()">Cancel</button>
+      <button type="button" class="btn btn-red" id="btnSend" onclick="doSend()">✉ Send Email</button>
     </div>
   </div>
 </div>
@@ -333,7 +333,7 @@ include 'includes/header.php';
   <div class="modal-box" style="max-width:660px">
     <div class="modal-header">
       <h3>Notes — <span id="notesCustomer"></span></h3>
-      <button class="modal-close" onclick="closeNotes()">&times;</button>
+      <button type="button" class="modal-close" onclick="closeNotes()">&times;</button>
     </div>
     <div class="modal-body" id="notesBody" style="min-height:100px"></div>
   </div>

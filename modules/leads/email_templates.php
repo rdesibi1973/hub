@@ -122,7 +122,7 @@ include 'includes/header.php';
 
 <div class="page-header">
   <h2>📧 Email Templates</h2>
-  <button class="btn btn-red btn-sm" onclick="openModal(0)">+ New Template</button>
+  <button type="button" class="btn btn-red btn-sm" onclick="openModal(0)">+ New Template</button>
 </div>
 
 <div class="table-wrap">
@@ -183,8 +183,8 @@ include 'includes/header.php';
         <td>
           <?php if ($editable): ?>
           <div style="display:flex;gap:6px">
-            <button class="btn btn-outline btn-sm" onclick="openModal(<?= $t['id'] ?>)">Edit</button>
-            <button class="btn btn-danger btn-sm" onclick="deleteTpl(<?= $t['id'] ?>, '<?= addslashes(h($t['name'])) ?>')">Delete</button>
+            <button type="button" class="btn btn-outline btn-sm" onclick="openModal(<?= $t['id'] ?>)">Edit</button>
+            <button type="button" class="btn btn-danger btn-sm" onclick="deleteTpl(<?= $t['id'] ?>, '<?= addslashes(h($t['name'])) ?>')">Delete</button>
           </div>
           <?php else: ?>
           <span style="font-size:.72rem;color:var(--grey-lt)">read-only</span>
@@ -201,7 +201,7 @@ include 'includes/header.php';
   <div class="modal-box" style="max-width:960px">
     <div class="modal-header">
       <h3 id="modalTitle">New Template</h3>
-      <button class="modal-close" onclick="closeModal()">&times;</button>
+      <button type="button" class="modal-close" onclick="closeModal()">&times;</button>
     </div>
     <div class="modal-body">
       <input type="hidden" id="f_id">
@@ -253,11 +253,11 @@ include 'includes/header.php';
               Body <span style="color:var(--red)">*</span>
             </div>
             <div class="tabs" style="border:none;margin:0">
-              <button class="tab-btn active" id="tabVisual" onclick="switchEditorTab('visual',this)">Visual</button>
+              <button type="button" class="tab-btn active" id="tabVisual" onclick="switchEditorTab('visual',this)">Visual</button>
               <?php if ($is_admin): ?>
-              <button class="tab-btn" id="tabHtml" onclick="switchEditorTab('html',this)">HTML</button>
+              <button type="button" class="tab-btn" id="tabHtml" onclick="switchEditorTab('html',this)">HTML</button>
               <?php endif; ?>
-              <button class="tab-btn" id="tabPreview" onclick="switchEditorTab('preview',this)">Preview</button>
+              <button type="button" class="tab-btn" id="tabPreview" onclick="switchEditorTab('preview',this)">Preview</button>
             </div>
           </div>
 
@@ -297,7 +297,7 @@ include 'includes/header.php';
           ];
           foreach ($vars as $var => $desc): ?>
           <div style="margin-bottom:8px">
-            <button class="var-tag" onclick="insertVar('<?= $var ?>')"><?= $var ?></button>
+            <button type="button" class="var-tag" onclick="insertVar('<?= $var ?>')"><?= $var ?></button>
             <span class="var-desc"> — <?= $desc ?></span>
           </div>
           <?php endforeach; ?>
@@ -315,8 +315,8 @@ include 'includes/header.php';
       <div id="saveAlert" style="display:none;margin-top:14px;padding:10px 14px;border-radius:6px;font-size:.82rem"></div>
     </div>
     <div class="modal-footer">
-      <button class="btn btn-outline" onclick="closeModal()">Cancel</button>
-      <button class="btn btn-red" onclick="saveTemplate()">Save Template</button>
+      <button type="button" class="btn btn-outline" onclick="closeModal()">Cancel</button>
+      <button type="button" class="btn btn-red" onclick="saveTemplate()">Save Template</button>
     </div>
   </div>
 </div>
