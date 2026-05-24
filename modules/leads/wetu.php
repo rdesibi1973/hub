@@ -399,8 +399,8 @@ $wetu_search_lang   = $_SESSION['wetu_search_lang']  ?? '';
 ═══════════════════════════════════════════════════════════════ */
 if ($action === 'create_personal' && $token) {
     $sample_id   = trim($_POST['sample_id']   ?? '');
-    $client_name = trim($_POST['client_name'] ?? '');
-    $ref_number  = trim($_POST['ref_number']  ?? '');
+    $client_name = wetu_utf8_sanitize(trim($_POST['client_name'] ?? ''));
+    $ref_number  = wetu_utf8_sanitize(trim($_POST['ref_number']  ?? ''));
     $start_date  = trim($_POST['start_date']  ?? '');
     $days        = max(1, intval($_POST['days'] ?? 0));   // kept for Wetu API (uses sample days if 0 → default 1)
     $pax         = intval($_POST['pax'] ?? 0);
