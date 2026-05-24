@@ -226,7 +226,7 @@ if ($token && !$created && !in_array($action, ['wetu_login', 'wetu_refresh', 'we
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   ACTION: SEARCH WETU (server-side, uses stored credentials)
+   ACTION: SEARCH / FILTER  (fetch full list from Wetu, filter in PHP)
 ═══════════════════════════════════════════════════════════════ */
 if ($action === 'wetu_search' && $token) {
     $q    = trim($_POST['wetu_search_query'] ?? '');
@@ -238,17 +238,47 @@ if ($action === 'wetu_search' && $token) {
         $samples = $_SESSION['wetu_samples'] ?? [];
     } else {
         try {
-            $found = wetu_search_samples($u, $p, $q, $lang);
+            /* Use cached full list; re-fetch only if cache is empty */
+            $all = $_SESSION['wetu_samples'] ?? [];
+            if (empty($all)) {
+                $all = wetu_fetch_samples($u, $p);
+                $_SESSION['wetu_samples'] = $all;
+            }
+
+            /* Apply PHP-side filters */
+            $ql = strtolower($q);
+            $found = array_values(array_filter($all, function($s) use ($ql, $lang) {
+                if (!is_array($s)) return false;
+                $name = strtolower((string)($s['name'] ?? $s['itinerary_name'] ?? $s['Name'] ?? $s['ItineraryName'] ?? ''));
+                /* Name filter: every word in query must appear in name */
+                if ($ql !== '') {
+                    foreach (preg_split('/\s+/', $ql, -1, PREG_SPLIT_NO_EMPTY) as $word) {
+                        if (strpos($name, $word) === false) return false;
+                    }
+                }
+                /* Language filter */
+                if ($lang !== '') {
+                    $slang = infer_language((string)($s['name'] ?? $s['Name'] ?? ''), $s);
+                    if (strcasecmp($slang, $lang) !== 0) return false;
+                }
+                return true;
+            }));
+
             $_SESSION['wetu_search_query']   = $q;
             $_SESSION['wetu_search_lang']    = $lang;
             $_SESSION['wetu_search_results'] = $found;
             $samples = $found;
-            $label   = trim(($lang ? ucfirst(strtolower($lang)) . ', ' : '') . ($q ?: ''));
+
+            $label_parts = [];
+            if ($lang) $label_parts[] = ucfirst(strtolower($lang));
+            if ($q)    $label_parts[] = '"' . $q . '"';
+            $label = implode(', ', $label_parts);
+
             if (empty($found)) {
-                $wetu_success = 'No samples found' . ($label ? ' for "' . h($label) . '"' : '') . '.';
+                $wetu_success = 'No samples found' . ($label ? ' for ' . h($label) : '') . '.';
             } else {
                 $wetu_success = count($found) . ' sample' . (count($found) !== 1 ? 's' : '') . ' found'
-                              . ($label ? ' for "' . h($label) . '"' : '') . '.';
+                              . ($label ? ' for ' . h($label) : '') . '.';
             }
         } catch (Throwable $e) {
             $wetu_error = 'Search error: ' . h($e->getMessage());
