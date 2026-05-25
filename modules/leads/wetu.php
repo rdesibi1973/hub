@@ -304,37 +304,28 @@ if ($action === 'wetu_search' && $token) {
                 $_SESSION['wetu_samples'] = $base;
             }
 
-            /* PHP filters: language + AND word match on name (both modes) */
+            /* PHP filter: AND word match on name only.
+               Language filtering handled client-side by the LOV (more reliable). */
             $ql = strtolower($q);
             $words = $ql !== '' ? preg_split('/\s+/', $ql, -1, PREG_SPLIT_NO_EMPTY) : [];
-            $found = array_values(array_filter($base, function($s) use ($words, $lang) {
+            $found = array_values(array_filter($base, function($s) use ($words) {
                 if (!is_array($s)) return false;
+                if (empty($words)) return true;
                 $name = strtolower((string)($s['name'] ?? $s['Name'] ?? $s['itinerary_name'] ?? $s['ItineraryName'] ?? ''));
-                /* AND: every word must appear in the name */
                 foreach ($words as $word) {
                     if (strpos($name, $word) === false) return false;
-                }
-                /* Language filter */
-                if ($lang !== '') {
-                    $slang = infer_language(
-                        (string)($s['name'] ?? $s['Name'] ?? $s['itinerary_name'] ?? $s['ItineraryName'] ?? ''),
-                        $s
-                    );
-                    if (strcasecmp($slang, $lang) !== 0) return false;
                 }
                 return true;
             }));
 
             $_SESSION['wetu_search_query']      = $q;
-            $_SESSION['wetu_search_lang']       = $lang;
             $_SESSION['wetu_search_title_only'] = $title_only;
+            unset($_SESSION['wetu_search_lang']);  // lang filtering is JS-side only
             $_SESSION['wetu_search_results']    = $found;
             $samples = $found;
 
             $label_parts = [];
-            if ($lang)       $label_parts[] = ucfirst(strtolower($lang));
-            if ($q)          $label_parts[] = '"' . $q . '"';
-            if ($title_only) $label_parts[] = 'title only';
+            if ($q) $label_parts[] = '"' . $q . '"';
             $label = implode(', ', $label_parts);
             $base_count = count(array_filter($base, 'is_array'));
 
@@ -366,10 +357,9 @@ if ($token && empty($samples)) {
     }
 }
 
-$wetu_search_active = (isset($_SESSION['wetu_search_query']) && $_SESSION['wetu_search_query'] !== '')
-                   || (isset($_SESSION['wetu_search_lang'])  && $_SESSION['wetu_search_lang']  !== '');
+$wetu_search_active = isset($_SESSION['wetu_search_query']) && $_SESSION['wetu_search_query'] !== '';
 $wetu_search_query  = $_SESSION['wetu_search_query'] ?? '';
-$wetu_search_lang   = $_SESSION['wetu_search_lang']  ?? '';
+$wetu_search_lang   = '';
 
 /* ═══════════════════════════════════════════════════════════════
    ACTION: CREATE PERSONAL ITINERARY
@@ -961,7 +951,6 @@ include __DIR__ . '/includes/header.php';
 
 <script>
 const allSamples = <?= $samples_json ?>;
-const serverFiltered = <?= $wetu_search_active ? 'true' : 'false' ?>; // server already filtered
 
 /* Language display names for the filter LOV */
 const langNames = {
@@ -1013,11 +1002,8 @@ function filterSamples() {
 
     let count = 0;
     allSamples.forEach(s => {
-        // Skip JS filters when server already filtered (search results are pre-filtered)
-        if (!serverFiltered) {
-            if (langRaw && s.lang !== langRaw) return;
-            if (search && !s.name.toLowerCase().includes(search)) return;
-        }
+        if (langRaw && s.lang !== langRaw) return;
+        if (search && !s.name.toLowerCase().includes(search)) return;
 
         const langTag = {'english':'EN','italian':'IT','german':'DE','spanish':'ES','french':'FR'};
         const opt = document.createElement('option');
