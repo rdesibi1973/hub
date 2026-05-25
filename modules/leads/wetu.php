@@ -62,15 +62,20 @@ function wetu_client() {
 ═══════════════════════════════════════════════════════════════ */
 if (!function_exists('infer_language')) {
 function infer_language(string $name, $s): string {
+    /* 1 — Use session lang map (built from per-language API calls at login) */
+    $key = is_array($s) ? ($s['identifier_key'] ?? ($s['IdentifierKey'] ?? null)) : null;
+    if ($key && isset($_SESSION['wetu_lang_map'][$key])) {
+        return $_SESSION['wetu_lang_map'][$key];
+    }
+    /* 2 — API language field (usually absent in V8/List) */
     $api = is_array($s) ? trim($s['language'] ?? ($s['Language'] ?? ($s['lang'] ?? ''))) : '';
     if ($api !== '') return $api;
+    /* 3 — Name-based inference */
     $n = strtoupper($name);
-    // Full words
     if (strpos($n, 'ITALIANO') !== false || strpos($n, 'ITALIAN') !== false) return 'Italian';
     if (strpos($n, 'FRENCH')   !== false || strpos($n, 'FRANCESE') !== false) return 'French';
     if (strpos($n, 'GERMAN')   !== false || strpos($n, 'TEDESCO')  !== false || strpos($n, 'DEUTSCH') !== false) return 'German';
     if (strpos($n, 'SPANISH')  !== false || strpos($n, 'ESPANOL')  !== false || strpos($n, 'SPAGNOLO') !== false) return 'Spanish';
-    // 3-letter abbreviations (word-boundary: space, underscore, hyphen, start/end)
     if (preg_match('/(?<![A-Z])IT[AO](?![A-Z])/', $n)) return 'Italian';
     if (preg_match('/(?<![A-Z])FR[AEH](?![A-Z])/',  $n)) return 'French';
     if (preg_match('/(?<![A-Z])DEU(?![A-Z])/',       $n)) return 'German';
@@ -102,7 +107,7 @@ $prefill_date = trim($_GET['start_date']  ?? '');
    ACTION: WETU LOGOUT
 ═══════════════════════════════════════════════════════════════ */
 if ($action === 'wetu_logout') {
-    unset($_SESSION['wetu_token'], $_SESSION['wetu_user'], $_SESSION['wetu_operator'], $_SESSION['wetu_pass'], $_SESSION['wetu_samples'], $_SESSION['wetu_search_query'], $_SESSION['wetu_search_lang'], $_SESSION['wetu_search_title_only'], $_SESSION['wetu_search_results']);
+    unset($_SESSION['wetu_token'], $_SESSION['wetu_user'], $_SESSION['wetu_operator'], $_SESSION['wetu_pass'], $_SESSION['wetu_samples'], $_SESSION['wetu_lang_map'], $_SESSION['wetu_search_query'], $_SESSION['wetu_search_lang'], $_SESSION['wetu_search_title_only'], $_SESSION['wetu_search_results']);
     header('Location: wetu.php');
     exit;
 }
@@ -216,6 +221,34 @@ function wetu_fetch_samples(string $u, string $p): array {
 }
 }
 
+/* ── Build a language map: identifier_key → language name
+   Makes one API call per language to get the definitive list.
+   Stored in session to avoid repeated calls. ── */
+if (!function_exists('wetu_build_lang_map')) {
+function wetu_build_lang_map(string $u, string $p): array {
+    $map    = [];
+    $langs  = ['Italian','French','German','Spanish','English'];
+    foreach ($langs as $lang) {
+        $url = 'https://wetu.com/API/Itinerary/V8/List?' . http_build_query([
+            'username' => $u,
+            'password' => $p,
+            'type'     => 'Sample',
+            'results'  => 500,
+            'start'    => 0,
+            'language' => $lang,
+        ]);
+        $batch = wetu_json_get($url);
+        if (!is_array($batch)) continue;
+        foreach ($batch as $s) {
+            if (!is_array($s)) continue;
+            $key = $s['identifier_key'] ?? ($s['IdentifierKey'] ?? null);
+            if ($key) $map[$key] = $lang;
+        }
+    }
+    return $map;
+}
+}
+
 /* ── Search: call V8/List with a search term + optional language ── */
 if (!function_exists('wetu_search_samples')) {
 function wetu_search_samples(string $u, string $p, string $search, string $lang = ''): array {
@@ -255,6 +288,7 @@ if ($action === 'wetu_login') {
                 $_SESSION['wetu_pass']     = $p;
                 $_SESSION['wetu_operator'] = $sess->OperatorName ?? '';
                 $_SESSION['wetu_samples']  = $fetched;
+                $_SESSION['wetu_lang_map'] = wetu_build_lang_map($u, $p);
                 $token    = $sess->SessionToken;
                 $wetu_user = $u;
                 $wetu_op   = $sess->OperatorName ?? '';
@@ -329,22 +363,6 @@ if ($action === 'wetu_search' && $token) {
             $_SESSION['wetu_search_lang']    = $lang;
             $_SESSION['wetu_search_results'] = $found;
             $samples = $found;
-
-            /* DEBUG: list ALL name-matched programs with detected language */
-            if (!empty($words)) {
-                $all_name_match = array_values(array_filter($base, function($s) use ($words) {
-                    if (!is_array($s)) return false;
-                    $nm = strtolower((string)($s['name'] ?? ''));
-                    foreach ($words as $w) { if (strpos($nm, $w) === false) return false; }
-                    return true;
-                }));
-                $debug_lines = [];
-                foreach ($all_name_match as $s) {
-                    $raw_lang = is_array($s) ? ($s['language'] ?? ($s['Language'] ?? 'n/a')) : 'n/a';
-                    $debug_lines[] = ($s['name'] ?? '?') . ' [api_lang=' . $raw_lang . '] → ' . infer_language((string)($s['name'] ?? ''), $s);
-                }
-                $wetu_debug = count($all_name_match) . " name matches:\n" . implode("\n", $debug_lines);
-            }
             if ($lang) $label_parts[] = ucfirst(strtolower($lang));
             if ($q)    $label_parts[] = '"' . $q . '"';
             $label = implode(', ', $label_parts);
@@ -691,9 +709,6 @@ include __DIR__ . '/includes/header.php';
 
 <?php if ($wetu_success && !$created): ?>
 <div class="wetu-alert wetu-alert-success">✅ <?= $wetu_success ?></div>
-<?php if ($wetu_debug): ?>
-<pre style="font-size:.68rem;background:#f5f5f5;padding:8px 12px;border-radius:6px;margin-bottom:12px;white-space:pre-wrap;word-break:break-all;max-height:300px;overflow:auto;"><?= h($wetu_debug) ?></pre>
-<?php endif; ?>
 
 <?php endif; ?>
 
