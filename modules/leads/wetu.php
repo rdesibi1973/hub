@@ -965,6 +965,7 @@ include __DIR__ . '/includes/header.php';
 
 <script>
 const allSamples = <?= $samples_json ?>;
+const serverFiltered = <?= $wetu_search_active ? 'true' : 'false' ?>; // server already filtered
 
 /* Language display names for the filter LOV */
 const langNames = {
@@ -1016,10 +1017,11 @@ function filterSamples() {
 
     let count = 0;
     allSamples.forEach(s => {
-        // Language filter: exact match on raw value from API
-        if (langRaw && s.lang !== langRaw) return;
-        // Name filter: case-insensitive contains
-        if (search && !s.name.toLowerCase().includes(search)) return;
+        // Skip JS filters when server already filtered (search results are pre-filtered)
+        if (!serverFiltered) {
+            if (langRaw && s.lang !== langRaw) return;
+            if (search && !s.name.toLowerCase().includes(search)) return;
+        }
 
         const langTag = {'english':'EN','italian':'IT','german':'DE','spanish':'ES','french':'FR'};
         const opt = document.createElement('option');
