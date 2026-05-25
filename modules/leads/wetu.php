@@ -297,35 +297,49 @@ if ($action === 'wetu_search' && $token) {
         $samples = $_SESSION['wetu_samples'] ?? [];
     } else {
         try {
-            /* Use cached list; re-fetch only if empty */
-            $base = $_SESSION['wetu_samples'] ?? [];
-            if (empty($base)) {
-                $base = wetu_fetch_samples($u, $p);
-                $_SESSION['wetu_samples'] = $base;
+            if ($title_only || $q === '') {
+                /* Title search or no query: filter the full cached list in PHP */
+                $base = $_SESSION['wetu_samples'] ?? [];
+                if (empty($base)) {
+                    $base = wetu_fetch_samples($u, $p);
+                    $_SESSION['wetu_samples'] = $base;
+                }
+            } else {
+                /* Full-text search: let Wetu search content + name */
+                $base = wetu_search_samples($u, $p, $q, '');
             }
 
-            /* PHP filter: AND word match on name only.
-               Language filtering handled client-side by the LOV (more reliable). */
+            /* PHP filters: language + AND word match on name (both modes) */
             $ql = strtolower($q);
             $words = $ql !== '' ? preg_split('/\s+/', $ql, -1, PREG_SPLIT_NO_EMPTY) : [];
-            $found = array_values(array_filter($base, function($s) use ($words) {
+            $found = array_values(array_filter($base, function($s) use ($words, $lang) {
                 if (!is_array($s)) return false;
-                if (empty($words)) return true;
                 $name = strtolower((string)($s['name'] ?? $s['Name'] ?? $s['itinerary_name'] ?? $s['ItineraryName'] ?? ''));
+                /* AND: every word must appear in the name */
                 foreach ($words as $word) {
                     if (strpos($name, $word) === false) return false;
+                }
+                /* Language filter */
+                if ($lang !== '') {
+                    $slang = infer_language(
+                        (string)($s['name'] ?? $s['Name'] ?? $s['itinerary_name'] ?? $s['ItineraryName'] ?? ''),
+                        $s
+                    );
+                    if (strcasecmp($slang, $lang) !== 0) return false;
                 }
                 return true;
             }));
 
             $_SESSION['wetu_search_query']      = $q;
+            $_SESSION['wetu_search_lang']       = $lang;
             $_SESSION['wetu_search_title_only'] = $title_only;
-            unset($_SESSION['wetu_search_lang']);  // lang filtering is JS-side only
             $_SESSION['wetu_search_results']    = $found;
             $samples = $found;
 
             $label_parts = [];
-            if ($q) $label_parts[] = '"' . $q . '"';
+            if ($lang)       $label_parts[] = ucfirst(strtolower($lang));
+            if ($q)          $label_parts[] = '"' . $q . '"';
+            if ($title_only) $label_parts[] = 'title only';
             $label = implode(', ', $label_parts);
             $base_count = count(array_filter($base, 'is_array'));
 
@@ -357,9 +371,10 @@ if ($token && empty($samples)) {
     }
 }
 
-$wetu_search_active = isset($_SESSION['wetu_search_query']) && $_SESSION['wetu_search_query'] !== '';
+$wetu_search_active = (isset($_SESSION['wetu_search_query']) && $_SESSION['wetu_search_query'] !== '')
+                   || (isset($_SESSION['wetu_search_lang'])  && $_SESSION['wetu_search_lang']  !== '');
 $wetu_search_query  = $_SESSION['wetu_search_query'] ?? '';
-$wetu_search_lang   = '';
+$wetu_search_lang   = $_SESSION['wetu_search_lang']  ?? '';
 
 /* ═══════════════════════════════════════════════════════════════
    ACTION: CREATE PERSONAL ITINERARY
@@ -993,6 +1008,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
 function filterSamples() {
     const langRaw = document.getElementById('wetu_search_lang')?.value || '';
+    
     const sel     = document.getElementById('sample_id');
     if (!sel) return;
 
@@ -1001,7 +1017,9 @@ function filterSamples() {
 
     let count = 0;
     allSamples.forEach(s => {
+        // Language filter: exact match on raw value from API
         if (langRaw && s.lang !== langRaw) return;
+        // Name filter: case-insensitive contains
 
         const langTag = {'english':'EN','italian':'IT','german':'DE','spanish':'ES','french':'FR'};
         const opt = document.createElement('option');
