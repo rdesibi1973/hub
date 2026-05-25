@@ -310,21 +310,25 @@ if ($action === 'wetu_search' && $token) {
                 $_SESSION['wetu_samples'] = $base;
             }
 
-            /* If language selected: use Wetu API language filter to get matching identifiers,
-               then intersect with cached list (which has complete item data) */
             if ($lang !== '') {
                 $lang_raw = wetu_search_samples($u, $p, '', $lang);
-                $lang_keys = [];
+                $lang_ids = [];
+                $debug_sample = !empty($lang_raw) ? json_encode(array_slice($lang_raw[0] ?? [], 0)) : 'empty';
                 foreach ($lang_raw as $lr) {
                     if (!is_array($lr)) continue;
-                    $k = $lr['identifier_key'] ?? ($lr['IdentifierKey'] ?? null);
-                    if ($k) $lang_keys[$k] = true;
+                    $id  = $lr['identifier']     ?? ($lr['Identifier']    ?? null);
+                    $key = $lr['identifier_key'] ?? ($lr['IdentifierKey'] ?? null);
+                    if ($id)  $lang_ids['id_'  . $id]  = true;
+                    if ($key) $lang_ids['key_' . $key] = true;
                 }
-                if (!empty($lang_keys)) {
-                    $base = array_values(array_filter($base, function($s) use ($lang_keys) {
+                $wetu_debug = "lang API returned " . count($lang_raw) . " items, " . count($lang_ids) . " ids. First: " . substr($debug_sample, 0, 200);
+                if (!empty($lang_ids)) {
+                    $base = array_values(array_filter($base, function($s) use ($lang_ids) {
                         if (!is_array($s)) return false;
-                        $k = $s['identifier_key'] ?? ($s['IdentifierKey'] ?? null);
-                        return $k && isset($lang_keys[$k]);
+                        $id  = $s['identifier']     ?? ($s['Identifier']    ?? null);
+                        $key = $s['identifier_key'] ?? ($s['IdentifierKey'] ?? null);
+                        return ($id  && isset($lang_ids['id_'  . $id]))
+                            || ($key && isset($lang_ids['key_' . $key]));
                     }));
                 }
             }
