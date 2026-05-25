@@ -297,16 +297,15 @@ if ($action === 'wetu_search' && $token) {
         $samples = $_SESSION['wetu_samples'] ?? [];
     } else {
         try {
-            if ($title_only || $q === '') {
-                /* Title search or no query: filter the full cached list in PHP */
-                $base = $_SESSION['wetu_samples'] ?? [];
-                if (empty($base)) {
-                    $base = wetu_fetch_samples($u, $p);
-                    $_SESSION['wetu_samples'] = $base;
-                }
-            } else {
-                /* Full-text search: let Wetu search content + name */
+            /* Always fetch fresh from Wetu on every search — clears stale cache */
+            $all_fresh = wetu_fetch_samples($u, $p);
+            $_SESSION['wetu_samples'] = $all_fresh;
+
+            if ($q !== '' && !$title_only) {
+                /* Full-text search: also call Wetu API with search term */
                 $base = wetu_search_samples($u, $p, $q, '');
+            } else {
+                $base = $all_fresh;
             }
 
             /* PHP filters: language + AND word match on name (both modes) */
