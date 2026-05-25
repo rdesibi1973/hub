@@ -329,6 +329,21 @@ if ($action === 'wetu_search' && $token) {
             $_SESSION['wetu_search_lang']    = $lang;
             $_SESSION['wetu_search_results'] = $found;
             $samples = $found;
+
+            /* DEBUG: list ALL name-matched programs with detected language */
+            if (!empty($words)) {
+                $all_name_match = array_values(array_filter($base, function($s) use ($words) {
+                    if (!is_array($s)) return false;
+                    $nm = strtolower((string)($s['name'] ?? ''));
+                    foreach ($words as $w) { if (strpos($nm, $w) === false) return false; }
+                    return true;
+                }));
+                $debug_lines = [];
+                foreach ($all_name_match as $s) {
+                    $debug_lines[] = ($s['name'] ?? '?') . ' → ' . infer_language((string)($s['name'] ?? ''), $s);
+                }
+                $wetu_debug = count($all_name_match) . " name matches:\n" . implode("\n", $debug_lines);
+            }
             if ($lang) $label_parts[] = ucfirst(strtolower($lang));
             if ($q)    $label_parts[] = '"' . $q . '"';
             $label = implode(', ', $label_parts);
@@ -675,6 +690,9 @@ include __DIR__ . '/includes/header.php';
 
 <?php if ($wetu_success && !$created): ?>
 <div class="wetu-alert wetu-alert-success">✅ <?= $wetu_success ?></div>
+<?php if ($wetu_debug): ?>
+<pre style="font-size:.68rem;background:#f5f5f5;padding:8px 12px;border-radius:6px;margin-bottom:12px;white-space:pre-wrap;word-break:break-all;max-height:300px;overflow:auto;"><?= h($wetu_debug) ?></pre>
+<?php endif; ?>
 
 <?php endif; ?>
 
