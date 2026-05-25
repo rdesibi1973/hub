@@ -323,15 +323,20 @@ if ($action === 'wetu_search' && $token) {
                 $_SESSION['wetu_samples'] = $base;
             }
 
-            /* PHP AND filter on name */
+            /* PHP AND filter: name words + language */
             $ql    = strtolower($q);
             $words = $ql !== '' ? preg_split('/\s+/', $ql, -1, PREG_SPLIT_NO_EMPTY) : [];
-            $found = array_values(array_filter($base, function($s) use ($words) {
+            $found = array_values(array_filter($base, function($s) use ($words, $lang) {
                 if (!is_array($s)) return false;
-                if (empty($words)) return true;
                 $name = strtolower((string)($s['name'] ?? $s['Name'] ?? ''));
-                foreach ($words as $word) {
-                    if (strpos($name, $word) === false) return false;
+                if (!empty($words)) {
+                    foreach ($words as $word) {
+                        if (strpos($name, $word) === false) return false;
+                    }
+                }
+                if ($lang !== '') {
+                    $slang = infer_language((string)($s['name'] ?? $s['Name'] ?? ''), $s);
+                    if (strcasecmp($slang, $lang) !== 0) return false;
                 }
                 return true;
             }));
@@ -341,9 +346,13 @@ if ($action === 'wetu_search' && $token) {
             $_SESSION['wetu_search_results'] = $found;
             $samples = $found;
 
+            $label_parts = [];
+            if ($lang) $label_parts[] = ucfirst(strtolower($lang));
+            if ($q)    $label_parts[] = '"' . $q . '"';
+            $label = implode(', ', $label_parts);
             $base_count = count(array_filter($base, 'is_array'));
             $wetu_success = count($found) . ' sample' . (count($found) !== 1 ? 's' : '') . ' found'
-                          . ($q ? ' for "' . h($q) . '"' : '')
+                          . ($label ? ' for ' . h($label) : '')
                           . ' (searched in ' . $base_count . ' samples).';
         } catch (Throwable $e) {
             $wetu_error = 'Search error: ' . h($e->getMessage());
