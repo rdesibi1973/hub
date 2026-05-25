@@ -873,8 +873,8 @@ include __DIR__ . '/includes/header.php';
             if ($wetu_search_query) $badge_parts[] = '"' . h($wetu_search_query) . '"';
             $badge_label = implode(', ', $badge_parts);
           ?>
-          <div style="margin-top:6px;font-size:.8rem;color:#1E4D7B;font-weight:600;">
-            Showing <?= count($samples_js_arr) ?> result<?= count($samples_js_arr) !== 1 ? 's' : '' ?>
+          <div style="margin-top:6px;font-size:.8rem;color:#1E4D7B;font-weight:600;" id="search-badge">
+            <span id="search-count"><?= count($samples_js_arr) ?></span> result<?= count($samples_js_arr) !== 1 ? 's' : '' ?>
             <?= $badge_label ? 'for: <em>' . $badge_label . '</em>' : '' ?>
           </div>
         <?php endif; ?>
@@ -1067,6 +1067,9 @@ function filterSamples() {
     if (hint) hint.textContent = count === allSamples.length
         ? `${count} samples available`
         : `${count} of ${allSamples.length} samples shown`;
+
+    const badge = document.getElementById('search-count');
+    if (badge) badge.textContent = count;
 }
 
 function onSampleChange(sel) {
