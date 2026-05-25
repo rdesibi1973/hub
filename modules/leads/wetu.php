@@ -320,25 +320,29 @@ if ($action === 'wetu_search' && $token) {
                 return $ids;
             };
 
-            /* Call 1 — text search (if query given) */
-            $text_ids = null;
-            if ($q !== '') {
-                $text_ids = $extract_ids(wetu_search_samples($u, $p, $q, ''));
-            }
-
-            /* Call 2 — language filter (if language given) */
+            /* Call 1 — language filter via Wetu API (accurate server-side) */
             $lang_ids = null;
             if ($lang !== '') {
                 $lang_ids = $extract_ids(wetu_search_samples($u, $p, '', $lang));
             }
 
-            /* Intersect: keep cached items whose UUID is in BOTH result sets */
-            $found = array_values(array_filter($base, function($s) use ($text_ids, $lang_ids) {
+            /* Filter cached list: language (UUID intersect) + title AND words (PHP) */
+            $ql    = strtolower($q);
+            $words = $ql !== '' ? preg_split('/\s+/', $ql, -1, PREG_SPLIT_NO_EMPTY) : [];
+            $found = array_values(array_filter($base, function($s) use ($lang_ids, $words) {
                 if (!is_array($s)) return false;
-                $id = $s['identifier'] ?? ($s['Identifier'] ?? null);
-                if (!$id) return false;
-                if ($text_ids !== null && !isset($text_ids[$id])) return false;
-                if ($lang_ids !== null && !isset($lang_ids[$id])) return false;
+                /* Language: UUID must be in Wetu language result set */
+                if ($lang_ids !== null) {
+                    $id = $s['identifier'] ?? ($s['Identifier'] ?? null);
+                    if (!$id || !isset($lang_ids[$id])) return false;
+                }
+                /* Title: every word must appear in the program name */
+                if (!empty($words)) {
+                    $name = strtolower((string)($s['name'] ?? $s['Name'] ?? ''));
+                    foreach ($words as $word) {
+                        if (strpos($name, $word) === false) return false;
+                    }
+                }
                 return true;
             }));
 
