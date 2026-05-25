@@ -384,10 +384,25 @@ if ($action === 'create_personal' && $token) {
     $client_name = wetu_utf8_sanitize(trim($_POST['client_name'] ?? ''));
     $ref_number  = wetu_utf8_sanitize(trim($_POST['ref_number']  ?? ''));
     $start_date  = trim($_POST['start_date']  ?? '');
-    $days        = max(1, intval($_POST['days'] ?? 0));   // kept for Wetu API (uses sample days if 0 → default 1)
-    $pax         = intval($_POST['pax'] ?? 0);
+    $days        = max(1, intval($_POST['days'] ?? 0));
+    $adults      = max(0, intval($_POST['adults']   ?? 2));
+    $children    = max(0, intval($_POST['children'] ?? 0));
     $language    = trim($_POST['language'] ?? 'en');
     if (!preg_match('/^[a-z]{2}$/', $language)) $language = 'en';
+
+    /* Traveller names */
+    $traveller_names = [];
+    foreach ($_POST['traveller'] ?? [] as $t) {
+        $t = wetu_utf8_sanitize(trim($t));
+        if ($t !== '') $traveller_names[] = $t;
+    }
+
+    /* Room counts */
+    $room_types = ['Single','Double','Twin','Triple','Family','Quadruple','Campsite'];
+    $rooms = [];
+    foreach ($room_types as $rt) {
+        $rooms[$rt] = max(0, intval($_POST['room_' . strtolower($rt)] ?? 0));
+    }
 
     if (!$sample_id)   $wetu_error = 'Please select a Sample itinerary.';
     elseif (!$client_name) $wetu_error = 'Client Name is required.';
@@ -442,14 +457,6 @@ if ($action === 'create_personal' && $token) {
             }
 
             /* 2 — Rewrite for Personal */
-            /* DEBUG: dump top-level itinerary field names to understand SOAP structure */
-            $wetu_debug = 'Itinerary fields: ' . implode(', ', array_keys((array)$itinerary))
-                        . ' | Adults=' . ($itinerary->Adults ?? 'n/a')
-                        . ' | Children=' . ($itinerary->Children ?? 'n/a')
-                        . ' | NumberOfAdults=' . ($itinerary->NumberOfAdults ?? 'n/a')
-                        . ' | Pax=' . ($itinerary->Pax ?? 'n/a')
-                        . ' | Rooms=' . (isset($itinerary->Rooms) ? json_encode($itinerary->Rooms) : 'n/a')
-                        . ' | Travellers=' . (isset($itinerary->Travellers) ? 'yes(' . count((array)$itinerary->Travellers) . ')' : 'n/a');
             unset($itinerary->Identifier);
             $itinerary->Type            = 'Personal';
             $itinerary->Name            = $client_name;
@@ -459,8 +466,27 @@ if ($action === 'create_personal' && $token) {
                 $ts = strtotime($start_date);
                 if ($ts) $itinerary->StartDate = date('Y-m-d\TH:i:s', $ts);
             }
-            $prev = trim($itinerary->Summary ?? '');
-            $itinerary->Summary = ($pax > 0 ? 'Pax: ' . $pax . "\n" : '') . $prev;
+            /* Adults / Children */
+            $itinerary->TravellersAdult    = $adults;
+            $itinerary->TravellersChildren = $children;
+            /* Rooms */
+            $itinerary->RoomsSingle    = $rooms['Single'];
+            $itinerary->RoomsDouble    = $rooms['Double'];
+            $itinerary->RoomsTwin      = $rooms['Twin'];
+            $itinerary->RoomsTriple    = $rooms['Triple'];
+            $itinerary->RoomsFamily    = $rooms['Family'];
+            $itinerary->RoomsQuadruple = $rooms['Quadruple'];
+            $itinerary->RoomsCampsite  = $rooms['Campsite'];
+            /* Traveller names */
+            if (!empty($traveller_names)) {
+                $travellers = [];
+                foreach ($traveller_names as $tname) {
+                    $t = new stdClass();
+                    $t->Name = $tname;
+                    $travellers[] = $t;
+                }
+                $itinerary->Travellers = $travellers;
+            }
 
             /* 3 — Save (with fallback minimal save on UTF-8 encoding errors) */
             $save_warning = '';
@@ -470,15 +496,23 @@ if ($action === 'create_personal' && $token) {
                 if (strpos($sf->getMessage(), 'not a valid utf-8') !== false) {
                     /* Fallback: save a clean minimal itinerary shell without day content */
                     $min = new stdClass();
-                    $min->Type            = 'Personal';
-                    $min->Name            = $client_name;
-                    $min->ReferenceNumber = $ref_number;
-                    $min->Language        = $language;
+                    $min->Type               = 'Personal';
+                    $min->Name               = $client_name;
+                    $min->ReferenceNumber    = $ref_number;
+                    $min->Language           = $language;
+                    $min->TravellersAdult    = $adults;
+                    $min->TravellersChildren = $children;
+                    $min->RoomsSingle    = $rooms['Single'];
+                    $min->RoomsDouble    = $rooms['Double'];
+                    $min->RoomsTwin      = $rooms['Twin'];
+                    $min->RoomsTriple    = $rooms['Triple'];
+                    $min->RoomsFamily    = $rooms['Family'];
+                    $min->RoomsQuadruple = $rooms['Quadruple'];
+                    $min->RoomsCampsite  = $rooms['Campsite'];
                     if ($start_date) {
                         $ts = strtotime($start_date);
                         if ($ts) $min->StartDate = date('Y-m-d\TH:i:s', $ts);
                     }
-                    if ($pax > 0) $min->Summary = 'Pax: ' . $pax;
                     $save_res = $c->SaveItinerary(['itinerary' => $min, 'sessionToken' => $soap_token]);
                     $save_warning = 'Note: sample content could not be copied due to special characters in the itinerary text. An empty personal itinerary was created — please add content manually in Wetu.';
                 } else {
@@ -500,7 +534,8 @@ if ($action === 'create_personal' && $token) {
             $created = [
                 'name'         => $client_name,
                 'ref'          => $ref_number,
-                'pax'          => $pax,
+                'adults'       => $adults,
+                'children'     => $children,
                 'days'         => $days,
                 'language'     => strtoupper($language),
                 'start_date'   => $start_date,
@@ -720,10 +755,6 @@ include __DIR__ . '/includes/header.php';
   </div>
     <div class="result-card-bd">
 
-    <?php if ($wetu_debug): ?>
-    <pre style="font-size:.68rem;background:#f5f5f5;padding:8px;border-radius:4px;margin-bottom:14px;white-space:pre-wrap;word-break:break-all;"><?= h($wetu_debug) ?></pre>
-    <?php endif; ?>
-
     <?php if (!empty($created['save_warning'])): ?>
     <div style="background:#fff3cd;border:1px solid #ffc107;border-radius:6px;padding:10px 14px;margin-bottom:14px;font-size:.82rem;color:#856404;">
       ⚠️ <?= h($created['save_warning']) ?>
@@ -732,9 +763,9 @@ include __DIR__ . '/includes/header.php';
 
     <div class="result-meta">
       <div><div class="meta-lbl">Client Name</div><div class="meta-val"><?= h($created['name']) ?></div></div>
-      <div><div class="meta-lbl">Reference Number</div><div class="meta-val"><?= h($created['ref']) ?></div></div>
-      <div><div class="meta-lbl">Duration</div><div class="meta-val"><?= $created['days'] ?> days</div></div>
-      <div><div class="meta-lbl">Pax</div><div class="meta-val"><?= $created['pax'] ?></div></div>
+      <div><div class="meta-lbl">Reference</div><div class="meta-val"><?= h($created['ref']) ?></div></div>
+      <div><div class="meta-lbl">Adults</div><div class="meta-val"><?= $created['adults'] ?></div></div>
+      <div><div class="meta-lbl">Children</div><div class="meta-val"><?= $created['children'] ?></div></div>
       <?php if ($created['start_date']): ?>
       <div><div class="meta-lbl">Start Date</div><div class="meta-val"><?= h(date('d M Y', strtotime($created['start_date']))) ?></div></div>
       <?php endif; ?>
@@ -867,19 +898,47 @@ include __DIR__ . '/includes/header.php';
         </div>
       </div>
 
-      <!-- Start Date + Pax -->
-      <div class="form-row" style="grid-template-columns:1fr 1fr;">
+      <!-- Start Date + Adults + Children -->
+      <div class="form-row" style="grid-template-columns:1fr 1fr 1fr;">
         <div class="form-group">
           <label class="form-label" for="start_date">Start Date</label>
           <input class="form-control" type="date" id="start_date" name="start_date"
                  value="<?= h($_POST['start_date'] ?? $prefill_date) ?>">
         </div>
         <div class="form-group">
-          <label class="form-label" for="pax">Pax</label>
-          <input class="form-control" type="number" id="pax" name="pax"
-                 min="1" max="99"
-                 value="<?= intval($_POST['pax'] ?? $prefill_pax) ?: '' ?>"
-                 placeholder="Optional">
+          <label class="form-label" for="adults">Adults</label>
+          <input class="form-control" type="number" id="adults" name="adults"
+                 min="0" max="99" value="<?= intval($_POST['adults'] ?? 2) ?>" placeholder="0">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="children">Children</label>
+          <input class="form-control" type="number" id="children" name="children"
+                 min="0" max="99" value="<?= intval($_POST['children'] ?? 0) ?>" placeholder="0">
+        </div>
+      </div>
+
+      <!-- Traveller Names -->
+      <div class="form-group" id="travellers-group">
+        <label class="form-label">Traveller Names <span style="font-weight:400;color:var(--grey-mid);">(optional)</span></label>
+        <div id="travellers-list" style="display:flex;flex-direction:column;gap:6px;"></div>
+        <div style="margin-top:6px;">
+          <button type="button" onclick="addTraveller()" style="font-size:.78rem;color:#1E4D7B;background:none;border:none;cursor:pointer;padding:0;font-weight:600;">+ Add traveller</button>
+        </div>
+      </div>
+
+      <!-- Room Configuration -->
+      <div class="form-group">
+        <label class="form-label">Room Configuration <span style="font-weight:400;color:var(--grey-mid);">(optional)</span></label>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;">
+          <?php foreach (['Single','Double','Twin','Triple','Family','Quadruple','Campsite'] as $rt): ?>
+          <div style="display:flex;align-items:center;gap:6px;">
+            <span style="font-size:.8rem;min-width:62px;"><?= $rt ?></span>
+            <button type="button" onclick="adj('room_<?= strtolower($rt) ?>',-1)" style="width:24px;height:24px;border:1px solid #ccc;background:#f5f5f5;border-radius:4px;cursor:pointer;font-size:.9rem;line-height:1;">−</button>
+            <input type="number" id="room_<?= strtolower($rt) ?>" name="room_<?= strtolower($rt) ?>"
+                   value="0" min="0" max="20" style="width:38px;text-align:center;border:1px solid #ccc;border-radius:4px;padding:2px 4px;font-size:.82rem;">
+            <button type="button" onclick="adj('room_<?= strtolower($rt) ?>',1)" style="width:24px;height:24px;border:1px solid #ccc;background:#f5f5f5;border-radius:4px;cursor:pointer;font-size:.9rem;line-height:1;">+</button>
+          </div>
+          <?php endforeach; ?>
         </div>
       </div>
 
@@ -993,7 +1052,48 @@ function onSampleChange(sel) {
     if (hl) hl.value = lang;
 }
 
-function copyLink(elId, btn) {
+/* ── Room +/- buttons ── */
+function adj(id, delta) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.value = Math.max(0, Math.min(20, parseInt(el.value || 0) + delta));
+}
+
+/* ── Traveller name rows ── */
+let travellerCount = 0;
+function addTraveller(name) {
+    const list = document.getElementById('travellers-list');
+    if (!list) return;
+    const idx  = travellerCount++;
+    const row  = document.createElement('div');
+    row.style.cssText = 'display:flex;gap:6px;align-items:center;';
+    row.innerHTML = `<input type="text" name="traveller[]" class="form-control" placeholder="Traveller name" value="${name ? name.replace(/"/g,'&quot;') : ''}" style="flex:1;">
+      <button type="button" onclick="this.parentNode.remove()" style="color:#999;background:none;border:none;cursor:pointer;font-size:1.1rem;line-height:1;padding:0 4px;" title="Remove">×</button>`;
+    list.appendChild(row);
+}
+
+/* Auto-populate traveller rows when adults changes */
+document.addEventListener('DOMContentLoaded', function() {
+    const adultsEl   = document.getElementById('adults');
+    const childrenEl = document.getElementById('children');
+    if (adultsEl) {
+        adultsEl.addEventListener('change', syncTravellerRows);
+        childrenEl?.addEventListener('change', syncTravellerRows);
+    }
+});
+function syncTravellerRows() {
+    const adults   = parseInt(document.getElementById('adults')?.value || 0);
+    const children = parseInt(document.getElementById('children')?.value || 0);
+    const total    = adults + children;
+    const list     = document.getElementById('travellers-list');
+    if (!list) return;
+    const current  = list.querySelectorAll('input').length;
+    // Only auto-add if list is currently empty
+    if (current === 0) {
+        for (let i = 0; i < total; i++) addTraveller('');
+    }
+}
+
     const el = document.getElementById(elId);
     copyText(el.href || el.textContent.trim(), btn);
 }
