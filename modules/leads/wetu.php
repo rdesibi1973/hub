@@ -289,9 +289,8 @@ if ($token && !$created && !in_array($action, ['wetu_login', 'wetu_search', 'wet
 
 /* ═══════════════════════════════════════════════════════════════
    ACTION: SEARCH / FILTER
-   - Language filter: Wetu API V8/List with language= param (server-side, accurate)
-   - Name filter: AND word match on name from cached list
-   - Results always taken from cached list (complete items with identifier_key)
+   Two Wetu API calls (text search + language filter), intersect
+   results by identifier UUID, pull complete items from cached list.
 ═══════════════════════════════════════════════════════════════ */
 if ($action === 'wetu_search' && $token) {
     $q    = trim($_POST['wetu_search_query'] ?? '');
@@ -310,39 +309,36 @@ if ($action === 'wetu_search' && $token) {
                 $_SESSION['wetu_samples'] = $base;
             }
 
-            if ($lang !== '') {
-                $lang_raw = wetu_search_samples($u, $p, '', $lang);
-                $lang_ids = [];
-                $debug_sample = !empty($lang_raw) ? json_encode(array_slice($lang_raw[0] ?? [], 0)) : 'empty';
-                foreach ($lang_raw as $lr) {
-                    if (!is_array($lr)) continue;
-                    $id  = $lr['identifier']     ?? ($lr['Identifier']    ?? null);
-                    $key = $lr['identifier_key'] ?? ($lr['IdentifierKey'] ?? null);
-                    if ($id)  $lang_ids['id_'  . $id]  = true;
-                    if ($key) $lang_ids['key_' . $key] = true;
+            /* Helper: UUID set from a Wetu API result */
+            $extract_ids = function(array $rows): array {
+                $ids = [];
+                foreach ($rows as $r) {
+                    if (!is_array($r)) continue;
+                    $id = $r['identifier'] ?? ($r['Identifier'] ?? null);
+                    if ($id) $ids[$id] = true;
                 }
-                $wetu_debug = "lang API returned " . count($lang_raw) . " items, " . count($lang_ids) . " ids. First: " . substr($debug_sample, 0, 200);
-                if (!empty($lang_ids)) {
-                    $base = array_values(array_filter($base, function($s) use ($lang_ids) {
-                        if (!is_array($s)) return false;
-                        $id  = $s['identifier']     ?? ($s['Identifier']    ?? null);
-                        $key = $s['identifier_key'] ?? ($s['IdentifierKey'] ?? null);
-                        return ($id  && isset($lang_ids['id_'  . $id]))
-                            || ($key && isset($lang_ids['key_' . $key]));
-                    }));
-                }
+                return $ids;
+            };
+
+            /* Call 1 — text search (if query given) */
+            $text_ids = null;
+            if ($q !== '') {
+                $text_ids = $extract_ids(wetu_search_samples($u, $p, $q, ''));
             }
 
-            /* Name AND filter on (already language-filtered) base */
-            $ql    = strtolower($q);
-            $words = $ql !== '' ? preg_split('/\s+/', $ql, -1, PREG_SPLIT_NO_EMPTY) : [];
-            $found = array_values(array_filter($base, function($s) use ($words) {
+            /* Call 2 — language filter (if language given) */
+            $lang_ids = null;
+            if ($lang !== '') {
+                $lang_ids = $extract_ids(wetu_search_samples($u, $p, '', $lang));
+            }
+
+            /* Intersect: keep cached items whose UUID is in BOTH result sets */
+            $found = array_values(array_filter($base, function($s) use ($text_ids, $lang_ids) {
                 if (!is_array($s)) return false;
-                if (empty($words)) return true;
-                $name = strtolower((string)($s['name'] ?? $s['Name'] ?? ''));
-                foreach ($words as $word) {
-                    if (strpos($name, $word) === false) return false;
-                }
+                $id = $s['identifier'] ?? ($s['Identifier'] ?? null);
+                if (!$id) return false;
+                if ($text_ids !== null && !isset($text_ids[$id])) return false;
+                if ($lang_ids !== null && !isset($lang_ids[$id])) return false;
                 return true;
             }));
 
