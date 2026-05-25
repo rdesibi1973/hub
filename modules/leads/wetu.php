@@ -320,42 +320,65 @@ if ($action === 'wetu_search' && $token) {
                 $_SESSION['wetu_samples'] = $base;
             }
 
-            /* Helper: UUID set from a Wetu API result */
-            $extract_ids = function(array $rows): array {
-                $ids = [];
-                foreach ($rows as $r) {
-                    if (!is_array($r)) continue;
-                    $id = $r['identifier'] ?? ($r['Identifier'] ?? null);
-                    if ($id) $ids[$id] = true;
-                }
-                return $ids;
-            };
-
-            /* Call 1 — language filter via Wetu API (accurate server-side) */
-            $lang_ids = null;
-            if ($lang !== '') {
-                $lang_ids = $extract_ids(wetu_search_samples($u, $p, '', $lang));
+            /* Build UUID → identifier_key map from cached list */
+            $id_key_map = [];
+            foreach ($base as $s) {
+                if (!is_array($s)) continue;
+                $id  = $s['identifier']     ?? ($s['Identifier']    ?? null);
+                $key = $s['identifier_key'] ?? ($s['IdentifierKey'] ?? null);
+                if ($id && $key) $id_key_map[$id] = $key;
             }
 
-            /* Filter cached list: language (UUID intersect) + title AND words (PHP) */
+            /* Determine the pool of items to title-filter:
+               - With language: use paginated Wetu language API (gets ALL language items beyond cached 200)
+               - Without language: use cached list */
             $ql    = strtolower($q);
             $words = $ql !== '' ? preg_split('/\s+/', $ql, -1, PREG_SPLIT_NO_EMPTY) : [];
-            $found = array_values(array_filter($base, function($s) use ($lang_ids, $words) {
-                if (!is_array($s)) return false;
-                /* Language: UUID must be in Wetu language result set */
-                if ($lang_ids !== null) {
-                    $id = $s['identifier'] ?? ($s['Identifier'] ?? null);
-                    if (!$id || !isset($lang_ids[$id])) return false;
+
+            if ($lang !== '') {
+                $lang_rows = wetu_search_samples($u, $p, '', $lang);
+                /* PHP title filter on language results, then resolve identifier_key */
+                $found = [];
+                foreach ($lang_rows as $s) {
+                    if (!is_array($s)) continue;
+                    $name = strtolower((string)($s['name'] ?? $s['Name'] ?? ''));
+                    if (!empty($words)) {
+                        $ok = true;
+                        foreach ($words as $word) { if (strpos($name, $word) === false) { $ok = false; break; } }
+                        if (!$ok) continue;
+                    }
+                    /* Resolve identifier_key from cache map (needed for SOAP call) */
+                    $id  = $s['identifier']     ?? ($s['Identifier']    ?? null);
+                    $key = $s['identifier_key'] ?? ($s['IdentifierKey'] ?? $id_key_map[$id] ?? null);
+                    if (!$key) continue;  // skip if we can't resolve it
+                    /* Use cached item if available (has more fields), otherwise use API item */
+                    if (isset($id_key_map[$id])) {
+                        /* Find full item from cache */
+                        foreach ($base as $b) {
+                            if (is_array($b) && ($b['identifier'] ?? ($b['Identifier'] ?? null)) === $id) {
+                                $found[] = $b;
+                                break;
+                            }
+                        }
+                    } else {
+                        /* Not in cache — use API item, inject the key */
+                        $s['identifier_key'] = $key;
+                        $found[] = $s;
+                    }
                 }
-                /* Title: every word must appear in the program name */
-                if (!empty($words)) {
+                $found = array_values($found);
+            } else {
+                /* No language filter: PHP title filter on cached list */
+                $found = array_values(array_filter($base, function($s) use ($words) {
+                    if (!is_array($s)) return false;
+                    if (empty($words)) return true;
                     $name = strtolower((string)($s['name'] ?? $s['Name'] ?? ''));
                     foreach ($words as $word) {
                         if (strpos($name, $word) === false) return false;
                     }
-                }
-                return true;
-            }));
+                    return true;
+                }));
+            }
 
             $_SESSION['wetu_search_query']   = $q;
             $_SESSION['wetu_search_lang']    = $lang;
