@@ -1031,7 +1031,6 @@ function buildLangLOV() {
 
 /* ── Populate dropdown on load ── */
 document.addEventListener('DOMContentLoaded', function() {
-    buildLangLOV();
     filterSamples();
 });
 
