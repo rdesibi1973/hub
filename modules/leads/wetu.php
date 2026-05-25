@@ -288,7 +288,12 @@ if ($action === 'wetu_login') {
                 $_SESSION['wetu_pass']     = $p;
                 $_SESSION['wetu_operator'] = $sess->OperatorName ?? '';
                 $_SESSION['wetu_samples']  = $fetched;
-                $_SESSION['wetu_lang_map'] = wetu_build_lang_map($u, $p);
+                $lang_map = wetu_build_lang_map($u, $p);
+                $_SESSION['wetu_lang_map'] = $lang_map;
+                // Count per language for debug
+                $lm_counts = [];
+                foreach ($lang_map as $lk => $lv) { $lm_counts[$lv] = ($lm_counts[$lv] ?? 0) + 1; }
+                $wetu_debug = 'lang_map built: ' . count($lang_map) . ' entries — ' . implode(', ', array_map(fn($l,$c) => "$l:$c", array_keys($lm_counts), $lm_counts));
                 $token    = $sess->SessionToken;
                 $wetu_user = $u;
                 $wetu_op   = $sess->OperatorName ?? '';
@@ -708,8 +713,9 @@ include __DIR__ . '/includes/header.php';
 <?php endif; ?>
 
 <?php if ($wetu_success && !$created): ?>
-<div class="wetu-alert wetu-alert-success">✅ <?= $wetu_success ?></div>
-
+<div class="wetu-alert wetu-alert-success">✅ <?= $wetu_success ?>
+<?php if ($wetu_debug): ?><br><small style="font-family:monospace;font-weight:400;"><?= h($wetu_debug) ?></small><?php endif; ?>
+</div>
 <?php endif; ?>
 
 
