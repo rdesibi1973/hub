@@ -544,16 +544,16 @@ $samples_json = json_encode($samples_js_arr, JSON_HEX_APOS | JSON_HEX_QUOT | JSO
 $pageTitle  = 'Wetu Itinerary Builder';
 $extra_css  = '
 /* ── WETU PAGE EXTRAS ── */
-:root { --wetu: #1E4D7B; --wetu-lt: #E5EFF7; }
+:root { --wetu: #1E4D7B; --wetu-lt: #f5f5f5; }
 
 .wetu-session-bar {
-  background: var(--wetu-lt); border: 1px solid #b8d0e8;
+  background: var(--white); border: 1px solid var(--grey-lt);
   border-radius: 8px; padding: 10px 16px;
   display: flex; align-items: center; gap: 10px;
   margin-bottom: 22px; font-size: .8rem;
 }
 .wetu-session-bar .dot { width:8px;height:8px;border-radius:50%;background:#27ae60;flex-shrink:0; }
-.wetu-session-bar strong { color: var(--wetu); }
+.wetu-session-bar strong { color: var(--black); }
 .wetu-session-bar .sep  { color: var(--grey-lt); margin: 0 4px; }
 
 .wetu-alert {
@@ -562,57 +562,34 @@ $extra_css  = '
   margin-bottom: 20px;
   display: flex; align-items: flex-start; gap: 9px;
 }
-.wetu-alert-error   { background: var(--red-lt);  color: var(--red-dk); border-left: 4px solid var(--red); }
-.wetu-alert-success { background: var(--green-lt); color: var(--green);  border-left: 4px solid var(--green); }
+.wetu-alert-error   { background: #fff0f0; color: #a00; border-left: 4px solid #C0211B; }
+.wetu-alert-success { background: #f5f5f5; color: #333; border-left: 4px solid #555; }
 
 .wetu-login-wrap { max-width: 400px; }
 .wetu-brand-badge {
   display: inline-flex; align-items: center; gap: 10px;
-  background: var(--wetu-lt); border: 1px solid #b8d0e8;
+  background: #f5f5f5; border: 1px solid var(--grey-lt);
   border-radius: 10px; padding: 10px 18px;
   margin-bottom: 20px;
 }
-.wetu-brand-badge span { font-family: "Merriweather",serif; font-size:1rem; font-weight:700; color:var(--wetu); }
+.wetu-brand-badge span { font-family: "Merriweather",serif; font-size:1rem; font-weight:700; color:var(--black); }
 .login-note { font-size:.72rem; color:var(--grey-mid); margin-top:14px; line-height:1.5; }
-
-.lang-toggle {
-  display: flex; border: 1.5px solid var(--grey-lt);
-  border-radius: 6px; overflow: hidden; height:38px;
-}
-.lang-toggle input[type="radio"] { display: none; }
-.lang-toggle label {
-  flex:1; display:flex; align-items:center; justify-content:center;
-  font-size:.82rem; font-weight:700; letter-spacing:.06em;
-  text-transform:uppercase; cursor:pointer;
-  background:var(--white); color:var(--grey-mid);
-  transition:background .15s, color .15s; padding: 0 14px;
-}
-.lang-toggle label:first-of-type { border-right: 1.5px solid var(--grey-lt); }
-.lang-toggle input:checked + label { background: var(--wetu); color: var(--white); }
 
 .field-hint { font-size:.68rem; color:var(--grey-mid); margin-top:3px; }
 .sample-count { font-size:.7rem; color:var(--grey-mid); font-weight:600; }
 
 /* Result card */
-.result-card { background:var(--white); border-radius:10px; border:2px solid #9dd4aa; box-shadow:0 2px 14px rgba(46,107,62,.1); overflow:hidden; margin-bottom:22px; }
-.result-card-hd { background:var(--green-lt); padding:14px 22px; display:flex; align-items:center; gap:10px; }
-.result-card-hd h3 { font-family:"Merriweather",serif; font-size:.95rem; font-weight:700; color:var(--green); }
+.result-card { background:var(--white); border-radius:10px; border:1px solid var(--grey-lt); box-shadow:0 1px 6px rgba(0,0,0,.06); overflow:hidden; margin-bottom:22px; }
+.result-card-hd { background:#f5f5f5; padding:14px 22px; display:flex; align-items:center; gap:10px; border-bottom:1px solid var(--grey-lt); }
+.result-card-hd h3 { font-family:"Merriweather",serif; font-size:.95rem; font-weight:700; color:var(--black); }
 .result-card-bd { padding: 22px; }
 .result-meta { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:20px; }
 .meta-lbl { font-size:.67rem; font-weight:700; text-transform:uppercase; letter-spacing:.1em; color:var(--grey-mid); margin-bottom:2px; }
 .meta-val { font-size:.86rem; font-weight:600; color:var(--black); }
-.result-link-row { display:flex; align-items:center; gap:10px; background:var(--off-white); border-radius:7px; padding:10px 14px; margin-bottom:8px; }
-.result-link-row .lbl { font-size:.7rem; font-weight:700; text-transform:uppercase; letter-spacing:.08em; color:var(--grey-mid); min-width:90px; flex-shrink:0; }
-.result-link-row a { font-size:.8rem; color:var(--wetu); text-decoration:none; font-weight:600; word-break:break-all; }
-.result-link-row a:hover { text-decoration:underline; }
-.copy-btn { margin-left:auto; flex-shrink:0; background:var(--white); border:1.5px solid var(--grey-lt); border-radius:5px; padding:3px 10px; font-size:.7rem; font-weight:600; color:var(--grey-dk); cursor:pointer; transition:all .15s; }
-.copy-btn:hover { border-color:var(--wetu); color:var(--wetu); }
-.copy-btn.copied { border-color:var(--green); color:var(--green); }
 
 .btn-wetu { background:#1E4D7B !important; color:#fff !important; }
 .btn-wetu:hover { background:#163d63 !important; }
 
-/* Ensure anchor .btn elements look like buttons, not links */
 a.btn { text-decoration: none !important; }
 a.btn-secondary { color: var(--grey-dk) !important; }
 a.btn-wetu      { color: #fff !important; }
@@ -628,12 +605,19 @@ a.btn-wetu      { color: #fff !important; }
 }
 .btn-disconnect:hover { background: #FAE8E7; }
 
-
-/* Inline refresh form */
-.refresh-form {
-  background: #E5EFF7; border: 1px solid #b8d0e8;
-  border-radius: 7px; padding: 10px 16px;
-  margin-bottom: 12px;
+/* Steps */
+.wetu-steps { margin: 0 0 20px 0; padding: 0; list-style: none; counter-reset: steps; }
+.wetu-steps li {
+  counter-increment: steps;
+  display: flex; align-items: flex-start; gap: 10px;
+  font-size: .82rem; color: var(--grey-dk); margin-bottom: 8px;
+}
+.wetu-steps li::before {
+  content: counter(steps);
+  min-width: 22px; height: 22px; border-radius: 50%;
+  background: #e8e8e8; color: #444;
+  display: flex; align-items: center; justify-content: center;
+  font-size: .72rem; font-weight: 700; flex-shrink: 0; margin-top: 1px;
 }
 ';
 include __DIR__ . '/includes/header.php';
@@ -778,6 +762,12 @@ include __DIR__ . '/includes/header.php';
     <span style="font-size:.75rem;color:var(--grey-mid);">Copy a Sample as Personal and customise it for the client</span>
   </div>
   <div class="card-body">
+
+    <ol class="wetu-steps">
+      <li>Search for the Sample program you need — e.g. select language <em>Italian</em> and type <em>SIMBA 2026</em></li>
+      <li>Select the Sample program to copy as a Personal program from the dropdown</li>
+      <li>Fill in Client Name, Reference Number and the other fields, then click <strong>Create</strong></li>
+    </ol>
 
       <!-- FILTER WETU SAMPLE PROGRAMS — standalone form (must not be nested inside create-form) -->
       <div class="form-group" style="margin-bottom:14px;">
