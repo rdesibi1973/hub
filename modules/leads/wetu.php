@@ -823,7 +823,7 @@ include __DIR__ . '/includes/header.php';
 
           <!-- Row 1: Language -->
           <div style="display:flex;gap:8px;align-items:center;">
-            <select name="wetu_search_lang" id="wetu_search_lang" class="form-control" style="max-width:200px;" onchange="filterSamples()">
+            <select name="wetu_search_lang" id="wetu_search_lang" class="form-control" style="max-width:200px;">
               <option value="">All languages</option>
               <option value="English"  <?= ($wetu_search_lang === 'English'  ? 'selected' : '') ?>>English</option>
               <option value="Italian"  <?= ($wetu_search_lang === 'Italian'  ? 'selected' : '') ?>>Italian</option>
@@ -1009,8 +1009,7 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 function filterSamples() {
-    const langRaw = document.getElementById('wetu_search_lang')?.value || '';
-    const sel     = document.getElementById('sample_id');
+    const sel = document.getElementById('sample_id');
     if (!sel) return;
 
     const prev = sel.value;
@@ -1018,10 +1017,6 @@ function filterSamples() {
 
     let count = 0;
     allSamples.forEach(s => {
-        // Language filter: exact match on raw value from API
-        if (langRaw && s.lang !== langRaw) return;
-        // Name filter: case-insensitive contains
-
         const langTag = {'english':'EN','italian':'IT','german':'DE','spanish':'ES','french':'FR'};
         const opt = document.createElement('option');
         opt.value = s.id;
