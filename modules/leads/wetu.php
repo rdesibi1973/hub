@@ -302,7 +302,9 @@ if ($action === 'wetu_login') {
                 /* Debug: show how many we fetched vs API total */
                 $debug_url = 'https://wetu.com/API/Itinerary/V8/List?' . http_build_query(['username'=>$u,'password'=>$p,'type'=>'Sample','results'=>1,'start'=>0]);
                 $debug_res = wetu_json_get_with_total($debug_url);
-                $wetu_debug = 'Fetched ' . count($fetched) . ' samples. API total: ' . $debug_res['total'] . '. language=Italian test: ' . count(wetu_search_samples($u, $p, '', 'Italian')) . ' items.';
+                $lang_test = count(wetu_search_samples($u, $p, '', 'Italian'));
+                $wetu_debug = 'Fetched ' . count($fetched) . ' samples. API total: ' . $debug_res['total'] . '. language=Italian test: ' . $lang_test . ' items.';
+                $wetu_success = 'Connected as ' . h($u) . ' — ' . count($fetched) . ' samples loaded.';
                 $token    = $sess->SessionToken;
                 $wetu_user = $u;
                 $wetu_op   = $sess->OperatorName ?? '';
@@ -324,7 +326,7 @@ if ($action === 'wetu_login') {
 /* ═══════════════════════════════════════════════════════════════
    LOAD SAMPLES FROM SESSION CACHE
 ═══════════════════════════════════════════════════════════════ */
-$wetu_debug = '';
+if (empty($wetu_debug)) $wetu_debug = '';
 
 
 if ($token && !$created && !in_array($action, ['wetu_login', 'wetu_search', 'wetu_clear_search'])) {
