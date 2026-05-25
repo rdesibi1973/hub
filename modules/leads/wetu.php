@@ -352,7 +352,20 @@ if ($action === 'wetu_search' && $token) {
             $_SESSION['wetu_search_results'] = $found;
             $samples = $found;
 
-            $label_parts = [];
+            /* DEBUG TEMP: show filter stats */
+            $name_pass = array_values(array_filter($base, function($s) use ($words) {
+                if (!is_array($s)) return false;
+                $name = strtolower((string)($s['name'] ?? $s['Name'] ?? ''));
+                foreach ($words as $word) { if (strpos($name, $word) === false) return false; }
+                return true;
+            }));
+            $lang_pass = array_values(array_filter($name_pass, function($s) use ($lang) {
+                $slang = infer_language((string)($s['name'] ?? $s['Name'] ?? ''), $s);
+                return strcasecmp($slang, $lang) === 0;
+            }));
+            $sample_names = array_map(fn($s) => ($s['name'] ?? '?') . ' → ' . infer_language($s['name'] ?? '', $s), array_slice($name_pass, 0, 10));
+            $wetu_debug = 'name_match:' . count($name_pass) . ' lang_match:' . count($lang_pass) . ' | ' . implode(' | ', $sample_names);
+            /* END DEBUG */
             if ($lang) $label_parts[] = ucfirst(strtolower($lang));
             if ($q)    $label_parts[] = '"' . $q . '"';
             $label = implode(', ', $label_parts);
