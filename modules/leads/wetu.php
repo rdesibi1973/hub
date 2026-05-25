@@ -220,20 +220,31 @@ function wetu_fetch_samples(string $u, string $p): array {
 /* ── Search: call V8/List with a search term + optional language ── */
 if (!function_exists('wetu_search_samples')) {
 function wetu_search_samples(string $u, string $p, string $search, string $lang = ''): array {
-    $params = [
-        'username' => $u,
-        'password' => $p,
-        'type'     => 'Sample',
-        'results'  => 200,
-        'start'    => 0,
-        'sort'     => 'ItineraryNameAsc',
-    ];
-    if ($search !== '') $params['search']   = $search;
-    if ($lang   !== '') $params['language'] = $lang;
+    $all      = [];
+    $pageSize = 200;
+    $start    = 0;
+    $maxPages = 10;
 
-    $url   = 'https://wetu.com/API/Itinerary/V8/List?' . http_build_query($params);
-    $batch = wetu_json_get($url);
-    return is_array($batch) ? $batch : [];
+    for ($page = 0; $page < $maxPages; $page++) {
+        $params = [
+            'username' => $u,
+            'password' => $p,
+            'type'     => 'Sample',
+            'results'  => $pageSize,
+            'start'    => $start,
+            'sort'     => 'ItineraryNameAsc',
+        ];
+        if ($search !== '') $params['search']   = $search;
+        if ($lang   !== '') $params['language'] = $lang;
+
+        $url   = 'https://wetu.com/API/Itinerary/V8/List?' . http_build_query($params);
+        $batch = wetu_json_get($url);
+        if (!is_array($batch) || empty($batch)) break;
+        $all   = array_merge($all, $batch);
+        $start += $pageSize;
+        if (count($batch) < $pageSize) break;
+    }
+    return $all;
 }
 }
 
