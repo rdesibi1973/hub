@@ -299,12 +299,23 @@ if ($action === 'wetu_login') {
                 $_SESSION['wetu_pass']     = $p;
                 $_SESSION['wetu_operator'] = $sess->OperatorName ?? '';
                 $_SESSION['wetu_samples']  = $fetched;
-                /* Debug: show how many we fetched vs API total */
-                $debug_url = 'https://wetu.com/API/Itinerary/V8/List?' . http_build_query(['username'=>$u,'password'=>$p,'type'=>'Sample','results'=>1,'start'=>0]);
-                $debug_res = wetu_json_get_with_total($debug_url);
-                $lang_test = count(wetu_search_samples($u, $p, '', 'Italian'));
-                $wetu_debug = 'Fetched ' . count($fetched) . ' samples. API total: ' . $debug_res['total'] . '. language=Italian test: ' . $lang_test . ' items.';
-                $wetu_success = 'Connected as ' . h($u) . ' — ' . count($fetched) . ' samples loaded.';
+                /* Supplement cache: fetch by language to capture programs beyond position 200.
+                   Combine all, deduplicate by identifier UUID. */
+                $combined = [];
+                foreach ($fetched as $s) {
+                    if (is_array($s) && isset($s['identifier'])) $combined[$s['identifier']] = $s;
+                }
+                foreach (['Italian','English','French','German','Spanish'] as $lng) {
+                    $lng_items = wetu_search_samples($u, $p, '', $lng);
+                    foreach ($lng_items as $s) {
+                        if (is_array($s) && isset($s['identifier']) && !isset($combined[$s['identifier']])) {
+                            $combined[$s['identifier']] = $s;
+                        }
+                    }
+                }
+                $all_samples = array_values($combined);
+                $_SESSION['wetu_samples'] = $all_samples;
+                $wetu_success = 'Connected as ' . h($u) . ' — ' . count($all_samples) . ' samples loaded.';
                 $token    = $sess->SessionToken;
                 $wetu_user = $u;
                 $wetu_op   = $sess->OperatorName ?? '';
@@ -358,65 +369,28 @@ if ($action === 'wetu_search' && $token) {
                 $_SESSION['wetu_samples'] = $base;
             }
 
-            /* Build UUID → identifier_key map from cached list */
-            $id_key_map = [];
-            foreach ($base as $s) {
-                if (!is_array($s)) continue;
-                $id  = $s['identifier']     ?? ($s['Identifier']    ?? null);
-                $key = $s['identifier_key'] ?? ($s['IdentifierKey'] ?? null);
-                if ($id && $key) $id_key_map[$id] = $key;
-            }
-
             /* Determine the pool of items to title-filter:
-               - With language: use paginated Wetu language API (gets ALL language items beyond cached 200)
-               - Without language: use cached list */
+               - With language: PHP infer_language filter on comprehensive cache
+               - Without language: full cache */
             $ql    = strtolower($q);
             $words = $ql !== '' ? preg_split('/\s+/', $ql, -1, PREG_SPLIT_NO_EMPTY) : [];
 
-            if ($lang !== '') {
-                $lang_rows = wetu_search_samples($u, $p, '', $lang);
-                /* PHP title filter on language results, then resolve identifier_key */
-                $found = [];
-                foreach ($lang_rows as $s) {
-                    if (!is_array($s)) continue;
-                    $name = strtolower((string)($s['name'] ?? $s['Name'] ?? ''));
-                    if (!empty($words)) {
-                        $ok = true;
-                        foreach ($words as $word) { if (strpos($name, $word) === false) { $ok = false; break; } }
-                        if (!$ok) continue;
-                    }
-                    /* Resolve identifier_key from cache map (needed for SOAP call) */
-                    $id  = $s['identifier']     ?? ($s['Identifier']    ?? null);
-                    $key = $s['identifier_key'] ?? ($s['IdentifierKey'] ?? $id_key_map[$id] ?? null);
-                    if (!$key) continue;  // skip if we can't resolve it
-                    /* Use cached item if available (has more fields), otherwise use API item */
-                    if (isset($id_key_map[$id])) {
-                        /* Find full item from cache */
-                        foreach ($base as $b) {
-                            if (is_array($b) && ($b['identifier'] ?? ($b['Identifier'] ?? null)) === $id) {
-                                $found[] = $b;
-                                break;
-                            }
-                        }
-                    } else {
-                        /* Not in cache — use API item, inject the key */
-                        $s['identifier_key'] = $key;
-                        $found[] = $s;
-                    }
+            $found = array_values(array_filter($base, function($s) use ($words, $lang) {
+                if (!is_array($s)) return false;
+                /* Language filter via infer_language (API language= param is ignored by Wetu) */
+                if ($lang !== '') {
+                    $slang = infer_language((string)($s['name'] ?? $s['Name'] ?? ''), $s);
+                    if (strcasecmp($slang, $lang) !== 0) return false;
                 }
-                $found = array_values($found);
-            } else {
-                /* No language filter: PHP title filter on cached list */
-                $found = array_values(array_filter($base, function($s) use ($words) {
-                    if (!is_array($s)) return false;
-                    if (empty($words)) return true;
+                /* Title AND filter */
+                if (!empty($words)) {
                     $name = strtolower((string)($s['name'] ?? $s['Name'] ?? ''));
                     foreach ($words as $word) {
                         if (strpos($name, $word) === false) return false;
                     }
-                    return true;
-                }));
-            }
+                }
+                return true;
+            }));
 
             $_SESSION['wetu_search_query']   = $q;
             $_SESSION['wetu_search_lang']    = $lang;
