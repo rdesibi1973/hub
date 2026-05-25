@@ -340,7 +340,8 @@ if ($action === 'wetu_search' && $token) {
                 }));
                 $debug_lines = [];
                 foreach ($all_name_match as $s) {
-                    $debug_lines[] = ($s['name'] ?? '?') . ' → ' . infer_language((string)($s['name'] ?? ''), $s);
+                    $raw_lang = is_array($s) ? ($s['language'] ?? ($s['Language'] ?? 'n/a')) : 'n/a';
+                    $debug_lines[] = ($s['name'] ?? '?') . ' [api_lang=' . $raw_lang . '] → ' . infer_language((string)($s['name'] ?? ''), $s);
                 }
                 $wetu_debug = count($all_name_match) . " name matches:\n" . implode("\n", $debug_lines);
             }
