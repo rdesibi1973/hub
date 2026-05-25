@@ -720,6 +720,10 @@ include __DIR__ . '/includes/header.php';
   </div>
     <div class="result-card-bd">
 
+    <?php if ($wetu_debug): ?>
+    <pre style="font-size:.68rem;background:#f5f5f5;padding:8px;border-radius:4px;margin-bottom:14px;white-space:pre-wrap;word-break:break-all;"><?= h($wetu_debug) ?></pre>
+    <?php endif; ?>
+
     <?php if (!empty($created['save_warning'])): ?>
     <div style="background:#fff3cd;border:1px solid #ffc107;border-radius:6px;padding:10px 14px;margin-bottom:14px;font-size:.82rem;color:#856404;">
       ⚠️ <?= h($created['save_warning']) ?>
