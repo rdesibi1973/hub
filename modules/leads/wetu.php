@@ -272,79 +272,76 @@ if ($action === 'wetu_login') {
 ═══════════════════════════════════════════════════════════════ */
 $wetu_debug = '';
 
+/* ── Refresh samples action (re-fetch using stored username + new password) ── */
+if ($action === 'wetu_refresh' && $token) {
+    $p = trim($_POST['wetu_password'] ?? '');
+    $u = $_SESSION['wetu_user'] ?? '';
+    if (!$p) {
+        $wetu_error = 'Please enter your Wetu password to refresh the sample list.';
+    } else {
+        try {
+            $fetched = wetu_fetch_samples($u, $p);
+            if ($fetched !== null && !empty($fetched)) {
+                $_SESSION['wetu_pass']    = $p;
+                $_SESSION['wetu_samples'] = $fetched;
+                $samples = $fetched;
+                $wetu_success = count($fetched) . ' samples refreshed successfully.';
+            } else {
+                $wetu_error = 'Refresh failed — wrong password or no samples returned.';
+            }
+        } catch (Throwable $e) {
+            $wetu_error = 'Refresh error: ' . h($e->getMessage());
+        }
+    }
+}
 
-if ($token && !$created && !in_array($action, ['wetu_login', 'wetu_search', 'wetu_clear_search'])) {
-    $samples = $_SESSION['wetu_samples'] ?? [];
+if ($token && !$created && !in_array($action, ['wetu_login', 'wetu_refresh', 'wetu_search', 'wetu_clear_search'])) {
+    $samples = isset($_SESSION['wetu_search_results']) ? $_SESSION['wetu_search_results'] : ($_SESSION['wetu_samples'] ?? []);
     if (empty($samples) && $token) {
         $wetu_error = 'No samples in session — please disconnect and sign in again.';
     }
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   ACTION: SEARCH / FILTER
-   - Text query  → Wetu full-text search (finds matches in content too)
-   - Language    → PHP filter on results (infer_language is reliable)
-   - No query, no lang → restore full cached list
+   ACTION: SEARCH / FILTER — always filter cached list in PHP by title
+   Language filtering is handled client-side by the LOV (JS filterSamples)
 ═══════════════════════════════════════════════════════════════ */
 if ($action === 'wetu_search' && $token) {
-    $q          = trim($_POST['wetu_search_query'] ?? '');
-    $lang       = trim($_POST['wetu_search_lang']  ?? '');
-    $title_only = !empty($_POST['title_only']);
-    $u    = $_SESSION['wetu_user'] ?? '';
-    $p    = $_SESSION['wetu_pass'] ?? '';
+    $q = trim($_POST['wetu_search_query'] ?? '');
+    $u = $_SESSION['wetu_user'] ?? '';
+    $p = $_SESSION['wetu_pass'] ?? '';
     if (!$u || !$p) {
         $wetu_error = 'Session expired — please disconnect and sign in again.';
         $samples = $_SESSION['wetu_samples'] ?? [];
     } else {
         try {
-            if ($title_only || $q === '') {
-                /* Title search or no query: filter the full cached list in PHP */
-                $base = $_SESSION['wetu_samples'] ?? [];
-                if (empty($base)) {
-                    $base = wetu_fetch_samples($u, $p);
-                    $_SESSION['wetu_samples'] = $base;
-                }
-            } else {
-                /* Full-text search: let Wetu search content + name */
-                $base = wetu_search_samples($u, $p, $q, '');
+            /* Always use cached list — wetu_search_samples returns incomplete items */
+            $base = $_SESSION['wetu_samples'] ?? [];
+            if (empty($base)) {
+                $base = wetu_fetch_samples($u, $p);
+                $_SESSION['wetu_samples'] = $base;
             }
 
-            /* PHP filters: language + AND word match on name (both modes) */
-            $ql = strtolower($q);
+            /* PHP AND filter: every word in query must appear in name */
+            $ql    = strtolower($q);
             $words = $ql !== '' ? preg_split('/\s+/', $ql, -1, PREG_SPLIT_NO_EMPTY) : [];
-            $found = array_values(array_filter($base, function($s) use ($words, $lang) {
+            $found = array_values(array_filter($base, function($s) use ($words) {
                 if (!is_array($s)) return false;
-                $name = strtolower((string)($s['name'] ?? $s['Name'] ?? $s['itinerary_name'] ?? $s['ItineraryName'] ?? ''));
-                /* AND: every word must appear in the name */
+                if (empty($words)) return true;
+                $name = strtolower((string)($s['name'] ?? $s['Name'] ?? ''));
                 foreach ($words as $word) {
                     if (strpos($name, $word) === false) return false;
-                }
-                /* Language filter */
-                if ($lang !== '') {
-                    $slang = infer_language(
-                        (string)($s['name'] ?? $s['Name'] ?? $s['itinerary_name'] ?? $s['ItineraryName'] ?? ''),
-                        $s
-                    );
-                    if (strcasecmp($slang, $lang) !== 0) return false;
                 }
                 return true;
             }));
 
-            $_SESSION['wetu_search_query']      = $q;
-            $_SESSION['wetu_search_lang']       = $lang;
-            $_SESSION['wetu_search_title_only'] = $title_only;
-            $_SESSION['wetu_search_results']    = $found;
+            $_SESSION['wetu_search_query']   = $q;
+            $_SESSION['wetu_search_results'] = $found;
             $samples = $found;
 
-            $label_parts = [];
-            if ($lang)       $label_parts[] = ucfirst(strtolower($lang));
-            if ($q)          $label_parts[] = '"' . $q . '"';
-            if ($title_only) $label_parts[] = 'title only';
-            $label = implode(', ', $label_parts);
             $base_count = count(array_filter($base, 'is_array'));
-
             $wetu_success = count($found) . ' sample' . (count($found) !== 1 ? 's' : '') . ' found'
-                          . ($label ? ' for ' . h($label) : '')
+                          . ($q ? ' for "' . h($q) . '"' : '')
                           . ' (searched in ' . $base_count . ' samples).';
         } catch (Throwable $e) {
             $wetu_error = 'Search error: ' . h($e->getMessage());
@@ -366,7 +363,7 @@ if ($action === 'wetu_clear_search') {
 if ($token && empty($samples)) {
     if (isset($_SESSION['wetu_search_results'])) {
         $samples = $_SESSION['wetu_search_results'];
-    } elseif (!in_array($action, ['wetu_login', 'wetu_search'])) {
+    } elseif (!in_array($action, ['wetu_login', 'wetu_refresh', 'wetu_search'])) {
         $samples = $_SESSION['wetu_samples'] ?? [];
     }
 }
@@ -384,20 +381,15 @@ if ($action === 'create_personal' && $token) {
     $client_name = wetu_utf8_sanitize(trim($_POST['client_name'] ?? ''));
     $ref_number  = wetu_utf8_sanitize(trim($_POST['ref_number']  ?? ''));
     $start_date  = trim($_POST['start_date']  ?? '');
-    $days        = max(1, intval($_POST['days'] ?? 0));
     $adults      = max(0, intval($_POST['adults']   ?? 2));
     $children    = max(0, intval($_POST['children'] ?? 0));
     $language    = trim($_POST['language'] ?? 'en');
     if (!preg_match('/^[a-z]{2}$/', $language)) $language = 'en';
-
-    /* Traveller names */
     $traveller_names = [];
     foreach ($_POST['traveller'] ?? [] as $t) {
         $t = wetu_utf8_sanitize(trim($t));
         if ($t !== '') $traveller_names[] = $t;
     }
-
-    /* Room counts */
     $room_types = ['Single','Double','Twin','Triple','Family','Quadruple','Campsite'];
     $rooms = [];
     foreach ($room_types as $rt) {
@@ -458,34 +450,29 @@ if ($action === 'create_personal' && $token) {
 
             /* 2 — Rewrite for Personal */
             unset($itinerary->Identifier);
-            $itinerary->Type            = 'Personal';
-            $itinerary->Name            = $client_name;
-            $itinerary->ReferenceNumber = $ref_number;
-            $itinerary->Language        = $language;
-            if ($start_date) {
-                $ts = strtotime($start_date);
-                if ($ts) $itinerary->StartDate = date('Y-m-d\TH:i:s', $ts);
-            }
-            /* Adults / Children */
+            $itinerary->Type               = 'Personal';
+            $itinerary->Name               = $client_name;
+            $itinerary->ReferenceNumber    = $ref_number;
+            $itinerary->Language           = $language;
             $itinerary->TravellersAdult    = $adults;
             $itinerary->TravellersChildren = $children;
-            /* Rooms */
-            $itinerary->RoomsSingle    = $rooms['Single'];
-            $itinerary->RoomsDouble    = $rooms['Double'];
-            $itinerary->RoomsTwin      = $rooms['Twin'];
-            $itinerary->RoomsTriple    = $rooms['Triple'];
-            $itinerary->RoomsFamily    = $rooms['Family'];
-            $itinerary->RoomsQuadruple = $rooms['Quadruple'];
-            $itinerary->RoomsCampsite  = $rooms['Campsite'];
-            /* Traveller names */
+            $itinerary->RoomsSingle        = $rooms['Single'];
+            $itinerary->RoomsDouble        = $rooms['Double'];
+            $itinerary->RoomsTwin          = $rooms['Twin'];
+            $itinerary->RoomsTriple        = $rooms['Triple'];
+            $itinerary->RoomsFamily        = $rooms['Family'];
+            $itinerary->RoomsQuadruple     = $rooms['Quadruple'];
+            $itinerary->RoomsCampsite      = $rooms['Campsite'];
             if (!empty($traveller_names)) {
                 $travellers = [];
                 foreach ($traveller_names as $tname) {
-                    $t = new stdClass();
-                    $t->Name = $tname;
-                    $travellers[] = $t;
+                    $t = new stdClass(); $t->Name = $tname; $travellers[] = $t;
                 }
                 $itinerary->Travellers = $travellers;
+            }
+            if ($start_date) {
+                $ts = strtotime($start_date);
+                if ($ts) $itinerary->StartDate = date('Y-m-d\TH:i:s', $ts);
             }
 
             /* 3 — Save (with fallback minimal save on UTF-8 encoding errors) */
@@ -502,17 +489,11 @@ if ($action === 'create_personal' && $token) {
                     $min->Language           = $language;
                     $min->TravellersAdult    = $adults;
                     $min->TravellersChildren = $children;
-                    $min->RoomsSingle    = $rooms['Single'];
-                    $min->RoomsDouble    = $rooms['Double'];
-                    $min->RoomsTwin      = $rooms['Twin'];
-                    $min->RoomsTriple    = $rooms['Triple'];
-                    $min->RoomsFamily    = $rooms['Family'];
-                    $min->RoomsQuadruple = $rooms['Quadruple'];
+                    $min->RoomsSingle    = $rooms['Single'];   $min->RoomsDouble    = $rooms['Double'];
+                    $min->RoomsTwin      = $rooms['Twin'];     $min->RoomsTriple    = $rooms['Triple'];
+                    $min->RoomsFamily    = $rooms['Family'];   $min->RoomsQuadruple = $rooms['Quadruple'];
                     $min->RoomsCampsite  = $rooms['Campsite'];
-                    if ($start_date) {
-                        $ts = strtotime($start_date);
-                        if ($ts) $min->StartDate = date('Y-m-d\TH:i:s', $ts);
-                    }
+                    if ($start_date) { $ts = strtotime($start_date); if ($ts) $min->StartDate = date('Y-m-d\TH:i:s', $ts); }
                     $save_res = $c->SaveItinerary(['itinerary' => $min, 'sessionToken' => $soap_token]);
                     $save_warning = 'Note: sample content could not be copied due to special characters in the itinerary text. An empty personal itinerary was created — please add content manually in Wetu.';
                 } else {
@@ -536,7 +517,6 @@ if ($action === 'create_personal' && $token) {
                 'ref'          => $ref_number,
                 'adults'       => $adults,
                 'children'     => $children,
-                'days'         => $days,
                 'language'     => strtoupper($language),
                 'start_date'   => $start_date,
                 'view_url'     => $view_url,
@@ -587,16 +567,16 @@ $samples_json = json_encode($samples_js_arr, JSON_HEX_APOS | JSON_HEX_QUOT | JSO
 $pageTitle  = 'Wetu Itinerary Builder';
 $extra_css  = '
 /* ── WETU PAGE EXTRAS ── */
-:root { --wetu: #1E4D7B; --wetu-lt: #f5f5f5; }
+:root { --wetu: #1E4D7B; --wetu-lt: #E5EFF7; }
 
 .wetu-session-bar {
-  background: var(--white); border: 1px solid var(--grey-lt);
+  background: var(--wetu-lt); border: 1px solid #b8d0e8;
   border-radius: 8px; padding: 10px 16px;
   display: flex; align-items: center; gap: 10px;
   margin-bottom: 22px; font-size: .8rem;
 }
 .wetu-session-bar .dot { width:8px;height:8px;border-radius:50%;background:#27ae60;flex-shrink:0; }
-.wetu-session-bar strong { color: var(--black); }
+.wetu-session-bar strong { color: var(--wetu); }
 .wetu-session-bar .sep  { color: var(--grey-lt); margin: 0 4px; }
 
 .wetu-alert {
@@ -605,34 +585,57 @@ $extra_css  = '
   margin-bottom: 20px;
   display: flex; align-items: flex-start; gap: 9px;
 }
-.wetu-alert-error   { background: #fff0f0; color: #a00; border-left: 4px solid #C0211B; }
-.wetu-alert-success { background: #f5f5f5; color: #333; border-left: 4px solid #555; }
+.wetu-alert-error   { background: var(--red-lt);  color: var(--red-dk); border-left: 4px solid var(--red); }
+.wetu-alert-success { background: var(--green-lt); color: var(--green);  border-left: 4px solid var(--green); }
 
 .wetu-login-wrap { max-width: 400px; }
 .wetu-brand-badge {
   display: inline-flex; align-items: center; gap: 10px;
-  background: #f5f5f5; border: 1px solid var(--grey-lt);
+  background: var(--wetu-lt); border: 1px solid #b8d0e8;
   border-radius: 10px; padding: 10px 18px;
   margin-bottom: 20px;
 }
-.wetu-brand-badge span { font-family: "Merriweather",serif; font-size:1rem; font-weight:700; color:var(--black); }
+.wetu-brand-badge span { font-family: "Merriweather",serif; font-size:1rem; font-weight:700; color:var(--wetu); }
 .login-note { font-size:.72rem; color:var(--grey-mid); margin-top:14px; line-height:1.5; }
+
+.lang-toggle {
+  display: flex; border: 1.5px solid var(--grey-lt);
+  border-radius: 6px; overflow: hidden; height:38px;
+}
+.lang-toggle input[type="radio"] { display: none; }
+.lang-toggle label {
+  flex:1; display:flex; align-items:center; justify-content:center;
+  font-size:.82rem; font-weight:700; letter-spacing:.06em;
+  text-transform:uppercase; cursor:pointer;
+  background:var(--white); color:var(--grey-mid);
+  transition:background .15s, color .15s; padding: 0 14px;
+}
+.lang-toggle label:first-of-type { border-right: 1.5px solid var(--grey-lt); }
+.lang-toggle input:checked + label { background: var(--wetu); color: var(--white); }
 
 .field-hint { font-size:.68rem; color:var(--grey-mid); margin-top:3px; }
 .sample-count { font-size:.7rem; color:var(--grey-mid); font-weight:600; }
 
 /* Result card */
-.result-card { background:var(--white); border-radius:10px; border:1px solid var(--grey-lt); box-shadow:0 1px 6px rgba(0,0,0,.06); overflow:hidden; margin-bottom:22px; }
-.result-card-hd { background:#f5f5f5; padding:14px 22px; display:flex; align-items:center; gap:10px; border-bottom:1px solid var(--grey-lt); }
-.result-card-hd h3 { font-family:"Merriweather",serif; font-size:.95rem; font-weight:700; color:var(--black); }
+.result-card { background:var(--white); border-radius:10px; border:2px solid #9dd4aa; box-shadow:0 2px 14px rgba(46,107,62,.1); overflow:hidden; margin-bottom:22px; }
+.result-card-hd { background:var(--green-lt); padding:14px 22px; display:flex; align-items:center; gap:10px; }
+.result-card-hd h3 { font-family:"Merriweather",serif; font-size:.95rem; font-weight:700; color:var(--green); }
 .result-card-bd { padding: 22px; }
 .result-meta { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:20px; }
 .meta-lbl { font-size:.67rem; font-weight:700; text-transform:uppercase; letter-spacing:.1em; color:var(--grey-mid); margin-bottom:2px; }
 .meta-val { font-size:.86rem; font-weight:600; color:var(--black); }
+.result-link-row { display:flex; align-items:center; gap:10px; background:var(--off-white); border-radius:7px; padding:10px 14px; margin-bottom:8px; }
+.result-link-row .lbl { font-size:.7rem; font-weight:700; text-transform:uppercase; letter-spacing:.08em; color:var(--grey-mid); min-width:90px; flex-shrink:0; }
+.result-link-row a { font-size:.8rem; color:var(--wetu); text-decoration:none; font-weight:600; word-break:break-all; }
+.result-link-row a:hover { text-decoration:underline; }
+.copy-btn { margin-left:auto; flex-shrink:0; background:var(--white); border:1.5px solid var(--grey-lt); border-radius:5px; padding:3px 10px; font-size:.7rem; font-weight:600; color:var(--grey-dk); cursor:pointer; transition:all .15s; }
+.copy-btn:hover { border-color:var(--wetu); color:var(--wetu); }
+.copy-btn.copied { border-color:var(--green); color:var(--green); }
 
 .btn-wetu { background:#1E4D7B !important; color:#fff !important; }
 .btn-wetu:hover { background:#163d63 !important; }
 
+/* Ensure anchor .btn elements look like buttons, not links */
 a.btn { text-decoration: none !important; }
 a.btn-secondary { color: var(--grey-dk) !important; }
 a.btn-wetu      { color: #fff !important; }
@@ -648,19 +651,22 @@ a.btn-wetu      { color: #fff !important; }
 }
 .btn-disconnect:hover { background: #FAE8E7; }
 
-/* Steps */
-.wetu-steps { margin: 0 0 20px 0; padding: 0; list-style: none; counter-reset: steps; }
-.wetu-steps li {
-  counter-increment: steps;
-  display: flex; align-items: flex-start; gap: 10px;
-  font-size: .82rem; color: var(--grey-dk); margin-bottom: 8px;
+/* Refresh button */
+.btn-refresh {
+  font-family: inherit; font-size: .75rem; font-weight: 700;
+  letter-spacing: .04em; text-transform: uppercase;
+  padding: 5px 14px; border-radius: 5px; cursor: pointer;
+  background: #fff; color: #1E4D7B;
+  border: 1.5px solid #1E4D7B;
+  transition: background .15s;
 }
-.wetu-steps li::before {
-  content: counter(steps);
-  min-width: 22px; height: 22px; border-radius: 50%;
-  background: #e8e8e8; color: #444;
-  display: flex; align-items: center; justify-content: center;
-  font-size: .72rem; font-weight: 700; flex-shrink: 0; margin-top: 1px;
+.btn-refresh:hover { background: #E5EFF7; }
+
+/* Inline refresh form */
+.refresh-form {
+  background: #E5EFF7; border: 1px solid #b8d0e8;
+  border-radius: 7px; padding: 10px 16px;
+  margin-bottom: 12px;
 }
 ';
 include __DIR__ . '/includes/header.php';
@@ -741,11 +747,22 @@ include __DIR__ . '/includes/header.php';
   Connected as <strong><?= h($wetu_user) ?></strong>
   <?php if ($wetu_op): ?><span class="sep">|</span><?= h($wetu_op) ?><?php endif; ?>
   <div style="margin-left:auto;display:flex;gap:8px;align-items:center;">
+    <button type="button" class="btn-refresh" onclick="toggleRefresh('rf1')">↻ Refresh Samples</button>
     <form method="POST" action="wetu.php">
       <input type="hidden" name="action" value="wetu_logout">
       <button type="submit" class="btn-disconnect">⏏ Disconnect</button>
     </form>
   </div>
+</div>
+<div id="rf1" class="refresh-form" style="display:none;">
+  <form method="POST" action="wetu.php" style="display:flex;gap:8px;align-items:center;">
+    <input type="hidden" name="action" value="wetu_refresh">
+    <span style="font-size:.78rem;color:#888;">Wetu password:</span>
+    <input type="password" name="wetu_password" class="form-control" style="max-width:200px;padding:6px 10px;"
+           placeholder="Enter password to refresh" autocomplete="current-password" required>
+    <button type="submit" class="btn-refresh">↻ Refresh</button>
+    <button type="button" class="btn-disconnect" onclick="toggleRefresh('rf1')">Cancel</button>
+  </form>
 </div>
 
 <div class="result-card">
@@ -792,11 +809,22 @@ include __DIR__ . '/includes/header.php';
   <?php if ($wetu_op): ?><span class="sep">|</span><?= h($wetu_op) ?><?php endif; ?>
   <span style="font-size:.7rem;color:#888;margin-left:8px;"><?= count($samples_js_arr) ?> samples</span>
   <div style="margin-left:auto;display:flex;gap:8px;align-items:center;">
+    <button type="button" class="btn-refresh" onclick="toggleRefresh('rf2')">↻ Refresh Samples</button>
     <form method="POST" action="wetu.php">
       <input type="hidden" name="action" value="wetu_logout">
       <button type="submit" class="btn-disconnect">⏏ Disconnect</button>
     </form>
   </div>
+</div>
+<div id="rf2" class="refresh-form" style="display:none;">
+  <form method="POST" action="wetu.php" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+    <input type="hidden" name="action" value="wetu_refresh">
+    <span style="font-size:.78rem;color:#888;">Wetu password:</span>
+    <input type="password" name="wetu_password" class="form-control" style="max-width:200px;padding:6px 10px;"
+           placeholder="Enter password to refresh" autocomplete="current-password" required>
+    <button type="submit" class="btn-refresh">↻ Refresh</button>
+    <button type="button" class="btn-disconnect" onclick="toggleRefresh('rf2')">Cancel</button>
+  </form>
 </div>
 
 <div class="card">
@@ -805,12 +833,6 @@ include __DIR__ . '/includes/header.php';
     <span style="font-size:.75rem;color:var(--grey-mid);">Copy a Sample as Personal and customise it for the client</span>
   </div>
   <div class="card-body">
-
-    <ol class="wetu-steps">
-      <li>Search for the Sample program you need — e.g. select language <em>Italian</em> and type <em>SIMBA 2026</em></li>
-      <li>Select the Sample program to copy as a Personal program from the dropdown</li>
-      <li>Fill in Client Name, Reference Number and the other fields, then click <strong>Create</strong></li>
-    </ol>
 
       <!-- FILTER WETU SAMPLE PROGRAMS — standalone form (must not be nested inside create-form) -->
       <div class="form-group" style="margin-bottom:14px;">
@@ -908,17 +930,17 @@ include __DIR__ . '/includes/header.php';
         <div class="form-group">
           <label class="form-label" for="adults">Adults</label>
           <input class="form-control" type="number" id="adults" name="adults"
-                 min="0" max="99" value="<?= intval($_POST['adults'] ?? 2) ?>" placeholder="0">
+                 min="0" max="99" value="<?= intval($_POST['adults'] ?? 2) ?>">
         </div>
         <div class="form-group">
           <label class="form-label" for="children">Children</label>
           <input class="form-control" type="number" id="children" name="children"
-                 min="0" max="99" value="<?= intval($_POST['children'] ?? 0) ?>" placeholder="0">
+                 min="0" max="99" value="<?= intval($_POST['children'] ?? 0) ?>">
         </div>
       </div>
 
       <!-- Traveller Names -->
-      <div class="form-group" id="travellers-group">
+      <div class="form-group">
         <label class="form-label">Traveller Names <span style="font-weight:400;color:var(--grey-mid);">(optional)</span></label>
         <div id="travellers-list" style="display:flex;flex-direction:column;gap:6px;"></div>
         <div style="margin-top:6px;">
@@ -974,6 +996,13 @@ const langNames = {
 };
 
 /* ── Build language LOV dynamically from actual sample data ── */
+function toggleRefresh(id) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const visible = el.style.display !== 'none';
+    el.style.display = visible ? 'none' : 'block';
+    if (!visible) el.querySelector('input[type=password]')?.focus();
+}
 
 function buildLangLOV() {
     const sel = document.getElementById('wetu_search_lang');
@@ -1008,7 +1037,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
 function filterSamples() {
     const langRaw = document.getElementById('wetu_search_lang')?.value || '';
-    
     const sel     = document.getElementById('sample_id');
     if (!sel) return;
 
@@ -1051,48 +1079,25 @@ function onSampleChange(sel) {
     if (hl) hl.value = lang;
 }
 
-/* ── Room +/- buttons ── */
+/* ── Room +/- ── */
 function adj(id, delta) {
     const el = document.getElementById(id);
-    if (!el) return;
-    el.value = Math.max(0, Math.min(20, parseInt(el.value || 0) + delta));
+    if (el) el.value = Math.max(0, Math.min(20, parseInt(el.value || 0) + delta));
 }
 
 /* ── Traveller name rows ── */
-let travellerCount = 0;
 function addTraveller(name) {
     const list = document.getElementById('travellers-list');
     if (!list) return;
-    const idx  = travellerCount++;
-    const row  = document.createElement('div');
+    const row = document.createElement('div');
     row.style.cssText = 'display:flex;gap:6px;align-items:center;';
-    row.innerHTML = `<input type="text" name="traveller[]" class="form-control" placeholder="Traveller name" value="${name ? name.replace(/"/g,'&quot;') : ''}" style="flex:1;">
-      <button type="button" onclick="this.parentNode.remove()" style="color:#999;background:none;border:none;cursor:pointer;font-size:1.1rem;line-height:1;padding:0 4px;" title="Remove">×</button>`;
+    row.innerHTML = '<input type="text" name="traveller[]" class="form-control" placeholder="Traveller name"'
+        + (name ? ' value="' + name.replace(/"/g,'&quot;') + '"' : '') + ' style="flex:1;">'
+        + '<button type="button" onclick="this.parentNode.remove()" style="color:#999;background:none;border:none;cursor:pointer;font-size:1.1rem;padding:0 4px;">×</button>';
     list.appendChild(row);
 }
 
-/* Auto-populate traveller rows when adults changes */
-document.addEventListener('DOMContentLoaded', function() {
-    const adultsEl   = document.getElementById('adults');
-    const childrenEl = document.getElementById('children');
-    if (adultsEl) {
-        adultsEl.addEventListener('change', syncTravellerRows);
-        childrenEl?.addEventListener('change', syncTravellerRows);
-    }
-});
-function syncTravellerRows() {
-    const adults   = parseInt(document.getElementById('adults')?.value || 0);
-    const children = parseInt(document.getElementById('children')?.value || 0);
-    const total    = adults + children;
-    const list     = document.getElementById('travellers-list');
-    if (!list) return;
-    const current  = list.querySelectorAll('input').length;
-    // Only auto-add if list is currently empty
-    if (current === 0) {
-        for (let i = 0; i < total; i++) addTraveller('');
-    }
-}
-
+function copyLink(elId, btn) {
     const el = document.getElementById(elId);
     copyText(el.href || el.textContent.trim(), btn);
 }
