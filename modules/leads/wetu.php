@@ -849,18 +849,6 @@ include __DIR__ . '/includes/header.php';
         <form method="post" action="wetu.php" style="display:flex;flex-direction:column;gap:8px;" id="wetu-search-form">
           <input type="hidden" name="action" value="wetu_search">
 
-          <!-- Row 1: Language -->
-          <div style="display:flex;gap:8px;align-items:center;">
-            <select name="wetu_search_lang" id="wetu_search_lang" class="form-control" style="max-width:200px;">
-              <option value="">All languages</option>
-              <option value="English"  <?= ($wetu_search_lang === 'English'  ? 'selected' : '') ?>>English</option>
-              <option value="Italian"  <?= ($wetu_search_lang === 'Italian'  ? 'selected' : '') ?>>Italian</option>
-              <option value="German"   <?= ($wetu_search_lang === 'German'   ? 'selected' : '') ?>>German</option>
-              <option value="Spanish"  <?= ($wetu_search_lang === 'Spanish'  ? 'selected' : '') ?>>Spanish</option>
-              <option value="French"   <?= ($wetu_search_lang === 'French'   ? 'selected' : '') ?>>French</option>
-            </select>
-          </div>
-
           <!-- Row 2: Text search + button — full width to match sample dropdown -->
           <div style="display:flex;gap:8px;align-items:center;">
             <input type="text" name="wetu_search_query" id="wetu_search_query"
@@ -882,7 +870,7 @@ include __DIR__ . '/includes/header.php';
           ?>
           <div style="margin-top:6px;font-size:.8rem;color:#1E4D7B;font-weight:600;" id="search-badge">
             <span id="search-count"><?= count($samples_js_arr) ?></span> result<?= count($samples_js_arr) !== 1 ? 's' : '' ?>
-            <?= $badge_label ? 'for: <em>' . $badge_label . '</em>' : '' ?>
+            <?= $wetu_search_query ? 'for: <em>"' . h($wetu_search_query) . '"</em>' : '' ?>
           </div>
         <?php endif; ?>
       </div>
