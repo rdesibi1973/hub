@@ -288,8 +288,10 @@ if ($token && !$created && !in_array($action, ['wetu_login', 'wetu_search', 'wet
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   ACTION: SEARCH / FILTER — always filter cached list in PHP by title
-   Language filtering is handled client-side by the LOV (JS filterSamples)
+   ACTION: SEARCH / FILTER
+   - Language filter: Wetu API V8/List with language= param (server-side, accurate)
+   - Name filter: AND word match on name from cached list
+   - Results always taken from cached list (complete items with identifier_key)
 ═══════════════════════════════════════════════════════════════ */
 if ($action === 'wetu_search' && $token) {
     $q    = trim($_POST['wetu_search_query'] ?? '');
@@ -301,23 +303,41 @@ if ($action === 'wetu_search' && $token) {
         $samples = $_SESSION['wetu_samples'] ?? [];
     } else {
         try {
-            /* Always use cached list */
+            /* Full cached list (complete items with identifier_key) */
             $base = $_SESSION['wetu_samples'] ?? [];
             if (empty($base)) {
                 $base = wetu_fetch_samples($u, $p);
                 $_SESSION['wetu_samples'] = $base;
             }
 
-            /* PHP AND filter: name words + language */
+            /* If language selected: use Wetu API language filter to get matching identifiers,
+               then intersect with cached list (which has complete item data) */
+            if ($lang !== '') {
+                $lang_raw = wetu_search_samples($u, $p, '', $lang);
+                $lang_keys = [];
+                foreach ($lang_raw as $lr) {
+                    if (!is_array($lr)) continue;
+                    $k = $lr['identifier_key'] ?? ($lr['IdentifierKey'] ?? null);
+                    if ($k) $lang_keys[$k] = true;
+                }
+                if (!empty($lang_keys)) {
+                    $base = array_values(array_filter($base, function($s) use ($lang_keys) {
+                        if (!is_array($s)) return false;
+                        $k = $s['identifier_key'] ?? ($s['IdentifierKey'] ?? null);
+                        return $k && isset($lang_keys[$k]);
+                    }));
+                }
+            }
+
+            /* Name AND filter on (already language-filtered) base */
             $ql    = strtolower($q);
             $words = $ql !== '' ? preg_split('/\s+/', $ql, -1, PREG_SPLIT_NO_EMPTY) : [];
-            $found = array_values(array_filter($base, function($s) use ($words, $lang) {
+            $found = array_values(array_filter($base, function($s) use ($words) {
                 if (!is_array($s)) return false;
+                if (empty($words)) return true;
                 $name = strtolower((string)($s['name'] ?? $s['Name'] ?? ''));
-                if (!empty($words)) {
-                    foreach ($words as $word) {
-                        if (strpos($name, $word) === false) return false;
-                    }
+                foreach ($words as $word) {
+                    if (strpos($name, $word) === false) return false;
                 }
                 return true;
             }));
@@ -326,10 +346,12 @@ if ($action === 'wetu_search' && $token) {
             $_SESSION['wetu_search_lang']    = $lang;
             $_SESSION['wetu_search_results'] = $found;
             $samples = $found;
+
+            $label_parts = [];
             if ($lang) $label_parts[] = ucfirst(strtolower($lang));
             if ($q)    $label_parts[] = '"' . $q . '"';
             $label = implode(', ', $label_parts);
-            $base_count = count(array_filter($base, 'is_array'));
+            $base_count = count(array_filter($_SESSION['wetu_samples'], 'is_array'));
             $wetu_success = count($found) . ' sample' . (count($found) !== 1 ? 's' : '') . ' found'
                           . ($label ? ' for ' . h($label) : '')
                           . ' (searched in ' . $base_count . ' samples).';
