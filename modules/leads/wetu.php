@@ -65,10 +65,16 @@ function infer_language(string $name, $s): string {
     $api = is_array($s) ? trim($s['language'] ?? ($s['Language'] ?? ($s['lang'] ?? ''))) : '';
     if ($api !== '') return $api;
     $n = strtoupper($name);
+    // Full words
     if (strpos($n, 'ITALIANO') !== false || strpos($n, 'ITALIAN') !== false) return 'Italian';
     if (strpos($n, 'FRENCH')   !== false || strpos($n, 'FRANCESE') !== false) return 'French';
     if (strpos($n, 'GERMAN')   !== false || strpos($n, 'TEDESCO')  !== false || strpos($n, 'DEUTSCH') !== false) return 'German';
     if (strpos($n, 'SPANISH')  !== false || strpos($n, 'ESPANOL')  !== false || strpos($n, 'SPAGNOLO') !== false) return 'Spanish';
+    // 3-letter abbreviations (word-boundary: space, underscore, hyphen, start/end)
+    if (preg_match('/(?<![A-Z])IT[AO](?![A-Z])/', $n)) return 'Italian';
+    if (preg_match('/(?<![A-Z])FR[AEH](?![A-Z])/',  $n)) return 'French';
+    if (preg_match('/(?<![A-Z])DEU(?![A-Z])/',       $n)) return 'German';
+    if (preg_match('/(?<![A-Z])ESP(?![A-Z])/',       $n)) return 'Spanish';
     return 'English';
 }
 }
