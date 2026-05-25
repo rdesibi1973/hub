@@ -278,30 +278,8 @@ if ($action === 'wetu_login') {
 ═══════════════════════════════════════════════════════════════ */
 $wetu_debug = '';
 
-/* ── Refresh samples action (re-fetch using stored username + new password) ── */
-if ($action === 'wetu_refresh' && $token) {
-    $p = trim($_POST['wetu_password'] ?? '');
-    $u = $_SESSION['wetu_user'] ?? '';
-    if (!$p) {
-        $wetu_error = 'Please enter your Wetu password to refresh the sample list.';
-    } else {
-        try {
-            $fetched = wetu_fetch_samples($u, $p);
-            if ($fetched !== null && !empty($fetched)) {
-                $_SESSION['wetu_pass']    = $p;
-                $_SESSION['wetu_samples'] = $fetched;
-                $samples = $fetched;
-                $wetu_success = count($fetched) . ' samples refreshed successfully.';
-            } else {
-                $wetu_error = 'Refresh failed — wrong password or no samples returned.';
-            }
-        } catch (Throwable $e) {
-            $wetu_error = 'Refresh error: ' . h($e->getMessage());
-        }
-    }
-}
 
-if ($token && !$created && !in_array($action, ['wetu_login', 'wetu_refresh', 'wetu_search', 'wetu_clear_search'])) {
+if ($token && !$created && !in_array($action, ['wetu_login', 'wetu_search', 'wetu_clear_search'])) {
     $samples = isset($_SESSION['wetu_search_results']) ? $_SESSION['wetu_search_results'] : ($_SESSION['wetu_samples'] ?? []);
     if (empty($samples) && $token) {
         $wetu_error = 'No samples in session — please disconnect and sign in again.';
@@ -351,21 +329,6 @@ if ($action === 'wetu_search' && $token) {
             $_SESSION['wetu_search_lang']    = $lang;
             $_SESSION['wetu_search_results'] = $found;
             $samples = $found;
-
-            /* DEBUG TEMP: show filter stats */
-            $name_pass = array_values(array_filter($base, function($s) use ($words) {
-                if (!is_array($s)) return false;
-                $name = strtolower((string)($s['name'] ?? $s['Name'] ?? ''));
-                foreach ($words as $word) { if (strpos($name, $word) === false) return false; }
-                return true;
-            }));
-            $lang_pass = array_values(array_filter($name_pass, function($s) use ($lang) {
-                $slang = infer_language((string)($s['name'] ?? $s['Name'] ?? ''), $s);
-                return strcasecmp($slang, $lang) === 0;
-            }));
-            $sample_names = array_map(fn($s) => ($s['name'] ?? '?') . ' → ' . infer_language($s['name'] ?? '', $s), array_slice($name_pass, 0, 10));
-            $wetu_debug = 'name_match:' . count($name_pass) . ' lang_match:' . count($lang_pass) . ' | ' . implode(' | ', $sample_names);
-            /* END DEBUG */
             if ($lang) $label_parts[] = ucfirst(strtolower($lang));
             if ($q)    $label_parts[] = '"' . $q . '"';
             $label = implode(', ', $label_parts);
@@ -393,7 +356,7 @@ if ($action === 'wetu_clear_search') {
 if ($token && empty($samples)) {
     if (isset($_SESSION['wetu_search_results'])) {
         $samples = $_SESSION['wetu_search_results'];
-    } elseif (!in_array($action, ['wetu_login', 'wetu_refresh', 'wetu_search'])) {
+    } elseif (!in_array($action, ['wetu_login', 'wetu_search'])) {
         $samples = $_SESSION['wetu_samples'] ?? [];
     }
 }
@@ -681,16 +644,6 @@ a.btn-wetu      { color: #fff !important; }
 }
 .btn-disconnect:hover { background: #FAE8E7; }
 
-/* Refresh button */
-.btn-refresh {
-  font-family: inherit; font-size: .75rem; font-weight: 700;
-  letter-spacing: .04em; text-transform: uppercase;
-  padding: 5px 14px; border-radius: 5px; cursor: pointer;
-  background: #fff; color: #1E4D7B;
-  border: 1.5px solid #1E4D7B;
-  transition: background .15s;
-}
-.btn-refresh:hover { background: #E5EFF7; }
 
 /* Inline refresh form */
 .refresh-form {
@@ -722,9 +675,7 @@ include __DIR__ . '/includes/header.php';
 
 <?php if ($wetu_success && !$created): ?>
 <div class="wetu-alert wetu-alert-success">✅ <?= $wetu_success ?></div>
-<?php if ($wetu_debug): ?>
-<pre style="font-size:.7rem;background:#f5f5f5;padding:8px 12px;border-radius:6px;margin-bottom:12px;white-space:pre-wrap;word-break:break-all;"><?= h($wetu_debug) ?></pre>
-<?php endif; ?>
+
 <?php endif; ?>
 
 
@@ -780,25 +731,12 @@ include __DIR__ . '/includes/header.php';
   Connected as <strong><?= h($wetu_user) ?></strong>
   <?php if ($wetu_op): ?><span class="sep">|</span><?= h($wetu_op) ?><?php endif; ?>
   <div style="margin-left:auto;display:flex;gap:8px;align-items:center;">
-    <button type="button" class="btn-refresh" onclick="toggleRefresh('rf1')">↻ Refresh Samples</button>
     <form method="POST" action="wetu.php">
       <input type="hidden" name="action" value="wetu_logout">
       <button type="submit" class="btn-disconnect">⏏ Disconnect</button>
     </form>
   </div>
-</div>
-<div id="rf1" class="refresh-form" style="display:none;">
-  <form method="POST" action="wetu.php" style="display:flex;gap:8px;align-items:center;">
-    <input type="hidden" name="action" value="wetu_refresh">
-    <span style="font-size:.78rem;color:#888;">Wetu password:</span>
-    <input type="password" name="wetu_password" class="form-control" style="max-width:200px;padding:6px 10px;"
-           placeholder="Enter password to refresh" autocomplete="current-password" required>
-    <button type="submit" class="btn-refresh">↻ Refresh</button>
-    <button type="button" class="btn-disconnect" onclick="toggleRefresh('rf1')">Cancel</button>
-  </form>
-</div>
-
-<div class="result-card">
+</div><div class="result-card">
   <div class="result-card-hd">
     <span style="font-size:1.3rem;">✅</span>
     <h3>Personal Itinerary Created</h3>
@@ -842,25 +780,12 @@ include __DIR__ . '/includes/header.php';
   <?php if ($wetu_op): ?><span class="sep">|</span><?= h($wetu_op) ?><?php endif; ?>
   <span style="font-size:.7rem;color:#888;margin-left:8px;"><?= count($samples_js_arr) ?> samples</span>
   <div style="margin-left:auto;display:flex;gap:8px;align-items:center;">
-    <button type="button" class="btn-refresh" onclick="toggleRefresh('rf2')">↻ Refresh Samples</button>
     <form method="POST" action="wetu.php">
       <input type="hidden" name="action" value="wetu_logout">
       <button type="submit" class="btn-disconnect">⏏ Disconnect</button>
     </form>
   </div>
-</div>
-<div id="rf2" class="refresh-form" style="display:none;">
-  <form method="POST" action="wetu.php" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-    <input type="hidden" name="action" value="wetu_refresh">
-    <span style="font-size:.78rem;color:#888;">Wetu password:</span>
-    <input type="password" name="wetu_password" class="form-control" style="max-width:200px;padding:6px 10px;"
-           placeholder="Enter password to refresh" autocomplete="current-password" required>
-    <button type="submit" class="btn-refresh">↻ Refresh</button>
-    <button type="button" class="btn-disconnect" onclick="toggleRefresh('rf2')">Cancel</button>
-  </form>
-</div>
-
-<div class="card">
+</div><div class="card">
   <div class="card-header">
     <h2>📋 Create Personal Itinerary</h2>
     <span style="font-size:.75rem;color:var(--grey-mid);">Copy a Sample as Personal and customise it for the client</span>
@@ -1029,13 +954,6 @@ const langNames = {
 };
 
 /* ── Build language LOV dynamically from actual sample data ── */
-function toggleRefresh(id) {
-    const el = document.getElementById(id);
-    if (!el) return;
-    const visible = el.style.display !== 'none';
-    el.style.display = visible ? 'none' : 'block';
-    if (!visible) el.querySelector('input[type=password]')?.focus();
-}
 
 function buildLangLOV() {
     const sel = document.getElementById('wetu_search_lang');
