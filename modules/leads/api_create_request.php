@@ -95,21 +95,28 @@ switch ($channel) {
 $folderName  = $namePart . $suffix;
 $dropboxPath = DROPBOX_BASE_PATH . '/' . $folderName;
 
-// Insert DB record
 $dropboxWebUrl = 'https://www.dropbox.com/home' . $dropboxPath;
 
-$db->prepare(
-    'INSERT INTO requests (date_received, customer_name, email, source, agent_id, destination, initial_request, status, pax, practice_code, dropbox_url, created_at)
-     VALUES (CURDATE(), ?, ?, ?, ?, ?, ?, "Inquiry", ?, ?, ?, NOW())'
-)->execute([$customerName, $email ?: null, $source, $agentId, $destination ?: null, $initialRequest ?: null, $pax, $folderName, $dropboxWebUrl]);
-$requestId = (int)$db->lastInsertId();
+// ── Idempotency check: if a record with this practice_code already exists,
+//    return it instead of creating a duplicate (handles client retries). ──────
+$existingStmt = $db->prepare('SELECT id FROM requests WHERE practice_code = ? LIMIT 1');
+$existingStmt->execute([$folderName]);
+$existingRow = $existingStmt->fetch();
+if ($existingRow) {
+    echo json_encode([
+        'success'     => true,
+        'request_id'  => (int)$existingRow['id'],
+        'folder_name' => $folderName,
+        'dropbox_path'=> $dropboxPath,
+        'message'     => 'Request already exists — returning existing record.',
+        'notify_sent' => false,
+        'notify_error'=> null,
+    ]);
+    exit;
+}
 
-// ── Send agent notification (before Dropbox, request is already in DB) ──────
-$notif = notify_agent_new_request(
-    $db, $agentId, $userId, $requestId, $customerName, $folderName, $notifyAgent
-);
-
-// Dropbox: main folder + subfolders + CustomerInfo.txt
+// ── Dropbox: main folder + subfolders + CustomerInfo.txt ─────────────────────
+// Create Dropbox FIRST — if this fails, no DB record is created (no orphan).
 $dropboxErrors = [];
 try {
     $token = dropbox_get_access_token();
@@ -141,18 +148,29 @@ try {
     dropbox_upload_text($token, $dropboxPath . '/CustomerInfo.txt', $txtContent);
 
 } catch (RuntimeException $e) {
-    // Main folder failed — DB record was still created
+    // Dropbox failed — no DB record created, client can safely retry
     echo json_encode([
         'success'      => false,
-        'request_id'   => $requestId,
         'folder_name'  => $folderName,
         'dropbox_path' => $dropboxPath,
-        'message'      => 'DB OK but Dropbox folder failed: ' . $e->getMessage(),
-        'notify_sent'  => $notif['sent'],
-        'notify_error' => $notif['error'],
+        'message'      => 'Dropbox folder creation failed: ' . $e->getMessage(),
+        'notify_sent'  => false,
+        'notify_error' => null,
     ]);
     exit;
 }
+
+// ── Insert DB record (only after Dropbox succeeded) ───────────────────────────
+$db->prepare(
+    'INSERT INTO requests (date_received, customer_name, email, source, agent_id, destination, initial_request, status, pax, practice_code, dropbox_url, created_at)
+     VALUES (CURDATE(), ?, ?, ?, ?, ?, ?, "Inquiry", ?, ?, ?, NOW())'
+)->execute([$customerName, $email ?: null, $source, $agentId, $destination ?: null, $initialRequest ?: null, $pax, $folderName, $dropboxWebUrl]);
+$requestId = (int)$db->lastInsertId();
+
+// ── Send agent notification ───────────────────────────────────────────────────
+$notif = notify_agent_new_request(
+    $db, $agentId, $userId, $requestId, $customerName, $folderName, $notifyAgent
+);
 
 echo json_encode([
     'success'          => true,
