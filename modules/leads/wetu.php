@@ -722,6 +722,9 @@ include __DIR__ . '/includes/header.php';
 
 <?php if ($wetu_success && !$created): ?>
 <div class="wetu-alert wetu-alert-success">✅ <?= $wetu_success ?></div>
+<?php if ($wetu_debug): ?>
+<pre style="font-size:.7rem;background:#f5f5f5;padding:8px 12px;border-radius:6px;margin-bottom:12px;white-space:pre-wrap;word-break:break-all;"><?= h($wetu_debug) ?></pre>
+<?php endif; ?>
 <?php endif; ?>
 
 
