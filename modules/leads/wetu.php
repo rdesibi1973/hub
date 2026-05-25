@@ -297,9 +297,12 @@ if ($action === 'wetu_search' && $token) {
         $samples = $_SESSION['wetu_samples'] ?? [];
     } else {
         try {
-            /* Always fetch fresh full list from Wetu */
-            $base = wetu_fetch_samples($u, $p);
-            $_SESSION['wetu_samples'] = $base;
+            /* Use cached list; re-fetch only if empty */
+            $base = $_SESSION['wetu_samples'] ?? [];
+            if (empty($base)) {
+                $base = wetu_fetch_samples($u, $p);
+                $_SESSION['wetu_samples'] = $base;
+            }
 
             /* PHP filters: language + AND word match on name (both modes) */
             $ql = strtolower($q);
