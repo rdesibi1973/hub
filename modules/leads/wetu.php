@@ -805,7 +805,7 @@ include __DIR__ . '/includes/header.php';
 
           <!-- Row 1: Language -->
           <div style="display:flex;gap:8px;align-items:center;">
-            <select name="wetu_search_lang" id="wetu_search_lang" class="form-control" style="max-width:200px;">
+            <select name="wetu_search_lang" id="wetu_search_lang" class="form-control" style="max-width:200px;" onchange="filterSamples()">
               <option value="">All languages</option>
               <option value="English"  <?= ($wetu_search_lang === 'English'  ? 'selected' : '') ?>>English</option>
               <option value="Italian"  <?= ($wetu_search_lang === 'Italian'  ? 'selected' : '') ?>>Italian</option>
@@ -961,7 +961,7 @@ const langNames = {
 /* ── Build language LOV dynamically from actual sample data ── */
 
 function buildLangLOV() {
-    const sel = document.getElementById('filter_lang');
+    const sel = document.getElementById('wetu_search_lang');
     if (!sel || allSamples.length === 0) return;
 
     // Collect unique raw lang values
@@ -992,8 +992,7 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 function filterSamples() {
-    const langRaw = document.getElementById('filter_lang')?.value || '';
-    const search  = (document.getElementById('search_sample')?.value || '').toLowerCase().trim();
+    const langRaw = document.getElementById('wetu_search_lang')?.value || '';
     const sel     = document.getElementById('sample_id');
     if (!sel) return;
 
@@ -1003,7 +1002,6 @@ function filterSamples() {
     let count = 0;
     allSamples.forEach(s => {
         if (langRaw && s.lang !== langRaw) return;
-        if (search && !s.name.toLowerCase().includes(search)) return;
 
         const langTag = {'english':'EN','italian':'IT','german':'DE','spanish':'ES','french':'FR'};
         const opt = document.createElement('option');
