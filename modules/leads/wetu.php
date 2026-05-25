@@ -442,6 +442,14 @@ if ($action === 'create_personal' && $token) {
             }
 
             /* 2 — Rewrite for Personal */
+            /* DEBUG: dump top-level itinerary field names to understand SOAP structure */
+            $wetu_debug = 'Itinerary fields: ' . implode(', ', array_keys((array)$itinerary))
+                        . ' | Adults=' . ($itinerary->Adults ?? 'n/a')
+                        . ' | Children=' . ($itinerary->Children ?? 'n/a')
+                        . ' | NumberOfAdults=' . ($itinerary->NumberOfAdults ?? 'n/a')
+                        . ' | Pax=' . ($itinerary->Pax ?? 'n/a')
+                        . ' | Rooms=' . (isset($itinerary->Rooms) ? json_encode($itinerary->Rooms) : 'n/a')
+                        . ' | Travellers=' . (isset($itinerary->Travellers) ? 'yes(' . count((array)$itinerary->Travellers) . ')' : 'n/a');
             unset($itinerary->Identifier);
             $itinerary->Type            = 'Personal';
             $itinerary->Name            = $client_name;
