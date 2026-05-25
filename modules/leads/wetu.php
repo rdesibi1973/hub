@@ -220,31 +220,40 @@ function wetu_json_get_with_total(string $url): array {
 
 if (!function_exists('wetu_fetch_samples')) {
 function wetu_fetch_samples(string $u, string $p): array {
-    $all      = [];
-    $pageSize = 200;
-    $start    = 0;
-    $maxPages = 15;
+    $combined = [];
 
-    for ($page = 0; $page < $maxPages; $page++) {
-        $url = 'https://wetu.com/API/Itinerary/V8/List?' . http_build_query([
-            'username' => $u, 'password' => $p,
-            'type'     => 'Sample',
-            'results'  => $pageSize,
-            'start'    => $start,
-            'sort'     => 'ItineraryNameAsc',
-        ]);
-        $res = wetu_json_get_with_total($url);
-        $batch = $res['items'];
-        $total = $res['total'];
-        if (empty($batch)) break;
-        $all   = array_merge($all, $batch);
-        $start += count($batch);
-        /* Stop when we have all items or got a short page */
-        if ($total > 0 && count($all) >= $total) break;
-        if (count($batch) < $pageSize) break;
+    /* Fetch with multiple sort strategies to maximise coverage beyond 200-item limit */
+    $sorts = ['ItineraryNameAsc', 'ItineraryNameDesc', 'LastModifiedDesc'];
+    foreach ($sorts as $sort) {
+        $all      = [];
+        $pageSize = 200;
+        $start    = 0;
+        $maxPages = 5;
+        for ($page = 0; $page < $maxPages; $page++) {
+            $url = 'https://wetu.com/API/Itinerary/V8/List?' . http_build_query([
+                'username' => $u, 'password' => $p,
+                'type'     => 'Sample',
+                'results'  => $pageSize,
+                'start'    => $start,
+                'sort'     => $sort,
+            ]);
+            $res = wetu_json_get_with_total($url);
+            $batch = $res['items'];
+            $total = $res['total'];
+            if (empty($batch)) break;
+            $all   = array_merge($all, $batch);
+            $start += count($batch);
+            if ($total > 0 && count($all) >= $total) break;
+            if (count($batch) < $pageSize) break;
+        }
+        /* Merge into combined, deduplicate by identifier */
+        foreach ($all as $s) {
+            if (!is_array($s)) continue;
+            $id = $s['identifier'] ?? ($s['Identifier'] ?? null);
+            if ($id && !isset($combined[$id])) $combined[$id] = $s;
+        }
     }
-
-    return $all;
+    return array_values($combined);
 }
 }
 
