@@ -179,13 +179,42 @@ function wetu_json_get(string $url): ?array {
     }
     $decoded = json_decode($raw, true);
     if (!is_array($decoded)) return null;
-    // Direct array
     if (empty($decoded) || isset($decoded[0])) return $decoded;
-    // Wrapper object — try common keys
     foreach (['Itineraries','itineraries','Items','items','Results','results'] as $k) {
         if (isset($decoded[$k]) && is_array($decoded[$k])) return $decoded[$k];
     }
     return $decoded;
+}
+}
+
+/* wetu_json_get_with_total: returns ['items' => [...], 'total' => N] */
+if (!function_exists('wetu_json_get_with_total')) {
+function wetu_json_get_with_total(string $url): array {
+    if (function_exists('curl_init')) {
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER=>true,CURLOPT_TIMEOUT=>20,CURLOPT_SSL_VERIFYPEER=>true,CURLOPT_FOLLOWLOCATION=>true]);
+        $raw  = curl_exec($ch);
+        $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+        if ($raw === false || $code !== 200) return ['items'=>[],'total'=>0];
+    } else {
+        $ctx = stream_context_create(['http'=>['timeout'=>20,'ignore_errors'=>true]]);
+        $raw = @file_get_contents($url, false, $ctx);
+        if ($raw === false) return ['items'=>[],'total'=>0];
+    }
+    $d = json_decode($raw, true);
+    if (!is_array($d)) return ['items'=>[],'total'=>0];
+    if (empty($d) || isset($d[0])) return ['items'=>$d,'total'=>count($d)];
+    $items = null; $total = 0;
+    foreach (['Itineraries','itineraries','Items','items','Results','results'] as $k) {
+        if (isset($d[$k]) && is_array($d[$k])) { $items = $d[$k]; break; }
+    }
+    foreach (['Total','total','TotalCount','totalCount','Count','count'] as $k) {
+        if (isset($d[$k]) && is_numeric($d[$k])) { $total = (int)$d[$k]; break; }
+    }
+    if ($items === null) $items = is_array($d) ? $d : [];
+    if (!$total) $total = count($items);
+    return ['items'=>$items,'total'=>$total];
 }
 }
 
@@ -194,22 +223,25 @@ function wetu_fetch_samples(string $u, string $p): array {
     $all      = [];
     $pageSize = 200;
     $start    = 0;
-    $maxPages = 10;   // safety cap: max 2000 samples
+    $maxPages = 15;
 
     for ($page = 0; $page < $maxPages; $page++) {
         $url = 'https://wetu.com/API/Itinerary/V8/List?' . http_build_query([
-            'username' => $u,
-            'password' => $p,
+            'username' => $u, 'password' => $p,
             'type'     => 'Sample',
             'results'  => $pageSize,
             'start'    => $start,
             'sort'     => 'ItineraryNameAsc',
         ]);
-        $batch = wetu_json_get($url);
-        if ($batch === null || empty($batch)) break;
+        $res = wetu_json_get_with_total($url);
+        $batch = $res['items'];
+        $total = $res['total'];
+        if (empty($batch)) break;
         $all   = array_merge($all, $batch);
-        $start += $pageSize;
-        if (count($batch) < $pageSize) break;   // last page — done
+        $start += count($batch);
+        /* Stop when we have all items or got a short page */
+        if ($total > 0 && count($all) >= $total) break;
+        if (count($batch) < $pageSize) break;
     }
 
     return $all;
@@ -267,6 +299,10 @@ if ($action === 'wetu_login') {
                 $_SESSION['wetu_pass']     = $p;
                 $_SESSION['wetu_operator'] = $sess->OperatorName ?? '';
                 $_SESSION['wetu_samples']  = $fetched;
+                /* Debug: show how many we fetched vs API total */
+                $debug_url = 'https://wetu.com/API/Itinerary/V8/List?' . http_build_query(['username'=>$u,'password'=>$p,'type'=>'Sample','results'=>1,'start'=>0]);
+                $debug_res = wetu_json_get_with_total($debug_url);
+                $wetu_debug = 'Fetched ' . count($fetched) . ' samples. API total: ' . $debug_res['total'] . '. language=Italian test: ' . count(wetu_search_samples($u, $p, '', 'Italian')) . ' items.';
                 $token    = $sess->SessionToken;
                 $wetu_user = $u;
                 $wetu_op   = $sess->OperatorName ?? '';
