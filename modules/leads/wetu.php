@@ -297,33 +297,9 @@ if ($action === 'wetu_search' && $token) {
         $samples = $_SESSION['wetu_samples'] ?? [];
     } else {
         try {
-            /* Always fetch fresh full list from Wetu — clears stale cache */
-            $all_fresh = wetu_fetch_samples($u, $p);
-            $_SESSION['wetu_samples'] = $all_fresh;
-
-            if ($q !== '' && !$title_only) {
-                /* Full-text search: call Wetu API to get matching identifier_keys,
-                   then filter the fresh full list to keep correct structure */
-                $search_raw = wetu_search_samples($u, $p, $q, '');
-                $match_keys = [];
-                foreach ($search_raw as $sr) {
-                    if (!is_array($sr)) continue;
-                    $k = $sr['identifier_key'] ?? ($sr['IdentifierKey'] ?? null);
-                    if ($k) $match_keys[$k] = true;
-                }
-                /* Filter full list by matched keys so structure is always consistent */
-                if (!empty($match_keys)) {
-                    $base = array_values(array_filter($all_fresh, function($s) use ($match_keys) {
-                        if (!is_array($s)) return false;
-                        $k = $s['identifier_key'] ?? ($s['IdentifierKey'] ?? null);
-                        return $k && isset($match_keys[$k]);
-                    }));
-                } else {
-                    $base = $all_fresh; // search returned nothing usable — show all
-                }
-            } else {
-                $base = $all_fresh;
-            }
+            /* Always fetch fresh full list from Wetu */
+            $base = wetu_fetch_samples($u, $p);
+            $_SESSION['wetu_samples'] = $base;
 
             /* PHP filters: language + AND word match on name (both modes) */
             $ql = strtolower($q);
