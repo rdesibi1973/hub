@@ -307,22 +307,23 @@ if ($token && !$created && !in_array($action, ['wetu_login', 'wetu_refresh', 'we
    Language filtering is handled client-side by the LOV (JS filterSamples)
 ═══════════════════════════════════════════════════════════════ */
 if ($action === 'wetu_search' && $token) {
-    $q = trim($_POST['wetu_search_query'] ?? '');
-    $u = $_SESSION['wetu_user'] ?? '';
-    $p = $_SESSION['wetu_pass'] ?? '';
+    $q    = trim($_POST['wetu_search_query'] ?? '');
+    $lang = trim($_POST['wetu_search_lang']  ?? '');
+    $u    = $_SESSION['wetu_user'] ?? '';
+    $p    = $_SESSION['wetu_pass'] ?? '';
     if (!$u || !$p) {
         $wetu_error = 'Session expired — please disconnect and sign in again.';
         $samples = $_SESSION['wetu_samples'] ?? [];
     } else {
         try {
-            /* Always use cached list — wetu_search_samples returns incomplete items */
+            /* Always use cached list */
             $base = $_SESSION['wetu_samples'] ?? [];
             if (empty($base)) {
                 $base = wetu_fetch_samples($u, $p);
                 $_SESSION['wetu_samples'] = $base;
             }
 
-            /* PHP AND filter: every word in query must appear in name */
+            /* PHP AND filter on name */
             $ql    = strtolower($q);
             $words = $ql !== '' ? preg_split('/\s+/', $ql, -1, PREG_SPLIT_NO_EMPTY) : [];
             $found = array_values(array_filter($base, function($s) use ($words) {
@@ -336,6 +337,7 @@ if ($action === 'wetu_search' && $token) {
             }));
 
             $_SESSION['wetu_search_query']   = $q;
+            $_SESSION['wetu_search_lang']    = $lang;
             $_SESSION['wetu_search_results'] = $found;
             $samples = $found;
 
