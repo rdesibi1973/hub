@@ -148,6 +148,10 @@ header {
   </a>
   <?php endif; ?>
   <?php endif; // !isLeadsRestricted ?>
+  <?php if (in_array($currentUser['role_name'] ?? '', ['admin','manager'])): ?>
+  <span style="display:inline-block;width:1px;background:#E8E8E8;margin:8px 4px;align-self:stretch;"></span>
+  <a href="../invoices/booked_requests.php" class="">🧾 Invoices</a>
+  <?php endif; ?>
   <?php if (in_array($currentUser['role_name'] ?? '', ['admin'])): ?>
   <span style="display:inline-block;width:1px;background:#E8E8E8;margin:8px 4px;align-self:stretch;"></span>
   <a href="<?= BASE_URL ?>/booked.php"          class="<?= $cur==='booked.php'?'active':'' ?>">✈ Booked</a>
