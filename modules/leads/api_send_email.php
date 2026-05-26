@@ -85,6 +85,7 @@ if (empty($toList)) {
 // ── Resolve Reply-To from logged-in user ─────────────────────────────────────
 $replyTo = '';
 if ($userId > 0) {
+    $db = db();
     $uStmt = $db->prepare('SELECT email, full_name FROM users WHERE id = ? AND is_active = 1 LIMIT 1');
     $uStmt->execute([$userId]);
     $uRow = $uStmt->fetch(PDO::FETCH_ASSOC);
