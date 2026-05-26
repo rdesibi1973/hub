@@ -30,12 +30,12 @@ $errors = [];
 
 // Fields editable by admin/manager (full set)
 $fullFields = ['practice_code','group_folder','date_received','customer_name','email','whatsapp','source','agent_id',
-               'destination','period','pax','status','value_usd','commission_pct','commission_usd',
+               'destination','period','pax','status','payment_status','value_usd','commission_pct','commission_usd',
                'date_paid','initial_request','dropbox_url','notes'];
 
 // Fields editable by staff (restricted set — no financials, no agent reassignment)
 $staffFields = ['customer_name','email','whatsapp','source','destination','period','pax',
-                'status','initial_request','dropbox_url','notes'];
+                'status','payment_status','initial_request','dropbox_url','notes'];
 
 $editableFields = $isRestricted ? $staffFields : $fullFields;
 
@@ -198,7 +198,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $db->prepare("
                 UPDATE requests SET
                   customer_name=?, email=?, whatsapp=?, source=?, destination=?, period=?,
-                  pax=?, status=?, initial_request=?, dropbox_url=?, notes=?,
+                  pax=?, status=?, payment_status=?, initial_request=?, dropbox_url=?, notes=?,
                   pipeline_column=IF(?='Booked',NULL,pipeline_column)
                 WHERE id=? AND agent_id=?
             ")->execute([
@@ -210,6 +210,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $v['period']          ?: null,
                 $v['pax']             ?: null,
                 $v['status'],
+                $v['payment_status']  ?: null,
                 $v['initial_request'] ?: null,
                 $v['dropbox_url']     ?: null,
                 $v['notes']           ?: null,
@@ -222,7 +223,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $db->prepare("
                 UPDATE requests SET
                   practice_code=?, group_folder=?, date_received=?, customer_name=?, email=?, whatsapp=?, source=?, agent_id=?,
-                  destination=?, period=?, pax=?, status=?, value_usd=?, commission_pct=?, commission_usd=?,
+                  destination=?, period=?, pax=?, status=?, payment_status=?, value_usd=?, commission_pct=?, commission_usd=?,
                   date_paid=?, initial_request=?, dropbox_url=?, notes=?,
                   pipeline_column=IF(?='Booked',NULL,pipeline_column)
                 WHERE id=?
@@ -239,6 +240,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $v['period']          ?: null,
                 $v['pax']             ?: null,
                 $v['status'],
+                $v['payment_status']  ?: null,
                 $v['value_usd']       !== '' ? $v['value_usd']      : null,
                 $v['commission_pct']  !== '' ? $v['commission_pct'] : null,
                 $v['commission_usd']  !== '' ? $v['commission_usd'] : null,
@@ -352,9 +354,19 @@ include 'includes/header.php';
 
       <div class="form-group">
         <label>Status</label>
-        <select name="status">
+        <select name="status" id="status_select" onchange="togglePaymentStatus()">
           <?php foreach (STATUSES as $s => $_): ?>
             <option value="<?= h($s) ?>" <?= $v['status']===$s?'selected':'' ?>><?= h($s) ?></option>
+          <?php endforeach; ?>
+        </select>
+      </div>
+
+      <div class="form-group" id="payment_status_group" style="<?= $v['status']==='Booked'?'':'display:none' ?>">
+        <label>Payment Status</label>
+        <select name="payment_status" id="payment_status_select">
+          <option value="">— None —</option>
+          <?php foreach (['Deposit','Balance','Balance-Cash','Paid'] as $ps): ?>
+            <option value="<?= h($ps) ?>" <?= ($v['payment_status']??'')===$ps?'selected':'' ?>><?= h($ps) ?></option>
           <?php endforeach; ?>
         </select>
       </div>
@@ -487,6 +499,18 @@ include 'includes/header.php';
 </div>
 
 <script>
+function togglePaymentStatus() {
+  const status = document.getElementById('status_select').value;
+  const group  = document.getElementById('payment_status_group');
+  const sel    = document.getElementById('payment_status_select');
+  if (status === 'Booked') {
+    group.style.display = '';
+  } else {
+    group.style.display = 'none';
+    sel.value = ''; // clear when status is not Booked
+  }
+}
+
 <?php if (!$isRestricted): ?>
 function calcComm() {
   const val  = parseFloat(document.getElementById('value_usd').value)      || 0;

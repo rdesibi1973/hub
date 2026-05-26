@@ -138,24 +138,25 @@ if ($newDropboxUrl === '') {
     $newDropboxUrl = 'https://www.dropbox.com/home/' . $dir . '/' . rawurlencode($newFolderName);
 }
 
-// ── Derive new DB status from folder name suffix ──────────────────────────────
-// Map folder status tag → requests.status value.
-// 'Booked' is intentionally excluded: that transition is handled by api_confirm_safari.php
-// which also sets confirmation_date. Renaming TO _PAID from a non-confirmed folder is
-// treated as Paid (edge case). If no recognised tag is found, status is left unchanged.
-$statusTagMap = [
-    '_CANCELLED'    => 'Cancelled',
-    '_BALANCE-CASH' => 'Balance',
-    '_BALANCE'      => 'Balance',
-    '_DEPOSIT'      => 'Deposit',
-    '_PROVISIONAL'  => 'Provisional',
-    '_PROGRESS'     => 'Booked',
-    '_PAID'         => 'Paid',
+// ── Derive new DB status + payment_status from folder name suffix ─────────────
+// Each entry: ['status' => ..., 'ps' => payment_status value or null to clear]
+// When a tag is matched, both status AND payment_status are always updated.
+// _PROGRESS / _PROVISIONAL / _CANCELLED clear payment_status (set to NULL).
+$folderTagMap = [
+    '_CANCELLED'    => ['status' => 'Cancelled',   'ps' => null],
+    '_BALANCE-CASH' => ['status' => 'Booked',      'ps' => 'Balance-Cash'],
+    '_BALANCE'      => ['status' => 'Booked',      'ps' => 'Balance'],
+    '_DEPOSIT'      => ['status' => 'Booked',      'ps' => 'Deposit'],
+    '_PROVISIONAL'  => ['status' => 'Provisional', 'ps' => null],
+    '_PROGRESS'     => ['status' => 'Booked',      'ps' => null],
+    '_PAID'         => ['status' => 'Booked',      'ps' => 'Paid'],
 ];
-$newDbStatus = null;
-foreach ($statusTagMap as $tag => $dbValue) {
+$newDbStatus      = null;
+$newPaymentStatus = false; // false = leave unchanged; null = explicitly clear
+foreach ($folderTagMap as $tag => $map) {
     if (str_ends_with(strtoupper($newFolderName), $tag)) {
-        $newDbStatus = $dbValue;
+        $newDbStatus      = $map['status'];
+        $newPaymentStatus = $map['ps']; // null means clear it
         break;
     }
 }
@@ -165,9 +166,9 @@ if ($matchedViaGroupFolder) {
     // GRP parent folder rename: update group_folder, leave practice_code untouched
     if ($newDbStatus !== null) {
         $update = $db->prepare(
-            'UPDATE requests SET group_folder = ?, dropbox_url = ?, status = ? WHERE id = ?'
+            'UPDATE requests SET group_folder = ?, dropbox_url = ?, status = ?, payment_status = ? WHERE id = ?'
         );
-        $update->execute([$newFolderName, $newDropboxUrl, $newDbStatus, (int)$row['id']]);
+        $update->execute([$newFolderName, $newDropboxUrl, $newDbStatus, $newPaymentStatus, (int)$row['id']]);
     } else {
         $update = $db->prepare(
             'UPDATE requests SET group_folder = ?, dropbox_url = ? WHERE id = ?'
@@ -177,9 +178,9 @@ if ($matchedViaGroupFolder) {
 } else {
     if ($newDbStatus !== null) {
         $update = $db->prepare(
-            'UPDATE requests SET practice_code = ?, dropbox_url = ?, status = ? WHERE id = ?'
+            'UPDATE requests SET practice_code = ?, dropbox_url = ?, status = ?, payment_status = ? WHERE id = ?'
         );
-        $update->execute([$newFolderName, $newDropboxUrl, $newDbStatus, (int)$row['id']]);
+        $update->execute([$newFolderName, $newDropboxUrl, $newDbStatus, $newPaymentStatus, (int)$row['id']]);
     } else {
         $update = $db->prepare(
             'UPDATE requests SET practice_code = ?, dropbox_url = ? WHERE id = ?'
@@ -189,12 +190,13 @@ if ($matchedViaGroupFolder) {
 }
 
 echo json_encode([
-    'success'       => true,
-    'request_id'    => (int)$row['id'],
-    'customer_name' => $row['customer_name'],
-    'old_folder'    => $oldFolderName,
-    'new_folder'    => $newFolderName,
-    'updated_field' => $matchedViaGroupFolder ? 'group_folder' : 'practice_code',
-    'dropbox_url'   => $newDropboxUrl,
-    'new_status'    => $newDbStatus,
+    'success'           => true,
+    'request_id'        => (int)$row['id'],
+    'customer_name'     => $row['customer_name'],
+    'old_folder'        => $oldFolderName,
+    'new_folder'        => $newFolderName,
+    'updated_field'     => $matchedViaGroupFolder ? 'group_folder' : 'practice_code',
+    'dropbox_url'       => $newDropboxUrl,
+    'new_status'        => $newDbStatus,
+    'new_payment_status'=> $newPaymentStatus,
 ]);

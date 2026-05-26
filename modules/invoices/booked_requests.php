@@ -22,6 +22,15 @@ if (!defined('STATUSES')) {
     ]);
 }
 
+if (!defined('PAYMENT_STATUSES')) {
+    define('PAYMENT_STATUSES', [
+        'Deposit'      => 'ps-deposit',
+        'Balance'      => 'ps-balance',
+        'Balance-Cash' => 'ps-balance',
+        'Paid'         => 'ps-paid',
+    ]);
+}
+
 $pageTitle = 'Requests';
 $db = db();
 
@@ -30,6 +39,7 @@ $search    = trim($_GET['q']      ?? '');
 $fstatus   = $_GET['status']      ?? 'Booked';   // default Booked
 $fagent    = (int)($_GET['agent'] ?? 0);
 $fyear     = (int)($_GET['year']  ?? 0);
+$fpstatus  = $_GET['pstatus']     ?? '';          // payment_status filter
 // '' | 'none' | 'New' | 'Partially Paid' | 'Fully Paid'
 $finvoice  = $_GET['invoice']     ?? '';
 
@@ -43,6 +53,11 @@ if ($fstatus && array_key_exists($fstatus, STATUSES)) {
 }
 if ($fagent > 0) { $where[] = 'r.agent_id = ?'; $params[] = $fagent; }
 if ($fyear  > 0) { $where[] = 'YEAR(r.date_received) = ?'; $params[] = $fyear; }
+if ($fpstatus === 'none') {
+    $where[] = '(r.status = \'Booked\' AND (r.payment_status IS NULL OR r.payment_status = \'\'))';
+} elseif ($fpstatus !== '' && array_key_exists($fpstatus, PAYMENT_STATUSES)) {
+    $where[] = 'r.payment_status = ?'; $params[] = $fpstatus;
+}
 if ($finvoice === 'none') {
     $where[] = '(SELECT COUNT(*) FROM invoices i WHERE i.request_id = r.id) = 0';
 } elseif (array_key_exists($finvoice, INV_STATUSES)) {
@@ -69,9 +84,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['set_status'])) {
     $rid     = (int)$_POST['request_id'];
     $nstatus = $_POST['new_status'] ?? '';
     if ($rid && array_key_exists($nstatus, STATUSES)) {
-        $db->prepare('UPDATE requests SET status = ? WHERE id = ?')->execute([$nstatus, $rid]);
+        // When moving away from Booked, clear payment_status
+        $clearPs = ($nstatus !== 'Booked') ? ', payment_status = NULL' : '';
+        $db->prepare("UPDATE requests SET status = ? $clearPs WHERE id = ?")->execute([$nstatus, $rid]);
     }
-    // Redirect to preserve filters
+    header('Location: ' . $_SERVER['REQUEST_URI']); exit;
+}
+
+// ── Handle inline payment_status change ───────────────────────────────────
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['set_payment_status'])) {
+    $rid = (int)$_POST['request_id'];
+    $nps = $_POST['new_payment_status'] ?? '';
+    $allowed = array_keys(PAYMENT_STATUSES);
+    if ($rid) {
+        $psVal = in_array($nps, $allowed, true) ? $nps : null;
+        $db->prepare('UPDATE requests SET payment_status = ? WHERE id = ? AND status = \'Booked\'')
+           ->execute([$psVal, $rid]);
+    }
     header('Location: ' . $_SERVER['REQUEST_URI']); exit;
 }
 
@@ -101,6 +130,16 @@ include 'includes/header.php';
       <option value="">All statuses</option>
       <?php foreach (STATUSES as $s => $cls): ?>
         <option value="<?= h($s) ?>" <?= $fstatus === $s ? 'selected' : '' ?>><?= h($s) ?></option>
+      <?php endforeach; ?>
+    </select>
+  </div>
+  <div>
+    <label>Payment Status</label>
+    <select name="pstatus">
+      <option value="">All</option>
+      <option value="none"         <?= $fpstatus === 'none'          ? 'selected' : '' ?>>No payment status</option>
+      <?php foreach (PAYMENT_STATUSES as $ps => $_): ?>
+        <option value="<?= h($ps) ?>" <?= $fpstatus === $ps ? 'selected' : '' ?>><?= h($ps) ?></option>
       <?php endforeach; ?>
     </select>
   </div>
@@ -179,6 +218,21 @@ include 'includes/header.php';
               </select>
               <input type="hidden" name="set_status" value="1">
             </form>
+            <?php if ($r['status'] === 'Booked'): ?>
+            <form method="POST" style="display:inline-flex;align-items:center;gap:6px;margin-top:4px;">
+              <input type="hidden" name="request_id" value="<?= $r['id'] ?>">
+              <select name="new_payment_status" onchange="this.form.submit()"
+                      style="font-size:.72rem;padding:2px 5px;border:1px solid var(--grey-lt);border-radius:5px;cursor:pointer;color:var(--grey-dk);">
+                <option value="">— payment —</option>
+                <?php foreach (PAYMENT_STATUSES as $ps => $_): ?>
+                  <option value="<?= h($ps) ?>" <?= ($r['payment_status'] ?? '') === $ps ? 'selected' : '' ?>>
+                    <?= h($ps) ?>
+                  </option>
+                <?php endforeach; ?>
+              </select>
+              <input type="hidden" name="set_payment_status" value="1">
+            </form>
+            <?php endif; ?>
           </td>
 
           <!-- Invoice column -->

@@ -201,8 +201,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 $lastSlash = strrpos($oldUrl, '/');
                 $newUrl    = substr($oldUrl, 0, $lastSlash + 1) . rawurlencode($newName);
             }
-            $db->prepare("UPDATE requests SET practice_code=?, dropbox_url=? WHERE id=?")
-               ->execute([$newName, $newUrl, (int)$req['id']]);
+
+            // Derive payment_status from the new folder tag
+            $psMap = [
+                'DEPOSIT'      => 'Deposit',
+                'BALANCE'      => 'Balance',
+                'BALANCE-CASH' => 'Balance-Cash',
+                'PAID'         => 'Paid',
+                'PROGRESS'     => null,
+                'PROVISIONAL'  => null,
+            ];
+            $newPs = array_key_exists($dbTag, $psMap) ? $psMap[$dbTag] : false;
+
+            if ($newPs !== false) {
+                $db->prepare("UPDATE requests SET practice_code=?, dropbox_url=?, payment_status=? WHERE id=?")
+                   ->execute([$newName, $newUrl, $newPs, (int)$req['id']]);
+            } else {
+                $db->prepare("UPDATE requests SET practice_code=?, dropbox_url=? WHERE id=?")
+                   ->execute([$newName, $newUrl, (int)$req['id']]);
+            }
 
             ob_end_clean(); echo json_encode(['ok'=>true,'new_name'=>$newName,'new_tag'=>$dbTag,'new_url'=>$newUrl]); exit;
         } catch (\Throwable $e) {
