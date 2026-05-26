@@ -82,11 +82,25 @@ if (empty($toList)) {
     exit;
 }
 
+// ── Resolve Reply-To from logged-in user ─────────────────────────────────────
+$replyTo = '';
+if ($userId > 0) {
+    $uStmt = $db->prepare('SELECT email, full_name FROM users WHERE id = ? AND is_active = 1 LIMIT 1');
+    $uStmt->execute([$userId]);
+    $uRow = $uStmt->fetch(PDO::FETCH_ASSOC);
+    if ($uRow && filter_var($uRow['email'], FILTER_VALIDATE_EMAIL)) {
+        $replyTo = $uRow['email'];
+    }
+}
+
 // ── Send via BlueHost mail() ──────────────────────────────────────────────────
 $toStr   = implode(', ', array_column($toList, 'email'));
 $headers = "From: noreply@savannahexplorers.com\r\n"
          . "MIME-Version: 1.0\r\n"
          . "Content-Type: text/plain; charset=UTF-8\r\n";
+if ($replyTo !== '') {
+    $headers .= "Reply-To: {$replyTo}\r\n";
+}
 if (!empty($ccList)) {
     $headers .= "Cc: " . implode(', ', array_column($ccList, 'email')) . "\r\n";
 }
