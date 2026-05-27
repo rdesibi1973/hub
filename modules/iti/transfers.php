@@ -109,6 +109,7 @@ $flight_routes = iti_get_flight_routes(false);
 $dest_map      = iti_destinations_map();
 
 $page_title = 'Transfers & Flights — Itinerary Builder';
+$extra_css = iti_extra_css();
 include __DIR__ . '/../../includes/layout_header.php';
 ?>
 <main>
