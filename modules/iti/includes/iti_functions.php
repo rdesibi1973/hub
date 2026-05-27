@@ -324,3 +324,52 @@ function iti_get_standard_inclusions(string $type = null): array {
     }
     return $st->fetchAll();
 }
+
+// ── Costanti lingue (alias per compatibilità) ─────────────────────────────────
+if (!defined('ITI_LANGS')) {
+    define('ITI_LANGS', ['en', 'it', 'fr', 'es', 'de']);
+}
+if (!defined('ITI_LANG_LABELS')) {
+    define('ITI_LANG_LABELS', [
+        'en' => 'English',
+        'it' => 'Italiano',
+        'fr' => 'Français',
+        'es' => 'Español',
+        'de' => 'Deutsch',
+    ]);
+}
+
+// ── Helper: genera <option> tags ──────────────────────────────────────────────
+// $options: ['value' => 'Label', ...]  oppure ['value1','value2',...]
+function iti_options(array $options, string $selected = ''): string {
+    $out = '';
+    foreach ($options as $val => $label) {
+        if (is_int($val)) { $val = $label; } // array numerico
+        $sel  = ($val == $selected) ? ' selected' : '';
+        $out .= '<option value="' . h((string)$val) . '"' . $sel . '>' . h((string)$label) . '</option>';
+    }
+    return $out;
+}
+
+// ── Helper: navigazione ITI ───────────────────────────────────────────────────
+function iti_nav(string $current = ''): void {
+    $links = [
+        'Dashboard'    => ITI_MODULE_URL . '/index.php',
+        'Programs'     => ITI_MODULE_URL . '/programs.php',
+        'Requests'     => ITI_MODULE_URL . '/requests.php',
+        'Destinations' => ITI_MODULE_URL . '/destinations.php',
+        'Lodges'       => ITI_MODULE_URL . '/lodges.php',
+        'Transfers'    => ITI_MODULE_URL . '/transfers.php',
+        'Activities'   => ITI_MODULE_URL . '/activities.php',
+    ];
+    echo '<nav class="iti-nav" style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:20px;border-bottom:1px solid var(--grey-light,#e5e7eb);padding-bottom:8px;">';
+    foreach ($links as $label => $url) {
+        $active = ($label === $current)
+            ? 'background:var(--red,#c0392b);color:#fff;'
+            : 'background:transparent;color:var(--grey-dark,#374151);';
+        echo '<a href="' . $url . '" style="' . $active
+           . 'padding:5px 12px;border-radius:6px;text-decoration:none;font-size:.8rem;font-weight:500;">'
+           . h($label) . '</a>';
+    }
+    echo '</nav>';
+}
