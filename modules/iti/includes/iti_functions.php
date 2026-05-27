@@ -352,7 +352,7 @@ function iti_options(array $options, string $selected = ''): string {
 }
 
 // ── Helper: navigazione ITI ───────────────────────────────────────────────────
-function iti_nav(string $current = ''): void {
+function iti_nav(string $current = '', array $breadcrumbs = []): void {
     $links = [
         'Dashboard'    => ITI_MODULE_URL . '/index.php',
         'Programs'     => ITI_MODULE_URL . '/programs.php',
@@ -362,16 +362,26 @@ function iti_nav(string $current = ''): void {
         'Transfers'    => ITI_MODULE_URL . '/transfers.php',
         'Activities'   => ITI_MODULE_URL . '/activities.php',
     ];
-    echo '<nav class="iti-nav" style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:20px;border-bottom:1px solid var(--grey-light,#e5e7eb);padding-bottom:8px;">';
+    echo '<nav class="iti-nav" style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:20px;border-bottom:1px solid var(--grey-lt);padding-bottom:8px;">';
     foreach ($links as $label => $url) {
         $active = ($label === $current)
-            ? 'background:var(--red,#c0392b);color:#fff;'
-            : 'background:transparent;color:var(--grey-dark,#374151);';
+            ? 'background:var(--red);color:#fff;'
+            : 'background:transparent;color:var(--grey-dk);';
         echo '<a href="' . $url . '" style="' . $active
            . 'padding:5px 12px;border-radius:6px;text-decoration:none;font-size:.8rem;font-weight:500;">'
            . h($label) . '</a>';
     }
     echo '</nav>';
+    // Breadcrumbs
+    if ($breadcrumbs) {
+        echo '<div style="font-size:.72rem;color:var(--grey-mid);margin-bottom:16px;">';
+        echo '<a href="' . ITI_MODULE_URL . '/index.php" style="color:var(--grey-mid);text-decoration:none;">ITI</a>';
+        foreach ($breadcrumbs as $b) {
+            echo ' › <a href="' . h($b['url']) . '" style="color:var(--grey-mid);text-decoration:none;">' . h($b['label']) . '</a>';
+        }
+        if ($current) echo ' › <span style="color:var(--black);">' . h($current) . '</span>';
+        echo '</div>';
+    }
 }
 
 // ── Costanti prezzi ───────────────────────────────────────────────────────────
