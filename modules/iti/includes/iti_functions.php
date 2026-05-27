@@ -420,6 +420,36 @@ if (!defined('ITI_ACTIVITY_ICONS')) {
     ]);
 }
 
+
+// ── Costanti lodge ────────────────────────────────────────────────────────────
+if (!defined('ITI_LODGE_CATEGORIES')) {
+    define('ITI_LODGE_CATEGORIES', [
+        'budget'      => 'Budget',
+        'mid'         => 'Mid-range',
+        'luxury'      => 'Luxury',
+        'ultra_luxury'=> 'Ultra Luxury',
+    ]);
+}
+
+if (!defined('ITI_LODGE_TYPES')) {
+    define('ITI_LODGE_TYPES', [
+        'lodge'       => 'Lodge',
+        'tented_camp' => 'Tented Camp',
+        'hotel'       => 'Hotel',
+        'mobile_camp' => 'Mobile Camp',
+        'house'       => 'House',
+    ]);
+}
+
+if (!defined('ITI_REQUEST_STATUSES')) {
+    define('ITI_REQUEST_STATUSES', [
+        'open'      => 'Open',
+        'quoted'    => 'Quoted',
+        'confirmed' => 'Confirmed',
+        'cancelled' => 'Cancelled',
+    ]);
+}
+
 // ── ITI CSS (da iniettare via $extra_css prima di layout_header) ──────────────
 function iti_extra_css(): string {
     return '
