@@ -373,3 +373,49 @@ function iti_nav(string $current = ''): void {
     }
     echo '</nav>';
 }
+
+// ── Costanti prezzi ───────────────────────────────────────────────────────────
+if (!defined('ITI_PRICE_CATEGORIES')) {
+    define('ITI_PRICE_CATEGORIES', [
+        'rack'    => 'Rack (Direct clients)',
+        'sto'     => 'STO (Standard agents)',
+        'stospec' => 'STO Special',
+    ]);
+}
+
+// ── Costanti status programma ─────────────────────────────────────────────────
+if (!defined('ITI_PROGRAM_STATUSES')) {
+    define('ITI_PROGRAM_STATUSES', [
+        'draft'     => 'Draft',
+        'sent'      => 'Sent',
+        'confirmed' => 'Confirmed',
+        'cancelled' => 'Cancelled',
+    ]);
+}
+
+// ── Costanti attività ─────────────────────────────────────────────────────────
+if (!defined('ITI_ACTIVITY_TYPES')) {
+    define('ITI_ACTIVITY_TYPES', [
+        'game_drive'     => 'Game Drive',
+        'walking_safari' => 'Walking Safari',
+        'cultural'       => 'Cultural',
+        'boat'           => 'Boat Safari',
+        'balloon'        => 'Hot Air Balloon',
+        'hiking'         => 'Hiking',
+        'beach'          => 'Beach',
+        'other'          => 'Other',
+    ]);
+}
+
+if (!defined('ITI_ACTIVITY_ICONS')) {
+    define('ITI_ACTIVITY_ICONS', [
+        'game_drive'     => '🦁',
+        'walking_safari' => '🥾',
+        'cultural'       => '🏛️',
+        'boat'           => '⛵',
+        'balloon'        => '🎈',
+        'hiking'         => '🏔️',
+        'beach'          => '🏖️',
+        'other'          => '⭐',
+    ]);
+}
