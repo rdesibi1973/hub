@@ -102,6 +102,7 @@ $activities = $stmt->fetchAll();
 $dest_map = ['' => 'Generic (all destinations)'] + iti_destinations_map();
 
 $page_title = 'Activities — Itinerary Builder';
+$extra_css = iti_extra_css();
 include __DIR__ . '/../../includes/layout_header.php';
 ?>
 <main>
