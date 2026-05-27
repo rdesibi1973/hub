@@ -26,7 +26,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'UPDATE iti_programs SET
              title_en=?,title_it=?,title_fr=?,title_es=?,title_de=?,
              subtitle_en=?,subtitle_it=?,subtitle_fr=?,subtitle_es=?,subtitle_de=?,
-             duration_days=?,pax_adults=?,pax_children=?,flights_included=?,
+             start_date=?,pax_adults=?,pax_children=?,flights_included=?,
              display_language=?,display_currency=?,terms_id=?,status=?
              WHERE id=?'
         )->execute([
@@ -34,7 +34,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             trim($_POST['title_es']),trim($_POST['title_de']),
             trim($_POST['subtitle_en']),trim($_POST['subtitle_it']),trim($_POST['subtitle_fr']),
             trim($_POST['subtitle_es']),trim($_POST['subtitle_de']),
-            max(1,(int)$_POST['duration_days']),
+            ($_POST['start_date'] ?? '') ?: null,
             max(1,(int)$_POST['pax_adults']),
             max(0,(int)$_POST['pax_children']),
             isset($_POST['flights_included'])?1:0,
@@ -96,6 +96,58 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $day_id = (int)($_POST['day_id'] ?? 0);
         if ($da_id) $db->prepare('DELETE FROM iti_day_activities WHERE id=?')->execute([$da_id]);
         iti_redirect("program_edit.php?id={$id}&day={$day_id}");
+    }
+
+
+    // ── Aggiungi giorno ──
+    if ($sub === 'add_day') {
+        $max = (int)$db->prepare('SELECT COALESCE(MAX(day_number),0) FROM iti_program_days WHERE program_id=?')->execute([$id]) ? $db->query("SELECT COALESCE(MAX(day_number),0) FROM iti_program_days WHERE program_id={$id}")->fetchColumn() : 0;
+        $max_st = $db->prepare('SELECT COALESCE(MAX(day_number),0) FROM iti_program_days WHERE program_id=?');
+        $max_st->execute([$id]);
+        $max = (int)$max_st->fetchColumn();
+        $new_num = $max + 1;
+        $db->prepare('INSERT INTO iti_program_days (program_id, day_number) VALUES (?,?)')->execute([$id, $new_num]);
+        $db->prepare('UPDATE iti_programs SET duration_days=? WHERE id=?')->execute([$new_num, $id]);
+        iti_flash_set('success', "Day {$new_num} added.");
+        iti_redirect("program_edit.php?id={$id}&tab=days");
+    }
+
+    // ── Cancella giorno ──
+    if ($sub === 'delete_day') {
+        $day_id  = (int)($_POST['day_id'] ?? 0);
+        $day_num = (int)($_POST['day_num'] ?? 0);
+        if ($day_id) {
+            $db->prepare('DELETE FROM iti_program_days WHERE id=?')->execute([$day_id]);
+            // Rinumera i giorni successivi
+            $remaining = $db->prepare('SELECT id FROM iti_program_days WHERE program_id=? ORDER BY day_number');
+            $remaining->execute([$id]);
+            $num = 1;
+            foreach ($remaining->fetchAll() as $r) {
+                $db->prepare('UPDATE iti_program_days SET day_number=? WHERE id=?')->execute([$num++, $r['id']]);
+            }
+            $new_count = $num - 1;
+            $db->prepare('UPDATE iti_programs SET duration_days=? WHERE id=?')->execute([$new_count, $id]);
+            iti_flash_set('success', 'Day deleted and days renumbered.');
+        }
+        iti_redirect("program_edit.php?id={$id}&tab=days");
+    }
+
+    // ── Sposta giorno su / giù ──
+    if ($sub === 'move_day') {
+        $day_id    = (int)($_POST['day_id']    ?? 0);
+        $direction = $_POST['direction'] ?? 'up';
+        if ($day_id) {
+            $cur = $db->prepare('SELECT day_number FROM iti_program_days WHERE id=?');
+            $cur->execute([$day_id]); $cur_num = (int)$cur->fetchColumn();
+            $swap_num = $direction === 'up' ? $cur_num - 1 : $cur_num + 1;
+            $swap = $db->prepare('SELECT id FROM iti_program_days WHERE program_id=? AND day_number=?');
+            $swap->execute([$id, $swap_num]); $swap_id = (int)$swap->fetchColumn();
+            if ($swap_id) {
+                $db->prepare('UPDATE iti_program_days SET day_number=? WHERE id=?')->execute([$swap_num, $day_id]);
+                $db->prepare('UPDATE iti_program_days SET day_number=? WHERE id=?')->execute([$cur_num, $swap_id]);
+            }
+        }
+        iti_redirect("program_edit.php?id={$id}&tab=days");
     }
 
     // ── Aggiungi volo ──
@@ -293,16 +345,65 @@ include __DIR__ . '/../../includes/layout_header.php';
 
   <!-- Day navigator -->
   <div>
-    <div style="font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--grey-mid);margin-bottom:10px;">Days</div>
+    <div style="font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--grey-mid);margin-bottom:6px;">
+      Days
+    </div>
+    <?php
+      $start_date = !empty($program['start_date']) ? new DateTime($program['start_date']) : null;
+      $total_days = count($days);
+    ?>
+    <?php if ($start_date): ?>
+    <div style="font-size:.72rem;color:var(--grey-mid);margin-bottom:10px;padding:6px 10px;background:var(--off-white);border-radius:6px;">
+      📅 <?= $start_date->format('d M Y') ?><br>
+      <?php $end = clone $start_date; $end->modify('+'.($total_days-1).' days'); ?>
+      → <?= $end->format('d M Y') ?><br>
+      <strong><?= $total_days ?> days / <?= max(0,$total_days-1) ?> nights</strong>
+    </div>
+    <?php else: ?>
+    <div style="font-size:.72rem;color:var(--amber);margin-bottom:10px;">
+      ⚠ Set start date in Settings
+    </div>
+    <?php endif; ?>
     <?php foreach ($days as $d): ?>
     <?php $has_lodge = !empty($d['start_lodge_id']) || !empty($d['end_lodge_id']); ?>
-    <a href="program_edit.php?id=<?= $id ?>&tab=days&day=<?= $d['id'] ?>"
-       class="day-btn<?= $active_day===(int)$d['id']?' active':'' ?><?= $has_lodge?' filled':'' ?>"
-       style="display:block;margin-bottom:6px;text-align:center;">
-      Day <?= $d['day_number'] ?>
-      <?php if ($d['day_title_en']): ?><div style="font-size:.68rem;font-weight:400;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"><?= h(mb_substr($d['day_title_en'],0,20)) ?></div><?php endif; ?>
-    </a>
+    <div style="display:flex;gap:3px;align-items:stretch;margin-bottom:6px;">
+      <a href="program_edit.php?id=<?= $id ?>&tab=days&day=<?= $d['id'] ?>"
+         class="day-btn<?= $active_day===(int)$d['id']?' active':'' ?><?= $has_lodge?' filled':'' ?>"
+         style="flex:1;display:block;text-align:center;">
+        Day <?= $d['day_number'] ?>
+        <?php if ($d['day_title_en']): ?><div style="font-size:.68rem;font-weight:400;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"><?= h(mb_substr($d['day_title_en'],0,20)) ?></div><?php endif; ?>
+      </a>
+      <div style="display:flex;flex-direction:column;gap:2px;">
+        <?php if ($d['day_number'] > 1): ?>
+        <form method="POST" action="program_edit.php?id=<?= $id ?>&tab=days" style="margin:0;">
+          <input type="hidden" name="_sub" value="move_day">
+          <input type="hidden" name="day_id" value="<?= $d['id'] ?>">
+          <input type="hidden" name="direction" value="up">
+          <button title="Move up" style="padding:2px 5px;font-size:.65rem;border:1px solid var(--grey-lt);border-radius:4px;background:var(--white);cursor:pointer;">▲</button>
+        </form>
+        <?php endif; ?>
+        <?php if ($d['day_number'] < $total_days): ?>
+        <form method="POST" action="program_edit.php?id=<?= $id ?>&tab=days" style="margin:0;">
+          <input type="hidden" name="_sub" value="move_day">
+          <input type="hidden" name="day_id" value="<?= $d['id'] ?>">
+          <input type="hidden" name="direction" value="down">
+          <button title="Move down" style="padding:2px 5px;font-size:.65rem;border:1px solid var(--grey-lt);border-radius:4px;background:var(--white);cursor:pointer;">▼</button>
+        </form>
+        <?php endif; ?>
+        <form method="POST" action="program_edit.php?id=<?= $id ?>&tab=days" style="margin:0;"
+              onsubmit="return confirm('Delete Day <?= $d['day_number'] ?>?')">
+          <input type="hidden" name="_sub" value="delete_day">
+          <input type="hidden" name="day_id" value="<?= $d['id'] ?>">
+          <input type="hidden" name="day_num" value="<?= $d['day_number'] ?>">
+          <button title="Delete day" style="padding:2px 5px;font-size:.65rem;border:1px solid var(--red-lt);border-radius:4px;background:var(--red-lt);color:var(--red-dk);cursor:pointer;">✕</button>
+        </form>
+      </div>
+    </div>
     <?php endforeach; ?>
+    <form method="POST" action="program_edit.php?id=<?= $id ?>&tab=days" style="margin-top:10px;">
+      <input type="hidden" name="_sub" value="add_day">
+      <button class="btn btn-red" style="width:100%;font-size:.75rem;">+ Add Day</button>
+    </form>
   </div>
 
   <!-- Day editor -->
@@ -586,9 +687,9 @@ include __DIR__ . '/../../includes/layout_header.php';
   <div class="form-section-title" style="margin-top:0;">Program Settings</div>
   <div class="form-grid">
     <div class="form-group">
-      <label>Duration (days)</label>
-      <input type="number" name="duration_days" min="1" max="30" value="<?= (int)$program['duration_days'] ?>">
-      <span class="form-hint">Note: changing this does not add/remove day rows</span>
+      <label>Start Date</label>
+      <input type="date" name="start_date" value="<?= h($program['start_date'] ?? '') ?>">
+      <span class="form-hint">End date and duration calculated automatically</span>
     </div>
     <div class="form-group">
       <label>Adults</label>
