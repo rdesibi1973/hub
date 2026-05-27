@@ -122,6 +122,7 @@ $programs = iti_get_programs($tab, array_filter(['q' => $search, 'status' => $fs
 $terms    = iti_get_terms();
 
 $page_title = 'Programs — Itinerary Builder';
+$extra_css = iti_extra_css();
 include __DIR__ . '/../../includes/layout_header.php';
 ?>
 <main>
