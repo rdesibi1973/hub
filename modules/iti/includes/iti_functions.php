@@ -419,3 +419,99 @@ if (!defined('ITI_ACTIVITY_ICONS')) {
         'other'          => '⭐',
     ]);
 }
+
+// ── ITI CSS (da iniettare via $extra_css prima di layout_header) ──────────────
+function iti_extra_css(): string {
+    return '
+/* ── ITI MODULE STYLES ───────────────────────────────────────────── */
+
+/* Buttons */
+.btn-red     { background:var(--red);      color:#fff; }
+.btn-red:hover { background:var(--red-dk); color:#fff; }
+.btn-outline { background:var(--white); color:var(--grey-dk); border:1.5px solid var(--grey-lt); }
+.btn-outline:hover { border-color:var(--grey-mid); background:var(--off-white); }
+.btn-green   { background:var(--green);    color:#fff; }
+.btn-green:hover { background:#145530; }
+.btn-amber   { background:var(--amber);    color:#fff; }
+
+/* Badges ITI */
+.badge-grey  { background:var(--grey-lt);  color:var(--grey-dk); }
+.badge-amber { background:var(--amber-lt); color:#7A4F01; }
+.badge-green { background:var(--green-lt); color:var(--green); }
+.badge-red   { background:var(--red-lt);   color:var(--red-dk); }
+.badge-navy  { background:var(--navy-lt);  color:var(--navy); }
+
+/* Page header */
+.page-header { display:flex; align-items:flex-start; justify-content:space-between;
+               gap:16px; margin-bottom:24px; flex-wrap:wrap; }
+.page-header h2 { font-family:"Merriweather",serif; font-size:1.25rem;
+                  font-weight:700; color:var(--red-dk); }
+.page-header .sub { font-size:.75rem; color:var(--grey-mid); margin-top:3px; }
+
+/* Stat grid */
+.stat-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(180px,1fr));
+             gap:16px; margin-bottom:28px; }
+.stat-card { background:var(--white); border-radius:10px;
+             box-shadow:0 1px 8px rgba(0,0,0,.08);
+             padding:18px 20px; border-top:3px solid var(--grey-lt); }
+.stat-card.red   { border-top-color:var(--red); }
+.stat-card.green { border-top-color:var(--green); }
+.stat-card.amber { border-top-color:var(--amber); }
+.stat-card.blue  { border-top-color:var(--navy); }
+.stat-label { font-size:.68rem; font-weight:700; text-transform:uppercase;
+              letter-spacing:.1em; color:var(--grey-mid); margin-bottom:6px; }
+.stat-value { font-family:"Merriweather",serif; font-size:1.8rem;
+              font-weight:700; color:var(--black); line-height:1; }
+.stat-sub   { font-size:.72rem; color:var(--grey-mid); margin-top:6px; }
+
+/* Table wrap */
+.table-wrap { background:var(--white); border-radius:10px;
+              box-shadow:0 1px 8px rgba(0,0,0,.08); overflow:hidden; }
+.table-wrap table { width:100%; border-collapse:collapse; font-size:.82rem; }
+.table-wrap thead th { background:var(--black); color:rgba(255,255,255,.8);
+                       padding:10px 16px; text-align:left; font-size:.65rem;
+                       font-weight:700; text-transform:uppercase;
+                       letter-spacing:.1em; white-space:nowrap; }
+.table-wrap tbody td { padding:11px 16px; border-bottom:1px solid var(--grey-lt);
+                       color:var(--grey-dk); vertical-align:middle; }
+.table-wrap tbody tr:last-child td { border-bottom:none; }
+.table-wrap tbody tr:hover td { background:#FAFAFA; }
+
+/* Form card */
+.form-card { background:var(--white); border-radius:10px;
+             box-shadow:0 1px 8px rgba(0,0,0,.08);
+             padding:28px 32px; margin-bottom:24px; }
+.form-section-title { font-size:.68rem; font-weight:700; text-transform:uppercase;
+                      letter-spacing:.14em; color:var(--grey-mid);
+                      padding-bottom:10px; margin-bottom:16px; margin-top:24px;
+                      border-bottom:1px solid var(--grey-lt); }
+.form-section-title:first-child { margin-top:0; }
+.form-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr));
+             gap:16px 20px; }
+.form-group label { display:block; font-size:.72rem; font-weight:700;
+                    text-transform:uppercase; letter-spacing:.08em;
+                    color:var(--grey-dk); margin-bottom:6px; }
+.form-group input[type=text],
+.form-group input[type=number],
+.form-group input[type=email],
+.form-group input[type=date],
+.form-group select,
+.form-group textarea { width:100%; padding:9px 12px;
+                       border:1.5px solid var(--grey-lt); border-radius:6px;
+                       font-family:"Open Sans",sans-serif; font-size:.85rem;
+                       color:var(--black); background:var(--white);
+                       transition:border-color .15s; }
+.form-group input:focus,
+.form-group select:focus,
+.form-group textarea:focus { outline:none; border-color:var(--red); }
+.form-group textarea { resize:vertical; min-height:80px; }
+
+/* Empty state */
+.empty-state { text-align:center; padding:48px 20px; color:var(--grey-mid); }
+.empty-state .icon { font-size:2.5rem; margin-bottom:12px; }
+.empty-state p { font-size:.85rem; }
+
+/* ITI Nav override */
+.iti-nav a:hover { opacity:.85; }
+';
+}
