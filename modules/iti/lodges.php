@@ -103,6 +103,7 @@ $lodges = $stmt->fetchAll();
 $destinations_map = iti_destinations_map();
 
 $page_title = 'Lodges — Itinerary Builder';
+$extra_css = iti_extra_css();
 include __DIR__ . '/../../includes/layout_header.php';
 ?>
 <main>
