@@ -101,6 +101,7 @@ $samples = $db->query(
 )->fetchAll();
 
 $page_title = 'Requests — Itinerary Builder';
+$extra_css = iti_extra_css();
 include __DIR__ . '/../../includes/layout_header.php';
 ?>
 <main>
