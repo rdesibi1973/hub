@@ -214,6 +214,7 @@ foreach ($days as $d) {
 $public_url = BASE_URL . '/modules/iti/itinerary.php?token=' . ($program['public_token'] ?? '');
 
 $page_title = 'Edit: ' . $program['title_en'] . ' — ITI Builder';
+$extra_css = iti_extra_css();
 include __DIR__ . '/../../includes/layout_header.php';
 ?>
 
