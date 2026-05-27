@@ -17,51 +17,32 @@ $id     = (int)($_REQUEST['id'] ?? 0);
 
 // ── POST: crea nuovo SAMPLE ──────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'add' && $can_edit) {
-    $f = [
-        'duration_days'    => max(1,(int)($_POST['duration_days'] ?? 1)),
-        'pax_adults'       => max(1,(int)($_POST['pax_adults']    ?? 2)),
-        'pax_children'     => max(0,(int)($_POST['pax_children']  ?? 0)),
-        'flights_included' => isset($_POST['flights_included']) ? 1 : 0,
-        'display_language' => $_POST['display_language'] ?? 'en',
-        'display_currency' => $_POST['display_currency'] ?? 'USD',
-        'terms_id'         => ($_POST['terms_id'] ?? '') !== '' ? (int)$_POST['terms_id'] : null,
-        'status'           => 'draft',
-        'created_by'       => $_cu['username'] ?? 'system',
-    ];
-    foreach (ITI_LANGS as $lang) {
-        $f["title_{$lang}"]    = trim($_POST["title_{$lang}"]    ?? '');
-        $f["subtitle_{$lang}"] = trim($_POST["subtitle_{$lang}"] ?? '');
-    }
+    $title_en         = trim($_POST['title_en'] ?? '');
+    $display_language = $_POST['display_language'] ?? 'en';
 
-    if ($f['title_en'] === '') {
-        iti_flash_set('error', 'Title (EN) is required.');
+    if ($title_en === '') {
+        iti_flash_set('error', 'Title is required.');
         iti_redirect("programs.php?type=sample&action=add");
     }
 
     $db->prepare(
         'INSERT INTO iti_programs
-         (program_type,terms_id,
+         (program_type,
           title_en,title_it,title_fr,title_es,title_de,
           subtitle_en,subtitle_it,subtitle_fr,subtitle_es,subtitle_de,
-          duration_days,pax_adults,pax_children,flights_included,
+          duration_days,pax_adults,pax_children,
           status,display_language,display_currency,created_by)
          VALUES
-         ("sample",?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+         ("sample",?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
     )->execute([
-        $f['terms_id'],
-        $f['title_en'],$f['title_it'],$f['title_fr'],$f['title_es'],$f['title_de'],
-        $f['subtitle_en'],$f['subtitle_it'],$f['subtitle_fr'],$f['subtitle_es'],$f['subtitle_de'],
-        $f['duration_days'],$f['pax_adults'],$f['pax_children'],$f['flights_included'],
-        $f['status'],$f['display_language'],$f['display_currency'],$f['created_by'],
+        $title_en,'','','','',
+        '','','','','',
+        1,2,0,
+        'draft',$display_language,'USD',$_cu['username'] ?? 'system',
     ]);
     $new_id = (int)$db->lastInsertId();
 
-    // Crea i giorni vuoti automaticamente
-    for ($d = 1; $d <= $f['duration_days']; $d++) {
-        $db->prepare('INSERT INTO iti_program_days (program_id,day_number) VALUES (?,?)')->execute([$new_id,$d]);
-    }
-
-    iti_flash_set('success', 'Sample program created. Now build the itinerary day by day.');
+    iti_flash_set('success', 'Sample program created. Now build the itinerary.');
     iti_redirect(ITI_MODULE_URL . "/program_edit.php?id={$new_id}");
 }
 
@@ -154,73 +135,24 @@ include __DIR__ . '/../../includes/layout_header.php';
   <a href="programs.php?type=sample" class="btn btn-outline btn-sm">← Back</a>
 </div>
 
-<div class="form-card">
+<div class="form-card" style="max-width:520px;">
 <form method="POST" action="programs.php?type=sample&action=add">
 
-  <div class="form-section-title">Program Info</div>
-  <div class="form-grid">
-    <div class="form-group">
-      <label>Duration (days) <span style="color:var(--red)">*</span></label>
-      <input type="number" name="duration_days" min="1" max="30" value="7" required>
-      <span class="form-hint">Days are created automatically</span>
-    </div>
-    <div class="form-group">
-      <label>Default Adults</label>
-      <input type="number" name="pax_adults" min="1" max="99" value="2">
-    </div>
-    <div class="form-group">
-      <label>Default Children</label>
-      <input type="number" name="pax_children" min="0" max="99" value="0">
-    </div>
-    <div class="form-group">
-      <label>Language</label>
-      <select name="display_language"><?= iti_options(ITI_LANG_LABELS, 'en') ?></select>
-    </div>
-    <div class="form-group">
-      <label>Currency</label>
-      <select name="display_currency">
-        <option value="USD">USD — $</option>
-        <option value="EUR">EUR — €</option>
-      </select>
-    </div>
-    <div class="form-group">
-      <label>Terms &amp; Conditions</label>
-      <select name="terms_id">
-        <option value="">— None —</option>
-        <?php foreach ($terms as $t): ?>
-        <option value="<?= $t['id'] ?>"><?= h($t['version']) ?> (<?= date('d M Y',strtotime($t['effective_date'])) ?>)</option>
-        <?php endforeach; ?>
-      </select>
-    </div>
-    <div class="form-group" style="flex-direction:row;align-items:center;gap:10px;align-self:flex-end;">
-      <input type="checkbox" name="flights_included" value="1" id="fi" checked
-             style="width:16px;height:16px;accent-color:var(--red);">
-      <label for="fi" style="margin:0;text-transform:none;font-size:.85rem;">Flights included in price</label>
-    </div>
+  <div class="form-group">
+    <label>Program Title <span style="color:var(--red)">*</span></label>
+    <input type="text" name="title_en" maxlength="200" required
+           placeholder="e.g. 7 Days Northern Circuit Classic"
+           style="font-size:1rem;">
+    <span class="form-hint">You can add translations in the editor after creation.</span>
   </div>
 
-  <div class="form-section-title">Title <span style="font-weight:400;font-size:.8rem;color:var(--grey-mid)">× 5 languages</span></div>
-  <div class="form-grid">
-    <?php foreach (ITI_LANGS as $lang): ?>
-    <div class="form-group">
-      <label><?= ITI_LANG_LABELS[$lang] ?><?= $lang==='en'?' <span style="color:var(--red)">*</span>':'' ?></label>
-      <input type="text" name="title_<?= $lang ?>" maxlength="200" <?= $lang==='en'?'required':'' ?>>
-    </div>
-    <?php endforeach; ?>
-  </div>
-
-  <div class="form-section-title">Subtitle <span style="font-weight:400;font-size:.8rem;color:var(--grey-mid)">× 5 languages</span></div>
-  <div class="form-grid">
-    <?php foreach (ITI_LANGS as $lang): ?>
-    <div class="form-group">
-      <label><?= ITI_LANG_LABELS[$lang] ?></label>
-      <input type="text" name="subtitle_<?= $lang ?>" maxlength="255">
-    </div>
-    <?php endforeach; ?>
+  <div class="form-group">
+    <label>Language</label>
+    <select name="display_language"><?= iti_options(ITI_LANG_LABELS, 'en') ?></select>
   </div>
 
   <div class="form-actions">
-    <button type="submit" class="btn btn-red">+ Create &amp; Build Itinerary</button>
+    <button type="submit" class="btn btn-red">+ Create &amp; Build Itinerary →</button>
     <a href="programs.php?type=sample" class="btn btn-outline">Cancel</a>
   </div>
 </form>
