@@ -522,6 +522,45 @@ function iti_get_discounts(int $program_id): array {
     return $st->fetchAll();
 }
 
+
+// ── Alias e funzioni mancanti per program_edit.php ───────────────────────────
+
+function iti_get_program_prices(int $program_id): array {
+    return iti_get_prices($program_id);
+}
+
+function iti_get_program_inclusions(int $program_id): array {
+    return iti_get_inclusions($program_id);
+}
+
+// Lodge raggruppati per destinazione: ['dest_name' => [lodge, lodge, ...]]
+function iti_lodges_grouped(): array {
+    $rows = iti_get_lodges();
+    $out  = [];
+    foreach ($rows as $l) {
+        $dest = $l['dest_name_en'] ?? 'Other';
+        $out[$dest][] = $l;
+    }
+    ksort($out);
+    return $out;
+}
+
+// Mappa transfer routes: [id => route_row] per lookup veloce
+function iti_transfer_routes_map(): array {
+    $rows = iti_get_transfer_routes();
+    $map  = [];
+    foreach ($rows as $r) { $map[$r['id']] = $r; }
+    return $map;
+}
+
+// Mappa flight routes: [id => route_row]
+function iti_flight_routes_map(): array {
+    $rows = iti_get_flight_routes();
+    $map  = [];
+    foreach ($rows as $r) { $map[$r['id']] = $r; }
+    return $map;
+}
+
 // ── ITI CSS (da iniettare via $extra_css prima di layout_header) ──────────────
 function iti_extra_css(): string {
     return '
