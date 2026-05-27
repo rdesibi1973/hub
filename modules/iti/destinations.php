@@ -95,6 +95,7 @@ foreach ($db->query('SELECT destination_id, COUNT(*) n FROM iti_lodges WHERE is_
 }
 
 $page_title = 'Destinations — Itinerary Builder';
+$extra_css = iti_extra_css();
 include __DIR__ . '/../../includes/layout_header.php';
 ?>
 <main>
