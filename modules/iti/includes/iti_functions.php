@@ -450,6 +450,78 @@ if (!defined('ITI_REQUEST_STATUSES')) {
     ]);
 }
 
+
+// ── Alias per compatibilità con program_edit.php ──────────────────────────────
+function iti_get_program_days(int $program_id): array {
+    return iti_get_days($program_id);
+}
+
+function iti_get_day_activities(int $program_day_id): array {
+    $st = db()->prepare(
+        'SELECT da.*, a.name_en, a.name_it, a.name_fr, a.name_es, a.name_de,
+                a.activity_type, a.duration_hours,
+                d.name_en AS dest_name_en
+           FROM iti_day_activities da
+           JOIN iti_activities a ON a.id = da.activity_id
+           LEFT JOIN iti_destinations d ON d.id = a.destination_id
+          WHERE da.program_day_id = ?
+          ORDER BY da.sort_order'
+    );
+    $st->execute([$program_day_id]);
+    return $st->fetchAll();
+}
+
+function iti_get_day_flights(int $program_day_id): array {
+    $st = db()->prepare(
+        'SELECT df.*, fr.from_airport, fr.to_airport, fr.operator,
+                fr.from_code, fr.to_code, fr.duration_min
+           FROM iti_day_flights df
+           JOIN iti_flight_routes fr ON fr.id = df.flight_route_id
+          WHERE df.program_day_id = ?
+          ORDER BY df.sort_order'
+    );
+    $st->execute([$program_day_id]);
+    return $st->fetchAll();
+}
+
+function iti_get_transfer_routes(): array {
+    $st = db()->query(
+        'SELECT tr.*, 
+                fd.name_en AS from_name,
+                td.name_en AS to_name
+           FROM iti_transfer_routes tr
+           JOIN iti_destinations fd ON fd.id = tr.from_destination
+           JOIN iti_destinations td ON td.id = tr.to_destination
+          WHERE tr.is_active = 1
+          ORDER BY fd.name_en, td.name_en'
+    );
+    return $st->fetchAll();
+}
+
+function iti_get_flight_routes(): array {
+    $st = db()->query(
+        'SELECT * FROM iti_flight_routes WHERE is_active = 1
+          ORDER BY from_airport, to_airport'
+    );
+    return $st->fetchAll();
+}
+
+function iti_get_supplements(int $program_id): array {
+    $st = db()->prepare(
+        'SELECT * FROM iti_price_supplements WHERE program_id = ? ORDER BY sort_order'
+    );
+    $st->execute([$program_id]);
+    return $st->fetchAll();
+}
+
+function iti_get_discounts(int $program_id): array {
+    $st = db()->prepare(
+        'SELECT * FROM iti_price_discounts WHERE program_id = ? ORDER BY sort_order'
+    );
+    $st->execute([$program_id]);
+    return $st->fetchAll();
+}
+
 // ── ITI CSS (da iniettare via $extra_css prima di layout_header) ──────────────
 function iti_extra_css(): string {
     return '
