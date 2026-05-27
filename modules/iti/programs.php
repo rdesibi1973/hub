@@ -43,7 +43,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'add' && $can_edit) {
     $new_id = (int)$db->lastInsertId();
 
     iti_flash_set('success', 'Sample program created. Now build the itinerary.');
-    iti_redirect(ITI_MODULE_URL . "/program_edit.php?id={$new_id}");
+    iti_redirect("program_edit.php?id={$new_id}");
 }
 
 // ── DELETE ───────────────────────────────────────────────────
