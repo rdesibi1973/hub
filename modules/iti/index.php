@@ -33,6 +33,7 @@ $open_requests = $db->query(
 )->fetchAll();
 
 $page_title = 'Itinerary Builder — Savannah Explorers';
+$extra_css = iti_extra_css();
 include __DIR__ . '/../../includes/layout_header.php';
 ?>
 
