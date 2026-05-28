@@ -39,6 +39,7 @@ include __DIR__ . '/../../includes/layout_header.php';
 
 <main>
 
+<?php iti_nav('Dashboard'); ?>
 <?php iti_flash_render(); ?>
 
 <div class="page-header">
