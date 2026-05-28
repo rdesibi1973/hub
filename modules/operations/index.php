@@ -665,7 +665,7 @@ function legacyCopy(text, onSuccess, onFail) {
 }
 
 // WhatsApp — copy directly to clipboard, 4 sections always shown
-function isJROorARK(text){if(!text)return false;const up=String(text).toUpperCase();return up.includes('JRO')||up.includes('KILI')||up.includes('KILIMANJARO')||up.includes('ARK')||up.includes('ARUSHA');}
+function isJROorARK(text){if(!text)return false;const up=String(text).toUpperCase();return up.includes('JRO')||up.includes('KILI')||up.includes('KILIMANJARO')||up.includes('ARK')||up.includes('ARUSHA')||up.includes('SERONERA')||up.includes('KOGATENDE')||up.includes('GRUMETI')||up.includes('LOBO')||up.includes('NDUTU')||up.includes('MANYARA')||up.includes('NAMANGA')||up.includes('ISEBANIA')||up.includes('ISEBANI');}
 function isCoastOrIsland(text){if(!text)return false;const up=String(text).toUpperCase();return up.includes('ZNZ')||up.includes('ZANZIBAR')||up.includes('PEMBA')||up.includes('MAFIA')||up.includes('DAR');}
 
 function buildWALine(r){
