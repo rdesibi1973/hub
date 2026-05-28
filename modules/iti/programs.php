@@ -78,7 +78,6 @@ if ($action === 'duplicate' && $id && $can_edit) {
         )->execute([$_cu['username'] ?? 'system', $id]);
         $new_id = (int)$db->lastInsertId();
 
-        // Duplica giorni + attività + voli
         foreach (iti_get_program_days($id) as $day) {
             $db->prepare(
                 'INSERT INTO iti_program_days
@@ -97,7 +96,6 @@ if ($action === 'duplicate' && $id && $can_edit) {
                 $day['meal_breakfast'],$day['meal_lunch'],$day['meal_dinner'],
             ]);
             $new_day_id = (int)$db->lastInsertId();
-
             foreach (iti_get_day_activities((int)$day['id']) as $a) {
                 $db->prepare('INSERT INTO iti_day_activities (program_day_id,activity_id,sort_order,custom_note_en,custom_note_it,custom_note_fr,custom_note_es,custom_note_de) VALUES (?,?,?,?,?,?,?,?)')->execute([$new_day_id,$a['activity_id'],$a['sort_order'],$a['custom_note_en'],$a['custom_note_it'],$a['custom_note_fr'],$a['custom_note_es'],$a['custom_note_de']]);
             }
@@ -105,8 +103,6 @@ if ($action === 'duplicate' && $id && $can_edit) {
                 $db->prepare('INSERT INTO iti_day_flights (program_day_id,flight_route_id,departure_time,arrival_time,sort_order,note_en,note_it,note_fr,note_es,note_de) VALUES (?,?,?,?,?,?,?,?,?,?)')->execute([$new_day_id,$fl['flight_route_id'],$fl['departure_time'],$fl['arrival_time'],$fl['sort_order'],$fl['note_en'],$fl['note_it'],$fl['note_fr'],$fl['note_es'],$fl['note_de']]);
             }
         }
-
-        // Prezzi + inclusi
         foreach (iti_get_program_prices($id) as $cat => $p) {
             $db->prepare('INSERT INTO iti_program_prices (program_id,price_category,price_per_pax_usd,price_per_pax_eur,single_suppl_usd,single_suppl_eur,child_price_usd,child_price_eur,min_pax,valid_from,valid_to,notes) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)')->execute([$new_id,$cat,$p['price_per_pax_usd'],$p['price_per_pax_eur'],$p['single_suppl_usd'],$p['single_suppl_eur'],$p['child_price_usd'],$p['child_price_eur'],$p['min_pax'],$p['valid_from'],$p['valid_to'],$p['notes']]);
         }
@@ -119,14 +115,23 @@ if ($action === 'duplicate' && $id && $can_edit) {
     }
 }
 
-// ── Carica dati lista ────────────────────────────────────────
+// ── Filtri ───────────────────────────────────────────────────
 $search  = trim($_GET['q']      ?? '');
+$fref    = trim($_GET['ref']    ?? '');
 $fstatus = $_GET['status']      ?? '';
-$programs = iti_get_programs($tab, array_filter(['q' => $search, 'status' => $fstatus]));
-$terms    = iti_get_terms();
+$flang   = $_GET['lang']        ?? '';
+
+$programs = iti_get_programs($tab, array_filter([
+    'q'      => $search,
+    'ref'    => $fref,
+    'status' => $fstatus,
+    'lang'   => $flang,
+]));
+
+$has_filters = $search || $fref || $fstatus || $flang;
 
 $page_title = 'Programs — Itinerary Builder';
-$extra_css = iti_extra_css();
+$extra_css  = iti_extra_css();
 include __DIR__ . '/../../includes/layout_header.php';
 ?>
 <main>
@@ -185,45 +190,83 @@ include __DIR__ . '/../../includes/layout_header.php';
   </a>
 </div>
 
-<div class="page-header" style="margin-bottom:16px;">
+<!-- Header con titolo + pulsante Nuovo -->
+<div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:6px;">
   <div>
-    <h2><?= $tab==='sample'?'Sample Programs':'Personal Programs' ?></h2>
-    <div class="sub"><?= count($programs) ?> program<?= count($programs)!==1?'s':'' ?></div>
+    <h2 style="margin:0;"><?= $tab==='sample'?'Sample Programs':'Personal Programs' ?></h2>
+    <div class="sub" style="margin-top:2px;">
+      <?= count($programs) ?> program<?= count($programs)!==1?'s':'' ?>
+      <?php if ($has_filters): ?>
+        <a href="programs.php?type=<?= h($tab) ?>" style="font-size:.75rem;margin-left:8px;color:var(--grey-mid);">✕ clear filters</a>
+      <?php endif; ?>
+    </div>
   </div>
   <?php if ($tab==='sample' && $can_edit): ?>
-  <a href="programs.php?type=sample&action=add" class="btn btn-red">+ New Sample</a>
+  <a href="programs.php?type=sample&action=add" class="btn btn-red btn-sm">+ New Sample</a>
   <?php endif; ?>
 </div>
 
-<form method="GET" action="programs.php" class="filters">
+<!-- Filtri -->
+<form method="GET" action="programs.php" style="margin:14px 0 20px;">
   <input type="hidden" name="type" value="<?= h($tab) ?>">
-  <div><label>Search</label><input type="text" name="q" placeholder="Title, ref. number, client…" value="<?= h($search) ?>"></div>
-  <div>
-    <label>Status</label>
-    <select name="status">
-      <option value="">All statuses</option>
-      <?= iti_options(ITI_PROGRAM_STATUSES, $fstatus ?: null) ?>
-    </select>
-  </div>
-  <div style="display:flex;gap:8px;align-items:flex-end;">
-    <button type="submit" class="btn btn-outline btn-sm">🔍 Filter</button>
-    <?php if ($search||$fstatus): ?><a href="programs.php?type=<?= h($tab) ?>" class="btn btn-outline btn-sm">✕ Clear</a><?php endif; ?>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;">
+
+    <div style="display:flex;flex-direction:column;gap:3px;flex:2;min-width:200px;">
+      <label style="font-size:.72rem;font-weight:700;color:var(--grey-dk);text-transform:uppercase;letter-spacing:.05em;">Search</label>
+      <input type="text" name="q"
+             placeholder="Title or client name…"
+             value="<?= h($search) ?>"
+             style="width:100%;">
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:3px;min-width:140px;">
+      <label style="font-size:.72rem;font-weight:700;color:var(--grey-dk);text-transform:uppercase;letter-spacing:.05em;">Ref. Number</label>
+      <input type="text" name="ref"
+             placeholder="e.g. SE-2025-…"
+             value="<?= h($fref) ?>"
+             style="width:100%;font-family:monospace;font-size:.85rem;">
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:3px;min-width:130px;">
+      <label style="font-size:.72rem;font-weight:700;color:var(--grey-dk);text-transform:uppercase;letter-spacing:.05em;">Language</label>
+      <select name="lang">
+        <option value="">All languages</option>
+        <?= iti_options(ITI_LANG_LABELS, $flang) ?>
+      </select>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:3px;min-width:130px;">
+      <label style="font-size:.72rem;font-weight:700;color:var(--grey-dk);text-transform:uppercase;letter-spacing:.05em;">Status</label>
+      <select name="status">
+        <option value="">All statuses</option>
+        <?= iti_options(ITI_PROGRAM_STATUSES, $fstatus) ?>
+      </select>
+    </div>
+
+    <div style="display:flex;gap:6px;align-items:flex-end;padding-bottom:1px;">
+      <button type="submit" class="btn btn-red btn-sm">🔍 Search</button>
+      <?php if ($has_filters): ?>
+      <a href="programs.php?type=<?= h($tab) ?>" class="btn btn-outline btn-sm">✕ Clear</a>
+      <?php endif; ?>
+    </div>
+
   </div>
 </form>
 
+<!-- Tabella -->
 <div class="table-wrap">
   <table>
     <thead>
       <tr>
-        <th>Ref. Number</th>
+        <th style="width:120px;">Ref. Number</th>
         <th>Title</th>
         <?php if ($tab==='personal'): ?><th>Client</th><?php endif; ?>
+        <th>Lang</th>
         <th>Duration</th>
         <th>Pax</th>
-        <th>Flights</th>
         <th>Status</th>
-        <th>Created</th>
-        <th></th>
+        <th>Updated</th>
+        <th style="width:1%;white-space:nowrap;"></th>
       </tr>
     </thead>
     <tbody>
@@ -244,38 +287,38 @@ include __DIR__ . '/../../includes/layout_header.php';
         <?php if ($tab==='personal'): ?>
         <td>
           <div style="font-size:.83rem;"><?= h($p['client_name'] ?? '—') ?></div>
-          <?php if ($p['agent_name']): ?><div style="font-size:.7rem;color:var(--grey-mid);"><?= h($p['agent_name']) ?></div><?php endif; ?>
+          <?php if (!empty($p['agent_name'])): ?><div style="font-size:.7rem;color:var(--grey-mid);"><?= h($p['agent_name']) ?></div><?php endif; ?>
         </td>
         <?php endif; ?>
+        <td style="font-size:.78rem;text-transform:uppercase;letter-spacing:.05em;color:var(--grey-mid);"><?= h($p['display_language']) ?></td>
         <td style="white-space:nowrap;"><?= iti_duration_label((int)$p['duration_days']) ?></td>
-        <td style="font-size:.82rem;"><?= $p['pax_adults'] ?>A<?= $p['pax_children']?'+'.($p['pax_children']).'C':'' ?></td>
-        <td style="text-align:center;"><?= $p['flights_included'] ? '✈️' : '<span class="text-muted">—</span>' ?></td>
+        <td style="font-size:.82rem;"><?= $p['pax_adults'] ?>A<?= $p['pax_children'] ? '+'.$p['pax_children'].'C' : '' ?></td>
         <td><span class="badge <?= ITI_PROGRAM_STATUS_BADGE[$p['status']] ?? '' ?>"><?= h($p['status']) ?></span></td>
-        <td style="font-size:.75rem;color:var(--grey-mid);white-space:nowrap;"><?= date('d M Y',strtotime($p['created_at'])) ?></td>
+        <td style="font-size:.75rem;color:var(--grey-mid);white-space:nowrap;"><?= date('d M Y', strtotime($p['updated_at'])) ?></td>
         <td>
-          <div class="gap-8">
-            <a href="program_edit.php?id=<?= $p['id'] ?>" class="btn btn-outline btn-sm">Edit</a>
-            <a href="program_view.php?id=<?= $p['id'] ?>" class="btn btn-outline btn-sm">Preview</a>
+          <div class="gap-8" style="white-space:nowrap;">
+            <a href="program_edit.php?id=<?= $p['id'] ?>" class="btn btn-outline btn-sm">✏️ Edit</a>
+            <a href="program_view.php?id=<?= $p['id'] ?>" class="btn btn-outline btn-sm">👁 Preview</a>
             <?php if ($tab==='sample' && $can_edit): ?>
             <a href="programs.php?type=sample&action=duplicate&id=<?= $p['id'] ?>"
-               class="btn btn-outline btn-sm btn-grey"
-               onclick="return confirm('Duplicate this sample program?')">Duplicate</a>
+               class="btn btn-outline btn-sm"
+               onclick="return confirm('Duplicate «<?= h(addslashes($p['title_en'])) ?>»?')">⧉ Duplicate</a>
             <?php endif; ?>
-            <?php if ($can_edit): ?>
+            <?php if ($can_edit && $p['status'] !== 'cancelled'): ?>
             <a href="programs.php?type=<?= $tab ?>&action=delete&id=<?= $p['id'] ?>"
                class="btn btn-danger btn-sm"
-               onclick="return confirm('Cancel this program?')">Cancel</a>
+               onclick="return confirm('Cancel «<?= h(addslashes($p['title_en'])) ?>»?')">🗑 Cancel</a>
             <?php endif; ?>
           </div>
         </td>
       </tr>
       <?php endforeach; ?>
     <?php else: ?>
-      <tr><td colspan="<?= $tab==='personal'?9:8 ?>">
+      <tr><td colspan="<?= $tab==='personal' ? 9 : 8 ?>">
         <div class="empty-state">
-          <div class="icon"><?= $tab==='sample'?'📋':'👤' ?></div>
-          <p>No <?= $tab ?> programs found<?= ($search||$fstatus)?' for the selected filters.':' yet.' ?></p>
-          <?php if ($tab==='sample' && $can_edit && !$search): ?>
+          <div class="icon"><?= $tab==='sample' ? '📋' : '👤' ?></div>
+          <p>No <?= $tab ?> programs found<?= $has_filters ? ' matching the selected filters.' : ' yet.' ?></p>
+          <?php if ($tab==='sample' && $can_edit && !$has_filters): ?>
           <p style="margin-top:12px;"><a href="programs.php?type=sample&action=add" class="btn btn-red btn-sm">+ Create first sample</a></p>
           <?php endif; ?>
         </div>
@@ -284,6 +327,7 @@ include __DIR__ . '/../../includes/layout_header.php';
     </tbody>
   </table>
 </div>
+
 <?php endif; ?>
 </main>
 <?php include __DIR__ . '/../../includes/layout_footer.php'; ?>
