@@ -195,8 +195,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($day_id && ($flight_route_id || $flight_custom !== '')) {
             $ms = $db->prepare('SELECT COALESCE(MAX(sort_order),0) FROM iti_day_flights WHERE program_day_id=?');
             $ms->execute([$day_id]); $max_sort = (int)$ms->fetchColumn();
-            $db->prepare('INSERT INTO iti_day_flights (program_day_id,flight_route_id,flight_custom,departure_time,arrival_time,sort_order) VALUES (?,?,?,?,?,?)')->execute([
+            $db->prepare('INSERT INTO iti_day_flights (program_day_id,flight_route_id,flight_custom,airline_company,departure_time,arrival_time,sort_order) VALUES (?,?,?,?,?,?,?)')->execute([
                 $day_id, $flight_route_id, $flight_custom ?: null,
+                trim($_POST['airline_company'] ?? '') ?: null,
                 ($_POST['departure_time']??'')?:null,
                 ($_POST['arrival_time']??'')?:null,
                 $max_sort+1,
@@ -756,7 +757,7 @@ include __DIR__ . '/../../includes/layout_header.php';
 
   <!-- Flights -->
   <div class="form-card" style="margin-top:16px;padding:20px 24px;">
-    <div style="font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--grey-mid);margin-bottom:14px;">✈️ Flights <span style="font-weight:400;"><?= $program['flights_included']?'(included in price)':'(extra cost)' ?></span></div>
+    <div style="font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--grey-mid);margin-bottom:14px;">✈️ Flights</div>
 
     <?php if ($current_flights): ?>
     <?php foreach ($current_flights as $fl): ?>
@@ -771,7 +772,7 @@ include __DIR__ . '/../../includes/layout_header.php';
           <?php endif; ?>
         </div>
         <div style="font-size:.72rem;color:var(--grey-mid);">
-          <?= !empty($fl['operator']) ? h($fl['operator']).' · ' : '' ?>
+          <?= !empty($fl['airline_company']) ? h($fl['airline_company']).' · ' : (!empty($fl['operator']) ? h($fl['operator']).' · ' : '') ?>
           <?= $fl['departure_time'] ? 'Dep '.h($fl['departure_time']) : '' ?>
           <?= $fl['arrival_time']   ? ' Arr '.h($fl['arrival_time'])  : '' ?>
         </div>
@@ -803,6 +804,11 @@ include __DIR__ . '/../../includes/layout_header.php';
         </div>
         <input type="hidden" name="flight_route_id" value="">
         <div class="iti-combo-drop" data-opts='<?= json_encode($fl_opts, JSON_HEX_APOS) ?>'></div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:3px;min-width:140px;">
+        <label style="font-size:.72rem;font-weight:700;color:var(--grey-dk);">Airline company</label>
+        <input type="text" name="airline_company" placeholder="e.g. Coastal Aviation"
+               style="padding:7px 10px;border:1.5px solid var(--grey-lt);border-radius:6px;font-size:.82rem;">
       </div>
       <div style="display:flex;flex-direction:column;gap:3px;">
         <label style="font-size:.72rem;font-weight:700;color:var(--grey-dk);">Dep.</label>
