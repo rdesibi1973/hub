@@ -291,7 +291,7 @@ include 'includes/header.php';
             <span class="card-agent"><?= h($r['agent_name']) ?></span>
             <?php endif; ?>
           </div>
-          <a class="card-link" href="request_view.php?id=<?= $r['id'] ?>" title="Open"></a>
+          <a class="card-link" href="request_view.php?id=<?= $r['id'] ?>" title="Open" target="_blank">
         </div>
         <?php endforeach; ?>
       </div>
