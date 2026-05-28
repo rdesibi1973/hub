@@ -245,6 +245,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         iti_flash_set('success','Program unpublished.');
         iti_redirect("program_edit.php?id={$id}&tab=info");
     }
+    if ($sub === 'cancel_program') {
+        $db->prepare("UPDATE iti_programs SET status='cancelled', is_published=0 WHERE id=?")->execute([$id]);
+        iti_flash_set('success','Program cancelled.');
+        iti_redirect("programs.php?type={$program['program_type']}");
+    }
+    if ($sub === 'hard_delete_program') {
+        $chk = $db->prepare("SELECT status FROM iti_programs WHERE id=?");
+        $chk->execute([$id]);
+        $row = $chk->fetch();
+        if ($row && $row['status'] === 'cancelled') {
+            $db->prepare("DELETE FROM iti_programs WHERE id=?")->execute([$id]);
+            iti_flash_set('success','Program permanently deleted.');
+            iti_redirect("programs.php?type={$program['program_type']}");
+        } else {
+            iti_flash_set('error','Only cancelled programs can be permanently deleted.');
+            iti_redirect("program_edit.php?id={$id}&tab=info");
+        }
+    }
 }
 
 // ── Dati per la pagina ───────────────────────────────────────
@@ -359,6 +377,19 @@ include __DIR__ . '/../../includes/layout_header.php';
     </form>
     <?php endif; ?>
     <a href="export_word.php?id=<?= $id ?>" class="btn btn-outline btn-sm">⬇ Export .docx</a>
+    <?php if ($program['status'] !== 'cancelled'): ?>
+    <form method="POST" action="program_edit.php?id=<?= $id ?>" style="display:inline;"
+          onsubmit="return confirm('Cancel this program?')">
+      <input type="hidden" name="_sub" value="cancel_program">
+      <button class="btn btn-danger btn-sm" style="color:#fff;">🗑 Cancel</button>
+    </form>
+    <?php else: ?>
+    <form method="POST" action="program_edit.php?id=<?= $id ?>" style="display:inline;"
+          onsubmit="return confirm('PERMANENTLY delete this program? This cannot be undone.')">
+      <input type="hidden" name="_sub" value="hard_delete_program">
+      <button class="btn btn-danger btn-sm" style="background:#7b1010;border-color:#7b1010;color:#fff;">🗑 Delete permanently</button>
+    </form>
+    <?php endif; ?>
   </div>
 </div>
 
