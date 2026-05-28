@@ -326,7 +326,7 @@ include __DIR__ . '/../../includes/layout_header.php';
             <?php elseif ($can_edit && $p['status'] === 'cancelled'): ?>
             <a href="programs.php?type=<?= $tab ?>&action=hard_delete&id=<?= $p['id'] ?>"
                class="btn btn-danger btn-sm"
-               style="background:var(--red-dk,#7b1010);border-color:var(--red-dk,#7b1010);"
+               style="background:var(--red-dk,#7b1010);border-color:var(--red-dk,#7b1010);color:#fff;"
                onclick="return confirm('PERMANENTLY delete «<?= h(addslashes($p['title_en'])) ?>»? This cannot be undone.')">🗑 Delete permanently</a>
             <?php endif; ?>
           </div>
