@@ -57,8 +57,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // Combo fields: se c'è un id FK lo usa, altrimenti salva il testo libero
             $start_id   = ($_POST['start_lodge_id']   !== '' ? (int)$_POST['start_lodge_id']   : null);
             $start_txt  = ($start_id  === null ? trim($_POST['start_lodge_custom']  ?? '') : null) ?: null;
-            $tr_id      = ($_POST['transfer_route_id'] !== '' ? (int)$_POST['transfer_route_id'] : null);
-            $tr_txt     = ($tr_id     === null ? trim($_POST['transfer_custom']      ?? '') : null) ?: null;
+            // transfers saved via separate add_transfer/remove_transfer actions
             $dest_id    = ($_POST['destination_id']   !== '' ? (int)$_POST['destination_id']   : null);
             $dest_txt   = ($dest_id   === null ? trim($_POST['destination_custom']   ?? '') : null) ?: null;
             $end_id     = ($_POST['end_lodge_id']     !== '' ? (int)$_POST['end_lodge_id']     : null);
@@ -68,7 +67,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'UPDATE iti_program_days SET
                  day_title_en=?,day_title_it=?,day_title_fr=?,day_title_es=?,day_title_de=?,
                  start_lodge_id=?,start_custom=?,
-                 transfer_route_id=?,transfer_custom=?,
+
                  destination_id=?,destination_custom=?,
                  narrative_en=?,narrative_it=?,narrative_fr=?,narrative_es=?,narrative_de=?,
                  end_lodge_id=?,end_lodge_custom=?,
@@ -78,7 +77,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 trim($_POST['day_title_en']),trim($_POST['day_title_it']),
                 trim($_POST['day_title_fr']),trim($_POST['day_title_es']),trim($_POST['day_title_de']),
                 $start_id, $start_txt,
-                $tr_id, $tr_txt,
+
                 $dest_id, $dest_txt,
                 trim($_POST['narrative_en']),trim($_POST['narrative_it']),
                 trim($_POST['narrative_fr']),trim($_POST['narrative_es']),trim($_POST['narrative_de']),
@@ -111,6 +110,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $da_id  = (int)($_POST['da_id']  ?? 0);
         $day_id = (int)($_POST['day_id'] ?? 0);
         if ($da_id) $db->prepare('DELETE FROM iti_day_activities WHERE id=?')->execute([$da_id]);
+        iti_redirect("program_edit.php?id={$id}&day={$day_id}");
+    }
+
+    // ── Aggiungi transfer ──
+    if ($sub === 'add_transfer') {
+        $day_id = (int)($_POST['day_id'] ?? 0);
+        $desc   = trim($_POST['transfer_desc'] ?? '');
+        if ($day_id && $desc !== '') {
+            $ms = $db->prepare('SELECT COALESCE(MAX(sort_order),0) FROM iti_day_transfers WHERE program_day_id=?');
+            $ms->execute([$day_id]);
+            $db->prepare('INSERT INTO iti_day_transfers (program_day_id,description,sort_order) VALUES (?,?,?)')->execute([$day_id, $desc, (int)$ms->fetchColumn()+1]);
+        }
+        iti_redirect("program_edit.php?id={$id}&day={$day_id}");
+    }
+
+    // ── Rimuovi transfer ──
+    if ($sub === 'remove_transfer') {
+        $tr_id  = (int)($_POST['tr_id']  ?? 0);
+        $day_id = (int)($_POST['day_id'] ?? 0);
+        if ($tr_id) $db->prepare('DELETE FROM iti_day_transfers WHERE id=?')->execute([$tr_id]);
         iti_redirect("program_edit.php?id={$id}&day={$day_id}");
     }
 
@@ -285,15 +304,17 @@ $transfer_map    = iti_transfer_routes_map();
 $flight_map      = iti_flight_routes_map();
 $activities_list = iti_get_activities(true);
 
-// Attività e voli del giorno corrente
+// Attività, voli e transfer del giorno corrente
 $current_day_data  = null;
 $current_acts      = [];
 $current_flights   = [];
+$current_transfers = [];
 foreach ($days as $d) {
     if ((int)$d['id'] === $active_day) {
-        $current_day_data = $d;
-        $current_acts    = iti_get_day_activities((int)$d['id']);
-        $current_flights = iti_get_day_flights((int)$d['id']);
+        $current_day_data  = $d;
+        $current_acts      = iti_get_day_activities((int)$d['id']);
+        $current_flights   = iti_get_day_flights((int)$d['id']);
+        $current_transfers = iti_get_day_transfers((int)$d['id']);
         break;
     }
 }
@@ -535,34 +556,35 @@ include __DIR__ . '/../../includes/layout_header.php';
         </div>
       </div>
 
-      <!-- 2. ROAD TRANSFER (optional) -->
+      <!-- 2. TRANSFER (multi-line, optional) -->
       <div style="background:var(--off-white,#f7f6f3);border-bottom:1px dashed var(--grey-lt);padding:12px 20px;">
-        <div style="font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--grey-mid);margin-bottom:6px;">🚗 Road transfer <span style="font-weight:400;">(optional)</span></div>
-        <?php
-        $tr_display = '';
-        $sel_tr = (string)($current_day_data['transfer_route_id'] ?? '');
-        if ($sel_tr !== '') {
-            foreach ($transfer_map as $_tid => $_tr)
-                if ((string)$_tid === $sel_tr)
-                    $tr_display = ($_tr['from_name'] ?? '') . ' → ' . ($_tr['to_name'] ?? '') . ' (' . ($_tr['duration_min'] ?? 0) . ' min)';
-        } elseif (!empty($current_day_data['transfer_custom'])) {
-            $tr_display = $current_day_data['transfer_custom'];
-        }
-        $tr_opts = [['id'=>'', 'label'=>'— No road transfer —', 'group'=>'']];
-        foreach ($transfer_map as $_tid => $_tr)
-            $tr_opts[] = ['id'=>(string)$_tid, 'label'=>($_tr['from_name']??'') . ' → ' . ($_tr['to_name']??'') . ' (' . ($_tr['duration_min']??0) . ' min)', 'group'=>'Routes'];
-        ?>
-        <div class="iti-combo" data-field="transfer">
-          <div class="iti-combo-inner">
-            <input type="text" class="iti-combo-text" autocomplete="off"
-                   placeholder="Type or choose from list…"
-                   value="<?= h($tr_display) ?>">
-            <button type="button" class="iti-combo-arrow" tabindex="-1">▾</button>
+        <div style="font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--grey-mid);margin-bottom:10px;">🚌 Transfer <span style="font-weight:400;">(optional)</span></div>
+
+        <?php if ($current_transfers): ?>
+        <div style="margin-bottom:10px;">
+          <?php foreach ($current_transfers as $tr): ?>
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+            <span style="flex:1;font-size:.83rem;padding:7px 10px;background:#fff;border:1px solid var(--grey-lt);border-radius:6px;"><?= h($tr['description']) ?></span>
+            <form method="POST" action="program_edit.php?id=<?= $id ?>&tab=days&day=<?= $active_day ?>" style="margin:0;">
+              <input type="hidden" name="_sub"    value="remove_transfer">
+              <input type="hidden" name="day_id"  value="<?= $active_day ?>">
+              <input type="hidden" name="tr_id"   value="<?= $tr['id'] ?>">
+              <button class="btn btn-danger btn-sm" title="Remove" onclick="return confirm('Remove this transfer?')">✕</button>
+            </form>
           </div>
-          <input type="hidden" name="transfer_route_id" value="<?= h($current_day_data['transfer_route_id'] ?? '') ?>">
-          <input type="hidden" name="transfer_custom"   value="<?= h($current_day_data['transfer_custom'] ?? '') ?>">
-          <div class="iti-combo-drop" data-opts='<?= json_encode($tr_opts, JSON_HEX_APOS) ?>'></div>
+          <?php endforeach; ?>
         </div>
+        <?php endif; ?>
+
+        <form method="POST" action="program_edit.php?id=<?= $id ?>&tab=days&day=<?= $active_day ?>"
+              style="display:flex;gap:8px;align-items:center;">
+          <input type="hidden" name="_sub"   value="add_transfer">
+          <input type="hidden" name="day_id" value="<?= $active_day ?>">
+          <input type="text" name="transfer_desc"
+                 placeholder="e.g. Transfer to Arusha airport — approx. 30 min"
+                 style="flex:1;font-size:.83rem;">
+          <button type="submit" class="btn btn-outline btn-sm">+ Add</button>
+        </form>
       </div>
 
       <!-- 3. MAIN DESTINATION -->
