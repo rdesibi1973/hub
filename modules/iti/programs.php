@@ -49,10 +49,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'add' && $can_edit) {
     iti_redirect("program_edit.php?id={$new_id}");
 }
 
-// ── DELETE ───────────────────────────────────────────────────
+// ── SOFT DELETE (cancel) ─────────────────────────────────────
 if ($action === 'delete' && $id && $can_edit) {
     $db->prepare("UPDATE iti_programs SET status='cancelled' WHERE id=?")->execute([$id]);
     iti_flash_set('success', 'Program cancelled.');
+    iti_redirect("programs.php?type={$tab}");
+}
+
+// ── HARD DELETE (permanent) ──────────────────────────────────
+if ($action === 'hard_delete' && $id && $can_edit) {
+    // Verifica che sia cancelled prima di eliminare definitivamente
+    $chk = $db->prepare("SELECT status FROM iti_programs WHERE id=?");
+    $chk->execute([$id]);
+    $row = $chk->fetch();
+    if ($row && $row['status'] === 'cancelled') {
+        $db->prepare("DELETE FROM iti_programs WHERE id=?")->execute([$id]);
+        iti_flash_set('success', 'Program permanently deleted.');
+    } else {
+        iti_flash_set('error', 'Only cancelled programs can be permanently deleted.');
+    }
     iti_redirect("programs.php?type={$tab}");
 }
 
@@ -308,6 +323,11 @@ include __DIR__ . '/../../includes/layout_header.php';
             <a href="programs.php?type=<?= $tab ?>&action=delete&id=<?= $p['id'] ?>"
                class="btn btn-danger btn-sm"
                onclick="return confirm('Cancel «<?= h(addslashes($p['title_en'])) ?>»?')">🗑 Cancel</a>
+            <?php elseif ($can_edit && $p['status'] === 'cancelled'): ?>
+            <a href="programs.php?type=<?= $tab ?>&action=hard_delete&id=<?= $p['id'] ?>"
+               class="btn btn-danger btn-sm"
+               style="background:var(--red-dk,#7b1010);border-color:var(--red-dk,#7b1010);"
+               onclick="return confirm('PERMANENTLY delete «<?= h(addslashes($p['title_en'])) ?>»? This cannot be undone.')">🗑 Delete permanently</a>
             <?php endif; ?>
           </div>
         </td>
