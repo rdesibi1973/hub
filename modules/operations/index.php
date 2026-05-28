@@ -362,6 +362,10 @@ include __DIR__ . '/../../includes/layout_header.php';
         <div class="sel-chips" id="gsel-chips"></div>
       </div>
     </div>
+    <div style="display:flex;align-items:center;gap:8px;">
+      <span class="ctrl-lbl">Client</span>
+      <input type="text" id="grid-client-filter" placeholder="Search client…" style="font-family:'Open Sans',sans-serif;font-size:.85rem;padding:7px 11px;border:1.5px solid rgba(255,255,255,.25);border-radius:6px;background:rgba(255,255,255,.1);color:var(--white);width:170px;" oninput="renderGridDB()" onkeydown="if(event.key==='Escape'){this.value='';renderGridDB();}">
+    </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;">
       <button class="btn-show" onclick="loadGridFromDB()">Load Movements</button>
       <button class="btn-show btn-ghost" onclick="deleteSelectedRows()" id="btnDeleteSel" style="display:none;">&#128465; Delete Selected</button>
@@ -377,7 +381,23 @@ include __DIR__ . '/../../includes/layout_header.php';
   </div>
 </div>
 
-<!-- ═══ TAB 4: AUDIT EXCEL ═══ -->
+<!-- Delete confirmation modal -->
+<div id="delConfirmOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;align-items:center;justify-content:center;">
+  <div style="background:var(--white);border-radius:12px;padding:28px 30px;width:min(440px,92vw);box-shadow:0 8px 40px rgba(0,0,0,.3);">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;">
+      <span style="font-size:1.6rem;">&#9888;&#65039;</span>
+      <h3 style="margin:0;font-size:1rem;color:var(--red-dk);" id="delConfirmTitle">Confirm deletion</h3>
+    </div>
+    <p id="delConfirmMsg" style="margin:0 0 8px;font-size:.88rem;color:var(--grey-dk);line-height:1.5;"></p>
+    <p style="margin:0 0 22px;font-size:.82rem;color:var(--red-dk);font-weight:700;">&#128683; This action is permanent and cannot be undone.</p>
+    <div style="display:flex;justify-content:flex-end;gap:10px;">
+      <button onclick="closeDelConfirm()" style="font-family:'Open Sans',sans-serif;font-size:.8rem;font-weight:700;padding:8px 20px;border:1.5px solid var(--grey-lt);border-radius:6px;background:var(--white);cursor:pointer;">Cancel</button>
+      <button id="delConfirmBtn" style="font-family:'Open Sans',sans-serif;font-size:.8rem;font-weight:700;padding:8px 20px;border:none;border-radius:6px;background:var(--red-dk);color:var(--white);cursor:pointer;">Delete</button>
+    </div>
+  </div>
+</div>
+
+
 <div id="tab-audit" class="tab-panel <?= $_isOpsStaff ? 'active' : '' ?>">
   <div class="excel-action-bar" id="auditTabActionBar" style="display:none;">
     <span class="file-label" id="auditTabFileName">&#8212;</span>
@@ -1134,13 +1154,17 @@ function loadGridFromDB(){
 
 function renderGridDB(){
   const wrap = document.getElementById('gridWrap');
-  if(!gridDBData.length){
-    wrap.innerHTML='<div class="grid-placeholder"><div class="icon">&#128235;</div><h2>No movements found</h2><p>No data for the selected date range.</p></div>';
+  const filterVal = (document.getElementById('grid-client-filter')||{}).value||'';
+  const filtered = filterVal.trim()
+    ? gridDBData.filter(r=>(r.client_name||'').toLowerCase().includes(filterVal.trim().toLowerCase()))
+    : gridDBData;
+  if(!filtered.length){
+    wrap.innerHTML='<div class="grid-placeholder"><div class="icon">&#128235;</div><h2>No movements found</h2><p>'+(filterVal.trim()?'No results for "'+escH(filterVal.trim())+'"':'No data for the selected date range.')+'</p></div>';
     document.getElementById('btnDeleteSel').style.display='none';
     return;
   }
   document.getElementById('btnDeleteSel').style.display='';
-  const sorted=[...gridDBData].sort((a,b)=>a.move_date.localeCompare(b.move_date)||(a.movement_type==='Departure'?1:-1));
+  const sorted=[...filtered].sort((a,b)=>a.move_date.localeCompare(b.move_date)||(a.movement_type==='Departure'?1:-1));
   let html='<table class="movements-table"><thead><tr>'+
     '<th style="width:32px;"><input type="checkbox" id="selAll" onchange="toggleSelectAll(this)"></th>'+
     '<th>Date</th><th>Type</th><th>Client</th><th>Pax</th><th>Flight</th><th>Time</th>'+
@@ -1169,6 +1193,20 @@ function renderGridDB(){
   html+='</tbody></table>';
   wrap.innerHTML=html;
 }
+
+// ── Delete confirmation modal ────────────────────────────────
+let _delCallback = null;
+function showDelConfirm(title, msg, onConfirm){
+  document.getElementById('delConfirmTitle').textContent = title;
+  document.getElementById('delConfirmMsg').textContent   = msg;
+  document.getElementById('delConfirmBtn').onclick = function(){closeDelConfirm();onConfirm();};
+  const ov = document.getElementById('delConfirmOverlay');
+  ov.style.display='flex';
+}
+function closeDelConfirm(){
+  document.getElementById('delConfirmOverlay').style.display='none';
+}
+document.addEventListener('keydown',function(e){if(e.key==='Escape')closeDelConfirm();});
 
 function toggleSelectAll(cb){
   document.querySelectorAll('.row-sel').forEach(el=>el.checked=cb.checked);
@@ -1201,28 +1239,39 @@ function editGridRow(id){
 
 function deleteGridRow(id, btn){
   const row=gridDBData.find(r=>parseInt(r.id)===id);
-  var name=row?('"'+row.client_name+'" ('+row.movement_type+' '+row.move_date+')'):'this movement';
-  if(!confirm('Delete '+name+'?\n\nThis action cannot be undone.'))return;
-  if(btn)btn.disabled=true;
-  const fd=new FormData();fd.append('id',id);
-  fetch(BASE+'/modules/operations/api/delete_movement.php',{method:'POST',body:fd})
-    .then(r=>r.json()).then(d=>{
-      if(d.ok){gridDBData=gridDBData.filter(r=>parseInt(r.id)!==id);renderGridDB();}
-      else alert('Error: '+d.error);
-    });
+  const name=row?('"'+row.client_name+'" — '+(row.movement_type)+', '+(row.move_date_fmt||row.move_date)):'this movement';
+  showDelConfirm(
+    'Delete movement?',
+    'You are about to delete: '+name+'.',
+    function(){
+      if(btn)btn.disabled=true;
+      const fd=new FormData();fd.append('id',id);
+      fetch(BASE+'/modules/operations/api/delete_movement.php',{method:'POST',body:fd})
+        .then(r=>r.json()).then(d=>{
+          if(d.ok){gridDBData=gridDBData.filter(r=>parseInt(r.id)!==id);renderGridDB();}
+          else alert('Error: '+d.error);
+        });
+    }
+  );
 }
 
 function deleteSelectedRows(){
   const selected=[...document.querySelectorAll('.row-sel:checked')].map(el=>parseInt(el.value));
   if(!selected.length){alert('No rows selected.');return;}
-  if(!confirm('Delete '+selected.length+' selected movement'+(selected.length>1?'s':'')+' ?\n\nThis action cannot be undone.'))return;
-  Promise.all(selected.map(id=>{
-    const fd=new FormData();fd.append('id',id);
-    return fetch(BASE+'/modules/operations/api/delete_movement.php',{method:'POST',body:fd}).then(r=>r.json());
-  })).then(()=>{
-    gridDBData=gridDBData.filter(r=>!selected.includes(parseInt(r.id)));
-    renderGridDB();
-  });
+  const n=selected.length;
+  showDelConfirm(
+    'Delete '+n+' movement'+(n>1?'s':'')+'?',
+    'You are about to permanently delete '+n+' selected movement'+(n>1?'s':'')+'.',
+    function(){
+      Promise.all(selected.map(id=>{
+        const fd=new FormData();fd.append('id',id);
+        return fetch(BASE+'/modules/operations/api/delete_movement.php',{method:'POST',body:fd}).then(r=>r.json());
+      })).then(()=>{
+        gridDBData=gridDBData.filter(r=>!selected.includes(parseInt(r.id)));
+        renderGridDB();
+      });
+    }
+  );
 }
 
 
