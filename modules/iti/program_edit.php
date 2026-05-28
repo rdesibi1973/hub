@@ -55,18 +55,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $day_id = (int)($_POST['day_id'] ?? 0);
         if ($day_id) {
             // Combo fields: se c'è un id FK lo usa, altrimenti salva il testo libero
-            $start_id  = ($_POST['start_lodge_id']  !== '' ? (int)$_POST['start_lodge_id']  : null);
-            $start_txt = ($start_id === null ? trim($_POST['start_lodge_custom']  ?? '') : null) ?: null;
-            $dest_id   = ($_POST['destination_id']  !== '' ? (int)$_POST['destination_id']  : null);
-            $dest_txt  = ($dest_id  === null ? trim($_POST['destination_custom']  ?? '') : null) ?: null;
-            $end_id    = ($_POST['end_lodge_id']    !== '' ? (int)$_POST['end_lodge_id']    : null);
-            $end_txt   = ($end_id   === null ? trim($_POST['end_lodge_custom']    ?? '') : null) ?: null;
+            $start_id   = ($_POST['start_lodge_id']   !== '' ? (int)$_POST['start_lodge_id']   : null);
+            $start_txt  = ($start_id  === null ? trim($_POST['start_lodge_custom']  ?? '') : null) ?: null;
+            $tr_id      = ($_POST['transfer_route_id'] !== '' ? (int)$_POST['transfer_route_id'] : null);
+            $tr_txt     = ($tr_id     === null ? trim($_POST['transfer_custom']      ?? '') : null) ?: null;
+            $dest_id    = ($_POST['destination_id']   !== '' ? (int)$_POST['destination_id']   : null);
+            $dest_txt   = ($dest_id   === null ? trim($_POST['destination_custom']   ?? '') : null) ?: null;
+            $end_id     = ($_POST['end_lodge_id']     !== '' ? (int)$_POST['end_lodge_id']     : null);
+            $end_txt    = ($end_id    === null ? trim($_POST['end_lodge_custom']     ?? '') : null) ?: null;
 
             $db->prepare(
                 'UPDATE iti_program_days SET
                  day_title_en=?,day_title_it=?,day_title_fr=?,day_title_es=?,day_title_de=?,
                  start_lodge_id=?,start_custom=?,
-                 transfer_route_id=?,
+                 transfer_route_id=?,transfer_custom=?,
                  destination_id=?,destination_custom=?,
                  narrative_en=?,narrative_it=?,narrative_fr=?,narrative_es=?,narrative_de=?,
                  end_lodge_id=?,end_lodge_custom=?,
@@ -76,7 +78,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 trim($_POST['day_title_en']),trim($_POST['day_title_it']),
                 trim($_POST['day_title_fr']),trim($_POST['day_title_es']),trim($_POST['day_title_de']),
                 $start_id, $start_txt,
-                ($_POST['transfer_route_id']!==''?(int)$_POST['transfer_route_id']:null),
+                $tr_id, $tr_txt,
                 $dest_id, $dest_txt,
                 trim($_POST['narrative_en']),trim($_POST['narrative_it']),
                 trim($_POST['narrative_fr']),trim($_POST['narrative_es']),trim($_POST['narrative_de']),
@@ -536,16 +538,31 @@ include __DIR__ . '/../../includes/layout_header.php';
       <!-- 2. ROAD TRANSFER (optional) -->
       <div style="background:var(--off-white,#f7f6f3);border-bottom:1px dashed var(--grey-lt);padding:12px 20px;">
         <div style="font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--grey-mid);margin-bottom:6px;">🚗 Road transfer <span style="font-weight:400;">(optional)</span></div>
-        <select name="transfer_route_id" style="width:100%;max-width:480px;">
-          <option value="">— No road transfer —</option>
-          <?php
-          $sel_tr = (string)($current_day_data['transfer_route_id'] ?? '');
-          foreach ($transfer_map as $_tid => $_tr):
-              $label = h(($_tr['from_name'] ?? '') . ' → ' . ($_tr['to_name'] ?? '') . ' (' . ($_tr['duration_min'] ?? 0) . ' min)');
-          ?>
-          <option value="<?= $_tid ?>" <?= $sel_tr === (string)$_tid ? 'selected' : '' ?>><?= $label ?></option>
-          <?php endforeach; ?>
-        </select>
+        <?php
+        $tr_display = '';
+        $sel_tr = (string)($current_day_data['transfer_route_id'] ?? '');
+        if ($sel_tr !== '') {
+            foreach ($transfer_map as $_tid => $_tr)
+                if ((string)$_tid === $sel_tr)
+                    $tr_display = ($_tr['from_name'] ?? '') . ' → ' . ($_tr['to_name'] ?? '') . ' (' . ($_tr['duration_min'] ?? 0) . ' min)';
+        } elseif (!empty($current_day_data['transfer_custom'])) {
+            $tr_display = $current_day_data['transfer_custom'];
+        }
+        $tr_opts = [['id'=>'', 'label'=>'— No road transfer —', 'group'=>'']];
+        foreach ($transfer_map as $_tid => $_tr)
+            $tr_opts[] = ['id'=>(string)$_tid, 'label'=>($_tr['from_name']??'') . ' → ' . ($_tr['to_name']??'') . ' (' . ($_tr['duration_min']??0) . ' min)', 'group'=>'Routes'];
+        ?>
+        <div class="iti-combo" data-field="transfer">
+          <div class="iti-combo-inner">
+            <input type="text" class="iti-combo-text" autocomplete="off"
+                   placeholder="Type or choose from list…"
+                   value="<?= h($tr_display) ?>">
+            <button type="button" class="iti-combo-arrow" tabindex="-1">▾</button>
+          </div>
+          <input type="hidden" name="transfer_route_id" value="<?= h($current_day_data['transfer_route_id'] ?? '') ?>">
+          <input type="hidden" name="transfer_custom"   value="<?= h($current_day_data['transfer_custom'] ?? '') ?>">
+          <div class="iti-combo-drop" data-opts='<?= json_encode($tr_opts, JSON_HEX_APOS) ?>'></div>
+        </div>
       </div>
 
       <!-- 3. MAIN DESTINATION -->
