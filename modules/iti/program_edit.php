@@ -423,14 +423,48 @@ include __DIR__ . '/../../includes/layout_header.php';
       <button type="submit" class="btn btn-red btn-sm">💾 Save Day</button>
     </div>
 
-    <!-- Lodge + Transfer -->
-    <div class="form-card" style="margin-bottom:16px;padding:20px 24px;">
-      <div class="form-section-title" style="margin-top:0;">Lodge &amp; Transfer</div>
-      <div class="form-grid">
-        <div class="form-group">
-          <label>Start Lodge / Overnight</label>
-          <select name="start_lodge_id">
+    <!-- ── BLOCCHI SEQUENZIALI DEL GIORNO ── -->
+
+    <?php
+    // Prev day lodge per "inherited" starting point
+    $prev_lodge_name = null;
+    foreach ($days as $_d) {
+        if ((int)$_d['day_number'] === (int)$current_day_data['day_number'] - 1) {
+            if (!empty($_d['end_lodge_id'])) {
+                $prev_lodge_name = $_d['end_lodge_name'] ?? null;
+                if (!$prev_lodge_name) {
+                    foreach ($lodges_grouped as $_dest => $_lodges)
+                        foreach ($_lodges as $_l)
+                            if ((int)$_l['id'] === (int)$_d['end_lodge_id'])
+                                $prev_lodge_name = $_l['name'];
+                }
+            } elseif (!empty($_d['start_lodge_id'])) {
+                foreach ($lodges_grouped as $_dest => $_lodges)
+                    foreach ($_lodges as $_l)
+                        if ((int)$_l['id'] === (int)$_d['start_lodge_id'])
+                            $prev_lodge_name = $_l['name'];
+            }
+            break;
+        }
+    }
+    $start_is_inherited = empty($current_day_data['start_lodge_id']) && $prev_lodge_name;
+    ?>
+
+    <div class="form-card" style="margin-bottom:16px;padding:0;overflow:hidden;">
+
+      <!-- STARTING POINT -->
+      <div style="padding:16px 20px;border-bottom:1px solid var(--grey-lt);">
+        <div style="font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--grey-mid);margin-bottom:8px;">
+          📍 Starting point
+        </div>
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+          <select name="start_lodge_id" style="flex:1;min-width:200px;" id="start-lodge-sel">
             <option value="">— None —</option>
+            <?php if ($prev_lodge_name): ?>
+            <option value="" <?= empty($current_day_data['start_lodge_id'])?'selected':'' ?>>
+              ↖ Inherited — <?= h($prev_lodge_name) ?>
+            </option>
+            <?php endif; ?>
             <?php foreach ($lodges_grouped as $dest_name => $lodges): ?>
             <optgroup label="<?= h($dest_name) ?>">
               <?php foreach ($lodges as $l): ?>
@@ -439,36 +473,53 @@ include __DIR__ . '/../../includes/layout_header.php';
             </optgroup>
             <?php endforeach; ?>
           </select>
-        </div>
-        <div class="form-group">
-          <label>End Lodge</label>
-          <select name="end_lodge_id">
-            <option value="">— Same as start —</option>
-            <?php foreach ($lodges_grouped as $dest_name => $lodges): ?>
-            <optgroup label="<?= h($dest_name) ?>">
-              <?php foreach ($lodges as $l): ?>
-              <option value="<?= $l['id'] ?>" <?= (int)($current_day_data['end_lodge_id']??0)===$l['id']?'selected':'' ?>><?= h($l['name']) ?></option>
-              <?php endforeach; ?>
-            </optgroup>
-            <?php endforeach; ?>
-          </select>
-        </div>
-        <div class="form-group full">
-          <label>Road Transfer</label>
-          <select name="transfer_route_id">
-            <option value="">— No road transfer —</option>
-            <?= iti_options($transfer_map, $current_day_data['transfer_route_id'] ?? null) ?>
-          </select>
+          <?php if ($start_is_inherited): ?>
+          <span style="font-size:.75rem;background:#e8f4f0;color:#0a6647;padding:3px 10px;border-radius:5px;border:1px solid #b2ddd0;white-space:nowrap;">↖ from Day <?= $current_day_data['day_number']-1 ?></span>
+          <?php endif; ?>
         </div>
       </div>
 
-      <!-- Pasti -->
-      <div style="display:flex;gap:20px;margin-top:8px;">
-        <label class="meal-check"><input type="checkbox" name="meal_breakfast" value="1" <?= $current_day_data['meal_breakfast']?'checked':'' ?> style="accent-color:var(--red);"> 🌅 Breakfast</label>
-        <label class="meal-check"><input type="checkbox" name="meal_lunch"     value="1" <?= $current_day_data['meal_lunch']?'checked':'' ?>     style="accent-color:var(--red);"> ☀️ Lunch</label>
-        <label class="meal-check"><input type="checkbox" name="meal_dinner"    value="1" <?= $current_day_data['meal_dinner']?'checked':'' ?>    style="accent-color:var(--red);"> 🌙 Dinner</label>
+      <!-- TRANSFER 1 (opzionale) -->
+      <div style="background:var(--off-white,#f7f6f3);border-bottom:1px dashed var(--grey-lt);padding:10px 20px;">
+        <div style="font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--grey-mid);margin-bottom:6px;">
+          🚗 Road transfer <span style="font-weight:400;font-size:.68rem;">(optional)</span>
+        </div>
+        <select name="transfer_route_id" style="width:100%;max-width:480px;">
+          <option value="">— No road transfer —</option>
+          <?= iti_options($transfer_map, $current_day_data['transfer_route_id'] ?? null) ?>
+        </select>
       </div>
-    </div>
+
+      <!-- ACCOMMODATION -->
+      <div style="padding:16px 20px;border-bottom:1px solid var(--grey-lt);">
+        <div style="font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--grey-mid);margin-bottom:8px;">
+          🏕️ Accommodation / overnight
+        </div>
+        <select name="end_lodge_id" style="width:100%;max-width:480px;">
+          <option value="">— No overnight (departure/transit day) —</option>
+          <?php foreach ($lodges_grouped as $dest_name => $lodges): ?>
+          <optgroup label="<?= h($dest_name) ?>">
+            <?php foreach ($lodges as $l): ?>
+            <option value="<?= $l['id'] ?>" <?= (int)($current_day_data['end_lodge_id']??0)===$l['id']?'selected':'' ?>><?= h($l['name']) ?></option>
+            <?php endforeach; ?>
+          </optgroup>
+          <?php endforeach; ?>
+        </select>
+      </div>
+
+      <!-- MEALS -->
+      <div style="padding:12px 20px;background:var(--off-white,#f7f6f3);">
+        <div style="font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--grey-mid);margin-bottom:8px;">
+          🍽️ Meals included
+        </div>
+        <div style="display:flex;gap:20px;">
+          <label class="meal-check"><input type="checkbox" name="meal_breakfast" value="1" <?= $current_day_data['meal_breakfast']?'checked':'' ?> style="accent-color:var(--red);"> Breakfast</label>
+          <label class="meal-check"><input type="checkbox" name="meal_lunch"     value="1" <?= $current_day_data['meal_lunch']?'checked':'' ?>     style="accent-color:var(--red);"> Lunch</label>
+          <label class="meal-check"><input type="checkbox" name="meal_dinner"    value="1" <?= $current_day_data['meal_dinner']?'checked':'' ?>    style="accent-color:var(--red);"> Dinner</label>
+        </div>
+      </div>
+
+    </div><!-- end blocchi giorno -->
 
     <!-- Titolo + Narrative ×5 lingue -->
     <div class="form-card" style="padding:20px 24px;">
