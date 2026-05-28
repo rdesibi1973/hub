@@ -24,12 +24,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($sub === 'header') {
         $db->prepare(
             'UPDATE iti_programs SET
+             ref_number=?,
              title_en=?,title_it=?,title_fr=?,title_es=?,title_de=?,
              subtitle_en=?,subtitle_it=?,subtitle_fr=?,subtitle_es=?,subtitle_de=?,
              start_date=?,pax_adults=?,pax_children=?,flights_included=?,
              display_language=?,display_currency=?,terms_id=?,status=?
              WHERE id=?'
         )->execute([
+            trim($_POST['ref_number'] ?? '') ?: null,
             trim($_POST['title_en']),trim($_POST['title_it']),trim($_POST['title_fr']),
             trim($_POST['title_es']),trim($_POST['title_de']),
             trim($_POST['subtitle_en']),trim($_POST['subtitle_it']),trim($_POST['subtitle_fr']),
@@ -310,6 +312,9 @@ include __DIR__ . '/../../includes/layout_header.php';
       &nbsp;·&nbsp; <?= iti_duration_label((int)$program['duration_days']) ?>
       &nbsp;·&nbsp; <?= $program['pax_adults'] ?>A<?= $program['pax_children']?'+'.$program['pax_children'].'C':'' ?>
       &nbsp;·&nbsp; <span class="badge <?= ITI_PROGRAM_STATUS_BADGE[$program['status']] ?? '' ?>"><?= h($program['status']) ?></span>
+      <?php if (!empty($program['ref_number'])): ?>
+      &nbsp;·&nbsp; <span style="font-family:monospace;font-size:.8rem;font-weight:700;color:var(--grey-dk);"><?= h($program['ref_number']) ?></span>
+      <?php endif; ?>
       <?php if ($program['flights_included']): ?>&nbsp;·&nbsp; ✈️ Flights included<?php else: ?>&nbsp;·&nbsp; <span style="color:var(--amber);">✈️ Flights extra</span><?php endif; ?>
     </div>
   </div>
@@ -686,6 +691,12 @@ include __DIR__ . '/../../includes/layout_header.php';
 
   <div class="form-section-title" style="margin-top:0;">Program Settings</div>
   <div class="form-grid">
+    <div class="form-group">
+      <label>Ref. Number</label>
+      <input type="text" name="ref_number" maxlength="60"
+             placeholder="e.g. SE-2025-001"
+             value="<?= h($program['ref_number'] ?? '') ?>">
+    </div>
     <div class="form-group">
       <label>Start Date</label>
       <input type="date" name="start_date" value="<?= h($program['start_date'] ?? '') ?>">
