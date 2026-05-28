@@ -911,7 +911,6 @@ function renderExtractor(){
     html+='<div class="row-lbl lbl-'+(isArr?'arrival':'departure')+'">'+r.type+(r._note?'<span class="row-note">'+escH(r._note)+'</span>':'')+
     '</div><div class="row-card" id="card_'+idx+'"><div class="row-card-header"><span class="badge-'+(isArr?'arrival':'departure')+'">'+r.type+'</span><div class="row-actions">'+
     '<button class="btn-sm2 btn-save-row" id="savebtn_'+idx+'" onclick="saveExtRowToDB('+idx+')">&#128190; Save to DB</button>'+
-    '<button class="btn-sm2 btn-save-row" id="savebtn_'+idx+'" onclick="saveExtRowToDB('+idx+')">&#128190; Save to DB</button>'+
     '<button class="btn-sm2 btn-copy-row" onclick="copyExtRow('+idx+')">Copy row</button>'+
     '<button class="btn-sm2 btn-del-card" onclick="deleteExtRow('+idx+')">&#10005;</button></div></div>'+
     '<div class="fields-grid">'+
@@ -1021,6 +1020,51 @@ function saveExtRowToDB(idx){
     .catch(e=>{btn.classList.remove('saving');btn.textContent='↻ Save to DB';alert('Error: '+e.message);});
 }
 
+
+async function saveAllExtToDB(){
+  const total = extRows.length;
+  if(!total){alert('No movements to save.');return;}
+  const btn = document.querySelector('.btn-copy-all2[onclick="saveAllExtToDB()"]');
+  if(btn){btn.disabled=true;btn.textContent='Saving...';}
+  let saved=0, skipped=0, errors=0;
+  for(let idx=0;idx<total;idx++){
+    const card = document.getElementById('card_'+idx);
+    // Skip already saved rows
+    if(card && card.classList.contains('saved')){skipped++;continue;}
+    const r = readExtDOM(idx);
+    const rowBtn = document.getElementById('savebtn_'+idx);
+    if(rowBtn){rowBtn.classList.add('saving');rowBtn.textContent='Saving...';}
+    try{
+      const res = await fetch(BASE+'/modules/operations/api/save_movement.php',{method:'POST',body:extRowToFormData(r)});
+      const d = await res.json();
+      if(d.ok){
+        savedRowIndices[idx]=d.id;
+        if(card){card.classList.add('saved');card.classList.remove('dup-error');card.querySelectorAll('.saved-badge,.dup-badge').forEach(el=>el.remove());const badge=document.createElement('span');badge.className='saved-badge';badge.textContent='Saved to DB';card.querySelector('.row-card-header').appendChild(badge);}
+        if(rowBtn){rowBtn.classList.remove('saving');rowBtn.classList.add('saved');rowBtn.textContent='✓ Saved';}
+        saved++;
+      } else if(d.duplicate){
+        if(card){card.classList.add('dup-error');card.classList.remove('saved');card.querySelectorAll('.saved-badge,.dup-badge').forEach(el=>el.remove());const badge=document.createElement('span');badge.className='dup-badge';badge.textContent='⚠ Duplicate';badge.title=d.message;card.querySelector('.row-card-header').appendChild(badge);}
+        if(rowBtn){rowBtn.classList.remove('saving','saved');rowBtn.textContent='↻ Save to DB';}
+        skipped++;
+      } else {
+        if(rowBtn){rowBtn.classList.remove('saving');rowBtn.textContent='↻ Save to DB';}
+        errors++;
+      }
+    } catch(e){
+      if(rowBtn){rowBtn.classList.remove('saving');rowBtn.textContent='↻ Save to DB';}
+      errors++;
+    }
+  }
+  if(btn){
+    btn.disabled=false;
+    const parts=[];
+    if(saved) parts.push(saved+' saved');
+    if(skipped) parts.push(skipped+' skipped');
+    if(errors) parts.push(errors+' error'+(errors>1?'s':''));
+    btn.textContent='&#128190; '+parts.join(', ');
+    setTimeout(()=>{btn.innerHTML='&#128190; Save all to DB';},4000);
+  }
+}
 
 // ── Grid: load from DB ────────────────────────────────────────
 let gridDBData = []; // rows from DB (with id)
