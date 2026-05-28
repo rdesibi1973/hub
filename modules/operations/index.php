@@ -665,7 +665,7 @@ function legacyCopy(text, onSuccess, onFail) {
 }
 
 // WhatsApp — copy directly to clipboard, 4 sections always shown
-function isJROorARK(text){if(!text)return false;const up=String(text).toUpperCase();return up.includes('JRO')||up.includes('KILI')||up.includes('KILIMANJARO')||up.includes('ARK')||up.includes('ARUSHA')||up.includes('SERONERA')||up.includes('KOGATENDE')||up.includes('GRUMETI')||up.includes('LOBO')||up.includes('NDUTU')||up.includes('MANYARA')||up.includes('NAMANGA')||up.includes('ISEBANIA')||up.includes('ISEBANI');}
+function isJROorARK(text){if(!text)return false;const up=String(text).toUpperCase();return up.includes('JRO')||up.includes('KILI')||up.includes('KILIMANJARO')||up.includes('ARK')||up.includes('ARUSHA')||up.includes('SERONERA')||up.includes('KOGATENDE')||up.includes('GRUMETI')||up.includes('LOBO')||up.includes('NDUTU')||up.includes('MANYARA')||up.includes('NAMANGA')||up.includes('ISEBANIA')||up.includes('ISEBANI')||up.includes('TAVETA');}
 function isCoastOrIsland(text){if(!text)return false;const up=String(text).toUpperCase();return up.includes('ZNZ')||up.includes('ZANZIBAR')||up.includes('PEMBA')||up.includes('MAFIA')||up.includes('DAR');}
 
 function buildWALine(r){
@@ -737,7 +737,7 @@ renderGCal();
 let extRows=[], currentFileName='', currentFileBlob=null, sheetData=[];
 
 const FIELD_KEYS=['date','type','client','pax','flight','time','pickup','dropoff','driver','notes','dropbox'];
-const AIRPORTS=[[['JRO','KILI','KILIMANJARO'],'JRO Kilimanjaro Airport'],[['DAR DOMESTIC'],'Dar domestic airport'],[['DAR ES SALAAM','DAR INTL','DAR INTERNATIONAL'],'Dar international airport'],[['DAR'],'Dar international airport'],[['ZNZ','ZANZIBAR'],'Zanzibar airport'],[['PEMBA'],'Pemba airport'],[['MAFIA'],'Mafia airport'],[['ARK','ARUSHA AIRPORT'],'Arusha airport']];
+const AIRPORTS=[[['JRO','KILI','KILIMANJARO'],'JRO Kilimanjaro Airport'],[['DAR DOMESTIC'],'Dar domestic airport'],[['DAR ES SALAAM','DAR INTL','DAR INTERNATIONAL'],'Dar international airport'],[['DAR'],'Dar international airport'],[['ZNZ','ZANZIBAR'],'Zanzibar airport'],[['PEMBA'],'Pemba airport'],[['MAFIA'],'Mafia airport'],[['ARK','ARUSHA AIRPORT'],'Arusha airport'],[['NAMANGA'],'Namanga border'],[['ISEBANIA','ISEBANI'],'Isebania border'],[['TAVETA'],'Taveta border']];
 const TRANSFER_DEST=[[['ZNZ','ZANZIBAR'],'Zanzibar airport'],[['PEMBA'],'Pemba airport'],[['MAFIA'],'Mafia airport'],[['DAR'],'Dar international airport'],[['JRO','KILI','KILIMANJARO'],'JRO Kilimanjaro Airport']];
 const ISLAND_DEST=['ZNZ','ZANZIBAR','PEMBA','MAFIA','DAR'];
 const HOTEL_AIRPORT_MAP=[[['MVUVI','VILLA KIVA','DREAMS OF ZANZIBAR','PEARL','MYBLUE','RIU PALACE','RIU JAMBO','ROYAL ZANZIBAR','Z HOTEL','NUNGWI','ZURI','TEMBO','FORODHANI'],'Zanzibar airport'],[['MANTA','AYANA','PEMBA PARADISE','FUNDU LAGOON'],'Pemba airport'],[['POLEPOLE','POLE POLE','MAFIALODGE','MAFIA LODGE','KILELENI','BUTIAMA','SHAMBA KILOLE'],'Mafia airport'],[['SLIPWAY','SERENA DAR'],'Dar international airport']];
@@ -769,7 +769,7 @@ function fmtDate(val){
 function extractTime(s){if(!s)return'';const m=String(s).match(/(\d{1,2})[.,:h](\d{2})\s*(am|pm)?/i);if(!m)return'';let h=parseInt(m[1]),mn=m[2];const ap=(m[3]||'').toLowerCase();if(ap==='pm'&&h<12)h+=12;if(ap==='am'&&h===12)h=0;return pad(h)+':'+mn;}
 function extractFlight(s){if(!s)return'';s=String(s).trim();const m=s.match(/\b([A-Z]{2,3})\s*(\d{2,4})\b/);if(m)return m[1]+' '+m[2];const m2=s.match(/\bby\s+([A-Z]{2,3})\b/i);if(m2)return m2[1].toUpperCase();return'';}
 function matchAirport(text){if(!text)return'';const up=String(text).toUpperCase();for(const[keys,name]of AIRPORTS)if(keys.some(k=>up.includes(k)))return name;return'';}
-function matchAirportFromPark(park){if(!park)return'';const up=String(park).toUpperCase();if(up.includes('JRO')||up.includes('KILI'))return'JRO Kilimanjaro Airport';if(up.includes('ZNZ')||up.includes('ZANZIBAR'))return'Zanzibar airport';if(up.includes('PMA')||up.includes('PEMBA'))return'Pemba airport';if(up.includes('MAFIA'))return'Mafia airport';if(up.includes('DAR'))return'Dar international airport';return'';}
+function matchAirportFromPark(park){if(!park)return'';const up=String(park).toUpperCase();if(up.includes('JRO')||up.includes('KILI'))return'JRO Kilimanjaro Airport';if(up.includes('ZNZ')||up.includes('ZANZIBAR'))return'Zanzibar airport';if(up.includes('PMA')||up.includes('PEMBA'))return'Pemba airport';if(up.includes('MAFIA'))return'Mafia airport';if(up.includes('DAR'))return'Dar international airport';if(up.includes('NAMANGA'))return'Namanga border';if(up.includes('ISEBANIA')||up.includes('ISEBANI'))return'Isebania border';if(up.includes('TAVETA'))return'Taveta border';return '';}
 function detectTransferAirport(park){if(!park||!park.includes('-'))return'';const dest=park.toUpperCase().split('-').pop().trim();for(const[keys,name]of TRANSFER_DEST)if(keys.some(k=>dest.includes(k)))return name;return'';}
 function detectExplicitDepartureAirport(park){if(!park)return'';const parts=park.toUpperCase().split('-').map(s=>s.trim());if(parts.length!==3)return'';const mid=parts[1];for(const[keys,name]of AIRPORTS)if(keys.some(k=>mid.includes(k)))return name;return'';}
 function detectAirportFromHotel(h){if(!h)return'';const up=String(h).toUpperCase();for(const[keys,airport]of HOTEL_AIRPORT_MAP)if(keys.some(k=>up.includes(k)))return airport;return'';}
