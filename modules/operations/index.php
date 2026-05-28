@@ -283,7 +283,7 @@ include __DIR__ . '/../../includes/layout_header.php';
     </div>
     <div id="ctrl-range" style="display:none;align-items:center;gap:8px;">
       <span class="ctrl-lbl">From</span>
-      <input type="date" id="inp-from" value="<?= date('Y-m-d') ?>">
+      <input type="date" id="inp-from" value="<?= date('Y-m-d') ?>" onchange="const t=document.getElementById('inp-to');if(!t.value||t.value<this.value)t.value=this.value;">
       <span class="ctrl-lbl">To</span>
       <input type="date" id="inp-to"   value="<?= date('Y-m-d') ?>">
     </div>
@@ -347,7 +347,7 @@ include __DIR__ . '/../../includes/layout_header.php';
     </div>
     <div id="gctrl-range" style="display:none;align-items:center;gap:8px;">
       <span class="ctrl-lbl">From</span>
-      <input type="date" id="grid-from" value="<?= date('Y-m-d') ?>">
+      <input type="date" id="grid-from" value="<?= date('Y-m-d') ?>" onchange="const t=document.getElementById('grid-to');if(!t.value||t.value<this.value)t.value=this.value;">
       <span class="ctrl-lbl">To</span>
       <input type="date" id="grid-to" value="<?= date('Y-m-d') ?>">
     </div>
