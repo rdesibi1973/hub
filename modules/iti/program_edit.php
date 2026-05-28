@@ -538,7 +538,13 @@ include __DIR__ . '/../../includes/layout_header.php';
         <div style="font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--grey-mid);margin-bottom:6px;">🚗 Road transfer <span style="font-weight:400;">(optional)</span></div>
         <select name="transfer_route_id" style="width:100%;max-width:480px;">
           <option value="">— No road transfer —</option>
-          <?= iti_options($transfer_map, $current_day_data['transfer_route_id'] ?? null) ?>
+          <?php
+          $sel_tr = (string)($current_day_data['transfer_route_id'] ?? '');
+          foreach ($transfer_map as $_tid => $_tr):
+              $label = h(($_tr['from_name'] ?? '') . ' → ' . ($_tr['to_name'] ?? '') . ' (' . ($_tr['duration_min'] ?? 0) . ' min)');
+          ?>
+          <option value="<?= $_tid ?>" <?= $sel_tr === (string)$_tid ? 'selected' : '' ?>><?= $label ?></option>
+          <?php endforeach; ?>
         </select>
       </div>
 
