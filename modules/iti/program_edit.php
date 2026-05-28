@@ -94,13 +94,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     // ── Aggiungi attività ──
     if ($sub === 'add_activity') {
-        $day_id      = (int)($_POST['day_id']     ?? 0);
-        $activity_id = (int)($_POST['activity_id']?? 0);
-        if ($day_id && $activity_id) {
-            $max_sort = (int)$db->prepare('SELECT MAX(sort_order) FROM iti_day_activities WHERE program_day_id=?')->execute([$day_id]) ? $db->prepare('SELECT COALESCE(MAX(sort_order),0) FROM iti_day_activities WHERE program_day_id=?') : 0;
+        $day_id         = (int)($_POST['day_id']          ?? 0);
+        $activity_id    = ($_POST['activity_id'] !== '' ? (int)$_POST['activity_id'] : null);
+        $activity_custom = trim($_POST['activity_custom'] ?? '');
+        if ($day_id && ($activity_id || $activity_custom !== '')) {
             $ms = $db->prepare('SELECT COALESCE(MAX(sort_order),0) FROM iti_day_activities WHERE program_day_id=?');
             $ms->execute([$day_id]); $max_sort = (int)$ms->fetchColumn();
-            $db->prepare('INSERT INTO iti_day_activities (program_day_id,activity_id,sort_order) VALUES (?,?,?)')->execute([$day_id,$activity_id,$max_sort+1]);
+            $db->prepare('INSERT INTO iti_day_activities (program_day_id,activity_id,activity_custom,sort_order) VALUES (?,?,?,?)')->execute([
+                $day_id, $activity_id, $activity_custom ?: null, $max_sort+1
+            ]);
         }
         iti_redirect("program_edit.php?id={$id}&day={$day_id}");
     }
@@ -187,13 +189,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     // ── Aggiungi volo ──
     if ($sub === 'add_flight') {
-        $day_id          = (int)($_POST['day_id']          ?? 0);
-        $flight_route_id = (int)($_POST['flight_route_id'] ?? 0);
-        if ($day_id && $flight_route_id) {
+        $day_id          = (int)($_POST['day_id']            ?? 0);
+        $flight_route_id = ($_POST['flight_route_id'] !== '' ? (int)$_POST['flight_route_id'] : null);
+        $flight_custom   = trim($_POST['flight_custom'] ?? '');
+        if ($day_id && ($flight_route_id || $flight_custom !== '')) {
             $ms = $db->prepare('SELECT COALESCE(MAX(sort_order),0) FROM iti_day_flights WHERE program_day_id=?');
             $ms->execute([$day_id]); $max_sort = (int)$ms->fetchColumn();
-            $db->prepare('INSERT INTO iti_day_flights (program_day_id,flight_route_id,departure_time,arrival_time,sort_order) VALUES (?,?,?,?,?)')->execute([
-                $day_id,$flight_route_id,
+            $db->prepare('INSERT INTO iti_day_flights (program_day_id,flight_route_id,flight_custom,departure_time,arrival_time,sort_order) VALUES (?,?,?,?,?,?)')->execute([
+                $day_id, $flight_route_id, $flight_custom ?: null,
                 ($_POST['departure_time']??'')?:null,
                 ($_POST['arrival_time']??'')?:null,
                 $max_sort+1,
@@ -703,23 +706,25 @@ include __DIR__ . '/../../includes/layout_header.php';
 
   <!-- Activities -->
   <div class="form-card" style="margin-top:16px;padding:20px 24px;">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
-      <div class="form-section-title" style="margin:0;">Activities</div>
-    </div>
+    <div style="font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--grey-mid);margin-bottom:14px;">🦁 Activities</div>
 
     <?php if ($current_acts): ?>
     <?php foreach ($current_acts as $a): ?>
     <div class="act-row">
-      <div style="font-size:1.2rem;"><?= ITI_ACTIVITY_ICONS[$a['activity_type']] ?? '⭐' ?></div>
+      <div style="font-size:1.1rem;"><?= !empty($a['activity_type']) ? (ITI_ACTIVITY_ICONS[$a['activity_type']] ?? '⭐') : '📌' ?></div>
       <div class="act-info">
-        <div style="font-weight:600;font-size:.85rem;"><?= h($a['name_en']) ?></div>
+        <div style="font-weight:600;font-size:.85rem;">
+          <?= !empty($a['activity_id']) ? h($a['name_en']) : h($a['activity_custom'] ?? '') ?>
+        </div>
+        <?php if (!empty($a['activity_type'])): ?>
         <div style="font-size:.72rem;color:var(--grey-mid);"><?= ITI_ACTIVITY_TYPES[$a['activity_type']] ?? '' ?><?= $a['duration_hours'] ? ' · '.$a['duration_hours'].'h' : '' ?></div>
+        <?php endif; ?>
       </div>
       <form method="POST" action="program_edit.php?id=<?= $id ?>&tab=days&day=<?= $active_day ?>">
-        <input type="hidden" name="_sub"    value="remove_activity">
-        <input type="hidden" name="day_id"  value="<?= $active_day ?>">
-        <input type="hidden" name="da_id"   value="<?= $a['id'] ?>">
-        <button class="btn btn-danger btn-sm" onclick="return confirm('Remove this activity?')">✕</button>
+        <input type="hidden" name="_sub"   value="remove_activity">
+        <input type="hidden" name="day_id" value="<?= $active_day ?>">
+        <input type="hidden" name="da_id"  value="<?= $a['id'] ?>">
+        <button class="btn btn-danger btn-sm" onclick="return confirm('Remove?')">✕</button>
       </form>
     </div>
     <?php endforeach; ?>
@@ -727,71 +732,87 @@ include __DIR__ . '/../../includes/layout_header.php';
     <div style="color:var(--grey-mid);font-size:.83rem;margin-bottom:12px;">No activities yet.</div>
     <?php endif; ?>
 
+    <?php
+    $act_opts = [];
+    foreach ($activities_list as $a)
+        $act_opts[] = ['id'=>(string)$a['id'], 'label'=>($a['name_en']).($a['dest_name_en'] ? ' — '.$a['dest_name_en'] : ''), 'group'=>ITI_ACTIVITY_TYPES[$a['activity_type']] ?? 'Other'];
+    ?>
     <form method="POST" action="program_edit.php?id=<?= $id ?>&tab=days&day=<?= $active_day ?>"
-          style="display:flex;gap:8px;align-items:flex-end;margin-top:8px;">
+          style="display:flex;gap:8px;align-items:center;margin-top:10px;">
       <input type="hidden" name="_sub"   value="add_activity">
       <input type="hidden" name="day_id" value="<?= $active_day ?>">
-      <div style="flex:1;">
-        <label style="font-size:.72rem;font-weight:700;color:var(--grey-dk);display:block;margin-bottom:4px;">Add Activity</label>
-        <select name="activity_id" style="width:100%;padding:8px 11px;border:1.5px solid var(--grey-lt);border-radius:6px;font-size:.82rem;">
-          <option value="">— Select —</option>
-          <?php foreach ($activities_list as $a): ?>
-          <option value="<?= $a['id'] ?>"><?= ITI_ACTIVITY_ICONS[$a['activity_type']]??'⭐' ?> <?= h($a['name_en']) ?><?= $a['dest_name_en'] ? ' — '.$a['dest_name_en'] : ' (generic)' ?></option>
-          <?php endforeach; ?>
-        </select>
+      <div class="iti-combo" data-field="act_new" style="flex:1;max-width:none;">
+        <div class="iti-combo-inner">
+          <input type="text" name="activity_custom" class="iti-combo-text" autocomplete="off"
+                 placeholder="Type or choose activity…">
+          <button type="button" class="iti-combo-arrow" tabindex="-1">▾</button>
+        </div>
+        <input type="hidden" name="activity_id" value="">
+        <div class="iti-combo-drop" data-opts='<?= json_encode($act_opts, JSON_HEX_APOS) ?>'></div>
       </div>
-      <button type="submit" class="btn btn-outline btn-sm">+ Add</button>
+      <button type="submit" class="btn btn-outline btn-sm" style="white-space:nowrap;">+ Add</button>
     </form>
   </div>
 
   <!-- Flights -->
   <div class="form-card" style="margin-top:16px;padding:20px 24px;">
-    <div class="form-section-title" style="margin-top:0;">Flights
-      <span style="font-weight:400;font-size:.75rem;color:var(--grey-mid);"><?= $program['flights_included']?'(included in price)':'(extra cost)' ?></span>
-    </div>
+    <div style="font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--grey-mid);margin-bottom:14px;">✈️ Flights <span style="font-weight:400;"><?= $program['flights_included']?'(included in price)':'(extra cost)' ?></span></div>
 
     <?php if ($current_flights): ?>
     <?php foreach ($current_flights as $fl): ?>
     <div class="act-row">
-      <div style="font-size:1.2rem;">✈️</div>
+      <div style="font-size:1.1rem;">✈️</div>
       <div class="act-info">
-        <div style="font-weight:600;font-size:.85rem;"><?= h($fl['from_airport']) ?> → <?= h($fl['to_airport']) ?></div>
+        <div style="font-weight:600;font-size:.85rem;">
+          <?php if (!empty($fl['flight_route_id'])): ?>
+            <?= h($fl['from_airport']) ?> → <?= h($fl['to_airport']) ?>
+          <?php else: ?>
+            <?= h($fl['flight_custom'] ?? '') ?>
+          <?php endif; ?>
+        </div>
         <div style="font-size:.72rem;color:var(--grey-mid);">
-          <?= h($fl['operator'] ?? '') ?>
-          <?= $fl['departure_time'] ? ' · Dep '.h($fl['departure_time']) : '' ?>
-          <?= $fl['arrival_time']   ? ' · Arr '.h($fl['arrival_time'])   : '' ?>
+          <?= !empty($fl['operator']) ? h($fl['operator']).' · ' : '' ?>
+          <?= $fl['departure_time'] ? 'Dep '.h($fl['departure_time']) : '' ?>
+          <?= $fl['arrival_time']   ? ' Arr '.h($fl['arrival_time'])  : '' ?>
         </div>
       </div>
       <form method="POST" action="program_edit.php?id=<?= $id ?>&tab=days&day=<?= $active_day ?>">
-        <input type="hidden" name="_sub"    value="remove_flight">
-        <input type="hidden" name="day_id"  value="<?= $active_day ?>">
-        <input type="hidden" name="df_id"   value="<?= $fl['id'] ?>">
-        <button class="btn btn-danger btn-sm" onclick="return confirm('Remove this flight?')">✕</button>
+        <input type="hidden" name="_sub"   value="remove_flight">
+        <input type="hidden" name="day_id" value="<?= $active_day ?>">
+        <input type="hidden" name="df_id"  value="<?= $fl['id'] ?>">
+        <button class="btn btn-danger btn-sm" onclick="return confirm('Remove?')">✕</button>
       </form>
     </div>
     <?php endforeach; ?>
     <?php endif; ?>
 
+    <?php
+    $fl_opts = [];
+    foreach ($flight_map as $_fid => $_fl)
+        $fl_opts[] = ['id'=>(string)$_fid, 'label'=>($_fl['from_airport']??'').' → '.($_fl['to_airport']??'').($_fl['operator']?' ('.$_fl['operator'].')':''), 'group'=>'Flight routes'];
+    ?>
     <form method="POST" action="program_edit.php?id=<?= $id ?>&tab=days&day=<?= $active_day ?>"
-          style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-top:8px;">
+          style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px;">
       <input type="hidden" name="_sub"   value="add_flight">
       <input type="hidden" name="day_id" value="<?= $active_day ?>">
-      <div style="flex:2;min-width:180px;">
-        <label style="font-size:.72rem;font-weight:700;color:var(--grey-dk);display:block;margin-bottom:4px;">Flight Route</label>
-        <select name="flight_route_id" style="width:100%;padding:8px 11px;border:1.5px solid var(--grey-lt);border-radius:6px;font-size:.82rem;">
-          <option value="">— Select —</option>
-          <?= iti_options($flight_map) ?>
-        </select>
+      <div class="iti-combo" data-field="fl_new" style="flex:2;min-width:200px;max-width:none;">
+        <div class="iti-combo-inner">
+          <input type="text" name="flight_custom" class="iti-combo-text" autocomplete="off"
+                 placeholder="Type or choose — e.g. Arusha → Seronera (Coastal Aviation)">
+          <button type="button" class="iti-combo-arrow" tabindex="-1">▾</button>
+        </div>
+        <input type="hidden" name="flight_route_id" value="">
+        <div class="iti-combo-drop" data-opts='<?= json_encode($fl_opts, JSON_HEX_APOS) ?>'></div>
       </div>
-      <div>
-        <label style="font-size:.72rem;font-weight:700;color:var(--grey-dk);display:block;margin-bottom:4px;">Dep.</label>
-        <input type="time" name="departure_time" style="padding:8px 10px;border:1.5px solid var(--grey-lt);border-radius:6px;font-size:.82rem;">
+      <div style="display:flex;flex-direction:column;gap:3px;">
+        <label style="font-size:.72rem;font-weight:700;color:var(--grey-dk);">Dep.</label>
+        <input type="time" name="departure_time" style="padding:7px 10px;border:1.5px solid var(--grey-lt);border-radius:6px;font-size:.82rem;">
       </div>
-      <div>
-        <label style="font-size:.72rem;font-weight:700;color:var(--grey-dk);display:block;margin-bottom:4px;">Arr.</label>
-        <input type="time" name="arrival_time" style="padding:8px 10px;border:1.5px solid var(--grey-lt);border-radius:6px;font-size:.82rem;">
+      <div style="display:flex;flex-direction:column;gap:3px;">
+        <label style="font-size:.72rem;font-weight:700;color:var(--grey-dk);">Arr.</label>
+        <input type="time" name="arrival_time" style="padding:7px 10px;border:1.5px solid var(--grey-lt);border-radius:6px;font-size:.82rem;">
       </div>
-      <button type="submit" class="btn btn-outline btn-sm">+ Add</button>
+      <button type="submit" class="btn btn-outline btn-sm" style="white-space:nowrap;align-self:flex-end;">+ Add</button>
     </form>
   </div>
 
