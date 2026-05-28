@@ -169,10 +169,19 @@ function iti_get_programs(string $type = null, array $filters = []): array {
         $params[] = $filters['status'];
     }
     if (!empty($filters['q'])) {
-        $where[] = '(p.title_en LIKE ? OR r.client_name LIKE ?)';
+        $where[] = '(p.title_en LIKE ? OR r.client_name LIKE ? OR p.ref_number LIKE ?)';
         $q = '%' . $filters['q'] . '%';
         $params[] = $q;
         $params[] = $q;
+        $params[] = $q;
+    }
+    if (!empty($filters['ref'])) {
+        $where[] = 'p.ref_number LIKE ?';
+        $params[] = '%' . $filters['ref'] . '%';
+    }
+    if (!empty($filters['lang'])) {
+        $where[] = 'p.display_language = ?';
+        $params[] = $filters['lang'];
     }
     $sql = 'SELECT p.*, r.client_name
               FROM iti_programs p
