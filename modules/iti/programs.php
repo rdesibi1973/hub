@@ -278,7 +278,7 @@ include __DIR__ . '/../../includes/layout_header.php';
         <?php if ($tab==='personal'): ?><th>Client</th><?php endif; ?>
         <th>Lang</th>
         <th>Duration</th>
-        <th>Pax</th>
+        <?php if ($tab==='personal'): ?><th>Pax</th><?php endif; ?>
         <th>Status</th>
         <th>Updated</th>
         <th style="width:1%;white-space:nowrap;"></th>
@@ -307,7 +307,9 @@ include __DIR__ . '/../../includes/layout_header.php';
         <?php endif; ?>
         <td style="font-size:.78rem;text-transform:uppercase;letter-spacing:.05em;color:var(--grey-mid);"><?= h($p['display_language']) ?></td>
         <td style="white-space:nowrap;"><?= iti_duration_label((int)$p['duration_days']) ?></td>
+        <?php if ($tab==='personal'): ?>
         <td style="font-size:.82rem;"><?= $p['pax_adults'] ?>A<?= $p['pax_children'] ? '+'.$p['pax_children'].'C' : '' ?></td>
+        <?php endif; ?>
         <td><span class="badge <?= ITI_PROGRAM_STATUS_BADGE[$p['status']] ?? '' ?>"><?= h($p['status']) ?></span></td>
         <td style="font-size:.75rem;color:var(--grey-mid);white-space:nowrap;"><?= date('d M Y', strtotime($p['updated_at'])) ?></td>
         <td>
@@ -334,7 +336,7 @@ include __DIR__ . '/../../includes/layout_header.php';
       </tr>
       <?php endforeach; ?>
     <?php else: ?>
-      <tr><td colspan="<?= $tab==='personal' ? 9 : 8 ?>">
+      <tr><td colspan="<?= $tab==='personal' ? 9 : 7 ?>">
         <div class="empty-state">
           <div class="icon"><?= $tab==='sample' ? '📋' : '👤' ?></div>
           <p>No <?= $tab ?> programs found<?= $has_filters ? ' matching the selected filters.' : ' yet.' ?></p>
