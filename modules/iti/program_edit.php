@@ -57,18 +57,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $db->prepare(
                 'UPDATE iti_program_days SET
                  day_title_en=?,day_title_it=?,day_title_fr=?,day_title_es=?,day_title_de=?,
-                 start_lodge_id=?,end_lodge_id=?,transfer_route_id=?,
+                 start_lodge_id=?,transfer_route_id=?,destination_id=?,
                  narrative_en=?,narrative_it=?,narrative_fr=?,narrative_es=?,narrative_de=?,
+                 end_lodge_id=?,
                  meal_breakfast=?,meal_lunch=?,meal_dinner=?
                  WHERE id=? AND program_id=?'
             )->execute([
                 trim($_POST['day_title_en']),trim($_POST['day_title_it']),
                 trim($_POST['day_title_fr']),trim($_POST['day_title_es']),trim($_POST['day_title_de']),
                 ($_POST['start_lodge_id']!==''?(int)$_POST['start_lodge_id']:null),
-                ($_POST['end_lodge_id']!==''?(int)$_POST['end_lodge_id']:null),
                 ($_POST['transfer_route_id']!==''?(int)$_POST['transfer_route_id']:null),
+                ($_POST['destination_id']!==''?(int)$_POST['destination_id']:null),
                 trim($_POST['narrative_en']),trim($_POST['narrative_it']),
                 trim($_POST['narrative_fr']),trim($_POST['narrative_es']),trim($_POST['narrative_de']),
+                ($_POST['end_lodge_id']!==''?(int)$_POST['end_lodge_id']:null),
                 isset($_POST['meal_breakfast'])?1:0,
                 isset($_POST['meal_lunch'])?1:0,
                 isset($_POST['meal_dinner'])?1:0,
@@ -248,6 +250,7 @@ $active_day = (int)($_GET['day'] ?? ($days[0]['id'] ?? 0));
 
 // Dati per dropdown
 $lodges_grouped  = iti_lodges_grouped();
+$destinations_list = iti_get_destinations();
 $transfer_map    = iti_transfer_routes_map();
 $flight_map      = iti_flight_routes_map();
 $activities_list = iti_get_activities(true);
@@ -430,20 +433,8 @@ include __DIR__ . '/../../includes/layout_header.php';
     $prev_lodge_name = null;
     foreach ($days as $_d) {
         if ((int)$_d['day_number'] === (int)$current_day_data['day_number'] - 1) {
-            if (!empty($_d['end_lodge_id'])) {
-                $prev_lodge_name = $_d['end_lodge_name'] ?? null;
-                if (!$prev_lodge_name) {
-                    foreach ($lodges_grouped as $_dest => $_lodges)
-                        foreach ($_lodges as $_l)
-                            if ((int)$_l['id'] === (int)$_d['end_lodge_id'])
-                                $prev_lodge_name = $_l['name'];
-                }
-            } elseif (!empty($_d['start_lodge_id'])) {
-                foreach ($lodges_grouped as $_dest => $_lodges)
-                    foreach ($_lodges as $_l)
-                        if ((int)$_l['id'] === (int)$_d['start_lodge_id'])
-                            $prev_lodge_name = $_l['name'];
-            }
+            $prev_lodge_name = !empty($_d['end_lodge_name']) ? $_d['end_lodge_name']
+                             : (!empty($_d['start_lodge_name']) ? $_d['start_lodge_name'] : null);
             break;
         }
     }
@@ -452,66 +443,91 @@ include __DIR__ . '/../../includes/layout_header.php';
 
     <div class="form-card" style="margin-bottom:16px;padding:0;overflow:hidden;">
 
-      <!-- STARTING POINT -->
-      <div style="padding:16px 20px;border-bottom:1px solid var(--grey-lt);">
-        <div style="font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--grey-mid);margin-bottom:8px;">
-          📍 Starting point
-        </div>
+      <!-- 1. STARTING POINT -->
+      <div style="padding:14px 20px;border-bottom:1px solid var(--grey-lt);">
+        <div style="font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--grey-mid);margin-bottom:8px;">📍 Starting point</div>
         <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
-          <select name="start_lodge_id" style="flex:1;min-width:200px;" id="start-lodge-sel">
+          <select name="start_lodge_id" style="flex:1;min-width:200px;">
             <option value="">— None —</option>
             <?php if ($prev_lodge_name): ?>
-            <option value="" <?= empty($current_day_data['start_lodge_id'])?'selected':'' ?>>
-              ↖ Inherited — <?= h($prev_lodge_name) ?>
-            </option>
+            <option value="" <?= empty($current_day_data['start_lodge_id'])?'selected':'' ?>>↖ Inherited — <?= h($prev_lodge_name) ?></option>
             <?php endif; ?>
             <?php foreach ($lodges_grouped as $dest_name => $lodges): ?>
             <optgroup label="<?= h($dest_name) ?>">
               <?php foreach ($lodges as $l): ?>
-              <option value="<?= $l['id'] ?>" <?= (int)($current_day_data['start_lodge_id']??0)===$l['id']?'selected':'' ?>><?= h($l['name']) ?></option>
+              <option value="<?= $l['id'] ?>" <?= (int)($current_day_data['start_lodge_id']??0)===(int)$l['id']?'selected':'' ?>><?= h($l['name']) ?></option>
               <?php endforeach; ?>
             </optgroup>
             <?php endforeach; ?>
           </select>
           <?php if ($start_is_inherited): ?>
-          <span style="font-size:.75rem;background:#e8f4f0;color:#0a6647;padding:3px 10px;border-radius:5px;border:1px solid #b2ddd0;white-space:nowrap;">↖ from Day <?= $current_day_data['day_number']-1 ?></span>
+          <span style="font-size:.75rem;background:#e8f4f0;color:#0a6647;padding:3px 10px;border-radius:5px;border:1px solid #b2ddd0;white-space:nowrap;">↖ Day <?= $current_day_data['day_number']-1 ?></span>
           <?php endif; ?>
         </div>
       </div>
 
-      <!-- TRANSFER 1 (opzionale) -->
-      <div style="background:var(--off-white,#f7f6f3);border-bottom:1px dashed var(--grey-lt);padding:10px 20px;">
-        <div style="font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--grey-mid);margin-bottom:6px;">
-          🚗 Road transfer <span style="font-weight:400;font-size:.68rem;">(optional)</span>
-        </div>
+      <!-- 2. ROAD TRANSFER (optional) -->
+      <div style="background:var(--off-white,#f7f6f3);border-bottom:1px dashed var(--grey-lt);padding:12px 20px;">
+        <div style="font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--grey-mid);margin-bottom:6px;">🚗 Road transfer <span style="font-weight:400;">(optional)</span></div>
         <select name="transfer_route_id" style="width:100%;max-width:480px;">
           <option value="">— No road transfer —</option>
           <?= iti_options($transfer_map, $current_day_data['transfer_route_id'] ?? null) ?>
         </select>
       </div>
 
-      <!-- ACCOMMODATION -->
-      <div style="padding:16px 20px;border-bottom:1px solid var(--grey-lt);">
-        <div style="font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--grey-mid);margin-bottom:8px;">
-          🏕️ Accommodation / overnight
+      <!-- 3. MAIN DESTINATION -->
+      <div style="padding:14px 20px;border-bottom:1px solid var(--grey-lt);">
+        <div style="font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--grey-mid);margin-bottom:8px;">🗺️ Main destination</div>
+        <select name="destination_id" style="width:100%;max-width:480px;">
+          <option value="">— Select destination —</option>
+          <?php foreach ($destinations_list as $dest): ?>
+          <option value="<?= $dest['id'] ?>" <?= (int)($current_day_data['destination_id']??0)===(int)$dest['id']?'selected':'' ?>><?= h($dest['name_en']) ?></option>
+          <?php endforeach; ?>
+        </select>
+      </div>
+
+      <!-- 4. DAY TITLE & DESCRIPTION -->
+      <div style="padding:14px 20px;border-bottom:1px solid var(--grey-lt);">
+        <div style="font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--grey-mid);margin-bottom:10px;">📝 Day title &amp; description</div>
+        <div class="lang-tabs" id="narr-tabs">
+          <?php foreach (ITI_LANGS as $i => $lang): ?>
+          <div class="lang-tab <?= $i===0?'active':'' ?>" onclick="switchLang('narr','<?= $lang ?>')"><?= strtoupper($lang) ?></div>
+          <?php endforeach; ?>
         </div>
+        <?php foreach (ITI_LANGS as $i => $lang): ?>
+        <div class="lang-panel <?= $i===0?'active':'' ?>" id="narr-<?= $lang ?>">
+          <div class="form-group" style="margin-bottom:10px;">
+            <label style="font-size:.75rem;"><?= ITI_LANG_LABELS[$lang] ?> — Title</label>
+            <input type="text" name="day_title_<?= $lang ?>" maxlength="200"
+                   placeholder="e.g. Arrival in Arusha…"
+                   value="<?= h($current_day_data["day_title_{$lang}"] ?? '') ?>">
+          </div>
+          <div class="form-group">
+            <label style="font-size:.75rem;"><?= ITI_LANG_LABELS[$lang] ?> — Narrative</label>
+            <textarea name="narrative_<?= $lang ?>" class="tall" style="min-height:120px;"><?= h($current_day_data["narrative_{$lang}"] ?? '') ?></textarea>
+          </div>
+        </div>
+        <?php endforeach; ?>
+      </div>
+
+      <!-- 5. ACCOMMODATION / OVERNIGHT -->
+      <div style="padding:14px 20px;border-bottom:1px solid var(--grey-lt);">
+        <div style="font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--grey-mid);margin-bottom:8px;">🏕️ Accommodation / overnight</div>
         <select name="end_lodge_id" style="width:100%;max-width:480px;">
           <option value="">— No overnight (departure/transit day) —</option>
           <?php foreach ($lodges_grouped as $dest_name => $lodges): ?>
           <optgroup label="<?= h($dest_name) ?>">
             <?php foreach ($lodges as $l): ?>
-            <option value="<?= $l['id'] ?>" <?= (int)($current_day_data['end_lodge_id']??0)===$l['id']?'selected':'' ?>><?= h($l['name']) ?></option>
+            <option value="<?= $l['id'] ?>" <?= (int)($current_day_data['end_lodge_id']??0)===(int)$l['id']?'selected':'' ?>><?= h($l['name']) ?></option>
             <?php endforeach; ?>
           </optgroup>
           <?php endforeach; ?>
         </select>
       </div>
 
-      <!-- MEALS -->
+      <!-- 6. MEALS -->
       <div style="padding:12px 20px;background:var(--off-white,#f7f6f3);">
-        <div style="font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--grey-mid);margin-bottom:8px;">
-          🍽️ Meals included
-        </div>
+        <div style="font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--grey-mid);margin-bottom:8px;">🍽️ Meals included</div>
         <div style="display:flex;gap:20px;">
           <label class="meal-check"><input type="checkbox" name="meal_breakfast" value="1" <?= $current_day_data['meal_breakfast']?'checked':'' ?> style="accent-color:var(--red);"> Breakfast</label>
           <label class="meal-check"><input type="checkbox" name="meal_lunch"     value="1" <?= $current_day_data['meal_lunch']?'checked':'' ?>     style="accent-color:var(--red);"> Lunch</label>
@@ -521,31 +537,6 @@ include __DIR__ . '/../../includes/layout_header.php';
 
     </div><!-- end blocchi giorno -->
 
-    <!-- Titolo + Narrative ×5 lingue -->
-    <div class="form-card" style="padding:20px 24px;">
-      <div class="form-section-title" style="margin-top:0;">Title &amp; Narrative</div>
-
-      <div class="lang-tabs" id="narr-tabs">
-        <?php foreach (ITI_LANGS as $i => $lang): ?>
-        <div class="lang-tab <?= $i===0?'active':'' ?>" onclick="switchLang('narr','<?= $lang ?>')"><?= strtoupper($lang) ?></div>
-        <?php endforeach; ?>
-      </div>
-
-      <?php foreach (ITI_LANGS as $i => $lang): ?>
-      <div class="lang-panel <?= $i===0?'active':'' ?>" id="narr-<?= $lang ?>">
-        <div class="form-group" style="margin-bottom:12px;">
-          <label>Day Title — <?= ITI_LANG_LABELS[$lang] ?></label>
-          <input type="text" name="day_title_<?= $lang ?>" maxlength="200"
-                 placeholder="Arrival in Arusha…"
-                 value="<?= h($current_day_data["day_title_{$lang}"] ?? '') ?>">
-        </div>
-        <div class="form-group">
-          <label>Narrative — <?= ITI_LANG_LABELS[$lang] ?></label>
-          <textarea name="narrative_<?= $lang ?>" class="tall" style="min-height:160px;"><?= h($current_day_data["narrative_{$lang}"] ?? '') ?></textarea>
-        </div>
-      </div>
-      <?php endforeach; ?>
-    </div>
   </form>
 
   <!-- Activities -->
