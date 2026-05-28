@@ -560,16 +560,25 @@ include __DIR__ . '/../../includes/layout_header.php';
       <div style="background:var(--off-white,#f7f6f3);border-bottom:1px dashed var(--grey-lt);padding:12px 20px;">
         <div style="font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--grey-mid);margin-bottom:10px;">🚌 Transfer <span style="font-weight:400;">(optional)</span></div>
 
+        <?php
+        // Build options for transfer combo: defined routes + flights
+        $tr_combo_opts = [];
+        foreach ($transfer_map as $_tid => $_tr)
+            $tr_combo_opts[] = ['label' => ($_tr['from_name']??'').' → '.($_tr['to_name']??'').' ('.($_tr['duration_min']??0).' min)'];
+        foreach ($flight_map as $_fid => $_fl)
+            $tr_combo_opts[] = ['label' => 'Flight: '.($_fl['from_airport']??'').' → '.($_fl['to_airport']??'').($_fl['operator']?' ('.$_fl['operator'].')':'')];
+        ?>
+
         <?php if ($current_transfers): ?>
-        <div style="margin-bottom:10px;">
+        <div style="margin-bottom:12px;">
           <?php foreach ($current_transfers as $tr): ?>
           <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
-            <span style="flex:1;font-size:.83rem;padding:7px 10px;background:#fff;border:1px solid var(--grey-lt);border-radius:6px;"><?= h($tr['description']) ?></span>
+            <span style="flex:1;font-size:.83rem;padding:7px 11px;background:#fff;border:1.5px solid var(--grey-lt);border-radius:6px;color:var(--grey-dk);"><?= h($tr['description']) ?></span>
             <form method="POST" action="program_edit.php?id=<?= $id ?>&tab=days&day=<?= $active_day ?>" style="margin:0;">
-              <input type="hidden" name="_sub"    value="remove_transfer">
-              <input type="hidden" name="day_id"  value="<?= $active_day ?>">
-              <input type="hidden" name="tr_id"   value="<?= $tr['id'] ?>">
-              <button class="btn btn-danger btn-sm" title="Remove" onclick="return confirm('Remove this transfer?')">✕</button>
+              <input type="hidden" name="_sub"   value="remove_transfer">
+              <input type="hidden" name="day_id" value="<?= $active_day ?>">
+              <input type="hidden" name="tr_id"  value="<?= $tr['id'] ?>">
+              <button class="btn btn-danger btn-sm" onclick="return confirm('Remove?')">✕</button>
             </form>
           </div>
           <?php endforeach; ?>
@@ -577,13 +586,22 @@ include __DIR__ . '/../../includes/layout_header.php';
         <?php endif; ?>
 
         <form method="POST" action="program_edit.php?id=<?= $id ?>&tab=days&day=<?= $active_day ?>"
-              style="display:flex;gap:8px;align-items:center;">
-          <input type="hidden" name="_sub"   value="add_transfer">
-          <input type="hidden" name="day_id" value="<?= $active_day ?>">
-          <input type="text" name="transfer_desc"
-                 placeholder="e.g. Transfer to Arusha airport — approx. 30 min"
-                 style="flex:1;font-size:.83rem;">
-          <button type="submit" class="btn btn-outline btn-sm">+ Add</button>
+              id="tr-add-form-<?= $active_day ?>">
+          <input type="hidden" name="_sub"          value="add_transfer">
+          <input type="hidden" name="day_id"        value="<?= $active_day ?>">
+          <div style="display:flex;gap:8px;align-items:center;">
+            <div class="iti-combo" data-field="tr_new" style="flex:1;max-width:none;">
+              <div class="iti-combo-inner">
+                <input type="text" name="transfer_desc" class="iti-combo-text" autocomplete="off"
+                       placeholder="Type or choose — e.g. Transfer to Arusha airport ~30 min">
+                <button type="button" class="iti-combo-arrow" tabindex="-1">▾</button>
+              </div>
+              <div class="iti-combo-drop"
+                   data-opts='<?= json_encode(array_map(fn($o)=>['id'=>'','label'=>$o['label'],'group'=>'Suggestions'], $tr_combo_opts), JSON_HEX_APOS) ?>'
+                   data-no-clear="1"></div>
+            </div>
+            <button type="submit" class="btn btn-outline btn-sm" style="white-space:nowrap;">+ Add</button>
+          </div>
         </form>
       </div>
 
@@ -989,6 +1007,7 @@ document.querySelectorAll('.iti-combo').forEach(function(combo) {
     var drop   = combo.querySelector('.iti-combo-drop');
     var hidId  = combo.querySelector('input[name$="_id"]');
     var hidTxt = combo.querySelector('input[name$="_custom"]');
+    if (!input || !drop) return;
     var opts   = JSON.parse(drop.dataset.opts || '[]');
 
     function renderDrop(q) {
@@ -1011,9 +1030,9 @@ document.querySelectorAll('.iti-combo').forEach(function(combo) {
             d.dataset.id  = o.id;
             d.addEventListener('mousedown', function(e) {
                 e.preventDefault();
-                input.value  = o.label;
-                hidId.value  = o.id;
-                hidTxt.value = '';
+                input.value = o.label;
+                if (hidId)  hidId.value  = o.id;
+                if (hidTxt) hidTxt.value = '';
                 closeDrop();
             });
             drop.appendChild(d);
