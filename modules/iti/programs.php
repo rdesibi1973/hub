@@ -18,6 +18,7 @@ $id     = (int)($_REQUEST['id'] ?? 0);
 // ── POST: crea nuovo SAMPLE ──────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'add' && $can_edit) {
     $title_en         = trim($_POST['title_en'] ?? '');
+    $ref_number       = trim($_POST['ref_number'] ?? '');
     $display_language = $_POST['display_language'] ?? 'en';
 
     if ($title_en === '') {
@@ -28,13 +29,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'add' && $can_edit) {
     $db->prepare(
         'INSERT INTO iti_programs
          (program_type,
+          ref_number,
           title_en,title_it,title_fr,title_es,title_de,
           subtitle_en,subtitle_it,subtitle_fr,subtitle_es,subtitle_de,
           duration_days,pax_adults,pax_children,
           status,display_language,display_currency,created_by)
          VALUES
-         ("sample",?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+         ("sample",?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
     )->execute([
+        $ref_number ?: null,
         $title_en,'','','','',
         '','','','','',
         1,2,0,
@@ -48,7 +51,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'add' && $can_edit) {
 
 // ── DELETE ───────────────────────────────────────────────────
 if ($action === 'delete' && $id && $can_edit) {
-    // Soft delete: cambia status in cancelled
     $db->prepare("UPDATE iti_programs SET status='cancelled' WHERE id=?")->execute([$id]);
     iti_flash_set('success', 'Program cancelled.');
     iti_redirect("programs.php?type={$tab}");
@@ -61,11 +63,13 @@ if ($action === 'duplicate' && $id && $can_edit) {
         $db->prepare(
             'INSERT INTO iti_programs
              (program_type,sample_program_id,terms_id,
+              ref_number,
               title_en,title_it,title_fr,title_es,title_de,
               subtitle_en,subtitle_it,subtitle_fr,subtitle_es,subtitle_de,
               duration_days,pax_adults,pax_children,flights_included,
               status,display_language,display_currency,created_by)
              SELECT "sample",id,terms_id,
+              ref_number,
               CONCAT(title_en," (copy)"),title_it,title_fr,title_es,title_de,
               subtitle_en,subtitle_it,subtitle_fr,subtitle_es,subtitle_de,
               duration_days,pax_adults,pax_children,flights_included,
@@ -148,6 +152,13 @@ include __DIR__ . '/../../includes/layout_header.php';
   </div>
 
   <div class="form-group">
+    <label>Ref. Number</label>
+    <input type="text" name="ref_number" maxlength="60"
+           placeholder="e.g. SE-2025-001">
+    <span class="form-hint">Optional. Can also be set later in the editor.</span>
+  </div>
+
+  <div class="form-group">
     <label>Language</label>
     <select name="display_language"><?= iti_options(ITI_LANG_LABELS, 'en') ?></select>
   </div>
@@ -186,7 +197,7 @@ include __DIR__ . '/../../includes/layout_header.php';
 
 <form method="GET" action="programs.php" class="filters">
   <input type="hidden" name="type" value="<?= h($tab) ?>">
-  <div><label>Search</label><input type="text" name="q" placeholder="Title, client…" value="<?= h($search) ?>"></div>
+  <div><label>Search</label><input type="text" name="q" placeholder="Title, ref. number, client…" value="<?= h($search) ?>"></div>
   <div>
     <label>Status</label>
     <select name="status">
@@ -204,6 +215,7 @@ include __DIR__ . '/../../includes/layout_header.php';
   <table>
     <thead>
       <tr>
+        <th>Ref. Number</th>
         <th>Title</th>
         <?php if ($tab==='personal'): ?><th>Client</th><?php endif; ?>
         <th>Duration</th>
@@ -218,6 +230,13 @@ include __DIR__ . '/../../includes/layout_header.php';
     <?php if ($programs): ?>
       <?php foreach ($programs as $p): ?>
       <tr>
+        <td>
+          <?php if (!empty($p['ref_number'])): ?>
+          <span style="font-family:monospace;font-size:.8rem;font-weight:700;color:var(--grey-dk);"><?= h($p['ref_number']) ?></span>
+          <?php else: ?>
+          <span style="color:var(--grey-lt);font-size:.75rem;">—</span>
+          <?php endif; ?>
+        </td>
         <td>
           <div style="font-weight:600;"><?= h($p['title_en']) ?></div>
           <?php if ($p['subtitle_en']): ?><div style="font-size:.72rem;color:var(--grey-mid);"><?= h($p['subtitle_en']) ?></div><?php endif; ?>
@@ -252,7 +271,7 @@ include __DIR__ . '/../../includes/layout_header.php';
       </tr>
       <?php endforeach; ?>
     <?php else: ?>
-      <tr><td colspan="<?= $tab==='personal'?8:7 ?>">
+      <tr><td colspan="<?= $tab==='personal'?9:8 ?>">
         <div class="empty-state">
           <div class="icon"><?= $tab==='sample'?'📋':'👤' ?></div>
           <p>No <?= $tab ?> programs found<?= ($search||$fstatus)?' for the selected filters.':' yet.' ?></p>
