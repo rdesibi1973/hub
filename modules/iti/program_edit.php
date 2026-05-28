@@ -306,6 +306,12 @@ $lodges_grouped  = iti_lodges_grouped();
 $destinations_list = iti_get_destinations();
 $transfer_map    = iti_transfer_routes_map();
 $flight_map      = iti_flight_routes_map();
+// Distinct airline operators from flight routes for combo suggestions
+$airline_opts = [];
+try {
+    $ao = db()->query("SELECT DISTINCT operator FROM iti_flight_routes WHERE operator IS NOT NULL AND operator <> '' ORDER BY operator");
+    foreach ($ao->fetchAll() as $_r) $airline_opts[] = ['id'=>'', 'label'=>$_r['operator'], 'group'=>'Known operators'];
+} catch (Exception $e) {}
 $activities_list = iti_get_activities(true);
 
 // Attività, voli e transfer del giorno corrente
@@ -805,10 +811,16 @@ include __DIR__ . '/../../includes/layout_header.php';
         <input type="hidden" name="flight_route_id" value="">
         <div class="iti-combo-drop" data-opts='<?= json_encode($fl_opts, JSON_HEX_APOS) ?>'></div>
       </div>
-      <div style="display:flex;flex-direction:column;gap:3px;min-width:140px;">
+      <div style="display:flex;flex-direction:column;gap:3px;min-width:160px;">
         <label style="font-size:.72rem;font-weight:700;color:var(--grey-dk);">Airline company</label>
-        <input type="text" name="airline_company" placeholder="e.g. Coastal Aviation"
-               style="padding:7px 10px;border:1.5px solid var(--grey-lt);border-radius:6px;font-size:.82rem;">
+        <div class="iti-combo" data-field="airline_co" style="max-width:none;">
+          <div class="iti-combo-inner">
+            <input type="text" name="airline_company" class="iti-combo-text" autocomplete="off"
+                   placeholder="Type or choose…">
+            <button type="button" class="iti-combo-arrow" tabindex="-1">▾</button>
+          </div>
+          <div class="iti-combo-drop" data-opts='<?= json_encode($airline_opts, JSON_HEX_APOS) ?>'></div>
+        </div>
       </div>
       <div style="display:flex;flex-direction:column;gap:3px;">
         <label style="font-size:.72rem;font-weight:700;color:var(--grey-dk);">Dep.</label>
