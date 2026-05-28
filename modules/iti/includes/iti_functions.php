@@ -217,10 +217,12 @@ function iti_get_days(int $program_id): array {
     $st = db()->prepare(
         'SELECT pd.*,
                 sl.name AS start_lodge_name,
-                el.name AS end_lodge_name
+                el.name AS end_lodge_name,
+                dest.name_en AS destination_name_en
            FROM iti_program_days pd
-           LEFT JOIN iti_lodges sl ON sl.id = pd.start_lodge_id
-           LEFT JOIN iti_lodges el ON el.id = pd.end_lodge_id
+           LEFT JOIN iti_lodges sl   ON sl.id   = pd.start_lodge_id
+           LEFT JOIN iti_lodges el   ON el.id   = pd.end_lodge_id
+           LEFT JOIN iti_destinations dest ON dest.id = pd.destination_id
           WHERE pd.program_id = ?
           ORDER BY pd.day_number'
     );
