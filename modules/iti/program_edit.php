@@ -54,23 +54,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($sub === 'day') {
         $day_id = (int)($_POST['day_id'] ?? 0);
         if ($day_id) {
+            // Combo fields: se c'è un id FK lo usa, altrimenti salva il testo libero
+            $start_id  = ($_POST['start_lodge_id']  !== '' ? (int)$_POST['start_lodge_id']  : null);
+            $start_txt = ($start_id === null ? trim($_POST['start_lodge_custom']  ?? '') : null) ?: null;
+            $dest_id   = ($_POST['destination_id']  !== '' ? (int)$_POST['destination_id']  : null);
+            $dest_txt  = ($dest_id  === null ? trim($_POST['destination_custom']  ?? '') : null) ?: null;
+            $end_id    = ($_POST['end_lodge_id']    !== '' ? (int)$_POST['end_lodge_id']    : null);
+            $end_txt   = ($end_id   === null ? trim($_POST['end_lodge_custom']    ?? '') : null) ?: null;
+
             $db->prepare(
                 'UPDATE iti_program_days SET
                  day_title_en=?,day_title_it=?,day_title_fr=?,day_title_es=?,day_title_de=?,
-                 start_lodge_id=?,transfer_route_id=?,destination_id=?,
+                 start_lodge_id=?,start_custom=?,
+                 transfer_route_id=?,
+                 destination_id=?,destination_custom=?,
                  narrative_en=?,narrative_it=?,narrative_fr=?,narrative_es=?,narrative_de=?,
-                 end_lodge_id=?,
+                 end_lodge_id=?,end_lodge_custom=?,
                  meal_breakfast=?,meal_lunch=?,meal_dinner=?
                  WHERE id=? AND program_id=?'
             )->execute([
                 trim($_POST['day_title_en']),trim($_POST['day_title_it']),
                 trim($_POST['day_title_fr']),trim($_POST['day_title_es']),trim($_POST['day_title_de']),
-                ($_POST['start_lodge_id']!==''?(int)$_POST['start_lodge_id']:null),
+                $start_id, $start_txt,
                 ($_POST['transfer_route_id']!==''?(int)$_POST['transfer_route_id']:null),
-                ($_POST['destination_id']!==''?(int)$_POST['destination_id']:null),
+                $dest_id, $dest_txt,
                 trim($_POST['narrative_en']),trim($_POST['narrative_it']),
                 trim($_POST['narrative_fr']),trim($_POST['narrative_es']),trim($_POST['narrative_de']),
-                ($_POST['end_lodge_id']!==''?(int)$_POST['end_lodge_id']:null),
+                $end_id, $end_txt,
                 isset($_POST['meal_breakfast'])?1:0,
                 isset($_POST['meal_lunch'])?1:0,
                 isset($_POST['meal_dinner'])?1:0,
@@ -298,6 +308,19 @@ include __DIR__ . '/../../includes/layout_header.php';
 .lang-tab.active { color:var(--red); border-bottom-color:var(--red); }
 .lang-panel { display:none; }
 .lang-panel.active { display:block; }
+.iti-combo { position:relative; max-width:480px; }
+.iti-combo-inner { display:flex; border:1.5px solid var(--grey-lt); border-radius:6px; background:#fff; overflow:hidden; }
+.iti-combo-inner:focus-within { border-color:var(--red); }
+.iti-combo-text { flex:1; border:none; outline:none; padding:8px 10px; font-size:.85rem; background:transparent; color:var(--black,#1a1a1a); font-family:inherit; }
+.iti-combo-text::placeholder { color:var(--grey-mid); }
+.iti-combo-arrow { border:none; background:var(--off-white,#f7f6f3); padding:0 10px; cursor:pointer; font-size:.75rem; color:var(--grey-mid); border-left:1px solid var(--grey-lt); }
+.iti-combo-arrow:hover { background:var(--grey-lt); }
+.iti-combo-drop { display:none; position:absolute; left:0; right:0; top:calc(100% + 2px); background:#fff; border:1.5px solid var(--grey-lt); border-radius:6px; z-index:200; max-height:220px; overflow-y:auto; box-shadow:0 4px 12px rgba(0,0,0,.08); }
+.iti-combo-drop.open { display:block; }
+.iti-combo-group { font-size:.65rem; font-weight:700; text-transform:uppercase; letter-spacing:.08em; color:var(--grey-mid); padding:7px 12px 3px; }
+.iti-combo-opt { padding:7px 14px; font-size:.83rem; cursor:pointer; color:var(--grey-dk,#333); }
+.iti-combo-opt:hover, .iti-combo-opt.focused { background:var(--red-lt,#fdf0f0); color:var(--red); }
+.iti-combo-opt.custom-hint { color:var(--amber,#b87c00); font-style:italic; }
 </style>
 
 <main>
@@ -446,23 +469,36 @@ include __DIR__ . '/../../includes/layout_header.php';
       <!-- 1. STARTING POINT -->
       <div style="padding:14px 20px;border-bottom:1px solid var(--grey-lt);">
         <div style="font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--grey-mid);margin-bottom:8px;">📍 Starting point</div>
-        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
-          <select name="start_lodge_id" style="flex:1;min-width:200px;">
-            <option value="">— None —</option>
-            <?php if ($prev_lodge_name): ?>
-            <option value="" <?= empty($current_day_data['start_lodge_id'])?'selected':'' ?>>↖ Inherited — <?= h($prev_lodge_name) ?></option>
-            <?php endif; ?>
-            <?php foreach ($lodges_grouped as $dest_name => $lodges): ?>
-            <optgroup label="<?= h($dest_name) ?>">
-              <?php foreach ($lodges as $l): ?>
-              <option value="<?= $l['id'] ?>" <?= (int)($current_day_data['start_lodge_id']??0)===(int)$l['id']?'selected':'' ?>><?= h($l['name']) ?></option>
-              <?php endforeach; ?>
-            </optgroup>
-            <?php endforeach; ?>
-          </select>
-          <?php if ($start_is_inherited): ?>
-          <span style="font-size:.75rem;background:#e8f4f0;color:#0a6647;padding:3px 10px;border-radius:5px;border:1px solid #b2ddd0;white-space:nowrap;">↖ Day <?= $current_day_data['day_number']-1 ?></span>
-          <?php endif; ?>
+        <?php
+        // Determine current display value for starting point
+        $start_display = '';
+        if (!empty($current_day_data['start_lodge_id'])) {
+            foreach ($lodges_grouped as $_d => $_ls)
+                foreach ($_ls as $_l)
+                    if ((int)$_l['id'] === (int)$current_day_data['start_lodge_id'])
+                        $start_display = $_l['name'];
+        } elseif (!empty($current_day_data['start_custom'])) {
+            $start_display = $current_day_data['start_custom'];
+        } elseif ($prev_lodge_name) {
+            $start_display = '↖ Inherited — ' . $prev_lodge_name;
+        }
+        // Build options JSON for JS
+        $start_opts = [];
+        if ($prev_lodge_name) $start_opts[] = ['id'=>'', 'label'=>'↖ Inherited — '.$prev_lodge_name, 'group'=>'Inherited'];
+        foreach ($lodges_grouped as $_dname => $_ls)
+            foreach ($_ls as $_l)
+                $start_opts[] = ['id'=>(string)$_l['id'], 'label'=>$_l['name'], 'group'=>$_dname];
+        ?>
+        <div class="iti-combo" data-field="start_lodge">
+          <div class="iti-combo-inner">
+            <input type="text" class="iti-combo-text" autocomplete="off"
+                   placeholder="Type or choose from list…"
+                   value="<?= h($start_display) ?>">
+            <button type="button" class="iti-combo-arrow" tabindex="-1">▾</button>
+          </div>
+          <input type="hidden" name="start_lodge_id"     value="<?= h($current_day_data['start_lodge_id'] ?? '') ?>">
+          <input type="hidden" name="start_lodge_custom" value="<?= h($current_day_data['start_custom'] ?? '') ?>">
+          <div class="iti-combo-drop" data-opts='<?= json_encode($start_opts, JSON_HEX_APOS) ?>'></div>
         </div>
       </div>
 
@@ -478,12 +514,29 @@ include __DIR__ . '/../../includes/layout_header.php';
       <!-- 3. MAIN DESTINATION -->
       <div style="padding:14px 20px;border-bottom:1px solid var(--grey-lt);">
         <div style="font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--grey-mid);margin-bottom:8px;">🗺️ Main destination</div>
-        <select name="destination_id" style="width:100%;max-width:480px;">
-          <option value="">— Select destination —</option>
-          <?php foreach ($destinations_list as $dest): ?>
-          <option value="<?= $dest['id'] ?>" <?= (int)($current_day_data['destination_id']??0)===(int)$dest['id']?'selected':'' ?>><?= h($dest['name_en']) ?></option>
-          <?php endforeach; ?>
-        </select>
+        <?php
+        $dest_display = '';
+        if (!empty($current_day_data['destination_id']))
+            foreach ($destinations_list as $_d)
+                if ((int)$_d['id'] === (int)$current_day_data['destination_id'])
+                    $dest_display = $_d['name_en'];
+        if (!$dest_display && !empty($current_day_data['destination_custom']))
+            $dest_display = $current_day_data['destination_custom'];
+        $dest_opts = [];
+        foreach ($destinations_list as $_d)
+            $dest_opts[] = ['id'=>(string)$_d['id'], 'label'=>$_d['name_en'], 'group'=>$_d['region'] ?? ''];
+        ?>
+        <div class="iti-combo" data-field="destination">
+          <div class="iti-combo-inner">
+            <input type="text" class="iti-combo-text" autocomplete="off"
+                   placeholder="Type or choose from list…"
+                   value="<?= h($dest_display) ?>">
+            <button type="button" class="iti-combo-arrow" tabindex="-1">▾</button>
+          </div>
+          <input type="hidden" name="destination_id"     value="<?= h($current_day_data['destination_id'] ?? '') ?>">
+          <input type="hidden" name="destination_custom" value="<?= h($current_day_data['destination_custom'] ?? '') ?>">
+          <div class="iti-combo-drop" data-opts='<?= json_encode($dest_opts, JSON_HEX_APOS) ?>'></div>
+        </div>
       </div>
 
       <!-- 4. DAY TITLE & DESCRIPTION -->
@@ -513,16 +566,31 @@ include __DIR__ . '/../../includes/layout_header.php';
       <!-- 5. ACCOMMODATION / OVERNIGHT -->
       <div style="padding:14px 20px;border-bottom:1px solid var(--grey-lt);">
         <div style="font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--grey-mid);margin-bottom:8px;">🏕️ Accommodation / overnight</div>
-        <select name="end_lodge_id" style="width:100%;max-width:480px;">
-          <option value="">— No overnight (departure/transit day) —</option>
-          <?php foreach ($lodges_grouped as $dest_name => $lodges): ?>
-          <optgroup label="<?= h($dest_name) ?>">
-            <?php foreach ($lodges as $l): ?>
-            <option value="<?= $l['id'] ?>" <?= (int)($current_day_data['end_lodge_id']??0)===(int)$l['id']?'selected':'' ?>><?= h($l['name']) ?></option>
-            <?php endforeach; ?>
-          </optgroup>
-          <?php endforeach; ?>
-        </select>
+        <?php
+        $acc_display = '';
+        if (!empty($current_day_data['end_lodge_id']))
+            foreach ($lodges_grouped as $_d => $_ls)
+                foreach ($_ls as $_l)
+                    if ((int)$_l['id'] === (int)$current_day_data['end_lodge_id'])
+                        $acc_display = $_l['name'];
+        if (!$acc_display && !empty($current_day_data['end_lodge_custom']))
+            $acc_display = $current_day_data['end_lodge_custom'];
+        $acc_opts = [['id'=>'', 'label'=>'— No overnight —', 'group'=>'']];
+        foreach ($lodges_grouped as $_dname => $_ls)
+            foreach ($_ls as $_l)
+                $acc_opts[] = ['id'=>(string)$_l['id'], 'label'=>$_l['name'], 'group'=>$_dname];
+        ?>
+        <div class="iti-combo" data-field="end_lodge">
+          <div class="iti-combo-inner">
+            <input type="text" class="iti-combo-text" autocomplete="off"
+                   placeholder="Type or choose from list…"
+                   value="<?= h($acc_display) ?>">
+            <button type="button" class="iti-combo-arrow" tabindex="-1">▾</button>
+          </div>
+          <input type="hidden" name="end_lodge_id"     value="<?= h($current_day_data['end_lodge_id'] ?? '') ?>">
+          <input type="hidden" name="end_lodge_custom" value="<?= h($current_day_data['end_lodge_custom'] ?? '') ?>">
+          <div class="iti-combo-drop" data-opts='<?= json_encode($acc_opts, JSON_HEX_APOS) ?>'></div>
+        </div>
       </div>
 
       <!-- 6. MEALS -->
@@ -838,6 +906,72 @@ function addIncRow(type) {
     <button type="button" onclick="this.closest('.inc-row').remove()" class="btn btn-danger btn-sm">✕</button>`;
   list.appendChild(div);
 }
+
+// ── ITI Combo field ──────────────────────────────────────────
+document.querySelectorAll('.iti-combo').forEach(function(combo) {
+    var input  = combo.querySelector('.iti-combo-text');
+    var drop   = combo.querySelector('.iti-combo-drop');
+    var hidId  = combo.querySelector('input[name$="_id"]');
+    var hidTxt = combo.querySelector('input[name$="_custom"]');
+    var opts   = JSON.parse(drop.dataset.opts || '[]');
+
+    function renderDrop(q) {
+        drop.innerHTML = '';
+        var q2 = q.toLowerCase();
+        var lastGroup = null;
+        var shown = 0;
+        opts.forEach(function(o) {
+            if (q2 && !o.label.toLowerCase().includes(q2)) return;
+            if (o.group && o.group !== lastGroup) {
+                var g = document.createElement('div');
+                g.className = 'iti-combo-group';
+                g.textContent = o.group;
+                drop.appendChild(g);
+                lastGroup = o.group;
+            }
+            var d = document.createElement('div');
+            d.className = 'iti-combo-opt';
+            d.textContent = o.label;
+            d.dataset.id  = o.id;
+            d.addEventListener('mousedown', function(e) {
+                e.preventDefault();
+                input.value  = o.label;
+                hidId.value  = o.id;
+                hidTxt.value = '';
+                closeDrop();
+            });
+            drop.appendChild(d);
+            shown++;
+        });
+        if (q2 && shown === 0) {
+            var hint = document.createElement('div');
+            hint.className = 'iti-combo-opt custom-hint';
+            hint.textContent = '✎ Save as custom: "' + q + '"';
+            hint.addEventListener('mousedown', function(e) {
+                e.preventDefault();
+                hidId.value  = '';
+                hidTxt.value = q;
+                closeDrop();
+            });
+            drop.appendChild(hint);
+        }
+    }
+
+    function openDrop() { renderDrop(input.value); drop.classList.add('open'); }
+    function closeDrop() { drop.classList.remove('open'); }
+
+    input.addEventListener('focus', function() { openDrop(); });
+    input.addEventListener('input', function() {
+        hidId.value  = '';
+        hidTxt.value = this.value;
+        renderDrop(this.value);
+        drop.classList.add('open');
+    });
+    input.addEventListener('blur', function() { setTimeout(closeDrop, 150); });
+    combo.querySelector('.iti-combo-arrow').addEventListener('click', function() {
+        if (drop.classList.contains('open')) { closeDrop(); } else { input.focus(); openDrop(); }
+    });
+});
 </script>
 
 <?php include __DIR__ . '/../../includes/layout_footer.php'; ?>
