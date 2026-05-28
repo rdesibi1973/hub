@@ -505,6 +505,14 @@ function iti_get_day_flights(int $program_day_id): array {
     return $st->fetchAll();
 }
 
+function iti_get_day_transfers(int $program_day_id): array {
+    $st = db()->prepare(
+        'SELECT * FROM iti_day_transfers WHERE program_day_id = ? ORDER BY sort_order, id'
+    );
+    $st->execute([$program_day_id]);
+    return $st->fetchAll();
+}
+
 function iti_get_transfer_routes(): array {
     $st = db()->query(
         'SELECT tr.*, 
