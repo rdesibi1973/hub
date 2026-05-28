@@ -126,7 +126,7 @@ if ($action === 'duplicate' && $id && $can_edit) {
         }
 
         iti_flash_set('success', 'Program duplicated.');
-        iti_redirect(ITI_MODULE_URL . "/program_edit.php?id={$new_id}");
+        iti_redirect("program_edit.php?id={$new_id}");
     }
 }
 
