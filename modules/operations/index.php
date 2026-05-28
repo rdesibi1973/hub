@@ -701,8 +701,8 @@ function buildWAForDate(dateRows){
     txt+='\n';
   }
 
-  section(arrJRO,    'ARRIVALS JRO/ARK',              true);
-  section(depJRO,    'DEPARTURES ARK/JRO',             true);
+  section(arrJRO,    'ARRIVALS',              true);
+  section(depJRO,    'DEPARTURES',             true);
   section(arrCoast,  'ARRIVALS ZNZ/PEMBA/MAFIA/DAR',  true);
   section(depCoast,  'DEPARTURES ZNZ/PEMBA/MAFIA/DAR',true);
   section(arrOther,  'ARRIVALS ROAD TRANSFERS / OTHER',false);
@@ -716,7 +716,7 @@ function copyWADate(date, btn){
   let text;
   if(!rows.length){
     const lbl=fmtDateLabel(date);
-    text=lbl.toUpperCase()+' - ARRIVALS/DEPARTURES\n-------------------------------------\n\nARRIVALS JRO/ARK\nNone\n\nDEPARTURES ARK/JRO\nNone\n\nARRIVALS ZNZ/PEMBA/MAFIA/DAR\nNone\n\nDEPARTURES ZNZ/PEMBA/MAFIA/DAR\nNone';
+    text=lbl.toUpperCase()+' - ARRIVALS/DEPARTURES\n-------------------------------------\n\nARRIVALS\nNone\n\nDEPARTURES\nNone\n\nARRIVALS ZNZ/PEMBA/MAFIA/DAR\nNone\n\nDEPARTURES ZNZ/PEMBA/MAFIA/DAR\nNone';
   } else {
     text=buildWAForDate(rows);
   }
