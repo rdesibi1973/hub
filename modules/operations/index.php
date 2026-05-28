@@ -687,22 +687,26 @@ function buildWAForDate(dateRows){
   const arrCoast=arrivals.filter(r=>isCoastOrIsland(r.pickup));
   const depJRO=departures.filter(r=>isJROorARK(r.dropoff));
   const depCoast=departures.filter(r=>isCoastOrIsland(r.dropoff));
+  const arrOther=arrivals.filter(r=>!isJROorARK(r.pickup)&&!isCoastOrIsland(r.pickup));
+  const depOther=departures.filter(r=>!isJROorARK(r.dropoff)&&!isCoastOrIsland(r.dropoff));
 
   let txt=date.toUpperCase()+' - ARRIVALS/DEPARTURES\n';
   txt+='-------------------------------------\n\n';
 
-  function section(rows,label){
-    if(!rows.length){txt+=label+'\nNone\n\n';return;}
+  function section(rows,label,alwaysShow){
+    if(!rows.length){if(alwaysShow)txt+=label+'\nNone\n\n';return;}
     const g=rows.length===1?'1 group':rows.length+' groups';
     txt+=label+' - '+g+'\n';
     rows.forEach(r=>{txt+=buildWALine(r)+'\n';});
     txt+='\n';
   }
 
-  section(arrJRO,   'ARRIVALS JRO/ARK');
-  section(depJRO,   'DEPARTURES ARK/JRO');
-  section(arrCoast, 'ARRIVALS ZNZ/PEMBA/MAFIA/DAR');
-  section(depCoast, 'DEPARTURES ZNZ/PEMBA/MAFIA/DAR');
+  section(arrJRO,    'ARRIVALS JRO/ARK',              true);
+  section(depJRO,    'DEPARTURES ARK/JRO',             true);
+  section(arrCoast,  'ARRIVALS ZNZ/PEMBA/MAFIA/DAR',  true);
+  section(depCoast,  'DEPARTURES ZNZ/PEMBA/MAFIA/DAR',true);
+  section(arrOther,  'ARRIVALS ROAD TRANSFERS / OTHER',false);
+  section(depOther,  'DEPARTURES ROAD TRANSFERS / OTHER',false);
   return txt.trim();
 }
 
