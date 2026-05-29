@@ -192,7 +192,8 @@ include __DIR__ . '/../../includes/layout_header.php';
   </div>
   <?php if ($can_edit): ?>
   <div style="display:flex;gap:8px;">
-    <a href="iti_import_lodges_web.php" class="btn btn-outline btn-sm">🌐 Import from Web</a>
+    <a href="iti_import_lodges_zanzibar.php" class="btn btn-outline btn-sm">🌴 Import Zanzibar</a>
+    <a href="iti_import_lodges_web.php" class="btn btn-outline btn-sm">🌐 Import Safari Partners</a>
     <a href="lodges.php?action=add<?= $filter_dest?"&destination_id={$filter_dest}":'' ?>" class="btn btn-red">+ New Lodge</a>
   </div>
   <?php endif; ?>
