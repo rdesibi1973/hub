@@ -180,8 +180,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $swap = $db->prepare('SELECT id FROM iti_program_days WHERE program_id=? AND day_number=?');
             $swap->execute([$id, $swap_num]); $swap_id = (int)$swap->fetchColumn();
             if ($swap_id) {
-                $db->prepare('UPDATE iti_program_days SET day_number=? WHERE id=?')->execute([$swap_num, $day_id]);
+                // Usa numero temporaneo 9999 per evitare duplicate key durante lo swap
+                $db->prepare('UPDATE iti_program_days SET day_number=9999 WHERE id=?')->execute([$day_id]);
                 $db->prepare('UPDATE iti_program_days SET day_number=? WHERE id=?')->execute([$cur_num, $swap_id]);
+                $db->prepare('UPDATE iti_program_days SET day_number=? WHERE id=?')->execute([$swap_num, $day_id]);
             }
         }
         iti_redirect("program_edit.php?id={$id}&tab=days");
