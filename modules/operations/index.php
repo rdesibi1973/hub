@@ -314,6 +314,7 @@ include __DIR__ . '/../../includes/layout_header.php';
     <span class="file-label" id="excelFileName">&#8212;</span>
     <button class="btn-reextract" id="btnReextract" onclick="reExtractAfterEdit()">&#8635; Re-extract</button>
     <button class="btn-audit-act" id="btnAudit"     onclick="runAudit()">&#128269; Audit</button>
+    <button class="btn-audit-act" style="background:var(--red);color:#fff;margin-left:auto;" onclick="cancelExtractor()">&#10005; Cancel</button>
   </div>
   <div class="upload-zone" id="extUploadZone"
        onclick="document.getElementById('extFileInput').click()"
@@ -326,6 +327,10 @@ include __DIR__ . '/../../includes/layout_header.php';
     <input type="file" id="extFileInput" accept=".xlsx,.xls" onchange="loadExtFile(this.files[0])" style="display:none">
   </div>
   <div id="auditPanelExt" style="display:none;"></div>
+  <div class="add-row-bar" id="extAddBar" style="padding:0 4px;">
+    <button class="btn-add-row2" onclick="addExtRow('Arrival')">+ Add Arrival</button>
+    <button class="btn-add-row2" onclick="addExtRow('Departure')">+ Add Departure</button>
+  </div>
   <div class="ext-main" id="extMain"></div>
 </div>
 
@@ -947,7 +952,7 @@ function extractMovements(data,clientName,dropboxFile){
 }
 
 function renderExtractor(){
-  if(!extRows.length){document.getElementById('extMain').innerHTML='<p style="padding:20px;color:var(--grey-mid)">No movements found.</p>';return;}
+  if(!extRows.length){document.getElementById('extMain').innerHTML='';return;}
   let html='<div class="info-box"><strong>'+extRows.length+' movement'+(extRows.length!==1?'s':'')+' extracted.</strong> Review, edit and save to DB.</div>';
   extRows.forEach((r,idx)=>{
     const isArr=r.type==='Arrival';
@@ -962,8 +967,7 @@ function renderExtractor(){
     extFld(idx,'driver','Driver / Guide',r.driver)+extFld(idx,'notes','Notes',r.notes)+extFld(idx,'dropbox','Dropbox File',r.dropbox)+
     '</div></div>';
   });
-  html+='<div class="add-row-bar"><button class="btn-add-row2" onclick="addExtRow(\'Arrival\')">+ Add Arrival</button><button class="btn-add-row2" onclick="addExtRow(\'Departure\')">+ Add Departure</button></div>'+
-    '<div class="copy-all-bar"><p>Ready: '+extRows.length+' row'+(extRows.length!==1?'s':'')+'</p>'+
+  html+='<div class="copy-all-bar"><p>Ready: '+extRows.length+' row'+(extRows.length!==1?'s':'')+'</p>'+
     '<button class="btn-copy-all2" style="background:var(--navy)" onclick="saveAllExtToDB()">&#128190; Save all to DB</button>'+
     '<button class="btn-copy-all2" onclick="copyAllExt()">Copy all</button></div>';
   document.getElementById('extMain').innerHTML=html;
@@ -972,6 +976,16 @@ function renderExtractor(){
 function extFld(idx,key,label,value){return'<div class="field"><label>'+label+'</label><input type="text" value="'+escA(value)+'" oninput="extRows['+idx+'][\''+key+'\']=this.value" placeholder="'+label+'"></div>';}
 function deleteExtRow(idx){extRows.splice(idx,1);renderExtractor();}
 function addExtRow(type){extRows.push(newRow({type}));renderExtractor();}
+function cancelExtractor(){
+  extRows=[];currentFileName='';currentFileBlob=null;sheetData=[];
+  document.getElementById('extMain').innerHTML='';
+  document.getElementById('excelActionBar').style.display='none';
+  document.getElementById('extUploadZone').style.display='';
+  document.getElementById('extUploadTitle').textContent='Load Safari Calc Excel';
+  document.getElementById('extUploadSub').innerHTML='Drop the file here or click to browse &mdash; reads CONF or RECAP sheet automatically';
+  document.getElementById('extFileInput').value='';
+  document.getElementById('auditPanelExt').style.display='none';
+}
 function readExtDOM(idx){const card=document.getElementById('card_'+idx);const r={...extRows[idx]};if(!card)return r;card.querySelectorAll('input').forEach((inp,i)=>{if(FIELD_KEYS[i])r[FIELD_KEYS[i]]=inp.value;});return r;}
 function extRowToTSV(r){return FIELD_KEYS.map((k,i)=>{const v=String(r[k]||'');if(i===0&&v)return fmtDate(v);if(i===5&&v)return v.replace(',',':');return v;}).join('\t');}
 function copyExtRow(idx){showExtModal(extRowToTSV(readExtDOM(idx)));}
