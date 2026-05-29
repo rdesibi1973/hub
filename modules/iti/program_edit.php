@@ -527,13 +527,19 @@ include __DIR__ . '/../../includes/layout_header.php';
   <!-- Day editor -->
   <div>
   <?php if ($current_day_data): ?>
-  <form method="POST" action="program_edit.php?id=<?= $id ?>&tab=days&day=<?= $active_day ?>">
-    <input type="hidden" name="_sub"    value="day">
-    <input type="hidden" name="day_id"  value="<?= $active_day ?>">
+  <?php $day_form_id = 'day-form-' . $active_day; ?>
+
+  <!-- Hidden form for day save — all inputs reference it via form= attribute to avoid nesting issues -->
+  <form id="<?= $day_form_id ?>"
+        method="POST"
+        action="program_edit.php?id=<?= $id ?>&tab=days&day=<?= $active_day ?>">
+    <input type="hidden" name="_sub"   value="day">
+    <input type="hidden" name="day_id" value="<?= $active_day ?>">
+  </form>
 
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
       <div style="font-family:'Merriweather',serif;font-size:1rem;font-weight:700;">Day <?= $current_day_data['day_number'] ?></div>
-      <button type="submit" class="btn btn-red btn-sm">💾 Save Day</button>
+      <button type="submit" form="<?= $day_form_id ?>" class="btn btn-red btn-sm">💾 Save Day</button>
     </div>
 
     <!-- ── BLOCCHI SEQUENZIALI DEL GIORNO ── -->
@@ -597,8 +603,8 @@ include __DIR__ . '/../../includes/layout_header.php';
                    value="<?= h($start_display) ?>">
             <button type="button" class="iti-combo-arrow" tabindex="-1">▾</button>
           </div>
-          <input type="hidden" name="start_lodge_id"     value="<?= h($start_hidden_id) ?>">
-          <input type="hidden" name="start_lodge_custom" value="<?= h($current_day_data['start_custom'] ?? '') ?>">
+          <input type="hidden" name="start_lodge_id"     value="<?= h($start_hidden_id) ?>" form="<?= $day_form_id ?>">
+          <input type="hidden" name="start_lodge_custom" value="<?= h($current_day_data['start_custom'] ?? '') ?>" form="<?= $day_form_id ?>">
           <div class="iti-combo-drop" data-opts='<?= json_encode($start_opts, JSON_HEX_APOS) ?>'></div>
         </div>
       </div>
@@ -681,8 +687,8 @@ include __DIR__ . '/../../includes/layout_header.php';
                    value="<?= h($dest_display) ?>">
             <button type="button" class="iti-combo-arrow" tabindex="-1">▾</button>
           </div>
-          <input type="hidden" name="destination_id"     value="<?= h($current_day_data['destination_id'] ?? '') ?>">
-          <input type="hidden" name="destination_custom" value="<?= h($current_day_data['destination_custom'] ?? '') ?>">
+          <input type="hidden" name="destination_id"     value="<?= h($current_day_data['destination_id'] ?? '') ?>" form="<?= $day_form_id ?>">
+          <input type="hidden" name="destination_custom" value="<?= h($current_day_data['destination_custom'] ?? '') ?>" form="<?= $day_form_id ?>">
           <div class="iti-combo-drop" data-opts='<?= json_encode($dest_opts, JSON_HEX_APOS) ?>'></div>
         </div>
       </div>
@@ -701,11 +707,12 @@ include __DIR__ . '/../../includes/layout_header.php';
             <label style="font-size:.75rem;"><?= ITI_LANG_LABELS[$lang] ?> — Title</label>
             <input type="text" name="day_title_<?= $lang ?>" maxlength="200"
                    placeholder="e.g. Arrival in Arusha…"
+                   form="<?= $day_form_id ?>"
                    value="<?= h($current_day_data["day_title_{$lang}"] ?? '') ?>">
           </div>
           <div class="form-group">
             <label style="font-size:.75rem;"><?= ITI_LANG_LABELS[$lang] ?> — Narrative</label>
-            <textarea name="narrative_<?= $lang ?>" class="tall" style="min-height:120px;"><?= h($current_day_data["narrative_{$lang}"] ?? '') ?></textarea>
+            <textarea name="narrative_<?= $lang ?>" class="tall" style="min-height:120px;" form="<?= $day_form_id ?>"><?= h($current_day_data["narrative_{$lang}"] ?? '') ?></textarea>
           </div>
         </div>
         <?php endforeach; ?>
@@ -735,8 +742,8 @@ include __DIR__ . '/../../includes/layout_header.php';
                    value="<?= h($acc_display) ?>">
             <button type="button" class="iti-combo-arrow" tabindex="-1">▾</button>
           </div>
-          <input type="hidden" name="end_lodge_id"     value="<?= h($current_day_data['end_lodge_id'] ?? '') ?>">
-          <input type="hidden" name="end_lodge_custom" value="<?= h($current_day_data['end_lodge_custom'] ?? '') ?>">
+          <input type="hidden" name="end_lodge_id"     value="<?= h($current_day_data['end_lodge_id'] ?? '') ?>" form="<?= $day_form_id ?>">
+          <input type="hidden" name="end_lodge_custom" value="<?= h($current_day_data['end_lodge_custom'] ?? '') ?>" form="<?= $day_form_id ?>">
           <div class="iti-combo-drop" data-opts='<?= json_encode($acc_opts, JSON_HEX_APOS) ?>'></div>
         </div>
       </div>
@@ -745,15 +752,13 @@ include __DIR__ . '/../../includes/layout_header.php';
       <div style="padding:12px 20px;background:var(--off-white,#f7f6f3);">
         <div style="font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--grey-mid);margin-bottom:8px;">🍽️ Meals included</div>
         <div style="display:flex;gap:20px;">
-          <label class="meal-check"><input type="checkbox" name="meal_breakfast" value="1" <?= $current_day_data['meal_breakfast']?'checked':'' ?> style="accent-color:var(--red);"> Breakfast</label>
-          <label class="meal-check"><input type="checkbox" name="meal_lunch"     value="1" <?= $current_day_data['meal_lunch']?'checked':'' ?>     style="accent-color:var(--red);"> Lunch</label>
-          <label class="meal-check"><input type="checkbox" name="meal_dinner"    value="1" <?= $current_day_data['meal_dinner']?'checked':'' ?>    style="accent-color:var(--red);"> Dinner</label>
+          <label class="meal-check"><input type="checkbox" name="meal_breakfast" value="1" <?= $current_day_data['meal_breakfast']?'checked':'' ?> form="<?= $day_form_id ?>" style="accent-color:var(--red);"> Breakfast</label>
+          <label class="meal-check"><input type="checkbox" name="meal_lunch"     value="1" <?= $current_day_data['meal_lunch']?'checked':'' ?>     form="<?= $day_form_id ?>" style="accent-color:var(--red);"> Lunch</label>
+          <label class="meal-check"><input type="checkbox" name="meal_dinner"    value="1" <?= $current_day_data['meal_dinner']?'checked':'' ?>    form="<?= $day_form_id ?>" style="accent-color:var(--red);"> Dinner</label>
         </div>
       </div>
 
     </div><!-- end blocchi giorno -->
-
-  </form>
 
   <!-- Activities -->
   <div class="form-card" style="margin-top:16px;padding:20px 24px;">
