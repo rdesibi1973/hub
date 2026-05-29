@@ -619,7 +619,7 @@ function deleteQuote(id, num) {
 }
 .todo-add-form .tf-due-wrap { display:flex; gap:6px; width:100%; }
 .todo-add-form .tf-due-wrap input[type=date] { flex:1.4; min-width:0; }
-.todo-add-form .tf-due-wrap input[type=time] { flex:1; min-width:0; }
+.todo-add-form .tf-due-wrap input.tf-time { flex:1; min-width:0; width:72px; font-family:monospace; letter-spacing:.05em; }
 .todo-add-form .tf-email { width:100%; }
 </style>
 
@@ -707,7 +707,7 @@ function deleteQuote(id, num) {
 .todo-inline-edit .tf-title { flex:2; min-width:160px; resize:vertical; min-height:52px; align-self:stretch; }
 .todo-inline-edit .tf-due-wrap { display:flex; gap:6px; width:185px; }
 .todo-inline-edit .tf-due-wrap input[type=date] { flex:1.4; min-width:0; }
-.todo-inline-edit .tf-due-wrap input[type=time] { flex:1; min-width:0; }
+.todo-inline-edit .tf-due-wrap input.tf-time { flex:1; min-width:0; width:62px; font-family:monospace; letter-spacing:.05em; }
 .todo-inline-edit .tf-email { flex:1; min-width:140px; }
 </style>
 
@@ -731,7 +731,7 @@ function deleteQuote(id, num) {
     <input type="hidden" name="todo_due" value="<?= $dueFmt ?>">
     <div class="tf-due-wrap">
       <input type="date" class="tf-due-date" value="<?= substr($dueFmt,0,10) ?>" required>
-      <input type="time" class="tf-due-time" value="<?= substr($dueFmt,11,5) ?>" required>
+      <input type="text" class="tf-due-time tf-time" value="<?= substr($dueFmt,11,5) ?>" placeholder="HH:MM" maxlength="5" pattern="\d{2}:\d{2}" title="Time in 24h format HH:MM" required>
     </div>
     <input class="tf-email" type="text" name="todo_email"
            value="<?= h($t['email_to'] ?? '') ?>" placeholder="email1, email2, …">
@@ -778,7 +778,7 @@ function deleteQuote(id, num) {
     <input type="hidden" name="todo_due" value="">
     <div class="tf-due-wrap">
       <input type="date" class="tf-due-date" value="<?= date('Y-m-d', strtotime('+1 day')) ?>" required>
-      <input type="time" class="tf-due-time" value="09:00" required>
+      <input type="text" class="tf-due-time tf-time" value="09:00" placeholder="HH:MM" maxlength="5" pattern="\d{2}:\d{2}" title="Time in 24h format HH:MM" required>
     </div>    <input class="tf-email" type="text" name="todo_email"
            placeholder="email1, email2, …"
            value="<?= h($cuEmail) ?>"
@@ -807,11 +807,50 @@ function todoCancel(id) {
 
 // Combine split date+time inputs into hidden todo_due before submit
 document.querySelectorAll('.todo-add-form, .todo-inline-edit').forEach(function(form) {
-  form.addEventListener('submit', function() {
+  form.addEventListener('submit', function(e) {
     var d = form.querySelector('.tf-due-date');
     var t = form.querySelector('.tf-due-time');
     var h = form.querySelector('[name="todo_due"]');
-    if (d && t && h) h.value = d.value + ' ' + t.value;
+    if (d && t && h) {
+      var timeVal = t.value.trim();
+      // Validate HH:MM 24h
+      if (!/^\d{2}:\d{2}$/.test(timeVal)) {
+        e.preventDefault();
+        t.style.borderColor = 'var(--red)';
+        t.focus();
+        return;
+      }
+      var parts = timeVal.split(':');
+      if (parseInt(parts[0]) > 23 || parseInt(parts[1]) > 59) {
+        e.preventDefault();
+        t.style.borderColor = 'var(--red)';
+        t.focus();
+        return;
+      }
+      h.value = d.value + ' ' + timeVal;
+    }
+  });
+});
+
+// Auto-format time text inputs: insert colon after 2 digits
+document.querySelectorAll('.tf-time').forEach(function(inp) {
+  inp.addEventListener('input', function() {
+    var v = inp.value.replace(/[^\d:]/g, '');
+    if (v.length === 2 && !v.includes(':') && inp.dataset.prev && inp.dataset.prev.length < 2) {
+      v = v + ':';
+    }
+    inp.value = v;
+    inp.dataset.prev = v;
+    inp.style.borderColor = '';
+  });
+  inp.addEventListener('blur', function() {
+    var v = inp.value.trim();
+    // Accept bare "HH" → "HH:00"
+    if (/^\d{1,2}$/.test(v)) {
+      v = v.padStart(2,'0') + ':00';
+      inp.value = v;
+    }
+    inp.style.borderColor = /^\d{2}:\d{2}$/.test(v) ? '' : 'var(--red)';
   });
 });
 </script>
