@@ -105,7 +105,7 @@ function extract_description(string $html, string $lang): string {
     foreach ($xp->query('//h2') as $h2) {
         $h2t = strtolower(trim($h2->textContent));
         foreach ($targets as $t) {
-            if (str_starts_with($h2t, $t)) {
+            if (strpos($h2t, $t) === 0) {
                 $parts = []; $s = $h2->nextSibling;
                 while ($s) {
                     if ($s->nodeType === XML_ELEMENT_NODE && $s->nodeName === 'h2') break;
