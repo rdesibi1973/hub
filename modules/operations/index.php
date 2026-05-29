@@ -314,7 +314,6 @@ include __DIR__ . '/../../includes/layout_header.php';
     <span class="file-label" id="excelFileName">&#8212;</span>
     <button class="btn-reextract" id="btnReextract" onclick="reExtractAfterEdit()">&#8635; Re-extract</button>
     <button class="btn-audit-act" id="btnAudit"     onclick="runAudit()">&#128269; Audit</button>
-    <button class="btn-audit-act" style="background:var(--red);color:#fff;margin-left:auto;" onclick="cancelExtractor()">&#10005; Cancel</button>
   </div>
   <div class="upload-zone" id="extUploadZone"
        onclick="document.getElementById('extFileInput').click()"
@@ -330,6 +329,7 @@ include __DIR__ . '/../../includes/layout_header.php';
   <div class="add-row-bar" id="extAddBar" style="padding:0 4px;">
     <button class="btn-add-row2" onclick="addExtRow('Arrival')">+ Add Arrival</button>
     <button class="btn-add-row2" onclick="addExtRow('Departure')">+ Add Departure</button>
+    <button class="btn-add-row2" onclick="cancelExtractor()" style="margin-left:auto;border-color:var(--red);color:var(--red-dk);">&#10005; Cancel</button>
   </div>
   <div class="ext-main" id="extMain"></div>
 </div>
