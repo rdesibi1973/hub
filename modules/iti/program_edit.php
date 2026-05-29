@@ -778,12 +778,10 @@ include __DIR__ . '/../../includes/layout_header.php';
         <div style="font-size:.72rem;color:var(--grey-mid);"><?= ITI_ACTIVITY_TYPES[$a['activity_type']] ?? '' ?><?= $a['duration_hours'] ? ' · '.$a['duration_hours'].'h' : '' ?></div>
         <?php endif; ?>
       </div>
-      <form method="POST" action="program_edit.php?id=<?= $id ?>&tab=days&day=<?= $active_day ?>">
-        <input type="hidden" name="_sub"   value="remove_activity">
-        <input type="hidden" name="day_id" value="<?= $active_day ?>">
-        <input type="hidden" name="da_id"  value="<?= $a['id'] ?>">
-        <button class="btn btn-danger btn-sm" onclick="return confirm('Remove?')">✕</button>
-      </form>
+      <button type="button" class="btn btn-danger btn-sm"
+              onclick="if(!confirm('Remove?'))return;
+                       var fd=new FormData();fd.append('_sub','remove_activity');fd.append('day_id','<?= $active_day ?>');fd.append('da_id','<?= $a['id'] ?>');
+                       fetch('program_edit.php?id=<?= $id ?>&tab=days&day=<?= $active_day ?>',{method:'POST',body:fd}).then(function(){location.reload();});">✕</button>
     </div>
     <?php endforeach; ?>
     <?php else: ?>
@@ -795,21 +793,32 @@ include __DIR__ . '/../../includes/layout_header.php';
     foreach ($activities_list as $a)
         $act_opts[] = ['id'=>(string)$a['id'], 'label'=>($a['name_en']).($a['dest_name_en'] ? ' — '.$a['dest_name_en'] : ''), 'group'=>ITI_ACTIVITY_TYPES[$a['activity_type']] ?? 'Other'];
     ?>
-    <form method="POST" action="program_edit.php?id=<?= $id ?>&tab=days&day=<?= $active_day ?>"
-          style="display:flex;gap:8px;align-items:center;margin-top:10px;">
-      <input type="hidden" name="_sub"   value="add_activity">
-      <input type="hidden" name="day_id" value="<?= $active_day ?>">
+    <div style="display:flex;gap:8px;align-items:center;margin-top:10px;">
       <div class="iti-combo" data-field="act_new" style="flex:1;max-width:none;">
         <div class="iti-combo-inner">
-          <input type="text" name="activity_custom" class="iti-combo-text" autocomplete="off"
+          <input type="text" id="act-txt-<?= $active_day ?>" class="iti-combo-text" autocomplete="off"
                  placeholder="Type or choose activity…">
           <button type="button" class="iti-combo-arrow" tabindex="-1">▾</button>
         </div>
-        <input type="hidden" name="activity_id" value="">
+        <input type="hidden" id="act-id-<?= $active_day ?>" name="activity_id" value="">
         <div class="iti-combo-drop" data-opts='<?= json_encode($act_opts, JSON_HEX_APOS) ?>'></div>
       </div>
-      <button type="submit" class="btn btn-outline btn-sm" style="white-space:nowrap;">+ Add</button>
-    </form>
+      <button type="button" class="btn btn-outline btn-sm" style="white-space:nowrap;"
+              onclick="(function(btn){
+                var txt=document.getElementById('act-txt-<?= $active_day ?>').value.trim();
+                var aid=document.getElementById('act-id-<?= $active_day ?>').value;
+                if(!txt && !aid) return;
+                var fd=new FormData();
+                fd.append('_sub','add_activity');
+                fd.append('day_id','<?= $active_day ?>');
+                fd.append('activity_id', aid);
+                fd.append('activity_custom', aid ? '' : txt);
+                btn.disabled=true;
+                fetch('program_edit.php?id=<?= $id ?>&tab=days&day=<?= $active_day ?>',{method:'POST',body:fd})
+                  .then(function(){location.reload();})
+                  .catch(function(){btn.disabled=false;});
+              })(this)">+ Add</button>
+    </div>
   </div>
 
   <!-- Flights -->
@@ -834,12 +843,10 @@ include __DIR__ . '/../../includes/layout_header.php';
           <?= $fl['arrival_time']   ? ' Arr '.h($fl['arrival_time'])  : '' ?>
         </div>
       </div>
-      <form method="POST" action="program_edit.php?id=<?= $id ?>&tab=days&day=<?= $active_day ?>">
-        <input type="hidden" name="_sub"   value="remove_flight">
-        <input type="hidden" name="day_id" value="<?= $active_day ?>">
-        <input type="hidden" name="df_id"  value="<?= $fl['id'] ?>">
-        <button class="btn btn-danger btn-sm" onclick="return confirm('Remove?')">✕</button>
-      </form>
+      <button type="button" class="btn btn-danger btn-sm"
+              onclick="if(!confirm('Remove?'))return;
+                       var fd=new FormData();fd.append('_sub','remove_flight');fd.append('day_id','<?= $active_day ?>');fd.append('df_id','<?= $fl['id'] ?>');
+                       fetch('program_edit.php?id=<?= $id ?>&tab=days&day=<?= $active_day ?>',{method:'POST',body:fd}).then(function(){location.reload();});">✕</button>
     </div>
     <?php endforeach; ?>
     <?php endif; ?>
@@ -849,24 +856,21 @@ include __DIR__ . '/../../includes/layout_header.php';
     foreach ($flight_map as $_fid => $_fl)
         $fl_opts[] = ['id'=>(string)$_fid, 'label'=>($_fl['from_airport']??'').' → '.($_fl['to_airport']??'').($_fl['operator']?' ('.$_fl['operator'].')':''), 'group'=>'Flight routes'];
     ?>
-    <form method="POST" action="program_edit.php?id=<?= $id ?>&tab=days&day=<?= $active_day ?>"
-          style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px;">
-      <input type="hidden" name="_sub"   value="add_flight">
-      <input type="hidden" name="day_id" value="<?= $active_day ?>">
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px;">
       <div class="iti-combo" data-field="fl_new" style="flex:2;min-width:200px;max-width:none;">
         <div class="iti-combo-inner">
-          <input type="text" name="flight_custom" class="iti-combo-text" autocomplete="off"
+          <input type="text" id="fl-txt-<?= $active_day ?>" class="iti-combo-text" autocomplete="off"
                  placeholder="Type or choose — e.g. Arusha → Seronera (Coastal Aviation)">
           <button type="button" class="iti-combo-arrow" tabindex="-1">▾</button>
         </div>
-        <input type="hidden" name="flight_route_id" value="">
+        <input type="hidden" id="fl-id-<?= $active_day ?>" name="flight_route_id" value="">
         <div class="iti-combo-drop" data-opts='<?= json_encode($fl_opts, JSON_HEX_APOS) ?>'></div>
       </div>
       <div style="display:flex;flex-direction:column;gap:3px;min-width:160px;">
         <label style="font-size:.72rem;font-weight:700;color:var(--grey-dk);">Airline company</label>
         <div class="iti-combo" data-field="airline_co" style="max-width:none;">
           <div class="iti-combo-inner">
-            <input type="text" name="airline_company" class="iti-combo-text" autocomplete="off"
+            <input type="text" id="fl-airline-<?= $active_day ?>" class="iti-combo-text" autocomplete="off"
                    placeholder="Type or choose…">
             <button type="button" class="iti-combo-arrow" tabindex="-1">▾</button>
           </div>
@@ -875,14 +879,31 @@ include __DIR__ . '/../../includes/layout_header.php';
       </div>
       <div style="display:flex;flex-direction:column;gap:3px;">
         <label style="font-size:.72rem;font-weight:700;color:var(--grey-dk);">Dep.</label>
-        <input type="time" name="departure_time" style="padding:7px 10px;border:1.5px solid var(--grey-lt);border-radius:6px;font-size:.82rem;">
+        <input type="time" id="fl-dep-<?= $active_day ?>" style="padding:7px 10px;border:1.5px solid var(--grey-lt);border-radius:6px;font-size:.82rem;">
       </div>
       <div style="display:flex;flex-direction:column;gap:3px;">
         <label style="font-size:.72rem;font-weight:700;color:var(--grey-dk);">Arr.</label>
-        <input type="time" name="arrival_time" style="padding:7px 10px;border:1.5px solid var(--grey-lt);border-radius:6px;font-size:.82rem;">
+        <input type="time" id="fl-arr-<?= $active_day ?>" style="padding:7px 10px;border:1.5px solid var(--grey-lt);border-radius:6px;font-size:.82rem;">
       </div>
-      <button type="submit" class="btn btn-outline btn-sm" style="white-space:nowrap;align-self:flex-end;">+ Add</button>
-    </form>
+      <button type="button" class="btn btn-outline btn-sm" style="white-space:nowrap;align-self:flex-end;"
+              onclick="(function(btn){
+                var txt=document.getElementById('fl-txt-<?= $active_day ?>').value.trim();
+                var fid=document.getElementById('fl-id-<?= $active_day ?>').value;
+                if(!txt && !fid) return;
+                var fd=new FormData();
+                fd.append('_sub','add_flight');
+                fd.append('day_id','<?= $active_day ?>');
+                fd.append('flight_route_id', fid);
+                fd.append('flight_custom', fid ? '' : txt);
+                fd.append('airline_company', document.getElementById('fl-airline-<?= $active_day ?>').value);
+                fd.append('departure_time',  document.getElementById('fl-dep-<?= $active_day ?>').value);
+                fd.append('arrival_time',    document.getElementById('fl-arr-<?= $active_day ?>').value);
+                btn.disabled=true;
+                fetch('program_edit.php?id=<?= $id ?>&tab=days&day=<?= $active_day ?>',{method:'POST',body:fd})
+                  .then(function(){location.reload();})
+                  .catch(function(){btn.disabled=false;});
+              })(this)">+ Add</button>
+    </div>
   </div>
 
   <?php else: ?>
