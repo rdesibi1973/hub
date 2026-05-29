@@ -453,7 +453,19 @@ include __DIR__ . '/../../includes/layout_header.php';
       </div>
       <div class="form-row">
         <div class="form-group"><label class="form-label">Flight / Transfer</label><input class="form-control" type="text" id="mf-flight" name="flight" placeholder="e.g. TC 136"></div>
-        <div class="form-group"><label class="form-label">Time</label><input class="form-control" type="time" id="mf-time" name="move_time"></div>
+        <div class="form-group"><label class="form-label">Time</label>
+          <div style="display:flex;gap:4px;align-items:center;">
+            <select id="mf-hour" class="form-control" style="flex:1;min-width:0;">
+              <option value="">--</option>
+              <?php for($i=0;$i<24;$i++) printf('<option value="%02d">%02d</option>',$i,$i); ?>
+            </select>
+            <span style="font-weight:700;color:var(--grey-mid);">:</span>
+            <select id="mf-min" class="form-control" style="flex:1;min-width:0;">
+              <?php for($i=0;$i<60;$i++) printf('<option value="%02d">%02d</option>',$i,$i); ?>
+            </select>
+          </div>
+          <input type="hidden" id="mf-time" name="move_time">
+        </div>
       </div>
       <div class="form-row">
         <div class="form-group"><label class="form-label">Pick Up</label><input class="form-control" type="text" id="mf-pickup" name="pickup"></div>
@@ -615,7 +627,9 @@ function openAddModal(r){
     document.getElementById('mf-client').value=r.client_name||'';
     document.getElementById('mf-pax').value=r.pax||1;
     document.getElementById('mf-flight').value=r.flight||'';
-    document.getElementById('mf-time').value=r.move_time?r.move_time.slice(0,5):'';
+    var t=r.move_time?r.move_time.slice(0,5):'';
+    document.getElementById('mf-hour').value=t?t.slice(0,2):'';
+    document.getElementById('mf-min').value=t?t.slice(3,5):'00';
     document.getElementById('mf-pickup').value=r.pickup||'';
     document.getElementById('mf-dropoff').value=r.dropoff||'';
     document.getElementById('mf-driver').value=r.driver||'';
@@ -624,6 +638,8 @@ function openAddModal(r){
   } else {
     document.getElementById('movModalTitle').textContent='Add New Movement';
     document.getElementById('mf-submit').textContent='Save Movement';
+    document.getElementById('mf-hour').value='';
+    document.getElementById('mf-min').value='00';
   }
   document.getElementById('mf-msg').innerHTML='';
   document.getElementById('movModalOverlay').classList.add('open');
@@ -634,6 +650,9 @@ function editMov(id){const r=lastData.find(r=>parseInt(r.id)===id);if(r)openAddM
 
 document.getElementById('movModalForm').addEventListener('submit',function(e){
   e.preventDefault();
+  var h=document.getElementById("mf-hour").value;
+  var m=document.getElementById("mf-min").value;
+  document.getElementById("mf-time").value=(h!=="")?(h+":"+m):"";
   var msg=document.getElementById('mf-msg');
   fetch(BASE+'/modules/operations/api/save_movement.php',{method:'POST',body:new FormData(this)})
     .then(function(r){return r.json();}).then(function(d){
@@ -1220,6 +1239,9 @@ function editGridRow(id){
   document.getElementById('movModalForm').onsubmit=null;
   document.getElementById('movModalForm').addEventListener('submit', function handler(e){
     e.preventDefault();
+    var h=document.getElementById("mf-hour").value;
+    var m=document.getElementById("mf-min").value;
+    document.getElementById("mf-time").value=(h!=="")?(h+":"+m):"";
     const msg=document.getElementById('mf-msg');
     fetch(BASE+'/modules/operations/api/save_movement.php',{method:'POST',body:new FormData(this)})
       .then(r=>r.json()).then(d=>{
