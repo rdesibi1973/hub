@@ -117,13 +117,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // ── Aggiungi attività ──
     if ($sub === 'add_activity') {
         $day_id         = (int)($_POST['day_id']          ?? 0);
-        $activity_id    = ($_POST['activity_id'] !== '' ? (int)$_POST['activity_id'] : null);
+        $activity_id    = ($_POST['activity_id'] !== '' ? (int)$_POST['activity_id'] : 0);
         $activity_custom = trim($_POST['activity_custom'] ?? '');
         if ($day_id && ($activity_id || $activity_custom !== '')) {
             $ms = $db->prepare('SELECT COALESCE(MAX(sort_order),0) FROM iti_day_activities WHERE program_day_id=?');
             $ms->execute([$day_id]); $max_sort = (int)$ms->fetchColumn();
             $db->prepare('INSERT INTO iti_day_activities (program_day_id,activity_id,activity_custom,sort_order) VALUES (?,?,?,?)')->execute([
-                $day_id, $activity_id, $activity_custom ?: null, $max_sort+1
+                $day_id, $activity_id ?: 0, $activity_custom ?: null, $max_sort+1
             ]);
         }
         iti_redirect("program_edit.php?id={$id}&day={$day_id}");
@@ -213,13 +213,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // ── Aggiungi volo ──
     if ($sub === 'add_flight') {
         $day_id          = (int)($_POST['day_id']            ?? 0);
-        $flight_route_id = ($_POST['flight_route_id'] !== '' ? (int)$_POST['flight_route_id'] : null);
+        $flight_route_id = ($_POST['flight_route_id'] !== '' ? (int)$_POST['flight_route_id'] : 0);
         $flight_custom   = trim($_POST['flight_custom'] ?? '');
         if ($day_id && ($flight_route_id || $flight_custom !== '')) {
             $ms = $db->prepare('SELECT COALESCE(MAX(sort_order),0) FROM iti_day_flights WHERE program_day_id=?');
             $ms->execute([$day_id]); $max_sort = (int)$ms->fetchColumn();
             $db->prepare('INSERT INTO iti_day_flights (program_day_id,flight_route_id,flight_custom,airline_company,departure_time,arrival_time,sort_order) VALUES (?,?,?,?,?,?,?)')->execute([
-                $day_id, $flight_route_id, $flight_custom ?: null,
+                $day_id, $flight_route_id ?: 0, $flight_custom ?: null,
                 trim($_POST['airline_company'] ?? '') ?: null,
                 ($_POST['departure_time']??'')?:null,
                 ($_POST['arrival_time']??'')?:null,
