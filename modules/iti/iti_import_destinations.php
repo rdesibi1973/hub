@@ -26,7 +26,7 @@ $NAMES = [
     'RNP' => ['Ruaha National Park',              'Parco Nazionale di Ruaha',             'Parc National de Ruaha',               'Parque Nacional de Ruaha',                'Ruaha-Nationalpark'],
     'RBN' => ['Rubondo National Park',            'Parco Nazionale di Rubondo',           'Parc National de Rubondo',             'Parque Nacional de Rubondo',              'Rubondo-Nationalpark'],
     'SDN' => ['Saadani National Park',            'Parco Nazionale di Saadani',           'Parc National de Saadani',             'Parque Nacional de Saadani',              'Saadani-Nationalpark'],
-    'SGR' => ['Selous Game Reserve',              'Riserva di Caccia del Selous',         'Réserve de Gibier de Selous',          'Reserva de Caza del Selous',              'Selous-Wildreservat'],
+    'SGR' => ['Nyerere National Park',            'Parco Nazionale di Nyerere',           'Parc National de Nyerere',             'Parque Nacional de Nyerere',              'Nyerere-Nationalpark'],
     'SNP' => ['Serengeti National Park',          'Parco Nazionale del Serengeti',        'Parc National du Serengeti',           'Parque Nacional del Serengeti',           'Serengeti-Nationalpark'],
     'TRP' => ['Tarangire National Park',          'Parco Nazionale di Tarangire',         'Parc National de Tarangire',           'Parque Nacional de Tarangire',            'Tarangire-Nationalpark'],
     'UNP' => ['Udzungwa Mountains National Park', 'Parco Nazionale dei Monti Udzungwa',   'Parc National des Monts Udzungwa',     'Parque Nacional de los Montes Udzungwa',  'Udzungwa-Berge-Nationalpark'],
@@ -242,7 +242,7 @@ td{padding:6px 10px;border-bottom:1px solid #eee;vertical-align:top;font-size:.7
 
 <div class="actions">
   <a href="?dry" class="btn btn-grey">🔍 Dry Run (preview)</a>
-  <form method="POST" style="margin:0;" onsubmit="return confirm('TRUNCATE iti_destinations e reimporta tutto?')">
+  <form method="POST" action="iti_import_destinations.php" style="margin:0;" onsubmit="return confirm('TRUNCATE iti_destinations e reimporta tutto?')">
     <input type="hidden" name="run" value="1">
     <button class="btn btn-red">🚀 Truncate + Import</button>
   </form>
