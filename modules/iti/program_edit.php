@@ -53,6 +53,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // ── Salva giorno ──
     if ($sub === 'day') {
         $day_id = (int)($_POST['day_id'] ?? 0);
+        // DEBUG — log POST values for start fields
+        error_log("ITI day save — day_id={$day_id} start_lodge_id=" . ($_POST['start_lodge_id'] ?? 'MISSING') . " start_lodge_custom=" . ($_POST['start_lodge_custom'] ?? 'MISSING'));
         if ($day_id) {
             // Combo fields: se c'è un id FK lo usa, altrimenti salva il testo libero.
             // Starting point: id stored as "lodge_{n}" or "dest_{n}" to distinguish FK table.
