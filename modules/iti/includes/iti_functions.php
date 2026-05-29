@@ -216,18 +216,31 @@ function iti_get_program_by_token(string $token): array|false {
 function iti_get_days(int $program_id): array {
     $st = db()->prepare(
         'SELECT pd.*,
-                sl.name AS start_lodge_name,
-                el.name AS end_lodge_name,
+                sl.name    AS start_lodge_name,
+                sd.name_en AS start_dest_name,
+                el.name    AS end_lodge_name,
                 dest.name_en AS destination_name_en
            FROM iti_program_days pd
-           LEFT JOIN iti_lodges sl   ON sl.id   = pd.start_lodge_id
-           LEFT JOIN iti_lodges el   ON el.id   = pd.end_lodge_id
+           LEFT JOIN iti_lodges       sl   ON sl.id   = pd.start_lodge_id
+           LEFT JOIN iti_destinations sd   ON sd.id   = pd.start_destination_id
+           LEFT JOIN iti_lodges       el   ON el.id   = pd.end_lodge_id
            LEFT JOIN iti_destinations dest ON dest.id = pd.destination_id
           WHERE pd.program_id = ?
           ORDER BY pd.day_number'
     );
     $st->execute([$program_id]);
     return $st->fetchAll();
+}
+
+/**
+ * Returns the best display name for the starting point of a day row.
+ * Priority: lodge name > destination name > custom text > null
+ */
+function iti_start_display_name(array $day): ?string {
+    if (!empty($day['start_lodge_name']))  return $day['start_lodge_name'];
+    if (!empty($day['start_dest_name']))   return $day['start_dest_name'];
+    if (!empty($day['start_custom']))      return $day['start_custom'];
+    return null;
 }
 
 // ── PRICES ────────────────────────────────────────────────────────────────────

@@ -97,15 +97,15 @@ if ($action === 'duplicate' && $id && $can_edit) {
             $db->prepare(
                 'INSERT INTO iti_program_days
                  (program_id,day_number,day_title_en,day_title_it,day_title_fr,day_title_es,day_title_de,
-                  start_lodge_id,end_lodge_id,transfer_route_id,
+                  start_lodge_id,start_destination_id,end_lodge_id,transfer_route_id,
                   narrative_en,narrative_it,narrative_fr,narrative_es,narrative_de,
                   meal_breakfast,meal_lunch,meal_dinner)
-                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
             )->execute([
                 $new_id,$day['day_number'],
                 $day['day_title_en'],$day['day_title_it'],$day['day_title_fr'],
                 $day['day_title_es'],$day['day_title_de'],
-                $day['start_lodge_id'],$day['end_lodge_id'],$day['transfer_route_id'],
+                $day['start_lodge_id'],$day['start_destination_id'],$day['end_lodge_id'],$day['transfer_route_id'],
                 $day['narrative_en'],$day['narrative_it'],$day['narrative_fr'],
                 $day['narrative_es'],$day['narrative_de'],
                 $day['meal_breakfast'],$day['meal_lunch'],$day['meal_dinner'],

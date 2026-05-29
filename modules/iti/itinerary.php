@@ -242,14 +242,15 @@ a { color:var(--red); }
     </div>
     <div class="day-body">
 
-      <?php if ($day['start_lodge_name'] || $day['end_lodge_name']): ?>
+      <?php $start_name = iti_start_display_name($day); ?>
+      <?php if ($start_name || $day['end_lodge_name']): ?>
       <div class="info-row">
         <div class="info-label">🏕️ <?= $lang==='it'?'Lodge':($lang==='de'?'Unterkunft':($lang==='fr'?'Lodge':($lang==='es'?'Lodge':'Lodge'))) ?></div>
         <div class="info-val">
-          <?php if ($day['start_lodge_name']): ?>
-          <span class="pill pill-green"><?= h($day['start_lodge_name']) ?><?= $day['start_dest_name'] ? ' · '.h($day['start_dest_name']) : '' ?></span>
+          <?php if ($start_name): ?>
+          <span class="pill pill-green"><?= h($start_name) ?><?= ($day['start_lodge_name'] && $day['start_dest_name']) ? ' · '.h($day['start_dest_name']) : '' ?></span>
           <?php endif; ?>
-          <?php if ($day['end_lodge_name'] && $day['end_lodge_name']!==$day['start_lodge_name']): ?>
+          <?php if ($day['end_lodge_name'] && $day['end_lodge_name'] !== $start_name): ?>
           → <span class="pill"><?= h($day['end_lodge_name']) ?></span>
           <?php endif; ?>
         </div>

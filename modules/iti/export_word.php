@@ -130,12 +130,15 @@ foreach ($days as $day) {
     // Rule line
     $section->addText('', null, ['borderBottomSize'=>4,'borderBottomColor'=>$OFF_WHITE,'spaceAfter'=>80]);
 
-    // Lodge
-    if ($day['start_lodge_name']) {
-        $section->addText('LODGE', 'label');
-        $txt = $day['start_lodge_name'];
-        if ($day['start_dest_name']) $txt .= '  —  '.$day['start_dest_name'];
-        if ($day['end_lodge_name'] && $day['end_lodge_name']!==$day['start_lodge_name']) $txt .= '  →  '.$day['end_lodge_name'];
+    // Lodge / Starting point
+    $start_name = iti_start_display_name($day);
+    if ($start_name) {
+        // Show label as LODGE only when starting point is actually a lodge
+        $section->addText($day['start_lodge_name'] ? 'LODGE' : 'STARTING POINT', 'label');
+        $txt = $start_name;
+        // Append destination context only when starting from a lodge
+        if ($day['start_lodge_name'] && $day['start_dest_name']) $txt .= '  —  '.$day['start_dest_name'];
+        if ($day['end_lodge_name'] && $day['end_lodge_name'] !== $start_name) $txt .= '  →  '.$day['end_lodge_name'];
         $section->addText($txt, 'normal', ['spaceAfter'=>80]);
     }
 

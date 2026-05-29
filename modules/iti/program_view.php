@@ -145,12 +145,15 @@ include __DIR__ . '/../../includes/layout_header.php';
     </div>
     <div class="day-body">
 
-      <?php if ($day['start_lodge_name'] || $day['end_lodge_name']): ?>
+      <?php $start_name = iti_start_display_name($day); ?>
+      <?php if ($start_name || $day['end_lodge_name']): ?>
       <div class="day-row">
-        <div class="label">🏕️ Lodge</div>
+        <div class="label"><?= $day['start_lodge_name'] ? '🏕️ Lodge' : '📍 Starting point' ?></div>
         <div class="val">
-          <?php if ($day['start_lodge_name']): ?><span class="lodge-pill"><?= h($day['start_lodge_name']) ?><?= $day['start_dest_name'] ? ' — '.h($day['start_dest_name'])  : '' ?></span><?php endif; ?>
-          <?php if ($day['end_lodge_name'] && $day['end_lodge_name'] !== $day['start_lodge_name']): ?>→ <span class="lodge-pill"><?= h($day['end_lodge_name']) ?></span><?php endif; ?>
+          <?php if ($start_name): ?>
+            <span class="lodge-pill"><?= h($start_name) ?><?= ($day['start_lodge_name'] && $day['start_dest_name']) ? ' — '.h($day['start_dest_name']) : '' ?></span>
+          <?php endif; ?>
+          <?php if ($day['end_lodge_name'] && $day['end_lodge_name'] !== $start_name): ?>→ <span class="lodge-pill"><?= h($day['end_lodge_name']) ?></span><?php endif; ?>
         </div>
       </div>
       <?php endif; ?>

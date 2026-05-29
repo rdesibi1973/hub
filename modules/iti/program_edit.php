@@ -54,9 +54,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($sub === 'day') {
         $day_id = (int)($_POST['day_id'] ?? 0);
         if ($day_id) {
-            // Combo fields: se c'è un id FK lo usa, altrimenti salva il testo libero
-            $start_id   = ($_POST['start_lodge_id']   !== '' ? (int)$_POST['start_lodge_id']   : null);
-            $start_txt  = ($start_id  === null ? trim($_POST['start_lodge_custom']  ?? '') : null) ?: null;
+            // Combo fields: se c'è un id FK lo usa, altrimenti salva il testo libero.
+            // Starting point: id stored as "lodge_{n}" or "dest_{n}" to distinguish FK table.
+            $start_raw       = trim($_POST['start_lodge_id'] ?? '');
+            $start_lodge_id  = null;
+            $start_dest_id   = null;
+            $start_txt       = null;
+            if (str_starts_with($start_raw, 'lodge_')) {
+                $start_lodge_id = (int)substr($start_raw, 6) ?: null;
+            } elseif (str_starts_with($start_raw, 'dest_')) {
+                $start_dest_id = (int)substr($start_raw, 5) ?: null;
+            } else {
+                $start_txt = trim($_POST['start_lodge_custom'] ?? '') ?: null;
+            }
+
             // transfers saved via separate add_transfer/remove_transfer actions
             $dest_id    = ($_POST['destination_id']   !== '' ? (int)$_POST['destination_id']   : null);
             $dest_txt   = ($dest_id   === null ? trim($_POST['destination_custom']   ?? '') : null) ?: null;
@@ -66,7 +77,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $db->prepare(
                 'UPDATE iti_program_days SET
                  day_title_en=?,day_title_it=?,day_title_fr=?,day_title_es=?,day_title_de=?,
-                 start_lodge_id=?,start_custom=?,
+                 start_lodge_id=?,start_destination_id=?,start_custom=?,
 
                  destination_id=?,destination_custom=?,
                  narrative_en=?,narrative_it=?,narrative_fr=?,narrative_es=?,narrative_de=?,
@@ -76,7 +87,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             )->execute([
                 trim($_POST['day_title_en']),trim($_POST['day_title_it']),
                 trim($_POST['day_title_fr']),trim($_POST['day_title_es']),trim($_POST['day_title_de']),
-                $start_id, $start_txt,
+                $start_lodge_id, $start_dest_id, $start_txt,
 
                 $dest_id, $dest_txt,
                 trim($_POST['narrative_en']),trim($_POST['narrative_it']),
@@ -543,17 +554,31 @@ include __DIR__ . '/../../includes/layout_header.php';
                 foreach ($_ls as $_l)
                     if ((int)$_l['id'] === (int)$current_day_data['start_lodge_id'])
                         $start_display = $_l['name'];
+        } elseif (!empty($current_day_data['start_destination_id'])) {
+            foreach ($destinations_list as $_d)
+                if ((int)$_d['id'] === (int)$current_day_data['start_destination_id'])
+                    $start_display = $_d['name_en'];
         } elseif (!empty($current_day_data['start_custom'])) {
             $start_display = $current_day_data['start_custom'];
         } elseif ($prev_lodge_name) {
             $start_display = '↖ Inherited — ' . $prev_lodge_name;
         }
+        // Determine current hidden id value (prefixed)
+        $start_hidden_id = '';
+        if (!empty($current_day_data['start_lodge_id']))
+            $start_hidden_id = 'lodge_' . $current_day_data['start_lodge_id'];
+        elseif (!empty($current_day_data['start_destination_id']))
+            $start_hidden_id = 'dest_' . $current_day_data['start_destination_id'];
         // Build options JSON for JS
         $start_opts = [];
         if ($prev_lodge_name) $start_opts[] = ['id'=>'', 'label'=>'↖ Inherited — '.$prev_lodge_name, 'group'=>'Inherited'];
+        // Destinations first (cities, airports, hubs)
+        foreach ($destinations_list as $_d)
+            $start_opts[] = ['id'=>'dest_'.(string)$_d['id'], 'label'=>$_d['name_en'], 'group'=>'Destinations'];
+        // Then lodges grouped by destination
         foreach ($lodges_grouped as $_dname => $_ls)
             foreach ($_ls as $_l)
-                $start_opts[] = ['id'=>(string)$_l['id'], 'label'=>$_l['name'], 'group'=>$_dname];
+                $start_opts[] = ['id'=>'lodge_'.(string)$_l['id'], 'label'=>$_l['name'], 'group'=>$_dname];
         ?>
         <div class="iti-combo" data-field="start_lodge">
           <div class="iti-combo-inner">
@@ -562,7 +587,7 @@ include __DIR__ . '/../../includes/layout_header.php';
                    value="<?= h($start_display) ?>">
             <button type="button" class="iti-combo-arrow" tabindex="-1">▾</button>
           </div>
-          <input type="hidden" name="start_lodge_id"     value="<?= h($current_day_data['start_lodge_id'] ?? '') ?>">
+          <input type="hidden" name="start_lodge_id"     value="<?= h($start_hidden_id) ?>">
           <input type="hidden" name="start_lodge_custom" value="<?= h($current_day_data['start_custom'] ?? '') ?>">
           <div class="iti-combo-drop" data-opts='<?= json_encode($start_opts, JSON_HEX_APOS) ?>'></div>
         </div>
