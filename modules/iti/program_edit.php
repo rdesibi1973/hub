@@ -628,13 +628,7 @@ include __DIR__ . '/../../includes/layout_header.php';
           <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
             <span style="flex:1;font-size:.83rem;padding:7px 11px;background:#fff;border:1.5px solid var(--grey-lt);border-radius:6px;color:var(--grey-dk);"><?= h($tr['description']) ?></span>
             <button type="button" class="btn btn-danger btn-sm"
-                    onclick="if(!confirm('Remove?')) return;
-                             var fd=new FormData();
-                             fd.append('_sub','remove_transfer');
-                             fd.append('day_id','<?= $active_day ?>');
-                             fd.append('tr_id','<?= $tr['id'] ?>');
-                             fetch('program_edit.php?id=<?= $id ?>&tab=days&day=<?= $active_day ?>',{method:'POST',body:fd})
-                               .then(function(){ location.reload(); });">✕</button>
+                    onclick="ufRemTransfer('<?= $tr['id'] ?>')">✕</button>
           </div>
           <?php endforeach; ?>
         </div>
@@ -652,18 +646,7 @@ include __DIR__ . '/../../includes/layout_header.php';
                    data-no-clear="1"></div>
             </div>
             <button type="button" class="btn btn-outline btn-sm" style="white-space:nowrap;"
-                    onclick="(function(btn){
-                      var txt = document.getElementById('tr-add-txt-<?= $active_day ?>').value.trim();
-                      if (!txt) return;
-                      var fd = new FormData();
-                      fd.append('_sub','add_transfer');
-                      fd.append('day_id','<?= $active_day ?>');
-                      fd.append('transfer_desc', txt);
-                      btn.disabled = true;
-                      fetch('program_edit.php?id=<?= $id ?>&tab=days&day=<?= $active_day ?>', {method:'POST', body:fd})
-                        .then(function(){ location.reload(); })
-                        .catch(function(){ btn.disabled=false; alert('Error adding transfer'); });
-                    })(this)">+ Add</button>
+                    onclick="ufAddTransfer()">+ Add</button>
           </div>
       </div>
 
@@ -779,9 +762,7 @@ include __DIR__ . '/../../includes/layout_header.php';
         <?php endif; ?>
       </div>
       <button type="button" class="btn btn-danger btn-sm"
-              onclick="if(!confirm('Remove?'))return;
-                       var fd=new FormData();fd.append('_sub','remove_activity');fd.append('day_id','<?= $active_day ?>');fd.append('da_id','<?= $a['id'] ?>');
-                       fetch('program_edit.php?id=<?= $id ?>&tab=days&day=<?= $active_day ?>',{method:'POST',body:fd}).then(function(){location.reload();});">✕</button>
+              onclick="ufRemActivity('<?= $a['id'] ?>')">✕</button>
     </div>
     <?php endforeach; ?>
     <?php else: ?>
@@ -804,20 +785,7 @@ include __DIR__ . '/../../includes/layout_header.php';
         <div class="iti-combo-drop" data-opts='<?= json_encode($act_opts, JSON_HEX_APOS) ?>'></div>
       </div>
       <button type="button" class="btn btn-outline btn-sm" style="white-space:nowrap;"
-              onclick="(function(btn){
-                var txt=document.getElementById('act-txt-<?= $active_day ?>').value.trim();
-                var aid=document.getElementById('act-id-<?= $active_day ?>').value;
-                if(!txt && !aid) return;
-                var fd=new FormData();
-                fd.append('_sub','add_activity');
-                fd.append('day_id','<?= $active_day ?>');
-                fd.append('activity_id', aid);
-                fd.append('activity_custom', aid ? '' : txt);
-                btn.disabled=true;
-                fetch('program_edit.php?id=<?= $id ?>&tab=days&day=<?= $active_day ?>',{method:'POST',body:fd})
-                  .then(function(){location.reload();})
-                  .catch(function(){btn.disabled=false;});
-              })(this)">+ Add</button>
+              onclick="ufAddActivity()">+ Add</button>
     </div>
   </div>
 
@@ -844,9 +812,7 @@ include __DIR__ . '/../../includes/layout_header.php';
         </div>
       </div>
       <button type="button" class="btn btn-danger btn-sm"
-              onclick="if(!confirm('Remove?'))return;
-                       var fd=new FormData();fd.append('_sub','remove_flight');fd.append('day_id','<?= $active_day ?>');fd.append('df_id','<?= $fl['id'] ?>');
-                       fetch('program_edit.php?id=<?= $id ?>&tab=days&day=<?= $active_day ?>',{method:'POST',body:fd}).then(function(){location.reload();});">✕</button>
+              onclick="ufRemFlight('<?= $fl['id'] ?>')">✕</button>
     </div>
     <?php endforeach; ?>
     <?php endif; ?>
@@ -886,23 +852,7 @@ include __DIR__ . '/../../includes/layout_header.php';
         <input type="time" id="fl-arr-<?= $active_day ?>" style="padding:7px 10px;border:1.5px solid var(--grey-lt);border-radius:6px;font-size:.82rem;">
       </div>
       <button type="button" class="btn btn-outline btn-sm" style="white-space:nowrap;align-self:flex-end;"
-              onclick="(function(btn){
-                var txt=document.getElementById('fl-txt-<?= $active_day ?>').value.trim();
-                var fid=document.getElementById('fl-id-<?= $active_day ?>').value;
-                if(!txt && !fid) return;
-                var fd=new FormData();
-                fd.append('_sub','add_flight');
-                fd.append('day_id','<?= $active_day ?>');
-                fd.append('flight_route_id', fid);
-                fd.append('flight_custom', fid ? '' : txt);
-                fd.append('airline_company', document.getElementById('fl-airline-<?= $active_day ?>').value);
-                fd.append('departure_time',  document.getElementById('fl-dep-<?= $active_day ?>').value);
-                fd.append('arrival_time',    document.getElementById('fl-arr-<?= $active_day ?>').value);
-                btn.disabled=true;
-                fetch('program_edit.php?id=<?= $id ?>&tab=days&day=<?= $active_day ?>',{method:'POST',body:fd})
-                  .then(function(){location.reload();})
-                  .catch(function(){btn.disabled=false;});
-              })(this)">+ Add</button>
+              onclick="ufAddFlight()">+ Add</button>
     </div>
   </div>
 
@@ -1179,5 +1129,86 @@ document.querySelectorAll('.iti-combo').forEach(function(combo) {
     });
 });
 </script>
+
+<?php if ($current_day_data): ?>
+<!-- ── UTILITY FORMS — outside all other forms, used by JS buttons ── -->
+<form id="uf-add-transfer"   method="POST" action="program_edit.php?id=<?= $id ?>&tab=days&day=<?= $active_day ?>">
+  <input type="hidden" name="_sub"          value="add_transfer">
+  <input type="hidden" name="day_id"        value="<?= $active_day ?>">
+  <input type="hidden" name="transfer_desc" id="uf-transfer-desc">
+</form>
+<form id="uf-rem-transfer"   method="POST" action="program_edit.php?id=<?= $id ?>&tab=days&day=<?= $active_day ?>">
+  <input type="hidden" name="_sub"   value="remove_transfer">
+  <input type="hidden" name="day_id" value="<?= $active_day ?>">
+  <input type="hidden" name="tr_id"  id="uf-tr-id">
+</form>
+<form id="uf-add-activity"   method="POST" action="program_edit.php?id=<?= $id ?>&tab=days&day=<?= $active_day ?>">
+  <input type="hidden" name="_sub"            value="add_activity">
+  <input type="hidden" name="day_id"          value="<?= $active_day ?>">
+  <input type="hidden" name="activity_id"     id="uf-act-id">
+  <input type="hidden" name="activity_custom" id="uf-act-custom">
+</form>
+<form id="uf-rem-activity"   method="POST" action="program_edit.php?id=<?= $id ?>&tab=days&day=<?= $active_day ?>">
+  <input type="hidden" name="_sub"   value="remove_activity">
+  <input type="hidden" name="day_id" value="<?= $active_day ?>">
+  <input type="hidden" name="da_id"  id="uf-da-id">
+</form>
+<form id="uf-add-flight"     method="POST" action="program_edit.php?id=<?= $id ?>&tab=days&day=<?= $active_day ?>">
+  <input type="hidden" name="_sub"           value="add_flight">
+  <input type="hidden" name="day_id"         value="<?= $active_day ?>">
+  <input type="hidden" name="flight_route_id"  id="uf-fl-route-id">
+  <input type="hidden" name="flight_custom"  id="uf-fl-custom">
+  <input type="hidden" name="airline_company" id="uf-fl-airline">
+  <input type="hidden" name="departure_time" id="uf-fl-dep">
+  <input type="hidden" name="arrival_time"   id="uf-fl-arr">
+</form>
+<form id="uf-rem-flight"     method="POST" action="program_edit.php?id=<?= $id ?>&tab=days&day=<?= $active_day ?>">
+  <input type="hidden" name="_sub"   value="remove_flight">
+  <input type="hidden" name="day_id" value="<?= $active_day ?>">
+  <input type="hidden" name="df_id"  id="uf-df-id">
+</form>
+<script>
+function ufAddTransfer() {
+  var txt = document.getElementById('tr-add-txt-<?= $active_day ?>').value.trim();
+  if (!txt) return;
+  document.getElementById('uf-transfer-desc').value = txt;
+  document.getElementById('uf-add-transfer').submit();
+}
+function ufRemTransfer(trId) {
+  if (!confirm('Remove?')) return;
+  document.getElementById('uf-tr-id').value = trId;
+  document.getElementById('uf-rem-transfer').submit();
+}
+function ufAddActivity() {
+  var aid = document.getElementById('act-id-<?= $active_day ?>').value;
+  var txt = document.getElementById('act-txt-<?= $active_day ?>').value.trim();
+  if (!aid && !txt) return;
+  document.getElementById('uf-act-id').value     = aid;
+  document.getElementById('uf-act-custom').value = aid ? '' : txt;
+  document.getElementById('uf-add-activity').submit();
+}
+function ufRemActivity(daId) {
+  if (!confirm('Remove?')) return;
+  document.getElementById('uf-da-id').value = daId;
+  document.getElementById('uf-rem-activity').submit();
+}
+function ufAddFlight() {
+  var fid = document.getElementById('fl-id-<?= $active_day ?>').value;
+  var txt = document.getElementById('fl-txt-<?= $active_day ?>').value.trim();
+  if (!fid && !txt) return;
+  document.getElementById('uf-fl-route-id').value = fid;
+  document.getElementById('uf-fl-custom').value   = fid ? '' : txt;
+  document.getElementById('uf-fl-airline').value  = document.getElementById('fl-airline-<?= $active_day ?>').value;
+  document.getElementById('uf-fl-dep').value      = document.getElementById('fl-dep-<?= $active_day ?>').value;
+  document.getElementById('uf-fl-arr').value      = document.getElementById('fl-arr-<?= $active_day ?>').value;
+  document.getElementById('uf-add-flight').submit();
+}
+function ufRemFlight(dfId) {
+  if (!confirm('Remove?')) return;
+  document.getElementById('uf-df-id').value = dfId;
+  document.getElementById('uf-rem-flight').submit();
+}
+</script>
+<?php endif; ?>
 
 <?php include __DIR__ . '/../../includes/layout_footer.php'; ?>
