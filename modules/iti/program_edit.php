@@ -627,27 +627,23 @@ include __DIR__ . '/../../includes/layout_header.php';
           <?php foreach ($current_transfers as $tr): ?>
           <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
             <span style="flex:1;font-size:.83rem;padding:7px 11px;background:#fff;border:1.5px solid var(--grey-lt);border-radius:6px;color:var(--grey-dk);"><?= h($tr['description']) ?></span>
-            <form method="POST" action="program_edit.php?id=<?= $id ?>&tab=days&day=<?= $active_day ?>" style="margin:0;">
-              <input type="hidden" name="_sub"   value="remove_transfer">
-              <input type="hidden" name="day_id" value="<?= $active_day ?>">
-              <input type="hidden" name="tr_id"  value="<?= $tr['id'] ?>">
-              <button class="btn btn-danger btn-sm" onclick="return confirm('Remove?')">✕</button>
-            </form>
+            <button type="button" class="btn btn-danger btn-sm"
+                    onclick="if(!confirm('Remove?')) return;
+                             var fd=new FormData();
+                             fd.append('_sub','remove_transfer');
+                             fd.append('day_id','<?= $active_day ?>');
+                             fd.append('tr_id','<?= $tr['id'] ?>');
+                             fetch('program_edit.php?id=<?= $id ?>&tab=days&day=<?= $active_day ?>',{method:'POST',body:fd})
+                               .then(function(){ location.reload(); });">✕</button>
           </div>
           <?php endforeach; ?>
         </div>
         <?php endif; ?>
 
-        <form method="POST" action="program_edit.php?id=<?= $id ?>&tab=days&day=<?= $active_day ?>"
-              id="tr-add-form-<?= $active_day ?>" style="display:none;">
-          <input type="hidden" name="_sub"          value="add_transfer">
-          <input type="hidden" name="day_id"        value="<?= $active_day ?>">
-          <input type="hidden" name="transfer_desc" id="tr-add-desc-<?= $active_day ?>">
-        </form>
-        <div style="display:flex;gap:8px;align-items:center;">
+        <div style="display:flex;gap:8px;align-items:center;" id="tr-add-row-<?= $active_day ?>">
             <div class="iti-combo" data-field="tr_new" style="flex:1;max-width:none;">
               <div class="iti-combo-inner">
-                <input type="text" class="iti-combo-text" autocomplete="off"
+                <input type="text" class="iti-combo-text" id="tr-add-txt-<?= $active_day ?>" autocomplete="off"
                        placeholder="Type or choose — e.g. Transfer to Arusha airport ~30 min">
                 <button type="button" class="iti-combo-arrow" tabindex="-1">▾</button>
               </div>
@@ -656,12 +652,18 @@ include __DIR__ . '/../../includes/layout_header.php';
                    data-no-clear="1"></div>
             </div>
             <button type="button" class="btn btn-outline btn-sm" style="white-space:nowrap;"
-                    onclick="
-                      var txt = this.closest('div').querySelector('.iti-combo-text').value.trim();
+                    onclick="(function(btn){
+                      var txt = document.getElementById('tr-add-txt-<?= $active_day ?>').value.trim();
                       if (!txt) return;
-                      document.getElementById('tr-add-desc-<?= $active_day ?>').value = txt;
-                      document.getElementById('tr-add-form-<?= $active_day ?>').submit();
-                    ">+ Add</button>
+                      var fd = new FormData();
+                      fd.append('_sub','add_transfer');
+                      fd.append('day_id','<?= $active_day ?>');
+                      fd.append('transfer_desc', txt);
+                      btn.disabled = true;
+                      fetch('program_edit.php?id=<?= $id ?>&tab=days&day=<?= $active_day ?>', {method:'POST', body:fd})
+                        .then(function(){ location.reload(); })
+                        .catch(function(){ btn.disabled=false; alert('Error adding transfer'); });
+                    })(this)">+ Add</button>
           </div>
       </div>
 
