@@ -373,7 +373,8 @@ function iti_destinations_map(bool $active_only = true): array {
     return $out;
 }
 
-function iti_options(array $options, string $selected = ''): string {
+function iti_options(array $options, string|null $selected = ''): string {
+    $selected = (string)($selected ?? '');
     $out = '';
     foreach ($options as $val => $label) {
         if (is_int($val)) { $val = $label; } // array numerico

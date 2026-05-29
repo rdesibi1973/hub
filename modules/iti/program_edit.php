@@ -160,11 +160,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     // ── Aggiungi giorno ──
     if ($sub === 'add_day') {
-        $max = (int)$db->prepare('SELECT COALESCE(MAX(day_number),0) FROM iti_program_days WHERE program_id=?')->execute([$id]) ? $db->query("SELECT COALESCE(MAX(day_number),0) FROM iti_program_days WHERE program_id={$id}")->fetchColumn() : 0;
         $max_st = $db->prepare('SELECT COALESCE(MAX(day_number),0) FROM iti_program_days WHERE program_id=?');
         $max_st->execute([$id]);
-        $max = (int)$max_st->fetchColumn();
-        $new_num = $max + 1;
+        $new_num = (int)$max_st->fetchColumn() + 1;
         $db->prepare('INSERT INTO iti_program_days (program_id, day_number) VALUES (?,?)')->execute([$id, $new_num]);
         $db->prepare('UPDATE iti_programs SET duration_days=? WHERE id=?')->execute([$new_num, $id]);
         iti_flash_set('success', "Day {$new_num} added.");
@@ -173,18 +171,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     // ── Cancella giorno ──
     if ($sub === 'delete_day') {
-        $day_id  = (int)($_POST['day_id'] ?? 0);
-        $day_num = (int)($_POST['day_num'] ?? 0);
+        $day_id = (int)($_POST['day_id'] ?? 0);
         if ($day_id) {
             $db->prepare('DELETE FROM iti_program_days WHERE id=?')->execute([$day_id]);
-            // Rinumera i giorni successivi
+            // Rinumera usando numeri temporanei alti per evitare duplicate key durante lo swap
             $remaining = $db->prepare('SELECT id FROM iti_program_days WHERE program_id=? ORDER BY day_number');
             $remaining->execute([$id]);
-            $num = 1;
-            foreach ($remaining->fetchAll() as $r) {
-                $db->prepare('UPDATE iti_program_days SET day_number=? WHERE id=?')->execute([$num++, $r['id']]);
-            }
-            $new_count = $num - 1;
+            $rows = $remaining->fetchAll();
+            $base = 10000;
+            foreach ($rows as $i => $r)
+                $db->prepare('UPDATE iti_program_days SET day_number=? WHERE id=?')->execute([$base + $i + 1, $r['id']]);
+            foreach ($rows as $i => $r)
+                $db->prepare('UPDATE iti_program_days SET day_number=? WHERE id=?')->execute([$i + 1, $r['id']]);
+            $new_count = count($rows);
             $db->prepare('UPDATE iti_programs SET duration_days=? WHERE id=?')->execute([$new_count, $id]);
             iti_flash_set('success', 'Day deleted and days renumbered.');
         }

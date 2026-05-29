@@ -319,7 +319,7 @@ include __DIR__ . '/../../includes/layout_header.php';
     <label>Status</label>
     <select name="status">
       <option value="">All statuses</option>
-      <?= iti_options(ITI_REQUEST_STATUSES, $fstatus ?: null) ?>
+      <?= iti_options(ITI_REQUEST_STATUSES, $fstatus ?: '') ?>
     </select>
   </div>
   <div style="display:flex;gap:8px;align-items:flex-end;">
