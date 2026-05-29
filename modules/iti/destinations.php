@@ -17,15 +17,18 @@ $id     = (int)($_REQUEST['id'] ?? 0);
 // ── POST ────────────────────────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit) {
     $fields = [];
+    // Ordine DEVE corrispondere esattamente alle colonne nelle query INSERT/UPDATE
+    $fields['code']        = strtoupper(trim($_POST['code']       ?? ''));
     foreach (ITI_LANGS as $lang) {
-        $fields["name_{$lang}"]        = trim($_POST["name_{$lang}"]        ?? '');
+        $fields["name_{$lang}"] = trim($_POST["name_{$lang}"] ?? '');
+    }
+    foreach (ITI_LANGS as $lang) {
         $fields["description_{$lang}"] = trim($_POST["description_{$lang}"] ?? '');
     }
-    $fields['code']        = strtoupper(trim($_POST['code']       ?? ''));
     $fields['region']      = trim($_POST['region']     ?? '');
     $fields['country']     = trim($_POST['country']    ?? 'Tanzania');
-    $fields['latitude']    = $_POST['latitude']  !== '' ? (float)$_POST['latitude']  : null;
-    $fields['longitude']   = $_POST['longitude'] !== '' ? (float)$_POST['longitude'] : null;
+    $fields['latitude']    = ($_POST['latitude']  ?? '') !== '' ? (float)$_POST['latitude']  : null;
+    $fields['longitude']   = ($_POST['longitude'] ?? '') !== '' ? (float)$_POST['longitude'] : null;
     $fields['cover_photo'] = trim($_POST['cover_photo'] ?? '');
     $fields['sort_order']  = (int)($_POST['sort_order'] ?? 0);
     $fields['is_active']   = isset($_POST['is_active']) ? 1 : 0;
