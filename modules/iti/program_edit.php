@@ -53,8 +53,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // ── Salva giorno ──
     if ($sub === 'day') {
         $day_id = (int)($_POST['day_id'] ?? 0);
-        // DEBUG — log POST values for start fields
-        error_log("ITI day save — day_id={$day_id} start_lodge_id=" . ($_POST['start_lodge_id'] ?? 'MISSING') . " start_lodge_custom=" . ($_POST['start_lodge_custom'] ?? 'MISSING'));
         if ($day_id) {
             // Combo fields: se c'è un id FK lo usa, altrimenti salva il testo libero.
             // Starting point: id stored as "lodge_{n}" or "dest_{n}" to distinguish FK table.
@@ -635,13 +633,15 @@ include __DIR__ . '/../../includes/layout_header.php';
         <?php endif; ?>
 
         <form method="POST" action="program_edit.php?id=<?= $id ?>&tab=days&day=<?= $active_day ?>"
-              id="tr-add-form-<?= $active_day ?>">
+              id="tr-add-form-<?= $active_day ?>" style="display:none;">
           <input type="hidden" name="_sub"          value="add_transfer">
           <input type="hidden" name="day_id"        value="<?= $active_day ?>">
-          <div style="display:flex;gap:8px;align-items:center;">
+          <input type="hidden" name="transfer_desc" id="tr-add-desc-<?= $active_day ?>">
+        </form>
+        <div style="display:flex;gap:8px;align-items:center;">
             <div class="iti-combo" data-field="tr_new" style="flex:1;max-width:none;">
               <div class="iti-combo-inner">
-                <input type="text" name="transfer_desc" class="iti-combo-text" autocomplete="off"
+                <input type="text" class="iti-combo-text" autocomplete="off"
                        placeholder="Type or choose — e.g. Transfer to Arusha airport ~30 min">
                 <button type="button" class="iti-combo-arrow" tabindex="-1">▾</button>
               </div>
@@ -649,9 +649,14 @@ include __DIR__ . '/../../includes/layout_header.php';
                    data-opts='<?= json_encode(array_map(fn($o)=>['id'=>'','label'=>$o['label'],'group'=>'Suggestions'], $tr_combo_opts), JSON_HEX_APOS) ?>'
                    data-no-clear="1"></div>
             </div>
-            <button type="submit" class="btn btn-outline btn-sm" style="white-space:nowrap;">+ Add</button>
+            <button type="button" class="btn btn-outline btn-sm" style="white-space:nowrap;"
+                    onclick="
+                      var txt = this.closest('div').querySelector('.iti-combo-text').value.trim();
+                      if (!txt) return;
+                      document.getElementById('tr-add-desc-<?= $active_day ?>').value = txt;
+                      document.getElementById('tr-add-form-<?= $active_day ?>').submit();
+                    ">+ Add</button>
           </div>
-        </form>
       </div>
 
       <!-- 3. MAIN DESTINATION -->
