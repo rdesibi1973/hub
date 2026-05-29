@@ -724,7 +724,7 @@ function deleteQuote(id, num) {
     <input type="hidden" name="action_todo" value="edit">
     <input type="hidden" name="todo_id"    value="<?= $t['id'] ?>">
     <textarea class="tf-title" name="todo_title" placeholder="What to do…" rows="2" required><?= h($t['title']) ?></textarea>
-    <input class="tf-due" type="datetime-local" name="todo_due" value="<?= $dueFmt ?>" required>
+    <input class="tf-due" type="datetime-local" name="todo_due" value="<?= $dueFmt ?>" lang="en-GB" required>
     <input class="tf-email" type="text" name="todo_email"
            value="<?= h($t['email_to'] ?? '') ?>" placeholder="email1, email2, …">
     <button type="submit" class="btn btn-outline btn-sm">Save</button>
@@ -767,7 +767,7 @@ function deleteQuote(id, num) {
   <input type="hidden" name="action_todo" value="add">
   <textarea class="tf-title" name="todo_title" placeholder="What to do…" rows="4" required></textarea>
   <div class="tf-right">
-    <input class="tf-due" type="datetime-local" name="todo_due" required
+    <input class="tf-due" type="datetime-local" name="todo_due" required lang="en-GB"
            value="<?= date('Y-m-d\TH:i', strtotime('+1 day')) ?>">
     <input class="tf-email" type="text" name="todo_email"
            placeholder="email1, email2, …"
