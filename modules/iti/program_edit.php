@@ -74,32 +74,43 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $end_id     = ($_POST['end_lodge_id']     !== '' ? (int)$_POST['end_lodge_id']     : null);
             $end_txt    = ($end_id    === null ? trim($_POST['end_lodge_custom']     ?? '') : null) ?: null;
 
-            $db->prepare(
-                'UPDATE iti_program_days SET
-                 day_title_en=?,day_title_it=?,day_title_fr=?,day_title_es=?,day_title_de=?,
-                 start_lodge_id=?,start_destination_id=?,start_custom=?,
+            try {
+                $db->prepare(
+                    'UPDATE iti_program_days SET
+                     day_title_en=?,day_title_it=?,day_title_fr=?,day_title_es=?,day_title_de=?,
+                     start_lodge_id=?,start_destination_id=?,start_custom=?,
 
-                 destination_id=?,destination_custom=?,
-                 narrative_en=?,narrative_it=?,narrative_fr=?,narrative_es=?,narrative_de=?,
-                 end_lodge_id=?,end_lodge_custom=?,
-                 meal_breakfast=?,meal_lunch=?,meal_dinner=?
-                 WHERE id=? AND program_id=?'
-            )->execute([
-                trim($_POST['day_title_en']),trim($_POST['day_title_it']),
-                trim($_POST['day_title_fr']),trim($_POST['day_title_es']),trim($_POST['day_title_de']),
-                $start_lodge_id, $start_dest_id, $start_txt,
+                     destination_id=?,destination_custom=?,
+                     narrative_en=?,narrative_it=?,narrative_fr=?,narrative_es=?,narrative_de=?,
+                     end_lodge_id=?,end_lodge_custom=?,
+                     meal_breakfast=?,meal_lunch=?,meal_dinner=?
+                     WHERE id=? AND program_id=?'
+                )->execute([
+                    trim($_POST['day_title_en']),trim($_POST['day_title_it']),
+                    trim($_POST['day_title_fr']),trim($_POST['day_title_es']),trim($_POST['day_title_de']),
+                    $start_lodge_id, $start_dest_id, $start_txt,
 
-                $dest_id, $dest_txt,
-                trim($_POST['narrative_en']),trim($_POST['narrative_it']),
-                trim($_POST['narrative_fr']),trim($_POST['narrative_es']),trim($_POST['narrative_de']),
-                $end_id, $end_txt,
-                isset($_POST['meal_breakfast'])?1:0,
-                isset($_POST['meal_lunch'])?1:0,
-                isset($_POST['meal_dinner'])?1:0,
-                $day_id, $id,
-            ]);
+                    $dest_id, $dest_txt,
+                    trim($_POST['narrative_en']),trim($_POST['narrative_it']),
+                    trim($_POST['narrative_fr']),trim($_POST['narrative_es']),trim($_POST['narrative_de']),
+                    $end_id, $end_txt,
+                    isset($_POST['meal_breakfast'])?1:0,
+                    isset($_POST['meal_lunch'])?1:0,
+                    isset($_POST['meal_dinner'])?1:0,
+                    $day_id, $id,
+                ]);
+                iti_flash_set('success','Day saved.');
+            } catch (\PDOException $e) {
+                // Most likely cause: start_destination_id column missing (ALTER TABLE not yet run)
+                if (str_contains($e->getMessage(), 'start_destination_id')) {
+                    iti_flash_set('error', 'DB schema out of date: run this SQL on the server → ALTER TABLE iti_program_days ADD COLUMN start_destination_id int(10) unsigned DEFAULT NULL AFTER start_lodge_id, ADD KEY fk_pd_start_dest (start_destination_id), ADD CONSTRAINT fk_pd_start_dest FOREIGN KEY (start_destination_id) REFERENCES iti_destinations (id) ON DELETE SET NULL ON UPDATE CASCADE;');
+                } else {
+                    iti_flash_set('error', 'Save failed: ' . $e->getMessage());
+                }
+            }
+        } else {
+            iti_flash_set('error', 'Save failed: day_id missing.');
         }
-        iti_flash_set('success','Day saved.');
         iti_redirect("program_edit.php?id={$id}&day={$day_id}");
     }
 
