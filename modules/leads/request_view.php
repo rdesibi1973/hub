@@ -617,7 +617,9 @@ function deleteQuote(id, num) {
 .todo-add-form .tf-right {
   display:flex; flex-direction:column; gap:6px; min-width:200px; justify-content:space-between;
 }
-.todo-add-form .tf-due   { width:100%; }
+.todo-add-form .tf-due-wrap { display:flex; gap:6px; width:100%; }
+.todo-add-form .tf-due-wrap input[type=date] { flex:1.4; min-width:0; }
+.todo-add-form .tf-due-wrap input[type=time] { flex:1; min-width:0; }
 .todo-add-form .tf-email { width:100%; }
 </style>
 
@@ -703,7 +705,9 @@ function deleteQuote(id, num) {
 }
 .todo-inline-edit input:focus, .todo-inline-edit textarea:focus { outline:none; border-color:var(--blue); }
 .todo-inline-edit .tf-title { flex:2; min-width:160px; resize:vertical; min-height:52px; align-self:stretch; }
-.todo-inline-edit .tf-due   { width:185px; }
+.todo-inline-edit .tf-due-wrap { display:flex; gap:6px; width:185px; }
+.todo-inline-edit .tf-due-wrap input[type=date] { flex:1.4; min-width:0; }
+.todo-inline-edit .tf-due-wrap input[type=time] { flex:1; min-width:0; }
 .todo-inline-edit .tf-email { flex:1; min-width:140px; }
 </style>
 
@@ -724,7 +728,11 @@ function deleteQuote(id, num) {
     <input type="hidden" name="action_todo" value="edit">
     <input type="hidden" name="todo_id"    value="<?= $t['id'] ?>">
     <textarea class="tf-title" name="todo_title" placeholder="What to do…" rows="2" required><?= h($t['title']) ?></textarea>
-    <input class="tf-due" type="datetime-local" name="todo_due" value="<?= $dueFmt ?>" lang="en-GB" required>
+    <input type="hidden" name="todo_due" value="<?= $dueFmt ?>">
+    <div class="tf-due-wrap">
+      <input type="date" class="tf-due-date" value="<?= substr($dueFmt,0,10) ?>" required>
+      <input type="time" class="tf-due-time" value="<?= substr($dueFmt,11,5) ?>" required>
+    </div>
     <input class="tf-email" type="text" name="todo_email"
            value="<?= h($t['email_to'] ?? '') ?>" placeholder="email1, email2, …">
     <button type="submit" class="btn btn-outline btn-sm">Save</button>
@@ -767,9 +775,11 @@ function deleteQuote(id, num) {
   <input type="hidden" name="action_todo" value="add">
   <textarea class="tf-title" name="todo_title" placeholder="What to do…" rows="4" required></textarea>
   <div class="tf-right">
-    <input class="tf-due" type="datetime-local" name="todo_due" required lang="en-GB"
-           value="<?= date('Y-m-d\TH:i', strtotime('+1 day')) ?>">
-    <input class="tf-email" type="text" name="todo_email"
+    <input type="hidden" name="todo_due" value="">
+    <div class="tf-due-wrap">
+      <input type="date" class="tf-due-date" value="<?= date('Y-m-d', strtotime('+1 day')) ?>" required>
+      <input type="time" class="tf-due-time" value="09:00" required>
+    </div>    <input class="tf-email" type="text" name="todo_email"
            placeholder="email1, email2, …"
            value="<?= h($cuEmail) ?>"
            title="One or more addresses separated by commas">
@@ -794,6 +804,16 @@ function todoCancel(id) {
   document.getElementById('todo-edit-' + id).style.display = 'none';
   document.getElementById('todo-row-'  + id).style.display = 'flex';
 }
+
+// Combine split date+time inputs into hidden todo_due before submit
+document.querySelectorAll('.todo-add-form, .todo-inline-edit').forEach(function(form) {
+  form.addEventListener('submit', function() {
+    var d = form.querySelector('.tf-due-date');
+    var t = form.querySelector('.tf-due-time');
+    var h = form.querySelector('[name="todo_due"]');
+    if (d && t && h) h.value = d.value + ' ' + t.value;
+  });
+});
 </script>
 
 <?php
