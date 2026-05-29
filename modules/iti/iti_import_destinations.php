@@ -34,16 +34,54 @@ $NAMES = [
     'EYS' => ['Lake Eyasi',                       'Lago Eyasi',                           'Lac Eyasi',                            'Lago Eyasi',                              'Eyasi-See'],
     'NAT' => ['Lake Natron',                      'Lago Natron',                          'Lac Natron',                           'Lago Natron',                             'Natron-See'],
     'OLD' => ['Olduvai Gorge',                    'Gola di Olduvai',                      'Gorge d\'Olduvai',                     'Garganta de Olduvai',                     'Olduvai-Schlucht'],
-    'KLM' => ['Mount Kilimanjaro',                'Monte Kilimanjaro',                    'Mont Kilimandjaro',                    'Monte Kilimanjaro',                       'Kilimandscharo'],
+    'KILI'=> ['Mount Kilimanjaro',                'Monte Kilimanjaro',                    'Mont Kilimandjaro',                    'Monte Kilimanjaro',                       'Kilimandscharo'],
     'MRU' => ['Mount Meru',                       'Monte Meru',                           'Mont Méru',                            'Monte Meru',                              'Mount Meru'],
     'ODL' => ['Ol Doinyo Lengai',                 'Ol Doinyo Lengai',                     'Ol Doinyo Lengai',                     'Ol Doinyo Lengai',                        'Ol Doinyo Lengai'],
-    'ZNZ' => ['Zanzibar',                         'Zanzibar',                             'Zanzibar',                             'Zanzíbar',                                'Sansibar'],
+    'ZNZB'=> ['Zanzibar',                         'Zanzibar',                             'Zanzibar',                             'Zanzíbar',                                'Sansibar'],
     'PMB' => ['Pemba Island',                     'Isola di Pemba',                       'Île de Pemba',                         'Isla de Pemba',                           'Pemba-Insel'],
     'MFA' => ['Mafia Island',                     'Isola di Mafia',                       'Île de Mafia',                         'Isla de Mafia',                           'Mafia-Insel'],
     'PGN' => ['Pangani',                          'Pangani',                              'Pangani',                              'Pangani',                                 'Pangani'],
     'FJV' => ['Fanjove Island',                   'Isola di Fanjove',                     'Île de Fanjove',                       'Isla de Fanjove',                         'Fanjove-Insel'],
-    'DAR' => ['Dar es Salaam',                    'Dar es Salaam',                        'Dar es Salaam',                        'Dar es Salaam',                           'Daressalam'],
+    'DRSM'=> ['Dar es Salaam',                    'Dar es Salaam',                        'Dar es Salaam',                        'Dar es Salaam',                           'Daressalam'],
+    // AIRPORTS — International & Regional
+    'JRO'  => ['Kilimanjaro International Airport',    'Aeroporto Internazionale del Kilimanjaro', 'Aéroport International du Kilimandjaro',  'Aeropuerto Internacional del Kilimanjaro', 'Kilimandscharo Internationaler Flughafen'],
+    'ARK'  => ['Arusha Airport',                       'Aeroporto di Arusha',                      'Aéroport d\'Arusha',                     'Aeropuerto de Arusha',                    'Flughafen Arusha'],
+    'DAR'  => ['Julius Nyerere International Airport', 'Aeroporto Internazionale Julius Nyerere',  'Aéroport International Julius Nyerere',   'Aeropuerto Internacional Julius Nyerere', 'Julius-Nyerere-Internationaler-Flughafen'],
+    'ZNZ'  => ['Zanzibar Karume Airport',              'Aeroporto di Zanzibar',                    'Aéroport de Zanzibar',                    'Aeropuerto de Zanzíbar',                  'Flughafen Sansibar'],
+    'EBB'  => ['Entebbe International Airport',        'Aeroporto Internazionale di Entebbe',      'Aéroport International d\'Entebbe',      'Aeropuerto Internacional de Entebbe',     'Internationaler Flughafen Entebbe'],
+    'NBO'  => ['Nairobi Jomo Kenyatta International Airport', 'Aeroporto Internazionale di Nairobi', 'Aéroport International de Nairobi',    'Aeropuerto Internacional de Nairobi',     'Nairobi Internationaler Flughafen'],
+    'WIL'  => ['Nairobi Wilson Airport',               'Aeroporto Wilson di Nairobi',              'Aéroport Wilson de Nairobi',              'Aeropuerto Wilson de Nairobi',            'Wilson-Flughafen Nairobi'],
+    'MWZ'  => ['Mwanza Airport',                       'Aeroporto di Mwanza',                      'Aéroport de Mwanza',                      'Aeropuerto de Mwanza',                    'Flughafen Mwanza'],
+    'TGT'  => ['Tanga Airport',                        'Aeroporto di Tanga',                       'Aéroport de Tanga',                       'Aeropuerto de Tanga',                     'Flughafen Tanga'],
+    'MYW'  => ['Mtwara Airport',                       'Aeroporto di Mtwara',                      'Aéroport de Mtwara',                      'Aeropuerto de Mtwara',                    'Flughafen Mtwara'],
+    // BUSH AIRSTRIPS
+    'SEU'  => ['Seronera Airstrip',                    'Pista di Seronera',                        'Piste de Seronera',                       'Pista de Seronera',                       'Flugplatz Seronera'],
+    'KGT'  => ['Kogatende Airstrip',                   'Pista di Kogatende',                       'Piste de Kogatende',                      'Pista de Kogatende',                      'Flugplatz Kogatende'],
+    'LAI'  => ['Lamai Airstrip',                       'Pista di Lamai',                           'Piste de Lamai',                          'Pista de Lamai',                          'Flugplatz Lamai'],
+    'NDU'  => ['Ndutu Airstrip',                       'Pista di Ndutu',                           'Piste de Ndutu',                          'Pista de Ndutu',                          'Flugplatz Ndutu'],
+    'NGS'  => ['Ngorongoro Airstrip',                  'Pista del Ngorongoro',                     'Piste du Ngorongoro',                     'Pista del Ngorongoro',                    'Flugplatz Ngorongoro'],
+    'TAA'  => ['Tarangire Airstrip',                   'Pista di Tarangire',                       'Piste de Tarangire',                      'Pista de Tarangire',                      'Flugplatz Tarangire'],
+    'RHA'  => ['Ruaha Airstrip',                       'Pista del Ruaha',                          'Piste de Ruaha',                          'Pista de Ruaha',                          'Flugplatz Ruaha'],
+    'NYR'  => ['Nyerere Airstrip',                     'Pista di Nyerere',                         'Piste de Nyerere',                        'Pista de Nyerere',                        'Flugplatz Nyerere'],
+    'MKA'  => ['Mikumi Airstrip',                      'Pista di Mikumi',                          'Piste de Mikumi',                         'Pista de Mikumi',                         'Flugplatz Mikumi'],
+    'GRU'  => ['Grumeti Airstrip',                     'Pista di Grumeti',                         'Piste de Grumeti',                        'Pista de Grumeti',                        'Flugplatz Grumeti'],
+    // TOWNS & TREKKING GATES
+    'MWB'  => ['Mto wa Mbu',                           'Mto wa Mbu',                               'Mto wa Mbu',                              'Mto wa Mbu',                              'Mto wa Mbu'],
+    'MKY'  => ['Makuyuni',                             'Makuyuni',                                 'Makuyuni',                                'Makuyuni',                                'Makuyuni'],
+    'KAR'  => ['Karatu',                               'Karatu',                                   'Karatu',                                  'Karatu',                                  'Karatu'],
+    'MSH'  => ['Moshi',                                'Moshi',                                    'Moshi',                                   'Moshi',                                   'Moshi'],
+    'MCH'  => ['Machame',                              'Machame',                                  'Machame',                                 'Machame',                                 'Machame'],
+    'MRG'  => ['Marangu',                              'Marangu',                                  'Marangu',                                 'Marangu',                                 'Marangu'],
+    'LEM'  => ['Lemosho',                              'Lemosho',                                  'Lemosho',                                 'Lemosho',                                 'Lemosho'],
+    'RNG'  => ['Rongai',                               'Rongai',                                   'Rongai',                                  'Rongai',                                  'Rongai'],
+    'TVT'  => ['Taveta',                               'Taveta',                                   'Taveta',                                  'Taveta',                                  'Taveta'],
+    'ISB'  => ['Isebania',                             'Isebania',                                 'Isebania',                                'Isebania',                                'Isebania'],
+    'NAM'  => ['Namanga',                              'Namanga',                                  'Namanga',                                 'Namanga',                                 'Namanga'],
+    'DOD'  => ['Dodoma',                               'Dodoma',                                   'Dodoma',                                  'Dodoma',                                  'Dodoma'],
+    'IRG'  => ['Iringa',                               'Iringa',                                   'Iringa',                                  'Iringa',                                  'Iringa'],
+    'KSZ'  => ['Kisolanza',                            'Kisolanza',                                'Kisolanza',                               'Kisolanza',                               'Kisolanza'],
 ];
+
 
 // ─── MAPPA SLUG + REGION + SORT ──────────────────────────────────────────────
 $DESTINATIONS = [
@@ -67,16 +105,55 @@ $DESTINATIONS = [
     ['EYS', 'Northern Circuit', 'lake-eyasi',                           'lake-eyasi',                   21],
     ['NAT', 'Northern Circuit', 'lake-natron',                          'lake-natron',                  22],
     ['OLD', 'Northern Circuit', 'olduvai-gorge',                        'olduvai-gorge',                23],
-    ['KLM', 'Northern Circuit', 'mount-kilimanjaro',                    'kilimanjaro',                  24],
+    ['KILI','Northern Circuit', 'mount-kilimanjaro',                    'kilimanjaro',                  24],
     ['MRU', 'Northern Circuit', 'mount-meru',                           'mount-meru',                   25],
     ['ODL', 'Northern Circuit', 'ol-doinyo-lengai',                     'ol-doinyo-lengai',             26],
-    ['ZNZ', 'Zanzibar',         'zanzibar/zanzibar',                    'zanzibar/zanzibar',            30],
+    ['ZNZB','Zanzibar',         'zanzibar/zanzibar',                    'zanzibar/zanzibar',            30],
     ['PMB', 'Zanzibar',         'pemba-island',                         'pemba-island',                 31],
     ['MFA', 'Zanzibar',         'mafia-island',                         'mafia-island',                 32],
     ['PGN', 'Zanzibar',         'pangani',                              'pangani',                      33],
     ['FJV', 'Zanzibar',         'fanjove-island',                       'fanjove-island',               34],
-    ['DAR', 'Other',            'dar-es-salaam',                        'dar-es-salaam',                35],
+    ['DRSM','Other',            'dar-es-salaam',                        'dar-es-salaam',                35],
+
+    // AIRPORTS
+    ['JRO', 'Airports',         '', '', 40],
+    ['ARK', 'Airports',         '', '', 41],
+    ['DAR', 'Airports',         '', '', 42],
+    ['ZNZ', 'Airports',         '', '', 43],
+    ['EBB', 'International',    '', '', 44],
+    ['NBO', 'International',    '', '', 45],
+    ['WIL', 'International',    '', '', 46],
+    ['MWZ', 'Airports',         '', '', 47],
+    ['TGT', 'Airports',         '', '', 48],
+    ['MYW', 'Airports',         '', '', 49],
+    // BUSH AIRSTRIPS
+    ['SEU', 'Airstrips',        '', '', 50],
+    ['KGT', 'Airstrips',        '', '', 51],
+    ['LAI', 'Airstrips',        '', '', 52],
+    ['NDU', 'Airstrips',        '', '', 53],
+    ['NGS', 'Airstrips',        '', '', 54],
+    ['TAA', 'Airstrips',        '', '', 55],
+    ['RHA', 'Airstrips',        '', '', 56],
+    ['NYR', 'Airstrips',        '', '', 57],
+    ['MKA', 'Airstrips',        '', '', 58],
+    ['GRU', 'Airstrips',        '', '', 59],
+    // TOWNS & TREKKING GATES
+    ['MWB', 'Northern Circuit', '', '', 60],
+    ['MKY', 'Northern Circuit', '', '', 61],
+    ['KAR', 'Northern Circuit', '', '', 62],
+    ['MSH', 'Kilimanjaro',      '', '', 63],
+    ['MCH', 'Kilimanjaro',      '', '', 64],
+    ['MRG', 'Kilimanjaro',      '', '', 65],
+    ['LEM', 'Kilimanjaro',      '', '', 66],
+    ['RNG', 'Kilimanjaro',      '', '', 67],
+    ['TVT', 'Border',           '', '', 68],
+    ['ISB', 'Border',           '', '', 69],
+    ['NAM', 'Border',           '', '', 70],
+    ['DOD', 'Other Tanzania',   '', '', 71],
+    ['IRG', 'Other Tanzania',   '', '', 72],
+    ['KSZ', 'Other Tanzania',   '', '', 73],
 ];
+
 
 $BASE_EN = 'https://www.savannahexplorers.net/tanzania/';
 $BASE_IT = 'https://www.savannahexplorers.com/tanzania/';
@@ -145,12 +222,16 @@ if ($do_run || $dry_run) {
     foreach ($DESTINATIONS as [$code, $region, $slug_en, $slug_it, $sort]) {
         $names = $NAMES[$code];
 
-        // Fetch descriptions
-        $html_en = fetch_page($BASE_EN . $slug_en . '.html');
-        $html_it = fetch_page($BASE_IT . $slug_it . '.html');
-
-        $desc_en = extract_description($html_en, 'en');
-        $desc_it = extract_description($html_it, 'it');
+        // Fetch descriptions only if slug is provided
+        $desc_en = $desc_it = '';
+        if ($slug_en) {
+            $html_en = fetch_page($BASE_EN . $slug_en . '.html');
+            $desc_en = extract_description($html_en, 'en');
+        }
+        if ($slug_it) {
+            $html_it = fetch_page($BASE_IT . $slug_it . '.html');
+            $desc_it = extract_description($html_it, 'it');
+        }
 
         // FR/ES/DE: use EN description (same content, different language names)
         // These can be translated later via the edit form
