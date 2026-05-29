@@ -191,7 +191,10 @@ include __DIR__ . '/../../includes/layout_header.php';
     <div class="sub"><?= count($lodges) ?> lodge<?= count($lodges)!==1?'s':'' ?></div>
   </div>
   <?php if ($can_edit): ?>
-  <a href="lodges.php?action=add<?= $filter_dest?"&destination_id={$filter_dest}":'' ?>" class="btn btn-red">+ New Lodge</a>
+  <div style="display:flex;gap:8px;">
+    <a href="iti_import_lodges_web.php" class="btn btn-outline btn-sm">🌐 Import from Web</a>
+    <a href="lodges.php?action=add<?= $filter_dest?"&destination_id={$filter_dest}":'' ?>" class="btn btn-red">+ New Lodge</a>
+  </div>
   <?php endif; ?>
 </div>
 

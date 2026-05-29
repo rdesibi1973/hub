@@ -365,6 +365,14 @@ if (!defined('ITI_LANG_LABELS')) {
 
 // ── Helper: genera <option> tags ──────────────────────────────────────────────
 // $options: ['value' => 'Label', ...]  oppure ['value1','value2',...]
+/** Returns [id => name_en] map of all active destinations, for use in <select> */
+function iti_destinations_map(bool $active_only = true): array {
+    $rows = iti_get_destinations($active_only);
+    $out  = [];
+    foreach ($rows as $d) { $out[$d['id']] = $d['name_en']; }
+    return $out;
+}
+
 function iti_options(array $options, string $selected = ''): string {
     $out = '';
     foreach ($options as $val => $label) {
