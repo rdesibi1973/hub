@@ -880,8 +880,16 @@ include __DIR__ . '/../../includes/layout_header.php';
           <input type="hidden" name="flight_custom[]"    value="<?= h($fl['flight_custom'] ?? '') ?>">
           <div class="iti-combo-drop" data-opts='<?= $fl_opts_json ?>'></div>
         </div>
-        <input type="text"  name="airline_company[]" value="<?= h($fl['airline_company'] ?? $fl['operator'] ?? '') ?>"
-               placeholder="Airline" style="padding:7px 10px;border:1.5px solid var(--grey-lt);border-radius:6px;font-size:.82rem;min-width:130px;">
+        <div class="iti-combo" style="min-width:160px;max-width:200px;">
+          <div class="iti-combo-inner">
+            <input type="text" class="iti-combo-text" autocomplete="off"
+                   name="airline_company[]"
+                   value="<?= h($fl['airline_company'] ?? $fl['operator'] ?? '') ?>"
+                   placeholder="Airline…">
+            <button type="button" class="iti-combo-arrow" tabindex="-1">▾</button>
+          </div>
+          <div class="iti-combo-drop" data-opts='<?= json_encode($airline_opts, JSON_HEX_APOS) ?>' data-no-clear="1"></div>
+        </div>
         <input type="time"  name="departure_time[]"  value="<?= h($fl['departure_time'] ?? '') ?>"
                style="padding:7px 10px;border:1.5px solid var(--grey-lt);border-radius:6px;font-size:.82rem;">
         <input type="time"  name="arrival_time[]"    value="<?= h($fl['arrival_time'] ?? '') ?>"
@@ -1200,6 +1208,7 @@ var trOptsJson   = <?= json_encode(array_map(fn($o)=>['id'=>'','label'=>$o['labe
 ))) ?>;
 var actOptsJson  = <?= json_encode(array_map(fn($a)=>['id'=>(string)$a['id'],'label'=>$a['name_en'].($a['dest_name_en']?' — '.$a['dest_name_en']:''),'group'=>ITI_ACTIVITY_TYPES[$a['activity_type']]??'Other'], $activities_list)) ?>;
 var flOptsJson   = <?= json_encode(array_map(fn($_fl)=>['id'=>(string)array_search($_fl,$flight_map),'label'=>($_fl['from_airport']??'').' → '.($_fl['to_airport']??''),'group'=>'Flight routes'], array_values($flight_map))) ?>;
+var airlineOptsJson = <?= json_encode($airline_opts) ?>;
 
 function makeCombo(inputAttrs, hiddenName, hiddenVal, opts, noId) {
     var wrap = document.createElement('div');
@@ -1283,7 +1292,9 @@ function addFlightRow() {
         return i;
     };
     info.appendChild(combo);
-    info.appendChild(mkInput('airline_company[]','text','Airline'));
+    var airlineCombo = makeCombo({placeholder:'Airline…', name:'airline_company[]'}, '', '', airlineOptsJson, true);
+    airlineCombo.style.cssText = 'min-width:160px;max-width:200px;';
+    info.appendChild(airlineCombo);
     info.appendChild(mkInput('departure_time[]','time',''));
     info.appendChild(mkInput('arrival_time[]','time',''));
     var btn = document.createElement('button');
