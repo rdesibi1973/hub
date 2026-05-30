@@ -1040,6 +1040,9 @@ include __DIR__ . '/../../includes/layout_header.php';
   </div>
 
   </form><!-- end day-save-form -->
+  <div style="margin-top:12px;">
+    <button type="submit" form="day-save-form" class="btn btn-red" style="width:100%;">💾 Save Day</button>
+  </div>
 
   <?php else: ?>
   <div class="empty-state"><div class="icon">📅</div><p>Select a day to edit.</p></div>

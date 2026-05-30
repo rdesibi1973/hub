@@ -114,14 +114,14 @@ function iti_flash_set(string $type, string $msg): void {
     iti_flash($type, $msg);
 }
 
-function iti_flash_render(): string {
-    if (empty($_SESSION['iti_flash'])) return '';
+function iti_flash_render(): void {
+    if (empty($_SESSION['iti_flash'])) return;
     $f   = $_SESSION['iti_flash'];
     unset($_SESSION['iti_flash']);
     $cls = $f['type'] === 'success' ? 'alert-success' : 'alert-danger';
-    return '<div class="alert ' . $cls . ' alert-dismissible fade show" role="alert">'
-         . h($f['msg'])
-         . '<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>';
+    echo '<div class="alert ' . $cls . ' alert-dismissible fade show" role="alert">'
+       . h($f['msg'])
+       . '<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>';
 }
 
 // ── DESTINATIONS ──────────────────────────────────────────────────────────────
