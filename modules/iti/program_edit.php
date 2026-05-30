@@ -1138,11 +1138,12 @@ include __DIR__ . '/../../includes/layout_header.php';
       <span class="form-hint">End date and duration calculated automatically</span>
     </div>
     <div class="form-group">
-      <label>Adults</label>
+      <label>Pax — Adults</label>
       <input type="number" name="pax_adults" min="1" value="<?= (int)$program['pax_adults'] ?>">
+      <span class="form-hint">Used in preview and .docx</span>
     </div>
     <div class="form-group">
-      <label>Children</label>
+      <label>Pax — Children</label>
       <input type="number" name="pax_children" min="0" value="<?= (int)$program['pax_children'] ?>">
     </div>
     <div class="form-group">
