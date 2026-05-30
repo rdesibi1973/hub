@@ -672,7 +672,8 @@ include __DIR__ . '/../../includes/layout_header.php';
   <!-- Single form wrapping the entire day editor -->
   <form id="day-save-form"
         method="POST"
-        action="program_edit.php?id=<?= $id ?>&tab=days&day=<?= $active_day ?>">
+        action="program_edit.php?id=<?= $id ?>&tab=days&day=<?= $active_day ?>"
+        onsubmit="console.log('FORM SUBMIT fired, day_id='+document.querySelector('[name=day_id]').value); return true;">
     <input type="hidden" name="_sub"   value="day">
     <input type="hidden" name="day_id" value="<?= $active_day ?>">
 
