@@ -367,7 +367,7 @@ try {
         foreach ($ao->fetchAll() as $_r) $airline_opts[] = ['id'=>'', 'label'=>$_r['operator'], 'group'=>'Known operators'];
     } catch (Exception $e2) {}
 }
-$activities_list = iti_get_activities(true);
+$activities_list = iti_get_activities();
 
 // Attività, voli e transfer del giorno corrente
 $current_day_data  = null;
