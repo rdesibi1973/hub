@@ -189,7 +189,12 @@ include __DIR__ . '/../../includes/layout_header.php';
 
 <div class="page-header">
   <div><h2>Activities</h2><div class="sub"><?= count($activities) ?> activit<?= count($activities)!==1?'ies':'y' ?></div></div>
-  <?php if ($can_edit): ?><a href="activities.php?action=add" class="btn btn-red">+ New Activity</a><?php endif; ?>
+  <?php if ($can_edit): ?>
+  <div style="display:flex;gap:8px;">
+    <a href="iti_import_activities.php" class="btn btn-outline btn-sm">⬆ Import Standard</a>
+    <a href="activities.php?action=add" class="btn btn-red">+ New Activity</a>
+  </div>
+  <?php endif; ?>
 </div>
 
 <form method="GET" action="activities.php" class="filters">
