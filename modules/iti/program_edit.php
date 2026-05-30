@@ -53,6 +53,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // ── Salva giorno ──
     if ($sub === 'day') {
         $day_id = (int)($_POST['day_id'] ?? 0);
+        error_log('ITI day save: day_id=' . $day_id . ' title_en=' . ($_POST['day_title_en'] ?? 'MISSING') . ' acts=' . count($_POST['activity_id'] ?? []) . ' flights=' . count($_POST['flight_route_id'] ?? []));
         if ($day_id) {
             $start_raw      = trim($_POST['start_lodge_id'] ?? '');
             $start_lodge_id = null; $start_dest_id = null; $start_txt = null;
@@ -1018,13 +1019,14 @@ include __DIR__ . '/../../includes/layout_header.php';
             onclick="addFlightRow()">+ Add Flight</button>
   </div>
 
-  </form><!-- end day-save-form -->
-  <div style="position:sticky;bottom:16px;margin-top:12px;z-index:10;">
-    <button type="submit" form="day-save-form" id="btn-save-day"
+  <div style="position:sticky;bottom:16px;margin-top:16px;z-index:10;">
+    <button type="submit" id="btn-save-day"
             class="btn btn-red" style="width:100%;padding:12px;font-size:.95rem;box-shadow:0 2px 8px rgba(0,0,0,.2);">
       💾 Save
     </button>
   </div>
+
+  </form><!-- end day-save-form -->
 
   <?php else: ?>
   <div class="empty-state"><div class="icon">📅</div><p>Select a day to edit.</p></div>
