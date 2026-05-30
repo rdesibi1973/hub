@@ -524,7 +524,7 @@ include __DIR__ . '/../../includes/layout_header.php';
 <!-- Page header -->
 <div class="page-header" style="margin-bottom:16px;">
   <div>
-    <h2><?= h($program['title_en']) ?></h2>
+    <h2><?= h($program['title_en']) ?> <a href="program_edit.php?id=<?= $id ?>&tab=info" title="Edit title" style="font-size:.75rem;font-weight:400;color:var(--grey-mid);text-decoration:none;vertical-align:middle;">✏️</a></h2>
     <div class="sub">
       <?= $program['program_type']==='sample'?'Sample':'Personal' ?>
       &nbsp;·&nbsp; <?= iti_duration_label((int)$program['duration_days']) ?>
@@ -909,26 +909,6 @@ include __DIR__ . '/../../includes/layout_header.php';
   <div class="form-card" style="margin-top:16px;padding:20px 24px;">
     <div style="font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--grey-mid);margin-bottom:14px;">🦁 Activities</div>
 
-    <?php if ($current_acts): ?>
-    <?php foreach ($current_acts as $a): ?>
-    <div class="act-row">
-      <div style="font-size:1.1rem;"><?= !empty($a['activity_type']) ? (ITI_ACTIVITY_ICONS[$a['activity_type']] ?? '⭐') : '📌' ?></div>
-      <div class="act-info">
-        <div style="font-weight:600;font-size:.85rem;">
-          <?= !empty($a['activity_id']) ? h($a['name_en']) : h($a['activity_custom'] ?? '') ?>
-        </div>
-        <?php if (!empty($a['activity_type'])): ?>
-        <div style="font-size:.72rem;color:var(--grey-mid);"><?= ITI_ACTIVITY_TYPES[$a['activity_type']] ?? '' ?><?= $a['duration_hours'] ? ' · '.$a['duration_hours'].'h' : '' ?></div>
-        <?php endif; ?>
-      </div>
-      <button type="button" class="btn btn-danger btn-sm"
-              onclick="ufRemActivity('<?= $a['id'] ?>')">✕</button>
-    </div>
-    <?php endforeach; ?>
-    <?php else: ?>
-    <div style="color:var(--grey-mid);font-size:.83rem;margin-bottom:12px;">No activities yet.</div>
-    <?php endif; ?>
-
     <?php
     $act_opts = [];
     foreach ($activities_list as $a)
@@ -939,7 +919,7 @@ include __DIR__ . '/../../includes/layout_header.php';
     <div id="activity-rows">
     <?php foreach ($current_acts as $a): ?>
     <div class="act-row array-row">
-      <div style="font-size:1.1rem;">🎯</div>
+      <div style="font-size:1.1rem;"><?= !empty($a['activity_type']) ? (ITI_ACTIVITY_ICONS[$a['activity_type']] ?? '🎯') : '🎯' ?></div>
       <div class="act-info" style="flex:1;">
         <div class="iti-combo" style="max-width:none;">
           <div class="iti-combo-inner">
@@ -964,30 +944,6 @@ include __DIR__ . '/../../includes/layout_header.php';
   <!-- Flights -->
   <div class="form-card" style="margin-top:16px;padding:20px 24px;">
     <div style="font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--grey-mid);margin-bottom:14px;">✈️ Flights</div>
-
-    <?php if ($current_flights): ?>
-    <?php foreach ($current_flights as $fl): ?>
-    <div class="act-row">
-      <div style="font-size:1.1rem;">✈️</div>
-      <div class="act-info">
-        <div style="font-weight:600;font-size:.85rem;">
-          <?php if (!empty($fl['flight_route_id'])): ?>
-            <?= h($fl['from_airport']) ?> → <?= h($fl['to_airport']) ?>
-          <?php else: ?>
-            <?= h($fl['flight_custom'] ?? '') ?>
-          <?php endif; ?>
-        </div>
-        <div style="font-size:.72rem;color:var(--grey-mid);">
-          <?= !empty($fl['airline_company']) ? h($fl['airline_company']).' · ' : (!empty($fl['operator']) ? h($fl['operator']).' · ' : '') ?>
-          <?= $fl['departure_time'] ? 'Dep '.h($fl['departure_time']) : '' ?>
-          <?= $fl['arrival_time']   ? ' Arr '.h($fl['arrival_time'])  : '' ?>
-        </div>
-      </div>
-      <button type="button" class="btn btn-danger btn-sm"
-              onclick="ufRemFlight('<?= $fl['id'] ?>')">✕</button>
-    </div>
-    <?php endforeach; ?>
-    <?php endif; ?>
 
     <?php
     $fl_opts = [];
@@ -1066,7 +1022,7 @@ include __DIR__ . '/../../includes/layout_header.php';
   <div style="position:sticky;bottom:16px;margin-top:12px;z-index:10;">
     <button type="submit" form="day-save-form" id="btn-save-day"
             class="btn btn-red" style="width:100%;padding:12px;font-size:.95rem;box-shadow:0 2px 8px rgba(0,0,0,.2);">
-      💾 Save Day
+      💾 Save
     </button>
   </div>
 
