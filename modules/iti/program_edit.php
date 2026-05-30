@@ -1149,7 +1149,21 @@ document.querySelectorAll('.iti-combo').forEach(function(combo) {
         }
     }
 
-    function openDrop() { renderDrop(input.value); drop.classList.add('open'); }
+    function openDrop() {
+        renderDrop(input.value);
+        drop.classList.add('open');
+        // Flip upward if not enough space below
+        var rect = combo.getBoundingClientRect();
+        var spaceBelow = window.innerHeight - rect.bottom;
+        var spaceAbove = rect.top;
+        if (spaceBelow < 240 && spaceAbove > spaceBelow) {
+            drop.style.top  = 'auto';
+            drop.style.bottom = 'calc(100% + 2px)';
+        } else {
+            drop.style.top  = 'calc(100% + 2px)';
+            drop.style.bottom = 'auto';
+        }
+    }
     function closeDrop() { drop.classList.remove('open'); }
 
     input.addEventListener('focus', function() { openDrop(); });
@@ -1286,7 +1300,7 @@ function initCombo(combo) {
         filtered.forEach(function(o){ if(!groups[o.group]) groups[o.group]=[]; groups[o.group].push(o); });
         Object.keys(groups).forEach(function(g){
             var gh=document.createElement('div'); gh.className='iti-combo-group'; gh.textContent=g; drop.appendChild(gh);
-            groups[g].forEach(function(o, oi){
+            groups[g].forEach(function(o){
                 var el=document.createElement('div'); el.className='iti-combo-opt'; el.textContent=o.label;
                 el.addEventListener('mousedown',function(e){
                     e.preventDefault();
@@ -1300,6 +1314,13 @@ function initCombo(combo) {
         });
         focusIdx = -1;
         drop.classList.toggle('open', filtered.length > 0);
+        // Flip upward if near bottom
+        var rect = combo.getBoundingClientRect();
+        if (window.innerHeight - rect.bottom < 240 && rect.top > window.innerHeight - rect.bottom) {
+            drop.style.top = 'auto'; drop.style.bottom = 'calc(100% + 2px)';
+        } else {
+            drop.style.top = 'calc(100% + 2px)'; drop.style.bottom = 'auto';
+        }
     }
     function closeDrop(){ drop.classList.remove('open'); }
     input.addEventListener('input', function(){ renderDrop(this.value); if(hidId) hidId.value=''; if(hidTxt) hidTxt.value=this.value; });
