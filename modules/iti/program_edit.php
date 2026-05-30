@@ -260,8 +260,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $swap = $db->prepare('SELECT id FROM iti_program_days WHERE program_id=? AND day_number=?');
             $swap->execute([$id, $swap_num]); $swap_id = (int)$swap->fetchColumn();
             if ($swap_id) {
-                // Usa numero temporaneo 9999 per evitare duplicate key durante lo swap
-                $db->prepare('UPDATE iti_program_days SET day_number=9999 WHERE id=?')->execute([$day_id]);
+                // Use negative temp to avoid duplicate key during swap
+                $db->prepare('UPDATE iti_program_days SET day_number=-1 WHERE id=?')->execute([$day_id]);
                 $db->prepare('UPDATE iti_program_days SET day_number=? WHERE id=?')->execute([$cur_num, $swap_id]);
                 $db->prepare('UPDATE iti_program_days SET day_number=? WHERE id=?')->execute([$swap_num, $day_id]);
             }
@@ -885,7 +885,7 @@ include __DIR__ . '/../../includes/layout_header.php';
     <?php
     $act_opts = [];
     foreach ($activities_list as $a)
-        $act_opts[] = ['id'=>(string)$a['id'], 'label'=>($a['name_en']).($a['dest_name_en'] ? ' — '.$a['dest_name_en'] : ''), 'group'=>ITI_ACTIVITY_TYPES[$a['activity_type']] ?? 'Other'];
+        $act_opts[] = ['id'=>(string)$a['id'], 'label'=>($a['name_en']).(($a['dest_name_en']??'') ? ' — '.$a['dest_name_en'] : ''), 'group'=>ITI_ACTIVITY_TYPES[$a['activity_type']] ?? 'Other'];
     $act_opts_json = json_encode($act_opts, JSON_HEX_APOS);
     ?>
 
