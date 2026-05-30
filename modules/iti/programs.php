@@ -99,8 +99,8 @@ if ($action === 'duplicate' && $id && $can_edit) {
                  (program_id,day_number,day_title_en,day_title_it,day_title_fr,day_title_es,day_title_de,
                   start_lodge_id,start_destination_id,end_lodge_id,transfer_route_id,
                   narrative_en,narrative_it,narrative_fr,narrative_es,narrative_de,
-                  meal_breakfast,meal_lunch,meal_dinner)
-                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+                  meal_breakfast,meal_lunch,meal_dinner,meal_all_inclusive,meal_game_package)
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
             )->execute([
                 $new_id,$day['day_number'],
                 $day['day_title_en'],$day['day_title_it'],$day['day_title_fr'],
@@ -109,6 +109,7 @@ if ($action === 'duplicate' && $id && $can_edit) {
                 $day['narrative_en'],$day['narrative_it'],$day['narrative_fr'],
                 $day['narrative_es'],$day['narrative_de'],
                 $day['meal_breakfast'],$day['meal_lunch'],$day['meal_dinner'],
+                $day['meal_all_inclusive']??0,$day['meal_game_package']??0,
             ]);
             $new_day_id = (int)$db->lastInsertId();
             foreach (iti_get_day_activities((int)$day['id']) as $a) {

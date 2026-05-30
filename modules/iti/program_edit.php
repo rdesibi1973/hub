@@ -73,7 +73,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                      destination_id=?,destination_custom=?,
                      narrative_en=?,narrative_it=?,narrative_fr=?,narrative_es=?,narrative_de=?,
                      end_lodge_id=?,end_lodge_custom=?,
-                     meal_breakfast=?,meal_lunch=?,meal_dinner=?
+                     meal_breakfast=?,meal_lunch=?,meal_dinner=?,
+                     meal_all_inclusive=?,meal_game_package=?
                      WHERE id=? AND program_id=?'
                 )->execute([
                     trim($_POST['day_title_en']),trim($_POST['day_title_it']),
@@ -86,6 +87,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     isset($_POST['meal_breakfast'])?1:0,
                     isset($_POST['meal_lunch'])?1:0,
                     isset($_POST['meal_dinner'])?1:0,
+                    isset($_POST['meal_all_inclusive'])?1:0,
+                    isset($_POST['meal_game_package'])?1:0,
                     $day_id, $id,
                 ]);
 
@@ -756,13 +759,15 @@ include __DIR__ . '/../../includes/layout_header.php';
         </div>
       </div>
 
-      <!-- 6. MEALS -->
+      <!-- 6. INCLUDED -->
       <div style="padding:12px 20px;background:var(--off-white,#f7f6f3);">
-        <div style="font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--grey-mid);margin-bottom:8px;">🍽️ Meals included</div>
-        <div style="display:flex;gap:20px;">
+        <div style="font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--grey-mid);margin-bottom:8px;">🍽️ Included</div>
+        <div style="display:flex;gap:20px;flex-wrap:wrap;">
           <label class="meal-check"><input type="checkbox" name="meal_breakfast" value="1" <?= $current_day_data['meal_breakfast']?'checked':'' ?> style="accent-color:var(--red);"> Breakfast</label>
           <label class="meal-check"><input type="checkbox" name="meal_lunch"     value="1" <?= $current_day_data['meal_lunch']?'checked':'' ?>     style="accent-color:var(--red);"> Lunch</label>
           <label class="meal-check"><input type="checkbox" name="meal_dinner"    value="1" <?= $current_day_data['meal_dinner']?'checked':'' ?>    style="accent-color:var(--red);"> Dinner</label>
+          <label class="meal-check"><input type="checkbox" name="meal_all_inclusive" value="1" <?= ($current_day_data['meal_all_inclusive']??0)?'checked':'' ?> style="accent-color:var(--red);"> All Inclusive</label>
+          <label class="meal-check"><input type="checkbox" name="meal_game_package"  value="1" <?= ($current_day_data['meal_game_package']??0)?'checked':'' ?>  style="accent-color:var(--red);"> Game Package</label>
         </div>
       </div>
 
