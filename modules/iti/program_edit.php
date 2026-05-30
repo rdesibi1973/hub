@@ -62,8 +62,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             $dest_id  = ($_POST['destination_id']  !== '' ? (int)$_POST['destination_id']  : null);
             $dest_txt = ($dest_id  === null ? trim($_POST['destination_custom']  ?? '') : null) ?: null;
-            $end_id   = ($_POST['end_lodge_id']    !== '' ? (int)$_POST['end_lodge_id']    : null);
-            $end_txt  = ($end_id   === null ? trim($_POST['end_lodge_custom']    ?? '') : null) ?: null;
+            $end_raw  = trim($_POST['end_lodge_id'] ?? '');
+            if ($end_raw === 'own') {
+                $end_id  = null;
+                $end_txt = 'Own Arrangement';
+            } else {
+                $end_id  = ($end_raw !== '' ? (int)$end_raw : null);
+                $end_txt = ($end_id  === null ? trim($_POST['end_lodge_custom'] ?? '') : null) ?: null;
+            }
 
             try {
                 $db->prepare(
@@ -206,13 +212,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $day_id = (int)($_POST['day_id'] ?? 0);
         if ($day_id) {
             $db->prepare('DELETE FROM iti_program_days WHERE id=?')->execute([$day_id]);
-            // Rinumera usando numeri temporanei alti per evitare duplicate key durante lo swap
+            // Renumber: first set negatives (guaranteed no collision), then set final values
             $remaining = $db->prepare('SELECT id FROM iti_program_days WHERE program_id=? ORDER BY day_number');
             $remaining->execute([$id]);
             $rows = $remaining->fetchAll();
-            $base = 10000;
             foreach ($rows as $i => $r)
-                $db->prepare('UPDATE iti_program_days SET day_number=? WHERE id=?')->execute([$base + $i + 1, $r['id']]);
+                $db->prepare('UPDATE iti_program_days SET day_number=? WHERE id=?')->execute([-(($i) + 1), $r['id']]);
             foreach ($rows as $i => $r)
                 $db->prepare('UPDATE iti_program_days SET day_number=? WHERE id=?')->execute([$i + 1, $r['id']]);
             $new_count = count($rows);
@@ -743,9 +748,19 @@ include __DIR__ . '/../../includes/layout_header.php';
                 foreach ($_ls as $_l)
                     if ((int)$_l['id'] === (int)$current_day_data['end_lodge_id'])
                         $acc_display = $_l['name'];
-        if (!$acc_display && !empty($current_day_data['end_lodge_custom']))
+        if (!$acc_display && !empty($current_day_data['end_lodge_custom'])) {
             $acc_display = $current_day_data['end_lodge_custom'];
-        $acc_opts = [['id'=>'', 'label'=>'— No overnight —', 'group'=>'']];
+        }
+        // Map back Own Arrangement to the special 'own' id for the combo
+        $acc_hidden_id = $current_day_data['end_lodge_id'] ?? '';
+        if (strcasecmp(trim($current_day_data['end_lodge_custom'] ?? ''), 'own arrangement') === 0 && !$acc_hidden_id) {
+            $acc_hidden_id = 'own';
+            $acc_display   = '🏨 Own Arrangement';
+        }
+        $acc_opts = [
+            ['id'=>'', 'label'=>'— No overnight —', 'group'=>''],
+            ['id'=>'own', 'label'=>'🏨 Own Arrangement', 'group'=>'Special'],
+        ];
         foreach ($lodges_grouped as $_dname => $_ls)
             foreach ($_ls as $_l)
                 $acc_opts[] = ['id'=>(string)$_l['id'], 'label'=>$_l['name'], 'group'=>$_dname];
@@ -757,7 +772,7 @@ include __DIR__ . '/../../includes/layout_header.php';
                    value="<?= h($acc_display) ?>">
             <button type="button" class="iti-combo-arrow" tabindex="-1">▾</button>
           </div>
-          <input type="hidden" name="end_lodge_id"     value="<?= h($current_day_data['end_lodge_id'] ?? '') ?>">
+          <input type="hidden" name="end_lodge_id"     value="<?= h($acc_hidden_id) ?>">
           <input type="hidden" name="end_lodge_custom" value="<?= h($current_day_data['end_lodge_custom'] ?? '') ?>">
           <div class="iti-combo-drop" data-opts='<?= json_encode($acc_opts, JSON_HEX_APOS) ?>'></div>
         </div>
@@ -1237,7 +1252,7 @@ var trOptsJson   = <?= json_encode(array_map(fn($o)=>['id'=>'','label'=>$o['labe
     array_map(fn($_tr)=>['label'=>($_tr['from_name']??'').' → '.($_tr['to_name']??'').' ('.($_tr['duration_min']??0).' min)'], array_values($transfer_map)),
     array_map(fn($_fl)=>['label'=>'Flight: '.($_fl['from_airport']??'').' → '.($_fl['to_airport']??'')], array_values($flight_map))
 ))) ?>;
-var actOptsJson  = <?= json_encode(array_map(fn($a)=>['id'=>(string)$a['id'],'label'=>$a['name_en'].($a['dest_name_en']?' — '.$a['dest_name_en']:''),'group'=>ITI_ACTIVITY_TYPES[$a['activity_type']]??'Other'], $activities_list)) ?>;
+var actOptsJson  = <?= json_encode(array_map(fn($a)=>['id'=>(string)$a['id'],'label'=>$a['name_en'].(($a['dest_name_en']??'')?' — '.($a['dest_name_en']??''):''),'group'=>ITI_ACTIVITY_TYPES[$a['activity_type']]??'Other'], $activities_list)) ?>;
 var flOptsJson   = <?= json_encode(array_map(fn($_fl)=>['id'=>(string)array_search($_fl,$flight_map),'label'=>($_fl['from_airport']??'').' → '.($_fl['to_airport']??''),'group'=>'Flight routes'], array_values($flight_map))) ?>;
 var airlineOptsJson = <?= json_encode($airline_opts) ?>;
 
