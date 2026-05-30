@@ -117,18 +117,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $fl_routes  = $_POST['flight_route_id']  ?? [];
                 $fl_customs = $_POST['flight_custom']    ?? [];
                 $fl_airline = $_POST['airline_company']  ?? [];
-                $fl_dep     = $_POST['departure_time']   ?? [];
-                $fl_arr     = $_POST['arrival_time']     ?? [];
+                $fl_dep_h   = $_POST['dep_h']            ?? [];
+                $fl_dep_m   = $_POST['dep_m']            ?? [];
+                $fl_arr_h   = $_POST['arr_h']            ?? [];
+                $fl_arr_m   = $_POST['arr_m']            ?? [];
                 foreach (array_values($fl_routes) as $i => $fid) {
                     $fid  = (int)$fid;
                     $cust = trim($fl_customs[$i] ?? '');
                     if (!$fid && $cust === '') continue;
+                    $dh = $fl_dep_h[$i] ?? ''; $dm = $fl_dep_m[$i] ?? '';
+                    $ah = $fl_arr_h[$i] ?? ''; $am = $fl_arr_m[$i] ?? '';
+                    $dep = ($dh !== '' && $dm !== '') ? "{$dh}:{$dm}" : null;
+                    $arr = ($ah !== '' && $am !== '') ? "{$ah}:{$am}" : null;
                     $db->prepare('INSERT INTO iti_day_flights (program_day_id,flight_route_id,flight_custom,airline_company,departure_time,arrival_time,sort_order) VALUES (?,?,?,?,?,?,?)')->execute([
                         $day_id, $fid ?: null, $cust ?: null,
                         trim($fl_airline[$i] ?? '') ?: null,
-                        ($fl_dep[$i] ?? '') ?: null,
-                        ($fl_arr[$i] ?? '') ?: null,
-                        $i+1,
+                        $dep, $arr, $i+1,
                     ]);
                 }
 
@@ -890,10 +894,37 @@ include __DIR__ . '/../../includes/layout_header.php';
           </div>
           <div class="iti-combo-drop" data-opts='<?= json_encode($airline_opts, JSON_HEX_APOS) ?>' data-no-clear="1"></div>
         </div>
-        <input type="time"  name="departure_time[]"  value="<?= h($fl['departure_time'] ?? '') ?>"
-               style="padding:7px 10px;border:1.5px solid var(--grey-lt);border-radius:6px;font-size:.82rem;">
-        <input type="time"  name="arrival_time[]"    value="<?= h($fl['arrival_time'] ?? '') ?>"
-               style="padding:7px 10px;border:1.5px solid var(--grey-lt);border-radius:6px;font-size:.82rem;">
+        <?php
+        // Helper: parse HH:MM from stored value
+        $dep_parts = explode(':', $fl['departure_time'] ?? '');
+        $arr_parts = explode(':', $fl['arrival_time']   ?? '');
+        $dep_h = $dep_parts[0] ?? ''; $dep_m = $dep_parts[1] ?? '';
+        $arr_h = $arr_parts[0] ?? ''; $arr_m = $arr_parts[1] ?? '';
+        // HH options 00-23, MM options 00-59 step 5
+        $hours = array_map(fn($h)=>str_pad($h,2,'0',STR_PAD_LEFT), range(0,23));
+        $mins  = array_map(fn($m)=>str_pad($m,2,'0',STR_PAD_LEFT), range(0,59,5));
+        ?>
+        <div style="display:flex;align-items:center;gap:3px;">
+          <select name="dep_h[]" style="padding:6px 4px;border:1.5px solid var(--grey-lt);border-radius:6px;font-size:.82rem;width:58px;">
+            <option value="">HH</option>
+            <?php foreach ($hours as $h): ?><option value="<?= $h ?>" <?= $dep_h===$h?'selected':'' ?>><?= $h ?></option><?php endforeach; ?>
+          </select>
+          <span style="color:var(--grey-mid);font-weight:700;">:</span>
+          <select name="dep_m[]" style="padding:6px 4px;border:1.5px solid var(--grey-lt);border-radius:6px;font-size:.82rem;width:58px;">
+            <option value="">MM</option>
+            <?php foreach ($mins as $m): ?><option value="<?= $m ?>" <?= $dep_m===$m?'selected':'' ?>><?= $m ?></option><?php endforeach; ?>
+          </select>
+          <span style="color:var(--grey-mid);font-size:.7rem;margin:0 4px;">→</span>
+          <select name="arr_h[]" style="padding:6px 4px;border:1.5px solid var(--grey-lt);border-radius:6px;font-size:.82rem;width:58px;">
+            <option value="">HH</option>
+            <?php foreach ($hours as $h): ?><option value="<?= $h ?>" <?= $arr_h===$h?'selected':'' ?>><?= $h ?></option><?php endforeach; ?>
+          </select>
+          <span style="color:var(--grey-mid);font-weight:700;">:</span>
+          <select name="arr_m[]" style="padding:6px 4px;border:1.5px solid var(--grey-lt);border-radius:6px;font-size:.82rem;width:58px;">
+            <option value="">MM</option>
+            <?php foreach ($mins as $m): ?><option value="<?= $m ?>" <?= $arr_m===$m?'selected':'' ?>><?= $m ?></option><?php endforeach; ?>
+          </select>
+        </div>
       </div>
       <button type="button" class="btn btn-danger btn-sm" onclick="this.closest('.array-row').remove()">✕</button>
     </div>
@@ -1295,8 +1326,29 @@ function addFlightRow() {
     var airlineCombo = makeCombo({placeholder:'Airline…', name:'airline_company[]'}, '', '', airlineOptsJson, true);
     airlineCombo.style.cssText = 'min-width:160px;max-width:200px;';
     info.appendChild(airlineCombo);
-    info.appendChild(mkInput('departure_time[]','time',''));
-    info.appendChild(mkInput('arrival_time[]','time',''));
+    // Time selects HH:MM dep → arr
+    var hours = [], mins = [];
+    for(var h=0;h<24;h++) hours.push((h<10?'0':'')+h);
+    for(var m=0;m<60;m+=5) mins.push((m<10?'0':'')+m);
+    function mkTimeSelects(nameH, nameM) {
+        var wrap = document.createElement('div');
+        wrap.style.cssText='display:flex;align-items:center;gap:3px;';
+        var sh=document.createElement('select'); sh.name=nameH;
+        sh.style.cssText='padding:6px 4px;border:1.5px solid var(--grey-lt);border-radius:6px;font-size:.82rem;width:58px;';
+        sh.innerHTML='<option value="">HH</option>'+hours.map(function(v){return'<option value="'+v+'">'+v+'</option>';}).join('');
+        var sep=document.createElement('span'); sep.textContent=':'; sep.style.cssText='color:var(--grey-mid);font-weight:700;';
+        var sm=document.createElement('select'); sm.name=nameM;
+        sm.style.cssText='padding:6px 4px;border:1.5px solid var(--grey-lt);border-radius:6px;font-size:.82rem;width:58px;';
+        sm.innerHTML='<option value="">MM</option>'+mins.map(function(v){return'<option value="'+v+'">'+v+'</option>';}).join('');
+        wrap.appendChild(sh); wrap.appendChild(sep); wrap.appendChild(sm);
+        return wrap;
+    }
+    var depWrap = mkTimeSelects('dep_h[]','dep_m[]');
+    var arrow = document.createElement('span'); arrow.textContent='→'; arrow.style.cssText='color:var(--grey-mid);font-size:.7rem;margin:0 4px;';
+    var arrWrap = mkTimeSelects('arr_h[]','arr_m[]');
+    var timeWrap = document.createElement('div'); timeWrap.style.cssText='display:flex;align-items:center;gap:3px;';
+    timeWrap.appendChild(depWrap); timeWrap.appendChild(arrow); timeWrap.appendChild(arrWrap);
+    info.appendChild(timeWrap);
     var btn = document.createElement('button');
     btn.type='button'; btn.className='btn btn-danger btn-sm'; btn.textContent='✕';
     btn.onclick=function(){ this.closest('.array-row').remove(); };
