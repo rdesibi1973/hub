@@ -71,10 +71,16 @@ function iti_field(array $row, string $field, string $lang = null): string {
 }
 
 // ── Helper: etichetta durata ──────────────────────────────────────────────────
-function iti_duration_label(int $days): string {
+function iti_duration_label(int $days, string $lang = null): string {
     $nights = max(0, $days - 1);
     return $days . ' day' . ($days != 1 ? 's' : '')
          . ' / ' . $nights . ' night' . ($nights != 1 ? 's' : '');
+}
+
+// ── Helper: campo localizzato con escape HTML ─────────────────────────────────
+// Shorthand per h(iti_field($row, $field, $lang))
+function iti_h(array $row, string $field, string $lang = null): string {
+    return h(iti_field($row, $field, $lang));
 }
 
 // ── Helper: formato prezzo ────────────────────────────────────────────────────

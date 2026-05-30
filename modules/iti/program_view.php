@@ -250,7 +250,7 @@ include __DIR__ . '/../../includes/layout_header.php';
         <?php foreach ($items as $inc): ?>
         <li>
           <span style="color:<?= $type==='included'?'var(--green)':'var(--red)' ?>;"><?= $type==='included'?'✓':'✗' ?></span>
-          <?= h(iti_field($inc,'resolved',$lang) ?: iti_field($inc,'text',$lang)) ?>
+          <?= h($inc['display_text'] ?? '') ?>
         </li>
         <?php endforeach; ?>
       </ul>
