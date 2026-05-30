@@ -71,8 +71,14 @@ if ($action === 'hard_delete' && $id && $can_edit) {
     iti_redirect("programs.php?type={$tab}");
 }
 
-// ── Duplicate SAMPLE ─────────────────────────────────────────
+// ── Duplicate (same type or cross-type) ──────────────────────
 if ($action === 'duplicate' && $id && $can_edit) {
+    // dest_type: 'sample' | 'personal' — defaults to same as source
+    $allowed_types = ['sample', 'personal'];
+    $dest_type = in_array($_GET['dest_type'] ?? '', $allowed_types)
+        ? $_GET['dest_type']
+        : $tab;
+
     $src = iti_get_program($id);
     if ($src) {
         $db->prepare(
@@ -83,14 +89,14 @@ if ($action === 'duplicate' && $id && $can_edit) {
               subtitle_en,subtitle_it,subtitle_fr,subtitle_es,subtitle_de,
               duration_days,pax_adults,pax_children,flights_included,
               status,display_language,display_currency,created_by)
-             SELECT "sample",id,terms_id,
+             SELECT ?,id,terms_id,
               ref_number,
               CONCAT(title_en," (copy)"),title_it,title_fr,title_es,title_de,
               subtitle_en,subtitle_it,subtitle_fr,subtitle_es,subtitle_de,
               duration_days,pax_adults,pax_children,flights_included,
               "draft",display_language,display_currency,?
              FROM iti_programs WHERE id=?'
-        )->execute([$_cu['username'] ?? 'system', $id]);
+        )->execute([$dest_type, $_cu['username'] ?? 'system', $id]);
         $new_id = (int)$db->lastInsertId();
 
         foreach (iti_get_program_days($id) as $day) {
@@ -126,7 +132,8 @@ if ($action === 'duplicate' && $id && $can_edit) {
             $db->prepare('INSERT INTO iti_program_inclusions (program_id,item_type,standard_inclusion_id,text_en,text_it,text_fr,text_es,text_de,sort_order) VALUES (?,?,?,?,?,?,?,?,?)')->execute([$new_id,$inc['item_type'],$inc['standard_inclusion_id'],$inc['text_en'],$inc['text_it'],$inc['text_fr'],$inc['text_es'],$inc['text_de'],$inc['sort_order']]);
         }
 
-        iti_flash_set('success', 'Program duplicated.');
+        $dest_label = $dest_type === 'personal' ? 'Personal' : 'Sample';
+        iti_flash_set('success', "Program duplicated as {$dest_label}.");
         iti_redirect("program_edit.php?id={$new_id}");
     }
 }
@@ -317,20 +324,29 @@ include __DIR__ . '/../../includes/layout_header.php';
           <div class="gap-8" style="white-space:nowrap;">
             <a href="program_edit.php?id=<?= $p['id'] ?>" class="btn btn-outline btn-sm">✏️ Edit</a>
             <a href="program_view.php?id=<?= $p['id'] ?>" class="btn btn-outline btn-sm">👁 Preview</a>
-            <?php if ($tab==='sample' && $can_edit): ?>
-            <a href="programs.php?type=sample&action=duplicate&id=<?= $p['id'] ?>"
+            <?php if ($can_edit): ?>
+            <a href="programs.php?type=<?= $tab ?>&action=duplicate&id=<?= $p['id'] ?>&dest_type=<?= $tab ?>"
                class="btn btn-outline btn-sm"
                onclick="return confirm('Duplicate «<?= h(addslashes($p['title_en'])) ?>»?')">⧉ Duplicate</a>
+            <?php if ($tab === 'sample'): ?>
+            <a href="programs.php?type=sample&action=duplicate&id=<?= $p['id'] ?>&dest_type=personal"
+               class="btn btn-outline btn-sm"
+               onclick="return confirm('Duplicate «<?= h(addslashes($p['title_en'])) ?>» as Personal?')">⧉ Duplicate as Personal</a>
+            <?php else: ?>
+            <a href="programs.php?type=personal&action=duplicate&id=<?= $p['id'] ?>&dest_type=sample"
+               class="btn btn-outline btn-sm"
+               onclick="return confirm('Duplicate «<?= h(addslashes($p['title_en'])) ?>» as Sample?')">⧉ Duplicate as Sample</a>
             <?php endif; ?>
-            <?php if ($can_edit && $p['status'] !== 'cancelled'): ?>
+            <?php if ($p['status'] !== 'cancelled'): ?>
             <a href="programs.php?type=<?= $tab ?>&action=delete&id=<?= $p['id'] ?>"
                class="btn btn-danger btn-sm"
-               onclick="return confirm('Cancel «<?= h(addslashes($p['title_en'])) ?>»?')">🗑 Cancel</a>
-            <?php elseif ($can_edit && $p['status'] === 'cancelled'): ?>
+               onclick="return confirm('Delete «<?= h(addslashes($p['title_en'])) ?>»?')">🗑 Delete</a>
+            <?php else: ?>
             <a href="programs.php?type=<?= $tab ?>&action=hard_delete&id=<?= $p['id'] ?>"
                class="btn btn-danger btn-sm"
                style="background:var(--red-dk,#7b1010);border-color:var(--red-dk,#7b1010);color:#fff;"
                onclick="return confirm('PERMANENTLY delete «<?= h(addslashes($p['title_en'])) ?>»? This cannot be undone.')">🗑 Delete permanently</a>
+            <?php endif; ?>
             <?php endif; ?>
           </div>
         </td>
