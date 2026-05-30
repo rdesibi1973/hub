@@ -452,6 +452,9 @@ include __DIR__ . '/../../includes/layout_header.php';
   </div>
   <div class="gap-8">
     <a href="program_view.php?id=<?= $id ?>" class="btn btn-outline btn-sm" target="_blank">👁 Preview</a>
+    <?php if ($active_tab === 'days' && $current_day_data): ?>
+    <button type="submit" form="day-save-form" class="btn btn-red btn-sm">💾 Save Program</button>
+    <?php endif; ?>
     <?php if ($program['is_published']): ?>
     <a href="<?= h($public_url) ?>" target="_blank" class="btn btn-green btn-sm">🔗 Public Link</a>
     <form method="POST" action="program_edit.php?id=<?= $id ?>" style="display:inline;">
@@ -566,9 +569,8 @@ include __DIR__ . '/../../includes/layout_header.php';
     <input type="hidden" name="_sub"   value="day">
     <input type="hidden" name="day_id" value="<?= $active_day ?>">
 
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+    <div style="margin-bottom:16px;">
       <div style="font-family:'Merriweather',serif;font-size:1rem;font-weight:700;">Day <?= $current_day_data['day_number'] ?></div>
-      <button type="submit" class="btn btn-red">💾 Save Program</button>
     </div>
 
     <!-- ── BLOCCHI SEQUENZIALI DEL GIORNO ── -->
@@ -888,9 +890,6 @@ include __DIR__ . '/../../includes/layout_header.php';
             onclick="addFlightRow()">+ Add Flight</button>
   </div>
 
-    <div style="margin-top:16px;text-align:right;">
-      <button type="submit" class="btn btn-red">💾 Save Program</button>
-    </div>
   </form><!-- end day-save-form -->
 
   <?php else: ?>
