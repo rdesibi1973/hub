@@ -399,20 +399,11 @@ include __DIR__ . '/../../includes/layout_header.php';
           <td style="padding:7px 12px;border-bottom:1px solid var(--off-white);color:var(--grey-mid);font-size:.78rem;font-weight:700;">Day <?= $rt['day'] ?></td>
           <td style="padding:7px 12px;border-bottom:1px solid var(--off-white);">
             <?php
-              $tr_label = '';
-              if (!empty($tr['from_name']) && !empty($tr['to_name'])) {
-                  $tr_label = $tr['from_name'] . ' → ' . $tr['to_name'];
-              } elseif (!empty($tr['route_name'])) {
-                  $tr_label = $tr['route_name'];
-              } else {
-                  $tr_label = '—';
-              }
+              $tr_label = !empty($tr['description']) ? $tr['description'] : '—';
             ?>
             <span class="lodge-pill"><?= h($tr_label) ?></span>
           </td>
-          <td style="padding:7px 12px;border-bottom:1px solid var(--off-white);font-size:.8rem;color:var(--grey-mid);">
-            <?= !empty($tr['note_en']) ? h($tr['note_en']) : '—' ?>
-          </td>
+          <td style="padding:7px 12px;border-bottom:1px solid var(--off-white);font-size:.8rem;color:var(--grey-mid);">—</td>
         </tr>
         <?php endforeach; ?>
         </tbody>
