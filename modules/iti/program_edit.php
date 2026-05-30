@@ -1124,7 +1124,29 @@ include __DIR__ . '/../../includes/layout_header.php';
 <form method="POST" action="program_edit.php?id=<?= $id ?>&tab=info">
 <input type="hidden" name="_sub" value="header">
 
-  <div class="form-section-title" style="margin-top:0;">Program Settings</div>
+  <div class="form-section-title" style="margin-top:0;font-size:.8rem;color:var(--red-dk);">✏️ Title &amp; Subtitle</div>
+  <div class="form-grid" style="margin-bottom:8px;">
+    <?php foreach (ITI_LANGS as $lang): ?>
+    <div class="form-group">
+      <label><?= ITI_LANG_LABELS[$lang] ?><?= $lang==='en'?' <span style="color:var(--red)">*</span>':'' ?></label>
+      <input type="text" name="title_<?= $lang ?>" maxlength="200"
+             value="<?= h($program["title_{$lang}"] ?? '') ?>"
+             <?= $lang==='en'?'style="font-weight:600;"':'' ?>>
+    </div>
+    <?php endforeach; ?>
+  </div>
+
+  <div class="form-grid" style="margin-bottom:16px;">
+    <?php foreach (ITI_LANGS as $lang): ?>
+    <div class="form-group">
+      <label style="color:var(--grey-mid);"><?= ITI_LANG_LABELS[$lang] ?> subtitle</label>
+      <input type="text" name="subtitle_<?= $lang ?>" maxlength="255"
+             value="<?= h($program["subtitle_{$lang}"] ?? '') ?>">
+    </div>
+    <?php endforeach; ?>
+  </div>
+
+  <div class="form-section-title">Program Settings</div>
   <div class="form-grid">
     <div class="form-group">
       <label>Ref. Number</label>
@@ -1135,16 +1157,7 @@ include __DIR__ . '/../../includes/layout_header.php';
     <div class="form-group">
       <label>Start Date</label>
       <input type="date" name="start_date" value="<?= h($program['start_date'] ?? '') ?>">
-      <span class="form-hint">End date and duration calculated automatically</span>
-    </div>
-    <div class="form-group">
-      <label>Pax — Adults</label>
-      <input type="number" name="pax_adults" min="1" value="<?= (int)$program['pax_adults'] ?>">
-      <span class="form-hint">Used in preview and .docx</span>
-    </div>
-    <div class="form-group">
-      <label>Pax — Children</label>
-      <input type="number" name="pax_children" min="0" value="<?= (int)$program['pax_children'] ?>">
+      <span class="form-hint">End date calculated automatically</span>
     </div>
     <div class="form-group">
       <label>Status</label>
@@ -1170,32 +1183,21 @@ include __DIR__ . '/../../includes/layout_header.php';
         <?php endforeach; ?>
       </select>
     </div>
+    <div class="form-group">
+      <label>Adults <span style="font-weight:400;color:var(--grey-mid);">(pax)</span></label>
+      <input type="number" name="pax_adults" min="1" value="<?= (int)$program['pax_adults'] ?>">
+      <span class="form-hint">Shown in preview &amp; .docx</span>
+    </div>
+    <div class="form-group">
+      <label>Children <span style="font-weight:400;color:var(--grey-mid);">(pax)</span></label>
+      <input type="number" name="pax_children" min="0" value="<?= (int)$program['pax_children'] ?>">
+    </div>
     <div class="form-group" style="flex-direction:row;align-items:center;gap:10px;align-self:flex-end;">
       <input type="checkbox" name="flights_included" value="1" id="fi2"
              <?= $program['flights_included']?'checked':'' ?>
              style="width:16px;height:16px;accent-color:var(--red);">
       <label for="fi2" style="margin:0;text-transform:none;font-size:.85rem;">Flights included in price</label>
     </div>
-  </div>
-
-  <div class="form-section-title">Title × 5 languages</div>
-  <div class="form-grid">
-    <?php foreach (ITI_LANGS as $lang): ?>
-    <div class="form-group">
-      <label><?= ITI_LANG_LABELS[$lang] ?></label>
-      <input type="text" name="title_<?= $lang ?>" maxlength="200" value="<?= h($program["title_{$lang}"] ?? '') ?>">
-    </div>
-    <?php endforeach; ?>
-  </div>
-
-  <div class="form-section-title">Subtitle × 5 languages</div>
-  <div class="form-grid">
-    <?php foreach (ITI_LANGS as $lang): ?>
-    <div class="form-group">
-      <label><?= ITI_LANG_LABELS[$lang] ?></label>
-      <input type="text" name="subtitle_<?= $lang ?>" maxlength="255" value="<?= h($program["subtitle_{$lang}"] ?? '') ?>">
-    </div>
-    <?php endforeach; ?>
   </div>
 
   <div class="form-actions">
