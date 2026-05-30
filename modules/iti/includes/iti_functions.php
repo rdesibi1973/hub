@@ -536,7 +536,15 @@ function iti_get_day_flights(int $program_day_id): array {
 
 function iti_get_day_transfers(int $program_day_id): array {
     $st = db()->prepare(
-        'SELECT * FROM iti_day_transfers WHERE program_day_id = ? ORDER BY sort_order, id'
+        'SELECT dt.*,
+                tr.route_name,
+                fd.name_en AS from_name,
+                td.name_en AS to_name
+           FROM iti_day_transfers dt
+           LEFT JOIN iti_transfer_routes tr ON tr.id = dt.transfer_route_id
+           LEFT JOIN iti_destinations fd ON fd.id = tr.from_destination
+           LEFT JOIN iti_destinations td ON td.id = tr.to_destination
+          WHERE dt.program_day_id = ? ORDER BY dt.sort_order, dt.id'
     );
     $st->execute([$program_day_id]);
     return $st->fetchAll();

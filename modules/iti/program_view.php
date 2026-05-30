@@ -39,7 +39,7 @@ include __DIR__ . '/../../includes/layout_header.php';
 
 <style>
 .prev-wrap   { max-width:800px; margin:0 auto; }
-.prev-hero   { background:var(--black); color:var(--white); border-radius:12px;
+.prev-hero   { background:var(--red); color:var(--white); border-radius:12px;
                padding:40px 48px; margin-bottom:32px; position:relative; overflow:hidden; }
 .prev-hero h1{ font-family:'Merriweather',serif; font-size:1.6rem; font-weight:700;
                margin:0 0 8px; line-height:1.3; }
@@ -158,6 +158,29 @@ include __DIR__ . '/../../includes/layout_header.php';
       </div>
       <?php endif; ?>
 
+      <?php
+        // Overnight / accommodation row
+        $overnight_name = '';
+        if (!empty($day['end_lodge_name'])) {
+            $overnight_name = $day['end_lodge_name'];
+        } elseif (!empty($day['end_lodge_custom'])) {
+            $overnight_name = $day['end_lodge_custom'];
+        }
+        $is_own = (strcasecmp(trim($overnight_name), 'own arrangement') === 0);
+      ?>
+      <?php if ($overnight_name): ?>
+      <div class="day-row">
+        <div class="label">🌙 Overnight</div>
+        <div class="val">
+          <?php if ($is_own): ?>
+            <span class="lodge-pill" style="background:#fff8e1;color:#7A4F01;border:1px solid #ffe082;">🏨 Own Arrangement</span>
+          <?php else: ?>
+            <span class="lodge-pill"><?= h($overnight_name) ?></span>
+          <?php endif; ?>
+        </div>
+      </div>
+      <?php endif; ?>
+
       <?php if ($flights): ?>
       <div class="day-row">
         <div class="label">✈️ Flights</div>
@@ -265,6 +288,139 @@ include __DIR__ . '/../../includes/layout_header.php';
     <div style="font-family:'Merriweather',serif;font-size:.85rem;font-weight:700;margin-bottom:8px;">Terms &amp; Conditions — <?= h($tc['version']) ?></div>
     <div style="font-size:.75rem;color:var(--grey-mid);">Effective <?= date('d M Y',strtotime($tc['effective_date'])) ?></div>
   </div>
+  <?php endif; ?>
+
+  <!-- ── RECAP ──────────────────────────────────────────────────────── -->
+  <?php
+    // Build recap arrays from all days
+    $recap_accommodation = [];
+    $recap_flights       = [];
+    $recap_transfers     = [];
+
+    foreach ($days as $d) {
+        $night = '';
+        $is_own_arr = false;
+        if (!empty($d['end_lodge_name'])) {
+            $night = $d['end_lodge_name'];
+        } elseif (!empty($d['end_lodge_custom'])) {
+            $night = $d['end_lodge_custom'];
+            $is_own_arr = (strcasecmp(trim($night), 'own arrangement') === 0);
+        }
+        if ($night) {
+            $recap_accommodation[] = ['day' => $d['day_number'], 'name' => $night, 'own' => $is_own_arr];
+        }
+        foreach (iti_get_day_flights((int)$d['id']) as $fl) {
+            $recap_flights[] = ['day' => $d['day_number'], 'fl' => $fl];
+        }
+        foreach (iti_get_day_transfers((int)$d['id']) as $tr) {
+            $recap_transfers[] = ['day' => $d['day_number'], 'tr' => $tr];
+        }
+    }
+  ?>
+
+  <?php if ($recap_accommodation || $recap_flights || $recap_transfers): ?>
+  <div class="section-box" style="margin-top:8px;">
+    <div style="font-family:'Merriweather',serif;font-size:1rem;font-weight:700;margin-bottom:20px;">📋 Recap</div>
+
+    <?php if ($recap_accommodation): ?>
+    <div style="margin-bottom:20px;">
+      <div style="font-size:.68rem;font-weight:800;text-transform:uppercase;letter-spacing:.12em;color:var(--grey-mid);margin-bottom:10px;">🌙 Accommodation</div>
+      <table style="width:100%;border-collapse:collapse;font-size:.83rem;">
+        <thead>
+          <tr>
+            <th style="text-align:left;padding:6px 12px;font-size:.65rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--grey-mid);border-bottom:1px solid var(--grey-lt);width:60px;">Night</th>
+            <th style="text-align:left;padding:6px 12px;font-size:.65rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--grey-mid);border-bottom:1px solid var(--grey-lt);">Lodge / Hotel</th>
+          </tr>
+        </thead>
+        <tbody>
+        <?php foreach ($recap_accommodation as $ra): ?>
+        <tr>
+          <td style="padding:7px 12px;border-bottom:1px solid var(--off-white);color:var(--grey-mid);font-size:.78rem;font-weight:700;">Night <?= $ra['day'] ?></td>
+          <td style="padding:7px 12px;border-bottom:1px solid var(--off-white);">
+            <?php if ($ra['own']): ?>
+              <span class="lodge-pill" style="background:#fff8e1;color:#7A4F01;border:1px solid #ffe082;">🏨 Own Arrangement</span>
+            <?php else: ?>
+              <span class="lodge-pill"><?= h($ra['name']) ?></span>
+            <?php endif; ?>
+          </td>
+        </tr>
+        <?php endforeach; ?>
+        </tbody>
+      </table>
+    </div>
+    <?php endif; ?>
+
+    <?php if ($recap_flights): ?>
+    <div style="margin-bottom:20px;">
+      <div style="font-size:.68rem;font-weight:800;text-transform:uppercase;letter-spacing:.12em;color:var(--grey-mid);margin-bottom:10px;">✈️ Flights</div>
+      <table style="width:100%;border-collapse:collapse;font-size:.83rem;">
+        <thead>
+          <tr>
+            <th style="text-align:left;padding:6px 12px;font-size:.65rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--grey-mid);border-bottom:1px solid var(--grey-lt);width:60px;">Day</th>
+            <th style="text-align:left;padding:6px 12px;font-size:.65rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--grey-mid);border-bottom:1px solid var(--grey-lt);">Route</th>
+            <th style="text-align:left;padding:6px 12px;font-size:.65rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--grey-mid);border-bottom:1px solid var(--grey-lt);">Time</th>
+            <th style="text-align:left;padding:6px 12px;font-size:.65rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--grey-mid);border-bottom:1px solid var(--grey-lt);">Operator</th>
+          </tr>
+        </thead>
+        <tbody>
+        <?php foreach ($recap_flights as $rf): $fl = $rf['fl']; ?>
+        <tr>
+          <td style="padding:7px 12px;border-bottom:1px solid var(--off-white);color:var(--grey-mid);font-size:.78rem;font-weight:700;">Day <?= $rf['day'] ?></td>
+          <td style="padding:7px 12px;border-bottom:1px solid var(--off-white);">
+            <span class="flight-pill"><?= h($fl['from_code'] ?: $fl['from_airport']) ?> → <?= h($fl['to_code'] ?: $fl['to_airport']) ?></span>
+          </td>
+          <td style="padding:7px 12px;border-bottom:1px solid var(--off-white);font-size:.8rem;color:var(--grey-dk);">
+            <?= $fl['departure_time'] ? h(substr($fl['departure_time'],0,5)) : '—' ?>
+          </td>
+          <td style="padding:7px 12px;border-bottom:1px solid var(--off-white);font-size:.8rem;color:var(--grey-dk);">
+            <?= $fl['operator'] ? h($fl['operator']) : '—' ?>
+          </td>
+        </tr>
+        <?php endforeach; ?>
+        </tbody>
+      </table>
+    </div>
+    <?php endif; ?>
+
+    <?php if ($recap_transfers): ?>
+    <div>
+      <div style="font-size:.68rem;font-weight:800;text-transform:uppercase;letter-spacing:.12em;color:var(--grey-mid);margin-bottom:10px;">🚐 Transfers</div>
+      <table style="width:100%;border-collapse:collapse;font-size:.83rem;">
+        <thead>
+          <tr>
+            <th style="text-align:left;padding:6px 12px;font-size:.65rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--grey-mid);border-bottom:1px solid var(--grey-lt);width:60px;">Day</th>
+            <th style="text-align:left;padding:6px 12px;font-size:.65rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--grey-mid);border-bottom:1px solid var(--grey-lt);">Transfer</th>
+            <th style="text-align:left;padding:6px 12px;font-size:.65rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--grey-mid);border-bottom:1px solid var(--grey-lt);">Notes</th>
+          </tr>
+        </thead>
+        <tbody>
+        <?php foreach ($recap_transfers as $rt): $tr = $rt['tr']; ?>
+        <tr>
+          <td style="padding:7px 12px;border-bottom:1px solid var(--off-white);color:var(--grey-mid);font-size:.78rem;font-weight:700;">Day <?= $rt['day'] ?></td>
+          <td style="padding:7px 12px;border-bottom:1px solid var(--off-white);">
+            <?php
+              $tr_label = '';
+              if (!empty($tr['from_name']) && !empty($tr['to_name'])) {
+                  $tr_label = $tr['from_name'] . ' → ' . $tr['to_name'];
+              } elseif (!empty($tr['route_name'])) {
+                  $tr_label = $tr['route_name'];
+              } else {
+                  $tr_label = '—';
+              }
+            ?>
+            <span class="lodge-pill"><?= h($tr_label) ?></span>
+          </td>
+          <td style="padding:7px 12px;border-bottom:1px solid var(--off-white);font-size:.8rem;color:var(--grey-mid);">
+            <?= !empty($tr['note_en']) ? h($tr['note_en']) : '—' ?>
+          </td>
+        </tr>
+        <?php endforeach; ?>
+        </tbody>
+      </table>
+    </div>
+    <?php endif; ?>
+
+  </div><!-- end recap -->
   <?php endif; ?>
 
 </div><!-- end prev-wrap -->
