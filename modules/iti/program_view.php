@@ -131,17 +131,64 @@ include __DIR__ . '/../../includes/layout_header.php';
   </div>
 
   <!-- Days -->
+  <?php
+    // Build date map for preview
+    $prev_start = !empty($program['start_date']) ? new DateTime($program['start_date']) : null;
+    $view_date_map = [];
+    if ($prev_start) {
+        $cur = clone $prev_start;
+        foreach ($days as $_d) {
+            $view_date_map[(int)$_d['id']] = clone $cur;
+            $nights_this = max(1, (int)($_d['own_arrangement_nights'] ?? 0) ?: 1);
+            $cur->modify("+{$nights_this} days");
+        }
+    }
+  ?>
   <?php foreach ($days as $day): ?>
   <?php
-    $acts    = iti_get_day_activities((int)$day['id']);
-    $flights = iti_get_day_flights((int)$day['id']);
-    $title   = iti_field($day, 'day_title', $lang);
-    $narr    = iti_field($day, 'narrative',  $lang);
+    $acts     = iti_get_day_activities((int)$day['id']);
+    $flights  = iti_get_day_flights((int)$day['id']);
+    $title    = iti_field($day, 'day_title', $lang);
+    $narr     = iti_field($day, 'narrative',  $lang);
+    $day_is_oa = !empty($day['own_arrangement']);
+    $oa_nights = (int)($day['own_arrangement_nights'] ?? 0);
+    $day_date  = $view_date_map[(int)$day['id']] ?? null;
+    $day_label = 'Day '.$day['day_number'];
+    if ($day_is_oa && $oa_nights > 1) $day_label .= '–'.($day['day_number']+$oa_nights-1);
   ?>
+
+  <?php if ($day_is_oa): ?>
+  <!-- OA block -->
+  <div class="day-card" style="border:2px solid #ffe082;">
+    <div class="day-head" style="background:#f9a825;">
+      <div class="num"><?= $day_label ?></div>
+      <div class="title">Own Arrangement<?= $title ? ' — '.h($title) : '' ?></div>
+      <?php if ($day_date): ?><div style="margin-left:auto;font-size:.75rem;opacity:.85;"><?= $day_date->format('d M Y') ?><?php if ($oa_nights>1): $end_oa=clone $day_date;$end_oa->modify('+'.($oa_nights-1).' days'); ?> – <?= $end_oa->format('d M Y') ?><?php endif; ?></div><?php endif; ?>
+    </div>
+    <div class="day-body">
+      <div class="day-row">
+        <div class="label">🏨 Accommodation</div>
+        <div class="val">
+          <span class="lodge-pill" style="background:#fff8e1;color:#7A4F01;border:1px solid #ffe082;">
+            🏨 Own Arrangement — <?= $oa_nights ?> night<?= $oa_nights!=1?'s':'' ?>
+          </span>
+        </div>
+      </div>
+      <?php if ($narr): ?>
+      <div class="day-row">
+        <div class="label">Notes</div>
+        <div class="val narrative"><?= h($narr) ?></div>
+      </div>
+      <?php endif; ?>
+    </div>
+  </div>
+
+  <?php else: ?>
   <div class="day-card">
     <div class="day-head">
-      <div class="num">Day <?= $day['day_number'] ?></div>
+      <div class="num"><?= $day_label ?></div>
       <?php if ($title): ?><div class="title"><?= h($title) ?></div><?php endif; ?>
+      <?php if ($day_date): ?><div style="margin-left:auto;font-size:.75rem;opacity:.75;"><?= $day_date->format('d M Y') ?></div><?php endif; ?>
     </div>
     <div class="day-body">
 
@@ -229,6 +276,7 @@ include __DIR__ . '/../../includes/layout_header.php';
 
     </div>
   </div>
+  <?php endif; // end OA / normal branch ?>
   <?php endforeach; ?>
 
   <!-- Prices -->

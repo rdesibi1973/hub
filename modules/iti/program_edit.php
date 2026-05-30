@@ -72,6 +72,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
 
             try {
+                $own_arr        = isset($_POST['own_arrangement']) ? 1 : 0;
+                $own_arr_nights = $own_arr ? max(1, (int)($_POST['own_arrangement_nights'] ?? 1)) : 0;
+                // When own_arrangement is on, clear lodge fields
+                if ($own_arr) { $end_id = null; $end_txt = 'Own Arrangement'; }
+
                 $db->prepare(
                     'UPDATE iti_program_days SET
                      day_title_en=?,day_title_it=?,day_title_fr=?,day_title_es=?,day_title_de=?,
@@ -79,6 +84,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                      destination_id=?,destination_custom=?,
                      narrative_en=?,narrative_it=?,narrative_fr=?,narrative_es=?,narrative_de=?,
                      end_lodge_id=?,end_lodge_custom=?,
+                     own_arrangement=?,own_arrangement_nights=?,
                      meal_breakfast=?,meal_lunch=?,meal_dinner=?,
                      meal_all_inclusive=?,meal_game_package=?
                      WHERE id=? AND program_id=?'
@@ -90,6 +96,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     trim($_POST['narrative_en']),trim($_POST['narrative_it']),
                     trim($_POST['narrative_fr']),trim($_POST['narrative_es']),trim($_POST['narrative_de']),
                     $end_id, $end_txt,
+                    $own_arr, $own_arr_nights,
                     isset($_POST['meal_breakfast'])?1:0,
                     isset($_POST['meal_lunch'])?1:0,
                     isset($_POST['meal_dinner'])?1:0,
@@ -198,11 +205,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     // ── Aggiungi giorno ──
     if ($sub === 'add_day') {
-        $max_st = $db->prepare('SELECT COALESCE(MAX(day_number),0) FROM iti_program_days WHERE program_id=?');
-        $max_st->execute([$id]);
-        $new_num = (int)$max_st->fetchColumn() + 1;
+        // Find last day row to account for own_arrangement_nights
+        $last_st = $db->prepare(
+            'SELECT day_number, own_arrangement_nights FROM iti_program_days
+              WHERE program_id=? ORDER BY day_number DESC LIMIT 1'
+        );
+        $last_st->execute([$id]);
+        $last_row = $last_st->fetch();
+        if ($last_row) {
+            $oa_extra = (int)($last_row['own_arrangement_nights'] ?? 0);
+            $new_num  = (int)$last_row['day_number'] + max(1, $oa_extra);
+        } else {
+            $new_num = 1;
+        }
         $db->prepare('INSERT INTO iti_program_days (program_id, day_number) VALUES (?,?)')->execute([$id, $new_num]);
-        $db->prepare('UPDATE iti_programs SET duration_days=? WHERE id=?')->execute([$new_num, $id]);
+        // duration_days = sum of all day slots (each OA day counts its nights)
+        $dur_st = $db->prepare('SELECT day_number, own_arrangement_nights FROM iti_program_days WHERE program_id=? ORDER BY day_number DESC LIMIT 1');
+        $dur_st->execute([$id]);
+        $last = $dur_st->fetch();
+        $duration = (int)$last['day_number'] + max(0, (int)$last['own_arrangement_nights'] - 1);
+        $db->prepare('UPDATE iti_programs SET duration_days=? WHERE id=?')->execute([$duration, $id]);
         iti_flash_set('success', "Day {$new_num} added.");
         iti_redirect("program_edit.php?id={$id}&tab=days");
     }
@@ -516,27 +538,51 @@ include __DIR__ . '/../../includes/layout_header.php';
     <?php
       $start_date = !empty($program['start_date']) ? new DateTime($program['start_date']) : null;
       $total_days = count($days);
+      // Calculate total nights accounting for OA blocks
+      $total_nights = 0;
+      foreach ($days as $_d) $total_nights += max(1, (int)($_d['own_arrangement_nights'] ?? 0) ?: 1);
+      $total_nights--; // last day has no extra night
     ?>
     <?php if ($start_date): ?>
     <div style="font-size:.72rem;color:var(--grey-mid);margin-bottom:10px;padding:6px 10px;background:var(--off-white);border-radius:6px;">
       📅 <?= $start_date->format('d M Y') ?><br>
-      <?php $end = clone $start_date; $end->modify('+'.($total_days-1).' days'); ?>
+      <?php $end = clone $start_date; $end->modify("+{$total_nights} days"); ?>
       → <?= $end->format('d M Y') ?><br>
-      <strong><?= $total_days ?> days / <?= max(0,$total_days-1) ?> nights</strong>
+      <strong><?= $total_days ?> days / <?= $total_nights ?> nights</strong>
     </div>
     <?php else: ?>
     <div style="font-size:.72rem;color:var(--amber);margin-bottom:10px;">
       ⚠ Set start date in Settings
     </div>
     <?php endif; ?>
+    <?php
+      // Build a date map: day_id → actual calendar date
+      $day_date_map = [];
+      if ($start_date) {
+          $cur_date = clone $start_date;
+          foreach ($days as $_d) {
+              $day_date_map[(int)$_d['id']] = clone $cur_date;
+              $nights_this = max(1, (int)($_d['own_arrangement_nights'] ?? 0) ?: 1);
+              $cur_date->modify("+{$nights_this} days");
+          }
+      }
+    ?>
     <?php foreach ($days as $d): ?>
     <?php $has_lodge = !empty($d['start_lodge_id']) || !empty($d['end_lodge_id']); ?>
+    <?php $d_is_oa = !empty($d['own_arrangement']); $d_oa_n = (int)($d['own_arrangement_nights'] ?? 0); ?>
     <div style="display:flex;gap:3px;align-items:stretch;margin-bottom:6px;">
       <a href="program_edit.php?id=<?= $id ?>&tab=days&day=<?= $d['id'] ?>"
          class="day-btn<?= $active_day===(int)$d['id']?' active':'' ?><?= $has_lodge?' filled':'' ?>"
          style="flex:1;display:block;text-align:center;">
-        Day <?= $d['day_number'] ?>
-        <?php if ($d['day_title_en']): ?><div style="font-size:.68rem;font-weight:400;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"><?= h(mb_substr($d['day_title_en'],0,20)) ?></div><?php endif; ?>
+        Day <?= $d['day_number'] ?><?= $d_is_oa ? '–'.($d['day_number']+$d_oa_n-1) : '' ?>
+        <?php if ($d_is_oa): ?>
+          <div style="font-size:.62rem;font-weight:700;color:#7A4F01;background:#fff8e1;border-radius:3px;padding:1px 4px;margin-top:2px;">🏨 OA ×<?= $d_oa_n ?>n</div>
+        <?php elseif ($d['day_title_en']): ?>
+          <div style="font-size:.68rem;font-weight:400;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"><?= h(mb_substr($d['day_title_en'],0,20)) ?></div>
+        <?php endif; ?>
+        <?php if (isset($day_date_map[(int)$d['id']])): ?>
+          <div style="font-size:.62rem;color:var(--grey-mid);margin-top:1px;"><?= $day_date_map[(int)$d['id']]->format('d M') ?></div>
+        <?php endif; ?>
       </a>
       <div style="display:flex;flex-direction:column;gap:2px;">
         <?php if ($d['day_number'] > 1): ?>
@@ -741,6 +787,24 @@ include __DIR__ . '/../../includes/layout_header.php';
       <!-- 5. ACCOMMODATION / OVERNIGHT -->
       <div style="padding:14px 20px;border-bottom:1px solid var(--grey-lt);">
         <div style="font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--grey-mid);margin-bottom:8px;">🏕️ Accommodation / overnight</div>
+
+        <!-- Own Arrangement toggle -->
+        <?php $is_oa = !empty($current_day_data['own_arrangement']); ?>
+        <label style="display:flex;align-items:center;gap:8px;margin-bottom:10px;cursor:pointer;">
+          <input type="checkbox" name="own_arrangement" value="1" id="oa-check"
+                 <?= $is_oa ? 'checked' : '' ?>
+                 style="width:16px;height:16px;accent-color:var(--red);"
+                 onchange="toggleOA(this.checked)">
+          <span style="font-size:.85rem;font-weight:600;">🏨 Own Arrangement</span>
+        </label>
+        <div id="oa-nights-wrap" style="margin-bottom:10px;<?= $is_oa ? '' : 'display:none;' ?>">
+          <label style="font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--grey-dk);display:block;margin-bottom:4px;">Own Arrangement Nights</label>
+          <input type="number" name="own_arrangement_nights" id="oa-nights"
+                 min="1" max="30" value="<?= (int)($current_day_data['own_arrangement_nights'] ?? 1) ?>"
+                 style="width:100px;padding:7px 10px;border:1.5px solid var(--grey-lt);border-radius:6px;font-size:.9rem;">
+          <span style="font-size:.75rem;color:var(--grey-mid);margin-left:8px;">nights in own accommodation</span>
+        </div>
+
         <?php
         $acc_display = '';
         if (!empty($current_day_data['end_lodge_id']))
@@ -765,6 +829,7 @@ include __DIR__ . '/../../includes/layout_header.php';
             foreach ($_ls as $_l)
                 $acc_opts[] = ['id'=>(string)$_l['id'], 'label'=>$_l['name'], 'group'=>$_dname];
         ?>
+        <div id="oa-lodge-wrap" style="<?= $is_oa ? 'display:none;' : '' ?>">
         <div class="iti-combo" data-field="end_lodge">
           <div class="iti-combo-inner">
             <input type="text" class="iti-combo-text" autocomplete="off"
@@ -775,6 +840,7 @@ include __DIR__ . '/../../includes/layout_header.php';
           <input type="hidden" name="end_lodge_id"     value="<?= h($acc_hidden_id) ?>">
           <input type="hidden" name="end_lodge_custom" value="<?= h($current_day_data['end_lodge_custom'] ?? '') ?>">
           <div class="iti-combo-drop" data-opts='<?= json_encode($acc_opts, JSON_HEX_APOS) ?>'></div>
+        </div>
         </div>
       </div>
 
@@ -1423,6 +1489,23 @@ function initCombo(combo) {
     combo.querySelector('.iti-combo-arrow').addEventListener('click', function(){
         if(drop.classList.contains('open')){ closeDrop(); } else { input.focus(); renderDrop(input.value); }
     });
+}
+
+function toggleOA(checked) {
+    document.getElementById('oa-nights-wrap').style.display = checked ? '' : 'none';
+    document.getElementById('oa-lodge-wrap').style.display  = checked ? 'none' : '';
+    if (checked) {
+        // Clear lodge combo when OA is enabled
+        var combo = document.querySelector('.iti-combo[data-field="end_lodge"]');
+        if (combo) {
+            var inp = combo.querySelector('.iti-combo-text');
+            var hid = combo.querySelector('input[name="end_lodge_id"]');
+            var cus = combo.querySelector('input[name="end_lodge_custom"]');
+            if (inp) inp.value = '';
+            if (hid) hid.value = '';
+            if (cus) cus.value = '';
+        }
+    }
 }
 </script>
 <?php endif; ?>
