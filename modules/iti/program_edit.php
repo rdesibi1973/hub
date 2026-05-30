@@ -84,7 +84,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                      destination_id=?,destination_custom=?,
                      narrative_en=?,narrative_it=?,narrative_fr=?,narrative_es=?,narrative_de=?,
                      end_lodge_id=?,end_lodge_custom=?,
-                     own_arrangement=?,own_arrangement_nights=?,
                      meal_breakfast=?,meal_lunch=?,meal_dinner=?,
                      meal_all_inclusive=?,meal_game_package=?
                      WHERE id=? AND program_id=?'
@@ -96,7 +95,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     trim($_POST['narrative_en']),trim($_POST['narrative_it']),
                     trim($_POST['narrative_fr']),trim($_POST['narrative_es']),trim($_POST['narrative_de']),
                     $end_id, $end_txt,
-                    $own_arr, $own_arr_nights,
                     isset($_POST['meal_breakfast'])?1:0,
                     isset($_POST['meal_lunch'])?1:0,
                     isset($_POST['meal_dinner'])?1:0,
@@ -104,6 +102,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     isset($_POST['meal_game_package'])?1:0,
                     $day_id, $id,
                 ]);
+
+                // OA columns — separate update in case ALTER TABLE not yet run on live DB
+                try {
+                    $db->prepare(
+                        'UPDATE iti_program_days SET own_arrangement=?,own_arrangement_nights=? WHERE id=?'
+                    )->execute([$own_arr, $own_arr_nights, $day_id]);
+                } catch (\PDOException $oa_e) { /* columns not yet in DB — skip silently */ }
 
                 // ── Transfers: delete all then re-insert from array ──
                 $db->prepare('DELETE FROM iti_day_transfers WHERE program_day_id=?')->execute([$day_id]);
@@ -205,26 +210,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     // ── Aggiungi giorno ──
     if ($sub === 'add_day') {
-        // Find last day row to account for own_arrangement_nights
-        $last_st = $db->prepare(
-            'SELECT day_number, own_arrangement_nights FROM iti_program_days
-              WHERE program_id=? ORDER BY day_number DESC LIMIT 1'
-        );
-        $last_st->execute([$id]);
-        $last_row = $last_st->fetch();
-        if ($last_row) {
-            $oa_extra = (int)($last_row['own_arrangement_nights'] ?? 0);
-            $new_num  = (int)$last_row['day_number'] + max(1, $oa_extra);
-        } else {
-            $new_num = 1;
+        try {
+            $last_st = $db->prepare(
+                'SELECT day_number, own_arrangement_nights FROM iti_program_days
+                  WHERE program_id=? ORDER BY day_number DESC LIMIT 1'
+            );
+            $last_st->execute([$id]);
+            $last_row = $last_st->fetch();
+            if ($last_row) {
+                $oa_extra = (int)($last_row['own_arrangement_nights'] ?? 0);
+                $new_num  = (int)$last_row['day_number'] + max(1, $oa_extra);
+            } else {
+                $new_num = 1;
+            }
+        } catch (\PDOException $e) {
+            // own_arrangement_nights column not yet in DB — fall back to MAX+1
+            $max_st = $db->prepare('SELECT COALESCE(MAX(day_number),0) FROM iti_program_days WHERE program_id=?');
+            $max_st->execute([$id]);
+            $new_num = (int)$max_st->fetchColumn() + 1;
         }
         $db->prepare('INSERT INTO iti_program_days (program_id, day_number) VALUES (?,?)')->execute([$id, $new_num]);
-        // duration_days = sum of all day slots (each OA day counts its nights)
-        $dur_st = $db->prepare('SELECT day_number, own_arrangement_nights FROM iti_program_days WHERE program_id=? ORDER BY day_number DESC LIMIT 1');
-        $dur_st->execute([$id]);
-        $last = $dur_st->fetch();
-        $duration = (int)$last['day_number'] + max(0, (int)$last['own_arrangement_nights'] - 1);
-        $db->prepare('UPDATE iti_programs SET duration_days=? WHERE id=?')->execute([$duration, $id]);
+        $db->prepare('UPDATE iti_programs SET duration_days=? WHERE id=?')->execute([$new_num, $id]);
         iti_flash_set('success', "Day {$new_num} added.");
         iti_redirect("program_edit.php?id={$id}&tab=days");
     }
@@ -254,16 +260,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $day_id    = (int)($_POST['day_id']    ?? 0);
         $direction = $_POST['direction'] ?? 'up';
         if ($day_id) {
-            $cur = $db->prepare('SELECT day_number FROM iti_program_days WHERE id=?');
-            $cur->execute([$day_id]); $cur_num = (int)$cur->fetchColumn();
-            $swap_num = $direction === 'up' ? $cur_num - 1 : $cur_num + 1;
-            $swap = $db->prepare('SELECT id FROM iti_program_days WHERE program_id=? AND day_number=?');
-            $swap->execute([$id, $swap_num]); $swap_id = (int)$swap->fetchColumn();
-            if ($swap_id) {
-                // Use negative temp to avoid duplicate key during swap
-                $db->prepare('UPDATE iti_program_days SET day_number=-1 WHERE id=?')->execute([$day_id]);
-                $db->prepare('UPDATE iti_program_days SET day_number=? WHERE id=?')->execute([$cur_num, $swap_id]);
-                $db->prepare('UPDATE iti_program_days SET day_number=? WHERE id=?')->execute([$swap_num, $day_id]);
+            // Get all days ordered by day_number to find the positional neighbour
+            $all_st = $db->prepare('SELECT id, day_number FROM iti_program_days WHERE program_id=? ORDER BY day_number');
+            $all_st->execute([$id]);
+            $all_rows = $all_st->fetchAll();
+            $pos = null;
+            foreach ($all_rows as $i => $r) {
+                if ((int)$r['id'] === $day_id) { $pos = $i; break; }
+            }
+            if ($pos !== null) {
+                $swap_pos = $direction === 'up' ? $pos - 1 : $pos + 1;
+                if (isset($all_rows[$swap_pos])) {
+                    $cur_num  = (int)$all_rows[$pos]['day_number'];
+                    $swap_id  = (int)$all_rows[$swap_pos]['id'];
+                    $swap_num = (int)$all_rows[$swap_pos]['day_number'];
+                    // Use negative temp to avoid duplicate key during swap
+                    $db->prepare('UPDATE iti_program_days SET day_number=-1 WHERE id=?')->execute([$day_id]);
+                    $db->prepare('UPDATE iti_program_days SET day_number=? WHERE id=?')->execute([$cur_num, $swap_id]);
+                    $db->prepare('UPDATE iti_program_days SET day_number=? WHERE id=?')->execute([$swap_num, $day_id]);
+                }
             }
         }
         iti_redirect("program_edit.php?id={$id}&tab=days");
@@ -538,10 +553,13 @@ include __DIR__ . '/../../includes/layout_header.php';
     <?php
       $start_date = !empty($program['start_date']) ? new DateTime($program['start_date']) : null;
       $total_days = count($days);
-      // Calculate total nights accounting for OA blocks
+      // Calculate total nights — safe fallback if OA columns not yet in DB
       $total_nights = 0;
-      foreach ($days as $_d) $total_nights += max(1, (int)($_d['own_arrangement_nights'] ?? 0) ?: 1);
-      $total_nights--; // last day has no extra night
+      foreach ($days as $_d) {
+          $oa_n = (int)(isset($_d['own_arrangement_nights']) ? $_d['own_arrangement_nights'] : 0);
+          $total_nights += max(1, $oa_n ?: 1);
+      }
+      $total_nights = max(0, $total_nights - 1);
     ?>
     <?php if ($start_date): ?>
     <div style="font-size:.72rem;color:var(--grey-mid);margin-bottom:10px;padding:6px 10px;background:var(--off-white);border-radius:6px;">
@@ -562,19 +580,22 @@ include __DIR__ . '/../../includes/layout_header.php';
           $cur_date = clone $start_date;
           foreach ($days as $_d) {
               $day_date_map[(int)$_d['id']] = clone $cur_date;
-              $nights_this = max(1, (int)($_d['own_arrangement_nights'] ?? 0) ?: 1);
-              $cur_date->modify("+{$nights_this} days");
+              $oa_n = (int)(isset($_d['own_arrangement_nights']) ? $_d['own_arrangement_nights'] : 0);
+              $cur_date->modify('+'.max(1, $oa_n ?: 1).' days');
           }
       }
     ?>
-    <?php foreach ($days as $d): ?>
+    <?php foreach ($days as $d_idx => $d): ?>
     <?php $has_lodge = !empty($d['start_lodge_id']) || !empty($d['end_lodge_id']); ?>
-    <?php $d_is_oa = !empty($d['own_arrangement']); $d_oa_n = (int)($d['own_arrangement_nights'] ?? 0); ?>
+    <?php
+      $d_is_oa = !empty($d['own_arrangement'] ?? 0);
+      $d_oa_n  = (int)(isset($d['own_arrangement_nights']) ? $d['own_arrangement_nights'] : 0);
+    ?>
     <div style="display:flex;gap:3px;align-items:stretch;margin-bottom:6px;">
       <a href="program_edit.php?id=<?= $id ?>&tab=days&day=<?= $d['id'] ?>"
          class="day-btn<?= $active_day===(int)$d['id']?' active':'' ?><?= $has_lodge?' filled':'' ?>"
          style="flex:1;display:block;text-align:center;">
-        Day <?= $d['day_number'] ?><?= $d_is_oa ? '–'.($d['day_number']+$d_oa_n-1) : '' ?>
+        Day <?= $d['day_number'] ?><?= ($d_is_oa && $d_oa_n > 1) ? '–'.($d['day_number']+$d_oa_n-1) : '' ?>
         <?php if ($d_is_oa): ?>
           <div style="font-size:.62rem;font-weight:700;color:#7A4F01;background:#fff8e1;border-radius:3px;padding:1px 4px;margin-top:2px;">🏨 OA ×<?= $d_oa_n ?>n</div>
         <?php elseif ($d['day_title_en']): ?>
@@ -585,7 +606,7 @@ include __DIR__ . '/../../includes/layout_header.php';
         <?php endif; ?>
       </a>
       <div style="display:flex;flex-direction:column;gap:2px;">
-        <?php if ($d['day_number'] > 1): ?>
+        <?php if ($d_idx > 0): ?>
         <form method="POST" action="program_edit.php?id=<?= $id ?>&tab=days" style="margin:0;">
           <input type="hidden" name="_sub" value="move_day">
           <input type="hidden" name="day_id" value="<?= $d['id'] ?>">
@@ -593,7 +614,7 @@ include __DIR__ . '/../../includes/layout_header.php';
           <button title="Move up" style="padding:2px 5px;font-size:.65rem;border:1px solid var(--grey-lt);border-radius:4px;background:var(--white);cursor:pointer;">▲</button>
         </form>
         <?php endif; ?>
-        <?php if ($d['day_number'] < $total_days): ?>
+        <?php if ($d_idx < $total_days - 1): ?>
         <form method="POST" action="program_edit.php?id=<?= $id ?>&tab=days" style="margin:0;">
           <input type="hidden" name="_sub" value="move_day">
           <input type="hidden" name="day_id" value="<?= $d['id'] ?>">
