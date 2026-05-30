@@ -850,7 +850,7 @@ include __DIR__ . '/../../includes/layout_header.php';
         <div id="oa-nights-wrap" style="margin-bottom:10px;<?= $is_oa ? '' : 'display:none;' ?>">
           <label style="font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--grey-dk);display:block;margin-bottom:4px;">Own Arrangement Nights</label>
           <input type="number" name="own_arrangement_nights" id="oa-nights"
-                 min="1" max="30" value="<?= (int)($current_day_data['own_arrangement_nights'] ?? 1) ?>"
+                 min="0" max="30" value="<?= (int)($current_day_data['own_arrangement_nights'] ?? 1) ?>"
                  style="width:100px;padding:7px 10px;border:1.5px solid var(--grey-lt);border-radius:6px;font-size:.9rem;">
           <span style="font-size:.75rem;color:var(--grey-mid);margin-left:8px;">nights in own accommodation</span>
         </div>
@@ -1515,11 +1515,8 @@ function initCombo(combo) {
 
 function toggleOA(checked) {
     document.getElementById('oa-nights-wrap').style.display = checked ? '' : 'none';
-    if (!checked) {
-        // Clear OA nights when unchecked
-        var n = document.getElementById('oa-nights');
-        if (n) n.value = '1';
-    }
+    var n = document.getElementById('oa-nights');
+    if (n) n.value = checked ? (n.value > 0 ? n.value : '1') : '0';
 }
 
 // ── Ctrl+S to save day ──
