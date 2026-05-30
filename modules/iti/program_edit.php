@@ -286,6 +286,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         iti_redirect("program_edit.php?id={$id}&tab=days");
     }
 
+    // ── Reorder giorni via drag & drop (AJAX, returns JSON) ──
+    if ($sub === 'reorder_days') {
+        header('Content-Type: application/json');
+        $order = $_POST['order'] ?? []; // array of day ids in new order
+        if ($order && is_array($order)) {
+            // Get current day_numbers ordered by position
+            $cur_st = $db->prepare('SELECT id, day_number, own_arrangement_nights FROM iti_program_days WHERE program_id=? ORDER BY day_number');
+            $cur_st->execute([$id]);
+            $cur_rows = $cur_st->fetchAll();
+            // Build the sequence of day_numbers to assign (respecting OA gaps)
+            $day_nums = [];
+            $n = 1;
+            foreach ($cur_rows as $r) {
+                $day_nums[] = $n;
+                $oa = (int)($r['own_arrangement_nights'] ?? 0);
+                $n += max(1, $oa ?: 1);
+            }
+            // Map submitted id order to day_numbers using temp negatives then final
+            foreach ($order as $pos => $rid) {
+                $rid = (int)$rid;
+                if (isset($day_nums[$pos]))
+                    $db->prepare('UPDATE iti_program_days SET day_number=? WHERE id=? AND program_id=?')
+                       ->execute([-($pos+1), $rid, $id]);
+            }
+            foreach ($order as $pos => $rid) {
+                $rid = (int)$rid;
+                if (isset($day_nums[$pos]))
+                    $db->prepare('UPDATE iti_program_days SET day_number=? WHERE id=? AND program_id=?')
+                       ->execute([$day_nums[$pos], $rid, $id]);
+            }
+        }
+        echo json_encode(['ok' => true]);
+        exit;
+    }
+
     // ── Aggiungi volo ──
     if ($sub === 'add_flight') {
         $day_id          = (int)($_POST['day_id']            ?? 0);
@@ -503,9 +538,6 @@ include __DIR__ . '/../../includes/layout_header.php';
   </div>
   <div class="gap-8">
     <a href="program_view.php?id=<?= $id ?>" class="btn btn-outline btn-sm" target="_blank">👁 Preview</a>
-    <?php if ($active_tab === 'days' && $current_day_data): ?>
-    <button type="submit" form="day-save-form" class="btn btn-red btn-sm">💾 Save Program</button>
-    <?php endif; ?>
     <?php if ($program['is_published']): ?>
     <a href="<?= h($public_url) ?>" target="_blank" class="btn btn-green btn-sm">🔗 Public Link</a>
     <form method="POST" action="program_edit.php?id=<?= $id ?>" style="display:inline;">
@@ -587,13 +619,16 @@ include __DIR__ . '/../../includes/layout_header.php';
           }
       }
     ?>
+    <div id="day-sort-list" style="margin-bottom:4px;">
     <?php foreach ($days as $d_idx => $d): ?>
     <?php $has_lodge = !empty($d['start_lodge_id']) || !empty($d['end_lodge_id']); ?>
     <?php
       $d_is_oa = !empty($d['own_arrangement'] ?? 0);
       $d_oa_n  = (int)(isset($d['own_arrangement_nights']) ? $d['own_arrangement_nights'] : 0);
     ?>
-    <div style="display:flex;gap:3px;align-items:stretch;margin-bottom:6px;">
+    <div class="day-sort-item" data-id="<?= $d['id'] ?>" style="display:flex;gap:3px;align-items:stretch;margin-bottom:6px;cursor:default;">
+      <div class="day-drag-handle" title="Drag to reorder"
+           style="display:flex;align-items:center;padding:0 4px;color:var(--grey-mid);cursor:grab;font-size:.9rem;user-select:none;">⠿</div>
       <a href="program_edit.php?id=<?= $id ?>&tab=days&day=<?= $d['id'] ?>"
          class="day-btn<?= $active_day===(int)$d['id']?' active':'' ?><?= $has_lodge?' filled':'' ?>"
          style="flex:1;display:block;text-align:center;">
@@ -607,33 +642,21 @@ include __DIR__ . '/../../includes/layout_header.php';
           <div style="font-size:.62rem;color:var(--grey-mid);margin-top:1px;"><?= $day_date_map[(int)$d['id']]->format('d M') ?></div>
         <?php endif; ?>
       </a>
-      <div style="display:flex;flex-direction:column;gap:2px;">
-        <?php if ($d_idx > 0): ?>
-        <form method="POST" action="program_edit.php?id=<?= $id ?>&tab=days" style="margin:0;">
-          <input type="hidden" name="_sub" value="move_day">
-          <input type="hidden" name="day_id" value="<?= $d['id'] ?>">
-          <input type="hidden" name="direction" value="up">
-          <button title="Move up" style="padding:2px 5px;font-size:.65rem;border:1px solid var(--grey-lt);border-radius:4px;background:var(--white);cursor:pointer;">▲</button>
-        </form>
-        <?php endif; ?>
-        <?php if ($d_idx < $total_days - 1): ?>
-        <form method="POST" action="program_edit.php?id=<?= $id ?>&tab=days" style="margin:0;">
-          <input type="hidden" name="_sub" value="move_day">
-          <input type="hidden" name="day_id" value="<?= $d['id'] ?>">
-          <input type="hidden" name="direction" value="down">
-          <button title="Move down" style="padding:2px 5px;font-size:.65rem;border:1px solid var(--grey-lt);border-radius:4px;background:var(--white);cursor:pointer;">▼</button>
-        </form>
-        <?php endif; ?>
+      <form method="POST" action="program_edit.php?id=<?= $id ?>&tab=days" style="margin:0;"
+            onsubmit="return confirm('Delete Day <?= $d['day_number'] ?>?')">
+        <input type="hidden" name="_sub" value="delete_day">
+        <input type="hidden" name="day_id" value="<?= $d['id'] ?>">
+        <button title="Delete day" style="height:100%;padding:2px 6px;font-size:.65rem;border:1px solid var(--red-lt);border-radius:4px;background:var(--red-lt);color:var(--red-dk);cursor:pointer;">✕</button>
+      </form>
+    </div>
+    <?php endforeach; ?>
+    </div>
         <form method="POST" action="program_edit.php?id=<?= $id ?>&tab=days" style="margin:0;"
               onsubmit="return confirm('Delete Day <?= $d['day_number'] ?>?')">
           <input type="hidden" name="_sub" value="delete_day">
           <input type="hidden" name="day_id" value="<?= $d['id'] ?>">
           <input type="hidden" name="day_num" value="<?= $d['day_number'] ?>">
           <button title="Delete day" style="padding:2px 5px;font-size:.65rem;border:1px solid var(--red-lt);border-radius:4px;background:var(--red-lt);color:var(--red-dk);cursor:pointer;">✕</button>
-        </form>
-      </div>
-    </div>
-    <?php endforeach; ?>
     <form method="POST" action="program_edit.php?id=<?= $id ?>&tab=days" style="margin-top:10px;">
       <input type="hidden" name="_sub" value="add_day">
       <button class="btn btn-red" style="width:100%;font-size:.75rem;">+ Add Day</button>
@@ -1040,8 +1063,11 @@ include __DIR__ . '/../../includes/layout_header.php';
   </div>
 
   </form><!-- end day-save-form -->
-  <div style="margin-top:12px;">
-    <button type="submit" form="day-save-form" class="btn btn-red" style="width:100%;">💾 Save Day</button>
+  <div style="position:sticky;bottom:16px;margin-top:12px;z-index:10;">
+    <button type="submit" form="day-save-form" id="btn-save-day"
+            class="btn btn-red" style="width:100%;padding:12px;font-size:.95rem;box-shadow:0 2px 8px rgba(0,0,0,.2);">
+      💾 Save Day
+    </button>
   </div>
 
   <?php else: ?>
@@ -1526,7 +1552,47 @@ function toggleOA(checked) {
         if (n) n.value = '1';
     }
 }
+
+// ── Ctrl+S to save day ──
+document.addEventListener('keydown', function(e) {
+    if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+        e.preventDefault();
+        var form = document.getElementById('day-save-form');
+        if (form) form.submit();
+    }
+});
+
+// ── Drag & drop day reorder via SortableJS ──
+(function() {
+    var list = document.getElementById('day-sort-list');
+    if (!list) return;
+    var script = document.createElement('script');
+    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.2/Sortable.min.js';
+    script.onload = function() {
+        Sortable.create(list, {
+            handle: '.day-drag-handle',
+            animation: 150,
+            ghostClass: 'day-sort-ghost',
+            onEnd: function() {
+                var ids = Array.from(list.querySelectorAll('.day-sort-item'))
+                              .map(function(el){ return el.dataset.id; });
+                var fd = new FormData();
+                fd.append('_sub', 'reorder_days');
+                ids.forEach(function(id){ fd.append('order[]', id); });
+                fetch('program_edit.php?id=<?= $id ?>', { method:'POST', body: fd })
+                    .then(function(r){ return r.json(); })
+                    .then(function(){ window.location.reload(); })
+                    .catch(function(){ window.location.reload(); });
+            }
+        });
+    };
+    document.head.appendChild(script);
+})();
 </script>
+<style>
+.day-sort-ghost  { opacity:.4; background:var(--red-lt,#fde8e8); }
+.day-drag-handle { touch-action:none; }
+</style>
 <?php endif; ?>
 
 <?php include __DIR__ . '/../../includes/layout_footer.php'; ?>
