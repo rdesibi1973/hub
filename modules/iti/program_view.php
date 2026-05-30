@@ -169,9 +169,22 @@ include __DIR__ . '/../../includes/layout_header.php';
       <div class="day-row">
         <div class="label">🏨 Accommodation</div>
         <div class="val">
-          <span class="lodge-pill" style="background:#fff8e1;color:#7A4F01;border:1px solid #ffe082;">
-            🏨 Own Arrangement — <?= $oa_nights ?> night<?= $oa_nights!=1?'s':'' ?>
-          </span>
+          <?php
+            $oa_lodge = '';
+            if (!empty($day['end_lodge_name'])) $oa_lodge = $day['end_lodge_name'];
+            elseif (!empty($day['end_lodge_custom']) && strcasecmp(trim($day['end_lodge_custom']), 'own arrangement') !== 0)
+                $oa_lodge = $day['end_lodge_custom'];
+          ?>
+          <?php if ($oa_lodge): ?>
+            <span class="lodge-pill" style="background:#fff8e1;color:#7A4F01;border:1px solid #ffe082;">
+              🏨 <?= h($oa_lodge) ?> <span style="opacity:.7;">(Own Arrangement)</span>
+            </span>
+          <?php else: ?>
+            <span class="lodge-pill" style="background:#fff8e1;color:#7A4F01;border:1px solid #ffe082;">
+              🏨 Own Arrangement — <?= $oa_nights ?> night<?= $oa_nights!=1?'s':'' ?>
+            </span>
+          <?php endif; ?>
+          <span style="font-size:.75rem;color:#7A4F01;margin-left:6px;"><?= $oa_nights ?> night<?= $oa_nights!=1?'s':'' ?></span>
         </div>
       </div>
       <?php if ($narr): ?>
@@ -346,16 +359,23 @@ include __DIR__ . '/../../includes/layout_header.php';
     $recap_transfers     = [];
 
     foreach ($days as $d) {
-        $night = '';
-        $is_own_arr = false;
+        $night      = '';
+        $is_own_arr = !empty($d['own_arrangement'] ?? 0);
+        $oa_nights  = (int)($d['own_arrangement_nights'] ?? 0);
         if (!empty($d['end_lodge_name'])) {
             $night = $d['end_lodge_name'];
-        } elseif (!empty($d['end_lodge_custom'])) {
+        } elseif (!empty($d['end_lodge_custom']) && strcasecmp(trim($d['end_lodge_custom']), 'own arrangement') !== 0) {
             $night = $d['end_lodge_custom'];
-            $is_own_arr = (strcasecmp(trim($night), 'own arrangement') === 0);
+        } elseif ($is_own_arr) {
+            $night = ''; // pure OA, no lodge
         }
-        if ($night) {
-            $recap_accommodation[] = ['day' => $d['day_number'], 'name' => $night, 'own' => $is_own_arr];
+        if ($night || $is_own_arr) {
+            $recap_accommodation[] = [
+                'day'       => $d['day_number'],
+                'name'      => $night,
+                'own'       => $is_own_arr,
+                'oa_nights' => $oa_nights,
+            ];
         }
         foreach (iti_get_day_flights((int)$d['id']) as $fl) {
             $recap_flights[] = ['day' => $d['day_number'], 'fl' => $fl];
@@ -383,10 +403,18 @@ include __DIR__ . '/../../includes/layout_header.php';
         <tbody>
         <?php foreach ($recap_accommodation as $ra): ?>
         <tr>
-          <td style="padding:7px 12px;border-bottom:1px solid var(--off-white);color:var(--grey-mid);font-size:.78rem;font-weight:700;">Night <?= $ra['day'] ?></td>
+          <td style="padding:7px 12px;border-bottom:1px solid var(--off-white);color:var(--grey-mid);font-size:.78rem;font-weight:700;">
+            Night <?= $ra['day'] ?><?= ($ra['own'] && $ra['oa_nights'] > 1) ? '–'.($ra['day']+$ra['oa_nights']-1) : '' ?>
+          </td>
           <td style="padding:7px 12px;border-bottom:1px solid var(--off-white);">
-            <?php if ($ra['own']): ?>
-              <span class="lodge-pill" style="background:#fff8e1;color:#7A4F01;border:1px solid #ffe082;">🏨 Own Arrangement</span>
+            <?php if ($ra['own'] && $ra['name']): ?>
+              <span class="lodge-pill" style="background:#fff8e1;color:#7A4F01;border:1px solid #ffe082;">
+                🏨 <?= h($ra['name']) ?> <span style="opacity:.7;">(Own Arrangement)</span>
+              </span>
+            <?php elseif ($ra['own']): ?>
+              <span class="lodge-pill" style="background:#fff8e1;color:#7A4F01;border:1px solid #ffe082;">
+                🏨 Own Arrangement
+              </span>
             <?php else: ?>
               <span class="lodge-pill"><?= h($ra['name']) ?></span>
             <?php endif; ?>

@@ -74,8 +74,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             try {
                 $own_arr        = isset($_POST['own_arrangement']) ? 1 : 0;
                 $own_arr_nights = $own_arr ? max(1, (int)($_POST['own_arrangement_nights'] ?? 1)) : 0;
-                // When own_arrangement is on, clear lodge fields
-                if ($own_arr) { $end_id = null; $end_txt = 'Own Arrangement'; }
+                // When own_arrangement is on but no lodge selected, mark as Own Arrangement text
+                if ($own_arr && $end_id === null && empty($end_txt)) {
+                    $end_txt = 'Own Arrangement';
+                }
 
                 $db->prepare(
                     'UPDATE iti_program_days SET
@@ -850,7 +852,8 @@ include __DIR__ . '/../../includes/layout_header.php';
             foreach ($_ls as $_l)
                 $acc_opts[] = ['id'=>(string)$_l['id'], 'label'=>$_l['name'], 'group'=>$_dname];
         ?>
-        <div id="oa-lodge-wrap" style="<?= $is_oa ? 'display:none;' : '' ?>">
+        <div id="oa-lodge-wrap">
+        <div style="font-size:.72rem;color:var(--grey-mid);margin-bottom:6px;font-style:italic;">Lodge (optional — leave blank if fully independent)</div>
         <div class="iti-combo" data-field="end_lodge">
           <div class="iti-combo-inner">
             <input type="text" class="iti-combo-text" autocomplete="off"
@@ -1514,18 +1517,10 @@ function initCombo(combo) {
 
 function toggleOA(checked) {
     document.getElementById('oa-nights-wrap').style.display = checked ? '' : 'none';
-    document.getElementById('oa-lodge-wrap').style.display  = checked ? 'none' : '';
-    if (checked) {
-        // Clear lodge combo when OA is enabled
-        var combo = document.querySelector('.iti-combo[data-field="end_lodge"]');
-        if (combo) {
-            var inp = combo.querySelector('.iti-combo-text');
-            var hid = combo.querySelector('input[name="end_lodge_id"]');
-            var cus = combo.querySelector('input[name="end_lodge_custom"]');
-            if (inp) inp.value = '';
-            if (hid) hid.value = '';
-            if (cus) cus.value = '';
-        }
+    if (!checked) {
+        // Clear OA nights when unchecked
+        var n = document.getElementById('oa-nights');
+        if (n) n.value = '1';
     }
 }
 </script>
