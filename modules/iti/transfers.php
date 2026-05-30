@@ -289,7 +289,12 @@ include __DIR__ . '/../../includes/layout_header.php';
 
 <div class="page-header" style="margin-bottom:16px;">
   <div><h2>Internal Flights</h2><div class="sub"><?= count($flight_routes) ?> routes total</div></div>
-  <?php if ($can_edit): ?><a href="transfers.php?tab=flight&action=add" class="btn btn-red">+ New Route</a><?php endif; ?>
+  <?php if ($can_edit): ?>
+  <div style="display:flex;gap:8px;">
+    <a href="iti_import_flight_routes.php" class="btn btn-outline btn-sm">⬆ Import Auric Air</a>
+    <a href="transfers.php?tab=flight&action=add" class="btn btn-red">+ New Route</a>
+  </div>
+  <?php endif; ?>
 </div>
 
 <div class="table-wrap">

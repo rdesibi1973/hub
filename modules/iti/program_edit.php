@@ -357,9 +357,16 @@ $flight_map      = iti_flight_routes_map();
 // Distinct airline operators from flight routes for combo suggestions
 $airline_opts = [];
 try {
-    $ao = db()->query("SELECT DISTINCT operator FROM iti_flight_routes WHERE operator IS NOT NULL AND operator <> '' ORDER BY operator");
-    foreach ($ao->fetchAll() as $_r) $airline_opts[] = ['id'=>'', 'label'=>$_r['operator'], 'group'=>'Known operators'];
-} catch (Exception $e) {}
+    // Try iti_airlines table first (preferred)
+    $ao = db()->query("SELECT name FROM iti_airlines WHERE is_active=1 ORDER BY type, name");
+    foreach ($ao->fetchAll() as $_r) $airline_opts[] = ['id'=>$_r['name'], 'label'=>$_r['name'], 'group'=>'Airlines'];
+} catch (Exception $e) {
+    // Fallback: distinct operators from flight routes
+    try {
+        $ao = db()->query("SELECT DISTINCT operator FROM iti_flight_routes WHERE operator IS NOT NULL AND operator <> '' ORDER BY operator");
+        foreach ($ao->fetchAll() as $_r) $airline_opts[] = ['id'=>'', 'label'=>$_r['operator'], 'group'=>'Known operators'];
+    } catch (Exception $e2) {}
+}
 $activities_list = iti_get_activities(true);
 
 // Attività, voli e transfer del giorno corrente

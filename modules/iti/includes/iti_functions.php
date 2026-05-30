@@ -394,6 +394,7 @@ function iti_nav(string $current = '', array $breadcrumbs = []): void {
         'Lodges'       => ITI_MODULE_URL . '/lodges.php',
         'Transfers'    => ITI_MODULE_URL . '/transfers.php',
         'Activities'   => ITI_MODULE_URL . '/activities.php',
+        'Airlines'     => ITI_MODULE_URL . '/airlines.php',
     ];
     echo '<nav class="iti-nav" style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:20px;border-bottom:1px solid var(--grey-lt);padding-bottom:8px;">';
     foreach ($links as $label => $url) {
