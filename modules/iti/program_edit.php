@@ -54,32 +54,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($sub === 'day') {
         $day_id = (int)($_POST['day_id'] ?? 0);
         if ($day_id) {
-            // Combo fields: se c'è un id FK lo usa, altrimenti salva il testo libero.
-            // Starting point: id stored as "lodge_{n}" or "dest_{n}" to distinguish FK table.
-            $start_raw       = trim($_POST['start_lodge_id'] ?? '');
-            $start_lodge_id  = null;
-            $start_dest_id   = null;
-            $start_txt       = null;
-            if (str_starts_with($start_raw, 'lodge_')) {
-                $start_lodge_id = (int)substr($start_raw, 6) ?: null;
-            } elseif (str_starts_with($start_raw, 'dest_')) {
-                $start_dest_id = (int)substr($start_raw, 5) ?: null;
-            } else {
-                $start_txt = trim($_POST['start_lodge_custom'] ?? '') ?: null;
-            }
+            $start_raw      = trim($_POST['start_lodge_id'] ?? '');
+            $start_lodge_id = null; $start_dest_id = null; $start_txt = null;
+            if (str_starts_with($start_raw, 'lodge_'))     $start_lodge_id = (int)substr($start_raw, 6) ?: null;
+            elseif (str_starts_with($start_raw, 'dest_'))  $start_dest_id  = (int)substr($start_raw, 5) ?: null;
+            else                                            $start_txt      = trim($_POST['start_lodge_custom'] ?? '') ?: null;
 
-            // transfers saved via separate add_transfer/remove_transfer actions
-            $dest_id    = ($_POST['destination_id']   !== '' ? (int)$_POST['destination_id']   : null);
-            $dest_txt   = ($dest_id   === null ? trim($_POST['destination_custom']   ?? '') : null) ?: null;
-            $end_id     = ($_POST['end_lodge_id']     !== '' ? (int)$_POST['end_lodge_id']     : null);
-            $end_txt    = ($end_id    === null ? trim($_POST['end_lodge_custom']     ?? '') : null) ?: null;
+            $dest_id  = ($_POST['destination_id']  !== '' ? (int)$_POST['destination_id']  : null);
+            $dest_txt = ($dest_id  === null ? trim($_POST['destination_custom']  ?? '') : null) ?: null;
+            $end_id   = ($_POST['end_lodge_id']    !== '' ? (int)$_POST['end_lodge_id']    : null);
+            $end_txt  = ($end_id   === null ? trim($_POST['end_lodge_custom']    ?? '') : null) ?: null;
 
             try {
                 $db->prepare(
                     'UPDATE iti_program_days SET
                      day_title_en=?,day_title_it=?,day_title_fr=?,day_title_es=?,day_title_de=?,
                      start_lodge_id=?,start_destination_id=?,start_custom=?,
-
                      destination_id=?,destination_custom=?,
                      narrative_en=?,narrative_it=?,narrative_fr=?,narrative_es=?,narrative_de=?,
                      end_lodge_id=?,end_lodge_custom=?,
@@ -89,7 +79,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     trim($_POST['day_title_en']),trim($_POST['day_title_it']),
                     trim($_POST['day_title_fr']),trim($_POST['day_title_es']),trim($_POST['day_title_de']),
                     $start_lodge_id, $start_dest_id, $start_txt,
-
                     $dest_id, $dest_txt,
                     trim($_POST['narrative_en']),trim($_POST['narrative_it']),
                     trim($_POST['narrative_fr']),trim($_POST['narrative_es']),trim($_POST['narrative_de']),
@@ -99,19 +88,55 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     isset($_POST['meal_dinner'])?1:0,
                     $day_id, $id,
                 ]);
-                iti_flash_set('success','Day saved.');
-            } catch (\PDOException $e) {
-                // Most likely cause: start_destination_id column missing (ALTER TABLE not yet run)
-                if (str_contains($e->getMessage(), 'start_destination_id')) {
-                    iti_flash_set('error', 'DB schema out of date: run this SQL on the server → ALTER TABLE iti_program_days ADD COLUMN start_destination_id int(10) unsigned DEFAULT NULL AFTER start_lodge_id, ADD KEY fk_pd_start_dest (start_destination_id), ADD CONSTRAINT fk_pd_start_dest FOREIGN KEY (start_destination_id) REFERENCES iti_destinations (id) ON DELETE SET NULL ON UPDATE CASCADE;');
-                } else {
-                    iti_flash_set('error', 'Save failed: ' . $e->getMessage());
+
+                // ── Transfers: delete all then re-insert from array ──
+                $db->prepare('DELETE FROM iti_day_transfers WHERE program_day_id=?')->execute([$day_id]);
+                $tr_descs = $_POST['transfer_desc'] ?? [];
+                foreach (array_values($tr_descs) as $i => $desc) {
+                    $desc = trim($desc);
+                    if ($desc === '') continue;
+                    $db->prepare('INSERT INTO iti_day_transfers (program_day_id,description,sort_order) VALUES (?,?,?)')->execute([$day_id, $desc, $i+1]);
                 }
+
+                // ── Activities: delete all then re-insert from array ──
+                $db->prepare('DELETE FROM iti_day_activities WHERE program_day_id=?')->execute([$day_id]);
+                $act_ids     = $_POST['activity_id']     ?? [];
+                $act_customs = $_POST['activity_custom'] ?? [];
+                foreach (array_values($act_ids) as $i => $aid) {
+                    $aid  = (int)$aid;
+                    $cust = trim($act_customs[$i] ?? '');
+                    if (!$aid && $cust === '') continue;
+                    $db->prepare('INSERT INTO iti_day_activities (program_day_id,activity_id,activity_custom,sort_order) VALUES (?,?,?,?)')->execute([$day_id, $aid ?: null, $cust ?: null, $i+1]);
+                }
+
+                // ── Flights: delete all then re-insert from array ──
+                $db->prepare('DELETE FROM iti_day_flights WHERE program_day_id=?')->execute([$day_id]);
+                $fl_routes  = $_POST['flight_route_id']  ?? [];
+                $fl_customs = $_POST['flight_custom']    ?? [];
+                $fl_airline = $_POST['airline_company']  ?? [];
+                $fl_dep     = $_POST['departure_time']   ?? [];
+                $fl_arr     = $_POST['arrival_time']     ?? [];
+                foreach (array_values($fl_routes) as $i => $fid) {
+                    $fid  = (int)$fid;
+                    $cust = trim($fl_customs[$i] ?? '');
+                    if (!$fid && $cust === '') continue;
+                    $db->prepare('INSERT INTO iti_day_flights (program_day_id,flight_route_id,flight_custom,airline_company,departure_time,arrival_time,sort_order) VALUES (?,?,?,?,?,?,?)')->execute([
+                        $day_id, $fid ?: null, $cust ?: null,
+                        trim($fl_airline[$i] ?? '') ?: null,
+                        ($fl_dep[$i] ?? '') ?: null,
+                        ($fl_arr[$i] ?? '') ?: null,
+                        $i+1,
+                    ]);
+                }
+
+                iti_flash_set('success', 'Day saved.');
+            } catch (\PDOException $e) {
+                iti_flash_set('error', 'Save failed: ' . $e->getMessage());
             }
         } else {
             iti_flash_set('error', 'Save failed: day_id missing.');
         }
-        iti_redirect("program_edit.php?id={$id}&day={$day_id}");
+        iti_redirect("program_edit.php?id={$id}&tab=days&day={$day_id}");
     }
 
     // ── Aggiungi attività ──
@@ -527,19 +552,16 @@ include __DIR__ . '/../../includes/layout_header.php';
   <!-- Day editor -->
   <div>
   <?php if ($current_day_data): ?>
-  <?php $day_form_id = 'day-form-' . $active_day; ?>
-
-  <!-- Hidden form for day save — all inputs reference it via form= attribute to avoid nesting issues -->
-  <form id="<?= $day_form_id ?>"
+  <!-- Single form wrapping the entire day editor -->
+  <form id="day-save-form"
         method="POST"
         action="program_edit.php?id=<?= $id ?>&tab=days&day=<?= $active_day ?>">
     <input type="hidden" name="_sub"   value="day">
     <input type="hidden" name="day_id" value="<?= $active_day ?>">
-  </form>
 
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
       <div style="font-family:'Merriweather',serif;font-size:1rem;font-weight:700;">Day <?= $current_day_data['day_number'] ?></div>
-      <button type="submit" form="<?= $day_form_id ?>" class="btn btn-red btn-sm">💾 Save Day</button>
+      <button type="submit" class="btn btn-red">💾 Save Program</button>
     </div>
 
     <!-- ── BLOCCHI SEQUENZIALI DEL GIORNO ── -->
@@ -603,8 +625,8 @@ include __DIR__ . '/../../includes/layout_header.php';
                    value="<?= h($start_display) ?>">
             <button type="button" class="iti-combo-arrow" tabindex="-1">▾</button>
           </div>
-          <input type="hidden" name="start_lodge_id"     value="<?= h($start_hidden_id) ?>" form="<?= $day_form_id ?>">
-          <input type="hidden" name="start_lodge_custom" value="<?= h($current_day_data['start_custom'] ?? '') ?>" form="<?= $day_form_id ?>">
+          <input type="hidden" name="start_lodge_id"     value="<?= h($start_hidden_id) ?>">
+          <input type="hidden" name="start_lodge_custom" value="<?= h($current_day_data['start_custom'] ?? '') ?>">
           <div class="iti-combo-drop" data-opts='<?= json_encode($start_opts, JSON_HEX_APOS) ?>'></div>
         </div>
       </div>
@@ -614,40 +636,32 @@ include __DIR__ . '/../../includes/layout_header.php';
         <div style="font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--grey-mid);margin-bottom:10px;">🚌 Transfer <span style="font-weight:400;">(optional)</span></div>
 
         <?php
-        // Build options for transfer combo: defined routes + flights
         $tr_combo_opts = [];
         foreach ($transfer_map as $_tid => $_tr)
             $tr_combo_opts[] = ['label' => ($_tr['from_name']??'').' → '.($_tr['to_name']??'').' ('.($_tr['duration_min']??0).' min)'];
         foreach ($flight_map as $_fid => $_fl)
             $tr_combo_opts[] = ['label' => 'Flight: '.($_fl['from_airport']??'').' → '.($_fl['to_airport']??'').($_fl['operator']?' ('.$_fl['operator'].')':'')];
+        $tr_opts_json = json_encode(array_map(fn($o)=>['id'=>'','label'=>$o['label'],'group'=>'Suggestions'], $tr_combo_opts), JSON_HEX_APOS);
         ?>
 
-        <?php if ($current_transfers): ?>
-        <div style="margin-bottom:12px;">
-          <?php foreach ($current_transfers as $tr): ?>
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
-            <span style="flex:1;font-size:.83rem;padding:7px 11px;background:#fff;border:1.5px solid var(--grey-lt);border-radius:6px;color:var(--grey-dk);"><?= h($tr['description']) ?></span>
-            <button type="button" class="btn btn-danger btn-sm"
-                    onclick="ufRemTransfer('<?= $tr['id'] ?>')">✕</button>
-          </div>
-          <?php endforeach; ?>
-        </div>
-        <?php endif; ?>
-
-        <div style="display:flex;gap:8px;align-items:center;" id="tr-add-row-<?= $active_day ?>">
-            <div class="iti-combo" data-field="tr_new" style="flex:1;max-width:none;">
-              <div class="iti-combo-inner">
-                <input type="text" class="iti-combo-text" id="tr-add-txt-<?= $active_day ?>" autocomplete="off"
-                       placeholder="Type or choose — e.g. Transfer to Arusha airport ~30 min">
-                <button type="button" class="iti-combo-arrow" tabindex="-1">▾</button>
-              </div>
-              <div class="iti-combo-drop"
-                   data-opts='<?= json_encode(array_map(fn($o)=>['id'=>'','label'=>$o['label'],'group'=>'Suggestions'], $tr_combo_opts), JSON_HEX_APOS) ?>'
-                   data-no-clear="1"></div>
+        <div id="transfer-rows">
+        <?php foreach ($current_transfers as $tr): ?>
+        <div class="array-row" style="display:flex;gap:8px;align-items:center;margin-bottom:6px;">
+          <div class="iti-combo" style="flex:1;max-width:none;">
+            <div class="iti-combo-inner">
+              <input type="text" name="transfer_desc[]" class="iti-combo-text" autocomplete="off"
+                     value="<?= h($tr['description']) ?>"
+                     placeholder="e.g. Transfer to Arusha airport ~30 min">
+              <button type="button" class="iti-combo-arrow" tabindex="-1">▾</button>
             </div>
-            <button type="button" class="btn btn-outline btn-sm" style="white-space:nowrap;"
-                    onclick="ufAddTransfer()">+ Add</button>
+            <div class="iti-combo-drop" data-opts='<?= $tr_opts_json ?>' data-no-clear="1"></div>
           </div>
+          <button type="button" class="btn btn-danger btn-sm" onclick="this.closest('.array-row').remove()">✕</button>
+        </div>
+        <?php endforeach; ?>
+        </div>
+        <button type="button" class="btn btn-outline btn-sm" style="margin-top:6px;"
+                onclick="addTransferRow()">+ Add Transfer</button>
       </div>
 
       <!-- 3. MAIN DESTINATION -->
@@ -672,8 +686,8 @@ include __DIR__ . '/../../includes/layout_header.php';
                    value="<?= h($dest_display) ?>">
             <button type="button" class="iti-combo-arrow" tabindex="-1">▾</button>
           </div>
-          <input type="hidden" name="destination_id"     value="<?= h($current_day_data['destination_id'] ?? '') ?>" form="<?= $day_form_id ?>">
-          <input type="hidden" name="destination_custom" value="<?= h($current_day_data['destination_custom'] ?? '') ?>" form="<?= $day_form_id ?>">
+          <input type="hidden" name="destination_id"     value="<?= h($current_day_data['destination_id'] ?? '') ?>">
+          <input type="hidden" name="destination_custom" value="<?= h($current_day_data['destination_custom'] ?? '') ?>">
           <div class="iti-combo-drop" data-opts='<?= json_encode($dest_opts, JSON_HEX_APOS) ?>'></div>
         </div>
       </div>
@@ -692,12 +706,12 @@ include __DIR__ . '/../../includes/layout_header.php';
             <label style="font-size:.75rem;"><?= ITI_LANG_LABELS[$lang] ?> — Title</label>
             <input type="text" name="day_title_<?= $lang ?>" maxlength="200"
                    placeholder="e.g. Arrival in Arusha…"
-                   form="<?= $day_form_id ?>"
+                  
                    value="<?= h($current_day_data["day_title_{$lang}"] ?? '') ?>">
           </div>
           <div class="form-group">
             <label style="font-size:.75rem;"><?= ITI_LANG_LABELS[$lang] ?> — Narrative</label>
-            <textarea name="narrative_<?= $lang ?>" class="tall" style="min-height:120px;" form="<?= $day_form_id ?>"><?= h($current_day_data["narrative_{$lang}"] ?? '') ?></textarea>
+            <textarea name="narrative_<?= $lang ?>" class="tall" style="min-height:120px;"><?= h($current_day_data["narrative_{$lang}"] ?? '') ?></textarea>
           </div>
         </div>
         <?php endforeach; ?>
@@ -727,8 +741,8 @@ include __DIR__ . '/../../includes/layout_header.php';
                    value="<?= h($acc_display) ?>">
             <button type="button" class="iti-combo-arrow" tabindex="-1">▾</button>
           </div>
-          <input type="hidden" name="end_lodge_id"     value="<?= h($current_day_data['end_lodge_id'] ?? '') ?>" form="<?= $day_form_id ?>">
-          <input type="hidden" name="end_lodge_custom" value="<?= h($current_day_data['end_lodge_custom'] ?? '') ?>" form="<?= $day_form_id ?>">
+          <input type="hidden" name="end_lodge_id"     value="<?= h($current_day_data['end_lodge_id'] ?? '') ?>">
+          <input type="hidden" name="end_lodge_custom" value="<?= h($current_day_data['end_lodge_custom'] ?? '') ?>">
           <div class="iti-combo-drop" data-opts='<?= json_encode($acc_opts, JSON_HEX_APOS) ?>'></div>
         </div>
       </div>
@@ -737,9 +751,9 @@ include __DIR__ . '/../../includes/layout_header.php';
       <div style="padding:12px 20px;background:var(--off-white,#f7f6f3);">
         <div style="font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--grey-mid);margin-bottom:8px;">🍽️ Meals included</div>
         <div style="display:flex;gap:20px;">
-          <label class="meal-check"><input type="checkbox" name="meal_breakfast" value="1" <?= $current_day_data['meal_breakfast']?'checked':'' ?> form="<?= $day_form_id ?>" style="accent-color:var(--red);"> Breakfast</label>
-          <label class="meal-check"><input type="checkbox" name="meal_lunch"     value="1" <?= $current_day_data['meal_lunch']?'checked':'' ?>     form="<?= $day_form_id ?>" style="accent-color:var(--red);"> Lunch</label>
-          <label class="meal-check"><input type="checkbox" name="meal_dinner"    value="1" <?= $current_day_data['meal_dinner']?'checked':'' ?>    form="<?= $day_form_id ?>" style="accent-color:var(--red);"> Dinner</label>
+          <label class="meal-check"><input type="checkbox" name="meal_breakfast" value="1" <?= $current_day_data['meal_breakfast']?'checked':'' ?> style="accent-color:var(--red);"> Breakfast</label>
+          <label class="meal-check"><input type="checkbox" name="meal_lunch"     value="1" <?= $current_day_data['meal_lunch']?'checked':'' ?>     style="accent-color:var(--red);"> Lunch</label>
+          <label class="meal-check"><input type="checkbox" name="meal_dinner"    value="1" <?= $current_day_data['meal_dinner']?'checked':'' ?>    style="accent-color:var(--red);"> Dinner</label>
         </div>
       </div>
 
@@ -773,20 +787,32 @@ include __DIR__ . '/../../includes/layout_header.php';
     $act_opts = [];
     foreach ($activities_list as $a)
         $act_opts[] = ['id'=>(string)$a['id'], 'label'=>($a['name_en']).($a['dest_name_en'] ? ' — '.$a['dest_name_en'] : ''), 'group'=>ITI_ACTIVITY_TYPES[$a['activity_type']] ?? 'Other'];
+    $act_opts_json = json_encode($act_opts, JSON_HEX_APOS);
     ?>
-    <div style="display:flex;gap:8px;align-items:center;margin-top:10px;">
-      <div class="iti-combo" data-field="act_new" style="flex:1;max-width:none;">
-        <div class="iti-combo-inner">
-          <input type="text" id="act-txt-<?= $active_day ?>" class="iti-combo-text" autocomplete="off"
-                 placeholder="Type or choose activity…">
-          <button type="button" class="iti-combo-arrow" tabindex="-1">▾</button>
+
+    <div id="activity-rows">
+    <?php foreach ($current_acts as $a): ?>
+    <div class="act-row array-row">
+      <div style="font-size:1.1rem;">🎯</div>
+      <div class="act-info" style="flex:1;">
+        <div class="iti-combo" style="max-width:none;">
+          <div class="iti-combo-inner">
+            <input type="text" class="iti-combo-text" autocomplete="off"
+                   value="<?= h(!empty($a['activity_id']) ? ($a['name_en'] ?? '') : ($a['activity_custom'] ?? '')) ?>"
+                   placeholder="Type or choose activity…">
+            <button type="button" class="iti-combo-arrow" tabindex="-1">▾</button>
+          </div>
+          <input type="hidden" name="activity_id[]"     value="<?= h($a['activity_id'] ?? '') ?>">
+          <input type="hidden" name="activity_custom[]" value="<?= h($a['activity_custom'] ?? '') ?>">
+          <div class="iti-combo-drop" data-opts='<?= $act_opts_json ?>'></div>
         </div>
-        <input type="hidden" id="act-id-<?= $active_day ?>" name="activity_id" value="">
-        <div class="iti-combo-drop" data-opts='<?= json_encode($act_opts, JSON_HEX_APOS) ?>'></div>
       </div>
-      <button type="button" class="btn btn-outline btn-sm" style="white-space:nowrap;"
-              onclick="ufAddActivity()">+ Add</button>
+      <button type="button" class="btn btn-danger btn-sm" onclick="this.closest('.array-row').remove()">✕</button>
     </div>
+    <?php endforeach; ?>
+    </div>
+    <button type="button" class="btn btn-outline btn-sm" style="margin-top:8px;"
+            onclick="addActivityRow()">+ Add Activity</button>
   </div>
 
   <!-- Flights -->
@@ -821,40 +847,44 @@ include __DIR__ . '/../../includes/layout_header.php';
     $fl_opts = [];
     foreach ($flight_map as $_fid => $_fl)
         $fl_opts[] = ['id'=>(string)$_fid, 'label'=>($_fl['from_airport']??'').' → '.($_fl['to_airport']??'').($_fl['operator']?' ('.$_fl['operator'].')':''), 'group'=>'Flight routes'];
+    $fl_opts_json = json_encode($fl_opts, JSON_HEX_APOS);
     ?>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px;">
-      <div class="iti-combo" data-field="fl_new" style="flex:2;min-width:200px;max-width:none;">
-        <div class="iti-combo-inner">
-          <input type="text" id="fl-txt-<?= $active_day ?>" class="iti-combo-text" autocomplete="off"
-                 placeholder="Type or choose — e.g. Arusha → Seronera (Coastal Aviation)">
-          <button type="button" class="iti-combo-arrow" tabindex="-1">▾</button>
-        </div>
-        <input type="hidden" id="fl-id-<?= $active_day ?>" name="flight_route_id" value="">
-        <div class="iti-combo-drop" data-opts='<?= json_encode($fl_opts, JSON_HEX_APOS) ?>'></div>
-      </div>
-      <div style="display:flex;flex-direction:column;gap:3px;min-width:160px;">
-        <label style="font-size:.72rem;font-weight:700;color:var(--grey-dk);">Airline company</label>
-        <div class="iti-combo" data-field="airline_co" style="max-width:none;">
+
+    <div id="flight-rows">
+    <?php foreach ($current_flights as $fl): ?>
+    <div class="act-row array-row">
+      <div style="font-size:1.1rem;">✈️</div>
+      <div class="act-info" style="flex:1;display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end;">
+        <div class="iti-combo" style="flex:2;min-width:180px;max-width:none;">
           <div class="iti-combo-inner">
-            <input type="text" id="fl-airline-<?= $active_day ?>" class="iti-combo-text" autocomplete="off"
-                   placeholder="Type or choose…">
+            <input type="text" class="iti-combo-text" autocomplete="off"
+                   value="<?= h(!empty($fl['flight_route_id']) ? (($fl['from_airport']??'').' → '.($fl['to_airport']??'')) : ($fl['flight_custom']??'')) ?>"
+                   placeholder="Route or custom flight…">
             <button type="button" class="iti-combo-arrow" tabindex="-1">▾</button>
           </div>
-          <div class="iti-combo-drop" data-opts='<?= json_encode($airline_opts, JSON_HEX_APOS) ?>'></div>
+          <input type="hidden" name="flight_route_id[]"  value="<?= h($fl['flight_route_id'] ?? '') ?>">
+          <input type="hidden" name="flight_custom[]"    value="<?= h($fl['flight_custom'] ?? '') ?>">
+          <div class="iti-combo-drop" data-opts='<?= $fl_opts_json ?>'></div>
         </div>
+        <input type="text"  name="airline_company[]" value="<?= h($fl['airline_company'] ?? $fl['operator'] ?? '') ?>"
+               placeholder="Airline" style="padding:7px 10px;border:1.5px solid var(--grey-lt);border-radius:6px;font-size:.82rem;min-width:130px;">
+        <input type="time"  name="departure_time[]"  value="<?= h($fl['departure_time'] ?? '') ?>"
+               style="padding:7px 10px;border:1.5px solid var(--grey-lt);border-radius:6px;font-size:.82rem;">
+        <input type="time"  name="arrival_time[]"    value="<?= h($fl['arrival_time'] ?? '') ?>"
+               style="padding:7px 10px;border:1.5px solid var(--grey-lt);border-radius:6px;font-size:.82rem;">
       </div>
-      <div style="display:flex;flex-direction:column;gap:3px;">
-        <label style="font-size:.72rem;font-weight:700;color:var(--grey-dk);">Dep.</label>
-        <input type="time" id="fl-dep-<?= $active_day ?>" style="padding:7px 10px;border:1.5px solid var(--grey-lt);border-radius:6px;font-size:.82rem;">
-      </div>
-      <div style="display:flex;flex-direction:column;gap:3px;">
-        <label style="font-size:.72rem;font-weight:700;color:var(--grey-dk);">Arr.</label>
-        <input type="time" id="fl-arr-<?= $active_day ?>" style="padding:7px 10px;border:1.5px solid var(--grey-lt);border-radius:6px;font-size:.82rem;">
-      </div>
-      <button type="button" class="btn btn-outline btn-sm" style="white-space:nowrap;align-self:flex-end;"
-              onclick="ufAddFlight()">+ Add</button>
+      <button type="button" class="btn btn-danger btn-sm" onclick="this.closest('.array-row').remove()">✕</button>
     </div>
+    <?php endforeach; ?>
+    </div>
+    <button type="button" class="btn btn-outline btn-sm" style="margin-top:8px;"
+            onclick="addFlightRow()">+ Add Flight</button>
   </div>
+
+    <div style="margin-top:16px;text-align:right;">
+      <button type="submit" class="btn btn-red">💾 Save Program</button>
+    </div>
+  </form><!-- end day-save-form -->
 
   <?php else: ?>
   <div class="empty-state"><div class="icon">📅</div><p>Select a day to edit.</p></div>
@@ -1131,82 +1161,147 @@ document.querySelectorAll('.iti-combo').forEach(function(combo) {
 </script>
 
 <?php if ($current_day_data): ?>
-<!-- ── UTILITY FORMS — outside all other forms, used by JS buttons ── -->
-<form id="uf-add-transfer"   method="POST" action="program_edit.php?id=<?= $id ?>&tab=days&day=<?= $active_day ?>">
-  <input type="hidden" name="_sub"          value="add_transfer">
-  <input type="hidden" name="day_id"        value="<?= $active_day ?>">
-  <input type="hidden" name="transfer_desc" id="uf-transfer-desc">
-</form>
-<form id="uf-rem-transfer"   method="POST" action="program_edit.php?id=<?= $id ?>&tab=days&day=<?= $active_day ?>">
-  <input type="hidden" name="_sub"   value="remove_transfer">
-  <input type="hidden" name="day_id" value="<?= $active_day ?>">
-  <input type="hidden" name="tr_id"  id="uf-tr-id">
-</form>
-<form id="uf-add-activity"   method="POST" action="program_edit.php?id=<?= $id ?>&tab=days&day=<?= $active_day ?>">
-  <input type="hidden" name="_sub"            value="add_activity">
-  <input type="hidden" name="day_id"          value="<?= $active_day ?>">
-  <input type="hidden" name="activity_id"     id="uf-act-id">
-  <input type="hidden" name="activity_custom" id="uf-act-custom">
-</form>
-<form id="uf-rem-activity"   method="POST" action="program_edit.php?id=<?= $id ?>&tab=days&day=<?= $active_day ?>">
-  <input type="hidden" name="_sub"   value="remove_activity">
-  <input type="hidden" name="day_id" value="<?= $active_day ?>">
-  <input type="hidden" name="da_id"  id="uf-da-id">
-</form>
-<form id="uf-add-flight"     method="POST" action="program_edit.php?id=<?= $id ?>&tab=days&day=<?= $active_day ?>">
-  <input type="hidden" name="_sub"           value="add_flight">
-  <input type="hidden" name="day_id"         value="<?= $active_day ?>">
-  <input type="hidden" name="flight_route_id"  id="uf-fl-route-id">
-  <input type="hidden" name="flight_custom"  id="uf-fl-custom">
-  <input type="hidden" name="airline_company" id="uf-fl-airline">
-  <input type="hidden" name="departure_time" id="uf-fl-dep">
-  <input type="hidden" name="arrival_time"   id="uf-fl-arr">
-</form>
-<form id="uf-rem-flight"     method="POST" action="program_edit.php?id=<?= $id ?>&tab=days&day=<?= $active_day ?>">
-  <input type="hidden" name="_sub"   value="remove_flight">
-  <input type="hidden" name="day_id" value="<?= $active_day ?>">
-  <input type="hidden" name="df_id"  id="uf-df-id">
-</form>
 <script>
-function ufAddTransfer() {
-  var txt = document.getElementById('tr-add-txt-<?= $active_day ?>').value.trim();
-  if (!txt) return;
-  document.getElementById('uf-transfer-desc').value = txt;
-  document.getElementById('uf-add-transfer').submit();
+var trOptsJson   = <?= json_encode(array_map(fn($o)=>['id'=>'','label'=>$o['label'],'group'=>'Suggestions'], array_merge(
+    array_map(fn($_tr)=>['label'=>($_tr['from_name']??'').' → '.($_tr['to_name']??'').' ('.($_tr['duration_min']??0).' min)'], array_values($transfer_map)),
+    array_map(fn($_fl)=>['label'=>'Flight: '.($_fl['from_airport']??'').' → '.($_fl['to_airport']??'').($_fl['operator']?' ('.$_fl['operator'].')':'')], array_values($flight_map))
+))) ?>;
+var actOptsJson  = <?= json_encode(array_map(fn($a)=>['id'=>(string)$a['id'],'label'=>$a['name_en'].($a['dest_name_en']?' — '.$a['dest_name_en']:''),'group'=>ITI_ACTIVITY_TYPES[$a['activity_type']]??'Other'], $activities_list)) ?>;
+var flOptsJson   = <?= json_encode(array_map(fn($_fl)=>['id'=>(string)array_search($_fl,$flight_map),'label'=>($_fl['from_airport']??'').' → '.($_fl['to_airport']??'').($_fl['operator']?' ('.$_fl['operator'].')':''),'group'=>'Flight routes'], array_values($flight_map))) ?>;
+
+function makeCombo(inputAttrs, hiddenName, hiddenVal, opts, noId) {
+    var wrap = document.createElement('div');
+    wrap.className = 'iti-combo';
+    wrap.style.cssText = 'flex:1;max-width:none;';
+    var inner = document.createElement('div');
+    inner.className = 'iti-combo-inner';
+    var inp = document.createElement('input');
+    inp.type = 'text'; inp.className = 'iti-combo-text'; inp.autocomplete = 'off';
+    Object.assign(inp, inputAttrs);
+    var arrow = document.createElement('button');
+    arrow.type = 'button'; arrow.className = 'iti-combo-arrow'; arrow.tabIndex = -1; arrow.textContent = '▾';
+    inner.appendChild(inp); inner.appendChild(arrow); wrap.appendChild(inner);
+    if (!noId) {
+        var hid = document.createElement('input');
+        hid.type = 'hidden'; hid.name = hiddenName; hid.value = hiddenVal || '';
+        wrap.appendChild(hid);
+    }
+    var drop = document.createElement('div');
+    drop.className = 'iti-combo-drop';
+    drop.dataset.opts = JSON.stringify(opts);
+    if (inputAttrs.name && inputAttrs.name.indexOf('transfer') > -1) drop.dataset.noClear = '1';
+    wrap.appendChild(drop);
+    // Init combo behaviour
+    initCombo(wrap);
+    return wrap;
 }
-function ufRemTransfer(trId) {
-  if (!confirm('Remove?')) return;
-  document.getElementById('uf-tr-id').value = trId;
-  document.getElementById('uf-rem-transfer').submit();
+
+function addTransferRow() {
+    var row = document.createElement('div');
+    row.className = 'array-row';
+    row.style.cssText = 'display:flex;gap:8px;align-items:center;margin-bottom:6px;';
+    var combo = makeCombo({name:'transfer_desc[]', placeholder:'e.g. Transfer to Arusha airport ~30 min'}, '', '', trOptsJson, true);
+    combo.style.flex = '1';
+    var btn = document.createElement('button');
+    btn.type = 'button'; btn.className = 'btn btn-danger btn-sm'; btn.textContent = '✕';
+    btn.onclick = function(){ this.closest('.array-row').remove(); };
+    row.appendChild(combo); row.appendChild(btn);
+    document.getElementById('transfer-rows').appendChild(row);
+    row.querySelector('.iti-combo-text').focus();
 }
-function ufAddActivity() {
-  var aid = document.getElementById('act-id-<?= $active_day ?>').value;
-  var txt = document.getElementById('act-txt-<?= $active_day ?>').value.trim();
-  if (!aid && !txt) return;
-  document.getElementById('uf-act-id').value     = aid;
-  document.getElementById('uf-act-custom').value = aid ? '' : txt;
-  document.getElementById('uf-add-activity').submit();
+
+function addActivityRow() {
+    var row = document.createElement('div');
+    row.className = 'act-row array-row';
+    var icon = document.createElement('div'); icon.style.fontSize='1.1rem'; icon.textContent='🎯';
+    var info = document.createElement('div'); info.className='act-info'; info.style.flex='1';
+    var combo = makeCombo({placeholder:'Type or choose activity…'}, 'activity_id[]', '', actOptsJson, false);
+    // rename hidden inputs for activity
+    var hids = combo.querySelectorAll('input[type=hidden]');
+    if (hids[0]) hids[0].name = 'activity_id[]';
+    // add activity_custom hidden
+    var hc = document.createElement('input'); hc.type='hidden'; hc.name='activity_custom[]'; hc.value='';
+    combo.appendChild(hc);
+    combo.style.maxWidth='none';
+    info.appendChild(combo);
+    var btn = document.createElement('button');
+    btn.type='button'; btn.className='btn btn-danger btn-sm'; btn.textContent='✕';
+    btn.onclick=function(){ this.closest('.array-row').remove(); };
+    row.appendChild(icon); row.appendChild(info); row.appendChild(btn);
+    document.getElementById('activity-rows').appendChild(row);
+    row.querySelector('.iti-combo-text').focus();
 }
-function ufRemActivity(daId) {
-  if (!confirm('Remove?')) return;
-  document.getElementById('uf-da-id').value = daId;
-  document.getElementById('uf-rem-activity').submit();
+
+function addFlightRow() {
+    var row = document.createElement('div');
+    row.className = 'act-row array-row';
+    var icon = document.createElement('div'); icon.style.fontSize='1.1rem'; icon.textContent='✈️';
+    var info = document.createElement('div'); info.className='act-info';
+    info.style.cssText = 'flex:1;display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end;';
+    var combo = makeCombo({placeholder:'Route or custom flight…'}, 'flight_route_id[]', '', flOptsJson, false);
+    var hids = combo.querySelectorAll('input[type=hidden]');
+    if (hids[0]) hids[0].name = 'flight_route_id[]';
+    var hc = document.createElement('input'); hc.type='hidden'; hc.name='flight_custom[]'; hc.value='';
+    combo.appendChild(hc);
+    combo.style.cssText = 'flex:2;min-width:180px;max-width:none;';
+    var mkInput = function(name, type, placeholder) {
+        var i = document.createElement('input');
+        i.type=type; i.name=name; i.placeholder=placeholder||'';
+        i.style.cssText='padding:7px 10px;border:1.5px solid var(--grey-lt);border-radius:6px;font-size:.82rem;'+(type==='text'?'min-width:130px;':'');
+        return i;
+    };
+    info.appendChild(combo);
+    info.appendChild(mkInput('airline_company[]','text','Airline'));
+    info.appendChild(mkInput('departure_time[]','time',''));
+    info.appendChild(mkInput('arrival_time[]','time',''));
+    var btn = document.createElement('button');
+    btn.type='button'; btn.className='btn btn-danger btn-sm'; btn.textContent='✕';
+    btn.onclick=function(){ this.closest('.array-row').remove(); };
+    row.appendChild(icon); row.appendChild(info); row.appendChild(btn);
+    document.getElementById('flight-rows').appendChild(row);
+    row.querySelector('.iti-combo-text').focus();
 }
-function ufAddFlight() {
-  var fid = document.getElementById('fl-id-<?= $active_day ?>').value;
-  var txt = document.getElementById('fl-txt-<?= $active_day ?>').value.trim();
-  if (!fid && !txt) return;
-  document.getElementById('uf-fl-route-id').value = fid;
-  document.getElementById('uf-fl-custom').value   = fid ? '' : txt;
-  document.getElementById('uf-fl-airline').value  = document.getElementById('fl-airline-<?= $active_day ?>').value;
-  document.getElementById('uf-fl-dep').value      = document.getElementById('fl-dep-<?= $active_day ?>').value;
-  document.getElementById('uf-fl-arr').value      = document.getElementById('fl-arr-<?= $active_day ?>').value;
-  document.getElementById('uf-add-flight').submit();
-}
-function ufRemFlight(dfId) {
-  if (!confirm('Remove?')) return;
-  document.getElementById('uf-df-id').value = dfId;
-  document.getElementById('uf-rem-flight').submit();
+
+// Wire up combo selection to update hidden id/custom fields
+function initCombo(combo) {
+    var input = combo.querySelector('.iti-combo-text');
+    var drop  = combo.querySelector('.iti-combo-drop');
+    if (!input || !drop) return;
+    var hidId  = combo.querySelector('input[name$="_id[]"], input[name$="_id"]');
+    var hidTxt = combo.querySelector('input[name*="custom"]');
+    var opts   = [];
+    try { opts = JSON.parse(drop.dataset.opts || '[]'); } catch(e){}
+    var filtered = [], focusIdx = -1;
+    function renderDrop(q) {
+        q = (q||'').toLowerCase().trim();
+        filtered = q ? opts.filter(function(o){ return o.label.toLowerCase().includes(q); }) : opts;
+        drop.innerHTML = '';
+        var groups = {};
+        filtered.forEach(function(o){ if(!groups[o.group]) groups[o.group]=[]; groups[o.group].push(o); });
+        Object.keys(groups).forEach(function(g){
+            var gh=document.createElement('div'); gh.className='iti-combo-group'; gh.textContent=g; drop.appendChild(gh);
+            groups[g].forEach(function(o, oi){
+                var el=document.createElement('div'); el.className='iti-combo-opt'; el.textContent=o.label;
+                el.addEventListener('mousedown',function(e){
+                    e.preventDefault();
+                    input.value = o.label;
+                    if (hidId)  hidId.value  = o.id || '';
+                    if (hidTxt) hidTxt.value = o.id ? '' : o.label;
+                    closeDrop();
+                });
+                drop.appendChild(el);
+            });
+        });
+        focusIdx = -1;
+        drop.classList.toggle('open', filtered.length > 0);
+    }
+    function closeDrop(){ drop.classList.remove('open'); }
+    input.addEventListener('input', function(){ renderDrop(this.value); if(hidId) hidId.value=''; if(hidTxt) hidTxt.value=this.value; });
+    input.addEventListener('focus', function(){ renderDrop(this.value); });
+    input.addEventListener('blur',  function(){ setTimeout(closeDrop, 150); });
+    combo.querySelector('.iti-combo-arrow').addEventListener('click', function(){
+        if(drop.classList.contains('open')){ closeDrop(); } else { input.focus(); renderDrop(input.value); }
+    });
 }
 </script>
 <?php endif; ?>
