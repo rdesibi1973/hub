@@ -94,7 +94,6 @@ $c2->addText(iti_field($program,'title',$lang), 'small', ['align'=>'right']);
 // Footer
 $footer = $section->addFooter();
 $footer->addText(date('F Y') . ' · Confidential', 'small', ['align'=>'center']);
-\PhpOffice\PhpWord\Shared\Converter::setPixelUnit('pt');
 
 // ── COPERTINA: brand + titolo ────────────────────────────────
 $section->addText('SAVANNAH EXPLORERS', 'brand', 'spacer');
