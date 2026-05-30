@@ -543,17 +543,27 @@ function iti_get_day_transfers(int $program_day_id): array {
 }
 
 function iti_get_transfer_routes(): array {
-    $st = db()->query(
-        'SELECT tr.*, 
-                fd.name_en AS from_name,
-                td.name_en AS to_name
-           FROM iti_transfer_routes tr
-           JOIN iti_destinations fd ON fd.id = tr.from_destination
-           JOIN iti_destinations td ON td.id = tr.to_destination
-          WHERE tr.is_active = 1
-          ORDER BY fd.name_en, td.name_en'
-    );
-    return $st->fetchAll();
+    try {
+        $st = db()->query(
+            'SELECT tr.*, 
+                    fd.name_en AS from_name,
+                    td.name_en AS to_name
+               FROM iti_transfer_routes tr
+               JOIN iti_destinations fd ON fd.id = tr.from_destination
+               JOIN iti_destinations td ON td.id = tr.to_destination
+              WHERE tr.is_active = 1
+              ORDER BY fd.name_en, td.name_en'
+        );
+        return $st->fetchAll();
+    } catch (Exception $e) {
+        // Fallback: return routes without destination names if JOIN columns missing
+        try {
+            $st = db()->query('SELECT * FROM iti_transfer_routes WHERE is_active = 1 ORDER BY id');
+            return $st->fetchAll();
+        } catch (Exception $e2) {
+            return [];
+        }
+    }
 }
 
 function iti_get_flight_routes(): array {
