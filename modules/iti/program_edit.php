@@ -649,7 +649,7 @@ include __DIR__ . '/../../includes/layout_header.php';
         foreach ($transfer_map as $_tid => $_tr)
             $tr_combo_opts[] = ['label' => ($_tr['from_name']??'').' → '.($_tr['to_name']??'').' ('.($_tr['duration_min']??0).' min)'];
         foreach ($flight_map as $_fid => $_fl)
-            $tr_combo_opts[] = ['label' => 'Flight: '.($_fl['from_airport']??'').' → '.($_fl['to_airport']??'').($_fl['operator']?' ('.$_fl['operator'].')':'')];
+            $tr_combo_opts[] = ['label' => 'Flight: '.($_fl['from_airport']??'').' → '.($_fl['to_airport']??'')];
         $tr_opts_json = json_encode(array_map(fn($o)=>['id'=>'','label'=>$o['label'],'group'=>'Suggestions'], $tr_combo_opts), JSON_HEX_APOS);
         ?>
 
@@ -855,7 +855,7 @@ include __DIR__ . '/../../includes/layout_header.php';
     <?php
     $fl_opts = [];
     foreach ($flight_map as $_fid => $_fl)
-        $fl_opts[] = ['id'=>(string)$_fid, 'label'=>($_fl['from_airport']??'').' → '.($_fl['to_airport']??'').($_fl['operator']?' ('.$_fl['operator'].')':''), 'group'=>'Flight routes'];
+        $fl_opts[] = ['id'=>(string)$_fid, 'label'=>($_fl['from_airport']??'').' → '.($_fl['to_airport']??''), 'group'=>'Flight routes'];
     $fl_opts_json = json_encode($fl_opts, JSON_HEX_APOS);
     ?>
 
@@ -1109,11 +1109,18 @@ document.querySelectorAll('.iti-combo').forEach(function(combo) {
 
     function renderDrop(q) {
         drop.innerHTML = '';
+        var words = q.toLowerCase().trim().split(/\s+/).filter(Boolean);
         var q2 = q.toLowerCase();
         var lastGroup = null;
         var shown = 0;
         opts.forEach(function(o) {
-            if (q2 && !o.label.toLowerCase().includes(q2)) return;
+            var label = o.label.toLowerCase();
+            // Multi-word: ALL words must appear somewhere in the label
+            if (words.length > 1) {
+                if (!words.every(function(w){ return label.includes(w); })) return;
+            } else if (words.length === 1) {
+                if (!label.includes(words[0])) return;
+            }
             if (o.group && o.group !== lastGroup) {
                 var g = document.createElement('div');
                 g.className = 'iti-combo-group';
@@ -1135,7 +1142,7 @@ document.querySelectorAll('.iti-combo').forEach(function(combo) {
             drop.appendChild(d);
             shown++;
         });
-        if (q2 && shown === 0) {
+        if (words.length > 0 && shown === 0) {
             var hint = document.createElement('div');
             hint.className = 'iti-combo-opt custom-hint';
             hint.textContent = '✎ Save as custom: "' + q + '"';
@@ -1184,10 +1191,10 @@ document.querySelectorAll('.iti-combo').forEach(function(combo) {
 <script>
 var trOptsJson   = <?= json_encode(array_map(fn($o)=>['id'=>'','label'=>$o['label'],'group'=>'Suggestions'], array_merge(
     array_map(fn($_tr)=>['label'=>($_tr['from_name']??'').' → '.($_tr['to_name']??'').' ('.($_tr['duration_min']??0).' min)'], array_values($transfer_map)),
-    array_map(fn($_fl)=>['label'=>'Flight: '.($_fl['from_airport']??'').' → '.($_fl['to_airport']??'').($_fl['operator']?' ('.$_fl['operator'].')':'')], array_values($flight_map))
+    array_map(fn($_fl)=>['label'=>'Flight: '.($_fl['from_airport']??'').' → '.($_fl['to_airport']??'')], array_values($flight_map))
 ))) ?>;
 var actOptsJson  = <?= json_encode(array_map(fn($a)=>['id'=>(string)$a['id'],'label'=>$a['name_en'].($a['dest_name_en']?' — '.$a['dest_name_en']:''),'group'=>ITI_ACTIVITY_TYPES[$a['activity_type']]??'Other'], $activities_list)) ?>;
-var flOptsJson   = <?= json_encode(array_map(fn($_fl)=>['id'=>(string)array_search($_fl,$flight_map),'label'=>($_fl['from_airport']??'').' → '.($_fl['to_airport']??'').($_fl['operator']?' ('.$_fl['operator'].')':''),'group'=>'Flight routes'], array_values($flight_map))) ?>;
+var flOptsJson   = <?= json_encode(array_map(fn($_fl)=>['id'=>(string)array_search($_fl,$flight_map),'label'=>($_fl['from_airport']??'').' → '.($_fl['to_airport']??''),'group'=>'Flight routes'], array_values($flight_map))) ?>;
 
 function makeCombo(inputAttrs, hiddenName, hiddenVal, opts, noId) {
     var wrap = document.createElement('div');
@@ -1293,8 +1300,12 @@ function initCombo(combo) {
     try { opts = JSON.parse(drop.dataset.opts || '[]'); } catch(e){}
     var filtered = [], focusIdx = -1;
     function renderDrop(q) {
-        q = (q||'').toLowerCase().trim();
-        filtered = q ? opts.filter(function(o){ return o.label.toLowerCase().includes(q); }) : opts;
+        q = (q||'').trim();
+        var words = q.toLowerCase().split(/\s+/).filter(Boolean);
+        filtered = words.length ? opts.filter(function(o){
+            var label = o.label.toLowerCase();
+            return words.every(function(w){ return label.includes(w); });
+        }) : opts;
         drop.innerHTML = '';
         var groups = {};
         filtered.forEach(function(o){ if(!groups[o.group]) groups[o.group]=[]; groups[o.group].push(o); });
