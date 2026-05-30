@@ -83,30 +83,104 @@ if (empty($toList)) {
 }
 
 // ── Resolve Reply-To from logged-in user ─────────────────────────────────────
-$replyTo = '';
+$replyTo  = '';
+$userEmail = '';
 if ($userId > 0) {
     $db = db();
     $uStmt = $db->prepare('SELECT email, full_name FROM users WHERE id = ? AND is_active = 1 LIMIT 1');
     $uStmt->execute([$userId]);
     $uRow = $uStmt->fetch(PDO::FETCH_ASSOC);
     if ($uRow && filter_var($uRow['email'], FILTER_VALIDATE_EMAIL)) {
-        $replyTo = $uRow['email'];
+        $replyTo   = $uRow['email'];
+        $userEmail = $uRow['email'];
     }
 }
 
-// ── Send via BlueHost mail() ──────────────────────────────────────────────────
-$toStr   = implode(', ', array_column($toList, 'email'));
-$headers = "From: noreply@savannahexplorers.com\r\n"
-         . "MIME-Version: 1.0\r\n"
-         . "Content-Type: text/plain; charset=UTF-8\r\n";
-if ($replyTo !== '') {
-    $headers .= "Reply-To: {$replyTo}\r\n";
-}
-if (!empty($ccList)) {
-    $headers .= "Cc: " . implode(', ', array_column($ccList, 'email')) . "\r\n";
+// ── Signature (only for rdesibi / info@savannahexplorers.com) ────────────────
+$signaturePlain = '';
+$signatureHtml  = '';
+if ($userEmail === 'info@savannahexplorers.com') {
+    $signaturePlain = "\r\n\r\n--\r\nRoberto\r\n\r\n"
+        . "Savannah Explorers Ltd\r\n"
+        . "Engosheraton - P.O. Box 16726\r\n"
+        . "Arusha - Tanzania\r\n"
+        . "Roberto +255 784 520 453\r\n"
+        . "Office +255 768 900 199\r\n"
+        . "Emergency Mobile Tanzania: +255 768 900 199 and +255 747 777 315\r\n"
+        . "Zanzibar transfers +255 773 053 725\r\n"
+        . "Email: info@savannahexplorers.com\r\n"
+        . "Website IT: savannahexplorers.com\r\n"
+        . "Website EN: savannahexplorers.net";
+
+    $signatureHtml = '<br><br><hr style="border:none;border-top:1px solid #ccc;margin:12px 0;">'
+        . '<p style="font-family:Arial,sans-serif;font-size:13px;color:#333;line-height:1.6;margin:0;">'
+        . 'Roberto'
+        . '<br><br>'
+        . '<strong style="font-size:14px;">Savannah Explorers Ltd</strong><br>'
+        . 'Engosheraton - P.O. Box 16726<br>'
+        . 'Arusha - Tanzania<br>'
+        . 'Roberto +255 784 520 453<br>'
+        . 'Office +255 768 900 199<br>'
+        . 'Emergency Mobile Tanzania: +255 768 900 199 and +255 747 777 315<br>'
+        . 'Zanzibar transfers +255 773 053 725<br>'
+        . 'Email: <a href="mailto:info@savannahexplorers.com">info@savannahexplorers.com</a><br>'
+        . 'Website IT: <a href="https://savannahexplorers.com">savannahexplorers.com</a><br>'
+        . 'Website EN: <a href="https://savannahexplorers.net">savannahexplorers.net</a>'
+        . '</p>';
 }
 
-$ok = mail($toStr, $subject, $body, $headers);
+// ── Send via BlueHost mail() ──────────────────────────────────────────────────
+$toStr = implode(', ', array_column($toList, 'email'));
+
+if ($signatureHtml !== '') {
+    // Send multipart/alternative (plain + HTML) so email clients pick the best version
+    $boundary = 'boundary_' . md5(uniqid('', true));
+
+    $plainPart = $body . $signaturePlain;
+
+    // Convert plain-text body to basic HTML (preserve line breaks)
+    $htmlBody = '<html><body><p style="font-family:Arial,sans-serif;font-size:13px;color:#333;line-height:1.6;white-space:pre-wrap;">'
+              . htmlspecialchars($body, ENT_QUOTES, 'UTF-8')
+              . '</p>'
+              . $signatureHtml
+              . '</body></html>';
+
+    $headers = "From: noreply@savannahexplorers.com\r\n"
+             . "MIME-Version: 1.0\r\n"
+             . "Content-Type: multipart/alternative; boundary=\"{$boundary}\"\r\n";
+    if ($replyTo !== '') {
+        $headers .= "Reply-To: {$replyTo}\r\n";
+    }
+    if (!empty($ccList)) {
+        $headers .= "Cc: " . implode(', ', array_column($ccList, 'email')) . "\r\n";
+    }
+
+    $messageBody = "--{$boundary}\r\n"
+                 . "Content-Type: text/plain; charset=UTF-8\r\n"
+                 . "Content-Transfer-Encoding: quoted-printable\r\n\r\n"
+                 . quoted_printable_encode($plainPart) . "\r\n"
+                 . "--{$boundary}\r\n"
+                 . "Content-Type: text/html; charset=UTF-8\r\n"
+                 . "Content-Transfer-Encoding: quoted-printable\r\n\r\n"
+                 . quoted_printable_encode($htmlBody) . "\r\n"
+                 . "--{$boundary}--";
+
+    $ok = mail($toStr, $subject, $messageBody, $headers);
+
+} else {
+    // Standard plain-text email (no signature)
+    $headers = "From: noreply@savannahexplorers.com\r\n"
+             . "MIME-Version: 1.0\r\n"
+             . "Content-Type: text/plain; charset=UTF-8\r\n";
+    if ($replyTo !== '') {
+        $headers .= "Reply-To: {$replyTo}\r\n";
+    }
+    if (!empty($ccList)) {
+        $headers .= "Cc: " . implode(', ', array_column($ccList, 'email')) . "\r\n";
+    }
+
+    $ok = mail($toStr, $subject, $body, $headers);
+}
 
 echo json_encode($ok
     ? ['success' => true]
