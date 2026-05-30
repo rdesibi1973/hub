@@ -529,7 +529,9 @@ include __DIR__ . '/../../includes/layout_header.php';
     <div class="sub">
       <?= $program['program_type']==='sample'?'Sample':'Personal' ?>
       &nbsp;·&nbsp; <?= iti_duration_label((int)$program['duration_days']) ?>
+      <?php if ($program['program_type'] === 'personal'): ?>
       &nbsp;·&nbsp; <?= $program['pax_adults'] ?>A<?= $program['pax_children']?'+'.$program['pax_children'].'C':'' ?>
+      <?php endif; ?>
       &nbsp;·&nbsp; <span class="badge <?= ITI_PROGRAM_STATUS_BADGE[$program['status']] ?? '' ?>"><?= h($program['status']) ?></span>
       <?php if (!empty($program['ref_number'])): ?>
       &nbsp;·&nbsp; <span style="font-family:monospace;font-size:.8rem;font-weight:700;color:var(--grey-dk);"><?= h($program['ref_number']) ?></span>
@@ -1185,6 +1187,7 @@ include __DIR__ . '/../../includes/layout_header.php';
         <?php endforeach; ?>
       </select>
     </div>
+    <?php if ($program['program_type'] === 'personal'): ?>
     <div class="form-group">
       <label>Adults <span style="font-weight:400;color:var(--grey-mid);">(pax)</span></label>
       <input type="number" name="pax_adults" min="1" value="<?= (int)$program['pax_adults'] ?>">
@@ -1194,6 +1197,10 @@ include __DIR__ . '/../../includes/layout_header.php';
       <label>Children <span style="font-weight:400;color:var(--grey-mid);">(pax)</span></label>
       <input type="number" name="pax_children" min="0" value="<?= (int)$program['pax_children'] ?>">
     </div>
+    <?php else: ?>
+    <input type="hidden" name="pax_adults"   value="<?= (int)$program['pax_adults'] ?>">
+    <input type="hidden" name="pax_children" value="<?= (int)$program['pax_children'] ?>">
+    <?php endif; ?>
     <div class="form-group" style="flex-direction:row;align-items:center;gap:10px;align-self:flex-end;">
       <input type="checkbox" name="flights_included" value="1" id="fi2"
              <?= $program['flights_included']?'checked':'' ?>
