@@ -290,6 +290,42 @@ include __DIR__ . '/includes/layout_header.php';
   </div>
 
   <?php if ($is_admin_or_manager): ?>
+  <!-- ══ LODGEBRIDGE ══ -->
+  <div class="section-label dot-amber group-spacer">Lodgebridge</div>
+  <div class="links-grid">
+
+    <a class="link-card lc-teal" href="https://orangi.lodgebridge.com/Account/LogOn" target="_blank">
+      <div class="lc-icon" style="background:#fff;padding:3px;">
+        <img src="https://www.google.com/s2/favicons?domain=lodgebridge.com&sz=64" alt="Lodgebridge">
+      </div>
+      <div><div class="lc-label">Orangi</div><div class="lc-sub">lodgebridge.com</div></div>
+    </a>
+
+    <a class="link-card lc-teal" href="http://kifaru.lodgebridge.com/Account/LogOn" target="_blank">
+      <div class="lc-icon" style="background:#fff;padding:3px;">
+        <img src="https://www.google.com/s2/favicons?domain=lodgebridge.com&sz=64" alt="Lodgebridge">
+      </div>
+      <div><div class="lc-label">Kifaru</div><div class="lc-sub">lodgebridge.com</div></div>
+    </a>
+
+    <a class="link-card lc-teal" href="http://marera.lodgebridge.com/Account/LogOn" target="_blank">
+      <div class="lc-icon" style="background:#fff;padding:3px;">
+        <img src="https://www.google.com/s2/favicons?domain=lodgebridge.com&sz=64" alt="Lodgebridge">
+      </div>
+      <div><div class="lc-label">Marera</div><div class="lc-sub">lodgebridge.com</div></div>
+    </a>
+
+    <a class="link-card lc-teal" href="https://arushaexplorers.lodgebridge.com/Account/LogOn" target="_blank">
+      <div class="lc-icon" style="background:#fff;padding:3px;">
+        <img src="https://www.google.com/s2/favicons?domain=lodgebridge.com&sz=64" alt="Lodgebridge">
+      </div>
+      <div><div class="lc-label">Explorers</div><div class="lc-sub">lodgebridge.com</div></div>
+    </a>
+
+  </div>
+  <?php endif; // admin_or_manager: Lodgebridge ?>
+
+  <?php if ($is_admin_or_manager): ?>
   <!-- ══ DRIVES ══ -->
   <div class="section-label dot-drive group-spacer">Drives</div>
   <div class="links-grid">
