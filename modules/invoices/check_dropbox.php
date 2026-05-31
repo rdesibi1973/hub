@@ -50,11 +50,17 @@ if (isset($_GET['scan'])) {
 
             if ($isGrp) {
                 // ── GRP folder: check each sub-folder ──────────────────────
+                // Standard folders present in every client folder — not real clients
+                $skipFolders = ['bookings','complain','flights','guestcomments',
+                                'insurance','invoices','mails','old','passports',
+                                'vouchers','intflights'];
+
                 $subFolders = dropbox_list_folder($token, $folderPath);
                 sort($subFolders);
 
                 $subResults = [];
                 foreach ($subFolders as $sub) {
+                    if (in_array(strtolower($sub), $skipFolders)) continue;
                     $subPath  = $folderPath . '/' . $sub;
                     $subFiles = dropbox_list_files($token, $subPath);
                     $hasInv   = false;
