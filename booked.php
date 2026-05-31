@@ -98,7 +98,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 // ── Fetch & sort booked requests ──────────────────────────────────────────────
 $rows = $pdo->query(
     "SELECT r.id, r.customer_name, r.email, r.destination, r.pax,
-            r.group_folder, r.period, r.status,
+            r.group_folder, r.period, r.status, r.source,
             a.name AS agent_name,
             (SELECT COUNT(*) FROM request_notes rn WHERE rn.request_id = r.id) AS note_count
      FROM requests r
@@ -187,19 +187,19 @@ include __DIR__ . '/includes/layout_header.php';
         <thead>
           <tr>
             <th>Arrival</th><th>Departure</th><th>Customer</th><th>Email</th>
-            <th>Agent</th><th>Destination</th><th style="text-align:center">Pax</th>
+            <th>Agent</th><th>Agency</th><th>Destination</th><th style="text-align:center">Pax</th>
             <th style="text-align:center">Notes</th><th></th>
           </tr>
         </thead>
         <tbody>
         <?php if (!$rows): ?>
-          <tr><td colspan="9" style="text-align:center;color:var(--grey-mid);padding:32px">No booked requests found.</td></tr>
+          <tr><td colspan="10" style="text-align:center;color:var(--grey-mid);padding:32px">No booked requests found.</td></tr>
         <?php endif; ?>
         <?php foreach ($rows as $r):
             $is_past = $r['start_ts'] !== PHP_INT_MAX && $r['start_ts'] < $today_ts;
         ?>
           <tr data-start="<?= $r['start_ts'] ?>"
-              data-search="<?= e(strtolower($r['customer_name'].' '.($r['agent_name']??'').' '.($r['destination']??''))) ?>"
+              data-search="<?= e(strtolower($r['customer_name'].' '.($r['agent_name']??'').' '.($r['source']??'').' '.($r['destination']??''))) ?>"
               style="<?= $is_past ? 'color:var(--grey-mid)' : '' ?>">
             <td class="<?= $is_past ? 'date-past' : 'date-cell' ?>">
               <?= $r['start_date'] ? date('d M Y', strtotime($r['start_date']))
@@ -211,6 +211,7 @@ include __DIR__ . '/includes/layout_header.php';
             <td class="td-name" style="<?= $is_past ? 'color:var(--grey-mid);font-weight:400' : '' ?>"><?= e($r['customer_name']) ?></td>
             <td style="font-size:.78rem"><?= e($r['email'] ?? '') ?></td>
             <td style="font-size:.78rem"><?= e($r['agent_name'] ?? '') ?></td>
+            <td style="font-size:.78rem"><?= e(!empty($r['source']) && strtolower($r['source']) !== 'direct' ? $r['source'] : 'Direct') ?></td>
             <td style="font-size:.78rem"><?= e($r['destination'] ?? '') ?></td>
             <td style="text-align:center;font-size:.82rem"><?= $r['pax'] ?></td>
             <td style="text-align:center">
