@@ -216,7 +216,6 @@ include 'includes/header.php';
         <th>Arrival</th>
         <th>Departure</th>
         <th>Customer</th>
-        <th>Agency</th>
         <th>Destination</th>
         <th style="text-align:center">Pax</th>
         <th>Agent</th>
@@ -227,7 +226,7 @@ include 'includes/header.php';
     </thead>
     <tbody>
     <?php if (!$rows): ?>
-      <tr><td colspan="10" style="text-align:center;color:var(--grey-mid);padding:32px">No booked requests found.</td></tr>
+      <tr><td colspan="9" style="text-align:center;color:var(--grey-mid);padding:32px">No booked requests found.</td></tr>
     <?php endif; ?>
     <?php foreach ($rows as $r):
         $is_past  = $r['start_ts'] !== null && $r['start_ts'] < $today_ts;
@@ -245,19 +244,24 @@ include 'includes/header.php';
           <?= $r['start_date'] ? date('d M Y', strtotime($r['start_date'])) : '<span style="color:var(--grey-lt)">—</span>' ?>
         </td>
         <td><?= $r['end_date'] ? date('d M Y', strtotime($r['end_date'])) : '—' ?></td>
-        <td style="font-weight:600"><?= h($r['customer_name']) ?></td>
-        <td style="font-size:.78rem"><?= h(!empty($r['source']) && strtolower($r['source']) !== 'direct' ? $r['source'] : 'Direct') ?></td>
+        <td>
+          <span style="font-weight:600"><?= h($r['customer_name']) ?></span>
+          <?php $agency = folder_agency($r); if ($agency): ?>
+            <span style="font-size:.73rem;color:var(--grey-mid);margin-left:4px">(<?= h($agency) ?>)</span>
+          <?php endif; ?>
+        </td>
         <td><?= h($r['destination'] ?? '') ?></td>
         <td style="text-align:center"><?= (int)$r['pax'] ?></td>
         <td><?= h($r['agent_name'] ?? '') ?></td>
         <td style="text-align:center">
           <?php
-            $ps = $r['payment_status'] ?? '';
+            $ps = $r['payment_status'] ?: folder_payment_status($r);
             $psStyle = match($ps) {
                 'Deposit'      => 'background:#fff3cd;color:#856404',
                 'Balance'      => 'background:#cfe2ff;color:#0a3678',
                 'Balance-Cash' => 'background:#d1ecf1;color:#0c5460',
                 'Paid'         => 'background:#d1e7dd;color:#155724',
+                'Cancelled'    => 'background:#f8d7da;color:#842029',
                 default        => 'background:#e2e8f0;color:#475569',
             };
             $psLabel = $ps ?: 'Progress';

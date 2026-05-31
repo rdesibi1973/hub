@@ -48,3 +48,42 @@ function get_date_folder(array $row): string {
     if ($gf) return $gf;
     return trim($row['practice_code'] ?? '');
 }
+
+/**
+ * Extract the agent/agency part from a folder name.
+ * Returns the content inside the first set of parentheses, e.g.
+ *   "06_LauraBellocchi(Roberto-Drct)_START..." → "Roberto-Drct"
+ * Returns '' if no parentheses found.
+ */
+function folder_agency(array $row): string {
+    $folder = get_date_folder($row);
+    if (!$folder) return '';
+    if (preg_match('/\(([^)]+)\)/', $folder, $m)) {
+        return $m[1];
+    }
+    return '';
+}
+
+/**
+ * Derive payment_status from folder name suffix tags.
+ * Used as fallback when payment_status column is null/empty.
+ * Check longest tags first to avoid BALANCE matching inside BALANCE-CASH.
+ */
+function folder_payment_status(array $row): string {
+    $folder = strtoupper(get_date_folder($row));
+    if (!$folder) return '';
+    $map = [
+        '_BALANCE-CASH' => 'Balance-Cash',
+        '_BALANCE_CASH' => 'Balance-Cash',
+        '_BALANCE'      => 'Balance',
+        '_DEPOSIT'      => 'Deposit',
+        '_PAID'         => 'Paid',
+        '_PROGRESS'     => 'Progress',
+        '_PROVISIONAL'  => 'Provisional',
+        '_CANCELLED'    => 'Cancelled',
+    ];
+    foreach ($map as $tag => $status) {
+        if (strpos($folder, $tag) !== false) return $status;
+    }
+    return '';
+}
