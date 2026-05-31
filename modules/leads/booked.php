@@ -123,16 +123,10 @@ $rows = db()->query(
 
 $today_ts = mktime(0,0,0);
 foreach ($rows as &$row) {
-    // For GRP folders the year is not in the folder name — derive from confirmation_date or date_received
-    $hint_year = null;
-    $ref_date = $row['confirmation_date'] ?? $row['date_received'] ?? null;
-    if ($ref_date) $hint_year = (int)date('Y', strtotime($ref_date));
-
-    $d = parse_folder_dates(get_date_folder($row), $hint_year);
+    $d = parse_folder_dates(get_date_folder($row));
     $row['start_date'] = $d['start_date'];
     $row['end_date']   = $d['end_date'];
     $row['start_ts']   = $d['start_ts'];
-    // Derive payment_status from folder if not set in DB
     $row['_ps_derived'] = $row['payment_status'] ?: folder_payment_status($row);
 }
 unset($row);
