@@ -216,10 +216,10 @@ include 'includes/header.php';
         <th>Arrival</th>
         <th>Departure</th>
         <th>Customer</th>
+        <th>Agency</th>
         <th>Destination</th>
         <th style="text-align:center">Pax</th>
         <th>Agent</th>
-        <th>Agency</th>
         <th style="text-align:center">Status</th>
         <th style="text-align:center">Sent</th>
         <th style="text-align:center">Action</th>
@@ -246,10 +246,10 @@ include 'includes/header.php';
         </td>
         <td><?= $r['end_date'] ? date('d M Y', strtotime($r['end_date'])) : '—' ?></td>
         <td style="font-weight:600"><?= h($r['customer_name']) ?></td>
+        <td style="font-size:.78rem"><?= h(!empty($r['source']) && strtolower($r['source']) !== 'direct' ? $r['source'] : 'Direct') ?></td>
         <td><?= h($r['destination'] ?? '') ?></td>
         <td style="text-align:center"><?= (int)$r['pax'] ?></td>
         <td><?= h($r['agent_name'] ?? '') ?></td>
-        <td style="font-size:.78rem"><?= h(!empty($r['source']) && strtolower($r['source']) !== 'direct' ? $r['source'] : 'Direct') ?></td>
         <td style="text-align:center">
           <?php
             $ps = $r['payment_status'] ?? '';
