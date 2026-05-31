@@ -216,7 +216,6 @@ include 'includes/header.php';
         <th>Arrival</th>
         <th>Departure</th>
         <th>Customer</th>
-        <th>Destination</th>
         <th style="text-align:center">Pax</th>
         <th>Agent</th>
         <th style="text-align:center">Status</th>
@@ -226,7 +225,7 @@ include 'includes/header.php';
     </thead>
     <tbody>
     <?php if (!$rows): ?>
-      <tr><td colspan="9" style="text-align:center;color:var(--grey-mid);padding:32px">No booked requests found.</td></tr>
+      <tr><td colspan="8" style="text-align:center;color:var(--grey-mid);padding:32px">No booked requests found.</td></tr>
     <?php endif; ?>
     <?php foreach ($rows as $r):
         $is_past  = $r['start_ts'] !== null && $r['start_ts'] < $today_ts;
@@ -250,7 +249,6 @@ include 'includes/header.php';
             <span style="font-size:.73rem;color:var(--grey-mid);margin-left:4px">(<?= h($agency) ?>)</span>
           <?php endif; ?>
         </td>
-        <td><?= h($r['destination'] ?? '') ?></td>
         <td style="text-align:center"><?= (int)$r['pax'] ?></td>
         <td><?= h($r['agent_name'] ?? '') ?></td>
         <td style="text-align:center">
