@@ -44,19 +44,25 @@ function parse_folder_dates(string $folder): array {
  * use group_folder if set, otherwise practice_code.
  */
 function get_date_folder(array $row): string {
-    $gf = trim($row['group_folder'] ?? '');
-    if ($gf) return $gf;
-    return trim($row['practice_code'] ?? '');
+    // For GRP bookings: practice_code holds the customer subfolder with START/END dates.
+    // group_folder is the parent GRP folder and does NOT contain date tags.
+    // So always prefer practice_code for date parsing; fall back to group_folder.
+    $pc = trim($row['practice_code'] ?? '');
+    if ($pc) return $pc;
+    return trim($row['group_folder'] ?? '');
 }
 
 /**
  * Extract the agent/agency part from a folder name.
  * Returns the content inside the first set of parentheses, e.g.
  *   "06_LauraBellocchi(Roberto-Drct)_START..." → "Roberto-Drct"
+ * For GRP bookings uses group_folder (parent) where the agency tag lives.
  * Returns '' if no parentheses found.
  */
 function folder_agency(array $row): string {
-    $folder = get_date_folder($row);
+    // For GRP: agency is in group_folder; for normal: in practice_code
+    $gf = trim($row['group_folder'] ?? '');
+    $folder = $gf ?: trim($row['practice_code'] ?? '');
     if (!$folder) return '';
     if (preg_match('/\(([^)]+)\)/', $folder, $m)) {
         return $m[1];

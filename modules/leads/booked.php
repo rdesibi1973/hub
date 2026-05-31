@@ -117,6 +117,7 @@ $rows = db()->query(
      FROM requests r
      LEFT JOIN agents a ON a.id = r.agent_id
      WHERE r.status IN ('Booked','Paid','Balance','Deposit')
+       AND (r.payment_status IS NULL OR r.payment_status != 'Cancelled')
      ORDER BY r.id DESC"
 )->fetchAll(PDO::FETCH_ASSOC);
 
@@ -126,8 +127,12 @@ foreach ($rows as &$row) {
     $row['start_date'] = $d['start_date'];
     $row['end_date']   = $d['end_date'];
     $row['start_ts']   = $d['start_ts'];
+    // Derive payment_status from folder if not set in DB
+    $row['_ps_derived'] = $row['payment_status'] ?: folder_payment_status($row);
 }
 unset($row);
+// Remove rows that are Cancelled (via folder tag, not caught by SQL filter)
+$rows = array_values(array_filter($rows, fn($r) => $r['_ps_derived'] !== 'Cancelled'));
 usort($rows, function($a, $b) {
     if ($a['start_ts'] === null && $b['start_ts'] === null) return 0;
     if ($a['start_ts'] === null) return 1;
@@ -253,7 +258,7 @@ include 'includes/header.php';
         <td><?= h($r['agent_name'] ?? '') ?></td>
         <td style="text-align:center">
           <?php
-            $ps = $r['payment_status'] ?: folder_payment_status($r);
+            $ps = $r['_ps_derived'];
             $psStyle = match($ps) {
                 'Deposit'      => 'background:#fff3cd;color:#856404',
                 'Balance'      => 'background:#cfe2ff;color:#0a3678',
