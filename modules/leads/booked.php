@@ -111,7 +111,7 @@ $agents = db()->query("SELECT id, name FROM agents WHERE active=1 ORDER BY name"
 $rows = db()->query(
     "SELECT r.id, r.customer_name, r.email, r.destination, r.pax,
             r.group_folder, r.practice_code, r.period, r.status, r.agent_id,
-            r.source, r.payment_status, r.date_received, r.confirmation_date,
+            r.source, r.payment_status, r.date_received, r.confirmation_date, r.dropbox_url,
             a.name AS agent_name,
             (SELECT COUNT(*) FROM request_notes rn WHERE rn.request_id = r.id AND rn.note_type='email_sent') AS note_count
      FROM requests r

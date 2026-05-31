@@ -48,9 +48,31 @@ function parse_folder_dates(string $folder): array {
  */
 function get_date_folder(array $row): string {
     $gf = trim($row['group_folder'] ?? '');
-    // GRP parent folder has _START/_END tags — use it for date parsing
-    if ($gf) return $gf;
-    return trim($row['practice_code'] ?? '');
+    $pc = trim($row['practice_code'] ?? '');
+
+    // If group_folder already has START/END tags, use it directly
+    if ($gf && stripos($gf, '_START') !== false) return $gf;
+
+    // For GRP bookings without START/END in group_folder (older records),
+    // extract the full parent folder name from dropbox_url.
+    // dropbox_url format: https://www.dropbox.com/home/001_Safari/PARENT_FOLDER/SUB_FOLDER
+    if ($gf && stripos($gf, 'GRP') !== false) {
+        $url = trim($row['dropbox_url'] ?? '');
+        if ($url) {
+            $path = urldecode(parse_url($url, PHP_URL_PATH));
+            // Extract the segment after /001_Safari/
+            if (preg_match('#/001_Safari/([^/]+)#i', $path, $m)) {
+                $parent = $m[1];
+                if (stripos($parent, '_START') !== false) return $parent;
+            }
+        }
+        // Still no dates — fall back to group_folder (will yield no dates)
+        return $gf;
+    }
+
+    // Normal booking: practice_code has _START/_END tags
+    if ($pc) return $pc;
+    return $gf;
 }
 
 /**
