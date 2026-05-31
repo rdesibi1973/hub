@@ -1,13 +1,16 @@
 <?php
 /**
  * Parse start/end dates from a Savannah Dropbox folder/practice_code name.
- * Format: 04_12APR_CustomerName_..._START12APR_END17APR2026_CK
  *
- * Accepts group_folder OR practice_code — same format, same parser.
+ * Supported formats:
+ *   Normal:  04_12APR_CustomerName_..._START12APR_END17APR2026_CK
+ *   GRP:     GRP0206_CustomerName(Agency-Agent)  → start = day 02, month 06
  *
+ * @param  string $folder
+ * @param  int|null $hint_year  Year hint (e.g. from confirmation_date) for GRP format
  * @return array ['start_date'=>'YYYY-MM-DD'|null, 'end_date'=>'YYYY-MM-DD'|null, 'start_ts'=>int|null]
  */
-function parse_folder_dates(string $folder): array {
+function parse_folder_dates(string $folder, ?int $hint_year = null): array {
     static $months = [
         'JAN'=>1,'FEB'=>2,'MAR'=>3,'APR'=>4,'MAY'=>5,'JUN'=>6,
         'JUL'=>7,'AUG'=>8,'SEP'=>9,'OCT'=>10,'NOV'=>11,'DEC'=>12
@@ -18,7 +21,20 @@ function parse_folder_dates(string $folder): array {
 
     $f = strtoupper($folder);
 
-    // END must be present — it carries the year
+    // ── GRP format: GRP{DDMM}_... ─────────────────────────────────────────────
+    if (preg_match('/^GRP(\d{2})(\d{2})_/i', $folder, $gm)) {
+        $day = (int)$gm[1];
+        $mon = (int)$gm[2];
+        if ($day >= 1 && $day <= 31 && $mon >= 1 && $mon <= 12) {
+            $yr = $hint_year ?? (int)date('Y');
+            $ts = mktime(0, 0, 0, $mon, $day, $yr);
+            $result['start_date'] = sprintf('%04d-%02d-%02d', $yr, $mon, $day);
+            $result['start_ts']   = $ts;
+        }
+        return $result;
+    }
+
+    // ── Normal format: _END{DD}{MMM}{YYYY} ────────────────────────────────────
     if (!preg_match('/_END(\d{1,2})([A-Z]{3})(\d{4})/', $f, $em)) return $result;
     $end_day = (int)$em[1];
     $end_mon = $months[$em[2]] ?? null;
@@ -40,16 +56,18 @@ function parse_folder_dates(string $folder): array {
 }
 
 /**
- * Get the best folder name for date parsing:
- * use group_folder if set, otherwise practice_code.
+ * Get the best folder name for date parsing.
+ * For GRP bookings the date is encoded in group_folder (e.g. GRP0206_...).
+ * For normal bookings use practice_code which has _START/_END tags.
  */
 function get_date_folder(array $row): string {
-    // For GRP bookings: practice_code holds the customer subfolder with START/END dates.
-    // group_folder is the parent GRP folder and does NOT contain date tags.
-    // So always prefer practice_code for date parsing; fall back to group_folder.
+    $gf = trim($row['group_folder'] ?? '');
+    // If group_folder starts with GRP it carries the arrival date
+    if ($gf && stripos($gf, 'GRP') === 0) return $gf;
+    // Normal booking: practice_code has START/END
     $pc = trim($row['practice_code'] ?? '');
     if ($pc) return $pc;
-    return trim($row['group_folder'] ?? '');
+    return $gf;
 }
 
 /**

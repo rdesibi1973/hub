@@ -111,7 +111,7 @@ $agents = db()->query("SELECT id, name FROM agents WHERE active=1 ORDER BY name"
 $rows = db()->query(
     "SELECT r.id, r.customer_name, r.email, r.destination, r.pax,
             r.group_folder, r.practice_code, r.period, r.status, r.agent_id,
-            r.source, r.payment_status,
+            r.source, r.payment_status, r.date_received, r.confirmation_date,
             a.name AS agent_name,
             (SELECT COUNT(*) FROM request_notes rn WHERE rn.request_id = r.id AND rn.note_type='email_sent') AS note_count
      FROM requests r
@@ -123,7 +123,12 @@ $rows = db()->query(
 
 $today_ts = mktime(0,0,0);
 foreach ($rows as &$row) {
-    $d = parse_folder_dates(get_date_folder($row));
+    // For GRP folders the year is not in the folder name — derive from confirmation_date or date_received
+    $hint_year = null;
+    $ref_date = $row['confirmation_date'] ?? $row['date_received'] ?? null;
+    if ($ref_date) $hint_year = (int)date('Y', strtotime($ref_date));
+
+    $d = parse_folder_dates(get_date_folder($row), $hint_year);
     $row['start_date'] = $d['start_date'];
     $row['end_date']   = $d['end_date'];
     $row['start_ts']   = $d['start_ts'];
