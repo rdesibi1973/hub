@@ -111,6 +111,7 @@ $agents = db()->query("SELECT id, name FROM agents WHERE active=1 ORDER BY name"
 $rows = db()->query(
     "SELECT r.id, r.customer_name, r.email, r.destination, r.pax,
             r.group_folder, r.practice_code, r.period, r.status, r.agent_id,
+            r.source, r.payment_status,
             a.name AS agent_name,
             (SELECT COUNT(*) FROM request_notes rn WHERE rn.request_id = r.id AND rn.note_type='email_sent') AS note_count
      FROM requests r
@@ -218,6 +219,7 @@ include 'includes/header.php';
         <th>Destination</th>
         <th style="text-align:center">Pax</th>
         <th>Agent</th>
+        <th>Agency</th>
         <th style="text-align:center">Status</th>
         <th style="text-align:center">Sent</th>
         <th style="text-align:center">Action</th>
@@ -225,7 +227,7 @@ include 'includes/header.php';
     </thead>
     <tbody>
     <?php if (!$rows): ?>
-      <tr><td colspan="9" style="text-align:center;color:var(--grey-mid);padding:32px">No booked requests found.</td></tr>
+      <tr><td colspan="10" style="text-align:center;color:var(--grey-mid);padding:32px">No booked requests found.</td></tr>
     <?php endif; ?>
     <?php foreach ($rows as $r):
         $is_past  = $r['start_ts'] !== null && $r['start_ts'] < $today_ts;
@@ -236,7 +238,7 @@ include 'includes/header.php';
           data-agent="<?= (int)$r['agent_id'] ?>"
           data-start="<?= (string)($r['start_ts'] ?? '') ?>"
           data-hasdate="<?= $has_date ? '1' : '0' ?>"
-          data-search="<?= h(strtolower($r['customer_name'].' '.($r['agent_name']??'').' '.($r['destination']??''))) ?>"
+          data-search="<?= h(strtolower($r['customer_name'].' '.($r['agent_name']??'').' '.($r['source']??'').' '.($r['destination']??''))) ?>"
           onclick="window.location='request_view.php?id=<?= $r['id'] ?>'"
           style="<?= $is_past ? 'color:var(--grey-mid)' : '' ?>">
         <td style="font-weight:<?= ($has_date && !$is_past) ? '700' : '400' ?>;color:<?= ($has_date && !$is_past) ? 'var(--green)' : 'inherit' ?>">
@@ -247,8 +249,20 @@ include 'includes/header.php';
         <td><?= h($r['destination'] ?? '') ?></td>
         <td style="text-align:center"><?= (int)$r['pax'] ?></td>
         <td><?= h($r['agent_name'] ?? '') ?></td>
+        <td style="font-size:.78rem"><?= h(!empty($r['source']) && strtolower($r['source']) !== 'direct' ? $r['source'] : 'Direct') ?></td>
         <td style="text-align:center">
-          <span class="badge <?= $status_cls ?>"><?= h($r['status']) ?></span>
+          <?php
+            $ps = $r['payment_status'] ?? '';
+            $psStyle = match($ps) {
+                'Deposit'      => 'background:#fff3cd;color:#856404',
+                'Balance'      => 'background:#cfe2ff;color:#0a3678',
+                'Balance-Cash' => 'background:#d1ecf1;color:#0c5460',
+                'Paid'         => 'background:#d1e7dd;color:#155724',
+                default        => 'background:#e2e8f0;color:#475569',
+            };
+            $psLabel = $ps ?: 'Progress';
+          ?>
+          <span class="badge" style="<?= $psStyle ?>"><?= h($psLabel) ?></span>
         </td>
         <td style="text-align:center" onclick="event.stopPropagation()">
           <?php if ($r['note_count'] > 0): ?>
