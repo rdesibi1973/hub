@@ -4,15 +4,13 @@
  * where raw_data contains recent_conversion_event_name but source was set to iBot.
  * Run once via browser, then delete this file.
  */
-require_once __DIR__ . '/includes/config.php';
-require_once __DIR__ . '/includes/db.php';
+require_once __DIR__ . '/includes/db.php'; // provides $pdo
 
-$db = db();
-$rows = $db->fetchAll(
+$rows = $pdo->query(
     "SELECT id, source, initial_request, raw_data FROM lead_staging WHERE raw_data IS NOT NULL"
-);
+)->fetchAll();
 
-$fixed = 0;
+$fixed   = 0;
 $skipped = 0;
 
 foreach ($rows as $row) {
@@ -22,7 +20,6 @@ foreach ($rows as $row) {
     $formName = trim($p['recent_conversion_event_name'] ?? '');
     if (!$formName) { $skipped++; continue; } // genuine iBot, skip
 
-    // Rebuild initial_request header and inject Form line
     $ir = $row['initial_request'] ?? '';
 
     // Replace header line
@@ -37,11 +34,12 @@ foreach ($rows as $row) {
         );
     }
 
-    $db->execute(
-        "UPDATE lead_staging SET source='Form', initial_request=? WHERE id=?",
-        [$ir, $row['id']]
+    $stmt = $pdo->prepare(
+        "UPDATE lead_staging SET source='Form', initial_request=? WHERE id=?"
     );
-    echo "Fixed ID {$row['id']} — form: $formName<br>\n";
+    $stmt->execute([$ir, $row['id']]);
+
+    echo "Fixed ID {$row['id']} — form: " . htmlspecialchars($formName) . "<br>\n";
     $fixed++;
 }
 
