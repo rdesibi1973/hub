@@ -126,10 +126,12 @@ mark { background:#FEF3C7; color:inherit; border-radius:2px; padding:0 1px; }
         <tbody>
           <?php foreach ($rows as $r):
             $editUrl = 'request_edit.php?id=' . $r['id'];
+            $viewUrl = 'request_view.php?id=' . $r['id'];
           ?>
           <tr class="clickable"
+              onclick="window.location='<?= $viewUrl ?>'"
               ondblclick="window.location='<?= $editUrl ?>'"
-              title="Double-click to open edit page">
+              title="Click to view · Double-click to edit">
 
             <td>
               <div style="font-weight:600;line-height:1.3;">
@@ -161,7 +163,10 @@ mark { background:#FEF3C7; color:inherit; border-radius:2px; padding:0 1px; }
               </span>
             </td>
 
-            <td>
+            <td style="white-space:nowrap">
+              <a href="<?= $viewUrl ?>"
+                 class="btn btn-outline btn-sm"
+                 onclick="event.stopPropagation()">View</a>
               <a href="<?= $editUrl ?>"
                  class="btn btn-red btn-sm"
                  onclick="event.stopPropagation()">Edit</a>
@@ -175,7 +180,7 @@ mark { background:#FEF3C7; color:inherit; border-radius:2px; padding:0 1px; }
 
     <p style="font-size:.71rem;color:var(--grey-mid);margin-top:10px;text-align:right;">
       <?= count($rows) ?> result<?= count($rows) !== 1 ? 's' : '' ?> &mdash;
-      double-click a row <strong>or</strong> click <strong>Edit</strong> to open
+      double-click a row to <strong>edit</strong> · single-click or <strong>View</strong> to open
     </p>
 
   <?php endif; ?>
