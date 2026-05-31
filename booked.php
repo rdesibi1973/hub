@@ -98,7 +98,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 // ── Fetch & sort booked requests ──────────────────────────────────────────────
 $rows = $pdo->query(
     "SELECT r.id, r.customer_name, r.email, r.destination, r.pax,
-            r.group_folder, r.period, r.status, r.source,
+            r.group_folder, r.period, r.status, r.source, r.payment_status,
             a.name AS agent_name,
             (SELECT COUNT(*) FROM request_notes rn WHERE rn.request_id = r.id) AS note_count
      FROM requests r
@@ -188,12 +188,12 @@ include __DIR__ . '/includes/layout_header.php';
           <tr>
             <th>Arrival</th><th>Departure</th><th>Customer</th><th>Email</th>
             <th>Agent</th><th>Agency</th><th>Destination</th><th style="text-align:center">Pax</th>
-            <th style="text-align:center">Notes</th><th></th>
+            <th>Status</th><th style="text-align:center">Notes</th><th></th>
           </tr>
         </thead>
         <tbody>
         <?php if (!$rows): ?>
-          <tr><td colspan="10" style="text-align:center;color:var(--grey-mid);padding:32px">No booked requests found.</td></tr>
+          <tr><td colspan="11" style="text-align:center;color:var(--grey-mid);padding:32px">No booked requests found.</td></tr>
         <?php endif; ?>
         <?php foreach ($rows as $r):
             $is_past = $r['start_ts'] !== PHP_INT_MAX && $r['start_ts'] < $today_ts;
@@ -214,6 +214,26 @@ include __DIR__ . '/includes/layout_header.php';
             <td style="font-size:.78rem"><?= e(!empty($r['source']) && strtolower($r['source']) !== 'direct' ? $r['source'] : 'Direct') ?></td>
             <td style="font-size:.78rem"><?= e($r['destination'] ?? '') ?></td>
             <td style="text-align:center;font-size:.82rem"><?= $r['pax'] ?></td>
+            <td>
+              <?php
+                $ps = $r['payment_status'] ?? '';
+                $psColor = match($ps) {
+                    'Deposit'      => ['bg'=>'#fff3cd','txt'=>'#856404'],
+                    'Balance'      => ['bg'=>'#cfe2ff','txt'=>'#0a3678'],
+                    'Balance-Cash' => ['bg'=>'#d1ecf1','txt'=>'#0c5460'],
+                    'Paid'         => ['bg'=>'#d1e7dd','txt'=>'#155724'],
+                    default        => null,
+                };
+                if ($ps && $psColor):
+              ?>
+                <span style="display:inline-block;padding:2px 7px;border-radius:10px;font-size:.72rem;font-weight:600;
+                             background:<?= $psColor['bg'] ?>;color:<?= $psColor['txt'] ?>">
+                  <?= h($ps) ?>
+                </span>
+              <?php elseif (!$ps): ?>
+                <span style="color:var(--grey-lt);font-size:.75rem">—</span>
+              <?php endif; ?>
+            </td>
             <td style="text-align:center">
               <?php if ($r['note_count'] > 0): ?>
                 <span class="badge badge-staff" style="cursor:pointer"
