@@ -55,7 +55,12 @@ ksort($tpl_by_cat);
       <div style="margin-top:14px">
         <label class="m-label">📎 Attachments</label>
         <input type="file" id="attach_input" multiple style="display:none" onchange="handleFiles(this)">
-        <button type="button" class="btn btn-outline btn-sm" onclick="document.getElementById('attach_input').click()">+ Add attachment</button>
+        <div id="dropZone"
+             style="margin-top:6px;border:2px dashed var(--grey-lt);border-radius:8px;padding:14px 16px;text-align:center;cursor:pointer;transition:border-color .15s,background .15s;font-size:.82rem;color:var(--grey-mid)"
+             onclick="document.getElementById('attach_input').click()"
+             ondragover="dzOver(event)" ondragleave="dzLeave(event)" ondrop="dzDrop(event)">
+          <span id="dropZoneLabel">📎 Drag &amp; drop files here, or <u>click to browse</u></span>
+        </div>
         <div id="attachList" style="margin-top:8px;display:flex;flex-wrap:wrap;gap:4px"></div>
       </div>
 
@@ -284,5 +289,29 @@ ksort($tpl_by_cat);
 
   function escH(s)    { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
   function escAttr(s) { return String(s).replace(/[^a-zA-Z0-9_-]/g,'_'); }
+
+  window.dzOver = function(e) {
+    e.preventDefault();
+    var dz = document.getElementById('dropZone');
+    dz.style.borderColor = 'var(--red)';
+    dz.style.background  = '#fff5f5';
+  };
+  window.dzLeave = function(e) {
+    var dz = document.getElementById('dropZone');
+    dz.style.borderColor = 'var(--grey-lt)';
+    dz.style.background  = '';
+  };
+  window.dzDrop = function(e) {
+    e.preventDefault();
+    var dz = document.getElementById('dropZone');
+    dz.style.borderColor = 'var(--grey-lt)';
+    dz.style.background  = '';
+    var files = e.dataTransfer ? e.dataTransfer.files : [];
+    Array.from(files).forEach(function(f) {
+      if (!attachedFiles.find(function(x){return x.name===f.name&&x.size===f.size;}))
+        attachedFiles.push(f);
+    });
+    renderAttachments();
+  };
 })();
 </script>
