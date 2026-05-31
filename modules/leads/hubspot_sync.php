@@ -521,16 +521,21 @@ function hs_contact_to_lead(array $contact): ?array {
         ];
     }
 
-    // Source: iBot fields present → iBot; only message → Form
+    // Source: a populated recent_conversion_event_name means a web form was submitted → Form.
+    // Fall back to iBot heuristic only when that property is absent.
+    $formName = trim($p['recent_conversion_event_name'] ?? '');
     $hasIbotFields = $destRaw || $period || $activities || $duration || $accomLevel || $contactNameRaw;
-    $source        = ($hasIbotFields || (!$message && !$pax)) ? 'iBot' : 'Form';
-    // Override: if Form-specific fields present alongside no iBot fields → Form
-    if (!$hasIbotFields && ($pax || $message)) $source = 'Form';
+    if ($formName) {
+        $source = 'Form';
+    } else {
+        $source = ($hasIbotFields || (!$message && !$pax)) ? 'iBot' : 'Form';
+        // Override: if Form-specific fields present alongside no iBot fields → Form
+        if (!$hasIbotFields && ($pax || $message)) $source = 'Form';
+    }
 
     $destNorm = $destRaw ? hs_map_destination(explode(';', $destRaw)[0]) : '';
 
     // Build initial_request
-    $formName = trim($p['recent_conversion_event_name'] ?? '');
     $lines = ["--- HubSpot $source ---"];
     if ($formName)   $lines[] = "Form: $formName";
     if ($name)       $lines[] = "Name: $name";
