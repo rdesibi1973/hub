@@ -768,20 +768,13 @@ include __DIR__ . '/../../includes/layout_header.php';
       </form>
     </div>
     <?php endforeach; ?>
-    </div>
-        <form method="POST" action="program_edit.php?id=<?= $id ?>&tab=days" style="margin:0;"
-              onsubmit="return confirm('Delete Day <?= $d['day_number'] ?>?')">
-          <input type="hidden" name="_sub" value="delete_day">
-          <input type="hidden" name="day_id" value="<?= $d['id'] ?>">
-          <input type="hidden" name="day_num" value="<?= $d['day_number'] ?>">
-          <button title="Delete day" style="padding:2px 5px;font-size:.65rem;border:1px solid var(--red-lt);border-radius:4px;background:var(--red-lt);color:var(--red-dk);cursor:pointer;">✕</button>
     </div><!-- end day-sort-list -->
     <form method="POST" action="program_edit.php?id=<?= $id ?>&tab=days" style="margin-top:10px;">
       <input type="hidden" name="_sub" value="add_day">
       <button class="btn btn-red" style="width:100%;font-size:.75rem;">+ Add Day</button>
     </form>
     </div><!-- end nav-hide-when-collapsed -->
-  </div>
+  </div><!-- end day-nav-panel -->
 
   <!-- Day editor — sequential scroll view -->
   <div id="days-scroll-container" style="max-height:calc(100vh - 120px);overflow-y:auto;overflow-x:hidden;padding-right:4px;">
