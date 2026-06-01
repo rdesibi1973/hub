@@ -500,6 +500,21 @@ if (!defined('ITI_REQUEST_STATUSES')) {
     ]);
 }
 
+if (!defined('ITI_ROAD_TYPES')) {
+    define('ITI_ROAD_TYPES', [
+        'tarmac' => 'Tarmac',
+        'gravel' => 'Gravel',
+        'mixed'  => 'Mixed',
+    ]);
+}
+
+if (!defined('ITI_FLIGHT_TYPES')) {
+    define('ITI_FLIGHT_TYPES', [
+        'scheduled' => 'Scheduled',
+        'charter'   => 'Charter',
+    ]);
+}
+
 
 // ── Alias per compatibilità con program_edit.php ──────────────────────────────
 function iti_get_program_days(int $program_id): array {
