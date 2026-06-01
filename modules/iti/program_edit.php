@@ -754,8 +754,15 @@ include __DIR__ . '/../../includes/layout_header.php';
 
         <?php
         $tr_combo_opts = [];
-        foreach ($transfer_map as $_tid => $_tr)
-            $tr_combo_opts[] = ['label' => ($_tr['from_name']??'').' → '.($_tr['to_name']??'').' ('.($_tr['duration_min']??0).' min)'];
+        foreach ($transfer_map as $_tid => $_tr) {
+            $_dur = (int)($_tr['duration_min'] ?? 0);
+            $_km  = (int)($_tr['distance_km']  ?? 0);
+            $_meta = [];
+            if ($_dur > 0) $_meta[] = $_dur . ' min';
+            if ($_km  > 0) $_meta[] = $_km  . ' km';
+            $_suffix = $_meta ? ' (' . implode(', ', $_meta) . ')' : '';
+            $tr_combo_opts[] = ['label' => ($_tr['from_name']??'').' → '.($_tr['to_name']??'').$_suffix];
+        }
         foreach ($flight_map as $_fid => $_fl)
             $tr_combo_opts[] = ['label' => 'Flight: '.($_fl['from_airport']??'').' → '.($_fl['to_airport']??'')];
         $tr_opts_json = json_encode(array_map(fn($o)=>['id'=>'','label'=>$o['label'],'group'=>'Suggestions'], $tr_combo_opts), JSON_HEX_APOS);
