@@ -314,16 +314,16 @@ include __DIR__ . '/../../includes/layout_header.php';
 </div>
 
 <form method="GET" action="requests.php" class="filters">
-  <div><label>Search</label><input type="text" name="q" placeholder="Client, agent…" value="<?= h($search) ?>"></div>
-  <div>
+  <div class="filter-search"><label>Search</label><input type="text" name="q" placeholder="Client, agent…" value="<?= h($search) ?>"></div>
+  <div class="filter-sm">
     <label>Status</label>
     <select name="status">
       <option value="">All statuses</option>
       <?= iti_options(ITI_REQUEST_STATUSES, $fstatus ?: '') ?>
     </select>
   </div>
-  <div style="display:flex;gap:8px;align-items:flex-end;">
-    <button type="submit" class="btn btn-outline btn-sm">🔍 Filter</button>
+  <div class="filter-actions">
+    <button type="submit" class="btn btn-red btn-sm">🔍 Search</button>
     <?php if ($search||$fstatus): ?><a href="requests.php" class="btn btn-outline btn-sm">✕ Clear</a><?php endif; ?>
   </div>
 </form>
