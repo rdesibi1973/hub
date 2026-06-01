@@ -589,12 +589,11 @@ include __DIR__ . '/../../includes/layout_header.php';
 
   <!-- Day navigator -->
   <div id="day-nav-panel" style="position:sticky;top:72px;max-height:calc(100vh - 90px);overflow-y:auto;overflow-x:hidden;padding-right:2px;">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
-      <div style="font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--grey-mid);">Days</div>
-      <button type="button" id="nav-toggle-btn" onclick="toggleDayNav()"
-              title="Collapse/expand day list"
-              style="border:none;background:none;cursor:pointer;font-size:.85rem;color:var(--grey-mid);padding:2px 4px;border-radius:4px;line-height:1;"
-              >◀</button>
+    <button type="button" id="nav-toggle-btn" onclick="toggleDayNav()"
+            title="Collapse day list"
+            style="border:none;background:none;cursor:pointer;font-size:.85rem;color:var(--grey-mid);padding:2px 4px;border-radius:4px;line-height:1;float:right;margin-bottom:4px;">◀</button>
+    <div class="nav-hide-when-collapsed" style="display:flex;align-items:center;margin-bottom:6px;">
+      <div style="font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--grey-mid);flex:1;">Days</div>
     </div>
     <?php
       $start_date = !empty($program['start_date']) ? new DateTime($program['start_date']) : null;
@@ -608,14 +607,14 @@ include __DIR__ . '/../../includes/layout_header.php';
       $total_nights = max(0, $total_nights - 1);
     ?>
     <?php if ($start_date): ?>
-    <div class="nav-collapsible" style="font-size:.72rem;color:var(--grey-mid);margin-bottom:10px;padding:6px 10px;background:var(--off-white);border-radius:6px;">
+    <div class="nav-hide-when-collapsed" style="font-size:.72rem;color:var(--grey-mid);margin-bottom:10px;padding:6px 10px;background:var(--off-white);border-radius:6px;">
       📅 <?= $start_date->format('d M Y') ?><br>
       <?php $end = clone $start_date; $end->modify("+{$total_nights} days"); ?>
       → <?= $end->format('d M Y') ?><br>
       <strong><?= $total_days ?> days / <?= $total_nights ?> nights</strong>
     </div>
     <?php else: ?>
-    <div class="nav-collapsible" style="font-size:.72rem;color:var(--amber);margin-bottom:10px;">
+    <div class="nav-hide-when-collapsed" style="font-size:.72rem;color:var(--amber);margin-bottom:10px;">
       ⚠ Set start date in Settings
     </div>
     <?php endif; ?>
@@ -631,6 +630,7 @@ include __DIR__ . '/../../includes/layout_header.php';
           }
       }
     ?>
+    <div class="nav-hide-when-collapsed">
     <div id="day-sort-list" style="margin-bottom:4px;">
     <?php foreach ($days as $d_idx => $d): ?>
     <?php $has_lodge = !empty($d['start_lodge_id']) || !empty($d['end_lodge_id']); ?>
@@ -671,10 +671,12 @@ include __DIR__ . '/../../includes/layout_header.php';
           <input type="hidden" name="day_id" value="<?= $d['id'] ?>">
           <input type="hidden" name="day_num" value="<?= $d['day_number'] ?>">
           <button title="Delete day" style="padding:2px 5px;font-size:.65rem;border:1px solid var(--red-lt);border-radius:4px;background:var(--red-lt);color:var(--red-dk);cursor:pointer;">✕</button>
+    </div><!-- end day-sort-list -->
     <form method="POST" action="program_edit.php?id=<?= $id ?>&tab=days" style="margin-top:10px;">
       <input type="hidden" name="_sub" value="add_day">
       <button class="btn btn-red" style="width:100%;font-size:.75rem;">+ Add Day</button>
     </form>
+    </div><!-- end nav-hide-when-collapsed -->
   </div>
 
   <!-- Day editor — sequential scroll view -->
@@ -1667,19 +1669,25 @@ document.addEventListener('keydown', function(e) {
 .day-sort-ghost  { opacity:.4; background:var(--red-lt,#fde8e8); }
 .day-drag-handle { touch-action:none; }
 
-/* Day nav collapsed state */
-#days-grid.nav-collapsed { grid-template-columns:40px 1fr; }
-#days-grid.nav-collapsed #day-nav-panel .nav-collapsible { display:none; }
-#days-grid.nav-collapsed .day-sort-item .day-drag-handle { display:none; }
-#days-grid.nav-collapsed .day-sort-item form { display:none; }
-#days-grid.nav-collapsed .day-btn {
-    padding:6px 4px;
-    font-size:.65rem;
-    white-space:nowrap;
-    overflow:hidden;
-    text-overflow:ellipsis;
+/* Day nav collapsed state — only toggle arrow visible */
+#days-grid.nav-collapsed { grid-template-columns:28px 1fr; gap:12px; }
+#days-grid.nav-collapsed #day-nav-panel { overflow:hidden; padding:0; }
+#days-grid.nav-collapsed #day-nav-panel .nav-hide-when-collapsed { display:none; }
+#days-grid.nav-collapsed #nav-toggle-btn {
+    writing-mode:vertical-rl;
+    transform:rotate(180deg);
+    width:28px;
+    height:auto;
+    padding:8px 4px;
+    background:var(--off-white);
+    border:1.5px solid var(--grey-lt) !important;
+    border-radius:6px;
+    font-size:.7rem;
+    color:var(--grey-dk);
+    display:flex;
+    align-items:center;
+    justify-content:center;
 }
-#days-grid.nav-collapsed .day-btn > div { display:none; }
 </style>
 <?php endif; ?>
 
