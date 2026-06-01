@@ -103,10 +103,22 @@ if (in_array($action, ['edit','view']) && $id) {
     if (!$row) { iti_flash_set('error', 'Record not found.'); iti_redirect("transfers.php?tab={$tab}"); }
 }
 
+// ── Filtri lista ────────────────────────────────────────────
+$search_road    = trim($_GET['q']         ?? '');
+$filter_road    = $_GET['road_type']      ?? '';
+$filter_active  = $_GET['active']         ?? '';
+$search_flight  = trim($_GET['q']         ?? '');
+$filter_op      = trim($_GET['operator']  ?? '');
+
+$road_filters   = array_filter(['q'=>$search_road,'road_type'=>$filter_road,'active'=>$filter_active], fn($v)=>$v!=='');
+$flight_filters = array_filter(['q'=>$search_flight,'operator'=>$filter_op,'active'=>$filter_active], fn($v)=>$v!=='');
+
 // ── Dati lista ──────────────────────────────────────────────
-$road_routes   = iti_get_transfer_routes(false);
-$flight_routes = iti_get_flight_routes(false);
+$road_routes   = iti_get_transfer_routes($road_filters);
+$flight_routes = iti_get_flight_routes($flight_filters);
 $dest_map      = iti_destinations_map();
+$has_road_filters   = $search_road   || $filter_road  || $filter_active !== '';
+$has_flight_filters = $search_flight || $filter_op    || $filter_active !== '';
 
 $page_title = 'Transfers & Flights — Itinerary Builder';
 $extra_css = iti_extra_css();
@@ -258,9 +270,36 @@ include __DIR__ . '/../../includes/layout_header.php';
 <?php if ($tab === 'road'): ?>
 
 <div class="page-header" style="margin-bottom:16px;">
-  <div><h2>Road Transfers</h2><div class="sub"><?= count($road_routes) ?> routes total</div></div>
+  <div><h2>Road Transfers</h2><div class="sub"><?= count($road_routes) ?> routes<?= $has_road_filters ? ' found' : ' total' ?></div></div>
   <?php if ($can_edit): ?><a href="transfers.php?tab=road&action=add" class="btn btn-red">+ New Route</a><?php endif; ?>
 </div>
+
+<form method="GET" action="transfers.php" class="filters">
+  <input type="hidden" name="tab" value="road">
+  <div class="filter-search">
+    <label>Search</label>
+    <input type="text" name="q" placeholder="From or to destination…" value="<?= h($search_road) ?>">
+  </div>
+  <div class="filter-sm">
+    <label>Road Type</label>
+    <select name="road_type">
+      <option value="">All types</option>
+      <?= iti_options(ITI_ROAD_TYPES, $filter_road ?: null) ?>
+    </select>
+  </div>
+  <div class="filter-sm">
+    <label>Status</label>
+    <select name="active">
+      <option value="">All</option>
+      <option value="1" <?= $filter_active==='1'?'selected':'' ?>>Active</option>
+      <option value="0" <?= $filter_active==='0'?'selected':'' ?>>Inactive</option>
+    </select>
+  </div>
+  <div class="filter-actions">
+    <button type="submit" class="btn btn-red btn-sm">🔍 Search</button>
+    <?php if ($has_road_filters): ?><a href="transfers.php?tab=road" class="btn btn-outline btn-sm">✕ Clear</a><?php endif; ?>
+  </div>
+</form>
 
 <div class="table-wrap">
   <table>
@@ -288,7 +327,7 @@ include __DIR__ . '/../../includes/layout_header.php';
 <?php else: // flight tab ?>
 
 <div class="page-header" style="margin-bottom:16px;">
-  <div><h2>Internal Flights</h2><div class="sub"><?= count($flight_routes) ?> routes total</div></div>
+  <div><h2>Internal Flights</h2><div class="sub"><?= count($flight_routes) ?> routes<?= $has_flight_filters ? ' found' : ' total' ?></div></div>
   <?php if ($can_edit): ?>
   <div style="display:flex;gap:8px;">
     <a href="iti_import_flight_routes.php" class="btn btn-outline btn-sm">⬆ Import Auric Air</a>
@@ -296,6 +335,38 @@ include __DIR__ . '/../../includes/layout_header.php';
   </div>
   <?php endif; ?>
 </div>
+
+<form method="GET" action="transfers.php" class="filters">
+  <input type="hidden" name="tab" value="flight">
+  <div class="filter-search">
+    <label>Search</label>
+    <input type="text" name="q" placeholder="Airport, code, operator…" value="<?= h($search_flight) ?>">
+  </div>
+  <div class="filter-sm">
+    <label>Operator</label>
+    <select name="operator">
+      <option value="">All operators</option>
+      <?php
+        $ops = array_unique(array_filter(array_column(iti_get_flight_routes(), 'operator')));
+        sort($ops);
+        foreach ($ops as $op): ?>
+        <option value="<?= h($op) ?>" <?= $filter_op===$op?'selected':'' ?>><?= h($op) ?></option>
+      <?php endforeach; ?>
+    </select>
+  </div>
+  <div class="filter-sm">
+    <label>Status</label>
+    <select name="active">
+      <option value="">All</option>
+      <option value="1" <?= $filter_active==='1'?'selected':'' ?>>Active</option>
+      <option value="0" <?= $filter_active==='0'?'selected':'' ?>>Inactive</option>
+    </select>
+  </div>
+  <div class="filter-actions">
+    <button type="submit" class="btn btn-red btn-sm">🔍 Search</button>
+    <?php if ($has_flight_filters): ?><a href="transfers.php?tab=flight" class="btn btn-outline btn-sm">✕ Clear</a><?php endif; ?>
+  </div>
+</form>
 
 <div class="table-wrap">
   <table>
