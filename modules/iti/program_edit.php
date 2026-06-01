@@ -576,11 +576,114 @@ include __DIR__ . '/../../includes/layout_header.php';
 </div>
 
 <!-- Main tabs -->
+<!-- ── Program Details collapsible panel ── -->
+<div id="prog-details-wrap" style="margin-bottom:16px;border:1.5px solid var(--grey-lt);border-radius:10px;background:var(--white);overflow:hidden;">
+  <button type="button" onclick="toggleProgDetails()"
+          style="width:100%;display:flex;align-items:center;justify-content:space-between;
+                 padding:12px 18px;border:none;background:none;cursor:pointer;text-align:left;">
+    <span style="font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--grey-mid);">⚙️ Program Details</span>
+    <span id="prog-details-arrow" style="font-size:.75rem;color:var(--grey-mid);">▼</span>
+  </button>
+  <div id="prog-details-body" style="display:none;padding:0 18px 18px;border-top:1px solid var(--grey-lt);">
+  <form method="POST" action="program_edit.php?id=<?= $id ?>&tab=<?= h($active_tab) ?>">
+  <input type="hidden" name="_sub" value="header">
+
+    <div class="form-section-title" style="margin-top:16px;font-size:.75rem;">✏️ Title &amp; Subtitle</div>
+    <div class="form-grid" style="margin-bottom:8px;">
+      <?php foreach (ITI_LANGS as $lang): ?>
+      <div class="form-group">
+        <label><?= ITI_LANG_LABELS[$lang] ?><?= $lang==='en'?' <span style="color:var(--red)">*</span>':'' ?></label>
+        <input type="text" name="title_<?= $lang ?>" maxlength="200"
+               value="<?= h($program["title_{$lang}"] ?? '') ?>"
+               <?= $lang==='en'?'style="font-weight:600;"':'' ?>>
+      </div>
+      <?php endforeach; ?>
+    </div>
+    <div class="form-grid" style="margin-bottom:16px;">
+      <?php foreach (ITI_LANGS as $lang): ?>
+      <div class="form-group">
+        <label style="color:var(--grey-mid);"><?= ITI_LANG_LABELS[$lang] ?> subtitle</label>
+        <input type="text" name="subtitle_<?= $lang ?>" maxlength="255"
+               value="<?= h($program["subtitle_{$lang}"] ?? '') ?>">
+      </div>
+      <?php endforeach; ?>
+    </div>
+
+    <div class="form-section-title">Program Settings</div>
+    <div class="form-grid">
+      <div class="form-group">
+        <label>Ref. Number</label>
+        <input type="text" name="ref_number" maxlength="60"
+               placeholder="e.g. SE-2025-001"
+               value="<?= h($program['ref_number'] ?? '') ?>">
+      </div>
+      <div class="form-group">
+        <label>Start Date</label>
+        <input type="date" name="start_date" value="<?= h($program['start_date'] ?? '') ?>">
+        <span class="form-hint">End date calculated automatically</span>
+      </div>
+      <div class="form-group">
+        <label>Status</label>
+        <select name="status"><?= iti_options(ITI_PROGRAM_STATUSES, $program['status']) ?></select>
+      </div>
+      <div class="form-group">
+        <label>Display Language</label>
+        <select name="display_language"><?= iti_options(ITI_LANG_LABELS, $program['display_language']) ?></select>
+      </div>
+      <div class="form-group">
+        <label>Display Currency</label>
+        <select name="display_currency">
+          <option value="USD" <?= $program['display_currency']==='USD'?'selected':'' ?>>USD — $</option>
+          <option value="EUR" <?= $program['display_currency']==='EUR'?'selected':'' ?>>EUR — €</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Terms &amp; Conditions</label>
+        <select name="terms_id">
+          <option value="">— None —</option>
+          <?php foreach ($terms as $t): ?>
+          <option value="<?= $t['id'] ?>" <?= (int)($program['terms_id']??0)===$t['id']?'selected':'' ?>><?= h($t['version']) ?></option>
+          <?php endforeach; ?>
+        </select>
+      </div>
+      <?php if ($program['program_type'] === 'personal'): ?>
+      <div class="form-group">
+        <label>Adults <span style="font-weight:400;color:var(--grey-mid);">(pax)</span></label>
+        <input type="number" name="pax_adults" min="1" value="<?= (int)$program['pax_adults'] ?>">
+      </div>
+      <div class="form-group">
+        <label>Children <span style="font-weight:400;color:var(--grey-mid);">(pax)</span></label>
+        <input type="number" name="pax_children" min="0" value="<?= (int)$program['pax_children'] ?>">
+      </div>
+      <?php else: ?>
+      <input type="hidden" name="pax_adults"   value="<?= (int)$program['pax_adults'] ?>">
+      <input type="hidden" name="pax_children" value="<?= (int)$program['pax_children'] ?>">
+      <?php endif; ?>
+      <div class="form-group" style="flex-direction:row;align-items:center;gap:10px;align-self:flex-end;">
+        <input type="checkbox" name="flights_included" value="1" id="fi_panel"
+               <?= $program['flights_included']?'checked':'' ?>
+               style="width:16px;height:16px;accent-color:var(--red);">
+        <label for="fi_panel" style="margin:0;text-transform:none;font-size:.85rem;">Flights included in price</label>
+      </div>
+    </div>
+
+    <div class="form-actions">
+      <button type="submit" class="btn btn-red">💾 Save</button>
+      <?php if ($program['is_published']): ?>
+      <div style="margin-left:auto;display:flex;align-items:center;gap:8px;">
+        <span style="font-size:.78rem;color:var(--green);font-weight:700;">🟢 Published</span>
+        <a href="<?= h($public_url) ?>" target="_blank" class="btn btn-green btn-sm">Open public link</a>
+      </div>
+      <?php endif; ?>
+    </div>
+  </form>
+  </div>
+</div>
+
 <nav class="iti-tabs">
   <a class="iti-tab <?= $active_tab==='days'?'active':'' ?>"       href="program_edit.php?id=<?= $id ?>&tab=days">📅 Days</a>
   <a class="iti-tab <?= $active_tab==='prices'?'active':'' ?>"     href="program_edit.php?id=<?= $id ?>&tab=prices">💰 Prices</a>
   <a class="iti-tab <?= $active_tab==='inclusions'?'active':'' ?>" href="program_edit.php?id=<?= $id ?>&tab=inclusions">✅ Inclusions</a>
-  <a class="iti-tab <?= $active_tab==='info'?'active':'' ?>"       href="program_edit.php?id=<?= $id ?>&tab=info">⚙️ Settings</a>
 </nav>
 
 <?php if ($active_tab === 'days'): ?>
@@ -1153,109 +1256,28 @@ include __DIR__ . '/../../includes/layout_header.php';
 </form>
 </div>
 
-<?php elseif ($active_tab === 'info'): ?>
-<!-- ═══════════ TAB INFO / SETTINGS ═══════════ -->
-<div class="form-card">
-<form method="POST" action="program_edit.php?id=<?= $id ?>&tab=info">
-<input type="hidden" name="_sub" value="header">
-
-  <div class="form-section-title" style="margin-top:0;font-size:.8rem;color:var(--red-dk);">✏️ Title &amp; Subtitle</div>
-  <div class="form-grid" style="margin-bottom:8px;">
-    <?php foreach (ITI_LANGS as $lang): ?>
-    <div class="form-group">
-      <label><?= ITI_LANG_LABELS[$lang] ?><?= $lang==='en'?' <span style="color:var(--red)">*</span>':'' ?></label>
-      <input type="text" name="title_<?= $lang ?>" maxlength="200"
-             value="<?= h($program["title_{$lang}"] ?? '') ?>"
-             <?= $lang==='en'?'style="font-weight:600;"':'' ?>>
-    </div>
-    <?php endforeach; ?>
-  </div>
-
-  <div class="form-grid" style="margin-bottom:16px;">
-    <?php foreach (ITI_LANGS as $lang): ?>
-    <div class="form-group">
-      <label style="color:var(--grey-mid);"><?= ITI_LANG_LABELS[$lang] ?> subtitle</label>
-      <input type="text" name="subtitle_<?= $lang ?>" maxlength="255"
-             value="<?= h($program["subtitle_{$lang}"] ?? '') ?>">
-    </div>
-    <?php endforeach; ?>
-  </div>
-
-  <div class="form-section-title">Program Settings</div>
-  <div class="form-grid">
-    <div class="form-group">
-      <label>Ref. Number</label>
-      <input type="text" name="ref_number" maxlength="60"
-             placeholder="e.g. SE-2025-001"
-             value="<?= h($program['ref_number'] ?? '') ?>">
-    </div>
-    <div class="form-group">
-      <label>Start Date</label>
-      <input type="date" name="start_date" value="<?= h($program['start_date'] ?? '') ?>">
-      <span class="form-hint">End date calculated automatically</span>
-    </div>
-    <div class="form-group">
-      <label>Status</label>
-      <select name="status"><?= iti_options(ITI_PROGRAM_STATUSES, $program['status']) ?></select>
-    </div>
-    <div class="form-group">
-      <label>Display Language</label>
-      <select name="display_language"><?= iti_options(ITI_LANG_LABELS, $program['display_language']) ?></select>
-    </div>
-    <div class="form-group">
-      <label>Display Currency</label>
-      <select name="display_currency">
-        <option value="USD" <?= $program['display_currency']==='USD'?'selected':'' ?>>USD — $</option>
-        <option value="EUR" <?= $program['display_currency']==='EUR'?'selected':'' ?>>EUR — €</option>
-      </select>
-    </div>
-    <div class="form-group">
-      <label>Terms &amp; Conditions</label>
-      <select name="terms_id">
-        <option value="">— None —</option>
-        <?php foreach ($terms as $t): ?>
-        <option value="<?= $t['id'] ?>" <?= (int)($program['terms_id']??0)===$t['id']?'selected':'' ?>><?= h($t['version']) ?></option>
-        <?php endforeach; ?>
-      </select>
-    </div>
-    <?php if ($program['program_type'] === 'personal'): ?>
-    <div class="form-group">
-      <label>Adults <span style="font-weight:400;color:var(--grey-mid);">(pax)</span></label>
-      <input type="number" name="pax_adults" min="1" value="<?= (int)$program['pax_adults'] ?>">
-      <span class="form-hint">Shown in preview &amp; .docx</span>
-    </div>
-    <div class="form-group">
-      <label>Children <span style="font-weight:400;color:var(--grey-mid);">(pax)</span></label>
-      <input type="number" name="pax_children" min="0" value="<?= (int)$program['pax_children'] ?>">
-    </div>
-    <?php else: ?>
-    <input type="hidden" name="pax_adults"   value="<?= (int)$program['pax_adults'] ?>">
-    <input type="hidden" name="pax_children" value="<?= (int)$program['pax_children'] ?>">
-    <?php endif; ?>
-    <div class="form-group" style="flex-direction:row;align-items:center;gap:10px;align-self:flex-end;">
-      <input type="checkbox" name="flights_included" value="1" id="fi2"
-             <?= $program['flights_included']?'checked':'' ?>
-             style="width:16px;height:16px;accent-color:var(--red);">
-      <label for="fi2" style="margin:0;text-transform:none;font-size:.85rem;">Flights included in price</label>
-    </div>
-  </div>
-
-  <div class="form-actions">
-    <button type="submit" class="btn btn-red">💾 Save Settings</button>
-    <?php if ($program['is_published']): ?>
-    <div style="margin-left:auto;display:flex;align-items:center;gap:8px;">
-      <span style="font-size:.78rem;color:var(--green);font-weight:700;">🟢 Published</span>
-      <a href="<?= h($public_url) ?>" target="_blank" class="btn btn-green btn-sm">Open public link</a>
-    </div>
-    <?php endif; ?>
-  </div>
-</form>
-</div>
-
 <?php endif; ?>
 </main>
 
 <script>
+function toggleProgDetails() {
+    var body  = document.getElementById('prog-details-body');
+    var arrow = document.getElementById('prog-details-arrow');
+    var open  = body.style.display === 'none';
+    body.style.display  = open ? '' : 'none';
+    arrow.textContent   = open ? '▲' : '▼';
+    try { localStorage.setItem('iti_prog_details_open', open ? '1' : '0'); } catch(e) {}
+}
+// Restore state
+(function() {
+    try {
+        if (localStorage.getItem('iti_prog_details_open') === '1') {
+            document.getElementById('prog-details-body').style.display = '';
+            document.getElementById('prog-details-arrow').textContent  = '▲';
+        }
+    } catch(e) {}
+})();
+
 function switchLang(prefix, lang) {
   document.querySelectorAll(`[id^="${prefix}-"]`).forEach(el => el.classList.remove('active'));
   document.querySelectorAll(`#${prefix}-tabs .lang-tab`).forEach(el => el.classList.remove('active'));
