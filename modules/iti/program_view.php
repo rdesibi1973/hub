@@ -118,7 +118,11 @@ include __DIR__ . '/../../includes/layout_header.php';
 
   <!-- Hero header -->
   <div class="prev-hero">
-    <div style="font-size:.7rem;font-weight:800;text-transform:uppercase;letter-spacing:.2em;opacity:.6;margin-bottom:8px;">Savannah Explorers</div>
+    <div style="margin-bottom:16px;">
+      <img src="https://www.savannahexplorers.net/img/logo-savannah-explorers.png"
+           alt="Savannah Explorers"
+           style="height:48px;width:auto;filter:brightness(0) invert(1);opacity:.9;">
+    </div>
     <h1><?= iti_h($program, 'title', $lang) ?></h1>
     <?php if (iti_field($program, 'subtitle', $lang)): ?>
     <div class="sub"><?= iti_h($program, 'subtitle', $lang) ?></div>
@@ -219,6 +223,21 @@ include __DIR__ . '/../../includes/layout_header.php';
       <?php endif; ?>
 
       <?php
+        // Transfers row
+        $day_transfers = iti_get_day_transfers((int)$day['id']);
+      ?>
+      <?php if ($day_transfers): ?>
+      <div class="day-row">
+        <div class="label">🚌 Transfer</div>
+        <div class="val">
+          <?php foreach ($day_transfers as $tr): ?>
+          <div style="margin-bottom:4px;"><?= h($tr['description'] ?? '') ?></div>
+          <?php endforeach; ?>
+        </div>
+      </div>
+      <?php endif; ?>
+
+      <?php
         // Overnight / accommodation row
         $overnight_name = '';
         if (!empty($day['end_lodge_name'])) {
@@ -256,6 +275,19 @@ include __DIR__ . '/../../includes/layout_header.php';
       </div>
       <?php endif; ?>
 
+      <?php
+      $meals = [];
+      if ($day['meal_breakfast']) $meals[] = '🌅 B';
+      if ($day['meal_lunch'])     $meals[] = '☀️ L';
+      if ($day['meal_dinner'])    $meals[] = '🌙 D';
+      ?>
+      <?php if ($meals): ?>
+      <div class="day-row">
+        <div class="label">Included</div>
+        <div class="val"><div class="meal-pills"><?php foreach ($meals as $m): ?><span class="meal-pill"><?= $m ?></span><?php endforeach; ?></div></div>
+      </div>
+      <?php endif; ?>
+
       <?php if ($acts): ?>
       <div class="day-row">
         <div class="label">Activities</div>
@@ -267,22 +299,9 @@ include __DIR__ . '/../../includes/layout_header.php';
       </div>
       <?php endif; ?>
 
-      <?php
-      $meals = [];
-      if ($day['meal_breakfast']) $meals[] = '🌅 B';
-      if ($day['meal_lunch'])     $meals[] = '☀️ L';
-      if ($day['meal_dinner'])    $meals[] = '🌙 D';
-      ?>
-      <?php if ($meals): ?>
-      <div class="day-row">
-        <div class="label">Meals</div>
-        <div class="val"><div class="meal-pills"><?php foreach ($meals as $m): ?><span class="meal-pill"><?= $m ?></span><?php endforeach; ?></div></div>
-      </div>
-      <?php endif; ?>
-
       <?php if ($narr): ?>
       <div class="day-row">
-        <div class="label">Narrative</div>
+        <div class="label">Description</div>
         <div class="val narrative"><?= h($narr) ?></div>
       </div>
       <?php endif; ?>
