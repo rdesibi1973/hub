@@ -259,11 +259,11 @@ include __DIR__ . '/../../includes/layout_header.php';
 <div style="display:flex;gap:0;border-bottom:2px solid var(--grey-lt);margin-bottom:24px;">
   <a href="transfers.php?tab=road"
      style="padding:10px 22px;font-size:.82rem;font-weight:700;text-decoration:none;border-bottom:2px solid <?= $tab==='road'?'var(--red)':'transparent' ?>;margin-bottom:-2px;color:<?= $tab==='road'?'var(--red)':'var(--grey-mid)' ?>;">
-    🚗 Road Transfers (<?= count(array_filter($road_routes, fn($r)=>$r['is_active'])) ?>)
+    🚗 Road Transfers (<?= count($road_routes) ?>)
   </a>
   <a href="transfers.php?tab=flight"
      style="padding:10px 22px;font-size:.82rem;font-weight:700;text-decoration:none;border-bottom:2px solid <?= $tab==='flight'?'var(--red)':'transparent' ?>;margin-bottom:-2px;color:<?= $tab==='flight'?'var(--red)':'var(--grey-mid)' ?>;">
-    ✈️ Internal Flights (<?= count(array_filter($flight_routes, fn($r)=>$r['is_active'])) ?>)
+    ✈️ Internal Flights (<?= count($flight_routes) ?>)
   </a>
 </div>
 
@@ -329,10 +329,7 @@ include __DIR__ . '/../../includes/layout_header.php';
 <div class="page-header" style="margin-bottom:16px;">
   <div><h2>Internal Flights</h2><div class="sub"><?= count($flight_routes) ?> routes<?= $has_flight_filters ? ' found' : ' total' ?></div></div>
   <?php if ($can_edit): ?>
-  <div style="display:flex;gap:8px;">
-    <a href="iti_import_flight_routes.php" class="btn btn-outline btn-sm">⬆ Import Auric Air</a>
-    <a href="transfers.php?tab=flight&action=add" class="btn btn-red">+ New Route</a>
-  </div>
+  <a href="transfers.php?tab=flight&action=add" class="btn btn-red">+ New Route</a>
   <?php endif; ?>
 </div>
 
