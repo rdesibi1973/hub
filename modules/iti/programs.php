@@ -233,50 +233,42 @@ include __DIR__ . '/../../includes/layout_header.php';
 </div>
 
 <!-- Filtri -->
-<form method="GET" action="programs.php" style="margin:14px 0 20px;">
+<form method="GET" action="programs.php" class="filters">
   <input type="hidden" name="type" value="<?= h($tab) ?>">
-  <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;">
 
-    <div style="display:flex;flex-direction:column;gap:3px;flex:2;min-width:200px;">
-      <label style="font-size:.72rem;font-weight:700;color:var(--grey-dk);text-transform:uppercase;letter-spacing:.05em;">Search</label>
-      <input type="text" name="q"
-             placeholder="Title or client name…"
-             value="<?= h($search) ?>"
-             style="width:100%;">
-    </div>
-
-    <div style="display:flex;flex-direction:column;gap:3px;min-width:140px;">
-      <label style="font-size:.72rem;font-weight:700;color:var(--grey-dk);text-transform:uppercase;letter-spacing:.05em;">Ref. Number</label>
-      <input type="text" name="ref"
-             placeholder="e.g. SE-2025-…"
-             value="<?= h($fref) ?>"
-             style="width:100%;font-family:monospace;font-size:.85rem;">
-    </div>
-
-    <div style="display:flex;flex-direction:column;gap:3px;min-width:130px;">
-      <label style="font-size:.72rem;font-weight:700;color:var(--grey-dk);text-transform:uppercase;letter-spacing:.05em;">Language</label>
-      <select name="lang">
-        <option value="">All languages</option>
-        <?= iti_options(ITI_LANG_LABELS, $flang) ?>
-      </select>
-    </div>
-
-    <div style="display:flex;flex-direction:column;gap:3px;min-width:130px;">
-      <label style="font-size:.72rem;font-weight:700;color:var(--grey-dk);text-transform:uppercase;letter-spacing:.05em;">Status</label>
-      <select name="status">
-        <option value="">All statuses</option>
-        <?= iti_options(ITI_PROGRAM_STATUSES, $fstatus) ?>
-      </select>
-    </div>
-
-    <div style="display:flex;gap:6px;align-items:flex-end;padding-bottom:1px;">
-      <button type="submit" class="btn btn-red btn-sm">🔍 Search</button>
-      <?php if ($has_filters): ?>
-      <a href="programs.php?type=<?= h($tab) ?>" class="btn btn-outline btn-sm">✕ Clear</a>
-      <?php endif; ?>
-    </div>
-
+  <div class="filter-search">
+    <label>Search</label>
+    <input type="text" name="q" placeholder="Title or client name…" value="<?= h($search) ?>">
   </div>
+
+  <div class="filter-ref">
+    <label>Ref. Number</label>
+    <input type="text" name="ref" placeholder="e.g. SE-2025-…" value="<?= h($fref) ?>">
+  </div>
+
+  <div class="filter-sm">
+    <label>Language</label>
+    <select name="lang">
+      <option value="">All languages</option>
+      <?= iti_options(ITI_LANG_LABELS, $flang) ?>
+    </select>
+  </div>
+
+  <div class="filter-sm">
+    <label>Status</label>
+    <select name="status">
+      <option value="">All statuses</option>
+      <?= iti_options(ITI_PROGRAM_STATUSES, $fstatus) ?>
+    </select>
+  </div>
+
+  <div class="filter-actions">
+    <button type="submit" class="btn btn-red btn-sm">🔍 Search</button>
+    <?php if ($has_filters): ?>
+    <a href="programs.php?type=<?= h($tab) ?>" class="btn btn-outline btn-sm">✕ Clear</a>
+    <?php endif; ?>
+  </div>
+
 </form>
 
 <!-- Tabella -->
