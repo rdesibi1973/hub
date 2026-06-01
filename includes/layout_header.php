@@ -302,6 +302,44 @@ table.data-table tr:hover td { background: #FAFAFA; }
 
 
 
+/* ── Filter bar ─────────────────────────────────────── */
+
+.filters { display: flex; gap: 8px; flex-wrap: wrap; align-items: flex-end; margin: 14px 0 20px; }
+
+.filters > div { display: flex; flex-direction: column; gap: 3px; }
+
+.filters label { font-size: .72rem; font-weight: 700; color: var(--grey-dk); text-transform: uppercase; letter-spacing: .05em; }
+
+.filters input[type=text],
+.filters input[type=search],
+.filters select {
+  padding: 8px 14px;
+  border: 1.5px solid var(--grey-lt);
+  border-radius: 20px;
+  font-family: 'Open Sans', sans-serif;
+  font-size: .82rem;
+  color: var(--black);
+  background: var(--white);
+  transition: border-color .15s;
+  box-sizing: border-box;
+}
+
+.filters input[type=text]:focus,
+.filters input[type=search]:focus,
+.filters select:focus { outline: none; border-color: var(--red); }
+
+.filters .filter-search { flex: 2; min-width: 200px; }
+
+.filters .filter-ref { min-width: 150px; }
+
+.filters .filter-ref input { font-family: monospace; font-size: .82rem; }
+
+.filters .filter-sm { min-width: 130px; }
+
+.filters .filter-actions { align-self: flex-end; padding-bottom: 1px; flex-direction: row; gap: 6px; }
+
+
+
 footer { margin: 0 40px; padding: 20px 0; border-top: 1px solid var(--grey-lt); font-size: .7rem; color: var(--grey-mid); text-transform: uppercase; letter-spacing: .1em; }
 
 
