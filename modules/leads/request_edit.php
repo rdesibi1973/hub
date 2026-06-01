@@ -31,7 +31,7 @@ $errors = [];
 // Fields editable by admin/manager (full set)
 $fullFields = ['practice_code','group_folder','date_received','customer_name','email','whatsapp','source','agent_id',
                'destination','period','pax','status','payment_status','value_usd','commission_pct','commission_usd',
-               'date_paid','initial_request','dropbox_url','notes'];
+               'date_paid','start_date','initial_request','dropbox_url','notes'];
 
 // Fields editable by staff (restricted set — no financials, no agent reassignment)
 $staffFields = ['customer_name','email','whatsapp','source','destination','period','pax',
@@ -224,7 +224,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 UPDATE requests SET
                   practice_code=?, group_folder=?, date_received=?, customer_name=?, email=?, whatsapp=?, source=?, agent_id=?,
                   destination=?, period=?, pax=?, status=?, payment_status=?, value_usd=?, commission_pct=?, commission_usd=?,
-                  date_paid=?, initial_request=?, dropbox_url=?, notes=?,
+                  date_paid=?, start_date=?, initial_request=?, dropbox_url=?, notes=?,
                   pipeline_column=IF(?='Booked',NULL,pipeline_column)
                 WHERE id=?
             ")->execute([
@@ -245,6 +245,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $v['commission_pct']  !== '' ? $v['commission_pct'] : null,
                 $v['commission_usd']  !== '' ? $v['commission_usd'] : null,
                 $v['date_paid']       ?: null,
+                $v['start_date']      ?: null,
                 $v['initial_request'] ?: null,
                 $v['dropbox_url']     ?: null,
                 $v['notes']           ?: null,
@@ -464,6 +465,11 @@ include 'includes/header.php';
       <div class="form-group">
         <label>Date Paid</label>
         <input type="date" name="date_paid" value="<?= h($v['date_paid']) ?>">
+      </div>
+
+      <div class="form-group">
+        <label>Start Date <span style="font-size:.72rem;color:var(--grey-mid);font-weight:400;">(travel start date)</span></label>
+        <input type="date" name="start_date" value="<?= h($v['start_date']) ?>">
       </div>
 
     </div>

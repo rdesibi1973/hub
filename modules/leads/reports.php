@@ -7,6 +7,9 @@ $db = db();
 
 // ── Parameters ───────────────────────────────────────────────────
 $mode          = $_GET['mode']          ?? 'monthly';   // monthly | global | range
+$report_type   = $_GET['rtype']         ?? 'sales';     // sales | travel
+// Travel period only makes sense month by month
+if ($report_type === 'travel' && $mode !== 'monthly') $mode = 'monthly';
 $year          = (int)($_GET['year']    ?? date('Y'));
 $month         = (int)($_GET['month']   ?? date('n'));
 $range_from    = $_GET['from']          ?? date('Y-01-01');
@@ -260,6 +263,67 @@ if ($mode === 'monthly') {
     $report_from = $from; $report_to = $to;
 }
 
+// ── Travel Period report data (report_type=travel, monthly only) ──
+$travel_summary = null;
+$travel_no_date = 0;
+if ($report_type === 'travel' && !$is_history) {
+    $tp_from = sprintf('%04d-%02d-01', $year, $month);
+    $tp_to   = date('Y-m-t', strtotime($tp_from));
+
+    // Fetch all Booked requests with start_date in the selected month
+    $tp_rows = $db->prepare("
+        SELECT r.agent_id, r.pax, r.value_usd, r.customer_name, r.start_date
+        FROM requests r
+        WHERE r.status = 'Booked'
+          AND r.start_date BETWEEN ? AND ?
+    ");
+    $tp_rows->execute([$tp_from, $tp_to]);
+    $tp_data = $tp_rows->fetchAll(PDO::FETCH_ASSOC);
+
+    // Count Booked requests with no start_date (for warning)
+    $travel_no_date = (int)$db->query("
+        SELECT COUNT(*) FROM requests WHERE status='Booked' AND start_date IS NULL
+    ")->fetchColumn();
+
+    // Aggregate by agent
+    $tp_by_agent = [];
+    foreach ($tp_data as $r) {
+        $aid = (int)($r['agent_id'] ?? 0);
+        if (!isset($tp_by_agent[$aid])) {
+            $tp_by_agent[$aid] = ['trips'=>0,'pax'=>0,'sales'=>0.0];
+        }
+        $tp_by_agent[$aid]['trips']++;
+        $tp_by_agent[$aid]['pax']   += (int)$r['pax'];
+        $tp_by_agent[$aid]['sales'] += (float)$r['value_usd'];
+    }
+
+    // Build rows per agent
+    $tp_agent_rows = [];
+    foreach ($all_agents as $ag) {
+        $aid = (int)$ag['id'];
+        if ($agent_filter > 0 && $aid !== $agent_filter) continue;
+        $d = $tp_by_agent[$aid] ?? ['trips'=>0,'pax'=>0,'sales'=>0.0];
+        $tp_agent_rows[] = ['name'=>$ag['name'],'trips'=>$d['trips'],'pax'=>$d['pax'],'sales'=>$d['sales']];
+    }
+    // Unassigned
+    $d = $tp_by_agent[0] ?? ['trips'=>0,'pax'=>0,'sales'=>0.0];
+    if ($d['trips'] > 0) {
+        $tp_agent_rows[] = ['name'=>'— Unassigned —','trips'=>$d['trips'],'pax'=>$d['pax'],'sales'=>$d['sales']];
+    }
+
+    // Sort by trips desc
+    usort($tp_agent_rows, function($a,$b){ return $b['trips'] - $a['trips']; });
+
+    $travel_summary = [
+        'rows'       => $tp_agent_rows,
+        'totals'     => [
+            'trips' => array_sum(array_column($tp_agent_rows,'trips')),
+            'pax'   => array_sum(array_column($tp_agent_rows,'pax')),
+            'sales' => array_sum(array_column($tp_agent_rows,'sales')),
+        ],
+    ];
+}
+
 // ── Month names ───────────────────────────────────────────────────
 $month_names = [
     1=>'January',2=>'February',3=>'March',4=>'April',
@@ -293,13 +357,27 @@ include 'includes/header.php';
 <div style="background:var(--white);border-radius:10px;padding:18px 20px;
             box-shadow:0 1px 6px rgba(0,0,0,.06);margin-bottom:<?= $is_history ? '8' : '24' ?>px;">
 
+  <!-- Report type tabs -->
+  <?php if (!$is_history): ?>
+  <div style="display:flex;gap:8px;margin-bottom:14px;">
+    <a href="?mode=<?= $mode ?>&rtype=sales&year=<?= $year ?>&month=<?= $month ?>&from=<?= h($range_from) ?>&to=<?= h($range_to) ?>&agent=<?= $agent_filter ?>"
+       class="btn btn-sm <?= $report_type==='sales' ? 'btn-red' : 'btn-outline' ?>">
+      📊 Sales Report
+    </a>
+    <a href="?mode=monthly&rtype=travel&year=<?= $year ?>&month=<?= $month ?>&agent=<?= $agent_filter ?>"
+       class="btn btn-sm <?= $report_type==='travel' ? 'btn-red' : 'btn-outline' ?>">
+      ✈️ Travel Period
+    </a>
+  </div>
+  <?php endif; ?>
+
   <!-- Mode tabs -->
   <div style="display:flex;gap:8px;margin-bottom:16px;border-bottom:1px solid var(--grey-lt);padding-bottom:14px;">
     <?php
     $tabs = ['monthly' => 'Monthly', 'global' => $is_history ? "Full Year $year" : 'Grand Total', 'range' => 'Date Range'];
     foreach ($tabs as $k => $label):
     ?>
-    <a href="?mode=<?= $k ?>&year=<?= $year ?>&month=<?= $month ?>&from=<?= h($range_from) ?>&to=<?= h($range_to) ?>&agent=<?= $agent_filter ?>"
+    <a href="?mode=<?= $k ?>&rtype=<?= h($report_type) ?>&year=<?= $year ?>&month=<?= $month ?>&from=<?= h($range_from) ?>&to=<?= h($range_to) ?>&agent=<?= $agent_filter ?>"
        class="btn btn-sm <?= $mode===$k ? 'btn-red' : 'btn-outline' ?>">
       <?= $label ?>
     </a>
@@ -428,7 +506,7 @@ include 'includes/header.php';
 <?php endif; ?>
 
 <!-- ── SUMMARY TABLE ──────────────────────────────────────────── -->
-<?php if ($summary): ?>
+<?php if ($summary && $report_type === 'sales'): ?>
 <?php
   $rows   = $summary['rows'];
   $totals = $summary['totals'];
@@ -457,7 +535,8 @@ include 'includes/header.php';
   </div>
 <?php else: ?>
 
-<!-- KPI row -->
+<!-- KPI row (Sales Report only) -->
+<?php if ($report_type === 'sales'): ?>
 <div class="stat-grid" style="margin-bottom:20px">
   <div class="stat-card blue">
     <div class="stat-label">Total Requests</div>
@@ -505,6 +584,7 @@ include 'includes/header.php';
   </div>
   <?php endif; ?>
 </div>
+<?php endif; ?>
 
 <!-- Detail table -->
 <div class="table-wrap">
@@ -629,6 +709,62 @@ include 'includes/header.php';
 </div>
 
 <?php endif; ?>
+<?php endif; ?>
+
+<!-- ── TRAVEL PERIOD TABLE ─────────────────────────────────────── -->
+<?php if ($report_type === 'travel' && !$is_history && $travel_summary !== null): ?>
+
+<?php if ($travel_no_date > 0): ?>
+<div style="background:#fff8e1;border:1px solid #ffe082;border-radius:8px;padding:10px 16px;margin-bottom:16px;font-size:.82rem;color:#6d4c00;">
+  ⚠️ <strong><?= $travel_no_date ?></strong> Booked request<?= $travel_no_date > 1 ? 's have' : ' has' ?> no Start Date set and are excluded from this report.
+  <a href="requests.php?status=Booked" style="color:var(--red);margin-left:8px">Review →</a>
+</div>
+<?php endif; ?>
+
+<div style="background:var(--white);border-radius:10px;box-shadow:0 1px 6px rgba(0,0,0,.07);overflow:hidden;margin-bottom:24px;">
+  <div style="padding:16px 20px;border-bottom:1px solid var(--grey-lt);display:flex;align-items:center;gap:12px;">
+    <span style="font-weight:700;font-size:.95rem;">✈️ Travel Period — <?= $month_names[$month] ?> <?= $year ?></span>
+    <span style="font-size:.78rem;color:var(--grey-mid);">Booked requests with travel start date in this month</span>
+  </div>
+
+  <?php if (empty($travel_summary['rows']) || $travel_summary['totals']['trips'] === 0): ?>
+    <div class="empty-state" style="padding:32px">
+      <div class="icon">✈️</div>
+      <p>No trips starting in <?= $month_names[$month] ?> <?= $year ?>.</p>
+    </div>
+  <?php else: ?>
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Agent</th>
+        <th class="text-right">Trips</th>
+        <th class="text-right">PAX</th>
+        <th class="text-right">Sales Amount</th>
+      </tr>
+    </thead>
+    <tbody>
+      <?php foreach ($travel_summary['rows'] as $r): ?>
+        <?php if ($r['trips'] === 0) continue; ?>
+        <tr>
+          <td><?= h($r['name']) ?></td>
+          <td class="text-right"><?= $r['trips'] ?></td>
+          <td class="text-right"><?= $r['pax'] ?: '—' ?></td>
+          <td class="text-right text-green">$<?= number_format($r['sales'], 0) ?></td>
+        </tr>
+      <?php endforeach; ?>
+    </tbody>
+    <tfoot>
+      <tr style="font-weight:700;background:var(--grey-lt)">
+        <td>Total</td>
+        <td class="text-right"><?= $travel_summary['totals']['trips'] ?></td>
+        <td class="text-right"><?= $travel_summary['totals']['pax'] ?></td>
+        <td class="text-right text-green">$<?= number_format($travel_summary['totals']['sales'], 0) ?></td>
+      </tr>
+    </tfoot>
+  </table>
+  <?php endif; ?>
+</div>
+
 <?php endif; ?>
 
 <?php include 'includes/footer.php'; ?>
