@@ -19,6 +19,7 @@
  */
 
 require_once 'config.php';
+require_once 'includes/folder_parser.php';
 header('Content-Type: application/json');
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
@@ -113,6 +114,10 @@ try { $db->exec("ALTER TABLE requests ADD COLUMN confirmation_date DATE NULL DEF
 try { $db->exec("ALTER TABLE requests ADD COLUMN group_folder VARCHAR(255) NULL DEFAULT NULL");
 } catch (PDOException $ignored) {}
 
+// ── Parse start_date from new folder name ────────────────────────────────────
+$parsedDates = parse_folder_dates($newFolderName);
+$startDate   = $parsedDates['start_date']; // null if not parseable
+
 // ── Update ────────────────────────────────────────────────────────────────────
 if ($grpAction === 'CREATE' && $grpSubfolder !== '') {
     // CREATE GRP: practice_code = individual subfolder, group_folder = main GRP folder
@@ -124,10 +129,11 @@ if ($grpAction === 'CREATE' && $grpSubfolder !== '') {
              group_folder      = ?,
              dropbox_url       = ?,
              status            = 'Booked',
-             confirmation_date = CURDATE()
+             confirmation_date = CURDATE(),
+             start_date        = COALESCE(?, start_date)
          WHERE id = ?"
     );
-    $update->execute([$grpSubfolder, $newFolderName, $newDropboxUrl, $id]);
+    $update->execute([$grpSubfolder, $newFolderName, $newDropboxUrl, $startDate, $id]);
     $responseFolder = $grpSubfolder;
 
 } elseif ($grpAction === 'ADD' && $grpMainFolder !== '') {
@@ -140,10 +146,11 @@ if ($grpAction === 'CREATE' && $grpSubfolder !== '') {
              group_folder      = ?,
              dropbox_url       = ?,
              status            = 'Booked',
-             confirmation_date = CURDATE()
+             confirmation_date = CURDATE(),
+             start_date        = COALESCE(?, start_date)
          WHERE id = ?"
     );
-    $update->execute([$newFolderName, $grpMainFolder, $newDropboxUrl, $id]);
+    $update->execute([$newFolderName, $grpMainFolder, $newDropboxUrl, $startDate, $id]);
     $responseFolder = $newFolderName;
 
 } else {
@@ -154,10 +161,11 @@ if ($grpAction === 'CREATE' && $grpSubfolder !== '') {
          SET practice_code     = ?,
              dropbox_url       = ?,
              status            = 'Booked',
-             confirmation_date = CURDATE()
+             confirmation_date = CURDATE(),
+             start_date        = COALESCE(?, start_date)
          WHERE id = ?"
     );
-    $update->execute([$newFolderName, $newDropboxUrl, $id]);
+    $update->execute([$newFolderName, $newDropboxUrl, $startDate, $id]);
     $responseFolder = $newFolderName;
 }
 
@@ -167,5 +175,5 @@ echo json_encode([
     'customer_name' => $row['customer_name'],
     'new_folder'    => $responseFolder,
     'grp_action'    => $grpAction,
-    'message'       => 'Status set to Booked, confirmation_date = today',
+    'message'       => 'Status set to Booked, confirmation_date = today, start_date = ' . ($startDate ?? 'not parsed'),
 ]);

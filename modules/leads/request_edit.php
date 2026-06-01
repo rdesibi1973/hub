@@ -102,6 +102,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $v['dropbox_url'] = substr($oldUrl, 0, $lastSlash + 1) . rawurlencode($newFolder);
                 }
                 $dropboxRenamed = true;
+                // Recalculate start_date from the new folder name if it changed
+                if ($req['status'] === 'Booked') {
+                    require_once 'includes/folder_parser.php';
+                    $parsed = parse_folder_dates($newFolder);
+                    if ($parsed['start_date']) $v['start_date'] = $parsed['start_date'];
+                }
             } catch (RuntimeException $e) {
                 $msg = $e->getMessage();
                 // If not_found, try swapping /2026/ ↔ /001_Safari/ (folder may have been confirmed)
@@ -121,6 +127,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             $v['dropbox_url'] = 'https://www.dropbox.com/home' . $altTo;
                             $dropboxRenamed   = true;
                             $retried          = true;
+                            if ($req['status'] === 'Booked') {
+                                require_once 'includes/folder_parser.php';
+                                $parsed = parse_folder_dates($newFolder);
+                                if ($parsed['start_date']) $v['start_date'] = $parsed['start_date'];
+                            }
                         } catch (RuntimeException $ignored) {}
                     }
                 }
@@ -170,15 +181,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
 
             if (!$errors) {
-                // Update ALL requests in this group: replace group_folder + fix dropbox_url
+                // Parse start_date from the new GRP folder name (for GRP the date is in group_folder)
+                require_once 'includes/folder_parser.php';
+                $grpParsed    = parse_folder_dates($newGrpFolder);
+                $grpStartDate = $grpParsed['start_date']; // null if not parseable
+
+                // Update ALL requests in this group: replace group_folder + fix dropbox_url + start_date
                 $db->prepare("
                     UPDATE requests
                     SET    group_folder = ?,
-                           dropbox_url  = REPLACE(dropbox_url, ?, ?)
+                           dropbox_url  = REPLACE(dropbox_url, ?, ?),
+                           start_date   = COALESCE(?, start_date)
                     WHERE  group_folder = ?
                 ")->execute([
                     $newGrpFolder,
                     rawurlencode($oldGrpFolder), rawurlencode($newGrpFolder),
+                    $grpStartDate,
                     $oldGrpFolder,
                 ]);
 
