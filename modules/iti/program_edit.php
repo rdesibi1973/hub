@@ -582,12 +582,16 @@ include __DIR__ . '/../../includes/layout_header.php';
 
 <?php if ($active_tab === 'days'): ?>
 <!-- ═══════════ TAB DAYS ═══════════ -->
-<div style="display:grid;grid-template-columns:220px 1fr;gap:24px;align-items:start;">
+<div id="days-grid" style="display:grid;grid-template-columns:220px 1fr;gap:24px;align-items:start;">
 
   <!-- Day navigator -->
-  <div>
-    <div style="font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--grey-mid);margin-bottom:6px;">
-      Days
+  <div id="day-nav-panel" style="position:sticky;top:72px;max-height:calc(100vh - 90px);overflow-y:auto;overflow-x:hidden;padding-right:2px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+      <div style="font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--grey-mid);">Days</div>
+      <button type="button" id="nav-toggle-btn" onclick="toggleDayNav()"
+              title="Collapse/expand day list"
+              style="border:none;background:none;cursor:pointer;font-size:.85rem;color:var(--grey-mid);padding:2px 4px;border-radius:4px;line-height:1;"
+              >◀</button>
     </div>
     <?php
       $start_date = !empty($program['start_date']) ? new DateTime($program['start_date']) : null;
@@ -601,14 +605,14 @@ include __DIR__ . '/../../includes/layout_header.php';
       $total_nights = max(0, $total_nights - 1);
     ?>
     <?php if ($start_date): ?>
-    <div style="font-size:.72rem;color:var(--grey-mid);margin-bottom:10px;padding:6px 10px;background:var(--off-white);border-radius:6px;">
+    <div class="nav-collapsible" style="font-size:.72rem;color:var(--grey-mid);margin-bottom:10px;padding:6px 10px;background:var(--off-white);border-radius:6px;">
       📅 <?= $start_date->format('d M Y') ?><br>
       <?php $end = clone $start_date; $end->modify("+{$total_nights} days"); ?>
       → <?= $end->format('d M Y') ?><br>
       <strong><?= $total_days ?> days / <?= $total_nights ?> nights</strong>
     </div>
     <?php else: ?>
-    <div style="font-size:.72rem;color:var(--amber);margin-bottom:10px;">
+    <div class="nav-collapsible" style="font-size:.72rem;color:var(--amber);margin-bottom:10px;">
       ⚠ Set start date in Settings
     </div>
     <?php endif; ?>
@@ -1539,6 +1543,26 @@ function toggleOA(checked) {
     if (n) n.value = checked ? (n.value > 0 ? n.value : '1') : '0';
 }
 
+// ── Day nav collapse/expand ──
+function toggleDayNav() {
+    var grid = document.getElementById('days-grid');
+    var btn  = document.getElementById('nav-toggle-btn');
+    var collapsed = grid.classList.toggle('nav-collapsed');
+    btn.textContent = collapsed ? '▶' : '◀';
+    btn.title = collapsed ? 'Expand day list' : 'Collapse day list';
+    try { localStorage.setItem('iti_nav_collapsed', collapsed ? '1' : '0'); } catch(e){}
+}
+// Restore collapse state
+(function() {
+    try {
+        if (localStorage.getItem('iti_nav_collapsed') === '1') {
+            document.getElementById('days-grid').classList.add('nav-collapsed');
+            var btn = document.getElementById('nav-toggle-btn');
+            if (btn) { btn.textContent = '▶'; btn.title = 'Expand day list'; }
+        }
+    } catch(e){}
+})();
+
 // ── Scroll-to-day and active highlight ──
 function scrollToDay(dayId) {
     var el = document.getElementById('day-anchor-' + dayId);
@@ -1626,6 +1650,20 @@ document.addEventListener('keydown', function(e) {
 <style>
 .day-sort-ghost  { opacity:.4; background:var(--red-lt,#fde8e8); }
 .day-drag-handle { touch-action:none; }
+
+/* Day nav collapsed state */
+#days-grid.nav-collapsed { grid-template-columns:40px 1fr; }
+#days-grid.nav-collapsed #day-nav-panel .nav-collapsible { display:none; }
+#days-grid.nav-collapsed .day-sort-item .day-drag-handle { display:none; }
+#days-grid.nav-collapsed .day-sort-item form { display:none; }
+#days-grid.nav-collapsed .day-btn {
+    padding:6px 4px;
+    font-size:.65rem;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+}
+#days-grid.nav-collapsed .day-btn > div { display:none; }
 </style>
 <?php endif; ?>
 
