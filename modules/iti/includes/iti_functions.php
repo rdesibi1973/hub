@@ -175,11 +175,9 @@ function iti_get_programs(string $type = null, array $filters = []): array {
         $params[] = $filters['status'];
     }
     if (!empty($filters['q'])) {
-        $where[] = '(p.title_en LIKE ? OR r.client_name LIKE ? OR p.ref_number LIKE ?)';
-        $q = '%' . $filters['q'] . '%';
-        $params[] = $q;
-        $params[] = $q;
-        $params[] = $q;
+        iti_search_where($filters['q'],
+            ['p.title_en','p.title_it','r.client_name','p.ref_number'],
+            $where, $params);
     }
     if (!empty($filters['ref'])) {
         $where[] = 'p.ref_number LIKE ?';
@@ -289,11 +287,9 @@ function iti_get_requests(array $filters = []): array {
         $params[] = $filters['status'];
     }
     if (!empty($filters['q'])) {
-        $where[] = '(client_name LIKE ? OR client_email LIKE ? OR agent_name LIKE ?)';
-        $q = '%' . $filters['q'] . '%';
-        $params[] = $q;
-        $params[] = $q;
-        $params[] = $q;
+        iti_search_where($filters['q'],
+            ['client_name','client_email','agent_name'],
+            $where, $params);
     }
     $sql = 'SELECT * FROM iti_requests'
          . ($where ? ' WHERE ' . implode(' AND ', $where) : '')
@@ -377,6 +373,20 @@ function iti_destinations_map(bool $active_only = true): array {
     $out  = [];
     foreach ($rows as $d) { $out[$d['id']] = $d['name_en']; }
     return $out;
+}
+
+/**
+ * Multi-word AND search: each space-separated word must match at least one column.
+ * Appends to $where and $params by reference.
+ */
+function iti_search_where(string $q, array $columns, array &$where, array &$params): void {
+    $words = array_filter(array_map('trim', preg_split('/\s+/', $q)));
+    foreach ($words as $word) {
+        $like    = '%' . $word . '%';
+        $clauses = implode(' OR ', array_map(fn($c) => "$c LIKE ?", $columns));
+        $where[] = '(' . $clauses . ')';
+        foreach ($columns as $_col) { $params[] = $like; }
+    }
 }
 
 function iti_options(array $options, string|null $selected = ''): string {
@@ -566,9 +576,9 @@ function iti_get_transfer_routes(array $filters = []): array {
         $where[] = 'tr.is_active = 1';
     }
     if (!empty($filters['q'])) {
-        $q = '%' . $filters['q'] . '%';
-        $where[] = '(fd.name_en LIKE ? OR td.name_en LIKE ?)';
-        $params[] = $q; $params[] = $q;
+        iti_search_where($filters['q'],
+            ['fd.name_en','td.name_en'],
+            $where, $params);
     }
     if (!empty($filters['road_type'])) {
         $where[] = 'tr.road_type = ?'; $params[] = $filters['road_type'];
@@ -595,9 +605,9 @@ function iti_get_flight_routes(array $filters = []): array {
         $where[] = 'is_active = 1';
     }
     if (!empty($filters['q'])) {
-        $q = '%' . $filters['q'] . '%';
-        $where[] = '(from_airport LIKE ? OR to_airport LIKE ? OR operator LIKE ? OR from_code LIKE ? OR to_code LIKE ?)';
-        for ($i=0;$i<5;$i++) $params[] = $q;
+        iti_search_where($filters['q'],
+            ['from_airport','to_airport','operator','from_code','to_code'],
+            $where, $params);
     }
     if (!empty($filters['operator'])) {
         $where[] = 'operator = ?'; $params[] = $filters['operator'];
