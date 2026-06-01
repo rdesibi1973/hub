@@ -214,7 +214,7 @@ include __DIR__ . '/../../includes/layout_header.php';
 </div>
 
 <form method="GET" action="destinations.php" class="filters">
-  <div><label>Search</label><input type="text" name="q" placeholder="Name, code, region…" value="<?= h($search) ?>"></div>
+  <div class="filter-search"><label>Search</label><input type="text" name="q" placeholder="Name, code, region…" value="<?= h($search) ?>"></div>
   <div>
     <label>Region</label>
     <select name="region">
