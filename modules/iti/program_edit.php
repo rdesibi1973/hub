@@ -585,20 +585,17 @@ include __DIR__ . '/../../includes/layout_header.php';
 
 <?php if ($active_tab === 'days'): ?>
 <!-- ═══════════ TAB DAYS ═══════════ -->
-<div id="days-grid" style="display:grid;grid-template-columns:28px 220px 1fr;gap:0 8px;align-items:start;">
-
-  <!-- Toggle strip — always visible -->
-  <div style="position:sticky;top:72px;">
-    <button type="button" id="nav-toggle-btn" onclick="toggleDayNav()"
-            title="Collapse day list"
-            style="border:none;background:var(--off-white);border:1.5px solid var(--grey-lt);cursor:pointer;
-                   width:28px;height:56px;border-radius:6px;color:var(--grey-mid);font-size:.75rem;
-                   display:flex;align-items:center;justify-content:center;padding:0;">◀</button>
-  </div>
+<div id="days-grid" style="display:grid;grid-template-columns:220px 1fr;gap:24px;align-items:start;">
 
   <!-- Day navigator -->
   <div id="day-nav-panel" style="position:sticky;top:72px;max-height:calc(100vh - 90px);overflow-y:auto;overflow-x:hidden;padding-right:2px;">
-    <div class="nav-hide-when-collapsed" style="font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--grey-mid);margin-bottom:6px;">Days</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+      <div style="font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--grey-mid);">Days</div>
+      <button type="button" id="nav-toggle-btn" onclick="toggleDayNav()"
+              title="Collapse day list"
+              style="border:none;background:none;cursor:pointer;font-size:.8rem;color:var(--grey-mid);
+                     padding:2px 6px;border-radius:4px;line-height:1;">◀</button>
+    </div>
     <?php
       $start_date = !empty($program['start_date']) ? new DateTime($program['start_date']) : null;
       $total_days = count($days);
@@ -1674,9 +1671,15 @@ document.addEventListener('keydown', function(e) {
 .day-drag-handle { touch-action:none; }
 
 /* Day nav collapsed state */
-#days-grid.nav-collapsed { grid-template-columns:28px 0px 1fr; }
-#days-grid.nav-collapsed #day-nav-panel { display:none; }
-#days-grid.nav-collapsed #nav-toggle-btn { }
+#days-grid.nav-collapsed { grid-template-columns:36px 1fr; gap:12px; }
+#days-grid.nav-collapsed #day-nav-panel .nav-hide-when-collapsed { display:none; }
+#days-grid.nav-collapsed #day-nav-panel { padding:0; overflow:hidden; }
+#days-grid.nav-collapsed #nav-toggle-btn {
+    width:32px; height:32px; border:1.5px solid var(--grey-lt) !important;
+    background:var(--off-white); border-radius:6px; float:none;
+    display:flex; align-items:center; justify-content:center;
+    margin:0 auto;
+}
 </style>
 <?php endif; ?>
 
