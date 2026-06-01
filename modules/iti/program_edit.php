@@ -457,19 +457,21 @@ try {
 $activities_list = iti_get_activities();
 
 // Attività, voli e transfer del giorno corrente
-$current_day_data  = null;
-$current_acts      = [];
-$current_flights   = [];
-$current_transfers = [];
-foreach ($days as $d) {
-    if ((int)$d['id'] === $active_day) {
-        $current_day_data  = $d;
-        $current_acts      = iti_get_day_activities((int)$d['id']);
-        $current_flights   = iti_get_day_flights((int)$d['id']);
-        $current_transfers = iti_get_day_transfers((int)$d['id']);
-        break;
-    }
+// Load data for ALL days (for sequential scroll view)
+$all_days_data = [];
+foreach ($days as $_day) {
+    $all_days_data[(int)$_day['id']] = [
+        'day'       => $_day,
+        'acts'      => iti_get_day_activities((int)$_day['id']),
+        'flights'   => iti_get_day_flights((int)$_day['id']),
+        'transfers' => iti_get_day_transfers((int)$_day['id']),
+    ];
 }
+// Keep legacy vars for any remaining references
+$current_day_data  = $days[0] ?? null;
+$current_acts      = $all_days_data[(int)($days[0]['id'] ?? 0)]['acts']      ?? [];
+$current_flights   = $all_days_data[(int)($days[0]['id'] ?? 0)]['flights']   ?? [];
+$current_transfers = $all_days_data[(int)($days[0]['id'] ?? 0)]['transfers'] ?? [];
 
 $public_url = BASE_URL . '/modules/iti/itinerary.php?token=' . ($program['public_token'] ?? '');
 
@@ -632,8 +634,10 @@ include __DIR__ . '/../../includes/layout_header.php';
     <div class="day-sort-item" data-id="<?= $d['id'] ?>" style="display:flex;gap:3px;align-items:stretch;margin-bottom:6px;cursor:default;">
       <div class="day-drag-handle" title="Drag to reorder"
            style="display:flex;align-items:center;padding:0 4px;color:var(--grey-mid);cursor:grab;font-size:.9rem;user-select:none;">⠿</div>
-      <a href="program_edit.php?id=<?= $id ?>&tab=days&day=<?= $d['id'] ?>"
-         class="day-btn<?= $active_day===(int)$d['id']?' active':'' ?><?= $has_lodge?' filled':'' ?>"
+      <a href="#day-anchor-<?= $d['id'] ?>"
+         class="day-btn<?= $has_lodge?' filled':'' ?>"
+         id="day-nav-<?= $d['id'] ?>"
+         onclick="scrollToDay(<?= $d['id'] ?>); return false;"
          style="flex:1;display:block;text-align:center;">
         Day <?= $d['day_number'] ?><?= ($d_is_oa && $d_oa_n > 1) ? '–'.($d['day_number']+$d_oa_n-1) : '' ?>
         <?php if ($d_is_oa): ?>
@@ -666,19 +670,27 @@ include __DIR__ . '/../../includes/layout_header.php';
     </form>
   </div>
 
-  <!-- Day editor -->
-  <div>
-  <?php if ($current_day_data): ?>
-  <!-- Single form wrapping the entire day editor -->
-  <form id="day-save-form"
+  <!-- Day editor — sequential scroll view -->
+  <div id="days-scroll-container">
+  <?php foreach ($all_days_data as $_day_id => $_day_bundle):
+    $current_day_data  = $_day_bundle['day'];
+    $current_acts      = $_day_bundle['acts'];
+    $current_flights   = $_day_bundle['flights'];
+    $current_transfers = $_day_bundle['transfers'];
+  ?>
+  <div id="day-anchor-<?= $current_day_data['id'] ?>" class="day-editor-block" style="margin-bottom:32px;scroll-margin-top:80px;">
+  <!-- Form for this day -->
+  <form id="day-save-form-<?= $current_day_data['id'] ?>"
         method="POST"
-        action="program_edit.php?id=<?= $id ?>&tab=days&day=<?= $active_day ?>"
-        onsubmit="console.log('FORM SUBMIT fired, day_id='+document.querySelector('[name=day_id]').value); return true;">
+        action="program_edit.php?id=<?= $id ?>&tab=days&day=<?= $current_day_data['id'] ?>">
     <input type="hidden" name="_sub"   value="day">
-    <input type="hidden" name="day_id" value="<?= $active_day ?>">
+    <input type="hidden" name="day_id" value="<?= $current_day_data['id'] ?>">
 
-    <div style="margin-bottom:16px;">
+    <div style="margin-bottom:16px;display:flex;align-items:center;gap:12px;">
       <div style="font-family:'Merriweather',serif;font-size:1rem;font-weight:700;">Day <?= $current_day_data['day_number'] ?></div>
+      <?php if (!empty($current_day_data['day_title_en'])): ?>
+      <div style="font-size:.85rem;color:var(--grey-mid);"><?= h($current_day_data['day_title_en']) ?></div>
+      <?php endif; ?>
     </div>
 
     <!-- ── BLOCCHI SEQUENZIALI DEL GIORNO ── -->
@@ -1029,19 +1041,20 @@ include __DIR__ . '/../../includes/layout_header.php';
             onclick="addFlightRow()">+ Add Flight</button>
   </div>
 
-  <div style="position:sticky;bottom:16px;margin-top:16px;z-index:10;">
-    <button type="submit" id="btn-save-day"
+  <div style="margin-top:16px;">
+    <button type="submit"
             class="btn btn-red" style="width:100%;padding:12px;font-size:.95rem;box-shadow:0 2px 8px rgba(0,0,0,.2);">
-      💾 Save
+      💾 Save Day <?= $current_day_data['day_number'] ?>
     </button>
   </div>
 
-  </form><!-- end day-save-form -->
-
-  <?php else: ?>
-  <div class="empty-state"><div class="icon">📅</div><p>Select a day to edit.</p></div>
+  </form><!-- end day-save-form-{id} -->
+  </div><!-- end day-anchor -->
+  <?php endforeach; ?>
+  <?php if (empty($all_days_data)): ?>
+  <div class="empty-state"><div class="icon">📅</div><p>No days yet. Add your first day!</p></div>
   <?php endif; ?>
-  </div>
+  </div><!-- end days-scroll-container -->
 </div><!-- end grid -->
 
 <?php elseif ($active_tab === 'prices'): ?>
@@ -1526,14 +1539,62 @@ function toggleOA(checked) {
     if (n) n.value = checked ? (n.value > 0 ? n.value : '1') : '0';
 }
 
-// ── Ctrl+S to save day ──
+// ── Scroll-to-day and active highlight ──
+function scrollToDay(dayId) {
+    var el = document.getElementById('day-anchor-' + dayId);
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    setActiveNav(dayId);
+}
+function setActiveNav(dayId) {
+    document.querySelectorAll('.day-btn').forEach(function(a) {
+        a.classList.remove('active');
+    });
+    var nav = document.getElementById('day-nav-' + dayId);
+    if (nav) nav.classList.add('active');
+}
+
+// IntersectionObserver: highlight nav as user scrolls
+(function() {
+    var blocks = document.querySelectorAll('.day-editor-block');
+    if (!blocks.length) return;
+    // Set first active on load
+    var firstId = blocks[0].id.replace('day-anchor-', '');
+    setActiveNav(firstId);
+    var observer = new IntersectionObserver(function(entries) {
+        entries.forEach(function(entry) {
+            if (entry.isIntersecting) {
+                var id = entry.target.id.replace('day-anchor-', '');
+                setActiveNav(id);
+                // Scroll nav item into view if needed
+                var navBtn = document.getElementById('day-nav-' + id);
+                if (navBtn) navBtn.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+        });
+    }, { threshold: 0.25, rootMargin: '-60px 0px -60% 0px' });
+    blocks.forEach(function(b) { observer.observe(b); });
+})();
+
+// ── Ctrl+S to save focused day ──
 document.addEventListener('keydown', function(e) {
     if ((e.ctrlKey || e.metaKey) && e.key === 's') {
         e.preventDefault();
-        var form = document.getElementById('day-save-form');
-        if (form) form.submit();
+        var active = document.querySelector('.day-btn.active');
+        if (active) {
+            var id = active.id.replace('day-nav-', '');
+            var form = document.getElementById('day-save-form-' + id);
+            if (form) form.submit();
+        }
     }
 });
+
+// Scroll to URL anchor day on load
+(function() {
+    var hash = window.location.hash;
+    if (hash && hash.startsWith('#day-anchor-')) {
+        var el = document.getElementById(hash.substring(1));
+        if (el) setTimeout(function() { el.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 200);
+    }
+})();
 
 // ── Drag & drop day reorder via SortableJS ──
 (function() {
