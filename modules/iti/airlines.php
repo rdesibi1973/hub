@@ -140,7 +140,6 @@ include __DIR__ . '/../../includes/layout_header.php';
     <div class="sub"><?= count($airlines) ?> airlines</div>
   </div>
   <div style="display:flex;gap:8px;">
-    <a href="iti_import_airlines.php" class="btn btn-outline btn-sm">⬆ Import</a>
     <?php if ($can_edit): ?><a href="airlines.php?action=add" class="btn btn-red">+ New Airline</a><?php endif; ?>
   </div>
 </div>
@@ -159,7 +158,7 @@ include __DIR__ . '/../../includes/layout_header.php';
     </thead>
     <tbody>
     <?php if (!$airlines): ?>
-    <tr><td colspan="6" style="text-align:center;color:var(--grey-mid);padding:32px;">No airlines yet — <a href="iti_import_airlines.php">import from the standard list</a>.</td></tr>
+    <tr><td colspan="6" style="text-align:center;color:var(--grey-mid);padding:32px;">No airlines yet.</td></tr>
     <?php endif; ?>
     <?php foreach ($airlines as $a):
       $badge = match($a['type']) { 'domestic'=>'dom', 'regional'=>'reg', default=>'int' };
