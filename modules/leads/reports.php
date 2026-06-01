@@ -54,39 +54,51 @@ $dest_rows = $db->query("SELECT DISTINCT destination FROM requests WHERE destina
 $dest_list = $dest_rows ?: [];
 
 // ── Helper: summary from LIVE table (requests) ───────────────────
+// total/by_dest  → date_received  (volume of incoming requests)
+// confirmed/sales/pax/commission → confirmation_date (closed deals)
 function buildSummary(PDO $db, string $from, string $to, array $agents, array $dest_list): array {
     $rows = [];
     $totals = ['agent' => 'TOTAL', 'total' => 0, 'confirmed' => 0, 'rate' => 0, 'by_dest' => [],
                'sales_amount' => 0, 'booked_pax' => 0, 'commission_total' => 0];
 
     foreach ($agents as $ag) {
-        $stmt = $db->prepare("
-            SELECT COUNT(*) AS total,
-                   SUM(status = 'Booked') AS confirmed,
-                   SUM(CASE WHEN status='Booked' THEN value_usd      ELSE 0 END) AS sales_amount,
-                   SUM(CASE WHEN status='Booked' THEN pax            ELSE 0 END) AS booked_pax,
-                   SUM(CASE WHEN status='Booked' THEN commission_usd ELSE 0 END) AS commission_total,
-                   destination
+        // Query 1: total received + destination breakdown (date_received)
+        $stmt1 = $db->prepare("
+            SELECT COUNT(*) AS total, destination
             FROM requests
             WHERE agent_id = ? AND date_received BETWEEN ? AND ?
             GROUP BY destination
         ");
-        $stmt->execute([$ag['id'], $from, $to]);
-        $dest_data = $stmt->fetchAll();
+        $stmt1->execute([$ag['id'], $from, $to]);
+        $recv_data = $stmt1->fetchAll();
 
-        $total = $confirmed = $sales_amount = $booked_pax = $commission_total = 0;
-        $by_dest = [];
-        foreach ($dest_data as $d) {
-            $total            += (int)$d['total'];
-            $confirmed        += (int)$d['confirmed'];
-            $sales_amount     += (float)$d['sales_amount'];
-            $booked_pax       += (int)$d['booked_pax'];
-            $commission_total += (float)$d['commission_total'];
+        $total = 0; $by_dest = [];
+        foreach ($recv_data as $d) {
+            $total += (int)$d['total'];
             if ($d['destination'] !== null) {
                 $key = $d['destination'];
                 $by_dest[$key] = ($by_dest[$key] ?? 0) + (int)$d['total'];
             }
         }
+
+        // Query 2: confirmed/sales/pax/commission (confirmation_date)
+        $stmt2 = $db->prepare("
+            SELECT COUNT(*) AS confirmed,
+                   SUM(value_usd)      AS sales_amount,
+                   SUM(pax)            AS booked_pax,
+                   SUM(commission_usd) AS commission_total
+            FROM requests
+            WHERE agent_id = ? AND status = 'Booked'
+              AND confirmation_date BETWEEN ? AND ?
+        ");
+        $stmt2->execute([$ag['id'], $from, $to]);
+        $conf_data = $stmt2->fetch();
+
+        $confirmed        = (int)($conf_data['confirmed']        ?? 0);
+        $sales_amount     = (float)($conf_data['sales_amount']   ?? 0);
+        $booked_pax       = (int)($conf_data['booked_pax']       ?? 0);
+        $commission_total = (float)($conf_data['commission_total'] ?? 0);
+
         $rate = $total > 0 ? round($confirmed / $total * 100, 1) : 0;
         $rows[] = [
             'agent_id' => $ag['id'], 'agent' => $ag['name'],
@@ -104,32 +116,41 @@ function buildSummary(PDO $db, string $from, string $to, array $agents, array $d
     }
 
     // Unassigned
-    $stmt = $db->prepare("
-        SELECT COUNT(*) AS total,
-               SUM(status = 'Booked') AS confirmed,
-               SUM(CASE WHEN status='Booked' THEN value_usd      ELSE 0 END) AS sales_amount,
-               SUM(CASE WHEN status='Booked' THEN pax            ELSE 0 END) AS booked_pax,
-               SUM(CASE WHEN status='Booked' THEN commission_usd ELSE 0 END) AS commission_total,
-               destination
+    $stmt1 = $db->prepare("
+        SELECT COUNT(*) AS total, destination
         FROM requests WHERE agent_id IS NULL AND date_received BETWEEN ? AND ?
         GROUP BY destination
     ");
-    $stmt->execute([$from, $to]);
-    $udata = $stmt->fetchAll();
-    $u_total = $u_conf = $u_sales = $u_pax = $u_comm = 0;
-    $u_dest = [];
+    $stmt1->execute([$from, $to]);
+    $udata = $stmt1->fetchAll();
+    $u_total = 0; $u_dest = [];
     foreach ($udata as $d) {
-        $u_total += (int)$d['total']; $u_conf += (int)$d['confirmed'];
-        $u_sales += (float)$d['sales_amount']; $u_pax += (int)$d['booked_pax'];
-        $u_comm  += (float)$d['commission_total'];
+        $u_total += (int)$d['total'];
         if ($d['destination'] !== null)
             $u_dest[$d['destination']] = ($u_dest[$d['destination']] ?? 0) + (int)$d['total'];
     }
-    if ($u_total > 0) {
+
+    $stmt2 = $db->prepare("
+        SELECT COUNT(*) AS confirmed,
+               SUM(value_usd)      AS sales_amount,
+               SUM(pax)            AS booked_pax,
+               SUM(commission_usd) AS commission_total
+        FROM requests
+        WHERE agent_id IS NULL AND status = 'Booked'
+          AND confirmation_date BETWEEN ? AND ?
+    ");
+    $stmt2->execute([$from, $to]);
+    $uconf = $stmt2->fetch();
+    $u_conf  = (int)($uconf['confirmed']        ?? 0);
+    $u_sales = (float)($uconf['sales_amount']   ?? 0);
+    $u_pax   = (int)($uconf['booked_pax']       ?? 0);
+    $u_comm  = (float)($uconf['commission_total'] ?? 0);
+
+    if ($u_total > 0 || $u_conf > 0) {
         $rows[] = [
             'agent_id' => -1, 'agent' => 'Unassigned',
             'total' => $u_total, 'confirmed' => $u_conf,
-            'rate' => round($u_conf / $u_total * 100, 1),
+            'rate' => $u_total > 0 ? round($u_conf / $u_total * 100, 1) : 0,
             'by_dest' => $u_dest, 'sales_amount' => $u_sales,
             'booked_pax' => $u_pax, 'commission_total' => $u_comm,
         ];
@@ -350,6 +371,11 @@ include 'includes/header.php';
   <div>
     <h2>Reports</h2>
     <div class="sub"><?= h($title_str) ?></div>
+    <?php if ($report_type === 'sales' && !$is_history): ?>
+    <div style="font-size:.72rem;color:var(--grey-mid);margin-top:3px">
+      Received = requests received in period &nbsp;·&nbsp; Confirmed + Sales = deals closed in period (by confirmation date)
+    </div>
+    <?php endif; ?>
   </div>
 </div>
 
@@ -539,7 +565,7 @@ include 'includes/header.php';
 <?php if ($report_type === 'sales'): ?>
 <div class="stat-grid" style="margin-bottom:20px">
   <div class="stat-card blue">
-    <div class="stat-label">Total Requests</div>
+    <div class="stat-label">Received</div>
     <div class="stat-value"><?= $totals['total'] ?></div>
   </div>
   <div class="stat-card green">
@@ -594,11 +620,11 @@ include 'includes/header.php';
         <th style="background:var(--green);color:white;font-size:.72rem">Agent</th>
         <?php if (!$is_history):
           $th_cols = [
-              'total'            => 'Total Requests',
+              'total'            => 'Received',
               'confirmed'        => 'Confirmed',
               'rate'             => 'Sales Rate',
               'sales_amount'     => 'Sales Amount',
-              'booked_pax'       => 'PAX (Booked)',
+              'booked_pax'       => 'PAX',
               'commission_total' => 'Total Comm',
           ];
         else:
