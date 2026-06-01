@@ -542,35 +542,54 @@ function iti_get_day_transfers(int $program_day_id): array {
     return $st->fetchAll();
 }
 
-function iti_get_transfer_routes(): array {
-    try {
-        $st = db()->query(
-            'SELECT tr.*, 
-                    fd.name_en AS from_name,
-                    td.name_en AS to_name
-               FROM iti_transfer_routes tr
-               JOIN iti_destinations fd ON fd.id = tr.from_destination
-               JOIN iti_destinations td ON td.id = tr.to_destination
-              WHERE tr.is_active = 1
-              ORDER BY fd.name_en, td.name_en'
-        );
-        return $st->fetchAll();
-    } catch (Exception $e) {
-        // Fallback: return routes without destination names if JOIN columns missing
-        try {
-            $st = db()->query('SELECT * FROM iti_transfer_routes WHERE is_active = 1 ORDER BY id');
-            return $st->fetchAll();
-        } catch (Exception $e2) {
-            return [];
-        }
+function iti_get_transfer_routes(array $filters = []): array {
+    $where  = [];
+    $params = [];
+    if (isset($filters['active']) && $filters['active'] !== '') {
+        $where[] = 'tr.is_active = ?'; $params[] = (int)$filters['active'];
+    } else {
+        // default: show all (active + inactive) for the admin list
     }
+    if (!empty($filters['q'])) {
+        $q = '%' . $filters['q'] . '%';
+        $where[] = '(fd.name_en LIKE ? OR td.name_en LIKE ?)';
+        $params[] = $q; $params[] = $q;
+    }
+    if (!empty($filters['road_type'])) {
+        $where[] = 'tr.road_type = ?'; $params[] = $filters['road_type'];
+    }
+    $sql = 'SELECT tr.*,
+                   fd.name_en AS from_name,
+                   td.name_en AS to_name
+              FROM iti_transfer_routes tr
+              JOIN iti_destinations fd ON fd.id = tr.from_destination
+              JOIN iti_destinations td ON td.id = tr.to_destination'
+         . ($where ? ' WHERE ' . implode(' AND ', $where) : '')
+         . ' ORDER BY fd.name_en, td.name_en';
+    $st = db()->prepare($sql);
+    $st->execute($params);
+    return $st->fetchAll();
 }
 
-function iti_get_flight_routes(): array {
-    $st = db()->query(
-        'SELECT * FROM iti_flight_routes WHERE is_active = 1
-          ORDER BY from_airport, to_airport'
-    );
+function iti_get_flight_routes(array $filters = []): array {
+    $where  = [];
+    $params = [];
+    if (isset($filters['active']) && $filters['active'] !== '') {
+        $where[] = 'is_active = ?'; $params[] = (int)$filters['active'];
+    }
+    if (!empty($filters['q'])) {
+        $q = '%' . $filters['q'] . '%';
+        $where[] = '(from_airport LIKE ? OR to_airport LIKE ? OR operator LIKE ? OR from_code LIKE ? OR to_code LIKE ?)';
+        for ($i=0;$i<5;$i++) $params[] = $q;
+    }
+    if (!empty($filters['operator'])) {
+        $where[] = 'operator = ?'; $params[] = $filters['operator'];
+    }
+    $sql = 'SELECT * FROM iti_flight_routes'
+         . ($where ? ' WHERE ' . implode(' AND ', $where) : '')
+         . ' ORDER BY from_airport, to_airport';
+    $st = db()->prepare($sql);
+    $st->execute($params);
     return $st->fetchAll();
 }
 
