@@ -756,6 +756,15 @@ function iti_extra_css(): string {
 .empty-state .icon { font-size:2.5rem; margin-bottom:12px; }
 .empty-state p { font-size:.85rem; }
 
+/* Form actions */
+.form-actions { display:flex; gap:10px; align-items:center;
+                padding-top:20px; margin-top:8px;
+                border-top:1px solid var(--grey-lt); }
+
+/* Utility */
+.gap-8 { display:flex; gap:8px; align-items:center; }
+.text-muted { color:var(--grey-mid); }
+
 /* ITI Nav override */
 .iti-nav a:hover { opacity:.85; }
 ';
