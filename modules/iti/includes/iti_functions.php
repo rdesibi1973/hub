@@ -548,7 +548,7 @@ function iti_get_transfer_routes(array $filters = []): array {
     if (isset($filters['active']) && $filters['active'] !== '') {
         $where[] = 'tr.is_active = ?'; $params[] = (int)$filters['active'];
     } else {
-        // default: show all (active + inactive) for the admin list
+        $where[] = 'tr.is_active = 1';
     }
     if (!empty($filters['q'])) {
         $q = '%' . $filters['q'] . '%';
@@ -576,6 +576,8 @@ function iti_get_flight_routes(array $filters = []): array {
     $params = [];
     if (isset($filters['active']) && $filters['active'] !== '') {
         $where[] = 'is_active = ?'; $params[] = (int)$filters['active'];
+    } else {
+        $where[] = 'is_active = 1';
     }
     if (!empty($filters['q'])) {
         $q = '%' . $filters['q'] . '%';
