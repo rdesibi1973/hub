@@ -548,10 +548,15 @@ function iti_get_day_activities(int $program_day_id): array {
 
 function iti_get_day_flights(int $program_day_id): array {
     $st = db()->prepare(
-        'SELECT df.*, fr.from_airport, fr.to_airport, fr.operator,
-                fr.from_code, fr.to_code, fr.duration_min
+        'SELECT df.*,
+                fr.from_airport, fr.to_airport,
+                fr.from_code, fr.to_code, fr.duration_min,
+                fr.operator AS route_operator,
+                COALESCE(NULLIF(df.airline_company,\'\'), fr.operator) AS operator,
+                COALESCE(NULLIF(df.flight_custom,\'\'),
+                    CONCAT(fr.from_airport, \' → \', fr.to_airport)) AS flight_label
            FROM iti_day_flights df
-           JOIN iti_flight_routes fr ON fr.id = df.flight_route_id
+           LEFT JOIN iti_flight_routes fr ON fr.id = df.flight_route_id
           WHERE df.program_day_id = ?
           ORDER BY df.sort_order'
     );
