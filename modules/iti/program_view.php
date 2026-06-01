@@ -265,10 +265,18 @@ include __DIR__ . '/../../includes/layout_header.php';
         <div class="label">✈️ Flights</div>
         <div class="val">
           <?php foreach ($flights as $fl): ?>
+          <?php
+            $fl_route = !empty($fl['flight_label']) ? $fl['flight_label']
+                      : (($fl['from_code'] ?: $fl['from_airport']) . ' → ' . ($fl['to_code'] ?: $fl['to_airport']));
+            $fl_dep = !empty($fl['departure_time']) ? substr($fl['departure_time'],0,5) : '';
+            $fl_arr = !empty($fl['arrival_time'])   ? substr($fl['arrival_time'],0,5)   : '';
+            $fl_times = $fl_dep ? ($fl_dep . ($fl_arr ? ' → '.$fl_arr : '')) : '';
+            $fl_op = $fl['operator'] ?? '';
+          ?>
           <span class="flight-pill">
-            <?= h($fl['from_code'] ?: $fl['from_airport']) ?> → <?= h($fl['to_code'] ?: $fl['to_airport']) ?>
-            <?= $fl['departure_time'] ? ' '.h(substr($fl['departure_time'],0,5)) : '' ?>
-            <?= $fl['operator'] ? ' · '.h($fl['operator']) : '' ?>
+            <?= h($fl_route) ?>
+            <?= $fl_times ? ' · <strong>'.h($fl_times).'</strong>' : '' ?>
+            <?= $fl_op    ? ' · '.h($fl_op) : '' ?>
           </span>
           <?php endforeach; ?>
         </div>
@@ -461,11 +469,17 @@ include __DIR__ . '/../../includes/layout_header.php';
         <?php foreach ($recap_flights as $rf): $fl = $rf['fl']; ?>
         <tr>
           <td style="padding:7px 12px;border-bottom:1px solid var(--off-white);color:var(--grey-mid);font-size:.78rem;font-weight:700;">Day <?= $rf['day'] ?></td>
+          <?php
+            $rf_route = !empty($fl['flight_label']) ? $fl['flight_label']
+                      : (($fl['from_code'] ?: $fl['from_airport']) . ' → ' . ($fl['to_code'] ?: $fl['to_airport']));
+            $rf_dep = !empty($fl['departure_time']) ? substr($fl['departure_time'],0,5) : '';
+            $rf_arr = !empty($fl['arrival_time'])   ? substr($fl['arrival_time'],0,5)   : '';
+          ?>
           <td style="padding:7px 12px;border-bottom:1px solid var(--off-white);">
-            <span class="flight-pill"><?= h($fl['from_code'] ?: $fl['from_airport']) ?> → <?= h($fl['to_code'] ?: $fl['to_airport']) ?></span>
+            <span class="flight-pill"><?= h($rf_route) ?></span>
           </td>
           <td style="padding:7px 12px;border-bottom:1px solid var(--off-white);font-size:.8rem;color:var(--grey-dk);">
-            <?= $fl['departure_time'] ? h(substr($fl['departure_time'],0,5)) : '—' ?>
+            <?= $rf_dep ? h($rf_dep).($rf_arr?' → '.h($rf_arr):'') : '—' ?>
           </td>
           <td style="padding:7px 12px;border-bottom:1px solid var(--off-white);font-size:.8rem;color:var(--grey-dk);">
             <?= $fl['operator'] ? h($fl['operator']) : '—' ?>
