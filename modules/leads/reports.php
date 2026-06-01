@@ -721,49 +721,63 @@ include 'includes/header.php';
 </div>
 <?php endif; ?>
 
-<div style="background:var(--white);border-radius:10px;box-shadow:0 1px 6px rgba(0,0,0,.07);overflow:hidden;margin-bottom:24px;">
-  <div style="padding:16px 20px;border-bottom:1px solid var(--grey-lt);display:flex;align-items:center;gap:12px;">
-    <span style="font-weight:700;font-size:.95rem;">✈️ Travel Period — <?= $month_names[$month] ?> <?= $year ?></span>
-    <span style="font-size:.78rem;color:var(--grey-mid);">Booked requests with travel start date in this month</span>
+<?php if ($travel_summary['totals']['trips'] === 0): ?>
+  <div class="empty-state">
+    <div class="icon">✈️</div>
+    <p>No trips starting in <?= $month_names[$month] ?> <?= $year ?>.</p>
   </div>
+<?php else: ?>
 
-  <?php if (empty($travel_summary['rows']) || $travel_summary['totals']['trips'] === 0): ?>
-    <div class="empty-state" style="padding:32px">
-      <div class="icon">✈️</div>
-      <p>No trips starting in <?= $month_names[$month] ?> <?= $year ?>.</p>
-    </div>
-  <?php else: ?>
-  <table class="data-table">
+<!-- KPI row -->
+<div class="stat-grid" style="margin-bottom:20px">
+  <div class="stat-card blue">
+    <div class="stat-label">Trips</div>
+    <div class="stat-value"><?= $travel_summary['totals']['trips'] ?></div>
+  </div>
+  <div class="stat-card blue">
+    <div class="stat-label">PAX</div>
+    <div class="stat-value"><?= $travel_summary['totals']['pax'] ?></div>
+  </div>
+  <div class="stat-card green">
+    <div class="stat-label">Sales Amount</div>
+    <div class="stat-value" style="font-size:1.3rem">$<?= number_format($travel_summary['totals']['sales'], 0) ?></div>
+  </div>
+</div>
+
+<!-- Detail table -->
+<div class="table-wrap">
+  <table>
     <thead>
-      <tr>
-        <th>Agent</th>
-        <th class="text-right">Trips</th>
-        <th class="text-right">PAX</th>
-        <th class="text-right">Sales Amount</th>
+      <tr style="background:var(--green);color:white">
+        <th style="background:var(--green);color:white;font-size:.72rem">Agent</th>
+        <th style="background:var(--green);color:white;font-size:.72rem;text-align:right">Trips</th>
+        <th style="background:var(--green);color:white;font-size:.72rem;text-align:right">PAX</th>
+        <th style="background:var(--green);color:white;font-size:.72rem;text-align:right">Sales Amount</th>
       </tr>
     </thead>
     <tbody>
       <?php foreach ($travel_summary['rows'] as $r): ?>
         <?php if ($r['trips'] === 0) continue; ?>
         <tr>
-          <td><?= h($r['name']) ?></td>
-          <td class="text-right"><?= $r['trips'] ?></td>
-          <td class="text-right"><?= $r['pax'] ?: '—' ?></td>
-          <td class="text-right text-green">$<?= number_format($r['sales'], 0) ?></td>
+          <td style="font-weight:600"><?= h($r['name']) ?></td>
+          <td style="text-align:right"><?= $r['trips'] ?></td>
+          <td style="text-align:right"><?= $r['pax'] ?: '—' ?></td>
+          <td style="text-align:right;color:var(--green);font-weight:600">$<?= number_format($r['sales'], 0) ?></td>
         </tr>
       <?php endforeach; ?>
     </tbody>
     <tfoot>
-      <tr style="font-weight:700;background:var(--grey-lt)">
-        <td>Total</td>
-        <td class="text-right"><?= $travel_summary['totals']['trips'] ?></td>
-        <td class="text-right"><?= $travel_summary['totals']['pax'] ?></td>
-        <td class="text-right text-green">$<?= number_format($travel_summary['totals']['sales'], 0) ?></td>
+      <tr style="font-weight:700;border-top:2px solid var(--grey-lt)">
+        <td style="font-weight:700">Total</td>
+        <td style="text-align:right;font-weight:700"><?= $travel_summary['totals']['trips'] ?></td>
+        <td style="text-align:right;font-weight:700"><?= $travel_summary['totals']['pax'] ?></td>
+        <td style="text-align:right;font-weight:700;color:var(--green)">$<?= number_format($travel_summary['totals']['sales'], 0) ?></td>
       </tr>
     </tfoot>
   </table>
-  <?php endif; ?>
 </div>
+
+<?php endif; ?>
 
 <?php endif; ?>
 
