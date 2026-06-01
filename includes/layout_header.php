@@ -421,7 +421,8 @@ footer { margin: 0 40px; padding: 20px 0; border-top: 1px solid var(--grey-lt); 
 <!-- SUB-NAV -->
 <?php
 $_cur = basename($_SERVER['PHP_SELF']);
-$_in_leads = in_array($_cur, [
+$_in_iti = (strpos($_SERVER['PHP_SELF'], '/modules/iti/') !== false);
+$_in_leads = !$_in_iti && in_array($_cur, [
     'dashboard.php','requests.php','request_add.php','request_edit.php','request_view.php',
     'reports.php','agents.php','agencies.php',
     'requests_import_list.php','request_import_edit.php','reports_import.php',
