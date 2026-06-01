@@ -688,7 +688,7 @@ include __DIR__ . '/../../includes/layout_header.php';
 
 <?php if ($active_tab === 'days'): ?>
 <!-- ═══════════ TAB DAYS ═══════════ -->
-<div id="days-grid" style="display:grid;grid-template-columns:220px 1fr;gap:24px;align-items:start;">
+<div id="days-grid" style="display:grid;grid-template-columns:220px 1fr;gap:24px;align-items:start;position:relative;">
 
   <!-- Day navigator -->
   <div id="day-nav-panel" style="position:sticky;top:72px;max-height:calc(100vh - 90px);overflow-y:auto;overflow-x:hidden;padding-right:2px;">
@@ -784,7 +784,7 @@ include __DIR__ . '/../../includes/layout_header.php';
   </div>
 
   <!-- Day editor — sequential scroll view -->
-  <div id="days-scroll-container">
+  <div id="days-scroll-container" style="max-height:calc(100vh - 120px);overflow-y:auto;overflow-x:hidden;padding-right:4px;">
   <?php foreach ($all_days_data as $_day_id => $_day_bundle):
     $current_day_data  = $_day_bundle['day'];
     $current_acts      = $_day_bundle['acts'];
