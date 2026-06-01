@@ -542,6 +542,9 @@ include __DIR__ . '/../../includes/layout_header.php';
     </div>
   </div>
   <div class="gap-8">
+    <?php if ($active_tab === 'days'): ?>
+    <button type="button" id="btn-save-current" onclick="saveCurrentDay()" class="btn btn-red btn-sm">💾 Save</button>
+    <?php endif; ?>
     <a href="program_view.php?id=<?= $id ?>" class="btn btn-outline btn-sm" target="_blank">👁 Preview</a>
     <?php if ($program['is_published']): ?>
     <a href="<?= h($public_url) ?>" target="_blank" class="btn btn-green btn-sm">🔗 Public Link</a>
@@ -1048,7 +1051,7 @@ include __DIR__ . '/../../includes/layout_header.php';
   <div style="margin-top:16px;">
     <button type="submit"
             class="btn btn-red" style="width:100%;padding:12px;font-size:.95rem;box-shadow:0 2px 8px rgba(0,0,0,.2);">
-      💾 Save Day <?= $current_day_data['day_number'] ?>
+      💾 Save
     </button>
   </div>
 
@@ -1541,6 +1544,19 @@ function toggleOA(checked) {
     document.getElementById('oa-nights-wrap').style.display = checked ? '' : 'none';
     var n = document.getElementById('oa-nights');
     if (n) n.value = checked ? (n.value > 0 ? n.value : '1') : '0';
+}
+
+// ── Save current visible day from header button ──
+function saveCurrentDay() {
+    var activeBtn = document.querySelector('.day-btn.active');
+    if (activeBtn) {
+        var id = activeBtn.id.replace('day-nav-', '');
+        var form = document.getElementById('day-save-form-' + id);
+        if (form) { form.submit(); return; }
+    }
+    // Fallback: submit first form
+    var first = document.querySelector('[id^="day-save-form-"]');
+    if (first) first.submit();
 }
 
 // ── Day nav collapse/expand ──
