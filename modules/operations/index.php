@@ -714,12 +714,30 @@ function isCoastOrIsland(text){if(!text)return false;const up=String(text).toUpp
 
 function buildWALine(r){
   let line='- '+(r.client_name||'—')+' '+r.pax+' pax';
-  if(r.move_time_fmt) line+=' - '+r.move_time_fmt;
-  if(r.flight)        line+=' '+r.flight;
-  if(r.pickup)        line+=' | Pick up: '+r.pickup;
-  if(r.dropoff)       line+=' transfer to '+r.dropoff;
-  if(r.driver)        line+=' | driver '+r.driver;
-  if(r.notes)         line+=' ('+r.notes+')';
+  const isArrival=(r.movement_type==='Arrival');
+  if(isArrival){
+    // Arrival: ... - Arrival [pickup] at [time] [flight] transfer to [dropoff]
+    line+=' - Arrival';
+    if(r.pickup)  line+=' '+r.pickup;
+    if(r.move_time_fmt||r.flight){
+      line+=' at';
+      if(r.move_time_fmt) line+=' '+r.move_time_fmt;
+      if(r.flight)        line+=' '+r.flight;
+    }
+    if(r.dropoff) line+=' transfer to '+r.dropoff;
+  } else {
+    // Departure: ... - From [pickup] transfer to [dropoff], [time] [flight]
+    line+=' -';
+    if(r.pickup)  line+=' From '+r.pickup;
+    if(r.dropoff) line+=' transfer to '+r.dropoff;
+    if(r.move_time_fmt||r.flight){
+      line+=',';
+      if(r.move_time_fmt) line+=' '+r.move_time_fmt;
+      if(r.flight)        line+=' '+r.flight;
+    }
+  }
+  if(r.driver) line+=' | driver '+r.driver;
+  if(r.notes)  line+=' ('+r.notes+')';
   return line;
 }
 
