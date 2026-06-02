@@ -713,31 +713,32 @@ function isJROorARK(text){if(!text)return false;const up=String(text).toUpperCas
 function isCoastOrIsland(text){if(!text)return false;const up=String(text).toUpperCase();return up.includes('ZNZ')||up.includes('ZANZIBAR')||up.includes('PEMBA')||up.includes('MAFIA')||up.includes('DAR');}
 
 function buildWALine(r){
-  let line='- '+(r.client_name||'—')+' '+r.pax+' pax';
+  let line1='- '+(r.client_name||'—')+' '+r.pax+' pax';
   const isArrival=(r.movement_type==='Arrival');
+  let line2='';
   if(isArrival){
-    // Arrival: ... - Arrival [pickup] at [time] [flight] transfer to [dropoff]
-    line+=' - Arrival';
-    if(r.pickup)  line+=' '+r.pickup;
+    // Line 2: Arrival [pickup] at [time] [flight] transfer to [dropoff]
+    line2='Arrival';
+    if(r.pickup)  line2+=' '+r.pickup;
     if(r.move_time_fmt||r.flight){
-      line+=' at';
-      if(r.move_time_fmt) line+=' '+r.move_time_fmt;
-      if(r.flight)        line+=' '+r.flight;
+      line2+=' at';
+      if(r.move_time_fmt) line2+=' '+r.move_time_fmt;
+      if(r.flight)        line2+=' '+r.flight;
     }
-    if(r.dropoff) line+=' transfer to '+r.dropoff;
+    if(r.dropoff) line2+=' transfer to '+r.dropoff;
   } else {
-    // Departure: ... - From [pickup] transfer to [dropoff], [time] [flight]
-    line+=' -';
-    if(r.pickup)  line+=' From '+r.pickup;
-    if(r.dropoff) line+=' transfer to '+r.dropoff;
+    // Line 2: From [pickup] transfer to [dropoff], [time] [flight]
+    if(r.pickup)  line2+='From '+r.pickup;
+    if(r.dropoff) line2+=' transfer to '+r.dropoff;
     if(r.move_time_fmt||r.flight){
-      line+=',';
-      if(r.move_time_fmt) line+=' '+r.move_time_fmt;
-      if(r.flight)        line+=' '+r.flight;
+      line2+=',';
+      if(r.move_time_fmt) line2+=' '+r.move_time_fmt;
+      if(r.flight)        line2+=' '+r.flight;
     }
   }
-  if(r.driver) line+=' | driver '+r.driver;
-  if(r.notes)  line+=' ('+r.notes+')';
+  if(r.driver) line2+=' | driver '+r.driver;
+  if(r.notes)  line2+=' ('+r.notes+')';
+  let line=line1+'\n'+line2;
   return line;
 }
 
@@ -759,7 +760,7 @@ function buildWAForDate(dateRows){
     if(!rows.length){if(alwaysShow)txt+=label+'\nNone\n\n';return;}
     const g=rows.length===1?'1 group':rows.length+' groups';
     txt+=label+' - '+g+'\n';
-    rows.forEach(r=>{txt+=buildWALine(r)+'\n';});
+    rows.forEach((r,i)=>{if(i>0)txt+='\n';txt+=buildWALine(r)+'\n';});
     txt+='\n';
   }
 
