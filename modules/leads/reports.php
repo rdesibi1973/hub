@@ -9,7 +9,7 @@ $db = db();
 $mode          = $_GET['mode']          ?? 'monthly';   // monthly | global | range
 $report_type   = $_GET['rtype']         ?? 'sales';     // sales | travel
 // Travel period only makes sense month by month
-if ($report_type === 'travel' && $mode !== 'monthly') $mode = 'monthly';
+if ($report_type === 'travel' && !in_array($mode, ['monthly','range'])) $mode = 'monthly';
 $year          = (int)($_GET['year']    ?? date('Y'));
 $month         = (int)($_GET['month']   ?? date('n'));
 $range_from    = $_GET['from']          ?? date('Y-01-01');
@@ -288,12 +288,17 @@ if ($mode === 'monthly') {
     $report_from = $from; $report_to = $to;
 }
 
-// ── Travel Period report data (report_type=travel, monthly only) ──
+// ── Travel Period report data (report_type=travel) ──
 $travel_summary = null;
 $travel_no_date = 0;
 if ($report_type === 'travel' && !$is_history) {
-    $tp_from = sprintf('%04d-%02d-01', $year, $month);
-    $tp_to   = date('Y-m-t', strtotime($tp_from));
+    if ($mode === 'range') {
+        $tp_from = $range_from;
+        $tp_to   = $range_to;
+    } else {
+        $tp_from = sprintf('%04d-%02d-01', $year, $month);
+        $tp_to   = date('Y-m-t', strtotime($tp_from));
+    }
 
     // Fetch all Booked requests with start_date in the selected month
     $tp_rows = $db->prepare("
@@ -396,7 +401,7 @@ include 'includes/header.php';
        class="btn btn-sm <?= $report_type==='sales' ? 'btn-red' : 'btn-outline' ?>">
       📊 Sales Report
     </a>
-    <a href="?mode=monthly&rtype=travel&year=<?= $year ?>&month=<?= $month ?>&agent=<?= $agent_filter ?>"
+    <a href="?mode=<?= $report_type==='travel' ? $mode : 'monthly' ?>&rtype=travel&year=<?= $year ?>&month=<?= $month ?>&from=<?= h($range_from) ?>&to=<?= h($range_to) ?>&agent=<?= $agent_filter ?>"
        class="btn btn-sm <?= $report_type==='travel' ? 'btn-red' : 'btn-outline' ?>">
       ✈️ Travel Period
     </a>
@@ -406,7 +411,11 @@ include 'includes/header.php';
   <!-- Mode tabs -->
   <div style="display:flex;gap:8px;margin-bottom:16px;border-bottom:1px solid var(--grey-lt);padding-bottom:14px;">
     <?php
-    $tabs = ['monthly' => 'Monthly', 'global' => $is_history ? "Full Year $year" : 'Grand Total', 'range' => 'Date Range'];
+    if ($report_type === 'travel') {
+        $tabs = ['monthly' => 'Monthly', 'range' => 'Date Range'];
+    } else {
+        $tabs = ['monthly' => 'Monthly', 'global' => $is_history ? "Full Year $year" : 'Grand Total', 'range' => 'Date Range'];
+    }
     foreach ($tabs as $k => $label):
     ?>
     <a href="?mode=<?= $k ?>&rtype=<?= h($report_type) ?>&year=<?= $year ?>&month=<?= $month ?>&from=<?= h($range_from) ?>&to=<?= h($range_to) ?>&agent=<?= $agent_filter ?>"
