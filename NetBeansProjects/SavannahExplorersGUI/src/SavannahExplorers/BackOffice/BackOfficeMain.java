@@ -1708,13 +1708,13 @@ public class BackOfficeMain extends javax.swing.JFrame {
         } catch (Exception ignored) { /* already validated above */ }  
 
         // ── Ask destination country (inserts suffix inside parentheses) ──────
-        String destSuffix = askDestination();
-        if (destSuffix == null) return;  // user cancelled
-        if (!destSuffix.isEmpty()) {
+        DestinationChoice destChoice = askDestination();
+        if (destChoice == null) return;  // user cancelled
+        if (!destChoice.suffix.isEmpty()) {
             int close = confirmedfolder.lastIndexOf(')');
             if (close >= 0) {
                 confirmedfolder = confirmedfolder.substring(0, close)
-                                + destSuffix
+                                + destChoice.suffix
                                 + confirmedfolder.substring(close);
             }
         }
@@ -1894,6 +1894,7 @@ public class BackOfficeMain extends javax.swing.JFrame {
                             bodyBld.append(",\"grp_action\":\"CREATE\"")
                                    .append(",\"grp_subfolder\":\"").append(escJson(grpOrigFinal)).append("\"");
                         }
+                        bodyBld.append(",\"destination\":\"").append(escJson(destChoice.destValue)).append("\"");
                         bodyBld.append("}");
                         String resp = postApiDirect("api_confirm_safari.php", bodyBld.toString());
                         if (resp != null && resp.contains("\"success\":true")) {
@@ -3747,19 +3748,33 @@ public class BackOfficeMain extends javax.swing.JFrame {
      * or null if the user cancelled.
      * Tanzania/Beach returns "" — no suffix added.
      */
-    private String askDestination() {
+    /**
+     * Result of askDestination dialog.
+     * suffix    — string to insert inside () in the folder name (may be empty for Tanzania)
+     * destValue — value to save in requests.destination DB field
+     */
+    static class DestinationChoice {
+        final String suffix;
+        final String destValue;
+        DestinationChoice(String suffix, String destValue) {
+            this.suffix = suffix;
+            this.destValue = destValue;
+        }
+    }
+
+    private DestinationChoice askDestination() {
         String[][] options = {
-            { "Safari / Safari & Beach — Tanzania",  ""             },
-            { "Trekking Kilimanjaro / Meru",         "-TREK"        },
-            { "Only Zanzibar",                       "-ZNZ"         },
-            { "Safari Kenya-Tanzania",               "-TZ-KENYA"    },
-            { "Safari Kenya",                        "-KENYA"       },
-            { "Uganda",                              "-UGANDA"      },
-            { "Namibia",                             "-NAMIBIA"     },
-            { "South Africa",                        "-SOUTHAFRICA" },
-            { "Rwanda",                              "-RWANDA"      },
-            { "Madagascar",                          "-MADAGASCAR"  },
-            { "Botswana",                            "-BOTSWANA"    },
+            { "Safari / Safari & Beach — Tanzania",  "",             "Tanzania"    },
+            { "Trekking Kilimanjaro / Meru",         "-TREK",        "Tanzania"    },
+            { "Only Zanzibar",                       "-ZNZ",         "Tanzania"    },
+            { "Safari Kenya-Tanzania",               "-TZ-KENYA",    "Kenya"       },
+            { "Safari Kenya",                        "-KENYA",       "Kenya"       },
+            { "Uganda",                              "-UGANDA",      "Uganda"      },
+            { "Namibia",                             "-NAMIBIA",     "Namibia"     },
+            { "South Africa",                        "-SOUTHAFRICA", "South Africa"},
+            { "Rwanda",                              "-RWANDA",      "Rwanda"      },
+            { "Madagascar",                          "-MADAGASCAR",  "Madagascar"  },
+            { "Botswana",                            "-BOTSWANA",    "Botswana"    },
         };
         String[] labels = new String[options.length];
         for (int i = 0; i < options.length; i++) labels[i] = options[i][0];
@@ -3779,7 +3794,8 @@ public class BackOfficeMain extends javax.swing.JFrame {
             JOptionPane.OK_CANCEL_OPTION, JOptionPane.QUESTION_MESSAGE);
 
         if (res != JOptionPane.OK_OPTION) return null;
-        return options[combo.getSelectedIndex()][1];
+        int sel = combo.getSelectedIndex();
+        return new DestinationChoice(options[sel][1], options[sel][2]);
     }
 
     // ── Safari Booking Email Dialog ───────────────────────────────────────────

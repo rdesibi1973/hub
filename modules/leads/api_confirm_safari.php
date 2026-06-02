@@ -43,6 +43,7 @@ $newFolderName = trim($body['new_folder_name'] ?? '');
 $grpAction     = trim($body['grp_action']     ?? 'NONE');  // NONE | CREATE | ADD
 $grpSubfolder  = trim($body['grp_subfolder']  ?? '');      // CREATE: individual subfolder name
 $grpMainFolder = trim($body['grp_main_folder'] ?? '');     // ADD: main GRP folder name
+$destination   = trim($body['destination']    ?? '');      // Trip destination (e.g. Tanzania, Kenya)
 
 if ($oldFolderName === '' || $newFolderName === '') {
     http_response_code(400);
@@ -130,10 +131,11 @@ if ($grpAction === 'CREATE' && $grpSubfolder !== '') {
              dropbox_url       = ?,
              status            = 'Booked',
              confirmation_date = CURDATE(),
-             start_date        = COALESCE(?, start_date)
+             start_date        = COALESCE(?, start_date),
+             destination       = CASE WHEN ? != '' THEN ? ELSE destination END
          WHERE id = ?"
     );
-    $update->execute([$grpSubfolder, $newFolderName, $newDropboxUrl, $startDate, $id]);
+    $update->execute([$grpSubfolder, $newFolderName, $newDropboxUrl, $startDate, $destination, $destination, $id]);
     $responseFolder = $grpSubfolder;
 
 } elseif ($grpAction === 'ADD' && $grpMainFolder !== '') {
@@ -147,10 +149,11 @@ if ($grpAction === 'CREATE' && $grpSubfolder !== '') {
              dropbox_url       = ?,
              status            = 'Booked',
              confirmation_date = CURDATE(),
-             start_date        = COALESCE(?, start_date)
+             start_date        = COALESCE(?, start_date),
+             destination       = CASE WHEN ? != '' THEN ? ELSE destination END
          WHERE id = ?"
     );
-    $update->execute([$newFolderName, $grpMainFolder, $newDropboxUrl, $startDate, $id]);
+    $update->execute([$newFolderName, $grpMainFolder, $newDropboxUrl, $startDate, $destination, $destination, $id]);
     $responseFolder = $newFolderName;
 
 } else {
@@ -162,10 +165,11 @@ if ($grpAction === 'CREATE' && $grpSubfolder !== '') {
              dropbox_url       = ?,
              status            = 'Booked',
              confirmation_date = CURDATE(),
-             start_date        = COALESCE(?, start_date)
+             start_date        = COALESCE(?, start_date),
+             destination       = CASE WHEN ? != '' THEN ? ELSE destination END
          WHERE id = ?"
     );
-    $update->execute([$newFolderName, $newDropboxUrl, $startDate, $id]);
+    $update->execute([$newFolderName, $newDropboxUrl, $startDate, $destination, $destination, $id]);
     $responseFolder = $newFolderName;
 }
 

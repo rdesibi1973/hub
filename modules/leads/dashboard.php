@@ -43,13 +43,13 @@ $total = $db->prepare("SELECT COUNT(*) FROM requests WHERE date_received BETWEEN
 $total->execute([$start, $end]);
 $totalCount = (int)$total->fetchColumn();
 
-$booked = $db->prepare("SELECT COUNT(*) FROM requests WHERE status='Booked' AND date_received BETWEEN ? AND ?");
+$booked = $db->prepare("SELECT COUNT(*) FROM requests WHERE status='Booked' AND date_received BETWEEN ? AND ? AND (practice_code NOT LIKE '%\_STAFF%' OR practice_code IS NULL)");
 $booked->execute([$start, $end]);
 $bookedCount = (int)$booked->fetchColumn();
 
 $salesRate = $totalCount > 0 ? round($bookedCount / $totalCount * 100, 1) : 0;
 
-$value = $db->prepare("SELECT COALESCE(SUM(value_usd),0) FROM requests WHERE status='Booked' AND date_received BETWEEN ? AND ?");
+$value = $db->prepare("SELECT COALESCE(SUM(value_usd),0) FROM requests WHERE status='Booked' AND date_received BETWEEN ? AND ? AND (practice_code NOT LIKE '%\_STAFF%' OR practice_code IS NULL)");
 $value->execute([$start, $end]);
 $totalValue = (float)$value->fetchColumn();
 
@@ -65,7 +65,7 @@ $lostCount = (int)$lost->fetchColumn();
 $byAgent = $db->prepare("
     SELECT a.name,
            COUNT(r.id)                          AS total,
-           SUM(r.status='Booked')               AS booked,
+           SUM(r.status='Booked' AND (r.practice_code NOT LIKE '%\_STAFF%' OR r.practice_code IS NULL)) AS booked,
            COALESCE(SUM(r.commission_usd),0)    AS comm
     FROM agents a
     LEFT JOIN requests r ON r.agent_id = a.id

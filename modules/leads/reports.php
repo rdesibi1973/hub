@@ -67,6 +67,7 @@ function buildSummary(PDO $db, string $from, string $to, array $agents, array $d
             SELECT COUNT(*) AS total, destination
             FROM requests
             WHERE agent_id = ? AND date_received BETWEEN ? AND ?
+              AND (practice_code NOT LIKE '%\_STAFF%' OR practice_code IS NULL)
             GROUP BY destination
         ");
         $stmt1->execute([$ag['id'], $from, $to]);
@@ -90,6 +91,7 @@ function buildSummary(PDO $db, string $from, string $to, array $agents, array $d
             FROM requests
             WHERE agent_id = ? AND status = 'Booked'
               AND confirmation_date BETWEEN ? AND ?
+              AND (practice_code NOT LIKE '%\_STAFF%' OR practice_code IS NULL)
         ");
         $stmt2->execute([$ag['id'], $from, $to]);
         $conf_data = $stmt2->fetch();
@@ -119,6 +121,7 @@ function buildSummary(PDO $db, string $from, string $to, array $agents, array $d
     $stmt1 = $db->prepare("
         SELECT COUNT(*) AS total, destination
         FROM requests WHERE agent_id IS NULL AND date_received BETWEEN ? AND ?
+              AND (practice_code NOT LIKE '%\_STAFF%' OR practice_code IS NULL)
         GROUP BY destination
     ");
     $stmt1->execute([$from, $to]);
@@ -138,6 +141,7 @@ function buildSummary(PDO $db, string $from, string $to, array $agents, array $d
         FROM requests
         WHERE agent_id IS NULL AND status = 'Booked'
           AND confirmation_date BETWEEN ? AND ?
+              AND (practice_code NOT LIKE '%\_STAFF%' OR practice_code IS NULL)
     ");
     $stmt2->execute([$from, $to]);
     $uconf = $stmt2->fetch();
@@ -297,6 +301,7 @@ if ($report_type === 'travel' && !$is_history) {
         FROM requests r
         WHERE r.status = 'Booked'
           AND r.start_date BETWEEN ? AND ?
+              AND (r.practice_code NOT LIKE '%\_STAFF%' OR r.practice_code IS NULL)
     ");
     $tp_rows->execute([$tp_from, $tp_to]);
     $tp_data = $tp_rows->fetchAll(PDO::FETCH_ASSOC);
@@ -304,6 +309,7 @@ if ($report_type === 'travel' && !$is_history) {
     // Count Booked requests with no start_date (for warning)
     $travel_no_date = (int)$db->query("
         SELECT COUNT(*) FROM requests WHERE status='Booked' AND start_date IS NULL
+              AND (practice_code NOT LIKE '%\_STAFF%' OR practice_code IS NULL)
     ")->fetchColumn();
 
     // Aggregate by agent
