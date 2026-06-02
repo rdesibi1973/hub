@@ -3775,6 +3775,7 @@ public class BackOfficeMain extends javax.swing.JFrame {
             { "Rwanda",                              "-RWANDA",      "Rwanda"      },
             { "Madagascar",                          "-MADAGASCAR",  "Madagascar"  },
             { "Botswana",                            "-BOTSWANA",    "Botswana"    },
+            { "Staff / Internal",                        "-STAFF",       "Staff"       },
         };
         String[] labels = new String[options.length];
         for (int i = 0; i < options.length; i++) labels[i] = options[i][0];
