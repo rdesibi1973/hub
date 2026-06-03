@@ -188,3 +188,106 @@ function fmt_money(float $amount, string $currency): string {
     $sym = ($currency === 'EUR') ? '€' : '$';
     return $sym . number_format($amount, 2);
 }
+
+// ── Credit note: amount already allocated (in CN currency) ───────────────────
+// Sums non-cancelled allocations. The CN "remaining credit" is total minus this.
+function cn_allocated_amount(PDO $db, int $cnId): float {
+    $s = $db->prepare("SELECT COALESCE(SUM(amount_cn),0) FROM credit_note_allocations WHERE credit_note_id=? AND cancelled_at IS NULL");
+    $s->execute([$cnId]);
+    return round((float)$s->fetchColumn(), 2);
+}
+
+function cn_remaining_credit(PDO $db, int $cnId): float {
+    $s = $db->prepare("SELECT total FROM credit_notes WHERE id=?");
+    $s->execute([$cnId]);
+    $total = (float)$s->fetchColumn();
+    return round($total - cn_allocated_amount($db, $cnId), 2);
+}
+
+// ── Apply part of a credit note's credit to another invoice ──────────────────
+// $amountCn   : amount to deduct from the CN, in the CN's currency
+// $fxRate     : CN currency -> invoice currency (1 when same currency)
+// The invoice amount = floor(amountCn * fxRate) to the unit, then recorded as a
+// POSITIVE payment on the target invoice (method "Other", reference = CN number).
+// Returns the new allocation id. Throws on validation failure.
+function cn_apply_to_invoice(
+    PDO $db, int $cnId, int $targetInvoiceId,
+    float $amountCn, float $fxRate, string $allocDate, ?string $note, int $uid
+): int {
+    $cn = $db->prepare("SELECT * FROM credit_notes WHERE id=?");
+    $cn->execute([$cnId]);
+    $cn = $cn->fetch();
+    if (!$cn) throw new \RuntimeException('Credit note not found.');
+    if ($cn['status'] !== 'Issued') throw new \RuntimeException('Credit note is not active.');
+
+    $inv = $db->prepare("SELECT * FROM invoices WHERE id=?");
+    $inv->execute([$targetInvoiceId]);
+    $inv = $inv->fetch();
+    if (!$inv) throw new \RuntimeException('Target invoice not found.');
+    if ($inv['status'] === 'Cancelled') throw new \RuntimeException('Cannot apply credit to a cancelled invoice.');
+
+    $amountCn = round($amountCn, 2);
+    if ($amountCn <= 0) throw new \RuntimeException('Amount must be greater than zero.');
+
+    $remaining = cn_remaining_credit($db, $cnId);
+    if ($amountCn > $remaining + 0.001) {
+        throw new \RuntimeException('Amount exceeds remaining credit (' . fmt_money($remaining, $cn['currency']) . ').');
+    }
+
+    if ($fxRate <= 0) $fxRate = 1.0;
+    // Floor to the unit in the invoice currency.
+    $amountInvoice = floor($amountCn * $fxRate);
+    if ($amountInvoice <= 0) throw new \RuntimeException('Resulting invoice amount is zero after rounding.');
+
+    $payNote = 'Credit note ' . $cn['cn_number']
+             . ' (' . fmt_money($amountCn, $cn['currency']) . ' @ ' . rtrim(rtrim(number_format($fxRate, 6, '.', ''), '0'), '.') . ')'
+             . ($note ? ' — ' . $note : '');
+
+    $db->beginTransaction();
+    try {
+        // Positive payment on the target invoice, in invoice currency.
+        $db->prepare("INSERT INTO invoice_payments (invoice_id,payment_date,amount,method,reference,notes) VALUES (?,?,?,?,?,?)")
+           ->execute([$targetInvoiceId, $allocDate, $amountInvoice, 'Other', $cn['cn_number'], $payNote]);
+        $payId = (int)$db->lastInsertId();
+
+        $db->prepare("INSERT INTO credit_note_allocations
+            (credit_note_id, invoice_id, payment_id, amount_cn, amount_invoice, fx_rate, alloc_date, notes, created_by)
+            VALUES (?,?,?,?,?,?,?,?,?)")
+           ->execute([$cnId, $targetInvoiceId, $payId, $amountCn, $amountInvoice, $fxRate, $allocDate, $note ?: null, $uid]);
+        $allocId = (int)$db->lastInsertId();
+
+        recalculate_invoice($db, $targetInvoiceId);
+        sync_request_value($db, $targetInvoiceId);
+
+        $db->commit();
+        return $allocId;
+    } catch (\Throwable $e) {
+        $db->rollBack();
+        throw $e;
+    }
+}
+
+// ── Cancel an allocation: removes the linked payment, frees the credit ───────
+function cn_cancel_allocation(PDO $db, int $allocId): void {
+    $a = $db->prepare("SELECT * FROM credit_note_allocations WHERE id=? AND cancelled_at IS NULL");
+    $a->execute([$allocId]);
+    $a = $a->fetch();
+    if (!$a) return;
+
+    $db->beginTransaction();
+    try {
+        if ($a['payment_id']) {
+            $db->prepare("UPDATE invoice_payments SET cancelled_at=NOW(), cancellation_reason=? WHERE id=? AND cancelled_at IS NULL")
+               ->execute(['Credit note allocation cancelled', (int)$a['payment_id']]);
+        }
+        $db->prepare("UPDATE credit_note_allocations SET cancelled_at=NOW() WHERE id=?")->execute([$allocId]);
+
+        recalculate_invoice($db, (int)$a['invoice_id']);
+        sync_request_value($db, (int)$a['invoice_id']);
+
+        $db->commit();
+    } catch (\Throwable $e) {
+        $db->rollBack();
+        throw $e;
+    }
+}
