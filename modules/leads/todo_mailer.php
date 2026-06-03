@@ -20,11 +20,17 @@ if (($_GET['token'] ?? '') !== MAILER_TOKEN) {
 require_once 'config.php';
 $db = db();
 
+// ── Timezone: align NOW() and entered times to Dar es Salaam (EAT) ──────────
+// BlueHost server clock is in US time (~7h behind), so NOW() must be forced to
+// the same zone in which to-do times are entered, otherwise reminders fire late.
+date_default_timezone_set('Africa/Dar_es_Salaam');
+$db->exec("SET time_zone = '+03:00'");
+
 // ── Find all due, unsent, not-done to-dos that have an email address ───────
 $stmt = $db->prepare("
     SELECT t.id, t.title, t.due_at, t.email_to, t.request_id,
            r.customer_name, r.destination, r.period,
-           u.full_name AS creator_name
+           u.full_name AS creator_name, u.email AS creator_email
     FROM request_todos t
     JOIN requests r ON r.id = t.request_id
     LEFT JOIN users u ON u.id = t.user_id
@@ -65,11 +71,21 @@ foreach ($due as $t) {
     $body .= str_repeat("-", 50) . "\r\n";
     $body .= "Savannah Explorers Hub — automated reminder\r\n";
 
-    $headers  = "From: noreply@savannahexplorers.com\r\n";
+    // Send from the creating user's company address (all @savannahexplorers.com).
+    // Fallback to noreply only if the user has no email on file.
+    $fromEmail = filter_var($t['creator_email'] ?? '', FILTER_VALIDATE_EMAIL)
+               ? $t['creator_email']
+               : 'noreply@savannahexplorers.com';
+    $fromName  = $t['creator_name'] ?: 'Savannah Explorers Hub';
+    $fromHeader = sprintf('%s <%s>', $fromName, $fromEmail);
+
+    $headers  = "From: " . $fromHeader . "\r\n";
+    $headers .= "MIME-Version: 1.0\r\n";
     $headers .= "Content-Type: text/plain; charset=UTF-8\r\n";
     $headers .= "X-Mailer: SavannahHub-TodoMailer\r\n";
 
-    $ok = @mail($to, $subject, $body, $headers);
+    // -f sets the envelope sender so BlueHost/SPF accepts the message.
+    $ok = @mail($to, $subject, $body, $headers, '-f' . $fromEmail);
 
     if ($ok) {
         $db->prepare("UPDATE request_todos SET reminder_sent=1 WHERE id=?")
