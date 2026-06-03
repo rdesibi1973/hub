@@ -263,6 +263,9 @@ $items->execute([$id]); $items = $items->fetchAll();
 $payments = $db->prepare("SELECT * FROM invoice_payments WHERE invoice_id=? ORDER BY payment_date, id");
 $payments->execute([$id]); $payments = $payments->fetchAll();
 
+$creditNotes = $db->prepare("SELECT * FROM credit_notes WHERE invoice_id=? ORDER BY issue_date, id");
+$creditNotes->execute([$id]); $creditNotes = $creditNotes->fetchAll();
+
 $pageTitle = $inv['invoice_number'];
 include 'includes/header.php';
 
@@ -298,6 +301,9 @@ $sym = $inv['currency'] === 'EUR' ? '€' : '$';
     <a href="invoice_edit.php?id=<?= $id ?>" class="btn btn-outline">Edit</a>
     <a href="#" class="btn btn-outline" onclick="openMailModal();return false;">✉ Mail</a>
     <a href="invoice_pdf.php?id=<?= $id ?>&download=1" class="btn btn-outline" target="_blank">🖨 PDF</a>
+    <?php if ($inv['status'] !== 'Cancelled'): ?>
+      <a href="cn_add.php?invoice_id=<?= $id ?>" class="btn btn-outline">+ Credit Note</a>
+    <?php endif; ?>
     <?php if ($inv['status'] === 'Cancelled' && isInvoiceAdmin()): ?>
       <button class="btn btn-outline" onclick="restoreInvoice()">↩ Restore</button>
     <?php endif; ?>
@@ -454,7 +460,35 @@ $sym = $inv['currency'] === 'EUR' ? '€' : '$';
   </table>
 </div>
 
-<!-- Add payment form -->
+<?php if ($creditNotes): ?>
+<!-- ── CREDIT NOTES ────────────────────────────────────────────────────── -->
+<div class="section-label">Credit Notes</div>
+<div class="table-wrap" style="max-width:860px;margin-bottom:16px">
+  <table>
+    <thead>
+      <tr>
+        <th>CN #</th>
+        <th>Date</th>
+        <th>Reason</th>
+        <th class="text-right">Credit</th>
+        <th>Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      <?php foreach ($creditNotes as $c): ?>
+      <tr style="cursor:pointer<?= $c['status']==='Cancelled' ? ';opacity:.5' : '' ?>" onclick="location.href='cn_view.php?id=<?= (int)$c['id'] ?>'">
+        <td><strong><?= h($c['cn_number']) ?></strong></td>
+        <td style="white-space:nowrap"><?= date('d M Y', strtotime($c['issue_date'])) ?></td>
+        <td class="text-muted"><?= h($c['reason'] ?: '—') ?></td>
+        <td class="text-right" style="font-weight:600;color:var(--red)"><?= fmt_money((float)$c['total'], $inv['currency']) ?></td>
+        <td><span class="badge <?= CN_STATUSES[$c['status']] ?? '' ?>"><?= h($c['status']) ?></span></td>
+      </tr>
+      <?php endforeach; ?>
+    </tbody>
+  </table>
+</div>
+<?php endif; ?>
+
 <?php if ($inv['status'] !== 'Cancelled'): ?>
 <div class="table-wrap" style="max-width:860px;padding:20px 24px;">
   <div style="font-size:.8rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--grey-dk);margin-bottom:16px;">Record Payment</div>

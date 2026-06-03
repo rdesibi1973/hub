@@ -36,6 +36,7 @@ $currentUser = current_user();
   <span style="display:inline-block;width:1px;background:#E8E8E8;margin:8px 4px;align-self:stretch;"></span>
   <a href="booked_requests.php"  class="<?= $cur==='booked_requests.php' ? 'active':'' ?>">Requests</a>
   <a href="invoices.php"         class="<?= in_array($cur,['invoices.php','invoice_add.php','invoice_edit.php','invoice_view.php']) ? 'active':'' ?>">Invoices</a>
+  <a href="cn_list.php"          class="<?= in_array($cur,['cn_list.php','cn_add.php','cn_view.php']) ? 'active':'' ?>">Credit Notes</a>
   <a href="customers.php"        class="<?= $cur==='customers.php'       ? 'active':'' ?>">Customers</a>
   <a href="reports.php"          class="<?= $cur==='reports.php'         ? 'active':'' ?>">Reports</a>
   <a href="invoice_import.php"  class="<?= $cur==='invoice_import.php'  ? 'active':'' ?>">Import PDF</a>
