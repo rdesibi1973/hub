@@ -2,7 +2,7 @@
 
 > **Authoritative source = the code in `modules/leads/includes/folder_parser.php`.** This document is *descriptive*: it explains the naming patterns and how the parser interprets them. It does **not** define behaviour. If you need to change how folders are parsed, edit the PHP — editing this file changes nothing. If this document and the code disagree, the code wins.
 >
-> ⚠️ A second, **older** copy exists at `includes/folder_parser.php` (root, 42 lines) containing only an early `parse_practice_dates()`. The live, complete logic is the `modules/leads/includes/` copy (functions `parse_folder_dates`, `get_date_folder`, `folder_agency`, `folder_payment_status`). Prefer the leads copy; consider consolidating the root copy in a future cleanup.
+> This is now the **single** copy of the parser (functions `parse_folder_dates`, `get_date_folder`, `folder_agency`, `folder_payment_status`). An older, reduced root copy at `includes/folder_parser.php` — together with the legacy root `booked.php` that used it — was removed during consolidation (the root `booked.php` computed dates from `group_folder` directly, missing the `get_date_folder()` routing for normal/GRP bookings). The live Booked page is `modules/leads/booked.php`.
 
 ---
 
