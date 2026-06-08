@@ -36,6 +36,10 @@ function send_hub_email(
     if ($reply_to) {
         $headers .= "Reply-To: {$reply_to}\r\n";
     }
+    // BCC the sending account so it keeps a copy of outgoing hub mail
+    if (filter_var($from_email, FILTER_VALIDATE_EMAIL)) {
+        $headers .= "Bcc: {$from_email}\r\n";
+    }
     $headers .= "X-Mailer: SavannahHub/1.0\r\n";
 
     return mail($to, '=?UTF-8?B?' . base64_encode($subject) . '?=', $body_html, $headers);
