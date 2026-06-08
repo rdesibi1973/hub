@@ -20,6 +20,20 @@ function substitute_vars(string $text, array $req, array $dates, string $agent_n
 }
 
 /**
+ * Tidy up HTML produced by the Quill editor so it renders compactly and
+ * consistently across mail clients.
+ */
+if (!function_exists('normalize_email_html')) {
+    function normalize_email_html(string $html): string {
+        $html = preg_replace('#<p>(\s|&nbsp;|<br\s*/?>)*</p>#i', '<p></p>', $html);
+        $html = preg_replace('#(<p></p>\s*){2,}#i', '<p></p>', $html);
+        $html = str_ireplace('<p></p>', '<p style="margin:0;line-height:1.4">&nbsp;</p>', $html);
+        $html = preg_replace('#<p(?![^>]*\bstyle=)#i', '<p style="margin:0 0 4px 0;line-height:1.4"', $html);
+        return $html;
+    }
+}
+
+/**
  * Send an HTML email via PHP mail().
  */
 function send_hub_email(
@@ -30,6 +44,7 @@ function send_hub_email(
     string $from_email,
     string $reply_to = ''
 ): bool {
+    $body_html = normalize_email_html($body_html);
     $headers  = "MIME-Version: 1.0\r\n";
     $headers .= "Content-Type: text/html; charset=UTF-8\r\n";
     $headers .= "From: =?UTF-8?B?" . base64_encode($from_name) . "?= <{$from_email}>\r\n";

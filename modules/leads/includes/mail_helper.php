@@ -6,6 +6,27 @@ require_once __DIR__ . '/phpmailer/Exception.php';
 require_once __DIR__ . '/phpmailer/PHPMailer.php';
 
 /**
+ * Tidy up HTML produced by the Quill editor so it renders compactly and
+ * consistently across mail clients (Thunderbird, Gmail, etc.).
+ *  - collapses runs of empty paragraphs (<p><br></p>, <p>&nbsp;</p>) into a single one
+ *  - gives every <p> an explicit uniform margin so clients don't apply their
+ *    own (large) default paragraph spacing
+ */
+if (!function_exists('normalize_email_html')) {
+    function normalize_email_html(string $html): string {
+        // Normalise empty-paragraph variants to a single marker
+        $html = preg_replace('#<p>(\s|&nbsp;|<br\s*/?>)*</p>#i', '<p></p>', $html);
+        // Collapse 2+ consecutive empty paragraphs into one
+        $html = preg_replace('#(<p></p>\s*){2,}#i', '<p></p>', $html);
+        // Empty paragraph = single blank line of fixed height
+        $html = str_ireplace('<p></p>', '<p style="margin:0;line-height:1.4">&nbsp;</p>', $html);
+        // Give content paragraphs (those without an inline style) a uniform margin
+        $html = preg_replace('#<p(?![^>]*\bstyle=)#i', '<p style="margin:0 0 4px 0;line-height:1.4"', $html);
+        return $html;
+    }
+}
+
+/**
  * Substitute {{variables}} in a template string using request data.
  */
 function substitute_vars(string $text, array $req, array $dates, string $agent_name, string $agent_email): string {
@@ -44,6 +65,7 @@ function send_hub_email(
 ): bool {
     $mail = new PHPMailer(true);
     try {
+        $body_html = normalize_email_html($body_html);
         $mail->isMail();
         $mail->CharSet    = 'UTF-8';
         $mail->setFrom($from_email, $from_name);
