@@ -829,6 +829,9 @@ function fmtDate(val){
   return s;
 }
 
+function toISO(val){const s=String(val||'').trim();const m=s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);if(m)return m[3]+'-'+m[2].padStart(2,'0')+'-'+m[1].padStart(2,'0');if(/^\d{4}-\d{2}-\d{2}$/.test(s))return s;return'';}
+function fromISO(val){const s=String(val||'').trim();const m=s.match(/^(\d{4})-(\d{2})-(\d{2})$/);if(m)return m[3]+'/'+m[2]+'/'+m[1];return s;}
+
 function extractTime(s){if(!s)return'';const m=String(s).match(/(\d{1,2})[.,:h](\d{2})\s*(am|pm)?/i);if(!m)return'';let h=parseInt(m[1]),mn=m[2];const ap=(m[3]||'').toLowerCase();if(ap==='pm'&&h<12)h+=12;if(ap==='am'&&h===12)h=0;return pad(h)+':'+mn;}
 function extractFlight(s){if(!s)return'';s=String(s).trim();const m=s.match(/\b([A-Z]{2,3})\s*(\d{2,4})\b/);if(m)return m[1]+' '+m[2];const m2=s.match(/\bby\s+([A-Z]{2,3})\b/i);if(m2)return m2[1].toUpperCase();return'';}
 function matchAirport(text){if(!text)return'';const up=String(text).toUpperCase();for(const[keys,name]of AIRPORTS)if(keys.some(k=>up.includes(k)))return name;return'';}
@@ -981,7 +984,7 @@ function renderExtractor(){
     '<button class="btn-sm2 btn-copy-row" onclick="copyExtRow('+idx+')">Copy row</button>'+
     '<button class="btn-sm2 btn-del-card" onclick="deleteExtRow('+idx+')">&#10005;</button></div></div>'+
     '<div class="fields-grid">'+
-    extFld(idx,'date','Date',r.date)+extFld(idx,'type','Movement Type',r.type)+extFld(idx,'client','Client / Group Name',r.client)+extFld(idx,'pax','Pax',r.pax)+
+    extFld(idx,'date','Date',r.date,true)+extFld(idx,'type','Movement Type',r.type)+extFld(idx,'client','Client / Group Name',r.client)+extFld(idx,'pax','Pax',r.pax)+
     extFld(idx,'flight','Flight / Transfer',r.flight)+extFld(idx,'time','Time',r.time)+extFld(idx,'pickup','Pick up',r.pickup)+extFld(idx,'dropoff','Drop off',r.dropoff)+
     extFld(idx,'driver','Driver / Guide',r.driver)+extFld(idx,'notes','Notes',r.notes)+extFld(idx,'dropbox','Dropbox File',r.dropbox)+
     '</div></div>';
@@ -992,7 +995,7 @@ function renderExtractor(){
   document.getElementById('extMain').innerHTML=html;
 }
 
-function extFld(idx,key,label,value){return'<div class="field"><label>'+label+'</label><input type="text" value="'+escA(value)+'" oninput="extRows['+idx+'][\''+key+'\']=this.value" placeholder="'+label+'"></div>';}
+function extFld(idx,key,label,value,isDate){if(isDate){return'<div class="field"><label>'+label+'</label><input type="date" value="'+toISO(value)+'" oninput="extRows['+idx+'][\''+key+'\']=fromISO(this.value)" placeholder="'+label+'"></div>';}return'<div class="field"><label>'+label+'</label><input type="text" value="'+escA(value)+'" oninput="extRows['+idx+'][\''+key+'\']=this.value" placeholder="'+label+'"></div>';}
 function deleteExtRow(idx){extRows.splice(idx,1);renderExtractor();}
 function addExtRow(type){extRows.push(newRow({type}));renderExtractor();}
 function cancelExtractor(){
@@ -1005,7 +1008,7 @@ function cancelExtractor(){
   document.getElementById('extFileInput').value='';
   document.getElementById('auditPanelExt').style.display='none';
 }
-function readExtDOM(idx){const card=document.getElementById('card_'+idx);const r={...extRows[idx]};if(!card)return r;card.querySelectorAll('input').forEach((inp,i)=>{if(FIELD_KEYS[i])r[FIELD_KEYS[i]]=inp.value;});return r;}
+function readExtDOM(idx){const card=document.getElementById('card_'+idx);const r={...extRows[idx]};if(!card)return r;card.querySelectorAll('input').forEach((inp,i)=>{if(FIELD_KEYS[i])r[FIELD_KEYS[i]]=(i===0?fromISO(inp.value):inp.value);});return r;}
 function extRowToTSV(r){return FIELD_KEYS.map((k,i)=>{const v=String(r[k]||'');if(i===0&&v)return fmtDate(v);if(i===5&&v)return v.replace(',',':');return v;}).join('\t');}
 function copyExtRow(idx){showExtModal(extRowToTSV(readExtDOM(idx)));}
 function copyAllExt(){showExtModal(extRows.map((_,i)=>extRowToTSV(readExtDOM(i))).join('\n'));}
