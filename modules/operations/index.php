@@ -156,6 +156,7 @@ input[type=date]::-webkit-calendar-picker-indicator{filter:invert(1);}
 .field label{font-size:.6rem;font-weight:700;text-transform:uppercase;letter-spacing:.09em;color:var(--grey-mid);}
 .field input{font-family:"Open Sans",sans-serif;font-size:.83rem;padding:6px 8px;border:1.5px solid var(--grey-lt);border-radius:5px;color:var(--black);background:var(--off-white);transition:border-color .15s;}
 .field input:focus{outline:none;border-color:var(--red);background:var(--white);}
+.field input[type=date]::-webkit-calendar-picker-indicator{filter:none;}
 .add-row-bar{display:flex;gap:8px;margin:14px 0;flex-wrap:wrap;}
 .btn-add-row2{background:var(--white);border:1.5px solid var(--grey-lt);color:var(--grey-dk);font-family:"Open Sans",sans-serif;font-size:.75rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;padding:7px 15px;border-radius:6px;cursor:pointer;transition:all .15s;}
 .btn-add-row2:hover{border-color:var(--red);color:var(--red-dk);}
