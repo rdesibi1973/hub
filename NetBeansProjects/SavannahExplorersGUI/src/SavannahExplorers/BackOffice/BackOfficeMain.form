@@ -267,7 +267,6 @@
                                                           <Component id="jDumaShort" alignment="0" min="-2" max="-2" attributes="0"/>
                                                           <Component id="jCheckBox2" alignment="0" min="-2" max="-2" attributes="0"/>
                                                           <Component id="jCheckBox3" alignment="0" min="-2" max="-2" attributes="0"/>
-                                                          <Component id="Simba2" alignment="0" min="-2" max="-2" attributes="0"/>
                                                           <Component id="Simba3" alignment="0" min="-2" max="-2" attributes="0"/>
                                                           <Component id="jCheckBox4" alignment="0" min="-2" max="-2" attributes="0"/>
                                                           <Component id="jCheckBox5" alignment="0" min="-2" max="-2" attributes="0"/>
@@ -287,7 +286,6 @@
                                                           </Group>
                                                           <Component id="jCheckBox13" min="-2" max="-2" attributes="0"/>
                                                           <Component id="jCheckBox28" min="-2" max="-2" attributes="0"/>
-                                                          <Component id="jCheckBox9" min="-2" max="-2" attributes="0"/>
                                                       </Group>
                                                       <EmptySpace min="-2" pref="73" max="-2" attributes="0"/>
                                                       <Group type="103" groupAlignment="1" attributes="0">
@@ -472,7 +470,6 @@
                                                       <EmptySpace max="-2" attributes="0"/>
                                                       <Group type="103" groupAlignment="3" attributes="0">
                                                           <Component id="PumbaPemba" alignment="3" min="-2" max="-2" attributes="0"/>
-                                                          <Component id="jCheckBox9" alignment="3" min="-2" max="-2" attributes="0"/>
                                                       </Group>
                                                   </Group>
                                               </Group>
@@ -516,7 +513,6 @@
                                               </Group>
                                               <EmptySpace max="-2" attributes="0"/>
                                               <Group type="103" groupAlignment="3" attributes="0">
-                                                  <Component id="Simba2" alignment="3" min="-2" pref="20" max="-2" attributes="0"/>
                                                   <Component id="jCheckBox28" alignment="3" max="32767" attributes="0"/>
                                               </Group>
                                               <EmptySpace max="-2" attributes="0"/>
@@ -960,11 +956,6 @@
                 <EventHandler event="actionPerformed" listener="java.awt.event.ActionListener" parameters="java.awt.event.ActionEvent" handler="PumbaPembaActionPerformed"/>
               </Events>
             </Component>
-            <Component class="javax.swing.JCheckBox" name="Simba2">
-              <Properties>
-                <Property name="text" type="java.lang.String" value="Simba2"/>
-              </Properties>
-            </Component>
             <Component class="javax.swing.JCheckBox" name="GranSafari">
               <Properties>
                 <Property name="text" type="java.lang.String" value="GranSafari"/>
@@ -1158,11 +1149,6 @@
               </Events>
             </Component>
             <Component class="javax.swing.JTextField" name="jTextField11">
-            </Component>
-            <Component class="javax.swing.JCheckBox" name="jCheckBox9">
-              <Properties>
-                <Property name="text" type="java.lang.String" value="Gombe Katavi"/>
-              </Properties>
             </Component>
           </SubComponents>
         </Container>

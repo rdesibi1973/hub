@@ -213,7 +213,6 @@ public class BackOfficeMain extends javax.swing.JFrame {
         jButton18 = new javax.swing.JButton();
         DumaPemba = new javax.swing.JCheckBox();
         PumbaPemba = new javax.swing.JCheckBox();
-        Simba2 = new javax.swing.JCheckBox();
         GranSafari = new javax.swing.JCheckBox();
         machame6 = new javax.swing.JCheckBox();
         jDumaShort = new javax.swing.JCheckBox();
@@ -249,7 +248,6 @@ public class BackOfficeMain extends javax.swing.JFrame {
         jButtonClearRename = new javax.swing.JButton();
         jButtonToCustomerFile = new javax.swing.JButton();
         jButtonCopyToCurrentName = new javax.swing.JButton();
-        jCheckBox9 = new javax.swing.JCheckBox();
         jMenuBar1 = new javax.swing.JMenuBar();
         jMenu1 = new javax.swing.JMenu();
         jMenuItem13 = new javax.swing.JMenuItem();
@@ -540,7 +538,6 @@ public class BackOfficeMain extends javax.swing.JFrame {
             }
         });
 
-        Simba2.setText("Simba2");
 
         GranSafari.setText("GranSafari");
 
@@ -675,7 +672,6 @@ public class BackOfficeMain extends javax.swing.JFrame {
             }
         });
 
-        jCheckBox9.setText("Gombe Katavi");
 
         buildMainLayout();
         // ── Menu setup ──────────────────────────────────────
@@ -896,9 +892,9 @@ public class BackOfficeMain extends javax.swing.JFrame {
 
         // Apply font to all checkboxes
         for (javax.swing.JCheckBox c : new javax.swing.JCheckBox[]{
-            jCheckBox1,jDumaShort,jCheckBox2,jCheckBox3,Simba2,Simba3,
+            jCheckBox1,jDumaShort,jCheckBox2,jCheckBox3,Simba3,
             jCheckBox4,jCheckBox5,jCheckBox27,jCheckBox6,jCheckBox7,jCheckBox8,
-            GranSafari,jCheckBox11,jCheckBox12,jCheckBox13,jCheckBox28,jCheckBox9,
+            GranSafari,jCheckBox11,jCheckBox12,jCheckBox13,jCheckBox28,
             ThursdayGRP,SundayGRP,
             BeachDumaShort,jCheckBox16,jCheckBox24,jCheckBox17,DumaPemba,PumbaPemba,SimbaPemba,jCheckBox22,
             machame,machame6,jCheckBox19,Marangu7days,jCheckBox25,jCheckBox26,Lemosho10days,
@@ -907,12 +903,12 @@ public class BackOfficeMain extends javax.swing.JFrame {
 
         // Col 0: main Safari
         javax.swing.JCheckBox[] col0 = {jCheckBox1,jDumaShort,jCheckBox2,jCheckBox3,
-            Simba2,Simba3,jCheckBox4,jCheckBox5,jCheckBox27,jCheckBox6,jCheckBox7,jCheckBox8};
+            Simba3,jCheckBox4,jCheckBox5,jCheckBox27,jCheckBox6,jCheckBox7,jCheckBox8};
         for (int i=0;i<col0.length;i++) addC(cbPanel,col0[i],cc,0,i+1);
 
         // Col 1: GRP + Migration
         javax.swing.JCheckBox[] col1 = {GranSafari,jCheckBox11,jCheckBox12,jCheckBox13,
-            jCheckBox28,jCheckBox9,ThursdayGRP,SundayGRP};
+            jCheckBox28,ThursdayGRP,SundayGRP};
         for (int i=0;i<col1.length;i++) addC(cbPanel,col1[i],cc,1,i+1);
 
         // Col 2: Beach (header jLabel8 then checkboxes)
@@ -2013,7 +2009,6 @@ public class BackOfficeMain extends javax.swing.JFrame {
         machame.setSelected(false);
         jCheckBox19.setSelected(false);
         jDumaShort.setSelected(false);
-        Simba2.setSelected(false);
         Simba3.setSelected(false);
         jCheckBox27.setSelected(false);
         GranSafari.setSelected(false);
@@ -2132,14 +2127,6 @@ public class BackOfficeMain extends javax.swing.JFrame {
             System.out.println(ioException.getMessage() );
         }
         
-        if (jCheckBox9.isSelected()==true)
-        try {
-            String newcust="cmd /c start /D \"%DROPBOX_HOME%\\SavannahScripts\\\" \" \" cpGombeKatavi.bat " + custname + " " + prognum;
-            Runtime rn=Runtime.getRuntime();
-            Process pr=rn.exec(newcust);
-        }   catch(IOException ioException) {
-            System.out.println(ioException.getMessage() );
-        }
 
         if (jCheckBox11.isSelected()==true)
         try {
@@ -2281,14 +2268,6 @@ public class BackOfficeMain extends javax.swing.JFrame {
         if (SimbaPemba.isSelected()==true)
         try {
             String newcust="cmd /c start /D \"%DROPBOX_HOME%\\SavannahScripts\\\" \" \" cpSimbaPemba.bat " + custname + " " + prognum;
-            Runtime rn=Runtime.getRuntime();
-            Process pr=rn.exec(newcust);
-        }   catch(IOException ioException) {
-            System.out.println(ioException.getMessage() );
-        }
-        if (Simba2.isSelected()==true)
-        try {
-            String newcust="cmd /c start /D \"%DROPBOX_HOME%\\SavannahScripts\\\" \" \" cpSimba2.bat " + custname + " " + prognum;
             Runtime rn=Runtime.getRuntime();
             Process pr=rn.exec(newcust);
         }   catch(IOException ioException) {
@@ -4285,7 +4264,6 @@ public class BackOfficeMain extends javax.swing.JFrame {
     private javax.swing.JCheckBox Lemosho10days;
     private javax.swing.JCheckBox Marangu7days;
     private javax.swing.JCheckBox PumbaPemba;
-    private javax.swing.JCheckBox Simba2;
     private javax.swing.JCheckBox Simba3;
     private javax.swing.JCheckBox SimbaPemba;
     private javax.swing.JCheckBox SundayGRP;
@@ -4332,7 +4310,6 @@ public class BackOfficeMain extends javax.swing.JFrame {
     private javax.swing.JCheckBox jCheckBox6;
     private javax.swing.JCheckBox jCheckBox7;
     private javax.swing.JCheckBox jCheckBox8;
-    private javax.swing.JCheckBox jCheckBox9;
     private javax.swing.JCheckBox jDC;
     private javax.swing.JCheckBox jDumaShort;
     private javax.swing.JCheckBox jKC;
