@@ -758,7 +758,8 @@ function deleteQuote(id, num) {
 }
 .todo-add-form-v2 .tf-email { flex:1; min-width:160px; }
 .todo-quill { background:#fff; border-radius:6px; }
-.todo-quill .ql-container { min-height:90px; font-size:.84rem; font-family:inherit; }
+.todo-quill .ql-container { min-height:210px; font-size:.84rem; font-family:inherit; }
+.todo-quill .ql-editor { min-height:210px; }
 .todo-inline-edit { flex-direction:column; align-items:stretch; }
 .todo-inline-edit .tf-subject { width:100%; }
 .todo-inline-edit .tf-due-wrap { width:100%; }
