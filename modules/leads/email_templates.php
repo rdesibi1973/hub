@@ -5,7 +5,9 @@ requireLogin();
 
 $cu          = current_user();
 $is_admin    = in_array($cu['role_name'] ?? '', ['admin']);
-$my_agent_id = (int)($cu['agent_id'] ?? 0);
+$_aid_stmt   = db()->prepare("SELECT agent_id FROM users WHERE id=?");
+$_aid_stmt->execute([$cu['id']]);
+$my_agent_id = (int)($_aid_stmt->fetchColumn() ?: 0);
 
 // ── AJAX handlers ─────────────────────────────────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
@@ -31,9 +33,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $sort_order = (int)($_POST['sort_order'] ?? 0);
         $visibility = $is_admin ? ($_POST['visibility'] ?? 'public') : 'private';
         if ($visibility === 'private') {
-            $aid_stmt = db()->prepare("SELECT agent_id FROM users WHERE id=?");
-            $aid_stmt->execute([$cu['id']]);
-            $agent_id = $aid_stmt->fetchColumn() ?: null;
+            if ($my_agent_id <= 0) {
+                echo json_encode(['ok'=>false,'msg'=>'Your user is not linked to an agent profile, so a private template cannot be saved. Please ask an administrator to link your account to an agent.']); exit;
+            }
+            $agent_id = $my_agent_id;
         } else {
             $agent_id = null;
         }

@@ -6,7 +6,9 @@ require_login();
 
 $cu         = current_user();
 $is_admin   = is_admin();
-$my_agent_id = (int)($cu['agent_id'] ?? 0);  // 0 if admin with no agent linked
+$_aid_stmt  = $pdo->prepare("SELECT agent_id FROM users WHERE id=?");
+$_aid_stmt->execute([$cu['id']]);
+$my_agent_id = (int)($_aid_stmt->fetchColumn() ?: 0);  // 0 if user has no agent linked
 
 // ── AJAX handlers ─────────────────────────────────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
@@ -31,9 +33,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $active     = isset($_POST['active']) ? 1 : 0;
         $sort_order = (int)($_POST['sort_order'] ?? 0);
         $visibility = $is_admin ? ($_POST['visibility'] ?? 'public') : 'private';
-        $agent_id   = $is_admin
-            ? ($visibility === 'private' ? ($cu['agent_id'] ?? null) : null)
-            : $my_agent_id;
+        if ($visibility === 'private' && $my_agent_id <= 0) {
+            echo json_encode(['ok'=>false,'msg'=>'Your user is not linked to an agent profile, so a private template cannot be saved. Please ask an administrator to link your account to an agent.']); exit;
+        }
+        $agent_id   = ($visibility === 'private') ? $my_agent_id : null;
 
         if (!$name || !$subject || !$body_html) {
             echo json_encode(['ok'=>false,'msg'=>'Name, subject and body are required.']); exit;
