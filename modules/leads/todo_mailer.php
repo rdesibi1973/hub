@@ -53,7 +53,6 @@ $baseUrl = defined('BASE_URL') ? BASE_URL : 'https://hub.savannahexplorers.com';
 foreach ($due as $t) {
     $recipients = array_filter(array_map('trim', explode(',', $t['email_to'])));
     if (empty($recipients)) { continue; }
-    $to = implode(', ', $recipients);
     $subject = "⏰ Reminder: " . $t['title'];
 
     $dueFormatted = date('d M Y H:i', strtotime($t['due_at']));
@@ -65,23 +64,30 @@ foreach ($due as $t) {
 
     $msgHtml = trim($t['body_html'] ?? '');
 
-    $body  = '<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#1a1a2e;max-width:620px">';
-    $body .= '<p style="margin:0 0 4px;color:#777;font-size:12px">Reminder from Savannah Explorers Hub</p>';
-    $body .= '<h2 style="margin:0 0 12px;font-size:17px;color:#C0211B">' . htmlspecialchars($t['title'], ENT_QUOTES, 'UTF-8') . '</h2>';
+    // ── Full version (for the creating user): header + message + request details + button
+    $bodyFull  = '<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#1a1a2e;max-width:620px">';
+    $bodyFull .= '<p style="margin:0 0 4px;color:#777;font-size:12px">Reminder from Savannah Explorers Hub</p>';
+    $bodyFull .= '<h2 style="margin:0 0 12px;font-size:17px;color:#C0211B">' . htmlspecialchars($t['title'], ENT_QUOTES, 'UTF-8') . '</h2>';
     if ($msgHtml !== '') {
-        $body .= '<div style="border-left:3px solid #e0e0e8;padding-left:12px;margin:0 0 14px;line-height:1.5">' . $msgHtml . '</div>';
+        $bodyFull .= '<div style="border-left:3px solid #e0e0e8;padding-left:12px;margin:0 0 14px;line-height:1.5">' . $msgHtml . '</div>';
     }
-    $body .= '<table style="font-size:13px;color:#333;border-collapse:collapse">';
-    $body .= '<tr><td style="padding:2px 10px 2px 0;color:#888">Due</td><td style="padding:2px 0">' . $dueFormatted . '</td></tr>';
-    $body .= '<tr><td style="padding:2px 10px 2px 0;color:#888">Request</td><td style="padding:2px 0">' . $reqLine . '</td></tr>';
-    $body .= '</table>';
-    $body .= '<p style="margin:16px 0"><a href="' . htmlspecialchars($viewUrl, ENT_QUOTES, 'UTF-8') . '" style="background:#C0211B;color:#fff;text-decoration:none;padding:8px 16px;border-radius:6px;font-size:13px">View request</a></p>';
-    $body .= '<hr style="border:none;border-top:1px solid #e0e0e8;margin:16px 0">';
-    $body .= '<p style="margin:0;color:#999;font-size:11px">Savannah Explorers Hub &mdash; automated reminder</p>';
-    $body .= '</div>';
+    $bodyFull .= '<table style="font-size:13px;color:#333;border-collapse:collapse">';
+    $bodyFull .= '<tr><td style="padding:2px 10px 2px 0;color:#888">Due</td><td style="padding:2px 0">' . $dueFormatted . '</td></tr>';
+    $bodyFull .= '<tr><td style="padding:2px 10px 2px 0;color:#888">Request</td><td style="padding:2px 0">' . $reqLine . '</td></tr>';
+    $bodyFull .= '</table>';
+    $bodyFull .= '<p style="margin:16px 0"><a href="' . htmlspecialchars($viewUrl, ENT_QUOTES, 'UTF-8') . '" style="background:#C0211B;color:#fff;text-decoration:none;padding:8px 16px;border-radius:6px;font-size:13px">View request</a></p>';
+    $bodyFull .= '<hr style="border:none;border-top:1px solid #e0e0e8;margin:16px 0">';
+    $bodyFull .= '<p style="margin:0;color:#999;font-size:11px">Savannah Explorers Hub &mdash; automated reminder</p>';
+    $bodyFull .= '</div>';
+
+    // ── Message-only version (for external recipients): just the formatted message
+    $bodyMsg  = '<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#1a1a2e;max-width:620px;line-height:1.5">';
+    $bodyMsg .= ($msgHtml !== '' ? $msgHtml : '');
+    $bodyMsg .= '</div>';
 
     // Send from the creating user's company address (all @savannahexplorers.com).
     // Fallback to noreply only if the user has no email on file.
+    $creatorEmail = strtolower(trim($t['creator_email'] ?? ''));
     $fromEmail = filter_var($t['creator_email'] ?? '', FILTER_VALIDATE_EMAIL)
                ? $t['creator_email']
                : 'noreply@savannahexplorers.com';
@@ -93,17 +99,50 @@ foreach ($due as $t) {
     $headers .= "Content-Type: text/html; charset=UTF-8\r\n";
     $headers .= "X-Mailer: SavannahHub-TodoMailer\r\n";
 
-    // -f sets the envelope sender so BlueHost/SPF accepts the message.
-    $ok = @mail($to, $subject, $body, $headers, '-f' . $fromEmail);
+    // Split recipients: the creating user gets the full email, everyone else
+    // gets the message-only version.
+    $userRcpts = [];
+    $extRcpts  = [];
+    foreach ($recipients as $rcpt) {
+        if ($creatorEmail !== '' && strtolower($rcpt) === $creatorEmail) {
+            $userRcpts[] = $rcpt;
+        } else {
+            $extRcpts[] = $rcpt;
+        }
+    }
 
-    if ($ok) {
+    $anyOk  = false;
+    $anyErr = false;
+
+    // -f sets the envelope sender so BlueHost/SPF accepts the message.
+    if (!empty($userRcpts)) {
+        $to = implode(', ', $userRcpts);
+        if (@mail($to, $subject, $bodyFull, $headers, '-f' . $fromEmail)) {
+            $anyOk = true;
+            error_log("[todo_mailer] Sent FULL reminder #{$t['id']} to {$to}: {$t['title']}");
+        } else {
+            $anyErr = true;
+            error_log("[todo_mailer] FAILED FULL reminder #{$t['id']} to {$to}: {$t['title']}");
+        }
+    }
+    if (!empty($extRcpts)) {
+        $to = implode(', ', $extRcpts);
+        if (@mail($to, $subject, $bodyMsg, $headers, '-f' . $fromEmail)) {
+            $anyOk = true;
+            error_log("[todo_mailer] Sent MESSAGE-ONLY reminder #{$t['id']} to {$to}: {$t['title']}");
+        } else {
+            $anyErr = true;
+            error_log("[todo_mailer] FAILED MESSAGE-ONLY reminder #{$t['id']} to {$to}: {$t['title']}");
+        }
+    }
+
+    if ($anyOk) {
         $db->prepare("UPDATE request_todos SET reminder_sent=1 WHERE id=?")
            ->execute([$t['id']]);
         $sent++;
-        error_log("[todo_mailer] Sent reminder #{$t['id']} to {$to}: {$t['title']}");
-    } else {
+    }
+    if ($anyErr) {
         $failed++;
-        error_log("[todo_mailer] FAILED reminder #{$t['id']} to {$to}: {$t['title']}");
     }
 }
 
