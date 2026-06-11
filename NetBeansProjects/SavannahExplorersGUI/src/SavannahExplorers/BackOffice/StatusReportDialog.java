@@ -455,12 +455,32 @@ public class StatusReportDialog extends JDialog {
             if (upper.endsWith(suf)) { inner = inner.substring(0, inner.length() - suf.length()); break; }
         }
         int dash = inner.lastIndexOf('-');
+        String agent;
         if (dash >= 0) {
             String after = inner.substring(dash + 1);
-            if (after.equalsIgnoreCase("Drct") || after.equalsIgnoreCase("SB")) return inner.substring(0, dash);
-            return after;
+            if (after.equalsIgnoreCase("Drct") || after.equalsIgnoreCase("SB")) agent = inner.substring(0, dash);
+            else agent = after;
+        } else {
+            agent = inner;
         }
-        return inner;
+        return normalizeAgentAlias(agent);
+    }
+
+    /** Map known agent-name variants to a single canonical agent code.
+     *  Roberto Capri's folders are inconsistent: some use "Capri" and some use
+     *  "RobertoCapri" as the agent. Both refer to the same person, so collapse
+     *  them to "RobertoCapri", which folderCodeToName resolves to "Roberto Capri".
+     *  NOTE: "EleonoraOngaro" is the AGENCY name, not an agent, and is never
+     *  mapped here. */
+    private static String normalizeAgentAlias(String agent) {
+        if (agent == null) return agent;
+        String a = agent.trim();
+        if (a.equalsIgnoreCase("Capri")
+         || a.equalsIgnoreCase("RobertoCapri")
+         || a.equalsIgnoreCase("Roberto Capri")) {
+            return "RobertoCapri";
+        }
+        return a;
     }
 
     // ── Save as RTF ───────────────────────────────────────────────────────────
