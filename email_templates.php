@@ -94,6 +94,14 @@ if ($is_admin) {
 }
 
 $categories = array_values(array_unique(array_filter(array_column($templates, 'category'))));
+$default_categories = ['General', 'Travel Info', 'Visa', 'Insurance', 'Health', 'Payment'];
+foreach ($default_categories as $dc) {
+    $exists = false;
+    foreach ($categories as $ec) {
+        if (strcasecmp(trim($ec), $dc) === 0) { $exists = true; break; }
+    }
+    if (!$exists) { $categories[] = $dc; }
+}
 sort($categories);
 
 $page_title = 'Email Templates';
@@ -233,8 +241,6 @@ include __DIR__ . '/includes/layout_header.php';
             <?php foreach ($categories as $c): ?>
               <option value="<?= e($c) ?>">
             <?php endforeach; ?>
-            <option value="Visa"><option value="Insurance"><option value="Travel Info">
-            <option value="Health"><option value="Payment"><option value="General">
           </datalist>
         </div>
         <?php if ($is_admin): ?>
