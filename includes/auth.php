@@ -136,6 +136,12 @@ function login_user(PDO $pdo, string $username, string $password): bool {
     $pdo->prepare('UPDATE users SET last_login = NOW() WHERE id = ?')
         ->execute([$user['id']]);
 
+    // Force the session file to be written to disk now. On BlueHost shared
+    // hosting the new session ID created by session_regenerate_id(true) can
+    // otherwise still be pending when the post-login redirect lands on the
+    // next page, causing an intermittent "access denied" that clears on reload.
+    session_write_close();
+
     return true;
 }
 
@@ -184,6 +190,12 @@ function e(string $s): string {
 }
 
 function redirect(string $url): never {
+    // Ensure any pending session data is flushed to disk before we hand the
+    // browser off to the next page, to avoid a redirect outrunning the
+    // session write on slow shared-hosting filesystems.
+    if (session_status() === PHP_SESSION_ACTIVE) {
+        session_write_close();
+    }
     header('Location: ' . $url);
     exit;
 }
