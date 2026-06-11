@@ -167,26 +167,49 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action_note'])) {
 }
 
 // ── To-Do POST ──────────────────────────────────────────────────────────────
+if (!function_exists('todo_sanitize_html')) {
+    /** Whitelist the limited HTML produced by the Quill toolbar
+     *  (bold/italic/underline, lists, links, colour, alignment) and strip
+     *  anything dangerous (script, event handlers, javascript: URLs). */
+    function todo_sanitize_html(string $html): string {
+        if (trim($html) === '') return '';
+        // Remove script/style blocks entirely
+        $html = preg_replace('#<(script|style)\b[^>]*>.*?</\1>#is', '', $html);
+        // Keep only the tags Quill can emit
+        $allowed = '<p><br><strong><b><em><i><u><s><ol><ul><li><a><span><h1><h2><h3><blockquote>';
+        $html = strip_tags($html, $allowed);
+        // Strip inline event handlers (onclick, onload, …)
+        $html = preg_replace('#\son\w+\s*=\s*("[^"]*"|\'[^\']*\'|[^\s>]+)#i', '', $html);
+        // Neutralise javascript: / data: URLs in href/src
+        $html = preg_replace('#(href|src)\s*=\s*("|\')\s*(javascript|data)\s*:[^"\']*\2#i', '$1=$2#$2', $html);
+        // Treat an empty Quill document as empty
+        if (preg_replace('#<(p|br)\s*/?>|\s|&nbsp;#i', '', $html) === '') return '';
+        return trim($html);
+    }
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action_todo'])) {
     $action = $_POST['action_todo'];
     if ($action === 'add') {
         $title    = trim($_POST['todo_title']   ?? '');
+        $body     = todo_sanitize_html($_POST['todo_body'] ?? '');
         $due      = trim($_POST['todo_due']     ?? '');
         $email_to = trim($_POST['todo_email']   ?? '');
         if ($title && $due) {
             $db->prepare(
-                "INSERT INTO request_todos (request_id, user_id, title, due_at, email_to) VALUES (?,?,?,?,?)"
-            )->execute([$id, (int)$cu['id'], $title, $due, $email_to ?: null]);
+                "INSERT INTO request_todos (request_id, user_id, title, body_html, due_at, email_to) VALUES (?,?,?,?,?,?)"
+            )->execute([$id, (int)$cu['id'], $title, $body ?: null, $due, $email_to ?: null]);
         }
     } elseif ($action === 'edit') {
         $tid      = (int)($_POST['todo_id']    ?? 0);
         $title    = trim($_POST['todo_title']  ?? '');
+        $body     = todo_sanitize_html($_POST['todo_body'] ?? '');
         $due      = trim($_POST['todo_due']    ?? '');
         $email_to = trim($_POST['todo_email']  ?? '');
         if ($tid && $title && $due) {
             $db->prepare(
-                "UPDATE request_todos SET title=?, due_at=?, email_to=?, reminder_sent=0 WHERE id=? AND request_id=?"
-            )->execute([$title, $due, $email_to ?: null, $tid, $id]);
+                "UPDATE request_todos SET title=?, body_html=?, due_at=?, email_to=?, reminder_sent=0 WHERE id=? AND request_id=?"
+            )->execute([$title, $body ?: null, $due, $email_to ?: null, $tid, $id]);
         }
     } elseif ($action === 'done') {
         $tid = (int)($_POST['todo_id'] ?? 0);
@@ -713,6 +736,33 @@ function deleteQuote(id, num) {
 .todo-inline-edit .tf-due-wrap select.tf-min  { flex:1; min-width:0; }
 .todo-inline-edit .tf-due-wrap .tf-sep { color:var(--grey-mid); font-weight:700; line-height:1; }
 .todo-inline-edit .tf-email { flex:1; min-width:140px; }
+
+/* Rich-text To-Do additions */
+.todo-main { flex:1; display:flex; flex-direction:column; gap:3px; min-width:0; }
+.todo-body { font-size:.8rem; color:var(--grey-dk); font-weight:400; line-height:1.4; }
+.todo-body p { margin:0 0 4px; }
+.todo-body ul, .todo-body ol { margin:2px 0 4px 18px; padding:0; }
+.todo-item.done-item .todo-body { text-decoration:line-through; }
+
+.tf-subject {
+  padding:7px 10px; border:1.5px solid var(--grey-lt); border-radius:6px;
+  font-size:.84rem; font-weight:600; font-family:inherit; background:#fff;
+}
+.tf-subject:focus { outline:none; border-color:var(--blue); }
+
+.todo-add-form-v2 {
+  display:flex; flex-direction:column; gap:8px; align-items:stretch;
+}
+.todo-add-form-v2 .tf-bottom {
+  display:flex; gap:8px; align-items:center; flex-wrap:wrap;
+}
+.todo-add-form-v2 .tf-email { flex:1; min-width:160px; }
+.todo-quill { background:#fff; border-radius:6px; }
+.todo-quill .ql-container { min-height:90px; font-size:.84rem; font-family:inherit; }
+.todo-inline-edit { flex-direction:column; align-items:stretch; }
+.todo-inline-edit .tf-subject { width:100%; }
+.todo-inline-edit .tf-due-wrap { width:100%; }
+.todo-inline-edit > .btn { align-self:flex-start; }
 </style>
 
 <a id="todos"></a>
@@ -731,7 +781,10 @@ function deleteQuote(id, num) {
   <form method="post" class="todo-inline-edit" id="todo-edit-<?= $t['id'] ?>">
     <input type="hidden" name="action_todo" value="edit">
     <input type="hidden" name="todo_id"    value="<?= $t['id'] ?>">
-    <textarea class="tf-title" name="todo_title" placeholder="What to do…" rows="2" required><?= h($t['title']) ?></textarea>
+    <input class="tf-subject" type="text" name="todo_title" placeholder="Subject…" value="<?= h($t['title']) ?>" required>
+    <div class="todo-quill" data-target="edit_body_<?= $t['id'] ?>"
+         data-initial="<?= h($t['body_html'] ?? '') ?>"></div>
+    <textarea name="todo_body" id="edit_body_<?= $t['id'] ?>" style="display:none"><?= h($t['body_html'] ?? '') ?></textarea>
     <input type="hidden" name="todo_due" value="<?= $dueFmt ?>">
     <div class="tf-due-wrap">
       <input type="date" class="tf-due-date" value="<?= substr($dueFmt,0,10) ?>" required>
@@ -761,7 +814,12 @@ function deleteQuote(id, num) {
       <input type="hidden" name="todo_id" value="<?= $t['id'] ?>">
       <input type="checkbox" class="todo-check" onchange="this.form.submit()" <?= $t['done']?'checked':'' ?>>
     </form>
-    <span class="todo-title"><?= h($t['title']) ?></span>
+    <div class="todo-main">
+      <span class="todo-title"><?= h($t['title']) ?></span>
+      <?php if (!empty($t['body_html'])): ?>
+      <div class="todo-body"><?= $t['body_html'] ?></div>
+      <?php endif; ?>
+    </div>
     <span class="todo-due">
       <?= $overdue ? '⚠ ' : '' ?><?= date('d M Y H:i', strtotime($t['due_at'])) ?>
     </span>
@@ -783,10 +841,12 @@ function deleteQuote(id, num) {
 </div>
 
 <!-- Add To-Do form -->
-<form method="post" class="todo-add-form">
+<form method="post" class="todo-add-form todo-add-form-v2">
   <input type="hidden" name="action_todo" value="add">
-  <textarea class="tf-title" name="todo_title" placeholder="What to do…" rows="4" required></textarea>
-  <div class="tf-right">
+  <input class="tf-subject" type="text" name="todo_title" placeholder="Subject…" required>
+  <div class="todo-quill" data-target="add_body"></div>
+  <textarea name="todo_body" id="add_body" style="display:none"></textarea>
+  <div class="tf-bottom">
     <input type="hidden" name="todo_due" value="">
     <div class="tf-due-wrap">
       <input type="date" class="tf-due-date" value="<?= date('Y-m-d', strtotime('+1 day')) ?>" required>
@@ -797,7 +857,8 @@ function deleteQuote(id, num) {
       <select class="tf-min"><?php
         foreach([0,15,30,45] as $m) printf('<option value="%02d"%s>%02d</option>',$m,$m===0?' selected':'',$m);
       ?></select>
-    </div>    <input class="tf-email" type="text" name="todo_email"
+    </div>
+    <input class="tf-email" type="text" name="todo_email"
            placeholder="email1, email2, …"
            value="<?= h($cuEmail) ?>"
            title="One or more addresses separated by commas">
@@ -811,19 +872,55 @@ function deleteQuote(id, num) {
   Leave blank to skip the email.
 </p>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/quill/1.3.7/quill.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/quill/1.3.7/quill.snow.css">
 <script>
+var todoQuills = {}; // target textarea id -> Quill instance
+
+function todoInitQuill(container) {
+  if (!container || container.dataset.qInit === '1') return;
+  var targetId = container.dataset.target;
+  var q = new Quill(container, {
+    theme: 'snow',
+    placeholder: 'Message…',
+    modules: { toolbar: [
+      ['bold','italic','underline'],
+      [{'list':'ordered'},{'list':'bullet'}],
+      ['link','clean'],
+      [{'color':[]},{'background':[]}],
+      [{'align':[]}]
+    ]}
+  });
+  var initial = container.dataset.initial || document.getElementById(targetId).value;
+  if (initial) q.clipboard.dangerouslyPasteHTML(0, initial);
+  q.on('text-change', function() {
+    document.getElementById(targetId).value = q.root.innerHTML;
+  });
+  todoQuills[targetId] = q;
+  container.dataset.qInit = '1';
+}
+
+// Init the Add-form editor immediately
+document.addEventListener('DOMContentLoaded', function() {
+  var addBox = document.querySelector('.todo-add-form-v2 .todo-quill');
+  if (addBox) todoInitQuill(addBox);
+});
+
 function todoEdit(id) {
   document.getElementById('todo-row-'  + id).style.display = 'none';
   const form = document.getElementById('todo-edit-' + id);
   form.style.display = 'flex';
-  form.querySelector('.tf-title').focus();
+  // Lazy-init this row's editor on first open
+  var box = form.querySelector('.todo-quill');
+  todoInitQuill(box);
+  form.querySelector('.tf-subject').focus();
 }
 function todoCancel(id) {
   document.getElementById('todo-edit-' + id).style.display = 'none';
   document.getElementById('todo-row-'  + id).style.display = 'flex';
 }
 
-// Combine date + hour/min selects into hidden todo_due before submit
+// Before submit: combine date/time into todo_due AND sync the Quill body
 document.querySelectorAll('.todo-add-form, .todo-inline-edit').forEach(function(form) {
   form.addEventListener('submit', function() {
     var d = form.querySelector('.tf-due-date');
@@ -831,6 +928,11 @@ document.querySelectorAll('.todo-add-form, .todo-inline-edit').forEach(function(
     var m = form.querySelector('.tf-min');
     var hidden = form.querySelector('[name="todo_due"]');
     if (d && h && m && hidden) hidden.value = d.value + ' ' + h.value + ':' + m.value;
+    var box = form.querySelector('.todo-quill');
+    if (box) {
+      var q = todoQuills[box.dataset.target];
+      if (q) document.getElementById(box.dataset.target).value = q.root.innerHTML;
+    }
   });
 });
 </script>

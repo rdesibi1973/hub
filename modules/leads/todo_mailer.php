@@ -28,7 +28,7 @@ $db->exec("SET time_zone = '+03:00'");
 
 // ── Find all due, unsent, not-done to-dos that have an email address ───────
 $stmt = $db->prepare("
-    SELECT t.id, t.title, t.due_at, t.email_to, t.request_id,
+    SELECT t.id, t.title, t.body_html, t.due_at, t.email_to, t.request_id,
            r.customer_name, r.destination, r.period,
            u.full_name AS creator_name, u.email AS creator_email
     FROM request_todos t
@@ -59,17 +59,26 @@ foreach ($due as $t) {
     $dueFormatted = date('d M Y H:i', strtotime($t['due_at']));
     $viewUrl      = $baseUrl . '/modules/leads/request_view.php?id=' . $t['request_id'] . '#todos';
 
-    $body  = "Reminder from Savannah Explorers Hub\r\n";
-    $body .= str_repeat("-", 50) . "\r\n\r\n";
-    $body .= "TO-DO: " . $t['title'] . "\r\n";
-    $body .= "Due:   " . $dueFormatted . "\r\n\r\n";
-    $body .= "Request: " . $t['customer_name'];
-    if ($t['destination']) $body .= " — " . $t['destination'];
-    if ($t['period'])      $body .= " (" . $t['period'] . ")";
-    $body .= "\r\n\r\n";
-    $body .= "View request: " . $viewUrl . "\r\n\r\n";
-    $body .= str_repeat("-", 50) . "\r\n";
-    $body .= "Savannah Explorers Hub — automated reminder\r\n";
+    $reqLine = htmlspecialchars($t['customer_name'], ENT_QUOTES, 'UTF-8');
+    if ($t['destination']) $reqLine .= ' &mdash; ' . htmlspecialchars($t['destination'], ENT_QUOTES, 'UTF-8');
+    if ($t['period'])      $reqLine .= ' (' . htmlspecialchars($t['period'], ENT_QUOTES, 'UTF-8') . ')';
+
+    $msgHtml = trim($t['body_html'] ?? '');
+
+    $body  = '<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#1a1a2e;max-width:620px">';
+    $body .= '<p style="margin:0 0 4px;color:#777;font-size:12px">Reminder from Savannah Explorers Hub</p>';
+    $body .= '<h2 style="margin:0 0 12px;font-size:17px;color:#C0211B">' . htmlspecialchars($t['title'], ENT_QUOTES, 'UTF-8') . '</h2>';
+    if ($msgHtml !== '') {
+        $body .= '<div style="border-left:3px solid #e0e0e8;padding-left:12px;margin:0 0 14px;line-height:1.5">' . $msgHtml . '</div>';
+    }
+    $body .= '<table style="font-size:13px;color:#333;border-collapse:collapse">';
+    $body .= '<tr><td style="padding:2px 10px 2px 0;color:#888">Due</td><td style="padding:2px 0">' . $dueFormatted . '</td></tr>';
+    $body .= '<tr><td style="padding:2px 10px 2px 0;color:#888">Request</td><td style="padding:2px 0">' . $reqLine . '</td></tr>';
+    $body .= '</table>';
+    $body .= '<p style="margin:16px 0"><a href="' . htmlspecialchars($viewUrl, ENT_QUOTES, 'UTF-8') . '" style="background:#C0211B;color:#fff;text-decoration:none;padding:8px 16px;border-radius:6px;font-size:13px">View request</a></p>';
+    $body .= '<hr style="border:none;border-top:1px solid #e0e0e8;margin:16px 0">';
+    $body .= '<p style="margin:0;color:#999;font-size:11px">Savannah Explorers Hub &mdash; automated reminder</p>';
+    $body .= '</div>';
 
     // Send from the creating user's company address (all @savannahexplorers.com).
     // Fallback to noreply only if the user has no email on file.
@@ -81,7 +90,7 @@ foreach ($due as $t) {
 
     $headers  = "From: " . $fromHeader . "\r\n";
     $headers .= "MIME-Version: 1.0\r\n";
-    $headers .= "Content-Type: text/plain; charset=UTF-8\r\n";
+    $headers .= "Content-Type: text/html; charset=UTF-8\r\n";
     $headers .= "X-Mailer: SavannahHub-TodoMailer\r\n";
 
     // -f sets the envelope sender so BlueHost/SPF accepts the message.
