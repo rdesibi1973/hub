@@ -4147,32 +4147,41 @@ public class BackOfficeMain extends javax.swing.JFrame {
         foot.add(openRootBtn); foot.add(openSelBtn); foot.add(closeBtn);
         dlg.add(foot, java.awt.BorderLayout.SOUTH);
 
-        // ── Scan folder tree in background ────────────────────────────────────
+        // ── Shared filter routine ─────────────────────────────────────────────
+        // Always rebuilds the visible list from the current query against allFiles.
+        // Used both by the search field and by the scan-complete callback, so the
+        // scan finishing never wipes out what the user has already typed.
         final java.util.List<java.io.File> allFiles = new java.util.ArrayList<>();
+        final boolean[] scanDone = { false };
+        final Runnable applyFilter = () -> {
+            String q = searchField.getText().toLowerCase().trim();
+            listModel.clear();
+            for (java.io.File f : new java.util.ArrayList<>(allFiles)) {
+                if (q.isEmpty() || f.getName().toLowerCase().contains(q)) {
+                    listModel.addElement(f);
+                }
+            }
+            String prefix = scanDone[0] ? "" : "Loading... ";
+            statusLbl.setText(prefix + listModel.size() + " / " + allFiles.size());
+        };
+
+        // ── Scan folder tree in background ────────────────────────────────────
         new Thread(() -> {
             scanFolderTree(baseDir, allFiles);
             javax.swing.SwingUtilities.invokeLater(() -> {
-                listModel.clear();
-                for (java.io.File f : allFiles) listModel.addElement(f);
-                statusLbl.setText(allFiles.size() + " items");
+                scanDone[0] = true;
+                // Re-apply whatever the user has typed so far against the now-complete
+                // list — do NOT blindly dump all files (that was the bug: a search
+                // typed during the scan got overwritten by the full list).
+                applyFilter.run();
             });
         }, "folder-scan").start();
 
         // ── Filter on typing ──────────────────────────────────────────────────
         searchField.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
-            private void filter() {
-                String q = searchField.getText().toLowerCase().trim();
-                listModel.clear();
-                for (java.io.File f : new java.util.ArrayList<>(allFiles)) {
-                    if (q.isEmpty() || f.getName().toLowerCase().contains(q)) {
-                        listModel.addElement(f);
-                    }
-                }
-                statusLbl.setText(listModel.size() + " / " + allFiles.size());
-            }
-            public void insertUpdate(javax.swing.event.DocumentEvent e) { javax.swing.SwingUtilities.invokeLater(this::filter); }
-            public void removeUpdate(javax.swing.event.DocumentEvent e)  { javax.swing.SwingUtilities.invokeLater(this::filter); }
-            public void changedUpdate(javax.swing.event.DocumentEvent e) {}
+            public void insertUpdate(javax.swing.event.DocumentEvent e) { javax.swing.SwingUtilities.invokeLater(applyFilter); }
+            public void removeUpdate(javax.swing.event.DocumentEvent e)  { javax.swing.SwingUtilities.invokeLater(applyFilter); }
+            public void changedUpdate(javax.swing.event.DocumentEvent e) { javax.swing.SwingUtilities.invokeLater(applyFilter); }
         });
 
         // ── Open on double-click ──────────────────────────────────────────────
