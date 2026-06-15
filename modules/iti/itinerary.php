@@ -182,7 +182,7 @@ a { color:var(--red); }
 <!-- Top bar -->
 <div class="topbar">
   <div class="topbar-inner">
-    <span class="brand">Savannah Explorers</span>
+    <span class="brand"><?= h(iti_setting('company_name','Savannah Explorers')) ?></span>
     <div class="lang-sw">
       <?php foreach (ITI_LANGS as $l): ?>
       <a href="?token=<?= h($token) ?>&lang=<?= $l ?>&curr=<?= $curr ?>"
@@ -372,7 +372,7 @@ a { color:var(--red); }
 <div class="cta-bar">
   <h2><?= $lang==='it'?'Pronto a partire?':($lang==='de'?'Bereit für ein Abenteuer?':($lang==='fr'?'Prêt à partir ?':($lang==='es'?'¿Listo para partir?':'Ready for your adventure?'))) ?></h2>
   <p><?= $lang==='it'?'Contattaci per confermare il tuo safari.':'Contact us to confirm your safari booking.' ?></p>
-  <a href="mailto:info@savannahexplorers.com" class="cta-btn">info@savannahexplorers.com</a>
+  <a href="mailto:<?= h(iti_setting('office_email','info@savannahexplorers.com')) ?>" class="cta-btn"><?= h(iti_setting('office_email','info@savannahexplorers.com')) ?></a>
 </div>
 
 <div class="site-footer">

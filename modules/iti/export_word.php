@@ -87,7 +87,7 @@ $header = $section->addHeader();
 $ht = $header->addTable(['borderSize'=>0,'cellMarginTop'=>80,'cellMarginBottom'=>80]);
 $ht->addRow();
 $c1 = $ht->addCell(4500);
-$c1->addText('SAVANNAH EXPLORERS', 'brand', ['align'=>'left']);
+$c1->addText(strtoupper(iti_setting('company_name','Savannah Explorers')), 'brand', ['align'=>'left']);
 $c2 = $ht->addCell(4500);
 $c2->addText(iti_field($program,'title',$lang), 'small', ['align'=>'right']);
 
@@ -96,7 +96,7 @@ $footer = $section->addFooter();
 $footer->addText(date('F Y') . ' · Confidential', 'small', ['align'=>'center']);
 
 // ── COPERTINA: brand + titolo ────────────────────────────────
-$section->addText('SAVANNAH EXPLORERS', 'brand', 'spacer');
+$section->addText(strtoupper(iti_setting('company_name','Savannah Explorers')), 'brand', 'spacer');
 $section->addText(iti_field($program,'title',$lang), 'hero');
 if (iti_field($program,'subtitle',$lang)) {
     $section->addText(iti_field($program,'subtitle',$lang), 'subtitle', ['spaceBefore'=>80]);

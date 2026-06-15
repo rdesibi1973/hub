@@ -62,6 +62,34 @@ function iti_lang(): string {
     return $_SESSION['iti_lang'] ?? 'en';
 }
 
+// ── SETTINGS (key/value) ──────────────────────────────────────────────────────
+// Cached read of the whole iti_settings table.
+function iti_settings_all(): array {
+    static $cache = null;
+    if ($cache !== null) return $cache;
+    $cache = [];
+    try {
+        foreach (db()->query('SELECT skey, svalue FROM iti_settings')->fetchAll() as $r) {
+            $cache[$r['skey']] = $r['svalue'];
+        }
+    } catch (Exception $e) {
+        // table missing → return empty, callers fall back to defaults
+    }
+    return $cache;
+}
+
+function iti_setting(string $key, string $default = ''): string {
+    $all = iti_settings_all();
+    return ($all[$key] ?? '') !== '' ? $all[$key] : $default;
+}
+
+function iti_set_setting(string $key, string $value): void {
+    db()->prepare(
+        'INSERT INTO iti_settings (skey, svalue) VALUES (?, ?)
+         ON DUPLICATE KEY UPDATE svalue = VALUES(svalue)'
+    )->execute([$key, $value]);
+}
+
 // ── Helper: campo localizzato ─────────────────────────────────────────────────
 function iti_field(array $row, string $field, string $lang = null): string {
     $lang = $lang ?? iti_lang();
@@ -307,8 +335,10 @@ function iti_get_request(int $id): array|false {
 
 // ── TERMS & CONDITIONS ────────────────────────────────────────────────────────
 function iti_get_terms(bool $active_only = true): array {
-    $sql = 'SELECT * FROM iti_terms_conditions'
-         . ($active_only ? ' WHERE is_active = 1' : '')
+    // Only standard library versions (program_id IS NULL); per-program
+    // overrides are excluded from the selectable list.
+    $sql = 'SELECT * FROM iti_terms_conditions WHERE program_id IS NULL'
+         . ($active_only ? ' AND is_active = 1' : '')
          . ' ORDER BY effective_date DESC';
     return db()->query($sql)->fetchAll();
 }
@@ -411,6 +441,7 @@ function iti_nav(string $current = '', array $breadcrumbs = []): void {
         'Transfers'    => ITI_MODULE_URL . '/transfers.php',
         'Activities'   => ITI_MODULE_URL . '/activities.php',
         'Airlines'     => ITI_MODULE_URL . '/airlines.php',
+        'Settings'     => ITI_MODULE_URL . '/settings.php',
     ];
     echo '<nav class="iti-nav" style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:20px;border-bottom:1px solid var(--grey-lt);padding-bottom:8px;">';
     foreach ($links as $label => $url) {

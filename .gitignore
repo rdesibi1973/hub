@@ -14,3 +14,10 @@ error_log
 
 # Conflicted copies (Dropbox sync artifacts)
 **/*conflicted copy*.php
+
+# ITI uploads — files live on server only; keep folder structure, ignore content
+modules/iti/uploads/logo/*
+modules/iti/uploads/profiles/*
+!modules/iti/uploads/logo/.gitkeep
+!modules/iti/uploads/profiles/.gitkeep
+!modules/iti/uploads/.htaccess

@@ -119,8 +119,8 @@ include __DIR__ . '/../../includes/layout_header.php';
   <!-- Hero header -->
   <div class="prev-hero">
     <div style="margin-bottom:16px;">
-      <img src="https://www.savannahexplorers.net/img/logo-savannah-explorers.png"
-           alt="Savannah Explorers"
+      <img src="<?= h(iti_setting('logo_url', 'https://www.savannahexplorers.net/img/logo-savannah-explorers.png')) ?>"
+           alt="<?= h(iti_setting('company_name', 'Savannah Explorers')) ?>"
            style="height:48px;width:auto;filter:brightness(0) invert(1);opacity:.9;">
     </div>
     <h1><?= iti_h($program, 'title', $lang) ?></h1>
@@ -373,8 +373,13 @@ include __DIR__ . '/../../includes/layout_header.php';
   <!-- T&C excerpt -->
   <?php if ($tc): ?>
   <div class="section-box" style="background:var(--off-white);">
-    <div style="font-family:'Merriweather',serif;font-size:.85rem;font-weight:700;margin-bottom:8px;">Terms &amp; Conditions — <?= h($tc['version']) ?></div>
-    <div style="font-size:.75rem;color:var(--grey-mid);">Effective <?= date('d M Y',strtotime($tc['effective_date'])) ?></div>
+    <div style="font-family:'Merriweather',serif;font-size:.85rem;font-weight:700;margin-bottom:4px;">Terms &amp; Conditions — <?= h($tc['version']) ?></div>
+    <?php if (!empty($tc['effective_date'])): ?>
+    <div style="font-size:.75rem;color:var(--grey-mid);margin-bottom:8px;">Effective <?= date('d M Y',strtotime($tc['effective_date'])) ?></div>
+    <?php endif; ?>
+    <?php $tc_text = iti_field($tc, 'text', $lang); if ($tc_text !== ''): ?>
+    <div style="font-size:.78rem;line-height:1.55;color:var(--grey-dk);white-space:pre-line;"><?= h($tc_text) ?></div>
+    <?php endif; ?>
   </div>
   <?php endif; ?>
 

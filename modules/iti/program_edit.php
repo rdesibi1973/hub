@@ -50,6 +50,49 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         iti_redirect("program_edit.php?id={$id}&tab=info");
     }
 
+    // ── Salva override T&C dedicato al programma ──
+    if ($sub === 'terms_override') {
+        // Find existing override for this program
+        $ex = $db->prepare('SELECT id FROM iti_terms_conditions WHERE program_id = ? LIMIT 1');
+        $ex->execute([$id]);
+        $ovr_id = (int)($ex->fetchColumn() ?: 0);
+
+        $ver = trim($_POST['ovr_version'] ?? '') ?: ('Custom — program #' . $id);
+        $vals = [
+            $ver,
+            $_POST['ovr_text_en'] ?? '',
+            $_POST['ovr_text_it'] ?? '',
+            $_POST['ovr_text_fr'] ?? '',
+            $_POST['ovr_text_es'] ?? '',
+            $_POST['ovr_text_de'] ?? '',
+        ];
+        if ($ovr_id) {
+            $db->prepare('UPDATE iti_terms_conditions SET version=?,text_en=?,text_it=?,text_fr=?,text_es=?,text_de=? WHERE id=? AND program_id=?')
+               ->execute([...$vals, $ovr_id, $id]);
+        } else {
+            $db->prepare('INSERT INTO iti_terms_conditions (version,text_en,text_it,text_fr,text_es,text_de,effective_date,is_active,program_id) VALUES (?,?,?,?,?,?,CURDATE(),1,?)')
+               ->execute([...$vals, $id]);
+            $ovr_id = (int)$db->lastInsertId();
+        }
+        // Point the program at its dedicated version
+        $db->prepare('UPDATE iti_programs SET terms_id=? WHERE id=?')->execute([$ovr_id, $id]);
+        iti_flash_set('success','Dedicated T&C saved and applied to this program.');
+        iti_redirect("program_edit.php?id={$id}&tab=info");
+    }
+
+    // ── Rimuovi override T&C dedicato ──
+    if ($sub === 'terms_override_remove') {
+        $ex = $db->prepare('SELECT id FROM iti_terms_conditions WHERE program_id = ? LIMIT 1');
+        $ex->execute([$id]);
+        if ($ovr_id = (int)($ex->fetchColumn() ?: 0)) {
+            // Detach from program then delete the override record
+            $db->prepare('UPDATE iti_programs SET terms_id=NULL WHERE id=? AND terms_id=?')->execute([$id, $ovr_id]);
+            $db->prepare('DELETE FROM iti_terms_conditions WHERE id=? AND program_id=?')->execute([$ovr_id, $id]);
+        }
+        iti_flash_set('success','Dedicated T&C removed. You can select a standard version instead.');
+        iti_redirect("program_edit.php?id={$id}&tab=info");
+    }
+
     // ── Salva giorno ──
     if ($sub === 'day') {
         $day_id = (int)($_POST['day_id'] ?? 0);
@@ -432,6 +475,14 @@ $prices   = iti_get_program_prices($id);
 $inclusions = iti_get_program_inclusions($id);
 $terms    = iti_get_terms();
 
+// Per-program T&C override (program_id = this program), if any
+$terms_override = null;
+try {
+    $sto = $db->prepare('SELECT * FROM iti_terms_conditions WHERE program_id = ? LIMIT 1');
+    $sto->execute([$id]);
+    $terms_override = $sto->fetch() ?: null;
+} catch (Exception $e) {}
+
 // Quale tab / giorno
 $active_tab = $_GET['tab']  ?? 'days';
 $active_day = (int)($_GET['day'] ?? ($days[0]['id'] ?? 0));
@@ -639,13 +690,108 @@ include __DIR__ . '/../../includes/layout_header.php';
       </div>
       <div class="form-group">
         <label>Terms &amp; Conditions</label>
-        <select name="terms_id">
+        <select name="terms_id" <?= $terms_override ? 'disabled' : '' ?>>
           <option value="">— None —</option>
           <?php foreach ($terms as $t): ?>
           <option value="<?= $t['id'] ?>" <?= (int)($program['terms_id']??0)===$t['id']?'selected':'' ?>><?= h($t['version']) ?></option>
           <?php endforeach; ?>
         </select>
+        <?php if ($terms_override): ?>
+          <div style="font-size:.72rem;color:var(--grey-mid);margin-top:4px;">
+            This program uses <strong>dedicated T&amp;C</strong> — the standard selection is overridden.
+          </div>
+        <?php endif; ?>
       </div>
+      <div class="form-group" style="grid-column:1/-1;">
+        <details <?= $terms_override ? 'open' : '' ?> style="border:1px solid var(--grey-lt);border-radius:8px;padding:0;">
+          <summary style="cursor:pointer;padding:10px 14px;font-weight:600;font-size:.82rem;background:#f7f7f6;border-radius:8px;">
+            📜 Dedicated T&amp;C for this program <?= $terms_override ? '— active' : '(optional override)' ?>
+          </summary>
+          <div style="padding:14px;">
+            <p style="font-size:.76rem;color:var(--grey-mid);margin:0 0 10px;">
+              Create T&amp;C that apply <strong>only to this program</strong>. This does not change the standard library.
+              <?php if (!$terms_override): ?> Pre-fill from a standard version below if you wish, then edit.<?php endif; ?>
+            </p>
+            <form method="POST" action="program_edit.php?id=<?= $id ?>" id="ovr-form">
+              <input type="hidden" name="_sub" value="terms_override">
+              <input type="hidden" name="ovr_version" value="<?= h($terms_override['version'] ?? '') ?>">
+
+              <?php if (!$terms_override): ?>
+              <div class="form-group">
+                <label>Pre-fill from standard version</label>
+                <select id="ovr-prefill">
+                  <option value="">— start blank —</option>
+                  <?php foreach ($terms as $t): ?>
+                  <option value="<?= $t['id'] ?>"><?= h($t['version']) ?></option>
+                  <?php endforeach; ?>
+                </select>
+              </div>
+              <?php endif; ?>
+
+              <div class="lang-tabs" style="display:flex;gap:4px;margin-bottom:8px;flex-wrap:wrap;">
+                <?php $i=0; foreach (['en'=>'English','it'=>'Italiano','fr'=>'Français','es'=>'Español','de'=>'Deutsch'] as $code=>$name): ?>
+                  <button type="button" class="ovr-lang-tab" data-lang="<?= $code ?>" style="padding:5px 12px;border-radius:6px;font-size:.74rem;font-weight:600;background:<?= $i===0?'var(--grey-dk);color:#fff':'#f0f0ef;color:#333' ?>;border:none;cursor:pointer;"><?= $name ?></button>
+                <?php $i++; endforeach; ?>
+              </div>
+              <?php $i=0; foreach (['en','it','fr','es','de'] as $code): ?>
+                <div class="ovr-lang-pane" data-lang="<?= $code ?>" style="display:<?= $i===0?'block':'none' ?>;">
+                  <textarea name="ovr_text_<?= $code ?>" rows="10" style="width:100%;font-family:inherit;"><?= h($terms_override['text_'.$code] ?? '') ?></textarea>
+                </div>
+              <?php $i++; endforeach; ?>
+
+              <div style="margin-top:12px;display:flex;gap:8px;">
+                <button type="submit" class="btn btn-red btn-sm">💾 Save dedicated T&amp;C</button>
+              </div>
+            </form>
+            <?php if ($terms_override): ?>
+            <form method="POST" action="program_edit.php?id=<?= $id ?>" style="margin-top:8px;"
+                  onsubmit="return confirm('Remove the dedicated T&C for this program? You can then pick a standard version.');">
+              <input type="hidden" name="_sub" value="terms_override_remove">
+              <button type="submit" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:.76rem;text-decoration:underline;padding:0;">Remove dedicated T&amp;C</button>
+            </form>
+            <?php endif; ?>
+          </div>
+        </details>
+      </div>
+      <script>
+      (function(){
+        var tabs  = document.querySelectorAll('.ovr-lang-tab');
+        var panes = document.querySelectorAll('.ovr-lang-pane');
+        for (var i=0;i<tabs.length;i++){
+          tabs[i].addEventListener('click', function(){
+            var lang = this.getAttribute('data-lang');
+            for (var j=0;j<tabs.length;j++){ tabs[j].style.background='#f0f0ef'; tabs[j].style.color='#333'; }
+            this.style.background='var(--grey-dk)'; this.style.color='#fff';
+            for (var k=0;k<panes.length;k++){
+              panes[k].style.display = (panes[k].getAttribute('data-lang')===lang) ? 'block' : 'none';
+            }
+          });
+        }
+        // Pre-fill from a standard version via AJAX-free embedded map
+        var prefill = document.getElementById('ovr-prefill');
+        var TERMS = <?php
+            $map = [];
+            foreach ($terms as $t) {
+                $map[$t['id']] = [
+                    'en'=>$t['text_en']??'', 'it'=>$t['text_it']??'',
+                    'fr'=>$t['text_fr']??'', 'es'=>$t['text_es']??'', 'de'=>$t['text_de']??'',
+                ];
+            }
+            echo json_encode($map, JSON_HEX_TAG|JSON_HEX_APOS|JSON_HEX_QUOT|JSON_HEX_AMP);
+        ?>;
+        if (prefill){
+          prefill.addEventListener('change', function(){
+            var t = TERMS[this.value];
+            if (!t) return;
+            var langs = ['en','it','fr','es','de'];
+            for (var i=0;i<langs.length;i++){
+              var ta = document.querySelector('textarea[name="ovr_text_'+langs[i]+'"]');
+              if (ta && ta.value.trim()==='') ta.value = t[langs[i]] || '';
+            }
+          });
+        }
+      })();
+      </script>
       <?php if ($program['program_type'] === 'personal'): ?>
       <div class="form-group">
         <label>Adults <span style="font-weight:400;color:var(--grey-mid);">(pax)</span></label>
