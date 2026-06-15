@@ -102,20 +102,45 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($tid) {
                 $db->prepare('UPDATE iti_terms_conditions SET version=?,effective_date=?,content_en=?,content_it=?,content_fr=?,content_es=?,content_de=?,is_active=? WHERE id=? AND program_id IS NULL')
                    ->execute([...$f, $tid]);
-                iti_flash_set('success', 'T&C version updated.');
+                iti_flash_set('success', 'T&C updated.');
             } else {
                 $db->prepare('INSERT INTO iti_terms_conditions (version,effective_date,content_en,content_it,content_fr,content_es,content_de,is_active,program_id) VALUES (?,?,?,?,?,?,?,?,NULL)')
                    ->execute($f);
-                iti_flash_set('success', 'New T&C version created.');
+                iti_flash_set('success', 'New T&C created.');
             }
         } else {
-            iti_flash_set('error', 'Version label is required.');
+            iti_flash_set('error', 'Name is required.');
         }
         iti_redirect('settings.php?tab=terms');
     }
     if ($do === 'terms_toggle' && $admin) {
         $tid = (int)($_POST['id'] ?? 0);
         $db->prepare('UPDATE iti_terms_conditions SET is_active = 1 - is_active WHERE id=? AND program_id IS NULL')->execute([$tid]);
+        iti_redirect('settings.php?tab=terms');
+    }
+    if ($do === 'terms_duplicate' && $admin) {
+        $tid = (int)($_POST['id'] ?? 0);
+        $src = $db->prepare('SELECT * FROM iti_terms_conditions WHERE id=? AND program_id IS NULL');
+        $src->execute([$tid]);
+        $row = $src->fetch();
+        if ($row) {
+            // Name capped at varchar(20); keep room for the suffix
+            $newname = substr($row['version'], 0, 13) . ' (copy)';
+            $ins = $db->prepare(
+                'INSERT INTO iti_terms_conditions
+                   (version,effective_date,content_en,content_it,content_fr,content_es,content_de,is_active,program_id)
+                 VALUES (?,?,?,?,?,?,?,0,NULL)'
+            );
+            $ins->execute([
+                $newname, $row['effective_date'],
+                $row['content_en'], $row['content_it'], $row['content_fr'],
+                $row['content_es'], $row['content_de'],
+            ]);
+            $newid = (int)$db->lastInsertId();
+            iti_flash_set('success', 'Duplicated — edit the copy below.');
+            iti_redirect('settings.php?tab=terms&action=edit&id=' . $newid);
+        }
+        iti_flash_set('error', 'Could not duplicate.');
         iti_redirect('settings.php?tab=terms');
     }
 }
@@ -276,7 +301,18 @@ include __DIR__ . '/../../includes/layout_header.php';
     <?php foreach ($terms_list as $t): ?>
       <tr class="term-row"><td><strong><?= h($t['version']) ?></strong></td>
       <td><?= $t['effective_date'] ? date('d M Y', strtotime($t['effective_date'])) : '—' ?></td>
-      <td><?= $t['is_active'] ? 'Active' : 'Inactive' ?></td></tr>
+      <td><?= $t['is_active'] ? 'Active' : 'Inactive' ?></td>
+      <?php if ($admin): ?>
+      <td style="text-align:right;white-space:nowrap;">
+        <a href="settings.php?tab=terms&action=edit&id=<?= (int)$t['id'] ?>" class="btn btn-outline btn-sm">Edit</a>
+        <form method="POST" action="settings.php?tab=terms" style="display:inline;">
+          <input type="hidden" name="_action" value="terms_duplicate">
+          <input type="hidden" name="id" value="<?= (int)$t['id'] ?>">
+          <button type="submit" class="btn btn-outline btn-sm">Duplicate</button>
+        </form>
+      </td>
+      <?php endif; ?>
+      </tr>
     <?php endforeach; ?>
     <?php if (!$terms_list): ?><tr><td style="padding:24px;text-align:center;color:var(--grey-mid);">No T&C versions yet.</td></tr><?php endif; ?>
     </tbody></table>
@@ -285,7 +321,7 @@ include __DIR__ . '/../../includes/layout_header.php';
 <?php elseif (($_GET['action'] ?? '') === 'add' || $terms_edit): ?>
   <!-- T&C editor -->
   <div class="page-header">
-    <div><h2><?= $terms_edit ? 'Edit: '.h($terms_edit['version']) : 'New T&C Version' ?></h2></div>
+    <div><h2><?= $terms_edit ? 'Edit: '.h($terms_edit['version']) : 'New T&C' ?></h2></div>
     <a href="settings.php?tab=terms" class="btn btn-outline btn-sm">← Cancel</a>
   </div>
   <form method="POST" action="settings.php?tab=terms" id="terms-form">
@@ -293,8 +329,8 @@ include __DIR__ . '/../../includes/layout_header.php';
     <input type="hidden" name="id" value="<?= (int)($terms_edit['id'] ?? 0) ?>">
     <div class="form-card">
       <div class="form-grid" style="grid-template-columns:1fr 200px 120px;">
-        <div class="form-group"><label>Version <span style="color:var(--red)">*</span></label>
-          <input type="text" name="version" value="<?= h($terms_edit['version'] ?? '') ?>" required maxlength="80" placeholder="e.g. 2026 v1"></div>
+        <div class="form-group"><label>Name <span style="color:var(--red)">*</span></label>
+          <input type="text" name="version" value="<?= h($terms_edit['version'] ?? '') ?>" required maxlength="20" placeholder="e.g. Tanzania Std"></div>
         <div class="form-group"><label>Effective Date</label>
           <input type="date" name="effective_date" value="<?= h($terms_edit['effective_date'] ?? '') ?>"></div>
         <div class="form-group"><label>Status</label>
