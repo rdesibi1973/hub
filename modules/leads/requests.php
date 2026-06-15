@@ -29,7 +29,8 @@ if (isset($_GET['clear'])) {
 $filter_submitted = array_key_exists('q', $_GET) || array_key_exists('status', $_GET)
                  || array_key_exists('agent', $_GET) || array_key_exists('year', $_GET)
                  || array_key_exists('no_folder', $_GET) || array_key_exists('sort', $_GET)
-                 || array_key_exists('date_from', $_GET) || array_key_exists('date_to', $_GET);
+                 || array_key_exists('date_from', $_GET) || array_key_exists('date_to', $_GET)
+                 || array_key_exists('date_field', $_GET);
 
 if ($filter_submitted) {
     $_SESSION['req_filters'] = [
@@ -41,6 +42,7 @@ if ($filter_submitted) {
         'sort'      => $_GET['sort'] ?? 'id_desc',
         'date_from' => $_GET['date_from']   ?? '',
         'date_to'   => $_GET['date_to']     ?? '',
+        'date_field'=> $_GET['date_field']  ?? '',
     ];
 }
 
@@ -57,6 +59,7 @@ if ($isFirstVisit) {
         'sort'      => 'id_desc',    // newest assignment first
         'date_from' => '',
         'date_to'   => '',
+        'date_field'=> '',
     ];
     $_SESSION['req_filters'] = $f;
 }
@@ -69,6 +72,12 @@ $no_folder = !empty($f['no_folder']);
 $sort      = $f['sort']      ?? 'id_desc';
 $date_from = $f['date_from'] ?? '';
 $date_to   = $f['date_to']   ?? '';
+// Which date column the date_from/date_to range filters on.
+// 'date_received' (default) for normal browsing; 'confirmation_date' when
+// drilling in from the Sales report's Confirmed count (which is computed
+// on confirmation_date, i.e. when the deal was closed).
+$date_field = (($f['date_field'] ?? '') === 'confirmation_date')
+            ? 'confirmation_date' : 'date_received';
 
 $allowedSorts = [
     'id_desc'   => 'r.id DESC',
@@ -102,11 +111,11 @@ if ($year > 0 && !$search) {
     $params[] = $year;
 }
 if ($date_from !== '') {
-    $where[]  = 'r.date_received >= ?';
+    $where[]  = "r.$date_field >= ?";
     $params[] = $date_from;
 }
 if ($date_to !== '') {
-    $where[]  = 'r.date_received <= ?';
+    $where[]  = "r.$date_field <= ?";
     $params[] = $date_to;
 }
 if ($no_folder) {

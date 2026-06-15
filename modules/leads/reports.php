@@ -684,7 +684,8 @@ include 'includes/header.php';
           <?php if (!$is_history && $r['confirmed'] > 0):
             $booked_url = 'requests.php?' . http_build_query([
                 'status' => 'Booked', 'agent' => $r['agent_id'],
-                'date_from' => $report_from, 'date_to' => $report_to, 'year' => 0,
+                'date_from' => $report_from, 'date_to' => $report_to,
+                'date_field' => 'confirmation_date', 'year' => 0,
             ]); ?>
             <a href="<?= h($booked_url) ?>" onclick="event.stopPropagation()" style="text-decoration:none">
               <span class="badge status-booked" style="cursor:pointer"><?= $r['confirmed'] ?></span>
