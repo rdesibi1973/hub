@@ -84,6 +84,10 @@ include __DIR__ . '/../../includes/layout_header.php';
 .inc-list li { padding:6px 0; border-bottom:1px solid var(--off-white); font-size:.85rem;
                display:flex; align-items:baseline; gap:8px; }
 .inc-list li:last-child{ border:none; }
+.tc-richtext p { margin:0 0 6px 0; }
+.tc-richtext ul, .tc-richtext ol { margin:6px 0 6px 0; padding-left:20px; }
+.tc-richtext li { margin:0 0 3px 0; }
+.tc-richtext a { color:var(--red); }
 </style>
 
 <main>
@@ -378,7 +382,7 @@ include __DIR__ . '/../../includes/layout_header.php';
     <div style="font-size:.75rem;color:var(--grey-mid);margin-bottom:8px;">Effective <?= date('d M Y',strtotime($tc['effective_date'])) ?></div>
     <?php endif; ?>
     <?php $tc_text = iti_field($tc, 'text', $lang); if ($tc_text !== ''): ?>
-    <div style="font-size:.78rem;line-height:1.55;color:var(--grey-dk);white-space:pre-line;"><?= h($tc_text) ?></div>
+    <div class="tc-richtext" style="font-size:.78rem;line-height:1.55;color:var(--grey-dk);"><?= $tc_text ?></div>
     <?php endif; ?>
   </div>
   <?php endif; ?>

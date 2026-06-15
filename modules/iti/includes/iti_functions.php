@@ -90,6 +90,243 @@ function iti_set_setting(string $key, string $value): void {
     )->execute([$key, $value]);
 }
 
+// ── Sanitizza HTML rich-text (output Quill) ──────────────────────────────────
+// Allow-list dei soli tag/attributi prodotti dalla toolbar Quill usata nei T&C.
+// Usato al SALVATAGGIO: l'HTML nel DB resta pulito e i render point possono
+// stamparlo senza escape. Obbligatorio per l'override per-programma, che è
+// editabile da qualsiasi utente (non solo admin).
+function iti_sanitize_richtext(string $html): string {
+    $html = trim($html);
+    if ($html === '') return '';
+
+    // Tag consentiti → attributi consentiti per ciascuno
+    $allowed = [
+        'p'      => ['class'],
+        'br'     => [],
+        'strong' => [], 'b' => [],
+        'em'     => [], 'i' => [],
+        'u'      => [],
+        's'      => [], 'strike' => [],
+        'ol'     => [], 'ul' => [],
+        'li'     => ['class'],
+        'a'      => ['href'],
+        'span'   => ['style'],
+    ];
+
+    // Carica in DOMDocument (wrap per parsing affidabile dei frammenti)
+    $prev = libxml_use_internal_errors(true);
+    $doc  = new DOMDocument();
+    $doc->loadHTML(
+        '<?xml encoding="UTF-8"><div id="__wrap">' . $html . '</div>',
+        LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD
+    );
+    libxml_clear_errors();
+    libxml_use_internal_errors($prev);
+
+    $wrap = $doc->getElementById('__wrap');
+    if (!$wrap) return '';
+
+    // Visita ricorsiva: rimuove tag non consentiti (preservando il testo
+    // interno), ripulisce gli attributi, neutralizza href pericolosi.
+    $clean = function (DOMNode $node) use (&$clean, $allowed, $doc): void {
+        // Itera su copia statica: modifichiamo l'albero durante il ciclo
+        foreach (iterator_to_array($node->childNodes) as $child) {
+            if ($child->nodeType === XML_TEXT_NODE) {
+                continue;
+            }
+            if ($child->nodeType !== XML_ELEMENT_NODE) {
+                // commenti, CDATA, ecc. → via
+                $node->removeChild($child);
+                continue;
+            }
+            $tag = strtolower($child->nodeName);
+
+            // Tag pericolosi: rimuovi tag E contenuto (niente unwrap del testo)
+            static $drop_with_content = ['script','style','iframe','object','embed','noscript','template','svg','math'];
+            if (in_array($tag, $drop_with_content, true)) {
+                $node->removeChild($child);
+                continue;
+            }
+
+            if (!isset($allowed[$tag])) {
+                // Altri tag non consentiti: sostituisci con i suoi figli
+                // (preserva il testo), poi rimuovi il tag.
+                while ($child->firstChild) {
+                    $node->insertBefore($child->firstChild, $child);
+                }
+                $node->removeChild($child);
+                continue;
+            }
+
+            // Pulisci attributi
+            if ($child->attributes !== null) {
+                foreach (iterator_to_array($child->attributes) as $attr) {
+                    $an = strtolower($attr->nodeName);
+                    if (!in_array($an, $allowed[$tag], true)) {
+                        $child->removeAttribute($attr->nodeName);
+                        continue;
+                    }
+                    if ($an === 'href') {
+                        $href = trim($attr->nodeValue);
+                        // Solo http(s), mailto, tel. Blocca javascript:, data:, ecc.
+                        if (!preg_match('#^(https?:|mailto:|tel:)#i', $href)) {
+                            $child->removeAttribute('href');
+                        }
+                    }
+                    if ($an === 'style') {
+                        // Quill usa style solo per color/background su <span>.
+                        // Tieni solo quelle due proprietà, scarta il resto.
+                        $keep = [];
+                        foreach (explode(';', $attr->nodeValue) as $decl) {
+                            if (strpos($decl, ':') === false) continue;
+                            [$prop, $val] = array_map('trim', explode(':', $decl, 2));
+                            $prop = strtolower($prop);
+                            if (in_array($prop, ['color', 'background-color', 'background'], true)
+                                && preg_match('/^(#[0-9a-f]{3,6}|rgb\([0-9, ]+\)|[a-z]+)$/i', $val)) {
+                                $keep[] = $prop . ':' . $val;
+                            }
+                        }
+                        if ($keep) {
+                            $child->setAttribute('style', implode(';', $keep));
+                        } else {
+                            $child->removeAttribute('style');
+                        }
+                    }
+                    if ($an === 'class') {
+                        // Tieni solo le classi di allineamento Quill
+                        $classes = preg_split('/\s+/', trim($attr->nodeValue));
+                        $keep = array_filter($classes, function ($c) {
+                            return preg_match('/^ql-(align|indent)-/', $c);
+                        });
+                        if ($keep) {
+                            $child->setAttribute('class', implode(' ', $keep));
+                        } else {
+                            $child->removeAttribute('class');
+                        }
+                    }
+                }
+            }
+
+            // Ricorsione sui figli
+            $clean($child);
+        }
+    };
+    $clean($wrap);
+
+    // Serializza solo il contenuto interno del wrap
+    $out = '';
+    foreach ($wrap->childNodes as $c) {
+        $out .= $doc->saveHTML($c);
+    }
+    return trim($out);
+}
+
+// ── Render rich-text (HTML Quill) negli elementi nativi PHPWord ───────────────
+// Evita PhpWord\Shared\Html::addHtml (fragile con l'HTML di Quill): converte a
+// mano i tag prodotti dalla toolbar in addText/addListItem con run di stile.
+// $section: container PhpWord; $html: stringa già sanitizzata; $fontStyle:
+// nome stile font registrato (es. 'tcFont'); $paraStyle: array stile paragrafo.
+function iti_richtext_to_phpword($section, string $html, string $fontStyle = 'tcFont', array $paraStyle = []): void {
+    $html = trim($html);
+    if ($html === '') return;
+
+    $prev = libxml_use_internal_errors(true);
+    $doc  = new DOMDocument();
+    $doc->loadHTML(
+        '<?xml encoding="UTF-8"><div id="__wrap">' . $html . '</div>',
+        LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD
+    );
+    libxml_clear_errors();
+    libxml_use_internal_errors($prev);
+
+    $wrap = $doc->getElementById('__wrap');
+    if (!$wrap) {
+        // Fallback: trattalo come testo semplice
+        foreach (explode("\n", strip_tags($html)) as $line) {
+            if (trim($line) !== '') $section->addText(trim($line), $fontStyle, $paraStyle);
+        }
+        return;
+    }
+
+    // Raccoglie i run di testo di un nodo, propagando bold/italic/underline.
+    $collectRuns = function (DOMNode $node, array $fmt) use (&$collectRuns): array {
+        $runs = [];
+        foreach ($node->childNodes as $child) {
+            if ($child->nodeType === XML_TEXT_NODE) {
+                $txt = $child->nodeValue;
+                if ($txt !== '') $runs[] = ['text' => $txt, 'fmt' => $fmt];
+                continue;
+            }
+            if ($child->nodeType !== XML_ELEMENT_NODE) continue;
+            $t = strtolower($child->nodeName);
+            $nf = $fmt;
+            if ($t === 'strong' || $t === 'b') $nf['bold'] = true;
+            if ($t === 'em' || $t === 'i')     $nf['italic'] = true;
+            if ($t === 'u')                    $nf['underline'] = 'single';
+            if ($t === 'br') { $runs[] = ['text' => "\n", 'fmt' => $fmt]; continue; }
+            $runs = array_merge($runs, $collectRuns($child, $nf));
+        }
+        return $runs;
+    };
+
+    // Emette un blocco di testo (paragrafo o list item) con i suoi run misti.
+    $emitBlock = function (DOMNode $node, $listType = null) use ($section, $collectRuns, $fontStyle, $paraStyle): void {
+        $runs = $collectRuns($node, []);
+        // Salta blocchi vuoti
+        $hasText = false;
+        foreach ($runs as $r) { if (trim($r['text']) !== '') { $hasText = true; break; } }
+        if (!$hasText) return;
+
+        $pStyle = $paraStyle + ['spaceAfter' => 60, 'lineHeight' => 1.5];
+        if ($listType) {
+            $listStyle = ['listType' => $listType === 'ol'
+                ? \PhpOffice\PhpWord\Style\ListItem::TYPE_NUMBER
+                : \PhpOffice\PhpWord\Style\ListItem::TYPE_BULLET_FILLED];
+            // PhpWord addListItemRun supporta più run nello stesso item
+            $run = $section->addListItemRun(0, $listStyle, $pStyle);
+        } else {
+            $run = $section->addTextRun($pStyle);
+        }
+        foreach ($runs as $r) {
+            $parts = explode("\n", $r['text']);
+            foreach ($parts as $k => $part) {
+                if ($part !== '') {
+                    $style = [$fontStyle];
+                    // merge font style name + inline flags
+                    $inline = [];
+                    if (!empty($r['fmt']['bold']))      $inline['bold'] = true;
+                    if (!empty($r['fmt']['italic']))    $inline['italic'] = true;
+                    if (!empty($r['fmt']['underline'])) $inline['underline'] = 'single';
+                    $run->addText($part, array_merge(['name' => 'Calibri', 'size' => 9, 'color' => '7A7A7A'], $inline));
+                }
+                if ($k < count($parts) - 1) $run->addTextBreak();
+            }
+        }
+    };
+
+    // Itera i blocchi top-level
+    foreach ($wrap->childNodes as $node) {
+        if ($node->nodeType === XML_TEXT_NODE) {
+            if (trim($node->nodeValue) !== '') {
+                $section->addText(trim($node->nodeValue), $fontStyle, $paraStyle + ['spaceAfter' => 60, 'lineHeight' => 1.5]);
+            }
+            continue;
+        }
+        if ($node->nodeType !== XML_ELEMENT_NODE) continue;
+        $t = strtolower($node->nodeName);
+        if ($t === 'ul' || $t === 'ol') {
+            foreach ($node->childNodes as $li) {
+                if ($li->nodeType === XML_ELEMENT_NODE && strtolower($li->nodeName) === 'li') {
+                    $emitBlock($li, $t);
+                }
+            }
+        } else {
+            // p, div, o testo inline sciolto
+            $emitBlock($node, null);
+        }
+    }
+}
+
 // ── Helper: campo localizzato ─────────────────────────────────────────────────
 function iti_field(array $row, string $field, string $lang = null): string {
     $lang = $lang ?? iti_lang();

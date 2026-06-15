@@ -60,11 +60,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $ver = trim($_POST['ovr_version'] ?? '') ?: ('Custom — program #' . $id);
         $vals = [
             $ver,
-            $_POST['ovr_text_en'] ?? '',
-            $_POST['ovr_text_it'] ?? '',
-            $_POST['ovr_text_fr'] ?? '',
-            $_POST['ovr_text_es'] ?? '',
-            $_POST['ovr_text_de'] ?? '',
+            iti_sanitize_richtext($_POST['ovr_text_en'] ?? ''),
+            iti_sanitize_richtext($_POST['ovr_text_it'] ?? ''),
+            iti_sanitize_richtext($_POST['ovr_text_fr'] ?? ''),
+            iti_sanitize_richtext($_POST['ovr_text_es'] ?? ''),
+            iti_sanitize_richtext($_POST['ovr_text_de'] ?? ''),
         ];
         if ($ovr_id) {
             $db->prepare('UPDATE iti_terms_conditions SET version=?,text_en=?,text_it=?,text_fr=?,text_es=?,text_de=? WHERE id=? AND program_id=?')
@@ -735,7 +735,8 @@ include __DIR__ . '/../../includes/layout_header.php';
               </div>
               <?php $i=0; foreach (['en','it','fr','es','de'] as $code): ?>
                 <div class="ovr-lang-pane" data-lang="<?= $code ?>" style="display:<?= $i===0?'block':'none' ?>;">
-                  <textarea name="ovr_text_<?= $code ?>" rows="10" style="width:100%;font-family:inherit;"><?= h($terms_override['text_'.$code] ?? '') ?></textarea>
+                  <div class="ovr-quill" id="ovr_quill_<?= $code ?>" style="background:#fff;min-height:200px;"><?= $terms_override['text_'.$code] ?? '' ?></div>
+                  <textarea name="ovr_text_<?= $code ?>" id="ovr_ta_<?= $code ?>" style="display:none;"></textarea>
                 </div>
               <?php $i++; endforeach; ?>
 
@@ -753,6 +754,8 @@ include __DIR__ . '/../../includes/layout_header.php';
           </div>
         </details>
       </div>
+      <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/quill/1.3.7/quill.snow.css">
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/quill/1.3.7/quill.min.js"></script>
       <script>
       (function(){
         var tabs  = document.querySelectorAll('.ovr-lang-tab');
@@ -767,7 +770,36 @@ include __DIR__ . '/../../includes/layout_header.php';
             }
           });
         }
-        // Pre-fill from a standard version via AJAX-free embedded map
+
+        // One Quill editor per language
+        var LANGS = ['en','it','fr','es','de'];
+        var editors = {};
+        var toolbar = [
+          ['bold','italic','underline'],
+          [{'list':'ordered'},{'list':'bullet'}],
+          ['link','clean'],
+          [{'color':[]},{'background':[]}],
+          [{'align':[]}]
+        ];
+        for (var n=0;n<LANGS.length;n++){
+          var code = LANGS[n];
+          editors[code] = new Quill('#ovr_quill_'+code, { theme:'snow', modules:{ toolbar: toolbar } });
+        }
+
+        // Sync editors into hidden textareas before submit
+        var ovrForm = document.getElementById('ovr-form');
+        if (ovrForm){
+          ovrForm.addEventListener('submit', function(){
+            for (var n=0;n<LANGS.length;n++){
+              var code = LANGS[n];
+              var html = editors[code].root.innerHTML;
+              if (html === '<p><br></p>') html = '';
+              document.getElementById('ovr_ta_'+code).value = html;
+            }
+          });
+        }
+
+        // Pre-fill from a standard version via embedded map
         var prefill = document.getElementById('ovr-prefill');
         var TERMS = <?php
             $map = [];
@@ -783,10 +815,15 @@ include __DIR__ . '/../../includes/layout_header.php';
           prefill.addEventListener('change', function(){
             var t = TERMS[this.value];
             if (!t) return;
-            var langs = ['en','it','fr','es','de'];
-            for (var i=0;i<langs.length;i++){
-              var ta = document.querySelector('textarea[name="ovr_text_'+langs[i]+'"]');
-              if (ta && ta.value.trim()==='') ta.value = t[langs[i]] || '';
+            for (var i=0;i<LANGS.length;i++){
+              var code = LANGS[i];
+              var ed = editors[code];
+              // Only fill if the editor is currently empty
+              var cur = ed.root.innerHTML;
+              if (cur === '' || cur === '<p><br></p>'){
+                ed.root.innerHTML = '';
+                if (t[code]) ed.clipboard.dangerouslyPasteHTML(0, t[code]);
+              }
             }
           });
         }

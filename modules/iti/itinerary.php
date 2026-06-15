@@ -151,6 +151,10 @@ a { color:var(--red); }
 /* ── T&C ── */
 .tc-box { background:var(--off-wh); border-radius:10px; padding:18px 22px;
           font-size:.78rem; color:var(--grey-dk); line-height:1.7; }
+.tc-richtext p { margin:0 0 6px 0; }
+.tc-richtext ul, .tc-richtext ol { margin:6px 0 6px 0; padding-left:20px; }
+.tc-richtext li { margin:0 0 3px 0; }
+.tc-richtext a { color:var(--red); }
 
 /* ── CTA footer ── */
 .cta-bar { background:var(--red); color:var(--white); text-align:center;
@@ -361,7 +365,7 @@ a { color:var(--red); }
     <div class="tc-box">
       <div style="font-weight:700;margin-bottom:6px;"><?= h($tc['version']) ?> — Effective <?= date('d F Y',strtotime($tc['effective_date'])) ?></div>
       <?php $tc_text = iti_field($tc,'text',$lang) ?: iti_field($tc,'text','en'); ?>
-      <?php if ($tc_text): ?><div style="margin-top:10px;"><?= nl2br(h($tc_text)) ?></div><?php endif; ?>
+      <?php if ($tc_text): ?><div class="tc-richtext" style="margin-top:10px;"><?= $tc_text ?></div><?php endif; ?>
     </div>
   </div>
   <?php endif; ?>

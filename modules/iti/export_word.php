@@ -249,9 +249,7 @@ if ($tc) {
     $section->addText($tc['version'].' — Effective '.date('d F Y',strtotime($tc['effective_date'])), 'small', ['spaceAfter'=>120]);
     $tc_text = iti_field($tc,'text',$lang)?:iti_field($tc,'text','en');
     if ($tc_text) {
-        foreach (explode("\n",$tc_text) as $para) {
-            if (trim($para)!=='') $section->addText(trim($para),'tcFont',['spaceAfter'=>60,'lineHeight'=>1.5]);
-        }
+        iti_richtext_to_phpword($section, $tc_text, 'tcFont', ['spaceAfter'=>60,'lineHeight'=>1.5]);
     }
 }
 

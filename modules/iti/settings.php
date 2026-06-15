@@ -91,11 +91,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $f = [
             trim($_POST['version'] ?? ''),
             ($_POST['effective_date'] ?? '') ?: null,
-            $_POST['text_en'] ?? '',
-            $_POST['text_it'] ?? '',
-            $_POST['text_fr'] ?? '',
-            $_POST['text_es'] ?? '',
-            $_POST['text_de'] ?? '',
+            iti_sanitize_richtext($_POST['text_en'] ?? ''),
+            iti_sanitize_richtext($_POST['text_it'] ?? ''),
+            iti_sanitize_richtext($_POST['text_fr'] ?? ''),
+            iti_sanitize_richtext($_POST['text_es'] ?? ''),
+            iti_sanitize_richtext($_POST['text_de'] ?? ''),
             isset($_POST['is_active']) ? 1 : 0,
         ];
         if ($f[0] !== '') {
@@ -154,6 +154,9 @@ $extra_css = iti_extra_css() . '
 .lang-tab.active{background:var(--grey-dk);color:#fff;}
 .lang-pane{display:none;}
 .lang-pane.active{display:block;}
+.tc-quill{background:#fff;min-height:260px;}
+.tc-quill .ql-editor{min-height:260px;font-family:\'Open Sans\',sans-serif;font-size:.85rem;}
+.form-card textarea{width:100%;box-sizing:border-box;padding:10px 14px;border:1.5px solid var(--grey-lt);border-radius:6px;font-family:\'Open Sans\',sans-serif;font-size:.85rem;resize:vertical;}
 .avatar{width:84px;height:84px;border-radius:50%;object-fit:cover;border:2px solid var(--grey-lt);background:#f0f0ef;}
 ';
 include __DIR__ . '/../../includes/layout_header.php';
@@ -285,7 +288,7 @@ include __DIR__ . '/../../includes/layout_header.php';
     <div><h2><?= $terms_edit ? 'Edit: '.h($terms_edit['version']) : 'New T&C Version' ?></h2></div>
     <a href="settings.php?tab=terms" class="btn btn-outline btn-sm">← Cancel</a>
   </div>
-  <form method="POST" action="settings.php?tab=terms">
+  <form method="POST" action="settings.php?tab=terms" id="terms-form">
     <input type="hidden" name="_action" value="terms_save">
     <input type="hidden" name="id" value="<?= (int)($terms_edit['id'] ?? 0) ?>">
     <div class="form-card">
@@ -306,15 +309,19 @@ include __DIR__ . '/../../includes/layout_header.php';
       </div>
       <?php $i=0; foreach ($LANGS as $code=>$name): ?>
         <div class="lang-pane <?= $i===0?'active':'' ?>" data-lang="<?= $code ?>">
-          <textarea name="text_<?= $code ?>" rows="12" style="font-family:inherit;"><?= h($terms_edit['text_'.$code] ?? '') ?></textarea>
+          <div class="tc-quill" id="quill_<?= $code ?>"><?= $terms_edit['text_'.$code] ?? '' ?></div>
+          <textarea name="text_<?= $code ?>" id="ta_<?= $code ?>" style="display:none;"></textarea>
         </div>
       <?php $i++; endforeach; ?>
 
       <div style="margin-top:16px;"><button type="submit" class="btn btn-red">💾 Save Version</button></div>
     </div>
   </form>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/quill/1.3.7/quill.snow.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/quill/1.3.7/quill.min.js"></script>
   <script>
   (function(){
+    // Language tab switching
     var tabs = document.querySelectorAll('.lang-tab');
     var panes = document.querySelectorAll('.lang-pane');
     for (var i=0;i<tabs.length;i++){
@@ -324,6 +331,35 @@ include __DIR__ . '/../../includes/layout_header.php';
         this.classList.add('active');
         for (var k=0;k<panes.length;k++){
           panes[k].classList.toggle('active', panes[k].getAttribute('data-lang')===lang);
+        }
+      });
+    }
+
+    // One Quill editor per language
+    var LANGS = <?= json_encode(array_keys($LANGS)) ?>;
+    var editors = {};
+    var toolbar = [
+      ['bold','italic','underline'],
+      [{'list':'ordered'},{'list':'bullet'}],
+      ['link','clean'],
+      [{'color':[]},{'background':[]}],
+      [{'align':[]}]
+    ];
+    for (var n=0;n<LANGS.length;n++){
+      var code = LANGS[n];
+      editors[code] = new Quill('#quill_'+code, { theme:'snow', modules:{ toolbar: toolbar } });
+    }
+
+    // Sync each editor into its hidden textarea before submit
+    var form = document.getElementById('terms-form') || document.querySelector('form');
+    if (form) {
+      form.addEventListener('submit', function(){
+        for (var n=0;n<LANGS.length;n++){
+          var code = LANGS[n];
+          var html = editors[code].root.innerHTML;
+          // Treat an empty editor as truly empty
+          if (html === '<p><br></p>') html = '';
+          document.getElementById('ta_'+code).value = html;
         }
       });
     }
