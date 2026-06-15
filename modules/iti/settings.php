@@ -294,8 +294,8 @@ include __DIR__ . '/../../includes/layout_header.php';
 
 <?php /* ════════════ TERMS ════════════ */ else: ?>
 <?php if (!$admin): ?>
-  <div class="page-header"><div><h2>Terms &amp; Conditions</h2><div class="sub">Standard versions used in itineraries.</div></div></div>
-  <div class="ro-note">🔒 Read-only. Only administrators can manage T&amp;C versions.</div>
+  <div class="page-header"><div><h2>Terms &amp; Conditions</h2><div class="sub">Standard T&amp;C used in itineraries.</div></div></div>
+  <div class="ro-note">🔒 Read-only. Only administrators can manage T&amp;C.</div>
   <div class="form-card" style="padding:0;overflow:hidden;">
     <table class="kv-table"><tbody>
     <?php foreach ($terms_list as $t): ?>
@@ -314,7 +314,7 @@ include __DIR__ . '/../../includes/layout_header.php';
       <?php endif; ?>
       </tr>
     <?php endforeach; ?>
-    <?php if (!$terms_list): ?><tr><td style="padding:24px;text-align:center;color:var(--grey-mid);">No T&C versions yet.</td></tr><?php endif; ?>
+    <?php if (!$terms_list): ?><tr><td style="padding:24px;text-align:center;color:var(--grey-mid);">No T&C yet.</td></tr><?php endif; ?>
     </tbody></table>
   </div>
 
@@ -350,7 +350,7 @@ include __DIR__ . '/../../includes/layout_header.php';
         </div>
       <?php $i++; endforeach; ?>
 
-      <div style="margin-top:16px;"><button type="submit" class="btn btn-red">💾 Save Version</button></div>
+      <div style="margin-top:16px;"><button type="submit" class="btn btn-red">💾 Save</button></div>
     </div>
   </form>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/quill/1.3.7/quill.snow.css">
@@ -405,13 +405,13 @@ include __DIR__ . '/../../includes/layout_header.php';
 <?php else: ?>
   <!-- T&C list -->
   <div class="page-header">
-    <div><h2>Terms &amp; Conditions</h2><div class="sub"><?= count($terms_list) ?> standard version(s)</div></div>
-    <a href="settings.php?tab=terms&action=add" class="btn btn-red">+ New Version</a>
+    <div><h2>Terms &amp; Conditions</h2><div class="sub"><?= count($terms_list) ?> standard T&amp;C</div></div>
+    <a href="settings.php?tab=terms&action=add" class="btn btn-red">+ New T&amp;C</a>
   </div>
   <div class="form-card" style="padding:0;overflow:hidden;">
     <table class="kv-table">
       <thead><tr>
-        <th style="width:auto;">Version</th><th style="width:140px;">Effective</th>
+        <th style="width:auto;">Name</th><th style="width:140px;">Effective</th>
         <th style="width:100px;">Status</th><th style="width:160px;"></th>
       </tr></thead>
       <tbody>
@@ -433,7 +433,7 @@ include __DIR__ . '/../../includes/layout_header.php';
         </tr>
       <?php endforeach; ?>
       <?php if (!$terms_list): ?>
-        <tr><td colspan="4" style="text-align:center;padding:28px;color:var(--grey-mid);">No T&C versions yet. Create the first one.</td></tr>
+        <tr><td colspan="4" style="text-align:center;padding:28px;color:var(--grey-mid);">No T&C yet. Create the first one.</td></tr>
       <?php endif; ?>
       </tbody>
     </table>
