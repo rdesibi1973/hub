@@ -377,7 +377,7 @@ include __DIR__ . '/../../includes/layout_header.php';
   <!-- T&C excerpt -->
   <?php if ($tc): ?>
   <div class="section-box" style="background:var(--off-white);">
-    <div style="font-family:'Merriweather',serif;font-size:.85rem;font-weight:700;margin-bottom:4px;">Terms &amp; Conditions — <?= h($tc['version']) ?></div>
+    <div style="font-family:'Merriweather',serif;font-size:.85rem;font-weight:700;margin-bottom:4px;">Terms &amp; Conditions — <?= h($tc['name']) ?></div>
     <?php if (!empty($tc['effective_date'])): ?>
     <div style="font-size:.75rem;color:var(--grey-mid);margin-bottom:8px;">Effective <?= date('d M Y',strtotime($tc['effective_date'])) ?></div>
     <?php endif; ?>

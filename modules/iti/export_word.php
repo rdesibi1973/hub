@@ -246,7 +246,7 @@ if ($included || $excluded) {
 if ($tc) {
     $section->addPageBreak();
     $section->addTitle('Terms & Conditions', 2);
-    $section->addText($tc['version'].' — Effective '.date('d F Y',strtotime($tc['effective_date'])), 'small', ['spaceAfter'=>120]);
+    $section->addText($tc['name'].' — Effective '.date('d F Y',strtotime($tc['effective_date'])), 'small', ['spaceAfter'=>120]);
     $tc_text = iti_field($tc,'content',$lang)?:iti_field($tc,'content','en');
     if ($tc_text) {
         iti_richtext_to_phpword($section, $tc_text, 'tcFont', ['spaceAfter'=>60,'lineHeight'=>1.5]);

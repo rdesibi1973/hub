@@ -100,11 +100,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         ];
         if ($f[0] !== '') {
             if ($tid) {
-                $db->prepare('UPDATE iti_terms_conditions SET version=?,effective_date=?,content_en=?,content_it=?,content_fr=?,content_es=?,content_de=?,is_active=? WHERE id=? AND program_id IS NULL')
+                $db->prepare('UPDATE iti_terms_conditions SET name=?,effective_date=?,content_en=?,content_it=?,content_fr=?,content_es=?,content_de=?,is_active=? WHERE id=? AND program_id IS NULL')
                    ->execute([...$f, $tid]);
                 iti_flash_set('success', 'T&C updated.');
             } else {
-                $db->prepare('INSERT INTO iti_terms_conditions (version,effective_date,content_en,content_it,content_fr,content_es,content_de,is_active,program_id) VALUES (?,?,?,?,?,?,?,?,NULL)')
+                $db->prepare('INSERT INTO iti_terms_conditions (name,effective_date,content_en,content_it,content_fr,content_es,content_de,is_active,program_id) VALUES (?,?,?,?,?,?,?,?,NULL)')
                    ->execute($f);
                 iti_flash_set('success', 'New T&C created.');
             }
@@ -125,10 +125,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $row = $src->fetch();
         if ($row) {
             // Name capped at varchar(20); keep room for the suffix
-            $newname = substr($row['version'], 0, 13) . ' (copy)';
+            $newname = substr($row['name'], 0, 43) . ' (copy)';
             $ins = $db->prepare(
                 'INSERT INTO iti_terms_conditions
-                   (version,effective_date,content_en,content_it,content_fr,content_es,content_de,is_active,program_id)
+                   (name,effective_date,content_en,content_it,content_fr,content_es,content_de,is_active,program_id)
                  VALUES (?,?,?,?,?,?,?,0,NULL)'
             );
             $ins->execute([
@@ -299,7 +299,7 @@ include __DIR__ . '/../../includes/layout_header.php';
   <div class="form-card" style="padding:0;overflow:hidden;">
     <table class="kv-table"><tbody>
     <?php foreach ($terms_list as $t): ?>
-      <tr class="term-row"><td><strong><?= h($t['version']) ?></strong></td>
+      <tr class="term-row"><td><strong><?= h($t['name']) ?></strong></td>
       <td><?= $t['effective_date'] ? date('d M Y', strtotime($t['effective_date'])) : '—' ?></td>
       <td><?= $t['is_active'] ? 'Active' : 'Inactive' ?></td>
       <?php if ($admin): ?>
@@ -321,7 +321,7 @@ include __DIR__ . '/../../includes/layout_header.php';
 <?php elseif (($_GET['action'] ?? '') === 'add' || $terms_edit): ?>
   <!-- T&C editor -->
   <div class="page-header">
-    <div><h2><?= $terms_edit ? 'Edit: '.h($terms_edit['version']) : 'New T&C' ?></h2></div>
+    <div><h2><?= $terms_edit ? 'Edit: '.h($terms_edit['name']) : 'New T&C' ?></h2></div>
     <a href="settings.php?tab=terms" class="btn btn-outline btn-sm">← Cancel</a>
   </div>
   <form method="POST" action="settings.php?tab=terms" id="terms-form">
@@ -330,7 +330,7 @@ include __DIR__ . '/../../includes/layout_header.php';
     <div class="form-card">
       <div class="form-grid" style="grid-template-columns:1fr 200px 120px;">
         <div class="form-group"><label>Name <span style="color:var(--red)">*</span></label>
-          <input type="text" name="version" value="<?= h($terms_edit['version'] ?? '') ?>" required maxlength="20" placeholder="e.g. Tanzania Std"></div>
+          <input type="text" name="version" value="<?= h($terms_edit['name'] ?? '') ?>" required maxlength="50" placeholder="e.g. Tanzania Standard"></div>
         <div class="form-group"><label>Effective Date</label>
           <input type="date" name="effective_date" value="<?= h($terms_edit['effective_date'] ?? '') ?>"></div>
         <div class="form-group"><label>Status</label>
@@ -417,7 +417,7 @@ include __DIR__ . '/../../includes/layout_header.php';
       <tbody>
       <?php foreach ($terms_list as $t): ?>
         <tr class="term-row" style="<?= $t['is_active']?'':'opacity:.55;' ?>">
-          <td><strong><?= h($t['version']) ?></strong></td>
+          <td><strong><?= h($t['name']) ?></strong></td>
           <td><?= $t['effective_date'] ? date('d M Y', strtotime($t['effective_date'])) : '—' ?></td>
           <td><?= $t['is_active'] ? '<span style="color:var(--green);font-weight:700;">Active</span>' : '<span style="color:var(--grey-mid);">Inactive</span>' ?></td>
           <td style="white-space:nowrap;">

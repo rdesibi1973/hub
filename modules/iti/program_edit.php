@@ -67,10 +67,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             iti_sanitize_richtext($_POST['ovr_text_de'] ?? ''),
         ];
         if ($ovr_id) {
-            $db->prepare('UPDATE iti_terms_conditions SET version=?,content_en=?,content_it=?,content_fr=?,content_es=?,content_de=? WHERE id=? AND program_id=?')
+            $db->prepare('UPDATE iti_terms_conditions SET name=?,content_en=?,content_it=?,content_fr=?,content_es=?,content_de=? WHERE id=? AND program_id=?')
                ->execute([...$vals, $ovr_id, $id]);
         } else {
-            $db->prepare('INSERT INTO iti_terms_conditions (version,content_en,content_it,content_fr,content_es,content_de,effective_date,is_active,program_id) VALUES (?,?,?,?,?,?,CURDATE(),1,?)')
+            $db->prepare('INSERT INTO iti_terms_conditions (name,content_en,content_it,content_fr,content_es,content_de,effective_date,is_active,program_id) VALUES (?,?,?,?,?,?,CURDATE(),1,?)')
                ->execute([...$vals, $id]);
             $ovr_id = (int)$db->lastInsertId();
         }
@@ -693,7 +693,7 @@ include __DIR__ . '/../../includes/layout_header.php';
         <select name="terms_id" <?= $terms_override ? 'disabled' : '' ?>>
           <option value="">— None —</option>
           <?php foreach ($terms as $t): ?>
-          <option value="<?= $t['id'] ?>" <?= (int)($program['terms_id']??0)===$t['id']?'selected':'' ?>><?= h($t['version']) ?></option>
+          <option value="<?= $t['id'] ?>" <?= (int)($program['terms_id']??0)===$t['id']?'selected':'' ?>><?= h($t['name']) ?></option>
           <?php endforeach; ?>
         </select>
         <?php if ($terms_override): ?>
@@ -714,7 +714,7 @@ include __DIR__ . '/../../includes/layout_header.php';
             </p>
             <form method="POST" action="program_edit.php?id=<?= $id ?>" id="ovr-form">
               <input type="hidden" name="_sub" value="terms_override">
-              <input type="hidden" name="ovr_version" value="<?= h($terms_override['version'] ?? '') ?>">
+              <input type="hidden" name="ovr_version" value="<?= h($terms_override['name'] ?? '') ?>">
 
               <?php if (!$terms_override): ?>
               <div class="form-group">
@@ -722,7 +722,7 @@ include __DIR__ . '/../../includes/layout_header.php';
                 <select id="ovr-prefill">
                   <option value="">— start blank —</option>
                   <?php foreach ($terms as $t): ?>
-                  <option value="<?= $t['id'] ?>"><?= h($t['version']) ?></option>
+                  <option value="<?= $t['id'] ?>"><?= h($t['name']) ?></option>
                   <?php endforeach; ?>
                 </select>
               </div>
