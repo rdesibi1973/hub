@@ -302,16 +302,6 @@ include __DIR__ . '/../../includes/layout_header.php';
       <tr class="term-row"><td><strong><?= h($t['name']) ?></strong></td>
       <td><?= $t['effective_date'] ? date('d M Y', strtotime($t['effective_date'])) : '—' ?></td>
       <td><?= $t['is_active'] ? 'Active' : 'Inactive' ?></td>
-      <?php if ($admin): ?>
-      <td style="text-align:right;white-space:nowrap;">
-        <a href="settings.php?tab=terms&action=edit&id=<?= (int)$t['id'] ?>" class="btn btn-outline btn-sm">Edit</a>
-        <form method="POST" action="settings.php?tab=terms" style="display:inline;">
-          <input type="hidden" name="_action" value="terms_duplicate">
-          <input type="hidden" name="id" value="<?= (int)$t['id'] ?>">
-          <button type="submit" class="btn btn-outline btn-sm">Duplicate</button>
-        </form>
-      </td>
-      <?php endif; ?>
       </tr>
     <?php endforeach; ?>
     <?php if (!$terms_list): ?><tr><td style="padding:24px;text-align:center;color:var(--grey-mid);">No T&C yet.</td></tr><?php endif; ?>
@@ -422,6 +412,11 @@ include __DIR__ . '/../../includes/layout_header.php';
           <td><?= $t['is_active'] ? '<span style="color:var(--green);font-weight:700;">Active</span>' : '<span style="color:var(--grey-mid);">Inactive</span>' ?></td>
           <td style="white-space:nowrap;">
             <a href="settings.php?tab=terms&action=edit&id=<?= $t['id'] ?>" style="font-size:.78rem;color:var(--green);text-decoration:none;margin-right:10px;">Edit</a>
+            <form method="POST" action="settings.php?tab=terms" style="display:inline;">
+              <input type="hidden" name="_action" value="terms_duplicate">
+              <input type="hidden" name="id" value="<?= $t['id'] ?>">
+              <button type="submit" style="background:none;border:none;cursor:pointer;font-size:.78rem;color:var(--green);text-decoration:underline;padding:0;margin-right:10px;">Duplicate</button>
+            </form>
             <form method="POST" action="settings.php?tab=terms" style="display:inline;">
               <input type="hidden" name="_action" value="terms_toggle">
               <input type="hidden" name="id" value="<?= $t['id'] ?>">
