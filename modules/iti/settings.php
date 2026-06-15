@@ -100,11 +100,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         ];
         if ($f[0] !== '') {
             if ($tid) {
-                $db->prepare('UPDATE iti_terms_conditions SET version=?,effective_date=?,text_en=?,text_it=?,text_fr=?,text_es=?,text_de=?,is_active=? WHERE id=? AND program_id IS NULL')
+                $db->prepare('UPDATE iti_terms_conditions SET version=?,effective_date=?,content_en=?,content_it=?,content_fr=?,content_es=?,content_de=?,is_active=? WHERE id=? AND program_id IS NULL')
                    ->execute([...$f, $tid]);
                 iti_flash_set('success', 'T&C version updated.');
             } else {
-                $db->prepare('INSERT INTO iti_terms_conditions (version,effective_date,text_en,text_it,text_fr,text_es,text_de,is_active,program_id) VALUES (?,?,?,?,?,?,?,?,NULL)')
+                $db->prepare('INSERT INTO iti_terms_conditions (version,effective_date,content_en,content_it,content_fr,content_es,content_de,is_active,program_id) VALUES (?,?,?,?,?,?,?,?,NULL)')
                    ->execute($f);
                 iti_flash_set('success', 'New T&C version created.');
             }
@@ -309,7 +309,7 @@ include __DIR__ . '/../../includes/layout_header.php';
       </div>
       <?php $i=0; foreach ($LANGS as $code=>$name): ?>
         <div class="lang-pane <?= $i===0?'active':'' ?>" data-lang="<?= $code ?>">
-          <div class="tc-quill" id="quill_<?= $code ?>"><?= $terms_edit['text_'.$code] ?? '' ?></div>
+          <div class="tc-quill" id="quill_<?= $code ?>"><?= $terms_edit['content_'.$code] ?? '' ?></div>
           <textarea name="text_<?= $code ?>" id="ta_<?= $code ?>" style="display:none;"></textarea>
         </div>
       <?php $i++; endforeach; ?>

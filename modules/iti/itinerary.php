@@ -364,7 +364,7 @@ a { color:var(--red); }
     <div class="section-head">📄 Terms &amp; Conditions</div>
     <div class="tc-box">
       <div style="font-weight:700;margin-bottom:6px;"><?= h($tc['version']) ?> — Effective <?= date('d F Y',strtotime($tc['effective_date'])) ?></div>
-      <?php $tc_text = iti_field($tc,'text',$lang) ?: iti_field($tc,'text','en'); ?>
+      <?php $tc_text = iti_field($tc,'content',$lang) ?: iti_field($tc,'content','en'); ?>
       <?php if ($tc_text): ?><div class="tc-richtext" style="margin-top:10px;"><?= $tc_text ?></div><?php endif; ?>
     </div>
   </div>

@@ -381,7 +381,7 @@ include __DIR__ . '/../../includes/layout_header.php';
     <?php if (!empty($tc['effective_date'])): ?>
     <div style="font-size:.75rem;color:var(--grey-mid);margin-bottom:8px;">Effective <?= date('d M Y',strtotime($tc['effective_date'])) ?></div>
     <?php endif; ?>
-    <?php $tc_text = iti_field($tc, 'text', $lang); if ($tc_text !== ''): ?>
+    <?php $tc_text = iti_field($tc, 'content', $lang); if ($tc_text !== ''): ?>
     <div class="tc-richtext" style="font-size:.78rem;line-height:1.55;color:var(--grey-dk);"><?= $tc_text ?></div>
     <?php endif; ?>
   </div>

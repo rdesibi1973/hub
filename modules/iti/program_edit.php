@@ -67,10 +67,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             iti_sanitize_richtext($_POST['ovr_text_de'] ?? ''),
         ];
         if ($ovr_id) {
-            $db->prepare('UPDATE iti_terms_conditions SET version=?,text_en=?,text_it=?,text_fr=?,text_es=?,text_de=? WHERE id=? AND program_id=?')
+            $db->prepare('UPDATE iti_terms_conditions SET version=?,content_en=?,content_it=?,content_fr=?,content_es=?,content_de=? WHERE id=? AND program_id=?')
                ->execute([...$vals, $ovr_id, $id]);
         } else {
-            $db->prepare('INSERT INTO iti_terms_conditions (version,text_en,text_it,text_fr,text_es,text_de,effective_date,is_active,program_id) VALUES (?,?,?,?,?,?,CURDATE(),1,?)')
+            $db->prepare('INSERT INTO iti_terms_conditions (version,content_en,content_it,content_fr,content_es,content_de,effective_date,is_active,program_id) VALUES (?,?,?,?,?,?,CURDATE(),1,?)')
                ->execute([...$vals, $id]);
             $ovr_id = (int)$db->lastInsertId();
         }
@@ -735,7 +735,7 @@ include __DIR__ . '/../../includes/layout_header.php';
               </div>
               <?php $i=0; foreach (['en','it','fr','es','de'] as $code): ?>
                 <div class="ovr-lang-pane" data-lang="<?= $code ?>" style="display:<?= $i===0?'block':'none' ?>;">
-                  <div class="ovr-quill" id="ovr_quill_<?= $code ?>" style="background:#fff;min-height:200px;"><?= $terms_override['text_'.$code] ?? '' ?></div>
+                  <div class="ovr-quill" id="ovr_quill_<?= $code ?>" style="background:#fff;min-height:200px;"><?= $terms_override['content_'.$code] ?? '' ?></div>
                   <textarea name="ovr_text_<?= $code ?>" id="ovr_ta_<?= $code ?>" style="display:none;"></textarea>
                 </div>
               <?php $i++; endforeach; ?>
@@ -805,8 +805,8 @@ include __DIR__ . '/../../includes/layout_header.php';
             $map = [];
             foreach ($terms as $t) {
                 $map[$t['id']] = [
-                    'en'=>$t['text_en']??'', 'it'=>$t['text_it']??'',
-                    'fr'=>$t['text_fr']??'', 'es'=>$t['text_es']??'', 'de'=>$t['text_de']??'',
+                    'en'=>$t['content_en']??'', 'it'=>$t['content_it']??'',
+                    'fr'=>$t['content_fr']??'', 'es'=>$t['content_es']??'', 'de'=>$t['content_de']??'',
                 ];
             }
             echo json_encode($map, JSON_HEX_TAG|JSON_HEX_APOS|JSON_HEX_QUOT|JSON_HEX_AMP);
