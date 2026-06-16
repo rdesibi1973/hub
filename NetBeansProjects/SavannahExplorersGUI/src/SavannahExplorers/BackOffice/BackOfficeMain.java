@@ -1327,7 +1327,7 @@ public class BackOfficeMain extends javax.swing.JFrame {
         String custname=custnamein.replaceAll("\\s", "");
         // Open folder in Windows Explorers
         try {
-            String mycmd="cmd /c explorer.exe \"%DROPBOX_HOME%\\001_Safari\\\"" + custname;
+            String mycmd="cmd /c explorer.exe \"%DROPBOX_HOME%\\001_Safari\\" + custname + "\"";
             Runtime rn=Runtime.getRuntime();
             Process pr=rn.exec(mycmd);
         }   catch(IOException ioException) {
