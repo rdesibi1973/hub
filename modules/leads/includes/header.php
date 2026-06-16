@@ -159,6 +159,9 @@ header {
   <span style="display:inline-block;width:1px;background:#E8E8E8;margin:8px 4px;align-self:stretch;"></span>
   <a href="../invoices/booked_requests.php" class="">🧾 Invoices</a>
   <?php endif; ?>
+  <?php if (($currentUser['role_name'] ?? '') === 'admin'): ?>
+  <a href="deleted_requests_list.php" class="<?= $cur==='deleted_requests_list.php'?'active':'' ?>">🗑️ Archive</a>
+  <?php endif; ?>
   <a href="logout.php"    class="sub-nav-logout">Logout</a>
 </nav>
 
