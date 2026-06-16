@@ -41,8 +41,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             try {
                 $address = trim($_POST['address'] ?? '');
-                $db->prepare('INSERT INTO agencies (nome, short_name, type, attiva, address) VALUES (?, ?, ?, ?, ?)')
-                   ->execute([$nome, $short, $type, $attiva, $address ?: null]);
+                $email   = trim($_POST['email'] ?? '');
+                $db->prepare('INSERT INTO agencies (nome, short_name, type, attiva, address, email) VALUES (?, ?, ?, ?, ?, ?)')
+                   ->execute([$nome, $short, $type, $attiva, $address ?: null, $email ?: null]);
                 $success = "Agency \"$nome\" added.";
             } catch (PDOException $e) {
                 $errors[] = 'Duplicate name or database error.';
@@ -68,8 +69,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $short .= '-LAM';
             }
             $address = trim($_POST['address'] ?? '');
-            $db->prepare('UPDATE agencies SET nome=?, short_name=?, type=?, attiva=?, address=? WHERE id=?')
-               ->execute([$nome, $short ?: null, $type, $attiva, $address ?: null, $id]);
+            $email   = trim($_POST['email'] ?? '');
+            $db->prepare('UPDATE agencies SET nome=?, short_name=?, type=?, attiva=?, address=?, email=? WHERE id=?')
+               ->execute([$nome, $short ?: null, $type, $attiva, $address ?: null, $email ?: null, $id]);
             $success = "Agency updated.";
         }
     }
@@ -129,7 +131,7 @@ include 'includes/header.php';
     <input type="hidden" name="action" value="add">
     <div class="form-section-title" style="margin-top:0">Add Agency</div>
     
-    <div class="form-grid" style="grid-template-columns:1fr 1fr 1fr auto;align-items:end;gap:12px;">
+    <div class="form-grid" style="grid-template-columns:1fr 1fr 1fr 1fr auto;align-items:end;gap:12px;">
       <div class="form-group" style="margin:0">
         <label>Agency Name *</label>
         <input type="text" name="nome" placeholder="e.g. BTG" required>
@@ -141,6 +143,10 @@ include 'includes/header.php';
       <div class="form-group" style="margin:0">
         <label>Address</label>
         <textarea name="address" placeholder="e.g. Via Roma 1, Milan" rows="5" style="width:100%;padding:7px 10px;border:1.5px solid var(--grey-lt);border-radius:6px;font-size:.85rem;font-family:inherit;resize:vertical;"></textarea>
+      </div>
+      <div class="form-group" style="margin:0">
+        <label>Email <span style="font-weight:400;color:var(--grey-mid)">(comma-separated)</span></label>
+        <textarea name="email" placeholder="e.g. info@agency.com, booking@agency.com" rows="5" style="width:100%;padding:7px 10px;border:1.5px solid var(--grey-lt);border-radius:6px;font-size:.85rem;font-family:inherit;resize:vertical;"></textarea>
       </div>
       <button type="submit" class="btn btn-red" style="height:38px;white-space:nowrap;">+ Add</button>
     </div>
@@ -175,6 +181,7 @@ include 'includes/header.php';
       <tr>
         <th>Agency Name</th>
         <th>Short Name</th>
+        <th>Email</th>
         <th style="text-align:center">Active</th>
         <th></th>
       </tr>
@@ -184,11 +191,12 @@ include 'includes/header.php';
       <tr id="row-<?= $ag['id'] ?>">
         <td class="view-<?= $ag['id'] ?>" style="font-weight:600"><?= h($ag['nome']) ?></td>
         <td class="view-<?= $ag['id'] ?>" style="font-size:.8rem;color:var(--grey-mid)"><?= h($ag['short_name'] ?? '—') ?></td>
+        <td class="view-<?= $ag['id'] ?>" style="font-size:.8rem;color:var(--grey-mid)"><?= h($ag['email'] ?? '') ?: '—' ?></td>
         <td class="view-<?= $ag['id'] ?>" style="text-align:center">
           <?= $ag['attiva'] ? '<span style="color:#1A6B3A">✓</span>' : '<span style="color:#C0211B">✗</span>' ?>
         </td>
         
-        <td class="edit-<?= $ag['id'] ?>" style="display:none" colspan="3">
+        <td class="edit-<?= $ag['id'] ?>" style="display:none" colspan="4">
           <?php $agType = $ag['type'] ?? 'savannah'; ?>
           <form method="POST" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
             <input type="hidden" name="action" value="edit">
@@ -196,6 +204,7 @@ include 'includes/header.php';
             <input type="text" name="nome" value="<?= h($ag['nome']) ?>" required style="width:160px;padding:5px 8px;border:1.5px solid var(--grey-lt);border-radius:5px;font-size:.85rem;">
             <input type="text" name="short_name" value="<?= h($ag['short_name'] ?? '') ?>" style="width:120px;padding:5px 8px;border:1.5px solid var(--grey-lt);border-radius:5px;font-size:.85rem;" placeholder="Short name">
             <textarea name="address" rows="5" style="width:260px;padding:5px 8px;border:1.5px solid var(--grey-lt);border-radius:5px;font-size:.85rem;font-family:inherit;resize:vertical;" placeholder="Address"><?= h($ag['address'] ?? '') ?></textarea>
+            <textarea name="email" rows="5" style="width:240px;padding:5px 8px;border:1.5px solid var(--grey-lt);border-radius:5px;font-size:.85rem;font-family:inherit;resize:vertical;" placeholder="Email (comma-separated)"><?= h($ag['email'] ?? '') ?></textarea>
             <label style="display:flex;align-items:center;gap:4px;font-size:.82rem;cursor:pointer;white-space:nowrap;"><input type="radio" name="type" value="savannah" <?= $agType==='savannah'?'checked':'' ?>> Savannah</label>
             <label style="display:flex;align-items:center;gap:4px;font-size:.82rem;cursor:pointer;white-space:nowrap;"><input type="radio" name="type" value="promoservice" <?= $agType==='promoservice'?'checked':'' ?>> Promo (-PS)</label>
             <label style="display:flex;align-items:center;gap:4px;font-size:.82rem;cursor:pointer;white-space:nowrap;"><input type="radio" name="type" value="lamprati" <?= $agType==='lamprati'?'checked':'' ?>> Lamprati (-LAM)</label>

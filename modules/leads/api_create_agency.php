@@ -24,6 +24,7 @@ $body      = json_decode(file_get_contents('php://input'), true) ?? [];
 $nome      = trim($body['nome']       ?? '');
 $shortName = trim($body['short_name'] ?? '');
 $address   = trim($body['address']    ?? '');
+$email     = trim($body['email']      ?? '');
 $type      = trim($body['type']       ?? 'savannah');
 
 if ($nome === '') {
@@ -75,9 +76,9 @@ try {
 
     // Insert
     $stmt = $db->prepare(
-        'INSERT INTO agencies (nome, short_name, type, address) VALUES (?, ?, ?, ?)'
+        'INSERT INTO agencies (nome, short_name, type, address, email) VALUES (?, ?, ?, ?, ?)'
     );
-    $stmt->execute([$nome, $shortName, $type, $address ?: null]);
+    $stmt->execute([$nome, $shortName, $type, $address ?: null, $email ?: null]);
     $newId = (int) $db->lastInsertId();
 
     echo json_encode([
