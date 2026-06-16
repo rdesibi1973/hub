@@ -748,8 +748,12 @@ public class NewRequestDialog extends JDialog {
 
         new Thread(() -> {
             try {
-                String resp = api.post("api_create_request.php", json.toString());
-                boolean ok  = ApiClient.jsonGetBool(resp, "success");
+                ApiClient.ApiResponse r = api.postWithStatus("api_create_request.php", json.toString());
+                String resp = r.body;
+                // Success requires BOTH a 2xx HTTP status AND success:true in the body.
+                // A 4xx/5xx (e.g. orphan-folder INSERT failure → HTTP 500) now produces
+                // a visible error with the HTTP code instead of failing silently.
+                boolean ok  = r.isOk() && ApiClient.jsonGetBool(resp, "success");
                 String msg  = ApiClient.jsonGetString(resp, "message");
                 String fold = ApiClient.jsonGetString(resp, "folder_name");
                 SwingUtilities.invokeLater(() -> {
@@ -778,9 +782,21 @@ public class NewRequestDialog extends JDialog {
                                 "⚠ " + notifyErr, "Notification Warning", JOptionPane.WARNING_MESSAGE);
                         }
                     } else {
-                        statusLabel.setText("<html><b style='color:#C0211B'>⚠ Error</b></html>");
-                        detailArea.setText(msg != null ? msg : "Unknown error");
-                        progressDlg.setSize(440, 280);
+                        statusLabel.setText("<html><b style='color:#C0211B'>⚠ Error (HTTP " + r.code + ")</b></html>");
+                        String detail;
+                        if (msg != null && !msg.isEmpty()) {
+                            // Server returned a structured message (e.g. orphan-folder warning).
+                            detail = msg;
+                        } else if (resp != null && !resp.isEmpty()) {
+                            detail = "HTTP " + r.code + " — server response:\n" + resp;
+                        } else {
+                            detail = "HTTP " + r.code + " — empty response from server.\n"
+                                   + "The request was NOT created. Check Dropbox: the folder "
+                                   + "may have been created without a matching request "
+                                   + "(orphan folder). Retry or contact the administrator.";
+                        }
+                        detailArea.setText(detail);
+                        progressDlg.setSize(440, 300);
                         progressDlg.revalidate();
                         progressDlg.repaint();
                     }

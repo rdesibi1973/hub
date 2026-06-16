@@ -161,16 +161,40 @@ try {
 }
 
 // ── Insert DB record (only after Dropbox succeeded) ───────────────────────────
-$db->prepare(
-    'INSERT INTO requests (date_received, customer_name, email, source, agent_id, destination, initial_request, status, pax, practice_code, dropbox_url, created_at)
-     VALUES (CURDATE(), ?, ?, ?, ?, ?, ?, "Inquiry", ?, ?, ?, NOW())'
-)->execute([$customerName, $email ?: null, $source, $agentId, $destination ?: null, $initialRequest ?: null, $pax, $folderName, $dropboxWebUrl]);
-$requestId = (int)$db->lastInsertId();
+try {
+    $db->prepare(
+        'INSERT INTO requests (date_received, customer_name, email, source, agent_id, destination, initial_request, status, pax, practice_code, dropbox_url, created_at)
+         VALUES (CURDATE(), ?, ?, ?, ?, ?, ?, "Inquiry", ?, ?, ?, NOW())'
+    )->execute([$customerName, $email ?: null, $source, $agentId, $destination ?: null, $initialRequest ?: null, $pax, $folderName, $dropboxWebUrl]);
+    $requestId = (int)$db->lastInsertId();
+} catch (\Throwable $e) {
+    // The Dropbox folder was already created above, but the DB INSERT failed.
+    // This is exactly the "orphan folder" scenario (folder on Dropbox, no
+    // request in the DB). Surface it explicitly with HTTP 500 so the client
+    // shows a clear error instead of failing silently.
+    http_response_code(500);
+    echo json_encode([
+        'success'      => false,
+        'folder_name'  => $folderName,
+        'dropbox_path' => $dropboxPath,
+        'message'      => 'ATTENTION: the Dropbox folder was created but the request '
+                        . 'could NOT be saved in the database. The request is INCOMPLETE '
+                        . '(orphan folder). Please retry or contact the administrator. '
+                        . 'Database error: ' . $e->getMessage(),
+    ]);
+    exit;
+}
 
-// ── Send agent notification ───────────────────────────────────────────────────
-$notif = notify_agent_new_request(
-    $db, $agentId, $userId, $requestId, $customerName, $folderName, $notifyAgent
-);
+// ── Send agent notification (non-fatal) ───────────────────────────────────────
+// A notification failure must never break an otherwise-successful request.
+$notif = ['sent' => false, 'error' => null];
+try {
+    $notif = notify_agent_new_request(
+        $db, $agentId, $userId, $requestId, $customerName, $folderName, $notifyAgent
+    );
+} catch (\Throwable $e) {
+    $notif['error'] = 'Notification failed: ' . $e->getMessage();
+}
 
 echo json_encode([
     'success'          => true,

@@ -49,6 +49,58 @@ public class ApiClient {
     }
 
     // -------------------------------------------------------------------------
+    // Response wrapper carrying both the HTTP status code and the body.
+    // -------------------------------------------------------------------------
+    public static class ApiResponse {
+        public final int code;
+        public final String body;
+        public ApiResponse(int code, String body) { this.code = code; this.body = body; }
+        public boolean isOk() { return code >= 200 && code < 300; }
+    }
+
+    // -------------------------------------------------------------------------
+    // POST returning HTTP status + body. Throws IOException only on a true
+    // network failure (no connection / timeout). A 4xx/5xx is returned as a
+    // populated ApiResponse so the caller can show the actual HTTP code.
+    // -------------------------------------------------------------------------
+    public ApiResponse postWithStatus(String endpoint, String jsonBody) throws IOException {
+        URL url = new URL(baseUrl + endpoint);
+        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+        try {
+            conn.setRequestMethod("POST");
+            conn.setDoOutput(true);
+            conn.setConnectTimeout(CONNECT_TIMEOUT_MS);
+            conn.setReadTimeout(READ_TIMEOUT_MS);
+            conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
+            if (apiKey != null && !apiKey.isEmpty()) {
+                conn.setRequestProperty("X-Api-Key", apiKey);
+            }
+            byte[] data = jsonBody.getBytes(StandardCharsets.UTF_8);
+            conn.setRequestProperty("Content-Length", String.valueOf(data.length));
+            try (OutputStream os = conn.getOutputStream()) {
+                os.write(data);
+            }
+            int code = conn.getResponseCode();
+            String body = readBody(conn, code);
+            return new ApiResponse(code, body);
+        } finally {
+            conn.disconnect();
+        }
+    }
+
+    // Read the body given an already-known status code (error stream for >=400).
+    private static String readBody(HttpURLConnection conn, int code) throws IOException {
+        InputStream is = (code >= 400) ? conn.getErrorStream() : conn.getInputStream();
+        if (is == null) return "";
+        try (BufferedReader br = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8))) {
+            StringBuilder sb = new StringBuilder();
+            String line;
+            while ((line = br.readLine()) != null) sb.append(line);
+            return sb.toString();
+        }
+    }
+
+    // -------------------------------------------------------------------------
     // POST — without API key (used for api_login which authenticates differently)
     // -------------------------------------------------------------------------
     public String postNoKey(String endpoint, String jsonBody) throws IOException {
