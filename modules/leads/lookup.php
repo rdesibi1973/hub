@@ -38,7 +38,7 @@ include 'includes/header.php';
 
 <style>
 /* ── Lookup-specific overrides ─────────────────────────────────── */
-.lookup-wrap       { max-width: 900px; }
+.lookup-wrap       { max-width: 1200px; }
 .lookup-search-bar { display:flex; gap:10px; margin-bottom:24px; }
 .lookup-search-bar input {
     flex:1;
@@ -64,6 +64,18 @@ tbody tr.clickable td    { border-bottom:1px solid var(--border); }
 
 /* Highlight the matching part */
 mark { background:#FEF3C7; color:inherit; border-radius:2px; padding:0 1px; }
+
+/* ── Fix: prevent the Status column from being clipped ──────────────
+   The shared .table-wrap uses overflow:hidden, which cut off the last
+   column (Status) when the folder name / practice_code is very long.
+   These overrides are scoped to the lookup page only. */
+.lookup-wrap .table-wrap { overflow-x:auto; }
+.lookup-wrap table       { min-width:760px; }
+/* Let the long folder/practice_code wrap instead of forcing the table wider */
+.lookup-wrap td:first-child { word-break:break-word; }
+/* Keep the status badge and its header on one line */
+.lookup-wrap td:last-child .badge,
+.lookup-wrap th:last-child  { white-space:nowrap; }
 </style>
 
 <div class="page-header">
