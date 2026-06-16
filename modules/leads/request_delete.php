@@ -1,7 +1,5 @@
 <?php
 require_once 'config.php';
-require_once 'dropbox_helper.php';
-require_once __DIR__ . '/includes/folder_parser.php';
 requireLogin();
 header('Content-Type: application/json');
 
@@ -17,27 +15,12 @@ if (!$ids) {
 $db   = db();
 $user = current_user();
 
-// Status suffix tags, longest first (so _BALANCE-CASH is matched before _BALANCE).
-$STATUS_TAGS = [
-    '_BALANCE-CASH', '_BALANCE_CASH', '_BALANCE',
-    '_DEPOSIT', '_PAID', '_PROGRESS', '_PROVISIONAL', '_CANCELLED',
-];
-
-/**
- * Replace the trailing status tag in a folder name with $newTag.
- * If no known tag is present, append $newTag.
- */
-function swap_status_tag(string $name, array $tags, string $newTag): string {
-    foreach ($tags as $tag) {
-        $pos = stripos($name, $tag);
-        if ($pos !== false) {
-            return substr($name, 0, $pos) . $newTag . substr($name, $pos + strlen($tag));
-        }
-    }
-    return $name . $newTag;
-}
-
 // ── Block deletion of Booked requests ────────────────────────────────────────
+// Confirmed bookings (status = Booked) live in /001_Safari and must not be
+// soft-deleted from the hub.  Status changes (e.g. BALANCE → CANCELLED) are
+// done manually via the Java GUI.  Because Booked is blocked here, every
+// soft-deletable request lives in the /<year>/ tree — its Dropbox folder is
+// therefore left untouched.
 $placeholders = implode(',', array_fill(0, count($ids), '?'));
 $bookedRows = $db->prepare(
     "SELECT id, customer_name FROM requests WHERE id IN ($placeholders) AND status = 'Booked'"
@@ -62,69 +45,13 @@ if (!$allRows) {
     echo json_encode(['error' => 'No matching requests found']); exit;
 }
 
-// Dropbox token (folder move). If unavailable we abort: we never delete the DB
-// row without successfully relocating the folder, to keep DB/Dropbox in sync.
-try {
-    $token = dropbox_get_access_token();
-} catch (RuntimeException $e) {
-    echo json_encode(['error' => 'Dropbox token error: ' . $e->getMessage()]); exit;
-}
-
 $results = [];
 
 foreach ($allRows as $row) {
-    $id        = (int)$row['id'];
-    $folder    = trim($row['practice_code'] ?? '');
-    $grpFolder = trim($row['group_folder']  ?? '');
-    $dbxUrl    = trim($row['dropbox_url']    ?? '');
+    $id = (int)$row['id'];
 
-    // Departure year drives the CANCELED bucket (00_CANCELED/00_<year>).
-    $dates    = parse_folder_dates(get_date_folder($row));
-    $startYr  = $dates['start_date'] ? substr($dates['start_date'], 0, 4)
-              : ($dates['end_date'] ? substr($dates['end_date'], 0, 4)
-              : date('Y', strtotime($row['date_received'] ?? 'now')));
-
-    // Source dir mirrors the (non-soft) layout: Booked → 001_Safari, else <recv year>.
-    $recvYear = date('Y', strtotime($row['date_received'] ?? 'now'));
-    $srcDir   = ($row['status'] === 'Booked') ? '001_Safari' : $recvYear;
-
-    // Resolve current Dropbox path + folder leaf name.
-    if ($grpFolder !== '') {
-        $leaf    = $grpFolder;
-        $fromPath = '/' . $srcDir . '/' . $grpFolder;
-    } elseif ($dbxUrl) {
-        $fromPath = rawurldecode(preg_replace('#^https://www\.dropbox\.com/home#i', '', $dbxUrl));
-        $leaf     = basename($fromPath);
-    } elseif ($folder !== '') {
-        $leaf     = $folder;
-        $fromPath = '/' . $srcDir . '/' . $folder;
-    } else {
-        $results[$id] = 'skipped (no folder name) — DB row NOT archived';
-        continue;
-    }
-
-    $newLeaf = swap_status_tag($leaf, $STATUS_TAGS, '_CANCELLED');
-    $destDir = '/001_Safari/00_CANCELED/00_' . $startYr;
-    $toPath  = $destDir . '/' . $newLeaf;
-
-    // Ensure destination buckets exist (idempotent).
-    try {
-        dropbox_create_folder($token, '/001_Safari/00_CANCELED');
-    } catch (RuntimeException $e) { /* exists */ }
-    try {
-        dropbox_create_folder($token, $destDir);
-    } catch (RuntimeException $e) { /* exists */ }
-
-    // Move + rename the folder. If this fails, do NOT touch the DB row.
-    try {
-        dropbox_move_folder($token, $fromPath, $toPath);
-    } catch (RuntimeException $e) {
-        $results[$id] = 'error moving Dropbox folder (' . $fromPath . '): '
-                      . $e->getMessage() . ' — DB row NOT archived';
-        continue;
-    }
-
-    // Archive + delete inside a transaction.
+    // Soft-delete: archive the full row, then remove from requests.
+    // The Dropbox folder (in /<year>/) is intentionally left in place.
     try {
         $db->beginTransaction();
         $ins = $db->prepare(
@@ -139,18 +66,16 @@ foreach ($allRows as $row) {
             $row['customer_name'] ?? null,
             $user['id'] ?? null,
             $user['full_name'] ?: ($user['username'] ?? ''),
-            $fromPath,
-            $toPath,
+            null,   // folder not moved — nothing to record
+            null,
             json_encode($row, JSON_UNESCAPED_UNICODE),
         ]);
         $db->prepare("DELETE FROM requests WHERE id = ?")->execute([$id]);
         $db->commit();
-        $results[$id] = 'archived & moved to ' . $toPath;
+        $results[$id] = 'archived (Dropbox folder left in place)';
     } catch (Exception $e) {
         if ($db->inTransaction()) $db->rollBack();
-        // DB failed but folder already moved — try to move it back.
-        try { dropbox_move_folder($token, $toPath, $fromPath); } catch (Exception $e2) {}
-        $results[$id] = 'DB archive failed: ' . $e->getMessage() . ' (Dropbox folder restored)';
+        $results[$id] = 'archive failed: ' . $e->getMessage();
     }
 }
 
