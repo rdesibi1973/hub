@@ -1322,16 +1322,29 @@ public class BackOfficeMain extends javax.swing.JFrame {
     }//GEN-LAST:event_BeachDumaShortActionPerformed
 
     private void jButton7ActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_jButton7ActionPerformed
-        // TODO add your handling code here:
-        String custnamein=jTextField1.getText();
-        String custname=custnamein.replaceAll("\\s", "");
-        // Open folder in Windows Explorers
+        String custnamein = jTextField1.getText();
+        String custname   = custnamein.replaceAll("\\s", "");
+        // Resolve DROPBOX_HOME in Java (do NOT leave %DROPBOX_HOME% for cmd to
+        // expand — that expansion was unreliable and made Explorer fall back to
+        // the Documents folder). Build a real File path and verify it exists.
+        String dh = System.getenv("DROPBOX_HOME");
+        if (dh == null) dh = "";
+        java.io.File target = new java.io.File(dh + "\\001_Safari\\" + custname);
+        if (!target.exists()) {
+            javax.swing.JOptionPane.showMessageDialog(this,
+                "001_Safari folder not found:\n" + target.getAbsolutePath(),
+                "Folder not found", javax.swing.JOptionPane.WARNING_MESSAGE);
+            return;
+        }
         try {
-            String mycmd="cmd /c explorer.exe \"%DROPBOX_HOME%\\001_Safari\\" + custname + "\"";
-            Runtime rn=Runtime.getRuntime();
-            Process pr=rn.exec(mycmd);
-        }   catch(IOException ioException) {
-            System.out.println(ioException.getMessage() );
+            java.awt.Desktop.getDesktop().open(target);
+        } catch (IOException ioException) {
+            // Fallback to explorer.exe with a single fully-quoted path argument.
+            try {
+                new ProcessBuilder("explorer.exe", target.getAbsolutePath()).start();
+            } catch (IOException ex2) {
+                System.out.println(ex2.getMessage());
+            }
         }
     }//GEN-LAST:event_jButton7ActionPerformed
 
