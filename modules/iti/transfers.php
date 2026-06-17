@@ -147,23 +147,23 @@ include __DIR__ . '/../../includes/layout_header.php';
   <div class="form-grid">
     <div class="form-group">
       <label>From <span style="color:var(--red)">*</span></label>
-      <select name="from_destination" required>
+      <select name="from_destination" id="tr_from" required>
         <?= iti_options($dest_map, $row['from_destination'] ?? null, '— Select —') ?>
       </select>
     </div>
     <div class="form-group">
       <label>To <span style="color:var(--red)">*</span></label>
-      <select name="to_destination" required>
+      <select name="to_destination" id="tr_to" required>
         <?= iti_options($dest_map, $row['to_destination'] ?? null, '— Select —') ?>
       </select>
     </div>
     <div class="form-group">
       <label>Duration (minutes)</label>
-      <input type="number" name="duration_min" min="0" value="<?= (int)($row['duration_min'] ?? 0) ?>">
+      <input type="number" name="duration_min" id="tr_dur" min="0" value="<?= (int)($row['duration_min'] ?? 0) ?>">
     </div>
     <div class="form-group">
       <label>Distance (km)</label>
-      <input type="number" name="distance_km" min="0" value="<?= $row['distance_km'] ?? '' ?>">
+      <input type="number" name="distance_km" id="tr_km" min="0" value="<?= $row['distance_km'] ?? '' ?>">
     </div>
     <div class="form-group">
       <label>Road Type</label>
@@ -179,13 +179,110 @@ include __DIR__ . '/../../includes/layout_header.php';
     </div>
   </div>
 
-  <div class="form-section-title">Notes <span style="font-weight:400;font-size:.8rem;color:var(--grey-mid)">× 5 languages</span></div>
+  <div class="form-section-title">Notes <span style="font-weight:400;font-size:.8rem;color:var(--grey-mid)">× 5 languages</span>
+    <a href="#" id="tr_regen" style="display:none;margin-left:10px;font-size:.75rem;font-weight:600;color:var(--red);text-decoration:none;">↻ Regenerate from route data</a>
+  </div>
   <?php foreach (ITI_LANGS as $lang): ?>
   <div class="form-group" style="margin-bottom:12px;">
     <label><?= ITI_LANG_LABELS[$lang] ?></label>
-    <textarea name="notes_<?= $lang ?>"><?= h($row["notes_{$lang}"] ?? '') ?></textarea>
+    <textarea name="notes_<?= $lang ?>" id="tr_notes_<?= $lang ?>" data-lang="<?= $lang ?>" class="tr-note"><?= h($row["notes_{$lang}"] ?? '') ?></textarea>
   </div>
   <?php endforeach; ?>
+
+  <script>
+  (function(){
+    var from = document.getElementById('tr_from');
+    var to   = document.getElementById('tr_to');
+    var dur  = document.getElementById('tr_dur');
+    var km   = document.getElementById('tr_km');
+    var regenLink = document.getElementById('tr_regen');
+    if (!from || !to) return;
+
+    var notes = {};
+    var areas = document.querySelectorAll('.tr-note');
+    for (var i=0;i<areas.length;i++) notes[areas[i].getAttribute('data-lang')] = areas[i];
+
+    // Templates per language. {from} {to} {km} {time}
+    var T = {
+      en: 'Road transfer from {from} to {to}{km}{time}.',
+      it: 'Trasferimento su strada da {from} a {to}{km}{time}.',
+      fr: 'Transfert routier de {from} à {to}{km}{time}.',
+      es: 'Traslado por carretera de {from} a {to}{km}{time}.',
+      de: 'Straßentransfer von {from} nach {to}{km}{time}.'
+    };
+    var KMW = { en:' — approx. {n} km', it:' — circa {n} km', fr:' — environ {n} km', es:' — aprox. {n} km', de:' — ca. {n} km' };
+    function fmtTime(min, lang){
+      min = parseInt(min,10) || 0;
+      if (min <= 0) return '';
+      var h = Math.floor(min/60), m = min%60;
+      var hUnit = (lang==='de') ? 'Std.' : 'h';
+      var parts = [];
+      if (h > 0) parts.push(h + ' ' + hUnit);
+      if (m > 0) parts.push(m + ' min');
+      return ', ' + parts.join(' ');
+    }
+    function selText(sel){
+      if (!sel || sel.selectedIndex < 0) return '';
+      var t = sel.options[sel.selectedIndex].text || '';
+      if (t.indexOf('—') === 0) return '';
+      return t.trim();
+    }
+    function build(lang){
+      var f = selText(from), t = selText(to);
+      if (!f || !t) return '';
+      var kmVal = parseInt(km && km.value, 10) || 0;
+      var kmStr = kmVal > 0 ? KMW[lang].replace('{n}', kmVal) : '';
+      var timeStr = fmtTime(dur && dur.value, lang);
+      return T[lang]
+        .replace('{from}', f).replace('{to}', t)
+        .replace('{km}', kmStr).replace('{time}', timeStr);
+    }
+
+    var lastAuto = {};
+    for (var lang in notes) { if (notes.hasOwnProperty(lang)) lastAuto[lang] = notes[lang].value; }
+    function isAuto(lang){
+      var v = notes[lang].value.trim();
+      return v === '' || v === (lastAuto[lang]||'').trim();
+    }
+    function anyManual(){
+      for (var lang in notes){ if (notes.hasOwnProperty(lang) && !isAuto(lang)) return true; }
+      return false;
+    }
+    function regenerate(force){
+      for (var lang in notes){
+        if (!notes.hasOwnProperty(lang)) continue;
+        if (force || isAuto(lang)){
+          var v = build(lang);
+          notes[lang].value = v;
+          lastAuto[lang] = v;
+        }
+      }
+    }
+    function onRouteChange(){
+      if (anyManual()) regenLink.style.display = 'inline';
+      else regenLink.style.display = 'none';
+      regenerate(false);
+    }
+    [from, to, dur, km].forEach(function(el){
+      if (!el) return;
+      el.addEventListener('change', onRouteChange);
+      el.addEventListener('input', onRouteChange);
+    });
+    for (var lang in notes){
+      if (!notes.hasOwnProperty(lang)) continue;
+      notes[lang].addEventListener('input', function(){
+        if (anyManual()) regenLink.style.display = 'inline';
+      });
+    }
+    regenLink.addEventListener('click', function(e){
+      e.preventDefault();
+      if (confirm('Overwrite all 5 language notes with text generated from the route data?')){
+        regenerate(true);
+        regenLink.style.display = 'none';
+      }
+    });
+  })();
+  </script>
 
 <?php else: // flight ?>
 
