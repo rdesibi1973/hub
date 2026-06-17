@@ -1060,7 +1060,7 @@ include __DIR__ . '/../../includes/layout_header.php';
             $_dur = (int)($_tr['duration_min'] ?? 0);
             $_km  = (int)($_tr['distance_km']  ?? 0);
             $_meta = [];
-            if ($_dur > 0) $_meta[] = $_dur . ' min';
+            if ($_dur > 0) $_meta[] = iti_fmt_duration($_dur);
             if ($_km  > 0) $_meta[] = $_km  . ' km';
             $_suffix = $_meta ? ' (' . implode(', ', $_meta) . ')' : '';
             $tr_combo_opts[] = ['label' => ($_tr['from_name']??'').' → '.($_tr['to_name']??'').$_suffix];
@@ -1566,7 +1566,15 @@ document.querySelectorAll('.iti-combo').forEach(function(combo) {
 <?php if ($current_day_data): ?>
 <script>
 var trOptsJson   = <?= json_encode(array_map(fn($o)=>['id'=>'','label'=>$o['label'],'group'=>'Suggestions'], array_merge(
-    array_map(fn($_tr)=>['label'=>($_tr['from_name']??'').' → '.($_tr['to_name']??'').' ('.($_tr['duration_min']??0).' min)'], array_values($transfer_map)),
+    array_map(function($_tr){
+        $dur = (int)($_tr['duration_min'] ?? 0);
+        $km  = (int)($_tr['distance_km']  ?? 0);
+        $meta = [];
+        if ($dur > 0) $meta[] = iti_fmt_duration($dur);
+        if ($km  > 0) $meta[] = $km . ' km';
+        $suffix = $meta ? ' (' . implode(', ', $meta) . ')' : '';
+        return ['label'=>($_tr['from_name']??'').' → '.($_tr['to_name']??'').$suffix];
+    }, array_values($transfer_map)),
     array_map(fn($_fl)=>['label'=>'Flight: '.($_fl['from_airport']??'').' → '.($_fl['to_airport']??'')], array_values($flight_map))
 ))) ?>;
 var actOptsJson  = <?= json_encode(array_map(fn($a)=>['id'=>(string)$a['id'],'label'=>$a['name_en'].(($a['dest_name_en']??'')?' — '.($a['dest_name_en']??''):''),'group'=>ITI_ACTIVITY_TYPES[$a['activity_type']]??'Other'], $activities_list)) ?>;

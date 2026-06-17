@@ -900,6 +900,17 @@ function iti_get_flight_routes(array $filters = []): array {
     return $st->fetchAll();
 }
 
+// ── Format a duration in minutes as "1 h 30 min" / "45 min" / "2 h" ──────────
+function iti_fmt_duration(int $min): string {
+    if ($min <= 0) return '';
+    $h = intdiv($min, 60);
+    $m = $min % 60;
+    $parts = [];
+    if ($h > 0) $parts[] = $h . ' h';
+    if ($m > 0) $parts[] = $m . ' min';
+    return implode(' ', $parts);
+}
+
 // ── Build road transfer notes in all 5 languages (server-side) ────────────────
 // Mirrors the live JS generator in transfers.php. $fromName/$toName are place
 // names; $durMin minutes; $km kilometres (0/null = omit). Returns [lang => text].
