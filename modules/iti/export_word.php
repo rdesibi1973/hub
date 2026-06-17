@@ -33,6 +33,12 @@ $included   = array_filter($inclusions, fn($i)=>$i['item_type']==='inclusion');
 $excluded   = array_filter($inclusions, fn($i)=>$i['item_type']==='exclusion');
 $req        = $program['request_id'] ? iti_get_request((int)$program['request_id']) : null;
 
+// Consultant (programme owner) + bio for header block
+$consultant     = iti_get_consultant($program['created_by'] ?? '');
+$consultant_bio = $consultant ? iti_consultant_bio($consultant, $lang) : '';
+// Local filesystem dir where profile photos live (URL → path mapping)
+$PROFILE_DIR_EXPORT = __DIR__ . '/uploads/profiles';
+
 // T&C
 $tc = null;
 if ($program['terms_id']) {
@@ -70,6 +76,10 @@ $phpWord->addFontStyle('small',    ['name'=>'Calibri','size'=>9,'color'=>$GREY])
 $phpWord->addFontStyle('incl',     ['name'=>'Calibri','size'=>11,'color'=>'2E7D32']);
 $phpWord->addFontStyle('excl',     ['name'=>'Calibri','size'=>11,'color'=>$RED]);
 $phpWord->addFontStyle('tcFont',   ['name'=>'Calibri','size'=>9,'color'=>$GREY]);
+$phpWord->addFontStyle('consName', ['name'=>'Merriweather','size'=>12,'bold'=>true,'color'=>$BLACK]);
+$phpWord->addFontStyle('consLabel',['name'=>'Calibri','size'=>8,'bold'=>true,'color'=>$RED,'caps'=>true]);
+$phpWord->addFontStyle('consMeta', ['name'=>'Calibri','size'=>9,'color'=>$GREY]);
+$phpWord->addFontStyle('consBio',  ['name'=>'Calibri','size'=>9,'color'=>'7A7A7A']);
 
 $phpWord->addParagraphStyle('spacer',  ['spaceBefore'=>80]);
 $phpWord->addParagraphStyle('divider', ['spaceBefore'=>120,'borderBottomSize'=>4,'borderBottomColor'=>$OFF_WHITE]);
@@ -108,6 +118,45 @@ if ($req && $req['client_name']) $meta[] = $req['client_name'];
 $meta[] = $program['pax_adults'].'A'.($program['pax_children']?'+'.$program['pax_children'].'C':'');
 if ($program['flights_included']) $meta[] = '✈ Flights included';
 $section->addText(implode('  ·  ',$meta), 'meta', ['spaceBefore'=>120,'spaceAfter'=>300]);
+
+// ── CONSULENTE (owner del programma): foto + bio + contatti ──
+if ($consultant) {
+    // Risolvi il file foto locale dall'URL pubblico salvato in photo_url
+    $photo_local = null;
+    if (!empty($consultant['photo_url'])) {
+        $fname = basename(parse_url($consultant['photo_url'], PHP_URL_PATH));
+        $cand  = $PROFILE_DIR_EXPORT . '/' . $fname;
+        if ($fname !== '' && is_file($cand)) $photo_local = $cand;
+    }
+
+    $section->addText('', null, ['borderBottomSize'=>4,'borderBottomColor'=>$OFF_WHITE,'spaceAfter'=>120]);
+    $section->addText(iti_lbl_consultant($lang), 'consLabel', ['spaceAfter'=>80]);
+
+    $ctbl = $section->addTable(['borderSize'=>0,'cellMarginRight'=>160]);
+    $ctbl->addRow();
+    // Colonna foto (se presente)
+    if ($photo_local) {
+        $pcell = $ctbl->addCell(1500, ['valign'=>'top']);
+        $pcell->addImage($photo_local, [
+            'width'=>90,'height'=>90,'marginTop'=>0,'marginLeft'=>0,
+        ]);
+        $tcell = $ctbl->addCell(7500, ['valign'=>'top']);
+    } else {
+        $tcell = $ctbl->addCell(9000, ['valign'=>'top']);
+    }
+
+    if (!empty($consultant['full_name'])) {
+        $tcell->addText($consultant['full_name'], 'consName', ['spaceAfter'=>40]);
+    }
+    $contacts = [];
+    if (!empty($consultant['email']))    $contacts[] = $consultant['email'];
+    if (!empty($consultant['whatsapp'])) $contacts[] = 'WhatsApp: ' . $consultant['whatsapp'];
+    if ($contacts) $tcell->addText(implode('   ·   ', $contacts), 'consMeta', ['spaceAfter'=>80]);
+
+    if ($consultant_bio !== '') {
+        iti_richtext_to_phpword($tcell, $consultant_bio, 'consBio', ['spaceAfter'=>60]);
+    }
+}
 
 $section->addPageBreak();
 

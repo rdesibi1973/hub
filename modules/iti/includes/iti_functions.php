@@ -1052,3 +1052,62 @@ function iti_extra_css(): string {
 .iti-nav a:hover { opacity:.85; }
 ';
 }
+
+// ── CONSULTANT / USER BIO (ITI programmes) ────────────────────────────────────
+// The "consultant" of a programme is the user whose username == iti_programs.created_by.
+// Bio is multilingual (bio_en/it/fr/es/de on the users table) + phone/whatsapp/photo.
+
+/**
+ * Load the consultant (owner) of a programme by its created_by username.
+ * Returns associative row or null. Safe against the username being empty.
+ */
+function iti_get_consultant(?string $username): ?array {
+    $username = trim((string)$username);
+    if ($username === '') return null;
+    $st = db()->prepare(
+        'SELECT id, username, full_name, email, phone, whatsapp, photo_url,
+                bio_en, bio_it, bio_fr, bio_es, bio_de
+           FROM users
+          WHERE username = ?
+          LIMIT 1'
+    );
+    $st->execute([$username]);
+    $row = $st->fetch();
+    return $row ?: null;
+}
+
+/**
+ * Return the consultant's bio HTML for the requested language, with fallback.
+ * Order: requested lang → English → first non-empty language → ''.
+ */
+function iti_consultant_bio(array $consultant, string $lang): string {
+    if (!in_array($lang, ITI_LANGS, true)) $lang = 'en';
+    $col = 'bio_' . $lang;
+    if (!empty($consultant[$col]) && trim((string)$consultant[$col]) !== '') {
+        return (string)$consultant[$col];
+    }
+    if (!empty($consultant['bio_en']) && trim((string)$consultant['bio_en']) !== '') {
+        return (string)$consultant['bio_en'];
+    }
+    foreach (ITI_LANGS as $l) {
+        $c = 'bio_' . $l;
+        if (!empty($consultant[$c]) && trim((string)$consultant[$c]) !== '') {
+            return (string)$consultant[$c];
+        }
+    }
+    return '';
+}
+
+/**
+ * Localized "Your travel consultant" label for the itinerary consultant block.
+ */
+function iti_lbl_consultant(string $lang): string {
+    $map = [
+        'en' => 'Your Travel Consultant',
+        'it' => 'Il tuo consulente di viaggio',
+        'fr' => 'Votre conseiller voyage',
+        'es' => 'Tu asesor de viajes',
+        'de' => 'Ihr Reiseberater',
+    ];
+    return $map[$lang] ?? $map['en'];
+}

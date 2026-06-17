@@ -51,6 +51,10 @@ if ($program['terms_id']) {
 // Ottieni la richiesta per il nome cliente
 $req = $program['request_id'] ? iti_get_request((int)$program['request_id']) : null;
 
+// Consulente (owner del programma): foto + bio + contatti
+$consultant     = iti_get_consultant($program['created_by'] ?? '');
+$consultant_bio = $consultant ? iti_consultant_bio($consultant, $lang) : '';
+
 $page_title = iti_field($program, 'title', $lang) . ' — Savannah Explorers';
 ?>
 <!DOCTYPE html>
@@ -114,6 +118,19 @@ a { color:var(--red); }
               text-transform:uppercase; letter-spacing:.1em; }
 .day-title  { font-family:'Merriweather',serif; font-size:1rem; font-weight:700; }
 .day-body   { padding:20px 24px; }
+.consultant-card { background:var(--white); border:1px solid var(--grey-lt); border-radius:12px;
+                   padding:24px; margin-bottom:24px; display:flex; gap:20px; align-items:flex-start; }
+.consultant-card img { width:96px; height:96px; border-radius:50%; object-fit:cover;
+                       border:2px solid var(--grey-lt); flex-shrink:0; }
+.consultant-card .c-label { font-size:.66rem; font-weight:800; text-transform:uppercase;
+                            letter-spacing:.12em; color:var(--red); margin-bottom:6px; }
+.consultant-card .c-name  { font-family:'Merriweather',serif; font-size:1.1rem; font-weight:700;
+                            color:var(--grey-dk); margin-bottom:6px; }
+.consultant-card .c-meta  { font-size:.8rem; color:var(--grey-mid); margin-bottom:10px; }
+.consultant-card .c-meta a{ color:var(--grey-mid); text-decoration:none; }
+.consultant-card .c-bio   { font-size:.85rem; color:var(--grey-dk); line-height:1.6; }
+.consultant-card .c-bio p { margin:0 0 8px; }
+@media (max-width:560px){ .consultant-card{ flex-direction:column; align-items:center; text-align:center; } }
 .info-row   { display:flex; gap:12px; margin-bottom:14px; }
 .info-label { width:110px; font-size:.68rem; font-weight:800; text-transform:uppercase;
               letter-spacing:.1em; color:var(--grey-md); padding-top:3px; flex-shrink:0; }
@@ -225,6 +242,35 @@ a { color:var(--red); }
 
 <!-- Main content -->
 <main class="page-main">
+
+  <!-- Travel consultant -->
+  <?php if ($consultant): ?>
+  <div class="consultant-card">
+    <?php if (!empty($consultant['photo_url'])): ?>
+      <img src="<?= h($consultant['photo_url']) ?>" alt="<?= h($consultant['full_name'] ?? '') ?>">
+    <?php endif; ?>
+    <div>
+      <div class="c-label"><?= h(iti_lbl_consultant($lang)) ?></div>
+      <?php if (!empty($consultant['full_name'])): ?>
+        <div class="c-name"><?= h($consultant['full_name']) ?></div>
+      <?php endif; ?>
+      <?php
+        $cparts = [];
+        if (!empty($consultant['email']))    $cparts[] = '<a href="mailto:'.h($consultant['email']).'">'.h($consultant['email']).'</a>';
+        if (!empty($consultant['whatsapp'])) {
+            $wa_digits = preg_replace('/[^0-9]/', '', $consultant['whatsapp']);
+            $cparts[] = 'WhatsApp: <a href="https://wa.me/'.h($wa_digits).'" target="_blank" rel="noopener">'.h($consultant['whatsapp']).'</a>';
+        }
+      ?>
+      <?php if ($cparts): ?>
+        <div class="c-meta"><?= implode(' &nbsp;·&nbsp; ', $cparts) ?></div>
+      <?php endif; ?>
+      <?php if ($consultant_bio !== ''): ?>
+        <div class="c-bio"><?= $consultant_bio ?></div>
+      <?php endif; ?>
+    </div>
+  </div>
+  <?php endif; ?>
 
   <!-- Days -->
   <?php foreach ($days as $day): ?>

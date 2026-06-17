@@ -25,6 +25,10 @@ if (!in_array($lang, ITI_LANGS)) $lang = 'en';
 $curr = $_GET['curr'] ?? $program['display_currency'] ?? 'USD';
 if (!in_array($curr, ITI_CURRENCIES)) $curr = 'USD';
 
+// Consulente (owner del programma): foto + bio + contatti
+$consultant     = iti_get_consultant($program['created_by'] ?? '');
+$consultant_bio = $consultant ? iti_consultant_bio($consultant, $lang) : '';
+
 // T&C
 $tc = null;
 if ($program['terms_id']) {
@@ -137,6 +141,32 @@ include __DIR__ . '/../../includes/layout_header.php';
       <?php if ($program['flights_included']): ?><div class="meta-item">✈️ Flights included</div><?php endif; ?>
     </div>
   </div>
+
+  <!-- Travel consultant -->
+  <?php if ($consultant): ?>
+  <div style="background:#fff;border:1px solid var(--grey-lt);border-radius:12px;padding:24px;margin-bottom:24px;display:flex;gap:20px;align-items:flex-start;">
+    <?php if (!empty($consultant['photo_url'])): ?>
+      <img src="<?= h($consultant['photo_url']) ?>" alt="<?= h($consultant['full_name'] ?? '') ?>" style="width:90px;height:90px;border-radius:50%;object-fit:cover;border:2px solid var(--grey-lt);flex-shrink:0;">
+    <?php endif; ?>
+    <div>
+      <div style="font-size:.66rem;font-weight:800;text-transform:uppercase;letter-spacing:.12em;color:var(--red);margin-bottom:6px;"><?= h(iti_lbl_consultant($lang)) ?></div>
+      <?php if (!empty($consultant['full_name'])): ?>
+        <div style="font-family:'Merriweather',serif;font-size:1.1rem;font-weight:700;color:var(--grey-dk);margin-bottom:6px;"><?= h($consultant['full_name']) ?></div>
+      <?php endif; ?>
+      <?php
+        $cparts = [];
+        if (!empty($consultant['email']))    $cparts[] = h($consultant['email']);
+        if (!empty($consultant['whatsapp'])) $cparts[] = 'WhatsApp: '.h($consultant['whatsapp']);
+      ?>
+      <?php if ($cparts): ?>
+        <div style="font-size:.8rem;color:var(--grey-mid);margin-bottom:10px;"><?= implode(' &nbsp;·&nbsp; ', $cparts) ?></div>
+      <?php endif; ?>
+      <?php if ($consultant_bio !== ''): ?>
+        <div style="font-size:.85rem;color:var(--grey-dk);line-height:1.6;"><?= $consultant_bio ?></div>
+      <?php endif; ?>
+    </div>
+  </div>
+  <?php endif; ?>
 
   <!-- Days -->
   <?php

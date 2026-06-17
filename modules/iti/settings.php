@@ -50,24 +50,42 @@ function iti_handle_upload(array $file, string $destDir, string $urlBase, string
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $do = $_POST['_action'] ?? '';
 
-    // ---- Personal profile (any logged-in user, own row) ----
+    // ---- Personal profile (any logged-in user, own row; admins any user) ----
     if ($do === 'profile') {
-        $full  = trim($_POST['full_name'] ?? '');
-        $phone = trim($_POST['phone'] ?? '');
-        $bio   = trim($_POST['bio'] ?? '');
-        $photo = iti_handle_upload($_FILES['photo'] ?? [], $PROFILE_DIR, $UPLOAD_URL.'/profiles', 'u'.$_cu['id']);
-
-        if ($photo !== null) {
-            $db->prepare('UPDATE users SET full_name=?, phone=?, bio=?, photo_url=? WHERE id=?')
-               ->execute([$full, $phone ?: null, $bio ?: null, $photo, $_cu['id']]);
-        } else {
-            $db->prepare('UPDATE users SET full_name=?, phone=?, bio=? WHERE id=?')
-               ->execute([$full, $phone ?: null, $bio ?: null, $_cu['id']]);
+        // Target user: own row by default. Admins may edit another user's row.
+        $target_id = (int)$_cu['id'];
+        if ($admin && !empty($_POST['target_user_id'])) {
+            $target_id = (int)$_POST['target_user_id'];
         }
-        // keep session name in sync
-        $_SESSION['full_name'] = $full;
-        iti_flash_set('success', 'Your profile has been updated.');
-        iti_redirect('settings.php?tab=profile');
+
+        $full     = trim($_POST['full_name'] ?? '');
+        $phone    = trim($_POST['phone'] ?? '');
+        $whatsapp = trim($_POST['whatsapp'] ?? '');
+
+        // Multilingual bios (Quill rich-text), sanitized per language
+        $bios = [];
+        foreach (ITI_LANGS as $lc) {
+            $bios[$lc] = iti_sanitize_richtext($_POST['bio_'.$lc] ?? '');
+        }
+        $photo = iti_handle_upload($_FILES['photo'] ?? [], $PROFILE_DIR, $UPLOAD_URL.'/profiles', 'u'.$target_id);
+
+        $cols = 'full_name=?, phone=?, whatsapp=?, bio_en=?, bio_it=?, bio_fr=?, bio_es=?, bio_de=?';
+        $vals = [
+            $full, $phone ?: null, $whatsapp ?: null,
+            $bios['en'] ?: null, $bios['it'] ?: null, $bios['fr'] ?: null,
+            $bios['es'] ?: null, $bios['de'] ?: null,
+        ];
+        if ($photo !== null) { $cols .= ', photo_url=?'; $vals[] = $photo; }
+        $vals[] = $target_id;
+
+        $db->prepare('UPDATE users SET '.$cols.' WHERE id=?')->execute($vals);
+
+        // keep session name in sync only when editing own row
+        if ($target_id === (int)$_cu['id']) {
+            $_SESSION['full_name'] = $full;
+        }
+        iti_flash_set('success', 'Profile saved.');
+        iti_redirect('settings.php?tab=profile' . ($target_id !== (int)$_cu['id'] ? '&u='.$target_id : ''));
     }
 
     // ---- Company / contacts / emergency (admin only) ----
@@ -146,9 +164,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 // ── Load data ────────────────────────────────────────────────────────────────
-$me = $db->prepare('SELECT full_name, email, phone, bio, photo_url FROM users WHERE id=?');
-$me->execute([$_cu['id']]);
+// Profile target: own row by default; admins may view/edit another user via ?u=
+$profile_uid = (int)$_cu['id'];
+if ($admin && !empty($_GET['u'])) {
+    $profile_uid = (int)$_GET['u'];
+}
+$me = $db->prepare(
+    'SELECT id, full_name, email, phone, whatsapp, photo_url,
+            bio_en, bio_it, bio_fr, bio_es, bio_de
+       FROM users WHERE id=?'
+);
+$me->execute([$profile_uid]);
 $me = $me->fetch() ?: [];
+// Fallback: if the editor row disappeared, revert to own row
+if (!$me) {
+    $profile_uid = (int)$_cu['id'];
+    $me = $db->prepare('SELECT id, full_name, email, phone, whatsapp, photo_url, bio_en, bio_it, bio_fr, bio_es, bio_de FROM users WHERE id=?');
+    $me->execute([$profile_uid]);
+    $me = $me->fetch() ?: [];
+}
+// Admin: list of users for the picker
+$user_list = [];
+if ($admin) {
+    $ul = $db->query('SELECT id, full_name, username FROM users WHERE is_active=1 ORDER BY full_name, username');
+    $user_list = $ul->fetchAll();
+}
 
 $S = iti_settings_all();
 $get = fn(string $k, string $d = '') => ($S[$k] ?? '') !== '' ? $S[$k] : $d;
@@ -196,10 +236,30 @@ include __DIR__ . '/../../includes/layout_header.php';
   <a href="settings.php?tab=terms"   class="set-tab <?= $tab==='terms'?'active':''   ?>">📜 Terms &amp; Conditions</a>
 </div>
 
-<?php /* ════════════ PROFILE ════════════ */ if ($tab === 'profile'): ?>
-<div class="page-header"><div><h2>My Profile</h2><div class="sub">These details are visible to your colleagues.</div></div></div>
-<form method="POST" enctype="multipart/form-data" action="settings.php?tab=profile">
+<?php /* ════════════ PROFILE ════════════ */ if ($tab === 'profile'):
+  $editing_other = $admin && (int)($me['id'] ?? 0) !== (int)$_cu['id'];
+?>
+<div class="page-header"><div><h2><?= $editing_other ? 'Edit Profile' : 'My Profile' ?></h2><div class="sub">Photo, contacts and biography appear at the top of itineraries shown or exported to clients.</div></div></div>
+
+<?php if ($admin): ?>
+<div class="form-card" style="margin-bottom:16px;">
+  <div class="form-group" style="margin:0;">
+    <label>Editing profile of</label>
+    <select onchange="if(this.value)location.href='settings.php?tab=profile&u='+this.value;" style="max-width:360px;">
+      <?php foreach ($user_list as $u): ?>
+        <option value="<?= (int)$u['id'] ?>" <?= (int)$u['id']===(int)($me['id']??0)?'selected':'' ?>>
+          <?= h($u['full_name'] ?: $u['username']) ?><?= (int)$u['id']===(int)$_cu['id'] ? ' (you)' : '' ?>
+        </option>
+      <?php endforeach; ?>
+    </select>
+    <div style="font-size:.7rem;color:var(--grey-mid);margin-top:4px;">As an administrator you can edit any colleague's profile and bios.</div>
+  </div>
+</div>
+<?php endif; ?>
+
+<form method="POST" enctype="multipart/form-data" action="settings.php?tab=profile<?= $editing_other ? '&u='.(int)$me['id'] : '' ?>">
   <input type="hidden" name="_action" value="profile">
+  <?php if ($editing_other): ?><input type="hidden" name="target_user_id" value="<?= (int)$me['id'] ?>"><?php endif; ?>
   <div class="form-card">
     <div class="form-grid" style="grid-template-columns:100px 1fr;align-items:start;">
       <div class="form-group" style="text-align:center;">
@@ -216,24 +276,82 @@ include __DIR__ . '/../../includes/layout_header.php';
             <input type="text" name="phone" value="<?= h($me['phone'] ?? '') ?>" maxlength="40" placeholder="+255 ...">
           </div>
         </div>
-        <div class="form-group">
-          <label>Email <span style="color:var(--grey-mid);font-weight:400;">(managed by admin)</span></label>
-          <input type="text" value="<?= h($me['email'] ?? '') ?>" disabled style="background:#f5f5f5;">
+        <div class="form-grid" style="grid-template-columns:1fr 1fr;">
+          <div class="form-group">
+            <label>WhatsApp</label>
+            <input type="text" name="whatsapp" value="<?= h($me['whatsapp'] ?? '') ?>" maxlength="40" placeholder="+255 ...">
+            <div style="font-size:.7rem;color:var(--grey-mid);margin-top:4px;">Shown to clients in the itinerary header.</div>
+          </div>
+          <div class="form-group">
+            <label>Email <span style="color:var(--grey-mid);font-weight:400;">(managed by admin)</span></label>
+            <input type="text" value="<?= h($me['email'] ?? '') ?>" disabled style="background:#f5f5f5;">
+          </div>
         </div>
         <div class="form-group">
           <label>Profile Photo</label>
           <input type="file" name="photo" accept="image/*">
-          <div style="font-size:.7rem;color:var(--grey-mid);margin-top:4px;">JPG/PNG/WEBP, max 4 MB.</div>
-        </div>
-        <div class="form-group">
-          <label>Biography</label>
-          <textarea name="bio" rows="4" placeholder="A short bio shown alongside your name."><?= h($me['bio'] ?? '') ?></textarea>
+          <div style="font-size:.7rem;color:var(--grey-mid);margin-top:4px;">JPG/PNG/WEBP, max 4 MB. A square photo works best.</div>
         </div>
       </div>
     </div>
+
+    <div class="form-section-title" style="margin-top:14px;">Biography (per language)</div>
+    <div style="font-size:.72rem;color:var(--grey-mid);margin-bottom:8px;">Each language is shown when the itinerary is in that language. If a language is empty, English is used as fallback.</div>
+    <div class="lang-tabs">
+      <?php $i=0; foreach ($LANGS as $code=>$name): ?>
+        <button type="button" class="lang-tab <?= $i===0?'active':'' ?>" data-lang="<?= $code ?>"><?= $name ?></button>
+      <?php $i++; endforeach; ?>
+    </div>
+    <?php $i=0; foreach ($LANGS as $code=>$name): ?>
+      <div class="lang-pane <?= $i===0?'active':'' ?>" data-lang="<?= $code ?>">
+        <div class="tc-quill" id="bquill_<?= $code ?>"><?= $me['bio_'.$code] ?? '' ?></div>
+        <textarea name="bio_<?= $code ?>" id="bta_<?= $code ?>" style="display:none;"></textarea>
+      </div>
+    <?php $i++; endforeach; ?>
+
     <div style="margin-top:16px;"><button type="submit" class="btn btn-red">💾 Save Profile</button></div>
   </div>
 </form>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/quill/1.3.7/quill.snow.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/quill/1.3.7/quill.min.js"></script>
+<script>
+(function(){
+  var tabs = document.querySelectorAll('.lang-tab');
+  var panes = document.querySelectorAll('.lang-pane');
+  for (var i=0;i<tabs.length;i++){
+    tabs[i].addEventListener('click', function(){
+      var lang = this.getAttribute('data-lang');
+      for (var j=0;j<tabs.length;j++) tabs[j].classList.remove('active');
+      this.classList.add('active');
+      for (var k=0;k<panes.length;k++){
+        panes[k].classList.toggle('active', panes[k].getAttribute('data-lang')===lang);
+      }
+    });
+  }
+  var LANGS = <?= json_encode(array_keys($LANGS)) ?>;
+  var editors = {};
+  var toolbar = [
+    ['bold','italic','underline'],
+    [{'list':'ordered'},{'list':'bullet'}],
+    ['link','clean']
+  ];
+  for (var n=0;n<LANGS.length;n++){
+    var code = LANGS[n];
+    editors[code] = new Quill('#bquill_'+code, { theme:'snow', modules:{ toolbar: toolbar } });
+  }
+  var form = document.querySelector('form[action*="tab=profile"]');
+  if (form) {
+    form.addEventListener('submit', function(){
+      for (var n=0;n<LANGS.length;n++){
+        var code = LANGS[n];
+        var html = editors[code].root.innerHTML;
+        if (html === '<p><br></p>') html = '';
+        document.getElementById('bta_'+code).value = html;
+      }
+    });
+  }
+})();
+</script>
 
 <?php /* ════════════ COMPANY ════════════ */ elseif ($tab === 'company'): ?>
 <div class="page-header"><div><h2>Company &amp; Contacts</h2><div class="sub">Used across itineraries, previews and exports.</div></div></div>
