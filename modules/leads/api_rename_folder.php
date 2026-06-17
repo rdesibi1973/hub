@@ -44,11 +44,18 @@ if ($oldFolderName === '' || $newFolderName === '') {
 // ── Find request by current practice_code ─────────────────────────────────────
 $db   = db();
 $stmt = $db->prepare(
-    'SELECT id, customer_name, status, dropbox_url
+    'SELECT id, customer_name, status, dropbox_url, practice_code
      FROM requests WHERE practice_code = ? ORDER BY id DESC LIMIT 1'
 );
 $stmt->execute([$oldFolderName]);
 $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+// Tracks the practice_code value that actually matched a row.
+// On an exact full-folder match this stays the new folder name; when a
+// fallback matches the bare/core code we PRESERVE that code instead of
+// overwriting practice_code with the long confirmed-folder string.
+$matchedPracticeCode = $oldFolderName;
+$matchedViaFallback  = false;
 
 // Fallback 1: strip known status suffixes and try base name.
 if (!$row) {
@@ -63,6 +70,7 @@ if (!$row) {
     if ($baseName !== $oldFolderName) {
         $stmt->execute([$baseName]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($row) { $matchedPracticeCode = $baseName; $matchedViaFallback = true; }
     }
 } else {
     $baseName = $oldFolderName;
@@ -79,6 +87,22 @@ if (!$row) {
     if ($bare !== '' && $bare !== $baseName) {
         $stmt->execute([$bare]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($row) { $matchedPracticeCode = $bare; $matchedViaFallback = true; }
+    }
+}
+
+// Fallback 2b: strip the trailing "(agency-agent)" suffix from the bare name.
+// The DB practice_code is often just the core code (e.g. "TRA1408"),
+// while the folder bare name includes the suffix "TRA1408(54traveler-Roberto)".
+if (!$row) {
+    $core = ($bare !== '' && $bare !== $baseName) ? $bare
+          : ($baseName !== $oldFolderName ? $baseName : $oldFolderName);
+    $core = preg_replace('/\(.*\)\s*$/', '', $core); // drop trailing (...) group
+    $core = trim($core);
+    if ($core !== '' && $core !== $oldFolderName) {
+        $stmt->execute([$core]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($row) { $bare = $core; $matchedPracticeCode = $core; $matchedViaFallback = true; }
     }
 }
 
@@ -87,11 +111,12 @@ if (!$row) {
     $searchName = ($bare !== '' && $bare !== $baseName) ? $bare
                 : ($baseName !== $oldFolderName ? $baseName : $oldFolderName);
     $stmt2 = $db->prepare(
-        'SELECT id, customer_name, status, dropbox_url
+        'SELECT id, customer_name, status, dropbox_url, practice_code
          FROM requests WHERE dropbox_url LIKE ? ORDER BY id DESC LIMIT 1'
     );
     $stmt2->execute(['%/' . rawurlencode($searchName) . '%']);
     $row = $stmt2->fetch(PDO::FETCH_ASSOC);
+    if ($row) { $matchedViaFallback = true; }
 }
 
 // Fallback 4: GRP parent folder — search by group_folder column.
@@ -101,7 +126,7 @@ if (!$row) {
 $matchedViaGroupFolder = false;
 if (!$row) {
     $stmtGrp = $db->prepare(
-        'SELECT id, customer_name, status, dropbox_url
+        'SELECT id, customer_name, status, dropbox_url, practice_code
          FROM requests WHERE group_folder = ? ORDER BY id DESC LIMIT 1'
     );
     $stmtGrp->execute([$oldFolderName]);
@@ -176,16 +201,21 @@ if ($matchedViaGroupFolder) {
         $update->execute([$newFolderName, $newDropboxUrl, (int)$row['id']]);
     }
 } else {
+    // When matched via a fallback the stored practice_code is the bare/core
+    // code (e.g. "TRA1408"); preserve it rather than overwriting with the
+    // long confirmed-folder string. Only an exact full-folder match updates it.
+    $pcToStore = $matchedViaFallback ? ($row['practice_code'] ?? $matchedPracticeCode)
+                                     : $newFolderName;
     if ($newDbStatus !== null) {
         $update = $db->prepare(
             'UPDATE requests SET practice_code = ?, dropbox_url = ?, status = ?, payment_status = ? WHERE id = ?'
         );
-        $update->execute([$newFolderName, $newDropboxUrl, $newDbStatus, $newPaymentStatus, (int)$row['id']]);
+        $update->execute([$pcToStore, $newDropboxUrl, $newDbStatus, $newPaymentStatus, (int)$row['id']]);
     } else {
         $update = $db->prepare(
             'UPDATE requests SET practice_code = ?, dropbox_url = ? WHERE id = ?'
         );
-        $update->execute([$newFolderName, $newDropboxUrl, (int)$row['id']]);
+        $update->execute([$pcToStore, $newDropboxUrl, (int)$row['id']]);
     }
 }
 
