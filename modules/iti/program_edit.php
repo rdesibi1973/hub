@@ -96,7 +96,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // ── Salva giorno ──
     if ($sub === 'day') {
         $day_id = (int)($_POST['day_id'] ?? 0);
-        error_log('ITI day save: day_id=' . $day_id . ' title_en=' . ($_POST['day_title_en'] ?? 'MISSING') . ' acts=' . count($_POST['activity_id'] ?? []) . ' flights=' . count($_POST['flight_route_id'] ?? []));
         if ($day_id) {
             $start_raw      = trim($_POST['start_lodge_id'] ?? '');
             $start_lodge_id = null; $start_dest_id = null; $start_txt = null;
@@ -206,6 +205,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         } else {
             iti_flash_set('error', 'Save failed: day_id missing.');
+        }
+        // AJAX (Save All from header): respond with JSON, no redirect
+        if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest') {
+            while (ob_get_level() > 0) ob_end_clean();
+            header('Content-Type: application/json');
+            echo json_encode(['ok' => true, 'day_id' => $day_id]);
+            exit;
         }
         iti_redirect("program_edit.php?id={$id}&tab=days&day={$day_id}");
     }
@@ -1758,15 +1764,35 @@ function toggleOA(checked) {
 
 // ── Save current visible day from header button ──
 function saveCurrentDay() {
-    var activeBtn = document.querySelector('.day-btn.active');
-    if (activeBtn) {
-        var id = activeBtn.id.replace('day-nav-', '');
-        var form = document.getElementById('day-save-form-' + id);
-        if (form) { form.submit(); return; }
+    var btn = document.getElementById('btn-save-current');
+    var forms = document.querySelectorAll('[id^="day-save-form-"]');
+    if (!forms.length) return;
+    if (btn) { btn.disabled = true; btn.textContent = '💾 Saving…'; }
+
+    var i = 0;
+    function saveNext() {
+        if (i >= forms.length) {
+            // All days saved — reload to reflect changes
+            window.location.reload();
+            return;
+        }
+        var form = forms[i];
+        i++;
+        var fd = new FormData(form);
+        fetch(form.getAttribute('action'), {
+            method: 'POST',
+            body: fd,
+            headers: { 'X-Requested-With': 'XMLHttpRequest' }
+        }).then(function(r){
+            return r.text();
+        }).then(function(){
+            saveNext();
+        }).catch(function(err){
+            if (btn) { btn.disabled = false; btn.textContent = '💾 Save'; }
+            alert('Save failed for one of the days. Please try again.\n' + err);
+        });
     }
-    // Fallback: submit first form
-    var first = document.querySelector('[id^="day-save-form-"]');
-    if (first) first.submit();
+    saveNext();
 }
 
 // ── Day nav collapse/expand ──
