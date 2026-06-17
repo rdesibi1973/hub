@@ -17,6 +17,14 @@ $action = $_REQUEST['action'] ?? '';
 $id     = (int)($_REQUEST['id'] ?? 0);
 
 // ── POST ────────────────────────────────────────────────────
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    error_log('ITI transfers POST: tab=' . $tab . ' action=' . $action . ' id=' . $id
+        . ' can_edit=' . ($can_edit ? '1' : '0')
+        . ' role=' . ($_cu['role_name'] ?? 'NULL')
+        . ' from=' . ($_POST['from_destination'] ?? 'MISSING')
+        . ' to=' . ($_POST['to_destination'] ?? 'MISSING')
+        . ' km=' . ($_POST['distance_km'] ?? 'MISSING'));
+}
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit) {
 
     if ($tab === 'road') {
@@ -346,15 +354,17 @@ include __DIR__ . '/../../includes/layout_header.php';
   <div class="form-actions">
     <button type="submit" class="btn btn-red"><?= $action==='add'?'+ Create':'💾 Save' ?></button>
     <a href="transfers.php?tab=<?= h($tab) ?>" class="btn btn-outline">Cancel</a>
-    <?php if ($action==='edit' && $can_edit): ?>
-    <div style="margin-left:auto;">
-      <form method="POST" action="transfers.php?tab=<?= h($tab) ?>&action=delete&id=<?= $id ?>" style="display:inline;">
-        <button class="btn btn-danger btn-sm" onclick="return confirm('Deactivate this route?')">Deactivate</button>
-      </form>
-    </div>
-    <?php endif; ?>
   </div>
 </form>
+<?php if ($action==='edit' && $can_edit): ?>
+<div class="form-actions" style="margin-top:-8px;">
+  <div style="margin-left:auto;">
+    <form method="POST" action="transfers.php?tab=<?= h($tab) ?>&action=delete&id=<?= $id ?>" style="display:inline;">
+      <button class="btn btn-danger btn-sm" onclick="return confirm('Deactivate this route?')">Deactivate</button>
+    </form>
+  </div>
+</div>
+<?php endif; ?>
 </div>
 
 <?php else: // lista ?>
