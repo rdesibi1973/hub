@@ -893,6 +893,47 @@ function iti_get_flight_routes(array $filters = []): array {
     return $st->fetchAll();
 }
 
+// ── Build road transfer notes in all 5 languages (server-side) ────────────────
+// Mirrors the live JS generator in transfers.php. $fromName/$toName are place
+// names; $durMin minutes; $km kilometres (0/null = omit). Returns [lang => text].
+function iti_build_transfer_notes(string $fromName, string $toName, int $durMin = 0, ?int $km = 0): array {
+    $T = [
+        'en' => 'Road transfer from {from} to {to}{km}{time}.',
+        'it' => 'Trasferimento su strada da {from} a {to}{km}{time}.',
+        'fr' => 'Transfert routier de {from} à {to}{km}{time}.',
+        'es' => 'Traslado por carretera de {from} a {to}{km}{time}.',
+        'de' => 'Straßentransfer von {from} nach {to}{km}{time}.',
+    ];
+    $KMW = [
+        'en' => ' — approx. {n} km', 'it' => ' — circa {n} km',
+        'fr' => ' — environ {n} km', 'es' => ' — aprox. {n} km',
+        'de' => ' — ca. {n} km',
+    ];
+    $fmtTime = function (int $min, string $lang): string {
+        if ($min <= 0) return '';
+        $h = intdiv($min, 60);
+        $m = $min % 60;
+        $hUnit = ($lang === 'de') ? 'Std.' : 'h';
+        $parts = [];
+        if ($h > 0) $parts[] = $h . ' ' . $hUnit;
+        if ($m > 0) $parts[] = $m . ' min';
+        return ', ' . implode(' ', $parts);
+    };
+    $out = [];
+    $kmVal = (int)$km;
+    foreach ($T as $lang => $tpl) {
+        if ($fromName === '' || $toName === '') { $out[$lang] = ''; continue; }
+        $kmStr = $kmVal > 0 ? str_replace('{n}', (string)$kmVal, $KMW[$lang]) : '';
+        $timeStr = $fmtTime($durMin, $lang);
+        $out[$lang] = str_replace(
+            ['{from}', '{to}', '{km}', '{time}'],
+            [$fromName, $toName, $kmStr, $timeStr],
+            $tpl
+        );
+    }
+    return $out;
+}
+
 // ── Single route getters (for edit/view) ─────────────────────────────────────
 function iti_get_transfer_route(int $id): array|false {
     $st = db()->prepare(

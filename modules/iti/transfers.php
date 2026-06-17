@@ -51,7 +51,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit) {
                   notes_en,notes_it,notes_fr,notes_es,notes_de,is_active)
                  VALUES (?,?,?,?,?,?,?,?,?,?,?)'
             )->execute([$f['from_destination'],$f['to_destination'],$f['duration_min'],$f['distance_km'],$f['road_type'],$f['notes_en'],$f['notes_it'],$f['notes_fr'],$f['notes_es'],$f['notes_de'],$f['is_active']]);
-            iti_flash_set('success', 'Transfer route created.');
+            $msg = 'Transfer route created.';
+
+            // Optional: also create the reverse route (to → from)
+            if (!empty($_POST['create_reverse'])) {
+                $exists = $db->prepare(
+                    'SELECT id FROM iti_transfer_routes
+                      WHERE from_destination=? AND to_destination=? AND is_active=1 LIMIT 1'
+                );
+                $exists->execute([$f['to_destination'], $f['from_destination']]);
+                if ($exists->fetch()) {
+                    $msg .= ' The reverse route already exists, so it was not duplicated.';
+                } else {
+                    $dmap     = iti_destinations_map(false);
+                    $revFrom  = $dmap[$f['to_destination']]   ?? '';
+                    $revTo    = $dmap[$f['from_destination']] ?? '';
+                    $revNotes = iti_build_transfer_notes($revFrom, $revTo, (int)$f['duration_min'], $f['distance_km']);
+                    $db->prepare(
+                        'INSERT INTO iti_transfer_routes
+                         (from_destination,to_destination,duration_min,distance_km,road_type,
+                          notes_en,notes_it,notes_fr,notes_es,notes_de,is_active)
+                         VALUES (?,?,?,?,?,?,?,?,?,?,?)'
+                    )->execute([
+                        $f['to_destination'], $f['from_destination'], $f['duration_min'], $f['distance_km'], $f['road_type'],
+                        $revNotes['en'], $revNotes['it'], $revNotes['fr'], $revNotes['es'], $revNotes['de'], $f['is_active'],
+                    ]);
+                    $msg .= ' Reverse route also created.';
+                }
+            }
+            iti_flash_set('success', $msg);
         } elseif ($action === 'edit' && $id) {
             $db->prepare(
                 'UPDATE iti_transfer_routes SET
@@ -193,6 +221,16 @@ include __DIR__ . '/../../includes/layout_header.php';
       <label for="is_active" style="margin:0;text-transform:none;font-size:.85rem;">Active</label>
     </div>
   </div>
+
+  <?php if ($action === 'add'): ?>
+  <div class="form-group" style="flex-direction:row;align-items:center;gap:10px;margin-bottom:8px;">
+    <input type="checkbox" name="create_reverse" value="1" id="create_reverse"
+           style="width:16px;height:16px;accent-color:var(--red);">
+    <label for="create_reverse" style="margin:0;text-transform:none;font-size:.85rem;">
+      Also create the reverse route (To → From) with the same duration and distance
+    </label>
+  </div>
+  <?php endif; ?>
 
   <div class="form-section-title">Notes <span style="font-weight:400;font-size:.8rem;color:var(--grey-mid)">× 5 languages</span>
     <a href="#" id="tr_regen" style="display:none;margin-left:10px;font-size:.75rem;font-weight:600;color:var(--red);text-decoration:none;">↻ Regenerate from route data</a>
