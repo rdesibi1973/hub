@@ -32,15 +32,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'add' && $can_edit) {
           ref_number,
           title_en,title_it,title_fr,title_es,title_de,
           subtitle_en,subtitle_it,subtitle_fr,subtitle_es,subtitle_de,
-          duration_days,pax_adults,pax_children,
+          duration_days,pax_adults,pax_children,flights_included,
           status,display_language,display_currency,created_by)
          VALUES
-         ("sample",?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+         ("sample",?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
     )->execute([
         $ref_number ?: null,
         $title_en,'','','','',
         '','','','','',
-        1,2,0,
+        1,2,0,0,
         'draft',$display_language,'USD',$_cu['username'] ?? 'system',
     ]);
     $new_id = (int)$db->lastInsertId();
