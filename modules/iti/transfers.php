@@ -17,14 +17,6 @@ $action = $_REQUEST['action'] ?? '';
 $id     = (int)($_REQUEST['id'] ?? 0);
 
 // ── POST ────────────────────────────────────────────────────
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    error_log('ITI transfers POST: tab=' . $tab . ' action=' . $action . ' id=' . $id
-        . ' can_edit=' . ($can_edit ? '1' : '0')
-        . ' role=' . ($_cu['role_name'] ?? 'NULL')
-        . ' from=' . ($_POST['from_destination'] ?? 'MISSING')
-        . ' to=' . ($_POST['to_destination'] ?? 'MISSING')
-        . ' km=' . ($_POST['distance_km'] ?? 'MISSING'));
-}
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit) {
 
     if ($tab === 'road') {

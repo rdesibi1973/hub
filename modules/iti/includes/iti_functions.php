@@ -656,12 +656,19 @@ function iti_search_where(string $q, array $columns, array &$where, array &$para
     }
 }
 
-function iti_options(array $options, string|null $selected = ''): string {
+function iti_options(array $options, string|null $selected = '', ?string $placeholder = null): string {
     $selected = (string)($selected ?? '');
     $out = '';
+    if ($placeholder !== null) {
+        $out .= '<option value="">' . h($placeholder) . '</option>';
+    }
+    // A "list" array (sequential 0,1,2… keys) uses its values as both value and
+    // label. An associative/id-keyed array (e.g. [10 => 'Karatu']) uses the key
+    // as the option value — do NOT replace it with the label.
+    $is_list = array_keys($options) === range(0, count($options) - 1);
     foreach ($options as $val => $label) {
-        if (is_int($val)) { $val = $label; } // array numerico
-        $sel  = ($val == $selected) ? ' selected' : '';
+        if ($is_list) { $val = $label; }
+        $sel  = ($val == $selected && $selected !== '') ? ' selected' : '';
         $out .= '<option value="' . h((string)$val) . '"' . $sel . '>' . h((string)$label) . '</option>';
     }
     return $out;
