@@ -42,13 +42,49 @@ if ($oldFolderName === '' || $newFolderName === '') {
 }
 
 // ── Find request by current practice_code ─────────────────────────────────────
+// practice_code stores the FULL folder string, e.g.
+//   08_14AUG_TRA1408(54traveler-Roberto)_START14AUG_END22AUG2026_PROVISIONAL
+// Across status renames only the trailing _TAG changes; the rest is stable.
 $db   = db();
 $stmt = $db->prepare(
-    'SELECT id, customer_name, status, dropbox_url
+    'SELECT id, customer_name, status, dropbox_url, practice_code
      FROM requests WHERE practice_code = ? ORDER BY id DESC LIMIT 1'
 );
 $stmt->execute([$oldFolderName]);
 $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+// Fallback 0: trim-resilient match (guards against stray trailing whitespace
+// stored in practice_code that breaks the exact equality above).
+if (!$row) {
+    $stmtTrim = $db->prepare(
+        'SELECT id, customer_name, status, dropbox_url, practice_code
+         FROM requests WHERE TRIM(practice_code) = ? ORDER BY id DESC LIMIT 1'
+    );
+    $stmtTrim->execute([$oldFolderName]);
+    $row = $stmtTrim->fetch(PDO::FETCH_ASSOC);
+}
+
+// Fallback 0b: match on the base (status suffix stripped). The base is a
+// stable, unique prefix; across renames only a trailing _TAG follows it.
+// We match practice_code that equals the base, or equals base + "_<TAG>".
+if (!$row) {
+    $statusTagsRe = '_(PROGRESS|PROVISIONAL|DEPOSIT|BALANCE-CASH|BALANCE|CANCELLED|CK|PAID)$';
+    $incomingBase = preg_replace('/' . $statusTagsRe . '/i', '', $oldFolderName);
+    if ($incomingBase !== $oldFolderName) {
+        // Escape LIKE wildcards in the base so '(', ')', '%', '_' are literal.
+        $likeBase = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $incomingBase);
+        $stmtBase = $db->prepare(
+            "SELECT id, customer_name, status, dropbox_url, practice_code
+             FROM requests
+             WHERE TRIM(practice_code) = ?
+                OR  TRIM(practice_code) LIKE ? ESCAPE '\\\\'
+             ORDER BY id DESC LIMIT 1"
+        );
+        // base + "_" + any tag (no further underscores in tags except BALANCE-CASH which has none after _)
+        $stmtBase->execute([$incomingBase, $likeBase . '\\_%']);
+        $row = $stmtBase->fetch(PDO::FETCH_ASSOC);
+    }
+}
 
 // Fallback 1: strip known status suffixes and try base name.
 if (!$row) {
