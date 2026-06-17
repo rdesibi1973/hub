@@ -3,7 +3,7 @@
  * settings.php — ITI Settings
  * Available to all logged-in users. Company / emergency / logo / T&C
  * sections are visible to everyone but editable by admins only.
- * Every user can edit their own profile (name, phone, photo, bio).
+ * Every user can edit their own profile (name, phone, WhatsApp, photo, multilingual bios).
  */
 require_once __DIR__ . '/../../includes/auth.php';
 require_login();
