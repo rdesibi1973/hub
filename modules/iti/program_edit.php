@@ -1069,7 +1069,7 @@ include __DIR__ . '/../../includes/layout_header.php';
         $tr_opts_json = json_encode(array_map(fn($o)=>['id'=>'','label'=>$o['label'],'group'=>'Suggestions'], $tr_combo_opts), JSON_HEX_APOS);
         ?>
 
-        <div id="transfer-rows">
+        <div id="transfer-rows-<?= $current_day_data['id'] ?>">
         <?php foreach ($current_transfers as $tr): ?>
         <div class="array-row" style="display:flex;gap:8px;align-items:center;margin-bottom:6px;">
           <div class="iti-combo" style="flex:1;max-width:none;">
@@ -1086,7 +1086,7 @@ include __DIR__ . '/../../includes/layout_header.php';
         <?php endforeach; ?>
         </div>
         <button type="button" class="btn btn-outline btn-sm" style="margin-top:6px;"
-                onclick="addTransferRow()">+ Add Transfer</button>
+                onclick="addTransferRow(<?= $current_day_data['id'] ?>)">+ Add Transfer</button>
       </div>
 
       <!-- 3. MAIN DESTINATION -->
@@ -1228,7 +1228,7 @@ include __DIR__ . '/../../includes/layout_header.php';
     $act_opts_json = json_encode($act_opts, JSON_HEX_APOS);
     ?>
 
-    <div id="activity-rows">
+    <div id="activity-rows-<?= $current_day_data['id'] ?>">
     <?php foreach ($current_acts as $a): ?>
     <div class="act-row array-row">
       <div style="font-size:1.1rem;"><?= !empty($a['activity_type']) ? (ITI_ACTIVITY_ICONS[$a['activity_type']] ?? '🎯') : '🎯' ?></div>
@@ -1250,7 +1250,7 @@ include __DIR__ . '/../../includes/layout_header.php';
     <?php endforeach; ?>
     </div>
     <button type="button" class="btn btn-outline btn-sm" style="margin-top:8px;"
-            onclick="addActivityRow()">+ Add Activity</button>
+            onclick="addActivityRow(<?= $current_day_data['id'] ?>)">+ Add Activity</button>
   </div>
 
   <!-- Flights -->
@@ -1264,7 +1264,7 @@ include __DIR__ . '/../../includes/layout_header.php';
     $fl_opts_json = json_encode($fl_opts, JSON_HEX_APOS);
     ?>
 
-    <div id="flight-rows">
+    <div id="flight-rows-<?= $current_day_data['id'] ?>">
     <?php foreach ($current_flights as $fl): ?>
     <div class="act-row array-row">
       <div style="font-size:1.1rem;">✈️</div>
@@ -1327,7 +1327,7 @@ include __DIR__ . '/../../includes/layout_header.php';
     <?php endforeach; ?>
     </div>
     <button type="button" class="btn btn-outline btn-sm" style="margin-top:8px;"
-            onclick="addFlightRow()">+ Add Flight</button>
+            onclick="addFlightRow(<?= $current_day_data['id'] ?>)">+ Add Flight</button>
   </div>
 
   <div style="margin-top:16px;">
@@ -1599,7 +1599,7 @@ function makeCombo(inputAttrs, hiddenName, hiddenVal, opts, noId) {
     return wrap;
 }
 
-function addTransferRow() {
+function addTransferRow(dayId) {
     var row = document.createElement('div');
     row.className = 'array-row';
     row.style.cssText = 'display:flex;gap:8px;align-items:center;margin-bottom:6px;';
@@ -1609,11 +1609,11 @@ function addTransferRow() {
     btn.type = 'button'; btn.className = 'btn btn-danger btn-sm'; btn.textContent = '✕';
     btn.onclick = function(){ this.closest('.array-row').remove(); };
     row.appendChild(combo); row.appendChild(btn);
-    document.getElementById('transfer-rows').appendChild(row);
+    document.getElementById('transfer-rows-' + dayId).appendChild(row);
     row.querySelector('.iti-combo-text').focus();
 }
 
-function addActivityRow() {
+function addActivityRow(dayId) {
     var row = document.createElement('div');
     row.className = 'act-row array-row';
     var icon = document.createElement('div'); icon.style.fontSize='1.1rem'; icon.textContent='🎯';
@@ -1631,11 +1631,11 @@ function addActivityRow() {
     btn.type='button'; btn.className='btn btn-danger btn-sm'; btn.textContent='✕';
     btn.onclick=function(){ this.closest('.array-row').remove(); };
     row.appendChild(icon); row.appendChild(info); row.appendChild(btn);
-    document.getElementById('activity-rows').appendChild(row);
+    document.getElementById('activity-rows-' + dayId).appendChild(row);
     row.querySelector('.iti-combo-text').focus();
 }
 
-function addFlightRow() {
+function addFlightRow(dayId) {
     var row = document.createElement('div');
     row.className = 'act-row array-row';
     var icon = document.createElement('div'); icon.style.fontSize='1.1rem'; icon.textContent='✈️';
@@ -1684,7 +1684,7 @@ function addFlightRow() {
     btn.type='button'; btn.className='btn btn-danger btn-sm'; btn.textContent='✕';
     btn.onclick=function(){ this.closest('.array-row').remove(); };
     row.appendChild(icon); row.appendChild(info); row.appendChild(btn);
-    document.getElementById('flight-rows').appendChild(row);
+    document.getElementById('flight-rows-' + dayId).appendChild(row);
     row.querySelector('.iti-combo-text').focus();
 }
 
