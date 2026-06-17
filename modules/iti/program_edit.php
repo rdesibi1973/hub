@@ -276,9 +276,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $new_num = (int)$max_st->fetchColumn() + 1;
         }
         $db->prepare('INSERT INTO iti_program_days (program_id, day_number) VALUES (?,?)')->execute([$id, $new_num]);
+        $new_day_id = (int)$db->lastInsertId();
         $db->prepare('UPDATE iti_programs SET duration_days=? WHERE id=?')->execute([$new_num, $id]);
         iti_flash_set('success', "Day {$new_num} added.");
-        iti_redirect("program_edit.php?id={$id}&tab=days");
+        iti_redirect("program_edit.php?id={$id}&tab=days&day={$new_day_id}#day-anchor-{$new_day_id}");
     }
 
     // ── Cancella giorno ──

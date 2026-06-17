@@ -893,6 +893,28 @@ function iti_get_flight_routes(array $filters = []): array {
     return $st->fetchAll();
 }
 
+// ── Single route getters (for edit/view) ─────────────────────────────────────
+function iti_get_transfer_route(int $id): array|false {
+    $st = db()->prepare(
+        'SELECT tr.*,
+                fd.name_en AS from_name,
+                td.name_en AS to_name
+           FROM iti_transfer_routes tr
+           JOIN iti_destinations fd ON fd.id = tr.from_destination
+           JOIN iti_destinations td ON td.id = tr.to_destination
+          WHERE tr.id = ?
+          LIMIT 1'
+    );
+    $st->execute([$id]);
+    return $st->fetch();
+}
+
+function iti_get_flight_route(int $id): array|false {
+    $st = db()->prepare('SELECT * FROM iti_flight_routes WHERE id = ? LIMIT 1');
+    $st->execute([$id]);
+    return $st->fetch();
+}
+
 function iti_get_supplements(int $program_id): array {
     $st = db()->prepare(
         'SELECT * FROM iti_price_supplements WHERE program_id = ? ORDER BY sort_order'
