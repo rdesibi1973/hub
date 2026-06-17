@@ -1055,7 +1055,7 @@ function iti_extra_css(): string {
 
 // ── CONSULTANT / USER BIO (ITI programmes) ────────────────────────────────────
 // The "consultant" of a programme is the user whose username == iti_programs.created_by.
-// Bio is multilingual (bio_en/it/fr/es/de on the users table) + phone/whatsapp/photo.
+// Bio is multilingual (bio_en/it/fr/es/de on the users table) + whatsapp/photo.
 
 /**
  * Load the consultant (owner) of a programme by its created_by username.
@@ -1065,7 +1065,7 @@ function iti_get_consultant(?string $username): ?array {
     $username = trim((string)$username);
     if ($username === '') return null;
     $st = db()->prepare(
-        'SELECT id, username, full_name, email, phone, whatsapp, photo_url,
+        'SELECT id, username, full_name, email, whatsapp, photo_url,
                 bio_en, bio_it, bio_fr, bio_es, bio_de
            FROM users
           WHERE username = ?

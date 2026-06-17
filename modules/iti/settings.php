@@ -3,7 +3,7 @@
  * settings.php — ITI Settings
  * Available to all logged-in users. Company / emergency / logo / T&C
  * sections are visible to everyone but editable by admins only.
- * Every user can edit their own profile (name, phone, WhatsApp, photo, multilingual bios).
+ * Every user can edit their own profile (name, WhatsApp, photo, multilingual bios).
  */
 require_once __DIR__ . '/../../includes/auth.php';
 require_login();
@@ -59,7 +59,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         $full     = trim($_POST['full_name'] ?? '');
-        $phone    = trim($_POST['phone'] ?? '');
         $whatsapp = trim($_POST['whatsapp'] ?? '');
 
         // Multilingual bios (Quill rich-text), sanitized per language
@@ -69,9 +68,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         $photo = iti_handle_upload($_FILES['photo'] ?? [], $PROFILE_DIR, $UPLOAD_URL.'/profiles', 'u'.$target_id);
 
-        $cols = 'full_name=?, phone=?, whatsapp=?, bio_en=?, bio_it=?, bio_fr=?, bio_es=?, bio_de=?';
+        $cols = 'full_name=?, whatsapp=?, bio_en=?, bio_it=?, bio_fr=?, bio_es=?, bio_de=?';
         $vals = [
-            $full, $phone ?: null, $whatsapp ?: null,
+            $full, $whatsapp ?: null,
             $bios['en'] ?: null, $bios['it'] ?: null, $bios['fr'] ?: null,
             $bios['es'] ?: null, $bios['de'] ?: null,
         ];
@@ -170,7 +169,7 @@ if ($admin && !empty($_GET['u'])) {
     $profile_uid = (int)$_GET['u'];
 }
 $me = $db->prepare(
-    'SELECT id, full_name, email, phone, whatsapp, photo_url,
+    'SELECT id, full_name, email, whatsapp, photo_url,
             bio_en, bio_it, bio_fr, bio_es, bio_de
        FROM users WHERE id=?'
 );
@@ -179,7 +178,7 @@ $me = $me->fetch() ?: [];
 // Fallback: if the editor row disappeared, revert to own row
 if (!$me) {
     $profile_uid = (int)$_cu['id'];
-    $me = $db->prepare('SELECT id, full_name, email, phone, whatsapp, photo_url, bio_en, bio_it, bio_fr, bio_es, bio_de FROM users WHERE id=?');
+    $me = $db->prepare('SELECT id, full_name, email, whatsapp, photo_url, bio_en, bio_it, bio_fr, bio_es, bio_de FROM users WHERE id=?');
     $me->execute([$profile_uid]);
     $me = $me->fetch() ?: [];
 }
@@ -272,20 +271,14 @@ include __DIR__ . '/../../includes/layout_header.php';
             <input type="text" name="full_name" value="<?= h($me['full_name'] ?? '') ?>" maxlength="150">
           </div>
           <div class="form-group">
-            <label>Phone</label>
-            <input type="text" name="phone" value="<?= h($me['phone'] ?? '') ?>" maxlength="40" placeholder="+255 ...">
-          </div>
-        </div>
-        <div class="form-grid" style="grid-template-columns:1fr 1fr;">
-          <div class="form-group">
             <label>WhatsApp</label>
             <input type="text" name="whatsapp" value="<?= h($me['whatsapp'] ?? '') ?>" maxlength="40" placeholder="+255 ...">
             <div style="font-size:.7rem;color:var(--grey-mid);margin-top:4px;">Shown to clients in the itinerary header.</div>
           </div>
-          <div class="form-group">
-            <label>Email <span style="color:var(--grey-mid);font-weight:400;">(managed by admin)</span></label>
-            <input type="text" value="<?= h($me['email'] ?? '') ?>" disabled style="background:#f5f5f5;">
-          </div>
+        </div>
+        <div class="form-group">
+          <label>Email <span style="color:var(--grey-mid);font-weight:400;">(managed by admin)</span></label>
+          <input type="text" value="<?= h($me['email'] ?? '') ?>" disabled style="background:#f5f5f5;">
         </div>
         <div class="form-group">
           <label>Profile Photo</label>
