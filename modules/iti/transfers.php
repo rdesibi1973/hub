@@ -3,6 +3,7 @@
  * modules/iti/transfers.php
  * CRUD Transfer Routes + Flight Routes (tabs)
  */
+ob_start(); // buffer output so stray warnings can't break redirect headers
 require_once __DIR__ . '/../../includes/auth.php';
 require_login();
 require_once __DIR__ . '/includes/iti_functions.php';
@@ -23,7 +24,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit) {
             'from_destination' => (int)($_POST['from_destination'] ?? 0),
             'to_destination'   => (int)($_POST['to_destination']   ?? 0),
             'duration_min'     => (int)($_POST['duration_min']     ?? 0),
-            'distance_km'      => $_POST['distance_km'] !== '' ? (int)$_POST['distance_km'] : null,
+            'distance_km'      => (($_POST['distance_km'] ?? '') !== '') ? (int)$_POST['distance_km'] : null,
             'road_type'        => $_POST['road_type'] ?? 'mixed',
             'is_active'        => isset($_POST['is_active']) ? 1 : 0,
         ];
@@ -34,6 +35,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit) {
             iti_redirect("transfers.php?tab=road&action={$action}" . ($id ? "&id={$id}" : ''));
         }
 
+        try {
         if ($action === 'add') {
             $db->prepare(
                 'INSERT INTO iti_transfer_routes
@@ -52,6 +54,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit) {
         } elseif ($action === 'delete' && $id) {
             $db->prepare('UPDATE iti_transfer_routes SET is_active=0 WHERE id=?')->execute([$id]);
             iti_flash_set('success', 'Route deactivated.');
+        }
+        } catch (\PDOException $e) {
+            error_log('ITI transfer save failed: ' . $e->getMessage());
+            iti_flash_set('error', 'Could not save the route: ' . $e->getMessage());
+            iti_redirect("transfers.php?tab=road&action={$action}" . ($id ? "&id={$id}" : ''));
         }
         iti_redirect('transfers.php?tab=road');
 
