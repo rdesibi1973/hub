@@ -718,27 +718,32 @@ function buildWALine(r){
   const isArrival=(r.movement_type==='Arrival');
   let line2='';
   if(isArrival){
-    // Line 2: Arrival [pickup] at [time] [flight] transfer to [dropoff]
+    // Line 2: Arrival [pickup] at [time] [note] [flight] transfer to [dropoff]
     line2='Arrival';
     if(r.pickup)  line2+=' '+r.pickup;
     if(r.move_time_fmt||r.flight){
       line2+=' at';
       if(r.move_time_fmt) line2+=' '+r.move_time_fmt;
+      if(r.notes)         line2+=' '+r.notes;
       if(r.flight)        line2+=' '+r.flight;
+    } else if(r.notes){
+      line2+=' '+r.notes;
     }
     if(r.dropoff) line2+=' transfer to '+r.dropoff;
   } else {
-    // Line 2: From [pickup] transfer to [dropoff], [time] [flight]
+    // Line 2: From [pickup] transfer to [dropoff], [time] [note] [flight]
     if(r.pickup)  line2+='From '+r.pickup;
     if(r.dropoff) line2+=' transfer to '+r.dropoff;
     if(r.move_time_fmt||r.flight){
       line2+=',';
       if(r.move_time_fmt) line2+=' '+r.move_time_fmt;
+      if(r.notes)         line2+=' '+r.notes;
       if(r.flight)        line2+=' '+r.flight;
+    } else if(r.notes){
+      line2+=' '+r.notes;
     }
   }
   if(r.driver) line2+=' | driver '+r.driver;
-  if(r.notes)  line2+=' ('+r.notes+')';
   let line=line1+'\n'+line2;
   return line;
 }
