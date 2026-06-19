@@ -1235,7 +1235,7 @@ function renderGridDB(){
     function sortRows(a,b){return a.move_date.localeCompare(b.move_date)||(a.move_time||'').localeCompare(b.move_time||'');}
     const arr=filtered.filter(r=>r.movement_type==='Arrival').sort(sortRows);
     const dep=filtered.filter(r=>r.movement_type==='Departure').sort(sortRows);
-    var html='';
+    let html='';
     html+=gridSection('Arrivals', arr, headCols, 'var(--green)');
     html+=gridSection('Departures', dep, headCols, 'var(--red-dk)');
     wrap.innerHTML=html;
