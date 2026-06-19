@@ -94,6 +94,50 @@ include 'includes/header.php';
 </div>
 
 <!-- FILTERS -->
+<?php
+// ── Pending payment follow-up (flagged invoices with an open balance) ──────
+$pendingFu = $db->query(
+  "SELECT i.id, i.invoice_number, i.bill_to_name, i.currency, i.balance_due,
+          i.issue_date, i.follow_up_note, i.request_id
+   FROM invoices i
+   WHERE i.follow_up = 1 AND i.balance_due > 0 AND i.status <> 'Cancelled'
+   ORDER BY i.issue_date ASC, i.id ASC"
+)->fetchAll();
+?>
+<?php if ($pendingFu): ?>
+<div style="border:1.5px solid #E0A800;background:#FFF8E1;border-radius:8px;padding:14px 18px;margin-bottom:22px;">
+  <div style="font-weight:700;font-size:.9rem;color:#8A6D00;margin-bottom:10px;">
+    &#9873; Pending Payment Follow-up
+    <span style="font-weight:400;color:#A07D00;font-size:.78rem;">— flagged invoices still awaiting payment (<?= count($pendingFu) ?>)</span>
+  </div>
+  <table style="width:100%;border-collapse:collapse;font-size:.83rem;">
+    <thead>
+      <tr style="text-align:left;color:#8A6D00;border-bottom:1px solid #E0C97A;">
+        <th style="padding:4px 8px;">#</th>
+        <th style="padding:4px 8px;">Bill To</th>
+        <th style="padding:4px 8px;text-align:right;">Balance</th>
+        <th style="padding:4px 8px;">Date</th>
+        <th style="padding:4px 8px;">Note</th>
+      </tr>
+    </thead>
+    <tbody>
+      <?php foreach ($pendingFu as $p): ?>
+      <tr style="border-bottom:1px solid #F0E2B0;">
+        <td style="padding:5px 8px;font-weight:700;white-space:nowrap;">
+          <a href="invoice_view.php?id=<?= $p['id'] ?>" style="color:var(--red-dk);text-decoration:none;"><?= h($p['invoice_number']) ?></a>
+        </td>
+        <td style="padding:5px 8px;"><?= h($p['bill_to_name']) ?></td>
+        <td style="padding:5px 8px;text-align:right;font-weight:600;color:#8A6D00;"><?= fmt_money((float)$p['balance_due'], $p['currency']) ?></td>
+        <td style="padding:5px 8px;white-space:nowrap;color:var(--grey-mid);"><?= date('d M Y', strtotime($p['issue_date'])) ?></td>
+        <td style="padding:5px 8px;color:var(--grey-dk);"><?= h($p['follow_up_note'] ?? '') ?></td>
+      </tr>
+      <?php endforeach; ?>
+    </tbody>
+  </table>
+</div>
+<?php endif; ?>
+
+<!-- FILTERS -->
 <form method="GET" class="filters">
   <div><label>Search</label><input type="text" name="q" value="<?= h($search) ?>" placeholder="Number or customer…"></div>
   <div>

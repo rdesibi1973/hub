@@ -148,6 +148,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $terms      = trim($_POST['terms']  ?? 'Due on Receipt');
     $notes      = trim($_POST['notes']  ?? INV_DEFAULT_NOTES);
     $tc         = trim($_POST['terms_conditions'] ?? INV_DEFAULT_TC);
+    $followUp   = !empty($_POST['follow_up']) ? 1 : 0;
+    $followNote = trim($_POST['follow_up_note'] ?? '');
+    if (strlen($followNote) > 255) $followNote = substr($followNote, 0, 255);
+    if (!$followUp) $followNote = '';
 
     if (!$billToName)                   $errors[] = 'Bill To name is required.';
     if (!in_array($issuer, INV_ISSUERS))$errors[] = 'Invalid issuer.';
@@ -171,11 +175,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $db->prepare("INSERT INTO invoices
             (invoice_number, request_id, customer_id, bill_to_name, bill_to_address,
              issuer, currency, issue_date, due_date, terms, notes, terms_conditions,
-             status, created_by)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'New',?)")
+             status, follow_up, follow_up_note, created_by)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'New',?,?,?)")
            ->execute([$invNum,$reqId,$customerId,$billToName,$billToAddr?:null,
                       $issuer,$currency,$issueDate,$dueDate,$terms,
-                      $notes?:null,$tc?:null,$uid]);
+                      $notes?:null,$tc?:null,$followUp,$followNote?:null,$uid]);
 
         $invId = (int)$db->lastInsertId();
 
@@ -322,6 +326,22 @@ include 'includes/header.php';
         <span id="tcBadge" style="display:none;margin-left:8px;font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.07em;padding:2px 8px;border-radius:4px;background:#EDE7F6;color:#6A1B9A;vertical-align:middle;">Agency — 45 days</span>
       </label>
       <textarea name="terms_conditions" id="tcTextarea" class="tall"><?= h($prefill['tc'] ?? INV_DEFAULT_TC) ?></textarea>
+    </div>
+  </div>
+
+  <!-- ── Payment follow-up ── -->
+  <div class="form-section">Payment Follow-up</div>
+  <div class="form-grid">
+    <div class="form-group full">
+      <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-weight:600;">
+        <input type="checkbox" name="follow_up" id="followUpCheck" value="1" onchange="onAddFollowUpToggle()" style="width:17px;height:17px;cursor:pointer;">
+        <span>&#9873; Flag for payment follow-up</span>
+        <span style="font-weight:400;color:var(--grey-mid);font-size:.78rem;">— for extra services billed on an already-settled trip</span>
+      </label>
+    </div>
+    <div class="form-group full" id="followUpNoteWrap" style="display:none;">
+      <label>Follow-up note</label>
+      <input type="text" name="follow_up_note" id="followUpNote" maxlength="255" placeholder="e.g. ask for payment together with practice TRA1408…">
     </div>
   </div>
 
@@ -503,6 +523,10 @@ function escHtml(s)  { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;
 function escAttr(s)  { return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/\n/g,' '); }
 function escJs(s)    { return String(s).replace(/'/g,"\\'").replace(/\n/g,' '); }
 function ucfirst(s) { return s.charAt(0).toUpperCase()+s.slice(1); }
+function onAddFollowUpToggle() {
+  var checked = document.getElementById('followUpCheck').checked;
+  document.getElementById('followUpNoteWrap').style.display = checked ? 'block' : 'none';
+}
 
 // Init TC badge if page was pre-filled with an agency
 (function() {

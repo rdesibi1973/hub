@@ -56,8 +56,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
     if ($action === 'cancel_invoice') {
         $invId = (int)($_POST['invoice_id'] ?? 0);
-        $db->prepare("UPDATE invoices SET status='Cancelled', updated_at=NOW() WHERE id=?")->execute([$invId]);
+        // Zero out the balance so a cancelled invoice never appears in the
+        // payment follow-up list (existing payment rows are kept for history).
+        $db->prepare("UPDATE invoices SET status='Cancelled', balance_due=0, amount_paid=0, updated_at=NOW() WHERE id=?")->execute([$invId]);
         sync_request_value($db, $invId);
+        ob_end_clean(); echo json_encode(['ok'=>true]); exit;
+    }
+
+    if ($action === 'toggle_follow_up') {
+        $invId = (int)($_POST['invoice_id'] ?? 0);
+        $flag  = !empty($_POST['follow_up']) ? 1 : 0;
+        $note  = trim($_POST['follow_up_note'] ?? '');
+        if (strlen($note) > 255) $note = substr($note, 0, 255);
+        // If the flag is turned off, clear the note as well.
+        if (!$flag) $note = '';
+        $db->prepare("UPDATE invoices SET follow_up=?, follow_up_note=?, updated_at=NOW() WHERE id=?")
+           ->execute([$flag, $note ?: null, $invId]);
         ob_end_clean(); echo json_encode(['ok'=>true]); exit;
     }
 
@@ -319,6 +333,27 @@ $sym = $inv['currency'] === 'EUR' ? '€' : '$';
     <?php endif; ?>
   </div>
 </div>
+
+<!-- ── PAYMENT FOLLOW-UP ───────────────────────────────────────────────── -->
+<?php if ($inv['status'] !== 'Cancelled'): ?>
+<div id="followUpPanel" style="max-width:860px;margin-bottom:20px;border:1.5px solid <?= $inv['follow_up'] ? '#E0A800' : 'var(--grey-lt)' ?>;background:<?= $inv['follow_up'] ? '#FFF8E1' : '#fff' ?>;border-radius:8px;padding:14px 16px;">
+  <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-weight:600;font-size:.88rem;">
+    <input type="checkbox" id="followUpCheck" <?= $inv['follow_up'] ? 'checked' : '' ?> onchange="onFollowUpToggle()" style="width:17px;height:17px;cursor:pointer;">
+    <span>&#9873; Flag for payment follow-up</span>
+    <span style="font-weight:400;color:var(--grey-mid);font-size:.78rem;">— for extra services billed on an already-settled trip</span>
+  </label>
+  <div id="followUpNoteWrap" style="margin-top:10px;<?= $inv['follow_up'] ? '' : 'display:none;' ?>">
+    <input type="text" id="followUpNote" maxlength="255"
+           value="<?= h($inv['follow_up_note'] ?? '') ?>"
+           placeholder="Note (e.g. ask for payment together with practice TRA1408)…"
+           style="width:100%;padding:8px 10px;border:1.5px solid var(--grey-lt);border-radius:6px;font-family:inherit;font-size:.83rem;box-sizing:border-box;">
+    <div style="margin-top:8px;display:flex;align-items:center;gap:10px;">
+      <button class="btn btn-outline btn-sm" onclick="saveFollowUp()">Save note</button>
+      <span id="followUpMsg" style="font-size:.78rem;display:none;"></span>
+    </div>
+  </div>
+</div>
+<?php endif; ?>
 
 <!-- ── INVOICE DETAILS ─────────────────────────────────────────────────── -->
 <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;max-width:860px;margin-bottom:24px;">
@@ -632,6 +667,39 @@ async function cancelInvoice() {
   var fd = new FormData();
   fd.append('action','cancel_invoice'); fd.append('invoice_id','<?= $id ?>');
   fetch('invoice_view.php', {method:'POST',body:fd}).then(function(r){return r.json();}).then(function(d){ if(d.ok) location.reload(); });
+}
+
+function onFollowUpToggle() {
+  var checked = document.getElementById('followUpCheck').checked;
+  document.getElementById('followUpNoteWrap').style.display = checked ? 'block' : 'none';
+  var panel = document.getElementById('followUpPanel');
+  panel.style.borderColor = checked ? '#E0A800' : 'var(--grey-lt)';
+  panel.style.background  = checked ? '#FFF8E1' : '#fff';
+  // Persist the flag immediately on toggle (note saved separately).
+  saveFollowUp(true);
+}
+
+async function saveFollowUp(silent) {
+  var checked = document.getElementById('followUpCheck').checked;
+  var note    = document.getElementById('followUpNote').value;
+  var msg     = document.getElementById('followUpMsg');
+  var fd = new FormData();
+  fd.append('action','toggle_follow_up');
+  fd.append('invoice_id','<?= $id ?>');
+  fd.append('follow_up', checked ? '1' : '0');
+  fd.append('follow_up_note', note);
+  try {
+    var r = await fetch('invoice_view.php?id=<?= $id ?>', {method:'POST', body:fd});
+    var d = await r.json();
+    if (d.ok && !silent) {
+      msg.style.display = 'inline'; msg.style.color = 'var(--green)'; msg.textContent = '\u2713 Saved';
+      setTimeout(function(){ msg.style.display='none'; }, 2500);
+    } else if (!d.ok) {
+      msg.style.display = 'inline'; msg.style.color = 'var(--red)'; msg.textContent = '\u2717 ' + (d.error || 'Error');
+    }
+  } catch(e) {
+    if (!silent) { msg.style.display = 'inline'; msg.style.color = 'var(--red)'; msg.textContent = '\u2717 ' + e.message; }
+  }
 }
 </script>
 
