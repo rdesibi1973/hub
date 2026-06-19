@@ -731,16 +731,14 @@ function buildWALine(r){
     }
     if(r.dropoff) line2+=' transfer to '+r.dropoff;
   } else {
-    // Line 2: From [pickup] transfer to [dropoff], [time] [note] [flight]
+    // Line 2: From [pickup] [note] transfer to [dropoff], [time] [flight]
     if(r.pickup)  line2+='From '+r.pickup;
+    if(r.notes)   line2+=' '+r.notes;
     if(r.dropoff) line2+=' transfer to '+r.dropoff;
     if(r.move_time_fmt||r.flight){
       line2+=',';
       if(r.move_time_fmt) line2+=' '+r.move_time_fmt;
-      if(r.notes)         line2+=' '+r.notes;
       if(r.flight)        line2+=' '+r.flight;
-    } else if(r.notes){
-      line2+=' '+r.notes;
     }
   }
   if(r.driver) line2+=' | driver '+r.driver;
