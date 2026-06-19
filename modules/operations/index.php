@@ -299,13 +299,9 @@ include __DIR__ . '/../../includes/layout_header.php';
         <div class="sel-chips" id="sel-chips"></div>
       </div>
     </div>
-    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+    <div style="display:flex;gap:8px;">
       <button class="btn-show" onclick="loadMovements()">Show Movements</button>
       <button class="btn-show btn-ghost" onclick="openAddModal()">&#10133; Add</button>
-      <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:.8rem;color:var(--grey-dk);margin-left:6px;">
-        <input type="checkbox" id="groupByType" onchange="renderMovements(lastData)" style="width:15px;height:15px;cursor:pointer;">
-        Group by arrival and departure
-      </label>
     </div>
   </div>
   <div class="mov-main" id="mov-output">
@@ -376,10 +372,14 @@ include __DIR__ . '/../../includes/layout_header.php';
       <span class="ctrl-lbl">Client</span>
       <input type="text" id="grid-client-filter" placeholder="Search client…" style="font-family:'Open Sans',sans-serif;font-size:.85rem;padding:7px 11px;border:1.5px solid rgba(255,255,255,.25);border-radius:6px;background:rgba(255,255,255,.1);color:var(--white);width:170px;" oninput="renderGridDB()" onkeydown="if(event.key==='Escape'){this.value='';renderGridDB();}">
     </div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
       <button class="btn-show" onclick="loadGridFromDB()">Load Movements</button>
       <button class="btn-show btn-ghost" onclick="deleteSelectedRows()" id="btnDeleteSel" style="display:none;">&#128465; Delete Selected</button>
       <button class="btn-show btn-ghost" onclick="copyGridAllRows()" id="copyGridAllBtn">&#128203; Copy all</button>
+      <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:.8rem;color:var(--white);margin-left:6px;">
+        <input type="checkbox" id="gridGroupByType" onchange="renderGridDB()" style="width:15px;height:15px;cursor:pointer;">
+        Group by arrival and departure
+      </label>
     </div>
   </div>
   <div class="grid-wrap" id="gridWrap">
@@ -596,8 +596,6 @@ function fmtDateLabel(iso){
 }
 function renderMovements(rows){
   const out=document.getElementById('mov-output');
-  const groupByType=document.getElementById('groupByType') && document.getElementById('groupByType').checked;
-  if(groupByType){ renderMovementsByType(rows); return; }
   const byDate={};
   rows.forEach(r=>{if(!byDate[r.move_date])byDate[r.move_date]=[];byDate[r.move_date].push(r);});
   const allDates=[...new Set([...reqDates,...Object.keys(byDate)])].sort();
@@ -618,34 +616,6 @@ function renderMovements(rows){
     html+='</div>';
   });
   out.innerHTML=html;
-}
-function renderMovementsByType(rows){
-  const out=document.getElementById('mov-output');
-  if(!rows||!rows.length){out.innerHTML='<div class="placeholder"><div class="icon">&#128235;</div><h2>No movements found</h2><p>No data for the selected date(s).</p></div>';return;}
-  function sortRows(a,b){return (a.move_date||'').localeCompare(b.move_date||'')||(a.move_time||'').localeCompare(b.move_time||'');}
-  const arr=rows.filter(r=>r.movement_type==='Arrival').sort(sortRows);
-  const dep=rows.filter(r=>r.movement_type==='Departure').sort(sortRows);
-  const arrPax=arr.reduce((s,r)=>s+parseInt(r.pax||0),0);
-  const depPax=dep.reduce((s,r)=>s+parseInt(r.pax||0),0);
-  let html='';
-  html+='<div class="date-block" style="border-left-color:var(--green);">';
-  html+='<div class="date-block-header"><h2 style="color:var(--green);">Arrivals</h2></div>';
-  html+='<div class="summary"><div class="chip chip-arr"><span class="num">'+arr.length+'</span><div><div class="chip-label">Arrivals</div></div></div>';
-  html+='<div class="chip chip-pax"><span class="num">'+arrPax+'</span><div><div class="chip-label">Total Pax</div></div></div></div>';
-  html+=arr.length?buildMovTableDated(arr):'<p style="color:var(--grey-mid);font-style:italic;">No arrivals.</p>';
-  html+='</div>';
-  html+='<div class="date-block">';
-  html+='<div class="date-block-header"><h2>Departures</h2></div>';
-  html+='<div class="summary"><div class="chip chip-dep"><span class="num">'+dep.length+'</span><div><div class="chip-label">Departures</div></div></div>';
-  html+='<div class="chip chip-pax"><span class="num">'+depPax+'</span><div><div class="chip-label">Total Pax</div></div></div></div>';
-  html+=dep.length?buildMovTableDated(dep):'<p style="color:var(--grey-mid);font-style:italic;">No departures.</p>';
-  html+='</div>';
-  out.innerHTML=html;
-}
-function buildMovTableDated(rows){
-  return '<div class="tbl-wrap"><table class="mov-table"><thead><tr><th>Date</th><th>Client / Group</th><th>Pax</th><th>Flight</th><th>Time</th><th>Pick Up</th><th>Drop Off</th><th>Driver</th><th>Notes</th><th>Dropbox</th><th></th></tr></thead><tbody>'+
-    rows.map(r=>'<tr><td style="white-space:nowrap;font-size:.78rem;color:var(--grey-dk);">'+xss(r.move_date_fmt||r.move_date)+'</td><td>'+xss(r.client_name)+'</td><td class="td-pax">'+r.pax+'</td><td class="td-flight">'+xss(r.flight)+'</td><td class="td-time">'+xss(r.move_time_fmt)+'</td><td>'+xss(r.pickup)+'</td><td>'+xss(r.dropoff)+'</td><td>'+xss(r.driver)+'</td><td class="td-notes">'+xss(r.notes)+'</td><td style="font-size:.72rem;color:var(--grey-mid);">'+xss(r.dropbox_folder)+'</td><td><button class="btn-edit" onclick="editMov('+r.id+')">Edit</button><button class="btn-del" onclick="delMov('+r.id+',this)">Del</button></td></tr>').join('')+
-    '</tbody></table></div>';
 }
 function buildMovTable(rows){
   return '<div class="tbl-wrap"><table class="mov-table"><thead><tr><th>Client / Group</th><th>Pax</th><th>Flight</th><th>Time</th><th>Pick Up</th><th>Drop Off</th><th>Driver</th><th>Notes</th><th>Dropbox</th><th></th></tr></thead><tbody>'+
@@ -1257,34 +1227,63 @@ function renderGridDB(){
     return;
   }
   document.getElementById('btnDeleteSel').style.display='';
+  const groupByType=document.getElementById('gridGroupByType') && document.getElementById('gridGroupByType').checked;
+  const headCols='<th>Date</th><th>Type</th><th>Client</th><th>Pax</th><th>Flight</th><th>Time</th>'+
+    '<th>Pick Up</th><th>Drop Off</th><th>Driver</th><th>Notes</th><th></th>';
+
+  if(groupByType){
+    function sortRows(a,b){return a.move_date.localeCompare(b.move_date)||(a.move_time||'').localeCompare(b.move_time||'');}
+    const arr=filtered.filter(r=>r.movement_type==='Arrival').sort(sortRows);
+    const dep=filtered.filter(r=>r.movement_type==='Departure').sort(sortRows);
+    var html='';
+    html+=gridSection('Arrivals', arr, headCols, 'var(--green)');
+    html+=gridSection('Departures', dep, headCols, 'var(--red-dk)');
+    wrap.innerHTML=html;
+    return;
+  }
+
   const sorted=[...filtered].sort((a,b)=>a.move_date.localeCompare(b.move_date)||(a.movement_type==='Departure'?1:-1));
   let html='<table class="movements-table"><thead><tr>'+
     '<th style="width:32px;"><input type="checkbox" id="selAll" onchange="toggleSelectAll(this)"></th>'+
-    '<th>Date</th><th>Type</th><th>Client</th><th>Pax</th><th>Flight</th><th>Time</th>'+
-    '<th>Pick Up</th><th>Drop Off</th><th>Driver</th><th>Notes</th><th></th>'+
+    headCols+
     '</tr></thead><tbody>';
   sorted.forEach(function(row){
-    var cls=row.movement_type==='Arrival'?'row-arrival':'row-departure';
-    html+='<tr class="'+cls+'" data-id="'+row.id+'">'+
-      '<td><input type="checkbox" class="row-sel" value="'+row.id+'"></td>'+
-      '<td>'+xss(row.move_date_fmt||row.move_date)+'</td>'+
-      '<td>'+xss(row.movement_type)+'</td>'+
-      '<td>'+xss(row.client_name)+'</td>'+
-      '<td>'+row.pax+'</td>'+
-      '<td class="td-flight">'+xss(row.flight)+'</td>'+
-      '<td class="td-time">'+xss(row.move_time_fmt)+'</td>'+
-      '<td>'+xss(row.pickup)+'</td>'+
-      '<td>'+xss(row.dropoff)+'</td>'+
-      '<td>'+xss(row.driver)+'</td>'+
-      '<td class="td-notes">'+xss(row.notes)+'</td>'+
-      '<td style="white-space:nowrap;">'+
-        '<button class="btn-edit" onclick="editGridRow('+row.id+')">Edit</button>'+
-        '<button class="btn-del" onclick="deleteGridRow('+row.id+',this)">Del</button>'+
-      '</td>'+
-    '</tr>';
+    html+=gridRowHtml(row);
   });
   html+='</tbody></table>';
   wrap.innerHTML=html;
+}
+
+function gridSection(label, rows, headCols, color){
+  var titlePax=rows.reduce(function(s,r){return s+parseInt(r.pax||0);},0);
+  var h='<div style="margin-bottom:8px;margin-top:18px;font-family:\'Merriweather\',serif;font-size:1.05rem;font-weight:700;color:'+color+';">'+
+        label+' <span style="font-family:\'Open Sans\',sans-serif;font-size:.78rem;font-weight:400;color:var(--grey-mid);">('+rows.length+' &middot; '+titlePax+' pax)</span></div>';
+  if(!rows.length){return h+'<p style="color:var(--grey-mid);font-style:italic;margin-bottom:14px;">No '+label.toLowerCase()+'.</p>';}
+  h+='<table class="movements-table" style="margin-bottom:18px;"><thead><tr><th style="width:32px;"></th>'+headCols+'</tr></thead><tbody>';
+  rows.forEach(function(row){ h+=gridRowHtml(row); });
+  h+='</tbody></table>';
+  return h;
+}
+
+function gridRowHtml(row){
+  var cls=row.movement_type==='Arrival'?'row-arrival':'row-departure';
+  return '<tr class="'+cls+'" data-id="'+row.id+'">'+
+    '<td><input type="checkbox" class="row-sel" value="'+row.id+'"></td>'+
+    '<td>'+xss(row.move_date_fmt||row.move_date)+'</td>'+
+    '<td>'+xss(row.movement_type)+'</td>'+
+    '<td>'+xss(row.client_name)+'</td>'+
+    '<td>'+row.pax+'</td>'+
+    '<td class="td-flight">'+xss(row.flight)+'</td>'+
+    '<td class="td-time">'+xss(row.move_time_fmt)+'</td>'+
+    '<td>'+xss(row.pickup)+'</td>'+
+    '<td>'+xss(row.dropoff)+'</td>'+
+    '<td>'+xss(row.driver)+'</td>'+
+    '<td class="td-notes">'+xss(row.notes)+'</td>'+
+    '<td style="white-space:nowrap;">'+
+      '<button class="btn-edit" onclick="editGridRow('+row.id+')">Edit</button>'+
+      '<button class="btn-del" onclick="deleteGridRow('+row.id+',this)">Del</button>'+
+    '</td>'+
+  '</tr>';
 }
 
 // ── Delete confirmation modal ────────────────────────────────
