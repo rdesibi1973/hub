@@ -84,9 +84,11 @@ function send_hub_email(
         $mail->Subject = $subject;
 
         // Append the logged-in user's HTML signature, if any.
+        error_log('[SIG-DEBUG] func_exists=' . (function_exists('get_user_signature_html')?'1':'0') . ' session_uid=' . ($_SESSION['user_id'] ?? 'NULL') . ' session_status=' . session_status());
         if (function_exists('get_user_signature_html')) {
             $sigUid = (int)($_SESSION['user_id'] ?? 0);
             $sig = $sigUid > 0 ? get_user_signature_html($sigUid) : '';
+            error_log('[SIG-DEBUG] sigUid=' . $sigUid . ' sig_len=' . strlen($sig) . ' path=' . (function_exists('signature_path')?signature_path($sigUid):'?'));
             if ($sig !== '') {
                 $body_html .= '<br><br><hr style="border:none;border-top:1px solid #ccc;margin:12px 0;">' . $sig;
             }
