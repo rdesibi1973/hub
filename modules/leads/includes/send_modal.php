@@ -4,6 +4,14 @@
  * Requires: $templates (array with id, name, category), $send_ajax_url (string)
  * Usage: include 'includes/send_modal.php';
  */
+if (is_file(__DIR__ . '/../../../includes/signature_helper.php')) {
+    require_once __DIR__ . '/../../../includes/signature_helper.php';
+}
+$sig_preview = '';
+if (function_exists('get_user_signature_html')) {
+    $sig_uid = (int)($_SESSION['user_id'] ?? 0);
+    if ($sig_uid > 0) $sig_preview = get_user_signature_html($sig_uid);
+}
 $tpl_by_cat = [];
 foreach ($templates as $t) $tpl_by_cat[$t['category'] ?: 'General'][] = $t;
 ksort($tpl_by_cat);
@@ -51,6 +59,18 @@ ksort($tpl_by_cat);
         <div id="send-quill" style="min-height:200px;font-size:.88rem;font-family:'Open Sans',sans-serif"></div>
       </div>
       <textarea id="send_body" style="display:none"></textarea>
+
+      <?php if ($sig_preview !== ''): ?>
+      <div style="margin-top:14px">
+        <label class="m-label" style="display:flex;align-items:center;gap:8px;">
+          Signature preview
+          <span style="font-weight:400;color:var(--grey-mid);font-size:.74rem;">— added automatically when you send (not editable here)</span>
+        </label>
+        <div style="border:1px dashed var(--grey-lt);border-radius:6px;padding:12px 14px;background:#FAFAFA;font-size:.84rem;color:#555;max-height:220px;overflow:auto;">
+          <?= $sig_preview /* sanitized on upload */ ?>
+        </div>
+      </div>
+      <?php endif; ?>
 
       <div style="margin-top:14px">
         <label class="m-label">📎 Attachments</label>
