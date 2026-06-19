@@ -8,7 +8,7 @@ $isStaff      = isLeadsRestricted();
 $staffAgentId = $isStaff ? getStaffAgentId() : 0;
 
 // ── Session-based filter persistence ────────────────────────────
-if (session_status() === PHP_SESSION_NONE) session_start();
+require_once __DIR__ . '/../../includes/session_boot.php'; hub_session_boot();
 
 // Default agent: current user's linked agent (if any), so "My Requests" opens pre-filtered
 $myAgentId = 0;

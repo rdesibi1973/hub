@@ -19,7 +19,7 @@ $body = json_decode($raw, true);
 if (!$body) fail('Invalid JSON body.');
 
 // CSRF
-if (session_status() === PHP_SESSION_NONE) session_start();
+require_once __DIR__ . '/../../includes/session_boot.php'; hub_session_boot();
 $expectedCsrf = $_SESSION['csrf_token'] ?? '';
 if (empty($body['csrf']) || !hash_equals($expectedCsrf, $body['csrf'])) fail('Invalid CSRF token.', 403);
 

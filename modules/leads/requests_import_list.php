@@ -5,7 +5,7 @@ if (isLeadsRestricted()) { header('Location: requests.php'); exit; }
 $pageTitle = 'Historical Requests';
 $db = db();
 
-if (session_status() === PHP_SESSION_NONE) session_start();
+require_once __DIR__ . '/../../includes/session_boot.php'; hub_session_boot();
 
 // Clear filters
 if (isset($_GET['clear'])) {

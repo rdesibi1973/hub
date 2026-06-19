@@ -1,18 +1,10 @@
 <?php
 require_once __DIR__ . '/config.php';
+require_once __DIR__ . '/session_boot.php';
 
 // ── Session bootstrap ─────────────────────────────────
 function start_session(): void {
-    if (session_status() === PHP_SESSION_NONE) {
-        session_set_cookie_params([
-            'lifetime' => SESSION_LIFETIME,
-            'path'     => '/',
-            'secure'   => (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on'),
-            'httponly' => true,
-            'samesite' => 'Lax',
-        ]);
-        session_start();
-    }
+    hub_session_boot();
 }
 
 // ── Auth checks ───────────────────────────────────────
@@ -103,6 +95,7 @@ function is_admin(): bool {
 
 // ── Login / Logout ────────────────────────────────────
 function login_user(PDO $pdo, string $username, string $password): bool {
+    start_session(); // ensure private save_path is active before regenerate
     $stmt = $pdo->prepare('
         SELECT u.*, r.name AS role_name
         FROM   users u
