@@ -5,6 +5,11 @@ use PHPMailer\PHPMailer\Exception as MailException;
 require_once __DIR__ . '/phpmailer/Exception.php';
 require_once __DIR__ . '/phpmailer/PHPMailer.php';
 
+// Per-user email signatures (defines get_user_signature_html, etc.)
+if (is_file(__DIR__ . '/../../../includes/signature_helper.php')) {
+    require_once __DIR__ . '/../../../includes/signature_helper.php';
+}
+
 /**
  * Tidy up HTML produced by the Quill editor so it renders compactly and
  * consistently across mail clients (Thunderbird, Gmail, etc.).
@@ -77,6 +82,16 @@ function send_hub_email(
         }
         $mail->isHTML(true);
         $mail->Subject = $subject;
+
+        // Append the logged-in user's HTML signature, if any.
+        if (function_exists('get_user_signature_html')) {
+            $sigUid = (int)($_SESSION['user_id'] ?? 0);
+            $sig = $sigUid > 0 ? get_user_signature_html($sigUid) : '';
+            if ($sig !== '') {
+                $body_html .= '<br><br><hr style="border:none;border-top:1px solid #ccc;margin:12px 0;">' . $sig;
+            }
+        }
+
         $mail->Body    = $body_html;
         $mail->AltBody = strip_tags($body_html);
 

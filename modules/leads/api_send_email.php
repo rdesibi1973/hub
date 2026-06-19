@@ -13,6 +13,7 @@ define('HS_INCLUDED', true);   // prevent hubspot_sync.php CLI block if required
 require_once __DIR__ . '/../../includes/config.php';
 require_once __DIR__ . '/../../includes/db.php';
 require_once __DIR__ . '/../../includes/auth.php';
+require_once __DIR__ . '/../../includes/signature_helper.php';
 // Also load module config so API_KEY constant is available
 if (!defined('API_KEY')) {
     require_once __DIR__ . '/config.php';
@@ -96,37 +97,15 @@ if ($userId > 0) {
     }
 }
 
-// ── Signature (only for rdesibi / info@savannahexplorers.com) ────────────────
+// ── Signature: per-user HTML file (admin/uploads/signatures/{user_id}.html) ──
 $signaturePlain = '';
 $signatureHtml  = '';
-if ($userEmail === 'info@savannahexplorers.com') {
-    $signaturePlain = "\r\n\r\n--\r\nRoberto\r\n\r\n"
-        . "Savannah Explorers Ltd\r\n"
-        . "Engosheraton - P.O. Box 16726\r\n"
-        . "Arusha - Tanzania\r\n"
-        . "Roberto +255 784 520 453\r\n"
-        . "Office +255 768 900 199\r\n"
-        . "Emergency Mobile Tanzania: +255 768 900 199 and +255 747 777 315\r\n"
-        . "Zanzibar transfers +255 773 053 725\r\n"
-        . "Email: info@savannahexplorers.com\r\n"
-        . "Website IT: savannahexplorers.com\r\n"
-        . "Website EN: savannahexplorers.net";
-
-    $signatureHtml = '<br><br><hr style="border:none;border-top:1px solid #ccc;margin:12px 0;">'
-        . '<p style="font-family:Arial,sans-serif;font-size:13px;color:#333;line-height:1.6;margin:0;">'
-        . 'Roberto'
-        . '<br><br>'
-        . '<strong style="font-size:14px;">Savannah Explorers Ltd</strong><br>'
-        . 'Engosheraton - P.O. Box 16726<br>'
-        . 'Arusha - Tanzania<br>'
-        . 'Roberto +255 784 520 453<br>'
-        . 'Office +255 768 900 199<br>'
-        . 'Emergency Mobile Tanzania: +255 768 900 199 and +255 747 777 315<br>'
-        . 'Zanzibar transfers +255 773 053 725<br>'
-        . 'Email: <a href="mailto:info@savannahexplorers.com">info@savannahexplorers.com</a><br>'
-        . 'Website IT: <a href="https://savannahexplorers.com">savannahexplorers.com</a><br>'
-        . 'Website EN: <a href="https://savannahexplorers.net">savannahexplorers.net</a>'
-        . '</p>';
+if ($userId > 0) {
+    $sig = get_user_signature_html($userId);
+    if ($sig !== '') {
+        $signatureHtml  = '<br><br><hr style="border:none;border-top:1px solid #ccc;margin:12px 0;">' . $sig;
+        $signaturePlain = "\r\n\r\n--\r\n" . signature_html_to_plain($sig);
+    }
 }
 
 // ── Send via BlueHost mail() ──────────────────────────────────────────────────

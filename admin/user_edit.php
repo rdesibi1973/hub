@@ -1,6 +1,7 @@
 <?php
 require_once __DIR__ . '/../includes/db.php';
 require_once __DIR__ . '/../includes/auth.php';
+require_once __DIR__ . '/../includes/signature_helper.php';
 require_admin();
 
 $id = (int)($_GET['id'] ?? 0);
@@ -15,6 +16,13 @@ $agents = $pdo->query('SELECT id, name FROM agents ORDER BY name')->fetchAll();
 
 $roles  = $pdo->query('SELECT * FROM roles ORDER BY name')->fetchAll();
 $form   = [];
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['form_kind'] ?? '') === 'signature') {
+    verify_csrf();
+    [$ok, $msg] = handle_signature_upload($id, $_FILES, $_POST);
+    if ($msg !== '') flash($msg, $ok ? 'success' : 'error');
+    redirect(BASE_URL . '/admin/user_edit.php?id=' . $id);
+}
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     verify_csrf();
@@ -142,6 +150,48 @@ include __DIR__ . '/../includes/layout_header.php';
         <div class="form-actions">
           <button type="submit" class="btn btn-primary">Save Changes</button>
           <a href="<?= BASE_URL ?>/admin/users.php" class="btn btn-secondary">Cancel</a>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <?php
+    $hasSig  = user_has_signature($id);
+    $sigHtml = $hasSig ? get_user_signature_html($id) : '';
+  ?>
+  <div class="card" style="margin-top:20px;">
+    <div class="card-header"><h2>Email Signature</h2></div>
+    <div style="padding:16px 18px;">
+      <p style="font-size:.86rem;color:var(--grey-mid);margin-top:0;">
+        HTML signature appended to emails this user sends from Hub. Images must
+        use full public URLs to display in email clients.
+      </p>
+      <?php if ($hasSig): ?>
+        <div style="margin:14px 0;">
+          <div style="font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--grey-mid);margin-bottom:6px;">Current signature preview</div>
+          <div style="border:1px solid var(--grey-lt);border-radius:8px;padding:14px;background:#fff;"><?= $sigHtml ?></div>
+        </div>
+      <?php else: ?>
+        <p style="font-size:.86rem;color:var(--grey-mid);font-style:italic;">No signature uploaded yet.</p>
+      <?php endif; ?>
+      <form method="POST" enctype="multipart/form-data" action="<?= BASE_URL ?>/admin/user_edit.php?id=<?= $id ?>" style="margin-top:14px;">
+        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+        <input type="hidden" name="form_kind" value="signature">
+        <div style="display:flex;flex-direction:column;gap:12px;">
+          <div>
+            <label style="display:block;font-size:.82rem;font-weight:600;margin-bottom:5px;">
+              <?= $hasSig ? 'Replace signature (.html)' : 'Upload signature (.html)' ?>
+            </label>
+            <input type="file" name="signature_file" accept=".html,.htm">
+          </div>
+          <div style="display:flex;gap:10px;align-items:center;">
+            <button type="submit" class="btn btn-primary btn-sm">Save Signature</button>
+            <?php if ($hasSig): ?>
+              <label style="display:flex;align-items:center;gap:6px;font-size:.82rem;color:var(--red-dk);cursor:pointer;">
+                <input type="checkbox" name="delete_signature" value="1"> Remove current signature
+              </label>
+            <?php endif; ?>
+          </div>
         </div>
       </form>
     </div>

@@ -406,6 +406,8 @@ footer { margin: 0 40px; padding: 20px 0; border-top: 1px solid var(--grey-lt); 
 
     <?php endif; ?>
 
+    <a href="<?= BASE_URL ?>/profile.php" class="btn-header" style="background:var(--grey-lt);color:var(--grey-dk);">👤 My Profile</a>
+
     <a href="<?= BASE_URL ?>/change_password.php" class="btn-header" style="background:var(--grey-lt);color:var(--grey-dk);">🔒 Password</a>
 
     <a href="<?= BASE_URL ?>/logout.php" class="btn-header btn-logout">Logout</a>

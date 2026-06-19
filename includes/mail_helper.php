@@ -2,6 +2,9 @@
 /**
  * Substitute {{variables}} in a template string using request data.
  */
+if (is_file(__DIR__ . '/signature_helper.php')) {
+    require_once __DIR__ . '/signature_helper.php';
+}
 function substitute_vars(string $text, array $req, array $dates, string $agent_name, string $agent_email): string {
     $start_fmt = $dates['start_date'] ? date('d M Y', strtotime($dates['start_date'])) : '';
     $end_fmt   = $dates['end_date']   ? date('d M Y', strtotime($dates['end_date']))   : '';
@@ -45,6 +48,16 @@ function send_hub_email(
     string $reply_to = ''
 ): bool {
     $body_html = normalize_email_html($body_html);
+
+    // Append the logged-in user's HTML signature, if any.
+    if (function_exists('get_user_signature_html')) {
+        $sigUid = (int)($_SESSION['user_id'] ?? 0);
+        $sig = $sigUid > 0 ? get_user_signature_html($sigUid) : '';
+        if ($sig !== '') {
+            $body_html .= '<br><br><hr style="border:none;border-top:1px solid #ccc;margin:12px 0;">' . $sig;
+        }
+    }
+
     $headers  = "MIME-Version: 1.0\r\n";
     $headers .= "Content-Type: text/html; charset=UTF-8\r\n";
     $headers .= "From: =?UTF-8?B?" . base64_encode($from_name) . "?= <{$from_email}>\r\n";

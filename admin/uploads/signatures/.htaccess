@@ -1,0 +1,4 @@
+# Allow only static html signatures; never execute anything here.
+<FilesMatch "\.(php|phtml|php3|php4|php5|pl|py|cgi|sh)$">
+  Require all denied
+</FilesMatch>
