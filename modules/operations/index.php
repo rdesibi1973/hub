@@ -299,9 +299,13 @@ include __DIR__ . '/../../includes/layout_header.php';
         <div class="sel-chips" id="sel-chips"></div>
       </div>
     </div>
-    <div style="display:flex;gap:8px;">
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
       <button class="btn-show" onclick="loadMovements()">Show Movements</button>
       <button class="btn-show btn-ghost" onclick="openAddModal()">&#10133; Add</button>
+      <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:.8rem;color:var(--grey-dk);margin-left:6px;">
+        <input type="checkbox" id="groupByType" onchange="renderMovements(lastData)" style="width:15px;height:15px;cursor:pointer;">
+        Group by arrival and departure
+      </label>
     </div>
   </div>
   <div class="mov-main" id="mov-output">
@@ -592,6 +596,8 @@ function fmtDateLabel(iso){
 }
 function renderMovements(rows){
   const out=document.getElementById('mov-output');
+  const groupByType=document.getElementById('groupByType') && document.getElementById('groupByType').checked;
+  if(groupByType){ renderMovementsByType(rows); return; }
   const byDate={};
   rows.forEach(r=>{if(!byDate[r.move_date])byDate[r.move_date]=[];byDate[r.move_date].push(r);});
   const allDates=[...new Set([...reqDates,...Object.keys(byDate)])].sort();
@@ -612,6 +618,34 @@ function renderMovements(rows){
     html+='</div>';
   });
   out.innerHTML=html;
+}
+function renderMovementsByType(rows){
+  const out=document.getElementById('mov-output');
+  if(!rows||!rows.length){out.innerHTML='<div class="placeholder"><div class="icon">&#128235;</div><h2>No movements found</h2><p>No data for the selected date(s).</p></div>';return;}
+  function sortRows(a,b){return (a.move_date||'').localeCompare(b.move_date||'')||(a.move_time||'').localeCompare(b.move_time||'');}
+  const arr=rows.filter(r=>r.movement_type==='Arrival').sort(sortRows);
+  const dep=rows.filter(r=>r.movement_type==='Departure').sort(sortRows);
+  const arrPax=arr.reduce((s,r)=>s+parseInt(r.pax||0),0);
+  const depPax=dep.reduce((s,r)=>s+parseInt(r.pax||0),0);
+  let html='';
+  html+='<div class="date-block" style="border-left-color:var(--green);">';
+  html+='<div class="date-block-header"><h2 style="color:var(--green);">Arrivals</h2></div>';
+  html+='<div class="summary"><div class="chip chip-arr"><span class="num">'+arr.length+'</span><div><div class="chip-label">Arrivals</div></div></div>';
+  html+='<div class="chip chip-pax"><span class="num">'+arrPax+'</span><div><div class="chip-label">Total Pax</div></div></div></div>';
+  html+=arr.length?buildMovTableDated(arr):'<p style="color:var(--grey-mid);font-style:italic;">No arrivals.</p>';
+  html+='</div>';
+  html+='<div class="date-block">';
+  html+='<div class="date-block-header"><h2>Departures</h2></div>';
+  html+='<div class="summary"><div class="chip chip-dep"><span class="num">'+dep.length+'</span><div><div class="chip-label">Departures</div></div></div>';
+  html+='<div class="chip chip-pax"><span class="num">'+depPax+'</span><div><div class="chip-label">Total Pax</div></div></div></div>';
+  html+=dep.length?buildMovTableDated(dep):'<p style="color:var(--grey-mid);font-style:italic;">No departures.</p>';
+  html+='</div>';
+  out.innerHTML=html;
+}
+function buildMovTableDated(rows){
+  return '<div class="tbl-wrap"><table class="mov-table"><thead><tr><th>Date</th><th>Client / Group</th><th>Pax</th><th>Flight</th><th>Time</th><th>Pick Up</th><th>Drop Off</th><th>Driver</th><th>Notes</th><th>Dropbox</th><th></th></tr></thead><tbody>'+
+    rows.map(r=>'<tr><td style="white-space:nowrap;font-size:.78rem;color:var(--grey-dk);">'+xss(r.move_date_fmt||r.move_date)+'</td><td>'+xss(r.client_name)+'</td><td class="td-pax">'+r.pax+'</td><td class="td-flight">'+xss(r.flight)+'</td><td class="td-time">'+xss(r.move_time_fmt)+'</td><td>'+xss(r.pickup)+'</td><td>'+xss(r.dropoff)+'</td><td>'+xss(r.driver)+'</td><td class="td-notes">'+xss(r.notes)+'</td><td style="font-size:.72rem;color:var(--grey-mid);">'+xss(r.dropbox_folder)+'</td><td><button class="btn-edit" onclick="editMov('+r.id+')">Edit</button><button class="btn-del" onclick="delMov('+r.id+',this)">Del</button></td></tr>').join('')+
+    '</tbody></table></div>';
 }
 function buildMovTable(rows){
   return '<div class="tbl-wrap"><table class="mov-table"><thead><tr><th>Client / Group</th><th>Pax</th><th>Flight</th><th>Time</th><th>Pick Up</th><th>Drop Off</th><th>Driver</th><th>Notes</th><th>Dropbox</th><th></th></tr></thead><tbody>'+
