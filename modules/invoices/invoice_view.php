@@ -343,10 +343,9 @@ $sym = $inv['currency'] === 'EUR' ? '€' : '$';
     <span style="font-weight:400;color:var(--grey-mid);font-size:.78rem;">— for extra services billed on an already-settled trip</span>
   </label>
   <div id="followUpNoteWrap" style="margin-top:10px;<?= $inv['follow_up'] ? '' : 'display:none;' ?>">
-    <input type="text" id="followUpNote" maxlength="255"
-           value="<?= h($inv['follow_up_note'] ?? '') ?>"
+    <textarea id="followUpNote" maxlength="255" rows="3"
            placeholder="Note (e.g. ask for payment together with practice TRA1408)…"
-           style="width:100%;padding:8px 10px;border:1.5px solid var(--grey-lt);border-radius:6px;font-family:inherit;font-size:.83rem;box-sizing:border-box;">
+           style="width:100%;padding:8px 10px;border:1.5px solid var(--grey-lt);border-radius:6px;font-family:inherit;font-size:.83rem;box-sizing:border-box;resize:vertical;"><?= h($inv['follow_up_note'] ?? '') ?></textarea>
     <div style="margin-top:8px;display:flex;align-items:center;gap:10px;">
       <button class="btn btn-outline btn-sm" onclick="saveFollowUp()">Save note</button>
       <span id="followUpMsg" style="font-size:.78rem;display:none;"></span>

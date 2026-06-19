@@ -341,7 +341,7 @@ include 'includes/header.php';
     </div>
     <div class="form-group full" id="followUpNoteWrap" style="display:none;">
       <label>Follow-up note</label>
-      <input type="text" name="follow_up_note" id="followUpNote" maxlength="255" placeholder="e.g. ask for payment together with practice TRA1408…">
+      <textarea name="follow_up_note" id="followUpNote" maxlength="255" rows="3" placeholder="e.g. ask for payment together with practice TRA1408…"></textarea>
     </div>
   </div>
 
