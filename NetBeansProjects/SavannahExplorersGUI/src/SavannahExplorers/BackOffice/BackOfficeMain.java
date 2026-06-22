@@ -1243,6 +1243,12 @@ public class BackOfficeMain extends javax.swing.JFrame {
             }
             newFolderName = folderName.replace("_" + fromStatus, "_" + toStatus);
         }
+        if (hasSpace(newFolderName)) {
+            javax.swing.JOptionPane.showMessageDialog(this,
+                "Folder name cannot contain spaces. Please remove the space (e.g. use BALANCE_CK instead of BALANCE CK).",
+                "Rename", javax.swing.JOptionPane.WARNING_MESSAGE);
+            return;
+        }
         String dropboxHome = System.getenv("DROPBOX_HOME");
         if (dropboxHome == null) dropboxHome = "";
         String reqYear = getReqYear();
@@ -1405,6 +1411,12 @@ public class BackOfficeMain extends javax.swing.JFrame {
                 javax.swing.JOptionPane.showMessageDialog(this,
                     "Please fill in both Current name and New name.", "Rename",
                     javax.swing.JOptionPane.WARNING_MESSAGE);
+                return;
+            }
+            if (hasSpace(newname)) {
+                javax.swing.JOptionPane.showMessageDialog(this,
+                    "Folder name cannot contain spaces. Please remove the space (e.g. use BALANCE_CK instead of BALANCE CK).",
+                    "Rename", javax.swing.JOptionPane.WARNING_MESSAGE);
                 return;
             }
             String dropboxHome = System.getenv("DROPBOX_HOME");
@@ -4042,6 +4054,11 @@ public class BackOfficeMain extends javax.swing.JFrame {
         if (s == null) return "";
         return s.replace("\\", "\\\\").replace("\"", "\\\"")
                 .replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t");
+    }
+
+    /** Folder names must never contain spaces (naming convention). */
+    private static boolean hasSpace(String s) {
+        return s != null && s.contains(" ");
     }
 
     /** Destination suffixes that can appear INSIDE the () of a confirmed folder name.

@@ -55,6 +55,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!$v['customer_name']) $errors[] = 'Customer name is required.';
     if (!$isRestricted && !$v['date_received']) $errors[] = 'Date received is required.';
 
+    // ── Folder names must never contain spaces (naming convention) ──
+    if (strpos($v['practice_code'] ?? '', ' ') !== false) {
+        $errors[] = 'Folder name cannot contain spaces. Please remove the space (e.g. use BALANCE_CK instead of BALANCE CK).';
+    }
+    if (strpos($v['group_folder'] ?? '', ' ') !== false) {
+        $errors[] = 'Parent folder name cannot contain spaces. Please remove the space (e.g. use BALANCE_CK instead of BALANCE CK).';
+    }
+
     // ── Dropbox folder rename when practice_code changes (admin/manager only) ──
     // Triggered by ANY change to the Dropbox Folder field (including when driven by
     // a customer-name edit via JS). Uses old DB value → new POST value as from/to.
