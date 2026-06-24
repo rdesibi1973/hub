@@ -7,8 +7,10 @@ ob_start(); // prevent stray PHP warnings from corrupting JSON
 
 date_default_timezone_set('Africa/Dar_es_Salaam');
 
-require_once __DIR__ . '/../../includes/auth.php';   // adjust if your auth bootstrap path differs
-require_once __DIR__ . '/../../includes/db.php';     // provides db()
+require_once __DIR__ . '/../../includes/auth.php';
+require_once __DIR__ . '/../../includes/db.php';
+
+start_session();
 
 header('Content-Type: application/json');
 
