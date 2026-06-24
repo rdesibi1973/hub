@@ -625,9 +625,11 @@ function buildMovTable(rows){
 function xss(s){if(!s)return'';return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 
 // Add/Edit modal
+var _editOrigDriver='', _editOrigClient='';
 function openAddModal(r){
   document.getElementById('movModalForm').reset();
   document.getElementById('mf-id').value=0;
+  _editOrigDriver=''; _editOrigClient='';
   if(r){
     document.getElementById('movModalTitle').textContent='Edit Movement';
     document.getElementById('mf-submit').textContent='Save Changes';
@@ -645,6 +647,8 @@ function openAddModal(r){
     document.getElementById('mf-driver').value=r.driver||'';
     document.getElementById('mf-notes').value=r.notes||'';
     document.getElementById('mf-dropbox').value=r.dropbox_folder||'';
+    _editOrigDriver=r.driver||'';
+    _editOrigClient=r.client_name||'';
   } else {
     document.getElementById('movModalTitle').textContent='Add New Movement';
     document.getElementById('mf-submit').textContent='Save Movement';
@@ -664,9 +668,34 @@ document.getElementById('movModalForm').addEventListener('submit',function(e){
   var m=document.getElementById("mf-min").value;
   document.getElementById("mf-time").value=(h!=="")?(h+":"+m):"";
   var msg=document.getElementById('mf-msg');
+  var _savedOrigDriver=_editOrigDriver, _savedOrigClient=_editOrigClient;
+  var _newDriver=document.getElementById('mf-driver').value.trim();
   fetch(BASE+'/modules/operations/api/save_movement.php',{method:'POST',body:new FormData(this)})
     .then(function(r){return r.json();}).then(function(d){
-      if(d.ok){msg.innerHTML='<span style="color:var(--green);font-weight:700;">✓ Saved!</span>';closeAddModal();loadMovements();if(gridDBData.length)loadGridFromDB();}
+      if(d.ok){
+        msg.innerHTML='<span style="color:var(--green);font-weight:700;">✓ Saved!</span>';
+        closeAddModal();
+        loadMovements();
+        if(gridDBData.length)loadGridFromDB();
+        // Offer group guide update if driver changed on an existing movement
+        if(_savedOrigDriver && _savedOrigClient && _newDriver && _newDriver!==_savedOrigDriver){
+          var others=lastData.filter(function(m){return m.client_name===_savedOrigClient && (m.driver||'')=== _savedOrigDriver;});
+          var prompt='Guide changed from "'+_savedOrigDriver+'" to "'+_newDriver+'".\n\nApply to ALL movements for "'+_savedOrigClient+'" where guide is "'+_savedOrigDriver+'"?';
+          if(others.length>0) prompt+=' ('+others.length+' movement'+(others.length!==1?'s':'')+' in current view)';
+          if(confirm(prompt)){
+            var fd=new FormData();
+            fd.append('client_name',_savedOrigClient);
+            fd.append('old_driver',_savedOrigDriver);
+            fd.append('new_driver',_newDriver);
+            fetch(BASE+'/modules/operations/api/update_guide_for_group.php',{method:'POST',body:fd})
+              .then(function(r){return r.json();}).then(function(d){
+                if(d.ok){loadMovements();if(gridDBData.length)loadGridFromDB();
+                  if(d.updated>0)alert('✓ Updated guide on '+d.updated+' movement'+(d.updated!==1?'s':'')+'.');
+                } else alert('Error updating group: '+(d.error||'unknown'));
+              });
+          }
+        }
+      }
       else if(d.duplicate){msg.innerHTML='<span style="color:var(--red-dk);">⚠ '+xss(d.message)+'</span>';}
       else msg.innerHTML='<span style="color:var(--red-dk);">Error: '+xss(d.error||'unknown')+'</span>';
     });
