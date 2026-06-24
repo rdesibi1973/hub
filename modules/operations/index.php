@@ -657,14 +657,14 @@ function openAddModal(r){
   }
   document.getElementById('mf-msg').innerHTML='';
   document.getElementById('movModalOverlay').classList.add('open');
+  _movModalReady=false; setTimeout(function(){_movModalReady=true;},250);
 }
 function closeAddModal(){document.getElementById('movModalOverlay').classList.remove('open');}
-// Close modal only when click lands outside the modal box (coordinate check — immune to autocomplete/browser quirks)
-document.getElementById('movModalOverlay').addEventListener('click',function(e){
-  var box=document.getElementById('movModalBox').getBoundingClientRect();
-  if(e.clientX<box.left||e.clientX>box.right||e.clientY<box.top||e.clientY>box.bottom){
-    closeAddModal();
-  }
+// Close modal only when mousedown hits the overlay itself.
+// _movModalReady prevents the same fast-click that opened the modal from immediately closing it.
+var _movModalReady=false;
+document.getElementById('movModalOverlay').addEventListener('mousedown',function(e){
+  if(_movModalReady && e.target===this) closeAddModal();
 });
 
 function editMov(id){const r=lastData.find(r=>parseInt(r.id)===id);if(r)openAddModal(r);}
