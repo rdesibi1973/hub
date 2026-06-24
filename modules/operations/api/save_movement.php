@@ -23,7 +23,7 @@ $driver        = trim($_POST['driver']        ?? '');
 $notes         = trim($_POST['notes']         ?? '');
 $dropbox_folder = trim($_POST['dropbox_folder'] ?? '');
 
-if (!$move_date || !in_array($movement_type, ['Arrival', 'Departure'])) {
+if (!$move_date || !in_array($movement_type, ['Arrival', 'Departure', 'Transfer'])) {
     echo json_encode(['error' => 'Date and movement type are required']);
     exit;
 }

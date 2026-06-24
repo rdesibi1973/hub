@@ -113,11 +113,13 @@ input[type=date]::-webkit-calendar-picker-indicator{filter:invert(1);}
 .row-lbl::before{content:"";display:inline-block;width:8px;height:8px;border-radius:50%;}
 .lbl-arrival::before{background:var(--green);}
 .lbl-departure::before{background:var(--red);}
+.lbl-transfer::before{background:var(--amber);}
 .row-note{font-size:.7rem;color:var(--grey-mid);font-style:italic;margin-left:8px;}
 .row-card{background:var(--white);border-radius:10px;box-shadow:0 1px 8px rgba(0,0,0,.07);margin-bottom:10px;overflow:hidden;}
 .row-card-header{display:flex;align-items:center;justify-content:space-between;padding:8px 13px;border-bottom:1px solid var(--grey-lt);background:var(--off-white);}
 .badge-arrival{background:var(--green-lt);color:var(--green);font-size:.65rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;padding:3px 10px;border-radius:20px;}
 .badge-departure{background:var(--red-lt);color:var(--red-dk);font-size:.65rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;padding:3px 10px;border-radius:20px;}
+.badge-transfer{background:var(--amber-lt);color:var(--amber);font-size:.65rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;padding:3px 10px;border-radius:20px;}
 .row-actions{display:flex;gap:6px;}
 .btn-sm2{font-family:"Open Sans",sans-serif;font-size:.65rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase;padding:4px 10px;border-radius:4px;cursor:pointer;border:1.5px solid;transition:all .15s;}
 .btn-copy-row{border-color:var(--red);color:var(--red-dk);background:var(--white);}
@@ -180,6 +182,7 @@ input[type=date]::-webkit-calendar-picker-indicator{filter:invert(1);}
 .movements-table tbody tr:hover{background:#FBF8F5;}
 .movements-table tbody tr.row-arrival td:first-child{border-left:4px solid var(--green);}
 .movements-table tbody tr.row-departure td:first-child{border-left:4px solid var(--red);}
+.movements-table tbody tr.row-transfer td:first-child{border-left:4px solid var(--amber);}
 .movements-table td{padding:7px 10px;vertical-align:middle;}
 .movements-table td input{font-family:"Open Sans",sans-serif;font-size:.82rem;padding:4px 6px;border:1.5px solid transparent;border-radius:4px;background:transparent;width:100%;min-width:80px;color:var(--black);transition:border-color .15s;}
 .movements-table td input:focus{outline:none;border-color:var(--red);background:var(--white);}
@@ -453,7 +456,7 @@ include __DIR__ . '/../../includes/layout_header.php';
         <div class="form-group"><label class="form-label">Date *</label><input class="form-control" type="date" id="mf-date" name="move_date" required></div>
         <div class="form-group"><label class="form-label">Movement Type *</label>
           <select class="form-control" id="mf-type" name="movement_type" required>
-            <option value="">-- Select --</option><option value="Arrival">Arrival</option><option value="Departure">Departure</option>
+            <option value="">-- Select --</option><option value="Arrival">Arrival</option><option value="Departure">Departure</option><option value="Transfer">Transfer</option>
           </select>
         </div>
       </div>
@@ -605,14 +608,17 @@ function renderMovements(rows){
     const dr=byDate[date]||[];
     const arr=dr.filter(r=>r.movement_type==='Arrival');
     const dep=dr.filter(r=>r.movement_type==='Departure');
+    const trn=dr.filter(r=>r.movement_type==='Transfer');
     const pax=dr.reduce((s,r)=>s+parseInt(r.pax||0),0);
     const lbl=dr.length?(xss(dr[0].move_date_fmt||date)):fmtDateLabel(date);
     html+='<div class="date-block"><div class="date-block-header"><h2>'+lbl+'</h2><button class="btn-wa" onclick="copyWADate(\''+date+'\',this)">&#128203; WhatsApp</button></div>';
     html+='<div class="summary"><div class="chip chip-arr"><span class="num">'+arr.length+'</span><div><div class="chip-label">Arrivals</div></div></div>';
     html+='<div class="chip chip-dep"><span class="num">'+dep.length+'</span><div><div class="chip-label">Departures</div></div></div>';
+    if(trn.length) html+='<div class="chip chip-trn" style="background:var(--amber-lt);"><span class="num" style="color:var(--amber);">'+trn.length+'</span><div><div class="chip-label" style="color:var(--amber);">Transfers</div></div></div>';
     html+='<div class="chip chip-pax"><span class="num">'+pax+'</span><div><div class="chip-label">Total Pax</div></div></div></div>';
     if(arr.length) html+='<div class="sec-title sec-arr">Arrivals</div>'+buildMovTable(arr);
     if(dep.length) html+='<div class="sec-title sec-dep">Departures</div>'+buildMovTable(dep);
+    if(trn.length) html+='<div class="sec-title" style="border-left:4px solid var(--amber);padding-left:12px;color:var(--amber);font-weight:700;margin:20px 0 8px;">Transfers</div>'+buildMovTable(trn);
     html+='</div>';
   });
   out.innerHTML=html;
@@ -1271,9 +1277,11 @@ function renderGridDB(){
     function sortRows(a,b){return a.move_date.localeCompare(b.move_date)||(a.move_time||'').localeCompare(b.move_time||'');}
     const arr=filtered.filter(r=>r.movement_type==='Arrival').sort(sortRows);
     const dep=filtered.filter(r=>r.movement_type==='Departure').sort(sortRows);
+    const trn=filtered.filter(r=>r.movement_type==='Transfer').sort(sortRows);
     let html='';
     html+=gridSection('Arrivals', arr, headCols, 'var(--green)');
     html+=gridSection('Departures', dep, headCols, 'var(--red-dk)');
+    html+=gridSection('Transfers', trn, headCols, 'var(--amber)');
     wrap.innerHTML=html;
     return;
   }
@@ -1302,11 +1310,11 @@ function gridSection(label, rows, headCols, color){
 }
 
 function gridRowHtml(row){
-  var cls=row.movement_type==='Arrival'?'row-arrival':'row-departure';
+  var cls=row.movement_type==='Arrival'?'row-arrival':row.movement_type==='Transfer'?'row-transfer':'row-departure';
   return '<tr class="'+cls+'" data-id="'+row.id+'">'+
     '<td><input type="checkbox" class="row-sel" value="'+row.id+'"></td>'+
     '<td>'+xss(row.move_date_fmt||row.move_date)+'</td>'+
-    '<td>'+xss(row.movement_type)+'</td>'+
+    '<td><span class="badge-'+xss(row.movement_type.toLowerCase())+'">'+xss(row.movement_type)+'</span></td>'+
     '<td>'+xss(row.client_name)+'</td>'+
     '<td>'+row.pax+'</td>'+
     '<td class="td-flight">'+xss(row.flight)+'</td>'+
@@ -1423,10 +1431,10 @@ function renderGrid(){
   html+='<th class="col-actions-g"></th></tr></thead><tbody>';
   gridData.forEach((row,ri)=>{
     const type=(row[1]||'').toLowerCase();
-    const cls=type.includes('arrival')?'row-arrival':type.includes('departure')?'row-departure':'';
+    const cls=type.includes('arrival')?'row-arrival':type.includes('departure')?'row-departure':type.includes('transfer')?'row-transfer':'';
     html+='<tr class="'+cls+'" id="grid-row-'+ri+'">';
     row.forEach((cell,ci)=>{
-      if(ci===1)html+='<td class="col-type"><select class="type-select" onchange="gridCell('+ri+','+ci+',this.value);updateRowClass('+ri+')"><option value=""'+(cell===''?' selected':'')+'>&#8212;</option><option value="Arrival"'+(cell==='Arrival'?' selected':'')+'>Arrival</option><option value="Departure"'+(cell==='Departure'?' selected':'')+'>Departure</option></select></td>';
+      if(ci===1)html+='<td class="col-type"><select class="type-select" onchange="gridCell('+ri+','+ci+',this.value);updateRowClass('+ri+')"><option value=""'+(cell===''?' selected':'')+'>&#8212;</option><option value="Arrival"'+(cell==='Arrival'?' selected':'')+'>Arrival</option><option value="Departure"'+(cell==='Departure'?' selected':'')+'>Departure</option><option value="Transfer"'+(cell==='Transfer'?' selected':'')+'>Transfer</option></select></td>';
       else{const c2=ci===0?'col-date':ci===3?'col-pax':ci===5?'col-time':ci===4?'col-flight':'';html+='<td class="'+c2+'"><input type="text" value="'+cell.replace(/"/g,'&quot;')+'" oninput="gridCell('+ri+','+ci+',this.value)" placeholder="'+GRID_COLS[ci]+'"></td>';}
     });
     html+='<td class="col-actions-g"><button class="btn-del-row2" onclick="deleteMemGridRow('+ri+')" title="Delete">&#10005;</button></td></tr>';
@@ -1435,7 +1443,7 @@ function renderGrid(){
   wrap.innerHTML=html;
 }
 function gridCell(ri,ci,val){gridData[ri][ci]=val;}
-function updateRowClass(ri){const tr=document.getElementById('grid-row-'+ri);if(!tr)return;const type=(gridData[ri][1]||'').toLowerCase();tr.className=type.includes('arrival')?'row-arrival':type.includes('departure')?'row-departure':'';}
+function updateRowClass(ri){const tr=document.getElementById('grid-row-'+ri);if(!tr)return;const type=(gridData[ri][1]||'').toLowerCase();tr.className=type.includes('arrival')?'row-arrival':type.includes('departure')?'row-departure':type.includes('transfer')?'row-transfer':'';}
 function deleteMemGridRow(ri){gridData.splice(ri,1);renderGrid();}
 function addGridRow(){gridData.push(GRID_COLS.map(()=>''));renderGrid();const rows=document.querySelectorAll('.movements-table tbody tr');if(rows.length)rows[rows.length-1].scrollIntoView({behavior:'smooth',block:'center'});}
 function copyGridAllRows(){
