@@ -1046,7 +1046,24 @@ function renderExtractor(){
   document.getElementById('extMain').innerHTML=html;
 }
 
-function extFld(idx,key,label,value,isDate,isTime){if(isDate){return'<div class="field"><label>'+label+'</label><input type="date" value="'+toISO(value)+'" oninput="extRows['+idx+'][\''+key+'\']=fromISO(this.value)" placeholder="'+label+'"></div>';}if(isTime){return'<div class="field"><label>'+label+'</label><input type="time" value="'+(value||'')+'" oninput="extRows['+idx+'][\''+key+'\']=this.value"></div>';}return'<div class="field"><label>'+label+'</label><input type="text" value="'+escA(value)+'" oninput="extRows['+idx+'][\''+key+'\']=this.value" placeholder="'+label+'"></div>';}
+function extFld(idx,key,label,value,isDate,isTime){
+  if(isDate){return'<div class="field"><label>'+label+'</label><input type="date" value="'+toISO(value)+'" oninput="extRows['+idx+'][\''+key+'\']=fromISO(this.value)" placeholder="'+label+'"></div>';}
+  if(isTime){
+    var parts=(value||'').split(':');
+    var hh=parts[0]||'';var mm=parts[1]||'00';
+    var hOpts='<option value="">--</option>';
+    for(var h=0;h<24;h++){var hv=(h<10?'0':'')+h;hOpts+='<option value="'+hv+'"'+(hv===hh?' selected':'')+'>'+hv+'</option>';}
+    var mOpts='';
+    for(var m=0;m<60;m++){var mv=(m<10?'0':'')+m;mOpts+='<option value="'+mv+'"'+(mv===mm?' selected':'')+'>'+mv+'</option>';}
+    return'<div class="field"><label>'+label+'</label><div style="display:flex;gap:3px;align-items:center;">'+
+      '<select class="form-control" style="flex:1;min-width:0;font-size:.78rem;padding:5px 4px;" onchange="extSetTime('+idx+',this.parentNode)">'+hOpts+'</select>'+
+      '<span style="font-weight:700;color:var(--grey-mid);">:</span>'+
+      '<select class="form-control" style="flex:1;min-width:0;font-size:.78rem;padding:5px 4px;" onchange="extSetTime('+idx+',this.parentNode)">'+mOpts+'</select>'+
+      '</div></div>';
+  }
+  return'<div class="field"><label>'+label+'</label><input type="text" value="'+escA(value)+'" oninput="extRows['+idx+'][\''+key+'\']=this.value" placeholder="'+label+'"></div>';
+}
+function extSetTime(idx,wrap){var sels=wrap.querySelectorAll('select');var h=sels[0].value;var m=sels[1].value;extRows[idx].time=h?h+':'+m:'';}
 function deleteExtRow(idx){extRows.splice(idx,1);renderExtractor();}
 function addExtRow(type){extRows.push(newRow({type}));renderExtractor();}
 function cancelExtractor(){
