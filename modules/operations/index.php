@@ -445,7 +445,7 @@ include __DIR__ . '/../../includes/layout_header.php';
 <!-- MODALS -->
 <!-- Add/Edit movement modal -->
 <div class="mov-modal-overlay" id="movModalOverlay" onclick="if(event.target===this)closeAddModal()">
-  <div class="mov-modal">
+  <div class="mov-modal" onclick="event.stopPropagation()">
     <h3 id="movModalTitle">&#10133; Add New Movement</h3>
     <form id="movModalForm">
       <input type="hidden" id="mf-id" name="id" value="0">
@@ -690,7 +690,7 @@ document.getElementById('movModalForm').addEventListener('submit',function(e){
             fetch(BASE+'/modules/operations/api/update_guide_for_group.php',{method:'POST',body:fd})
               .then(function(r){return r.json();}).then(function(d){
                 if(d.ok){loadMovements();if(gridDBData.length)loadGridFromDB();
-                  if(d.updated>0)alert('✓ Updated guide on '+d.updated+' movement'+(d.updated!==1?'s':'')+'.');
+                  if(d.updated>0)alert('✓ Also updated '+d.updated+' other movement'+(d.updated!==1?'s':'')+'.');
                 } else alert('Error updating group: '+(d.error||'unknown'));
               });
           }
