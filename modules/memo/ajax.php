@@ -27,7 +27,6 @@ $uid = isset($_SESSION['user_id']) ? intval($_SESSION['user_id']) : 0;
 if ($uid <= 0) { out(false, array('error' => 'Not authenticated')); }
 
 $action = isset($_POST['action']) ? $_POST['action'] : (isset($_GET['action']) ? $_GET['action'] : '');
-$pdo    = db();
 $now    = date('Y-m-d H:i:s');
 
 // helper: parse a client datetime-local value (already EAT) into MySQL DATETIME or null
