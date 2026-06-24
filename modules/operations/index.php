@@ -1036,7 +1036,7 @@ function renderExtractor(){
     '<button class="btn-sm2 btn-del-card" onclick="deleteExtRow('+idx+')">&#10005;</button></div></div>'+
     '<div class="fields-grid">'+
     extFld(idx,'date','Date',r.date,true)+extFld(idx,'type','Movement Type',r.type)+extFld(idx,'client','Client / Group Name',r.client)+extFld(idx,'pax','Pax',r.pax)+
-    extFld(idx,'flight','Flight / Transfer',r.flight)+extFld(idx,'time','Time',r.time)+extFld(idx,'pickup','Pick up',r.pickup)+extFld(idx,'dropoff','Drop off',r.dropoff)+
+    extFld(idx,'flight','Flight / Transfer',r.flight)+extFld(idx,'time','Time',r.time,false,true)+extFld(idx,'pickup','Pick up',r.pickup)+extFld(idx,'dropoff','Drop off',r.dropoff)+
     extFld(idx,'driver','Driver / Guide',r.driver)+extFld(idx,'notes','Notes',r.notes)+extFld(idx,'dropbox','Dropbox File',r.dropbox)+
     '</div></div>';
   });
@@ -1046,7 +1046,7 @@ function renderExtractor(){
   document.getElementById('extMain').innerHTML=html;
 }
 
-function extFld(idx,key,label,value,isDate){if(isDate){return'<div class="field"><label>'+label+'</label><input type="date" value="'+toISO(value)+'" oninput="extRows['+idx+'][\''+key+'\']=fromISO(this.value)" placeholder="'+label+'"></div>';}return'<div class="field"><label>'+label+'</label><input type="text" value="'+escA(value)+'" oninput="extRows['+idx+'][\''+key+'\']=this.value" placeholder="'+label+'"></div>';}
+function extFld(idx,key,label,value,isDate,isTime){if(isDate){return'<div class="field"><label>'+label+'</label><input type="date" value="'+toISO(value)+'" oninput="extRows['+idx+'][\''+key+'\']=fromISO(this.value)" placeholder="'+label+'"></div>';}if(isTime){return'<div class="field"><label>'+label+'</label><input type="time" value="'+(value||'')+'" oninput="extRows['+idx+'][\''+key+'\']=this.value"></div>';}return'<div class="field"><label>'+label+'</label><input type="text" value="'+escA(value)+'" oninput="extRows['+idx+'][\''+key+'\']=this.value" placeholder="'+label+'"></div>';}
 function deleteExtRow(idx){extRows.splice(idx,1);renderExtractor();}
 function addExtRow(type){extRows.push(newRow({type}));renderExtractor();}
 function cancelExtractor(){
