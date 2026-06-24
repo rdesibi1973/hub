@@ -1,13 +1,50 @@
 <?php
-// modules/memo/index.php — private Memo Board (post-it style)
-date_default_timezone_set('Africa/Dar_es_Salaam');
+require_once __DIR__ . '/../../includes/auth.php';
+require_login();
 
-require_once __DIR__ . '/../../includes/auth.php';   // adjust to your auth/header bootstrap
-// If your Hub uses a shared header that opens <html><body> and the nav, include it here:
-// require_once __DIR__ . '/../../includes/header.php';
+$page_title = 'Memo Board';
+$extra_css = '
+.memo-wrap { padding: 16px; }
+.memo-topbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+.memo-topbar h2 { margin: 0; color: #333; }
+.memo-board { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-start; }
+.memo-empty { color: #888; font-style: italic; }
+.memo-card { width: 220px; min-height: 120px; background: #FFF59D; border-radius: 4px; padding: 12px; box-shadow: 0 2px 6px rgba(0,0,0,0.18); cursor: grab; position: relative; display: flex; flex-direction: column; transition: box-shadow .15s, transform .15s; }
+.memo-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.25); }
+.memo-card.dragging { opacity: .5; }
+.memo-card.is-pinned { box-shadow: 0 0 0 2px #C0211B, 0 2px 6px rgba(0,0,0,0.18); }
+.memo-card.is-done { opacity: .6; }
+.memo-card.is-done .memo-card-title { text-decoration: line-through; }
+.memo-card.prio-high::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: #C0211B; border-radius: 4px 0 0 4px; }
+.memo-card.prio-low::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: #9e9e9e; border-radius: 4px 0 0 4px; }
+.memo-card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.memo-type-badge { font-size: 10px; text-transform: uppercase; letter-spacing: .5px; background: rgba(0,0,0,0.12); color: #333; padding: 2px 6px; border-radius: 10px; }
+.memo-pin { background: none; border: none; cursor: pointer; font-size: 16px; color: #C0211B; line-height: 1; padding: 0; }
+.memo-card-title { font-weight: 700; color: #2b2b2b; word-wrap: break-word; }
+.memo-card-body { margin-top: 6px; font-size: 13px; color: #444; white-space: pre-wrap; word-wrap: break-word; flex: 1; }
+.memo-card-meta { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px; }
+.memo-meta-item { font-size: 11px; color: #555; background: rgba(255,255,255,0.5); padding: 2px 6px; border-radius: 4px; }
+.memo-card-actions { margin-top: 10px; display: flex; gap: 6px; }
+.memo-mini { font-size: 12px; border: none; cursor: pointer; background: rgba(0,0,0,0.10); color: #333; padding: 3px 8px; border-radius: 4px; }
+.memo-mini:hover { background: rgba(0,0,0,0.18); }
+.memo-btn { border: none; cursor: pointer; padding: 8px 14px; border-radius: 4px; background: #e0e0e0; color: #333; font-size: 14px; }
+.memo-btn:hover { background: #d5d5d5; }
+.memo-btn-primary { background: #C0211B; color: #fff; }
+.memo-btn-primary:hover { background: #a51b16; }
+.memo-btn-danger { background: #fff; color: #C0211B; border: 1px solid #C0211B; }
+.memo-btn-danger:hover { background: #fdecea; }
+.memo-modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.45); display: flex; align-items: center; justify-content: center; z-index: 9999; }
+.memo-modal { background: #fff; border-radius: 8px; padding: 22px; width: 480px; max-width: 92vw; max-height: 90vh; overflow-y: auto; box-shadow: 0 8px 30px rgba(0,0,0,0.3); }
+.memo-modal h3 { margin: 0 0 14px; color: #333; }
+.memo-modal label { display: block; font-size: 12px; color: #666; margin: 10px 0 4px; font-weight: 600; }
+.memo-modal input[type="text"], .memo-modal input[type="date"], .memo-modal input[type="datetime-local"], .memo-modal select, .memo-modal textarea { width: 100%; box-sizing: border-box; padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; font-family: inherit; }
+.memo-row { display: flex; gap: 10px; }
+.memo-row > div { flex: 1; }
+.memo-modal-actions { display: flex; align-items: center; gap: 8px; margin-top: 18px; }
+';
+
+include __DIR__ . '/../../includes/layout_header.php';
 ?>
-<!-- If header.php already outputs <head>, move this <link> into the shared <head>. -->
-<link rel="stylesheet" href="memo.css">
 
 <div class="memo-wrap">
   <div class="memo-topbar">
@@ -94,5 +131,4 @@ require_once __DIR__ . '/../../includes/auth.php';   // adjust to your auth/head
 
 <script src="memo.js"></script>
 
-<?php
-// require_once __DIR__ . '/../../includes/footer.php';
+<?php include __DIR__ . '/../../includes/layout_footer.php'; ?>

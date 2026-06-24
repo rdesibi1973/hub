@@ -31,7 +31,7 @@ $now = date('Y-m-d H:i:s');
 // For one-shot (recur_rule='none') we additionally require reminder_sent = 0.
 $sql =
     "SELECT m.id, m.user_id, m.title, m.body, m.type, m.due_date, " .
-    "m.reminder_at, m.recur_rule, u.email AS user_email, u.name AS user_name " .
+    "m.reminder_at, m.recur_rule, u.email AS user_email, u.full_name AS user_name " .
     "FROM memos m " .
     "JOIN users u ON u.id = m.user_id " .
     "WHERE m.deleted_at IS NULL " .
@@ -70,7 +70,7 @@ foreach ($rows as $r) {
 
     // send_mail() is assumed available from mail_helper.php (PHPMailer isMail(), noreply@ sender).
     // Adjust the call if your helper signature differs.
-    $okMail = send_mail($email, $subject, $html);
+    $okMail = send_hub_email($email, $subject, $html, 'Savannah Explorers Hub', 'noreply@savannahexplorers.com');
 
     if ($okMail) {
         $sent++;

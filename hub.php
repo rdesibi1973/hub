@@ -47,6 +47,12 @@ include __DIR__ . '/includes/layout_header.php';
     </a>
     <?php endif; ?>
 
+    <a class="primary-card" href="<?= BASE_URL ?>/modules/memo/index.php">
+      <div class="pc-icon">📝</div>
+      <div class="pc-text"><h3>Memo Board</h3><p>Personal memos &amp; reminders</p></div>
+      <span class="pc-arrow">↗</span>
+    </a>
+
     <a class="primary-card pc-green" href="https://www.savannahexplorers.net/" target="_blank">
       <div class="pc-icon pc-logo">
         <img src="https://www.savannahexplorers.net/img/logo-savannah-explorers.png" alt="Savannah Explorers">

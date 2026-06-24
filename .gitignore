@@ -15,6 +15,9 @@ error_log
 # Conflicted copies (Dropbox sync artifacts)
 **/*conflicted copy*.php
 
+# Claude Code worktrees (local dev tool artifacts — never commit)
+.claude/
+
 # ITI uploads — files live on server only; keep folder structure, ignore content
 modules/iti/uploads/logo/*
 modules/iti/uploads/profiles/*
