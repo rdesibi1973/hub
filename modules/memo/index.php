@@ -7,6 +7,14 @@ $extra_css = '
 .memo-wrap { padding: 24px 40px; }
 .memo-topbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
 .memo-topbar h2 { margin: 0; font-family: "Merriweather", serif; color: var(--red-dk); font-size: 1.3rem; }
+.memo-help-btn { background: none; border: 2px solid var(--grey-lt); border-radius: 50%; width: 28px; height: 28px; font-size: .82rem; font-weight: 700; color: var(--grey-mid); cursor: pointer; line-height: 1; flex-shrink: 0; }
+.memo-help-btn:hover { border-color: var(--red); color: var(--red); }
+.memo-help-panel { display: none; background: var(--white); border: 1px solid var(--grey-lt); border-radius: 10px; padding: 18px 22px; margin-bottom: 20px; box-shadow: 0 2px 10px rgba(0,0,0,.08); }
+.memo-help-panel.visible { display: block; }
+.memo-help-panel h4 { margin: 0 0 12px; font-family: "Merriweather", serif; color: var(--red-dk); font-size: .88rem; }
+.memo-help-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px 24px; }
+.memo-help-item { font-size: .78rem; color: var(--grey-dk); line-height: 1.5; }
+.memo-help-item strong { color: var(--black); display: block; margin-bottom: 2px; }
 
 /* group headers */
 .memo-group-label { width: 100%; font-size: .68rem; font-weight: 700; text-transform: uppercase;
@@ -98,8 +106,25 @@ include __DIR__ . '/../../includes/layout_header.php';
 <div class="memo-wrap">
   <div class="memo-topbar">
     <h2>Memo Board</h2>
-    <button id="memoNewBtn" class="memo-btn memo-btn-primary">+ New memo</button>
+    <div style="display:flex;gap:10px;align-items:center;">
+      <button class="memo-help-btn" id="memoHelpBtn" title="Help">?</button>
+      <button id="memoNewBtn" class="memo-btn memo-btn-primary">+ New memo</button>
+    </div>
   </div>
+
+  <div id="memoHelpPanel" class="memo-help-panel">
+    <h4>How the Memo Board works</h4>
+    <div class="memo-help-grid">
+      <div class="memo-help-item"><strong>📋 Groups</strong>Memos are grouped by due date: <em>Overdue</em> (red border), <em>Today</em>, <em>Upcoming</em>, and memos without a due date at the bottom.</div>
+      <div class="memo-help-item"><strong>✓ Done / Reopen</strong>Mark a memo as done to move it out of Overdue. Click Reopen to bring it back to active.</div>
+      <div class="memo-help-item"><strong>★ Pin</strong>Pin a memo to keep it at the top of its group. Click the star icon on the card.</div>
+      <div class="memo-help-item"><strong>↕ Drag to reorder</strong>Drag and drop cards within the board to change their order.</div>
+      <div class="memo-help-item"><strong>✉ Email reminder</strong>Tick "Send email reminder", set a date &amp; time, and choose Once / Daily / Weekly / Monthly. An email is sent to your account at that time (checked every 15 min).</div>
+      <div class="memo-help-item"><strong>🎨 Priority &amp; color</strong>High priority adds a red bar on the left edge. Choose a card color to visually group memos.</div>
+      <div class="memo-help-item"><strong>🗑 Delete</strong>Open a memo, click Edit, then Delete. Deletion is permanent.</div>
+    </div>
+  </div>
+
   <div id="memoBoard" class="memo-board"></div>
 </div>
 

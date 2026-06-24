@@ -311,6 +311,13 @@
   document.getElementById('memoDeleteBtn').addEventListener('click', del);
   modal.addEventListener('click', function (e) { if (e.target === modal) { closeModal(); } });
 
+  document.getElementById('memoHelpBtn').addEventListener('click', function () {
+    var panel = document.getElementById('memoHelpPanel');
+    panel.classList.toggle('visible');
+    this.style.color = panel.classList.contains('visible') ? 'var(--red)' : '';
+    this.style.borderColor = panel.classList.contains('visible') ? 'var(--red)' : '';
+  });
+
   initQuill();
   load();
 })();
