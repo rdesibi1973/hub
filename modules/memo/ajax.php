@@ -48,6 +48,12 @@ function clean_enum($v, $allowed, $default) {
     $v = trim((string)$v);
     return in_array($v, $allowed, true) ? $v : $default;
 }
+function sanitise_memo_html($html) {
+    $html = strip_tags($html, '<b><strong><i><em><u><s><p><br><ol><ul><li><a><span><h1><h2><h3>');
+    $stripped = preg_replace('/<[^>]+>/', '', $html);
+    if (trim($stripped) === '') { return ''; }
+    return $html;
+}
 function clean_color($v) {
     $v = trim((string)$v);
     if ($v === '') { return null; }
@@ -76,7 +82,7 @@ if ($action === 'create') {
     $type      = clean_enum(isset($_POST['type']) ? $_POST['type'] : '', array('memo','todo','note'), 'memo');
     $priority  = clean_enum(isset($_POST['priority']) ? $_POST['priority'] : '', array('low','normal','high'), 'normal');
     $recur     = clean_enum(isset($_POST['recur_rule']) ? $_POST['recur_rule'] : '', array('none','daily','weekly','monthly'), 'none');
-    $body      = isset($_POST['body']) ? trim($_POST['body']) : '';
+    $body      = sanitise_memo_html(isset($_POST['body']) ? $_POST['body'] : '');
     $color     = clean_color(isset($_POST['color']) ? $_POST['color'] : '');
     $due       = parse_date(isset($_POST['due_date']) ? $_POST['due_date'] : '');
     $remind    = parse_dt(isset($_POST['reminder_at']) ? $_POST['reminder_at'] : '');
@@ -105,7 +111,7 @@ if ($action === 'update') {
     $type      = clean_enum(isset($_POST['type']) ? $_POST['type'] : '', array('memo','todo','note'), 'memo');
     $priority  = clean_enum(isset($_POST['priority']) ? $_POST['priority'] : '', array('low','normal','high'), 'normal');
     $recur     = clean_enum(isset($_POST['recur_rule']) ? $_POST['recur_rule'] : '', array('none','daily','weekly','monthly'), 'none');
-    $body      = isset($_POST['body']) ? trim($_POST['body']) : '';
+    $body      = sanitise_memo_html(isset($_POST['body']) ? $_POST['body'] : '');
     $color     = clean_color(isset($_POST['color']) ? $_POST['color'] : '');
     $due       = parse_date(isset($_POST['due_date']) ? $_POST['due_date'] : '');
     $remind    = parse_dt(isset($_POST['reminder_at']) ? $_POST['reminder_at'] : '');

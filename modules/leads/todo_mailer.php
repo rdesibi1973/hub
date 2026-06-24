@@ -146,4 +146,77 @@ foreach ($due as $t) {
     }
 }
 
-echo "Done. Sent: $sent, Failed: $failed\n";
+echo "Todos — sent: $sent, failed: $failed\n";
+
+// ── Memo reminders ─────────────────────────────────────────────────────────
+$mstmt = $db->prepare("
+    SELECT m.id, m.title, m.body, m.due_date, m.reminder_at, m.recur_rule,
+           u.email AS user_email, u.full_name AS user_name
+    FROM memos m
+    JOIN users u ON u.id = m.user_id
+    WHERE m.deleted_at IS NULL
+      AND m.status = 'open'
+      AND m.reminder_at IS NOT NULL
+      AND m.reminder_at <= NOW()
+      AND ( m.recur_rule <> 'none' OR m.reminder_sent = 0 )
+");
+$mstmt->execute();
+$memos_due = $mstmt->fetchAll(PDO::FETCH_ASSOC);
+
+$msent = 0; $mskipped = 0;
+foreach ($memos_due as $mr) {
+    $memail = trim($mr['user_email']);
+    if ($memail === '') { $mskipped++; continue; }
+
+    $mname  = ($mr['user_name'] !== '') ? $mr['user_name'] : 'there';
+    $mtitle = $mr['title'];
+    $mbody  = $mr['body'] !== null ? $mr['body'] : '';
+
+    $msubject = 'Memo reminder: ' . $mtitle;
+
+    $mhtml  = '<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#1a1a2e;max-width:620px">';
+    $mhtml .= '<p style="margin:0 0 4px;color:#777;font-size:12px">Reminder from Savannah Explorers Hub</p>';
+    $mhtml .= '<h2 style="margin:0 0 12px;font-size:17px;color:#C0211B">' . htmlspecialchars($mtitle, ENT_QUOTES, 'UTF-8') . '</h2>';
+    if ($mbody !== '') {
+        $mhtml .= '<div style="border-left:3px solid #C0211B;padding-left:12px;margin:0 0 14px;line-height:1.5">' . $mbody . '</div>';
+    }
+    if (!empty($mr['due_date'])) {
+        $mhtml .= '<p style="color:#777;font-size:13px">Due: ' . htmlspecialchars($mr['due_date'], ENT_QUOTES, 'UTF-8') . '</p>';
+    }
+    $mhtml .= '<hr style="border:none;border-top:1px solid #e0e0e8;margin:16px 0">';
+    $mhtml .= '<p style="margin:0;color:#999;font-size:11px">Savannah Explorers Hub &mdash; Memo Board</p>';
+    $mhtml .= '</div>';
+
+    $mfrom    = 'noreply@savannahexplorers.com';
+    $mheaders = "From: Savannah Explorers Hub <{$mfrom}>\r\n";
+    $mheaders .= "MIME-Version: 1.0\r\n";
+    $mheaders .= "Content-Type: text/html; charset=UTF-8\r\n";
+    $mheaders .= "X-Mailer: SavannahHub-MemoMailer\r\n";
+
+    if (@mail($memail, $msubject, $mhtml, $mheaders, '-f' . $mfrom)) {
+        $msent++;
+        if ($mr['recur_rule'] === 'none') {
+            $db->prepare("UPDATE memos SET reminder_sent = 1, updated_at = NOW() WHERE id = ?")
+               ->execute([$mr['id']]);
+        } else {
+            $mnext = _advance_memo_reminder($mr['reminder_at'], $mr['recur_rule']);
+            $db->prepare("UPDATE memos SET reminder_at = ?, reminder_sent = 0, updated_at = NOW() WHERE id = ?")
+               ->execute([$mnext, $mr['id']]);
+        }
+    } else {
+        $mskipped++;
+    }
+}
+
+echo "Memos — sent: $msent, skipped: $mskipped\n";
+
+function _advance_memo_reminder($current, $rule) {
+    $ts = strtotime($current);
+    if ($ts === false) { $ts = time(); }
+    $nowTs = time();
+    $step = '+1 day';
+    if ($rule === 'weekly')  { $step = '+1 week'; }
+    if ($rule === 'monthly') { $step = '+1 month'; }
+    do { $ts = strtotime($step, $ts); } while ($ts !== false && $ts <= $nowTs);
+    return date('Y-m-d H:i:s', $ts);
+}
