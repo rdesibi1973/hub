@@ -1191,7 +1191,7 @@ async function saveAllExtToDB(){
     if(saved) parts.push(saved+' saved');
     if(skipped) parts.push(skipped+' skipped');
     if(errors) parts.push(errors+' error'+(errors>1?'s':''));
-    btn.textContent='&#128190; '+parts.join(', ');
+    btn.innerHTML='&#128190; '+parts.join(', ');
     setTimeout(()=>{btn.innerHTML='&#128190; Save all to DB';},4000);
   }
 }
@@ -1436,7 +1436,7 @@ function renderGrid(){
     html+='<tr class="'+cls+'" id="grid-row-'+ri+'">';
     row.forEach((cell,ci)=>{
       if(ci===1)html+='<td class="col-type"><select class="type-select" onchange="gridCell('+ri+','+ci+',this.value);updateRowClass('+ri+')"><option value=""'+(cell===''?' selected':'')+'>&#8212;</option><option value="Arrival"'+(cell==='Arrival'?' selected':'')+'>Arrival</option><option value="Departure"'+(cell==='Departure'?' selected':'')+'>Departure</option><option value="Transfer"'+(cell==='Transfer'?' selected':'')+'>Transfer</option></select></td>';
-      else{const c2=ci===0?'col-date':ci===3?'col-pax':ci===5?'col-time':ci===4?'col-flight':'';html+='<td class="'+c2+'"><input type="text" value="'+cell.replace(/"/g,'&quot;')+'" oninput="gridCell('+ri+','+ci+',this.value)" placeholder="'+GRID_COLS[ci]+'"></td>';}
+      else{const c2=ci===0?'col-date':ci===3?'col-pax':ci===5?'col-time':ci===4?'col-flight':'';const itype=ci===5?'time':'text';html+='<td class="'+c2+'"><input type="'+itype+'" value="'+cell.replace(/"/g,'&quot;')+'" oninput="gridCell('+ri+','+ci+',this.value)" placeholder="'+GRID_COLS[ci]+'"></td>';}
     });
     html+='<td class="col-actions-g"><button class="btn-del-row2" onclick="deleteMemGridRow('+ri+')" title="Delete">&#10005;</button></td></tr>';
   });

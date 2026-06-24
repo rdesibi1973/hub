@@ -5,6 +5,19 @@ require_permission('operations');
 
 header('Content-Type: application/json');
 
+function normalise_time($v) {
+    $v = trim($v);
+    if ($v === '') return null;
+    $v = preg_replace('/[,.]/', ':', $v);             // 10,30 → 10:30
+    if (preg_match('/^(\d{1,2}):(\d{2})/', $v, $m))
+        return sprintf('%02d:%02d', (int)$m[1], (int)$m[2]);
+    if (preg_match('/^(\d{3,4})$/', $v, $m)) {        // 1030 → 10:30
+        $s = str_pad($m[1], 4, '0', STR_PAD_LEFT);
+        return substr($s, 0, 2) . ':' . substr($s, 2, 2);
+    }
+    return null;
+}
+
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     echo json_encode(['error' => 'POST only']);
     exit;
@@ -16,7 +29,7 @@ $movement_type = $_POST['movement_type'] ?? '';
 $client_name   = trim($_POST['client_name']   ?? '');
 $pax           = max(1, (int)($_POST['pax'] ?? 1));
 $flight        = trim($_POST['flight']        ?? '');
-$move_time     = trim($_POST['move_time']     ?? '') ?: null;
+$move_time     = normalise_time($_POST['move_time'] ?? '');
 $pickup        = trim($_POST['pickup']        ?? '');
 $dropoff       = trim($_POST['dropoff']       ?? '');
 $driver        = trim($_POST['driver']        ?? '');
