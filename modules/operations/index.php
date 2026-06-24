@@ -382,7 +382,7 @@ include __DIR__ . '/../../includes/layout_header.php';
       <button class="btn-show btn-ghost" onclick="copyGridAllRows()" id="copyGridAllBtn">&#128203; Copy all</button>
       <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:.8rem;color:var(--white);margin-left:6px;">
         <input type="checkbox" id="gridGroupByType" onchange="renderGridDB()" style="width:15px;height:15px;cursor:pointer;">
-        Group by arrival and departure
+        Group by arrival, transfer and departure
       </label>
     </div>
   </div>
