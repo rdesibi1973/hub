@@ -444,8 +444,8 @@ include __DIR__ . '/../../includes/layout_header.php';
 
 <!-- MODALS -->
 <!-- Add/Edit movement modal -->
-<div class="mov-modal-overlay" id="movModalOverlay" onclick="if(event.target===this)closeAddModal()">
-  <div class="mov-modal" onclick="event.stopPropagation()">
+<div class="mov-modal-overlay" id="movModalOverlay">
+  <div class="mov-modal" id="movModalBox">
     <h3 id="movModalTitle">&#10133; Add New Movement</h3>
     <form id="movModalForm">
       <input type="hidden" id="mf-id" name="id" value="0">
@@ -482,7 +482,7 @@ include __DIR__ . '/../../includes/layout_header.php';
         <div class="form-group"><label class="form-label">Drop Off</label><input class="form-control" type="text" id="mf-dropoff" name="dropoff"></div>
       </div>
       <div class="form-row">
-        <div class="form-group"><label class="form-label">Driver / Guide</label><input class="form-control" type="text" id="mf-driver" name="driver"></div>
+        <div class="form-group"><label class="form-label">Driver / Guide</label><input class="form-control" type="text" id="mf-driver" name="driver" autocomplete="off"></div>
         <div class="form-group"><label class="form-label">Dropbox Folder</label><input class="form-control" type="text" id="mf-dropbox" name="dropbox_folder"></div>
       </div>
       <div class="form-group"><label class="form-label">Notes</label><input class="form-control" type="text" id="mf-notes" name="notes"></div>
@@ -659,6 +659,13 @@ function openAddModal(r){
   document.getElementById('movModalOverlay').classList.add('open');
 }
 function closeAddModal(){document.getElementById('movModalOverlay').classList.remove('open');}
+// Close modal only when click lands outside the modal box (coordinate check — immune to autocomplete/browser quirks)
+document.getElementById('movModalOverlay').addEventListener('click',function(e){
+  var box=document.getElementById('movModalBox').getBoundingClientRect();
+  if(e.clientX<box.left||e.clientX>box.right||e.clientY<box.top||e.clientY>box.bottom){
+    closeAddModal();
+  }
+});
 
 function editMov(id){const r=lastData.find(r=>parseInt(r.id)===id);if(r)openAddModal(r);}
 
