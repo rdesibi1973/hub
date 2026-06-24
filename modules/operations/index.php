@@ -333,6 +333,7 @@ include __DIR__ . '/../../includes/layout_header.php';
   <div class="add-row-bar" id="extAddBar" style="padding:0 4px;">
     <button class="btn-add-row2" onclick="addExtRow('Arrival')">+ Add Arrival</button>
     <button class="btn-add-row2" onclick="addExtRow('Departure')">+ Add Departure</button>
+    <button class="btn-add-row2" onclick="addExtRow('Transfer')" style="border-color:var(--amber);color:var(--amber);">+ Add Transfer</button>
     <button class="btn-add-row2" onclick="cancelExtractor()" style="margin-left:auto;border-color:var(--red);color:var(--red-dk);">&#10005; Cancel</button>
   </div>
   <div class="ext-main" id="extMain"></div>
