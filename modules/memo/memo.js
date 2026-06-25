@@ -32,7 +32,6 @@
     var fields = document.getElementById('m_reminder_fields');
     fields.classList.toggle('visible', this.checked);
     if (this.checked && !document.getElementById('m_reminder_date').value) {
-      // default reminder date to due date (or today) when first enabling
       var due = document.getElementById('m_due_date').value;
       document.getElementById('m_reminder_date').value = due || todayStr();
     }
@@ -67,6 +66,23 @@
     xhr.send(fd);
   }
 
+  function get(action, params, cb) {
+    var url = AJAX + '?action=' + encodeURIComponent(action);
+    for (var k in params) {
+      if (params.hasOwnProperty(k)) { url += '&' + encodeURIComponent(k) + '=' + encodeURIComponent(params[k]); }
+    }
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', url, true);
+    xhr.onreadystatechange = function () {
+      if (xhr.readyState === 4) {
+        var res = null;
+        try { res = JSON.parse(xhr.responseText); } catch (e) {}
+        if (cb) { cb(res); }
+      }
+    };
+    xhr.send();
+  }
+
   function esc(s) {
     if (s === null || s === undefined) { return ''; }
     return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;')
@@ -94,7 +110,6 @@
       return;
     }
 
-    var today = todayDate();
     var todaySt = todayStr();
 
     var overdue = [], todayArr = [], upcoming = [], nodate = [];
@@ -130,21 +145,34 @@
   }
 
   function buildCard(m) {
+    var isOwner  = Number(m.is_owner)  === 1;
+    var canEdit  = Number(m.can_edit)  === 1;
+    var isShared = Number(m.is_shared) === 1;
     var isOverdue = m.due_date && m.due_date < todayStr() && m.status !== 'done';
+
     var card = document.createElement('div');
     card.className = 'memo-card prio-' + esc(m.priority) +
       (m.status === 'done'       ? ' is-done'    : '') +
       (Number(m.pinned) === 1    ? ' is-pinned'  : '') +
       (isOverdue                 ? ' is-overdue' : '');
-    card.setAttribute('draggable', 'true');
+    card.setAttribute('draggable', isOwner ? 'true' : 'false');
     card.setAttribute('data-id', m.id);
     if (m.color) { card.style.background = m.color; }
 
     var pinTxt = Number(m.pinned) === 1 ? '★' : '☆';
     var html = '';
     html += '<div class="memo-card-head">';
-    html += '<button class="memo-pin" data-act="pin">' + pinTxt + '</button>';
+    if (isOwner) {
+      html += '<button class="memo-pin" data-act="pin">' + pinTxt + '</button>';
+      html += '<button class="memo-share-btn" data-act="share" title="Condividi">👥</button>';
+    } else {
+      html += '<span style="font-size:.68rem;color:#888;">di ' + esc(m.owner_name || '') + '</span>';
+    }
+    if (isShared && isOwner) {
+      html += '<span class="memo-share-badge">Condivisa</span>';
+    }
     html += '</div>';
+
     html += '<div class="memo-card-title">' + esc(m.title) + '</div>';
     if (m.body) { html += '<div class="memo-card-body">' + m.body + '</div>'; }
 
@@ -161,20 +189,32 @@
     if (meta) { html += '<div class="memo-card-meta">' + meta + '</div>'; }
 
     html += '<div class="memo-card-actions">';
-    if (m.status !== 'done') {
-      html += '<button class="memo-mini" data-act="done">✓ Done</button>';
-    } else {
-      html += '<button class="memo-mini" data-act="reopen">Reopen</button>';
+    if (canEdit) {
+      if (m.status !== 'done') {
+        html += '<button class="memo-mini" data-act="done">✓ Done</button>';
+      } else {
+        html += '<button class="memo-mini" data-act="reopen">Reopen</button>';
+      }
+      html += '<button class="memo-mini" data-act="edit">Edit</button>';
     }
-    html += '<button class="memo-mini" data-act="edit">Edit</button>';
     html += '</div>';
 
     card.innerHTML = html;
 
-    card.querySelector('[data-act="pin"]').addEventListener('click', function (e) {
+    // wire up pin
+    var pinBtn = card.querySelector('[data-act="pin"]');
+    if (pinBtn) { pinBtn.addEventListener('click', function (e) {
       e.stopPropagation();
       post('toggle_pin', { id: m.id }, function () { load(); });
-    });
+    }); }
+
+    // wire up share
+    var shareBtn = card.querySelector('[data-act="share"]');
+    if (shareBtn) { shareBtn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      memoShareOpen(m.id);
+    }); }
+
     var doneBtn = card.querySelector('[data-act="done"]');
     if (doneBtn) { doneBtn.addEventListener('click', function (e) {
       e.stopPropagation();
@@ -185,13 +225,16 @@
       e.stopPropagation();
       post('set_status', { id: m.id, status: 'open' }, function () { load(); });
     }); }
-    card.querySelector('[data-act="edit"]').addEventListener('click', function (e) {
+    var editBtn = card.querySelector('[data-act="edit"]');
+    if (editBtn) { editBtn.addEventListener('click', function (e) {
       e.stopPropagation();
       openModal(m);
-    });
+    }); }
 
-    card.addEventListener('dragstart', function () { dragId = m.id; card.classList.add('dragging'); });
-    card.addEventListener('dragend',   function () { card.classList.remove('dragging'); dragId = null; });
+    if (isOwner) {
+      card.addEventListener('dragstart', function () { dragId = m.id; card.classList.add('dragging'); });
+      card.addEventListener('dragend',   function () { card.classList.remove('dragging'); dragId = null; });
+    }
     card.addEventListener('dragover',  function (e) { e.preventDefault(); });
     card.addEventListener('drop', function (e) {
       e.preventDefault();
@@ -214,8 +257,9 @@
     post('reorder', { ids: ids }, function () { load(); });
   }
 
-  // ---------- modal ----------
+  // ---------- memo modal ----------
   function openModal(m) {
+    var isOwner = m ? Number(m.is_owner) === 1 : true;
     document.getElementById('memoModalTitle').textContent = m ? 'Edit memo' : 'New memo';
     document.getElementById('m_id').value       = m ? m.id : '';
     document.getElementById('m_title').value    = m ? (m.title    || '') : '';
@@ -223,7 +267,6 @@
     document.getElementById('m_color').value    = m && m.color ? m.color : '';
     document.getElementById('m_due_date').value = m && m.due_date ? m.due_date : '';
 
-    // Quill body
     var bodyHtml = m ? (m.body || '') : '';
     document.getElementById('m_body').value = bodyHtml;
     if (memoQuill) {
@@ -231,7 +274,6 @@
       if (bodyHtml) { memoQuill.clipboard.dangerouslyPasteHTML(0, bodyHtml); }
     }
 
-    // Reminder
     var hasReminder = m && m.reminder_at;
     var chk = document.getElementById('m_send_mail');
     chk.checked = !!hasReminder;
@@ -254,7 +296,8 @@
     document.getElementById('m_reminder_min').value  = rMin;
     document.getElementById('m_recur_rule').value    = rRecur;
 
-    document.getElementById('memoDeleteBtn').style.display = m ? 'inline-block' : 'none';
+    // delete only for owner
+    document.getElementById('memoDeleteBtn').style.display = (m && isOwner) ? 'inline-block' : 'none';
     modal.style.display = 'flex';
     document.getElementById('m_title').focus();
   }
@@ -304,7 +347,6 @@
     post('delete', { id: id }, function () { closeModal(); load(); });
   }
 
-  // ---------- wire up ----------
   document.getElementById('memoNewBtn').addEventListener('click',   function () { openModal(null); });
   document.getElementById('memoSaveBtn').addEventListener('click',  save);
   document.getElementById('memoCancelBtn').addEventListener('click', closeModal);
@@ -318,6 +360,104 @@
     this.style.borderColor = panel.classList.contains('visible') ? 'var(--red)' : '';
   });
 
+  // ---------- share modal ----------
+  var shareModal   = document.getElementById('memoShareModal');
+  var allUsers     = [];   // populated once on first open
+
+  function memoShareOpen(memoId) {
+    document.getElementById('share_memo_id').value = memoId;
+    document.getElementById('share_all_on').checked   = false;
+    document.getElementById('share_all_edit').checked = false;
+    document.getElementById('shareUserList').innerHTML = '<p style="color:#aaa;font-size:.8rem;">Caricamento…</p>';
+    shareModal.style.display = 'flex';
+
+    // load users list if not yet loaded, then load current shares
+    function loadShares() {
+      get('get_shares', { id: memoId }, function (res) {
+        if (!res || !res.ok) { return; }
+        var shares = res.shares || [];
+
+        // populate "all" row
+        for (var i = 0; i < shares.length; i++) {
+          if (shares[i].shared_with_user_id === null || shares[i].shared_with_user_id === '') {
+            document.getElementById('share_all_on').checked   = true;
+            document.getElementById('share_all_edit').checked = Number(shares[i].can_edit) === 1;
+          }
+        }
+
+        // build per-user rows
+        var html = '';
+        for (var j = 0; j < allUsers.length; j++) {
+          var u = allUsers[j];
+          var checked = false, editChecked = false;
+          for (var k = 0; k < shares.length; k++) {
+            if (String(shares[k].shared_with_user_id) === String(u.id)) {
+              checked = true;
+              editChecked = Number(shares[k].can_edit) === 1;
+            }
+          }
+          html += '<div class="memo-share-row">' +
+            '<span class="share-name">' + esc(u.full_name) + '</span>' +
+            '<div class="memo-share-toggle">' +
+            '<input type="checkbox" class="sh-on"  data-uid="' + u.id + '"' + (checked     ? ' checked' : '') + '>' +
+            '<span>Condividi</span>' +
+            '<input type="checkbox" class="sh-edit" data-uid="' + u.id + '"' + (editChecked ? ' checked' : '') + '>' +
+            '<span>Può modificare</span>' +
+            '</div></div>';
+        }
+        document.getElementById('shareUserList').innerHTML = html || '<p style="color:#aaa;font-size:.8rem;">Nessun altro utente.</p>';
+      });
+    }
+
+    if (allUsers.length > 0) {
+      loadShares();
+    } else {
+      get('get_users', {}, function (res) {
+        allUsers = (res && res.ok && res.users) ? res.users : [];
+        loadShares();
+      });
+    }
+  }
+
+  window.memoShareOpen  = memoShareOpen;
+
+  window.memoShareAllToggle = function () {
+    // no extra logic needed — just let save read the checkboxes
+  };
+
+  window.memoShareClose = function () {
+    shareModal.style.display = 'none';
+  };
+
+  window.memoShareSave = function () {
+    var memoId = document.getElementById('share_memo_id').value;
+    var shares = [];
+
+    // "all" entry
+    if (document.getElementById('share_all_on').checked) {
+      shares.push({ user_id: null, can_edit: document.getElementById('share_all_edit').checked ? 1 : 0 });
+    }
+
+    // per-user entries
+    var onChecks = document.getElementById('shareUserList').querySelectorAll('.sh-on');
+    for (var i = 0; i < onChecks.length; i++) {
+      if (onChecks[i].checked) {
+        var uid2  = onChecks[i].getAttribute('data-uid');
+        var editEl = document.querySelector('.sh-edit[data-uid="' + uid2 + '"]');
+        shares.push({ user_id: uid2, can_edit: (editEl && editEl.checked) ? 1 : 0 });
+      }
+    }
+
+    post('save_shares', { id: memoId, shares: JSON.stringify(shares) }, function (res) {
+      if (!res || !res.ok) { alert('Errore nel salvataggio condivisione.'); return; }
+      window.memoShareClose();
+      load();
+    });
+  };
+
+  shareModal.addEventListener('click', function (e) { if (e.target === shareModal) { window.memoShareClose(); } });
+
+  // ---------- init ----------
   initQuill();
   load();
 })();

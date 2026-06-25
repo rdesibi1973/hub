@@ -97,6 +97,29 @@ $extra_css = '
 .memo-quill .ql-toolbar { border-radius:4px 4px 0 0; border-color:#ccc; }
 .memo-quill .ql-container { border-radius:0 0 4px 4px; border-color:#ccc; }
 .memo-quill .ql-editor { min-height:80px; font-size:14px; font-family:"Open Sans",sans-serif; }
+
+/* share badge on card */
+.memo-share-badge { font-size:.63rem; background:rgba(0,0,0,.12); color:#333; padding:1px 5px;
+  border-radius:3px; margin-left:auto; }
+.memo-share-btn { background:none; border:none; cursor:pointer; font-size:13px; padding:0 2px;
+  color:#666; line-height:1; }
+.memo-share-btn:hover { color:#C0211B; }
+
+/* share modal */
+.memo-share-modal { background:#fff; border-radius:8px; padding:22px; width:420px;
+  max-width:94vw; max-height:88vh; overflow-y:auto; box-shadow:0 8px 30px rgba(0,0,0,.3); }
+.memo-share-modal h3 { margin:0 0 14px; color:var(--red-dk); font-family:"Merriweather",serif; font-size:1rem; }
+.memo-share-section { margin-bottom:14px; }
+.memo-share-section label { display:block; font-size:.72rem; font-weight:700; text-transform:uppercase;
+  letter-spacing:.05em; color:#666; margin-bottom:8px; }
+.memo-share-row { display:flex; align-items:center; gap:8px; padding:6px 0;
+  border-bottom:1px solid #f0f0f0; font-size:.85rem; }
+.memo-share-row:last-child { border-bottom:none; }
+.memo-share-row .share-name { flex:1; color:#2b2b2b; }
+.memo-share-toggle { display:flex; gap:6px; align-items:center; }
+.memo-share-toggle input[type="checkbox"] { width:15px; height:15px; accent-color:#C0211B; cursor:pointer; }
+.memo-share-toggle span { font-size:.75rem; color:#555; white-space:nowrap; }
+.memo-share-hint { font-size:.75rem; color:#888; margin-top:8px; line-height:1.4; }
 ';
 
 include __DIR__ . '/../../includes/layout_header.php';
@@ -121,6 +144,7 @@ include __DIR__ . '/../../includes/layout_header.php';
       <div class="memo-help-item"><strong>↕ Drag to reorder</strong>Drag and drop cards within the board to change their order.</div>
       <div class="memo-help-item"><strong>✉ Email reminder</strong>Tick "Send email reminder", set a date &amp; time, and choose Once / Daily / Weekly / Monthly. An email is sent to your account at that time (checked every 15 min).</div>
       <div class="memo-help-item"><strong>🎨 Priority &amp; color</strong>High priority adds a red bar on the left edge. Choose a card color to visually group memos.</div>
+      <div class="memo-help-item"><strong>👥 Condividi</strong>Clicca l'icona 👥 sulla card per condividere con tutti o con utenti specifici. Puoi scegliere se possono solo vedere o anche modificare.</div>
       <div class="memo-help-item"><strong>🗑 Delete</strong>Open a memo, click Edit, then Delete. Deletion is permanent.</div>
     </div>
   </div>
@@ -198,6 +222,42 @@ include __DIR__ . '/../../includes/layout_header.php';
       <span style="flex:1"></span>
       <button id="memoCancelBtn" class="memo-btn">Cancel</button>
       <button id="memoSaveBtn" class="memo-btn memo-btn-primary">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Share modal -->
+<div id="memoShareModal" class="memo-modal-overlay" style="display:none;">
+  <div class="memo-share-modal">
+    <h3>Condividi memo</h3>
+    <input type="hidden" id="share_memo_id">
+
+    <div class="memo-share-section">
+      <label>Tutti gli utenti</label>
+      <div class="memo-share-row">
+        <span class="share-name">👥 Tutti i membri del team</span>
+        <div class="memo-share-toggle">
+          <input type="checkbox" id="share_all_on" onchange="memoShareAllToggle()">
+          <span>Condividi</span>
+          <input type="checkbox" id="share_all_edit">
+          <span>Può modificare</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="memo-share-section">
+      <label>Utenti specifici</label>
+      <div id="shareUserList">
+        <p style="color:#aaa;font-size:.8rem;">Caricamento…</p>
+      </div>
+    </div>
+
+    <p class="memo-share-hint">Chi non ha il permesso di modifica può vedere la memo ma non cambiarla.</p>
+
+    <div class="memo-modal-actions">
+      <span style="flex:1"></span>
+      <button class="memo-btn" onclick="memoShareClose()">Annulla</button>
+      <button class="memo-btn memo-btn-primary" onclick="memoShareSave()">Salva</button>
     </div>
   </div>
 </div>
