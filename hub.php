@@ -295,6 +295,17 @@ include __DIR__ . '/includes/layout_header.php';
 
   </div>
 
+  <!-- ══ GHALA ══ -->
+  <div class="section-label dot-amber group-spacer">Stock & POS</div>
+  <div class="links-grid">
+    <a class="link-card lc-teal" href="https://ghala.theorangicollection.com" target="_blank">
+      <div class="lc-icon" style="background:#fff;padding:3px;">
+        <img src="https://www.google.com/s2/favicons?domain=ghala.theorangicollection.com&sz=64" alt="Ghala">
+      </div>
+      <div><div class="lc-label">Ghala</div><div class="lc-sub">theorangicollection.com</div></div>
+    </a>
+  </div>
+
   <?php if ($is_admin_or_manager): ?>
   <!-- ══ LODGEBRIDGE ══ -->
   <div class="section-label dot-amber group-spacer">Lodgebridge</div>
