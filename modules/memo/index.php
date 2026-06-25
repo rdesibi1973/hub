@@ -58,6 +58,8 @@ $extra_css = '
 .memo-mini { font-size:.75rem; border:none; cursor:pointer; background:rgba(0,0,0,.10);
   color:#333; padding:3px 8px; border-radius:4px; }
 .memo-mini:hover { background:rgba(0,0,0,.18); }
+.memo-mini-del { background:none; color:#bbb; padding:3px 5px; margin-left:auto; }
+.memo-mini-del:hover { color:#C0211B; background:rgba(192,33,27,.08); }
 
 /* buttons */
 .memo-btn { border:none; cursor:pointer; padding:8px 14px; border-radius:4px;

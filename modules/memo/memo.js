@@ -197,6 +197,9 @@
       }
       html += '<button class="memo-mini" data-act="edit">Edit</button>';
     }
+    if (isOwner) {
+      html += '<button class="memo-mini memo-mini-del" data-act="delcard" title="Delete">🗑</button>';
+    }
     html += '</div>';
 
     card.innerHTML = html;
@@ -229,6 +232,12 @@
     if (editBtn) { editBtn.addEventListener('click', function (e) {
       e.stopPropagation();
       openModal(m);
+    }); }
+    var delCardBtn = card.querySelector('[data-act="delcard"]');
+    if (delCardBtn) { delCardBtn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      if (!confirm('Eliminare questo memo?')) { return; }
+      post('delete', { id: m.id }, function () { load(); });
     }); }
 
     if (isOwner) {
