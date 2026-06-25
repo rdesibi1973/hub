@@ -198,7 +198,7 @@
       html += '<button class="memo-mini" data-act="edit">Edit</button>';
     }
     if (isOwner) {
-      html += '<button class="memo-mini memo-mini-del" data-act="delcard" title="Delete">🗑</button>';
+      html += '<button class="memo-mini memo-mini-del" data-act="delcard">Delete</button>';
     }
     html += '</div>';
 
