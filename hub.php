@@ -53,19 +53,9 @@ include __DIR__ . '/includes/layout_header.php';
       <span class="pc-arrow">↗</span>
     </a>
 
-    <a class="primary-card pc-green" href="https://www.savannahexplorers.net/" target="_blank">
-      <div class="pc-icon pc-logo">
-        <img src="https://www.savannahexplorers.net/img/logo-savannah-explorers.png" alt="Savannah Explorers">
-      </div>
-      <div class="pc-text"><h3>Website — EN</h3><p>savannahexplorers.net</p></div>
-      <span class="pc-arrow">↗</span>
-    </a>
-
-    <a class="primary-card pc-green" href="https://www.savannahexplorers.com/" target="_blank">
-      <div class="pc-icon pc-logo">
-        <img src="https://www.savannahexplorers.net/img/logo-savannah-explorers.png" alt="Savannah Explorers">
-      </div>
-      <div class="pc-text"><h3>Website — IT</h3><p>savannahexplorers.com</p></div>
+    <a class="primary-card pc-teal" href="https://ghala.theorangicollection.com" target="_blank">
+      <div class="pc-icon">🏪</div>
+      <div class="pc-text"><h3>Ghala</h3><p>Stock &amp; Purchase Orders</p></div>
       <span class="pc-arrow">↗</span>
     </a>
 
@@ -195,6 +185,20 @@ include __DIR__ . '/includes/layout_header.php';
   <div class="section-label dot-navy group-spacer">Tools</div>
   <div class="links-grid">
 
+    <a class="link-card lc-green" href="https://www.savannahexplorers.net/" target="_blank">
+      <div class="lc-icon" style="background:#fff;border:1px solid var(--grey-lt);padding:3px;">
+        <img src="https://www.savannahexplorers.net/img/logo-savannah-explorers.png" alt="Savannah Explorers">
+      </div>
+      <div><div class="lc-label">Website — EN</div><div class="lc-sub">savannahexplorers.net</div></div>
+    </a>
+
+    <a class="link-card lc-green" href="https://www.savannahexplorers.com/" target="_blank">
+      <div class="lc-icon" style="background:#fff;border:1px solid var(--grey-lt);padding:3px;">
+        <img src="https://www.savannahexplorers.net/img/logo-savannah-explorers.png" alt="Savannah Explorers">
+      </div>
+      <div><div class="lc-label">Website — IT</div><div class="lc-sub">savannahexplorers.com</div></div>
+    </a>
+
     <a class="link-card lc-navy" href="https://safer.intermundial.com/login?lang=it" target="_blank">
       <div class="lc-icon emoji">🧭</div>
       <div><div class="lc-label">Intermundial</div><div class="lc-sub">Operator Portal</div></div>
@@ -293,17 +297,6 @@ include __DIR__ . '/includes/layout_header.php';
 
     <?php endif; // admin_or_manager: BlueHost + Brevo ?>
 
-  </div>
-
-  <!-- ══ GHALA ══ -->
-  <div class="section-label dot-amber group-spacer">Stock & POS</div>
-  <div class="links-grid">
-    <a class="link-card lc-teal" href="https://ghala.theorangicollection.com" target="_blank">
-      <div class="lc-icon" style="background:#fff;padding:3px;">
-        <img src="https://www.google.com/s2/favicons?domain=ghala.theorangicollection.com&sz=64" alt="Ghala">
-      </div>
-      <div><div class="lc-label">Ghala</div><div class="lc-sub">theorangicollection.com</div></div>
-    </a>
   </div>
 
   <?php if ($is_admin_or_manager): ?>
