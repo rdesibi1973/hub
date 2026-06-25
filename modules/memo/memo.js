@@ -121,10 +121,10 @@
       else { upcoming.push(m); }
     }
 
-    renderGroup('Overdue', overdue,   'overdue');
-    renderGroup('Today',   todayArr,  'today');
-    renderGroup('Upcoming',upcoming,  'upcoming');
-    renderGroup('',        nodate,    'nodate');
+    renderGroup('Forever',   nodate,   'nodate');
+    renderGroup('Expired',  overdue,  'overdue');
+    renderGroup('Today',    todayArr, 'today');
+    renderGroup('Next days',upcoming, 'upcoming');
   }
 
   function renderGroup(label, memos, cls) {
