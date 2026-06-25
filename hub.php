@@ -54,7 +54,10 @@ include __DIR__ . '/includes/layout_header.php';
     </a>
 
     <a class="primary-card pc-teal" href="https://ghala.theorangicollection.com" target="_blank">
-      <div class="pc-icon">🏪</div>
+      <div class="pc-icon pc-logo">
+        <img src="https://www.google.com/s2/favicons?domain=theorangicollection.com&sz=64" alt="Ghala"
+             onerror="this.style.display='none';this.parentNode.innerHTML='🏪'">
+      </div>
       <div class="pc-text"><h3>Ghala</h3><p>Stock &amp; Purchase Orders</p></div>
       <span class="pc-arrow">↗</span>
     </a>
