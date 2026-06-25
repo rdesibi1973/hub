@@ -164,7 +164,7 @@
     html += '<div class="memo-card-head">';
     if (isOwner) {
       html += '<button class="memo-pin" data-act="pin">' + pinTxt + '</button>';
-      html += '<button class="memo-share-btn" data-act="share" title="Condividi">👥</button>';
+      html += '<button class="memo-share-btn" data-act="share">Share</button>';
     } else {
       html += '<span style="font-size:.68rem;color:#888;">di ' + esc(m.owner_name || '') + '</span>';
     }
@@ -409,12 +409,12 @@
             '<span class="share-name">' + esc(u.full_name) + '</span>' +
             '<div class="memo-share-toggle">' +
             '<input type="checkbox" class="sh-on"  data-uid="' + u.id + '"' + (checked     ? ' checked' : '') + '>' +
-            '<span>Condividi</span>' +
+            '<span>Share</span>' +
             '<input type="checkbox" class="sh-edit" data-uid="' + u.id + '"' + (editChecked ? ' checked' : '') + '>' +
-            '<span>Può modificare</span>' +
+            '<span>Can edit</span>' +
             '</div></div>';
         }
-        document.getElementById('shareUserList').innerHTML = html || '<p style="color:#aaa;font-size:.8rem;">Nessun altro utente.</p>';
+        document.getElementById('shareUserList').innerHTML = html || '<p style="color:#aaa;font-size:.8rem;">No other users.</p>';
       });
     }
 

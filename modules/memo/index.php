@@ -103,9 +103,9 @@ $extra_css = '
 /* share badge on card */
 .memo-share-badge { font-size:.63rem; background:rgba(0,0,0,.12); color:#333; padding:1px 5px;
   border-radius:3px; margin-left:auto; }
-.memo-share-btn { background:none; border:none; cursor:pointer; font-size:13px; padding:0 2px;
-  color:#666; line-height:1; }
-.memo-share-btn:hover { color:#C0211B; }
+.memo-share-btn { background:rgba(0,0,0,.10); border:none; cursor:pointer; font-size:.72rem;
+  font-weight:700; padding:2px 7px; border-radius:4px; color:#555; line-height:1.4; }
+.memo-share-btn:hover { background:rgba(0,0,0,.18); color:#C0211B; }
 
 /* share modal */
 .memo-share-modal { background:#fff; border-radius:8px; padding:22px; width:420px;
@@ -235,31 +235,31 @@ include __DIR__ . '/../../includes/layout_header.php';
     <input type="hidden" id="share_memo_id">
 
     <div class="memo-share-section">
-      <label>Tutti gli utenti</label>
+      <label>All users</label>
       <div class="memo-share-row">
-        <span class="share-name">👥 Tutti i membri del team</span>
+        <span class="share-name">👥 All team members</span>
         <div class="memo-share-toggle">
           <input type="checkbox" id="share_all_on" onchange="memoShareAllToggle()">
-          <span>Condividi</span>
+          <span>Share</span>
           <input type="checkbox" id="share_all_edit">
-          <span>Può modificare</span>
+          <span>Can edit</span>
         </div>
       </div>
     </div>
 
     <div class="memo-share-section">
-      <label>Utenti specifici</label>
+      <label>Specific users</label>
       <div id="shareUserList">
         <p style="color:#aaa;font-size:.8rem;">Caricamento…</p>
       </div>
     </div>
 
-    <p class="memo-share-hint">Chi non ha il permesso di modifica può vedere la memo ma non cambiarla.</p>
+    <p class="memo-share-hint">Users without edit permission can view the memo but cannot change it.</p>
 
     <div class="memo-modal-actions">
       <span style="flex:1"></span>
-      <button class="memo-btn" onclick="memoShareClose()">Annulla</button>
-      <button class="memo-btn memo-btn-primary" onclick="memoShareSave()">Salva</button>
+      <button class="memo-btn" onclick="memoShareClose()">Cancel</button>
+      <button class="memo-btn memo-btn-primary" onclick="memoShareSave()">Save</button>
     </div>
   </div>
 </div>
