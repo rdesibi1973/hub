@@ -57,6 +57,24 @@ function clean_color($v) {
     if (preg_match('/^#[0-9A-Fa-f]{6}$/', $v)) { return $v; }
     return null;
 }
+// Parse a comma/semicolon/newline separated list of emails into a clean,
+// de-duplicated, comma-separated string. Invalid entries are dropped.
+function clean_emails($v) {
+    $v = trim((string)$v);
+    if ($v === '') { return null; }
+    $parts = preg_split('/[,;\s]+/', $v);
+    $out = array();
+    foreach ($parts as $p) {
+        $p = trim($p);
+        if ($p === '') { continue; }
+        if (filter_var($p, FILTER_VALIDATE_EMAIL)) {
+            $key = strtolower($p);
+            if (!isset($out[$key])) { $out[$key] = $p; }
+        }
+    }
+    if (empty($out)) { return null; }
+    return implode(', ', array_values($out));
+}
 
 // Returns: is_owner=1 if owner; can_edit=1 if owner or shared with can_edit; 0 if no access.
 function memo_access($pdo, $memo_id, $uid) {
@@ -83,7 +101,7 @@ if ($action === 'list') {
     // Own memos + memos shared with this user (or with everyone)
     $stmt = $pdo->prepare(
         "SELECT m.id, m.user_id, m.title, m.body, m.type, m.status, m.priority,
-                m.pinned, m.color, m.due_date, m.reminder_at, m.reminder_sent,
+                m.pinned, m.color, m.due_date, m.reminder_at, m.reminder_emails, m.reminder_sent,
                 m.recur_rule, m.sort_order, m.created_at, m.updated_at,
                 (m.user_id = ?) AS is_owner,
                 MAX(CASE WHEN ms.id IS NOT NULL THEN ms.can_edit ELSE 0 END) AS shared_can_edit,
@@ -124,13 +142,14 @@ if ($action === 'create') {
     $color     = clean_color(isset($_POST['color'])     ? $_POST['color']     : '');
     $due       = parse_date(isset($_POST['due_date'])   ? $_POST['due_date']  : '');
     $remind    = parse_dt(isset($_POST['reminder_at'])  ? $_POST['reminder_at']: '');
+    $remEmails = $remind ? clean_emails(isset($_POST['reminder_emails']) ? $_POST['reminder_emails'] : '') : null;
 
     $stmt = $pdo->prepare(
         "INSERT INTO memos " .
-        "(user_id, title, body, type, status, priority, pinned, color, due_date, reminder_at, reminder_sent, recur_rule, sort_order, created_at, updated_at) " .
-        "VALUES (?, ?, ?, ?, 'open', ?, 0, ?, ?, ?, 0, ?, 0, ?, ?)"
+        "(user_id, title, body, type, status, priority, pinned, color, due_date, reminder_at, reminder_emails, reminder_sent, recur_rule, sort_order, created_at, updated_at) " .
+        "VALUES (?, ?, ?, ?, 'open', ?, 0, ?, ?, ?, ?, 0, ?, 0, ?, ?)"
     );
-    $stmt->execute(array($uid, $title, $body, $type, $priority, $color, $due, $remind, $recur, $now, $now));
+    $stmt->execute(array($uid, $title, $body, $type, $priority, $color, $due, $remind, $remEmails, $recur, $now, $now));
     out(true, array('id' => intval($pdo->lastInsertId())));
 }
 
@@ -152,13 +171,14 @@ if ($action === 'update') {
     $color     = clean_color(isset($_POST['color'])     ? $_POST['color']     : '');
     $due       = parse_date(isset($_POST['due_date'])   ? $_POST['due_date']  : '');
     $remind    = parse_dt(isset($_POST['reminder_at'])  ? $_POST['reminder_at']: '');
+    $remEmails = $remind ? clean_emails(isset($_POST['reminder_emails']) ? $_POST['reminder_emails'] : '') : null;
 
     $stmt = $pdo->prepare(
         "UPDATE memos SET title=?, body=?, type=?, priority=?, color=?, due_date=?, " .
-        "reminder_at=?, recur_rule=?, reminder_sent=0, updated_at=? " .
+        "reminder_at=?, reminder_emails=?, recur_rule=?, reminder_sent=0, updated_at=? " .
         "WHERE id=?"
     );
-    $stmt->execute(array($title, $body, $type, $priority, $color, $due, $remind, $recur, $now, $id));
+    $stmt->execute(array($title, $body, $type, $priority, $color, $due, $remind, $remEmails, $recur, $now, $id));
     out(true, array());
 }
 

@@ -1,6 +1,16 @@
 <?php
 require_once __DIR__ . '/../../includes/auth.php';
+require_once __DIR__ . '/../../includes/db.php';
 require_login();
+
+// The reminder always goes to the logged-in user; show their address in the form.
+$me = current_user();
+$my_email = '';
+if (!empty($me['id'])) {
+    $st = db()->prepare('SELECT email FROM users WHERE id = ?');
+    $st->execute(array($me['id']));
+    $my_email = (string)$st->fetchColumn();
+}
 
 $page_title = 'Memo Board';
 $extra_css = '
@@ -95,6 +105,12 @@ $extra_css = '
 .memo-time-sep { color:#888; font-weight:700; flex-shrink:0; }
 .memo-modal-actions { display:flex; align-items:center; gap:8px; margin-top:18px; }
 
+/* reminder recipients */
+.memo-recipients { margin-top:12px; }
+.memo-recipients-to { font-size:.8rem; color:#444; }
+.memo-recipients-to strong { color:#2b2b2b; }
+.memo-recipients-hint { font-size:.72rem; color:#888; margin-top:4px; }
+
 /* Quill */
 .memo-quill .ql-toolbar { border-radius:4px 4px 0 0; border-color:#ccc; }
 .memo-quill .ql-container { border-radius:0 0 4px 4px; border-color:#ccc; }
@@ -144,7 +160,7 @@ include __DIR__ . '/../../includes/layout_header.php';
       <div class="memo-help-item"><strong>✓ Done / Reopen</strong>Mark a memo as done to move it out of Overdue. Click Reopen to bring it back to active.</div>
       <div class="memo-help-item"><strong>★ Pin</strong>Pin a memo to keep it at the top of its group. Click the star icon on the card.</div>
       <div class="memo-help-item"><strong>↕ Drag to reorder</strong>Drag and drop cards within the board to change their order.</div>
-      <div class="memo-help-item"><strong>✉ Email reminder</strong>Tick "Send email reminder", set a date &amp; time, and choose Once / Daily / Weekly / Monthly. An email is sent to your account at that time (checked every 15 min).</div>
+      <div class="memo-help-item"><strong>✉ Email reminder</strong>Tick "Send email reminder", set a date &amp; time, and choose Once / Daily / Weekly / Monthly. An email is sent to your account at that time (checked every 15 min). You can also add extra recipients under &ldquo;Also send to&rdquo;.</div>
       <div class="memo-help-item"><strong>🎨 Priority &amp; color</strong>High priority adds a red bar on the left edge. Choose a card color to visually group memos.</div>
       <div class="memo-help-item"><strong>👥 Condividi</strong>Clicca l'icona 👥 sulla card per condividere con tutti o con utenti specifici. Puoi scegliere se possono solo vedere o anche modificare.</div>
       <div class="memo-help-item"><strong>🗑 Delete</strong>Open a memo, click Edit, then Delete. Deletion is permanent.</div>
@@ -216,6 +232,15 @@ include __DIR__ . '/../../includes/layout_header.php';
           <option value="weekly">Weekly</option>
           <option value="monthly">Monthly</option>
         </select>
+      </div>
+
+      <div class="memo-recipients">
+        <div class="memo-recipients-to">
+          Sent to: <strong><?php echo htmlspecialchars($my_email !== '' ? $my_email : 'your account'); ?></strong> (you)
+        </div>
+        <label>Also send to (optional)</label>
+        <input type="text" id="m_reminder_emails" placeholder="email1@example.com, email2@example.com">
+        <div class="memo-recipients-hint">Separate multiple addresses with commas.</div>
       </div>
     </div>
 

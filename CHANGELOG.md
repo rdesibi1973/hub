@@ -20,6 +20,12 @@ Running log of notable changes and current build state. Module-level "active / p
 
 ---
 
+## 2026-06 — Memo reminders: extra recipients
+- Reminder form now shows who the email goes to (your account, by default) and an
+  optional "Also send to" field for additional comma-separated addresses
+- Migration `053_memo_reminder_recipients.sql` adds `memos.reminder_emails`
+- `cron_reminders.php` sends each reminder to the owner + any validated extras
+
 ## 2026-06 — Memo Board
 - New `modules/memo/` module: per-user memos/todos/notes, post-it UI, drag-to-reorder, pin-to-top
 - Self-scheduled email reminders (one-shot + recurring daily/weekly/monthly), self-advancing

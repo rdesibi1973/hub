@@ -31,7 +31,7 @@ $now = date('Y-m-d H:i:s');
 // For one-shot (recur_rule='none') we additionally require reminder_sent = 0.
 $sql =
     "SELECT m.id, m.user_id, m.title, m.body, m.type, m.due_date, " .
-    "m.reminder_at, m.recur_rule, u.email AS user_email, u.full_name AS user_name " .
+    "m.reminder_at, m.recur_rule, m.reminder_emails, u.email AS user_email, u.full_name AS user_name " .
     "FROM memos m " .
     "JOIN users u ON u.id = m.user_id " .
     "WHERE m.deleted_at IS NULL " .
@@ -48,7 +48,22 @@ $skipped = 0;
 
 foreach ($rows as $r) {
     $email = trim($r['user_email']);
-    if ($email === '') { $skipped++; continue; }
+
+    // Recipients = owner (always) + any extra addresses the owner added.
+    $recipients = array();
+    if ($email !== '' && filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        $recipients[strtolower($email)] = $email;
+    }
+    if (!empty($r['reminder_emails'])) {
+        foreach (preg_split('/[,;\s]+/', $r['reminder_emails']) as $extra) {
+            $extra = trim($extra);
+            if ($extra !== '' && filter_var($extra, FILTER_VALIDATE_EMAIL)) {
+                $recipients[strtolower($extra)] = $extra;
+            }
+        }
+    }
+    if (empty($recipients)) { $skipped++; continue; }
+    $to = implode(', ', array_values($recipients));
 
     $name  = $r['user_name'] !== '' ? $r['user_name'] : 'there';
     $title = $r['title'];
@@ -70,7 +85,7 @@ foreach ($rows as $r) {
 
     // send_mail() is assumed available from mail_helper.php (PHPMailer isMail(), noreply@ sender).
     // Adjust the call if your helper signature differs.
-    $okMail = send_hub_email($email, $subject, $html, 'Savannah Explorers Hub', 'noreply@savannahexplorers.com');
+    $okMail = send_hub_email($to, $subject, $html, 'Savannah Explorers Hub', 'noreply@savannahexplorers.com');
 
     if ($okMail) {
         $sent++;

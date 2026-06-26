@@ -304,6 +304,7 @@
     document.getElementById('m_reminder_hour').value = rHour;
     document.getElementById('m_reminder_min').value  = rMin;
     document.getElementById('m_recur_rule').value    = rRecur;
+    document.getElementById('m_reminder_emails').value = m && m.reminder_emails ? m.reminder_emails : '';
 
     // delete only for owner
     document.getElementById('memoDeleteBtn').style.display = (m && isOwner) ? 'inline-block' : 'none';
@@ -323,6 +324,7 @@
     }
 
     var reminderAt = '';
+    var reminderEmails = '';
     if (document.getElementById('m_send_mail').checked) {
       var rDate = document.getElementById('m_reminder_date').value;
       if (rDate) {
@@ -330,16 +332,18 @@
         var rMin  = document.getElementById('m_reminder_min').value;
         reminderAt = rDate + ' ' + rHour + ':' + rMin;
       }
+      reminderEmails = document.getElementById('m_reminder_emails').value;
     }
 
     var data = {
-      title:       title,
-      body:        document.getElementById('m_body').value,
-      priority:    document.getElementById('m_priority').value,
-      color:       document.getElementById('m_color').value,
-      due_date:    document.getElementById('m_due_date').value,
-      reminder_at: reminderAt,
-      recur_rule:  document.getElementById('m_recur_rule').value
+      title:           title,
+      body:            document.getElementById('m_body').value,
+      priority:        document.getElementById('m_priority').value,
+      color:           document.getElementById('m_color').value,
+      due_date:        document.getElementById('m_due_date').value,
+      reminder_at:     reminderAt,
+      reminder_emails: reminderEmails,
+      recur_rule:      document.getElementById('m_recur_rule').value
     };
     if (id) { data.id = id; }
 
