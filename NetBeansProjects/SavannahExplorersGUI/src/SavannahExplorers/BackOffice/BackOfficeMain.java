@@ -1512,7 +1512,7 @@ public class BackOfficeMain extends javax.swing.JFrame {
     private void jButton11ActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_jButton11ActionPerformed
         // Safari is confirmed with Start Date, End Date and other info
         // Generate the new safari folder and move to confirmed safari folder %DROPBOX_HOME%\\001_Safari
-        String custname=jTextField1.getText();
+        String custname=jTextField1.getText().trim();
         String grpAction = (grpActionCombo != null) ? (String)grpActionCombo.getSelectedItem() : "NONE";
         if (grpAction == null) grpAction = "NONE";
         String grpCode   = (grpCodeField != null) ? grpCodeField.getText().trim() : "";
@@ -1555,13 +1555,13 @@ public class BackOfficeMain extends javax.swing.JFrame {
             return;
         }
 
-        String startdatein=jTextField2.getText();
+        String startdatein=jTextField2.getText().trim();
         String startdate=startdatein.toUpperCase();
-        String intdatein=jTextField10.getText();
+        String intdatein=jTextField10.getText().trim();
         String intdate=intdatein.toUpperCase();
-        String intdate2in=jTextField10b.getText();
+        String intdate2in=jTextField10b.getText().trim();
         String intdate2=intdate2in.toUpperCase();
-        String enddatein=jTextField3.getText();
+        String enddatein=jTextField3.getText().trim();
         String enddate=enddatein.toUpperCase();
         String month = "00";
         String endmonth = "00";
