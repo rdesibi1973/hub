@@ -154,7 +154,7 @@ function buildInvoiceHtml(array $inv, array $items, array $payments): string
 
     $issuerAddr = $inv['issuer'] === 'Savannah Explorers Ltd'
         ? "Arusha, P.O. Box 16726<br>Tanzania"
-        : "Port Louis, Mauritius";
+        : "Certificate of Incorporation No. 212622<br>H21 Home Scene Building, Healthscape, Forbach - Mauritius<br>info@savannahholidays.net";
 
     // Line items rows
     $itemRows = '';

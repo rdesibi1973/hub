@@ -107,7 +107,7 @@ body { font-family: 'Open Sans', Arial, sans-serif; font-size: 13px; color: #333
       <?php if ($cn['issuer'] === 'Savannah Explorers Ltd'): ?>
         <div class="issuer-addr">Arusha, P.O. Box 16726<br>Tanzania</div>
       <?php else: ?>
-        <div class="issuer-addr">Port Louis, Mauritius</div>
+        <div class="issuer-addr">Certificate of Incorporation No. 212622<br>H21 Home Scene Building, Healthscape, Forbach - Mauritius<br>info@savannahholidays.net</div>
       <?php endif; ?>
     </div>
 
