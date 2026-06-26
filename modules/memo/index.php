@@ -7,7 +7,7 @@ require_login();
 $me = current_user();
 $my_email = '';
 if (!empty($me['id'])) {
-    $st = db()->prepare('SELECT email FROM users WHERE id = ?');
+    $st = $pdo->prepare('SELECT email FROM users WHERE id = ?');
     $st->execute(array($me['id']));
     $my_email = (string)$st->fetchColumn();
 }

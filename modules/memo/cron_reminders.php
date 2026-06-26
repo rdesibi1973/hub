@@ -8,7 +8,7 @@
 date_default_timezone_set('Africa/Dar_es_Salaam');
 
 require_once __DIR__ . '/../../includes/config.php';  // must define MEMO_CRON_TOKEN
-require_once __DIR__ . '/../../includes/db.php';       // provides db()
+require_once __DIR__ . '/../../includes/db.php';       // provides $pdo
 
 if (!defined('MEMO_CRON_TOKEN')) {
     http_response_code(500);
@@ -24,7 +24,7 @@ header('Content-Type: text/plain');
 // PHPMailer (same setup as the rest of the Hub)
 require_once __DIR__ . '/../../includes/mail_helper.php'; // adjust if your mail bootstrap differs
 
-$pdo = db();
+// $pdo comes from db.php (global PDO connection).
 $now = date('Y-m-d H:i:s');
 
 // Pull due reminders: only OPEN, not deleted, due now or earlier.
