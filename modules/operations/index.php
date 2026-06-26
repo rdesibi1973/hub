@@ -1076,7 +1076,7 @@ function cancelExtractor(){
   document.getElementById('extFileInput').value='';
   document.getElementById('auditPanelExt').style.display='none';
 }
-function readExtDOM(idx){const card=document.getElementById('card_'+idx);const r={...extRows[idx]};if(!card)return r;card.querySelectorAll('input').forEach((inp,i)=>{if(FIELD_KEYS[i])r[FIELD_KEYS[i]]=(i===0?fromISO(inp.value):inp.value);});return r;}
+function readExtDOM(idx){const card=document.getElementById('card_'+idx);const r={...extRows[idx]};if(!card)return r;const inputKeys=FIELD_KEYS.filter(k=>k!=='time');card.querySelectorAll('input').forEach((inp,i)=>{if(inputKeys[i])r[inputKeys[i]]=(i===0?fromISO(inp.value):inp.value);});return r;}
 function extRowToTSV(r){return FIELD_KEYS.map((k,i)=>{const v=String(r[k]||'');if(i===0&&v)return fmtDate(v);if(i===5&&v)return v.replace(',',':');return v;}).join('\t');}
 function copyExtRow(idx){showExtModal(extRowToTSV(readExtDOM(idx)));}
 function copyAllExt(){showExtModal(extRows.map((_,i)=>extRowToTSV(readExtDOM(i))).join('\n'));}
