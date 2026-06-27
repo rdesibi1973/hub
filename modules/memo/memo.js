@@ -166,10 +166,10 @@
       html += '<button class="memo-pin" data-act="pin">' + pinTxt + '</button>';
       html += '<button class="memo-share-btn" data-act="share">Share</button>';
     } else {
-      html += '<span style="font-size:.68rem;color:#888;">di ' + esc(m.owner_name || '') + '</span>';
+      html += '<span style="font-size:.68rem;color:#888;">by ' + esc(m.owner_name || '') + '</span>';
     }
     if (isShared && isOwner) {
-      html += '<span class="memo-share-badge">Condivisa</span>';
+      html += '<span class="memo-share-badge">Shared</span>';
     }
     html += '</div>';
 
@@ -236,7 +236,7 @@
     var delCardBtn = card.querySelector('[data-act="delcard"]');
     if (delCardBtn) { delCardBtn.addEventListener('click', function (e) {
       e.stopPropagation();
-      if (!confirm('Eliminare questo memo?')) { return; }
+      if (!confirm('Delete this memo?')) { return; }
       post('delete', { id: m.id }, function () { load(); });
     }); }
 
@@ -381,7 +381,7 @@
     document.getElementById('share_memo_id').value = memoId;
     document.getElementById('share_all_on').checked   = false;
     document.getElementById('share_all_edit').checked = false;
-    document.getElementById('shareUserList').innerHTML = '<p style="color:#aaa;font-size:.8rem;">Caricamento…</p>';
+    document.getElementById('shareUserList').innerHTML = '<p style="color:#aaa;font-size:.8rem;">Loading…</p>';
     shareModal.style.display = 'flex';
 
     // load users list if not yet loaded, then load current shares
@@ -462,7 +462,7 @@
     }
 
     post('save_shares', { id: memoId, shares: JSON.stringify(shares) }, function (res) {
-      if (!res || !res.ok) { alert('Errore nel salvataggio condivisione.'); return; }
+      if (!res || !res.ok) { alert('Error saving share settings.'); return; }
       window.memoShareClose();
       load();
     });

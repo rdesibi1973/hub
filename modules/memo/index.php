@@ -162,7 +162,7 @@ include __DIR__ . '/../../includes/layout_header.php';
       <div class="memo-help-item"><strong>↕ Drag to reorder</strong>Drag and drop cards within the board to change their order.</div>
       <div class="memo-help-item"><strong>✉ Email reminder</strong>Tick "Send email reminder", set a date &amp; time, and choose Once / Daily / Weekly / Monthly. An email is sent to your account at that time (checked every 15 min). You can also add extra recipients under &ldquo;Also send to&rdquo;.</div>
       <div class="memo-help-item"><strong>🎨 Priority &amp; color</strong>High priority adds a red bar on the left edge. Choose a card color to visually group memos.</div>
-      <div class="memo-help-item"><strong>👥 Condividi</strong>Clicca l'icona 👥 sulla card per condividere con tutti o con utenti specifici. Puoi scegliere se possono solo vedere o anche modificare.</div>
+      <div class="memo-help-item"><strong>👥 Share</strong>Click the Share button on a card to share it with everyone or with specific users. You can choose whether they can only view or also edit.</div>
       <div class="memo-help-item"><strong>🗑 Delete</strong>Open a memo, click Edit, then Delete. Deletion is permanent.</div>
     </div>
   </div>
@@ -256,7 +256,7 @@ include __DIR__ . '/../../includes/layout_header.php';
 <!-- Share modal -->
 <div id="memoShareModal" class="memo-modal-overlay" style="display:none;">
   <div class="memo-share-modal">
-    <h3>Condividi memo</h3>
+    <h3>Share memo</h3>
     <input type="hidden" id="share_memo_id">
 
     <div class="memo-share-section">
@@ -275,7 +275,7 @@ include __DIR__ . '/../../includes/layout_header.php';
     <div class="memo-share-section">
       <label>Specific users</label>
       <div id="shareUserList">
-        <p style="color:#aaa;font-size:.8rem;">Caricamento…</p>
+        <p style="color:#aaa;font-size:.8rem;">Loading…</p>
       </div>
     </div>
 
