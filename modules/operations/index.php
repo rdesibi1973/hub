@@ -115,6 +115,9 @@ input[type=date]::-webkit-calendar-picker-indicator{filter:invert(1);}
 .lbl-departure::before{background:var(--red);}
 .lbl-transfer::before{background:var(--amber);}
 .row-note{font-size:.7rem;color:var(--grey-mid);font-style:italic;margin-left:8px;}
+/* Night movement shown on the previous day */
+.next-day-badge{display:inline-block;background:var(--amber);color:var(--white);font-size:.66rem;font-weight:700;line-height:1;padding:3px 7px;border-radius:10px;margin-left:7px;white-space:nowrap;vertical-align:middle;letter-spacing:.02em;}
+.mov-table tr.row-next-day{background:var(--amber-lt);}
 .row-card{background:var(--white);border-radius:10px;box-shadow:0 1px 8px rgba(0,0,0,.07);margin-bottom:10px;overflow:hidden;}
 .row-card-header{display:flex;align-items:center;justify-content:space-between;padding:8px 13px;border-bottom:1px solid var(--grey-lt);background:var(--off-white);}
 .badge-arrival{background:var(--green-lt);color:var(--green);font-size:.65rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;padding:3px 10px;border-radius:20px;}
@@ -570,7 +573,7 @@ function loadMovements(){
   const d1=document.getElementById('inp-date').value;
   const d2=document.getElementById('inp-from').value;
   const d3=document.getElementById('inp-to').value;
-  let url=BASE+'/modules/operations/api/movements.php?mode='+currentMode;
+  let url=BASE+'/modules/operations/api/movements.php?mode='+currentMode+'&shift=1';
   if(currentMode==='single')   url+='&date='+d1;
   if(currentMode==='range')    url+='&from='+d2+'&to='+d3;
   if(currentMode==='multiple') url+='&dates='+selDates.join(',');
@@ -601,7 +604,7 @@ function fmtDateLabel(iso){
 function renderMovements(rows){
   const out=document.getElementById('mov-output');
   const byDate={};
-  rows.forEach(r=>{if(!byDate[r.move_date])byDate[r.move_date]=[];byDate[r.move_date].push(r);});
+  rows.forEach(r=>{const dk=r.display_date||r.move_date;if(!byDate[dk])byDate[dk]=[];byDate[dk].push(r);});
   const allDates=[...new Set([...reqDates,...Object.keys(byDate)])].sort();
   if(!allDates.length){out.innerHTML='<div class="placeholder"><div class="icon">&#128235;</div><h2>No movements found</h2><p>No data for the selected date(s).</p></div>';return;}
   let html='';
@@ -611,7 +614,7 @@ function renderMovements(rows){
     const dep=dr.filter(r=>r.movement_type==='Departure');
     const trn=dr.filter(r=>r.movement_type==='Transfer');
     const pax=dr.reduce((s,r)=>s+parseInt(r.pax||0),0);
-    const lbl=dr.length?(xss(dr[0].move_date_fmt||date)):fmtDateLabel(date);
+    const lbl=dr.length?(xss(dr[0].display_date_fmt||dr[0].move_date_fmt||date)):fmtDateLabel(date);
     html+='<div class="date-block"><div class="date-block-header"><h2>'+lbl+'</h2><button class="btn-wa" onclick="copyWADate(\''+date+'\',this)">&#128203; WhatsApp</button></div>';
     html+='<div class="summary"><div class="chip chip-arr"><span class="num">'+arr.length+'</span><div><div class="chip-label">Arrivals</div></div></div>';
     html+='<div class="chip chip-dep"><span class="num">'+dep.length+'</span><div><div class="chip-label">Departures</div></div></div>';
@@ -626,7 +629,7 @@ function renderMovements(rows){
 }
 function buildMovTable(rows){
   return '<div class="tbl-wrap"><table class="mov-table"><thead><tr><th>Client / Group</th><th>Pax</th><th>Flight</th><th>Time</th><th>Pick Up</th><th>Drop Off</th><th>Driver</th><th>Notes</th><th>Dropbox</th><th></th></tr></thead><tbody>'+
-    rows.map(r=>'<tr><td>'+xss(r.client_name)+'</td><td class="td-pax">'+r.pax+'</td><td class="td-flight">'+xss(r.flight)+'</td><td class="td-time">'+xss(r.move_time_fmt)+'</td><td>'+xss(r.pickup)+'</td><td>'+xss(r.dropoff)+'</td><td>'+xss(r.driver)+'</td><td class="td-notes">'+xss(r.notes)+'</td><td style="font-size:.72rem;color:var(--grey-mid);">'+xss(r.dropbox_folder)+'</td><td><button class="btn-edit" onclick="editMov('+r.id+')">Edit</button><button class="btn-del" onclick="delMov('+r.id+',this)">Del</button></td></tr>').join('')+
+    rows.map(r=>'<tr'+(r.is_next_day?' class="row-next-day"':'')+'><td>'+xss(r.client_name)+(r.is_next_day?' <span class="next-day-badge">'+xss(r.next_day_label)+'</span>':'')+'</td><td class="td-pax">'+r.pax+'</td><td class="td-flight">'+xss(r.flight)+'</td><td class="td-time">'+xss(r.move_time_fmt)+'</td><td>'+xss(r.pickup)+'</td><td>'+xss(r.dropoff)+'</td><td>'+xss(r.driver)+'</td><td class="td-notes">'+xss(r.notes)+'</td><td style="font-size:.72rem;color:var(--grey-mid);">'+xss(r.dropbox_folder)+'</td><td><button class="btn-edit" onclick="editMov('+r.id+')">Edit</button><button class="btn-del" onclick="delMov('+r.id+',this)">Del</button></td></tr>').join('')+
     '</tbody></table></div>';
 }
 function xss(s){if(!s)return'';return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
@@ -789,12 +792,13 @@ function buildWALine(r){
     }
   }
   if(r.driver) line2+=' | driver '+r.driver;
+  if(r.is_next_day) line2+=' | '+r.next_day_label;
   let line=line1+'\n'+line2;
   return line;
 }
 
 function buildWAForDate(dateRows){
-  const date=dateRows[0].move_date_fmt||dateRows[0].move_date;
+  const date=dateRows[0].display_date_fmt||dateRows[0].move_date_fmt||dateRows[0].display_date||dateRows[0].move_date;
   const arrivals=dateRows.filter(r=>r.movement_type==='Arrival');
   const departures=dateRows.filter(r=>r.movement_type==='Departure');
   const arrJRO=arrivals.filter(r=>isJROorARK(r.pickup));
@@ -825,7 +829,7 @@ function buildWAForDate(dateRows){
 }
 
 function copyWADate(date, btn){
-  const rows=lastData.filter(r=>r.move_date===date);
+  const rows=lastData.filter(r=>(r.display_date||r.move_date)===date);
   const orig=btn?btn.textContent:'';
   let text;
   if(!rows.length){
