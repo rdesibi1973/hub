@@ -8,6 +8,12 @@ if (isLeadsRestricted()) { header('Location: requests.php'); exit; }
 $errors  = [];
 $success = '';
 
+// Build a wa.me number (digits only) from a free-text phone, or null.
+function wa_number($phone) {
+    $digits = preg_replace('/[^0-9]/', '', (string)$phone);
+    return $digits !== '' ? $digits : null;
+}
+
 // ── Handle POST actions ───────────────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? '';
@@ -80,7 +86,45 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($action === 'delete') {
         $id = (int)$_POST['id'];
         $db->prepare('DELETE FROM agencies WHERE id=?')->execute([$id]);
+        $db->prepare('DELETE FROM agency_contacts WHERE agency_id=?')->execute([$id]);
         $success = "Agency deleted.";
+    }
+
+    // CONTACT ADD / EDIT
+    if ($action === 'contact_add' || $action === 'contact_edit') {
+        $agencyId = (int)($_POST['agency_id'] ?? 0);
+        $cname    = trim($_POST['c_name']  ?? '');
+        $crole    = trim($_POST['c_role']  ?? '');
+        $cemail   = trim($_POST['c_email'] ?? '');
+        $cphone   = trim($_POST['c_phone'] ?? '');
+        $cnotes   = trim($_POST['c_notes'] ?? '');
+        $cprimary = isset($_POST['c_primary']) ? 1 : 0;
+
+        if (!$agencyId || $cname === '') {
+            $errors[] = 'Contact name is required.';
+        } else {
+            // Only one primary contact per agency.
+            if ($cprimary) {
+                $db->prepare('UPDATE agency_contacts SET is_primary=0 WHERE agency_id=?')->execute([$agencyId]);
+            }
+            if ($action === 'contact_add') {
+                $db->prepare('INSERT INTO agency_contacts (agency_id, name, role, email, phone, is_primary, notes) VALUES (?, ?, ?, ?, ?, ?, ?)')
+                   ->execute([$agencyId, $cname, $crole ?: null, $cemail ?: null, $cphone ?: null, $cprimary, $cnotes ?: null]);
+                $success = "Contact added.";
+            } else {
+                $cid = (int)($_POST['contact_id'] ?? 0);
+                $db->prepare('UPDATE agency_contacts SET name=?, role=?, email=?, phone=?, is_primary=?, notes=? WHERE id=? AND agency_id=?')
+                   ->execute([$cname, $crole ?: null, $cemail ?: null, $cphone ?: null, $cprimary, $cnotes ?: null, $cid, $agencyId]);
+                $success = "Contact updated.";
+            }
+        }
+    }
+
+    // CONTACT DELETE
+    if ($action === 'contact_delete') {
+        $cid = (int)($_POST['contact_id'] ?? 0);
+        $db->prepare('DELETE FROM agency_contacts WHERE id=?')->execute([$cid]);
+        $success = "Contact deleted.";
     }
 
     if (!$errors) {
@@ -104,6 +148,22 @@ if ($search !== '') {
 $agencies = $db->prepare("SELECT * FROM agencies WHERE $where ORDER BY nome ASC");
 $agencies->execute($params);
 $agencies = $agencies->fetchAll();
+
+// ── Load contacts, grouped by agency ──────────────────────────────
+$contactsByAgency = [];
+$agencyIds = array_column($agencies, 'id');
+if ($agencyIds) {
+    try {
+        $in = implode(',', array_fill(0, count($agencyIds), '?'));
+        $cstmt = $db->prepare("SELECT * FROM agency_contacts WHERE agency_id IN ($in) ORDER BY is_primary DESC, name ASC");
+        $cstmt->execute($agencyIds);
+        foreach ($cstmt->fetchAll() as $c) {
+            $contactsByAgency[$c['agency_id']][] = $c;
+        }
+    } catch (PDOException $e) {
+        // agency_contacts table not migrated yet — degrade gracefully.
+    }
+}
 
 include 'includes/header.php';
 ?>
@@ -182,6 +242,7 @@ include 'includes/header.php';
         <th>Agency Name</th>
         <th>Short Name</th>
         <th>Email</th>
+        <th>Contacts</th>
         <th style="text-align:center">Active</th>
         <th></th>
       </tr>
@@ -192,11 +253,34 @@ include 'includes/header.php';
         <td class="view-<?= $ag['id'] ?>" style="font-weight:600"><?= h($ag['nome']) ?></td>
         <td class="view-<?= $ag['id'] ?>" style="font-size:.8rem;color:var(--grey-mid)"><?= h($ag['short_name'] ?? '—') ?></td>
         <td class="view-<?= $ag['id'] ?>" style="font-size:.8rem;color:var(--grey-mid)"><?= h($ag['email'] ?? '') ?: '—' ?></td>
+        <td class="view-<?= $ag['id'] ?>" style="font-size:.8rem;">
+          <?php $cs = $contactsByAgency[$ag['id']] ?? []; ?>
+          <?php if (!$cs): ?>
+            <span style="color:var(--grey-mid)">—</span>
+          <?php else: foreach ($cs as $c): $wa = wa_number($c['phone']); ?>
+            <div style="margin-bottom:4px;line-height:1.35;">
+              <span style="font-weight:600;"><?= h($c['name']) ?></span>
+              <?php if ($c['is_primary']): ?><span title="Primary contact" style="color:#C9A227;">&#9733;</span><?php endif; ?>
+              <?php if (!empty($c['role'])): ?><span style="color:var(--grey-mid);"> &middot; <?= h($c['role']) ?></span><?php endif; ?>
+              <?php if ($wa): ?>
+                <a href="https://wa.me/<?= h($wa) ?>" target="_blank" rel="noopener" title="WhatsApp <?= h($c['phone']) ?>" style="color:#1A6B3A;text-decoration:none;margin-left:6px;white-space:nowrap;">&#128172; <?= h($c['phone']) ?></a>
+              <?php elseif (!empty($c['phone'])): ?>
+                <span style="color:var(--grey-mid);margin-left:6px;"><?= h($c['phone']) ?></span>
+              <?php endif; ?>
+              <?php if (!empty($c['email'])): ?>
+                <a href="mailto:<?= h($c['email']) ?>" title="<?= h($c['email']) ?>" style="color:var(--grey-mid);margin-left:6px;text-decoration:none;">&#9993;</a>
+              <?php endif; ?>
+              <?php if (!empty($c['notes'])): ?>
+                <span style="color:var(--grey-mid);display:block;font-size:.74rem;"><?= h($c['notes']) ?></span>
+              <?php endif; ?>
+            </div>
+          <?php endforeach; endif; ?>
+        </td>
         <td class="view-<?= $ag['id'] ?>" style="text-align:center">
           <?= $ag['attiva'] ? '<span style="color:#1A6B3A">✓</span>' : '<span style="color:#C0211B">✗</span>' ?>
         </td>
-        
-        <td class="edit-<?= $ag['id'] ?>" style="display:none" colspan="4">
+
+        <td class="edit-<?= $ag['id'] ?>" style="display:none" colspan="5">
           <?php $agType = $ag['type'] ?? 'savannah'; ?>
           <form method="POST" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
             <input type="hidden" name="action" value="edit">
@@ -219,12 +303,56 @@ include 'includes/header.php';
         <td class="actions-<?= $ag['id'] ?>">
           <div style="display:flex; gap:8px;">
             <button class="btn btn-outline btn-sm" onclick="toggleEdit(<?= $ag['id'] ?>, true)">Edit</button>
+            <button type="button" class="btn btn-outline btn-sm" onclick="toggleContacts(<?= $ag['id'] ?>)">Contacts</button>
             <form method="POST" style="display:inline" onsubmit="return confirm('Delete agency?')">
               <input type="hidden" name="action" value="delete">
               <input type="hidden" name="id" value="<?= $ag['id'] ?>">
               <button type="submit" class="btn btn-outline btn-sm" style="color:#C0211B; border-color:#C0211B;">Delete</button>
             </form>
           </div>
+        </td>
+      </tr>
+
+      <!-- CONTACTS MANAGEMENT ROW (separate from the agency edit form) -->
+      <tr class="contacts-<?= $ag['id'] ?>" style="display:none">
+        <td colspan="6" style="background:var(--grey-bg,#f7f7f7);padding:14px 16px;">
+          <div style="font-weight:600;font-size:.82rem;margin-bottom:10px;">Contacts &mdash; <?= h($ag['nome']) ?></div>
+
+          <?php $cs = $contactsByAgency[$ag['id']] ?? []; ?>
+          <?php foreach ($cs as $c): ?>
+            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px;">
+              <form method="POST" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+                <input type="hidden" name="action" value="contact_edit">
+                <input type="hidden" name="agency_id" value="<?= $ag['id'] ?>">
+                <input type="hidden" name="contact_id" value="<?= $c['id'] ?>">
+                <input type="text" name="c_name"  value="<?= h($c['name']) ?>"  required placeholder="Name"  style="width:150px;padding:5px 8px;border:1.5px solid var(--grey-lt);border-radius:5px;font-size:.82rem;">
+                <input type="text" name="c_role"  value="<?= h($c['role'] ?? '') ?>"  placeholder="Role"  style="width:120px;padding:5px 8px;border:1.5px solid var(--grey-lt);border-radius:5px;font-size:.82rem;">
+                <input type="text" name="c_phone" value="<?= h($c['phone'] ?? '') ?>" placeholder="Phone (e.g. +39…)" style="width:150px;padding:5px 8px;border:1.5px solid var(--grey-lt);border-radius:5px;font-size:.82rem;">
+                <input type="email" name="c_email" value="<?= h($c['email'] ?? '') ?>" placeholder="Email" style="width:180px;padding:5px 8px;border:1.5px solid var(--grey-lt);border-radius:5px;font-size:.82rem;">
+                <input type="text" name="c_notes" value="<?= h($c['notes'] ?? '') ?>" placeholder="Notes" style="width:180px;padding:5px 8px;border:1.5px solid var(--grey-lt);border-radius:5px;font-size:.82rem;">
+                <label style="display:flex;align-items:center;gap:4px;font-size:.78rem;white-space:nowrap;"><input type="checkbox" name="c_primary" <?= $c['is_primary']?'checked':'' ?>> Primary</label>
+                <button type="submit" class="btn btn-outline btn-sm">Save</button>
+              </form>
+              <form method="POST" style="display:inline" onsubmit="return confirm('Delete contact?')">
+                <input type="hidden" name="action" value="contact_delete">
+                <input type="hidden" name="contact_id" value="<?= $c['id'] ?>">
+                <button type="submit" class="btn btn-outline btn-sm" style="color:#C0211B;border-color:#C0211B;">Delete</button>
+              </form>
+            </div>
+          <?php endforeach; ?>
+
+          <!-- ADD CONTACT -->
+          <form method="POST" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:6px;border-top:1px dashed var(--grey-lt);padding-top:10px;">
+            <input type="hidden" name="action" value="contact_add">
+            <input type="hidden" name="agency_id" value="<?= $ag['id'] ?>">
+            <input type="text" name="c_name"  required placeholder="Name"  style="width:150px;padding:5px 8px;border:1.5px solid var(--grey-lt);border-radius:5px;font-size:.82rem;">
+            <input type="text" name="c_role"  placeholder="Role"  style="width:120px;padding:5px 8px;border:1.5px solid var(--grey-lt);border-radius:5px;font-size:.82rem;">
+            <input type="text" name="c_phone" placeholder="Phone (e.g. +39…)" style="width:150px;padding:5px 8px;border:1.5px solid var(--grey-lt);border-radius:5px;font-size:.82rem;">
+            <input type="email" name="c_email" placeholder="Email" style="width:180px;padding:5px 8px;border:1.5px solid var(--grey-lt);border-radius:5px;font-size:.82rem;">
+            <input type="text" name="c_notes" placeholder="Notes" style="width:180px;padding:5px 8px;border:1.5px solid var(--grey-lt);border-radius:5px;font-size:.82rem;">
+            <label style="display:flex;align-items:center;gap:4px;font-size:.78rem;white-space:nowrap;"><input type="checkbox" name="c_primary"> Primary</label>
+            <button type="submit" class="btn btn-red btn-sm">+ Add contact</button>
+          </form>
         </td>
       </tr>
       <?php endforeach; ?>
@@ -240,6 +368,12 @@ function toggleEdit(id, show) {
       if (cls === 'edit-')    el.style.display = show ? 'table-cell' : 'none';
       else                   el.style.display = show ? 'none' : 'flex';
     });
+  });
+}
+
+function toggleContacts(id) {
+  document.querySelectorAll('.contacts-' + id).forEach(function(el){
+    el.style.display = (el.style.display === 'none' || el.style.display === '') ? 'table-row' : 'none';
   });
 }
 </script>
