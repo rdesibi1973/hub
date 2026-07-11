@@ -233,6 +233,7 @@ if ($action === 'approve') {
 } elseif ($action === 'merge') {
 
     $targetId = (int)($_POST['target_request_id'] ?? 0);
+    $doNotify = !empty($_POST['notify_owner']); // checkbox
     if (!$targetId) { flash('Please enter a valid Request ID.','error'); header('Location: staging.php'); exit; }
 
     $target = $db->prepare("SELECT * FROM requests WHERE id = ? LIMIT 1");
@@ -247,7 +248,13 @@ if ($action === 'approve') {
 
     $db->prepare("UPDATE requests SET notes = ? WHERE id = ?")->execute([$newNotes, $targetId]);
     $db->prepare("DELETE FROM lead_staging WHERE id = ?")->execute([$stagingId]);
-    flash("Lead merged into Request #{$targetId}.");
+
+    $notif = notify_agent_duplicate_lead($db, $targetId, $lead, $doNotify);
+
+    flash("Lead merged into Request #{$targetId}."
+        . ($notif['sent'] ? " — ✉ Notification sent to request owner." : ''));
+    if ($notif['error']) flash('⚠ ' . htmlspecialchars($notif['error']), 'error');
+
     header("Location: request_view.php?id=$targetId"); exit;
 
 // ─────────────────────────────────────────────────────────────────────────────

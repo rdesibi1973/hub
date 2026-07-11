@@ -328,6 +328,12 @@ select:focus,input:focus{outline:none;border-color:#C0211B;box-shadow:0 0 0 2px 
           </div>
         </div>
         <p style="font-size:.75rem;color:#6B7280;margin:4px 0 10px">Appends this lead's initial request to the existing request's notes. Then deletes from staging.</p>
+        <div style="margin:6px 0 12px;">
+          <label style="display:flex;align-items:center;gap:8px;font-size:.78rem;font-weight:600;cursor:pointer;">
+            <input type="checkbox" name="notify_owner" value="1" checked style="width:14px;height:14px;cursor:pointer;">
+            Send email notification to request owner
+          </label>
+        </div>
         <button type="submit" class="btn-merge">🔗 Merge</button>
       </form>
     </div>

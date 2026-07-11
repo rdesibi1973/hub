@@ -131,3 +131,81 @@ function notify_agent_new_request(
     error_log("[notify] mail() sent to: {$agent['email']} for request #{$requestId} ({$customerName})");
     return ['sent' => true, 'error' => null];
 }
+
+/**
+ * notify_agent_duplicate_lead()
+ *  Sends an email to the agent who owns an existing request when a new
+ *  incoming lead is confirmed as a duplicate of it and merged in.
+ *
+ * @param  PDO    $db
+ * @param  int    $targetRequestId   Existing request the duplicate was merged into
+ * @param  array  $lead              The lead_staging row (customer_name, email, phone,
+ *                                    source, destination, period, pax, initial_request)
+ * @param  bool   $doNotify          Whether the "notify owner" checkbox was checked
+ *
+ * @return array  ['sent' => bool, 'error' => string|null]
+ *                'error' is non-null when notify was requested but the owner has no email.
+ */
+function notify_agent_duplicate_lead(
+    PDO   $db,
+    int   $targetRequestId,
+    array $lead,
+    bool  $doNotify
+): array {
+
+    if (!$doNotify) return ['sent' => false, 'error' => null];
+
+    // Owning agent + customer name of the target request
+    $s = $db->prepare(
+        'SELECT r.customer_name, a.id AS agent_id, a.name AS agent_name, u.email
+         FROM requests r
+         LEFT JOIN agents a ON a.id = r.agent_id
+         LEFT JOIN users  u ON u.agent_id = a.id AND u.is_active = 1
+         WHERE r.id = ? LIMIT 1'
+    );
+    $s->execute([$targetRequestId]);
+    $target = $s->fetch(PDO::FETCH_ASSOC);
+
+    if (!$target || empty($target['agent_id'])) {
+        return ['sent' => false, 'error' => null];
+    }
+
+    if (empty($target['email'])) {
+        $name = $target['agent_name'] ?? 'Unknown agent';
+        error_log("[notify] SKIP duplicate — agent_id={$target['agent_id']} ({$name}) has no email. request={$targetRequestId}");
+        return [
+            'sent'  => false,
+            'error' => "Agent \"{$name}\" has no email address configured — duplicate notification not sent.",
+        ];
+    }
+
+    $hubUrl = 'https://hub.savannahexplorers.com/modules/leads/request_view.php?id=' . $targetRequestId;
+
+    $div  = "────────────────────────────────\n";
+    $subject = "Duplicate lead merged into request #{$targetRequestId} - {$target['customer_name']}";
+    $body =
+        "Hi {$target['agent_name']},\n\n"
+      . "A new incoming lead was confirmed as a duplicate of your request "
+      . "#{$targetRequestId} ({$target['customer_name']}) and has been merged into it.\n\n"
+      . $div
+      . "New Lead Details:\n"
+      . "Name:        {$lead['customer_name']}\n"
+      . (!empty($lead['email'])           ? "Email:       {$lead['email']}\n"           : '')
+      . (!empty($lead['phone'])           ? "Phone:       {$lead['phone']}\n"           : '')
+      . (!empty($lead['source'])          ? "Source:      {$lead['source']}\n"          : '')
+      . (!empty($lead['destination'])     ? "Destination: {$lead['destination']}\n"     : '')
+      . (!empty($lead['period'])          ? "Period:      {$lead['period']}\n"          : '')
+      . (!empty($lead['pax'])             ? "Pax:         {$lead['pax']}\n"             : '')
+      . $div
+      . (!empty($lead['initial_request']) ? "Message:\n{$lead['initial_request']}\n\n"  : '')
+      . "View request in Hub:\n{$hubUrl}\n\n"
+      . "- Savannah Explorers Hub";
+
+    $headers =
+        "From: noreply@savannahexplorers.com\r\n"
+      . "Content-Type: text/plain; charset=UTF-8\r\n";
+
+    @mail($target['email'], $subject, $body, $headers);
+    error_log("[notify] duplicate mail() sent to: {$target['email']} for request #{$targetRequestId} ({$lead['customer_name']})");
+    return ['sent' => true, 'error' => null];
+}
