@@ -344,6 +344,18 @@ select:focus,input:focus{outline:none;border-color:#C0211B;box-shadow:0 0 0 2px 
         <input type="hidden" name="action" value="dismiss">
         <input type="hidden" name="staging_id" id="dismissId">
         <p style="font-size:.82rem;color:#6B7280;margin:0 0 12px">Permanently removes this lead from staging (spam, test, etc.).</p>
+        <div class="form-row full" id="dismissNotifyRow" style="display:none;margin-bottom:10px;">
+          <div>
+            <label style="font-size:.75rem;font-weight:600;display:block;margin-bottom:4px">Duplicate Request ID</label>
+            <input type="text" name="target_request_id" id="dismissTarget" placeholder="e.g. 2282">
+          </div>
+        </div>
+        <div style="margin:6px 0 12px;display:none;" id="dismissNotifyCheckRow">
+          <label style="display:flex;align-items:center;gap:8px;font-size:.78rem;font-weight:600;cursor:pointer;">
+            <input type="checkbox" name="notify_owner" id="dismissNotifyCheck" value="1" style="width:14px;height:14px;cursor:pointer;">
+            Notify the agent who owns that request (FYI, no merge)
+          </label>
+        </div>
         <button type="submit" class="btn-dismiss">🗑 Dismiss &amp; Delete</button>
       </form>
     </div>
@@ -411,6 +423,20 @@ function openDrawer(id) {
   for (let i=0;i<ds.options.length;i++) {
     if (ds.options[i].value === l.destination) { ds.selectedIndex=i; break; }
   }
+
+  // Resolve the best-matching existing Request ID (email match wins, then name match)
+  let dupTargetId = '';
+  if (l.email_matches && l.email_matches.length) {
+    dupTargetId = l.email_matches[0].id;
+  } else if (l.dup_flag !== 'clean' && l.dup_refs) {
+    const refs = JSON.parse(l.dup_refs);
+    const reqRef = (refs || []).find(r => r.table === 'requests');
+    if (reqRef) dupTargetId = reqRef.id;
+  }
+  document.getElementById('dismissTarget').value = dupTargetId;
+  document.getElementById('dismissNotifyRow').style.display = dupTargetId ? 'block' : 'none';
+  document.getElementById('dismissNotifyCheckRow').style.display = dupTargetId ? 'block' : 'none';
+  document.getElementById('dismissNotifyCheck').checked = !!dupTargetId;
 
   // Build body HTML
   let html = '';

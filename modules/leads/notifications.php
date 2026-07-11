@@ -152,13 +152,16 @@ function format_duplicate_lead_block(array $lead): string {
 /**
  * notify_agent_duplicate_lead()
  *  Sends an email to the agent who owns an existing request when a new
- *  incoming lead is confirmed as a duplicate of it and merged in.
+ *  incoming lead is confirmed as a duplicate of it — either merged into it
+ *  (Merge action) or dismissed without merging (Dismiss action, FYI only).
  *
  * @param  PDO    $db
- * @param  int    $targetRequestId   Existing request the duplicate was merged into
+ * @param  int    $targetRequestId   Existing request the duplicate matches
  * @param  array  $lead              The lead_staging row (customer_name, email, phone,
  *                                    source, destination, period, pax, initial_request)
  * @param  bool   $doNotify          Whether the "notify owner" checkbox was checked
+ * @param  bool   $merged            true = lead was merged into the request (default);
+ *                                    false = lead was dismissed, notification is FYI only
  *
  * @return array  ['sent' => bool, 'error' => string|null]
  *                'error' is non-null when notify was requested but the owner has no email.
@@ -167,7 +170,8 @@ function notify_agent_duplicate_lead(
     PDO   $db,
     int   $targetRequestId,
     array $lead,
-    bool  $doNotify
+    bool  $doNotify,
+    bool  $merged = true
 ): array {
 
     if (!$doNotify) return ['sent' => false, 'error' => null];
@@ -199,11 +203,18 @@ function notify_agent_duplicate_lead(
     $hubUrl = 'https://hub.savannahexplorers.com/modules/leads/request_view.php?id=' . $targetRequestId;
 
     $div  = "────────────────────────────────\n";
-    $subject = "Duplicate lead merged into request #{$targetRequestId} - {$target['customer_name']}";
+    $subject = $merged
+        ? "Duplicate lead merged into request #{$targetRequestId} - {$target['customer_name']}"
+        : "Possible duplicate lead for request #{$targetRequestId} - {$target['customer_name']}";
+    $intro = $merged
+        ? "A new incoming lead was confirmed as a duplicate of your request "
+        . "#{$targetRequestId} ({$target['customer_name']}) and has been merged into it.\n\n"
+        : "A new incoming lead was identified as a possible duplicate of your request "
+        . "#{$targetRequestId} ({$target['customer_name']}) and was dismissed from staging "
+        . "(not merged) — for your awareness only.\n\n";
     $body =
         "Hi {$target['agent_name']},\n\n"
-      . "A new incoming lead was confirmed as a duplicate of your request "
-      . "#{$targetRequestId} ({$target['customer_name']}) and has been merged into it.\n\n"
+      . $intro
       . $div
       . "New Lead Details:\n"
       . format_duplicate_lead_block($lead)

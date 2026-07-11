@@ -283,8 +283,18 @@ if ($action === 'approve') {
 // ─────────────────────────────────────────────────────────────────────────────
 } elseif ($action === 'dismiss') {
 
+    $targetId = (int)($_POST['target_request_id'] ?? 0);
+    $doNotify = !empty($_POST['notify_owner']); // checkbox
+
+    $notif = ['sent' => false, 'error' => null];
+    if ($targetId && $doNotify) {
+        $notif = notify_agent_duplicate_lead($db, $targetId, $lead, $doNotify, false);
+    }
+
     $db->prepare("DELETE FROM lead_staging WHERE id = ?")->execute([$stagingId]);
-    flash('Lead dismissed.', 'success');
+
+    flash('Lead dismissed.' . ($notif['sent'] ? ' — ✉ Notification sent to agent.' : ''), 'success');
+    if ($notif['error']) flash('⚠ ' . htmlspecialchars($notif['error']), 'error');
     header('Location: staging.php'); exit;
 
 } else {
