@@ -241,12 +241,14 @@ if ($action === 'approve') {
     $target = $target->fetch();
     if (!$target) { flash("Request #$targetId not found.",'error'); header('Location: staging.php'); exit; }
 
-    // Append this lead's initial request to the target's notes
+    // Append this lead's initial request to the target's notes AND initial_request
     $append  = "\n\n--- Merged from HubSpot (ID: {$lead['hubspot_id']}) ---\n";
     $append .= $lead['initial_request'] ?? '';
-    $newNotes = ($target['notes'] ?? '') . $append;
+    $newNotes    = ($target['notes'] ?? '') . $append;
+    $newInitReq  = ($target['initial_request'] ?? '') . $append;
 
-    $db->prepare("UPDATE requests SET notes = ? WHERE id = ?")->execute([$newNotes, $targetId]);
+    $db->prepare("UPDATE requests SET notes = ?, initial_request = ? WHERE id = ?")
+       ->execute([$newNotes, $newInitReq, $targetId]);
     $db->prepare("DELETE FROM lead_staging WHERE id = ?")->execute([$stagingId]);
 
     $notif = notify_agent_duplicate_lead($db, $targetId, $lead, $doNotify);
