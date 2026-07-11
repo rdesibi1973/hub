@@ -133,6 +133,23 @@ function notify_agent_new_request(
 }
 
 /**
+ * format_duplicate_lead_block()
+ *  Plain-text summary of a lead_staging row, shared by the duplicate-lead
+ *  email and the CustomerInfo.txt append.
+ */
+function format_duplicate_lead_block(array $lead): string {
+    return
+        "Name:        {$lead['customer_name']}\n"
+      . (!empty($lead['email'])       ? "Email:       {$lead['email']}\n"       : '')
+      . (!empty($lead['phone'])       ? "Phone:       {$lead['phone']}\n"       : '')
+      . (!empty($lead['source'])      ? "Source:      {$lead['source']}\n"      : '')
+      . (!empty($lead['destination']) ? "Destination: {$lead['destination']}\n" : '')
+      . (!empty($lead['period'])      ? "Period:      {$lead['period']}\n"      : '')
+      . (!empty($lead['pax'])         ? "Pax:         {$lead['pax']}\n"         : '')
+      . (!empty($lead['initial_request']) ? "\nMessage:\n{$lead['initial_request']}\n" : '');
+}
+
+/**
  * notify_agent_duplicate_lead()
  *  Sends an email to the agent who owns an existing request when a new
  *  incoming lead is confirmed as a duplicate of it and merged in.
@@ -189,15 +206,8 @@ function notify_agent_duplicate_lead(
       . "#{$targetRequestId} ({$target['customer_name']}) and has been merged into it.\n\n"
       . $div
       . "New Lead Details:\n"
-      . "Name:        {$lead['customer_name']}\n"
-      . (!empty($lead['email'])           ? "Email:       {$lead['email']}\n"           : '')
-      . (!empty($lead['phone'])           ? "Phone:       {$lead['phone']}\n"           : '')
-      . (!empty($lead['source'])          ? "Source:      {$lead['source']}\n"          : '')
-      . (!empty($lead['destination'])     ? "Destination: {$lead['destination']}\n"     : '')
-      . (!empty($lead['period'])          ? "Period:      {$lead['period']}\n"          : '')
-      . (!empty($lead['pax'])             ? "Pax:         {$lead['pax']}\n"             : '')
+      . format_duplicate_lead_block($lead)
       . $div
-      . (!empty($lead['initial_request']) ? "Message:\n{$lead['initial_request']}\n\n"  : '')
       . "View request in Hub:\n{$hubUrl}\n\n"
       . "- Savannah Explorers Hub";
 

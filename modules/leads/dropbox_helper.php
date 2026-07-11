@@ -111,6 +111,36 @@ function dropbox_upload_text(string $token, string $path, string $content): arra
 }
 
 /**
+ * Download a text file from Dropbox.
+ * @param  string $token  Access token from dropbox_get_access_token()
+ * @param  string $path   Full Dropbox path, e.g. '/2026/SmithJohn(BTG-Roberto)/CustomerInfo.txt'
+ * @return string|null    File content, or null if the file does not exist
+ * @throws RuntimeException on unexpected API error
+ */
+function dropbox_download_text(string $token, string $path): ?string {
+    $ch = curl_init('https://content.dropboxapi.com/2/files/download');
+    curl_setopt_array($ch, [
+        CURLOPT_POST           => true,
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_HTTPHEADER     => [
+            'Authorization: Bearer ' . $token,
+            'Dropbox-API-Arg: ' . json_encode(['path' => $path]),
+        ],
+    ]);
+    $body = curl_exec($ch);
+    $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+
+    if ($code === 409) {
+        return null; // path/not_found — file doesn't exist yet
+    }
+    if ($code !== 200) {
+        throw new RuntimeException("Dropbox download failed (HTTP $code): $body");
+    }
+    return $body;
+}
+
+/**
  * Move/rename a folder in Dropbox.
  * @param  string $token      Access token from dropbox_get_access_token()
  * @param  string $from_path  Full Dropbox path, e.g. '/2026/SmithJohn(BTG-Roberto)_DEPOSIT'

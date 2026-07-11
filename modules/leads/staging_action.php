@@ -251,8 +251,29 @@ if ($action === 'approve') {
 
     $notif = notify_agent_duplicate_lead($db, $targetId, $lead, $doNotify);
 
+    // ── Append duplicate lead details to the target's CustomerInfo.txt ────────
+    $dropboxMsg = '';
+    if (!empty($target['practice_code'])) {
+        try {
+            $token      = dropbox_get_access_token();
+            $folderPath = dropbox_find_folder($token, $target['practice_code'])
+                       ?? (DROPBOX_BASE_PATH . '/' . $target['practice_code']);
+            $filePath   = $folderPath . '/CustomerInfo.txt';
+
+            $existing = dropbox_download_text($token, $filePath) ?? '';
+            $block    = "\r\n\r\n--- Duplicate Lead Merged (" . date('d M Y H:i') . ") ---\r\n"
+                      . format_duplicate_lead_block($lead);
+            dropbox_upload_text($token, $filePath, $existing . $block);
+            $dropboxMsg = ' Logged in CustomerInfo.txt.';
+        } catch (RuntimeException $e) {
+            error_log("[merge] CustomerInfo.txt append failed for request #{$targetId}: " . $e->getMessage());
+            $dropboxMsg = ' ⚠ Could not update CustomerInfo.txt.';
+        }
+    }
+
     flash("Lead merged into Request #{$targetId}."
-        . ($notif['sent'] ? " — ✉ Notification sent to request owner." : ''));
+        . ($notif['sent'] ? " — ✉ Notification sent to request owner." : '')
+        . $dropboxMsg);
     if ($notif['error']) flash('⚠ ' . htmlspecialchars($notif['error']), 'error');
 
     header("Location: request_view.php?id=$targetId"); exit;
