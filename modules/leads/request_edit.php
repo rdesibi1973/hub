@@ -1,5 +1,6 @@
 <?php
 require_once 'config.php';
+require_once 'notifications.php';
 $pageTitle = 'Edit Request';
 $db = db();
 
@@ -43,6 +44,9 @@ $editableFields = $isRestricted ? $staffFields : $fullFields;
 $v = $req;
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $reassignFlash = '';
+    $reassignError = '';
+
     foreach ($editableFields as $f) {
         $v[$f] = trim($_POST[$f] ?? '');
     }
@@ -278,11 +282,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $v['status'],
                 $id,
             ]);
+
+            // ── Notify the newly assigned agent when the request is reassigned ──
+            $oldAgentId = (int)($req['agent_id'] ?? 0);
+            $newAgentId = (int)($v['agent_id'] ?: 0);
+            if ($newAgentId !== $oldAgentId && $newAgentId > 0) {
+                $cu    = current_user();
+                $notif = notify_agent_reassigned(
+                    $db, $newAgentId, (int)($cu['id'] ?? 0), $id, $v['customer_name']
+                );
+                if ($notif['sent'])  $reassignFlash = '✉ Notification sent to newly assigned agent.';
+                if ($notif['error']) $reassignError = $notif['error'];
+            }
         }
         $flashParts = ['Request updated successfully.'];
-        if ($dropboxRenamed) $flashParts[] = 'Dropbox folder renamed.';
-        if ($grpRenamed)     $flashParts[] = 'GRP folder renamed (all group members updated).';
+        if ($dropboxRenamed)      $flashParts[] = 'Dropbox folder renamed.';
+        if ($grpRenamed)          $flashParts[] = 'GRP folder renamed (all group members updated).';
+        if (!empty($reassignFlash)) $flashParts[] = $reassignFlash;
         flash(implode(' ', $flashParts));
+        if (!empty($reassignError)) flash('⚠ ' . htmlspecialchars($reassignError), 'error');
         header("Location: request_view.php?id=" . $id);
         exit;
     }

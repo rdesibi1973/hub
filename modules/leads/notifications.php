@@ -63,6 +63,97 @@ function notify_agent_new_request(
         ];
     }
 
+    $intro   = "A new request has been created and assigned to you.\n\n";
+    $subject = "New request assigned to you - {$customerName}";
+    $body    = build_assignment_email_body($db, $requestId, $agent['name'], $customerName, $intro);
+
+    $ok = send_notification_mail($agent['email'], $subject, $body,
+        "new request #{$requestId} ({$customerName})");
+    return [
+        'sent'  => $ok,
+        'error' => $ok ? null
+            : "Email server rejected the notification for {$agent['email']} (mail() returned false).",
+    ];
+}
+
+/**
+ * notify_agent_reassigned()
+ *  Sends an email to an agent when an existing request is reassigned to them
+ *  (agent_id changed on edit). Silently skips when the editor reassigns the
+ *  request to their own agent identity.
+ *
+ * @param  PDO    $db
+ * @param  int    $newAgentId    Agent the request is now assigned to
+ * @param  int    $editorUserId  users.id of whoever made the change (0 = unknown)
+ * @param  int    $requestId
+ * @param  string $customerName
+ *
+ * @return array  ['sent' => bool, 'error' => string|null]
+ *                'error' is non-null when the agent has no email or mail() failed.
+ */
+function notify_agent_reassigned(
+    PDO    $db,
+    int    $newAgentId,
+    int    $editorUserId,
+    int    $requestId,
+    string $customerName
+): array {
+    if ($newAgentId <= 0) return ['sent' => false, 'error' => null];
+
+    // Reassigning to your own agent identity — no notification needed
+    if ($editorUserId > 0) {
+        $s = $db->prepare('SELECT agent_id FROM users WHERE id = ? LIMIT 1');
+        $s->execute([$editorUserId]);
+        $row = $s->fetch(PDO::FETCH_ASSOC);
+        if ($row && (int)$row['agent_id'] === $newAgentId) {
+            return ['sent' => false, 'error' => null];
+        }
+    }
+
+    // Agent name + email (email lives in users table, not agents)
+    $s = $db->prepare(
+        'SELECT a.name, u.email
+         FROM agents a
+         LEFT JOIN users u ON u.agent_id = a.id AND u.is_active = 1
+         WHERE a.id = ?
+         LIMIT 1'
+    );
+    $s->execute([$newAgentId]);
+    $agent = $s->fetch(PDO::FETCH_ASSOC);
+
+    if (!$agent || empty($agent['email'])) {
+        $name = $agent['name'] ?? 'Unknown agent';
+        error_log("[notify] SKIP reassign — agent_id={$newAgentId} ({$name}) has no email. editor_user={$editorUserId}");
+        return [
+            'sent'  => false,
+            'error' => "Agent \"{$name}\" has no email address configured — reassignment notification not sent.",
+        ];
+    }
+
+    $intro   = "An existing request has been reassigned to you.\n\n";
+    $subject = "Request reassigned to you - {$customerName}";
+    $body    = build_assignment_email_body($db, $requestId, $agent['name'], $customerName, $intro);
+
+    $ok = send_notification_mail($agent['email'], $subject, $body,
+        "reassigned request #{$requestId} ({$customerName})");
+    return [
+        'sent'  => $ok,
+        'error' => $ok ? null
+            : "Email server rejected the notification for {$agent['email']} (mail() returned false).",
+    ];
+}
+
+/**
+ * build_assignment_email_body()
+ *  Shared plain-text body for the new-request and reassignment notifications.
+ */
+function build_assignment_email_body(
+    PDO    $db,
+    int    $requestId,
+    string $agentName,
+    string $customerName,
+    string $intro
+): string {
     $hubUrl = 'https://hub.savannahexplorers.com/modules/leads/request_view.php?id=' . $requestId;
 
     // Fetch full request details
@@ -100,10 +191,9 @@ function notify_agent_new_request(
 
     // Build email — show only fields that have a value
     $div  = "────────────────────────────────\n";
-    $subject = "New request assigned to you - {$customerName}";
-    $body =
-        "Hi {$agent['name']},\n\n"
-      . "A new request has been created and assigned to you.\n\n"
+    return
+        "Hi {$agentName},\n\n"
+      . $intro
       . $div
       . "Customer:    {$customerName}\n"
       . ($custEmail   ? "Email:       {$custEmail}\n"    : '')
@@ -122,14 +212,29 @@ function notify_agent_new_request(
       . $div
       . "View in Hub:\n{$hubUrl}\n\n"
       . "- Savannah Explorers Hub";
+}
 
+/**
+ * send_notification_mail()
+ *  Sends a plain-text notification via mail() and logs the ACTUAL result, so a
+ *  delivery failure is visible in the PHP error log ("[notify] mail() FAILED")
+ *  instead of being swallowed by @-suppression and an ignored return value.
+ *
+ * @return bool  What mail() returned (false = server rejected the message).
+ */
+function send_notification_mail(
+    string $to,
+    string $subject,
+    string $body,
+    string $context
+): bool {
     $headers =
-        "From: noreply@savannahexplorers.com\r\n"
+        "From: info@savannahexplorers.com\r\n"
       . "Content-Type: text/plain; charset=UTF-8\r\n";
 
-    @mail($agent['email'], $subject, $body, $headers);
-    error_log("[notify] mail() sent to: {$agent['email']} for request #{$requestId} ({$customerName})");
-    return ['sent' => true, 'error' => null];
+    $ok = mail($to, $subject, $body, $headers);
+    error_log("[notify] mail() " . ($ok ? 'OK' : 'FAILED') . " to: {$to} — {$context}");
+    return $ok;
 }
 
 /**
@@ -222,11 +327,11 @@ function notify_agent_duplicate_lead(
       . "View request in Hub:\n{$hubUrl}\n\n"
       . "- Savannah Explorers Hub";
 
-    $headers =
-        "From: noreply@savannahexplorers.com\r\n"
-      . "Content-Type: text/plain; charset=UTF-8\r\n";
-
-    @mail($target['email'], $subject, $body, $headers);
-    error_log("[notify] duplicate mail() sent to: {$target['email']} for request #{$targetRequestId} ({$lead['customer_name']})");
-    return ['sent' => true, 'error' => null];
+    $ok = send_notification_mail($target['email'], $subject, $body,
+        "duplicate lead for request #{$targetRequestId} ({$lead['customer_name']})");
+    return [
+        'sent'  => $ok,
+        'error' => $ok ? null
+            : "Email server rejected the duplicate notification for {$target['email']} (mail() returned false).",
+    ];
 }
