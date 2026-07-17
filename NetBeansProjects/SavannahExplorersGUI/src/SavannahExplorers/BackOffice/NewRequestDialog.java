@@ -108,7 +108,7 @@ public class NewRequestDialog extends JDialog {
         // Channel
         addLabel(panel, c, "Channel:", row, 0);
         channelCombo = new JComboBox<>(new String[]{
-            "Agency", "Direct (Drct)", "Safari Bookings (SB)", "Other"
+            "Agency", "Direct (Drct)"
         });
         channelCombo.setFont(new Font("SansSerif", Font.PLAIN, 13));
         c.gridx = 1; c.gridy = row; c.gridwidth = 3; c.weightx = 1;
@@ -462,17 +462,14 @@ public class NewRequestDialog extends JDialog {
         if (camel.isEmpty()) { folderPreviewLabel.setText("..."); return; }
         String agentName = getSelectedAgentName();
         String suffix;
-        switch (channelCombo.getSelectedIndex()) {
-            case 0:
-                String agShort = getSelectedAgencyShortName();
-                // getSelectedAgencyShortName() already appends -PS / -LAM from
-                // the agency type, so use the result verbatim here.
-                suffix = agShort.isEmpty() ? "(?-" + agentName + ")"
-                                           : "(" + agShort + "-" + agentName + ")";
-                break;
-            case 1:  suffix = "(" + agentName + "-Drct)"; break;
-            case 2:  suffix = "(" + agentName + "-SB)";   break;
-            default: suffix = "(" + agentName + ")";      break;
+        if (channelCombo.getSelectedIndex() == 0) {
+            String agShort = getSelectedAgencyShortName();
+            // getSelectedAgencyShortName() already appends -PS / -LAM from
+            // the agency type, so use the result verbatim here.
+            suffix = agShort.isEmpty() ? "(?-" + agentName + ")"
+                                       : "(" + agShort + "-" + agentName + ")";
+        } else {
+            suffix = "(" + agentName + "-Drct)";
         }
         folderPreviewLabel.setText(camel + suffix);
     }
@@ -600,14 +597,7 @@ public class NewRequestDialog extends JDialog {
             JOptionPane.showMessageDialog(this, "Enter the customer name.", "Warning", JOptionPane.WARNING_MESSAGE);
             return;
         }
-        int channelIdx = channelCombo.getSelectedIndex();
-        String channel;
-        switch (channelIdx) {
-            case 0: channel = "agency";  break;
-            case 1: channel = "direct";  break;
-            case 2: channel = "sb";      break;
-            default: channel = "other";  break;
-        }
+        String channel = channelCombo.getSelectedIndex() == 0 ? "agency" : "direct";
         if ("agency".equals(channel) && getSelectedAgencyName().isEmpty()) {
             JOptionPane.showMessageDialog(this, "Please select an agency.", "Warning", JOptionPane.WARNING_MESSAGE);
             return;
