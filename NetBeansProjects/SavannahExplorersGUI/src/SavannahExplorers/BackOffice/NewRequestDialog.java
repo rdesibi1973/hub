@@ -230,6 +230,16 @@ public class NewRequestDialog extends JDialog {
                 }
             }
         });
+        whatsappField.addFocusListener(new java.awt.event.FocusAdapter() {
+            @Override
+            public void focusLost(java.awt.event.FocusEvent e) {
+                String wa = whatsappField.getText().trim();
+                if (digitsOnly(wa).length() >= 7) {
+                    if (pendingDupCheck != null) pendingDupCheck.cancel(false);
+                    pendingDupCheck = scheduler.schedule(() -> checkDuplicateByWhatsapp(wa), 200, TimeUnit.MILLISECONDS);
+                }
+            }
+        });
         channelCombo.addActionListener(e -> {
             boolean isAgency = channelCombo.getSelectedIndex() == 0;
             agencyCombo.setEnabled(isAgency);
@@ -590,6 +600,34 @@ public class NewRequestDialog extends JDialog {
         } catch (IOException ex) { /* silent */ }
     }
 
+    // U+1F4F1 (mobile phone). Built from the code point rather than written as a
+    // literal so the surrogate pair can't be mangled by the build file encoding —
+    // same reason the email check uses an escaped 📧.
+    private static final String WA_ICON = new String(Character.toChars(0x1F4F1));
+
+    private void checkDuplicateByWhatsapp(String whatsapp) {
+        try {
+            String resp = api.get("check_duplicate.php", "whatsapp=" + urlEncode(whatsapp));
+            if (resp.contains("\"id\"")) {
+                String dupName = ApiClient.jsonGetString(resp, "name");
+                int count = 0;
+                java.util.regex.Matcher mc = java.util.regex.Pattern.compile("\"id\"").matcher(resp);
+                while (mc.find()) count++;
+                final String msg = WA_ICON + " WHATSAPP already on file: \"" + dupName + "\""
+                    + (count > 1 ? " +" + (count - 1) + " more" : "");
+                SwingUtilities.invokeLater(() -> {
+                    dupWarningLabel.setForeground(Color.RED);
+                    dupWarningLabel.setText(msg);
+                });
+            } else {
+                SwingUtilities.invokeLater(() -> {
+                    String cur = dupWarningLabel.getText();
+                    if (cur != null && cur.startsWith(WA_ICON)) dupWarningLabel.setText(" ");
+                });
+            }
+        } catch (IOException ex) { /* silent */ }
+    }
+
     // ── Create request ────────────────────────────────────────────────────────
     private void doCreateRequest() {
         String customerName = customerNameField.getText().trim();
@@ -614,33 +652,28 @@ public class NewRequestDialog extends JDialog {
 
         String folderPreview = folderPreviewLabel.getText();
 
-        // ── Email duplicate check before proceeding ───────────────────────────
+        // ── Duplicate check before proceeding ─────────────────────────────────
+        // Network errors are swallowed by collectDuplicates() so a hiccup never
+        // blocks data entry.
+        StringBuilder dupList = new StringBuilder();
         String emailToCheck = emailField.getText().trim();
         if (!emailToCheck.isEmpty() && emailToCheck.contains("@")) {
-            try {
-                String dupResp = api.get("check_duplicate.php", "email=" + urlEncode(emailToCheck));
-                if (dupResp.contains("\"id\"")) {
-                    // Build list of duplicates for the message
-                    StringBuilder dupList = new StringBuilder();
-                    java.util.regex.Matcher mName = java.util.regex.Pattern
-                        .compile("\"name\"\\s*:\\s*\"([^\"]+)\"").matcher(dupResp);
-                    java.util.regex.Matcher mId = java.util.regex.Pattern
-                        .compile("\"id\"\\s*:\\s*(\\d+)").matcher(dupResp);
-                    while (mName.find() && mId.find()) {
-                        dupList.append("  • \"").append(mName.group(1))
-                               .append("\"  (Request #").append(mId.group(1)).append(")\n");
-                    }
-                    int choice = JOptionPane.showConfirmDialog(this,
-                        "⚠  WARNING — Email already on file!\n\n"
-                        + "This email address is associated with:\n"
-                        + dupList.toString()
-                        + "\nDo you want to create a NEW request anyway?",
-                        "Duplicate Email",
-                        JOptionPane.YES_NO_OPTION,
-                        JOptionPane.WARNING_MESSAGE);
-                    if (choice != JOptionPane.YES_OPTION) return;
-                }
-            } catch (IOException ex) { /* network error — proceed anyway */ }
+            collectDuplicates("email=" + urlEncode(emailToCheck), "email", dupList);
+        }
+        String waToCheck = whatsappField.getText().trim();
+        if (digitsOnly(waToCheck).length() >= 7) {
+            collectDuplicates("whatsapp=" + urlEncode(waToCheck), "WhatsApp", dupList);
+        }
+        if (dupList.length() > 0) {
+            int choice = JOptionPane.showConfirmDialog(this,
+                "⚠  WARNING — customer already on file!\n\n"
+                + "These existing records match:\n"
+                + dupList.toString()
+                + "\nDo you want to create a NEW request anyway?",
+                "Possible Duplicate",
+                JOptionPane.YES_NO_OPTION,
+                JOptionPane.WARNING_MESSAGE);
+            if (choice != JOptionPane.YES_OPTION) return;
         }
         // ─────────────────────────────────────────────────────────────────────
 
@@ -1003,6 +1036,33 @@ public class NewRequestDialog extends JDialog {
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
+    // Queries check_duplicate.php and appends one bullet per match to out.
+    // Never throws: an unreachable endpoint must not block the save (fail-open).
+    private void collectDuplicates(String query, String matchedOn, StringBuilder out) {
+        try {
+            String resp = api.get("check_duplicate.php", query);
+            java.util.regex.Matcher obj = java.util.regex.Pattern
+                .compile("\\{([^{}]+)\\}").matcher(resp);
+            while (obj.find()) {
+                String block = obj.group(1);
+                String id    = jsonField(block, "id");
+                String nm    = jsonField(block, "name");
+                String table = jsonField(block, "source_table");
+                if (id == null || nm == null) continue;
+                boolean staging = "lead_staging".equals(table);
+                out.append("  • \"").append(nm).append("\"  (")
+                   .append(staging ? "Lead #" : "Request #").append(id)
+                   .append(", same ").append(matchedOn)
+                   .append(staging ? ", not yet promoted" : "")
+                   .append(")\n");
+            }
+        } catch (IOException ex) { /* network error — proceed anyway */ }
+    }
+
+    private static String digitsOnly(String s) {
+        return s == null ? "" : s.replaceAll("\\D", "");
+    }
+
     private static String toCamelCase(String name) {
         if (name == null || name.trim().isEmpty()) return "";
         String trimmed = name.trim();

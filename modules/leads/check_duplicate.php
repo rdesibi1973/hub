@@ -4,7 +4,14 @@ header('Content-Type: application/json');
 
 $name       = trim($_GET['name']       ?? '');
 $email      = trim($_GET['email']      ?? '');
+$whatsapp   = trim($_GET['whatsapp']   ?? '');
 $exclude_id = (int)($_GET['exclude_id'] ?? 0);
+
+// Last-7-digits comparison, matching hs_check_duplicates() in hubspot_sync.php.
+// Normalization happens in PHP because MySQL 5.7 has no REGEXP_SUBSTR.
+function phoneTail(string $s): string {
+    return substr(preg_replace('/\D/', '', $s), -7);
+}
 
 // ── Email-only check ─────────────────────────────────────────────────────────
 if ($email !== '' && $name === '') {
@@ -20,14 +27,68 @@ if ($email !== '' && $name === '') {
     $results = [];
     foreach ($rows as $row) {
         $results[] = [
-            'id'     => $row['id'],
-            'name'   => $row['customer_name'],
-            'email'  => $row['email'],
-            'level'  => 'email',
-            'reason' => 'Same email address',
+            'id'           => $row['id'],
+            'name'         => $row['customer_name'],
+            'email'        => $row['email'],
+            'level'        => 'email',
+            'reason'       => 'Same email address',
+            'source_table' => 'requests',
+        ];
+    }
+    $st = $db->prepare("SELECT id, customer_name, email FROM lead_staging WHERE LOWER(email) = LOWER(?)");
+    $st->execute([$email]);
+    foreach ($st->fetchAll() as $row) {
+        $results[] = [
+            'id'           => $row['id'],
+            'name'         => $row['customer_name'],
+            'email'        => $row['email'],
+            'level'        => 'email',
+            'reason'       => 'Same email address (lead not yet promoted)',
+            'source_table' => 'lead_staging',
         ];
     }
     echo json_encode($results);
+    exit;
+}
+
+// ── WhatsApp-only check ──────────────────────────────────────────────────────
+if ($whatsapp !== '' && $name === '') {
+    $tail = phoneTail($whatsapp);
+    if (strlen($tail) < 7) { echo json_encode([]); exit; }
+    $db = db();
+    $results = [];
+
+    $sql = $exclude_id
+        ? "SELECT id, customer_name, whatsapp FROM requests WHERE whatsapp IS NOT NULL AND whatsapp != '' AND id != ?"
+        : "SELECT id, customer_name, whatsapp FROM requests WHERE whatsapp IS NOT NULL AND whatsapp != ''";
+    $stmt = $db->prepare($sql);
+    $stmt->execute($exclude_id ? [$exclude_id] : []);
+    foreach ($stmt->fetchAll() as $row) {
+        if (phoneTail($row['whatsapp']) !== $tail) continue;
+        $results[] = [
+            'id'           => $row['id'],
+            'name'         => $row['customer_name'],
+            'whatsapp'     => $row['whatsapp'],
+            'level'        => 'whatsapp',
+            'reason'       => 'Same WhatsApp / phone number',
+            'source_table' => 'requests',
+        ];
+    }
+
+    $st = $db->query("SELECT id, customer_name, phone FROM lead_staging WHERE phone IS NOT NULL AND phone != ''");
+    foreach ($st->fetchAll() as $row) {
+        if (phoneTail($row['phone']) !== $tail) continue;
+        $results[] = [
+            'id'           => $row['id'],
+            'name'         => $row['customer_name'],
+            'whatsapp'     => $row['phone'],
+            'level'        => 'whatsapp',
+            'reason'       => 'Same WhatsApp / phone number (lead not yet promoted)',
+            'source_table' => 'lead_staging',
+        ];
+    }
+
+    echo json_encode(array_slice($results, 0, 5));
     exit;
 }
 
@@ -39,7 +100,15 @@ $sql = $exclude_id
     : "SELECT id, customer_name FROM requests";
 $stmt = $db->prepare($sql);
 $stmt->execute($exclude_id ? [$exclude_id] : []);
-$all = $stmt->fetchAll();
+$all = [];
+foreach ($stmt->fetchAll() as $row) {
+    $row['source_table'] = 'requests';
+    $all[] = $row;
+}
+foreach ($db->query("SELECT id, customer_name FROM lead_staging")->fetchAll() as $row) {
+    $row['source_table'] = 'lead_staging';
+    $all[] = $row;
+}
 
 function normalize(string $s): string {
     return mb_strtolower(trim(preg_replace('/\s+/', ' ', $s)));
@@ -128,10 +197,13 @@ foreach ($all as $row) {
 
     if ($level) {
         $results[] = [
-            'id'     => $row['id'],
-            'name'   => $candidate,
-            'level'  => $level,
-            'reason' => $reason,
+            'id'           => $row['id'],
+            'name'         => $candidate,
+            'level'        => $level,
+            'reason'       => $row['source_table'] === 'lead_staging'
+                                ? $reason . ' (lead not yet promoted)'
+                                : $reason,
+            'source_table' => $row['source_table'],
         ];
     }
 }

@@ -23,6 +23,7 @@ $destination    = trim($body['destination']     ?? '');
 $initialRequest = trim($body['initial_request'] ?? '');
 $pax            = isset($body['pax']) ? (int)$body['pax'] : null;
 $email          = trim($body['email'] ?? $body['mail'] ?? ''); // Java sends "mail", web sends "email"
+$whatsapp       = trim($body['whatsapp_phone_number'] ?? $body['whatsapp'] ?? ''); // Java sends "whatsapp_phone_number", web sends "whatsapp"
 $notifyAgent    = (bool)($body['notify_agent']  ?? false); // ← checkbox from Java
 
 if (!$userId || !$agentId || $customerName === '' || $channel === '') {
@@ -134,13 +135,19 @@ try {
         }
     }
 
-    // CustomerInfo.txt — matches template exactly
+    // CustomerInfo.txt
+    // The WhatsApp web link only works with international code and no separators.
+    $waDigits = preg_replace('/\D/', '', $whatsapp);
     $txtContent =
-        "REQUEST DETAILS:\r\n\r\n"
+        "CUSTOMER:\r\n\r\n"
+      . "Name:        " . $customerName . "\r\n"
+      . "Email:       " . $email . "\r\n"
+      . "WhatsApp:    " . $whatsapp . "\r\n\r\n\r\n"
+      . "REQUEST DETAILS:\r\n\r\n"
       . $initialRequest . "\r\n\r\n\r\n"
       . "WHATSAPP link\r\n"
       . "Add phone number with international code without + or spaces and use the following link to chat with customer on whatsapp web\r\n"
-      . "https://web.whatsapp.com/send?phone=\r\n\r\n"
+      . "https://web.whatsapp.com/send?phone=" . $waDigits . "\r\n\r\n"
       . "CUSTOMERS FULL NAMES:\r\n\r\n\r\n\r\n"
       . "ARRIVAL/DEPARTURE DETAILS - FLIGHTS:\r\n\r\n\r\n\r\n\r\n\r\n"
       . "DIETARY RESTRICTIONS:\r\n\r\n\r\n\r\n"
@@ -163,9 +170,9 @@ try {
 // ── Insert DB record (only after Dropbox succeeded) ───────────────────────────
 try {
     $db->prepare(
-        'INSERT INTO requests (date_received, customer_name, email, source, agent_id, destination, initial_request, status, pax, practice_code, dropbox_url, created_at)
-         VALUES (CURDATE(), ?, ?, ?, ?, ?, ?, "Inquiry", ?, ?, ?, NOW())'
-    )->execute([$customerName, $email ?: null, $source, $agentId, $destination ?: null, $initialRequest ?: null, $pax, $folderName, $dropboxWebUrl]);
+        'INSERT INTO requests (date_received, customer_name, email, whatsapp, source, agent_id, destination, initial_request, status, pax, practice_code, dropbox_url, created_at)
+         VALUES (CURDATE(), ?, ?, ?, ?, ?, ?, ?, "Inquiry", ?, ?, ?, NOW())'
+    )->execute([$customerName, $email ?: null, $whatsapp ?: null, $source, $agentId, $destination ?: null, $initialRequest ?: null, $pax, $folderName, $dropboxWebUrl]);
     $requestId = (int)$db->lastInsertId();
 } catch (\Throwable $e) {
     // The Dropbox folder was already created above, but the DB INSERT failed.
