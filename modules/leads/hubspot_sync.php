@@ -32,6 +32,14 @@ if (!defined('HUBSPOT_TOKEN')) {
     exit(1);
 }
 
+// ── Lag floor: HubSpot's /search endpoint indexes asynchronously and a freshly
+//    created contact can be invisible there for up to ~1h. The incremental cron
+//    window advances forward, so without a floor a contact indexed *after* the
+//    window has passed its createdate would be skipped forever. We therefore make
+//    every incremental run look back at least this many seconds. Re-encountered
+//    leads are cheap (skipped via hubspot_id + lead_processed), so a wide floor is safe.
+if (!defined('HS_LAG_FLOOR_SEC')) define('HS_LAG_FLOOR_SEC', 3 * 3600); // 3 hours
+
 // ─────────────────────────────────────────────────────────────────────────────
 // ── Shared library functions (available when included as HS_INCLUDED)  ──────
 // ─────────────────────────────────────────────────────────────────────────────
@@ -301,32 +309,16 @@ function hs_fetch_contacts(int $since): array {
         $after = $data['paging']['next']['after'] ?? null;
     } while ($after);
 
-    // ── Pass 3: CRM-list fallback — catches contacts missed by search-index delay ──
-    // The /search endpoint indexes asynchronously; freshly created contacts can be
-    // invisible there for up to ~60 min.  The basic CRM list endpoint reads live
-    // storage and has no indexing lag.  We walk it newest-first and stop as soon as
-    // we see a contact older than $since.
-    $foundIds = array_flip(array_column($contacts, 'id'));
-    $propsQS  = implode(',', $props);
-    $after    = null;
-    do {
-        $url  = 'https://api.hubapi.com/crm/v3/objects/contacts?limit=100'
-              . '&sort=-createdate'
-              . '&properties=' . urlencode($propsQS);
-        if ($after) $url .= '&after=' . urlencode($after);
-        $data    = hs_curl($url);          // GET — bypasses search index
-        $results = $data['results'] ?? [];
-        $stop    = false;
-        foreach ($results as $c) {
-            $cMs = hs_parse_ms($c['properties']['createdate'] ?? 0);
-            if ($cMs < $since) { $stop = true; break; }   // older than window — done
-            if (!isset($foundIds[$c['id']])) {
-                $contacts[]         = $c;                  // no _is_reconversion flag
-                $foundIds[$c['id']] = true;
-            }
-        }
-        $after = ($stop || empty($results)) ? null : ($data['paging']['next']['after'] ?? null);
-    } while ($after);
+    // ── (Former Pass 3 removed) ──────────────────────────────────────────────
+    // A CRM-list "live storage" fallback used to live here to catch contacts the
+    // search index hadn't picked up yet. It relied on GET /objects/contacts with
+    // &sort=-createdate — but that endpoint IGNORES sort and returns contacts
+    // oldest-first, so the newest-first walk stopped on the very first (oldest)
+    // contact and fetched nothing. With 15k+ contacts a full walk to reach the
+    // newest ones is not viable (~155 calls/run). Search-index lag is instead
+    // handled by HS_LAG_FLOOR_SEC in the cron entry point, which keeps the
+    // incremental window wide enough that a late-indexed contact is re-checked
+    // on a later run (safe against re-import via lead_processed).
 
     return $contacts;
 }
@@ -604,6 +596,14 @@ function hs_insert_lead(PDO $db, array $lead, bool $dryRun = false): array {
         return ['status' => 'skipped', 'message' => "Already staged: $name"];
     }
 
+    // Already approved / merged / dismissed in a prior session — never re-import.
+    hs_ensure_processed_table($db);
+    $wasProcessed = $db->prepare("SELECT action FROM lead_processed WHERE hubspot_id = ? LIMIT 1");
+    $wasProcessed->execute([$hsId]);
+    if ($row = $wasProcessed->fetch()) {
+        return ['status' => 'skipped', 'message' => "Already {$row['action']}: $name"];
+    }
+
     $dup = hs_check_duplicates($db, $name, $lead['email'], $lead['phone'], $hsId);
 
     // Downgrade 'definite' to 'returning' for old matches, map to 'possible' for DB storage
@@ -659,6 +659,33 @@ function hs_insert_lead(PDO $db, array $lead, bool $dryRun = false): array {
     } catch (PDOException $e) {
         return ['status' => 'error', 'message' => "ERROR $name: " . $e->getMessage()];
     }
+}
+
+/**
+ * Creates the lead_processed suppression table if it does not exist.
+ * Holds hubspot_ids of leads that have been approved / merged / dismissed so they
+ * are never re-imported by a later sync, regardless of how wide the lookback window is.
+ */
+function hs_ensure_processed_table(PDO $db): void {
+    static $done = false;
+    if ($done) return;
+    $db->exec("CREATE TABLE IF NOT EXISTS lead_processed (
+        id           INT AUTO_INCREMENT PRIMARY KEY,
+        hubspot_id   VARCHAR(30)  NOT NULL,
+        action       VARCHAR(20)  DEFAULT NULL,
+        customer_name VARCHAR(200) DEFAULT NULL,
+        processed_at DATETIME     NOT NULL DEFAULT NOW(),
+        UNIQUE KEY uk_hubspot (hubspot_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    $done = true;
+}
+
+/** Records a lead as processed so future syncs skip it. Safe to call repeatedly. */
+function hs_mark_processed(PDO $db, ?string $hubspotId, string $action, string $name = ''): void {
+    if (!$hubspotId) return;
+    hs_ensure_processed_table($db);
+    $db->prepare("INSERT IGNORE INTO lead_processed (hubspot_id, action, customer_name) VALUES (?,?,?)")
+       ->execute([$hubspotId, $action, $name ?: null]);
 }
 
 /** Creates lead_staging table if it does not exist. */
@@ -815,7 +842,10 @@ if (!defined('HS_INCLUDED')) {
         echo "[RESET] Ignoring last sync timestamp, looking back 24 hours.\n";
     } elseif (file_exists($syncFile)) {
         $since = (int)trim(file_get_contents($syncFile));
-        echo "[INFO] Last sync: " . date('Y-m-d H:i:s', (int)($since / 1000)) . "\n";
+        // Floor the window to outlast search-index lag (see HS_LAG_FLOOR_SEC).
+        $lagFloor = (time() - HS_LAG_FLOOR_SEC) * 1000;
+        if ($since > $lagFloor) $since = $lagFloor;
+        echo "[INFO] Last sync (lag-floored): " . date('Y-m-d H:i:s', (int)($since / 1000)) . "\n";
     } else {
         $since = (time() - 86400) * 1000;
     }

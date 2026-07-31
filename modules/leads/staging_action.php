@@ -3,6 +3,11 @@ require_once 'config.php';
 require_once 'dropbox_helper.php';
 require_once 'notifications.php';
 
+// Load the HubSpot sync as a library (skips its CLI block). Gives us
+// hs_mark_processed() / hs_ensure_processed_table() for the anti-reimport suppression list.
+if (!defined('HS_INCLUDED')) define('HS_INCLUDED', true);
+require_once __DIR__ . '/hubspot_sync.php';
+
 $currentUser = current_user();
 if (!in_array($currentUser['role_name'] ?? '', ['admin','manager'])) {
     flash('Access denied.', 'error');
@@ -19,8 +24,6 @@ $db        = db();
 
 if ($action === 'hubspot_preview') {
     header('Content-Type: application/json');
-    define('HS_INCLUDED', true);
-    require_once __DIR__ . '/hubspot_sync.php';
 
     $days  = max(1, min(30, (int)($_POST['days'] ?? 1)));
     $since = (time() - $days * 86400) * 1000;
@@ -37,10 +40,16 @@ if ($action === 'hubspot_preview') {
         $db->query("SELECT hubspot_id FROM lead_staging WHERE hubspot_id IS NOT NULL")
            ->fetchAll(PDO::FETCH_COLUMN)
     );
+    // Also exclude leads already approved / merged / dismissed (never show them again)
+    hs_ensure_processed_table($db);
+    $processedIds = array_flip(
+        $db->query("SELECT hubspot_id FROM lead_processed")->fetchAll(PDO::FETCH_COLUMN)
+    );
 
     $preview = [];
     foreach ($leads as $lead) {
-        if (isset($stagedIds[$lead['hubspot_id']])) continue;
+        if (isset($stagedIds[$lead['hubspot_id']]))    continue;
+        if (isset($processedIds[$lead['hubspot_id']])) continue;
         $preview[] = [
             'hubspot_id'    => $lead['hubspot_id'],
             'source'        => $lead['source'],
@@ -62,8 +71,6 @@ if ($action === 'hubspot_preview') {
 
 if ($action === 'hubspot_import') {
     header('Content-Type: application/json');
-    define('HS_INCLUDED', true);
-    require_once __DIR__ . '/hubspot_sync.php';
 
     $days        = max(1, min(30, (int)($_POST['days'] ?? 1)));
     $since       = (time() - $days * 86400) * 1000;
@@ -198,6 +205,7 @@ if ($action === 'approve') {
     ]);
 
     $newId = $db->lastInsertId();
+    hs_mark_processed($db, $lead['hubspot_id'] ?? null, 'approved', $customerName);
     $db->prepare("DELETE FROM lead_staging WHERE id = ?")->execute([$stagingId]);
 
     // ── Check for email duplicate (warn only, request already created) ────────
@@ -249,6 +257,7 @@ if ($action === 'approve') {
 
     $db->prepare("UPDATE requests SET notes = ?, initial_request = ? WHERE id = ?")
        ->execute([$newNotes, $newInitReq, $targetId]);
+    hs_mark_processed($db, $lead['hubspot_id'] ?? null, 'merged', $lead['customer_name'] ?? '');
     $db->prepare("DELETE FROM lead_staging WHERE id = ?")->execute([$stagingId]);
 
     $notif = notify_agent_duplicate_lead($db, $targetId, $lead, $doNotify);
@@ -291,6 +300,7 @@ if ($action === 'approve') {
         $notif = notify_agent_duplicate_lead($db, $targetId, $lead, $doNotify, false);
     }
 
+    hs_mark_processed($db, $lead['hubspot_id'] ?? null, 'dismissed', $lead['customer_name'] ?? '');
     $db->prepare("DELETE FROM lead_staging WHERE id = ?")->execute([$stagingId]);
 
     flash('Lead dismissed.' . ($notif['sent'] ? ' — ✉ Notification sent to agent.' : ''), 'success');
