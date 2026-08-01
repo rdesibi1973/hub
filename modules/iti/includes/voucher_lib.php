@@ -668,6 +668,38 @@ function voucher_travellers_line(array $model): string
     return implode(', ', array_filter($parts));
 }
 
+/** Prominent "service" line for a transfer voucher: the route, or "Transfer". */
+function voucher_transfer_headline(array $t): string
+{
+    $from = $t['from'] ?? '';
+    $to   = $t['to'] ?? '';
+    if ($from !== '' && $to !== '') return $from . ' → ' . $to;
+    if ($from !== '') return $from;
+    if ($to !== '')   return $to;
+    return 'Transfer';
+}
+
+/** Path to the Savannah Explorers logo (reused from the invoices module). */
+function voucher_logo_path(): string
+{
+    return __DIR__ . '/../../invoices/assets/logo_se.png';
+}
+
+function voucher_company_name(): string
+{
+    return 'Savannah Explorers Ltd';
+}
+
+/** Standard company phone references printed on every voucher. */
+function voucher_company_contacts(): array
+{
+    return [
+        'Office: +255 768 900 199',
+        'Emergency Mobile (Tanzania): +255 768 900 199 and +255 747 777 315',
+        'Zanzibar transfers: +255 773 053 725',
+    ];
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 //  Rendering — PDF (Dompdf-compatible HTML)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -680,31 +712,44 @@ function voucher_render_html(array $model): string
     $adults = (int)$model['adults'];
     $ref = $model['ref'];
 
-    $blocks = [];
+    // Branded header (logo + company contacts), embedded once as base64.
+    $logoSrc = '';
+    $lp = voucher_logo_path();
+    if (is_file($lp)) $logoSrc = 'data:image/png;base64,' . base64_encode((string)file_get_contents($lp));
+    $contacts = implode('<br>', array_map($h, voucher_company_contacts()));
+    $brand =
+        '<table class="v-brand"><tr>'
+      . ($logoSrc ? '<td class="v-brand-logo"><img src="' . $logoSrc . '" style="height:62px;width:62px;"></td>' : '')
+      . '<td class="v-brand-info"><div class="v-brand-name">' . $h(strtoupper(voucher_company_name())) . '</div>' . $contacts . '</td>'
+      . '</tr></table>';
 
-    $headBlock = function (string $title) use ($h, $c, $ref): string {
+    // One voucher block: brand → title → highlighted service band → meta → body.
+    $voucher = function (string $title, string $headline, string $bodyHtml) use ($brand, $h, $c, $ref): string {
         return
-            '<div class="v-title">' . $h($title) . '</div>'
+            '<div class="voucher">'
+          . $brand
+          . '<div class="v-title">' . $h($title) . '</div>'
+          . '<div class="v-headline">' . $h($headline) . '</div>'
           . '<div class="v-meta">'
           . 'Consultant: ' . $h($c['name']) . ', ' . $h($c['phone']) . '<br>'
           . 'Email: ' . $h($c['email']) . '<br>'
           . 'Our Ref. No.: ' . $h($ref)
+          . '</div>'
+          . $bodyHtml
           . '</div>';
     };
 
+    $blocks = [];
+
     foreach ($model['accommodations'] as $a) {
-        $prov = $h($a['provider_name']);
-        if ($a['provider_phone'] !== '') $prov .= ', ' . $h($a['provider_phone']);
-        $addr = $a['provider_address'] !== '' ? '<div>' . $h($a['provider_address']) . '</div>' : '';
-        $gps  = $a['gps'] !== '' ? '<div>GPS: ' . $h($a['gps']) . '</div>' : '';
+        $tel  = $a['provider_phone']   !== '' ? '<div class="v-row">Tel: ' . $h($a['provider_phone']) . '</div>' : '';
+        $addr = $a['provider_address'] !== '' ? '<div class="v-row">' . $h($a['provider_address']) . '</div>' : '';
+        $gps  = $a['gps'] !== '' ? '<div class="v-row">GPS: ' . $h($a['gps']) . '</div>' : '';
         $nights = $a['nights'] === 1 ? '1 Night' : $a['nights'] . ' Nights';
-        $blocks[] =
-            '<div class="voucher">'
-          . $headBlock('ACCOMMODATION VOUCHER - OVERNIGHT')
-          . '<div class="v-row">Provider: ' . $prov . '</div>'
+        $body =
+            $tel . $addr . $gps
           . '<div class="v-row">Travellers: ' . $h($travellers) . '</div>'
           . '<div class="v-row v-sub">(Adults ' . $adults . ')&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Your Ref no.:</div>'
-          . $addr . $gps
           . '<div class="v-row">Check In: ' . $h(voucher_fmt_date($a['checkin']))
           . '&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Check Out: ' . $h(voucher_fmt_date($a['checkout']))
           . ' (' . $nights . ')</div>'
@@ -713,8 +758,8 @@ function voucher_render_html(array $model): string
           . '<div class="v-row">Meal Basis: ' . $h($a['meal']) . '</div>'
           . '<div class="v-row">Dietary Requirements: ' . $h($model['dietary']) . '</div>'
           . '<div class="v-foot">All additional services are for guest\'s own account</div>'
-          . '<div class="v-row">Notes:</div>'
-          . '</div>';
+          . '<div class="v-row">Notes:</div>';
+        $blocks[] = $voucher('ACCOMMODATION VOUCHER - OVERNIGHT', $a['provider_name'], $body);
     }
 
     foreach ($model['transfers'] as $t) {
@@ -723,19 +768,16 @@ function voucher_render_html(array $model): string
             $flight = '<div class="v-row">Flight Departs: ' . $h($t['flight_no'])
                     . ($t['flight_time'] !== '' ? ', ' . $h($t['flight_time']) : '') . '</div>';
         }
-        $blocks[] =
-            '<div class="voucher">'
-          . $headBlock('TRANSPORT VOUCHER - TRANSFER')
-          . '<div class="v-row">Provider:</div>'
-          . '<div class="v-row">Travellers: ' . $h($travellers) . '</div>'
+        $body =
+            '<div class="v-row">Travellers: ' . $h($travellers) . '</div>'
           . '<div class="v-row v-sub">(Adults ' . $adults . ')&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Your Ref no.:</div>'
           . '<div class="v-label">INCLUDED SERVICES:</div>'
           . '<div class="v-row">Pick Up: ' . $h(voucher_fmt_date($t['date'])) . ', ' . $h($t['from']) . '</div>'
           . '<div class="v-row">Drop Off: ' . $h(voucher_fmt_date($t['date'])) . ', ' . $h($t['to']) . '</div>'
           . $flight
           . '<div class="v-foot">All additional services are for guest\'s own account</div>'
-          . '<div class="v-row">Notes: ' . $h($t['notes'] ?? '') . '</div>'
-          . '</div>';
+          . '<div class="v-row">Notes: ' . $h($t['notes'] ?? '') . '</div>';
+        $blocks[] = $voucher('TRANSPORT VOUCHER - TRANSFER', voucher_transfer_headline($t), $body);
     }
 
     $body = implode("\n", $blocks);
@@ -747,8 +789,14 @@ function voucher_render_html(array $model): string
       body { font-family: DejaVu Sans, Arial, sans-serif; font-size: 12px; color: #1a1a1a; }
       .voucher { page-break-after: always; padding: 4px 2px; }
       .voucher:last-child { page-break-after: auto; }
+      .v-brand { width: 100%; margin-bottom: 10px; border-collapse: collapse; }
+      .v-brand-logo { width: 72px; vertical-align: top; }
+      .v-brand-info { text-align: right; font-size: 9px; line-height: 1.5; color: #333; vertical-align: top; }
+      .v-brand-name { font-weight: bold; font-size: 12px; color: #C0211B; margin-bottom: 2px; }
       .v-title { font-size: 15px; font-weight: bold; letter-spacing: .5px;
-                 border-bottom: 2px solid #C0211B; padding-bottom: 6px; margin-bottom: 10px; color: #C0211B; }
+                 border-bottom: 2px solid #C0211B; padding-bottom: 6px; margin-bottom: 8px; color: #C0211B; }
+      .v-headline { font-size: 17px; font-weight: bold; color: #111;
+                    background: #fbeceb; border-left: 5px solid #C0211B; padding: 8px 12px; margin: 0 0 12px; }
       .v-meta { margin-bottom: 12px; line-height: 1.6; }
       .v-row { margin: 3px 0; line-height: 1.5; }
       .v-sub { color: #555; }
@@ -766,19 +814,34 @@ function voucher_render_word(array $model)
 {
     $phpWord = new \PhpOffice\PhpWord\PhpWord();
     $RED = 'C0211B'; $GREY = '555555';
-    $phpWord->addFontStyle('vTitle', ['name' => 'Calibri', 'size' => 14, 'bold' => true, 'color' => $RED]);
-    $phpWord->addFontStyle('vBase',  ['name' => 'Calibri', 'size' => 10]);
-    $phpWord->addFontStyle('vLabel', ['name' => 'Calibri', 'size' => 10, 'bold' => true]);
-    $phpWord->addFontStyle('vSub',   ['name' => 'Calibri', 'size' => 10, 'color' => $GREY]);
-    $phpWord->addFontStyle('vFoot',  ['name' => 'Calibri', 'size' => 10, 'italic' => true, 'color' => $GREY]);
+    $phpWord->addFontStyle('vTitle',     ['name' => 'Calibri', 'size' => 14, 'bold' => true, 'color' => $RED]);
+    $phpWord->addFontStyle('vHeadline',  ['name' => 'Calibri', 'size' => 15, 'bold' => true, 'color' => '111111']);
+    $phpWord->addFontStyle('vBase',      ['name' => 'Calibri', 'size' => 10]);
+    $phpWord->addFontStyle('vLabel',     ['name' => 'Calibri', 'size' => 10, 'bold' => true]);
+    $phpWord->addFontStyle('vSub',       ['name' => 'Calibri', 'size' => 10, 'color' => $GREY]);
+    $phpWord->addFontStyle('vFoot',      ['name' => 'Calibri', 'size' => 10, 'italic' => true, 'color' => $GREY]);
+    $phpWord->addFontStyle('vBrandName', ['name' => 'Calibri', 'size' => 11, 'bold' => true, 'color' => $RED]);
+    $phpWord->addFontStyle('vBrand',     ['name' => 'Calibri', 'size' => 8, 'color' => $GREY]);
 
     $c = $model['consultant'];
     $travellers = voucher_travellers_line($model);
     $adults = (int)$model['adults'];
     $ref = $model['ref'];
+    $logo = voucher_logo_path();
+    $contacts = voucher_company_contacts();
 
-    $addHead = function ($section, string $title) use ($c, $ref) {
-        $section->addText($title, 'vTitle', ['spaceAfter' => 120]);
+    // Branded header + title + highlighted service band + booking meta.
+    $addHead = function ($section, string $title, string $headline)
+        use ($c, $ref, $logo, $contacts) {
+        if (is_file($logo)) {
+            $section->addImage($logo, ['height' => 52, 'width' => 52]);
+        }
+        $section->addText(strtoupper(voucher_company_name()), 'vBrandName');
+        foreach ($contacts as $line) $section->addText($line, 'vBrand');
+        $section->addTextBreak(1, 'vBrand');
+        $section->addText($title, 'vTitle', ['spaceAfter' => 80]);
+        $section->addText($headline, 'vHeadline',
+            ['shading' => ['fill' => 'FBECEB'], 'spaceBefore' => 40, 'spaceAfter' => 160]);
         $section->addText('Consultant: ' . $c['name'] . ', ' . $c['phone'], 'vBase');
         $section->addText('Email: ' . $c['email'], 'vBase');
         $section->addText('Our Ref. No.: ' . $ref, 'vBase', ['spaceAfter' => 120]);
@@ -786,20 +849,19 @@ function voucher_render_word(array $model)
 
     $first = true;
     $newSection = function () use ($phpWord, &$first) {
-        $s = $phpWord->addSection(['marginTop' => 900, 'marginBottom' => 900, 'marginLeft' => 1000, 'marginRight' => 1000]);
+        $s = $phpWord->addSection(['marginTop' => 800, 'marginBottom' => 800, 'marginLeft' => 1000, 'marginRight' => 1000]);
         $first = false;
         return $s;
     };
 
     foreach ($model['accommodations'] as $a) {
         $s = $newSection();
-        $addHead($s, 'ACCOMMODATION VOUCHER - OVERNIGHT');
-        $prov = $a['provider_name'] . ($a['provider_phone'] !== '' ? ', ' . $a['provider_phone'] : '');
-        $s->addText('Provider: ' . $prov, 'vBase');
-        $s->addText('Travellers: ' . $travellers, 'vBase');
-        $s->addText('(Adults ' . $adults . ')     Your Ref no.:', 'vSub', ['spaceAfter' => 60]);
+        $addHead($s, 'ACCOMMODATION VOUCHER - OVERNIGHT', $a['provider_name']);
+        if ($a['provider_phone']   !== '') $s->addText('Tel: ' . $a['provider_phone'], 'vBase');
         if ($a['provider_address'] !== '') $s->addText($a['provider_address'], 'vBase');
         if ($a['gps'] !== '') $s->addText('GPS: ' . $a['gps'], 'vBase');
+        $s->addText('Travellers: ' . $travellers, 'vBase');
+        $s->addText('(Adults ' . $adults . ')     Your Ref no.:', 'vSub', ['spaceAfter' => 60]);
         $nights = $a['nights'] === 1 ? '1 Night' : $a['nights'] . ' Nights';
         $s->addText('Check In: ' . voucher_fmt_date($a['checkin'])
                   . '     Check Out: ' . voucher_fmt_date($a['checkout']) . ' (' . $nights . ')', 'vBase', ['spaceAfter' => 120]);
@@ -813,8 +875,7 @@ function voucher_render_word(array $model)
 
     foreach ($model['transfers'] as $t) {
         $s = $newSection();
-        $addHead($s, 'TRANSPORT VOUCHER - TRANSFER');
-        $s->addText('Provider:', 'vBase');
+        $addHead($s, 'TRANSPORT VOUCHER - TRANSFER', voucher_transfer_headline($t));
         $s->addText('Travellers: ' . $travellers, 'vBase');
         $s->addText('(Adults ' . $adults . ')     Your Ref no.:', 'vSub', ['spaceAfter' => 60]);
         $s->addText('INCLUDED SERVICES:', 'vLabel');

@@ -28,6 +28,11 @@ Running log of notable changes and current build state. Module-level "active / p
 - Accommodation vouchers skip own-arrangement stays; transfer vouchers auto-attach
   the departing flight; meal basis mapped (FB/HB/B&B → full text); dates parsed
   from the Italian programme
+- Each voucher carries the Savannah Explorers logo + standard phone contacts
+  (Office / Emergency / Zanzibar transfers) and a highlighted service band (lodge
+  name or transfer route); review screen has per-voucher include/skip checkboxes
+- Zanzibar airport drop-offs get an automatic pick-up-timing note (4.5h intl /
+  3.5h internal), editable in review
 - Input parsing is dependency-free (ZipArchive + DOM) — no new vendor libs needed
 - `includes/voucher_lib.php`: parsers, model builder, lodge lookup, both renderers
 - Migration `054_iti_voucher_lodges.sql`: `iti_voucher_lodges` directory (GPS /

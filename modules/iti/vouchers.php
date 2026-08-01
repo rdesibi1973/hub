@@ -151,6 +151,7 @@ if ($step === 'generate' && !$error) {
         }
 
         $options = new \Dompdf\Options();
+        $options->set('isHtml5ParserEnabled', true);
         $options->set('isRemoteEnabled', false);
         $options->set('defaultFont', 'DejaVu Sans');
         $dompdf = new \Dompdf\Dompdf($options);
@@ -198,10 +199,23 @@ function voucher_overlay_edits(array &$model, array $post): void
         }
     }
 
-    // Transfers (+ their internal flight) — rebuilt from the editable rows.
+    // Per-voucher include checkboxes — drop the accommodations left unticked.
+    if (!empty($post['acc_include_present'])) {
+        $incl = array_flip(array_map('strval', (array)($post['acc_include'] ?? [])));
+        $kept = [];
+        foreach ($model['accommodations'] as $i => $a) {
+            if (isset($incl[(string)$i])) $kept[] = $a;
+        }
+        $model['accommodations'] = $kept;
+    }
+
+    // Transfers (+ their internal flight) — rebuilt from the editable rows,
+    // keeping only ticked rows that have a pick-up or drop-off.
     if (isset($post['xf_from']) && is_array($post['xf_from'])) {
+        $xincl = array_flip(array_map('strval', (array)($post['xf_include'] ?? [])));
         $transfers = [];
         foreach ($post['xf_from'] as $i => $from) {
+            if (!isset($xincl[(string)$i])) continue; // unticked → skip
             $from = trim((string)$from);
             $to   = trim($post['xf_to'][$i] ?? '');
             if ($from === '' && $to === '') continue;
@@ -401,11 +415,16 @@ include __DIR__ . '/../../includes/layout_header.php';
       <?php if ($missingGps): ?>
         <span style="color:#C0211B;font-weight:500;font-size:.85rem;">— <?= $missingGps ?> lodge(s) missing GPS</span>
       <?php endif; ?>
+      <span style="color:var(--grey-mid);font-weight:400;font-size:.8rem;">— untick to skip a voucher</span>
     </div>
+    <input type="hidden" name="acc_include_present" value="1">
 
     <?php foreach ($model['accommodations'] as $i => $a): ?>
       <div style="background:#fff;border:1px solid var(--grey-lt);border-left:4px solid #C0211B;border-radius:10px;padding:16px 18px;margin-bottom:12px;">
-        <div style="font-weight:600;margin-bottom:2px;"><?= h($a['lodge']) ?></div>
+        <label style="display:flex;align-items:center;gap:8px;font-weight:600;margin-bottom:2px;cursor:pointer;">
+          <input type="checkbox" name="acc_include[]" value="<?= $i ?>" checked style="width:16px;height:16px;">
+          <?= h($a['lodge']) ?>
+        </label>
         <div style="color:var(--grey-mid);font-size:.82rem;margin-bottom:12px;">
           <?= h(voucher_fmt_date($a['checkin'])) ?> → <?= h(voucher_fmt_date($a['checkout'])) ?>
           (<?= (int)$a['nights'] ?> night<?= $a['nights'] === 1 ? '' : 's' ?>) · <?= h($a['dest']) ?>
@@ -441,9 +460,10 @@ include __DIR__ . '/../../includes/layout_header.php';
     <!-- Transfers (+ internal flights) — editable -->
     <div style="font-weight:600;margin:16px 0 10px;">Transfer vouchers (<?= count($model['transfers']) ?>)</div>
     <div style="background:#fff;border:1px solid var(--grey-lt);border-radius:10px;padding:12px 14px;margin-bottom:16px;overflow-x:auto;">
-      <table style="width:100%;border-collapse:collapse;font-size:.85rem;min-width:920px;">
+      <table style="width:100%;border-collapse:collapse;font-size:.85rem;min-width:960px;">
         <thead>
           <tr style="text-align:left;font-size:.7rem;color:var(--grey-mid);text-transform:uppercase;letter-spacing:.06em;">
+            <th style="padding:4px 6px;width:32px;" title="Generate this voucher">✓</th>
             <th style="padding:4px 6px;width:140px;">Date</th>
             <th style="padding:4px 6px;">Pick up</th>
             <th style="padding:4px 6px;">Drop off</th>
@@ -458,6 +478,7 @@ include __DIR__ . '/../../includes/layout_header.php';
             for ($k = 0; $k < 2; $k++) $xrows[] = ['date' => '', 'from' => '', 'to' => '', 'flight_no' => '', 'flight_time' => '', 'notes' => '']; // spare rows
             foreach ($xrows as $i => $t): ?>
             <tr>
+              <td style="padding:3px 6px;text-align:center;"><input type="checkbox" name="xf_include[]" value="<?= $i ?>" checked style="width:16px;height:16px;"></td>
               <td style="padding:3px 6px;"><input type="date" name="xf_date[<?= $i ?>]" value="<?= h($t['date']) ?>" style="width:100%;padding:6px;border-radius:6px;"></td>
               <td style="padding:3px 6px;"><input type="text" name="xf_from[<?= $i ?>]" value="<?= h($t['from']) ?>" style="width:100%;padding:6px;border-radius:6px;"></td>
               <td style="padding:3px 6px;"><input type="text" name="xf_to[<?= $i ?>]" value="<?= h($t['to']) ?>" style="width:100%;padding:6px;border-radius:6px;"></td>
