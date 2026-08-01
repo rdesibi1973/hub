@@ -766,7 +766,7 @@ function voucher_render_html(array $model): string
     $blocks = [];
 
     foreach ($model['accommodations'] as $a) {
-        $tel  = $a['provider_phone']   !== '' ? '<div class="v-row">Tel: ' . $h($a['provider_phone']) . '</div>' : '';
+        $tel  = $a['provider_phone']   !== '' ? '<div class="v-row">Lodge Phone: ' . $h($a['provider_phone']) . '</div>' : '';
         $addr = $a['provider_address'] !== '' ? '<div class="v-row">' . $h($a['provider_address']) . '</div>' : '';
         $gps  = $a['gps'] !== '' ? '<div class="v-row">GPS: ' . $h($a['gps']) . '</div>' : '';
         $nights = $a['nights'] === 1 ? '1 Night' : $a['nights'] . ' Nights';
@@ -880,7 +880,7 @@ function voucher_render_word(array $model)
     foreach ($model['accommodations'] as $a) {
         $s = $newSection();
         $addHead($s, 'ACCOMMODATION VOUCHER - OVERNIGHT', $a['provider_name']);
-        if ($a['provider_phone']   !== '') $s->addText('Tel: ' . $a['provider_phone'], 'vBase');
+        if ($a['provider_phone']   !== '') $s->addText('Lodge Phone: ' . $a['provider_phone'], 'vBase');
         if ($a['provider_address'] !== '') $s->addText($a['provider_address'], 'vBase');
         if ($a['gps'] !== '') $s->addText('GPS: ' . $a['gps'], 'vBase');
         $s->addText('Travellers: ' . $travellers, 'vBase');
