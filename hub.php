@@ -47,6 +47,12 @@ include __DIR__ . '/includes/layout_header.php';
     </a>
     <?php endif; ?>
 
+    <a class="primary-card" href="<?= BASE_URL ?>/modules/iti/vouchers.php">
+      <div class="pc-icon">🎫</div>
+      <div class="pc-text"><h3>Vouchers</h3><p>Generate guest vouchers (PDF / Word)</p></div>
+      <span class="pc-arrow">↗</span>
+    </a>
+
     <a class="primary-card" href="<?= BASE_URL ?>/modules/memo/index.php">
       <div class="pc-icon">📝</div>
       <div class="pc-text"><h3>Memo Board</h3><p>Personal memos &amp; reminders</p></div>

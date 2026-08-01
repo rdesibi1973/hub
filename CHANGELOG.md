@@ -20,6 +20,21 @@ Running log of notable changes and current build state. Module-level "active / p
 
 ---
 
+## 2026-08 — Voucher generator (ITI)
+- New `modules/iti/vouchers.php`: upload a WeTu Word programme (.docx) + the Excel
+  calc (.xlsx), review/edit traveller names (Mr/Mrs), dietary notes, per-lodge
+  details and transfers/internal flights, then download vouchers as **PDF**
+  (Dompdf) or **Word** (PhpWord)
+- Accommodation vouchers skip own-arrangement stays; transfer vouchers auto-attach
+  the departing flight; meal basis mapped (FB/HB/B&B → full text); dates parsed
+  from the Italian programme
+- Input parsing is dependency-free (ZipArchive + DOM) — no new vendor libs needed
+- `includes/voucher_lib.php`: parsers, model builder, lodge lookup, both renderers
+- Migration `054_iti_voucher_lodges.sql`: `iti_voucher_lodges` directory (GPS /
+  phone / address per lodge, missing from the WeTu export), seeded from existing
+  vouchers; the review screen can fill + save new lodges
+- Hub dashboard gains a **Vouchers** card; ITI nav gains a **Vouchers** tab
+
 ## 2026-06 — Memo reminders: extra recipients
 - Reminder form now shows who the email goes to (your account, by default) and an
   optional "Also send to" field for additional comma-separated addresses
