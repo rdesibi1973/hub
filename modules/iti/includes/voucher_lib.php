@@ -716,7 +716,9 @@ function voucher_render_html(array $model): string
     $logoSrc = '';
     $lp = voucher_logo_path();
     if (is_file($lp)) $logoSrc = 'data:image/png;base64,' . base64_encode((string)file_get_contents($lp));
-    $contacts = implode('<br>', array_map($h, voucher_company_contacts()));
+    $contactLines = voucher_company_contacts();
+    if (!empty($c['email'])) $contactLines[] = 'Email: ' . $c['email'];
+    $contacts = implode('<br>', array_map($h, $contactLines));
     $brand =
         '<table class="v-brand"><tr>'
       . ($logoSrc ? '<td class="v-brand-logo"><img src="' . $logoSrc . '" style="height:62px;width:62px;"></td>' : '')
@@ -731,8 +733,6 @@ function voucher_render_html(array $model): string
           . '<div class="v-title">' . $h($title) . '</div>'
           . '<div class="v-headline">' . $h($headline) . '</div>'
           . '<div class="v-meta">'
-          . 'Consultant: ' . $h($c['name']) . ', ' . $h($c['phone']) . '<br>'
-          . 'Email: ' . $h($c['email']) . '<br>'
           . 'Our Ref. No.: ' . $h($ref)
           . '</div>'
           . $bodyHtml
@@ -796,7 +796,7 @@ function voucher_render_html(array $model): string
       .v-title { font-size: 15px; font-weight: bold; letter-spacing: .5px;
                  border-bottom: 2px solid #C0211B; padding-bottom: 6px; margin-bottom: 8px; color: #C0211B; }
       .v-headline { font-size: 17px; font-weight: bold; color: #111;
-                    background: #fbeceb; border-left: 5px solid #C0211B; padding: 8px 12px; margin: 0 0 12px; }
+                    border-left: 5px solid #C0211B; padding: 6px 0 6px 12px; margin: 0 0 12px; }
       .v-meta { margin-bottom: 12px; line-height: 1.6; }
       .v-row { margin: 3px 0; line-height: 1.5; }
       .v-sub { color: #555; }
@@ -838,12 +838,10 @@ function voucher_render_word(array $model)
         }
         $section->addText(strtoupper(voucher_company_name()), 'vBrandName');
         foreach ($contacts as $line) $section->addText($line, 'vBrand');
+        if (!empty($c['email'])) $section->addText('Email: ' . $c['email'], 'vBrand');
         $section->addTextBreak(1, 'vBrand');
         $section->addText($title, 'vTitle', ['spaceAfter' => 80]);
-        $section->addText($headline, 'vHeadline',
-            ['shading' => ['fill' => 'FBECEB'], 'spaceBefore' => 40, 'spaceAfter' => 160]);
-        $section->addText('Consultant: ' . $c['name'] . ', ' . $c['phone'], 'vBase');
-        $section->addText('Email: ' . $c['email'], 'vBase');
+        $section->addText($headline, 'vHeadline', ['spaceBefore' => 40, 'spaceAfter' => 160]);
         $section->addText('Our Ref. No.: ' . $ref, 'vBase', ['spaceAfter' => 120]);
     };
 
