@@ -47,6 +47,17 @@ include 'includes/header.php';
     <div class="sub"><?= count($rows) ?> invoice<?= count($rows)!==1?'s':'' ?></div>
   </div>
   <div class="gap-8">
+    <?php if ($rows):
+      $zipParams = [];
+      if ($search)  $zipParams['q']          = $search;
+      if ($fstatus) $zipParams['status']     = $fstatus;
+      if ($fissuer) $zipParams['issuer']     = $fissuer;
+      if ($fcurr)   $zipParams['currency']   = $fcurr;
+      if ($freqid)  $zipParams['request_id'] = $freqid;
+      $zipParams['year'] = $fyear; // always pass, 0 = all years
+    ?>
+      <a href="invoices_zip.php?<?= h(http_build_query($zipParams)) ?>" class="btn btn-outline">⬇ Download ZIP (<?= count($rows) ?>)</a>
+    <?php endif; ?>
     <?php if ($freqid): ?>
       <a href="invoices.php" class="btn btn-grey">✕ Clear filter</a>
       <a href="invoice_add.php?request_id=<?= $freqid ?>" class="btn btn-red">+ New Invoice for this request</a>
