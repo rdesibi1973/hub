@@ -211,6 +211,7 @@ function voucher_overlay_edits(array &$model, array $post): void
                 'to'          => $to,
                 'flight_no'   => trim($post['xf_flight_no'][$i] ?? ''),
                 'flight_time' => trim($post['xf_flight_time'][$i] ?? ''),
+                'notes'       => trim($post['xf_notes'][$i] ?? ''),
             ];
         }
         $model['transfers'] = $transfers;
@@ -440,20 +441,21 @@ include __DIR__ . '/../../includes/layout_header.php';
     <!-- Transfers (+ internal flights) — editable -->
     <div style="font-weight:600;margin:16px 0 10px;">Transfer vouchers (<?= count($model['transfers']) ?>)</div>
     <div style="background:#fff;border:1px solid var(--grey-lt);border-radius:10px;padding:12px 14px;margin-bottom:16px;overflow-x:auto;">
-      <table style="width:100%;border-collapse:collapse;font-size:.85rem;min-width:720px;">
+      <table style="width:100%;border-collapse:collapse;font-size:.85rem;min-width:920px;">
         <thead>
           <tr style="text-align:left;font-size:.7rem;color:var(--grey-mid);text-transform:uppercase;letter-spacing:.06em;">
-            <th style="padding:4px 6px;width:150px;">Date</th>
+            <th style="padding:4px 6px;width:140px;">Date</th>
             <th style="padding:4px 6px;">Pick up</th>
             <th style="padding:4px 6px;">Drop off</th>
-            <th style="padding:4px 6px;width:120px;">Flight no.</th>
-            <th style="padding:4px 6px;width:100px;">Flight time</th>
+            <th style="padding:4px 6px;width:100px;">Flight no.</th>
+            <th style="padding:4px 6px;width:90px;">Flight time</th>
+            <th style="padding:4px 6px;width:230px;">Notes</th>
           </tr>
         </thead>
         <tbody>
           <?php
             $xrows = $model['transfers'];
-            for ($k = 0; $k < 2; $k++) $xrows[] = ['date' => '', 'from' => '', 'to' => '', 'flight_no' => '', 'flight_time' => '']; // spare rows
+            for ($k = 0; $k < 2; $k++) $xrows[] = ['date' => '', 'from' => '', 'to' => '', 'flight_no' => '', 'flight_time' => '', 'notes' => '']; // spare rows
             foreach ($xrows as $i => $t): ?>
             <tr>
               <td style="padding:3px 6px;"><input type="date" name="xf_date[<?= $i ?>]" value="<?= h($t['date']) ?>" style="width:100%;padding:6px;border-radius:6px;"></td>
@@ -461,12 +463,14 @@ include __DIR__ . '/../../includes/layout_header.php';
               <td style="padding:3px 6px;"><input type="text" name="xf_to[<?= $i ?>]" value="<?= h($t['to']) ?>" style="width:100%;padding:6px;border-radius:6px;"></td>
               <td style="padding:3px 6px;"><input type="text" name="xf_flight_no[<?= $i ?>]" value="<?= h($t['flight_no']) ?>" placeholder="AL145" style="width:100%;padding:6px;border-radius:6px;"></td>
               <td style="padding:3px 6px;"><input type="text" name="xf_flight_time[<?= $i ?>]" value="<?= h($t['flight_time']) ?>" placeholder="07:45" style="width:100%;padding:6px;border-radius:6px;"></td>
+              <td style="padding:3px 6px;"><input type="text" name="xf_notes[<?= $i ?>]" value="<?= h($t['notes'] ?? '') ?>" style="width:100%;padding:6px;border-radius:6px;"></td>
             </tr>
           <?php endforeach; ?>
         </tbody>
       </table>
       <div style="color:var(--grey-mid);font-size:.78rem;margin-top:6px;">
         Leave Pick up &amp; Drop off blank to skip a row. Add a flight no./time to print “Flight Departs” on that transfer voucher.
+        Zanzibar airport drop-offs get the standard pick-up timing note automatically (editable).
       </div>
     </div>
 

@@ -88,6 +88,22 @@ function voucher_airport_code(string $s): ?string
     return preg_match('/\[([A-Z]{3,4})\]/', $s, $m) ? $m[1] : null;
 }
 
+/**
+ * Standard note for a transfer whose drop-off is Zanzibar airport: pick-up is
+ * 4.5 h before an international flight, or 3.5 h before an internal one.
+ * $hasInternalFlight = an internal (Voli-table) flight departs on this transfer.
+ */
+function voucher_zanzibar_note(string $dropoff, bool $hasInternalFlight): string
+{
+    $isZnzAirport = strpos($dropoff, '[ZNZ]') !== false
+        || stripos($dropoff, 'Abeid Amani Karume') !== false
+        || (stripos($dropoff, 'Zanzibar') !== false && stripos($dropoff, 'airport') !== false);
+    if (!$isZnzAirport) return '';
+    return $hasInternalFlight
+        ? 'Please be ready for pick-up 3.5 hours before your internal flight departure.'
+        : 'Please be ready for pick-up 4.5 hours before your international flight departure.';
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 //  Meal basis
 // ─────────────────────────────────────────────────────────────────────────────
@@ -567,6 +583,7 @@ function voucher_build_model(string $docxPath, string $xlsxPath, ?string $sheet 
                 'to'           => $to,
                 'flight_no'    => $fl['no'] ?? '',
                 'flight_time'  => $fl['dep_time'] ?? '',
+                'notes'        => voucher_zanzibar_note($to, $fl !== null),
             ];
         }
     }
@@ -717,7 +734,7 @@ function voucher_render_html(array $model): string
           . '<div class="v-row">Drop Off: ' . $h(voucher_fmt_date($t['date'])) . ', ' . $h($t['to']) . '</div>'
           . $flight
           . '<div class="v-foot">All additional services are for guest\'s own account</div>'
-          . '<div class="v-row">Notes:</div>'
+          . '<div class="v-row">Notes: ' . $h($t['notes'] ?? '') . '</div>'
           . '</div>';
     }
 
@@ -807,7 +824,7 @@ function voucher_render_word(array $model)
             $s->addText('Flight Departs: ' . $t['flight_no'] . ($t['flight_time'] !== '' ? ', ' . $t['flight_time'] : ''), 'vBase');
         }
         $s->addText('All additional services are for guest\'s own account', 'vFoot', ['spaceBefore' => 120]);
-        $s->addText('Notes:', 'vBase');
+        $s->addText('Notes: ' . ($t['notes'] ?? ''), 'vBase');
     }
 
     if ($first) { // nothing added
