@@ -188,6 +188,13 @@ include __DIR__ . '/includes/layout_header.php';
   <div class="section-label dot-navy group-spacer">Tools</div>
   <div class="links-grid">
 
+    <?php if ($is_admin_or_manager): ?>
+    <a class="link-card lc-navy" href="<?= BASE_URL ?>/modules/leads/import_folder.php">
+      <div class="lc-icon emoji">📁</div>
+      <div><div class="lc-label">Import Group Folder</div><div class="lc-sub">Confirmed group → HUB request</div></div>
+    </a>
+    <?php endif; ?>
+
     <a class="link-card lc-green" href="https://www.savannahexplorers.net/" target="_blank">
       <div class="lc-icon" style="background:#fff;border:1px solid var(--grey-lt);padding:3px;">
         <img src="https://www.savannahexplorers.net/img/logo-savannah-explorers.png" alt="Savannah Explorers">

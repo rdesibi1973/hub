@@ -116,3 +116,154 @@ function folder_payment_status(array $row): string {
     }
     return '';
 }
+
+/**
+ * Strip a trailing status/document token from a confirmed-group folder name,
+ * returning the "stem" that is stable across status changes.
+ * e.g. "..._END09MAR2027_CONFIRMED" and "..._END09MAR2027_PROVISIONAL"
+ *      both reduce to "..._END09MAR2027".
+ */
+function import_folder_stem(string $folder): string {
+    $tags = ['_CONFIRMED','_PROVISIONAL','_CANCELLED','_BALANCE-CASH','_BALANCE_CASH',
+             '_BALANCE','_DEPOSIT','_PROGRESS','_PAID','_CK'];
+    $stem = trim($folder);
+    $changed = true;
+    while ($changed) {
+        $changed = false;
+        foreach ($tags as $tag) {
+            if (strlen($stem) > strlen($tag)
+                && strtoupper(substr($stem, -strlen($tag))) === $tag) {
+                $stem    = substr($stem, 0, -strlen($tag));
+                $changed = true;
+                break;
+            }
+        }
+    }
+    return $stem;
+}
+
+/**
+ * Parse a confirmed-group Dropbox folder name into request fields.
+ *
+ * Canonical shape (Diamante/Panorama example):
+ *   03_02MAR_Panorama05_(Diamante-PS-Roberto)_START02MAR_END09MAR2027_CONFIRMED
+ *
+ * Parses generically — does not assume a specific TO/programme. The
+ * parenthesised block is read as (TourOperator - agencyCode - handler);
+ * 2-token and 1-token blocks are handled with a warning.
+ *
+ * @return array {
+ *   ok, folder, stem, customer_name, tour_operator, agency_code, handler,
+ *   start_date, end_date, period, status_token, status, errors[], warnings[]
+ * }
+ */
+function parse_import_folder(string $folder): array {
+    $out = [
+        'ok'            => false,
+        'folder'        => trim($folder),
+        'stem'          => '',
+        'customer_name' => '',
+        'tour_operator' => '',
+        'agency_code'   => '',
+        'handler'       => '',
+        'start_date'    => null,
+        'end_date'      => null,
+        'period'        => '',
+        'status_token'  => '',
+        'status'        => '',
+        'payment_status'=> '',
+        'errors'        => [],
+        'warnings'      => [],
+    ];
+
+    $folder = trim($folder);
+    if ($folder === '') {
+        $out['errors'][] = 'Empty folder name.';
+        return $out;
+    }
+    $out['stem'] = import_folder_stem($folder);
+
+    // ── Dates (authoritative parser; handles year inheritance + boundary wrap) ──
+    $dates = parse_folder_dates($folder);
+    $out['start_date'] = $dates['start_date'];
+    $out['end_date']   = $dates['end_date'];
+    if (!$out['end_date']) {
+        $out['errors'][] = 'No _END{DD}{MMM}{YYYY} tag found — cannot determine dates.';
+    }
+
+    // ── Parenthesised block: (TourOperator-agencyCode-handler) ─────────────────
+    if (preg_match('/\(([^)]+)\)/', $folder, $pm)) {
+        $block  = $pm[1];
+        $tokens = array_values(array_filter(
+            array_map('trim', explode('-', $block)),
+            function ($t) { return $t !== ''; }
+        ));
+        $n = count($tokens);
+        if ($n >= 3) {
+            $out['tour_operator'] = $tokens[0];
+            $out['agency_code']   = $tokens[1];
+            $out['handler']       = $tokens[2];
+        } elseif ($n === 2) {
+            $out['tour_operator'] = $tokens[0];
+            $out['handler']       = $tokens[1];
+            $out['warnings'][]    = 'Parenthesis block "' . $block
+                                  . '" has 2 tokens — assumed (TourOperator-handler). Verify agent & source.';
+        } elseif ($n === 1) {
+            $out['handler']    = $tokens[0];
+            $out['warnings'][] = 'Parenthesis block "' . $block . '" has 1 token — assumed handler only.';
+        }
+    } else {
+        $out['warnings'][] = 'No (TourOperator-agent-handler) block found in folder name.';
+    }
+
+    // ── Group / customer name: strip leading "NN_DDMON_", cut at "(" / "_START" ─
+    $name = preg_replace('/^\s*\d{1,2}_\d{1,2}[A-Za-z]{3}_/', '', $folder);
+    $ppos = strpos($name, '(');
+    if ($ppos !== false) $name = substr($name, 0, $ppos);
+    $spos = stripos($name, '_START');
+    if ($spos !== false) $name = substr($name, 0, $spos);
+    $name = trim($name, " _-");
+    $out['customer_name'] = $name;
+    if ($name === '') $out['errors'][] = 'Could not extract group/customer name.';
+
+    // ── Status / payment-status suffix → HUB status ────────────────────────────
+    // The confirmed workflow moves a group from _PROVISIONAL to a payment tag
+    // (_BALANCE, _DEPOSIT, _PAID …), which means Booked. Longest tags first so
+    // _BALANCE-CASH is not shadowed by _BALANCE. Matched anywhere near the end
+    // (contains) so a trailing document marker like _CK does not hide the tag.
+    $tagMap = [
+        '_BALANCE-CASH' => ['Booked',      'Balance-Cash'],
+        '_BALANCE_CASH' => ['Booked',      'Balance-Cash'],
+        '_BALANCE'      => ['Booked',      'Balance'],
+        '_DEPOSIT'      => ['Booked',      'Deposit'],
+        '_PAID'         => ['Booked',      'Paid'],
+        '_PROGRESS'     => ['Booked',      ''],
+        '_CONFIRMED'    => ['Booked',      ''],
+        '_PROVISIONAL'  => ['Provisional', ''],
+        '_CANCELLED'    => ['Cancelled',   ''],
+    ];
+    $up = strtoupper($folder);
+    foreach ($tagMap as $tag => $sp) {
+        if (strpos($up, $tag) !== false) {
+            $out['status_token']   = ltrim($tag, '_');
+            $out['status']         = $sp[0];
+            $out['payment_status'] = $sp[1];
+            break;
+        }
+    }
+    if ($out['status'] === '') {
+        $out['status']     = 'Booked';
+        $out['warnings'][] = 'No status/payment suffix (_BALANCE, _DEPOSIT, _PROVISIONAL …) — defaulting status to Booked.';
+    }
+
+    // ── Human-readable period ──────────────────────────────────────────────────
+    if ($out['start_date'] && $out['end_date']) {
+        $out['period'] = date('d M', strtotime($out['start_date']))
+                       . ' – ' . date('d M Y', strtotime($out['end_date']));
+    } elseif ($out['end_date']) {
+        $out['period'] = date('d M Y', strtotime($out['end_date']));
+    }
+
+    $out['ok'] = empty($out['errors']);
+    return $out;
+}

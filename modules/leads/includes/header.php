@@ -149,6 +149,7 @@ header {
     <?php endif; ?>
   </a>
   <a href="reconcile.php" class="<?= $cur==='reconcile.php'?'active':'' ?>">🔗 Reconcile</a>
+  <a href="import_folder.php" class="<?= $cur==='import_folder.php'?'active':'' ?>">📁 Import Group</a>
   <?php endif; ?>
   <?php endif; // !isLeadsRestricted ?>
   <?php if (!isLeadsRestricted()): ?>
