@@ -556,6 +556,7 @@ function voucher_build_model(string $docxPath, string $xlsxPath, ?string $sheet 
                 'dep_code'  => voucher_airport_code($row[3] ?? ''),
                 'dep_time'  => trim($row[4] ?? ''),
                 'arr_code'  => voucher_airport_code($row[5] ?? ''),
+                'arr_time'  => trim($row[6] ?? ''),
             ];
         }
     }
@@ -563,6 +564,13 @@ function voucher_build_model(string $docxPath, string $xlsxPath, ?string $sheet 
         if (!$date || !$airportCode) return null;
         foreach ($flights as $f) {
             if ($f['date'] === $date && $f['dep_code'] === $airportCode) return $f;
+        }
+        return null;
+    };
+    $flightArriving = function (?string $date, ?string $airportCode) use ($flights): ?array {
+        if (!$date || !$airportCode) return null;
+        foreach ($flights as $f) {
+            if ($f['date'] === $date && $f['arr_code'] === $airportCode) return $f;
         }
         return null;
     };
@@ -576,14 +584,17 @@ function voucher_build_model(string $docxPath, string $xlsxPath, ?string $sheet 
             $from = trim($row[2] ?? '');
             $to   = trim($row[3] ?? '');
             if ($from === '' && $to === '') continue;
-            $fl = $flightDeparting($date, voucher_airport_code($to));
+            // Attach the departing flight (drop-off airport) if any; otherwise the
+            // arriving flight (pick-up airport) so arrival transfers show it too.
+            $depFl = $flightDeparting($date, voucher_airport_code($to));
+            $arrFl = $depFl ? null : $flightArriving($date, voucher_airport_code($from));
             $transfers[] = [
                 'date'         => $date,
                 'from'         => $from,
                 'to'           => $to,
-                'flight_no'    => $fl['no'] ?? '',
-                'flight_time'  => $fl['dep_time'] ?? '',
-                'notes'        => voucher_zanzibar_note($to, $fl !== null),
+                'flight_no'    => $depFl['no'] ?? ($arrFl['no'] ?? ''),
+                'flight_time'  => $depFl['dep_time'] ?? ($arrFl['arr_time'] ?? ''),
+                'notes'        => voucher_zanzibar_note($to, $depFl !== null),
             ];
         }
     }
@@ -666,6 +677,19 @@ function voucher_travellers_line(array $model): string
         $parts[] = trim(($t['title'] ? $t['title'] . ' ' : '') . $t['name']);
     }
     return implode(', ', array_filter($parts));
+}
+
+/**
+ * Flight line label for a transfer: "Flight Departs" when it drops at an
+ * airport, "Flight Arrives" when it picks up at one, else "Flight". Empty when
+ * the transfer carries no flight number.
+ */
+function voucher_flight_label(array $t): string
+{
+    if (($t['flight_no'] ?? '') === '') return '';
+    if (voucher_airport_code($t['to'] ?? ''))   return 'Flight Departs';
+    if (voucher_airport_code($t['from'] ?? '')) return 'Flight Arrives';
+    return 'Flight';
 }
 
 /** Prominent "service" line for a transfer voucher: the route, or "Transfer". */
@@ -764,8 +788,9 @@ function voucher_render_html(array $model): string
 
     foreach ($model['transfers'] as $t) {
         $flight = '';
-        if ($t['flight_no'] !== '') {
-            $flight = '<div class="v-row">Flight Departs: ' . $h($t['flight_no'])
+        $flabel = voucher_flight_label($t);
+        if ($flabel !== '') {
+            $flight = '<div class="v-row">' . $flabel . ': ' . $h($t['flight_no'])
                     . ($t['flight_time'] !== '' ? ', ' . $h($t['flight_time']) : '') . '</div>';
         }
         $body =
@@ -879,8 +904,9 @@ function voucher_render_word(array $model)
         $s->addText('INCLUDED SERVICES:', 'vLabel');
         $s->addText('Pick Up: ' . voucher_fmt_date($t['date']) . ', ' . $t['from'], 'vBase');
         $s->addText('Drop Off: ' . voucher_fmt_date($t['date']) . ', ' . $t['to'], 'vBase');
-        if ($t['flight_no'] !== '') {
-            $s->addText('Flight Departs: ' . $t['flight_no'] . ($t['flight_time'] !== '' ? ', ' . $t['flight_time'] : ''), 'vBase');
+        $flabel = voucher_flight_label($t);
+        if ($flabel !== '') {
+            $s->addText($flabel . ': ' . $t['flight_no'] . ($t['flight_time'] !== '' ? ', ' . $t['flight_time'] : ''), 'vBase');
         }
         $s->addText('All additional services are for guest\'s own account', 'vFoot', ['spaceBefore' => 120]);
         $s->addText('Notes: ' . ($t['notes'] ?? ''), 'vBase');

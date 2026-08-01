@@ -302,16 +302,27 @@ include __DIR__ . '/../../includes/layout_header.php';
 
 <?php if ($step !== 'review' || !$model): ?>
   <!-- ── STEP 1: UPLOAD ─────────────────────────────────────────────── -->
-  <form method="post" enctype="multipart/form-data" action="vouchers.php?step=review"
+  <form id="vform" method="post" enctype="multipart/form-data" action="vouchers.php?step=review"
         style="max-width:640px;background:#fff;border:1px solid var(--grey-lt);border-radius:10px;padding:24px;">
     <input type="hidden" name="step" value="review">
-    <div class="form-group">
+
+    <!-- Drag & drop zone (routes files by extension into the fields below) -->
+    <div id="vdrop" tabindex="0" role="button"
+         style="border:2px dashed var(--grey-lt);border-radius:12px;padding:28px 20px;text-align:center;cursor:pointer;transition:.15s;background:var(--off-white);">
+      <div style="font-size:1.6rem;line-height:1;margin-bottom:8px;">📄⬇️</div>
+      <div style="font-weight:600;">Drag &amp; drop the Word and Excel here</div>
+      <div style="color:var(--grey-mid);font-size:.82rem;margin-top:4px;">…or click to browse. We sort them by type automatically.</div>
+      <div id="vdrop-status" style="margin-top:12px;font-size:.85rem;display:flex;flex-direction:column;gap:4px;align-items:center;"></div>
+    </div>
+    <input type="file" id="vpick" accept=".docx,.xlsx" multiple hidden>
+
+    <div class="form-group" style="margin-top:16px;">
       <label>Word programme (.docx) — from WeTu</label>
-      <input type="file" name="docx" accept=".docx" required>
+      <input type="file" id="f_docx" name="docx" accept=".docx" required>
     </div>
     <div class="form-group" style="margin-top:14px;">
       <label>Excel calc (.xlsx)</label>
-      <input type="file" name="xlsx" accept=".xlsx" required>
+      <input type="file" id="f_xlsx" name="xlsx" accept=".xlsx" required>
     </div>
     <div style="margin-top:20px;">
       <button type="submit" class="btn btn-red">Continue to review →</button>
@@ -322,6 +333,65 @@ include __DIR__ . '/../../includes/layout_header.php';
       on the next screen before generating.
     </p>
   </form>
+
+  <script>
+  (function () {
+    var drop   = document.getElementById('vdrop');
+    var pick   = document.getElementById('vpick');
+    var fDocx  = document.getElementById('f_docx');
+    var fXlsx  = document.getElementById('f_xlsx');
+    var status = document.getElementById('vdrop-status');
+    if (!drop) return;
+
+    function setInput(input, file) {
+      try { var dt = new DataTransfer(); dt.items.add(file); input.files = dt.files; }
+      catch (e) { /* older browser: fall back to manual field */ }
+    }
+    function render() {
+      var d = fDocx.files[0], x = fXlsx.files[0];
+      status.innerHTML =
+        '<span>' + (d ? '✅ Word: ' + d.name : '⬜ Word (.docx) — not set') + '</span>' +
+        '<span>' + (x ? '✅ Excel: ' + x.name : '⬜ Excel (.xlsx) — not set') + '</span>';
+    }
+    function route(files) {
+      var skipped = [];
+      for (var i = 0; i < files.length; i++) {
+        var f = files[i], name = (f.name || '').toLowerCase();
+        if (name.endsWith('.docx'))      setInput(fDocx, f);
+        else if (name.endsWith('.xlsx')) setInput(fXlsx, f);
+        else skipped.push(f.name);
+      }
+      render();
+      if (skipped.length) alert('Ignored (need .docx / .xlsx): ' + skipped.join(', '));
+    }
+
+    ['dragenter', 'dragover'].forEach(function (ev) {
+      drop.addEventListener(ev, function (e) {
+        e.preventDefault(); e.stopPropagation();
+        drop.style.borderColor = 'var(--red)';
+        drop.style.background = '#fff';
+      });
+    });
+    ['dragleave', 'drop'].forEach(function (ev) {
+      drop.addEventListener(ev, function (e) {
+        e.preventDefault(); e.stopPropagation();
+        drop.style.borderColor = 'var(--grey-lt)';
+        drop.style.background = 'var(--off-white)';
+      });
+    });
+    drop.addEventListener('drop', function (e) {
+      if (e.dataTransfer && e.dataTransfer.files) route(e.dataTransfer.files);
+    });
+    drop.addEventListener('click', function () { pick.click(); });
+    drop.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick.click(); }
+    });
+    pick.addEventListener('change', function () { route(pick.files); });
+    fDocx.addEventListener('change', render);
+    fXlsx.addEventListener('change', render);
+    render();
+  })();
+  </script>
 
 <?php else: ?>
   <!-- ── STEP 2: REVIEW ─────────────────────────────────────────────── -->
@@ -482,8 +552,8 @@ include __DIR__ . '/../../includes/layout_header.php';
               <td style="padding:3px 6px;"><input type="date" name="xf_date[<?= $i ?>]" value="<?= h($t['date']) ?>" style="width:100%;padding:6px;border-radius:6px;"></td>
               <td style="padding:3px 6px;"><input type="text" name="xf_from[<?= $i ?>]" value="<?= h($t['from']) ?>" style="width:100%;padding:6px;border-radius:6px;"></td>
               <td style="padding:3px 6px;"><input type="text" name="xf_to[<?= $i ?>]" value="<?= h($t['to']) ?>" style="width:100%;padding:6px;border-radius:6px;"></td>
-              <td style="padding:3px 6px;"><input type="text" name="xf_flight_no[<?= $i ?>]" value="<?= h($t['flight_no']) ?>" placeholder="AL145" style="width:100%;padding:6px;border-radius:6px;"></td>
-              <td style="padding:3px 6px;"><input type="text" name="xf_flight_time[<?= $i ?>]" value="<?= h($t['flight_time']) ?>" placeholder="07:45" style="width:100%;padding:6px;border-radius:6px;"></td>
+              <td style="padding:3px 6px;"><input type="text" name="xf_flight_no[<?= $i ?>]" value="<?= h($t['flight_no']) ?>" style="width:100%;padding:6px;border-radius:6px;"></td>
+              <td style="padding:3px 6px;"><input type="text" name="xf_flight_time[<?= $i ?>]" value="<?= h($t['flight_time']) ?>" style="width:100%;padding:6px;border-radius:6px;"></td>
               <td style="padding:3px 6px;"><input type="text" name="xf_notes[<?= $i ?>]" value="<?= h($t['notes'] ?? '') ?>" style="width:100%;padding:6px;border-radius:6px;"></td>
             </tr>
           <?php endforeach; ?>
