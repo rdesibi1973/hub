@@ -265,7 +265,7 @@ select:focus,input:focus{outline:none;border-color:#C0211B;box-shadow:0 0 0 2px 
 
     <!-- APPROVE -->
     <div class="action-panel active" id="panel-approve">
-      <form method="POST" action="staging_action.php">
+      <form method="POST" action="staging_action.php" target="_blank" onsubmit="afterProcess()">
         <input type="hidden" name="action" value="approve">
         <input type="hidden" name="staging_id" id="approveId">
         <!-- Editable customer name -->
@@ -318,7 +318,7 @@ select:focus,input:focus{outline:none;border-color:#C0211B;box-shadow:0 0 0 2px 
 
     <!-- MERGE -->
     <div class="action-panel" id="panel-merge">
-      <form method="POST" action="staging_action.php">
+      <form method="POST" action="staging_action.php" target="_blank" onsubmit="afterProcess()">
         <input type="hidden" name="action" value="merge">
         <input type="hidden" name="staging_id" id="mergeId">
         <div class="form-row full">
@@ -488,6 +488,13 @@ function openDrawer(id) {
   document.getElementById('drawer').classList.add('open');
   document.getElementById('drawerOverlay').classList.add('open');
   switchTab('approve');
+}
+
+// After approve/merge, the request opens in a new tab; close the drawer and
+// reload the incoming list so the just-processed lead disappears.
+function afterProcess() {
+  closeDrawer();
+  setTimeout(() => location.reload(), 1200);
 }
 
 function closeDrawer() {
