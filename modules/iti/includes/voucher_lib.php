@@ -777,7 +777,7 @@ function voucher_build_model(string $docxPath, string $xlsxPath, ?string $sheet 
         }
     }
 
-    // ── Flights from "Voli" ───────────────────────────────────────────────────
+    // ── Flights from "Voli" (each becomes its own flight voucher) ─────────────
     $flights = [];
     if ($t = voucher_find_table($doc['tables'], ['Voli', 'Compagnia aerea'])) {
         for ($i = 1; $i < count($t); $i++) {
@@ -786,12 +786,15 @@ function voucher_build_model(string $docxPath, string $xlsxPath, ?string $sheet 
             $no   = trim(preg_replace('/\(.*?\)/', '', $row[1] ?? '')); // strip "(Programmati)"
             if (!$date || $no === '') continue;
             $flights[] = [
-                'date'      => $date,
-                'no'        => $no,
-                'dep_code'  => voucher_airport_code($row[3] ?? ''),
-                'dep_time'  => trim($row[4] ?? ''),
-                'arr_code'  => voucher_airport_code($row[5] ?? ''),
-                'arr_time'  => trim($row[6] ?? ''),
+                'date'        => $date,
+                'no'          => $no,
+                'airline'     => trim($row[2] ?? ''),
+                'dep_airport' => trim($row[3] ?? ''),
+                'dep_code'    => voucher_airport_code($row[3] ?? ''),
+                'dep_time'    => trim($row[4] ?? ''),
+                'arr_airport' => trim($row[5] ?? ''),
+                'arr_code'    => voucher_airport_code($row[5] ?? ''),
+                'arr_time'    => trim($row[6] ?? ''),
             ];
         }
     }
@@ -811,6 +814,12 @@ function voucher_build_model(string $docxPath, string $xlsxPath, ?string $sheet 
     };
 
     // ── Transfers from "Trasferimenti" ────────────────────────────────────────
+    // Flights get their own vouchers (above), so transfers no longer carry flight
+    // numbers automatically — a transfer is a pure ground leg. WeTu sometimes
+    // encodes a hotel↔airport ground transfer as airport→same-airport (when the
+    // stay is "organizzazione personale", so the hotel name isn't in the files):
+    // we swap the hotel side for a placeholder the operator fills on review, and
+    // decide arrival vs departure from whether a flight arrives that day.
     $transfers = [];
     if ($t = voucher_find_table($doc['tables'], ['Presa', 'Rilascio'])) {
         for ($i = 1; $i < count($t); $i++) {
@@ -819,17 +828,37 @@ function voucher_build_model(string $docxPath, string $xlsxPath, ?string $sheet 
             $from = trim($row[2] ?? '');
             $to   = trim($row[3] ?? '');
             if ($from === '' && $to === '') continue;
-            // Attach the departing flight (drop-off airport) if any; otherwise the
-            // arriving flight (pick-up airport) so arrival transfers show it too.
-            $depFl = $flightDeparting($date, voucher_airport_code($to));
-            $arrFl = $depFl ? null : $flightArriving($date, voucher_airport_code($from));
+
+            $fromCode = voucher_airport_code($from);
+            $toCode   = voucher_airport_code($to);
+            $hotelMissing = false;
+
+            // Same airport both ends → hotel placeholder on the non-airport side.
+            if ($fromCode && $toCode && $fromCode === $toCode) {
+                $hotel = voucher_hotel_placeholder($from);
+                if ($flightArriving($date, $fromCode)) { // arrival: airport → hotel
+                    $to = $hotel;
+                } else {                                 // departure: hotel → airport
+                    $from = $hotel;
+                }
+                $hotelMissing = true;
+            }
+
+            // Timing note only on departures to the airport (drop-off = airport,
+            // pick-up = not an airport). Internal flight → 3.5 h, else 4.5 h.
+            $notes = '';
+            if (voucher_airport_code($to) && !voucher_airport_code($from)) {
+                $notes = voucher_zanzibar_note($to, $flightDeparting($date, voucher_airport_code($to)) !== null);
+            }
+
             $transfers[] = [
-                'date'         => $date,
-                'from'         => $from,
-                'to'           => $to,
-                'flight_no'    => $depFl['no'] ?? ($arrFl['no'] ?? ''),
-                'flight_time'  => $depFl['dep_time'] ?? ($arrFl['arr_time'] ?? ''),
-                'notes'        => voucher_zanzibar_note($to, $depFl !== null),
+                'date'          => $date,
+                'from'          => $from,
+                'to'            => $to,
+                'flight_no'     => '',
+                'flight_time'   => '',
+                'notes'         => $notes,
+                'hotel_missing' => $hotelMissing,
             ];
         }
     }
@@ -861,9 +890,21 @@ function voucher_build_model(string $docxPath, string $xlsxPath, ?string $sheet 
         'adults'         => $adults,
         'dietary'        => $xl['dietary'],
         'accommodations' => $accommodations,
+        'flights'        => $flights,
         'transfers'      => $transfers,
         'lodge_check'    => $lodgeCheck,
     ];
+}
+
+/** Placeholder name for a hotel WeTu didn't export (own-arrangement stay). */
+function voucher_hotel_placeholder(string $airport): string
+{
+    if (stripos($airport, 'zanzibar') !== false
+        || stripos($airport, '[ZNZ]') !== false
+        || stripos($airport, 'Abeid Amani') !== false) {
+        return 'Zanzibar hotel';
+    }
+    return 'Hotel';
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -937,6 +978,15 @@ function voucher_flight_label(array $t): string
     if (voucher_airport_code($t['to'] ?? ''))   return 'Flight Departs';
     if (voucher_airport_code($t['from'] ?? '')) return 'Flight Arrives';
     return 'Flight';
+}
+
+/** Prominent "service" line for a flight voucher: "DEP → ARR" or "Flight NO". */
+function voucher_flight_headline(array $f): string
+{
+    $dep = $f['dep_airport'] ?? '';
+    $arr = $f['arr_airport'] ?? '';
+    if ($dep !== '' && $arr !== '') return $dep . ' → ' . $arr;
+    return trim('Flight ' . ($f['no'] ?? ''));
 }
 
 /** Prominent "service" line for a transfer voucher: the route, or "Transfer". */
@@ -1031,6 +1081,23 @@ function voucher_render_html(array $model): string
           . '<div class="v-foot">All additional services are for guest\'s own account</div>'
           . '<div class="v-row">Notes:</div>';
         $blocks[] = $voucher('ACCOMMODATION VOUCHER - OVERNIGHT', $a['provider_name'], $body);
+    }
+
+    foreach ($model['flights'] ?? [] as $f) {
+        $dep = trim(($f['dep_airport'] ?? '') . ($f['dep_time'] !== '' ? ', ' . $f['dep_time'] : ''));
+        $arr = trim(($f['arr_airport'] ?? '') . ($f['arr_time'] !== '' ? ', ' . $f['arr_time'] : ''));
+        $body =
+            '<div class="v-row">Travellers: ' . $h($travellers) . '</div>'
+          . '<div class="v-row v-sub">(Adults ' . $adults . ')&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Your Ref no.:</div>'
+          . '<div class="v-label">FLIGHT DETAILS:</div>'
+          . '<div class="v-row">Date: ' . $h(voucher_fmt_date($f['date'])) . '</div>'
+          . ($f['airline'] !== '' ? '<div class="v-row">Airline: ' . $h($f['airline']) . '</div>' : '')
+          . '<div class="v-row">Flight No.: ' . $h($f['no']) . '</div>'
+          . '<div class="v-row">Departure: ' . $h($dep) . '</div>'
+          . '<div class="v-row">Arrival: ' . $h($arr) . '</div>'
+          . '<div class="v-foot">All additional services are for guest\'s own account</div>'
+          . '<div class="v-row">Notes:</div>';
+        $blocks[] = $voucher('FLIGHT VOUCHER', voucher_flight_headline($f), $body);
     }
 
     foreach ($model['transfers'] as $t) {
@@ -1140,6 +1207,21 @@ function voucher_render_word(array $model)
         $s->addText('Meal Basis: ' . $a['meal'], 'vBase');
         $s->addText('Dietary Requirements: ' . $model['dietary'], 'vBase', ['spaceAfter' => 120]);
         $s->addText('All additional services are for guest\'s own account', 'vFoot');
+        $s->addText('Notes:', 'vBase');
+    }
+
+    foreach ($model['flights'] ?? [] as $f) {
+        $s = $newSection();
+        $addHead($s, 'FLIGHT VOUCHER', voucher_flight_headline($f));
+        $s->addText('Travellers: ' . $travellers, 'vBase');
+        $s->addText('(Adults ' . $adults . ')     Your Ref no.:', 'vSub', ['spaceAfter' => 60]);
+        $s->addText('FLIGHT DETAILS:', 'vLabel');
+        $s->addText('Date: ' . voucher_fmt_date($f['date']), 'vBase');
+        if ($f['airline'] !== '') $s->addText('Airline: ' . $f['airline'], 'vBase');
+        $s->addText('Flight No.: ' . $f['no'], 'vBase');
+        $s->addText('Departure: ' . trim(($f['dep_airport'] ?? '') . ($f['dep_time'] !== '' ? ', ' . $f['dep_time'] : '')), 'vBase');
+        $s->addText('Arrival: ' . trim(($f['arr_airport'] ?? '') . ($f['arr_time'] !== '' ? ', ' . $f['arr_time'] : '')), 'vBase');
+        $s->addText('All additional services are for guest\'s own account', 'vFoot', ['spaceBefore' => 120]);
         $s->addText('Notes:', 'vBase');
     }
 

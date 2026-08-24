@@ -241,6 +241,31 @@ function voucher_overlay_edits(array &$model, array $post): void
         }
         $model['transfers'] = $transfers;
     }
+
+    // Flights — rebuilt from the editable rows, keeping only ticked rows.
+    if (isset($post['fl_no']) && is_array($post['fl_no'])) {
+        $fincl = array_flip(array_map('strval', (array)($post['fl_include'] ?? [])));
+        $flights = [];
+        foreach ($post['fl_no'] as $i => $no) {
+            if (!isset($fincl[(string)$i])) continue; // unticked → skip
+            $no          = trim((string)$no);
+            $dep_airport = trim($post['fl_dep_airport'][$i] ?? '');
+            $arr_airport = trim($post['fl_arr_airport'][$i] ?? '');
+            if ($no === '' && $dep_airport === '' && $arr_airport === '') continue;
+            $flights[] = [
+                'date'        => trim($post['fl_date'][$i] ?? ''),
+                'no'          => $no,
+                'airline'     => trim($post['fl_airline'][$i] ?? ''),
+                'dep_airport' => $dep_airport,
+                'dep_code'    => voucher_airport_code($dep_airport),
+                'dep_time'    => trim($post['fl_dep_time'][$i] ?? ''),
+                'arr_airport' => $arr_airport,
+                'arr_code'    => voucher_airport_code($arr_airport),
+                'arr_time'    => trim($post['fl_arr_time'][$i] ?? ''),
+            ];
+        }
+        $model['flights'] = $flights;
+    }
 }
 
 /** Persist filled-in GPS/phone/address for matched or new lodges. */
@@ -585,7 +610,48 @@ include __DIR__ . '/../../includes/layout_header.php';
       </div>
     <?php endforeach; ?>
 
-    <!-- Transfers (+ internal flights) — editable -->
+    <!-- Flights — editable (one voucher each, from the programme's "Voli" table) -->
+    <div style="font-weight:600;margin:16px 0 10px;">Flight vouchers (<?= count($model['flights'] ?? []) ?>)
+      <span style="color:var(--grey-mid);font-weight:400;font-size:.8rem;">— untick to skip a row</span>
+    </div>
+    <div style="background:#fff;border:1px solid var(--grey-lt);border-radius:10px;padding:12px 14px;margin-bottom:16px;overflow-x:auto;">
+      <table style="width:100%;border-collapse:collapse;font-size:.85rem;min-width:960px;">
+        <thead>
+          <tr style="text-align:left;font-size:.7rem;color:var(--grey-mid);text-transform:uppercase;letter-spacing:.06em;">
+            <th style="padding:4px 6px;width:32px;" title="Generate this voucher">✓</th>
+            <th style="padding:4px 6px;width:140px;">Date</th>
+            <th style="padding:4px 6px;width:130px;">Airline</th>
+            <th style="padding:4px 6px;width:90px;">Flight no.</th>
+            <th style="padding:4px 6px;">From (airport)</th>
+            <th style="padding:4px 6px;width:80px;">Dep time</th>
+            <th style="padding:4px 6px;">To (airport)</th>
+            <th style="padding:4px 6px;width:80px;">Arr time</th>
+          </tr>
+        </thead>
+        <tbody>
+          <?php
+            $frows = $model['flights'] ?? [];
+            $frows[] = ['date' => '', 'no' => '', 'airline' => '', 'dep_airport' => '', 'dep_time' => '', 'arr_airport' => '', 'arr_time' => '']; // spare row
+            foreach ($frows as $i => $f): ?>
+            <tr>
+              <td style="padding:3px 6px;text-align:center;"><input type="checkbox" name="fl_include[]" value="<?= $i ?>" checked style="width:16px;height:16px;"></td>
+              <td style="padding:3px 6px;"><input type="date" name="fl_date[<?= $i ?>]" value="<?= h($f['date']) ?>" style="width:100%;padding:6px;border-radius:6px;"></td>
+              <td style="padding:3px 6px;"><input type="text" name="fl_airline[<?= $i ?>]" value="<?= h($f['airline'] ?? '') ?>" style="width:100%;padding:6px;border-radius:6px;"></td>
+              <td style="padding:3px 6px;"><input type="text" name="fl_no[<?= $i ?>]" value="<?= h($f['no'] ?? '') ?>" style="width:100%;padding:6px;border-radius:6px;"></td>
+              <td style="padding:3px 6px;"><input type="text" name="fl_dep_airport[<?= $i ?>]" value="<?= h($f['dep_airport'] ?? '') ?>" style="width:100%;padding:6px;border-radius:6px;"></td>
+              <td style="padding:3px 6px;"><input type="text" name="fl_dep_time[<?= $i ?>]" value="<?= h($f['dep_time'] ?? '') ?>" style="width:100%;padding:6px;border-radius:6px;"></td>
+              <td style="padding:3px 6px;"><input type="text" name="fl_arr_airport[<?= $i ?>]" value="<?= h($f['arr_airport'] ?? '') ?>" style="width:100%;padding:6px;border-radius:6px;"></td>
+              <td style="padding:3px 6px;"><input type="text" name="fl_arr_time[<?= $i ?>]" value="<?= h($f['arr_time'] ?? '') ?>" style="width:100%;padding:6px;border-radius:6px;"></td>
+            </tr>
+          <?php endforeach; ?>
+        </tbody>
+      </table>
+      <div style="color:var(--grey-mid);font-size:.78rem;margin-top:6px;">
+        Each row prints its own flight voucher. Ground transfers to/from the airport are handled below, separately.
+      </div>
+    </div>
+
+    <!-- Transfers — editable -->
     <div style="font-weight:600;margin:16px 0 10px;">Transfer vouchers (<?= count($model['transfers']) ?>)</div>
     <div style="background:#fff;border:1px solid var(--grey-lt);border-radius:10px;padding:12px 14px;margin-bottom:16px;overflow-x:auto;">
       <table style="width:100%;border-collapse:collapse;font-size:.85rem;min-width:960px;">
@@ -608,8 +674,9 @@ include __DIR__ . '/../../includes/layout_header.php';
             <tr>
               <td style="padding:3px 6px;text-align:center;"><input type="checkbox" name="xf_include[]" value="<?= $i ?>" checked style="width:16px;height:16px;"></td>
               <td style="padding:3px 6px;"><input type="date" name="xf_date[<?= $i ?>]" value="<?= h($t['date']) ?>" style="width:100%;padding:6px;border-radius:6px;"></td>
-              <td style="padding:3px 6px;"><input type="text" name="xf_from[<?= $i ?>]" value="<?= h($t['from']) ?>" style="width:100%;padding:6px;border-radius:6px;"></td>
-              <td style="padding:3px 6px;"><input type="text" name="xf_to[<?= $i ?>]" value="<?= h($t['to']) ?>" style="width:100%;padding:6px;border-radius:6px;"></td>
+              <?php $hm = !empty($t['hotel_missing']); $hmStyle = $hm ? 'border-color:#C0211B;' : ''; ?>
+              <td style="padding:3px 6px;"><input type="text" name="xf_from[<?= $i ?>]" value="<?= h($t['from']) ?>" title="<?= $hm ? 'Hotel non nei file (organizzazione personale) — compila il nome' : '' ?>" style="width:100%;padding:6px;border-radius:6px;<?= $hmStyle ?>"></td>
+              <td style="padding:3px 6px;"><input type="text" name="xf_to[<?= $i ?>]" value="<?= h($t['to']) ?>" title="<?= $hm ? 'Hotel non nei file (organizzazione personale) — compila il nome' : '' ?>" style="width:100%;padding:6px;border-radius:6px;<?= $hmStyle ?>"></td>
               <td style="padding:3px 6px;"><input type="text" name="xf_flight_no[<?= $i ?>]" value="<?= h($t['flight_no']) ?>" style="width:100%;padding:6px;border-radius:6px;"></td>
               <td style="padding:3px 6px;"><input type="text" name="xf_flight_time[<?= $i ?>]" value="<?= h($t['flight_time']) ?>" style="width:100%;padding:6px;border-radius:6px;"></td>
               <td style="padding:3px 6px;"><input type="text" name="xf_notes[<?= $i ?>]" value="<?= h($t['notes'] ?? '') ?>" style="width:100%;padding:6px;border-radius:6px;"></td>
@@ -618,8 +685,9 @@ include __DIR__ . '/../../includes/layout_header.php';
         </tbody>
       </table>
       <div style="color:var(--grey-mid);font-size:.78rem;margin-top:6px;">
-        Leave Pick up &amp; Drop off blank to skip a row. Add a flight no./time to print “Flight Departs” on that transfer voucher.
-        Zanzibar airport drop-offs get the standard pick-up timing note automatically (editable).
+        Leave Pick up &amp; Drop off blank to skip a row. Flights are separate vouchers (above).
+        Rows highlighted in red are hotel↔airport transfers whose hotel isn’t in the files (own-arrangement stay) —
+        <strong>fill in the hotel name</strong>. Departure-to-airport transfers get the standard pick-up timing note automatically (editable).
       </div>
     </div>
 
