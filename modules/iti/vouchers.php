@@ -50,6 +50,7 @@ function voucher_token_dir(string $token): string
 
 $step  = $_REQUEST['step'] ?? 'upload';
 $error = '';
+$confirm_required = false; // soft-block: lodge/nights mismatch not yet confirmed
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Handle uploads → prepare token dir, then fall through to review.
@@ -127,7 +128,17 @@ if ($step === 'generate' && !$error) {
         $step  = 'review';
     }
 
+    // Soft-block: if the calc-sheet lodges/nights don't match the programme and
+    // the operator hasn't confirmed, bounce back to review instead of rendering.
     if (!$error) {
+        $lc = $model['lodge_check'] ?? null;
+        if ($lc && $lc['applicable'] && !$lc['ok'] && empty($_POST['confirm_mismatch'])) {
+            $confirm_required = true;
+            $step = 'review';
+        }
+    }
+
+    if (!$error && !$confirm_required) {
         // Optionally remember filled-in GPS/contacts in the lodge directory.
         if (!empty($_POST['save_directory'])) {
             voucher_save_directory($db, $model);
@@ -424,6 +435,53 @@ include __DIR__ . '/../../includes/layout_header.php';
     </form>
   <?php endif; ?>
 
+  <?php if ($confirm_required): ?>
+    <div style="background:#fdecea;border:1px solid #f5c6cb;color:#a1231c;padding:10px 14px;border-radius:8px;margin-bottom:12px;font-size:.88rem;">
+      Generazione sospesa: alloggi, notti o date non combaciano. Controlla sotto e spunta la conferma per procedere.
+    </div>
+  <?php endif; ?>
+
+  <?php $lc = $model['lodge_check'] ?? null; if ($lc && $lc['applicable']): ?>
+    <?php if ($lc['ok']): ?>
+      <div style="background:#e8f5e9;border:1px solid #b7dfb9;color:#1e6b25;padding:10px 14px;border-radius:8px;margin-bottom:16px;font-size:.88rem;">
+        ✅ Alloggi coerenti tra programma (Word) e calc (Excel).
+      </div>
+    <?php else: ?>
+      <div style="background:#fff8e1;border:1px solid #f0d98a;color:#7a5b00;padding:12px 16px;border-radius:8px;margin-bottom:16px;font-size:.88rem;line-height:1.6;">
+        <strong>⚠️ Gli alloggi non combaciano tra programma (Word) e calc (Excel).</strong>
+        Controlla di aver caricato i file della stessa pratica (e il foglio giusto). I voucher usano gli alloggi del <strong>programma Word</strong>.
+        <?php if ($lc['word_only']): ?>
+          <div style="margin-top:8px;">Nel <strong>programma</strong> ma non nel calc:
+            <ul style="margin:4px 0 0 18px;"><?php foreach ($lc['word_only'] as $n): ?><li><?= h($n) ?></li><?php endforeach; ?></ul>
+          </div>
+        <?php endif; ?>
+        <?php if ($lc['excel_only']): ?>
+          <div style="margin-top:8px;">Nel <strong>calc</strong> ma non nel programma <span style="color:#a07a00;">(può essere normale per soggiorni "organizzazione personale", che il programma salta)</span>:
+            <ul style="margin:4px 0 0 18px;"><?php foreach ($lc['excel_only'] as $n): ?><li><?= h($n) ?></li><?php endforeach; ?></ul>
+          </div>
+        <?php endif; ?>
+        <?php if (!empty($lc['nights_mismatch'])): ?>
+          <div style="margin-top:8px;">Numero di <strong>notti diverso</strong> tra programma e calc:
+            <ul style="margin:4px 0 0 18px;">
+              <?php foreach ($lc['nights_mismatch'] as $nm): ?>
+                <li><?= h($nm['name']) ?> — programma <strong><?= (int)$nm['word'] ?></strong>, calc <strong><?= (int)$nm['excel'] ?></strong></li>
+              <?php endforeach; ?>
+            </ul>
+          </div>
+        <?php endif; ?>
+        <?php if (!empty($lc['date_mismatch'])): ?>
+          <div style="margin-top:8px;"><strong>Date diverse</strong> tra programma e calc:
+            <ul style="margin:4px 0 0 18px;">
+              <?php foreach ($lc['date_mismatch'] as $dm): ?>
+                <li><?= h($dm['name']) ?> — <?= h($dm['field']) ?>: programma <strong><?= h(voucher_fmt_date($dm['word'])) ?></strong>, calc <strong><?= h(voucher_fmt_date($dm['excel'])) ?></strong></li>
+              <?php endforeach; ?>
+            </ul>
+          </div>
+        <?php endif; ?>
+      </div>
+    <?php endif; ?>
+  <?php endif; ?>
+
   <form method="post" action="vouchers.php?step=generate">
     <input type="hidden" name="step" value="generate">
     <input type="hidden" name="token" value="<?= h($token) ?>">
@@ -565,18 +623,38 @@ include __DIR__ . '/../../includes/layout_header.php';
       </div>
     </div>
 
+    <?php $mismatch = ($lc && $lc['applicable'] && !$lc['ok']); ?>
+
     <!-- Actions -->
     <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;background:#fff;border:1px solid var(--grey-lt);border-radius:10px;padding:16px 18px;">
+      <?php if ($mismatch): ?>
+        <label style="font-size:.85rem;display:flex;gap:6px;align-items:center;width:100%;color:#7a5b00;">
+          <input type="checkbox" name="confirm_mismatch" value="1" id="confirm_mismatch"> Ho verificato alloggi, notti e date e voglio procedere comunque
+        </label>
+      <?php endif; ?>
       <?php if ($missingGps): ?>
         <label style="font-size:.85rem;display:flex;gap:6px;align-items:center;">
           <input type="checkbox" name="save_directory" value="1"> Save filled GPS/contacts to the lodge directory
         </label>
         <span style="flex:1;"></span>
       <?php endif; ?>
-      <button type="submit" name="format" value="pdf" class="btn btn-red">Generate PDF</button>
-      <button type="submit" name="format" value="word" class="btn btn-outline">Generate Word</button>
+      <button type="submit" name="format" value="pdf" id="gen_pdf" class="btn btn-red"<?= $mismatch ? ' disabled' : '' ?>>Generate PDF</button>
+      <button type="submit" name="format" value="word" id="gen_word" class="btn btn-outline"<?= $mismatch ? ' disabled' : '' ?>>Generate Word</button>
       <a href="vouchers.php" class="btn btn-outline">Start over</a>
     </div>
+
+    <?php if ($mismatch): ?>
+      <script>
+      (function () {
+        var cb = document.getElementById('confirm_mismatch');
+        var pdf = document.getElementById('gen_pdf'), word = document.getElementById('gen_word');
+        if (!cb || !pdf || !word) return;
+        function sync() { pdf.disabled = word.disabled = !cb.checked; }
+        cb.addEventListener('change', sync);
+        sync();
+      })();
+      </script>
+    <?php endif; ?>
   </form>
 <?php endif; ?>
 

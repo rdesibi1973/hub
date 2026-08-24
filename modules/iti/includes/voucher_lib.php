@@ -435,6 +435,241 @@ function voucher_title_case(string $t): string
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+//  Excel ↔ Word accommodation cross-check
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Parse a calc-sheet date cell to ISO "YYYY-MM-DD". Handles both a text date
+ * ("1-Jul-2026", "01/07/2026") and an Excel serial number (days since the
+ * 1899-12-30 epoch). Returns null when it can't be read as a plausible date.
+ */
+function voucher_parse_xlsx_date(string $v): ?string
+{
+    $v = trim($v);
+    if ($v === '') return null;
+
+    // Excel serial: a bare number in the modern-date range (~1954..2100).
+    if (preg_match('/^\d+(?:\.\d+)?$/', $v)) {
+        $n = (int)floor((float)$v);
+        if ($n >= 20000 && $n <= 80000) {
+            $d = new DateTime('1899-12-30');
+            $d->modify('+' . $n . ' days');
+            return $d->format('Y-m-d');
+        }
+        return null;
+    }
+
+    // Text date. strtotime reads "1-Jul-2026"; normalise "/" so "01/07/2026" too.
+    $ts = strtotime($v);
+    if ($ts === false) $ts = strtotime(str_replace('/', '-', $v));
+    return $ts !== false ? date('Y-m-d', $ts) : null;
+}
+
+/**
+ * Per-stay accommodations from the calc sheet. The sheet lists one row per night
+ * (a DATE column + the HOTEL/LODGE/CAMPSITE column); consecutive nights at the
+ * same lodge are grouped into one stay. A night dated D means check-in D,
+ * check-out D+1, so a run of rows becomes checkin = first date, checkout = last
+ * date + 1 day, nights = row count. Split stays (same lodge, non-consecutive)
+ * come back as separate entries.
+ * @return array<int, array{name:string, checkin:?string, checkout:?string, nights:int}>
+ */
+function voucher_xlsx_stays(array $cells): array
+{
+    // Locate the lodge column and the table header row.
+    $lodgeCol = null; $headerRow = 0;
+    foreach ($cells as $ref => $val) {
+        $v = strtolower($val);
+        if (strpos($v, 'lodge') !== false && (strpos($v, 'hotel') !== false || strpos($v, 'camp') !== false)) {
+            [$c, $r] = voucher_ref_split($ref);
+            if ($c !== '') { $lodgeCol = $c; $headerRow = $r; break; }
+        }
+    }
+    if ($lodgeCol === null) return [];
+
+    // Date column: a "DATE" header on the same row (fallback: column A).
+    $dateCol = 'A';
+    foreach ($cells as $ref => $val) {
+        [$c, $r] = voucher_ref_split($ref);
+        if ($r !== $headerRow) continue;
+        if (strpos(strtolower(trim($val)), 'date') === 0) { $dateCol = $c; break; }
+    }
+
+    // Gather night rows (lodge + parsed date) in row order.
+    $rows = [];
+    foreach ($cells as $ref => $val) {
+        [$c, $r] = voucher_ref_split($ref);
+        if ($c !== $lodgeCol || $r <= $headerRow) continue;
+        $name = trim($val);
+        if ($name === '' || stripos($name, 'total') === 0) continue;
+        $rows[$r] = ['name' => $name, 'date' => voucher_parse_xlsx_date(voucher_cell($cells, $dateCol, $r))];
+    }
+    ksort($rows);
+
+    // Group consecutive same-lodge rows into stays.
+    $stays = []; $cur = null;
+    foreach ($rows as $row) {
+        $key = voucher_norm($row['name']);
+        if ($cur !== null && $cur['key'] === $key) {
+            $cur['nights']++;
+            if ($cur['first'] === null) $cur['first'] = $row['date'];
+            if ($row['date'] !== null)  $cur['last']  = $row['date'];
+        } else {
+            if ($cur !== null) $stays[] = $cur;
+            $cur = ['key' => $key, 'name' => $row['name'], 'first' => $row['date'], 'last' => $row['date'], 'nights' => 1];
+        }
+    }
+    if ($cur !== null) $stays[] = $cur;
+
+    // Finalize: checkout = last night's date + 1 day.
+    $out = [];
+    foreach ($stays as $s) {
+        $checkout = null;
+        if ($s['last'] !== null) {
+            $d = new DateTime($s['last']); $d->modify('+1 day');
+            $checkout = $d->format('Y-m-d');
+        }
+        $out[] = ['name' => $s['name'], 'checkin' => $s['first'], 'checkout' => $checkout, 'nights' => $s['nights']];
+    }
+    return $out;
+}
+
+/**
+ * Meaningful lower-case tokens of a lodge name, for fuzzy set-matching. Drops
+ * meal-basis codes and generic hospitality words so two spellings of the same
+ * place still overlap ("Marera View Lodge" ↔ "Marera View Lodge HB" → {marera}).
+ * @return string[]
+ */
+function voucher_lodge_tokens(string $s): array
+{
+    static $stop = [
+        'lodge' => 1, 'camp' => 1, 'tented' => 1, 'hotel' => 1, 'resort' => 1,
+        'room' => 1, 'rooms' => 1, 'deluxe' => 1, 'standard' => 1, 'luxury' => 1,
+        'view' => 1, 'safari' => 1, 'the' => 1, 'and' => 1, 'wing' => 1,
+        'suite' => 1, 'villa' => 1, 'house' => 1, 'campsite' => 1, 'mobile' => 1,
+        'special' => 1, 'night' => 1, 'nights' => 1, 'in' => 1, 'of' => 1,
+        'fb' => 1, 'hb' => 1, 'bb' => 1, 'ro' => 1, 'ai' => 1,
+    ];
+    $tokens = [];
+    foreach (explode(' ', voucher_norm($s)) as $w) {
+        if (strlen($w) < 3 || isset($stop[$w])) continue;
+        $tokens[$w] = true;
+    }
+    return array_keys($tokens);
+}
+
+/**
+ * Cross-check the accommodations parsed from the Word programme against the
+ * calc-sheet stays — names, nights AND check-in/out dates. Advisory: it reports
+ * discrepancies; the caller decides whether to soft-block. Two names "match"
+ * when they share a meaningful token (accents/case/meal-basis ignored), so
+ * legitimate spelling differences line up while a mismatched file (wrong pair
+ * uploaded) stands out.
+ *
+ * Names + nights are compared aggregated per lodge (so split stays add up).
+ * Dates are compared per stay: each programme stay is paired to the calc stay
+ * that shares a token and has the nearest check-in, then the two dates are
+ * compared.
+ *
+ * @param array<int, array{name:string, nights:int, checkin:?string, checkout:?string}> $wordStays
+ * @param array<int, array{name:string, nights:int, checkin:?string, checkout:?string}> $excelStays
+ * @return array{applicable:bool, ok:bool, word_only:string[], excel_only:string[],
+ *               nights_mismatch:array<int, array{name:string, word:int, excel:int}>,
+ *               date_mismatch:array<int, array{name:string, field:string, word:string, excel:string}>,
+ *               excel_lodges:string[]}
+ */
+function voucher_lodge_crosscheck(array $wordStays, array $excelStays): array
+{
+    // Distinct calc lodge names (for display), first-seen order.
+    $excelNames = []; $seen = [];
+    foreach ($excelStays as $s) {
+        $k = voucher_norm($s['name']);
+        if ($k !== '' && !isset($seen[$k])) { $seen[$k] = true; $excelNames[] = $s['name']; }
+    }
+
+    $result = [
+        'applicable'      => ($wordStays !== [] && $excelStays !== []),
+        'ok'              => true,
+        'word_only'       => [],
+        'excel_only'      => [],
+        'nights_mismatch' => [],
+        'date_mismatch'   => [],
+        'excel_lodges'    => $excelNames,
+    ];
+    if (!$result['applicable']) return $result;
+
+    $shares = function (array $a, array $b): bool {
+        foreach ($a as $t) if (in_array($t, $b, true)) return true;
+        return false;
+    };
+    // Aggregate stays into one entry per lodge (by normalized name).
+    $group = function (array $stays): array {
+        $g = [];
+        foreach ($stays as $s) {
+            $key = voucher_norm($s['name']);
+            if ($key === '') continue;
+            if (!isset($g[$key])) $g[$key] = ['name' => $s['name'], 'nights' => 0, 'tokens' => voucher_lodge_tokens($s['name'])];
+            $g[$key]['nights'] += (int)($s['nights'] ?? 0);
+        }
+        return $g;
+    };
+
+    $wG = $group($wordStays);
+    $xG = $group($excelStays);
+
+    // Programme lodges with no match in the calc.
+    foreach ($wG as $w) {
+        if ($w['tokens'] === []) continue;
+        $hit = false;
+        foreach ($xG as $x) { if ($shares($w['tokens'], $x['tokens'])) { $hit = true; break; } }
+        if (!$hit) $result['word_only'][] = $w['name'];
+    }
+
+    // Calc lodges: unmatched → excel_only; matched → compare aggregated nights.
+    foreach ($xG as $x) {
+        if ($x['tokens'] === []) continue;
+        $matched = false; $wordNights = 0;
+        foreach ($wG as $w) {
+            if ($w['tokens'] !== [] && $shares($x['tokens'], $w['tokens'])) { $matched = true; $wordNights += $w['nights']; }
+        }
+        if (!$matched) { $result['excel_only'][] = $x['name']; continue; }
+        if ($x['nights'] > 0 && $wordNights > 0 && $wordNights !== $x['nights']) {
+            $result['nights_mismatch'][] = ['name' => $x['name'], 'word' => $wordNights, 'excel' => $x['nights']];
+        }
+    }
+
+    // Per-stay date comparison: pair by token overlap + nearest check-in.
+    $wTok = []; foreach ($wordStays as $i => $w)  $wTok[$i] = voucher_lodge_tokens($w['name']);
+    $xTok = []; foreach ($excelStays as $j => $x) $xTok[$j] = voucher_lodge_tokens($x['name']);
+    $used = [];
+    foreach ($wordStays as $i => $w) {
+        if ($wTok[$i] === [] || (empty($w['checkin']) && empty($w['checkout']))) continue;
+        $best = null; $bestDiff = null;
+        foreach ($excelStays as $j => $x) {
+            if (isset($used[$j]) || $xTok[$j] === [] || !$shares($wTok[$i], $xTok[$j])) continue;
+            $diff = PHP_INT_MAX;
+            if (!empty($w['checkin']) && !empty($x['checkin'])) $diff = abs(strtotime($w['checkin']) - strtotime($x['checkin']));
+            if ($best === null || $diff < $bestDiff) { $best = $j; $bestDiff = $diff; }
+        }
+        if ($best === null) continue;
+        $used[$best] = true;
+        $x = $excelStays[$best];
+        if (!empty($w['checkin']) && !empty($x['checkin']) && $w['checkin'] !== $x['checkin']) {
+            $result['date_mismatch'][] = ['name' => $w['name'], 'field' => 'Check-in', 'word' => $w['checkin'], 'excel' => $x['checkin']];
+        }
+        if (!empty($w['checkout']) && !empty($x['checkout']) && $w['checkout'] !== $x['checkout']) {
+            $result['date_mismatch'][] = ['name' => $w['name'], 'field' => 'Check-out', 'word' => $w['checkout'], 'excel' => $x['checkout']];
+        }
+    }
+
+    $result['word_only']  = array_values(array_unique($result['word_only']));
+    $result['excel_only'] = array_values(array_unique($result['excel_only']));
+    $result['ok'] = ($result['word_only'] === [] && $result['excel_only'] === []
+                     && $result['nights_mismatch'] === [] && $result['date_mismatch'] === []);
+    return $result;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 //  Model builder
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -608,6 +843,17 @@ function voucher_build_model(string $docxPath, string $xlsxPath, ?string $sheet 
         $adults = max(1, $adults);
     }
 
+    // Advisory cross-check: do the calc-sheet lodges match the programme's?
+    $lodgeCheck = voucher_lodge_crosscheck(
+        array_map(fn($a) => [
+            'name'     => $a['lodge'],
+            'nights'   => $a['nights'],
+            'checkin'  => $a['checkin'],
+            'checkout' => $a['checkout'],
+        ], $accommodations),
+        voucher_xlsx_stays($cells)
+    );
+
     return [
         'ref'            => $ref ?: pathinfo($origDocxName !== '' ? $origDocxName : $docxPath, PATHINFO_FILENAME),
         'consultant'     => $consultant,
@@ -616,6 +862,7 @@ function voucher_build_model(string $docxPath, string $xlsxPath, ?string $sheet 
         'dietary'        => $xl['dietary'],
         'accommodations' => $accommodations,
         'transfers'      => $transfers,
+        'lodge_check'    => $lodgeCheck,
     ];
 }
 
