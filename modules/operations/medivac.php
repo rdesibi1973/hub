@@ -397,10 +397,16 @@ function extractTravelers(rows) {
     if (headerRow < 0) { showToast("Cannot find traveler header row (NAME (first name + surname))", "error"); return []; }
 
     const travelers = [];
+    let blanks = 0;
     for (let i = headerRow + 1; i < rows.length; i++) {
         const row = rows[i];
         const name = String(row[0] || "").trim();
-        if (!name || name.toUpperCase().startsWith("ARRIVAL") || name.toUpperCase().startsWith("DEPARTURE")) break;
+        // Skip blank separator rows (travelers are often spaced out with empty rows).
+        // Bail out only after a long run of blanks, in case the sheet has no ARRIVAL/DEPARTURE marker.
+        if (!name) { if (++blanks >= 8) break; continue; }
+        const up = name.toUpperCase();
+        if (up.startsWith("ARRIVAL") || up.startsWith("DEPARTURE")) break;
+        blanks = 0;
         travelers.push({
             full_name:       name.toUpperCase(),
             title:           normTitle(String(row[1] || "").trim()),
