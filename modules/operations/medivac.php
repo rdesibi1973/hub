@@ -376,19 +376,22 @@ function handleFile(file) {
 function pickBestSheet(wb) {
     document.getElementById('sheet-error').style.display = 'none';
 
-    // Sheet priority by name: a RECAP tab wins; otherwise a CONF tab; otherwise fall back
-    // to every sheet (most files just have one). Only if the priority group has nothing
-    // parseable do we look at the remaining sheets.
-    let group = wb.SheetNames.filter(n => n.toUpperCase().includes('RECAP'));
-    if (!group.length) group = wb.SheetNames.filter(n => n.toUpperCase().includes('CONF'));
-    if (!group.length) group = wb.SheetNames.slice();
+    // Ignore hidden / very-hidden tabs entirely — they are stale or superseded copies.
+    // (Deleted sheets aren't in the workbook at all.) Excel guarantees at least one
+    // visible sheet, so this list is never empty.
+    const visible = wb.SheetNames.filter(n => !sheetHidden(wb, n));
 
-    return bestOf(wb, group) || bestOf(wb, wb.SheetNames.filter(n => group.indexOf(n) < 0));
+    // Priority by name: a RECAP tab wins; otherwise a CONF tab; otherwise every visible
+    // sheet (most files just have one).
+    let group = visible.filter(n => n.toUpperCase().includes('RECAP'));
+    if (!group.length) group = visible.filter(n => n.toUpperCase().includes('CONF'));
+    if (!group.length) group = visible;
+
+    return bestOf(wb, group);
 }
 
-// Pick the best sheet from a candidate list. When a group holds several near-duplicate
-// tabs (e.g. two CONF sheets), prefer the visible one, then the most complete
-// (filled passport/DOB/country), then the longest traveler list.
+// Pick the best sheet from a candidate list. When a group holds several tabs, prefer the
+// most complete (filled passport/DOB/country), then the longest traveler list.
 function bestOf(wb, names) {
     let best = null;
     names.forEach(name => {
@@ -396,10 +399,9 @@ function bestOf(wb, names) {
         const rows  = XLSX.utils.sheet_to_json(sheet, {header: 1, defval: "", raw: false, dateNF: "yyyy-mm-dd"});
         const travelers = extractTravelers(rows, true); // silent — no toast while scanning
         if (!travelers.length) return;
-        const visBonus = sheetHidden(wb, name) ? 0 : 1000000;
-        const filled   = travelers.reduce((s, t) =>
+        const filled = travelers.reduce((s, t) =>
             s + (t.dob ? 1 : 0) + (t.passport_number ? 1 : 0) + (t.country ? 1 : 0), 0);
-        const score    = visBonus + filled * 100 + travelers.length * 10;
+        const score  = filled * 100 + travelers.length * 10;
         if (!best || score > best.score) best = {name, sheet, rows, travelers, score};
     });
     return best;
