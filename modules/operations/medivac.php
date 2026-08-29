@@ -375,21 +375,31 @@ function handleFile(file) {
 // only one has passport / DOB filled in — pick that one rather than the first by name.
 function pickBestSheet(wb) {
     document.getElementById('sheet-error').style.display = 'none';
+
+    // Sheet priority by name: a RECAP tab wins; otherwise a CONF tab; otherwise fall back
+    // to every sheet (most files just have one). Only if the priority group has nothing
+    // parseable do we look at the remaining sheets.
+    let group = wb.SheetNames.filter(n => n.toUpperCase().includes('RECAP'));
+    if (!group.length) group = wb.SheetNames.filter(n => n.toUpperCase().includes('CONF'));
+    if (!group.length) group = wb.SheetNames.slice();
+
+    return bestOf(wb, group) || bestOf(wb, wb.SheetNames.filter(n => group.indexOf(n) < 0));
+}
+
+// Pick the best sheet from a candidate list. When a group holds several near-duplicate
+// tabs (e.g. two CONF sheets), prefer the visible one, then the most complete
+// (filled passport/DOB/country), then the longest traveler list.
+function bestOf(wb, names) {
     let best = null;
-    wb.SheetNames.forEach(name => {
+    names.forEach(name => {
         const sheet = wb.Sheets[name];
         const rows  = XLSX.utils.sheet_to_json(sheet, {header: 1, defval: "", raw: false, dateNF: "yyyy-mm-dd"});
         const travelers = extractTravelers(rows, true); // silent — no toast while scanning
         if (!travelers.length) return;
-        // Visibility is the strongest signal: the user works on the visible tab, and
-        // stale/superseded copies are almost always hidden. Among visible sheets, prefer
-        // the most complete (filled passport/DOB/country), then row count, then name hints.
-        const visBonus  = sheetHidden(wb, name) ? 0 : 1000000;
-        const filled    = travelers.reduce((s, t) =>
+        const visBonus = sheetHidden(wb, name) ? 0 : 1000000;
+        const filled   = travelers.reduce((s, t) =>
             s + (t.dob ? 1 : 0) + (t.passport_number ? 1 : 0) + (t.country ? 1 : 0), 0);
-        const up        = name.toUpperCase();
-        const nameBonus = (up.includes('RECAP') ? 3 : 0) + (up.includes('CONF') ? 2 : 0) + (up.includes('CORRECT') ? 2 : 0);
-        const score     = visBonus + filled * 100 + travelers.length * 10 + nameBonus;
+        const score    = visBonus + filled * 100 + travelers.length * 10;
         if (!best || score > best.score) best = {name, sheet, rows, travelers, score};
     });
     return best;
