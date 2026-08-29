@@ -353,14 +353,11 @@ function handleFile(file) {
     reader.onload = e => {
         try {
             const wb = XLSX.read(e.target.result, {type: "array", cellDates: true});
-            const sheet = selectSheet(wb);
-            if (!sheet) return;
-            const rows = XLSX.utils.sheet_to_json(sheet, {header: 1, defval: "", raw: false, dateNF: "yyyy-mm-dd"});
+            const best = pickBestSheet(wb);
+            if (!best) { showToast("No travelers found in this file.", "error"); return; }
 
-            const travelers = extractTravelers(rows);
-            if (!travelers.length) { showToast("No travelers found in this file.", "error"); return; }
-
-            const {coverageStart, coverageEnd} = extractDates(rows, sheet);
+            const travelers = best.travelers;
+            const {coverageStart, coverageEnd} = extractDates(best.rows, best.sheet);
             const {groupName, tourAgent} = parseFilename(file.name);
 
             showPreview(travelers, groupName, 'Savannah Explorers', coverageStart, coverageEnd, file.name);
@@ -373,28 +370,39 @@ function handleFile(file) {
     fileInput.value = "";
 }
 
-function selectSheet(wb) {
+// Scan every sheet and choose the one whose traveler block is the most complete.
+// Calc files often carry several near-duplicate sheets (e.g. two "CONF" tabs) where
+// only one has passport / DOB filled in — pick that one rather than the first by name.
+function pickBestSheet(wb) {
     document.getElementById('sheet-error').style.display = 'none';
-    if (wb.SheetNames.length === 1) return wb.Sheets[wb.SheetNames[0]];
-    const recapIdx = wb.SheetNames.findIndex(n => n.toUpperCase().includes('RECAP'));
-    if (recapIdx >= 0) return wb.Sheets[wb.SheetNames[recapIdx]];
-    const confIdx  = wb.SheetNames.findIndex(n => n.toUpperCase().includes('CONF'));
-    if (confIdx  >= 0) return wb.Sheets[wb.SheetNames[confIdx]];
-    const names = wb.SheetNames.join(', ');
-    const el = document.getElementById('sheet-error');
-    el.textContent = `This file has multiple sheets (${names}) but none is named RECAP or CONF. Please rename the correct sheet and try again.`;
-    el.style.display = 'block';
-    el.scrollIntoView({behavior: 'smooth', block: 'center'});
-    return null;
+    let best = null;
+    wb.SheetNames.forEach(name => {
+        const sheet = wb.Sheets[name];
+        const rows  = XLSX.utils.sheet_to_json(sheet, {header: 1, defval: "", raw: false, dateNF: "yyyy-mm-dd"});
+        const travelers = extractTravelers(rows, true); // silent — no toast while scanning
+        if (!travelers.length) return;
+        // Reward filled passport/DOB/country far above raw traveler count, with a small
+        // nudge for sheet names that signal the authoritative copy.
+        const filled = travelers.reduce((s, t) =>
+            s + (t.dob ? 1 : 0) + (t.passport_number ? 1 : 0) + (t.country ? 1 : 0), 0);
+        const up = name.toUpperCase();
+        const nameBonus = (up.includes('RECAP') ? 3 : 0) + (up.includes('CONF') ? 2 : 0) + (up.includes('CORRECT') ? 2 : 0);
+        const score = filled * 100 + travelers.length * 10 + nameBonus;
+        if (!best || score > best.score) best = {name, sheet, rows, travelers, score};
+    });
+    return best;
 }
 
-function extractTravelers(rows) {
+function extractTravelers(rows, silent) {
     let headerRow = -1;
     for (let i = 0; i < rows.length; i++) {
         const cell = String(rows[i][0] || "").toLowerCase();
         if (cell.includes("name (first name")) { headerRow = i; break; }
     }
-    if (headerRow < 0) { showToast("Cannot find traveler header row (NAME (first name + surname))", "error"); return []; }
+    if (headerRow < 0) {
+        if (!silent) showToast("Cannot find traveler header row (NAME (first name + surname))", "error");
+        return [];
+    }
 
     const travelers = [];
     let blanks = 0;
