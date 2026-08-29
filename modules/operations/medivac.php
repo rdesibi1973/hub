@@ -381,16 +381,26 @@ function pickBestSheet(wb) {
         const rows  = XLSX.utils.sheet_to_json(sheet, {header: 1, defval: "", raw: false, dateNF: "yyyy-mm-dd"});
         const travelers = extractTravelers(rows, true); // silent — no toast while scanning
         if (!travelers.length) return;
-        // Reward filled passport/DOB/country far above raw traveler count, with a small
-        // nudge for sheet names that signal the authoritative copy.
-        const filled = travelers.reduce((s, t) =>
+        // Visibility is the strongest signal: the user works on the visible tab, and
+        // stale/superseded copies are almost always hidden. Among visible sheets, prefer
+        // the most complete (filled passport/DOB/country), then row count, then name hints.
+        const visBonus  = sheetHidden(wb, name) ? 0 : 1000000;
+        const filled    = travelers.reduce((s, t) =>
             s + (t.dob ? 1 : 0) + (t.passport_number ? 1 : 0) + (t.country ? 1 : 0), 0);
-        const up = name.toUpperCase();
+        const up        = name.toUpperCase();
         const nameBonus = (up.includes('RECAP') ? 3 : 0) + (up.includes('CONF') ? 2 : 0) + (up.includes('CORRECT') ? 2 : 0);
-        const score = filled * 100 + travelers.length * 10 + nameBonus;
+        const score     = visBonus + filled * 100 + travelers.length * 10 + nameBonus;
         if (!best || score > best.score) best = {name, sheet, rows, travelers, score};
     });
     return best;
+}
+
+// True when a sheet is hidden or very-hidden (SheetJS Workbook.Sheets[i].Hidden = 1|2).
+function sheetHidden(wb, name) {
+    const meta = wb.Workbook && wb.Workbook.Sheets;
+    if (!meta) return false;
+    const s = meta[wb.SheetNames.indexOf(name)];
+    return !!(s && s.Hidden);
 }
 
 function extractTravelers(rows, silent) {
