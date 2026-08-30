@@ -673,7 +673,7 @@ include 'includes/header.php';
             ]);
         }
       ?>
-      <tr <?= !$is_history ? "style=\"cursor:pointer\" onclick=\"location.href='".h($req_url)."'\"" : '' ?>
+      <tr <?= !$is_history ? "style=\"cursor:pointer\" onclick=\"window.open('".h($req_url)."','_blank')\"" : '' ?>
           <?= !$is_history ? "onmouseenter=\"this.style.background='#f0f7f0'\" onmouseleave=\"this.style.background=''\"" : '' ?>>
         <td style="font-weight:600">
           <?= h($r['agent']) ?>
@@ -681,7 +681,7 @@ include 'includes/header.php';
         </td>
         <td class="text-right">
           <?php if (!$is_history): ?>
-            <a href="<?= h($req_url) ?>" onclick="event.stopPropagation()"
+            <a href="<?= h($req_url) ?>" target="_blank" rel="noopener" onclick="event.stopPropagation()"
                style="text-decoration:none;font-weight:600;color:#1a6bb3;cursor:pointer"><?= $r['total'] ?></a>
           <?php else: ?>
             <?= $r['total'] ?>
@@ -694,7 +694,7 @@ include 'includes/header.php';
                 'date_from' => $report_from, 'date_to' => $report_to,
                 'date_field' => 'confirmation_date', 'year' => 0,
             ]); ?>
-            <a href="<?= h($booked_url) ?>" onclick="event.stopPropagation()" style="text-decoration:none">
+            <a href="<?= h($booked_url) ?>" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="text-decoration:none">
               <span class="badge status-booked" style="cursor:pointer"><?= $r['confirmed'] ?></span>
             </a>
           <?php elseif ($r['confirmed'] > 0): ?>
@@ -731,7 +731,7 @@ include 'includes/header.php';
                 'agent' => 0, 'date_from' => $report_from, 'date_to' => $report_to,
                 'year' => 0, 'month' => 0,
             ]); ?>
-            <a href="<?= h($all_recv_url) ?>"
+            <a href="<?= h($all_recv_url) ?>" target="_blank" rel="noopener"
                style="text-decoration:none;font-weight:700;color:#1a6bb3"><?= $totals['total'] ?></a>
           <?php else: ?>
             <?= $totals['total'] ?>
@@ -743,7 +743,7 @@ include 'includes/header.php';
                 'status' => 'Booked', 'agent' => 0,
                 'date_from' => $report_from, 'date_to' => $report_to, 'year' => 0,
             ]); ?>
-            <a href="<?= h($all_booked_url) ?>" style="text-decoration:none">
+            <a href="<?= h($all_booked_url) ?>" target="_blank" rel="noopener" style="text-decoration:none">
               <span class="badge status-booked" style="cursor:pointer"><?= $totals['confirmed'] ?></span>
             </a>
           <?php else: ?>
