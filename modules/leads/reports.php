@@ -679,7 +679,14 @@ include 'includes/header.php';
           <?= h($r['agent']) ?>
           <?= !$is_history ? '<span style="font-size:.65rem;color:var(--grey-mid);margin-left:4px">↗</span>' : '' ?>
         </td>
-        <td class="text-right"><?= $r['total'] ?></td>
+        <td class="text-right">
+          <?php if (!$is_history): ?>
+            <a href="<?= h($req_url) ?>" onclick="event.stopPropagation()"
+               style="text-decoration:none;font-weight:600;color:#1a6bb3;cursor:pointer"><?= $r['total'] ?></a>
+          <?php else: ?>
+            <?= $r['total'] ?>
+          <?php endif; ?>
+        </td>
         <td class="text-right">
           <?php if (!$is_history && $r['confirmed'] > 0):
             $booked_url = 'requests.php?' . http_build_query([
@@ -718,7 +725,18 @@ include 'includes/header.php';
       <!-- TOTALS ROW -->
       <tr style="background:var(--off-white);font-weight:700;border-top:2px solid var(--grey-lt)">
         <td>TOTAL</td>
-        <td class="text-right"><?= $totals['total'] ?></td>
+        <td class="text-right">
+          <?php if (!$is_history):
+            $all_recv_url = 'requests.php?' . http_build_query([
+                'agent' => 0, 'date_from' => $report_from, 'date_to' => $report_to,
+                'year' => 0, 'month' => 0,
+            ]); ?>
+            <a href="<?= h($all_recv_url) ?>"
+               style="text-decoration:none;font-weight:700;color:#1a6bb3"><?= $totals['total'] ?></a>
+          <?php else: ?>
+            <?= $totals['total'] ?>
+          <?php endif; ?>
+        </td>
         <td class="text-right">
           <?php if (!$is_history):
             $all_booked_url = 'requests.php?' . http_build_query([
