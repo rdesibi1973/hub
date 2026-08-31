@@ -669,10 +669,11 @@ include __DIR__ . '/../../includes/layout_header.php';
         <tbody>
           <?php
             $xrows = $model['transfers'];
+            $realCount = count($xrows);
             for ($k = 0; $k < 2; $k++) $xrows[] = ['date' => '', 'from' => '', 'to' => '', 'flight_no' => '', 'flight_time' => '', 'notes' => '']; // spare rows
             foreach ($xrows as $i => $t): ?>
             <tr>
-              <td style="padding:3px 6px;text-align:center;"><input type="checkbox" name="xf_include[]" value="<?= $i ?>" checked style="width:16px;height:16px;"></td>
+              <td style="padding:3px 6px;text-align:center;"><input type="checkbox" name="xf_include[]" value="<?= $i ?>"<?= $i < $realCount ? ' checked' : '' ?> style="width:16px;height:16px;"></td>
               <td style="padding:3px 6px;"><input type="date" name="xf_date[<?= $i ?>]" value="<?= h($t['date']) ?>" style="width:100%;padding:6px;border-radius:6px;"></td>
               <?php $hm = !empty($t['hotel_missing']); $hmStyle = $hm ? 'border-color:#C0211B;' : ''; ?>
               <td style="padding:3px 6px;"><input type="text" name="xf_from[<?= $i ?>]" value="<?= h($t['from']) ?>" title="<?= $hm ? 'Hotel non nei file (organizzazione personale) — compila il nome' : '' ?>" style="width:100%;padding:6px;border-radius:6px;<?= $hmStyle ?>"></td>
