@@ -35,9 +35,20 @@ public class NewRequestDialog extends JDialog {
     private String[] allAgencyNames = new String[0];
     private String[] allAgentNames  = new String[0];
     private boolean suppressFilter             = false; // prevents autocomplete filter during init
-    // Guards setupAgencyAutoComplete() so the listener+focus handler are
-    // installed exactly once, even though the model may be refreshed many times.
+    // Guards setupAgencyAutoComplete()/setupAgentAutoComplete() so the
+    // listener+focus handler are installed exactly once, even though the model
+    // may be refreshed many times (initial load + any manual reload).
     private boolean agencyAutoCompleteInstalled = false;
+    private boolean agentAutoCompleteInstalled  = false;
+
+    // ── LOV load status ─────────────────────────────────────────────────────
+    // A load fails when the endpoint errors OR returns no usable rows; the two
+    // loads run independently, so we track each and show a single reload prompt
+    // if either failed. Touched only on the EDT — no synchronization needed.
+    private JButton reloadLovBtn;
+    private boolean agenciesLoadOk = false, agenciesLoadDone = false;
+    private boolean agentsLoadOk   = false, agentsLoadDone   = false;
+    private static final int MAX_LOV_ATTEMPTS = 3;
 
     private static final String[] SOURCES = {
         "Form", "Email", "Agent", "iBot",
@@ -137,6 +148,23 @@ public class NewRequestDialog extends JDialog {
         agentCombo.setFont(new Font("SansSerif", Font.PLAIN, 13));
         c.gridx = 1; c.gridy = row; c.gridwidth = 3; c.weightx = 1;
         panel.add(agentCombo, c);
+        c.gridwidth = 1; c.weightx = 0;
+        row++;
+
+        // LOV load-failure prompt (hidden unless agencies/agents failed to load)
+        reloadLovBtn = new JButton("⚠ Lists not loaded — click to retry");
+        reloadLovBtn.setFont(new Font("SansSerif", Font.PLAIN, 11));
+        reloadLovBtn.setForeground(new Color(180, 80, 0));
+        reloadLovBtn.setFocusable(false);
+        reloadLovBtn.setVisible(false);
+        reloadLovBtn.addActionListener(e -> {
+            reloadLovBtn.setEnabled(false);
+            reloadLovBtn.setText("⚙ Reloading…");
+            loadAgencies();
+            loadAgents();
+        });
+        c.gridx = 1; c.gridy = row; c.gridwidth = 3; c.weightx = 1;
+        panel.add(reloadLovBtn, c);
         c.gridwidth = 1; c.weightx = 0;
         row++;
 
@@ -319,7 +347,74 @@ public class NewRequestDialog extends JDialog {
         });
     }
 
-    // ── Generic autocomplete helper (used for agentCombo only) ───────────────
+    // ── Agent autocomplete — installed ONCE, reads allAgentNames instance field ──
+    // Same pattern as setupAgencyAutoComplete(): the model is repopulated in
+    // place on every (re)load, so this listener must be attached exactly once —
+    // otherwise a manual reload would stack duplicate filters on the editor.
+    private void setupAgentAutoComplete() {
+        if (agentAutoCompleteInstalled) return;
+        agentAutoCompleteInstalled = true;
+
+        agentCombo.setEditable(true);
+        final DefaultComboBoxModel<String> model =
+            (DefaultComboBoxModel<String>) agentCombo.getModel();
+        final JTextField editor =
+            (JTextField) agentCombo.getEditor().getEditorComponent();
+
+        editor.getDocument().addDocumentListener(new DocumentListener() {
+            private boolean updating = false;
+            private void filter() {
+                if (updating || suppressFilter) return;
+                updating = true;
+                SwingUtilities.invokeLater(() -> {
+                    String typed = editor.getText();
+                    String lower = typed.toLowerCase();
+                    model.removeAllElements();
+                    // allAgentNames is an instance field — always current.
+                    for (String item : allAgentNames) {
+                        if (item.toLowerCase().contains(lower)) model.addElement(item);
+                    }
+                    editor.setText(typed);
+                    editor.setCaretPosition(typed.length());
+                    if (!typed.isEmpty() && model.getSize() > 0) {
+                        try { agentCombo.showPopup(); } catch (Exception ex) {}
+                    }
+                    updating = false;
+                    SwingUtilities.invokeLater(() -> updateFolderPreview());
+                });
+            }
+            public void insertUpdate(DocumentEvent e)  { filter(); }
+            public void removeUpdate(DocumentEvent e)  { filter(); }
+            public void changedUpdate(DocumentEvent e) {}
+        });
+    }
+
+    // ── LOV load status handling (EDT only) ──────────────────────────────────
+    // Records the outcome of each independent load and shows/hides the single
+    // reload prompt: visible if either load has finished and failed.
+    private void onLovLoadResult(boolean isAgency, boolean ok) {
+        if (isAgency) { agenciesLoadOk = ok; agenciesLoadDone = true; }
+        else          { agentsLoadOk   = ok; agentsLoadDone   = true; }
+
+        boolean anyFailed = (agenciesLoadDone && !agenciesLoadOk)
+                         || (agentsLoadDone   && !agentsLoadOk);
+        if (anyFailed) {
+            reloadLovBtn.setText("⚠ Lists not loaded — click to retry");
+            reloadLovBtn.setEnabled(true);
+            reloadLovBtn.setVisible(true);
+        } else if (agenciesLoadOk && agentsLoadOk) {
+            reloadLovBtn.setVisible(false);
+        }
+    }
+
+    // Small linear backoff between retry attempts (0.4s, 0.8s, …). Runs on the
+    // load worker thread, never on the EDT.
+    private static void sleepBeforeRetry(int attempt) {
+        try { Thread.sleep(400L * attempt); }
+        catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
+    }
+
+    // ── Generic autocomplete helper (currently unused; kept for reference) ────
     private DocumentListener setupAutoComplete(JComboBox<String> combo, String[] allItems, boolean hasSelectItem) {
         combo.setEditable(true);
         DefaultComboBoxModel<String> model = new DefaultComboBoxModel<>();
@@ -375,29 +470,50 @@ public class NewRequestDialog extends JDialog {
     }
 
     // ── Load data ─────────────────────────────────────────────────────────────
+    // Retries a few times on failure. A failure is EITHER a thrown IOException
+    // (network / non-2xx HTTP via getOrThrow) OR a 2xx response that parses to
+    // zero rows (garbled/partial body). On final failure the reload prompt is
+    // shown instead of leaving the LOV silently empty.
     private void loadAgencies() {
         new Thread(() -> {
-            try {
-                String resp = api.get("api_get_agencies.php", "");
-                agencies = parseAgenciesArray(resp);
-                allAgencyNames = new String[agencies.length];
-                for (int i = 0; i < agencies.length; i++) allAgencyNames[i] = agencies[i][1];
-                SwingUtilities.invokeLater(() -> {
-                    // Populate the model in-place — no model replacement, so the
-                    // single DocumentListener installed by setupAgencyAutoComplete()
-                    // stays valid and doesn't need reinstalling.
-                    DefaultComboBoxModel<String> model =
-                        (DefaultComboBoxModel<String>) agencyCombo.getModel();
-                    model.removeAllElements();
-                    model.addElement("-- select --");
-                    for (String n : allAgencyNames) model.addElement(n);
-                    // Install listener+focus handler exactly once.
-                    setupAgencyAutoComplete();
-                });
-            } catch (IOException ex) {
-                SwingUtilities.invokeLater(() ->
-                    agencyCombo.setToolTipText("Error loading agencies: " + ex.getMessage()));
+            String lastErr = "no data";
+            for (int attempt = 1; attempt <= MAX_LOV_ATTEMPTS; attempt++) {
+                try {
+                    String resp = api.getOrThrow("api_get_agencies.php", "");
+                    String[][] parsed = parseAgenciesArray(resp);
+                    if (parsed.length > 0) {
+                        agencies = parsed;
+                        allAgencyNames = new String[agencies.length];
+                        for (int i = 0; i < agencies.length; i++) allAgencyNames[i] = agencies[i][1];
+                        SwingUtilities.invokeLater(() -> {
+                            // Populate the model in-place — no model replacement, so the
+                            // single DocumentListener installed by setupAgencyAutoComplete()
+                            // stays valid and doesn't need reinstalling. suppressFilter guards
+                            // against the model mutation retriggering the autocomplete filter.
+                            DefaultComboBoxModel<String> model =
+                                (DefaultComboBoxModel<String>) agencyCombo.getModel();
+                            suppressFilter = true;
+                            model.removeAllElements();
+                            model.addElement("-- select --");
+                            for (String n : allAgencyNames) model.addElement(n);
+                            suppressFilter = false;
+                            // Install listener+focus handler exactly once.
+                            setupAgencyAutoComplete();
+                            onLovLoadResult(true, true);
+                        });
+                        return;
+                    }
+                    lastErr = "response contained no agencies";
+                } catch (IOException ex) {
+                    lastErr = ex.getMessage();
+                }
+                if (attempt < MAX_LOV_ATTEMPTS) sleepBeforeRetry(attempt);
             }
+            final String err = lastErr;
+            SwingUtilities.invokeLater(() -> {
+                agencyCombo.setToolTipText("Error loading agencies: " + err);
+                onLovLoadResult(true, false);
+            });
         }, "load-agencies").start();
     }
 
@@ -433,35 +549,62 @@ public class NewRequestDialog extends JDialog {
 
     private void loadAgents() {
         new Thread(() -> {
-            try {
-                String resp = api.get("api_get_agents.php", "");
-                agents = ApiClient.parseIdNomeArray(resp);
-                allAgentNames = new String[agents.length];
-                for (int i = 0; i < agents.length; i++) allAgentNames[i] = agents[i][1];
-                SwingUtilities.invokeLater(() -> {
-                    agentCombo.removeAllItems();
-                    for (String n : allAgentNames) agentCombo.addItem(n);
-                    setupAutoComplete(agentCombo, allAgentNames, false);
-                    // Pre-select logged-in user's agent
-                    suppressFilter = true;
-                    for (int i = 0; i < agents.length; i++) {
-                        if (Integer.parseInt(agents[i][0]) == AppSession.agentId) {
-                            agentCombo.setSelectedIndex(i);
-                            JTextField ed = (JTextField) agentCombo.getEditor().getEditorComponent();
-                            ed.setText(agents[i][1]);
-                            break;
-                        }
+            String lastErr = "no data";
+            for (int attempt = 1; attempt <= MAX_LOV_ATTEMPTS; attempt++) {
+                try {
+                    String resp = api.getOrThrow("api_get_agents.php", "");
+                    String[][] parsed = ApiClient.parseIdNomeArray(resp);
+                    if (parsed.length > 0) {
+                        agents = parsed;
+                        allAgentNames = new String[agents.length];
+                        for (int i = 0; i < agents.length; i++) allAgentNames[i] = agents[i][1];
+                        SwingUtilities.invokeLater(() -> {
+                            // Populate the model in-place (mirrors loadAgencies) so the
+                            // autocomplete listener installed by setupAgentAutoComplete()
+                            // is never duplicated across reloads.
+                            DefaultComboBoxModel<String> model =
+                                (DefaultComboBoxModel<String>) agentCombo.getModel();
+                            suppressFilter = true;
+                            model.removeAllElements();
+                            for (String n : allAgentNames) model.addElement(n);
+                            setupAgentAutoComplete();
+                            // Pre-select logged-in user's agent
+                            for (int i = 0; i < agents.length; i++) {
+                                if (Integer.parseInt(agents[i][0]) == AppSession.agentId) {
+                                    agentCombo.setSelectedItem(agents[i][1]);
+                                    JTextField ed = (JTextField) agentCombo.getEditor().getEditorComponent();
+                                    ed.setText(agents[i][1]);
+                                    break;
+                                }
+                            }
+                            suppressFilter = false;
+                            if (!AppSession.canSelectAgent) agentCombo.setEnabled(false);
+                            onLovLoadResult(false, true);
+                            updateFolderPreview();
+                        });
+                        return;
                     }
-                    suppressFilter = false;
-                    if (!AppSession.canSelectAgent) agentCombo.setEnabled(false);
-                    updateFolderPreview();
-                });
-            } catch (IOException ex) {
-                SwingUtilities.invokeLater(() -> {
-                    agentCombo.removeAllItems();
-                    agentCombo.addItem(AppSession.fullName);
-                });
+                    lastErr = "response contained no agents";
+                } catch (IOException ex) {
+                    lastErr = ex.getMessage();
+                }
+                if (attempt < MAX_LOV_ATTEMPTS) sleepBeforeRetry(attempt);
             }
+            final String err = lastErr;
+            SwingUtilities.invokeLater(() -> {
+                // Minimal fallback so the user can still submit: at least their own
+                // name in the combo. Only added if the combo is currently empty.
+                DefaultComboBoxModel<String> model =
+                    (DefaultComboBoxModel<String>) agentCombo.getModel();
+                if (model.getSize() == 0) {
+                    suppressFilter = true;
+                    model.addElement(AppSession.fullName);
+                    agentCombo.setSelectedItem(AppSession.fullName);
+                    suppressFilter = false;
+                }
+                agentCombo.setToolTipText("Error loading agents: " + err);
+                onLovLoadResult(false, false);
+            });
         }, "load-agents").start();
     }
 

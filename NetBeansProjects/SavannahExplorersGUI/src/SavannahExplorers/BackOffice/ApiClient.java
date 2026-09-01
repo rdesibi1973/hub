@@ -150,6 +150,42 @@ public class ApiClient {
     }
 
     // -------------------------------------------------------------------------
+    // GET that FAILS LOUDLY — throws IOException on any non-2xx status.
+    //
+    // Unlike get(), which returns the 4xx/5xx error body as if it were a normal
+    // response (so callers silently receive an HTML/PHP error page or an empty
+    // string), this variant treats a >=400 status as a real failure. Use it for
+    // list loads (agencies/agents) so a transient 401/403/500 triggers the
+    // caller's catch/retry path instead of leaving the LOV silently empty.
+    // -------------------------------------------------------------------------
+    public String getOrThrow(String endpoint, String queryString) throws IOException {
+        String fullUrl = baseUrl + endpoint;
+        if (queryString != null && !queryString.isEmpty()) {
+            fullUrl += "?" + queryString;
+        }
+        URL url = new URL(fullUrl);
+        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+        try {
+            conn.setRequestMethod("GET");
+            conn.setConnectTimeout(CONNECT_TIMEOUT_MS);
+            conn.setReadTimeout(READ_TIMEOUT_MS);
+            if (apiKey != null && !apiKey.isEmpty()) {
+                conn.setRequestProperty("X-Api-Key", apiKey);
+            }
+            int code = conn.getResponseCode();
+            String body = readBody(conn, code);
+            if (code < 200 || code >= 300) {
+                String snippet = body == null ? "" : body.trim().replaceAll("\\s+", " ");
+                if (snippet.length() > 200) snippet = snippet.substring(0, 200) + "…";
+                throw new IOException("HTTP " + code + (snippet.isEmpty() ? "" : " — " + snippet));
+            }
+            return body;
+        } finally {
+            conn.disconnect();
+        }
+    }
+
+    // -------------------------------------------------------------------------
     // Read response body from connection (handles 4xx/5xx error streams too).
     // -------------------------------------------------------------------------
     private static String readResponse(HttpURLConnection conn) throws IOException {
