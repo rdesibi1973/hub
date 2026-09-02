@@ -7,6 +7,12 @@
 
 require_once 'config.php';
 header('Content-Type: application/json');
+// Dynamic list — never serve from the BlueHost proxy cache, or newly added
+// agents stay invisible to the GUI (which always hits the same URL) until
+// the cached copy expires on its own.
+header('Cache-Control: no-cache, no-store, must-revalidate, private');
+header('Pragma: no-cache');
+header('Expires: 0');
 
 if (($_SERVER['HTTP_X_API_KEY'] ?? '') !== API_KEY) {
     http_response_code(401);
