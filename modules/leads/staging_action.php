@@ -140,7 +140,9 @@ if ($action === 'approve') {
             preg_split('/[\s\-]+/', $name))));
     }
     $agentName  = str_replace(' ', '', $agent['name']); // e.g. "RobertoCapri"
-    $folderName = trim($_POST['folder_name_override'] ?? '') ?: toCamelCaseSt($customerName) . "({$agentName}-Drct)";
+    // Blog-referral flag: "EleonoraOngaro" suffix instead of the default "Drct".
+    $suffix     = !empty($_POST['eleonora_ongaro']) ? 'EleonoraOngaro' : 'Drct';
+    $folderName = trim($_POST['folder_name_override'] ?? '') ?: toCamelCaseSt($customerName) . "({$agentName}-{$suffix})";
     $folderPath = DROPBOX_BASE_PATH . '/' . $folderName;
 
     // Create Dropbox folder — block on conflict (folder already exists)

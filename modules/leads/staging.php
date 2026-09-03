@@ -296,6 +296,14 @@ select:focus,input:focus{outline:none;border-color:#C0211B;box-shadow:0 0 0 2px 
             </select>
           </div>
         </div>
+        <!-- Eleonora Ongaro blog-referral flag -->
+        <div style="margin:6px 0 10px;">
+          <label style="display:flex;align-items:center;gap:8px;font-size:.78rem;font-weight:600;cursor:pointer;">
+            <input type="checkbox" name="eleonora_ongaro" id="eleonoraFlag" value="1"
+                   onchange="onEleonoraToggle()" style="width:14px;height:14px;cursor:pointer;">
+            📝 Eleonora Ongaro referral — folder as <code>(<span id="eleonoraAgentHint">Agent</span>-EleonoraOngaro)</code>
+          </label>
+        </div>
         <!-- Editable folder name -->
         <div id="folderPreviewRow" style="margin-bottom:10px;display:none;">
           <label style="font-size:.75rem;font-weight:600;display:block;margin-bottom:4px">📁 Dropbox Folder Name</label>
@@ -375,10 +383,19 @@ function toCamelCase(name) {
                .map(p => p.charAt(0).toUpperCase() + p.slice(1).toLowerCase())
                .join('');
 }
+function folderSuffix() {
+    return document.getElementById('eleonoraFlag').checked ? 'EleonoraOngaro' : 'Drct';
+}
 function buildFolderName(customerName, agentName) {
     const namePart  = toCamelCase(customerName);
     const agentPart = agentName.replace(/\s+/g, '');
-    return namePart + '(' + agentPart + '-Drct)';
+    return namePart + '(' + agentPart + '-' + folderSuffix() + ')';
+}
+
+// Toggling the referral flag regenerates the folder name from scratch.
+function onEleonoraToggle() {
+    folderUserEdited = false;
+    updateFolderPreview();
 }
 
 let currentLeadName = '';
@@ -390,6 +407,9 @@ function updateFolderPreview() {
     const row = document.getElementById('folderPreviewRow');
     const inp = document.getElementById('folderNameInput');
     const name = document.getElementById('customerNameInput').value.trim();
+    const agentName = (opt && (opt.dataset.name || opt.text)) || 'Agent';
+    document.getElementById('eleonoraAgentHint').textContent =
+        sel.value ? agentName.replace(/\s+/g, '') : 'Agent';
     if (!sel.value || !name) { row.style.display = 'none'; return; }
     row.style.display = 'block';
     if (!folderUserEdited) {
@@ -415,6 +435,8 @@ function openDrawer(id) {
   folderUserEdited = false;
   document.getElementById('customerNameInput').value = l.customer_name;
   document.getElementById('approveAgent').value = '';
+  document.getElementById('eleonoraFlag').checked = false;
+  document.getElementById('eleonoraAgentHint').textContent = 'Agent';
   document.getElementById('folderPreviewRow').style.display = 'none';
   document.getElementById('folderNameInput').value = '';
 
