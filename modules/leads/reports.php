@@ -557,7 +557,7 @@ include 'includes/header.php';
   // Destination columns (live only)
   $all_dests = [];
   if (!$is_history) {
-      $dest_order = ['Safari','Kilimanjaro','Safari+Beach','Meru Trekking','Tailor-made','Other'];
+      $dest_order = ['Safari','Kilimanjaro','Safari+Beach','Meru Trekking','Trekking+Safari','Tailor-made','Other'];
       foreach ($dest_order as $d) {
           if (isset($totals['by_dest'][$d]) && $totals['by_dest'][$d] > 0) $all_dests[] = $d;
       }

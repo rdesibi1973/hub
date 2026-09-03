@@ -290,7 +290,7 @@ select:focus,input:focus{outline:none;border-color:#C0211B;box-shadow:0 0 0 2px 
             <label style="font-size:.75rem;font-weight:600;display:block;margin-bottom:4px">Request Type</label>
             <select name="destination" id="approveDest">
               <option value="">— Keep existing —</option>
-              <?php foreach (['Safari','Kilimanjaro','Safari+Beach','Meru Trekking','Tailor-made','Other'] as $dt): ?>
+              <?php foreach (['Safari','Kilimanjaro','Safari+Beach','Meru Trekking','Trekking+Safari','Tailor-made','Other'] as $dt): ?>
                 <option value="<?= $dt ?>"><?= $dt ?></option>
               <?php endforeach; ?>
             </select>

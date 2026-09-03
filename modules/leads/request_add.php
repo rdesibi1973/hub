@@ -281,7 +281,7 @@ include 'includes/header.php';
         <label for="destination">Request Type</label>
         <select id="destination" name="destination">
           <option value="">— Select —</option>
-          <?php foreach (['Safari','Kilimanjaro','Safari+Beach','Meru Trekking','Tailor-made','Other'] as $dt): ?>
+          <?php foreach (['Safari','Kilimanjaro','Safari+Beach','Meru Trekking','Trekking+Safari','Tailor-made','Other'] as $dt): ?>
             <option value="<?= h($dt) ?>" <?= $v['destination']===$dt?'selected':'' ?>><?= h($dt) ?></option>
           <?php endforeach; ?>
         </select>
