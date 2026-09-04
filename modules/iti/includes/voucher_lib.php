@@ -407,9 +407,11 @@ function voucher_xlsx_extract(array $cells): array
     }
 
     // Travellers — rows below the NAME header until a blank name or ARRIVAL label.
+    // Cap is only a safety bound against a malformed sheet; the real stop is the
+    // blank-name / ARRIVAL break below (groups can exceed 20 pax).
     $travellers = [];
     if ($r = $labelRow('name (')) {
-        for ($i = $r + 1; $i <= $r + 20; $i++) {
+        for ($i = $r + 1; $i <= $r + 300; $i++) {
             $name = voucher_cell($cells, 'A', $i);
             if ($name === '') break;
             if (stripos($name, 'arrival') === 0 || stripos($name, 'departure') === 0) break;
