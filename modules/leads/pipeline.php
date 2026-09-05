@@ -12,25 +12,32 @@ $stmt->execute([$currentUser['id']]);
 $myAgentId = (int)($stmt->fetchColumn() ?: 0);
 $canSeeAll    = in_array($myRole, ['admin','manager']);
 
-// ── AJAX: move card (updates pipeline_column only, status unchanged) ───────
+// ── AJAX: move card ───────────────────────────────────────────────────────
+// Moving a card normally updates pipeline_column only. Exception: dragging a
+// lead OUT of NEW into QUOTED or HOT auto-promotes its status to 'Quoted'
+// (a lead reaching either of those columns has been quoted).
 if ($_SERVER['REQUEST_METHOD'] === 'POST'
     && ($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '') === 'XMLHttpRequest') {
     header('Content-Type: application/json');
-    $id  = (int)($_POST['id']  ?? 0);
-    $col = trim($_POST['col'] ?? '');
+    $id   = (int)($_POST['id']  ?? 0);
+    $col  = trim($_POST['col'] ?? '');
+    $from = trim($_POST['from'] ?? '');
     $allowed = ['new','wip','quoted','hot','booked'];
     if (!$id || !in_array($col, $allowed, true)) {
         echo json_encode(['ok'=>false,'message'=>'Invalid params']); exit;
     }
+    $promoteToQuoted = ($from === 'new' && in_array($col, ['quoted','hot'], true));
+    $sql    = $promoteToQuoted
+        ? "UPDATE requests SET pipeline_column=?, status='Quoted' WHERE id=?"
+        : "UPDATE requests SET pipeline_column=? WHERE id=?";
+    $args   = [$col, $id];
     // Staff can only move their own requests
     if ($isStaff && $staffAgentId) {
-        $db->prepare("UPDATE requests SET pipeline_column=? WHERE id=? AND agent_id=?")
-           ->execute([$col, $id, $staffAgentId]);
-    } else {
-        $db->prepare("UPDATE requests SET pipeline_column=? WHERE id=?")
-           ->execute([$col, $id]);
+        $sql .= " AND agent_id=?";
+        $args[] = $staffAgentId;
     }
-    echo json_encode(['ok'=>true]); exit;
+    $db->prepare($sql)->execute($args);
+    echo json_encode(['ok'=>true, 'status'=>$promoteToQuoted ? 'Quoted' : null]); exit;
 }
 
 // ── Filters ────────────────────────────────────────────────────────────────
@@ -344,9 +351,11 @@ async function moveCard(id, from, to) {
       headers: { 'Content-Type': 'application/x-www-form-urlencoded',
                  'X-Requested-With': 'XMLHttpRequest' },
       body:    'id=' + encodeURIComponent(id) + '&col=' + encodeURIComponent(to)
+                 + '&from=' + encodeURIComponent(from)
     });
     const data = await res.json();
     if (!data.ok) throw new Error(data.message || 'Error');
+    if (data.status) setStatusBadge(card, data.status);
     const labels = {new:'NEW', wip:'WIP', quoted:'QUOTED', hot:'HOT', booked:'CONFIRMED'};
     showToast('✓  ' + card.querySelector('.card-name').textContent.trim() + '  →  ' + (labels[to]||to.toUpperCase()));
   } catch (err) {
@@ -359,6 +368,17 @@ async function moveCard(id, from, to) {
     updateEmpty(from);
     showToast('✗  ' + err.message, true);
   }
+}
+
+// Update a card's status badge in place (colors mirror the PHP-rendered map).
+function setStatusBadge(card, status) {
+  const badge = card.querySelector('.card-status-badge');
+  if (!badge) return;
+  const sbg = {Inquiry:'#E5F0FC',Quoted:'#FEF0E5',Hot:'#FFF0E0',Booked:'#EBF5EE',Lost:'#F0F0F0',Cancelled:'#FAE8E7'};
+  const sco = {Inquiry:'#0062B1',Quoted:'#E87722',Hot:'#C45000',Booked:'#1A6B3A',Lost:'#888',Cancelled:'#C0211B'};
+  badge.textContent      = (status === 'Booked') ? 'Confirmed' : status;
+  badge.style.background  = sbg[status] || '#eee';
+  badge.style.color       = sco[status] || '#444';
 }
 
 function updateCount(col, delta) {
