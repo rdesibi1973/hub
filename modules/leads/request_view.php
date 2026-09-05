@@ -88,23 +88,51 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     echo json_encode(['ok'=>false,'msg'=>'Unknown action']); exit;
 }
 
+// Reasons a request can be marked Lost (slug => label). Used by the status
+// handler below and the "Lost" modal in the view. Kept inline because the
+// shared config.php lives only on the server.
+$LOST_REASONS = [
+    'insufficient_budget' => 'Insufficient budget',
+    'trip_postponed'      => 'Trip postponed',
+    'no_more_replies'     => 'No more replies',
+    'other'               => 'Other',
+];
+
 // ── Inline status update ────────────────────────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['quick_status'])) {
     $newStatus    = trim($_POST['quick_status']);
     $isXhr        = ($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '') === 'XMLHttpRequest';
     $staffAgentId = isLeadsRestricted() ? getStaffAgentId() : 0;
+    $lostReason   = trim($_POST['lost_reason'] ?? '');
+    $lostNote     = trim($_POST['lost_note']   ?? '');
 
     if (!array_key_exists($newStatus, STATUSES)) {
         if ($isXhr) { header('Content-Type: application/json');
                       echo json_encode(['ok'=>false,'message'=>'Invalid status']); exit; }
         flash('Invalid status.', 'error');
+    } elseif ($newStatus === 'Lost' && !array_key_exists($lostReason, $LOST_REASONS)) {
+        // A reason is mandatory when marking a request Lost.
+        if ($isXhr) { header('Content-Type: application/json');
+                      echo json_encode(['ok'=>false,'message'=>'Please choose a reason.']); exit; }
+        flash('Please choose a reason for marking this request as Lost.', 'error');
     } else {
+        // Reason/note are stored only for Lost; cleared when leaving Lost.
+        $reasonVal = ($newStatus === 'Lost') ? $lostReason : null;
+        $noteVal   = ($newStatus === 'Lost' && $lostNote !== '') ? $lostNote : null;
+
         if (isLeadsRestricted()) {
-            $db->prepare("UPDATE requests SET status=?, pipeline_column=IF(?='Booked',NULL,pipeline_column) WHERE id=? AND agent_id=?")
-               ->execute([$newStatus, $newStatus, $id, $staffAgentId]);
+            $db->prepare("UPDATE requests SET status=?, pipeline_column=IF(?='Booked',NULL,pipeline_column), lost_reason=?, lost_note=? WHERE id=? AND agent_id=?")
+               ->execute([$newStatus, $newStatus, $reasonVal, $noteVal, $id, $staffAgentId]);
         } else {
-            $db->prepare("UPDATE requests SET status=?, pipeline_column=IF(?='Booked',NULL,pipeline_column) WHERE id=?")
-               ->execute([$newStatus, $newStatus, $id]);
+            $db->prepare("UPDATE requests SET status=?, pipeline_column=IF(?='Booked',NULL,pipeline_column), lost_reason=?, lost_note=? WHERE id=?")
+               ->execute([$newStatus, $newStatus, $reasonVal, $noteVal, $id]);
+        }
+        // Log a timeline note so the reason is visible in the request history.
+        if ($newStatus === 'Lost') {
+            $noteText = 'Marked Lost — ' . $LOST_REASONS[$lostReason]
+                      . ($noteVal !== null ? ': ' . $noteVal : '');
+            $db->prepare("INSERT INTO request_notes (request_id, user_id, note) VALUES (?,?,?)")
+               ->execute([$id, (int)($cu['id'] ?? 0), $noteText]);
         }
         if ($isXhr) { header('Content-Type: application/json');
                       echo json_encode(['ok'=>true]); exit; }
@@ -406,17 +434,29 @@ include 'includes/header.php';
     <div class="detail-label">Status</div>
     <div class="detail-value">
       <?php if ($canEdit): ?>
-        <form method="POST" style="display:inline-flex;align-items:center;gap:8px;">
-          <select name="quick_status" onchange="this.form.submit()"
+        <form method="POST" id="status-form" style="display:inline-flex;align-items:center;gap:8px;">
+          <select name="quick_status" id="quick-status"
+                  data-prev="<?= h($r['status']) ?>" onchange="onStatusChange(this)"
                   style="font-size:.82rem;padding:3px 6px;border:1px solid var(--grey-lt);border-radius:5px;cursor:pointer;">
             <?php foreach (STATUSES as $s => $_): ?>
               <option value="<?= h($s) ?>" <?= $r['status']===$s?'selected':'' ?>><?= h($s) ?></option>
             <?php endforeach; ?>
           </select>
+          <input type="hidden" name="lost_reason" id="lost-reason-field" value="">
+          <input type="hidden" name="lost_note"   id="lost-note-field"   value="">
           <noscript><button type="submit" class="btn btn-outline" style="font-size:.78rem;padding:3px 8px;">Update</button></noscript>
         </form>
       <?php else: ?>
         <span class="badge <?= STATUSES[$r['status']] ?? '' ?>"><?= h($r['status']) ?></span>
+      <?php endif; ?>
+      <?php if ($r['status'] === 'Lost' && !empty($r['lost_reason'])): ?>
+        <div style="margin-top:6px;font-size:.8rem;color:var(--grey-mid);">
+          <strong>Lost reason:</strong>
+          <?= h($LOST_REASONS[$r['lost_reason']] ?? $r['lost_reason']) ?>
+          <?php if (!empty($r['lost_note'])): ?>
+            — <?= h($r['lost_note']) ?>
+          <?php endif; ?>
+        </div>
       <?php endif; ?>
     </div>
 
@@ -948,5 +988,73 @@ $templates = $stmt->fetchAll(PDO::FETCH_ASSOC);
 $send_ajax_url = 'request_view.php?id=' . $r['id'];
 include 'includes/send_modal.php';
 ?>
+
+<?php if ($canEdit): ?>
+<!-- ── Lost-reason modal ─────────────────────────────────────────────────── -->
+<div id="lost-modal" style="display:none;position:fixed;inset:0;z-index:9998;
+     background:rgba(0,0,0,.45);align-items:center;justify-content:center;">
+  <div style="background:#fff;border-radius:10px;max-width:420px;width:calc(100% - 40px);
+       padding:22px 24px;box-shadow:0 12px 40px rgba(0,0,0,.25);">
+    <h3 style="margin:0 0 4px;font-family:'Merriweather',serif;font-size:1.05rem;color:var(--red-dk);">
+      Mark as Lost
+    </h3>
+    <p style="margin:0 0 14px;font-size:.82rem;color:var(--grey-mid);">
+      Why was this request lost?
+    </p>
+    <div id="lost-reason-list" style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px;">
+      <?php foreach ($LOST_REASONS as $slug => $label): ?>
+      <label style="display:flex;align-items:center;gap:9px;font-size:.86rem;color:var(--grey-dk);cursor:pointer;">
+        <input type="radio" name="lost_reason_choice" value="<?= h($slug) ?>">
+        <?= h($label) ?>
+      </label>
+      <?php endforeach; ?>
+    </div>
+    <label style="display:block;font-size:.78rem;color:var(--grey-mid);margin-bottom:5px;">
+      Note (optional)
+    </label>
+    <textarea id="lost-note-input" rows="3"
+      style="width:100%;box-sizing:border-box;font-size:.85rem;padding:8px 10px;
+             border:1.5px solid var(--grey-lt);border-radius:6px;resize:vertical;"
+      placeholder="Add any detail…"></textarea>
+    <div id="lost-error" style="display:none;color:var(--red-dk);font-size:.78rem;margin-top:8px;">
+      Please choose a reason.
+    </div>
+    <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:18px;">
+      <button type="button" class="btn btn-outline" style="font-size:.82rem;"
+              onclick="cancelLost()">Cancel</button>
+      <button type="button" class="btn" style="font-size:.82rem;background:var(--red);color:#fff;"
+              onclick="confirmLost()">Confirm Lost</button>
+    </div>
+  </div>
+</div>
+<script>
+function onStatusChange(sel) {
+  if (sel.value === 'Lost') {
+    document.getElementById('lost-error').style.display = 'none';
+    document.querySelectorAll('input[name="lost_reason_choice"]').forEach(r => r.checked = false);
+    document.getElementById('lost-note-input').value = '';
+    document.getElementById('lost-modal').style.display = 'flex';
+  } else {
+    sel.form.submit();
+  }
+}
+function cancelLost() {
+  const sel = document.getElementById('quick-status');
+  sel.value = sel.dataset.prev;          // restore previous status
+  document.getElementById('lost-modal').style.display = 'none';
+}
+function confirmLost() {
+  const chosen = document.querySelector('input[name="lost_reason_choice"]:checked');
+  if (!chosen) { document.getElementById('lost-error').style.display = 'block'; return; }
+  document.getElementById('lost-reason-field').value = chosen.value;
+  document.getElementById('lost-note-field').value   = document.getElementById('lost-note-input').value;
+  document.getElementById('status-form').submit();
+}
+// Close on backdrop click = cancel
+document.getElementById('lost-modal').addEventListener('click', function (e) {
+  if (e.target === this) cancelLost();
+});
+</script>
+<?php endif; ?>
 
 <?php include 'includes/footer.php'; ?>
