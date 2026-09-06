@@ -488,7 +488,11 @@ function iti_get_days(int $program_id): array {
                 sl.name    AS start_lodge_name,
                 sd.name_en AS start_dest_name,
                 el.name    AS end_lodge_name,
-                dest.name_en AS destination_name_en
+                el.latitude  AS end_lodge_lat,
+                el.longitude AS end_lodge_lng,
+                dest.name_en AS destination_name_en,
+                dest.latitude  AS dest_lat,
+                dest.longitude AS dest_lng
            FROM iti_program_days pd
            LEFT JOIN iti_lodges       sl   ON sl.id   = pd.start_lodge_id
            LEFT JOIN iti_destinations sd   ON sd.id   = pd.start_destination_id
@@ -510,6 +514,43 @@ function iti_start_display_name(array $day): ?string {
     if (!empty($day['start_dest_name']))   return $day['start_dest_name'];
     if (!empty($day['start_custom']))      return $day['start_custom'];
     return null;
+}
+
+/**
+ * Ordered geo-points for the itinerary map, one per overnight stop.
+ * For each day it prefers the end-lodge coordinates, falling back to the
+ * day's destination centre. Days with no coordinates are skipped, and
+ * consecutive stops at the same spot (multi-night) are merged into one point.
+ * Returns: [ ['day'=>int, 'name'=>string, 'lat'=>float, 'lng'=>float], ... ]
+ */
+function iti_get_program_map_points(array $days): array {
+    $points = [];
+    foreach ($days as $d) {
+        $lat = $lng = null; $name = '';
+        if ($d['end_lodge_lat'] !== null && $d['end_lodge_lng'] !== null) {
+            $lat = (float)$d['end_lodge_lat'];
+            $lng = (float)$d['end_lodge_lng'];
+            $name = $d['end_lodge_name'] ?: ($d['destination_name_en'] ?? '');
+        } elseif (($d['dest_lat'] ?? null) !== null && ($d['dest_lng'] ?? null) !== null) {
+            $lat = (float)$d['dest_lat'];
+            $lng = (float)$d['dest_lng'];
+            $name = $d['destination_name_en'] ?: ($d['end_lodge_name'] ?? '');
+        }
+        if ($lat === null || $lng === null) continue;
+
+        // Merge consecutive stops at the same coordinates (multi-night stays)
+        $last = end($points);
+        if ($last && abs($last['lat'] - $lat) < 0.0001 && abs($last['lng'] - $lng) < 0.0001) {
+            continue;
+        }
+        $points[] = [
+            'day'  => (int)$d['day_number'],
+            'name' => $name,
+            'lat'  => $lat,
+            'lng'  => $lng,
+        ];
+    }
+    return $points;
 }
 
 // ── PRICES ────────────────────────────────────────────────────────────────────
@@ -1190,6 +1231,17 @@ function iti_lbl_consultant(string $lang): string {
         'fr' => 'Votre conseiller voyage',
         'es' => 'Tu asesor de viajes',
         'de' => 'Ihr Reiseberater',
+    ];
+    return $map[$lang] ?? $map['en'];
+}
+
+function iti_lbl_map(string $lang): string {
+    $map = [
+        'en' => 'Itinerary Map',
+        'it' => 'Mappa dell\'itinerario',
+        'fr' => 'Carte de l\'itinéraire',
+        'es' => 'Mapa del itinerario',
+        'de' => 'Reiseroute-Karte',
     ];
     return $map[$lang] ?? $map['en'];
 }

@@ -22,6 +22,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit) {
         'category'       => $_POST['category']       ?? 'mid',
         'lodge_type'     => $_POST['lodge_type']     ?? 'lodge',
         'website'        => trim($_POST['website']   ?? ''),
+        'latitude'       => ($_POST['latitude']  ?? '') !== '' ? (float)$_POST['latitude']  : null,
+        'longitude'      => ($_POST['longitude'] ?? '') !== '' ? (float)$_POST['longitude'] : null,
         'is_active'      => isset($_POST['is_active']) ? 1 : 0,
     ];
     foreach (ITI_LANGS as $lang) {
@@ -38,13 +40,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit) {
             'INSERT INTO iti_lodges
              (destination_id,name,category,lodge_type,
               description_en,description_it,description_fr,description_es,description_de,
-              website,is_active)
-             VALUES (?,?,?,?,?,?,?,?,?,?,?)'
+              website,latitude,longitude,is_active)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)'
         )->execute([
             $fields['destination_id'], $fields['name'], $fields['category'], $fields['lodge_type'],
             $fields['description_en'], $fields['description_it'], $fields['description_fr'],
             $fields['description_es'], $fields['description_de'],
-            $fields['website'], $fields['is_active'],
+            $fields['website'], $fields['latitude'], $fields['longitude'], $fields['is_active'],
         ]);
         iti_flash_set('success', '"' . $fields['name'] . '" created.');
         iti_redirect('lodges.php');
@@ -54,12 +56,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit) {
             'UPDATE iti_lodges SET
              destination_id=?,name=?,category=?,lodge_type=?,
              description_en=?,description_it=?,description_fr=?,description_es=?,description_de=?,
-             website=?,is_active=? WHERE id=?'
+             website=?,latitude=?,longitude=?,is_active=? WHERE id=?'
         )->execute([
             $fields['destination_id'], $fields['name'], $fields['category'], $fields['lodge_type'],
             $fields['description_en'], $fields['description_it'], $fields['description_fr'],
             $fields['description_es'], $fields['description_de'],
-            $fields['website'], $fields['is_active'], $id,
+            $fields['website'], $fields['latitude'], $fields['longitude'], $fields['is_active'], $id,
         ]);
         iti_flash_set('success', 'Lodge updated.');
         iti_redirect('lodges.php');
@@ -152,6 +154,36 @@ include __DIR__ . '/../../includes/layout_header.php';
       <input type="url" name="website" placeholder="https://…" value="<?= h($row['website'] ?? '') ?>">
     </div>
   </div>
+
+  <div class="form-section-title">Location <span style="font-weight:400;font-size:.8rem;color:var(--grey-mid)">for the itinerary map</span></div>
+  <div class="form-grid">
+    <div class="form-group full">
+      <label>Paste from Google Maps</label>
+      <input type="text" id="gmaps_paste" placeholder="Right-click the lodge on Google Maps, click the coordinates to copy, paste here — e.g. -2.472099, 34.546776"
+             autocomplete="off">
+      <div style="font-size:.72rem;color:var(--grey-mid);margin-top:4px;">Splits automatically into Latitude / Longitude below.</div>
+    </div>
+    <div class="form-group">
+      <label>Latitude</label>
+      <input type="number" name="latitude" id="lat" step="0.000001" placeholder="-2.472099" value="<?= $row['latitude'] ?? '' ?>">
+    </div>
+    <div class="form-group">
+      <label>Longitude</label>
+      <input type="number" name="longitude" id="lng" step="0.000001" placeholder="34.546776" value="<?= $row['longitude'] ?? '' ?>">
+    </div>
+  </div>
+  <script>
+  (function(){
+    var paste = document.getElementById('gmaps_paste');
+    if (!paste) return;
+    function apply(){
+      var m = paste.value.match(/(-?\d+(?:\.\d+)?)\s*[,;\s]\s*(-?\d+(?:\.\d+)?)/);
+      if (m){ document.getElementById('lat').value = m[1]; document.getElementById('lng').value = m[2]; }
+    }
+    paste.addEventListener('input', apply);
+    paste.addEventListener('paste', function(){ setTimeout(apply, 0); });
+  })();
+  </script>
 
   <div class="form-section-title">Description <span style="font-weight:400;font-size:.8rem;color:var(--grey-mid)">× 5 languages</span></div>
   <?php foreach (ITI_LANGS as $lang): ?>
