@@ -154,7 +154,7 @@ header {
   <?php endif; // !isLeadsRestricted ?>
   <?php if (!isLeadsRestricted()): ?>
   <a href="pricing.php" class="<?= in_array($cur,['pricing.php','pricing_lodge.php']) ? 'active':'' ?>">Pricing</a>
-  <a href="wetu.php" class="<?= $cur==='wetu.php' ? 'active':'' ?>">🗺️ Wetu</a>
+  <a href="../iti/index.php" class="">🗺️ Itineraries</a>
   <?php endif; ?>
   <?php if (in_array($currentUser['role_name'] ?? '', ['admin','manager'])): ?>
   <span style="display:inline-block;width:1px;background:#E8E8E8;margin:8px 4px;align-self:stretch;"></span>
