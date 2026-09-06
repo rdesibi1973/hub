@@ -128,7 +128,7 @@ include __DIR__ . '/../../includes/layout_header.php';
 
   <!-- Hero header -->
   <div class="prev-hero">
-    <div style="margin-bottom:16px;">
+    <div style="margin:-24px 0 20px -28px;">
       <img src="<?= h(iti_setting('logo_url', 'https://hub.savannahexplorers.com/modules/iti/uploads/logo/logo_1781526818.png')) ?>"
            alt="<?= h(iti_setting('company_name', 'Savannah Explorers')) ?>"
            style="height:56px;width:auto;display:block;">
