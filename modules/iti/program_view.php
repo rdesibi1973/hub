@@ -43,9 +43,7 @@ include __DIR__ . '/../../includes/layout_header.php';
 
 <style>
 .prev-wrap   { max-width:800px; margin:0 auto; }
-.prev-hero   { background:
-                 linear-gradient(rgba(192,33,27,.74), rgba(192,33,27,.82)),
-                 url('https://www.savannahexplorers.com/img/leoni-safari.jpg') center/cover no-repeat;
+.prev-hero   { background:url('https://www.savannahexplorers.com/img/leoni-safari.jpg') center/cover no-repeat;
                background-color:var(--red);
                color:var(--white); border-radius:12px;
                padding:40px 48px; margin-bottom:32px; position:relative; overflow:hidden; }
