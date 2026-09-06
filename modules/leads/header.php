@@ -143,7 +143,7 @@ header {
   <a href="staging.php" class="<?= $cur==='staging.php'?'active':'' ?>" style="display:flex;align-items:center;gap:6px;">
     Incoming
     <?php if ($stagingCount): ?>
-      <span style="background:#C0211B;color:#fff;border-radius:10px;padding:1px 7px;font-size:.68rem;font-weight:700;line-height:1.6"><?= $stagingCount ?></span>
+      <span id="incomingBadge" style="background:#C0211B;color:#fff;border-radius:10px;padding:1px 7px;font-size:.68rem;font-weight:700;line-height:1.6"><?= $stagingCount ?></span>
     <?php endif; ?>
   </a>
   <?php endif; ?>

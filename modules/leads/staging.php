@@ -205,7 +205,7 @@ select:focus,input:focus{outline:none;border-color:#C0211B;box-shadow:0 0 0 2px 
     <p>No incoming leads<?= $filterDup||$filterSrc ? ' matching this filter' : '' ?>.</p>
   </div>
 <?php else: ?>
-<div style="background:#fff;border-radius:10px;box-shadow:0 2px 12px rgba(0,0,0,.07);overflow:hidden;">
+<div id="stageTableWrap" style="background:#fff;border-radius:10px;box-shadow:0 2px 12px rgba(0,0,0,.07);overflow:hidden;">
 <table class="stage-table">
   <thead>
     <tr>
@@ -265,7 +265,7 @@ select:focus,input:focus{outline:none;border-color:#C0211B;box-shadow:0 0 0 2px 
 
     <!-- APPROVE -->
     <div class="action-panel active" id="panel-approve">
-      <form method="POST" action="staging_action.php" target="_blank" onsubmit="afterProcess()">
+      <form method="POST" action="staging_action.php" target="_blank" onsubmit="afterProcess(this)">
         <input type="hidden" name="action" value="approve">
         <input type="hidden" name="staging_id" id="approveId">
         <!-- Editable customer name -->
@@ -326,7 +326,7 @@ select:focus,input:focus{outline:none;border-color:#C0211B;box-shadow:0 0 0 2px 
 
     <!-- MERGE -->
     <div class="action-panel" id="panel-merge">
-      <form method="POST" action="staging_action.php" target="_blank" onsubmit="afterProcess()">
+      <form method="POST" action="staging_action.php" target="_blank" onsubmit="afterProcess(this)">
         <input type="hidden" name="action" value="merge">
         <input type="hidden" name="staging_id" id="mergeId">
         <div class="form-row full">
@@ -512,11 +512,37 @@ function openDrawer(id) {
   switchTab('approve');
 }
 
-// After approve/merge, the request opens in a new tab; close the drawer and
-// reload the incoming list so the just-processed lead disappears.
-function afterProcess() {
+// After approve/merge, the request opens in a new tab. Just remove the
+// just-processed lead's row from the list so it disappears — do NOT reload the
+// whole page: a reload would wipe an assignment the user may already have
+// started on a different lead (its drawer/form is filled in but not submitted).
+function afterProcess(form) {
+  const idField = form ? form.querySelector('input[name="staging_id"]') : null;
+  const id = idField ? idField.value : null;
   closeDrawer();
-  setTimeout(() => location.reload(), 1200);
+  if (!id) return;
+  const tr = document.querySelector('tr[data-id="' + id + '"]');
+  if (tr) tr.remove();
+  try { delete LEADS[id]; } catch (e) {}
+  updateIncomingCount();
+}
+
+// Keep the Incoming nav badge and the empty-state in sync after a row is removed.
+function updateIncomingCount() {
+  const remaining = document.querySelectorAll('.stage-table tbody tr').length;
+  const badge = document.getElementById('incomingBadge');
+  if (badge) {
+    if (remaining > 0) { badge.textContent = remaining; badge.style.display = ''; }
+    else { badge.style.display = 'none'; }
+  }
+  if (remaining === 0) {
+    const wrap = document.getElementById('stageTableWrap');
+    if (wrap) {
+      wrap.outerHTML =
+        '<div class="empty-state"><div class="icon">📭</div>' +
+        '<p>No incoming leads.</p></div>';
+    }
+  }
 }
 
 function closeDrawer() {
