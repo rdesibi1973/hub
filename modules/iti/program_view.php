@@ -129,11 +129,9 @@ include __DIR__ . '/../../includes/layout_header.php';
   <!-- Hero header -->
   <div class="prev-hero">
     <div style="margin-bottom:16px;">
-      <span style="display:inline-block;background:#fff;border-radius:10px;padding:8px 12px;">
-        <img src="<?= h(iti_setting('logo_url', 'https://hub.savannahexplorers.com/modules/iti/uploads/logo/logo_1781526818.png')) ?>"
-             alt="<?= h(iti_setting('company_name', 'Savannah Explorers')) ?>"
-             style="height:56px;width:auto;display:block;">
-      </span>
+      <img src="<?= h(iti_setting('logo_url', 'https://hub.savannahexplorers.com/modules/iti/uploads/logo/logo_1781526818.png')) ?>"
+           alt="<?= h(iti_setting('company_name', 'Savannah Explorers')) ?>"
+           style="height:56px;width:auto;display:block;">
     </div>
     </div>
     <h1><?= iti_h($program, 'title', $lang) ?></h1>
