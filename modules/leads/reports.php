@@ -1,7 +1,6 @@
 <?php
 require_once 'config.php';
 requireLogin();
-if (isLeadsRestricted()) { header('Location: requests.php'); exit; }
 $pageTitle = 'Reports';
 $db = db();
 
@@ -17,6 +16,21 @@ $range_to      = $_GET['to']            ?? date('Y-m-d');
 $agent_filter  = (int)($_GET['agent']   ?? 0);
 $sort          = $_GET['sort']          ?? 'total';
 $dir           = $_GET['dir']           ?? 'desc';
+
+// ── Access model ──────────────────────────────────────────────────
+// Admin/manager: full Reports (sales/travel/team, any agent).
+// Restricted sellers: ONLY their own Sales Team card, locked to self.
+$isRestricted = isLeadsRestricted();
+$myAgentId    = 0;
+if ($isRestricted) {
+    $st = $db->prepare("SELECT agent_id FROM users WHERE id = ?");
+    $st->execute([current_user()['id']]);
+    $myAgentId = (int)($st->fetchColumn() ?: 0);
+    // A seller with no linked agent has nothing to show here.
+    if ($myAgentId <= 0) { header('Location: requests.php'); exit; }
+    $report_type  = 'team';       // force the team view
+    $agent_filter = $myAgentId;   // locked to their own agent
+}
 
 // ── Available years — merge live + history ────────────────────────
 $live_years = $db->query("SELECT DISTINCT YEAR(date_received) y FROM requests ORDER BY y DESC")
@@ -250,7 +264,7 @@ $sortFn = function($a, $b) use ($sort, $dir) {
     return $dir === 'desc' ? $vb <=> $va : $va <=> $vb;
 };
 
-if ($mode === 'monthly') {
+if ($report_type !== 'team' && $mode === 'monthly') {
     $from = sprintf('%04d-%02d-01', $year, $month);
     $to   = date('Y-m-t', strtotime($from));
     $summary = $is_history
@@ -356,6 +370,100 @@ if ($report_type === 'travel' && !$is_history) {
     ];
 }
 
+// ── Sales Team data (report_type=team) ────────────────────────────
+// "Since start of year" = the selected year. Conversion rate is COHORT-CONSISTENT:
+// of the requests ASSIGNED this year, how many are now Booked (regardless of when).
+$team_overview = null;   // per-agent rows (agent_filter = 0)
+$team_agent    = null;   // single-agent drill-down (agent_filter > 0)
+$OPEN_STATUSES = ['Inquiry','Quoted','Hot','Hot-Quoted'];
+if ($report_type === 'team') {
+    $ty       = $year;
+    $notStaff = "(practice_code NOT LIKE '%-STAFF%' OR practice_code IS NULL)";
+
+    if ($agent_filter > 0) {
+        // Drill-down: one query with every request assigned to this agent this year.
+        $q = $db->prepare("
+            SELECT id, customer_name, destination, value_usd, pax,
+                   date_received, status, pipeline_column
+            FROM requests
+            WHERE agent_id = ? AND YEAR(date_received) = ? AND $notStaff
+            ORDER BY date_received DESC
+        ");
+        $q->execute([$agent_filter, $ty]);
+        $reqs = $q->fetchAll(PDO::FETCH_ASSOC);
+
+        $kpi   = ['assigned'=>0,'booked'=>0,'open'=>0,'lost'=>0,'hot'=>0,'sales'=>0.0];
+        $weeks = [];   // isoWeek => aggregate + request list
+        foreach ($reqs as $r) {
+            $kpi['assigned']++;
+            $isBooked = ($r['status'] === 'Booked');
+            $isLost   = ($r['status'] === 'Lost');
+            $isOpen   = in_array($r['status'], $OPEN_STATUSES, true);
+            $isHot    = ($r['pipeline_column'] === 'hot');
+            if ($isBooked) { $kpi['booked']++; $kpi['sales'] += (float)$r['value_usd']; }
+            if ($isLost)   $kpi['lost']++;
+            if ($isOpen)   $kpi['open']++;
+            if ($isHot)    $kpi['hot']++;
+
+            $wk = (int)date('W', strtotime($r['date_received']));
+            if (!isset($weeks[$wk])) {
+                $weeks[$wk] = ['wk'=>$wk,'assigned'=>0,'booked'=>0,'open'=>0,'lost'=>0,'reqs'=>[]];
+            }
+            $weeks[$wk]['assigned']++;
+            if ($isBooked) $weeks[$wk]['booked']++;
+            if ($isLost)   $weeks[$wk]['lost']++;
+            if ($isOpen)   $weeks[$wk]['open']++;
+            $weeks[$wk]['reqs'][] = $r;
+        }
+        krsort($weeks);   // most recent week first
+
+        $aname = 'Agent';
+        foreach ($all_agents as $ag) if ((int)$ag['id'] === $agent_filter) $aname = $ag['name'];
+        $team_agent = ['name'=>$aname,'kpi'=>$kpi,'weeks'=>$weeks,'reqs'=>$reqs];
+        $title_str  = "$aname — Sales Team $ty";
+
+    } else {
+        // Overview: one grouped query for every agent.
+        $q = $db->prepare("
+            SELECT agent_id,
+                   COUNT(*)                                            AS assigned,
+                   SUM(status='Booked')                                AS booked,
+                   SUM(status IN ('Inquiry','Quoted','Hot','Hot-Quoted')) AS open_cnt,
+                   SUM(status='Lost')                                  AS lost,
+                   SUM(pipeline_column='hot')                          AS hot_cnt,
+                   SUM(CASE WHEN status='Booked' THEN value_usd ELSE 0 END) AS sales
+            FROM requests
+            WHERE YEAR(date_received) = ? AND $notStaff
+            GROUP BY agent_id
+        ");
+        $q->execute([$ty]);
+        $by = [];
+        foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $r) $by[(int)$r['agent_id']] = $r;
+
+        $rows = [];
+        $tot  = ['assigned'=>0,'booked'=>0,'open'=>0,'lost'=>0,'hot'=>0,'sales'=>0.0];
+        $push = function(int $aid, string $name, $d) use (&$rows, &$tot) {
+            $row = [
+                'aid'=>$aid, 'name'=>$name,
+                'assigned'=>(int)($d['assigned']??0),
+                'booked'  =>(int)($d['booked']??0),
+                'open'    =>(int)($d['open_cnt']??0),
+                'lost'    =>(int)($d['lost']??0),
+                'hot'     =>(int)($d['hot_cnt']??0),
+                'sales'   =>(float)($d['sales']??0),
+            ];
+            $rows[] = $row;
+            foreach (['assigned','booked','open','lost','hot','sales'] as $k) $tot[$k] += $row[$k];
+        };
+        foreach ($all_agents as $ag) $push((int)$ag['id'], $ag['name'], $by[(int)$ag['id']] ?? []);
+        if (!empty($by[0])) $push(0, '— Unassigned —', $by[0]);   // requests with no agent
+
+        usort($rows, fn($a,$b) => $b['assigned'] <=> $a['assigned']);
+        $team_overview = ['rows'=>$rows,'totals'=>$tot];
+        $title_str     = "Sales Team — $ty";
+    }
+}
+
 // ── Month names ───────────────────────────────────────────────────
 $month_names = [
     1=>'January',2=>'February',3=>'March',4=>'April',
@@ -397,6 +505,7 @@ include 'includes/header.php';
   <!-- Report type tabs -->
   <?php if (!$is_history): ?>
   <div style="display:flex;gap:8px;margin-bottom:14px;">
+    <?php if (!$isRestricted): ?>
     <a href="?mode=<?= $mode ?>&rtype=sales&year=<?= $year ?>&month=<?= $month ?>&from=<?= h($range_from) ?>&to=<?= h($range_to) ?>&agent=<?= $agent_filter ?>"
        class="btn btn-sm <?= $report_type==='sales' ? 'btn-red' : 'btn-outline' ?>">
       📊 Sales Report
@@ -405,9 +514,45 @@ include 'includes/header.php';
        class="btn btn-sm <?= $report_type==='travel' ? 'btn-red' : 'btn-outline' ?>">
       ✈️ Travel Period
     </a>
+    <?php endif; ?>
+    <a href="?rtype=team&year=<?= $year ?>&agent=<?= $agent_filter ?>"
+       class="btn btn-sm <?= $report_type==='team' ? 'btn-red' : 'btn-outline' ?>">
+      👥 Sales Team
+    </a>
   </div>
   <?php endif; ?>
 
+  <?php if ($report_type === 'team'): ?>
+  <!-- Team filter: year (+ agent for admin/manager) -->
+  <form method="GET" style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap">
+    <input type="hidden" name="rtype" value="team">
+    <div>
+      <label style="font-size:.72rem;font-weight:700;color:var(--grey-dk);display:block;margin-bottom:4px">Year</label>
+      <select name="year" onchange="this.form.submit()"
+              style="padding:8px 12px;border:1.5px solid var(--grey-lt);border-radius:6px;font-family:'Open Sans',sans-serif;font-size:.82rem">
+        <?php foreach ($years as $y): ?>
+          <option value="<?= $y ?>" <?= (int)$y===$year?'selected':'' ?>><?= $y ?></option>
+        <?php endforeach; ?>
+      </select>
+    </div>
+    <?php if (!$isRestricted): ?>
+    <div>
+      <label style="font-size:.72rem;font-weight:700;color:var(--grey-dk);display:block;margin-bottom:4px">Agent</label>
+      <select name="agent" onchange="this.form.submit()"
+              style="padding:8px 12px;border:1.5px solid var(--grey-lt);border-radius:6px;font-family:'Open Sans',sans-serif;font-size:.82rem">
+        <option value="0">All agents (overview)</option>
+        <?php foreach ($all_agents as $ag): ?>
+          <option value="<?= $ag['id'] ?>" <?= $agent_filter===(int)$ag['id']?'selected':'' ?>><?= h($ag['name']) ?></option>
+        <?php endforeach; ?>
+      </select>
+    </div>
+    <?php endif; ?>
+    <button type="submit" class="btn btn-red btn-sm">View</button>
+    <?php if ($agent_filter>0 && !$isRestricted): ?>
+      <a href="?rtype=team&year=<?= $year ?>&agent=0" class="btn btn-outline btn-sm">← All agents</a>
+    <?php endif; ?>
+  </form>
+  <?php else: ?>
   <!-- Mode tabs -->
   <div style="display:flex;gap:8px;margin-bottom:16px;border-bottom:1px solid var(--grey-lt);padding-bottom:14px;">
     <?php
@@ -532,6 +677,7 @@ include 'includes/header.php';
     <button type="submit" class="btn btn-red btn-sm">View</button>
   </form>
   <?php endif; ?>
+  <?php endif; /* team filter vs mode tabs+controls */ ?>
 </div>
 
 <!-- ── HISTORICAL DATA BANNER ──────────────────────────────────── -->
@@ -545,6 +691,156 @@ include 'includes/header.php';
   </span>
 </div>
 <?php endif; ?>
+
+<!-- ── SALES TEAM ─────────────────────────────────────────────── -->
+<?php if ($report_type === 'team'): ?>
+<?php
+  $rate = fn($num,$den) => $den>0 ? round($num*100/$den) : 0;
+  $pill = fn($st) => '<span class="badge '.(STATUSES[$st] ?? '').'">'.h($st).'</span>';
+?>
+
+<?php if ($team_overview !== null): // ---- OVERVIEW: all agents ---- ?>
+  <?php $T = $team_overview['totals']; ?>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th style="text-align:left">Agent</th>
+          <th>Assigned</th><th>Booked</th><th>Rate</th>
+          <th>Open</th><th>🔥 Hot</th><th>Lost</th><th>Sales</th>
+        </tr>
+      </thead>
+      <tbody>
+      <?php foreach ($team_overview['rows'] as $r): ?>
+        <tr>
+          <td style="text-align:left">
+            <?php if ($r['aid']>0): ?>
+              <a href="?rtype=team&year=<?= $year ?>&agent=<?= $r['aid'] ?>" style="font-weight:700;color:var(--red);text-decoration:none"><?= h($r['name']) ?></a>
+            <?php else: ?>
+              <span style="color:var(--grey-mid)"><?= h($r['name']) ?></span>
+            <?php endif; ?>
+          </td>
+          <td><?= $r['assigned'] ?></td>
+          <td><?= $r['booked'] ?: '—' ?></td>
+          <td style="font-weight:700"><?= $rate($r['booked'],$r['assigned']) ?>%</td>
+          <td><?= $r['open'] ?: '—' ?></td>
+          <td><?= $r['hot'] ?: '—' ?></td>
+          <td><?= $r['lost'] ?: '—' ?></td>
+          <td><?= $r['sales']>0 ? '$'.number_format($r['sales'],0) : '—' ?></td>
+        </tr>
+      <?php endforeach; ?>
+      </tbody>
+      <tfoot>
+        <tr style="font-weight:700;border-top:2px solid var(--grey-lt)">
+          <td style="text-align:left">TOTAL</td>
+          <td><?= $T['assigned'] ?></td>
+          <td><?= $T['booked'] ?></td>
+          <td><?= $rate($T['booked'],$T['assigned']) ?>%</td>
+          <td><?= $T['open'] ?></td>
+          <td><?= $T['hot'] ?></td>
+          <td><?= $T['lost'] ?></td>
+          <td>$<?= number_format($T['sales'],0) ?></td>
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+  <p style="font-size:.72rem;color:var(--grey-mid);margin-top:8px">
+    Cohort view for <?= $year ?>: <strong>Rate = Booked ÷ Assigned</strong> over requests assigned this year
+    (a lead assigned this year that is now Booked counts, whenever it closed). Click an agent for the weekly breakdown.
+  </p>
+
+<?php elseif ($team_agent !== null): // ---- DRILL-DOWN: single agent ---- ?>
+  <?php $k = $team_agent['kpi']; ?>
+  <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:20px">
+    <?php
+      $cards = [
+        ['Assigned',      $k['assigned'],                              'var(--blue)'],
+        ['Booked',        $k['booked'],                                'var(--green)'],
+        ['Rate',          $rate($k['booked'],$k['assigned']).'%',      'var(--amber)'],
+        ['Open',          $k['open'],                                  'var(--grey-dk)'],
+        ['🔥 Hot-Quoted', $k['hot'],                                   '#C45000'],
+        ['Sales',         '$'.number_format($k['sales'],0),            'var(--green)'],
+      ];
+      foreach ($cards as $c): ?>
+      <div style="flex:1;min-width:120px;background:var(--white);border-radius:10px;box-shadow:0 1px 6px rgba(0,0,0,.06);border-top:3px solid <?= $c[2] ?>;padding:14px 16px">
+        <div style="font-size:.66rem;font-weight:700;letter-spacing:.06em;color:var(--grey-mid);text-transform:uppercase"><?= $c[0] ?></div>
+        <div style="font-size:1.5rem;font-weight:800;color:var(--grey-dk);margin-top:4px"><?= $c[1] ?></div>
+      </div>
+    <?php endforeach; ?>
+  </div>
+
+  <h3 style="font-family:'Merriweather',serif;font-size:1rem;color:var(--red-dk);margin:0 0 8px">Week by week <span style="font-weight:400;font-size:.8rem;color:var(--grey-mid)">(by assignment week — click a row)</span></h3>
+  <?php if (empty($team_agent['weeks'])): ?>
+    <p style="color:var(--grey-mid);font-size:.85rem">No requests assigned in <?= $year ?>.</p>
+  <?php else: ?>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th style="text-align:left">Week</th>
+          <th>Assigned</th><th>🟢 Booked</th><th>🟡 Open</th><th>⚪ Lost</th><th>Rate</th><th></th>
+        </tr>
+      </thead>
+      <tbody>
+      <?php foreach ($team_agent['weeks'] as $wk => $w):
+        $first = $w['reqs'][count($w['reqs'])-1]['date_received']; // earliest (list is DESC)
+        $mon   = date('d M', strtotime('monday this week', strtotime($first)));
+        $sun   = date('d M', strtotime('sunday this week', strtotime($first)));
+      ?>
+        <tr class="wk-row" onclick="toggleWk(<?= $wk ?>)" style="cursor:pointer">
+          <td style="text-align:left;font-weight:700">W<?= $wk ?> <span style="font-weight:400;color:var(--grey-mid)">· <?= $mon ?>–<?= $sun ?></span></td>
+          <td><?= $w['assigned'] ?></td>
+          <td><?= $w['booked'] ?: '—' ?></td>
+          <td><?= $w['open'] ?: '—' ?></td>
+          <td><?= $w['lost'] ?: '—' ?></td>
+          <td style="font-weight:700"><?= $rate($w['booked'],$w['assigned']) ?>%</td>
+          <td style="color:var(--grey-mid)">▸</td>
+        </tr>
+        <tr class="wk-detail" id="wk-<?= $wk ?>" hidden>
+          <td colspan="7" style="background:#FAFAFA;padding:6px 12px">
+            <?php foreach ($w['reqs'] as $r): ?>
+              <div style="display:flex;align-items:center;gap:10px;padding:5px 4px;border-bottom:1px solid var(--grey-lt);font-size:.8rem">
+                <span style="color:var(--grey-mid);white-space:nowrap;width:52px"><?= date('d M', strtotime($r['date_received'])) ?></span>
+                <a href="request_view.php?id=<?= $r['id'] ?>" target="_blank" rel="noopener" style="font-weight:600;color:var(--grey-dk);flex:1;min-width:120px;text-decoration:none"><?= h($r['customer_name']) ?></a>
+                <span style="color:var(--grey-mid);flex:1;min-width:80px"><?= h($r['destination'] ?: '—') ?></span>
+                <?= $pill($r['status']) ?>
+                <?php if ($r['pipeline_column']==='hot'): ?><span class="badge status-hot-quoted">🔥 HOT</span><?php endif; ?>
+                <span style="width:80px;text-align:right;color:var(--grey-dk)"><?= $r['value_usd']>0 ? '$'.number_format($r['value_usd'],0):'' ?></span>
+              </div>
+            <?php endforeach; ?>
+          </td>
+        </tr>
+      <?php endforeach; ?>
+      </tbody>
+    </table>
+  </div>
+  <?php endif; ?>
+
+  <h3 style="font-family:'Merriweather',serif;font-size:1rem;color:var(--red-dk);margin:22px 0 8px">All requests <?= $year ?> <span style="font-weight:400;font-size:.8rem;color:var(--grey-mid)">(<?= count($team_agent['reqs']) ?>)</span></h3>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th style="text-align:left">Received</th><th style="text-align:left">Customer</th><th style="text-align:left">Destination</th><th>Pax</th><th style="text-align:left">Status</th><th>Value</th></tr></thead>
+      <tbody>
+      <?php foreach ($team_agent['reqs'] as $r): ?>
+        <tr>
+          <td style="text-align:left;color:var(--grey-mid);white-space:nowrap"><?= date('d M', strtotime($r['date_received'])) ?></td>
+          <td style="text-align:left"><a href="request_view.php?id=<?= $r['id'] ?>" target="_blank" rel="noopener" style="font-weight:600;color:var(--grey-dk);text-decoration:none"><?= h($r['customer_name']) ?></a></td>
+          <td style="text-align:left"><?= h($r['destination'] ?: '—') ?></td>
+          <td><?= $r['pax'] ?: '—' ?></td>
+          <td style="text-align:left"><?= $pill($r['status']) ?><?php if ($r['pipeline_column']==='hot'): ?> <span class="badge status-hot-quoted">🔥</span><?php endif; ?></td>
+          <td><?= $r['value_usd']>0 ? '$'.number_format($r['value_usd'],0):'—' ?></td>
+        </tr>
+      <?php endforeach; ?>
+      </tbody>
+    </table>
+  </div>
+
+  <script>
+  function toggleWk(wk){ var el=document.getElementById('wk-'+wk); if(el) el.hidden=!el.hidden; }
+  </script>
+<?php endif; ?>
+
+<?php endif; /* report_type team */ ?>
 
 <!-- ── SUMMARY TABLE ──────────────────────────────────────────── -->
 <?php if ($summary && $report_type === 'sales'): ?>
