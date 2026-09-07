@@ -26,18 +26,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'
     if (!$id || !in_array($col, $allowed, true)) {
         echo json_encode(['ok'=>false,'message'=>'Invalid params']); exit;
     }
-    $promoteToQuoted = ($from === 'new' && in_array($col, ['quoted','hot'], true));
-    $sql    = $promoteToQuoted
-        ? "UPDATE requests SET pipeline_column=?, status='Quoted' WHERE id=?"
-        : "UPDATE requests SET pipeline_column=? WHERE id=?";
-    $args   = [$col, $id];
+    // Auto-status on drop:
+    //  - into HOT       → 'Hot-Quoted' (a lead in the hot column has been quoted
+    //                     and is heating up); can also be set manually via the LOV.
+    //  - NEW → QUOTED   → 'Quoted' (a lead reaching QUOTED has been quoted).
+    // Never overwrite a closed/dead status (Booked/Lost/Cancelled).
+    $newStatus = null;
+    if ($col === 'hot')                             $newStatus = 'Hot-Quoted';
+    elseif ($from === 'new' && $col === 'quoted')   $newStatus = 'Quoted';
+
+    if ($newStatus !== null) {
+        $sql  = "UPDATE requests SET pipeline_column=?,
+                        status = CASE WHEN status IN ('Booked','Lost','Cancelled')
+                                      THEN status ELSE ? END
+                 WHERE id=?";
+        $args = [$col, $newStatus, $id];
+    } else {
+        $sql  = "UPDATE requests SET pipeline_column=? WHERE id=?";
+        $args = [$col, $id];
+    }
     // Staff can only move their own requests
     if ($isStaff && $staffAgentId) {
         $sql .= " AND agent_id=?";
         $args[] = $staffAgentId;
     }
     $db->prepare($sql)->execute($args);
-    echo json_encode(['ok'=>true, 'status'=>$promoteToQuoted ? 'Quoted' : null]); exit;
+    echo json_encode(['ok'=>true, 'status'=>$newStatus]); exit;
 }
 
 // ── Filters ────────────────────────────────────────────────────────────────
@@ -68,12 +82,12 @@ $columns = [
     'new'    => ['label'=>'NEW',      'icon'=>'📥', 'cls'=>'col-new',    'default_statuses'=>['Inquiry']],
     'wip'    => ['label'=>'WIP',      'icon'=>'⚙️', 'cls'=>'col-wip',    'default_statuses'=>[]],
     'quoted' => ['label'=>'QUOTED',   'icon'=>'💬', 'cls'=>'col-quoted', 'default_statuses'=>['Quoted']],
-    'hot'    => ['label'=>'HOT',      'icon'=>'🔥', 'cls'=>'col-hot',    'default_statuses'=>['Hot']],
+    'hot'    => ['label'=>'HOT',      'icon'=>'🔥', 'cls'=>'col-hot',    'default_statuses'=>['Hot-Quoted','Hot']],
     'booked' => ['label'=>'CONFIRMED','icon'=>'✅', 'cls'=>'col-booked', 'default_statuses'=>[]],
 ];
 
 // ── Fetch all pipeline-visible requests ────────────────────────────────────
-$where  = ["(r.status IN ('Inquiry','Quoted','Hot') OR r.pipeline_column = 'booked')"];
+$where  = ["(r.status IN ('Inquiry','Quoted','Hot','Hot-Quoted') OR r.pipeline_column = 'booked')"];
 $params = [];
 
 if ($isStaff && $staffAgentId) {
@@ -266,9 +280,9 @@ include 'includes/header.php';
           $val  = $r['value_usd'] ? '$'.number_format($r['value_usd'],0) : '';
           $date = date('d M', strtotime($r['date_received']));
           // Status badge colors inline (no dependency on CSS class names for WIP)
-          $sbg  = ['Inquiry'=>'#E5F0FC','Quoted'=>'#FEF0E5','Hot'=>'#FFF0E0',
+          $sbg  = ['Inquiry'=>'#E5F0FC','Quoted'=>'#FEF0E5','Hot'=>'#FFF0E0','Hot-Quoted'=>'#FFF0E0',
                    'Booked' =>'#EBF5EE','Lost'  =>'#F0F0F0','Cancelled'=>'#FAE8E7'];
-          $sco  = ['Inquiry'=>'#0062B1','Quoted'=>'#E87722','Hot'=>'#C45000',
+          $sco  = ['Inquiry'=>'#0062B1','Quoted'=>'#E87722','Hot'=>'#C45000','Hot-Quoted'=>'#C45000',
                    'Booked' =>'#1A6B3A','Lost'  =>'#888',   'Cancelled'=>'#C0211B'];
           $st      = $r['status'];
           $stLabel = ($st === 'Booked') ? 'Confirmed' : $st;
@@ -374,8 +388,8 @@ async function moveCard(id, from, to) {
 function setStatusBadge(card, status) {
   const badge = card.querySelector('.card-status-badge');
   if (!badge) return;
-  const sbg = {Inquiry:'#E5F0FC',Quoted:'#FEF0E5',Hot:'#FFF0E0',Booked:'#EBF5EE',Lost:'#F0F0F0',Cancelled:'#FAE8E7'};
-  const sco = {Inquiry:'#0062B1',Quoted:'#E87722',Hot:'#C45000',Booked:'#1A6B3A',Lost:'#888',Cancelled:'#C0211B'};
+  const sbg = {Inquiry:'#E5F0FC',Quoted:'#FEF0E5',Hot:'#FFF0E0','Hot-Quoted':'#FFF0E0',Booked:'#EBF5EE',Lost:'#F0F0F0',Cancelled:'#FAE8E7'};
+  const sco = {Inquiry:'#0062B1',Quoted:'#E87722',Hot:'#C45000','Hot-Quoted':'#C45000',Booked:'#1A6B3A',Lost:'#888',Cancelled:'#C0211B'};
   badge.textContent      = (status === 'Booked') ? 'Confirmed' : status;
   badge.style.background  = sbg[status] || '#eee';
   badge.style.color       = sco[status] || '#444';

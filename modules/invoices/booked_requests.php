@@ -13,12 +13,13 @@ require_once 'config.php';
 // STATUSES defined inline — avoids loading leads/config.php which redefines db() and h()
 if (!defined('STATUSES')) {
     define('STATUSES', [
-        'Inquiry'   => 'status-inquiry',
-        'Quoted'    => 'status-quoted',
-        'Hot'       => 'status-hot',
-        'Booked'    => 'status-booked',
-        'Cancelled' => 'status-cancelled',
-        'Lost'      => 'status-lost',
+        'Inquiry'    => 'status-inquiry',
+        'Quoted'     => 'status-quoted',
+        'Hot-Quoted' => 'status-hot-quoted',
+        'Hot'        => 'status-hot',
+        'Booked'     => 'status-booked',
+        'Cancelled'  => 'status-cancelled',
+        'Lost'       => 'status-lost',
     ]);
 }
 
