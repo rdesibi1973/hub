@@ -20,6 +20,21 @@ Running log of notable changes and current build state. Module-level "active / p
 
 ---
 
+## 2026-09 — Itinerary map: merged markers + legend (ITI)
+- Fixed overlapping map markers: when a stop is visited more than once (e.g. a
+  return to the same lodge on day 2 and day 4) the two pins used to stack and one
+  disappeared. Stops sharing coordinates now collapse into a single marker whose
+  label combines the numbers ("2 & 4"). The route line still visits every point
+  in order, so the out-and-back leg stays drawn.
+- New `iti_group_map_points()` helper (`includes/iti_functions.php`) is the single
+  source of the grouping, used by both interactive maps and the export.
+- Added a **legend** under the map (new `includes/iti_map_legend.php`) listing each
+  numbered stop and its name — shown on `program_view.php` (client view) and
+  `itinerary.php` (editor), and as a table under the map in the Word export
+  (`export_word.php`). New label `iti_lbl_map_legend()`.
+- Interactive markers are now auto-width pills so combined numbers fit; the PNG/Word
+  export (`includes/iti_map.php`) draws the same pill via a new `iti_map_pill()`.
+
 ## 2026-08 — Voucher generator (ITI)
 - New `modules/iti/vouchers.php`: upload a WeTu Word programme (.docx) + the Excel
   calc (.xlsx), review/edit traveller names (Mr/Mrs), dietary notes, per-lodge

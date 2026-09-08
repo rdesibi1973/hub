@@ -158,6 +158,40 @@ if ($consultant) {
     }
 }
 
+// ── MAPPA ITINERARIO (immagine statica GD) ──────────────────
+$map_tmp = null;
+$map_points = iti_get_program_map_points($days);
+if (count($map_points) >= 2 && function_exists('imagecreatetruecolor')) {
+    require_once __DIR__ . '/includes/iti_map.php';
+    $map_tmp = sys_get_temp_dir() . '/itimap_' . $id . '_' . uniqid() . '.png';
+    if (iti_render_itinerary_map($map_points, $map_tmp)) {
+        $section->addText('', null, ['borderBottomSize'=>4,'borderBottomColor'=>$OFF_WHITE,'spaceAfter'=>120]);
+        $section->addText(iti_lbl_map($lang), 'consLabel', ['spaceAfter'=>80]);
+        $section->addImage($map_tmp, ['width'=>460, 'alignment'=>'center']);
+        // Legend: one row per numbered stop (matches the map marker numbers).
+        $section->addText(iti_lbl_map_legend($lang), 'consLabel', ['spaceBefore'=>140,'spaceAfter'=>80]);
+        $ltbl = $section->addTable(['borderSize'=>0,'cellMargin'=>40]);
+        foreach ($map_points as $i => $mp) {
+            $ltbl->addRow();
+            $ltbl->addCell(500, ['bgColor'=>$RED,'valign'=>'center'])
+                 ->addText((string)($i + 1),
+                     ['name'=>'Calibri','size'=>10,'bold'=>true,'color'=>'FFFFFF'],
+                     ['alignment'=>'center']);
+            $ltbl->addCell(8500, ['valign'=>'center'])
+                 ->addText((string)($mp['name'] ?? ''), 'normal', ['spaceAfter'=>0]);
+        }
+        if (!empty($program['is_published']) && !empty($program['public_token']) && defined('BASE_URL')) {
+            $pub = BASE_URL . '/modules/iti/itinerary.php?token=' . $program['public_token'];
+            $section->addText(iti_lbl_map_online($lang), 'small', ['alignment'=>'center','spaceBefore'=>100,'spaceAfter'=>20]);
+            $section->addLink($pub, $pub,
+                ['name'=>'Calibri','size'=>9,'color'=>$RED,'underline'=>'single'],
+                ['alignment'=>'center']);
+        }
+    } else {
+        $map_tmp = null;
+    }
+}
+
 $section->addPageBreak();
 
 // ── GIORNI ──────────────────────────────────────────────────
@@ -314,4 +348,5 @@ header('Cache-Control: max-age=0');
 
 $writer = \PhpOffice\PhpWord\IOFactory::createWriter($phpWord,'Word2007');
 $writer->save('php://output');
+if ($map_tmp && is_file($map_tmp)) @unlink($map_tmp);
 exit;

@@ -553,6 +553,44 @@ function iti_get_program_map_points(array $days): array {
     return $points;
 }
 
+/**
+ * Collapse map points that share the same coordinates into a single marker,
+ * combining their stop numbers (e.g. returning to a lodge on day 2 and day 4
+ * yields one marker labelled "2 & 4" instead of two overlapping pins).
+ *
+ * Input:  the ordered points from iti_get_program_map_points() (1-based
+ *         numbering follows their order in the array).
+ * Returns: [ ['nums'=>[2,4], 'label'=>'2 & 4', 'name'=>string,
+ *            'lat'=>float, 'lng'=>float], ... ] in first-visit order.
+ *
+ * The route polyline should still be drawn from the full point list so the
+ * out-and-back leg to a repeated stop remains visible.
+ */
+function iti_group_map_points(array $points): array {
+    $groups = [];
+    $index  = []; // "lat,lng" (rounded) => group position
+    foreach (array_values($points) as $i => $p) {
+        $num = $i + 1;
+        $key = round((float)$p['lat'], 4) . ',' . round((float)$p['lng'], 4);
+        if (isset($index[$key])) {
+            $groups[$index[$key]]['nums'][] = $num;
+        } else {
+            $index[$key] = count($groups);
+            $groups[] = [
+                'nums' => [$num],
+                'name' => (string)($p['name'] ?? ''),
+                'lat'  => (float)$p['lat'],
+                'lng'  => (float)$p['lng'],
+            ];
+        }
+    }
+    foreach ($groups as &$g) {
+        $g['label'] = implode(' & ', $g['nums']);
+    }
+    unset($g);
+    return $groups;
+}
+
 // ── PRICES ────────────────────────────────────────────────────────────────────
 function iti_get_prices(int $program_id): array {
     $st = db()->prepare(
@@ -1242,6 +1280,28 @@ function iti_lbl_map(string $lang): string {
         'fr' => 'Carte de l\'itinéraire',
         'es' => 'Mapa del itinerario',
         'de' => 'Reiseroute-Karte',
+    ];
+    return $map[$lang] ?? $map['en'];
+}
+
+function iti_lbl_map_legend(string $lang): string {
+    $map = [
+        'en' => 'Legend',
+        'it' => 'Legenda',
+        'fr' => 'Légende',
+        'es' => 'Leyenda',
+        'de' => 'Legende',
+    ];
+    return $map[$lang] ?? $map['en'];
+}
+
+function iti_lbl_map_online(string $lang): string {
+    $map = [
+        'en' => 'View the interactive map online:',
+        'it' => 'Vedi la mappa interattiva online:',
+        'fr' => 'Voir la carte interactive en ligne :',
+        'es' => 'Ver el mapa interactivo online:',
+        'de' => 'Interaktive Karte online ansehen:',
     ];
     return $map[$lang] ?? $map['en'];
 }

@@ -40,6 +40,9 @@ $inclusions = iti_get_program_inclusions($id);
 $included   = array_filter($inclusions, fn($i) => $i['item_type'] === 'inclusion');
 $excluded   = array_filter($inclusions, fn($i) => $i['item_type'] === 'exclusion');
 
+// Geo-points for the interactive itinerary map
+$map_points = iti_get_program_map_points($days);
+
 // T&C
 $tc = null;
 if ($program['terms_id']) {
@@ -65,6 +68,9 @@ $page_title = iti_field($program, 'title', $lang) . ' — Savannah Explorers';
 <title><?= h($page_title) ?></title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700&family=Merriweather:wght@400;700&display=swap" rel="stylesheet">
+<?php if (count($map_points) >= 1): ?>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<?php endif; ?>
 <style>
 *, *::before, *::after { box-sizing:border-box; margin:0; padding:0; }
 :root {
@@ -270,6 +276,49 @@ a { color:var(--red); }
       <?php endif; ?>
     </div>
   </div>
+  <?php endif; ?>
+
+  <!-- Itinerary map -->
+  <?php if (count($map_points) >= 1): ?>
+  <div class="section-card" style="padding:0;overflow:hidden;">
+    <div class="section-head" style="margin:0;padding:20px 24px 16px;border:none;">🗺️ <?= h(iti_lbl_map($lang)) ?></div>
+    <div id="itiMap" style="height:420px;background:var(--off-wh);"></div>
+    <?php include __DIR__ . '/includes/iti_map_legend.php'; ?>
+  </div>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+  (function(){
+    var pts    = <?= json_encode($map_points, JSON_UNESCAPED_UNICODE) ?>;
+    var groups = <?= json_encode(iti_group_map_points($map_points), JSON_UNESCAPED_UNICODE) ?>;
+    if (!pts.length || typeof L === 'undefined') return;
+    var map = L.map('itiMap', { scrollWheelZoom:false });
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 17, attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(map);
+    // Route line follows every stop in order (so a return trip is drawn).
+    var latlngs = pts.map(function(p){ return [p.lat, p.lng]; });
+    // One marker per location; stops sharing coordinates share a marker ("2 & 4").
+    groups.forEach(function(g){
+      var w = Math.max(26, 15 + g.label.length * 7);
+      var icon = L.divIcon({
+        className: 'iti-marker',
+        html: '<div style="background:#C0211B;color:#fff;height:26px;padding:0 7px;'
+            + 'box-sizing:border-box;border-radius:13px;display:flex;align-items:center;'
+            + 'justify-content:center;font:700 12px/1 sans-serif;border:2px solid #fff;'
+            + 'box-shadow:0 1px 4px rgba(0,0,0,.4);white-space:nowrap;">' + g.label + '</div>',
+        iconSize: [w,26], iconAnchor: [w/2,13]
+      });
+      L.marker([g.lat, g.lng], { icon: icon }).addTo(map)
+       .bindPopup('<strong>' + g.label + '. ' + (g.name || '') + '</strong>');
+    });
+    if (latlngs.length > 1) {
+      L.polyline(latlngs, { color:'#C0211B', weight:3, opacity:.75, dashArray:'6,6' }).addTo(map);
+      map.fitBounds(L.latLngBounds(latlngs).pad(0.25));
+    } else {
+      map.setView(latlngs[0], 8);
+    }
+  })();
+  </script>
   <?php endif; ?>
 
   <!-- Days -->
