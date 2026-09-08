@@ -19,8 +19,8 @@ $inclusions = iti_get_program_inclusions($id);
 $included   = array_filter($inclusions, fn($i) => $i['item_type'] === 'inclusion');
 $excluded   = array_filter($inclusions, fn($i) => $i['item_type'] === 'exclusion');
 
-// Geo-points for the itinerary map (lodge coords, falling back to destination)
-$map_points = iti_get_program_map_points($days);
+// Itinerary map: airport start/end pins + numbered overnight stops + legend.
+$map = iti_get_program_map($days);
 
 $lang = $_GET['lang'] ?? $program['display_language'] ?? 'en';
 if (!in_array($lang, ITI_LANGS)) $lang = 'en';
@@ -149,52 +149,20 @@ include __DIR__ . '/../../includes/layout_header.php';
   </div>
 
   <!-- Itinerary map -->
-  <?php if (count($map_points) >= 1): ?>
+  <?php if (!empty($map['route'])): ?>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <div class="section-box" style="padding:0;overflow:hidden;">
     <div style="padding:18px 24px 0;">
       <div style="font-family:'Merriweather',serif;font-size:1rem;font-weight:700;">🗺️ <?= iti_lbl_map($lang) ?></div>
     </div>
-    <div id="itiMap" style="height:380px;margin-top:14px;background:var(--off-white);"></div>
-    <?php include __DIR__ . '/includes/iti_map_legend.php'; ?>
+    <div class="iti-map-wrap" style="margin-top:14px;">
+      <div id="itiMap" class="iti-map" style="background:var(--off-white);"></div>
+      <?php include __DIR__ . '/includes/iti_map_legend.php'; ?>
+    </div>
   </div>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script>
-  (function(){
-    var pts    = <?= json_encode($map_points, JSON_UNESCAPED_UNICODE) ?>;
-    var groups = <?= json_encode(iti_group_map_points($map_points), JSON_UNESCAPED_UNICODE) ?>;
-    if (!pts.length || typeof L === 'undefined') return;
-    var map = L.map('itiMap', { scrollWheelZoom:false });
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 17,
-      attribution: '&copy; OpenStreetMap contributors'
-    }).addTo(map);
-
-    // Route line follows every stop in order (so a return trip is drawn).
-    var latlngs = pts.map(function(p){ return [p.lat, p.lng]; });
-
-    // One marker per location; stops sharing coordinates share a marker ("2 & 4").
-    groups.forEach(function(g){
-      var w = Math.max(26, 15 + g.label.length * 7);
-      var icon = L.divIcon({
-        className: 'iti-marker',
-        html: '<div style="background:#C0211B;color:#fff;height:26px;padding:0 7px;'
-            + 'box-sizing:border-box;border-radius:13px;display:flex;align-items:center;'
-            + 'justify-content:center;font:700 12px/1 sans-serif;border:2px solid #fff;'
-            + 'box-shadow:0 1px 4px rgba(0,0,0,.4);white-space:nowrap;">' + g.label + '</div>',
-        iconSize: [w,26], iconAnchor: [w/2,13]
-      });
-      L.marker([g.lat, g.lng], { icon: icon }).addTo(map)
-       .bindPopup('<strong>' + g.label + '. ' + (g.name || '') + '</strong>');
-    });
-
-    if (latlngs.length > 1) {
-      L.polyline(latlngs, { color:'#C0211B', weight:3, opacity:.75, dashArray:'6,6' }).addTo(map);
-      map.fitBounds(L.latLngBounds(latlngs).pad(0.25));
-    } else {
-      map.setView(latlngs[0], 8);
-    }
-  })();
+  <?php include __DIR__ . '/includes/iti_map_script.php'; ?>
   </script>
   <?php endif; ?>
 

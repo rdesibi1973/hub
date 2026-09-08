@@ -6,7 +6,11 @@
  * from the same points as the interactive preview (iti_get_program_map_points).
  *
  * iti_render_itinerary_map(array $points, string $outFile): bool
- *   $points: [ ['day'=>int,'name'=>string,'lat'=>float,'lng'=>float], ... ]
+ *   $points: [ ['name'=>string,'lat'=>float,'lng'=>float,
+ *               'label'=>?string,   // pill text; defaults to 1-based position
+ *               'airport'=>?bool],  // true draws a slate pin instead of red
+ *              ... ]
+ *   Points sharing coordinates merge into one marker (labels joined by " & ").
  *   Returns true on success (PNG written to $outFile), false otherwise.
  */
 
@@ -133,6 +137,7 @@ function iti_render_itinerary_map(array $points, string $outFile): bool {
     $WHITE = $c('FFFFFF');
     $BLACK = $c('1A1A1A');
     $GREY  = $c('999591');
+    $SLATE = $c('1F5673'); // airport (start/end) pins
 
     imagefilledrectangle($img, 0, 0, $W * $SS - 1, $H * $SS - 1, $BG);
     imagesetthickness($img, $SS);
@@ -142,20 +147,29 @@ function iti_render_itinerary_map(array $points, string $outFile): bool {
     $pts = [];
     foreach ($points as $p) $pts[] = $project((float)$p['lat'], (float)$p['lng']);
 
-    // Group stops sharing coordinates so a repeated lodge draws one marker
-    // ("2 & 4") instead of overlapping pins. The route line below still visits
-    // every point in order, so an out-and-back leg stays visible.
+    // Group points sharing coordinates so a repeated lodge draws one marker
+    // ("2 & 4") instead of overlapping pins, and an airport used for both
+    // arrival and departure shows once. The route line below still visits every
+    // point in order, so an out-and-back leg stays visible.
+    // Each point may carry an explicit 'label' (pill text) and 'airport' flag;
+    // otherwise the label defaults to the point's 1-based position.
     $groups = []; $gidx = [];
     foreach ($points as $i => $p) {
-        $key = round((float)$p['lat'], 4) . ',' . round((float)$p['lng'], 4);
+        $lbl   = array_key_exists('label', $p) ? trim((string)$p['label']) : (string)($i + 1);
+        $isAir = !empty($p['airport']);
+        $key   = round((float)$p['lat'], 4) . ',' . round((float)$p['lng'], 4);
         if (isset($gidx[$key])) {
-            $groups[$gidx[$key]]['nums'][] = $i + 1;
+            if ($lbl !== '' && !in_array($lbl, $groups[$gidx[$key]]['labels'], true)) {
+                $groups[$gidx[$key]]['labels'][] = $lbl;
+            }
+            if ($isAir) $groups[$gidx[$key]]['airport'] = true;
         } else {
             $gidx[$key] = count($groups);
             $groups[] = [
-                'nums' => [$i + 1],
-                'name' => trim((string)($p['name'] ?? '')),
-                'px'   => $pts[$i],
+                'labels'  => ($lbl !== '' ? [$lbl] : []),
+                'airport' => $isAir,
+                'name'    => trim((string)($p['name'] ?? '')),
+                'px'      => $pts[$i],
             ];
         }
     }
@@ -187,8 +201,8 @@ function iti_render_itinerary_map(array $points, string $outFile): bool {
         if ($nlen > 28) {
             $name = function_exists('mb_substr') ? mb_substr($name, 0, 27) . '…' : substr($name, 0, 27) . '...';
         }
-        $numLabel = implode(' & ', $g['nums']);
-        $label = $numLabel . '. ' . $name;
+        $numLabel = implode(' & ', $g['labels']);
+        $label = $numLabel === '' ? $name : $numLabel . '. ' . $name;
         [$tw, $th]  = iti_map_text_size($label, $labelPt, $ttf);
         [$nw0, ]    = iti_map_text_size($numLabel, $numPt, $ttfBold);
         $halfW = max($r, $nw0 / 2 + 8 * $SS); // must match the marker loop
@@ -199,14 +213,14 @@ function iti_render_itinerary_map(array $points, string $outFile): bool {
         iti_map_text($img, $tx, $ty, $label, $labelPt, $ttf, $BLACK, $WHITE);
     }
 
-    // ── Markers: red pill, white ring, number(s) ─────────────────────
+    // ── Markers: pill, white ring, label (slate for airports) ────────
     foreach ($groups as $g) {
         [$cx, $cy] = $g['px'];
-        $num = implode(' & ', $g['nums']);
+        $num = implode(' & ', $g['labels']);
         [$nw, $nh] = iti_map_text_size($num, $numPt, $ttfBold);
         $halfW = max($r, $nw / 2 + 8 * $SS);
-        iti_map_pill($img, $cx, $cy, $halfW + 2 * $SS, $r + 2 * $SS, $WHITE); // ring
-        iti_map_pill($img, $cx, $cy, $halfW, $r, $RED);                       // fill
+        iti_map_pill($img, $cx, $cy, $halfW + 2 * $SS, $r + 2 * $SS, $WHITE);       // ring
+        iti_map_pill($img, $cx, $cy, $halfW, $r, $g['airport'] ? $SLATE : $RED);    // fill
         $nx = $cx - $nw / 2;
         if ($ttfBold) {
             imagettftext($img, $numPt, 0, (int)round($nx), (int)round($cy + $nh / 2), $WHITE, $ttfBold, $num);

@@ -52,6 +52,7 @@ $RED     = 'C0211B';
 $BLACK   = '1A1A1A';
 $GREY    = '999591';
 $OFF_WHITE = 'F7F5F2';
+$SLATE   = '1F5673';
 
 // ── Crea documento ──────────────────────────────────────────
 $phpWord = new \PhpOffice\PhpWord\PhpWord();
@@ -160,25 +161,42 @@ if ($consultant) {
 
 // ── MAPPA ITINERARIO (immagine statica GD) ──────────────────
 $map_tmp = null;
-$map_points = iti_get_program_map_points($days);
-if (count($map_points) >= 2 && function_exists('imagecreatetruecolor')) {
+$map = iti_get_program_map($days);
+// PNG points: numbered stops + slate airport pins (labelled with the IATA code).
+$png_points = [];
+foreach ($map['route'] as $rp) {
+    $png_points[] = [
+        'lat'     => $rp['lat'],
+        'lng'     => $rp['lng'],
+        'name'    => $rp['name'],
+        'label'   => $rp['role'] === 'stop' ? (string)$rp['num'] : (string)($rp['code'] ?? ''),
+        'airport' => $rp['role'] !== 'stop',
+    ];
+}
+if (count($png_points) >= 2 && function_exists('imagecreatetruecolor')) {
     require_once __DIR__ . '/includes/iti_map.php';
     $map_tmp = sys_get_temp_dir() . '/itimap_' . $id . '_' . uniqid() . '.png';
-    if (iti_render_itinerary_map($map_points, $map_tmp)) {
+    if (iti_render_itinerary_map($png_points, $map_tmp)) {
         $section->addText('', null, ['borderBottomSize'=>4,'borderBottomColor'=>$OFF_WHITE,'spaceAfter'=>120]);
         $section->addText(iti_lbl_map($lang), 'consLabel', ['spaceAfter'=>80]);
         $section->addImage($map_tmp, ['width'=>460, 'alignment'=>'center']);
-        // Legend: one row per numbered stop (matches the map marker numbers).
+        // Legend: arrival airport, numbered stops, departure airport.
         $section->addText(iti_lbl_map_legend($lang), 'consLabel', ['spaceBefore'=>140,'spaceAfter'=>80]);
         $ltbl = $section->addTable(['borderSize'=>0,'cellMargin'=>40]);
-        foreach ($map_points as $i => $mp) {
+        foreach ($map['legend'] as $lrow) {
+            $is_air = ($lrow['role'] === 'start' || $lrow['role'] === 'end');
             $ltbl->addRow();
-            $ltbl->addCell(500, ['bgColor'=>$RED,'valign'=>'center'])
-                 ->addText((string)($i + 1),
+            $ltbl->addCell(500, ['bgColor'=>$is_air ? $SLATE : $RED, 'valign'=>'center'])
+                 ->addText($is_air ? ' ' : (string)$lrow['num'],
                      ['name'=>'Calibri','size'=>10,'bold'=>true,'color'=>'FFFFFF'],
                      ['alignment'=>'center']);
+            $name = (string)($lrow['name'] ?? '');
+            if ($is_air) {
+                $role = $lrow['role'] === 'start' ? iti_lbl_map_start($lang) : iti_lbl_map_end($lang);
+                $name = $role . ' — ' . $name . (!empty($lrow['code']) ? ' (' . $lrow['code'] . ')' : '');
+            }
             $ltbl->addCell(8500, ['valign'=>'center'])
-                 ->addText((string)($mp['name'] ?? ''), 'normal', ['spaceAfter'=>0]);
+                 ->addText($name, 'normal', ['spaceAfter'=>0]);
         }
         if (!empty($program['is_published']) && !empty($program['public_token']) && defined('BASE_URL')) {
             $pub = BASE_URL . '/modules/iti/itinerary.php?token=' . $program['public_token'];

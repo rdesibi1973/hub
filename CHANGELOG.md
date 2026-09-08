@@ -20,6 +20,24 @@ Running log of notable changes and current build state. Module-level "active / p
 
 ---
 
+## 2026-09 — Itinerary map: start/end airports + layout (ITI)
+- The map now shows the trip **start and end** — the arrival/departure airport —
+  in addition to the overnight stops. Airports are derived from the first/last
+  day's transfers (free-text, matched by IATA `[CODE]` or name) or flights
+  (route codes); when none is found it falls back to the day's start / final
+  destination coordinates. New airport coordinate table + matchers in
+  `iti_functions.php` (`iti_map_airports`, `iti_match_airport`, `iti_day_airport`).
+- New `iti_get_program_map()` returns the full route (airport start → numbered
+  stops → airport end), grouped markers, and legend rows with per-leg
+  straight-line distance. Airports render as a distinct slate ✈ pin.
+- Layout: larger map with the **legend beside it** (stacks on mobile) via a
+  shared `includes/iti_map_script.php` + restyled `includes/iti_map_legend.php`,
+  used by `program_view.php` and `itinerary.php`. Legend shows distances.
+- Word export (`export_word.php` + `iti_map.php`) plots the same airport pins
+  (slate, labelled with the IATA code) and lists arrival/stops/departure with
+  distances. `iti_map.php` markers now accept a per-point `label`/`airport`.
+- New labels: `iti_lbl_map_start/end/airdist`.
+
 ## 2026-09 — Itinerary map: merged markers + legend (ITI)
 - Fixed overlapping map markers: when a stop is visited more than once (e.g. a
   return to the same lodge on day 2 and day 4) the two pins used to stack and one

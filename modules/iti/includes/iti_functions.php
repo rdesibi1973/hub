@@ -486,7 +486,11 @@ function iti_get_days(int $program_id): array {
     $st = db()->prepare(
         'SELECT pd.*,
                 sl.name    AS start_lodge_name,
+                sl.latitude  AS start_lodge_lat,
+                sl.longitude AS start_lodge_lng,
                 sd.name_en AS start_dest_name,
+                sd.latitude  AS start_dest_lat,
+                sd.longitude AS start_dest_lng,
                 el.name    AS end_lodge_name,
                 el.latitude  AS end_lodge_lat,
                 el.longitude AS end_lodge_lng,
@@ -589,6 +593,173 @@ function iti_group_map_points(array $points): array {
     }
     unset($g);
     return $groups;
+}
+
+/** Great-circle (straight-line) distance in km between two lat/lng points. */
+function iti_haversine(float $lat1, float $lng1, float $lat2, float $lng2): float {
+    $R = 6371.0;
+    $dLat = deg2rad($lat2 - $lat1);
+    $dLng = deg2rad($lng2 - $lng1);
+    $a = sin($dLat / 2) ** 2
+       + cos(deg2rad($lat1)) * cos(deg2rad($lat2)) * sin($dLng / 2) ** 2;
+    return $R * 2 * atan2(sqrt($a), sqrt(1 - $a));
+}
+
+/** Known airports used for the trip start/end pins: IATA => [lat, lng, name]. */
+function iti_map_airports(): array {
+    return [
+        'JRO' => [-3.4294, 37.0745, 'Kilimanjaro International Airport'],
+        'ARK' => [-3.3677, 36.6333, 'Arusha Airport'],
+        'ZNZ' => [-6.2220, 39.2249, 'Zanzibar Airport'],
+        'DAR' => [-6.8781, 39.2026, 'Dar es Salaam Airport'],
+        'MWZ' => [-2.4444, 32.9327, 'Mwanza Airport'],
+        'SEU' => [-2.4581, 34.8222, 'Seronera Airstrip'],
+        'LKY' => [-3.3763, 35.8183, 'Lake Manyara Airport'],
+    ];
+}
+
+/**
+ * Identify an airport from an explicit IATA code and/or free text (transfer
+ * description, flight label). Returns ['code','name','lat','lng'] or null.
+ */
+function iti_match_airport(?string $text, ?string $code = null): ?array {
+    $A = iti_map_airports();
+    $mk = fn(string $c) => ['code' => $c, 'name' => $A[$c][2], 'lat' => $A[$c][0], 'lng' => $A[$c][1]];
+    if ($code) {
+        $c = strtoupper(trim($code));
+        if (isset($A[$c])) return $mk($c);
+    }
+    if ($text === null || $text === '') return null;
+    if (preg_match_all('/\b([A-Z]{3})\b/', $text, $m)) {
+        foreach ($m[1] as $c) if (isset($A[$c])) return $mk($c);
+    }
+    $low = function_exists('mb_strtolower') ? mb_strtolower($text) : strtolower($text);
+    $kw = [
+        'kilimanjaro'   => 'JRO',
+        'arusha airport'=> 'ARK', 'arusha airstrip' => 'ARK',
+        'zanzibar'      => 'ZNZ', 'abeid amani' => 'ZNZ',
+        'dar es salaam' => 'DAR', 'julius nyerere' => 'DAR', 'nyerere' => 'DAR',
+        'mwanza'        => 'MWZ',
+        'seronera'      => 'SEU',
+        'manyara airport'=> 'LKY', 'manyara airstrip' => 'LKY',
+    ];
+    foreach ($kw as $k => $c) if (strpos($low, $k) !== false) return $mk($c);
+    return null;
+}
+
+/**
+ * Find the arrival ('from') or departure ('to') airport of a day, scanning its
+ * transfers (free-text descriptions) then its flights (route codes / text).
+ * Returns ['code','name','lat','lng'] or null.
+ */
+function iti_day_airport(array $day, string $dir): ?array {
+    $tr = iti_get_day_transfers((int)$day['id']);
+    if ($tr) {
+        $row  = $dir === 'from' ? reset($tr) : end($tr);
+        $desc = (string)($row['description'] ?? '');
+        // Split on a directional/dash separator; take the origin or destination half.
+        $parts = preg_split('/\s*(?:→|=>|->|–|—|\bto\b|\ba\b)\s*/ui', $desc, 2);
+        $seg   = $dir === 'from' ? ($parts[0] ?? $desc) : ($parts[count($parts) - 1] ?? $desc);
+        $hit   = iti_match_airport($seg) ?? iti_match_airport($desc);
+        if ($hit) return $hit;
+    }
+    $fl = iti_get_day_flights((int)$day['id']);
+    if ($fl) {
+        $row   = $dir === 'from' ? reset($fl) : end($fl);
+        $code  = $dir === 'from' ? ($row['from_code'] ?? null) : ($row['to_code'] ?? null);
+        $label = $dir === 'from' ? ($row['from_airport'] ?? '') : ($row['to_airport'] ?? '');
+        if ($label === '' || $label === null) $label = (string)($row['flight_custom'] ?? $row['flight_label'] ?? '');
+        $hit = iti_match_airport($label, $code);
+        if ($hit) return $hit;
+    }
+    return null;
+}
+
+/**
+ * Full itinerary map data: airport start/end pins + numbered overnight stops.
+ * The airport is derived from the first/last day's transfers or flights; when
+ * none is found it falls back to the day's start / destination coordinates.
+ *
+ * Returns:
+ *   ['route'   => ordered points  ['role'=>'start'|'stop'|'end','num'=>?int,
+ *                                  'name'=>str,'lat'=>float,'lng'=>float,'code'=>?str],
+ *    'markers' => grouped pins     ['lat','lng','name','label'=>'2 & 4'|'','airport'=>bool],
+ *    'legend'  => ordered rows     ['role','num'=>?,'name','code'=>?,'dist'=>?float(km)] ]
+ */
+function iti_get_program_map(array $days): array {
+    $days  = array_values($days);
+    $stops = iti_get_program_map_points($days);
+    $route = [];
+
+    if ($days) {
+        $first = $days[0];
+        $start = iti_day_airport($first, 'from');
+        if (!$start) {
+            if (($first['start_lodge_lat'] ?? null) !== null) {
+                $start = ['name' => $first['start_lodge_name'], 'lat' => (float)$first['start_lodge_lat'], 'lng' => (float)$first['start_lodge_lng'], 'code' => null];
+            } elseif (($first['start_dest_lat'] ?? null) !== null) {
+                $start = ['name' => $first['start_dest_name'], 'lat' => (float)$first['start_dest_lat'], 'lng' => (float)$first['start_dest_lng'], 'code' => null];
+            }
+        }
+        if ($start && (!$stops || abs($start['lat'] - $stops[0]['lat']) > 0.0005 || abs($start['lng'] - $stops[0]['lng']) > 0.0005)) {
+            $route[] = ['role' => 'start'] + $start;
+        }
+    }
+
+    $num = 0;
+    foreach ($stops as $s) {
+        $num++;
+        $route[] = ['role' => 'stop', 'num' => $num, 'name' => $s['name'], 'lat' => (float)$s['lat'], 'lng' => (float)$s['lng'], 'code' => null];
+    }
+
+    if ($days) {
+        $last = $days[count($days) - 1];
+        $end  = iti_day_airport($last, 'to');
+        if (!$end && ($last['dest_lat'] ?? null) !== null) {
+            $end = ['name' => $last['destination_name_en'], 'lat' => (float)$last['dest_lat'], 'lng' => (float)$last['dest_lng'], 'code' => null];
+        }
+        $lastStop = $stops ? $stops[count($stops) - 1] : null;
+        if ($end && (!$lastStop || abs($end['lat'] - $lastStop['lat']) > 0.0005 || abs($end['lng'] - $lastStop['lng']) > 0.0005)) {
+            $route[] = ['role' => 'end'] + $end;
+        }
+    }
+
+    // Markers: group by coordinate so overlapping stops share a pin ("2 & 4")
+    // and an airport used for both arrival and departure shows only once.
+    $markers = []; $mi = [];
+    foreach ($route as $p) {
+        $key = round($p['lat'], 4) . ',' . round($p['lng'], 4);
+        if (isset($mi[$key])) {
+            if ($p['role'] === 'stop') $markers[$mi[$key]]['nums'][] = $p['num'];
+            else                       $markers[$mi[$key]]['airport'] = true;
+        } else {
+            $mi[$key] = count($markers);
+            $markers[] = [
+                'lat'     => $p['lat'],
+                'lng'     => $p['lng'],
+                'name'    => $p['name'],
+                'nums'    => $p['role'] === 'stop' ? [$p['num']] : [],
+                'airport' => $p['role'] !== 'stop',
+            ];
+        }
+    }
+    foreach ($markers as &$m) { $m['label'] = implode(' & ', $m['nums']); }
+    unset($m);
+
+    // Legend rows carry the straight-line leg distance from the previous point.
+    $legend = []; $prev = null;
+    foreach ($route as $p) {
+        $legend[] = [
+            'role' => $p['role'],
+            'num'  => $p['num'] ?? null,
+            'name' => $p['name'],
+            'code' => $p['code'] ?? null,
+            'dist' => $prev ? iti_haversine($prev['lat'], $prev['lng'], $p['lat'], $p['lng']) : null,
+        ];
+        $prev = $p;
+    }
+
+    return ['route' => $route, 'markers' => $markers, 'legend' => $legend];
 }
 
 // ── PRICES ────────────────────────────────────────────────────────────────────
@@ -1291,6 +1462,27 @@ function iti_lbl_map_legend(string $lang): string {
         'fr' => 'Légende',
         'es' => 'Leyenda',
         'de' => 'Legende',
+    ];
+    return $map[$lang] ?? $map['en'];
+}
+
+function iti_lbl_map_start(string $lang): string {
+    $map = ['en'=>'Arrival','it'=>'Arrivo','fr'=>'Arrivée','es'=>'Llegada','de'=>'Ankunft'];
+    return $map[$lang] ?? $map['en'];
+}
+
+function iti_lbl_map_end(string $lang): string {
+    $map = ['en'=>'Departure','it'=>'Partenza','fr'=>'Départ','es'=>'Salida','de'=>'Abreise'];
+    return $map[$lang] ?? $map['en'];
+}
+
+function iti_lbl_map_airdist(string $lang): string {
+    $map = [
+        'en'=>'Distances shown as the crow flies.',
+        'it'=>'Distanze indicative in linea d\'aria.',
+        'fr'=>'Distances à vol d\'oiseau.',
+        'es'=>'Distancias en línea recta.',
+        'de'=>'Entfernungen in Luftlinie.',
     ];
     return $map[$lang] ?? $map['en'];
 }
