@@ -14,8 +14,8 @@ $canSeeAll    = in_array($myRole, ['admin','manager']);
 
 // ── AJAX: move card ───────────────────────────────────────────────────────
 // Moving a card normally updates pipeline_column only. Exception: dragging a
-// lead OUT of NEW into QUOTED or HOT auto-promotes its status to 'Quoted'
-// (a lead reaching either of those columns has been quoted).
+// lead into QUOTED or HOT auto-promotes its status (a lead reaching either of
+// those columns has been quoted). QUOTED fires from NEW or WIP; HOT from any.
 if ($_SERVER['REQUEST_METHOD'] === 'POST'
     && ($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '') === 'XMLHttpRequest') {
     header('Content-Type: application/json');
@@ -27,13 +27,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'
         echo json_encode(['ok'=>false,'message'=>'Invalid params']); exit;
     }
     // Auto-status on drop:
-    //  - into HOT       → 'Hot-Quoted' (a lead in the hot column has been quoted
-    //                     and is heating up); can also be set manually via the LOV.
-    //  - NEW → QUOTED   → 'Quoted' (a lead reaching QUOTED has been quoted).
+    //  - into HOT          → 'Hot-Quoted' (a lead in the hot column has been quoted
+    //                        and is heating up); can also be set manually via the LOV.
+    //  - NEW/WIP → QUOTED  → 'Quoted' (a lead reaching QUOTED has been quoted).
     // Never overwrite a closed/dead status (Booked/Lost/Cancelled).
     $newStatus = null;
-    if ($col === 'hot')                             $newStatus = 'Hot-Quoted';
-    elseif ($from === 'new' && $col === 'quoted')   $newStatus = 'Quoted';
+    if ($col === 'hot')                                            $newStatus = 'Hot-Quoted';
+    elseif ($col === 'quoted' && in_array($from, ['new','wip'], true)) $newStatus = 'Quoted';
 
     if ($newStatus !== null) {
         $sql  = "UPDATE requests SET pipeline_column=?,
