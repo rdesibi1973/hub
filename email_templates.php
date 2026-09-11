@@ -350,9 +350,18 @@ function openModal(id) {
 
 function closeModal() { document.getElementById('tplOverlay').classList.add('hidden'); }
 
-document.getElementById('tplOverlay').addEventListener('click', e => {
-  if (e.target.id === 'tplOverlay') closeModal();
-});
+// Close on backdrop click only when BOTH press and release land on the
+// overlay itself, so a text selection started inside a field and released
+// over the backdrop doesn't wrongly close the modal.
+(function () {
+  var overlay = document.getElementById('tplOverlay');
+  var pressedOnBackdrop = false;
+  overlay.addEventListener('mousedown', e => { pressedOnBackdrop = (e.target.id === 'tplOverlay'); });
+  overlay.addEventListener('mouseup', e => {
+    if (pressedOnBackdrop && e.target.id === 'tplOverlay') closeModal();
+    pressedOnBackdrop = false;
+  });
+})();
 
 function saveTemplate() {
   const alrt = document.getElementById('saveAlert');

@@ -382,10 +382,18 @@ function delFlight(id) {
   post({action:'delete_flight', id:id});
 }
 
-// Close modal on backdrop click
-document.getElementById('modal').addEventListener('click', function(e){
-  if (e.target === this) closeModal();
-});
+// Close modal on backdrop click only when BOTH press and release land on the
+// overlay itself, so a text selection started inside a field and released over
+// the backdrop doesn't wrongly close the modal.
+(function () {
+  var modal = document.getElementById('modal');
+  var pressedOnBackdrop = false;
+  modal.addEventListener('mousedown', function(e){ pressedOnBackdrop = (e.target === this); });
+  modal.addEventListener('mouseup', function(e){
+    if (pressedOnBackdrop && e.target === this) closeModal();
+    pressedOnBackdrop = false;
+  });
+})();
 </script>
 
 <?php include 'includes/footer.php'; ?>

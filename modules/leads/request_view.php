@@ -1050,10 +1050,19 @@ function confirmLost() {
   document.getElementById('lost-note-field').value   = document.getElementById('lost-note-input').value;
   document.getElementById('status-form').submit();
 }
-// Close on backdrop click = cancel
-document.getElementById('lost-modal').addEventListener('click', function (e) {
-  if (e.target === this) cancelLost();
-});
+// Close on backdrop click = cancel, but only when BOTH press and release
+// land on the overlay itself. Otherwise a text selection started inside the
+// note textarea and released over the backdrop would close the modal and
+// discard what was typed.
+(function () {
+  var modal = document.getElementById('lost-modal');
+  var pressedOnBackdrop = false;
+  modal.addEventListener('mousedown', function (e) { pressedOnBackdrop = (e.target === this); });
+  modal.addEventListener('mouseup', function (e) {
+    if (pressedOnBackdrop && e.target === this) cancelLost();
+    pressedOnBackdrop = false;
+  });
+})();
 </script>
 <?php endif; ?>
 
