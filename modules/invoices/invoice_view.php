@@ -780,9 +780,21 @@ function openMailModal() {
 function closeMailModal() {
   document.getElementById('mailModal').style.display = 'none';
 }
-document.getElementById('mailModal').addEventListener('click', function(e) {
-  if (e.target === this) closeMailModal();
-});
+// Close on backdrop click only when BOTH press and release happen on the
+// overlay itself. Otherwise a text selection started inside an input/textarea
+// and released over the backdrop fires a click on the overlay and wrongly
+// closes the modal.
+(function() {
+  var modal = document.getElementById('mailModal');
+  var pressedOnBackdrop = false;
+  modal.addEventListener('mousedown', function(e) {
+    pressedOnBackdrop = (e.target === this);
+  });
+  modal.addEventListener('mouseup', function(e) {
+    if (pressedOnBackdrop && e.target === this) closeMailModal();
+    pressedOnBackdrop = false;
+  });
+})();
 
 async function sendInvoiceMail() {
   var to      = document.getElementById('mailTo').value.trim();
