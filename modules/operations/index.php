@@ -1619,7 +1619,11 @@ function cfLoadFiles(files){
   }).catch(err=>document.getElementById('cf-status').textContent='Error: '+err);
 }
 function cfCellStr(v){if(v===null||v===undefined)return'';if(v instanceof Date)return String(v.getDate()).padStart(2,'0')+'/'+String(v.getMonth()+1).padStart(2,'0')+'/'+v.getFullYear();if(typeof v==='number'&&Number.isInteger(v))return String(v);if(typeof v==='number')return String(parseFloat(v.toFixed(10)));return String(v).trim();}
+// Normalise a formula for comparison (SheetJS .f has no leading '='): drop any
+// '=', collapse whitespace, upper-case. Same formula → same key.
+function cfNormFormula(f){return String(f).replace(/^=/,'').replace(/\s+/g,'').toUpperCase();}
 function cfCompare(){
+  const wss=cfWBs.map(wb=>wb.wb.Sheets[wb.sname]);
   const sheets=cfWBs.map(wb=>XLSX.utils.sheet_to_json(wb.wb.Sheets[wb.sname],{header:1,defval:null}));
   const maxRow=Math.max(...sheets.map(s=>s.length));const maxCol=Math.max(...sheets.map(s=>Math.max(...s.map(r=>r.length),0)));
   const discs=[];
@@ -1627,11 +1631,21 @@ function cfCompare(){
     const rv=sheets.map(s=>(s[r]||[]).map(cfCellStr));
     if(rv.some(row=>row.some(v=>CF_SKIP.includes(v.toLowerCase()))))continue;
     for(let c=0;c<maxCol;c++){
-      const vals=rv.map(row=>row[c]||'');const ne=vals.filter(v=>v!=='');if(!ne.length)continue;
-      const uniq=[...new Set(ne)];if(uniq.length===1&&ne.length===vals.length)continue;
-      const type=uniq.length===1?'gap':'conflict';const ctx=[];const br=sheets[cfBaseIdx][r]||[];
+      const addr=XLSX.utils.encode_cell({r:r,c:c});
+      const vals=rv.map(row=>row[c]||'');
+      // Formula-aware comparison: when a cell holds a formula, compare the
+      // formula text itself, not its computed value — so a value that differs
+      // only because the referenced cells differ is NOT flagged (those cells
+      // surface as their own discrepancies). It counts as different only if the
+      // formula text differs (or formula-vs-literal).
+      const keys=wss.map((ws,fi)=>{const cell=ws[addr];return (cell&&cell.f!=null&&cell.f!=='')?('ƒ'+cfNormFormula(cell.f)):vals[fi];});
+      const neKeys=keys.filter(k=>k!=='');if(!neKeys.length)continue;
+      const uniqKeys=[...new Set(neKeys)];
+      if(uniqKeys.length===1&&neKeys.length===keys.length)continue;
+      const type=uniqKeys.length===1?'gap':'conflict';const ctx=[];const br=sheets[cfBaseIdx][r]||[];
       for(let cc=0;cc<Math.min(8,maxCol);cc++){if(cc===c)continue;const cv=cfCellStr(br[cc]);if(cv){ctx.push(cv);if(ctx.length>=3)break;}}
-      discs.push({row:r,col:c,colLetter:colLtr(c),type,vals,suggested:uniq.length===1?uniq[0]:null,ctx});
+      const uniqVals=[...new Set(vals.filter(v=>v!==''))];
+      discs.push({row:r,col:c,colLetter:colLtr(c),type,vals,suggested:uniqVals.length===1?uniqVals[0]:null,ctx});
     }
   }
   const nConf=discs.filter(d=>d.type==='conflict').length,nGap=discs.filter(d=>d.type==='gap').length;
