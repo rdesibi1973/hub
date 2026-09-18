@@ -1,7 +1,11 @@
 <?php
 require_once __DIR__ . '/../../includes/auth.php';
-require_permission('operations');
-$page_title = 'Operations Hub';
+require_login();
+// Users with the full "operations" permission get the complete Operations Hub.
+// Everyone else (any logged-in user) gets a restricted, tools-only view that
+// exposes just the two client-side Excel utilities: Audit Excel + Fix Conflicts.
+$_isOpsStaff = !has_permission('operations');
+$page_title = $_isOpsStaff ? 'Excel Tools' : 'Operations Hub';
 $extra_css = '
 .tab-nav{background:var(--black);display:flex;gap:0;padding:0 32px;overflow-x:auto;}
 .tab-btn{font-family:"Open Sans",sans-serif;font-size:.75rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;padding:13px 18px;border:none;background:transparent;color:rgba(255,255,255,.5);cursor:pointer;border-bottom:3px solid transparent;transition:all .2s;white-space:nowrap;}
@@ -269,8 +273,10 @@ include __DIR__ . '/../../includes/layout_header.php';
   <?php endif; ?>
   <button class="tab-btn <?= $_isOpsStaff ? 'active' : '' ?>" onclick="switchTab('audit',this)">🔍 Audit Excel</button>
   <button class="tab-btn"           onclick="switchTab('conflicts',this)">🔀 Fix Conflicts</button>
+  <?php if (!$_isOpsStaff): ?>
   <a class="tab-btn" href="medivac.php"     style="text-decoration:none;">🏥 Medivac</a>
   <a class="tab-btn" href="lunch_boxes.php" style="text-decoration:none;">🍱 Lunch Boxes</a>
+  <?php endif; ?>
 </div>
 
 <!-- ═══ TAB 1: DAILY MOVEMENTS ═══ -->
@@ -1666,6 +1672,15 @@ function cfApply(discs){
     .finally(()=>{btn.disabled=false;btn.textContent='Apply & Download Fixed File';});
 }
 function colLtr(n){let s='';n++;while(n>0){s=String.fromCharCode(64+(n%26||26))+s;n=Math.floor((n-1)/26);}return s;}
+
+// ── Deep-link: open a specific tab via ?tab=audit|conflicts|movements|extractor|grid ──
+(function(){
+  var t=new URLSearchParams(location.search).get('tab');
+  if(!t)return;
+  var panel=document.getElementById('tab-'+t);
+  var btn=document.querySelector('.tab-btn[onclick*="\'"+t+"\'"]');
+  if(panel&&btn)switchTab(t,btn);
+})();
 </script>
 
 <?php include __DIR__ . '/../../includes/layout_footer.php'; ?>

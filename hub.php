@@ -194,6 +194,20 @@ include __DIR__ . '/includes/layout_header.php';
   <div class="section-label dot-navy group-spacer">Tools</div>
   <div class="links-grid">
 
+    <a class="link-card lc-green" href="<?= BASE_URL ?>/modules/operations/index.php?tab=audit">
+      <div class="lc-icon" style="background:#fff;border:1px solid var(--grey-lt);padding:3px;">
+        <img src="https://www.savannahexplorers.net/img/logo-savannah-explorers.png" alt="Savannah Explorers">
+      </div>
+      <div><div class="lc-label">Audit Excel</div><div class="lc-sub">Check Safari Calc CONF</div></div>
+    </a>
+
+    <a class="link-card lc-green" href="<?= BASE_URL ?>/modules/operations/index.php?tab=conflicts">
+      <div class="lc-icon" style="background:#fff;border:1px solid var(--grey-lt);padding:3px;">
+        <img src="https://www.savannahexplorers.net/img/logo-savannah-explorers.png" alt="Savannah Explorers">
+      </div>
+      <div><div class="lc-label">Fix Conflicts</div><div class="lc-sub">Compare &amp; merge Excel copies</div></div>
+    </a>
+
     <?php if ($is_admin_or_manager): ?>
     <a class="link-card lc-navy" href="<?= BASE_URL ?>/modules/leads/import_folder.php">
       <div class="lc-icon emoji">📁</div>

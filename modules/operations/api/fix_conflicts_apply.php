@@ -1,6 +1,8 @@
 <?php
 require_once __DIR__ . '/../../../includes/auth.php';
-require_permission('operations');
+// Fix Conflicts is a general Excel utility available to every logged-in user
+// (it only rewrites cells in a user-uploaded file — it touches no hub data).
+require_login();
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     http_response_code(405); die('Method Not Allowed');
