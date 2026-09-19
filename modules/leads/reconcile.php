@@ -49,7 +49,26 @@ function reconcile_match(string $folderName, array $byPC, array $byName): array 
 // ── APPLY ─────────────────────────────────────────────────────────────────────
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'apply') {
+    $syncStatus = !empty($_POST['sync_status']);
+
+    // Folder-suffix → [status, payment_status]. Same mapping as
+    // api_rename_folder.php. Longest/most-specific first so _BALANCE-CASH is not
+    // shadowed by _BALANCE. A 'contains' match tolerates a trailing document
+    // marker (e.g. _CK) after the payment tag. A null payment_status clears it.
+    $tagMap = [
+        '_BALANCE-CASH' => ['Booked',      'Balance-Cash'],
+        '_BALANCE_CASH' => ['Booked',      'Balance-Cash'],
+        '_BALANCE'      => ['Booked',      'Balance'],
+        '_DEPOSIT'      => ['Booked',      'Deposit'],
+        '_PAID'         => ['Booked',      'Paid'],
+        '_PROGRESS'     => ['Booked',      null],
+        '_CONFIRMED'    => ['Booked',      null],
+        '_PROVISIONAL'  => ['Provisional', null],
+        '_CANCELLED'    => ['Cancelled',   null],
+    ];
+
     $applied = 0;
+    $statusChanged = 0;
     foreach ($_POST['sel'] ?? [] as $encoded) {
         $item = json_decode(base64_decode($encoded), true);
         if (empty($item['request_id']) || empty($item['folder_name'])) continue;
@@ -62,23 +81,42 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'apply
 
         // Rebuild the Dropbox URL so the 📁 link points to the REAL (renamed)
         // folder. GRP bookings live one level deeper: /<source>/<parent>/<sub>.
+        $cols = ['practice_code' => $folder];
         if ($isGrp && $parent !== '') {
-            $url = 'https://www.dropbox.com/home/' . $source
-                 . '/' . rawurlencode($parent) . '/' . rawurlencode($folder);
-            // For GRP the practice_code is the subfolder; group_folder is the parent.
-            $db->prepare(
-                "UPDATE requests SET practice_code = ?, group_folder = ?, dropbox_url = ? WHERE id = ?"
-            )->execute([$folder, $parent, $url, $reqId]);
+            $cols['group_folder'] = $parent;                 // real parent
+            $cols['dropbox_url']  = 'https://www.dropbox.com/home/' . $source
+                                  . '/' . rawurlencode($parent) . '/' . rawurlencode($folder);
         } else {
-            $url = 'https://www.dropbox.com/home/' . $source . '/' . rawurlencode($folder);
-            $db->prepare(
-                "UPDATE requests SET practice_code = ?, dropbox_url = ? WHERE id = ?"
-            )->execute([$folder, $url, $reqId]);
+            $cols['dropbox_url']  = 'https://www.dropbox.com/home/' . $source
+                                  . '/' . rawurlencode($folder);
         }
+
+        // Realign status / payment_status from the folder-name suffix. For GRP
+        // the status tag lives on the PARENT folder (group_folder); for a normal
+        // booking it is on the folder itself.
+        if ($syncStatus) {
+            $tagSource = strtoupper(($isGrp && $parent !== '') ? $parent : $folder);
+            foreach ($tagMap as $tag => $sp) {
+                if (strpos($tagSource, $tag) !== false) {
+                    $cols['status']         = $sp[0];
+                    $cols['payment_status'] = $sp[1]; // null → SQL NULL (cleared)
+                    $statusChanged++;
+                    break;
+                }
+            }
+        }
+
+        $set  = [];
+        $vals = [];
+        foreach ($cols as $c => $v) { $set[] = "$c = ?"; $vals[] = $v; }
+        $vals[] = $reqId;
+        $db->prepare("UPDATE requests SET " . implode(', ', $set) . " WHERE id = ?")
+           ->execute($vals);
         $applied++;
     }
     flash($applied > 0
-        ? "✔ Updated folder + Dropbox link for $applied request(s)."
+        ? "✔ Updated folder + Dropbox link for $applied request(s)"
+          . ($syncStatus ? " (status/payment realigned on $statusChanged)." : '.')
         : 'Nothing to apply.');
     header('Location: reconcile.php');
     exit;
@@ -247,6 +285,11 @@ include 'includes/header.php';
               onclick="document.querySelectorAll('.row-sel').forEach(c=>c.checked=true)">Select all with match</button>
       <button type="button" class="btn btn-grey btn-sm"
               onclick="document.querySelectorAll('.row-sel').forEach(c=>c.checked=false)">Clear</button>
+      <label style="display:flex;align-items:center;gap:6px;font-size:.8rem;cursor:pointer;margin-left:8px;"
+             title="Read the folder suffix (_DEPOSIT, _BALANCE, _PROVISIONAL…) and set status + payment_status to match.">
+        <input type="checkbox" name="sync_status" value="1" checked style="width:14px;height:14px;accent-color:#C0211B;">
+        Also realign status / payment from folder tag
+      </label>
     </div>
 
     <div class="table-wrap">
