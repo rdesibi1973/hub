@@ -132,6 +132,7 @@ header {
   <a href="requests.php"  class="<?= in_array($cur,['requests.php','request_add.php','request_edit.php','request_view.php']) ? 'active':'' ?>"><?= isLeadsRestricted() ? 'My Requests' : 'Requests' ?></a>
   <a href="pipeline.php"  class="<?= $cur==='pipeline.php' ? 'active':'' ?>">🔥 Pipeline</a>
   <a href="booked.php"          class="<?= $cur==='booked.php'?'active':'' ?>">✈ Booked</a>
+  <a href="payments.php"        class="<?= $cur==='payments.php'?'active':'' ?>">💳 Payments</a>
   <a href="email_templates.php" class="<?= $cur==='email_templates.php'?'active':'' ?>">📧 Templates</a>
   <?php if (isLeadsRestricted()): // sellers get a direct link to their own Sales Team card ?>
   <a href="reports.php?rtype=team" class="<?= $cur==='reports.php' ? 'active':'' ?>">👥 Sales Team</a>
