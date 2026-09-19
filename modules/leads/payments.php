@@ -174,6 +174,35 @@ unset($row);
 // Keep only NOT-yet-settled pratiche (per-request status).
 $rows = array_values(array_filter($rows, fn($r) => in_array($r['_ps_derived'], UNPAID_STATUSES, true)));
 
+// ── Filters (server-side GET, consistent with requests.php) ───────────────────
+// Fresh visit (no filter params) pre-selects the current user's own agent and
+// the "next 12 months + overdue" window. Submitting the form (or ?clear=1)
+// takes the posted values verbatim; an empty value means "all".
+$clear   = isset($_GET['clear']);
+$fresh   = !$clear && !array_intersect(['agent','status','window','q'], array_keys($_GET));
+$fAgent  = $clear ? '' : (isset($_GET['agent'])  ? trim($_GET['agent'])  : ($fresh ? (string)$my_agent_id : ''));
+$fStatus = $clear ? '' : (isset($_GET['status']) ? trim($_GET['status']) : '');
+$fWindow = $clear ? 'next12' : (isset($_GET['window']) && $_GET['window'] !== '' ? trim($_GET['window']) : 'next12');
+$fQ      = $clear ? '' : (isset($_GET['q']) ? trim($_GET['q']) : '');
+
+$rows = array_values(array_filter($rows, function ($r) use ($fAgent, $fStatus, $fWindow, $fQ, $today_ts, $window_end) {
+    if ($fAgent  !== '' && (int)$r['agent_id'] !== (int)$fAgent) return false;
+    if ($fStatus !== '' && $r['_ps_derived'] !== $fStatus)       return false;
+    $has  = $r['start_ts'] !== null;
+    $over = $has && $r['start_ts'] <  $today_ts;
+    $in12 = $has && $r['start_ts'] >= $today_ts && $r['start_ts'] <= $window_end;
+    if ($fWindow === 'next12'   && !($over || $in12)) return false;
+    if ($fWindow === 'upcoming' && !$in12)            return false;
+    if ($fWindow === 'overdue'  && !$over)            return false;
+    // 'all' → no date restriction
+    if ($fQ !== '') {
+        $hay = strtolower($r['customer_name'] . ' ' . folder_agency($r) . ' '
+             . get_date_folder($r) . ' ' . ($r['agent_name'] ?? ''));
+        if (strpos($hay, strtolower($fQ)) === false) return false;
+    }
+    return true;
+}));
+
 // Sort: by agent, then group the GRP rows together (group_folder), then arrival.
 usort($rows, function ($a, $b) {
     $an = strtolower($a['agent_name'] ?? 'zzz');
@@ -246,50 +275,50 @@ include 'includes/header.php';
 ?>
 
 <div class="page-header">
-  <h2>💳 Payments to collect <span id="rowCount" style="font-size:.8rem;font-weight:400;color:var(--grey-mid)"></span></h2>
+  <h2>💳 Payments to collect <span id="rowCount" style="font-size:.8rem;font-weight:400;color:var(--grey-mid)">(<?= count($rows) ?>)</span></h2>
 </div>
 
-<div class="filters">
+<form method="GET" class="filters">
   <div>
     <label>Agent</label>
-    <select id="filterAgent">
+    <select name="agent">
       <option value="">All agents</option>
       <?php foreach ($agents as $ag): ?>
-        <option value="<?= (int)$ag['id'] ?>" <?= $ag['id'] == $my_agent_id ? 'selected' : '' ?>><?= h($ag['name']) ?></option>
+        <option value="<?= (int)$ag['id'] ?>" <?= (string)$ag['id'] === (string)$fAgent ? 'selected' : '' ?>><?= h($ag['name']) ?></option>
       <?php endforeach; ?>
     </select>
   </div>
   <div>
     <label>Status</label>
-    <select id="filterStatus">
+    <select name="status">
       <option value="">All</option>
-      <option value="Deposit">Deposit</option>
-      <option value="Balance">Balance</option>
-      <option value="Balance-Cash">Balance-Cash</option>
+      <?php foreach (['Deposit','Balance','Balance-Cash'] as $st): ?>
+        <option value="<?= h($st) ?>" <?= $fStatus === $st ? 'selected' : '' ?>><?= h($st) ?></option>
+      <?php endforeach; ?>
     </select>
   </div>
   <div>
     <label>Window</label>
-    <select id="filterWindow">
-      <option value="next12">Overdue + next 12 months</option>
-      <option value="upcoming">Next 12 months only</option>
-      <option value="overdue">Overdue only</option>
-      <option value="all">All</option>
+    <select name="window">
+      <option value="next12"   <?= $fWindow === 'next12'   ? 'selected' : '' ?>>Overdue + next 12 months</option>
+      <option value="upcoming" <?= $fWindow === 'upcoming' ? 'selected' : '' ?>>Next 12 months only</option>
+      <option value="overdue"  <?= $fWindow === 'overdue'  ? 'selected' : '' ?>>Overdue only</option>
+      <option value="all"      <?= $fWindow === 'all'      ? 'selected' : '' ?>>All</option>
     </select>
   </div>
   <div>
     <label>Search</label>
-    <input type="text" id="searchBox" placeholder="Customer, destination…">
+    <input type="text" name="q" value="<?= h($fQ) ?>" placeholder="Customer, destination…">
   </div>
   <div>
     <label>&nbsp;</label>
-    <button type="button" id="btnFilter" class="btn btn-outline">Filter</button>
+    <button type="submit" class="btn btn-outline">Filter</button>
   </div>
   <div>
     <label>&nbsp;</label>
-    <button type="button" id="btnClearFilters" class="btn btn-outline btn-grey">✕ Clear Filters</button>
+    <a href="payments.php?clear=1" class="btn btn-outline btn-grey">✕ Clear Filters</a>
   </div>
-</div>
+</form>
 
 <div id="groups">
 <?php if (!$rows): ?>
@@ -299,7 +328,7 @@ include 'includes/header.php';
     $agentId = (int)($arows[0]['agent_id'] ?? 0);
 ?>
   <div class="agent-group" data-agent-id="<?= $agentId ?>">
-    <div class="agent-head"><?= h($agentName) ?> <span class="agent-count" style="font-weight:400;opacity:.8"></span></div>
+    <div class="agent-head"><?= h($agentName) ?> <span class="agent-count" style="font-weight:400;opacity:.8">(<?= count($arows) ?>)</span></div>
     <table class="pay-table">
       <thead>
         <tr>
@@ -412,68 +441,7 @@ include 'includes/send_modal.php';
 </div>
 
 <script>
-const TODAY_TS      = <?= $today_ts ?>;
-const DEFAULT_AGENT = '<?= (int)$my_agent_id ?>';
 let notesReqId  = 0;
-
-function updateTable() {
-  const agent  = document.getElementById('filterAgent').value;
-  const status = document.getElementById('filterStatus').value;
-  const win    = document.getElementById('filterWindow').value;
-  const search = document.getElementById('searchBox').value.toLowerCase().trim();
-  let total = 0;
-
-  document.querySelectorAll('.agent-group').forEach(function(grp) {
-    let vis = 0;
-    grp.querySelectorAll('tr.pay-row').forEach(function(tr) {
-      const overdue = tr.dataset.overdue === '1';
-      const in12    = tr.dataset.in12 === '1';
-      const agentOk  = !agent  || tr.dataset.agent === agent;
-      const statusOk = !status || tr.dataset.status === status;
-      const srchOk   = !search || tr.dataset.search.includes(search);
-      let winOk = true;
-      if      (win === 'next12')   winOk = overdue || in12;
-      else if (win === 'upcoming') winOk = in12;
-      else if (win === 'overdue')  winOk = overdue;
-      // 'all' → always true
-      const show = agentOk && statusOk && srchOk && winOk;
-      tr.style.display = show ? '' : 'none';
-      if (show) vis++;
-    });
-    grp.style.display = vis > 0 ? '' : 'none';
-    const cnt = grp.querySelector('.agent-count');
-    if (cnt) cnt.textContent = '(' + vis + ')';
-    total += vis;
-  });
-  document.getElementById('rowCount').textContent = '(' + total + ')';
-}
-function clearFilters() {
-  var a = document.getElementById('filterAgent');
-  var s = document.getElementById('filterStatus');
-  var w = document.getElementById('filterWindow');
-  var q = document.getElementById('searchBox');
-  if (a) a.value = DEFAULT_AGENT;
-  if (s) s.value = '';
-  if (w) w.value = 'next12';
-  if (q) q.value = '';
-  updateTable();
-}
-
-// Wire the filter controls. Guarded so it runs after the DOM is ready and the
-// elements exist (fixes the filters doing nothing when the script ran early).
-function initFilters() {
-  ['filterAgent','filterStatus','filterWindow','searchBox'].forEach(function(id) {
-    var el = document.getElementById(id);
-    if (!el) return;
-    el.addEventListener('change', updateTable);
-    el.addEventListener('input', updateTable);
-  });
-  var bf = document.getElementById('btnFilter');
-  if (bf) bf.addEventListener('click', updateTable);
-  var bc = document.getElementById('btnClearFilters');
-  if (bc) bc.addEventListener('click', clearFilters);
-  updateTable();
-}
 
 // Open the request in a new tab for editing (row click).
 function openRequest(id) { window.open('request_edit.php?id=' + id, '_blank'); }
@@ -555,12 +523,6 @@ function updateNoteBadge(reqId, count, lastBody) {
 }
 
 function esc(s) { return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
-
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', initFilters);
-} else {
-  initFilters();
-}
 </script>
 
 <?php include 'includes/footer.php'; ?>
