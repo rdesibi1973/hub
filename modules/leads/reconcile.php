@@ -53,11 +53,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'apply
     foreach ($_POST['sel'] ?? [] as $encoded) {
         $item = json_decode(base64_decode($encoded), true);
         if (empty($item['request_id']) || empty($item['folder_name'])) continue;
-        $db->prepare("UPDATE requests SET practice_code = ? WHERE id = ?")
-           ->execute([$item['folder_name'], (int)$item['request_id']]);
+
+        $reqId  = (int)$item['request_id'];
+        $folder = trim($item['folder_name']);
+        $isGrp  = !empty($item['is_grp']);
+        $parent = trim($item['parent'] ?? '');
+        $source = (($item['source'] ?? '001_Safari') === '2026') ? '2026' : '001_Safari';
+
+        // Rebuild the Dropbox URL so the 📁 link points to the REAL (renamed)
+        // folder. GRP bookings live one level deeper: /<source>/<parent>/<sub>.
+        if ($isGrp && $parent !== '') {
+            $url = 'https://www.dropbox.com/home/' . $source
+                 . '/' . rawurlencode($parent) . '/' . rawurlencode($folder);
+            // For GRP the practice_code is the subfolder; group_folder is the parent.
+            $db->prepare(
+                "UPDATE requests SET practice_code = ?, group_folder = ?, dropbox_url = ? WHERE id = ?"
+            )->execute([$folder, $parent, $url, $reqId]);
+        } else {
+            $url = 'https://www.dropbox.com/home/' . $source . '/' . rawurlencode($folder);
+            $db->prepare(
+                "UPDATE requests SET practice_code = ?, dropbox_url = ? WHERE id = ?"
+            )->execute([$folder, $url, $reqId]);
+        }
         $applied++;
     }
-    flash($applied > 0 ? "✔ Updated practice_code for $applied request(s)." : 'Nothing to apply.');
+    flash($applied > 0
+        ? "✔ Updated folder + Dropbox link for $applied request(s)."
+        : 'Nothing to apply.');
     header('Location: reconcile.php');
     exit;
 }
@@ -166,7 +188,7 @@ include 'includes/header.php';
 <div class="page-header">
   <div>
     <h2>Dropbox Reconciliation</h2>
-    <div class="sub">Sync Dropbox folder names → <code>practice_code</code> in DB</div>
+    <div class="sub">Sync hand-renamed Dropbox folders → <code>practice_code</code>, <code>group_folder</code> &amp; <code>dropbox_url</code> in DB (matched by customer name)</div>
   </div>
 </div>
 
@@ -250,6 +272,9 @@ include 'includes/header.php';
         $encoded  = base64_encode(json_encode([
           'folder_name' => $row['folder'],
           'request_id'  => $defReqId,
+          'is_grp'      => $row['is_grp'] ? 1 : 0,
+          'parent'      => $row['parent'],
+          'source'      => $row['source'],
         ]));
       ?>
       <tr>
@@ -321,8 +346,14 @@ include 'includes/header.php';
 
 <script>
 function updateSel(aplId, folderName, requestId, chkId) {
-  var enc = btoa(JSON.stringify({folder_name: folderName, request_id: requestId ? parseInt(requestId) : ''}));
-  document.getElementById(aplId).value = enc;
+  var el = document.getElementById(aplId);
+  // Preserve is_grp/parent/source already encoded server-side; only swap the
+  // chosen request_id (and folder name, in case it changed).
+  var data = {};
+  try { data = JSON.parse(atob(el.value)) || {}; } catch (e) { data = {}; }
+  data.folder_name = folderName;
+  data.request_id  = requestId ? parseInt(requestId) : '';
+  el.value = btoa(JSON.stringify(data));
   if (requestId) document.getElementById(chkId).checked = true;
 }
 </script>

@@ -281,6 +281,14 @@ include 'includes/header.php';
     <label>Search</label>
     <input type="text" id="searchBox" placeholder="Customer, destination…">
   </div>
+  <div>
+    <label>&nbsp;</label>
+    <button type="button" id="btnFilter" class="btn btn-outline">Filter</button>
+  </div>
+  <div>
+    <label>&nbsp;</label>
+    <button type="button" id="btnClearFilters" class="btn btn-outline btn-grey">✕ Clear Filters</button>
+  </div>
 </div>
 
 <div id="groups">
@@ -330,6 +338,7 @@ include 'includes/header.php';
       ?>
         <tr class="pay-row<?= $isGrp ? ' grp' : '' ?>" style="cursor:pointer"
             onclick="openRequest(<?= (int)$r['id'] ?>)"
+            data-reqid="<?= (int)$r['id'] ?>"
             data-agent="<?= (int)$r['agent_id'] ?>"
             data-status="<?= h($ps) ?>"
             data-start="<?= $has_date ? (int)$r['start_ts'] : '' ?>"
@@ -403,7 +412,8 @@ include 'includes/send_modal.php';
 </div>
 
 <script>
-const TODAY_TS  = <?= $today_ts ?>;
+const TODAY_TS      = <?= $today_ts ?>;
+const DEFAULT_AGENT = '<?= (int)$my_agent_id ?>';
 let notesReqId  = 0;
 
 function updateTable() {
@@ -437,12 +447,33 @@ function updateTable() {
   });
   document.getElementById('rowCount').textContent = '(' + total + ')';
 }
-['filterAgent','filterStatus','filterWindow','searchBox'].forEach(function(id) {
-  const el = document.getElementById(id);
-  if (!el) return;
-  el.addEventListener('change', updateTable);
-  el.addEventListener('input', updateTable);
-});
+function clearFilters() {
+  var a = document.getElementById('filterAgent');
+  var s = document.getElementById('filterStatus');
+  var w = document.getElementById('filterWindow');
+  var q = document.getElementById('searchBox');
+  if (a) a.value = DEFAULT_AGENT;
+  if (s) s.value = '';
+  if (w) w.value = 'next12';
+  if (q) q.value = '';
+  updateTable();
+}
+
+// Wire the filter controls. Guarded so it runs after the DOM is ready and the
+// elements exist (fixes the filters doing nothing when the script ran early).
+function initFilters() {
+  ['filterAgent','filterStatus','filterWindow','searchBox'].forEach(function(id) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    el.addEventListener('change', updateTable);
+    el.addEventListener('input', updateTable);
+  });
+  var bf = document.getElementById('btnFilter');
+  if (bf) bf.addEventListener('click', updateTable);
+  var bc = document.getElementById('btnClearFilters');
+  if (bc) bc.addEventListener('click', clearFilters);
+  updateTable();
+}
 
 // Open the request in a new tab for editing (row click).
 function openRequest(id) { window.open('request_edit.php?id=' + id, '_blank'); }
@@ -514,21 +545,21 @@ function delNote(id) {
 
 // Refresh the row's note badge + preview without a full reload.
 function updateNoteBadge(reqId, count, lastBody) {
-  var btn = document.querySelector('button[onclick^="openNotes(' + reqId + ',']');
-  if (!btn) return;
-  var td = btn.closest('tr').querySelectorAll('td')[5];
+  var tr = document.querySelector('tr[data-reqid="' + reqId + '"]');
+  if (!tr) return;
+  var td = tr.querySelectorAll('td')[5]; // "Latest note" column
   if (!td) return;
   td.innerHTML =
     '<span class="note-preview" title="' + esc(lastBody) + '">' + esc(lastBody.substring(0, 60)) + '</span> ' +
-    '<span class="badge" style="background:#fff3cd;color:#856404;cursor:pointer" onclick="openNotes(' + reqId + ', \'\')">' + count + '</span>';
+    '<span class="badge" style="background:#fff3cd;color:#856404;cursor:pointer" onclick="event.stopPropagation();openNotes(' + reqId + ', \'\')">' + count + '</span>';
 }
 
 function esc(s) { return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', updateTable);
+  document.addEventListener('DOMContentLoaded', initFilters);
 } else {
-  updateTable();
+  initFilters();
 }
 </script>
 
