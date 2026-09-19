@@ -297,7 +297,7 @@ include 'includes/header.php';
         <tr>
           <th style="width:100px">Arrival</th>
           <th>Customer</th>
-          <th>Destination</th>
+          <th>Folder</th>
           <th style="width:44px;text-align:center">Pax</th>
           <th style="width:120px;text-align:center">Status</th>
           <th>Latest note</th>
@@ -314,14 +314,22 @@ include 'includes/header.php';
           $isGrp    = $gf !== '' && ($groupCounts[$gf] ?? 0) > 1;
           $agency   = folder_agency($r);
           $psCls    = 'status-' . strtolower($ps);
+          // Dropbox folder path (main folder + subfolder for GRP), from dropbox_url.
+          $dbxUrl   = trim($r['dropbox_url'] ?? '');
+          $dbxPath  = $dbxUrl ? urldecode((string)parse_url($dbxUrl, PHP_URL_PATH)) : '';
+          $segs     = array_values(array_filter(explode('/', $dbxPath), fn($s) => $s !== ''));
+          if ($segs && in_array($segs[0], ['001_Safari', '2026'], true)) array_shift($segs);
+          $folderMain = $segs[0] ?? ($gf ?: trim($r['practice_code'] ?? ''));
+          $folderSub  = $segs[1] ?? '';
       ?>
-        <tr class="pay-row<?= $isGrp ? ' grp' : '' ?>"
+        <tr class="pay-row<?= $isGrp ? ' grp' : '' ?>" style="cursor:pointer"
+            onclick="openRequest(<?= (int)$r['id'] ?>)"
             data-agent="<?= (int)$r['agent_id'] ?>"
             data-status="<?= h($ps) ?>"
             data-start="<?= $has_date ? (int)$r['start_ts'] : '' ?>"
             data-overdue="<?= $is_over ? '1' : '0' ?>"
             data-in12="<?= $in_12 ? '1' : '0' ?>"
-            data-search="<?= h(strtolower($r['customer_name'].' '.($agency).' '.($r['destination'] ?? '').' '.($r['agent_name'] ?? ''))) ?>">
+            data-search="<?= h(strtolower($r['customer_name'].' '.($agency).' '.($folderMain).' '.($folderSub).' '.($r['agent_name'] ?? ''))) ?>">
           <td style="white-space:nowrap;<?= $is_over ? 'color:#842029;font-weight:700' : '' ?>">
             <?= $r['start_date'] ? date('d M Y', strtotime($r['start_date'])) : '<span style="color:var(--grey-lt)">— no date —</span>' ?>
             <?php if ($is_over): ?><span class="overdue-pill">OVERDUE</span><?php endif; ?>
@@ -331,20 +339,29 @@ include 'includes/header.php';
             <?php if ($agency): ?><span style="font-size:.73rem;color:var(--grey-mid)">(<?= h($agency) ?>)</span><?php endif; ?>
             <?php if ($isGrp): ?><span style="font-size:.66rem;color:#8a6d3b;background:#fcf3e3;border-radius:6px;padding:1px 5px;margin-left:4px">GROUP</span><?php endif; ?>
           </td>
-          <td><?= h($r['destination'] ?? '') ?></td>
+          <td style="font-family:monospace;font-size:.76rem">
+            <?php if ($dbxUrl): ?>
+              <a href="<?= h($dbxUrl) ?>" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="color:var(--navy,#1a3a5c);text-decoration:none" title="Open in Dropbox">📁 <?= h($folderMain) ?></a>
+            <?php else: ?>
+              <span style="color:var(--grey-mid)">📁 <?= h($folderMain) ?></span>
+            <?php endif; ?>
+            <?php if ($folderSub !== ''): ?>
+              <div style="color:var(--grey-mid);margin-top:2px">↳ <?= h($folderSub) ?></div>
+            <?php endif; ?>
+          </td>
           <td style="text-align:center"><?= (int)$r['pax'] ?></td>
           <td style="text-align:center"><span class="badge <?= $psCls ?>"><?= h($ps) ?></span></td>
           <td>
             <?php if ($r['note_count'] > 0): ?>
               <span class="note-preview" title="<?= h(strip_tags($r['last_note'] ?? '')) ?>"><?= h(mb_strimwidth(strip_tags($r['last_note'] ?? ''), 0, 60, '…')) ?></span>
-              <span class="badge" style="background:#fff3cd;color:#856404;cursor:pointer" onclick="openNotes(<?= (int)$r['id'] ?>, '<?= addslashes(h($r['customer_name'])) ?>')"><?= (int)$r['note_count'] ?></span>
+              <span class="badge" style="background:#fff3cd;color:#856404;cursor:pointer" onclick="event.stopPropagation();openNotes(<?= (int)$r['id'] ?>, '<?= addslashes(h($r['customer_name'])) ?>')"><?= (int)$r['note_count'] ?></span>
             <?php else: ?>
               <span style="color:var(--grey-lt)">—</span>
             <?php endif; ?>
           </td>
           <td style="text-align:right;white-space:nowrap">
-            <button type="button" class="btn btn-outline btn-sm" onclick="openNotes(<?= (int)$r['id'] ?>, '<?= addslashes(h($r['customer_name'])) ?>')">📝 Note</button>
-            <button type="button" class="btn btn-outline btn-sm" onclick="openSend(<?= (int)$r['id'] ?>, '<?= addslashes(h($r['customer_name'])) ?>', '<?= addslashes(h($r['agent_email'] ?? '')) ?>')">✉ Reminder</button>
+            <button type="button" class="btn btn-outline btn-sm" onclick="event.stopPropagation();openNotes(<?= (int)$r['id'] ?>, '<?= addslashes(h($r['customer_name'])) ?>')">📝 Note</button>
+            <button type="button" class="btn btn-outline btn-sm" onclick="event.stopPropagation();openSend(<?= (int)$r['id'] ?>, '<?= addslashes(h($r['customer_name'])) ?>', '<?= addslashes(h($r['agent_email'] ?? '')) ?>')">✉ Reminder</button>
           </td>
         </tr>
       <?php endforeach; ?>
@@ -416,9 +433,13 @@ function updateTable() {
 }
 ['filterAgent','filterStatus','filterWindow','searchBox'].forEach(function(id) {
   const el = document.getElementById(id);
+  if (!el) return;
   el.addEventListener('change', updateTable);
   el.addEventListener('input', updateTable);
 });
+
+// Open the request in a new tab for editing (row click).
+function openRequest(id) { window.open('request_edit.php?id=' + id, '_blank'); }
 
 document.querySelector('#notesOverlay .modal-box').addEventListener('click', function(e){ e.stopPropagation(); });
 function closeNotes() { document.getElementById('notesOverlay').style.display = 'none'; }
@@ -498,7 +519,11 @@ function updateNoteBadge(reqId, count, lastBody) {
 
 function esc(s) { return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
-updateTable();
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', updateTable);
+} else {
+  updateTable();
+}
 </script>
 
 <?php include 'includes/footer.php'; ?>
