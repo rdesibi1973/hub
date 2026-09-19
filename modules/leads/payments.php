@@ -314,13 +314,19 @@ include 'includes/header.php';
           $isGrp    = $gf !== '' && ($groupCounts[$gf] ?? 0) > 1;
           $agency   = folder_agency($r);
           $psCls    = 'status-' . strtolower($ps);
-          // Dropbox folder path (main folder + subfolder for GRP), from dropbox_url.
-          $dbxUrl   = trim($r['dropbox_url'] ?? '');
-          $dbxPath  = $dbxUrl ? urldecode((string)parse_url($dbxUrl, PHP_URL_PATH)) : '';
-          $segs     = array_values(array_filter(explode('/', $dbxPath), fn($s) => $s !== ''));
-          if ($segs && in_array($segs[0], ['001_Safari', '2026'], true)) array_shift($segs);
-          $folderMain = $segs[0] ?? ($gf ?: trim($r['practice_code'] ?? ''));
-          $folderSub  = $segs[1] ?? '';
+          // Dropbox folder: the real folder name (parent folder for GRP), reliable
+          // via get_date_folder(); the subfolder is added for GRP when the URL has it.
+          $dbxUrl     = trim($r['dropbox_url'] ?? '');
+          $folderMain = get_date_folder($r);
+          if ($folderMain === '') $folderMain = $gf ?: trim($r['practice_code'] ?? '');
+          $folderSub  = '';
+          if ($isGrp && $dbxUrl) {
+              $p = urldecode((string)parse_url($dbxUrl, PHP_URL_PATH));
+              if (preg_match('#/(?:001_Safari|2026)/[^/]+/([^/]+)#i', $p, $m)) {
+                  $sub = trim($m[1]);
+                  if ($sub !== '' && strcasecmp($sub, $folderMain) !== 0) $folderSub = $sub;
+              }
+          }
       ?>
         <tr class="pay-row<?= $isGrp ? ' grp' : '' ?>" style="cursor:pointer"
             onclick="openRequest(<?= (int)$r['id'] ?>)"
