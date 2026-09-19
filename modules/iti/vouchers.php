@@ -631,10 +631,11 @@ include __DIR__ . '/../../includes/layout_header.php';
         <tbody>
           <?php
             $frows = $model['flights'] ?? [];
+            $realCount = count($frows);
             $frows[] = ['date' => '', 'no' => '', 'airline' => '', 'dep_airport' => '', 'dep_time' => '', 'arr_airport' => '', 'arr_time' => '']; // spare row
             foreach ($frows as $i => $f): ?>
             <tr>
-              <td style="padding:3px 6px;text-align:center;"><input type="checkbox" name="fl_include[]" value="<?= $i ?>" checked style="width:16px;height:16px;"></td>
+              <td style="padding:3px 6px;text-align:center;"><input type="checkbox" name="fl_include[]" value="<?= $i ?>"<?= $i < $realCount ? ' checked' : '' ?> style="width:16px;height:16px;"></td>
               <td style="padding:3px 6px;"><input type="date" name="fl_date[<?= $i ?>]" value="<?= h($f['date']) ?>" style="width:100%;padding:6px;border-radius:6px;"></td>
               <td style="padding:3px 6px;"><input type="text" name="fl_airline[<?= $i ?>]" value="<?= h($f['airline'] ?? '') ?>" style="width:100%;padding:6px;border-radius:6px;"></td>
               <td style="padding:3px 6px;"><input type="text" name="fl_no[<?= $i ?>]" value="<?= h($f['no'] ?? '') ?>" style="width:100%;padding:6px;border-radius:6px;"></td>
