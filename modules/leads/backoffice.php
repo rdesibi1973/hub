@@ -118,24 +118,42 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'chang
             }
         }
     }
-    header('Location: backoffice.php' . (($q = trim($_POST['q'] ?? '')) !== '' ? '?q=' . urlencode($q) : ''));
+    $qs = array_filter([
+        'q'    => trim($_POST['q'] ?? ''),
+        'root' => trim($_POST['root'] ?? ''),
+    ], fn($x) => $x !== '');
+    header('Location: backoffice.php' . ($qs ? '?' . http_build_query($qs) : ''));
     exit;
 }
 
 // ── Search ────────────────────────────────────────────────────────────────────
+// Folder-root filter: which Dropbox root the request's folder lives in
+// (matched literally against dropbox_url). 'All' removes the restriction.
+$ROOT_MAP = [
+    '2026'       => '/home/2026/',
+    '001_Safari' => '/home/001_Safari/',
+    'Contracts'  => '/home/00_Contracts/',
+];
 $q    = trim($_GET['q'] ?? '');
+$root = $_GET['root'] ?? '2026';
+if ($root !== 'All' && !isset($ROOT_MAP[$root])) $root = '2026';
+
 $rows = [];
 if ($q !== '') {
-    $like = '%' . $q . '%';
-    $stmt = $db->prepare(
-        "SELECT r.id, r.customer_name, r.practice_code, r.group_folder, r.status, r.payment_status,
-                r.dropbox_url, a.name AS agent_name
-         FROM requests r LEFT JOIN agents a ON a.id = r.agent_id
-         WHERE r.status NOT IN ('Cancelled','Lost')
-           AND (r.customer_name LIKE ? OR r.practice_code LIKE ? OR r.group_folder LIKE ?)
-         ORDER BY r.id DESC LIMIT 60"
-    );
-    $stmt->execute([$like, $like, $like]);
+    $like   = '%' . $q . '%';
+    $sql    = "SELECT r.id, r.customer_name, r.practice_code, r.group_folder, r.status, r.payment_status,
+                      r.dropbox_url, a.name AS agent_name
+               FROM requests r LEFT JOIN agents a ON a.id = r.agent_id
+               WHERE r.status NOT IN ('Cancelled','Lost')
+                 AND (r.customer_name LIKE ? OR r.practice_code LIKE ? OR r.group_folder LIKE ?)";
+    $params = [$like, $like, $like];
+    if (isset($ROOT_MAP[$root])) {
+        $sql     .= " AND LOCATE(?, r.dropbox_url) > 0";
+        $params[] = $ROOT_MAP[$root];
+    }
+    $sql .= " ORDER BY r.id DESC LIMIT 60";
+    $stmt = $db->prepare($sql);
+    $stmt->execute($params);
     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 }
 
@@ -163,7 +181,15 @@ include 'includes/header.php';
 <form method="GET" class="filters">
   <div>
     <label>Search</label>
-    <input type="text" name="q" value="<?= h($q) ?>" placeholder="Customer or folder…" autofocus style="width:280px">
+    <input type="text" name="q" value="<?= h($q) ?>" placeholder="Customer or folder…" autofocus style="width:260px">
+  </div>
+  <div>
+    <label>Folder</label>
+    <select name="root">
+      <?php foreach (['2026'=>'2026','001_Safari'=>'001_Safari','Contracts'=>'Contracts','All'=>'All'] as $val=>$lbl): ?>
+        <option value="<?= h($val) ?>" <?= $root===$val?'selected':'' ?>><?= h($lbl) ?></option>
+      <?php endforeach; ?>
+    </select>
   </div>
   <div>
     <label>&nbsp;</label>
@@ -216,6 +242,7 @@ include 'includes/header.php';
             <input type="hidden" name="action" value="change_status">
             <input type="hidden" name="request_id" value="<?= (int)$r['id'] ?>">
             <input type="hidden" name="q" value="<?= h($q) ?>">
+            <input type="hidden" name="root" value="<?= h($root) ?>">
             <select name="new_status" class="m-input" style="width:150px;padding:5px 8px;font-size:.8rem">
               <?php foreach (array_keys($STATUS_MAP) as $st): ?>
                 <option value="<?= h($st) ?>"><?= h($st) ?></option>
