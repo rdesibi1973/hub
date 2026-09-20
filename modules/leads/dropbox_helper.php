@@ -176,6 +176,45 @@ function dropbox_move_folder(string $token, string $from_path, string $to_path):
 }
 
 /**
+ * Copy a single file within Dropbox (does not overwrite).
+ * Returns 'copied' on success, 'exists' if the destination already exists,
+ * or 'src_missing' if the source file is not found. Any other error throws.
+ *
+ * @param  string $token  Access token from dropbox_get_access_token()
+ * @param  string $from   Full Dropbox path of the source file
+ * @param  string $to     Full Dropbox path of the destination file
+ * @return string         'copied' | 'exists' | 'src_missing'
+ * @throws RuntimeException on any other API error
+ */
+function dropbox_copy_file(string $token, string $from, string $to): string {
+    $ch = curl_init('https://api.dropboxapi.com/2/files/copy_v2');
+    curl_setopt_array($ch, [
+        CURLOPT_POST           => true,
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_HTTPHEADER     => [
+            'Authorization: Bearer ' . $token,
+            'Content-Type: application/json',
+        ],
+        CURLOPT_POSTFIELDS => json_encode([
+            'from_path'  => $from,
+            'to_path'    => $to,
+            'autorename' => false,
+        ]),
+    ]);
+    $body = curl_exec($ch);
+    $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+
+    if ($code === 200) return 'copied';
+
+    $data    = json_decode($body, true) ?? [];
+    $summary = (string)($data['error_summary'] ?? $body);
+    if (stripos($summary, 'conflict')  !== false) return 'exists';       // to/conflict/...
+    if (stripos($summary, 'not_found') !== false) return 'src_missing';  // from_lookup/not_found/...
+    throw new RuntimeException("Dropbox copy_v2 failed (HTTP $code): $summary");
+}
+
+/**
  * List all sub-folders (one level deep) inside a Dropbox path.
  * Handles pagination automatically.
  *
@@ -263,6 +302,56 @@ function dropbox_delete_folder(string $token, string $path): array {
  * Find a folder's actual Dropbox path by searching for its name.
  * Returns the full path string (e.g. '/001_Safari/07_15JUL_...') or null if not found.
  */
+/**
+ * Search for folders whose name matches $query, restricted to $scopePath and all
+ * of its subfolders (recursive — Dropbox search_v2 always descends the subtree).
+ * Returns a list of ['name' => ..., 'path' => path_display], most-relevant first.
+ *
+ * @param  string $token      Access token from dropbox_get_access_token()
+ * @param  string $query      Substring to look for in the folder name
+ * @param  string $scopePath  Subtree to search, e.g. '/000_Contracts' ('' = whole Dropbox)
+ * @param  int    $max        Max results (Dropbox caps at 1000)
+ * @return array<int,array{name:string,path:string}>
+ */
+function dropbox_search_folders(string $token, string $query, string $scopePath = '', int $max = 25): array {
+    $options = [
+        'file_categories' => ['folder'],
+        'filename_only'   => true,
+        'max_results'     => max(1, min($max, 1000)),
+    ];
+    if ($scopePath !== '') $options['path'] = rtrim($scopePath, '/');
+
+    $ch = curl_init('https://api.dropboxapi.com/2/files/search_v2');
+    curl_setopt_array($ch, [
+        CURLOPT_POST           => true,
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_HTTPHEADER     => [
+            'Authorization: Bearer ' . $token,
+            'Content-Type: application/json',
+        ],
+        CURLOPT_POSTFIELDS => json_encode(['query' => $query, 'options' => $options]),
+    ]);
+    $body = curl_exec($ch);
+    $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+
+    if ($code !== 200) {
+        throw new RuntimeException("Dropbox search_v2 failed (HTTP $code): $body");
+    }
+    $data = json_decode($body, true) ?? [];
+    $out  = [];
+    foreach ($data['matches'] ?? [] as $match) {
+        $meta = $match['metadata']['metadata'] ?? [];
+        if (($meta['.tag'] ?? '') === 'folder') {
+            $out[] = [
+                'name' => $meta['name'] ?? '',
+                'path' => $meta['path_display'] ?? '',
+            ];
+        }
+    }
+    return $out;
+}
+
 function dropbox_find_folder(string $token, string $folderName): ?string {
     $ch = curl_init('https://api.dropboxapi.com/2/files/search_v2');
     curl_setopt_array($ch, [

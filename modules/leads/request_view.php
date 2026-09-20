@@ -85,6 +85,83 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         exit;
     }
 
+    // ── Copy standard program templates into the request folder ────────────────
+    if ($action === 'copy_programs') {
+        try {
+            $req_id   = (int)($_POST['request_id'] ?? 0);
+            $prognum  = trim($_POST['prognum'] ?? '');
+            $programs = $_POST['programs'] ?? [];
+            if (!is_array($programs)) $programs = [];
+
+            if ($prognum === '' || preg_match('#[\\\\/:*?"<>|]#', $prognum)) {
+                echo json_encode(['ok'=>false,'msg'=>'Enter a valid ProgNumber (no \\ / : * ? " < > |).']); exit;
+            }
+            if (!$programs) { echo json_encode(['ok'=>false,'msg'=>'Select at least one program.']); exit; }
+
+            $rq = $db->prepare("SELECT id, practice_code, group_folder, dropbox_url FROM requests WHERE id=?");
+            $rq->execute([$req_id]);
+            $rr = $rq->fetch(PDO::FETCH_ASSOC);
+            if (!$rr) { echo json_encode(['ok'=>false,'msg'=>'Request not found.']); exit; }
+
+            // Destination folder = the request's Dropbox folder (same logic as the view).
+            if (!empty($rr['group_folder']) && $rr['practice_code']) {
+                $destDir = '/001_Safari/' . $rr['group_folder'] . '/' . $rr['practice_code'];
+            } elseif (!empty($rr['dropbox_url'])) {
+                preg_match('#dropbox\.com/home(/.*)?$#i', $rr['dropbox_url'], $m);
+                $destDir = rtrim(urldecode($m[1] ?? ''), '/');
+            } else {
+                $destDir = '';
+            }
+            $folderName = trim($rr['practice_code'] ?? '');
+            if ($destDir === '' || $folderName === '') {
+                echo json_encode(['ok'=>false,'msg'=>'This request has no Dropbox folder yet — cannot copy programs.']); exit;
+            }
+
+            // Resolve {YEAR} in template sources from the request folder's first path segment.
+            $seg  = explode('/', ltrim($destDir, '/'));
+            $year = (isset($seg[0]) && preg_match('/^\d{4}$/', $seg[0])) ? $seg[0] : date('Y');
+
+            // Flatten the grouped program map by label.
+            $groups = require 'includes/std_programs.php';
+            $byLabel = [];
+            foreach ($groups as $progs) foreach ($progs as $label => $files) $byLabel[$label] = $files;
+
+            require_once 'dropbox_helper.php';
+            $token = dropbox_get_access_token();
+
+            $copied = []; $skipped = []; $missing = []; $unknown = [];
+            foreach ($programs as $label) {
+                if (!isset($byLabel[$label])) { $unknown[] = $label; continue; }
+                foreach ($byLabel[$label] as $f) {
+                    $src = str_replace('{YEAR}', $year, $f['src']);
+                    $dst = $destDir . '/' . $prognum . '_' . $folderName . '_' . $f['dst'];
+                    $res = dropbox_copy_file($token, $src, $dst);
+                    $base = $prognum . '_' . $folderName . '_' . $f['dst'];
+                    if      ($res === 'copied')      $copied[]  = $base;
+                    elseif  ($res === 'exists')      $skipped[] = $base;
+                    else                              $missing[] = basename($src); // src_missing
+                }
+            }
+
+            $parts = [];
+            if ($copied)  $parts[] = count($copied) . ' copied';
+            if ($skipped) $parts[] = count($skipped) . ' skipped (already there)';
+            if ($missing) $parts[] = count($missing) . ' template(s) missing';
+            if ($unknown) $parts[] = count($unknown) . ' unknown';
+            echo json_encode([
+                'ok'      => true,
+                'summary' => $parts ? implode(', ', $parts) : 'Nothing to do',
+                'copied'  => $copied,
+                'skipped' => $skipped,
+                'missing' => $missing,
+                'unknown' => $unknown,
+            ]);
+        } catch (Throwable $e) {
+            echo json_encode(['ok'=>false,'msg'=>'Error: '.$e->getMessage()]);
+        }
+        exit;
+    }
+
     echo json_encode(['ok'=>false,'msg'=>'Unknown action']); exit;
 }
 
@@ -512,6 +589,82 @@ include 'includes/header.php';
 
   </div>
 </div>
+<?php endif; ?>
+
+<!-- STANDARD PROGRAMS (Copy Programs) -->
+<?php if (!isLeadsRestricted() && $dbxPath): ?>
+<?php $stdPrograms = require 'includes/std_programs.php'; ?>
+<div class="section-label">Standard Programs</div>
+<div class="table-wrap" style="max-width:1100px;margin-bottom:20px">
+  <div style="padding:18px 22px">
+    <div style="font-size:.8rem;color:var(--grey-mid);margin-bottom:14px">
+      Copy standard itinerary + price templates into this booking's folder, renamed
+      <code>ProgNumber_<?= h($r['practice_code'] ?? '') ?>_…</code>. Existing files are skipped.
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:26px">
+      <?php foreach ($stdPrograms as $groupName => $progs): ?>
+      <div style="min-width:170px">
+        <div style="font-weight:700;font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;color:var(--grey-mid);margin-bottom:8px"><?= h($groupName) ?></div>
+        <?php foreach ($progs as $label => $files): ?>
+        <label style="display:block;font-size:.8rem;margin-bottom:5px;cursor:pointer">
+          <input type="checkbox" class="cp-prog" value="<?= h($label) ?>" style="vertical-align:middle;margin-right:5px"><?= h($label) ?>
+        </label>
+        <?php endforeach; ?>
+      </div>
+      <?php endforeach; ?>
+    </div>
+    <div style="display:flex;align-items:center;gap:12px;margin-top:18px;flex-wrap:wrap">
+      <label style="font-size:.8rem">ProgNumber
+        <input type="text" id="cp-prognum" value="01" style="width:60px;font-family:monospace;padding:5px 7px;border:1.5px solid var(--grey-lt);border-radius:5px;margin-left:4px">
+      </label>
+      <button type="button" class="btn btn-red btn-sm" id="cp-copy" onclick="copyPrograms()">Copy Programs</button>
+      <button type="button" class="btn btn-outline btn-sm" onclick="document.querySelectorAll('.cp-prog').forEach(c=>c.checked=false)">Clear</button>
+      <span id="cp-status" style="font-size:.8rem;color:var(--grey-mid)"></span>
+    </div>
+    <div id="cp-result" style="margin-top:12px;font-size:.78rem;display:none"></div>
+  </div>
+</div>
+<script>
+function copyPrograms() {
+  var progs = Array.from(document.querySelectorAll('.cp-prog:checked')).map(c => c.value);
+  var prognum = document.getElementById('cp-prognum').value.trim();
+  var status = document.getElementById('cp-status');
+  var result = document.getElementById('cp-result');
+  var btn = document.getElementById('cp-copy');
+  result.style.display = 'none'; result.innerHTML = '';
+  if (!progs.length) { status.textContent = 'Select at least one program.'; return; }
+  if (!prognum)      { status.textContent = 'Enter a ProgNumber.'; return; }
+  if (!confirm('Copy ' + progs.length + ' program(s) into this booking\'s Dropbox folder?')) return;
+
+  status.textContent = 'Copying…'; btn.disabled = true;
+  var fd = new FormData();
+  fd.append('action', 'copy_programs');
+  fd.append('request_id', '<?= (int)$r['id'] ?>');
+  fd.append('prognum', prognum);
+  progs.forEach(p => fd.append('programs[]', p));
+
+  fetch('request_view.php?id=<?= (int)$r['id'] ?>', { method:'POST', body:fd })
+    .then(r => r.json())
+    .then(d => {
+      btn.disabled = false;
+      if (!d.ok) { status.textContent = d.msg || 'Failed.'; return; }
+      status.textContent = d.summary;
+      var html = '';
+      function list(title, arr, color) {
+        if (!arr || !arr.length) return '';
+        return '<div style="margin-top:6px"><strong style="color:'+color+'">'+title+'</strong><ul style="margin:4px 0 0 18px">'
+             + arr.map(x => '<li style="font-family:monospace">'+x.replace(/</g,'&lt;')+'</li>').join('') + '</ul></div>';
+      }
+      html += list('Copied', d.copied, 'var(--green,#2e7d32)');
+      html += list('Skipped (already there)', d.skipped, '#92400e');
+      html += list('Templates missing', d.missing, '#C0211B');
+      html += list('Unknown', d.unknown, '#C0211B');
+      result.innerHTML = html;
+      result.style.display = html ? 'block' : 'none';
+    })
+    .catch(e => { btn.disabled = false; status.textContent = 'Error: ' + e; });
+}
+</script>
 <?php endif; ?>
 
 <!-- INITIAL REQUEST -->
