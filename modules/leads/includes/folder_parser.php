@@ -267,3 +267,35 @@ function parse_import_folder(string $folder): array {
     $out['ok'] = empty($out['errors']);
     return $out;
 }
+
+/**
+ * Relative Dropbox path of a request under DROPBOX_HOME (forward-slashed),
+ * e.g. "001_Safari/SmithJohn(BTG-Roberto)_..._BALANCE" or "2026/Foo".
+ * Derived from dropbox_url (kept in sync); falls back to 001_Safari/<folder>.
+ */
+function folder_rel_path(array $r): string {
+    $url = trim($r['dropbox_url'] ?? '');
+    if ($url !== '') {
+        $p = urldecode((string)parse_url($url, PHP_URL_PATH)); // /home/001_Safari/...
+        $p = preg_replace('#^/?home/#i', '', ltrim($p, '/'));
+        $p = trim((string)$p, '/');
+        if ($p !== '') return $p;
+    }
+    $folder = trim($r['group_folder'] ?? '') ?: trim($r['practice_code'] ?? '');
+    return $folder !== '' ? '001_Safari/' . $folder : '';
+}
+
+/** savannah:// URL that opens the request's folder in Explorer ('' if unknown). */
+function savannah_open_url(array $r): string {
+    $rel = folder_rel_path($r);
+    if ($rel === '') return '';
+    $enc = implode('/', array_map('rawurlencode', explode('/', $rel)));
+    return 'savannah://open?path=' . $enc;
+}
+
+/** Windows path with a %DROPBOX_HOME% prefix, for the Copy-path button. */
+function savannah_local_path(array $r): string {
+    $rel = folder_rel_path($r);
+    if ($rel === '') return '';
+    return '%DROPBOX_HOME%\\' . str_replace('/', '\\', $rel);
+}

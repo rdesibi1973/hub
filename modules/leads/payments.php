@@ -403,6 +403,13 @@ include 'includes/header.php';
             <?php if ($folderSub !== ''): ?>
               <div style="color:var(--grey-mid);margin-top:2px">↳ <?= h($folderSub) ?></div>
             <?php endif; ?>
+            <?php $sPath = savannah_local_path($r); $sUrl = savannah_open_url($r); ?>
+            <?php if ($sPath !== ''): ?>
+              <div style="margin-top:3px;font-family:'Open Sans',sans-serif">
+                <a href="<?= h($sUrl) ?>" onclick="event.stopPropagation()" title="Open in Windows Explorer" style="font-size:.68rem;text-decoration:none">📂 Open</a>
+                <a href="#" class="copy-path" data-path="<?= h($sPath) ?>" onclick="event.stopPropagation();copyPath(this);return false" title="Copy Windows path" style="font-size:.68rem;text-decoration:none;margin-left:8px">📋 Copy path</a>
+              </div>
+            <?php endif; ?>
           </td>
           <td style="text-align:center"><?= (int)$r['pax'] ?></td>
           <td style="text-align:center"><span class="badge <?= $psCls ?>"><?= h($ps) ?></span></td>
@@ -456,6 +463,22 @@ include 'includes/send_modal.php';
 <script>
 let notesReqId  = 0;
 const CURRENT_USER = '<?= addslashes($cu['full_name'] ?? $cu['username'] ?? '') ?>';
+
+// Copy a Windows path to the clipboard (paste into Explorer's address bar).
+function copyPath(el) {
+  var t = el.getAttribute('data-path') || '';
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(t).then(function(){ flashCopied(el); }, function(){ fallbackCopy(t, el); });
+  } else { fallbackCopy(t, el); }
+}
+function fallbackCopy(t, el) {
+  var ta = document.createElement('textarea');
+  ta.value = t; ta.style.position = 'fixed'; ta.style.opacity = '0';
+  document.body.appendChild(ta); ta.select();
+  try { document.execCommand('copy'); flashCopied(el); } catch (e) { prompt('Copy this path:', t); }
+  document.body.removeChild(ta);
+}
+function flashCopied(el) { var o = el.textContent; el.textContent = '✓ Copied'; setTimeout(function(){ el.textContent = o; }, 1200); }
 
 // Open the request in a new tab for editing (row click).
 function openRequest(id) { window.open('request_edit.php?id=' + id, '_blank'); }

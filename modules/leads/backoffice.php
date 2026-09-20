@@ -12,6 +12,7 @@
  * (coming next) and are blocked here with a clear message.
  */
 require_once 'config.php';
+require_once 'includes/folder_parser.php';
 $pageTitle = 'BackOffice';
 $db = db();
 
@@ -128,7 +129,7 @@ if ($q !== '') {
     $like = '%' . $q . '%';
     $stmt = $db->prepare(
         "SELECT r.id, r.customer_name, r.practice_code, r.group_folder, r.status, r.payment_status,
-                a.name AS agent_name
+                r.dropbox_url, a.name AS agent_name
          FROM requests r LEFT JOIN agents a ON a.id = r.agent_id
          WHERE r.status NOT IN ('Cancelled','Lost')
            AND (r.customer_name LIKE ? OR r.practice_code LIKE ? OR r.group_folder LIKE ?)
@@ -195,7 +196,16 @@ include 'includes/header.php';
           <strong><?= h($r['customer_name']) ?></strong>
           <?php if ($r['agent_name']): ?><div style="font-size:.7rem;color:var(--grey-mid)">👤 <?= h($r['agent_name']) ?></div><?php endif; ?>
         </td>
-        <td class="bo-folder">📁 <?= h($folder ?: '—') ?><?php if ($isGrp): ?><span class="bo-grp">GRP</span><?php endif; ?></td>
+        <td class="bo-folder">
+          📁 <?= h($folder ?: '—') ?><?php if ($isGrp): ?><span class="bo-grp">GRP</span><?php endif; ?>
+          <?php $sPath = savannah_local_path($r); $sUrl = savannah_open_url($r); ?>
+          <?php if ($sPath !== ''): ?>
+            <div style="margin-top:3px;font-family:'Open Sans',sans-serif">
+              <a href="<?= h($sUrl) ?>" title="Open in Windows Explorer" style="font-size:.68rem;text-decoration:none">📂 Open</a>
+              <a href="#" data-path="<?= h($sPath) ?>" onclick="copyPath(this);return false" title="Copy Windows path" style="font-size:.68rem;text-decoration:none;margin-left:8px">📋 Copy path</a>
+            </div>
+          <?php endif; ?>
+        </td>
         <td><span class="badge"><?= h($psLabel) ?></span></td>
         <td>
           <?php if ($isGrp): ?>
@@ -224,5 +234,23 @@ include 'includes/header.php';
 <?php else: ?>
   <p style="color:var(--grey-mid);padding:20px">Search a customer name or folder to begin.</p>
 <?php endif; ?>
+
+<script>
+// Copy a Windows path to the clipboard (paste into Explorer's address bar).
+function copyPath(el) {
+  var t = el.getAttribute('data-path') || '';
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(t).then(function(){ flashCopied(el); }, function(){ fallbackCopy(t, el); });
+  } else { fallbackCopy(t, el); }
+}
+function fallbackCopy(t, el) {
+  var ta = document.createElement('textarea');
+  ta.value = t; ta.style.position = 'fixed'; ta.style.opacity = '0';
+  document.body.appendChild(ta); ta.select();
+  try { document.execCommand('copy'); flashCopied(el); } catch (e) { prompt('Copy this path:', t); }
+  document.body.removeChild(ta);
+}
+function flashCopied(el) { var o = el.textContent; el.textContent = '✓ Copied'; setTimeout(function(){ el.textContent = o; }, 1200); }
+</script>
 
 <?php include 'includes/footer.php'; ?>
