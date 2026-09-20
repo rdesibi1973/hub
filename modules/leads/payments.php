@@ -203,26 +203,29 @@ $rows = array_values(array_filter($rows, function ($r) use ($fAgent, $fStatus, $
     return true;
 }));
 
-// Sort: by agent, then group the GRP rows together (group_folder), then arrival.
+// Sort strictly by arrival date (chronological). Rows with no parsable date go
+// last. Same-day arrivals fall back to customer name for a stable order.
 usort($rows, function ($a, $b) {
-    $an = strtolower($a['agent_name'] ?? 'zzz');
-    $bn = strtolower($b['agent_name'] ?? 'zzz');
-    if ($an !== $bn) return $an <=> $bn;
-    $ag = strtolower(trim($a['group_folder'] ?? ''));
-    $bg = strtolower(trim($b['group_folder'] ?? ''));
-    if ($ag !== $bg) return $ag <=> $bg;
     $at = $a['start_ts'] ?? PHP_INT_MAX;
     $bt = $b['start_ts'] ?? PHP_INT_MAX;
-    return $at <=> $bt;
+    if ($at !== $bt) return $at <=> $bt;
+    return strcasecmp($a['customer_name'] ?? '', $b['customer_name'] ?? '');
 });
 
-// Group rows by agent for rendering.
-$byAgent = [];
+// Group rows by arrival month (English month name); no-date rows in a final bucket.
+$byMonth = [];
 foreach ($rows as $r) {
-    $key = $r['agent_name'] ?: '— No agent —';
-    $byAgent[$key][] = $r;
+    if ($r['start_ts'] !== null) {
+        $key   = date('Y-m', $r['start_ts']);
+        $label = date('F Y', $r['start_ts']);
+    } else {
+        $key   = '9999-99';
+        $label = 'No arrival date';
+    }
+    if (!isset($byMonth[$key])) $byMonth[$key] = ['label' => $label, 'rows' => []];
+    $byMonth[$key]['rows'][] = $r;
 }
-ksort($byAgent, SORT_NATURAL | SORT_FLAG_CASE);
+ksort($byMonth);
 
 // Count how many requests share each group_folder (to flag GRP clusters).
 $groupCounts = [];
@@ -261,6 +264,8 @@ $extra_css  = '
 .attach-chip button{background:none;border:none;cursor:pointer;color:var(--red);font-size:.9rem;line-height:1;padding:0 1px}
 .agent-group{margin-bottom:22px}
 .agent-head{background:#E8F5E9;color:#1A6B3A;font-weight:700;font-size:.9rem;padding:8px 14px;border-radius:8px 8px 0 0;border-left:4px solid #1A6B3A}
+.month-group{margin-bottom:22px}
+.month-head{background:#EAF1F8;color:#1a3a5c;font-weight:700;font-size:.95rem;padding:9px 14px;border-radius:8px 8px 0 0;border-left:4px solid #1a3a5c}
 .pay-table{width:100%;border-collapse:collapse}
 .pay-table th{text-align:left;font-size:.68rem;text-transform:uppercase;letter-spacing:.05em;color:var(--grey-mid);padding:8px 10px;border-bottom:1px solid var(--grey-lt)}
 .pay-table td{padding:8px 10px;border-bottom:1px solid var(--grey-lt);font-size:.83rem;vertical-align:top}
@@ -324,11 +329,11 @@ include 'includes/header.php';
 <?php if (!$rows): ?>
   <p style="text-align:center;color:var(--grey-mid);padding:40px">No outstanding payments found. 🎉</p>
 <?php endif; ?>
-<?php foreach ($byAgent as $agentName => $arows):
-    $agentId = (int)($arows[0]['agent_id'] ?? 0);
+<?php foreach ($byMonth as $mkey => $mgrp):
+    $arows = $mgrp['rows'];
 ?>
-  <div class="agent-group" data-agent-id="<?= $agentId ?>">
-    <div class="agent-head"><?= h($agentName) ?> <span class="agent-count" style="font-weight:400;opacity:.8">(<?= count($arows) ?>)</span></div>
+  <div class="month-group">
+    <div class="month-head"><?= h($mgrp['label']) ?> <span style="font-weight:400;opacity:.8">(<?= count($arows) ?>)</span></div>
     <table class="pay-table">
       <thead>
         <tr>
@@ -382,6 +387,7 @@ include 'includes/header.php';
             <span style="font-weight:600"><?= h($r['customer_name']) ?></span>
             <?php if ($agency): ?><span style="font-size:.73rem;color:var(--grey-mid)">(<?= h($agency) ?>)</span><?php endif; ?>
             <?php if ($isGrp): ?><span style="font-size:.66rem;color:#8a6d3b;background:#fcf3e3;border-radius:6px;padding:1px 5px;margin-left:4px">GROUP</span><?php endif; ?>
+            <div style="font-size:.7rem;color:var(--grey-mid);margin-top:2px">👤 <?= h($r['agent_name'] ?: '— no agent —') ?></div>
           </td>
           <td style="font-family:monospace;font-size:.76rem">
             <?php if ($dbxUrl): ?>
