@@ -7,9 +7,10 @@
  *   (practice_code, dropbox_url, status, payment_status) in one atomic action.
  *   No local Dropbox sync / Java runtime needed — works from any browser.
  *
- * Scope of this first version: private safaris (non-GRP). Group bookings share
- * a parent folder that carries the status tag, so they are handled separately
- * (coming next) and are blocked here with a clear message.
+ * Handles private safaris and group bookings. A group carries its status tag on
+ * the shared parent folder: changing a group renames that parent and updates
+ * every request in the group (status, payment_status and each sub-booking's
+ * dropbox_url), since the subfolders move with the parent.
  */
 require_once 'config.php';
 require_once 'includes/folder_parser.php';
@@ -72,49 +73,59 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'chang
         flash('Request not found.', 'error');
     } elseif (!isset($STATUS_MAP[$target])) {
         flash('Invalid target status.', 'error');
-    } elseif (trim($r['group_folder'] ?? '') !== '') {
-        flash('This is a group booking (GRP). Group status changes are not handled here yet — use the desktop tool for now.', 'error');
+    } elseif (($folder = ($isGrp = trim($r['group_folder'] ?? '') !== '')
+                        ? trim($r['group_folder'])
+                        : trim($r['practice_code'] ?? '')) === '') {
+        // $isGrp/$folder set above: tag lives on the parent for a group, on the
+        // folder itself for a private safari.
+        flash('This request has no folder to rename.', 'error');
     } else {
-        $folder = trim($r['practice_code'] ?? '');
-        if ($folder === '') {
-            flash('This request has no folder (practice_code) to rename.', 'error');
+        $newTag    = $STATUS_MAP[$target]['tag'];
+        $newFolder = bo_new_folder_name($folder, $newTag, $KNOWN_TAGS);
+
+        if (strcasecmp($newFolder, $folder) === 0) {
+            flash('The folder is already at that status — nothing to change.', 'error');
         } else {
-            $newTag    = $STATUS_MAP[$target]['tag'];
-            $newFolder = bo_new_folder_name($folder, $newTag, $KNOWN_TAGS);
+            require_once 'dropbox_helper.php';
+            try {
+                $token   = dropbox_get_access_token();
+                // Locate the real folder by its current name (robust against a stale dropbox_url).
+                $curPath = dropbox_find_folder($token, $folder);
+                if ($curPath === null) {
+                    flash('Could not find the folder "' . $folder . '" in Dropbox. Check the name, then retry.', 'error');
+                } else {
+                    $parentDir = rtrim(substr($curPath, 0, strrpos($curPath, '/')), '/');
+                    $newPath   = $parentDir . '/' . $newFolder;
 
-            if (strcasecmp($newFolder, $folder) === 0) {
-                flash('The folder is already at that status — nothing to change.', 'error');
-            } else {
-                require_once 'dropbox_helper.php';
-                try {
-                    $token   = dropbox_get_access_token();
-                    // Locate the real folder by its current name (robust against a stale dropbox_url).
-                    $curPath = dropbox_find_folder($token, $folder);
-                    if ($curPath === null) {
-                        flash('Could not find the folder "' . $folder . '" in Dropbox. Check the name, then retry.', 'error');
+                    dropbox_move_folder($token, $curPath, $newPath);   // subfolders move with the parent
+
+                    $newStatus = $STATUS_MAP[$target]['status'];
+                    $newPs     = $STATUS_MAP[$target]['ps'];
+
+                    if ($isGrp) {
+                        // Group rename touches the shared parent → update every booking in the group,
+                        // rebuilding each sub-booking's dropbox_url under the renamed parent.
+                        $subs = $db->prepare("SELECT id, practice_code FROM requests WHERE group_folder = ?");
+                        $subs->execute([$folder]);
+                        $updOne = $db->prepare("UPDATE requests
+                                                SET group_folder = ?, dropbox_url = ?, status = ?, payment_status = ?
+                                                WHERE id = ?");
+                        $n = 0;
+                        foreach ($subs->fetchAll(PDO::FETCH_ASSOC) as $g) {
+                            $sub    = trim($g['practice_code'] ?? '');
+                            $subUrl = bo_url_from_path($sub !== '' ? $newPath . '/' . $sub : $newPath);
+                            $updOne->execute([$newFolder, $subUrl, $newStatus, $newPs, (int)$g['id']]);
+                            $n++;
+                        }
+                        flash('✔ Group "' . $newFolder . '": renamed and set to ' . $target . ' (' . $n . ' booking(s) updated).');
                     } else {
-                        $parent  = rtrim(substr($curPath, 0, strrpos($curPath, '/')), '/');
-                        $newPath = $parent . '/' . $newFolder;
-
-                        dropbox_move_folder($token, $curPath, $newPath);
-
-                        // Dropbox rename OK → update the DB.
-                        $newUrl = bo_url_from_path($newPath);
-                        $upd = $db->prepare("UPDATE requests
-                                             SET practice_code = ?, dropbox_url = ?, status = ?, payment_status = ?
-                                             WHERE id = ?");
-                        $upd->execute([
-                            $newFolder,
-                            $newUrl,
-                            $STATUS_MAP[$target]['status'],
-                            $STATUS_MAP[$target]['ps'], // null clears it
-                            $reqId,
-                        ]);
+                        $db->prepare("UPDATE requests SET practice_code = ?, dropbox_url = ?, status = ?, payment_status = ? WHERE id = ?")
+                           ->execute([$newFolder, bo_url_from_path($newPath), $newStatus, $newPs, $reqId]);
                         flash('✔ ' . $r['customer_name'] . ': renamed to "' . $newFolder . '" and set to ' . $target . '.');
                     }
-                } catch (Throwable $e) {
-                    flash('Dropbox/DB error — nothing was changed: ' . $e->getMessage(), 'error');
                 }
+            } catch (Throwable $e) {
+                flash('Dropbox/DB error — nothing was changed: ' . $e->getMessage(), 'error');
             }
         }
     }
@@ -174,8 +185,8 @@ include 'includes/header.php';
 
 <div class="bo-note">
   Renames the Dropbox folder <strong>server-side</strong> (no Java, no local Dropbox needed) and updates
-  the request status + payment in one step. First version handles <strong>private safaris</strong>;
-  group bookings (GRP) are coming next.
+  the request status + payment in one step. Works for <strong>private safaris and groups</strong> — a
+  group renames the shared parent folder and updates all its bookings.
 </div>
 
 <form method="GET" class="filters">
@@ -234,11 +245,8 @@ include 'includes/header.php';
         </td>
         <td><span class="badge"><?= h($psLabel) ?></span></td>
         <td>
-          <?php if ($isGrp): ?>
-            <span style="font-size:.75rem;color:var(--grey-mid)">Group booking — use the desktop tool for now.</span>
-          <?php else: ?>
           <form method="POST" style="display:flex;gap:6px;align-items:center;margin:0"
-                onsubmit="return confirm('Rename the Dropbox folder and set this booking to ' + this.new_status.value + '?\n\nThis renames the real Dropbox folder.');">
+                onsubmit="return confirm('<?= $isGrp ? 'GROUP: this renames the shared group folder and updates ALL its bookings.\\n\\n' : '' ?>Rename the Dropbox folder and set to ' + this.new_status.value + '?\n\nThis renames the real Dropbox folder.');">
             <input type="hidden" name="action" value="change_status">
             <input type="hidden" name="request_id" value="<?= (int)$r['id'] ?>">
             <input type="hidden" name="q" value="<?= h($q) ?>">
@@ -248,9 +256,8 @@ include 'includes/header.php';
                 <option value="<?= h($st) ?>"><?= h($st) ?></option>
               <?php endforeach; ?>
             </select>
-            <button type="submit" class="btn btn-red btn-sm">Apply</button>
+            <button type="submit" class="btn btn-red btn-sm"><?= $isGrp ? 'Apply (group)' : 'Apply' ?></button>
           </form>
-          <?php endif; ?>
         </td>
       </tr>
     <?php endforeach; ?>
