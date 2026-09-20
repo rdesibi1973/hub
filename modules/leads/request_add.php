@@ -17,7 +17,7 @@ $v = [
     'email'           => '',
     'whatsapp'        => '',
     'source'          => 'Email',
-    'channel'         => 'direct',
+    'channel'         => 'agency',
     'agency_id'       => '',
     'agent_id'        => '',
     'destination'     => '',
@@ -239,19 +239,21 @@ include 'includes/header.php';
       </div>
 
       <div class="form-group">
-        <label for="channel">Channel *</label>
-        <select id="channel" name="channel" onchange="updateChannel()">
-          <option value="direct" <?= $v['channel']==='direct'?'selected':'' ?>>Direct (Drct)</option>
-          <option value="agency" <?= $v['channel']==='agency'?'selected':'' ?>>Agency</option>
-          <option value="sb"     <?= $v['channel']==='sb'    ?'selected':'' ?>>Safari Bookings (SB)</option>
-          <option value="other"  <?= $v['channel']==='other' ?'selected':'' ?>>Other</option>
-        </select>
+        <label>Channel *</label>
+        <div style="display:flex;gap:20px;align-items:center;padding-top:4px">
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-weight:400">
+            <input type="radio" name="channel" value="agency" <?= $v['channel']!=='direct'?'checked':'' ?> onchange="updateChannel()" style="accent-color:#C0211B"> Agency
+          </label>
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-weight:400">
+            <input type="radio" name="channel" value="direct" <?= $v['channel']==='direct'?'checked':'' ?> onchange="updateChannel()" style="accent-color:#C0211B"> Direct
+          </label>
+        </div>
       </div>
 
       <div class="form-group" id="agencyRow"
-           style="display:<?= $v['channel']==='agency'?'block':'none' ?>">
+           style="display:<?= $v['channel']!=='direct'?'block':'none' ?>">
         <label for="agency_id">Agency *</label>
-        <select id="agency_id" name="agency_id" onchange="updateFolderPreview()">
+        <select id="agency_id" name="agency_id" onchange="updateFolderPreview()" <?= $v['channel']!=='direct'?'required':'' ?>>
           <option value="">— Select Agency —</option>
           <?php foreach ($agencies as $ag): ?>
             <option value="<?= $ag['id'] ?>"
@@ -408,10 +410,20 @@ include 'includes/header.php';
 
 <script>
 // ── Channel / agency toggle ───────────────────────────────────────────────────
+function channelValue() {
+  const r = document.querySelector('input[name="channel"]:checked');
+  return r ? r.value : 'agency';
+}
 function updateChannel() {
-  const ch = document.getElementById('channel').value;
+  const ch = channelValue();
+  const agSel = document.getElementById('agency_id');
   document.getElementById('agencyRow').style.display = (ch === 'agency') ? 'block' : 'none';
-  if (ch !== 'agency') document.getElementById('agency_id').value = '';
+  if (ch === 'agency') {
+    agSel.setAttribute('required', '');           // Agency is mandatory
+  } else {
+    agSel.removeAttribute('required');
+    agSel.value = '';
+  }
   updateFolderPreview();
 }
 
@@ -421,7 +433,7 @@ function updateFolderPreview() {
   const agentSel = document.getElementById('agent_id');
   const agentOpt = agentSel.options[agentSel.selectedIndex];
   const agentName = (agentOpt && agentOpt.value) ? (agentOpt.dataset.name || '') : '';
-  const channel  = document.getElementById('channel').value;
+  const channel  = channelValue();
   const row      = document.getElementById('folderPreviewRow');
   const box      = document.getElementById('folderPreviewBox');
 
