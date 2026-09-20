@@ -572,7 +572,7 @@ include 'includes/header.php';
       <?php endif; ?>
     </div>
 
-    <div class="detail-label">Dropbox Folder Link</div>
+    <div class="detail-label">Folder</div>
     <div class="detail-value">
       <?php
         // Build the Dropbox path (without full URL, just the path portion)
@@ -587,7 +587,8 @@ include 'includes/header.php';
         }
       ?>
       <?php if ($dbxPath): ?>
-        <a href="dropbox_open.php?path=<?= rawurlencode($dbxPath) ?>" target="_blank">📁 Open Dropbox Folder</a>
+        <?php $sUrl = 'savannah://open?path=' . implode('/', array_map('rawurlencode', explode('/', ltrim($dbxPath, '/')))); ?>
+        <a href="<?= h($sUrl) ?>" title="Open the folder in Windows Explorer">📂 Open Folder</a>
       <?php else: ?>
         <span class="text-muted">— not set yet</span>
       <?php endif; ?>
