@@ -215,6 +215,51 @@ function dropbox_copy_file(string $token, string $from, string $to): string {
 }
 
 /**
+ * List file names (not folders, one level deep) inside a Dropbox path.
+ * Returns [] if the folder does not exist yet. Handles pagination.
+ *
+ * @param  string $token  Access token from dropbox_get_access_token()
+ * @param  string $path   Full Dropbox path, e.g. '/2026/SmithJohn(BTG-Roberto)'
+ * @return string[]       File names (basename only)
+ */
+function dropbox_list_files(string $token, string $path): array {
+    $names  = [];
+    $cursor = null;
+    do {
+        if ($cursor) {
+            $url     = 'https://api.dropboxapi.com/2/files/list_folder/continue';
+            $payload = json_encode(['cursor' => $cursor]);
+        } else {
+            $url     = 'https://api.dropboxapi.com/2/files/list_folder';
+            $payload = json_encode(['path' => $path, 'recursive' => false]);
+        }
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_POST           => true,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_HTTPHEADER     => ['Authorization: Bearer ' . $token, 'Content-Type: application/json'],
+            CURLOPT_POSTFIELDS     => $payload,
+        ]);
+        $body = curl_exec($ch);
+        $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        if ($code === 409) return $names;   // path/not_found — folder not created yet
+        if ($code !== 200) {
+            throw new RuntimeException("Dropbox list_folder failed (HTTP $code): $body");
+        }
+        $data = json_decode($body, true);
+        foreach ($data['entries'] ?? [] as $entry) {
+            if (($entry['.tag'] ?? '') === 'file') $names[] = $entry['name'];
+        }
+        $cursor  = $data['cursor']   ?? null;
+        $hasMore = $data['has_more'] ?? false;
+    } while ($hasMore && $cursor);
+
+    return $names;
+}
+
+/**
  * List all sub-folders (one level deep) inside a Dropbox path.
  * Handles pagination automatically.
  *

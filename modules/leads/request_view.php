@@ -162,6 +162,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         exit;
     }
 
+    // ── Next ProgNumber: max existing NN_ prefix in the folder + 1 ─────────────
+    if ($action === 'next_prognum') {
+        try {
+            $req_id = (int)($_POST['request_id'] ?? 0);
+            $rq = $db->prepare("SELECT practice_code, group_folder, dropbox_url FROM requests WHERE id=?");
+            $rq->execute([$req_id]);
+            $rr = $rq->fetch(PDO::FETCH_ASSOC);
+            if (!$rr) { echo json_encode(['ok'=>false]); exit; }
+
+            if (!empty($rr['group_folder']) && $rr['practice_code']) {
+                $destDir = '/001_Safari/' . $rr['group_folder'] . '/' . $rr['practice_code'];
+            } elseif (!empty($rr['dropbox_url'])) {
+                preg_match('#dropbox\.com/home(/.*)?$#i', $rr['dropbox_url'], $m);
+                $destDir = rtrim(urldecode($m[1] ?? ''), '/');
+            } else {
+                $destDir = '';
+            }
+            if ($destDir === '') { echo json_encode(['ok'=>true,'next'=>'01']); exit; }
+
+            require_once 'dropbox_helper.php';
+            $token = dropbox_get_access_token();
+            $max = 0;
+            foreach (dropbox_list_files($token, $destDir) as $fn) {
+                if (preg_match('/^(\d{1,3})_/', $fn, $mm)) {
+                    $n = (int)$mm[1];
+                    if ($n > $max) $max = $n;
+                }
+            }
+            echo json_encode(['ok'=>true, 'next'=>str_pad((string)($max + 1), 2, '0', STR_PAD_LEFT)]);
+        } catch (Throwable $e) {
+            echo json_encode(['ok'=>false]);
+        }
+        exit;
+    }
+
     echo json_encode(['ok'=>false,'msg'=>'Unknown action']); exit;
 }
 
@@ -599,7 +634,7 @@ include 'includes/header.php';
   <div style="padding:18px 22px">
     <div style="font-size:.8rem;color:var(--grey-mid);margin-bottom:14px">
       Copy standard itinerary + price templates into this booking's folder, renamed
-      <code>ProgNumber_<?= h($r['practice_code'] ?? '') ?>_…</code>. Existing files are skipped.
+      <code>ProgNumber_<?= h($r['practice_code'] ?? '') ?>_…</code>. ProgNumber is set automatically to the next free number.
     </div>
     <div style="display:flex;flex-wrap:wrap;gap:26px">
       <?php foreach ($stdPrograms as $groupName => $progs): ?>
@@ -661,9 +696,21 @@ function copyPrograms() {
       html += list('Unknown', d.unknown, '#C0211B');
       result.innerHTML = html;
       result.style.display = html ? 'block' : 'none';
+      loadNextProg();   // advance ProgNumber for the next program
     })
     .catch(e => { btn.disabled = false; status.textContent = 'Error: ' + e; });
 }
+// Pre-fill ProgNumber with the next free number (max existing NN_ prefix + 1).
+function loadNextProg() {
+  var fd = new FormData();
+  fd.append('action', 'next_prognum');
+  fd.append('request_id', '<?= (int)$r['id'] ?>');
+  fetch('request_view.php?id=<?= (int)$r['id'] ?>', { method:'POST', body:fd })
+    .then(r => r.json())
+    .then(d => { if (d.ok && d.next) document.getElementById('cp-prognum').value = d.next; })
+    .catch(() => {});
+}
+loadNextProg();
 </script>
 <?php endif; ?>
 
