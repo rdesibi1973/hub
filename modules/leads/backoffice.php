@@ -59,10 +59,80 @@ function bo_url_from_path(string $path): string {
     return 'https://www.dropbox.com/home/' . $enc;
 }
 
-// ── Apply a status change ─────────────────────────────────────────────────────
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'change_status') {
-    $reqId   = (int)($_POST['request_id'] ?? 0);
-    $target  = trim($_POST['new_status'] ?? '');
+// Folder suffix → [status, payment_status]. "Contains" match, longest first
+// (tolerates a trailing _CK). Used to keep the DB in sync after a free rename.
+$BO_TAG_STATUS = [
+    '_BALANCE-CASH' => ['Booked',      'Balance-Cash'],
+    '_BALANCE_CASH' => ['Booked',      'Balance-Cash'],
+    '_BALANCE'      => ['Booked',      'Balance'],
+    '_DEPOSIT'      => ['Booked',      'Deposit'],
+    '_PAID'         => ['Booked',      'Paid'],
+    '_PROGRESS'     => ['Booked',      null],
+    '_CONFIRMED'    => ['Booked',      null],
+    '_PROVISIONAL'  => ['Provisional', null],
+    '_CANCELLED'    => ['Cancelled',   null],
+];
+
+/** Derive [status, payment_status, matched] from a folder name, or matched=false. */
+function bo_status_from_name(string $name, array $tagStatus): array {
+    $up = strtoupper($name);
+    foreach ($tagStatus as $tag => $sp) {
+        if (strpos($up, $tag) !== false) return ['status' => $sp[0], 'ps' => $sp[1], 'matched' => true];
+    }
+    return ['status' => null, 'ps' => null, 'matched' => false];
+}
+
+/**
+ * Rename a booking's Dropbox folder (private = its own folder; group = the shared
+ * parent) and sync the DB. When $setStatus, also writes status/payment_status
+ * (for a group, to every request in it, rebuilding each sub's dropbox_url).
+ * Dropbox move happens first; the DB is only touched if it succeeds.
+ */
+function bo_do_rename(PDO $db, string $token, array $r, bool $isGrp,
+                      string $folder, string $newFolder,
+                      ?string $newStatus, $newPs, bool $setStatus): array {
+    $curPath = dropbox_find_folder($token, $folder);
+    if ($curPath === null) {
+        return ['ok' => false, 'msg' => 'Could not find the folder "' . $folder . '" in Dropbox. Check the name, then retry.'];
+    }
+    $parentDir = rtrim(substr($curPath, 0, strrpos($curPath, '/')), '/');
+    $newPath   = $parentDir . '/' . $newFolder;
+
+    dropbox_move_folder($token, $curPath, $newPath);   // subfolders move with the parent
+
+    if ($isGrp) {
+        $subs = $db->prepare("SELECT id, practice_code FROM requests WHERE group_folder = ?");
+        $subs->execute([$folder]);
+        $rowsG = $subs->fetchAll(PDO::FETCH_ASSOC);
+        $upd = $setStatus
+            ? $db->prepare("UPDATE requests SET group_folder=?, dropbox_url=?, status=?, payment_status=? WHERE id=?")
+            : $db->prepare("UPDATE requests SET group_folder=?, dropbox_url=? WHERE id=?");
+        $n = 0;
+        foreach ($rowsG as $g) {
+            $sub    = trim($g['practice_code'] ?? '');
+            $subUrl = bo_url_from_path($sub !== '' ? $newPath . '/' . $sub : $newPath);
+            if ($setStatus) $upd->execute([$newFolder, $subUrl, $newStatus, $newPs, (int)$g['id']]);
+            else            $upd->execute([$newFolder, $subUrl, (int)$g['id']]);
+            $n++;
+        }
+        return ['ok' => true, 'msg' => '✔ Group "' . $newFolder . '": renamed (' . $n . ' booking(s) updated).'];
+    }
+
+    $newUrl = bo_url_from_path($newPath);
+    if ($setStatus) {
+        $db->prepare("UPDATE requests SET practice_code=?, dropbox_url=?, status=?, payment_status=? WHERE id=?")
+           ->execute([$newFolder, $newUrl, $newStatus, $newPs, (int)$r['id']]);
+    } else {
+        $db->prepare("UPDATE requests SET practice_code=?, dropbox_url=? WHERE id=?")
+           ->execute([$newFolder, $newUrl, (int)$r['id']]);
+    }
+    return ['ok' => true, 'msg' => '✔ ' . $r['customer_name'] . ': renamed to "' . $newFolder . '".'];
+}
+
+// ── Actions: change status / free rename ──────────────────────────────────────
+$act = $_POST['action'] ?? '';
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array($act, ['change_status', 'rename'], true)) {
+    $reqId = (int)($_POST['request_id'] ?? 0);
 
     $stmt = $db->prepare("SELECT id, customer_name, practice_code, group_folder, dropbox_url, status, payment_status
                           FROM requests WHERE id = ?");
@@ -71,59 +141,49 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'chang
 
     if (!$r) {
         flash('Request not found.', 'error');
-    } elseif (!isset($STATUS_MAP[$target])) {
-        flash('Invalid target status.', 'error');
     } elseif (($folder = ($isGrp = trim($r['group_folder'] ?? '') !== '')
-                        ? trim($r['group_folder'])
-                        : trim($r['practice_code'] ?? '')) === '') {
-        // $isGrp/$folder set above: tag lives on the parent for a group, on the
-        // folder itself for a private safari.
+                       ? trim($r['group_folder'])
+                       : trim($r['practice_code'] ?? '')) === '') {
+        // tag lives on the parent for a group, on the folder itself for a private safari.
         flash('This request has no folder to rename.', 'error');
     } else {
-        $newTag    = $STATUS_MAP[$target]['tag'];
-        $newFolder = bo_new_folder_name($folder, $newTag, $KNOWN_TAGS);
+        // Work out the new folder name + whether/how to touch status.
+        $newFolder = '';
+        $newStatus = null; $newPs = null; $setStatus = false;
+        $ok = true;
 
-        if (strcasecmp($newFolder, $folder) === 0) {
-            flash('The folder is already at that status — nothing to change.', 'error');
-        } else {
+        if ($act === 'change_status') {
+            $target = trim($_POST['new_status'] ?? '');
+            if (!isset($STATUS_MAP[$target])) { flash('Invalid target status.', 'error'); $ok = false; }
+            else {
+                $newFolder = bo_new_folder_name($folder, $STATUS_MAP[$target]['tag'], $KNOWN_TAGS);
+                $newStatus = $STATUS_MAP[$target]['status'];
+                $newPs     = $STATUS_MAP[$target]['ps'];
+                $setStatus = true;
+            }
+        } else { // rename
+            $newFolder = trim($_POST['new_name'] ?? '');
+            if ($newFolder === '') { flash('New name is empty.', 'error'); $ok = false; }
+            elseif (preg_match('#[\\\\/:*?"<>|]#', $newFolder)) { flash('Invalid characters in the new name (\\ / : * ? " < > | are not allowed).', 'error'); $ok = false; }
+            else {
+                // Keep the DB status in sync with the new name's suffix (if it has one).
+                $d = bo_status_from_name($newFolder, $BO_TAG_STATUS);
+                $setStatus = $d['matched'];
+                $newStatus = $d['status'];
+                $newPs     = $d['ps'];
+            }
+        }
+
+        if ($ok && strcmp($newFolder, $folder) === 0) {
+            flash('The new name is identical — nothing to change.', 'error'); $ok = false;
+        }
+
+        if ($ok) {
             require_once 'dropbox_helper.php';
             try {
-                $token   = dropbox_get_access_token();
-                // Locate the real folder by its current name (robust against a stale dropbox_url).
-                $curPath = dropbox_find_folder($token, $folder);
-                if ($curPath === null) {
-                    flash('Could not find the folder "' . $folder . '" in Dropbox. Check the name, then retry.', 'error');
-                } else {
-                    $parentDir = rtrim(substr($curPath, 0, strrpos($curPath, '/')), '/');
-                    $newPath   = $parentDir . '/' . $newFolder;
-
-                    dropbox_move_folder($token, $curPath, $newPath);   // subfolders move with the parent
-
-                    $newStatus = $STATUS_MAP[$target]['status'];
-                    $newPs     = $STATUS_MAP[$target]['ps'];
-
-                    if ($isGrp) {
-                        // Group rename touches the shared parent → update every booking in the group,
-                        // rebuilding each sub-booking's dropbox_url under the renamed parent.
-                        $subs = $db->prepare("SELECT id, practice_code FROM requests WHERE group_folder = ?");
-                        $subs->execute([$folder]);
-                        $updOne = $db->prepare("UPDATE requests
-                                                SET group_folder = ?, dropbox_url = ?, status = ?, payment_status = ?
-                                                WHERE id = ?");
-                        $n = 0;
-                        foreach ($subs->fetchAll(PDO::FETCH_ASSOC) as $g) {
-                            $sub    = trim($g['practice_code'] ?? '');
-                            $subUrl = bo_url_from_path($sub !== '' ? $newPath . '/' . $sub : $newPath);
-                            $updOne->execute([$newFolder, $subUrl, $newStatus, $newPs, (int)$g['id']]);
-                            $n++;
-                        }
-                        flash('✔ Group "' . $newFolder . '": renamed and set to ' . $target . ' (' . $n . ' booking(s) updated).');
-                    } else {
-                        $db->prepare("UPDATE requests SET practice_code = ?, dropbox_url = ?, status = ?, payment_status = ? WHERE id = ?")
-                           ->execute([$newFolder, bo_url_from_path($newPath), $newStatus, $newPs, $reqId]);
-                        flash('✔ ' . $r['customer_name'] . ': renamed to "' . $newFolder . '" and set to ' . $target . '.');
-                    }
-                }
+                $token = dropbox_get_access_token();
+                $res   = bo_do_rename($db, $token, $r, $isGrp, $folder, $newFolder, $newStatus, $newPs, $setStatus);
+                flash($res['msg'], $res['ok'] ? 'info' : 'error');
             } catch (Throwable $e) {
                 flash('Dropbox/DB error — nothing was changed: ' . $e->getMessage(), 'error');
             }
@@ -180,13 +240,14 @@ include 'includes/header.php';
 ?>
 
 <div class="page-header">
-  <h2>🛠 BackOffice — Change booking status</h2>
+  <h2>🛠 BackOffice — Bookings &amp; folders</h2>
 </div>
 
 <div class="bo-note">
-  Renames the Dropbox folder <strong>server-side</strong> (no Java, no local Dropbox needed) and updates
-  the request status + payment in one step. Works for <strong>private safaris and groups</strong> — a
-  group renames the shared parent folder and updates all its bookings.
+  Change a booking's status, or freely <strong>rename</strong> its folder — done <strong>server-side</strong>
+  on Dropbox (no Java, no local Dropbox needed), keeping status + payment in sync. Works for
+  <strong>private safaris and groups</strong> (a group renames the shared parent and updates all its
+  bookings). Each row also has <strong>Copy folder name</strong> (for emails) and Open / Copy path.
 </div>
 
 <form method="GET" class="filters">
@@ -236,12 +297,15 @@ include 'includes/header.php';
         <td class="bo-folder">
           📁 <?= h($folder ?: '—') ?><?php if ($isGrp): ?><span class="bo-grp">GRP</span><?php endif; ?>
           <?php $sPath = savannah_local_path($r); $sUrl = savannah_open_url($r); ?>
-          <?php if ($sPath !== ''): ?>
-            <div style="margin-top:3px;font-family:'Open Sans',sans-serif">
+          <div style="margin-top:3px;font-family:'Open Sans',sans-serif">
+            <?php if ($sPath !== ''): ?>
               <a href="<?= h($sUrl) ?>" title="Open in Windows Explorer" style="font-size:.68rem;text-decoration:none">📂 Open</a>
-              <a href="#" data-path="<?= h($sPath) ?>" onclick="copyPath(this);return false" title="Copy Windows path" style="font-size:.68rem;text-decoration:none;margin-left:8px">📋 Copy path</a>
-            </div>
-          <?php endif; ?>
+              <a href="#" data-copy="<?= h($sPath) ?>" onclick="copyPath(this);return false" title="Copy Windows path" style="font-size:.68rem;text-decoration:none;margin-left:8px">📋 Copy path</a>
+            <?php endif; ?>
+            <?php if ($folder !== ''): ?>
+              <a href="#" data-copy="<?= h($folder) ?>" onclick="copyPath(this);return false" title="Copy the folder name (to paste into an email)" style="font-size:.68rem;text-decoration:none;margin-left:<?= $sPath!==''?'8px':'0' ?>">📄 Copy folder name</a>
+            <?php endif; ?>
+          </div>
         </td>
         <td><span class="badge"><?= h($psLabel) ?></span></td>
         <td>
@@ -258,6 +322,22 @@ include 'includes/header.php';
             </select>
             <button type="submit" class="btn btn-red btn-sm"><?= $isGrp ? 'Apply (group)' : 'Apply' ?></button>
           </form>
+          <div style="margin-top:5px">
+            <a href="#" onclick="toggleRename(<?= (int)$r['id'] ?>);return false" style="font-size:.72rem;text-decoration:none">✏ Rename…</a>
+          </div>
+          <form method="POST" id="rn<?= (int)$r['id'] ?>" style="display:none;margin-top:6px"
+                onsubmit="return confirm('<?= $isGrp ? 'GROUP: this renames the shared group folder and updates ALL its bookings.\\n\\n' : '' ?>Rename the real Dropbox folder to the new name?');">
+            <input type="hidden" name="action" value="rename">
+            <input type="hidden" name="request_id" value="<?= (int)$r['id'] ?>">
+            <input type="hidden" name="q" value="<?= h($q) ?>">
+            <input type="hidden" name="root" value="<?= h($root) ?>">
+            <input type="text" name="new_name" value="<?= h($folder) ?>" spellcheck="false"
+                   style="width:100%;font-family:monospace;font-size:.72rem;padding:5px 7px;border:1.5px solid var(--grey-lt);border-radius:5px">
+            <div style="margin-top:4px;display:flex;gap:6px">
+              <button type="submit" class="btn btn-red btn-sm">Rename</button>
+              <button type="button" class="btn btn-outline btn-sm" onclick="toggleRename(<?= (int)$r['id'] ?>)">Cancel</button>
+            </div>
+          </form>
         </td>
       </tr>
     <?php endforeach; ?>
@@ -270,9 +350,13 @@ include 'includes/header.php';
 <?php endif; ?>
 
 <script>
-// Copy a Windows path to the clipboard (paste into Explorer's address bar).
+function toggleRename(id) {
+  var f = document.getElementById('rn' + id);
+  if (f) f.style.display = (f.style.display === 'none' || !f.style.display) ? 'block' : 'none';
+}
+// Copy text (Windows path or folder name) to the clipboard.
 function copyPath(el) {
-  var t = el.getAttribute('data-path') || '';
+  var t = el.getAttribute('data-copy') || el.getAttribute('data-path') || '';
   if (navigator.clipboard && navigator.clipboard.writeText) {
     navigator.clipboard.writeText(t).then(function(){ flashCopied(el); }, function(){ fallbackCopy(t, el); });
   } else { fallbackCopy(t, el); }
