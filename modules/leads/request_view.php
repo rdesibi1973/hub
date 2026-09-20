@@ -649,8 +649,9 @@ include 'includes/header.php';
       <?php endforeach; ?>
     </div>
     <div style="display:flex;align-items:center;gap:12px;margin-top:18px;flex-wrap:wrap">
-      <label style="font-size:.8rem">ProgNumber
-        <input type="text" id="cp-prognum" value="01" style="width:60px;font-family:monospace;padding:5px 7px;border:1.5px solid var(--grey-lt);border-radius:5px;margin-left:4px">
+      <label style="font-size:.8rem">ProgNumber <span style="color:var(--grey-mid);font-weight:400">(auto)</span>
+        <input type="text" id="cp-prognum" value="…" readonly title="Set automatically to the next free number"
+               style="width:56px;font-family:monospace;padding:5px 7px;border:1.5px solid var(--grey-lt);border-radius:5px;margin-left:4px;background:#f0f0ee;color:var(--grey-dk)">
       </label>
       <button type="button" class="btn btn-red btn-sm" id="cp-copy" onclick="copyPrograms()">Copy Programs</button>
       <button type="button" class="btn btn-outline btn-sm" onclick="document.querySelectorAll('.cp-prog').forEach(c=>c.checked=false)">Clear</button>
@@ -668,7 +669,7 @@ function copyPrograms() {
   var btn = document.getElementById('cp-copy');
   result.style.display = 'none'; result.innerHTML = '';
   if (!progs.length) { status.textContent = 'Select at least one program.'; return; }
-  if (!prognum)      { status.textContent = 'Enter a ProgNumber.'; return; }
+  if (!prognum || prognum === '…') { status.textContent = 'Wait for the ProgNumber to load…'; return; }
   if (!confirm('Copy ' + progs.length + ' program(s) into this booking\'s Dropbox folder?')) return;
 
   status.textContent = 'Copying…'; btn.disabled = true;
@@ -702,13 +703,22 @@ function copyPrograms() {
 }
 // Pre-fill ProgNumber with the next free number (max existing NN_ prefix + 1).
 function loadNextProg() {
+  var el = document.getElementById('cp-prognum');
+  function unlock() { // auto-calc unavailable — let the user type a number
+    el.removeAttribute('readonly');
+    el.style.background = '#fff';
+    if (!el.value || el.value === '…') el.value = '01';
+  }
   var fd = new FormData();
   fd.append('action', 'next_prognum');
   fd.append('request_id', '<?= (int)$r['id'] ?>');
   fetch('request_view.php?id=<?= (int)$r['id'] ?>', { method:'POST', body:fd })
     .then(r => r.json())
-    .then(d => { if (d.ok && d.next) document.getElementById('cp-prognum').value = d.next; })
-    .catch(() => {});
+    .then(d => {
+      if (d.ok && d.next) { el.value = d.next; el.setAttribute('readonly', 'readonly'); el.style.background = '#f0f0ee'; }
+      else { unlock(); }
+    })
+    .catch(unlock);
 }
 loadNextProg();
 </script>
