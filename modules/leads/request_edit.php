@@ -492,6 +492,7 @@ include 'includes/header.php';
                step="0.01" min="0" oninput="calcComm()">
       </div>
 
+      <?php if (defined('SHOW_COMMISSIONS') && SHOW_COMMISSIONS): ?>
       <div class="form-group">
         <label>Commission %</label>
         <input type="number" id="commission_pct" name="commission_pct" value="<?= h($v['commission_pct']) ?>"
@@ -505,6 +506,10 @@ include 'includes/header.php';
         </div>
         <input type="hidden" id="commission_usd" name="commission_usd" value="<?= h($v['commission_usd']) ?>">
       </div>
+      <?php else: /* commissions hidden — keep values so saving does not wipe them */ ?>
+      <input type="hidden" name="commission_pct" value="<?= h($v['commission_pct']) ?>">
+      <input type="hidden" name="commission_usd" value="<?= h($v['commission_usd']) ?>">
+      <?php endif; ?>
 
       <div class="form-group">
         <label>Date Paid</label>
@@ -563,11 +568,13 @@ function togglePaymentStatus() {
 
 <?php if (!$isRestricted): ?>
 function calcComm() {
-  const val  = parseFloat(document.getElementById('value_usd').value)      || 0;
-  const pct  = parseFloat(document.getElementById('commission_pct').value) || 0;
-  const comm = val * pct / 100;
+  const pctEl   = document.getElementById('commission_pct');
   const display = document.getElementById('comm_display');
   const hidden  = document.getElementById('commission_usd');
+  if (!pctEl || !display || !hidden) return; // commissions hidden — nothing to calc
+  const val  = parseFloat(document.getElementById('value_usd').value) || 0;
+  const pct  = parseFloat(pctEl.value) || 0;
+  const comm = val * pct / 100;
   if (val > 0 && pct > 0) {
     display.textContent = '$ ' + comm.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
     hidden.value = comm.toFixed(2);

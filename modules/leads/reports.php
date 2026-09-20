@@ -896,10 +896,12 @@ include 'includes/header.php';
     <div class="stat-label">PAX (Booked)</div>
     <div class="stat-value"><?= $totals['booked_pax'] ?></div>
   </div>
+  <?php if (defined('SHOW_COMMISSIONS') && SHOW_COMMISSIONS): ?>
   <div class="stat-card amber">
     <div class="stat-label">Total Comm</div>
     <div class="stat-value" style="font-size:1.3rem">$<?= number_format($totals['commission_total'],0) ?></div>
   </div>
+  <?php endif; ?>
   <?php foreach ($all_dests as $d): ?>
   <div class="stat-card">
     <div class="stat-label"><?= h($d) ?></div>
@@ -948,6 +950,7 @@ include 'includes/header.php';
               'cancelled'   => 'Cancelled',
           ];
         endif;
+        if (!(defined('SHOW_COMMISSIONS') && SHOW_COMMISSIONS)) unset($th_cols['commission_total']);
         foreach ($th_cols as $col => $label): ?>
         <th style="background:var(--green);color:white;font-size:.72rem;text-align:right;white-space:nowrap;cursor:pointer"
             onclick="location.href='<?= sortUrl($col, $sort, $dir, $base_params) ?>'">
@@ -1006,7 +1009,9 @@ include 'includes/header.php';
         <?php if (!$is_history): ?>
         <td class="text-right text-green"><?= $r['sales_amount'] > 0 ? '$'.number_format($r['sales_amount'],0) : '—' ?></td>
         <td class="text-right text-muted"><?= $r['booked_pax'] > 0 ? $r['booked_pax'] : '—' ?></td>
+        <?php if (defined('SHOW_COMMISSIONS') && SHOW_COMMISSIONS): ?>
         <td class="text-right text-green"><?= $r['commission_total'] > 0 ? '$'.number_format($r['commission_total'],0) : '—' ?></td>
+        <?php endif; ?>
         <?php foreach ($all_dests as $d): ?>
           <td class="text-right text-muted"><?= $r['by_dest'][$d] ?? 0 ?: '—' ?></td>
         <?php endforeach; ?>
@@ -1050,7 +1055,9 @@ include 'includes/header.php';
         <?php if (!$is_history): ?>
         <td class="text-right text-green" style="font-weight:700">$<?= number_format($totals['sales_amount'],0) ?></td>
         <td class="text-right" style="font-weight:700"><?= $totals['booked_pax'] ?></td>
+        <?php if (defined('SHOW_COMMISSIONS') && SHOW_COMMISSIONS): ?>
         <td class="text-right text-green" style="font-weight:700">$<?= number_format($totals['commission_total'],0) ?></td>
+        <?php endif; ?>
         <?php foreach ($all_dests as $d): ?>
           <td class="text-right"><?= $totals['by_dest'][$d] ?? 0 ?></td>
         <?php endforeach; ?>

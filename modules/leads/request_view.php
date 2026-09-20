@@ -495,6 +495,7 @@ include 'includes/header.php';
       <?= $r['value_usd'] ? '<strong>$'.number_format((float)$r['value_usd'],2).'</strong>' : '<span class="text-muted">—</span>' ?>
     </div>
 
+    <?php if (defined('SHOW_COMMISSIONS') && SHOW_COMMISSIONS): ?>
     <div class="detail-label">Commission %</div>
     <div class="detail-value"><?= $r['commission_pct'] ? h($r['commission_pct']).'%' : '<span class="text-muted">—</span>' ?></div>
 
@@ -502,6 +503,7 @@ include 'includes/header.php';
     <div class="detail-value text-green">
       <?= $r['commission_usd'] ? '<strong>$'.number_format((float)$r['commission_usd'],2).'</strong>' : '<span class="text-muted">—</span>' ?>
     </div>
+    <?php endif; ?>
 
     <div class="detail-label">Date Paid</div>
     <div class="detail-value">

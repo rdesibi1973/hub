@@ -204,11 +204,13 @@ function applyPeriod(val) {
     <div class="stat-value" style="font-size:1.35rem">$<?= number_format($totalValue, 0) ?></div>
     <div class="stat-sub">USD confirmed</div>
   </div>
+  <?php if (defined('SHOW_COMMISSIONS') && SHOW_COMMISSIONS): ?>
   <div class="stat-card red">
     <div class="stat-label">Commissions</div>
     <div class="stat-value" style="font-size:1.35rem">$<?= number_format($totalComm, 0) ?></div>
     <div class="stat-sub">USD total</div>
   </div>
+  <?php endif; ?>
 </div>
 
 <!-- AGENT BREAKDOWN + RECENT -->
@@ -231,7 +233,9 @@ function applyPeriod(val) {
           <div class="bbar-booked" style="width:<?= $bookedPct ?>%"></div>
         </div>
         <span class="breakdown-val"><?= $row['booked'] ?> / <?= $row['total'] ?></span>
+        <?php if (defined('SHOW_COMMISSIONS') && SHOW_COMMISSIONS): ?>
         <span class="breakdown-val text-muted">$<?= number_format($row['comm'],0) ?></span>
+        <?php endif; ?>
       </div>
       <?php endforeach; ?>
     <?php else: ?>
