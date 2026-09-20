@@ -243,18 +243,7 @@ include 'includes/header.php';
   <h2>🛠 BackOffice — Bookings &amp; folders</h2>
 </div>
 
-<div class="bo-note">
-  Change a booking's status, or freely <strong>rename</strong> its folder — done <strong>server-side</strong>
-  on Dropbox (no Java, no local Dropbox needed), keeping status + payment in sync. Works for
-  <strong>private safaris and groups</strong> (a group renames the shared parent and updates all its
-  bookings). Each row also has <strong>Copy folder name</strong> (for emails) and Open / Copy path.
-</div>
-
 <form method="GET" class="filters">
-  <div>
-    <label>Search</label>
-    <input type="text" name="q" value="<?= h($q) ?>" placeholder="Customer or folder…" autofocus style="width:260px">
-  </div>
   <div>
     <label>Folder</label>
     <select name="root">
@@ -262,6 +251,10 @@ include 'includes/header.php';
         <option value="<?= h($val) ?>" <?= $root===$val?'selected':'' ?>><?= h($lbl) ?></option>
       <?php endforeach; ?>
     </select>
+  </div>
+  <div>
+    <label>Search</label>
+    <input type="text" name="q" value="<?= h($q) ?>" placeholder="Customer or folder…" autofocus style="width:260px">
   </div>
   <div>
     <label>&nbsp;</label>
