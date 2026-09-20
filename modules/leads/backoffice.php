@@ -379,8 +379,9 @@ $extra_css = '
 include 'includes/header.php';
 ?>
 
-<div class="page-header">
+<div class="page-header" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
   <h2>🛠 BackOffice — Bookings &amp; folders</h2>
+  <a href="relink_folders.php" class="btn btn-outline btn-sm" title="Refresh Dropbox links after moving folders to an archive">🔗 Re-link folders (bulk)</a>
 </div>
 
 <form method="GET" class="filters">
