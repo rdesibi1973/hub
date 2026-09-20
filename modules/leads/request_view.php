@@ -5,6 +5,23 @@ require_once 'includes/folder_parser.php';
 require_once 'includes/mail_helper.php';
 requireLogin();
 
+/**
+ * Current Dropbox path of a request's folder, e.g. '/001_Safari/00_2026/Foo'.
+ * Trusts dropbox_url (kept fresh by confirm / rename / re-group / "Re-link folder"),
+ * so a folder moved by hand into an archive still resolves once re-linked.
+ * Falls back to the group/practice construction when no URL is stored.
+ */
+function req_folder_path(array $r): string {
+    if (!empty($r['dropbox_url']) && preg_match('#dropbox\.com/home(/.*)?$#i', $r['dropbox_url'], $m)) {
+        $p = rtrim(urldecode($m[1] ?? ''), '/');
+        if ($p !== '') return $p;
+    }
+    if (!empty($r['group_folder']) && !empty($r['practice_code'])) {
+        return '/001_Safari/' . $r['group_folder'] . '/' . $r['practice_code'];
+    }
+    return '';
+}
+
 $id  = (int)($_GET['id'] ?? 0);
 $db  = db();
 $cu  = current_user();
@@ -104,14 +121,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             if (!$rr) { echo json_encode(['ok'=>false,'msg'=>'Request not found.']); exit; }
 
             // Destination folder = the request's Dropbox folder (same logic as the view).
-            if (!empty($rr['group_folder']) && $rr['practice_code']) {
-                $destDir = '/001_Safari/' . $rr['group_folder'] . '/' . $rr['practice_code'];
-            } elseif (!empty($rr['dropbox_url'])) {
-                preg_match('#dropbox\.com/home(/.*)?$#i', $rr['dropbox_url'], $m);
-                $destDir = rtrim(urldecode($m[1] ?? ''), '/');
-            } else {
-                $destDir = '';
-            }
+            $destDir = req_folder_path($rr);
             $folderName = trim($rr['practice_code'] ?? '');
             if ($destDir === '' || $folderName === '') {
                 echo json_encode(['ok'=>false,'msg'=>'This request has no Dropbox folder yet — cannot copy programs.']); exit;
@@ -171,14 +181,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             $rr = $rq->fetch(PDO::FETCH_ASSOC);
             if (!$rr) { echo json_encode(['ok'=>false]); exit; }
 
-            if (!empty($rr['group_folder']) && $rr['practice_code']) {
-                $destDir = '/001_Safari/' . $rr['group_folder'] . '/' . $rr['practice_code'];
-            } elseif (!empty($rr['dropbox_url'])) {
-                preg_match('#dropbox\.com/home(/.*)?$#i', $rr['dropbox_url'], $m);
-                $destDir = rtrim(urldecode($m[1] ?? ''), '/');
-            } else {
-                $destDir = '';
-            }
+            $destDir = req_folder_path($rr);
             if ($destDir === '') { echo json_encode(['ok'=>true,'next'=>'01']); exit; }
 
             require_once 'dropbox_helper.php';
@@ -193,6 +196,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             echo json_encode(['ok'=>true, 'next'=>str_pad((string)($max + 1), 2, '0', STR_PAD_LEFT)]);
         } catch (Throwable $e) {
             echo json_encode(['ok'=>false]);
+        }
+        exit;
+    }
+
+    // ── Re-link folder: find it by name in Dropbox and refresh dropbox_url ──────
+    // Use after a folder was moved by hand (e.g. into /001_Safari/00_2026 archive).
+    if ($action === 'relink_folder') {
+        try {
+            $req_id = (int)($_POST['request_id'] ?? 0);
+            $rq = $db->prepare("SELECT practice_code, group_folder, dropbox_url FROM requests WHERE id=?");
+            $rq->execute([$req_id]);
+            $rr = $rq->fetch(PDO::FETCH_ASSOC);
+            if (!$rr) { echo json_encode(['ok'=>false,'msg'=>'Request not found.']); exit; }
+
+            $name = trim($rr['practice_code'] ?? '');
+            if ($name === '') { echo json_encode(['ok'=>false,'msg'=>'This request has no folder name to search.']); exit; }
+
+            require_once 'dropbox_helper.php';
+            $token = dropbox_get_access_token();
+            $path  = dropbox_find_folder($token, $name);   // searches the whole Dropbox by name
+            if (!$path) {
+                echo json_encode(['ok'=>false,'msg'=>'Folder "'.$name.'" not found in Dropbox (renamed or deleted?).']); exit;
+            }
+            $newUrl = 'https://www.dropbox.com/home/' . implode('/', array_map('rawurlencode', explode('/', ltrim($path, '/'))));
+            $db->prepare("UPDATE requests SET dropbox_url=? WHERE id=?")->execute([$newUrl, $req_id]);
+            echo json_encode(['ok'=>true, 'path'=>$path]);
+        } catch (Throwable $e) {
+            echo json_encode(['ok'=>false,'msg'=>'Error: '.$e->getMessage()]);
         }
         exit;
     }
@@ -574,25 +605,34 @@ include 'includes/header.php';
 
     <div class="detail-label">Folder</div>
     <div class="detail-value">
-      <?php
-        // Build the Dropbox path (without full URL, just the path portion)
-        if (!empty($r['group_folder']) && $r['practice_code']) {
-            $dbxPath = '/001_Safari/' . $r['group_folder'] . '/' . $r['practice_code'];
-        } elseif (!empty($r['dropbox_url'])) {
-            // Extract path from https://www.dropbox.com/home/PATH
-            preg_match('#dropbox\.com/home(/.*)?$#i', $r['dropbox_url'], $m);
-            $dbxPath = urldecode($m[1] ?? '');
-        } else {
-            $dbxPath = '';
-        }
-      ?>
+      <?php $dbxPath = req_folder_path($r); ?>
       <?php if ($dbxPath): ?>
         <?php $sUrl = 'savannah://open?path=' . implode('/', array_map('rawurlencode', explode('/', ltrim($dbxPath, '/')))); ?>
         <a href="<?= h($sUrl) ?>" title="Open the folder in Windows Explorer">📂 Open Folder</a>
       <?php else: ?>
         <span class="text-muted">— not set yet</span>
       <?php endif; ?>
+      <?php if (!empty($r['practice_code'])): ?>
+        <a href="#" onclick="relinkFolder();return false" title="Find the folder in Dropbox and refresh the link (after moving it to an archive)" style="margin-left:12px;font-size:.8rem;text-decoration:none">🔗 Re-link</a>
+        <span id="relink-status" style="font-size:.78rem;color:var(--grey-mid);margin-left:6px"></span>
+      <?php endif; ?>
     </div>
+    <script>
+    function relinkFolder() {
+      var st = document.getElementById('relink-status');
+      st.textContent = 'Searching Dropbox…';
+      var fd = new FormData();
+      fd.append('action', 'relink_folder');
+      fd.append('request_id', '<?= (int)$r['id'] ?>');
+      fetch('request_view.php?id=<?= (int)$r['id'] ?>', { method:'POST', body:fd })
+        .then(r => r.json())
+        .then(d => {
+          if (d.ok) { st.textContent = '✔ Re-linked — reloading…'; setTimeout(function(){ location.reload(); }, 700); }
+          else      { st.textContent = d.msg || 'Failed.'; }
+        })
+        .catch(e => { st.textContent = 'Error: ' + e; });
+    }
+    </script>
 
   </div>
 </div>
