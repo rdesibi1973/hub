@@ -177,20 +177,28 @@ if ($newDropboxUrl === '') {
 // ── Derive new DB status + payment_status from folder name suffix ─────────────
 // Each entry: ['status' => ..., 'ps' => payment_status value or null to clear]
 // When a tag is matched, both status AND payment_status are always updated.
-// _PROGRESS / _PROVISIONAL / _CANCELLED clear payment_status (set to NULL).
+// _PROGRESS / _CONFIRMED / _PROVISIONAL / _CANCELLED clear payment_status (NULL).
+//
+// A "contains" match (strpos) is used, NOT str_ends_with, because folders keep a
+// trailing document marker after the payment tag (e.g. ..._BALANCE-CASH_CK).
+// str_ends_with('_BALANCE-CASH') would miss those and leave payment_status stale.
+// Most-specific tags first so _BALANCE-CASH is not shadowed by _BALANCE.
 $folderTagMap = [
-    '_CANCELLED'    => ['status' => 'Cancelled',   'ps' => null],
     '_BALANCE-CASH' => ['status' => 'Booked',      'ps' => 'Balance-Cash'],
+    '_BALANCE_CASH' => ['status' => 'Booked',      'ps' => 'Balance-Cash'],
     '_BALANCE'      => ['status' => 'Booked',      'ps' => 'Balance'],
     '_DEPOSIT'      => ['status' => 'Booked',      'ps' => 'Deposit'],
-    '_PROVISIONAL'  => ['status' => 'Provisional', 'ps' => null],
-    '_PROGRESS'     => ['status' => 'Booked',      'ps' => null],
     '_PAID'         => ['status' => 'Booked',      'ps' => 'Paid'],
+    '_PROGRESS'     => ['status' => 'Booked',      'ps' => null],
+    '_CONFIRMED'    => ['status' => 'Booked',      'ps' => null],
+    '_PROVISIONAL'  => ['status' => 'Provisional', 'ps' => null],
+    '_CANCELLED'    => ['status' => 'Cancelled',   'ps' => null],
 ];
 $newDbStatus      = null;
 $newPaymentStatus = false; // false = leave unchanged; null = explicitly clear
+$upperNew = strtoupper($newFolderName);
 foreach ($folderTagMap as $tag => $map) {
-    if (str_ends_with(strtoupper($newFolderName), $tag)) {
+    if (strpos($upperNew, $tag) !== false) {
         $newDbStatus      = $map['status'];
         $newPaymentStatus = $map['ps']; // null means clear it
         break;
