@@ -1,5 +1,7 @@
 @echo off
-REM Double-click to remove the "savannah://" handler and its launcher (current user).
-powershell -NoProfile -ExecutionPolicy Bypass -Command "Remove-Item -Path 'HKCU:\Software\Classes\savannah' -Recurse -Force -ErrorAction SilentlyContinue; Remove-Item -Path (Join-Path $env:LOCALAPPDATA 'SavannahTools') -Recurse -Force -ErrorAction SilentlyContinue; Write-Host 'Savannah open-folder handler uninstalled.' -ForegroundColor Green"
+REM Remove the "savannah://" handler and its launcher (current user).
+reg delete "HKCU\Software\Classes\savannah" /f >nul 2>nul
+rmdir /s /q "%LOCALAPPDATA%\SavannahTools" 2>nul
+echo Savannah open-folder handler uninstalled.
 echo.
 pause

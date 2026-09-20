@@ -13,6 +13,10 @@ you click a link like:
 
 Explorer opens `%DROPBOX_HOME%\001_Safari\SmithJohn(BTG-Roberto)_..._BALANCE`.
 
+The handler is a small JScript file run by `wscript.exe` (no PowerShell) — this
+avoids antivirus heuristics that flag browser-spawned `powershell.exe` command
+lines.
+
 ## Install (per PC, once — no admin needed)
 1. Copy this `savannah-open` folder to the PC (anywhere).
 2. Double-click **`install.cmd`**.
@@ -29,8 +33,9 @@ BackOffice tool used).
 Double-click **`uninstall.cmd`**.
 
 ## Files
-- `savannah-open.ps1` — the launcher (validates the path, opens Explorer).
-- `install.ps1` / `install.cmd` — register the handler in HKCU.
+- `savannah-open.js` — the launcher (validates the path, opens Explorer).
+- `install.cmd` — copies the launcher to `%LOCALAPPDATA%\SavannahTools` and
+  registers the handler in HKCU (pure batch + reg.exe).
 - `uninstall.cmd` — remove it.
 
 ## Security
@@ -38,6 +43,12 @@ The launcher only opens folders **inside `%DROPBOX_HOME%`**. It rejects path
 traversal (`..`), drive letters, UNC/rooted paths, and shell/wildcard
 characters, and launches Explorer directly (no shell), so a link cannot run a
 command or reach files outside Dropbox.
+
+## If the antivirus still blocks it
+Bitdefender/others may still be cautious about any browser-launched script. If a
+block persists, add an exception for `%LOCALAPPDATA%\SavannahTools\savannah-open.js`
+(and `wscript.exe`) in the AV's Advanced Threat Control / exclusions. As a
+no-install alternative, use the **Copy path** button in Hub (below).
 
 ## No-install fallback
 Every Hub folder also has a **Copy path** button that copies
