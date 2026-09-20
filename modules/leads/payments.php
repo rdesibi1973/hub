@@ -343,7 +343,7 @@ include 'includes/header.php';
           <th style="width:44px;text-align:center">Pax</th>
           <th style="width:120px;text-align:center">Status</th>
           <th>Latest note</th>
-          <th style="width:150px;text-align:right">Action</th>
+          <th style="width:220px;text-align:right">Action</th>
         </tr>
       </thead>
       <tbody>
@@ -390,11 +390,7 @@ include 'includes/header.php';
             <div style="font-size:.7rem;color:var(--grey-mid);margin-top:2px">👤 <?= h($r['agent_name'] ?: '— no agent —') ?></div>
           </td>
           <td style="font-family:monospace;font-size:.76rem">
-            <?php if ($dbxUrl): ?>
-              <a href="<?= h($dbxUrl) ?>" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="color:var(--navy,#1a3a5c);text-decoration:none" title="Open in Dropbox">📁 <?= h($folderMain) ?></a>
-            <?php else: ?>
-              <span style="color:var(--grey-mid)">📁 <?= h($folderMain) ?></span>
-            <?php endif; ?>
+            <span style="color:var(--grey-dk)" title="Folder reference">📁 <?= h($folderMain) ?></span>
             <?php if ($folderSub !== ''): ?>
               <div style="color:var(--grey-mid);margin-top:2px">↳ <?= h($folderSub) ?></div>
             <?php endif; ?>
@@ -410,8 +406,9 @@ include 'includes/header.php';
             <?php endif; ?>
           </td>
           <td style="text-align:right;white-space:nowrap">
-            <button type="button" class="btn btn-outline btn-sm" onclick="event.stopPropagation();openNotes(<?= (int)$r['id'] ?>, '<?= addslashes(h($r['customer_name'])) ?>')">📝 Note</button>
-            <button type="button" class="btn btn-outline btn-sm" onclick="event.stopPropagation();openSend(<?= (int)$r['id'] ?>, '<?= addslashes(h($r['customer_name'])) ?>', '<?= addslashes(h($r['agent_email'] ?? '')) ?>')">✉ Reminder</button>
+            <button type="button" class="btn btn-outline btn-sm" title="Add / view payment notes" onclick="event.stopPropagation();openNotes(<?= (int)$r['id'] ?>, '<?= addslashes(h($r['customer_name'])) ?>')">📝 Note</button>
+            <button type="button" class="btn btn-outline btn-sm" title="Email the client" onclick="event.stopPropagation();openSend(<?= (int)$r['id'] ?>, '<?= addslashes(h($r['customer_name'])) ?>', '<?= addslashes(h($r['email'] ?? '')) ?>')">✉ Mail</button>
+            <button type="button" class="btn btn-outline btn-sm" title="Remind the sales agent" onclick="event.stopPropagation();openSend(<?= (int)$r['id'] ?>, '<?= addslashes(h($r['customer_name'])) ?>', '<?= addslashes(h($r['agent_email'] ?? '')) ?>')">✉ Reminder</button>
           </td>
         </tr>
       <?php endforeach; ?>
