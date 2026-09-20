@@ -96,7 +96,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $req_id = (int)$_POST['request_id'];
         $notes  = db()->prepare("SELECT n.*, u.full_name AS user_name
              FROM request_notes n LEFT JOIN users u ON u.id = n.created_by
-             WHERE n.request_id = ? ORDER BY n.created_at DESC");
+             WHERE n.request_id = ?
+               AND (n.note_type <> 'manual' OR (n.body IS NOT NULL AND TRIM(n.body) <> ''))
+             ORDER BY n.created_at DESC");
         $notes->execute([$req_id]);
         echo json_encode(['ok'=>true,'notes'=> $notes->fetchAll(PDO::FETCH_ASSOC)]);
         exit;
@@ -145,10 +147,17 @@ $rows = db()->query(
             (SELECT u.email FROM users u
                WHERE u.agent_id = r.agent_id ORDER BY u.id LIMIT 1) AS agent_email,
             (SELECT COUNT(*) FROM request_notes rn
-               WHERE rn.request_id = r.id AND rn.note_type='manual') AS note_count,
+               WHERE rn.request_id = r.id AND rn.note_type='manual'
+                 AND rn.body IS NOT NULL AND TRIM(rn.body) <> '') AS note_count,
             (SELECT rn2.body FROM request_notes rn2
                WHERE rn2.request_id = r.id AND rn2.note_type='manual'
-               ORDER BY rn2.created_at DESC LIMIT 1) AS last_note
+                 AND rn2.body IS NOT NULL AND TRIM(rn2.body) <> ''
+               ORDER BY rn2.created_at DESC LIMIT 1) AS last_note,
+            (SELECT u3.full_name FROM request_notes rn3
+               LEFT JOIN users u3 ON u3.id = rn3.created_by
+               WHERE rn3.request_id = r.id AND rn3.note_type='manual'
+                 AND rn3.body IS NOT NULL AND TRIM(rn3.body) <> ''
+               ORDER BY rn3.created_at DESC LIMIT 1) AS last_note_by
      FROM requests r
      LEFT JOIN agents a ON a.id = r.agent_id
      WHERE r.status IN ('Booked','Paid','Balance','Deposit')
@@ -400,6 +409,7 @@ include 'includes/header.php';
           <td>
             <?php if ($r['note_count'] > 0): ?>
               <span class="note-preview" title="<?= h(strip_tags($r['last_note'] ?? '')) ?>"><?= h(mb_strimwidth(strip_tags($r['last_note'] ?? ''), 0, 60, '…')) ?></span>
+              <?php if (!empty($r['last_note_by'])): ?><span style="font-size:.68rem;color:var(--grey-mid)">— <?= h($r['last_note_by']) ?></span><?php endif; ?>
               <span class="badge" style="background:#fff3cd;color:#856404;cursor:pointer" onclick="event.stopPropagation();openNotes(<?= (int)$r['id'] ?>, '<?= addslashes(h($r['customer_name'])) ?>')"><?= (int)$r['note_count'] ?></span>
             <?php else: ?>
               <span style="color:var(--grey-lt)">—</span>
@@ -445,6 +455,7 @@ include 'includes/send_modal.php';
 
 <script>
 let notesReqId  = 0;
+const CURRENT_USER = '<?= addslashes($cu['full_name'] ?? $cu['username'] ?? '') ?>';
 
 // Open the request in a new tab for editing (row click).
 function openRequest(id) { window.open('request_edit.php?id=' + id, '_blank'); }
@@ -472,7 +483,8 @@ function loadNotes() {
     }
     document.getElementById('notesList').innerHTML = d.notes.map(function(n) {
       var isEmail = n.note_type === 'email_sent';
-      var meta = esc(n.created_at) + (n.user_name ? ' — ' + esc(n.user_name) : '');
+      var author  = n.user_name ? esc(n.user_name) : (isEmail ? 'System' : 'Unknown user');
+      var meta = '<strong style="color:var(--grey-dk)">👤 ' + author + '</strong> · ' + esc(n.created_at);
       var del  = isEmail ? '' :
         '<button type="button" title="Delete note" onclick="delNote(' + n.id + ')" ' +
         'style="background:none;border:none;color:var(--red);cursor:pointer;font-size:.9rem;line-height:1">×</button>';
@@ -522,6 +534,7 @@ function updateNoteBadge(reqId, count, lastBody) {
   if (!td) return;
   td.innerHTML =
     '<span class="note-preview" title="' + esc(lastBody) + '">' + esc(lastBody.substring(0, 60)) + '</span> ' +
+    (CURRENT_USER ? '<span style="font-size:.68rem;color:var(--grey-mid)">— ' + esc(CURRENT_USER) + '</span> ' : '') +
     '<span class="badge" style="background:#fff3cd;color:#856404;cursor:pointer" onclick="event.stopPropagation();openNotes(' + reqId + ', \'\')">' + count + '</span>';
 }
 
