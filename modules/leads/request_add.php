@@ -10,6 +10,26 @@ $isRestricted = isLeadsRestricted();   // true = staff, false = admin/manager
 $agents   = $db->query("SELECT * FROM agents WHERE active=1 ORDER BY name")->fetchAll();
 $agencies = $db->query("SELECT * FROM agencies ORDER BY nome")->fetchAll();
 
+// Staff (restricted) users may only assign requests to themselves; managers/admins
+// see the full agent list. getStaffAgentId() maps the logged-in user → their agent.
+$staffAgentId = 0;
+if ($isRestricted && function_exists('getStaffAgentId')) {
+    $staffAgentId = (int) getStaffAgentId();
+}
+// Only lock to the staff agent if it actually exists in the active agent list.
+$staffAgent = null;
+if ($staffAgentId) {
+    foreach ($agents as $a) { if ((int)$a['id'] === $staffAgentId) { $staffAgent = $a; break; } }
+}
+$lockAgent = ($isRestricted && $staffAgent !== null);   // restrict + default the Agent field
+
+// Agency list for the searchable picker (id / display name / short code).
+$agencyJs = array_map(fn($a) => [
+    'id'    => (int)$a['id'],
+    'nome'  => $a['nome'],
+    'short' => $a['short_name'] ?: $a['nome'],
+], $agencies);
+
 $errors = [];
 $v = [
     'date_received'   => date('Y-m-d'),
@@ -31,6 +51,9 @@ $v = [
     'initial_request' => '',
     'notes'           => '',
 ];
+
+// Staff: default (and lock) the Assigned Agent to their own agent.
+if ($lockAgent) $v['agent_id'] = (string)$staffAgentId;
 
 function toCamelCaseRa(string $name): string {
     $name = trim($name);
@@ -54,6 +77,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $v['commission_usd'] = '';
         $v['date_paid']      = '';
     }
+    // Staff can only assign to themselves — ignore any posted agent_id.
+    if ($lockAgent) $v['agent_id'] = (string)$staffAgentId;
 
     if ($v['value_usd'] !== '' && $v['commission_pct'] !== '') {
         $v['commission_usd'] = round((float)$v['value_usd'] * (float)$v['commission_pct'] / 100, 2);
@@ -182,6 +207,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
+// Currently-selected agency (repopulate the search box after a POST error).
+$selAgencyNome = $selAgencyShort = '';
+if (($v['agency_id'] ?? '') !== '') {
+    foreach ($agencies as $a) {
+        if ((string)$a['id'] === (string)$v['agency_id']) {
+            $selAgencyNome  = $a['nome'];
+            $selAgencyShort = $a['short_name'] ?: $a['nome'];
+            break;
+        }
+    }
+}
 include 'includes/header.php';
 ?>
 
@@ -252,31 +288,44 @@ include 'includes/header.php';
 
       <div class="form-group" id="agencyRow"
            style="display:<?= $v['channel']!=='direct'?'block':'none' ?>">
-        <label for="agency_id">Agency *</label>
-        <select id="agency_id" name="agency_id" onchange="updateFolderPreview()" <?= $v['channel']!=='direct'?'required':'' ?>>
-          <option value="">— Select Agency —</option>
-          <?php foreach ($agencies as $ag): ?>
-            <option value="<?= $ag['id'] ?>"
-                    data-short="<?= h($ag['short_name'] ?: $ag['nome']) ?>"
-                    <?= $v['agency_id']==(string)$ag['id']?'selected':'' ?>>
-              <?= h($ag['nome']) ?>
-            </option>
-          <?php endforeach; ?>
-        </select>
+        <label for="agency_search">Agency *</label>
+        <div style="position:relative">
+          <div style="display:flex;gap:6px;align-items:stretch">
+            <input type="text" id="agency_search" autocomplete="off" placeholder="Type to filter agencies…"
+                   value="<?= h($selAgencyNome) ?>"
+                   oninput="filterAgencies()" onfocus="filterAgencies()" onkeydown="agencyKeydown(event)"
+                   style="flex:1">
+            <button type="button" class="btn btn-outline" onclick="openAddAgency()" title="Add a new agency" style="white-space:nowrap">➕ Add</button>
+          </div>
+          <input type="hidden" id="agency_id" name="agency_id" value="<?= h($v['agency_id']) ?>"
+                 data-short="<?= h($selAgencyShort) ?>">
+          <div id="agency_list" role="listbox"
+               style="position:absolute;z-index:30;left:0;right:0;top:100%;margin-top:2px;max-height:230px;overflow:auto;background:#fff;border:1px solid var(--grey-lt);border-radius:6px;box-shadow:0 6px 18px rgba(0,0,0,.12);display:none"></div>
+        </div>
       </div>
 
       <div class="form-group">
         <label for="agent_id">Assigned Agent *</label>
-        <select id="agent_id" name="agent_id" onchange="updateFolderPreview()" required>
-          <option value="">— Select Agent —</option>
-          <?php foreach ($agents as $ag): ?>
-            <option value="<?= $ag['id'] ?>"
-                    data-name="<?= h(str_replace(' ', '', $ag['name'])) ?>"
-                    <?= $v['agent_id']==(string)$ag['id']?'selected':'' ?>>
-              <?= h($ag['name']) ?>
+        <?php if ($lockAgent): ?>
+          <!-- Staff: locked to their own agent (single option). -->
+          <select id="agent_id" name="agent_id" onchange="updateFolderPreview()" required>
+            <option value="<?= (int)$staffAgent['id'] ?>"
+                    data-name="<?= h(str_replace(' ', '', $staffAgent['name'])) ?>" selected>
+              <?= h($staffAgent['name']) ?>
             </option>
-          <?php endforeach; ?>
-        </select>
+          </select>
+        <?php else: ?>
+          <select id="agent_id" name="agent_id" onchange="updateFolderPreview()" required>
+            <option value="">— Select Agent —</option>
+            <?php foreach ($agents as $ag): ?>
+              <option value="<?= $ag['id'] ?>"
+                      data-name="<?= h(str_replace(' ', '', $ag['name'])) ?>"
+                      <?= $v['agent_id']==(string)$ag['id']?'selected':'' ?>>
+                <?= h($ag['name']) ?>
+              </option>
+            <?php endforeach; ?>
+          </select>
+        <?php endif; ?>
       </div>
 
       <div class="form-group">
@@ -408,6 +457,34 @@ include 'includes/header.php';
   </form>
 </div>
 
+<!-- Add Agency modal -->
+<div id="addAgencyOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100;align-items:center;justify-content:center">
+  <div style="background:#fff;border-radius:10px;max-width:430px;width:92%;padding:20px;box-shadow:0 12px 40px rgba(0,0,0,.3)">
+    <div style="font-size:1.05rem;font-weight:700;margin-bottom:12px">Add Agency</div>
+    <div id="addAgencyError" style="display:none;background:#FEE2E2;border:1px solid #C0211B;color:#991B1B;border-radius:6px;padding:8px 12px;font-size:.82rem;margin-bottom:10px"></div>
+    <div class="form-group">
+      <label for="aa_nome">Agency name *</label>
+      <input type="text" id="aa_nome" autocomplete="off" placeholder="e.g. Go World Travel">
+    </div>
+    <div class="form-group">
+      <label for="aa_short">Short code (optional)</label>
+      <input type="text" id="aa_short" autocomplete="off" placeholder="auto-generated from name if blank">
+    </div>
+    <div class="form-group">
+      <label>Type</label>
+      <div style="display:flex;gap:16px;padding-top:4px;flex-wrap:wrap">
+        <label style="font-weight:400;display:flex;align-items:center;gap:5px;cursor:pointer"><input type="radio" name="aa_type" value="savannah" checked> Savannah</label>
+        <label style="font-weight:400;display:flex;align-items:center;gap:5px;cursor:pointer"><input type="radio" name="aa_type" value="promoservice"> Promoservice&nbsp;(-PS)</label>
+        <label style="font-weight:400;display:flex;align-items:center;gap:5px;cursor:pointer"><input type="radio" name="aa_type" value="lamprati"> Lamprati&nbsp;(-LAM)</label>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+      <button type="button" class="btn btn-outline" onclick="closeAddAgency()">Cancel</button>
+      <button type="button" class="btn btn-red" id="aa_submit" onclick="submitAddAgency()">Create agency</button>
+    </div>
+  </div>
+</div>
+
 <script>
 // ── Channel / agency toggle ───────────────────────────────────────────────────
 function channelValue() {
@@ -416,14 +493,8 @@ function channelValue() {
 }
 function updateChannel() {
   const ch = channelValue();
-  const agSel = document.getElementById('agency_id');
   document.getElementById('agencyRow').style.display = (ch === 'agency') ? 'block' : 'none';
-  if (ch === 'agency') {
-    agSel.setAttribute('required', '');           // Agency is mandatory
-  } else {
-    agSel.removeAttribute('required');
-    agSel.value = '';
-  }
+  if (ch !== 'agency') clearAgency();   // leaving Agency channel — drop any selection
   updateFolderPreview();
 }
 
@@ -442,9 +513,8 @@ function updateFolderPreview() {
   const camel = toCamelCase(name);
   let suffix;
   if (channel === 'agency') {
-    const agSel   = document.getElementById('agency_id');
-    const agOpt   = agSel.options[agSel.selectedIndex];
-    const agShort = (agOpt && agOpt.value) ? (agOpt.dataset.short || toCamelCase(agOpt.text)) : '?';
+    const agHidden = document.getElementById('agency_id');
+    const agShort  = (agHidden && agHidden.value) ? (agHidden.dataset.short || '?') : '?';
     suffix = `(${agShort}-${agentName})`;
   } else if (channel === 'sb') {
     suffix = `(${agentName}-SB)`;
@@ -629,6 +699,130 @@ function onDropboxSkipChange() {
     lbl.textContent = 'Initial Request *';
   }
 }
+
+// ── Agency searchable picker ──────────────────────────────────────────────────
+window.AGENCIES = <?= json_encode($agencyJs, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
+
+function agencyEls() {
+  return {
+    search: document.getElementById('agency_search'),
+    hidden: document.getElementById('agency_id'),
+    list:   document.getElementById('agency_list'),
+  };
+}
+
+function filterAgencies() {
+  const { search, list } = agencyEls();
+  if (!search || !list) return;
+  const q = search.value.trim().toLowerCase();
+  const matches = window.AGENCIES.filter(a =>
+    !q || a.nome.toLowerCase().includes(q) || (a.short || '').toLowerCase().includes(q)
+  ).slice(0, 60);
+  if (!matches.length) {
+    list.innerHTML = '<div style="padding:8px 12px;color:var(--grey-mid);font-size:.82rem">No match — use ➕ Add to create it</div>';
+    list.style.display = 'block';
+    return;
+  }
+  list.innerHTML = matches.map(a =>
+    '<div class="agency-opt" data-id="' + a.id + '" style="padding:7px 12px;cursor:pointer;font-size:.85rem;border-bottom:1px solid #f1f1f1">' +
+      escAg(a.nome) + ' <span style="color:var(--grey-mid);font-size:.75rem">' + escAg(a.short) + '</span></div>'
+  ).join('');
+  list.style.display = 'block';
+  list.querySelectorAll('.agency-opt').forEach(el => {
+    el.addEventListener('mousedown', function (e) { e.preventDefault(); selectAgency(parseInt(this.dataset.id, 10)); });
+    el.addEventListener('mouseenter', function () { this.style.background = '#F0FDF4'; });
+    el.addEventListener('mouseleave', function () { this.style.background = ''; });
+  });
+}
+
+function selectAgency(id) {
+  const { search, hidden, list } = agencyEls();
+  const a = window.AGENCIES.find(x => x.id === id);
+  if (!a) return;
+  hidden.value = a.id;
+  hidden.dataset.short = a.short || '';
+  if (search) search.value = a.nome;
+  if (list) list.style.display = 'none';
+  updateFolderPreview();
+}
+
+function clearAgency() {
+  const { search, hidden, list } = agencyEls();
+  if (hidden) { hidden.value = ''; hidden.dataset.short = ''; }
+  if (search) search.value = '';
+  if (list) list.style.display = 'none';
+}
+
+function agencyKeydown(e) {
+  if (e.key === 'Escape') { const { list } = agencyEls(); if (list) list.style.display = 'none'; }
+}
+
+function escAg(s){ const d=document.createElement('div'); d.appendChild(document.createTextNode(s||'')); return d.innerHTML; }
+
+// Close the dropdown on an outside click.
+document.addEventListener('click', function (e) {
+  const { search, list } = agencyEls();
+  if (!list) return;
+  if (e.target === search || list.contains(e.target)) return;
+  list.style.display = 'none';
+});
+
+// ── Add Agency modal ──────────────────────────────────────────────────────────
+function openAddAgency() {
+  const ov  = document.getElementById('addAgencyOverlay');
+  const pre = document.getElementById('agency_search');
+  document.getElementById('aa_nome').value  = (pre && pre.value.trim()) || '';
+  document.getElementById('aa_short').value = '';
+  document.getElementById('addAgencyError').style.display = 'none';
+  ov.style.display = 'flex';
+  document.getElementById('aa_nome').focus();
+}
+function closeAddAgency() { document.getElementById('addAgencyOverlay').style.display = 'none'; }
+
+function submitAddAgency() {
+  const nome   = document.getElementById('aa_nome').value.trim();
+  const short  = document.getElementById('aa_short').value.trim();
+  const type   = (document.querySelector('input[name="aa_type"]:checked') || {}).value || 'savannah';
+  const errBox = document.getElementById('addAgencyError');
+  const btn    = document.getElementById('aa_submit');
+  if (!nome) { errBox.textContent = 'Agency name is required.'; errBox.style.display = 'block'; return; }
+  btn.disabled = true; btn.textContent = 'Saving…';
+  const body = new URLSearchParams({ nome: nome, short_name: short, type: type });
+  fetch('ajax_create_agency.php', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body })
+    .then(r => r.json().then(j => ({ ok: r.ok, j: j })))
+    .then(({ ok, j }) => {
+      // Success, or a duplicate that still hands back the existing id → select it.
+      if (!j || (!j.success && !j.id)) throw new Error((j && j.message) || 'Could not create the agency.');
+      if (!window.AGENCIES.some(a => a.id === j.id)) {
+        window.AGENCIES.push({ id: j.id, nome: j.nome, short: j.short_name });
+        window.AGENCIES.sort((a, b) => a.nome.localeCompare(b.nome));
+      }
+      selectAgency(j.id);
+      closeAddAgency();
+    })
+    .catch(err => { errBox.textContent = err.message; errBox.style.display = 'block'; })
+    .finally(() => { btn.disabled = false; btn.textContent = 'Create agency'; });
+}
+
+// Require an agency (via the picker) when the channel is Agency. Capture phase so
+// this runs before the email-duplicate submit handler.
+document.getElementById('request-form').addEventListener('submit', function (e) {
+  if (channelValue() !== 'agency') return;
+  const hidden = document.getElementById('agency_id');
+  const search = document.getElementById('agency_search');
+  // Auto-select when the typed text exactly matches one agency name.
+  if (!hidden.value && search) {
+    const typed = search.value.trim().toLowerCase();
+    const m = typed ? window.AGENCIES.find(a => a.nome.toLowerCase() === typed) : null;
+    if (m) selectAgency(m.id);
+  }
+  if (!hidden.value) {
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    alert('Please select an agency (type to filter, or use ➕ Add).');
+    if (search) search.focus();
+  }
+}, true);
 
 // Init on load (after a POST error, restore skip state)
 updateChannel();
