@@ -14,6 +14,7 @@
  */
 require_once 'config.php';
 require_once 'includes/folder_parser.php';
+require_once 'includes/safari_check.php';
 $pageTitle = 'BackOffice';
 $db = db();
 
@@ -139,6 +140,120 @@ function bo_path_from_url(string $url): string {
     $p = preg_replace('#^/?home/#i', '', ltrim($p, '/')); // strip leading /home/
     $p = trim((string)$p, '/');
     return $p !== '' ? '/' . $p : '';
+}
+
+// ── Confirm Safari: destinations + folder-name builder (ports the Java tool) ──
+// label => [folder suffix inserted inside (), requests.destination value].
+$CONFIRM_DESTINATIONS = [
+    'Safari / Safari & Beach — Tanzania' => ['',             'Tanzania'],
+    'Trekking Kilimanjaro / Meru'        => ['-TREK',        'Tanzania'],
+    'Only Zanzibar'                      => ['-ZNZ',         'Tanzania'],
+    'Safari Kenya-Tanzania'              => ['-TZ-KENYA',    'Kenya'],
+    'Safari Kenya'                       => ['-KENYA',       'Kenya'],
+    'Uganda'                             => ['-UGANDA',      'Uganda'],
+    'Namibia'                            => ['-NAMIBIA',     'Namibia'],
+    'South Africa'                       => ['-SOUTHAFRICA', 'South Africa'],
+    'Rwanda'                             => ['-RWANDA',      'Rwanda'],
+    'Madagascar'                         => ['-MADAGASCAR',  'Madagascar'],
+    'Botswana'                           => ['-BOTSWANA',    'Botswana'],
+    'Staff / Internal'                   => ['-STAFF',       'Staff'],
+];
+
+$CONFIRM_MONTHS = ['JAN'=>'01','FEB'=>'02','MAR'=>'03','APR'=>'04','MAY'=>'05','JUN'=>'06',
+                   'JUL'=>'07','AUG'=>'08','SEP'=>'09','OCT'=>'10','NOV'=>'11','DEC'=>'12'];
+
+/**
+ * Build the confirmed folder name from the entered dates, mirroring the Java
+ * "Confirm Safari" rules exactly:
+ *   {MM}_{START}_{custname}_START{START}[_MIDT{MID}][_MIDT{MID2}]_END{END}_PROGRESS
+ * with the destination suffix inserted before the last ')'. Hard-format errors
+ * (bad month / wrong length) are returned in $errors and yield null.
+ *
+ * $start/$mid/$mid2 are DDMMM (e.g. 05JAN); $end is DDMMMYYYY (e.g. 18JAN2026).
+ * "NA" or empty middles are skipped.
+ */
+function bo_confirmed_name(string $custname, string $start, string $mid, string $mid2,
+                           string $end, string $destSuffix, array $months, array &$errors): ?string {
+    $errors = [];
+    $custname = trim($custname);
+    $start = strtoupper(trim($start));
+    $mid   = strtoupper(trim($mid));
+    $mid2  = strtoupper(trim($mid2));
+    $end   = strtoupper(trim($end));
+
+    $monOf = function (string $s) use ($months): string {
+        foreach ($months as $abbr => $num) { if (strpos($s, $abbr) !== false) return $num; }
+        return '00';
+    };
+
+    // Start date: DDMMM, valid month, exactly 5 chars.
+    $month = $monOf($start);
+    if ($month === '00') { $errors[] = 'Start Date month is wrong — use DDMMM, e.g. 05JAN.'; }
+    if (strpos($start, 'NA') !== false || strlen($start) !== 5) {
+        $errors[] = 'Start Date must be DDMMM (5 characters), e.g. 05JAN.';
+    }
+
+    // End date: DDMMMYYYY, valid month, exactly 9 chars.
+    $endMonth = $monOf($end);
+    if ($endMonth === '00') { $errors[] = 'End Date month is wrong — use DDMMMYYYY, e.g. 18JAN2026.'; }
+    if (strpos($end, 'NA') !== false || strlen($end) !== 9) {
+        $errors[] = 'End Date must be DDMMMYYYY (9 characters), e.g. 18JAN2026.';
+    }
+
+    // Middle dates (optional): DDMMM. Middle 2 only considered if middle 1 is set.
+    $hasMid  = ($mid  !== '' && strpos($mid, 'NA')  === false);
+    $hasMid2 = $hasMid && ($mid2 !== '' && strpos($mid2, 'NA') === false);
+    if ($hasMid  && strlen($mid)  !== 5) { $errors[] = 'Middle Date must be DDMMM (5 characters), e.g. 10JAN.'; }
+    if ($hasMid2 && strlen($mid2) !== 5) { $errors[] = 'Middle Date 2 must be DDMMM (5 characters), e.g. 12JAN.'; }
+
+    if ($errors) return null;
+
+    $name = $month . '_' . $start . '_' . $custname . '_START' . $start;
+    if ($hasMid)  $name .= '_MIDT' . $mid;
+    if ($hasMid2) $name .= '_MIDT' . $mid2;
+    $name .= '_END' . $end . '_PROGRESS';
+
+    if ($destSuffix !== '') {
+        $close = strrpos($name, ')');
+        if ($close !== false) {
+            $name = substr($name, 0, $close) . $destSuffix . substr($name, $close);
+        }
+    }
+    return $name;
+}
+
+/** Insert "_GRP{code}" before the first '(' of the customer folder (Java CREATE rule). */
+function bo_grp_insert(string $cust, string $code): string {
+    $paren = strpos($cust, '(');
+    return $paren !== false
+        ? substr($cust, 0, $paren) . '_GRP' . $code . substr($cust, $paren)
+        : $cust . '_GRP' . $code;
+}
+
+/** Valid GRP code = 4 digits DDMM, day 1-31, month 1-12 (mirrors the Java check). */
+function bo_grp_code_valid(string $code): bool {
+    if (!preg_match('/^\d{4}$/', $code)) return false;
+    $d = (int)substr($code, 0, 2); $m = (int)substr($code, 2);
+    return $d >= 1 && $d <= 31 && $m >= 1 && $m <= 12;
+}
+
+/** 'DDMM' from a Y-m-d start date, or '' if not parseable. */
+function bo_grp_code_from_ymd(?string $ymd): string {
+    if (!$ymd) return '';
+    $ts = strtotime($ymd);
+    return $ts !== false ? date('dm', $ts) : '';
+}
+
+/** Existing GRP folder names under /001_Safari whose name contains "GRP{code}". */
+function bo_find_grps(string $token, string $code): array {
+    if ($code === '' || !function_exists('dropbox_list_folder')) return [];
+    try { $all = dropbox_list_folder($token, '/001_Safari'); }
+    catch (Throwable $e) { return []; }
+    $needle = 'GRP' . $code;
+    $out = [];
+    foreach ($all as $name) { if (stripos($name, $needle) !== false) $out[] = $name; }
+    sort($out, SORT_NATURAL | SORT_FLAG_CASE);
+    return $out;
 }
 
 /**
@@ -305,6 +420,255 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'regro
     exit;
 }
 
+// ── Confirm Safari: preview (build name + checks) / commit (move + DB) ────────
+$previewFor  = 0;      // request_id whose inline preview panel to render
+$previewData = null;   // ['new_name','errors','checks','dates']
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST'
+    && in_array($_POST['action'] ?? '', ['confirm_preview', 'confirm_safari'], true)) {
+
+    $reqId    = (int)($_POST['request_id'] ?? 0);
+    $action   = $_POST['action'];
+    $fStart   = strtoupper(trim($_POST['cs_start'] ?? ''));
+    $fMid     = strtoupper(trim($_POST['cs_mid']   ?? ''));
+    $fMid2    = strtoupper(trim($_POST['cs_mid2']  ?? ''));
+    $fEnd     = strtoupper(trim($_POST['cs_end']   ?? ''));
+    $fDestKey = $_POST['cs_dest'] ?? '';
+    [$destSuffix, $destValue] = $CONFIRM_DESTINATIONS[$fDestKey] ?? ['', ''];
+
+    $grpAction = strtoupper(trim($_POST['cs_grp'] ?? 'NONE'));
+    if (!in_array($grpAction, ['NONE', 'CREATE', 'ADD'], true)) $grpAction = 'NONE';
+    $grpCode   = preg_replace('/\D/', '', $_POST['cs_grpcode'] ?? '');   // digits only (DDMM)
+    $grpMain   = trim($_POST['cs_grpmain'] ?? '');                       // chosen existing GRP (ADD)
+    $proceed   = !empty($_POST['cs_proceed']);                           // "Proceed anyway" override
+
+    // Preserve the search context so the list re-renders / the redirect returns here.
+    $_GET['q']        = trim($_POST['q'] ?? '');
+    $_GET['root']     = trim($_POST['root'] ?? '2026');
+    $_GET['show_all'] = !empty($_POST['show_all']) ? '1' : '';
+    $backQs = http_build_query(array_filter(['q'=>$_GET['q'], 'root'=>$_GET['root'], 'show_all'=>$_GET['show_all']]));
+
+    $stmt = $db->prepare("SELECT id, customer_name, practice_code, group_folder, dropbox_url, status
+                          FROM requests WHERE id = ?");
+    $stmt->execute([$reqId]);
+    $r = $stmt->fetch(PDO::FETCH_ASSOC);
+    $oldFolder = $r ? trim($r['practice_code'] ?? '') : '';
+
+    if (!$r) {
+        flash('Request not found.', 'error');
+        header('Location: backoffice.php' . ($backQs ? '?' . $backQs : '')); exit;
+    }
+    if ($oldFolder === '') {
+        flash('This request has no folder (practice_code) to confirm.', 'error');
+        header('Location: backoffice.php' . ($backQs ? '?' . $backQs : '')); exit;
+    }
+
+    // GRP code defaults to DDMM derived from the Start date when left blank.
+    $deriveCode = function (string $start) use ($CONFIRM_MONTHS): string {
+        $s = strtoupper(trim($start));
+        if (strlen($s) < 5 || !ctype_digit(substr($s, 0, 2))) return '';
+        foreach ($CONFIRM_MONTHS as $ab => $num) { if (strpos($s, $ab) !== false) return substr($s, 0, 2) . $num; }
+        return '';
+    };
+    if ($grpAction !== 'NONE' && $grpCode === '') $grpCode = $deriveCode($fStart);
+
+    // ── Build the target name(s) + validate per booking type ──────────────────
+    $errs       = [];
+    $newName    = null;   // GRP main / private confirmed folder (NONE, CREATE)
+    $subName    = null;   // CREATE: member subfolder = original practice_code
+    $memberName = null;   // ADD:    member folder that moves into the GRP (unchanged)
+    $pd         = ['start_date' => null, 'end_date' => null];
+
+    if ($grpAction === 'ADD') {
+        // No dates: the customer folder keeps its name and moves into the existing GRP.
+        $memberName = $oldFolder;
+        if ($grpCode === '')                 $errs[] = 'Enter the GRP code (DDMM) to find the existing group.';
+        elseif (!bo_grp_code_valid($grpCode)) $errs[] = 'GRP code must be 4 digits DDMM (e.g. 2306 = 23 Jun).';
+    } else {
+        $custForName = $oldFolder;
+        if ($grpAction === 'CREATE') {
+            if (!bo_grp_code_valid($grpCode)) $errs[] = 'GRP code must be 4 digits DDMM (e.g. 2306 = 23 Jun).';
+            else $custForName = bo_grp_insert($oldFolder, $grpCode);
+        }
+        $buildErr = [];
+        $newName  = bo_confirmed_name($custForName, $fStart, $fMid, $fMid2, $fEnd, $destSuffix, $CONFIRM_MONTHS, $buildErr);
+        $errs     = array_merge($errs, $buildErr);
+        if ($newName !== null) { $pd = parse_folder_dates($newName); $subName = $oldFolder; }
+    }
+
+    $csFields = [
+        'fStart'    => $fStart, 'fMid' => $fMid, 'fMid2' => $fMid2, 'fEnd' => $fEnd,
+        'fDestKey'  => $fDestKey, 'grpAction' => $grpAction, 'grpCode' => $grpCode, 'grpMain' => $grpMain,
+    ];
+
+    if ($errs) {
+        // Hard format error — show it in the inline panel, move nothing.
+        $previewFor  = $reqId;
+        $previewData = ['new_name' => $newName, 'errors' => $errs, 'checks' => [],
+                        'fields' => $csFields, 'block' => true, 'can_override' => false, 'grps' => []];
+        // fall through to render
+    } else {
+        require_once 'dropbox_helper.php';
+
+        // Resolve the folder's current Dropbox path (url first — no search lag).
+        $token = null; $curPath = null; $dbxErr = '';
+        try {
+            $token   = dropbox_get_access_token();
+            $curPath = bo_path_from_url($r['dropbox_url'] ?? '');
+            if ($curPath === '' || !dropbox_path_exists($token, $curPath)) {
+                $curPath = dropbox_find_folder($token, $oldFolder);
+            }
+        } catch (Throwable $e) { $dbxErr = $e->getMessage(); }
+
+        // Existing GRP folders for this date/code.
+        $grps = ($grpAction !== 'NONE' && $token) ? bo_find_grps($token, $grpCode) : [];
+
+        // ADD: auto-select the single match; resolve the group dates for the checks.
+        if ($grpAction === 'ADD') {
+            if (count($grps) === 1) $grpMain = $grps[0];
+            $csFields['grpMain'] = $grpMain;
+            if ($grpMain !== '') {
+                $gpd = parse_folder_dates($grpMain);
+                $pd  = ['start_date' => $gpd['start_date'], 'end_date' => $gpd['end_date']];
+            }
+        }
+
+        // ── Decide whether the confirmation is blocked ────────────────────────
+        $block = false; $canOverride = false; $blockMsg = '';
+        if ($grpAction === 'CREATE' && $grps) {
+            $block = true; $canOverride = true;
+            $blockMsg = 'A GRP already exists for ' . $grpCode . ': ' . implode(', ', $grps)
+                      . '. Add to it instead — or tick “Proceed anyway” to create a second GRP.';
+        } elseif ($grpAction === 'ADD' && !$grps) {
+            $block = true; $canOverride = false;
+            $blockMsg = 'No existing GRP found for code ' . $grpCode . ' in 001_Safari. Use “Create new GRP” instead.';
+        } elseif ($grpAction === 'ADD' && count($grps) > 1 && ($grpMain === '' || !in_array($grpMain, $grps, true))) {
+            $block = true; $canOverride = false;
+            $blockMsg = 'Several GRP folders match ' . $grpCode . ' — choose one below.';
+        }
+
+        // ── COMMIT ────────────────────────────────────────────────────────────
+        if ($action === 'confirm_safari') {
+            // Re-enforce the block server-side (CREATE dup requires the override).
+            if ($block && !($canOverride && $proceed)) {
+                flash($blockMsg !== '' ? $blockMsg : 'Confirmation is blocked — review the checks.', 'error');
+                header('Location: backoffice.php' . ($backQs ? '?' . $backQs : '')); exit;
+            }
+            try {
+                if ($token === null) throw new RuntimeException($dbxErr ?: 'No Dropbox token.');
+                if ($curPath === null || $curPath === '') {
+                    flash('Could not find "' . $oldFolder . '" in Dropbox — nothing changed. Verify the folder, then retry.', 'error');
+                } else {
+                    try { $db->exec("ALTER TABLE requests ADD COLUMN confirmation_date DATE NULL DEFAULT NULL"); } catch (PDOException $ig) {}
+                    try { $db->exec("ALTER TABLE requests ADD COLUMN group_folder VARCHAR(255) NULL DEFAULT NULL"); } catch (PDOException $ig) {}
+
+                    if ($grpAction === 'ADD') {
+                        $destPath = '/001_Safari/' . $grpMain . '/' . $memberName;
+                        if (dropbox_path_exists($token, $destPath)) {
+                            flash('"' . $memberName . '" already exists inside GRP "' . $grpMain . '" — nothing changed.', 'error');
+                        } else {
+                            dropbox_move_folder($token, $curPath, $destPath);
+                            $gpd = parse_folder_dates($grpMain);
+                            $db->prepare(
+                                "UPDATE requests
+                                 SET practice_code=?, group_folder=?, dropbox_url=?, status='Booked', confirmation_date=CURDATE(),
+                                     start_date=COALESCE(?, start_date),
+                                     destination=CASE WHEN ?<>'' THEN ? ELSE destination END
+                                 WHERE id=?"
+                            )->execute([$memberName, $grpMain, bo_url_from_path($destPath), $gpd['start_date'], $destValue, $destValue, $reqId]);
+                            flash('✔ ' . ($r['customer_name'] ?? 'Booking') . ' added to GRP "' . $grpMain . '" (status → Booked).', 'info');
+                        }
+                    } else { // NONE or CREATE — move to a top-level 001_Safari folder
+                        $newPath = '/001_Safari/' . $newName;
+                        if (dropbox_path_exists($token, $newPath)) {
+                            flash('A folder named "' . $newName . '" already exists in 001_Safari — nothing changed.', 'error');
+                        } else {
+                            dropbox_move_folder($token, $curPath, $newPath);
+
+                            if ($grpAction === 'CREATE') {
+                                // Create the member subfolder and move the loose docs (keep the group xlsx at GRP root).
+                                $subPath = $newPath . '/' . $subName;
+                                dropbox_create_folder($token, $subPath, false);
+                                foreach (dropbox_list_files($token, $newPath) as $fn) {
+                                    if (preg_match('/\.xlsx?$/i', $fn)) continue;         // group calc stays at GRP root
+                                    try { dropbox_move_folder($token, $newPath . '/' . $fn, $subPath . '/' . $fn); }
+                                    catch (Throwable $ig) { /* best-effort per file */ }
+                                }
+                                $db->prepare(
+                                    "UPDATE requests
+                                     SET practice_code=?, group_folder=?, dropbox_url=?, status='Booked', confirmation_date=CURDATE(),
+                                         start_date=COALESCE(?, start_date),
+                                         destination=CASE WHEN ?<>'' THEN ? ELSE destination END
+                                     WHERE id=?"
+                                )->execute([$subName, $newName, bo_url_from_path($subPath), $pd['start_date'], $destValue, $destValue, $reqId]);
+                                flash('✔ ' . ($r['customer_name'] ?? 'Booking') . ' — new GRP "' . $newName . '" created (status → Booked).', 'info');
+                            } else { // NONE
+                                $db->prepare(
+                                    "UPDATE requests
+                                     SET practice_code=?, dropbox_url=?, status='Booked', confirmation_date=CURDATE(),
+                                         start_date=COALESCE(?, start_date),
+                                         destination=CASE WHEN ?<>'' THEN ? ELSE destination END
+                                     WHERE id=?"
+                                )->execute([$newName, bo_url_from_path($newPath), $pd['start_date'], $destValue, $destValue, $reqId]);
+                                flash('✔ ' . ($r['customer_name'] ?? 'Booking') . ' confirmed → "' . $newName . '" (status → Booked).', 'info');
+                            }
+                        }
+                    }
+                }
+            } catch (Throwable $e) {
+                flash('Dropbox/DB error — nothing was changed: ' . $e->getMessage(), 'error');
+            }
+            header('Location: backoffice.php' . ($backQs ? '?' . $backQs : '')); exit;
+        }
+
+        // ── PREVIEW: run non-blocking QC + GRP checks, render inline ───────────
+        $checks = [];
+        try {
+            $xlsx   = ($token && $curPath) ? sc_fetch_calc_xlsx($token, $curPath) : null;
+            $checks = sc_run_checks([
+                'xlsx_path'  => $xlsx,
+                'start'      => $pd['start_date'],
+                'end'        => $pd['end_date'],
+                'today'      => date('Y-m-d'),
+                'grp_action' => $grpAction,
+                'grp_code'   => $grpCode,
+            ]);
+            if ($xlsx) @unlink($xlsx);
+        } catch (Throwable $e) {
+            $checks[] = ['level' => 'info', 'msg' => 'Excel checks skipped — ' . $e->getMessage()];
+        }
+        if ($dbxErr !== '') {
+            $checks[] = ['level' => 'info', 'msg' => 'Dropbox error while checking: ' . $dbxErr];
+        } elseif (!$curPath) {
+            array_unshift($checks, ['level' => 'warn',
+                'msg' => 'Folder "' . $oldFolder . '" not found in Dropbox search yet (new folders can lag ~1h). You can still confirm if you know it exists.']);
+        }
+
+        // GRP existence check lines.
+        if ($grpAction === 'CREATE') {
+            $checks[] = $grps
+                ? ['level' => 'warn', 'msg' => $blockMsg]
+                : ['level' => 'ok',   'msg' => 'No existing GRP for ' . $grpCode . ' — safe to create a new group.'];
+        } elseif ($grpAction === 'ADD') {
+            if (!$grps)                  $checks[] = ['level' => 'warn', 'msg' => $blockMsg];
+            elseif (count($grps) === 1)  $checks[] = ['level' => 'ok',   'msg' => 'Will add to existing GRP: ' . $grps[0] . '.'];
+            elseif ($grpMain !== '')     $checks[] = ['level' => 'ok',   'msg' => 'Will add to GRP: ' . $grpMain . '.'];
+            else                          $checks[] = ['level' => 'warn', 'msg' => $blockMsg];
+        }
+
+        $previewFor  = $reqId;
+        $previewData = [
+            'new_name'     => ($grpAction === 'ADD') ? ($grpMain !== '' ? $grpMain . ' / ' . $memberName : '(choose a GRP)') : $newName,
+            'errors'       => [],
+            'checks'       => $checks,
+            'fields'       => $csFields,
+            'block'        => $block,
+            'can_override' => $canOverride,
+            'grps'         => $grps,
+        ];
+    }
+}
+
 // ── Search ────────────────────────────────────────────────────────────────────
 // Folder-root filter: which Dropbox root the request's folder lives in
 // (matched literally against dropbox_url). 'All' removes the restriction.
@@ -467,6 +831,12 @@ include 'includes/header.php';
         $psLabel = $r['payment_status'] ?: $r['status'];
         // Re-group only makes sense on a confirmed safari (its folder is under 001_Safari).
         $canRegroup = in_array($r['status'] ?? '', ['Booked', 'Provisional'], true);
+        // Confirm Safari applies to a not-yet-confirmed private booking (no _START tag,
+        // not already Booked/Cancelled, not a group). GRP create/add stays in the Java tool.
+        $pcode      = trim($r['practice_code'] ?? '');
+        $canConfirm = !$isGrp && $pcode !== ''
+                    && stripos($pcode, '_START') === false
+                    && !in_array($r['status'] ?? '', ['Booked', 'Cancelled', 'Lost'], true);
     ?>
       <?php $isCancelled = in_array($r['status'] ?? '', ['Cancelled', 'Lost'], true); ?>
       <tr<?= $isCancelled ? ' style="background:#fcf0f0"' : '' ?>>
@@ -489,6 +859,9 @@ include 'includes/header.php';
             <?php if ($folder !== ''): ?>
               <a href="#" data-copy="<?= h($folder) ?>" onclick="copyPath(this);return false" title="Copy the folder name (to paste into an email)" style="font-size:.68rem;text-decoration:none;margin-left:<?= $sPath!==''?'8px':'0' ?>">📄 Copy folder name</a>
               <a href="#" onclick="toggleRename(<?= (int)$r['id'] ?>);return false" title="Rename the Dropbox folder" style="font-size:.68rem;text-decoration:none;margin-left:8px">✏ Rename…</a>
+              <?php if ($canConfirm): ?>
+              <a href="#" onclick="toggleEl('cs<?= (int)$r['id'] ?>');return false" title="Confirm this safari: set dates, move to 001_Safari, mark Booked" style="font-size:.68rem;text-decoration:none;margin-left:8px;color:#1A6B3A;font-weight:600">✅ Confirm Safari…</a>
+              <?php endif; ?>
               <?php if ($canRegroup): ?>
               <a href="#" onclick="toggleEl('rg<?= (int)$r['id'] ?>');return false" title="Fix a wrong confirmation: move this booking between private and a group" style="font-size:.68rem;text-decoration:none;margin-left:8px">👥 Re-group…</a>
               <?php endif; ?>
@@ -532,6 +905,139 @@ include 'includes/header.php';
               <button type="button" class="btn btn-outline btn-sm" onclick="toggleRename(<?= (int)$r['id'] ?>)">Cancel</button>
             </div>
           </form>
+          <?php endif; ?>
+
+          <?php
+            $isPreview = ($previewFor === (int)$r['id'] && $previewData !== null);
+            $pv = $isPreview ? $previewData['fields']
+                             : ['fStart'=>'','fMid'=>'NA','fMid2'=>'NA','fEnd'=>'','fDestKey'=>'','grpAction'=>'NONE','grpCode'=>'','grpMain'=>''];
+            $rid = (int)$r['id'];
+          ?>
+          <?php if ($canConfirm): ?>
+          <form method="POST" id="cs<?= $rid ?>" style="display:<?= $isPreview ? 'block' : 'none' ?>;margin-top:6px;padding:10px;background:#eef6f0;border:1px solid #cfe6d6;border-radius:8px">
+            <input type="hidden" name="action" value="confirm_preview">
+            <input type="hidden" name="request_id" value="<?= $rid ?>">
+            <input type="hidden" name="q" value="<?= h($q) ?>">
+            <input type="hidden" name="root" value="<?= h($root) ?>">
+            <input type="hidden" name="show_all" value="<?= $showAll ? '1' : '' ?>">
+            <div style="font-size:.68rem;color:#1A6B3A;font-weight:600;margin-bottom:6px">✅ Confirm Safari — enter dates as in the Excel</div>
+            <div style="display:flex;gap:8px;margin-bottom:6px;font-family:'Open Sans',sans-serif">
+              <label style="font-size:.66rem;color:var(--grey-mid);flex:1">Booking type
+                <select name="cs_grp" onchange="document.getElementById('csgw<?= $rid ?>').style.display=this.value==='NONE'?'none':'block'" style="width:100%;font-size:.74rem;padding:4px 6px;border:1.5px solid var(--grey-lt);border-radius:5px">
+                  <option value="NONE"   <?= $pv['grpAction']==='NONE'   ?'selected':'' ?>>Private (no group)</option>
+                  <option value="CREATE" <?= $pv['grpAction']==='CREATE' ?'selected':'' ?>>Create new GRP</option>
+                  <option value="ADD"    <?= $pv['grpAction']==='ADD'    ?'selected':'' ?>>Add to existing GRP</option>
+                </select>
+              </label>
+              <label id="csgw<?= $rid ?>" style="font-size:.66rem;color:var(--grey-mid);width:130px;display:<?= $pv['grpAction']==='NONE'?'none':'block' ?>">GRP code (DDMM)
+                <input type="text" name="cs_grpcode" value="<?= h($pv['grpCode']) ?>" placeholder="from Start" spellcheck="false"
+                       style="width:100%;font-family:monospace;font-size:.74rem;padding:4px 6px;border:1.5px solid var(--grey-lt);border-radius:5px"></label>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:6px 10px;font-family:'Open Sans',sans-serif">
+              <label style="font-size:.66rem;color:var(--grey-mid)">Start (DDMMM)
+                <input type="text" name="cs_start" value="<?= h($pv['fStart']) ?>" placeholder="05JAN" spellcheck="false"
+                       style="width:100%;font-family:monospace;font-size:.74rem;padding:4px 6px;border:1.5px solid var(--grey-lt);border-radius:5px;text-transform:uppercase"></label>
+              <label style="font-size:.66rem;color:var(--grey-mid)">End (DDMMMYYYY)
+                <input type="text" name="cs_end" value="<?= h($pv['fEnd']) ?>" placeholder="18JAN2026" spellcheck="false"
+                       style="width:100%;font-family:monospace;font-size:.74rem;padding:4px 6px;border:1.5px solid var(--grey-lt);border-radius:5px;text-transform:uppercase"></label>
+              <label style="font-size:.66rem;color:var(--grey-mid)">Middle (DDMMM / NA)
+                <input type="text" name="cs_mid" value="<?= h($pv['fMid']) ?>" placeholder="NA" spellcheck="false"
+                       style="width:100%;font-family:monospace;font-size:.74rem;padding:4px 6px;border:1.5px solid var(--grey-lt);border-radius:5px;text-transform:uppercase"></label>
+              <label style="font-size:.66rem;color:var(--grey-mid)">Middle 2 (DDMMM / NA)
+                <input type="text" name="cs_mid2" value="<?= h($pv['fMid2']) ?>" placeholder="NA" spellcheck="false"
+                       style="width:100%;font-family:monospace;font-size:.74rem;padding:4px 6px;border:1.5px solid var(--grey-lt);border-radius:5px;text-transform:uppercase"></label>
+            </div>
+            <label style="font-size:.66rem;color:var(--grey-mid);display:block;margin-top:6px;font-family:'Open Sans',sans-serif">Destination
+              <select name="cs_dest" style="width:100%;font-size:.74rem;padding:4px 6px;border:1.5px solid var(--grey-lt);border-radius:5px">
+                <?php foreach (array_keys($CONFIRM_DESTINATIONS) as $dlabel): ?>
+                  <option value="<?= h($dlabel) ?>" <?= ($pv['fDestKey'] === $dlabel || ($pv['fDestKey'] === '' && $dlabel === array_key_first($CONFIRM_DESTINATIONS))) ? 'selected' : '' ?>><?= h($dlabel) ?></option>
+                <?php endforeach; ?>
+              </select>
+            </label>
+            <div style="margin-top:8px;display:flex;gap:6px">
+              <button type="submit" class="btn btn-outline btn-sm">🔍 Check &amp; preview</button>
+              <button type="button" class="btn btn-outline btn-sm" onclick="toggleEl('cs<?= $rid ?>')">Cancel</button>
+            </div>
+          </form>
+          <?php endif; ?>
+
+          <?php if ($isPreview): ?>
+          <?php
+            $pvBlock    = !empty($previewData['block']);
+            $pvOverride = !empty($previewData['can_override']);
+            $pvGrps     = $previewData['grps'] ?? [];
+            $pvGrpMult  = ($pv['grpAction'] === 'ADD' && count($pvGrps) > 1 && $pv['grpMain'] === '');
+            // Common hidden fields carried into the confirm/re-preview submit.
+            $csHidden = function () use ($rid, $pv, $q, $root, $showAll) { ?>
+                <input type="hidden" name="request_id" value="<?= $rid ?>">
+                <input type="hidden" name="cs_start" value="<?= h($pv['fStart']) ?>">
+                <input type="hidden" name="cs_mid"   value="<?= h($pv['fMid']) ?>">
+                <input type="hidden" name="cs_mid2"  value="<?= h($pv['fMid2']) ?>">
+                <input type="hidden" name="cs_end"   value="<?= h($pv['fEnd']) ?>">
+                <input type="hidden" name="cs_dest"  value="<?= h($pv['fDestKey']) ?>">
+                <input type="hidden" name="cs_grp"   value="<?= h($pv['grpAction']) ?>">
+                <input type="hidden" name="cs_grpcode" value="<?= h($pv['grpCode']) ?>">
+                <input type="hidden" name="q" value="<?= h($q) ?>">
+                <input type="hidden" name="root" value="<?= h($root) ?>">
+                <input type="hidden" name="show_all" value="<?= $showAll ? '1' : '' ?>">
+            <?php };
+          ?>
+          <div style="margin-top:6px;padding:10px;background:#fff;border:1px solid #cfe6d6;border-radius:8px">
+            <?php if (!empty($previewData['errors'])): ?>
+              <div style="font-size:.72rem;color:#a33;font-weight:600;margin-bottom:4px">Fix these before confirming:</div>
+              <ul style="margin:0 0 0 16px;padding:0;font-size:.72rem;color:#a33">
+                <?php foreach ($previewData['errors'] as $er): ?><li><?= h($er) ?></li><?php endforeach; ?>
+              </ul>
+            <?php else: ?>
+              <div style="font-size:.66rem;color:var(--grey-mid);margin-bottom:2px"><?= $pv['grpAction']==='ADD' ? 'Will file under' : 'New folder name' ?></div>
+              <div class="bo-folder" style="font-size:.74rem;margin-bottom:8px">📁 <?= h($previewData['new_name']) ?></div>
+              <?php if (!empty($previewData['checks'])): ?>
+                <div style="font-size:.66rem;color:var(--grey-mid);margin-bottom:3px">Pre-flight checks (advisory)</div>
+                <ul style="margin:0 0 8px 0;padding:0;list-style:none;font-size:.72rem;line-height:1.5">
+                  <?php foreach ($previewData['checks'] as $ck):
+                        $lv = $ck['level'] ?? 'info';
+                        $ic = $lv === 'ok' ? '✓' : ($lv === 'warn' ? '⚠' : 'ℹ');
+                        $cl = $lv === 'ok' ? '#1A6B3A' : ($lv === 'warn' ? '#B26A00' : '#666'); ?>
+                    <li style="color:<?= $cl ?>"><?= $ic ?> <?= h($ck['msg']) ?></li>
+                  <?php endforeach; ?>
+                </ul>
+              <?php endif; ?>
+
+              <?php if ($pvGrpMult): ?>
+                <!-- ADD, several matching GRPs: pick one, then re-preview. -->
+                <form method="POST" style="margin:0 0 4px 0">
+                  <input type="hidden" name="action" value="confirm_preview">
+                  <?php $csHidden(); ?>
+                  <div style="font-size:.66rem;color:var(--grey-mid);margin-bottom:3px">Choose the GRP to add to:</div>
+                  <select name="cs_grpmain" style="width:100%;font-family:monospace;font-size:.72rem;padding:4px 6px;border:1.5px solid var(--grey-lt);border-radius:5px;margin-bottom:6px">
+                    <?php foreach ($pvGrps as $gname): ?><option value="<?= h($gname) ?>"><?= h($gname) ?></option><?php endforeach; ?>
+                  </select>
+                  <button type="submit" class="btn btn-outline btn-sm">Use this GRP →</button>
+                </form>
+              <?php elseif ($pvBlock && !$pvOverride): ?>
+                <!-- Blocked, no override (e.g. ADD but no GRP exists): must fix the form above. -->
+                <div style="font-size:.7rem;color:#B26A00;font-weight:600">Cannot confirm yet — adjust the booking type / GRP code above and re-check.</div>
+              <?php else: ?>
+                <form method="POST" onsubmit="return confirm('<?= $pv['grpAction']==='ADD' ? 'Move the folder into the GRP and mark Booked?' : 'Move the Dropbox folder to 001_Safari and mark Booked?' ?>');" style="margin:0">
+                  <input type="hidden" name="action" value="confirm_safari">
+                  <?php $csHidden(); ?>
+                  <input type="hidden" name="cs_grpmain" value="<?= h($pv['grpMain']) ?>">
+                  <?php if ($pvBlock && $pvOverride): ?>
+                    <label style="display:flex;gap:6px;align-items:flex-start;font-size:.7rem;color:#B26A00;margin-bottom:6px;font-weight:600">
+                      <input type="checkbox" name="cs_proceed" value="1" onchange="document.getElementById('csbtn<?= $rid ?>').disabled=!this.checked" style="margin-top:2px">
+                      Proceed anyway — a GRP already exists for this date; create a second one deliberately.
+                    </label>
+                    <button type="submit" id="csbtn<?= $rid ?>" class="btn btn-red btn-sm" disabled>Continue anyway</button>
+                  <?php else: ?>
+                    <div style="display:flex;gap:6px;align-items:center">
+                      <button type="submit" class="btn btn-red btn-sm"><?= $pv['grpAction']==='ADD' ? '✅ Add to GRP' : '✅ Confirm now' ?></button>
+                      <span style="font-size:.66rem;color:var(--grey-mid)">Warnings do not block — confirm when you're satisfied.</span>
+                    </div>
+                  <?php endif; ?>
+                </form>
+              <?php endif; ?>
+            <?php endif; ?>
+          </div>
           <?php endif; ?>
         </td>
         <td><span class="badge"><?= h($psLabel) ?></span></td>
