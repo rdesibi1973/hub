@@ -25,6 +25,11 @@ if (!in_array($currentUser['role_name'] ?? '', ['admin','manager'], true)) {
     header('Location: requests.php'); exit;
 }
 
+// Column that records the pre-confirmation state so a confirm can be rolled back.
+// Created lazily (MySQL: no IF NOT EXISTS) so the listing query can always read it.
+try { $db->exec("ALTER TABLE requests ADD COLUMN pre_confirm_json TEXT NULL DEFAULT NULL"); }
+catch (PDOException $ignored) {}
+
 // ── Target status → folder tag + DB status/payment_status ─────────────────────
 // Mirrors the Java tool and api_rename_folder.php. A null 'ps' clears payment_status.
 $STATUS_MAP = [
@@ -257,6 +262,79 @@ function bo_find_grps(string $token, string $code): array {
 }
 
 /**
+ * Build the post-confirmation booking-notification email (ports the Java
+ * showSafariBookingEmailDialog template). $grpMain != '' → the "added to group"
+ * variant. Returns ['to','cc','subject','body'] (to/cc comma-separated).
+ */
+function bo_booking_email(string $folder, string $agentEmail, string $grpMain, string $sessionFullName): array {
+    // Agent code = last token inside the last (…) block, e.g. "(GoWorld-PS-Roberto)" → "Roberto".
+    $agentCode = '';
+    if (preg_match_all('/\(([^)]+)\)/', $folder, $m) && !empty($m[1])) {
+        $parts = array_values(array_filter(array_map('trim', explode('-', (string)end($m[1]))), fn($x) => $x !== ''));
+        if ($parts) $agentCode = (string)end($parts);
+    }
+    $grpAdd  = ($grpMain !== '');
+    $fnLower = strtolower(trim($sessionFullName));
+
+    $to = ['accountant@savannahexplorers.com', 'glady@savannahexplorers.com', 'operations@savannahexplorers.com'];
+    $addNuru = in_array(strtolower($agentCode), ['roberto','robertocapri','eleonoraongaro','alessia','daniela'], true)
+            || in_array($fnLower, ['roberto','roberto capri','alessia','daniela'], true);
+    if ($addNuru) $to[] = 'nuru@savannahexplorers.com';
+
+    $cc = [];
+    if ($agentEmail !== '') $cc[] = $agentEmail;
+    $cc[] = 'savannah.explorers@gmail.com';
+    $cc[] = 'saruni@savannahexplorers.com';
+
+    if ($grpAdd) {
+        $subject = $grpMain . '\\' . $folder;
+    } else {
+        $cust = preg_replace('/^\d+_\d+[A-Za-z]+_/', '', $folder);
+        $cust = preg_replace('/_START.+$/', '', $cust);
+        $subject = $cust . ' safari bookings';
+    }
+
+    $agentDisplay = $sessionFullName !== '' ? $sessionFullName : $agentCode;
+    $b  = "Hi Glady/Lydia,\n";
+    if ($grpAdd) {
+        $b .= "         this customer has been added to group " . $grpMain . ",\n";
+        $b .= "         please check the extra services to book as in the excel file (transfers, hotels, Zanzibar, etc. — if any)\n\n";
+        $b .= "Dropbox folder is   " . $grpMain . "\\" . $folder . "\n\n";
+    } else {
+        $b .= "         you can book for this safari as in the excel file\n\n";
+        $b .= "Dropbox folder is   " . $folder . "\n\n";
+    }
+    $b .= "Kindly check domestic flights, invoices, transfers and activities are correctly"
+        . " booked and invoiced for the correct price/date/pax before saving."
+        . " Put invoice details and your name in Excel after it's checked.\n\n";
+    if ($addNuru) $b .= "Nuru - prepare the final program when bookings are completed\n\n";
+    $b .= "Esther - prepare the not paid invoice\n";
+    $b .= "\nThanks\nBest Regards,\n" . $agentDisplay;
+
+    return [
+        'to'      => implode(', ', array_values(array_unique($to))),
+        'cc'      => implode(', ', array_values(array_unique($cc))),
+        'subject' => $subject,
+        'body'    => $b,
+    ];
+}
+
+/** Restore the request row to its pre-confirmation state (used by rollback). */
+function bo_rollback_db(PDO $db, int $id, string $name, string $path, array $pre): void {
+    $status = $pre['status'] ?? '';
+    // Never leave it Booked after a rollback; fall back to Inquiry if unknown.
+    if ($status === '' || strcasecmp($status, 'Booked') === 0) $status = 'Inquiry';
+    $pay   = $pre['pay']   ?? null;
+    $group = trim($pre['group'] ?? '');
+    $db->prepare(
+        "UPDATE requests
+         SET practice_code=?, group_folder=?, dropbox_url=?, status=?, payment_status=?,
+             confirmation_date=NULL, pre_confirm_json=NULL
+         WHERE id=?"
+    )->execute([$name, ($group !== '' ? $group : null), bo_url_from_path($path), $status, ($pay !== '' ? $pay : null), $id]);
+}
+
+/**
  * Re-group a confirmed booking that was filed under the wrong grouping: move ONLY
  * this booking's Dropbox folder and sync the DB. $targetGrp === '' → make it a
  * private (top-level) safari; otherwise it becomes a member of that GRP (the GRP
@@ -448,7 +526,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'
     $_GET['show_all'] = !empty($_POST['show_all']) ? '1' : '';
     $backQs = http_build_query(array_filter(['q'=>$_GET['q'], 'root'=>$_GET['root'], 'show_all'=>$_GET['show_all']]));
 
-    $stmt = $db->prepare("SELECT id, customer_name, practice_code, group_folder, dropbox_url, status
+    $stmt = $db->prepare("SELECT id, customer_name, practice_code, group_folder, dropbox_url, status, payment_status
                           FROM requests WHERE id = ?");
     $stmt->execute([$reqId]);
     $r = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -462,6 +540,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'
         flash('This request has no folder (practice_code) to confirm.', 'error');
         header('Location: backoffice.php' . ($backQs ? '?' . $backQs : '')); exit;
     }
+    $confirmedMailId = 0;   // set on a successful confirm → open the booking email after redirect
 
     // GRP code defaults to DDMM derived from the Start date when left blank.
     $deriveCode = function (string $start) use ($CONFIRM_MONTHS): string {
@@ -562,6 +641,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'
                     try { $db->exec("ALTER TABLE requests ADD COLUMN confirmation_date DATE NULL DEFAULT NULL"); } catch (PDOException $ig) {}
                     try { $db->exec("ALTER TABLE requests ADD COLUMN group_folder VARCHAR(255) NULL DEFAULT NULL"); } catch (PDOException $ig) {}
 
+                    // Snapshot the pre-confirmation state so this can be rolled back exactly.
+                    $preConfirm = json_encode([
+                        'name'   => $oldFolder,
+                        'path'   => $curPath,
+                        'status' => $r['status'] ?? '',
+                        'pay'    => $r['payment_status'] ?? null,
+                        'action' => $grpAction,
+                        'group'  => trim($r['group_folder'] ?? ''),
+                        'sub'    => $subName,
+                    ], JSON_UNESCAPED_UNICODE);
+
                     if ($grpAction === 'ADD') {
                         $destPath = '/001_Safari/' . $grpMain . '/' . $memberName;
                         if (dropbox_path_exists($token, $destPath)) {
@@ -573,9 +663,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'
                                 "UPDATE requests
                                  SET practice_code=?, group_folder=?, dropbox_url=?, status='Booked', confirmation_date=CURDATE(),
                                      start_date=COALESCE(?, start_date),
-                                     destination=CASE WHEN ?<>'' THEN ? ELSE destination END
+                                     destination=CASE WHEN ?<>'' THEN ? ELSE destination END,
+                                     pre_confirm_json=?
                                  WHERE id=?"
-                            )->execute([$memberName, $grpMain, bo_url_from_path($destPath), $gpd['start_date'], $destValue, $destValue, $reqId]);
+                            )->execute([$memberName, $grpMain, bo_url_from_path($destPath), $gpd['start_date'], $destValue, $destValue, $preConfirm, $reqId]);
+                            $confirmedMailId = $reqId;
                             flash('✔ ' . ($r['customer_name'] ?? 'Booking') . ' added to GRP "' . $grpMain . '" (status → Booked).', 'info');
                         }
                     } else { // NONE or CREATE — move to a top-level 001_Safari folder
@@ -598,18 +690,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'
                                     "UPDATE requests
                                      SET practice_code=?, group_folder=?, dropbox_url=?, status='Booked', confirmation_date=CURDATE(),
                                          start_date=COALESCE(?, start_date),
-                                         destination=CASE WHEN ?<>'' THEN ? ELSE destination END
+                                         destination=CASE WHEN ?<>'' THEN ? ELSE destination END,
+                                         pre_confirm_json=?
                                      WHERE id=?"
-                                )->execute([$subName, $newName, bo_url_from_path($subPath), $pd['start_date'], $destValue, $destValue, $reqId]);
+                                )->execute([$subName, $newName, bo_url_from_path($subPath), $pd['start_date'], $destValue, $destValue, $preConfirm, $reqId]);
+                                $confirmedMailId = $reqId;
                                 flash('✔ ' . ($r['customer_name'] ?? 'Booking') . ' — new GRP "' . $newName . '" created (status → Booked).', 'info');
                             } else { // NONE
                                 $db->prepare(
                                     "UPDATE requests
                                      SET practice_code=?, dropbox_url=?, status='Booked', confirmation_date=CURDATE(),
                                          start_date=COALESCE(?, start_date),
-                                         destination=CASE WHEN ?<>'' THEN ? ELSE destination END
+                                         destination=CASE WHEN ?<>'' THEN ? ELSE destination END,
+                                         pre_confirm_json=?
                                      WHERE id=?"
-                                )->execute([$newName, bo_url_from_path($newPath), $pd['start_date'], $destValue, $destValue, $reqId]);
+                                )->execute([$newName, bo_url_from_path($newPath), $pd['start_date'], $destValue, $destValue, $preConfirm, $reqId]);
+                                $confirmedMailId = $reqId;
                                 flash('✔ ' . ($r['customer_name'] ?? 'Booking') . ' confirmed → "' . $newName . '" (status → Booked).', 'info');
                             }
                         }
@@ -618,7 +714,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'
             } catch (Throwable $e) {
                 flash('Dropbox/DB error — nothing was changed: ' . $e->getMessage(), 'error');
             }
-            header('Location: backoffice.php' . ($backQs ? '?' . $backQs : '')); exit;
+            $qsParts = $backQs;
+            if ($confirmedMailId) {
+                $qsParts .= ($qsParts ? '&' : '') . 'mail_for=' . $confirmedMailId . '&mail_action=' . rawurlencode($grpAction);
+            }
+            header('Location: backoffice.php' . ($qsParts ? '?' . $qsParts : '')); exit;
         }
 
         // ── PREVIEW: run non-blocking QC + GRP checks, render inline ───────────
@@ -669,6 +769,104 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'
     }
 }
 
+// ── Rollback a confirmation: move the folder back to its source and restore DB ─
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'rollback_confirm') {
+    $reqId  = (int)($_POST['request_id'] ?? 0);
+    $backQs = http_build_query(array_filter([
+        'q'        => trim($_POST['q'] ?? ''),
+        'root'     => trim($_POST['root'] ?? ''),
+        'show_all' => !empty($_POST['show_all']) ? '1' : '',
+    ], fn($x) => $x !== ''));
+
+    $stmt = $db->prepare("SELECT id, customer_name, practice_code, group_folder, dropbox_url, pre_confirm_json
+                          FROM requests WHERE id = ?");
+    $stmt->execute([$reqId]);
+    $r   = $stmt->fetch(PDO::FETCH_ASSOC);
+    $pre = $r ? json_decode($r['pre_confirm_json'] ?? '', true) : null;
+
+    if (!$r) {
+        flash('Request not found.', 'error');
+    } elseif (!$pre || empty($pre['name']) || empty($pre['path'])) {
+        flash('No rollback data stored for this booking (only Hub-confirmed bookings can be rolled back).', 'error');
+    } else {
+        require_once 'dropbox_helper.php';
+        try {
+            $token    = dropbox_get_access_token();
+            $act      = strtoupper($pre['action'] ?? 'NONE');
+            $origName = $pre['name'];
+            $destPath = $pre['path'];                        // e.g. /2026/CustName(Ag-Handler)
+            $group    = trim($r['group_folder'] ?? '');
+            $member   = trim($r['practice_code'] ?? '');
+
+            if (dropbox_path_exists($token, $destPath)) {
+                flash('The original location "' . $destPath . '" already exists — resolve it manually; nothing changed.', 'error');
+            } elseif ($act === 'CREATE') {
+                // Safe only while this is the group's sole member (authoritative: the DB).
+                $cnt = $db->prepare("SELECT COUNT(*) FROM requests WHERE group_folder = ?");
+                $cnt->execute([$group]);
+                $members = (int)$cnt->fetchColumn();
+                if ($group === '') {
+                    flash('Missing group folder — cannot roll back automatically.', 'error');
+                } elseif ($members > 1) {
+                    flash('This group has ' . $members . ' members — remove the others first, then roll back the last one.', 'error');
+                } else {
+                    // Move the member's loose files back to the group root, drop the empty
+                    // subfolder, then move the (renamed) group folder back to its source.
+                    $sub     = trim($pre['sub'] ?? $member);
+                    $grpPath = '/001_Safari/' . $group;
+                    $subPath = $grpPath . '/' . $sub;
+                    foreach (dropbox_list_files($token, $subPath) as $fn) {
+                        try { dropbox_move_folder($token, $subPath . '/' . $fn, $grpPath . '/' . $fn); }
+                        catch (Throwable $ig) { /* best-effort per file */ }
+                    }
+                    try { dropbox_delete_folder($token, $subPath); } catch (Throwable $ig) { /* empty subfolder */ }
+                    dropbox_move_folder($token, $grpPath, $destPath);
+                    bo_rollback_db($db, $reqId, $origName, $destPath, $pre);
+                    flash('↩ Rolled back "' . ($r['customer_name'] ?? 'Booking') . '" — single-member group undone, folder restored to ' . $destPath . '.', 'info');
+                }
+            } else {
+                // NONE / ADD — a single folder move back to the source path.
+                $curPath = bo_path_from_url($r['dropbox_url'] ?? '');
+                if ($curPath === '') {
+                    $curPath = ($act === 'ADD' && $group !== '')
+                        ? '/001_Safari/' . $group . '/' . $member
+                        : '/001_Safari/' . $member;
+                }
+                dropbox_move_folder($token, $curPath, $destPath);
+                bo_rollback_db($db, $reqId, $origName, $destPath, $pre);
+                flash('↩ Rolled back "' . ($r['customer_name'] ?? 'Booking') . '" — folder restored to ' . $destPath . '.', 'info');
+            }
+        } catch (Throwable $e) {
+            flash('Dropbox/DB error — nothing was changed: ' . $e->getMessage(), 'error');
+        }
+    }
+    header('Location: backoffice.php' . ($backQs ? '?' . $backQs : '')); exit;
+}
+
+// ── Post-confirm booking email (GET, right after a successful confirmation) ────
+$bookingEmail = null;   // ['to','cc','subject','body','request_id'] when set
+if (($_GET['mail_for'] ?? '') !== '') {
+    $mid  = (int)$_GET['mail_for'];
+    $mact = strtoupper($_GET['mail_action'] ?? 'NONE');
+    $ms   = $db->prepare("SELECT id, customer_name, practice_code, group_folder, agent_id FROM requests WHERE id = ?");
+    $ms->execute([$mid]);
+    $mr = $ms->fetch(PDO::FETCH_ASSOC);
+    if ($mr) {
+        $agentEmail = '';
+        if (!empty($mr['agent_id'])) {
+            $es = $db->prepare("SELECT email FROM users WHERE agent_id = ? AND email IS NOT NULL AND email <> '' ORDER BY id ASC LIMIT 1");
+            $es->execute([(int)$mr['agent_id']]);
+            $agentEmail = (string)($es->fetchColumn() ?: '');
+        }
+        $grpMain = '';
+        $folder  = trim($mr['practice_code'] ?? '');
+        if     ($mact === 'ADD')    { $grpMain = trim($mr['group_folder'] ?? ''); }
+        elseif ($mact === 'CREATE') { $folder  = trim($mr['group_folder'] ?? '') ?: $folder; }
+        $bookingEmail = bo_booking_email($folder, $agentEmail, $grpMain, trim($currentUser['full_name'] ?? ''));
+        $bookingEmail['request_id'] = $mid;
+    }
+}
+
 // ── Search ────────────────────────────────────────────────────────────────────
 // Folder-root filter: which Dropbox root the request's folder lives in
 // (matched literally against dropbox_url). 'All' removes the restriction.
@@ -704,7 +902,7 @@ if ($q !== '' && $isContracts) {
     // ── Bookings: search the requests table ────────────────────────────────────
     $like   = '%' . $q . '%';
     $sql    = "SELECT r.id, r.customer_name, r.practice_code, r.group_folder, r.status, r.payment_status,
-                      r.dropbox_url, a.name AS agent_name
+                      r.dropbox_url, r.pre_confirm_json, a.name AS agent_name
                FROM requests r LEFT JOIN agents a ON a.id = r.agent_id
                WHERE (r.customer_name LIKE ? OR r.practice_code LIKE ? OR r.group_folder LIKE ?)";
     $params = [$like, $like, $like];
@@ -837,6 +1035,12 @@ include 'includes/header.php';
         $canConfirm = !$isGrp && $pcode !== ''
                     && stripos($pcode, '_START') === false
                     && !in_array($r['status'] ?? '', ['Booked', 'Cancelled', 'Lost'], true);
+        // Rollback is offered for any Hub-confirmed booking (a stored snapshot). For a
+        // group-create the handler still guards it: it only proceeds when this is the
+        // group's sole member.
+        $preRb       = json_decode($r['pre_confirm_json'] ?? '', true);
+        $canRollback = is_array($preRb) && !empty($preRb['name'])
+                     && in_array(strtoupper($preRb['action'] ?? 'NONE'), ['NONE', 'ADD', 'CREATE'], true);
     ?>
       <?php $isCancelled = in_array($r['status'] ?? '', ['Cancelled', 'Lost'], true); ?>
       <tr<?= $isCancelled ? ' style="background:#fcf0f0"' : '' ?>>
@@ -864,6 +1068,9 @@ include 'includes/header.php';
               <?php endif; ?>
               <?php if ($canRegroup): ?>
               <a href="#" onclick="toggleEl('rg<?= (int)$r['id'] ?>');return false" title="Fix a wrong confirmation: move this booking between private and a group" style="font-size:.68rem;text-decoration:none;margin-left:8px">👥 Re-group…</a>
+              <?php endif; ?>
+              <?php if ($canRollback): ?>
+              <a href="#" onclick="toggleEl('rb<?= (int)$r['id'] ?>');return false" title="Undo the confirmation: move the folder back and restore the request" style="font-size:.68rem;text-decoration:none;margin-left:8px;color:#B26A00;font-weight:600">↩ Rollback…</a>
               <?php endif; ?>
             <?php endif; ?>
           </div>
@@ -903,6 +1110,22 @@ include 'includes/header.php';
             <div style="margin-top:4px;display:flex;gap:6px">
               <button type="submit" class="btn btn-red btn-sm">Rename</button>
               <button type="button" class="btn btn-outline btn-sm" onclick="toggleRename(<?= (int)$r['id'] ?>)">Cancel</button>
+            </div>
+          </form>
+          <?php endif; ?>
+
+          <?php if ($canRollback): ?>
+          <form method="POST" id="rb<?= (int)$r['id'] ?>" style="display:none;margin-top:6px;padding:8px;background:#fff7ec;border:1px solid #f0d9b5;border-radius:6px"
+                onsubmit="return confirm('Roll back this confirmation?\n\nThe Dropbox folder is moved back to its original location and the request is set back to un-booked.');">
+            <input type="hidden" name="action" value="rollback_confirm">
+            <input type="hidden" name="request_id" value="<?= (int)$r['id'] ?>">
+            <input type="hidden" name="q" value="<?= h($q) ?>">
+            <input type="hidden" name="root" value="<?= h($root) ?>">
+            <input type="hidden" name="show_all" value="<?= $showAll ? '1' : '' ?>">
+            <div style="font-size:.68rem;color:#B26A00;margin-bottom:6px">↩ Move the folder back to <span style="font-family:monospace"><?= h($preRb['path'] ?? '') ?></span> and restore the request to un-booked.</div>
+            <div style="display:flex;gap:6px">
+              <button type="submit" class="btn btn-red btn-sm">Roll back</button>
+              <button type="button" class="btn btn-outline btn-sm" onclick="toggleEl('rb<?= (int)$r['id'] ?>')">Cancel</button>
             </div>
           </form>
           <?php endif; ?>
@@ -1094,5 +1317,55 @@ function fallbackCopy(t, el) {
 }
 function flashCopied(el) { var o = el.textContent; el.textContent = '✓ Copied'; setTimeout(function(){ el.textContent = o; }, 1200); }
 </script>
+
+<?php if ($bookingEmail): ?>
+<!-- Post-confirmation booking email (ports the Java "Send Booking Email" dialog). -->
+<div id="mailOverlay" style="display:flex;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:200;align-items:center;justify-content:center">
+  <div style="background:#fff;border-radius:10px;max-width:720px;width:94%;max-height:92vh;overflow:auto;padding:20px;box-shadow:0 12px 40px rgba(0,0,0,.3)">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <div style="font-size:1.05rem;font-weight:700">✉ Send booking email</div>
+      <button type="button" class="btn btn-outline btn-sm" onclick="document.getElementById('mailOverlay').style.display='none'">✕</button>
+    </div>
+    <div id="mailStatus" style="display:none;margin-bottom:10px;border-radius:6px;padding:8px 12px;font-size:.82rem"></div>
+    <div class="form-group"><label for="mail_to">To</label>
+      <input type="text" id="mail_to" value="<?= h($bookingEmail['to']) ?>" style="width:100%"></div>
+    <div class="form-group"><label for="mail_cc">Cc</label>
+      <input type="text" id="mail_cc" value="<?= h($bookingEmail['cc']) ?>" style="width:100%"></div>
+    <div class="form-group"><label for="mail_subject">Subject</label>
+      <input type="text" id="mail_subject" value="<?= h($bookingEmail['subject']) ?>" style="width:100%"></div>
+    <div class="form-group"><label for="mail_body">Body</label>
+      <textarea id="mail_body" rows="14" style="width:100%;font-family:inherit;line-height:1.5"><?= h($bookingEmail['body']) ?></textarea></div>
+    <input type="hidden" id="mail_request_id" value="<?= (int)$bookingEmail['request_id'] ?>">
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px">
+      <button type="button" class="btn btn-outline" onclick="document.getElementById('mailOverlay').style.display='none'">Skip</button>
+      <button type="button" class="btn btn-red" id="mail_send_btn" onclick="sendBookingEmail()">Send email</button>
+    </div>
+  </div>
+</div>
+<script>
+function sendBookingEmail() {
+  var btn = document.getElementById('mail_send_btn');
+  var st  = document.getElementById('mailStatus');
+  var body = new URLSearchParams({
+    request_id: document.getElementById('mail_request_id').value,
+    to:      document.getElementById('mail_to').value,
+    cc:      document.getElementById('mail_cc').value,
+    subject: document.getElementById('mail_subject').value,
+    body:    document.getElementById('mail_body').value
+  });
+  btn.disabled = true; btn.textContent = 'Sending…';
+  fetch('ajax_booking_email.php', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body })
+    .then(function (r) { return r.json(); })
+    .then(function (j) {
+      if (j && j.success) {
+        st.textContent = '✔ Email sent.'; st.style.background = '#DCFCE7'; st.style.color = '#166534'; st.style.display = 'block';
+        setTimeout(function () { document.getElementById('mailOverlay').style.display = 'none'; }, 900);
+      } else { throw new Error((j && j.message) || 'Send failed.'); }
+    })
+    .catch(function (e) { st.textContent = '⚠ ' + e.message; st.style.background = '#FEE2E2'; st.style.color = '#991B1B'; st.style.display = 'block'; })
+    .finally(function () { btn.disabled = false; btn.textContent = 'Send email'; });
+}
+</script>
+<?php endif; ?>
 
 <?php include 'includes/footer.php'; ?>
