@@ -271,6 +271,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         exit;
     }
 
+    // ── Re-link free search: folders matching a typed term (manual picker) ──────
+    if ($action === 'relink_search') {
+        try {
+            $q = trim($_POST['q'] ?? '');
+            if ($q === '') { echo json_encode(['ok'=>true, 'candidates'=>[]]); exit; }
+            require_once 'dropbox_helper.php';
+            $token = dropbox_get_access_token();
+            echo json_encode(['ok'=>true, 'candidates'=>dropbox_search_folders($token, $q, '', 25)]);
+        } catch (Throwable $e) {
+            echo json_encode(['ok'=>false, 'msg'=>'Error: '.$e->getMessage()]);
+        }
+        exit;
+    }
+
     // ── Re-link set: link this booking to a chosen/pasted Dropbox path ──────────
     if ($action === 'relink_set') {
         try {
@@ -681,9 +695,15 @@ include 'includes/header.php';
         <a href="#" onclick="relinkPicker();return false" title="Choose the folder manually" style="margin-left:10px;font-size:.8rem;text-decoration:none">✎ Pick manually</a>
         <span id="relink-status" style="font-size:.78rem;color:var(--grey-mid);margin-left:6px"></span>
         <div id="relink-picker" style="display:none;margin-top:8px;padding:10px;background:#f6f6f4;border-radius:6px;max-width:720px">
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+            <input type="text" id="relink-search" placeholder="Search Dropbox folders (customer, GRP code, part of the name…)" spellcheck="false"
+                   onkeydown="if(event.key==='Enter'){relinkSearch();return false;}"
+                   style="flex:1;min-width:260px;font-size:.78rem;padding:6px 8px;border:1.5px solid var(--grey-lt);border-radius:5px">
+            <button type="button" class="btn btn-outline btn-sm" onclick="relinkSearch()">Search</button>
+          </div>
           <div id="relink-cands" style="font-size:.78rem"></div>
           <div style="margin-top:8px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-            <input type="text" id="relink-path" placeholder="/001_Safari/00_2026/…  (paste a Dropbox path)" spellcheck="false"
+            <input type="text" id="relink-path" placeholder="…or paste a Dropbox path  (/001_Safari/00_2026/…)" spellcheck="false"
                    style="flex:1;min-width:280px;font-family:monospace;font-size:.75rem;padding:6px 8px;border:1.5px solid var(--grey-lt);border-radius:5px">
             <button type="button" class="btn btn-red btn-sm" onclick="relinkSet(document.getElementById('relink-path').value)">Set link</button>
           </div>
@@ -704,20 +724,37 @@ include 'includes/header.php';
       }).catch(e => { st.textContent = 'Error: ' + e; });
     }
 
+    function relinkRender(cands, emptyMsg) {
+      var list = document.getElementById('relink-cands');
+      if (!cands || !cands.length) { list.innerHTML = '<span style="color:var(--grey-mid)">' + emptyMsg + '</span>'; return; }
+      list.innerHTML = '<div style="margin-bottom:4px;color:var(--grey-mid)">Pick a folder:</div>' +
+        cands.map(function(c){
+          var p = c.path.replace(/'/g, "\\'").replace(/</g,'&lt;');
+          return '<div style="margin:2px 0"><a href="#" onclick="relinkSet(\'' + p + '\');return false" style="font-family:monospace;text-decoration:none">📁 ' + c.path.replace(/</g,'&lt;') + '</a></div>';
+        }).join('');
+    }
+
     function relinkPicker() {
       var box = document.getElementById('relink-picker');
-      var list = document.getElementById('relink-cands');
+      document.getElementById('relink-cands').innerHTML = 'Searching for candidate folders…';
       box.style.display = 'block';
-      list.innerHTML = 'Searching for candidate folders…';
       var fd = new FormData(); fd.append('action','relink_candidates'); fd.append('request_id', RVID);
       relinkPost(fd).then(d => {
+        if (!d.ok) { document.getElementById('relink-cands').textContent = d.msg || 'Search failed.'; return; }
+        relinkRender(d.candidates, 'No auto candidates — use the search box above or paste the path below.');
+      }).catch(e => { document.getElementById('relink-cands').textContent = 'Error: ' + e; });
+    }
+
+    function relinkSearch() {
+      var q = document.getElementById('relink-search').value.trim();
+      var list = document.getElementById('relink-cands');
+      document.getElementById('relink-picker').style.display = 'block';
+      if (!q) { list.innerHTML = '<span style="color:var(--grey-mid)">Type something to search.</span>'; return; }
+      list.innerHTML = 'Searching “' + q.replace(/</g,'&lt;') + '”…';
+      var fd = new FormData(); fd.append('action','relink_search'); fd.append('q', q);
+      relinkPost(fd).then(d => {
         if (!d.ok) { list.textContent = d.msg || 'Search failed.'; return; }
-        if (!d.candidates || !d.candidates.length) { list.innerHTML = '<span style="color:var(--grey-mid)">No candidates found — paste the path manually below.</span>'; return; }
-        list.innerHTML = '<div style="margin-bottom:4px;color:var(--grey-mid)">Pick the correct folder:</div>' +
-          d.candidates.map(function(c){
-            var p = c.path.replace(/'/g, "\\'").replace(/</g,'&lt;');
-            return '<div style="margin:2px 0"><a href="#" onclick="relinkSet(\'' + p + '\');return false" style="font-family:monospace;text-decoration:none">📁 ' + c.path.replace(/</g,'&lt;') + '</a></div>';
-          }).join('');
+        relinkRender(d.candidates, 'No folders match “' + q.replace(/</g,'&lt;') + '”.');
       }).catch(e => { list.textContent = 'Error: ' + e; });
     }
 
