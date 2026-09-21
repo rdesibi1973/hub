@@ -900,11 +900,15 @@ if ($q !== '' && $isContracts) {
     }
 } elseif ($q !== '') {
     // ── Bookings: search the requests table ────────────────────────────────────
-    $like   = '%' . $q . '%';
+    // '*' acts as a wildcard (like the old Java search): escape the real LIKE
+    // metacharacters in the input, then turn '*' into '%'.
+    $esc    = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $q);
+    $esc    = str_replace('*', '%', $esc);
+    $like   = '%' . $esc . '%';
     $sql    = "SELECT r.id, r.customer_name, r.practice_code, r.group_folder, r.status, r.payment_status,
                       r.dropbox_url, r.pre_confirm_json, a.name AS agent_name
                FROM requests r LEFT JOIN agents a ON a.id = r.agent_id
-               WHERE (r.customer_name LIKE ? OR r.practice_code LIKE ? OR r.group_folder LIKE ?)";
+               WHERE (r.customer_name LIKE ? ESCAPE '\\' OR r.practice_code LIKE ? ESCAPE '\\' OR r.group_folder LIKE ? ESCAPE '\\')";
     $params = [$like, $like, $like];
     if (!$showAll) {
         $sql .= " AND r.status NOT IN ('Cancelled','Lost')";
