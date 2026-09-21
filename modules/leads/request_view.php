@@ -215,13 +215,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
             require_once 'dropbox_helper.php';
             $token = dropbox_get_access_token();
-            $path  = dropbox_find_folder($token, $name);   // searches the whole Dropbox by name
-            if (!$path) {
-                echo json_encode(['ok'=>false,'msg'=>'Folder "'.$name.'" not found in Dropbox (renamed or deleted?).']); exit;
+            $res   = dropbox_relink_find($token, $name);   // tolerant of status-suffix drift
+            if ($res['result'] === 'exact' || $res['result'] === 'stem') {
+                $newUrl = 'https://www.dropbox.com/home/' . implode('/', array_map('rawurlencode', explode('/', ltrim($res['path'], '/'))));
+                $db->prepare("UPDATE requests SET dropbox_url=? WHERE id=?")->execute([$newUrl, $req_id]);
+                echo json_encode(['ok'=>true, 'path'=>$res['path']]); exit;
             }
-            $newUrl = 'https://www.dropbox.com/home/' . implode('/', array_map('rawurlencode', explode('/', ltrim($path, '/'))));
-            $db->prepare("UPDATE requests SET dropbox_url=? WHERE id=?")->execute([$newUrl, $req_id]);
-            echo json_encode(['ok'=>true, 'path'=>$path]);
+            if ($res['result'] === 'ambiguous') {
+                $paths = array_map(fn($c) => $c['path'], $res['candidates']);
+                echo json_encode(['ok'=>false,'msg'=>'Multiple folders match "'.$name.'": '.implode(' | ', $paths).'. Tidy them in Dropbox, then retry.']); exit;
+            }
+            echo json_encode(['ok'=>false,'msg'=>'Folder "'.$name.'" not found in Dropbox (renamed or deleted?).']); exit;
         } catch (Throwable $e) {
             echo json_encode(['ok'=>false,'msg'=>'Error: '.$e->getMessage()]);
         }

@@ -62,7 +62,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'scan'
         require_once 'dropbox_helper.php';
         $token = dropbox_get_access_token();
 
-        $okCount = 0; $noFolder = 0; $relinked = []; $missing = [];
+        $okCount = 0; $noFolder = 0; $relinked = []; $missing = []; $ambiguous = [];
         foreach ($batch as $r) {
             $name = trim($r['practice_code'] ?? '');
             $path = rlf_path($r);
@@ -71,12 +71,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'scan'
             // Already correct? cheap check first.
             if ($path !== '' && dropbox_path_exists($token, $path)) { $okCount++; continue; }
 
-            // Moved or missing → locate by name.
-            $found = $name !== '' ? dropbox_find_folder($token, $name) : null;
-            if ($found) {
-                $newUrl = 'https://www.dropbox.com/home/' . implode('/', array_map('rawurlencode', explode('/', ltrim($found, '/'))));
+            // Moved or missing → locate by name (tolerant of status-suffix drift).
+            $res = dropbox_relink_find($token, $name);
+            if ($res['result'] === 'exact' || $res['result'] === 'stem') {
+                $newUrl = 'https://www.dropbox.com/home/' . implode('/', array_map('rawurlencode', explode('/', ltrim($res['path'], '/'))));
                 $db->prepare("UPDATE requests SET dropbox_url=? WHERE id=?")->execute([$newUrl, (int)$r['id']]);
-                $relinked[] = ['name' => $name, 'path' => $found];
+                $relinked[] = ['name' => $name, 'path' => $res['path']];
+            } elseif ($res['result'] === 'ambiguous') {
+                $ambiguous[] = ['name' => $name, 'customer' => $r['customer_name'] ?? '',
+                                'candidates' => array_map(fn($c) => $c['path'], $res['candidates'])];
             } else {
                 $missing[] = ['name' => $name, 'customer' => $r['customer_name'] ?? '', 'status' => $r['status'] ?? ''];
             }
@@ -93,6 +96,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'scan'
             'no_folder'  => $noFolder,
             'relinked'   => $relinked,
             'missing'    => $missing,
+            'ambiguous'  => $ambiguous,
         ]);
     } catch (Throwable $e) {
         echo json_encode(['ok' => false, 'msg' => $e->getMessage()]);
@@ -134,11 +138,13 @@ include 'includes/header.php';
 </div>
 
 <script>
-var rlfRun = false, rlfTotals = { ok:0, relinked:0, missing:0, no_folder:0 }, rlfRelinked = [], rlfMissing = [];
+var rlfRun = false, rlfTotals = { ok:0, relinked:0, missing:0, ambiguous:0, no_folder:0 };
+var rlfRelinked = [], rlfMissing = [], rlfAmbiguous = [];
 
 function rlfStart() {
   rlfRun = true;
-  rlfTotals = { ok:0, relinked:0, missing:0, no_folder:0 }; rlfRelinked = []; rlfMissing = [];
+  rlfTotals = { ok:0, relinked:0, missing:0, ambiguous:0, no_folder:0 };
+  rlfRelinked = []; rlfMissing = []; rlfAmbiguous = [];
   document.getElementById('rlf-start').disabled = true;
   document.getElementById('rlf-scope').disabled = true;
   document.getElementById('rlf-stop').style.display = '';
@@ -160,14 +166,16 @@ function rlfScan(offset) {
       if (!d.ok) { rlfFinish('Error: ' + (d.msg || 'failed')); return; }
       rlfTotals.ok += d.ok_count; rlfTotals.no_folder += d.no_folder;
       rlfTotals.relinked += d.relinked.length; rlfTotals.missing += d.missing.length;
+      rlfTotals.ambiguous += (d.ambiguous || []).length;
       d.relinked.forEach(x => rlfRelinked.push(x));
       d.missing.forEach(x => rlfMissing.push(x));
+      (d.ambiguous || []).forEach(x => rlfAmbiguous.push(x));
 
       var pct = d.total ? Math.round(d.next / d.total * 100) : 100;
       document.getElementById('rlf-bar-fill').style.width = pct + '%';
       document.getElementById('rlf-progress').textContent =
         d.next + ' / ' + d.total + '  —  re-linked ' + rlfTotals.relinked +
-        ', unchanged ' + rlfTotals.ok + ', missing ' + rlfTotals.missing;
+        ', unchanged ' + rlfTotals.ok + ', ambiguous ' + rlfTotals.ambiguous + ', missing ' + rlfTotals.missing;
       rlfRenderLog();
 
       if (d.done || !rlfRun) { rlfFinish('Done.'); }
@@ -184,6 +192,11 @@ function rlfRenderLog() {
           + '<ul style="margin:4px 0 0 18px">' + rlfRelinked.slice(-200).map(x =>
               '<li style="font-family:monospace">' + esc(x.name) + ' → ' + esc(x.path) + '</li>').join('') + '</ul></div>';
   }
+  if (rlfAmbiguous.length) {
+    html += '<div style="margin-top:8px"><strong style="color:#92400e">Ambiguous — review manually (' + rlfAmbiguous.length + ')</strong>'
+          + '<ul style="margin:4px 0 0 18px">' + rlfAmbiguous.slice(-200).map(x =>
+              '<li style="font-family:monospace">' + esc(x.name) + ' <span style="color:#888">→ ' + (x.candidates||[]).map(esc).join(' | ') + '</span></li>').join('') + '</ul></div>';
+  }
   if (rlfMissing.length) {
     html += '<div style="margin-top:8px"><strong style="color:#C0211B">Not found in Dropbox (' + rlfMissing.length + ')</strong>'
           + '<ul style="margin:4px 0 0 18px">' + rlfMissing.slice(-200).map(x =>
@@ -199,7 +212,7 @@ function rlfFinish(msg) {
   document.getElementById('rlf-stop').style.display = 'none';
   document.getElementById('rlf-summary').innerHTML =
     '<strong>' + msg + '</strong> Re-linked ' + rlfTotals.relinked + ', unchanged ' + rlfTotals.ok +
-    ', missing ' + rlfTotals.missing + ', no folder ' + rlfTotals.no_folder + '.';
+    ', ambiguous ' + rlfTotals.ambiguous + ', missing ' + rlfTotals.missing + ', no folder ' + rlfTotals.no_folder + '.';
   rlfRenderLog();
 }
 </script>

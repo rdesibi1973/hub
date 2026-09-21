@@ -459,3 +459,50 @@ function dropbox_find_folder(string $token, string $folderName): ?string {
     return null;
 }
 
+/**
+ * Folder "stem": the name with trailing status / _CK tags removed and lowercased,
+ * so DB practice_code and the real Dropbox folder match even when the status
+ * suffix drifted (e.g. '..._PROGRESS' vs '..._cancelled', or '..._PAID_CK').
+ * Strips repeated trailing tags in any order (e.g. '..._CANCELLED_CK_CANCELLED').
+ */
+function dropbox_folder_stem(string $name): string {
+    $s = trim($name);
+    $tags = 'CK|PROGRESS|PROVISIONAL|CONFIRMED|DEPOSIT|BALANCE-CASH|BALANCE_CASH|BALANCE|PAID|CANCELLED|CANCELED|LOST';
+    do {
+        $prev = $s;
+        $s = preg_replace('/[_-](?:' . $tags . ')$/i', '', $s);
+    } while ($s !== $prev && $s !== '');
+    return strtolower($s);
+}
+
+/**
+ * Locate a request's current folder for re-linking, tolerant of status-suffix drift.
+ * Returns ['result' => 'exact'|'stem'|'ambiguous'|'none', 'path' => ?string,
+ *          'candidates' => [['name'=>…,'path'=>…], …]].
+ *  - exact/stem : a confident single match (path set) — safe to re-link.
+ *  - ambiguous  : several folders share the same stem — do NOT auto-link, review.
+ *  - none       : the folder was not found (renamed beyond recognition / deleted).
+ */
+function dropbox_relink_find(string $token, string $name): array {
+    $name = trim($name);
+    if ($name === '') return ['result' => 'none', 'path' => null, 'candidates' => []];
+
+    // Fast path: exact (case-insensitive) name still exists somewhere.
+    $exact = dropbox_find_folder($token, $name);
+    if ($exact) return ['result' => 'exact', 'path' => $exact, 'candidates' => []];
+
+    // Fuzzy: match on the stem (status suffix stripped).
+    $stem  = dropbox_folder_stem($name);
+    $query = preg_replace('/_START.*$/i', '', $name);   // distinctive, suffix-free query
+    if ($query === '') $query = $name;
+
+    $hits    = dropbox_search_folders($token, $query, '', 25);
+    $matches = [];
+    foreach ($hits as $h) {
+        if (dropbox_folder_stem($h['name']) === $stem) $matches[] = $h;
+    }
+    if (count($matches) === 1) return ['result' => 'stem',      'path' => $matches[0]['path'], 'candidates' => $matches];
+    if (count($matches) > 1)   return ['result' => 'ambiguous', 'path' => null,               'candidates' => $matches];
+    return ['result' => 'none', 'path' => null, 'candidates' => []];
+}
+
