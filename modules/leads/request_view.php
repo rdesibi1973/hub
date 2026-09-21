@@ -115,21 +115,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             }
             if (!$programs) { echo json_encode(['ok'=>false,'msg'=>'Select at least one program.']); exit; }
 
-            $rq = $db->prepare("SELECT id, practice_code, group_folder, dropbox_url FROM requests WHERE id=?");
+            $rq = $db->prepare("SELECT id, practice_code, group_folder, dropbox_url, start_date FROM requests WHERE id=?");
             $rq->execute([$req_id]);
             $rr = $rq->fetch(PDO::FETCH_ASSOC);
             if (!$rr) { echo json_encode(['ok'=>false,'msg'=>'Request not found.']); exit; }
 
-            // Destination folder = the request's Dropbox folder (same logic as the view).
+            // Destination = the request's real Dropbox folder — works whether the booking
+            // is still pre-confirmation (/YYYY/…) or already confirmed (/001_Safari/…).
             $destDir = req_folder_path($rr);
             $folderName = trim($rr['practice_code'] ?? '');
             if ($destDir === '' || $folderName === '') {
                 echo json_encode(['ok'=>false,'msg'=>'This request has no Dropbox folder yet — cannot copy programs.']); exit;
             }
 
-            // Resolve {YEAR} in template sources from the request folder's first path segment.
-            $seg  = explode('/', ltrim($destDir, '/'));
-            $year = (isset($seg[0]) && preg_match('/^\d{4}$/', $seg[0])) ? $seg[0] : date('Y');
+            // {YEAR} for the group-template sources (Duma-GRP / Simba-GRP live under /YYYY/GRUPPI-…):
+            // folder year if pre-confirmation, else the booking's start year, else current year.
+            $seg = explode('/', ltrim($destDir, '/'));
+            if (isset($seg[0]) && preg_match('/^\d{4}$/', $seg[0]))          $year = $seg[0];
+            elseif (!empty($rr['start_date']) && preg_match('/^(\d{4})/', $rr['start_date'], $ym)) $year = $ym[1];
+            else                                                             $year = date('Y');
 
             // Flatten the grouped program map by label.
             $groups = require 'includes/std_programs.php';
