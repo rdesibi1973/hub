@@ -476,12 +476,25 @@ function dropbox_folder_stem(string $name): string {
 }
 
 /**
- * Locate a request's current folder for re-linking, tolerant of status-suffix drift.
- * Returns ['result' => 'exact'|'stem'|'ambiguous'|'none', 'path' => ?string,
+ * Folder "core": the customer(agent) part only — drops the leading progressive+date
+ * ("08_31AUG_"), an inserted group code ("GRP1906_", "MAPO1908_"), everything from
+ * "_START" onward (dates + status), and punctuation/case. Lets a request match its
+ * folder even when a group code was added or the end date / status changed on disk.
+ */
+function dropbox_folder_core(string $name): string {
+    $s = preg_replace('/_START.*$/i', '', trim($name));       // drop dates + status tail
+    $s = preg_replace('/^\d{1,2}_\d{1,2}[A-Za-z]{3,5}_/', '', $s); // drop "08_31AUG_"
+    $s = preg_replace('/^[A-Za-z]{2,6}\d{2,6}_/', '', $s);    // drop inserted "GRP1906_" / "MAPO1908_"
+    return strtolower(preg_replace('/[\s\'\-_.]+/', '', (string)$s));
+}
+
+/**
+ * Locate a request's current folder for re-linking, tolerant of name drift.
+ * Returns ['result' => 'exact'|'stem'|'core'|'ambiguous'|'none', 'path' => ?string,
  *          'candidates' => [['name'=>…,'path'=>…], …]].
- *  - exact/stem : a confident single match (path set) — safe to re-link.
- *  - ambiguous  : several folders share the same stem — do NOT auto-link, review.
- *  - none       : the folder was not found (renamed beyond recognition / deleted).
+ *  - exact/stem/core : a confident single match (path set) — safe to re-link.
+ *  - ambiguous       : several folders match — do NOT auto-link, review.
+ *  - none            : not found (renamed beyond recognition / deleted / typo).
  */
 function dropbox_relink_find(string $token, string $name): array {
     $name = trim($name);
@@ -491,18 +504,22 @@ function dropbox_relink_find(string $token, string $name): array {
     $exact = dropbox_find_folder($token, $name);
     if ($exact) return ['result' => 'exact', 'path' => $exact, 'candidates' => []];
 
-    // Fuzzy: match on the stem (status suffix stripped).
     $stem  = dropbox_folder_stem($name);
+    $core  = dropbox_folder_core($name);
     $query = preg_replace('/_START.*$/i', '', $name);   // distinctive, suffix-free query
     if ($query === '') $query = $name;
 
-    $hits    = dropbox_search_folders($token, $query, '', 25);
-    $matches = [];
+    $hits  = dropbox_search_folders($token, $query, '', 25);
+    $stemM = []; $coreM = [];
     foreach ($hits as $h) {
-        if (dropbox_folder_stem($h['name']) === $stem) $matches[] = $h;
+        if (dropbox_folder_stem($h['name']) === $stem) $stemM[] = $h;
+        if ($core !== '' && dropbox_folder_core($h['name']) === $core) $coreM[] = $h;
     }
-    if (count($matches) === 1) return ['result' => 'stem',      'path' => $matches[0]['path'], 'candidates' => $matches];
-    if (count($matches) > 1)   return ['result' => 'ambiguous', 'path' => null,               'candidates' => $matches];
+    // Prefer the tighter stem match, then fall back to the looser customer core.
+    if (count($stemM) === 1) return ['result' => 'stem',      'path' => $stemM[0]['path'], 'candidates' => $stemM];
+    if (count($stemM) > 1)   return ['result' => 'ambiguous', 'path' => null,             'candidates' => $stemM];
+    if (count($coreM) === 1) return ['result' => 'core',      'path' => $coreM[0]['path'], 'candidates' => $coreM];
+    if (count($coreM) > 1)   return ['result' => 'ambiguous', 'path' => null,             'candidates' => $coreM];
     return ['result' => 'none', 'path' => null, 'candidates' => []];
 }
 

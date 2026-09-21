@@ -73,7 +73,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'scan'
 
             // Moved or missing → locate by name (tolerant of status-suffix drift).
             $res = dropbox_relink_find($token, $name);
-            if ($res['result'] === 'exact' || $res['result'] === 'stem') {
+            if (in_array($res['result'], ['exact','stem','core'], true)) {
                 $newUrl = 'https://www.dropbox.com/home/' . implode('/', array_map('rawurlencode', explode('/', ltrim($res['path'], '/'))));
                 $db->prepare("UPDATE requests SET dropbox_url=? WHERE id=?")->execute([$newUrl, (int)$r['id']]);
                 $relinked[] = ['name' => $name, 'path' => $res['path']];

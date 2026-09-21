@@ -219,8 +219,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
             require_once 'dropbox_helper.php';
             $token = dropbox_get_access_token();
-            $res   = dropbox_relink_find($token, $name);   // tolerant of status-suffix drift
-            if ($res['result'] === 'exact' || $res['result'] === 'stem') {
+            $res   = dropbox_relink_find($token, $name);   // tolerant of name drift
+            if (in_array($res['result'], ['exact','stem','core'], true)) {
                 $newUrl = 'https://www.dropbox.com/home/' . implode('/', array_map('rawurlencode', explode('/', ltrim($res['path'], '/'))));
                 $db->prepare("UPDATE requests SET dropbox_url=? WHERE id=?")->execute([$newUrl, $req_id]);
                 echo json_encode(['ok'=>true, 'path'=>$res['path']]); exit;
