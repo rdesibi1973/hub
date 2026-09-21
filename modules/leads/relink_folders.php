@@ -78,10 +78,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'scan'
                 $db->prepare("UPDATE requests SET dropbox_url=? WHERE id=?")->execute([$newUrl, (int)$r['id']]);
                 $relinked[] = ['name' => $name, 'path' => $res['path']];
             } elseif ($res['result'] === 'ambiguous') {
-                $ambiguous[] = ['name' => $name, 'customer' => $r['customer_name'] ?? '',
+                $ambiguous[] = ['id' => (int)$r['id'], 'name' => $name, 'customer' => $r['customer_name'] ?? '',
                                 'candidates' => array_map(fn($c) => $c['path'], $res['candidates'])];
             } else {
-                $missing[] = ['name' => $name, 'customer' => $r['customer_name'] ?? '', 'status' => $r['status'] ?? ''];
+                $missing[] = ['id' => (int)$r['id'], 'name' => $name, 'customer' => $r['customer_name'] ?? '', 'status' => $r['status'] ?? ''];
             }
         }
 
@@ -192,15 +192,17 @@ function rlfRenderLog() {
           + '<ul style="margin:4px 0 0 18px">' + rlfRelinked.slice(-200).map(x =>
               '<li style="font-family:monospace">' + esc(x.name) + ' → ' + esc(x.path) + '</li>').join('') + '</ul></div>';
   }
+  function reqLink(x){ return '<a href="request_view.php?id=' + x.id + '" target="_blank" title="Open the request — use ' + "✎ Pick manually" + ' there" style="text-decoration:none">' + esc(x.name) + '</a>'; }
   if (rlfAmbiguous.length) {
-    html += '<div style="margin-top:8px"><strong style="color:#92400e">Ambiguous — review manually (' + rlfAmbiguous.length + ')</strong>'
+    html += '<div style="margin-top:8px"><strong style="color:#92400e">Ambiguous — click to fix manually (' + rlfAmbiguous.length + ')</strong>'
           + '<ul style="margin:4px 0 0 18px">' + rlfAmbiguous.slice(-200).map(x =>
-              '<li style="font-family:monospace">' + esc(x.name) + ' <span style="color:#888">→ ' + (x.candidates||[]).map(esc).join(' | ') + '</span></li>').join('') + '</ul></div>';
+              '<li style="font-family:monospace">' + reqLink(x) + ' <span style="color:#888">→ ' + (x.candidates||[]).map(esc).join(' | ') + '</span></li>').join('') + '</ul></div>';
   }
   if (rlfMissing.length) {
-    html += '<div style="margin-top:8px"><strong style="color:#C0211B">Not found in Dropbox (' + rlfMissing.length + ')</strong>'
+    html += '<div style="margin-top:8px"><strong style="color:#C0211B">Not found — click to fix manually (' + rlfMissing.length + ')</strong>'
+          + '<div style="color:#888;margin:2px 0 0 18px;font-family:inherit">Click a name to open the request, then use ✎ Pick manually.</div>'
           + '<ul style="margin:4px 0 0 18px">' + rlfMissing.slice(-200).map(x =>
-              '<li style="font-family:monospace">' + esc(x.name) + ' <span style="color:#888">(' + esc(x.customer) + ', ' + esc(x.status) + ')</span></li>').join('') + '</ul></div>';
+              '<li style="font-family:monospace">' + reqLink(x) + ' <span style="color:#888">(' + esc(x.customer) + ', ' + esc(x.status) + ')</span></li>').join('') + '</ul></div>';
   }
   document.getElementById('rlf-log').innerHTML = html;
 }
