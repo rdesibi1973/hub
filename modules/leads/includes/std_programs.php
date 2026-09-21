@@ -8,17 +8,18 @@
  *   {ProgNumber}_{FolderName}_{dst}
  *
  * Structure: group label => [ program label => [ ['src'=>…, 'dst'=>…], … ] ].
- *   src : full Dropbox path of the template file. A src beginning with '{YEAR}/'
- *         is resolved against the request's own year folder at copy time.
+ *   src : full Dropbox path of the template file (group templates live in a stable
+ *         season folder under Agenzia/2026-27/Gruppi, so they don't depend on a year).
  *   dst : destination filename suffix (what follows {ProgNumber}_{FolderName}_).
  *
  * Program labels are unique across all groups (the copy handler flattens by label).
  * Keep this file in sync with the cp*.bat scripts if the templates change.
  */
 
-$IT = '/itineraries/SafariClassic/it/';
-$BE = '/itineraries/Beach/';
-$KI = '/itineraries/Kili/it/Trekking/';
+$IT  = '/itineraries/SafariClassic/it/';
+$BE  = '/itineraries/Beach/';
+$KI  = '/itineraries/Kili/it/Trekking/';
+$GRP = '/itineraries/SafariClassic/it/Agenzia/2026-27/Gruppi/'; // group templates (year-independent)
 
 return [
     'Safari' => [
@@ -38,8 +39,8 @@ return [
         'MigrationSummer'   => [['src'=>$IT.'SavannahExplorers_SafariGrandeMigrazioneEstate.docx','dst'=>'SafariGrandeMigrazioneEstate.docx'], ['src'=>$IT.'MigrazioneEstate_Calc.xlsx','dst'=>'MigrazioneEstate_Calc.xlsx']],
         'Ndege'             => [['src'=>$IT.'SavannahExplorers_NdegeSafari.docx','dst'=>'NdegeSafari.docx'], ['src'=>$IT.'Ndege_Calc.xlsx','dst'=>'Ndege_Calc.xlsx']],
         'Baobab'            => [['src'=>$IT.'Baobab.docx','dst'=>'Baobab.docx'], ['src'=>$IT.'BaobabDeluxe2025_Calc.xlsx','dst'=>'BaobabDeluxe2025_Calc.xlsx']],
-        'Duma-GRP'          => [['src'=>'{YEAR}/GRUPPI-Giovedi(Roberto)/DumaGruppoGiovedi.docx','dst'=>'GRUPPI-GIOVE.docx'], ['src'=>'{YEAR}/GRUPPI-Giovedi(Roberto)/01_GRUPPI-Giove_(Roberto)_Duma_Calc.xlsx','dst'=>'GRUPPI-Giove(Roberto)_Calc.xlsx']],
-        'Simba-GRP'         => [['src'=>'{YEAR}/GRUPPI-Domenica(Roberto)/SimbaSafariOgniDomenica.docx','dst'=>'SimbaSafariGruppo.docx'], ['src'=>'{YEAR}/GRUPPI-Domenica(Roberto)/SimbaGRP_Calc.xlsx','dst'=>'SimbaGRP_Calc.xlsx']],
+        'Duma-GRP'          => [['src'=>$GRP.'DumaGruppoGiovedi.docx','dst'=>'GRUPPI-GIOVE.docx'], ['src'=>$GRP.'01_GRUPPI-Giove_(Roberto)_Duma_Calc.xlsx','dst'=>'GRUPPI-Giove(Roberto)_Calc.xlsx']],
+        'Simba-GRP'         => [['src'=>$GRP.'SimbaSafariOgniDomenica.docx','dst'=>'SimbaSafariGruppo.docx'], ['src'=>$GRP.'SimbaGRP_Calc.xlsx','dst'=>'SimbaGRP_Calc.xlsx']],
         'PumbaFlyOutZNZ'    => [['src'=>$IT.'SavannahExplorers_PumbaFlyOutZNZSafari.docx','dst'=>'PumbaFlyOutZNZSafari.docx'], ['src'=>$IT.'PumbaFlyOutZNZ_Calc.xlsx','dst'=>'PumbaFlyOutZNZ_Calc.xlsx']],
         'LUXPumbaFlyOutZNZ' => [['src'=>$IT.'SavannahExplorers_LUXPumbaFlyOutZNZSafari.docx','dst'=>'LUXPumbaFlyOutZNZSafari.docx'], ['src'=>$IT.'LUX_PumbaFlyOutZNZ_Calc.xlsx','dst'=>'LUX_PumbaFlyOutZNZ_Calc.xlsx']],
         'LUXSimbaFlyOutZNZ' => [['src'=>$IT.'SavannahExplorers_LUXSimbaFlyOutZNZSafari.docx','dst'=>'LUXSimbaFlyOutZNZSafari.docx'], ['src'=>$IT.'LUX_SimbaFlyOutZNZ_Calc.xlsx','dst'=>'LUX_SimbaFlyOutZNZ_Calc.xlsx']],
