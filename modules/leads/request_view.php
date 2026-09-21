@@ -236,6 +236,62 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         exit;
     }
 
+    // ── Re-link candidates: folders in Dropbox that might be this booking ───────
+    if ($action === 'relink_candidates') {
+        try {
+            $req_id = (int)($_POST['request_id'] ?? 0);
+            $rq = $db->prepare("SELECT practice_code, customer_name FROM requests WHERE id=?");
+            $rq->execute([$req_id]);
+            $rr = $rq->fetch(PDO::FETCH_ASSOC);
+            if (!$rr) { echo json_encode(['ok'=>false,'msg'=>'Request not found.']); exit; }
+
+            $name  = trim($rr['practice_code'] ?? '');
+            $custQ = preg_replace('/_START.*$/i', '', $name);              // drop dates/status tail
+            $custQ = preg_replace('/^\d{1,2}_\d{1,2}[A-Za-z]{3,5}_/', '', $custQ); // drop "08_31AUG_"
+            $custQ = preg_replace('/^[A-Za-z]{2,6}\d{2,6}_/', '', $custQ); // drop inserted "GRP1906_"
+            $queries = array_values(array_unique(array_filter([
+                preg_replace('/_START.*$/i', '', $name),
+                $custQ,
+                trim($rr['customer_name'] ?? ''),
+            ], fn($x) => trim((string)$x) !== '')));
+
+            require_once 'dropbox_helper.php';
+            $token = dropbox_get_access_token();
+            $seen = []; $out = [];
+            foreach ($queries as $q) {
+                foreach (dropbox_search_folders($token, $q, '', 15) as $h) {
+                    if (!isset($seen[$h['path']])) { $seen[$h['path']] = 1; $out[] = $h; }
+                    if (count($out) >= 20) break 2;
+                }
+            }
+            echo json_encode(['ok'=>true, 'candidates'=>$out]);
+        } catch (Throwable $e) {
+            echo json_encode(['ok'=>false,'msg'=>'Error: '.$e->getMessage()]);
+        }
+        exit;
+    }
+
+    // ── Re-link set: link this booking to a chosen/pasted Dropbox path ──────────
+    if ($action === 'relink_set') {
+        try {
+            $req_id = (int)($_POST['request_id'] ?? 0);
+            $path   = trim($_POST['path'] ?? '');
+            if ($path === '' || $path[0] !== '/') { echo json_encode(['ok'=>false,'msg'=>'Enter a Dropbox path starting with /.']); exit; }
+            $chk = $db->prepare("SELECT id FROM requests WHERE id=?"); $chk->execute([$req_id]);
+            if (!$chk->fetch()) { echo json_encode(['ok'=>false,'msg'=>'Request not found.']); exit; }
+
+            require_once 'dropbox_helper.php';
+            $token = dropbox_get_access_token();
+            if (!dropbox_path_exists($token, $path)) { echo json_encode(['ok'=>false,'msg'=>'That path does not exist in Dropbox.']); exit; }
+            $newUrl = 'https://www.dropbox.com/home/' . implode('/', array_map('rawurlencode', explode('/', ltrim($path, '/'))));
+            $db->prepare("UPDATE requests SET dropbox_url=? WHERE id=?")->execute([$newUrl, $req_id]);
+            echo json_encode(['ok'=>true, 'path'=>$path]);
+        } catch (Throwable $e) {
+            echo json_encode(['ok'=>false,'msg'=>'Error: '.$e->getMessage()]);
+        }
+        exit;
+    }
+
     echo json_encode(['ok'=>false,'msg'=>'Unknown action']); exit;
 }
 
@@ -622,23 +678,58 @@ include 'includes/header.php';
       <?php endif; ?>
       <?php if (!empty($r['practice_code'])): ?>
         <a href="#" onclick="relinkFolder();return false" title="Find the folder in Dropbox and refresh the link (after moving it to an archive)" style="margin-left:12px;font-size:.8rem;text-decoration:none">🔗 Re-link</a>
+        <a href="#" onclick="relinkPicker();return false" title="Choose the folder manually" style="margin-left:10px;font-size:.8rem;text-decoration:none">✎ Pick manually</a>
         <span id="relink-status" style="font-size:.78rem;color:var(--grey-mid);margin-left:6px"></span>
+        <div id="relink-picker" style="display:none;margin-top:8px;padding:10px;background:#f6f6f4;border-radius:6px;max-width:720px">
+          <div id="relink-cands" style="font-size:.78rem"></div>
+          <div style="margin-top:8px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+            <input type="text" id="relink-path" placeholder="/001_Safari/00_2026/…  (paste a Dropbox path)" spellcheck="false"
+                   style="flex:1;min-width:280px;font-family:monospace;font-size:.75rem;padding:6px 8px;border:1.5px solid var(--grey-lt);border-radius:5px">
+            <button type="button" class="btn btn-red btn-sm" onclick="relinkSet(document.getElementById('relink-path').value)">Set link</button>
+          </div>
+        </div>
       <?php endif; ?>
     </div>
     <script>
+    var RVID = '<?= (int)$r['id'] ?>';
+    function relinkPost(fd) { return fetch('request_view.php?id=' + RVID, { method:'POST', body:fd }).then(r => r.json()); }
+
     function relinkFolder() {
       var st = document.getElementById('relink-status');
       st.textContent = 'Searching Dropbox…';
-      var fd = new FormData();
-      fd.append('action', 'relink_folder');
-      fd.append('request_id', '<?= (int)$r['id'] ?>');
-      fetch('request_view.php?id=<?= (int)$r['id'] ?>', { method:'POST', body:fd })
-        .then(r => r.json())
-        .then(d => {
-          if (d.ok) { st.textContent = '✔ Re-linked — reloading…'; setTimeout(function(){ location.reload(); }, 700); }
-          else      { st.textContent = d.msg || 'Failed.'; }
-        })
-        .catch(e => { st.textContent = 'Error: ' + e; });
+      var fd = new FormData(); fd.append('action','relink_folder'); fd.append('request_id', RVID);
+      relinkPost(fd).then(d => {
+        if (d.ok) { st.textContent = '✔ Re-linked — reloading…'; setTimeout(function(){ location.reload(); }, 700); }
+        else      { st.textContent = (d.msg || 'Not found automatically') + ' — pick manually below.'; relinkPicker(); }
+      }).catch(e => { st.textContent = 'Error: ' + e; });
+    }
+
+    function relinkPicker() {
+      var box = document.getElementById('relink-picker');
+      var list = document.getElementById('relink-cands');
+      box.style.display = 'block';
+      list.innerHTML = 'Searching for candidate folders…';
+      var fd = new FormData(); fd.append('action','relink_candidates'); fd.append('request_id', RVID);
+      relinkPost(fd).then(d => {
+        if (!d.ok) { list.textContent = d.msg || 'Search failed.'; return; }
+        if (!d.candidates || !d.candidates.length) { list.innerHTML = '<span style="color:var(--grey-mid)">No candidates found — paste the path manually below.</span>'; return; }
+        list.innerHTML = '<div style="margin-bottom:4px;color:var(--grey-mid)">Pick the correct folder:</div>' +
+          d.candidates.map(function(c){
+            var p = c.path.replace(/'/g, "\\'").replace(/</g,'&lt;');
+            return '<div style="margin:2px 0"><a href="#" onclick="relinkSet(\'' + p + '\');return false" style="font-family:monospace;text-decoration:none">📁 ' + c.path.replace(/</g,'&lt;') + '</a></div>';
+          }).join('');
+      }).catch(e => { list.textContent = 'Error: ' + e; });
+    }
+
+    function relinkSet(path) {
+      var st = document.getElementById('relink-status');
+      if (!path || path.charAt(0) !== '/') { st.textContent = 'Enter a Dropbox path starting with /'; return; }
+      st.textContent = 'Linking…';
+      var fd = new FormData(); fd.append('action','relink_set'); fd.append('request_id', RVID); fd.append('path', path);
+      relinkPost(fd).then(d => {
+        if (d.ok) { st.textContent = '✔ Linked — reloading…'; setTimeout(function(){ location.reload(); }, 700); }
+        else      { st.textContent = d.msg || 'Failed.'; }
+      }).catch(e => { st.textContent = 'Error: ' + e; });
     }
     </script>
 
