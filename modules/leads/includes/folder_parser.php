@@ -269,19 +269,51 @@ function parse_import_folder(string $folder): array {
 }
 
 /**
+ * Does a single path segment look like an actual booking folder (a leaf), as
+ * opposed to a container/parent folder?
+ *
+ * Real booking folders always carry an agency block "(...)", a date range
+ * (_START…/_MIDT…/_END…), or a "NN_DDMON_" progressive+date prefix. Container
+ * folders (001_Safari, 00_2026, 2026, Contracts, 000_Contracts, 00_CANCELED …)
+ * have none of these.
+ */
+function folder_is_booking_leaf(string $seg): bool {
+    $seg = trim($seg);
+    if ($seg === '') return false;
+    if (strpos($seg, '(') !== false) return true;
+    if (preg_match('/_(?:START|END|MIDT?)\d/i', $seg)) return true;
+    if (preg_match('/^\d{1,2}_\d{1,2}[A-Za-z]{3,5}_/', $seg)) return true;
+    return false;
+}
+
+/**
  * Relative Dropbox path of a request under DROPBOX_HOME (forward-slashed),
  * e.g. "001_Safari/SmithJohn(BTG-Roberto)_..._BALANCE" or "2026/Foo".
  * Derived from dropbox_url (kept in sync); falls back to 001_Safari/<folder>.
+ *
+ * If dropbox_url points only to a parent container (e.g. ".../001_Safari/" or
+ * ".../001_Safari/00_2026") — a link that would open the wrong folder — the
+ * booking folder name (practice_code) is appended so Open / Copy-path resolve
+ * to the real folder. A link already ending in the booking folder is kept as-is,
+ * so archived folders under 00_YYYY still open correctly.
  */
 function folder_rel_path(array $r): string {
-    $url = trim($r['dropbox_url'] ?? '');
+    $leaf = trim($r['practice_code'] ?? '');
+    $url  = trim($r['dropbox_url'] ?? '');
     if ($url !== '') {
         $p = urldecode((string)parse_url($url, PHP_URL_PATH)); // /home/001_Safari/...
         $p = preg_replace('#^/?home/#i', '', ltrim($p, '/'));
         $p = trim((string)$p, '/');
-        if ($p !== '') return $p;
+        if ($p !== '') {
+            $segs = explode('/', $p);
+            $last = (string)end($segs);
+            if ($leaf !== '' && !folder_is_booking_leaf($last)) {
+                $p .= '/' . $leaf;
+            }
+            return $p;
+        }
     }
-    $folder = trim($r['group_folder'] ?? '') ?: trim($r['practice_code'] ?? '');
+    $folder = trim($r['group_folder'] ?? '') ?: $leaf;
     return $folder !== '' ? '001_Safari/' . $folder : '';
 }
 

@@ -12,12 +12,23 @@ requireLogin();
  * Falls back to the group/practice construction when no URL is stored.
  */
 function req_folder_path(array $r): string {
+    $leaf = trim($r['practice_code'] ?? '');
     if (!empty($r['dropbox_url']) && preg_match('#dropbox\.com/home(/.*)?$#i', $r['dropbox_url'], $m)) {
         $p = rtrim(urldecode($m[1] ?? ''), '/');
-        if ($p !== '') return $p;
+        if ($p !== '') {
+            // If the link points only to a parent container (…/001_Safari or
+            // …/001_Safari/00_2026), append the booking folder so it opens the
+            // real folder. A link already ending in the booking folder is kept.
+            $segs = explode('/', ltrim($p, '/'));
+            $last = (string)end($segs);
+            if ($leaf !== '' && !folder_is_booking_leaf($last)) {
+                $p .= '/' . $leaf;
+            }
+            return $p;
+        }
     }
-    if (!empty($r['group_folder']) && !empty($r['practice_code'])) {
-        return '/001_Safari/' . $r['group_folder'] . '/' . $r['practice_code'];
+    if (!empty($r['group_folder']) && $leaf !== '') {
+        return '/001_Safari/' . $r['group_folder'] . '/' . $leaf;
     }
     return '';
 }
