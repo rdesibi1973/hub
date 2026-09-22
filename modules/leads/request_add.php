@@ -31,6 +31,7 @@ $agencyJs = array_map(fn($a) => [
 ], $agencies);
 
 $errors = [];
+$dupCandidates = [];   // duplicate matches found before insert (name/email/phone)
 $v = [
     'date_received'   => date('Y-m-d'),
     'customer_name'   => '',
@@ -91,6 +92,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!$v['agent_id'])        $errors[] = 'Please select an agent.';
     if (!array_key_exists($v['status'], STATUSES)) $errors[] = 'Invalid status.';
     if ($v['channel'] === 'agency' && !$v['agency_id']) $errors[] = 'Please select an agency.';
+
+    // ── Duplicate check BEFORE inserting (same checks as Incoming) ──────────────
+    // Name + email + phone against requests and lead_staging. Strong matches
+    // (definite/possible) block until the user ticks "Create anyway".
+    if (!$errors && empty($_POST['dup_override'])) {
+        require_once 'includes/dup_check.php';
+        $dupCandidates = array_values(array_filter(
+            find_duplicate_candidates($db, $v['customer_name'], $v['email'], $v['whatsapp']),
+            fn($c) => $c['severity'] !== 'weak'
+        ));
+        if ($dupCandidates) {
+            $errors[] = 'Possible duplicate found — review the matches below, then tick "Create anyway" if this really is a new booking.';
+        }
+    }
 
     if (!$errors) {
 
@@ -450,6 +465,29 @@ include 'includes/header.php';
       </label>
     </div>
 
+    <?php if ($dupCandidates): ?>
+    <div style="border:2px solid #C0211B;background:#FEE2E2;border-radius:8px;padding:14px 16px;margin-bottom:16px">
+      <div style="font-weight:700;color:#C0211B;margin-bottom:8px">⚠ Possible duplicate — don't create a second record for the same customer</div>
+      <ul style="margin:0 0 10px 18px;padding:0;font-size:.85rem">
+        <?php foreach ($dupCandidates as $c): ?>
+          <li style="margin-bottom:3px">
+            <?php if ($c['source_table'] === 'requests'): ?>
+              <a href="request_view.php?id=<?= (int)$c['id'] ?>" target="_blank" rel="noopener" style="font-weight:600"><?= h($c['name']) ?></a>
+              <span style="color:#7a1c17">— <?= h($c['reason']) ?> (request #<?= (int)$c['id'] ?>)</span>
+            <?php else: ?>
+              <span style="font-weight:600"><?= h($c['name']) ?></span>
+              <span style="color:#7a1c17">— <?= h($c['reason']) ?></span>
+            <?php endif; ?>
+          </li>
+        <?php endforeach; ?>
+      </ul>
+      <label style="display:flex;align-items:center;gap:8px;font-weight:700;cursor:pointer;color:#7a1c17">
+        <input type="checkbox" name="dup_override" value="1" style="width:16px;height:16px;accent-color:#C0211B">
+        Create anyway — I checked, this is not a duplicate
+      </label>
+    </div>
+    <?php endif; ?>
+
     <div class="form-actions">
       <button type="submit" class="btn btn-red">Save Request</button>
       <a href="requests.php" class="btn btn-outline">Cancel</a>
@@ -644,6 +682,9 @@ function calcComm() {
 
   // Intercept submit: if email has duplicates, ask for confirmation
   form.addEventListener('submit', function(e) {
+    // If "Create anyway" is ticked, the server-side guard is overriding — don't
+    // also prompt here.
+    if (document.querySelector('input[name="dup_override"]:checked')) return;
     const currentEmail = emailField.value.trim();
     if (!currentEmail || !currentEmail.includes('@')) return; // no email, proceed
 
