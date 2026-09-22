@@ -149,12 +149,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 catch (RuntimeException $e) { /* non-blocking */ }
             }
 
+            $waDigits = preg_replace('/\D/', '', $v['whatsapp']);
             $txtContent =
-                "REQUEST DETAILS:\r\n\r\n"
+                "CUSTOMER:\r\n\r\n"
+              . "Name:        " . $v['customer_name'] . "\r\n"
+              . "Email:       " . $v['email'] . "\r\n"
+              . "WhatsApp:    " . $v['whatsapp'] . "\r\n\r\n\r\n"
+              . "REQUEST DETAILS:\r\n\r\n"
               . $v['initial_request'] . "\r\n\r\n\r\n"
               . "WHATSAPP link\r\n"
               . "Add phone number with international code without + or spaces and use the following link to chat with customer on whatsapp web\r\n"
-              . "https://web.whatsapp.com/send?phone=\r\n\r\n"
+              . "https://web.whatsapp.com/send?phone=" . $waDigits . "\r\n\r\n"
               . "CUSTOMERS FULL NAMES:\r\n\r\n\r\n\r\n"
               . "ARRIVAL/DEPARTURE DETAILS - FLIGHTS:\r\n\r\n\r\n\r\n\r\n\r\n"
               . "DIETARY RESTRICTIONS:\r\n\r\n\r\n\r\n"
