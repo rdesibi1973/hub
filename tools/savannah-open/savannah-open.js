@@ -41,7 +41,9 @@ if (full.substring(0, root.length).toLowerCase() !== root.toLowerCase()) {
   warn("Blocked: path is outside the Dropbox folder."); WScript.Quit();
 }
 
-function openExplorer(args) { sh.Run("explorer.exe " + args, 1, false); }
+// Full path: some PCs have a PATH without the Windows folders.
+var explorer = sh.ExpandEnvironmentStrings("%SystemRoot%") + "\\explorer.exe";
+function openExplorer(args) { sh.Run('"' + explorer + '" ' + args, 1, false); }
 
 if (fso.FolderExists(full)) {
   openExplorer('"' + full + '"');
