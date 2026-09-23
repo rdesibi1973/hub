@@ -597,6 +597,18 @@ function calcComm() {
   }
 }
 
+// ── Duplicate match rendering (request vs incoming lead) ──────────────────────
+function escDup(s){ const d=document.createElement('div'); d.appendChild(document.createTextNode(s==null?'':s)); return d.innerHTML; }
+function dupTargetHtml(m){
+  const name = escDup(m.name);
+  // lead_staging matches are Incoming leads, NOT requests — don't link them to
+  // request_view.php (a different record lives at that id in the requests table).
+  if (m.source_table === 'lead_staging') {
+    return '<span style="font-weight:600">' + name + '</span> <span style="color:#6B7280">— incoming lead (not yet a request)</span>';
+  }
+  return '<a href="request_view.php?id=' + m.id + '" target="_blank" style="color:inherit;font-weight:600">' + name + '</a> <span style="color:#6B7280">— Request #' + m.id + '</span>';
+}
+
 // ── Duplicate detection ───────────────────────────────────────────────────────
 (function(){
   const COLORS = {
@@ -627,7 +639,7 @@ function calcComm() {
     let html = `<div style="background:${c.bg};border:1px solid ${c.border};border-radius:6px;padding:8px 12px;font-size:.8rem;">`;
     html += `<strong>${c.icon} ${c.label}</strong><ul style="margin:4px 0 0 16px;padding:0">`;
     matches.forEach(m => {
-      html += `<li style="margin:2px 0"><a href="request_view.php?id=${m.id}" target="_blank" style="color:inherit;font-weight:600">${esc(m.name)}</a> <span style="color:#6B7280">— ${esc(m.reason)}</span></li>`;
+      html += `<li style="margin:2px 0">${dupTargetHtml(m)} <span style="color:#6B7280">(${esc(m.reason)})</span></li>`;
     });
     html += '</ul></div>';
     warning.innerHTML = html;
@@ -678,7 +690,7 @@ function calcComm() {
     let html = '<div style="background:#FEE2E2;border:1px solid #C0211B;border-radius:6px;padding:8px 12px;font-size:.8rem;">';
     html += '<strong>🔴 Same email already on file</strong><ul style="margin:4px 0 0 16px;padding:0">';
     matches.forEach(m => {
-      html += `<li style="margin:2px 0"><a href="request_view.php?id=${m.id}" target="_blank" style="color:#991B1B;font-weight:600">${esc(m.name)}</a> <span style="color:#6B7280">— Request #${m.id}</span></li>`;
+      html += `<li style="margin:2px 0">${dupTargetHtml(m)}</li>`;
     });
     html += '</ul></div>';
     emailWarn.innerHTML = html;
@@ -701,7 +713,7 @@ function calcComm() {
           form.submit(); // clean — submit normally
           return;
         }
-        const names = matches.map(m => `"${m.name}" (Request #${m.id})`).join(', ');
+        const names = matches.map(m => `"${m.name}" (${m.source_table === 'lead_staging' ? 'incoming lead' : 'Request #' + m.id})`).join(', ');
         const ok = confirm(
           '⚠ WARNING — Email already on file!\n\n' +
           'This email address is associated with:\n' + names + '\n\n' +
@@ -715,7 +727,7 @@ function calcComm() {
     // Email was already checked and duplicates found — ask confirmation
     if (emailDupMatches.length) {
       e.preventDefault();
-      const names = emailDupMatches.map(m => `"${m.name}" (Request #${m.id})`).join(', ');
+      const names = emailDupMatches.map(m => `"${m.name}" (${m.source_table === 'lead_staging' ? 'incoming lead' : 'Request #' + m.id})`).join(', ');
       const ok = confirm(
         '⚠ WARNING — Email already on file!\n\n' +
         'This email address is associated with:\n' + names + '\n\n' +
