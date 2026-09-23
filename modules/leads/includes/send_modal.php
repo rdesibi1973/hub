@@ -269,6 +269,11 @@ ksort($tpl_by_cat);
           alrt.style.cssText = 'display:block;background:#e8f5e9;color:#2e7d32;margin-top:12px;padding:10px 14px;border-radius:6px;font-size:.82rem';
           alrt.textContent = 'Email sent and logged successfully.';
           btn.textContent = '✓ Sent';
+          // Optional page hook (e.g. Payments refreshes the row's latest note).
+          if (typeof window.onEmailSent === 'function') {
+            window.onEmailSent(document.getElementById('send_req_id').value,
+                               document.getElementById('send_subject').value, d);
+          }
           setTimeout(function() { closeSend(); }, 2000);
         } else {
           alrt.style.cssText = 'display:block;background:#ffebee;color:#c62828;margin-top:12px;padding:10px 14px;border-radius:6px;font-size:.82rem';

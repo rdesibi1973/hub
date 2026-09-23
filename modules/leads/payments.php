@@ -82,7 +82,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             ob_end_clean();
             if ($sent) {
                 log_email_note(db(), $req_id, $cu['id'] ?? null, $subject, $body, $attachment_names);
-                echo json_encode(['ok'=>true]);
+                $cnt = db()->prepare("SELECT COUNT(*) FROM request_notes WHERE request_id=?
+                                        AND (note_type <> 'manual' OR (body IS NOT NULL AND TRIM(body) <> ''))");
+                $cnt->execute([$req_id]);
+                echo json_encode(['ok'=>true, 'note_count'=>(int)$cnt->fetchColumn()]);
             } else {
                 echo json_encode(['ok'=>false,'msg'=>'Send failed. Check server mail configuration.']);
             }
@@ -119,7 +122,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
              VALUES (?, ?, 'manual', NULL, ?)"
         );
         $ins->execute([$req_id, $cu['id'] ?? null, $body]);
-        $cnt = db()->prepare("SELECT COUNT(*) FROM request_notes WHERE request_id=? AND note_type='manual'");
+        $cnt = db()->prepare("SELECT COUNT(*) FROM request_notes WHERE request_id=?
+                                AND (note_type <> 'manual' OR (body IS NOT NULL AND TRIM(body) <> ''))");
         $cnt->execute([$req_id]);
         echo json_encode(['ok'=>true,'count'=>(int)$cnt->fetchColumn()]);
         exit;
@@ -155,18 +159,21 @@ $rows = db()->query(
             a.name AS agent_name,
             (SELECT u.email FROM users u
                WHERE u.agent_id = r.agent_id ORDER BY u.id LIMIT 1) AS agent_email,
+            -- Notes = manual notes + logged sent emails (same set as the notes popup).
             (SELECT COUNT(*) FROM request_notes rn
-               WHERE rn.request_id = r.id AND rn.note_type='manual'
-                 AND rn.body IS NOT NULL AND TRIM(rn.body) <> '') AS note_count,
-            (SELECT rn2.body FROM request_notes rn2
-               WHERE rn2.request_id = r.id AND rn2.note_type='manual'
-                 AND rn2.body IS NOT NULL AND TRIM(rn2.body) <> ''
-               ORDER BY rn2.created_at DESC LIMIT 1) AS last_note,
+               WHERE rn.request_id = r.id
+                 AND (rn.note_type <> 'manual' OR (rn.body IS NOT NULL AND TRIM(rn.body) <> ''))) AS note_count,
+            -- \"type|text\": the body for a manual note, the subject for a sent email.
+            (SELECT CONCAT(rn2.note_type, '|', COALESCE(IF(rn2.note_type = 'manual', rn2.body, rn2.subject), ''))
+               FROM request_notes rn2
+               WHERE rn2.request_id = r.id
+                 AND (rn2.note_type <> 'manual' OR (rn2.body IS NOT NULL AND TRIM(rn2.body) <> ''))
+               ORDER BY rn2.created_at DESC, rn2.id DESC LIMIT 1) AS last_note_raw,
             (SELECT u3.full_name FROM request_notes rn3
                LEFT JOIN users u3 ON u3.id = rn3.created_by
-               WHERE rn3.request_id = r.id AND rn3.note_type='manual'
-                 AND rn3.body IS NOT NULL AND TRIM(rn3.body) <> ''
-               ORDER BY rn3.created_at DESC LIMIT 1) AS last_note_by
+               WHERE rn3.request_id = r.id
+                 AND (rn3.note_type <> 'manual' OR (rn3.body IS NOT NULL AND TRIM(rn3.body) <> ''))
+               ORDER BY rn3.created_at DESC, rn3.id DESC LIMIT 1) AS last_note_by
      FROM requests r
      LEFT JOIN agents a ON a.id = r.agent_id
      WHERE r.status IN ('Booked','Paid','Balance','Deposit')
@@ -178,6 +185,8 @@ $today_ts   = mktime(0, 0, 0);
 $window_end = strtotime('+12 months', $today_ts);
 
 foreach ($rows as &$row) {
+    [$nType, $nText] = array_pad(explode('|', (string)($row['last_note_raw'] ?? ''), 2), 2, '');
+    $row['last_note'] = $nType === 'email_sent' ? '📧 ' . $nText : $nText;
     $d = parse_folder_dates(get_date_folder($row));
     $row['start_date'] = $d['start_date'];
     $row['end_date']   = $d['end_date'];
@@ -606,6 +615,11 @@ function updateNoteBadge(reqId, count, lastBody) {
     (CURRENT_USER ? '<span style="font-size:.68rem;color:var(--grey-mid)">— ' + esc(CURRENT_USER) + '</span> ' : '') +
     '<span class="badge" style="background:#fff3cd;color:#856404;cursor:pointer" onclick="event.stopPropagation();openNotes(' + reqId + ', \'\')">' + count + '</span>';
 }
+
+// After Mail / Reminder is sent: show it as the row's latest note.
+window.onEmailSent = function(reqId, subject, d) {
+  if (d && d.note_count) updateNoteBadge(reqId, d.note_count, '📧 ' + subject);
+};
 
 function esc(s) { return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 </script>
