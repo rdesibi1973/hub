@@ -283,6 +283,7 @@ include 'includes/header.php';
         <label for="whatsapp">WhatsApp / Phone</label>
         <input type="text" id="whatsapp" name="whatsapp" value="<?= h($v['whatsapp']) ?>"
                placeholder="e.g. +39 333 1234567" autocomplete="off">
+        <div id="whatsapp-dup-warning" style="display:none;margin-top:6px"></div>
       </div>
 
       <div class="form-group">
@@ -647,6 +648,43 @@ function dupTargetHtml(m){
   }
 
   function esc(s){ const d=document.createElement('div'); d.appendChild(document.createTextNode(s)); return d.innerHTML; }
+})();
+
+// ── WhatsApp / phone duplicate detection (last 7 digits, like the server) ─────
+// Warning only: the server-side check on submit still blocks a strong match
+// until "Create anyway" is ticked.
+(function(){
+  const waField = document.getElementById('whatsapp');
+  const waWarn  = document.getElementById('whatsapp-dup-warning');
+  if (!waField) return;
+  let debounce, lastTail = '';
+
+  function tailOf(s){ return s.replace(/\D/g, '').slice(-7); }
+
+  function check(){
+    const tail = tailOf(waField.value);
+    if (tail.length < 7) { lastTail = ''; waWarn.style.display = 'none'; return; }
+    if (tail === lastTail) return; // already checked
+    lastTail = tail;
+    const excludeId = <?= json_encode((int)($v['id'] ?? 0)) ?>;
+    fetch('check_duplicate.php?whatsapp=' + encodeURIComponent(waField.value.trim())
+          + (excludeId ? '&exclude_id=' + excludeId : ''))
+      .then(r => r.json()).then(render).catch(() => {});
+  }
+
+  function render(matches){
+    if (!matches.length) { waWarn.style.display = 'none'; return; }
+    let html = '<div style="background:#FEE2E2;border:1px solid #C0211B;border-radius:6px;padding:8px 12px;font-size:.8rem;">';
+    html += '<strong>🔴 Same WhatsApp / phone already on file</strong><ul style="margin:4px 0 0 16px;padding:0">';
+    matches.forEach(m => { html += `<li style="margin:2px 0">${dupTargetHtml(m)}</li>`; });
+    html += '</ul></div>';
+    waWarn.innerHTML = html;
+    waWarn.style.display = '';
+  }
+
+  waField.addEventListener('input', function(){ clearTimeout(debounce); debounce = setTimeout(check, 500); });
+  waField.addEventListener('blur', function(){ clearTimeout(debounce); check(); });
+  if (waField.value.trim()) check(); // re-populated form after a validation error
 })();
 
 // ── Email duplicate detection + submit guard ──────────────────────────────────
