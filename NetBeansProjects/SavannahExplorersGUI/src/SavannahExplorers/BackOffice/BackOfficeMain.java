@@ -228,7 +228,7 @@ public class BackOfficeMain extends javax.swing.JFrame {
         Lemosho10days = new javax.swing.JCheckBox();
         Marangu7days = new javax.swing.JCheckBox();
         SundayGRP = new javax.swing.JCheckBox();
-        Simba3 = new javax.swing.JCheckBox();
+        Nyumbu = new javax.swing.JCheckBox();
         SimbaPemba = new javax.swing.JCheckBox();
         jLabel7 = new javax.swing.JLabel();
         jTextField10 = new javax.swing.JTextField();
@@ -610,10 +610,10 @@ public class BackOfficeMain extends javax.swing.JFrame {
             }
         });
 
-        Simba3.setText("Simba3");
-        Simba3.addActionListener(new java.awt.event.ActionListener() {
+        Nyumbu.setText("Nyumbu");
+        Nyumbu.addActionListener(new java.awt.event.ActionListener() {
             public void actionPerformed(java.awt.event.ActionEvent evt) {
-                Simba3ActionPerformed(evt);
+                NyumbuActionPerformed(evt);
             }
         });
 
@@ -890,12 +890,17 @@ public class BackOfficeMain extends javax.swing.JFrame {
         addC(cbPanel, jLabel4,  cc, 3,0);
         addC(cbPanel, jLabel14, cc, 4,0);
 
+        // Extra Fly-Out ZNZ safaris (rendered in col1, under Simba-GRP)
+        PumbaFlyOutZNZ    = new javax.swing.JCheckBox("PumbaFlyOutZNZ");
+        LUXPumbaFlyOutZNZ = new javax.swing.JCheckBox("LUXPumbaFlyOutZNZ");
+        LUXSimbaFlyOutZNZ = new javax.swing.JCheckBox("LUXSimbaFlyOutZNZ");
+
         // Apply font to all checkboxes
         for (javax.swing.JCheckBox c : new javax.swing.JCheckBox[]{
-            jCheckBox1,jDumaShort,jCheckBox2,jCheckBox3,Simba3,
+            jCheckBox1,jDumaShort,jCheckBox2,jCheckBox3,Nyumbu,
             jCheckBox4,jCheckBox5,jCheckBox27,jCheckBox6,jCheckBox7,jCheckBox8,
             GranSafari,jCheckBox11,jCheckBox12,jCheckBox13,jCheckBox28,
-            ThursdayGRP,SundayGRP,
+            ThursdayGRP,SundayGRP,PumbaFlyOutZNZ,LUXPumbaFlyOutZNZ,LUXSimbaFlyOutZNZ,
             BeachDumaShort,jCheckBox16,jCheckBox24,jCheckBox17,DumaPemba,PumbaPemba,SimbaPemba,jCheckBox22,
             machame,machame6,jCheckBox19,Marangu7days,jCheckBox25,jCheckBox26,Lemosho10days,
             jLuxDuma,jLuxPumba,jLuxSimba,jDC,jPC,jSC,jKC
@@ -903,12 +908,13 @@ public class BackOfficeMain extends javax.swing.JFrame {
 
         // Col 0: main Safari
         javax.swing.JCheckBox[] col0 = {jCheckBox1,jDumaShort,jCheckBox2,jCheckBox3,
-            Simba3,jCheckBox4,jCheckBox5,jCheckBox27,jCheckBox6,jCheckBox7,jCheckBox8};
+            Nyumbu,jCheckBox4,jCheckBox5,jCheckBox27,jCheckBox6,jCheckBox7,jCheckBox8};
         for (int i=0;i<col0.length;i++) addC(cbPanel,col0[i],cc,0,i+1);
 
         // Col 1: GRP + Migration
         javax.swing.JCheckBox[] col1 = {GranSafari,jCheckBox11,jCheckBox12,jCheckBox13,
-            jCheckBox28,ThursdayGRP,SundayGRP};
+            jCheckBox28,ThursdayGRP,SundayGRP,
+            PumbaFlyOutZNZ,LUXPumbaFlyOutZNZ,LUXSimbaFlyOutZNZ};
         for (int i=0;i<col1.length;i++) addC(cbPanel,col1[i],cc,1,i+1);
 
         // Col 2: Beach (header jLabel8 then checkboxes)
@@ -1159,9 +1165,9 @@ public class BackOfficeMain extends javax.swing.JFrame {
         // TODO add your handling code here:
     }
 
-    private void Simba3ActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_Simba3ActionPerformed
+    private void NyumbuActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_NyumbuActionPerformed
         // TODO add your handling code here:
-    }//GEN-LAST:event_Simba3ActionPerformed
+    }//GEN-LAST:event_NyumbuActionPerformed
 
     private void SundayGRPActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_SundayGRPActionPerformed
         // TODO add your handling code here:
@@ -2034,7 +2040,7 @@ public class BackOfficeMain extends javax.swing.JFrame {
         machame.setSelected(false);
         jCheckBox19.setSelected(false);
         jDumaShort.setSelected(false);
-        Simba3.setSelected(false);
+        Nyumbu.setSelected(false);
         jCheckBox27.setSelected(false);
         GranSafari.setSelected(false);
         
@@ -2042,6 +2048,9 @@ public class BackOfficeMain extends javax.swing.JFrame {
         jCheckBox28.setSelected(false);
         ThursdayGRP.setSelected(false);
         SundayGRP.setSelected(false);
+        PumbaFlyOutZNZ.setSelected(false);
+        LUXPumbaFlyOutZNZ.setSelected(false);
+        LUXSimbaFlyOutZNZ.setSelected(false);
         BeachDumaShort.setSelected(false);
         jCheckBox24.setSelected(false);
         DumaPemba.setSelected(false);
@@ -2298,9 +2307,9 @@ public class BackOfficeMain extends javax.swing.JFrame {
         }   catch(IOException ioException) {
             System.out.println(ioException.getMessage() );
         }
-        if (Simba3.isSelected()==true)
+        if (Nyumbu.isSelected()==true)
         try {
-            String newcust="cmd /c start /D \"%DROPBOX_HOME%\\SavannahScripts\\\" \" \" cpSimba3.bat " + custname + " " + prognum;
+            String newcust="cmd /c start /D \"%DROPBOX_HOME%\\SavannahScripts\\\" \" \" cpNyumbu.bat " + custname + " " + prognum;
             Runtime rn=Runtime.getRuntime();
             Process pr=rn.exec(newcust);
         }   catch(IOException ioException) {
@@ -2318,6 +2327,33 @@ public class BackOfficeMain extends javax.swing.JFrame {
         if (SundayGRP.isSelected()==true)
         try {
             String newcust="cmd /c start /D \"%DROPBOX_HOME%\\SavannahScripts\\\" \" \" cpSG.bat " + custname + " " + prognum;
+            Runtime rn=Runtime.getRuntime();
+            Process pr=rn.exec(newcust);
+        }   catch(IOException ioException) {
+            System.out.println(ioException.getMessage() );
+        }
+
+        if (PumbaFlyOutZNZ.isSelected()==true)
+        try {
+            String newcust="cmd /c start /D \"%DROPBOX_HOME%\\SavannahScripts\\\" \" \" cpPumbaFlyOutZNZ.bat " + custname + " " + prognum;
+            Runtime rn=Runtime.getRuntime();
+            Process pr=rn.exec(newcust);
+        }   catch(IOException ioException) {
+            System.out.println(ioException.getMessage() );
+        }
+
+        if (LUXPumbaFlyOutZNZ.isSelected()==true)
+        try {
+            String newcust="cmd /c start /D \"%DROPBOX_HOME%\\SavannahScripts\\\" \" \" cpLUXPumbaFlyOutZNZ.bat " + custname + " " + prognum;
+            Runtime rn=Runtime.getRuntime();
+            Process pr=rn.exec(newcust);
+        }   catch(IOException ioException) {
+            System.out.println(ioException.getMessage() );
+        }
+
+        if (LUXSimbaFlyOutZNZ.isSelected()==true)
+        try {
+            String newcust="cmd /c start /D \"%DROPBOX_HOME%\\SavannahScripts\\\" \" \" cpLUXSimbaFlyOutZNZ.bat " + custname + " " + prognum;
             Runtime rn=Runtime.getRuntime();
             Process pr=rn.exec(newcust);
         }   catch(IOException ioException) {
@@ -3392,6 +3428,12 @@ public class BackOfficeMain extends javax.swing.JFrame {
                     String res = get();
                     detail.setText(res.startsWith("OK:") ? res.substring(3)
                                  : res.startsWith("ERROR:") ? res.substring(6) : res);
+                    // On success, offer the booking-notification email (extra services)
+                    if (res.startsWith("OK:")) {
+                        final String cn = custname, gmf = grpMainFolder;
+                        javax.swing.SwingUtilities.invokeLater(
+                            () -> showSafariBookingEmailDialogForGrpAdd(cn, gmf));
+                    }
                 } catch (Exception ex) { detail.setText("Error: " + ex.getMessage()); }
                 dlg.setSize(500, 320);
                 dlg.revalidate(); dlg.repaint();
@@ -3822,7 +3864,27 @@ public class BackOfficeMain extends javax.swing.JFrame {
                 }
             } catch (Exception ignored) {}
         }
-        buildAndShowEmailDialog(folderName, agentEmail);
+        buildAndShowEmailDialog(folderName, agentEmail, false, null);
+    }
+
+    /**
+     * Variant shown after adding a customer folder to an existing GRP.
+     * The relevant folder for the agent-email lookup and the signature is the
+     * customer sub-folder (custname); the subject shows GRP main folder\custname.
+     */
+    private void showSafariBookingEmailDialogForGrpAdd(String custname, String grpMainFolder) {
+        String agentEmail = "";
+        if (USE_API && AppSession.isLoggedIn()) {
+            try {
+                String body = "{\"folder_name\":\"" + escJsonStatic(custname) + "\"}";
+                String resp = postApiDirect("api_get_agent_email.php", body);
+                if (resp != null && resp.contains("\"success\":true")) {
+                    String extracted = ApiClient.jsonGetString(resp, "email");
+                    if (extracted != null && !extracted.isBlank()) agentEmail = extracted;
+                }
+            } catch (Exception ignored) {}
+        }
+        buildAndShowEmailDialog(custname, agentEmail, true, grpMainFolder);
     }
 
     /**
@@ -3841,7 +3903,8 @@ public class BackOfficeMain extends javax.swing.JFrame {
         return emailMap.getOrDefault(key, agentName.toLowerCase() + "@savannahexplorers.com");
     }
 
-    private void buildAndShowEmailDialog(String folderName, String agentEmail) {
+    private void buildAndShowEmailDialog(String folderName, String agentEmail,
+                                         boolean grpAdd, String grpMainFolder) {
         String agentName = extractAgentFromFolder(folderName);
 
         // ── Build To ─────────────────────────────────────────────────────────
@@ -3870,6 +3933,23 @@ public class BackOfficeMain extends javax.swing.JFrame {
         ccList.add("savannah.explorers@gmail.com");
         ccList.add("saruni@savannahexplorers.com");
 
+        // For the logged-in user Roberto only: never CC his own address
+        // (info@savannahexplorers.com). His DB full_name may be "Roberto De Sibi"
+        // rather than a bare "Roberto", so an exact match on fullName was failing;
+        // identify him robustly via the folder code ("Roberto") or a name match,
+        // while excluding "Roberto Capri" (different person, code EleonoraOngaro,
+        // email roberto.capri@...). removeIf only ever targets info@, which is
+        // Roberto's own address, so this can never strip another agent's email.
+        String fnLower = sessionFullName.toLowerCase();
+        String codeLower = (AppSession.codiceCartella != null)
+            ? AppSession.codiceCartella.toLowerCase() : "";
+        boolean isLoggedRoberto =
+                codeLower.equals("roberto")
+             || (fnLower.contains("roberto") && !fnLower.contains("capri"));
+        if (isLoggedRoberto) {
+            ccList.removeIf(e -> e.equalsIgnoreCase("info@savannahexplorers.com"));
+        }
+
         boolean nuruInCc = ccList.stream()
             .anyMatch(e -> e.equalsIgnoreCase("nuru@savannahexplorers.com"));
         // Nuru line in body whenever Nuru appears in To OR CC
@@ -3879,10 +3959,16 @@ public class BackOfficeMain extends javax.swing.JFrame {
         // Extract customer name: strip leading {prog}_{date}_ and trailing _START...
         // e.g. "06_09JUN_EleonoraDrago(Oniva-Roberto)_START09JUN_END14JUN2026_CK"
         //   →  "EleonoraDrago(Oniva-Roberto)"
-        String customerPart = folderName
-            .replaceFirst("^\\d+_\\d+[A-Za-z]+_", "")   // strip leading 06_09JUN_
-            .replaceFirst("_START.+$", "");               // strip trailing _START...
-        String subject = customerPart + " safari bookings";
+        String subject;
+        if (grpAdd) {
+            // GRP add: subject = GRP main folder \ customer sub-folder (custname)
+            subject = grpMainFolder + "\\" + folderName;
+        } else {
+            String customerPart = folderName
+                .replaceFirst("^\\d+_\\d+[A-Za-z]+_", "")   // strip leading 06_09JUN_
+                .replaceFirst("_START.+$", "");               // strip trailing _START...
+            subject = customerPart + " safari bookings";
+        }
 
         // ── Body ─────────────────────────────────────────────────────────────
         // Signature: always use the logged-in user's full name (most accurate).
@@ -3892,8 +3978,14 @@ public class BackOfficeMain extends javax.swing.JFrame {
                 ? "Roberto Capri" : agentName;
         StringBuilder body = new StringBuilder();
         body.append("Hi Glady/Lydia,\n");
-        body.append("         you can book for this safari as in the excel file\n\n");
-        body.append("Dropbox folder is   ").append(folderName).append("\n\n");
+        if (grpAdd) {
+            body.append("         this customer has been added to group ").append(grpMainFolder).append(",\n");
+            body.append("         please check the extra services to book as in the excel file (transfers, hotels, Zanzibar, etc. — if any)\n\n");
+            body.append("Dropbox folder is   ").append(grpMainFolder).append("\\").append(folderName).append("\n\n");
+        } else {
+            body.append("         you can book for this safari as in the excel file\n\n");
+            body.append("Dropbox folder is   ").append(folderName).append("\n\n");
+        }
         body.append("Kindly check domestic flights, invoices, transfers and activities are correctly");
         body.append(" booked and invoiced for the correct price/date/pax before saving.");
         body.append(" Put invoice details and your name in Excel after it's checked.\n\n");
@@ -4303,7 +4395,7 @@ public class BackOfficeMain extends javax.swing.JFrame {
     private javax.swing.JCheckBox Lemosho10days;
     private javax.swing.JCheckBox Marangu7days;
     private javax.swing.JCheckBox PumbaPemba;
-    private javax.swing.JCheckBox Simba3;
+    private javax.swing.JCheckBox Nyumbu;
     private javax.swing.JCheckBox SimbaPemba;
     private javax.swing.JCheckBox SundayGRP;
     private javax.swing.JCheckBox ThursdayGRP;
@@ -4409,4 +4501,9 @@ public class BackOfficeMain extends javax.swing.JFrame {
     private javax.swing.JTextField grpCodeField;
     private javax.swing.JButton jButtonRefreshProg;
     // End of variables declaration//GEN-END:variables
+
+    // Extra Fly-Out ZNZ safaris (manual; instantiated and laid out under Simba-GRP in buildMainLayout)
+    private javax.swing.JCheckBox PumbaFlyOutZNZ;
+    private javax.swing.JCheckBox LUXPumbaFlyOutZNZ;
+    private javax.swing.JCheckBox LUXSimbaFlyOutZNZ;
 }

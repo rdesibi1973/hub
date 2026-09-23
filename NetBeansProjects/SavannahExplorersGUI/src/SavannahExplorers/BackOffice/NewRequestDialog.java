@@ -18,7 +18,8 @@ public class NewRequestDialog extends JDialog {
     private JTextField customerNameField;
     private JTextField emailField;
     private JTextField whatsappField;
-    private JComboBox<String> channelCombo;
+    private JRadioButton channelAgencyRadio;
+    private JRadioButton channelDirectRadio;
     private JComboBox<String> agencyCombo;
     private JComboBox<String> agentCombo;
     private JComboBox<String> sourceCombo;
@@ -116,14 +117,23 @@ public class NewRequestDialog extends JDialog {
         c.gridwidth = 1; c.weightx = 0;
         row++;
 
-        // Channel
+        // Channel — Agency / Direct radio buttons on one row (Agency active by default)
         addLabel(panel, c, "Channel:", row, 0);
-        channelCombo = new JComboBox<>(new String[]{
-            "Agency", "Direct (Drct)"
-        });
-        channelCombo.setFont(new Font("SansSerif", Font.PLAIN, 13));
+        channelAgencyRadio = new JRadioButton("Agency", true);
+        channelDirectRadio = new JRadioButton("Direct");
+        channelAgencyRadio.setFont(new Font("SansSerif", Font.PLAIN, 13));
+        channelDirectRadio.setFont(new Font("SansSerif", Font.PLAIN, 13));
+        channelAgencyRadio.setOpaque(false);
+        channelDirectRadio.setOpaque(false);
+        ButtonGroup channelGroup = new ButtonGroup();
+        channelGroup.add(channelAgencyRadio);
+        channelGroup.add(channelDirectRadio);
+        JPanel channelPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 16, 0));
+        channelPanel.setOpaque(false);
+        channelPanel.add(channelAgencyRadio);
+        channelPanel.add(channelDirectRadio);
         c.gridx = 1; c.gridy = row; c.gridwidth = 3; c.weightx = 1;
-        panel.add(channelCombo, c);
+        panel.add(channelPanel, c);
         c.gridwidth = 1; c.weightx = 0;
         row++;
 
@@ -268,12 +278,14 @@ public class NewRequestDialog extends JDialog {
                 }
             }
         });
-        channelCombo.addActionListener(e -> {
-            boolean isAgency = channelCombo.getSelectedIndex() == 0;
+        java.awt.event.ActionListener channelListener = e -> {
+            boolean isAgency = channelAgencyRadio.isSelected();
             agencyCombo.setEnabled(isAgency);
             newAgencyBtn.setEnabled(isAgency);
             updateFolderPreview();
-        });
+        };
+        channelAgencyRadio.addActionListener(channelListener);
+        channelDirectRadio.addActionListener(channelListener);
         agencyCombo.addActionListener(e -> updateFolderPreview());
         agentCombo.addActionListener(e -> updateFolderPreview());
 
@@ -317,10 +329,38 @@ public class NewRequestDialog extends JDialog {
             }
         });
 
+        // Only filter / re-open the popup when the change comes from the KEYBOARD
+        // (the user typing). When the editor text changes because an item was picked
+        // from the popup, we must NOT re-filter and re-show the popup, otherwise the
+        // list pops straight back up and the selection appears to need a second click.
+        final boolean[] typing = { false };
+        editor.addKeyListener(new java.awt.event.KeyAdapter() {
+            @Override public void keyPressed(java.awt.event.KeyEvent e) {
+                switch (e.getKeyCode()) {
+                    case java.awt.event.KeyEvent.VK_ENTER:
+                    case java.awt.event.KeyEvent.VK_ESCAPE:
+                    case java.awt.event.KeyEvent.VK_UP:
+                    case java.awt.event.KeyEvent.VK_DOWN:
+                    case java.awt.event.KeyEvent.VK_LEFT:
+                    case java.awt.event.KeyEvent.VK_RIGHT:
+                    case java.awt.event.KeyEvent.VK_TAB:
+                        return; // navigation / commit keys don't count as typing
+                    default:
+                        typing[0] = true;
+                }
+            }
+        });
+
         editor.getDocument().addDocumentListener(new DocumentListener() {
             private boolean updating = false;
             private void filter() {
                 if (updating || suppressFilter) return;
+                if (!typing[0]) {
+                    // Change caused by a popup selection (or programmatic setText):
+                    // just refresh the preview, keep the value, leave the popup closed.
+                    SwingUtilities.invokeLater(() -> updateFolderPreview());
+                    return;
+                }
                 updating = true;
                 SwingUtilities.invokeLater(() -> {
                     String typed = editor.getText();
@@ -337,6 +377,7 @@ public class NewRequestDialog extends JDialog {
                     if (!typed.isEmpty() && model.getSize() > 0) {
                         try { agencyCombo.showPopup(); } catch (Exception ex) {}
                     }
+                    typing[0] = false;
                     updating = false;
                     SwingUtilities.invokeLater(() -> updateFolderPreview());
                 });
@@ -361,10 +402,34 @@ public class NewRequestDialog extends JDialog {
         final JTextField editor =
             (JTextField) agentCombo.getEditor().getEditorComponent();
 
+        // See setupAgencyAutoComplete(): filter only on real typing, so picking an
+        // item from the popup doesn't re-open the list and force a second click.
+        final boolean[] typing = { false };
+        editor.addKeyListener(new java.awt.event.KeyAdapter() {
+            @Override public void keyPressed(java.awt.event.KeyEvent e) {
+                switch (e.getKeyCode()) {
+                    case java.awt.event.KeyEvent.VK_ENTER:
+                    case java.awt.event.KeyEvent.VK_ESCAPE:
+                    case java.awt.event.KeyEvent.VK_UP:
+                    case java.awt.event.KeyEvent.VK_DOWN:
+                    case java.awt.event.KeyEvent.VK_LEFT:
+                    case java.awt.event.KeyEvent.VK_RIGHT:
+                    case java.awt.event.KeyEvent.VK_TAB:
+                        return;
+                    default:
+                        typing[0] = true;
+                }
+            }
+        });
+
         editor.getDocument().addDocumentListener(new DocumentListener() {
             private boolean updating = false;
             private void filter() {
                 if (updating || suppressFilter) return;
+                if (!typing[0]) {
+                    SwingUtilities.invokeLater(() -> updateFolderPreview());
+                    return;
+                }
                 updating = true;
                 SwingUtilities.invokeLater(() -> {
                     String typed = editor.getText();
@@ -379,6 +444,7 @@ public class NewRequestDialog extends JDialog {
                     if (!typed.isEmpty() && model.getSize() > 0) {
                         try { agentCombo.showPopup(); } catch (Exception ex) {}
                     }
+                    typing[0] = false;
                     updating = false;
                     SwingUtilities.invokeLater(() -> updateFolderPreview());
                 });
@@ -437,11 +503,39 @@ public class NewRequestDialog extends JDialog {
             });
         }
 
+        // Only filter / re-open the popup when the change comes from the KEYBOARD
+        // (the user typing). When the editor text changes because an item was picked
+        // from the popup, we must NOT re-filter and re-show the popup, otherwise the
+        // list pops straight back up and the selection appears to need a second click.
+        final boolean[] typing = { false };
+        editor.addKeyListener(new java.awt.event.KeyAdapter() {
+            @Override public void keyPressed(java.awt.event.KeyEvent e) {
+                switch (e.getKeyCode()) {
+                    case java.awt.event.KeyEvent.VK_ENTER:
+                    case java.awt.event.KeyEvent.VK_ESCAPE:
+                    case java.awt.event.KeyEvent.VK_UP:
+                    case java.awt.event.KeyEvent.VK_DOWN:
+                    case java.awt.event.KeyEvent.VK_LEFT:
+                    case java.awt.event.KeyEvent.VK_RIGHT:
+                    case java.awt.event.KeyEvent.VK_TAB:
+                        return; // navigation / commit keys don't count as typing
+                    default:
+                        typing[0] = true;
+                }
+            }
+        });
+
         DocumentListener listener = new DocumentListener() {
 
             private boolean updating = false;
             private void filter() {
                 if (updating || suppressFilter) return;
+                if (!typing[0]) {
+                    // Change caused by a popup selection (or programmatic setText):
+                    // just refresh the preview, keep the value, leave the popup closed.
+                    SwingUtilities.invokeLater(() -> updateFolderPreview());
+                    return;
+                }
                 updating = true;
                 SwingUtilities.invokeLater(() -> {
                     String typed = editor.getText();
@@ -457,6 +551,7 @@ public class NewRequestDialog extends JDialog {
                     if (!typed.isEmpty() && model.getSize() > 0) {
                         try { combo.showPopup(); } catch (Exception ex) {}
                     }
+                    typing[0] = false;
                     updating = false;
                     SwingUtilities.invokeLater(() -> updateFolderPreview());
                 });
@@ -615,7 +710,7 @@ public class NewRequestDialog extends JDialog {
         if (camel.isEmpty()) { folderPreviewLabel.setText("..."); return; }
         String agentName = getSelectedAgentName();
         String suffix;
-        if (channelCombo.getSelectedIndex() == 0) {
+        if (channelAgencyRadio.isSelected()) {
             String agShort = getSelectedAgencyShortName();
             // getSelectedAgencyShortName() already appends -PS / -LAM from
             // the agency type, so use the result verbatim here.
@@ -778,7 +873,7 @@ public class NewRequestDialog extends JDialog {
             JOptionPane.showMessageDialog(this, "Enter the customer name.", "Warning", JOptionPane.WARNING_MESSAGE);
             return;
         }
-        String channel = channelCombo.getSelectedIndex() == 0 ? "agency" : "direct";
+        String channel = channelAgencyRadio.isSelected() ? "agency" : "direct";
         if ("agency".equals(channel) && getSelectedAgencyName().isEmpty()) {
             JOptionPane.showMessageDialog(this, "Please select an agency.", "Warning", JOptionPane.WARNING_MESSAGE);
             return;

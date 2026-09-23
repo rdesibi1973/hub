@@ -267,7 +267,7 @@
                                                           <Component id="jDumaShort" alignment="0" min="-2" max="-2" attributes="0"/>
                                                           <Component id="jCheckBox2" alignment="0" min="-2" max="-2" attributes="0"/>
                                                           <Component id="jCheckBox3" alignment="0" min="-2" max="-2" attributes="0"/>
-                                                          <Component id="Simba3" alignment="0" min="-2" max="-2" attributes="0"/>
+                                                          <Component id="Nyumbu" alignment="0" min="-2" max="-2" attributes="0"/>
                                                           <Component id="jCheckBox4" alignment="0" min="-2" max="-2" attributes="0"/>
                                                           <Component id="jCheckBox5" alignment="0" min="-2" max="-2" attributes="0"/>
                                                           <Component id="jCheckBox27" alignment="0" min="-2" max="-2" attributes="0"/>
@@ -516,7 +516,7 @@
                                                   <Component id="jCheckBox28" alignment="3" max="32767" attributes="0"/>
                                               </Group>
                                               <EmptySpace max="-2" attributes="0"/>
-                                              <Component id="Simba3" min="-2" max="-2" attributes="0"/>
+                                              <Component id="Nyumbu" min="-2" max="-2" attributes="0"/>
                                               <EmptySpace max="-2" attributes="0"/>
                                               <Component id="jCheckBox4" min="-2" max="-2" attributes="0"/>
                                               <EmptySpace type="unrelated" max="-2" attributes="0"/>
@@ -1063,12 +1063,12 @@
                 <EventHandler event="actionPerformed" listener="java.awt.event.ActionListener" parameters="java.awt.event.ActionEvent" handler="SundayGRPActionPerformed"/>
               </Events>
             </Component>
-            <Component class="javax.swing.JCheckBox" name="Simba3">
+            <Component class="javax.swing.JCheckBox" name="Nyumbu">
               <Properties>
-                <Property name="text" type="java.lang.String" value="Simba3"/>
+                <Property name="text" type="java.lang.String" value="Nyumbu"/>
               </Properties>
               <Events>
-                <EventHandler event="actionPerformed" listener="java.awt.event.ActionListener" parameters="java.awt.event.ActionEvent" handler="Simba3ActionPerformed"/>
+                <EventHandler event="actionPerformed" listener="java.awt.event.ActionListener" parameters="java.awt.event.ActionEvent" handler="NyumbuActionPerformed"/>
               </Events>
             </Component>
             <Component class="javax.swing.JCheckBox" name="SimbaPemba">
