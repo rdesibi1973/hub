@@ -88,6 +88,8 @@ function hs_map_destination(string $raw): string {
     if (str_contains($r, 'beach')    || str_contains($r, 'mare')
      || str_contains($r, 'spiaggia') || str_contains($r, 'zanzibar')
      || str_contains($r, 'seychell') || str_contains($r, 'pemba'))         return 'Safari+Beach';
+    if (str_contains($r, 'trekking') || str_contains($r, 'trek'))
+        return str_contains($r, 'safari') ? 'Trekking+Safari' : 'Kilimanjaro';
     if (str_contains($r, 'safari')   || str_contains($r, 'tanzania')
      || str_contains($r, 'namibia')  || str_contains($r, 'uganda')
      || str_contains($r, 'rwanda')   || str_contains($r, 'kenya'))         return 'Safari';
@@ -100,8 +102,8 @@ function hs_map_destination(string $raw): string {
  * Destinations field. Activities ("safari+mare") and the accommodation notes
  * often carry the beach/trekking intent that Destinations ("Tanzania") lacks.
  */
-function hs_classify_type(string $destRaw, string $activities = '', string $accomLevel = ''): string {
-    $t = trim($destRaw . ' ' . $activities . ' ' . $accomLevel);
+function hs_classify_type(string $destRaw, string $activities = '', string $accomLevel = '', string $formName = ''): string {
+    $t = trim($destRaw . ' ' . $activities . ' ' . $accomLevel . ' ' . $formName);
     return $t !== '' ? hs_map_destination($t) : '';
 }
 
@@ -515,7 +517,7 @@ function hs_contact_to_lead(array $contact): ?array {
             'phone'           => $phone,
             'pax'             => $pax,
             'period'          => $period,
-            'destination'     => hs_classify_type($destRaw, $activities, $accomLevel),
+            'destination'     => hs_classify_type($destRaw, $activities, $accomLevel, $formName),
             'initial_request' => implode("\n", $lines),
             'notes'           => "HubSpot Reconversion | Contact: $hsId | Form: $formName",
             'raw_data'        => $p,
@@ -535,7 +537,7 @@ function hs_contact_to_lead(array $contact): ?array {
         if (!$hasIbotFields && ($pax || $message)) $source = 'Form';
     }
 
-    $destNorm = hs_classify_type($destRaw, $activities, $accomLevel);
+    $destNorm = hs_classify_type($destRaw, $activities, $accomLevel, $formName);
 
     // Build initial_request
     $lines = ["--- HubSpot $source ---"];
