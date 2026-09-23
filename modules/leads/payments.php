@@ -369,8 +369,9 @@ include 'includes/header.php';
           <th>Customer</th>
           <th>Folder</th>
           <th style="width:44px;text-align:center">Pax</th>
+          <th style="width:110px;text-align:center" title="Date the booking was confirmed">Confirmed</th>
           <th style="width:120px;text-align:center">Status</th>
-          <th>Latest note</th>
+          <th class="col-note">Latest note</th>
           <th style="width:220px;text-align:right">Action</th>
         </tr>
       </thead>
@@ -463,8 +464,22 @@ include 'includes/header.php';
             <?php endif; ?>
           </td>
           <td style="text-align:center"><?= (int)$r['pax'] ?></td>
+          <td style="text-align:center;white-space:nowrap">
+            <?php
+              $cTs = !empty($r['confirmation_date']) ? strtotime($r['confirmation_date']) : false;
+              $cAgo = $cTs ? (int)floor(($today_ts - $cTs) / 86400) : null;
+            ?>
+            <?php if ($cTs): ?>
+              <?= h(date('d M Y', $cTs)) ?>
+              <div style="font-size:.68rem;color:<?= $cAgo <= 7 ? '#1A6B3A;font-weight:600' : 'var(--grey-mid)' ?>">
+                <?= $cAgo <= 0 ? 'today' : ($cAgo === 1 ? '1 day ago' : $cAgo . ' days ago') ?>
+              </div>
+            <?php else: ?>
+              <span style="color:var(--grey-lt)">—</span>
+            <?php endif; ?>
+          </td>
           <td style="text-align:center"><span class="badge <?= $psCls ?>"><?= h($ps) ?></span></td>
-          <td>
+          <td class="col-note">
             <?php if ($r['note_count'] > 0): ?>
               <span class="note-preview" title="<?= h(strip_tags($r['last_note'] ?? '')) ?>"><?= h(mb_strimwidth(strip_tags($r['last_note'] ?? ''), 0, 60, '…')) ?></span>
               <?php if (!empty($r['last_note_by'])): ?><span style="font-size:.68rem;color:var(--grey-mid)">— <?= h($r['last_note_by']) ?></span><?php endif; ?>
@@ -608,7 +623,7 @@ function delNote(id) {
 function updateNoteBadge(reqId, count, lastBody) {
   var tr = document.querySelector('tr[data-reqid="' + reqId + '"]');
   if (!tr) return;
-  var td = tr.querySelectorAll('td')[5]; // "Latest note" column
+  var td = tr.querySelector('td.col-note'); // "Latest note" column
   if (!td) return;
   td.innerHTML =
     '<span class="note-preview" title="' + esc(lastBody) + '">' + esc(lastBody.substring(0, 60)) + '</span> ' +
