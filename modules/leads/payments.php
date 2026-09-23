@@ -225,7 +225,8 @@ $rows = array_values(array_filter($rows, fn($r) => in_array($r['_ps_derived'], U
 // takes the posted values verbatim; an empty value means "all".
 $clear   = isset($_GET['clear']);
 $fresh   = !$clear && !array_intersect(['agent','status','window','q'], array_keys($_GET));
-$fAgent  = $clear ? '' : (isset($_GET['agent'])  ? trim($_GET['agent'])  : ($fresh ? (string)$my_agent_id : ''));
+// Users with no linked agent (accountant, admin …) start on "all agents".
+$fAgent  = $clear ? '' : (isset($_GET['agent'])  ? trim($_GET['agent'])  : ($fresh && $my_agent_id > 0 ? (string)$my_agent_id : ''));
 $fStatus = $clear ? '' : (isset($_GET['status']) ? trim($_GET['status']) : '');
 $fWindow = $clear ? 'next12' : (isset($_GET['window']) && $_GET['window'] !== '' ? trim($_GET['window']) : 'next12');
 $fQ      = $clear ? '' : (isset($_GET['q']) ? trim($_GET['q']) : '');
