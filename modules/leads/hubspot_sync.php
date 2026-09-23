@@ -86,13 +86,23 @@ function hs_map_destination(string $raw): string {
     if (str_contains($r, 'kilimanjaro'))                                   return 'Kilimanjaro';
     if (str_contains($r, 'meru'))                                          return 'Meru Trekking';
     if (str_contains($r, 'beach')    || str_contains($r, 'mare')
-     || str_contains($r, 'zanzibar') || str_contains($r, 'seychell')
-     || str_contains($r, 'pemba'))                                         return 'Safari+Beach';
+     || str_contains($r, 'spiaggia') || str_contains($r, 'zanzibar')
+     || str_contains($r, 'seychell') || str_contains($r, 'pemba'))         return 'Safari+Beach';
     if (str_contains($r, 'safari')   || str_contains($r, 'tanzania')
      || str_contains($r, 'namibia')  || str_contains($r, 'uganda')
      || str_contains($r, 'rwanda')   || str_contains($r, 'kenya'))         return 'Safari';
     if (str_contains($r, 'tailor')   || str_contains($r, 'personaliz'))   return 'Tailor-made';
     return 'Other';
+}
+
+/**
+ * Classify the request type from all available lead text — not just the
+ * Destinations field. Activities ("safari+mare") and the accommodation notes
+ * often carry the beach/trekking intent that Destinations ("Tanzania") lacks.
+ */
+function hs_classify_type(string $destRaw, string $activities = '', string $accomLevel = ''): string {
+    $t = trim($destRaw . ' ' . $activities . ' ' . $accomLevel);
+    return $t !== '' ? hs_map_destination($t) : '';
 }
 
 /** Converts a HubSpot date value to milliseconds.
@@ -401,7 +411,7 @@ function hs_fetch_tickets(int $since): array {
         $duration   = trim($cp['duration']            ?? $cp['durata']              ?? '');
         $accomLevel = trim($cp['accommodation_level'] ?? $cp['livello_sistemazione']?? '');
         $pax        = ($rawPax !== '' && (float)$rawPax > 0) ? (int)round((float)$rawPax) : null;
-        $destNorm   = $destRaw ? hs_map_destination(explode(';', $destRaw)[0]) : '';
+        $destNorm   = hs_classify_type($destRaw, $activities, $accomLevel);
 
         // Ticket conversation text
         $ticketContent = trim($tp['content'] ?? $tp['subject'] ?? '');
@@ -505,7 +515,7 @@ function hs_contact_to_lead(array $contact): ?array {
             'phone'           => $phone,
             'pax'             => $pax,
             'period'          => $period,
-            'destination'     => $destRaw ? hs_map_destination(explode(';', $destRaw)[0]) : '',
+            'destination'     => hs_classify_type($destRaw, $activities, $accomLevel),
             'initial_request' => implode("\n", $lines),
             'notes'           => "HubSpot Reconversion | Contact: $hsId | Form: $formName",
             'raw_data'        => $p,
@@ -525,7 +535,7 @@ function hs_contact_to_lead(array $contact): ?array {
         if (!$hasIbotFields && ($pax || $message)) $source = 'Form';
     }
 
-    $destNorm = $destRaw ? hs_map_destination(explode(';', $destRaw)[0]) : '';
+    $destNorm = hs_classify_type($destRaw, $activities, $accomLevel);
 
     // Build initial_request
     $lines = ["--- HubSpot $source ---"];
