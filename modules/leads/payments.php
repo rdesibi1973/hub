@@ -696,14 +696,21 @@ function xlRender(td, d) {
   }[d.status] || ['—', ''];
   td.innerHTML = '<span class="xl-none" title="' + esc(msg[1]) + '">' + esc(msg[0]) + '</span>' + refresh;
 }
-function xlLoad(td, force) {
+// On a (usually transient) error, retry once by itself after 2 seconds.
+function xlLoad(td, force, retried) {
   td.innerHTML = '<span class="xl-wait">…</span>';
   return fetch('payments.php', {
     method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'},
     body:'action=excel_payments&request_id=' + td.getAttribute('data-reqid') + (force ? '&force=1' : '')
   }).then(function(r){ return r.json(); })
-    .then(function(d){ xlRender(td, d); })
-    .catch(function(e){ xlRender(td, {ok:false, msg:e.message}); });
+    .catch(function(e){ return {ok:false, msg:e.message}; })
+    .then(function(d){
+      if (!d.ok && !retried) {
+        return new Promise(function(res){ setTimeout(res, 2000); })
+          .then(function(){ return xlLoad(td, force, true); });
+      }
+      xlRender(td, d);
+    });
 }
 (function() {
   var queue = Array.prototype.slice.call(document.querySelectorAll('td.col-excel'));

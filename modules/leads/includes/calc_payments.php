@@ -31,6 +31,22 @@ const CP_MAX_ROW = 40;
 const CP_COLS = ['A','B','C','D','E','F','G','H','I','J','K','L'];
 const CP_LABEL_COLS = 7;   // payment labels are looked for in A–G only
 
+/**
+ * Run a Dropbox call, retrying transient failures (HTTP 429 rate limit, 5xx,
+ * network errors) — the Payments page fires several lookups in parallel.
+ */
+function cp_retry(callable $fn, int $tries = 3) {
+    for ($i = 1; ; $i++) {
+        try {
+            return $fn();
+        } catch (RuntimeException $e) {
+            $transient = preg_match('/HTTP (0|429|5\d\d)\b/', $e->getMessage());
+            if (!$transient || $i >= $tries) throw $e;
+            usleep($i * 1500000);   // 1.5s, 3s
+        }
+    }
+}
+
 /** Files in a Dropbox folder with their revision: [['name'=>..,'rev'=>..], …]. */
 function cp_list_files(string $token, string $path): array {
     $out = []; $cursor = null;
@@ -290,7 +306,7 @@ function cp_payments_for_request(PDO $db, array $r, bool $force = false): array 
     if ($rel === '') return $save(['status' => 'nofolder', 'lines' => []], null, null);
 
     require_once __DIR__ . '/../dropbox_helper.php';
-    $token = dropbox_get_access_token();
+    $token = cp_retry(fn() => dropbox_get_access_token());
 
     // The booking folder; for a GRP member the Calc is one level up (group folder).
     $dirs = ['/' . $rel];
@@ -300,7 +316,7 @@ function cp_payments_for_request(PDO $db, array $r, bool $force = false): array 
     }
     $calc = null; $dir = null;
     foreach ($dirs as $d) {
-        $calc = cp_pick_calc(cp_list_files($token, $d));
+        $calc = cp_pick_calc(cp_retry(fn() => cp_list_files($token, $d)));
         if ($calc) { $dir = $d; break; }
     }
     if (!$calc) return $save(['status' => 'nocalc', 'lines' => []], null, null);
@@ -312,7 +328,7 @@ function cp_payments_for_request(PDO $db, array $r, bool $force = false): array 
         return $cached;
     }
 
-    $bytes = dropbox_download_text($token, $file);
+    $bytes = cp_retry(fn() => dropbox_download_text($token, $file));
     if ($bytes === null || $bytes === '') return $save(['status' => 'nocalc', 'lines' => []], null, null);
     $tmp = tempnam(sys_get_temp_dir(), 'paycalc_');
     file_put_contents($tmp, $bytes);
