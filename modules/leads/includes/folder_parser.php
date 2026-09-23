@@ -118,6 +118,17 @@ function folder_payment_status(array $row): string {
 }
 
 /**
+ * Client-facing email subject from a folder name: everything up to and
+ * including the _END{DD}{MMM}{YYYY} tag, dropping the internal suffixes
+ * after it (_BALANCE, _PAID, _CK …). Folder returned as-is if it has no END tag.
+ */
+function folder_mail_subject(string $folder): string {
+    $folder = trim($folder);
+    if (preg_match('/^(.*?_END\d{1,2}[A-Za-z]{3}\d{4})/', $folder, $m)) return $m[1];
+    return $folder;
+}
+
+/**
  * Strip a trailing status/document token from a confirmed-group folder name,
  * returning the "stem" that is stable across status changes.
  * e.g. "..._END09MAR2027_CONFIRMED" and "..._END09MAR2027_PROVISIONAL"

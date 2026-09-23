@@ -453,6 +453,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array($act, ['change_status', 'r
             }
         }
     }
+    // Rename posted from the Payments page: go back there with its filters.
+    if (($_POST['return_to'] ?? '') === 'payments') {
+        parse_str((string)($_POST['return_qs'] ?? ''), $rq);
+        $rq = array_intersect_key($rq, array_flip(['agent', 'status', 'window', 'q']));
+        header('Location: payments.php' . ($rq ? '?' . http_build_query($rq) : ''));
+        exit;
+    }
     $qs = array_filter([
         'q'        => trim($_POST['q'] ?? ''),
         'root'     => trim($_POST['root'] ?? ''),

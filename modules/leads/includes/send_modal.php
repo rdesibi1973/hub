@@ -188,7 +188,7 @@ ksort($tpl_by_cat);
     document.getElementById('paramsOverlay').style.display = 'none';
     var finalSubject = substituteParams(_pendingSubject, values);
     var finalBody    = substituteParams(_pendingBody, values);
-    document.getElementById('send_subject').value = finalSubject;
+    if (finalSubject) document.getElementById('send_subject').value = finalSubject;
     if (sendQuill) {
       sendQuill.root.innerHTML = '';
       sendQuill.clipboard.dangerouslyPasteHTML(0, finalBody);
@@ -200,12 +200,12 @@ ksort($tpl_by_cat);
   };
 
   // ── Open/close send modal ───────────────────────────────────────────────────
-  window.openSend = function(id, customer, to) {
+  window.openSend = function(id, customer, to, subject) {
     document.getElementById('send_req_id').value        = id;
     document.getElementById('sendCustomer').textContent = customer;
     document.getElementById('send_to').value            = to || '';
     document.getElementById('send_tpl').value           = '';
-    document.getElementById('send_subject').value       = '';
+    document.getElementById('send_subject').value       = subject || '';
     document.getElementById('sendAlert').style.display  = 'none';
     document.getElementById('btnSend').disabled         = false;
     document.getElementById('btnSend').textContent      = '✉ Send Email';
@@ -238,7 +238,7 @@ ksort($tpl_by_cat);
       if (params.length > 0) {
         showParamsModal(tpl_name, d.subject, d.body, params);
       } else {
-        document.getElementById('send_subject').value = d.subject;
+        if (d.subject) document.getElementById('send_subject').value = d.subject;
         if (sendQuill) {
           sendQuill.root.innerHTML = '';
           sendQuill.clipboard.dangerouslyPasteHTML(0, d.body || '');

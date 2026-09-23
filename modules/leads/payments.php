@@ -9,6 +9,8 @@ $cu   = current_user();
 $stmt = db()->prepare("SELECT agent_id FROM users WHERE id=?");
 $stmt->execute([$cu['id']]);
 $my_agent_id = (int)($stmt->fetchColumn() ?: 0);
+// Rename / BackOffice links: BackOffice is admin + manager only.
+$canManage = in_array($cu['role_name'] ?? '', ['admin', 'manager'], true);
 
 // Payment statuses that count as "not yet settled".
 const UNPAID_STATUSES = ['Deposit', 'Balance', 'Balance-Cash'];
@@ -140,7 +142,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 $agents = db()->query("SELECT id, name FROM agents WHERE active=1 ORDER BY name")->fetchAll(PDO::FETCH_ASSOC);
 
 $rows = db()->query(
-    "SELECT r.id, r.customer_name, r.email, r.destination, r.pax,
+    "SELECT r.id, r.customer_name, r.destination, r.pax,
+            -- Bookings imported from a Dropbox folder have no email: fall back to
+            -- the latest email on another request for the same client.
+            COALESCE(NULLIF(TRIM(r.email), ''),
+                     (SELECT r2.email FROM requests r2
+                       WHERE r2.customer_name = r.customer_name
+                         AND r2.email IS NOT NULL AND TRIM(r2.email) <> ''
+                       ORDER BY r2.id DESC LIMIT 1)) AS email,
             r.group_folder, r.practice_code, r.period, r.status, r.agent_id,
             r.source, r.payment_status, r.date_received, r.confirmation_date, r.dropbox_url,
             a.name AS agent_name,
@@ -268,6 +277,7 @@ $extra_css  = '
 .m-input:focus{outline:none;border-color:var(--red)}
 .note-card{background:var(--off-white);border-radius:7px;padding:12px 16px;margin-bottom:10px;border-left:3px solid var(--grey-lt)}
 .note-card.email-sent{border-left-color:var(--navy,#1a3a5c)}
+.folder-actions a{font-size:.68rem;text-decoration:none;margin-right:8px;white-space:nowrap}
 .note-card.manual{border-left-color:#e0a800}
 .attach-chip{display:inline-flex;align-items:center;gap:4px;background:var(--off-white);border:1px solid var(--grey-lt);border-radius:4px;padding:2px 8px;font-size:.72rem;margin:2px}
 .attach-chip button{background:none;border:none;cursor:pointer;color:var(--red);font-size:.9rem;line-height:1;padding:0 1px}
@@ -378,6 +388,10 @@ include 'includes/header.php';
                   if ($sub !== '' && strcasecmp($sub, $folderMain) !== 0) $folderSub = $sub;
               }
           }
+          // Client email subject: the client's own folder (practice_code) when it
+          // carries dates, else the main folder — cut at the END date.
+          $pc          = trim($r['practice_code'] ?? '');
+          $mailSubject = folder_mail_subject(stripos($pc, '_END') !== false ? $pc : $folderMain);
       ?>
         <tr class="pay-row<?= $isGrp ? ' grp' : '' ?>" style="cursor:pointer"
             onclick="openRequest(<?= (int)$r['id'] ?>)"
@@ -403,12 +417,40 @@ include 'includes/header.php';
             <?php if ($folderSub !== ''): ?>
               <div style="color:var(--grey-mid);margin-top:2px">↳ <?= h($folderSub) ?></div>
             <?php endif; ?>
-            <?php $sPath = savannah_local_path($r); $sUrl = savannah_open_url($r); ?>
-            <?php if ($sPath !== ''): ?>
-              <div style="margin-top:3px;font-family:'Open Sans',sans-serif">
-                <a href="<?= h($sUrl) ?>" onclick="event.stopPropagation()" title="Open in Windows Explorer" style="font-size:.68rem;text-decoration:none">📂 Open</a>
-                <a href="#" class="copy-path" data-path="<?= h($sPath) ?>" onclick="event.stopPropagation();copyPath(this);return false" title="Copy Windows path" style="font-size:.68rem;text-decoration:none;margin-left:8px">📋 Copy path</a>
+            <?php
+              $sPath = savannah_local_path($r); $sUrl = savannah_open_url($r);
+              // Same folder BackOffice renames: the shared parent for a GRP, else its own.
+              $boFolder = $gf !== '' ? $gf : trim($r['practice_code'] ?? '');
+            ?>
+            <div class="folder-actions" onclick="event.stopPropagation()" style="margin-top:3px;font-family:'Open Sans',sans-serif">
+              <a href="request_view.php?id=<?= (int)$r['id'] ?>" target="_blank" title="Open the booking request in the Hub">🔗 Open Request</a>
+              <?php if ($sPath !== ''): ?>
+                <a href="<?= h($sUrl) ?>" title="Open in Windows Explorer">📂 Open</a>
+                <a href="#" data-path="<?= h($sPath) ?>" onclick="copyPath(this);return false" title="Copy Windows path">📋 Copy path</a>
+              <?php endif; ?>
+              <?php if ($boFolder !== ''): ?>
+                <a href="#" data-path="<?= h($boFolder) ?>" onclick="copyPath(this);return false" title="Copy the folder name (to paste into an email)">📄 Copy folder name</a>
+                <?php if ($canManage): ?>
+                  <a href="#" onclick="toggleRename(<?= (int)$r['id'] ?>);return false" title="Rename the Dropbox folder">✏ Rename…</a>
+                  <a href="backoffice.php?<?= h(http_build_query(['q' => $r['customer_name'], 'root' => 'All', 'show_all' => '1'])) ?>" target="_blank" title="Open in BackOffice search (status change, re-group, rollback…)">⚙ BackOffice</a>
+                <?php endif; ?>
+              <?php endif; ?>
+            </div>
+            <?php if ($canManage && $boFolder !== ''): ?>
+            <form method="POST" action="backoffice.php" id="rn<?= (int)$r['id'] ?>" onclick="event.stopPropagation()"
+                  style="display:none;margin-top:6px"
+                  onsubmit="return confirm('<?= $gf !== '' ? 'GROUP: this renames the shared group folder and updates ALL its bookings.\\n\\n' : '' ?>Rename the real Dropbox folder to the new name?');">
+              <input type="hidden" name="action" value="rename">
+              <input type="hidden" name="request_id" value="<?= (int)$r['id'] ?>">
+              <input type="hidden" name="return_to" value="payments">
+              <input type="hidden" name="return_qs" value="<?= h($_SERVER['QUERY_STRING'] ?? '') ?>">
+              <input type="text" name="new_name" value="<?= h($boFolder) ?>" spellcheck="false"
+                     style="width:100%;font-family:monospace;font-size:.72rem;padding:5px 7px;border:1.5px solid var(--grey-lt);border-radius:5px">
+              <div style="margin-top:4px;display:flex;gap:6px">
+                <button type="submit" class="btn btn-red btn-sm">Rename</button>
+                <button type="button" class="btn btn-outline btn-sm" onclick="toggleRename(<?= (int)$r['id'] ?>)">Cancel</button>
               </div>
+            </form>
             <?php endif; ?>
           </td>
           <td style="text-align:center"><?= (int)$r['pax'] ?></td>
@@ -424,7 +466,7 @@ include 'includes/header.php';
           </td>
           <td style="text-align:right;white-space:nowrap">
             <button type="button" class="btn btn-outline btn-sm" title="Add / view payment notes" onclick="event.stopPropagation();openNotes(<?= (int)$r['id'] ?>, '<?= addslashes(h($r['customer_name'])) ?>')">📝 Note</button>
-            <button type="button" class="btn btn-outline btn-sm" title="Email the client" onclick="event.stopPropagation();openSend(<?= (int)$r['id'] ?>, '<?= addslashes(h($r['customer_name'])) ?>', '<?= addslashes(h($r['email'] ?? '')) ?>')">✉ Mail</button>
+            <button type="button" class="btn btn-outline btn-sm" title="Email the client" onclick="event.stopPropagation();openSend(<?= (int)$r['id'] ?>, '<?= addslashes(h($r['customer_name'])) ?>', '<?= addslashes(h($r['email'] ?? '')) ?>', '<?= addslashes(h($mailSubject)) ?>')">✉ Mail</button>
             <button type="button" class="btn btn-outline btn-sm" title="Remind the sales agent" onclick="event.stopPropagation();openSend(<?= (int)$r['id'] ?>, '<?= addslashes(h($r['customer_name'])) ?>', '<?= addslashes(h($r['agent_email'] ?? '')) ?>')">✉ Reminder</button>
           </td>
         </tr>
@@ -477,6 +519,10 @@ function fallbackCopy(t, el) {
   document.body.appendChild(ta); ta.select();
   try { document.execCommand('copy'); flashCopied(el); } catch (e) { prompt('Copy this path:', t); }
   document.body.removeChild(ta);
+}
+function toggleRename(id) {
+  var f = document.getElementById('rn' + id);
+  if (f) f.style.display = (f.style.display === 'none' || !f.style.display) ? 'block' : 'none';
 }
 function flashCopied(el) { var o = el.textContent; el.textContent = '✓ Copied'; setTimeout(function(){ el.textContent = o; }, 1200); }
 
