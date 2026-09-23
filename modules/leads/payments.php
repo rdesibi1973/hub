@@ -139,6 +139,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         exit;
     }
 
+    // ── Deposit / Balance notes from the booking's *_Calc.xlsx (cached) ──────
+    if ($action === 'excel_payments') {
+        require_once 'includes/calc_payments.php';
+        $st = db()->prepare("SELECT id, customer_name, practice_code, group_folder, dropbox_url FROM requests WHERE id=?");
+        $st->execute([(int)($_POST['request_id'] ?? 0)]);
+        $req = $st->fetch(PDO::FETCH_ASSOC);
+        if (!$req) { echo json_encode(['ok'=>false,'msg'=>'Request not found.']); exit; }
+        // Release the session lock so the page's parallel Excel lookups really run in parallel.
+        session_write_close();
+        try {
+            $res = cp_payments_for_request(db(), $req, !empty($_POST['force']));
+            echo json_encode(['ok'=>true] + $res, JSON_UNESCAPED_UNICODE);
+        } catch (Throwable $e) {
+            echo json_encode(['ok'=>false,'msg'=>$e->getMessage()]);
+        }
+        exit;
+    }
+
     echo json_encode(['ok'=>false,'msg'=>'Unknown action']); exit;
 }
 
@@ -286,6 +304,13 @@ $extra_css  = '
 .m-input:focus{outline:none;border-color:var(--red)}
 .note-card{background:var(--off-white);border-radius:7px;padding:12px 16px;margin-bottom:10px;border-left:3px solid var(--grey-lt)}
 .note-card.email-sent{border-left-color:var(--navy,#1a3a5c)}
+.col-excel{font-size:.74rem;line-height:1.35}
+.col-excel .xl-line{white-space:nowrap}
+.col-excel .xl-kind{font-weight:700;display:inline-block;min-width:26px}
+.col-excel .xl-paid{color:#1A6B3A}
+.col-excel .xl-open{color:#B26A00}
+.col-excel .xl-none,.col-excel .xl-wait{color:var(--grey-mid)}
+.col-excel .xl-refresh{color:var(--grey-mid);text-decoration:none;font-size:.7rem;margin-left:4px}
 .folder-actions a{font-size:.68rem;text-decoration:none;margin-right:8px;white-space:nowrap}
 .note-card.manual{border-left-color:#e0a800}
 .attach-chip{display:inline-flex;align-items:center;gap:4px;background:var(--off-white);border:1px solid var(--grey-lt);border-radius:4px;padding:2px 8px;font-size:.72rem;margin:2px}
@@ -371,6 +396,7 @@ include 'includes/header.php';
           <th style="width:44px;text-align:center">Pax</th>
           <th style="width:110px;text-align:center" title="Date the booking was confirmed">Confirmed</th>
           <th style="width:120px;text-align:center">Status</th>
+          <th style="min-width:200px" title="Deposit / Balance notes from the Calc Excel">Excel</th>
           <th class="col-note">Latest note</th>
           <th style="width:220px;text-align:right">Action</th>
         </tr>
@@ -479,6 +505,7 @@ include 'includes/header.php';
             <?php endif; ?>
           </td>
           <td style="text-align:center"><span class="badge <?= $psCls ?>"><?= h($ps) ?></span></td>
+          <td class="col-excel" data-reqid="<?= (int)$r['id'] ?>" onclick="event.stopPropagation()"><span class="xl-wait">…</span></td>
           <td class="col-note">
             <?php if ($r['note_count'] > 0): ?>
               <span class="note-preview" title="<?= h(strip_tags($r['last_note'] ?? '')) ?>"><?= h(mb_strimwidth(strip_tags($r['last_note'] ?? ''), 0, 60, '…')) ?></span>
@@ -635,6 +662,53 @@ function updateNoteBadge(reqId, count, lastBody) {
 window.onEmailSent = function(reqId, subject, d) {
   if (d && d.note_count) updateNoteBadge(reqId, d.note_count, '📧 ' + subject);
 };
+
+// ── Excel column: Deposit / Balance notes from the Calc, loaded in background ──
+var XL_KIND = {Dep: 'Dep', Bal: 'Bal', Tot: 'Tot'};
+function xlIsPaid(note) {
+  return /\b(paid|pagato|received|ricevuto)\b/i.test(note) && !/(to be paid|not paid|unpaid|da pagare)/i.test(note);
+}
+function xlRender(td, d) {
+  var id = td.getAttribute('data-reqid');
+  var refresh = ' <a href="#" class="xl-refresh" title="Re-read the Excel now" onclick="xlLoad(this.parentNode, true);return false">↻</a>';
+  if (!d || !d.ok) {
+    td.innerHTML = '<span class="xl-none" title="' + esc(d && d.msg || 'Error') + '">⚠ error</span>' + refresh;
+    return;
+  }
+  var src = (d.file || '') + (d.sheet ? ' › ' + d.sheet : '');
+  if (d.status === 'ok' && d.lines.length) {
+    td.innerHTML = d.lines.map(function(l) {
+      var amt  = l.amount != null ? Math.round(l.amount).toLocaleString('en-US') : '';
+      var note = l.note || '';
+      var cls  = note === '' ? 'xl-none' : (xlIsPaid(note) ? 'xl-paid' : 'xl-open');
+      return '<div class="xl-line ' + cls + '" title="' + esc(l.label + ' — ' + src) + '">' +
+             '<span class="xl-kind">' + esc(XL_KIND[l.kind] || l.kind) + '</span> ' + esc(amt) +
+             (note ? ' · ' + esc(note) : '') + '</div>';
+    }).join('') + refresh;
+    return;
+  }
+  var msg = {
+    ambiguous: ['⚠ which sheet?', 'Several quote sheets and none marked CONF: ' + (d.sheets || []).join(', ')],
+    nocalc:    ['no Calc', 'No *_Calc.xlsx in the folder'],
+    nofolder:  ['—', 'No Dropbox folder linked'],
+    none:      ['no Deposit/Balance', 'No Deposit / Balance rows in ' + src]
+  }[d.status] || ['—', ''];
+  td.innerHTML = '<span class="xl-none" title="' + esc(msg[1]) + '">' + esc(msg[0]) + '</span>' + refresh;
+}
+function xlLoad(td, force) {
+  td.innerHTML = '<span class="xl-wait">…</span>';
+  return fetch('payments.php', {
+    method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'},
+    body:'action=excel_payments&request_id=' + td.getAttribute('data-reqid') + (force ? '&force=1' : '')
+  }).then(function(r){ return r.json(); })
+    .then(function(d){ xlRender(td, d); })
+    .catch(function(e){ xlRender(td, {ok:false, msg:e.message}); });
+}
+(function() {
+  var queue = Array.prototype.slice.call(document.querySelectorAll('td.col-excel'));
+  function next() { var td = queue.shift(); if (td) xlLoad(td).then(next); }
+  for (var i = 0; i < 4; i++) next();   // 4 parallel Dropbox lookups
+})();
 
 function esc(s) { return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 </script>
