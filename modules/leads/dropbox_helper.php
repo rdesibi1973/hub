@@ -425,6 +425,51 @@ function dropbox_search_folders(string $token, string $query, string $scopePath 
     return $out;
 }
 
+/**
+ * Search Dropbox for FILES whose name matches $query (filename only, not content).
+ * Same search_v2 index as dropbox_search_folders(), so very new files can lag.
+ *
+ * @param  string $scopePath  Subtree to search, e.g. '/001_Safari' ('' = whole Dropbox)
+ * @return array<int,array{name:string,path:string}>
+ */
+function dropbox_search_files(string $token, string $query, string $scopePath = '', int $max = 100): array {
+    $options = [
+        'filename_only' => true,
+        'max_results'   => max(1, min($max, 1000)),
+    ];
+    if ($scopePath !== '') $options['path'] = rtrim($scopePath, '/');
+
+    $ch = curl_init('https://api.dropboxapi.com/2/files/search_v2');
+    curl_setopt_array($ch, [
+        CURLOPT_POST           => true,
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_HTTPHEADER     => [
+            'Authorization: Bearer ' . $token,
+            'Content-Type: application/json',
+        ],
+        CURLOPT_POSTFIELDS => json_encode(['query' => $query, 'options' => $options]),
+    ]);
+    $body = curl_exec($ch);
+    $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+
+    if ($code !== 200) {
+        throw new RuntimeException("Dropbox search_v2 failed (HTTP $code): $body");
+    }
+    $data = json_decode($body, true) ?? [];
+    $out  = [];
+    foreach ($data['matches'] ?? [] as $match) {
+        $meta = $match['metadata']['metadata'] ?? [];
+        if (($meta['.tag'] ?? '') === 'file') {
+            $out[] = [
+                'name' => $meta['name'] ?? '',
+                'path' => $meta['path_display'] ?? '',
+            ];
+        }
+    }
+    return $out;
+}
+
 function dropbox_find_folder(string $token, string $folderName): ?string {
     $ch = curl_init('https://api.dropboxapi.com/2/files/search_v2');
     curl_setopt_array($ch, [

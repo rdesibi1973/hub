@@ -464,6 +464,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array($act, ['change_status', 'r
         'q'        => trim($_POST['q'] ?? ''),
         'root'     => trim($_POST['root'] ?? ''),
         'show_all' => !empty($_POST['show_all']) ? '1' : '',
+        'in_files' => !empty($_POST['in_files']) ? '1' : '',
     ], fn($x) => $x !== '');
     header('Location: backoffice.php' . ($qs ? '?' . http_build_query($qs) : ''));
     exit;
@@ -500,6 +501,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'regro
         'q'        => trim($_POST['q'] ?? ''),
         'root'     => trim($_POST['root'] ?? ''),
         'show_all' => !empty($_POST['show_all']) ? '1' : '',
+        'in_files' => !empty($_POST['in_files']) ? '1' : '',
     ], fn($x) => $x !== '');
     header('Location: backoffice.php' . ($qs ? '?' . http_build_query($qs) : ''));
     exit;
@@ -531,7 +533,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'
     $_GET['q']        = trim($_POST['q'] ?? '');
     $_GET['root']     = trim($_POST['root'] ?? '2026');
     $_GET['show_all'] = !empty($_POST['show_all']) ? '1' : '';
-    $backQs = http_build_query(array_filter(['q'=>$_GET['q'], 'root'=>$_GET['root'], 'show_all'=>$_GET['show_all']]));
+    $_GET['in_files'] = !empty($_POST['in_files']) ? '1' : '';
+    $backQs = http_build_query(array_filter(['q'=>$_GET['q'], 'root'=>$_GET['root'], 'show_all'=>$_GET['show_all'], 'in_files'=>$_GET['in_files']]));
 
     $stmt = $db->prepare("SELECT id, customer_name, practice_code, group_folder, dropbox_url, status, payment_status
                           FROM requests WHERE id = ?");
@@ -783,6 +786,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'rollb
         'q'        => trim($_POST['q'] ?? ''),
         'root'     => trim($_POST['root'] ?? ''),
         'show_all' => !empty($_POST['show_all']) ? '1' : '',
+        'in_files' => !empty($_POST['in_files']) ? '1' : '',
     ], fn($x) => $x !== ''));
 
     $stmt = $db->prepare("SELECT id, customer_name, practice_code, group_folder, dropbox_url, pre_confirm_json
@@ -889,14 +893,76 @@ $CONTRACTS_ROOT = '/000_Contracts';
 $q       = trim($_GET['q'] ?? '');
 $root    = $_GET['root'] ?? '2026';
 $showAll = !empty($_GET['show_all']);   // include Cancelled/Lost bookings too
+$inFiles = !empty($_GET['in_files']);   // search file names inside the folders (Dropbox)
 if ($root !== 'All' && $root !== 'Contracts' && !isset($ROOT_MAP[$root])) $root = '2026';
 
 $rows          = [];   // booking rows (from requests table)
 $contractRows  = [];   // contract folders (from Dropbox search)
+$fileHits      = [];   // request id => [file, …]   (file-name search)
+$orphanFiles   = [];   // matched files not inside any known booking folder
 $searchError   = '';
 $isContracts   = ($root === 'Contracts');
 
-if ($q !== '' && $isContracts) {
+if ($q !== '' && $inFiles) {
+    // ── File-name search: find files in Dropbox, then map each to the booking
+    //    whose folder (practice_code / group_folder) appears in the file's path.
+    //    The status/root DB filters are NOT applied: the folder was found directly.
+    require_once 'dropbox_helper.php';
+    $scope = $isContracts ? $CONTRACTS_ROOT
+           : (isset($ROOT_MAP[$root]) ? rtrim(substr($ROOT_MAP[$root], strlen('/home')), '/') : '');
+    try {
+        $token = dropbox_get_access_token();
+        $files = dropbox_search_files($token, $q, $scope, 100);
+    } catch (Throwable $e) {
+        $files       = [];
+        $searchError = 'Dropbox search failed: ' . $e->getMessage();
+    }
+
+    // Folder segments of every matched file's path (root and file name excluded).
+    $segs = [];
+    foreach ($files as $i => $f) {
+        $parts = array_values(array_filter(explode('/', $f['path']), 'strlen'));
+        $files[$i]['dirs'] = array_slice($parts, 1, -1);
+        foreach ($files[$i]['dirs'] as $d) $segs[mb_strtolower($d)] = $d;
+    }
+
+    // lowercase folder name => [request id, …], by booking folder and by GRP folder
+    $byFolder = ['practice_code' => [], 'group_folder' => []];
+    if (!$isContracts && $segs) {
+        $in   = implode(',', array_fill(0, count($segs), '?'));
+        $vals = array_values($segs);
+        $stmt = $db->prepare(
+            "SELECT r.id, r.customer_name, r.practice_code, r.group_folder, r.status, r.payment_status,
+                    r.dropbox_url, r.pre_confirm_json, a.name AS agent_name
+             FROM requests r LEFT JOIN agents a ON a.id = r.agent_id
+             WHERE r.practice_code IN ($in) OR r.group_folder IN ($in)
+             ORDER BY r.id DESC LIMIT 60");
+        $stmt->execute(array_merge($vals, $vals));
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $rows[] = $r;
+            foreach (['practice_code', 'group_folder'] as $col) {
+                $k = mb_strtolower(trim($r[$col] ?? ''));
+                if ($k !== '') $byFolder[$col][$k][] = (int)$r['id'];
+            }
+        }
+    }
+
+    foreach ($files as $f) {
+        // A member's own folder wins; only a file loose in the GRP folder itself
+        // is attributed to every member of the group.
+        $ids = [];
+        foreach (['practice_code', 'group_folder'] as $col) {
+            foreach ($f['dirs'] as $d) {
+                foreach ($byFolder[$col][mb_strtolower($d)] ?? [] as $id) $ids[$id] = true;
+            }
+            if ($ids) break;
+        }
+        if (!$ids) { $orphanFiles[] = $f; continue; }
+        foreach (array_keys($ids) as $id) $fileHits[$id][] = $f;
+    }
+    // Only keep bookings that actually hold a matched file.
+    $rows = array_values(array_filter($rows, fn($r) => isset($fileHits[(int)$r['id']])));
+} elseif ($q !== '' && $isContracts) {
     // ── Contracts: recursive Dropbox folder search ─────────────────────────────
     require_once 'dropbox_helper.php';
     try {
@@ -972,6 +1038,10 @@ include 'includes/header.php';
     <label style="font-weight:400;font-size:.82rem;display:flex;align-items:center;gap:6px;white-space:nowrap">
       <input type="checkbox" name="show_all" value="1" <?= $showAll?'checked':'' ?>> Show cancelled / lost
     </label>
+    <label style="font-weight:400;font-size:.82rem;display:flex;align-items:center;gap:6px;white-space:nowrap;margin-top:4px"
+           title="Search Dropbox for a FILE with this name (e.g. INV-002461) and show the folder that contains it">
+      <input type="checkbox" name="in_files" value="1" <?= $inFiles?'checked':'' ?>> Search file names (inside folders)
+    </label>
   </div>
   <div>
     <label>&nbsp;</label>
@@ -983,7 +1053,7 @@ include 'includes/header.php';
   <?php if ($searchError): ?>
     <div class="bo-note" style="background:#fbeaea;border-left-color:#a33;color:#a33"><?= h($searchError) ?></div>
   <?php endif; ?>
-  <?php if ($isContracts): ?>
+  <?php if ($isContracts && !$inFiles): ?>
     <?php if (!$contractRows): ?>
       <?php if (!$searchError): ?><p style="color:var(--grey-mid);padding:20px">No matching contract folders under <?= h($CONTRACTS_ROOT) ?> (subfolders included).</p><?php endif; ?>
     <?php else: ?>
@@ -1015,7 +1085,11 @@ include 'includes/header.php';
     <?php endif; ?>
   <?php else: ?>
   <?php if (!$rows): ?>
-    <p style="color:var(--grey-mid);padding:20px">No matching bookings.</p>
+    <?php if (!$searchError && !$orphanFiles): ?>
+    <p style="color:var(--grey-mid);padding:20px"><?= $inFiles
+        ? 'No file named like this in Dropbox' . ($isContracts ? ' under ' . h($CONTRACTS_ROOT) : ($root !== 'All' ? ' under ' . h($root) : '')) . ' (files added in the last hour may not be indexed yet).'
+        : 'No matching bookings.' ?></p>
+    <?php endif; ?>
   <?php else: ?>
   <datalist id="bo-grp-names">
     <?php foreach ($existingGrps as $g): ?><option value="<?= h($g) ?>"></option><?php endforeach; ?>
@@ -1061,6 +1135,10 @@ include 'includes/header.php';
         </td>
         <td class="bo-folder">
           📁 <?= h($folder ?: '—') ?><?php if ($isGrp): ?><span class="bo-grp">GRP</span><?php endif; ?>
+          <?php foreach ($fileHits[(int)$r['id']] ?? [] as $fh): ?>
+            <div style="font-size:.7rem;color:#1A6B3A;margin-top:2px" title="<?= h($fh['path']) ?>">📄 <?= h($fh['name']) ?>
+              <span style="color:var(--grey-mid)">— in <?= h(implode(' / ', $fh['dirs'])) ?></span></div>
+          <?php endforeach; ?>
           <?php $sPath = savannah_local_path($r); $sUrl = savannah_open_url($r); ?>
           <div style="margin-top:3px;font-family:'Open Sans',sans-serif">
             <a href="request_view.php?id=<?= (int)$r['id'] ?>" target="_blank" title="Open the booking request in the Hub" style="font-size:.68rem;text-decoration:none">🔗 Open Request</a>
@@ -1091,6 +1169,7 @@ include 'includes/header.php';
             <input type="hidden" name="q" value="<?= h($q) ?>">
             <input type="hidden" name="root" value="<?= h($root) ?>">
             <input type="hidden" name="show_all" value="<?= $showAll ? '1' : '' ?>">
+            <input type="hidden" name="in_files" value="<?= $inFiles ? '1' : '' ?>">
             <div style="font-size:.68rem;color:var(--grey-mid);margin-bottom:4px">Now: <?= $curGrp !== '' ? 'group “' . h($curGrp) . '”' : 'private (no group)' ?></div>
             <select name="regroup_type" onchange="var g=document.getElementById('rgn<?= (int)$r['id'] ?>');g.style.display=this.value==='grp'?'block':'none'" style="font-size:.72rem;padding:3px 5px;margin-bottom:4px">
               <option value="grp"<?= $curGrp!==''?' selected':'' ?>>Group (join existing / create new)</option>
@@ -1113,6 +1192,7 @@ include 'includes/header.php';
             <input type="hidden" name="q" value="<?= h($q) ?>">
             <input type="hidden" name="root" value="<?= h($root) ?>">
             <input type="hidden" name="show_all" value="<?= $showAll ? '1' : '' ?>">
+            <input type="hidden" name="in_files" value="<?= $inFiles ? '1' : '' ?>">
             <input type="text" name="new_name" value="<?= h($folder) ?>" spellcheck="false"
                    style="width:100%;font-family:monospace;font-size:.72rem;padding:5px 7px;border:1.5px solid var(--grey-lt);border-radius:5px">
             <div style="margin-top:4px;display:flex;gap:6px">
@@ -1130,6 +1210,7 @@ include 'includes/header.php';
             <input type="hidden" name="q" value="<?= h($q) ?>">
             <input type="hidden" name="root" value="<?= h($root) ?>">
             <input type="hidden" name="show_all" value="<?= $showAll ? '1' : '' ?>">
+            <input type="hidden" name="in_files" value="<?= $inFiles ? '1' : '' ?>">
             <div style="font-size:.68rem;color:#B26A00;margin-bottom:6px">↩ Move the folder back to <span style="font-family:monospace"><?= h($preRb['path'] ?? '') ?></span> and restore the request to un-booked.</div>
             <div style="display:flex;gap:6px">
               <button type="submit" class="btn btn-red btn-sm">Roll back</button>
@@ -1151,6 +1232,7 @@ include 'includes/header.php';
             <input type="hidden" name="q" value="<?= h($q) ?>">
             <input type="hidden" name="root" value="<?= h($root) ?>">
             <input type="hidden" name="show_all" value="<?= $showAll ? '1' : '' ?>">
+            <input type="hidden" name="in_files" value="<?= $inFiles ? '1' : '' ?>">
             <div style="font-size:.68rem;color:#1A6B3A;font-weight:600;margin-bottom:6px">✅ Confirm Safari — enter dates as in the Excel</div>
             <div style="display:flex;gap:8px;margin-bottom:6px;font-family:'Open Sans',sans-serif">
               <label style="font-size:.66rem;color:var(--grey-mid);flex:1">Booking type
@@ -1211,6 +1293,7 @@ include 'includes/header.php';
                 <input type="hidden" name="q" value="<?= h($q) ?>">
                 <input type="hidden" name="root" value="<?= h($root) ?>">
                 <input type="hidden" name="show_all" value="<?= $showAll ? '1' : '' ?>">
+                <input type="hidden" name="in_files" value="<?= $inFiles ? '1' : '' ?>">
             <?php };
           ?>
           <div style="margin-top:6px;padding:10px;background:#fff;border:1px solid #cfe6d6;border-radius:8px">
@@ -1280,6 +1363,7 @@ include 'includes/header.php';
             <input type="hidden" name="q" value="<?= h($q) ?>">
             <input type="hidden" name="root" value="<?= h($root) ?>">
             <input type="hidden" name="show_all" value="<?= $showAll ? '1' : '' ?>">
+            <input type="hidden" name="in_files" value="<?= $inFiles ? '1' : '' ?>">
             <select name="new_status" class="m-input" style="width:150px;padding:5px 8px;font-size:.8rem">
               <?php foreach (array_keys($STATUS_MAP) as $st): ?>
                 <option value="<?= h($st) ?>"><?= h($st) ?></option>
@@ -1293,6 +1377,32 @@ include 'includes/header.php';
     </tbody>
   </table>
   </div>
+  <?php endif; ?>
+  <?php if ($orphanFiles): ?>
+    <h3 style="font-size:.9rem;margin:22px 0 8px"><?= $isContracts ? 'Matching files' : 'Files not linked to a booking' ?></h3>
+    <div class="table-wrap">
+    <table class="bo-table">
+      <thead><tr><th>File</th><th>Folder</th><th style="width:240px">Actions</th></tr></thead>
+      <tbody>
+      <?php foreach ($orphanFiles as $of):
+          $oDir  = trim(dirname($of['path']), '/');                  // 001_Safari/Foo/Bar
+          $oWin  = '%DROPBOX_HOME%\\' . str_replace('/', '\\', $oDir);
+          $oOpen = 'savannah://open?path=' . implode('/', array_map('rawurlencode', explode('/', $oDir)));
+      ?>
+        <tr>
+          <td class="bo-folder">📄 <?= h($of['name']) ?></td>
+          <td class="bo-folder" style="color:var(--grey-mid)"><?= h($oDir ?: '—') ?></td>
+          <td>
+            <div style="font-family:'Open Sans',sans-serif">
+              <a href="<?= h($oOpen) ?>" title="Open the folder in Windows Explorer" style="font-size:.68rem;text-decoration:none">📂 Open folder</a>
+              <a href="#" data-copy="<?= h($oWin) ?>" onclick="copyPath(this);return false" title="Copy Windows path of the folder" style="font-size:.68rem;text-decoration:none;margin-left:8px">📋 Copy path</a>
+            </div>
+          </td>
+        </tr>
+      <?php endforeach; ?>
+      </tbody>
+    </table>
+    </div>
   <?php endif; ?>
   <?php endif; ?>
 <?php else: ?>
