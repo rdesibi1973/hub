@@ -421,6 +421,16 @@ function onCustomerNameInput() {
     if (!folderUserEdited) updateFolderPreview();
 }
 
+// "MARIO ROSSI" / "mario rossi" → "Mario Rossi". Per word: only words typed
+// all-lower or all-upper are fixed, so "McDonald" is kept. Parts joined by
+// "-" or "'" are capitalised too ("anna-maria d'amico" → "Anna-Maria D'Amico").
+function fixNameCase(name) {
+  return String(name || '').trim().split(/\s+/).map(function (w) {
+    if (w !== w.toLowerCase() && w !== w.toUpperCase()) return w;   // mixed case: keep
+    return w.toLowerCase().replace(/(^|[-'’])(\S)/g, function (m, sep, ch) { return sep + ch.toUpperCase(); });
+  }).join(' ');
+}
+
 function openDrawer(id) {
   const l = LEADS[id];
   if (!l) return;
@@ -433,7 +443,7 @@ function openDrawer(id) {
   // Populate editable name; reset folder state
   currentLeadName = l.customer_name;
   folderUserEdited = false;
-  document.getElementById('customerNameInput').value = l.customer_name;
+  document.getElementById('customerNameInput').value = fixNameCase(l.customer_name);
   document.getElementById('approveAgent').value = '';
   document.getElementById('eleonoraFlag').checked = false;
   document.getElementById('eleonoraAgentHint').textContent = 'Agent';

@@ -114,6 +114,17 @@ $lead->execute([$stagingId]);
 $lead = $lead->fetch();
 if (!$lead) { flash('Lead not found in staging.','error'); header('Location: staging.php'); exit; }
 
+/** "MARIO ROSSI" / "mario rossi" → "Mario Rossi" (mixed-case words kept; "-" and "'" parts capitalised). */
+function fix_name_case(string $name): string {
+    $words = preg_split('/\s+/u', trim($name), -1, PREG_SPLIT_NO_EMPTY);
+    foreach ($words as &$w) {
+        if ($w !== mb_strtolower($w) && $w !== mb_strtoupper($w)) continue; // mixed case: keep
+        $w = preg_replace_callback("/(^|[-'’])(\S)/u",
+            fn($m) => $m[1] . mb_strtoupper($m[2]), mb_strtolower($w));
+    }
+    return implode(' ', $words);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 if ($action === 'approve') {
 
@@ -122,7 +133,9 @@ if ($action === 'approve') {
     if (!$agentId) { flash('Please select an agent.','error'); header('Location: staging.php'); exit; }
 
     // Allow overriding the customer name and folder name from the form
-    $customerName = trim($_POST['customer_name_override'] ?? '') ?: $lead['customer_name'];
+    // An empty field falls back to the lead's name, case-fixed like the form
+    // pre-fill (fixNameCase() in staging.php). A typed name is kept as entered.
+    $customerName = trim($_POST['customer_name_override'] ?? '') ?: fix_name_case($lead['customer_name']);
 
     $dest = trim($_POST['destination'] ?? '') ?: $lead['destination'];
 
