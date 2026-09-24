@@ -15,6 +15,7 @@
 require_once 'config.php';
 require_once 'includes/folder_parser.php';
 require_once 'includes/safari_check.php';
+require_once 'includes/ck_lib.php';
 $pageTitle = 'BackOffice';
 $db = db();
 
@@ -447,6 +448,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array($act, ['change_status', 'r
             try {
                 $token = dropbox_get_access_token();
                 $res   = bo_do_rename($db, $token, $r, $isGrp, $folder, $newFolder, $newStatus, $newPs, $setStatus);
+                if ($res['ok']) {
+                    // CK tracker history: record the stage/_CK change with the user.
+                    try { ck_record_rename($db, $folder, $newFolder, (int)($currentUser['id'] ?? 0) ?: null); }
+                    catch (Throwable $ig) { /* tracking only — the next scan catches it */ }
+                }
                 flash($res['msg'], $res['ok'] ? 'info' : 'error');
             } catch (Throwable $e) {
                 flash('Dropbox/DB error — nothing was changed: ' . $e->getMessage(), 'error');
@@ -1019,6 +1025,7 @@ include 'includes/header.php';
   <h2>🛠 BackOffice — Bookings &amp; folders</h2>
   <div style="display:flex;gap:8px;flex-wrap:wrap">
     <a href="grp_groups.php" class="btn btn-outline btn-sm" title="All GRP group folders in 001_Safari by month, with their confirmed bookings and pax">👥 List GRP groups</a>
+    <a href="ck_tracker.php" class="btn btn-outline btn-sm" title="Confirmed bookings missing the _CK, by days to arrival">✅ Missing CK</a>
     <?php if (($currentUser['role_name'] ?? '') === 'admin'): ?>
     <a href="relink_folders.php" class="btn btn-outline btn-sm" title="Refresh Dropbox links after moving folders to an archive">🔗 Re-link folders (bulk)</a>
     <?php endif; ?>

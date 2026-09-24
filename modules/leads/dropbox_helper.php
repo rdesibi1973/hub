@@ -340,6 +340,52 @@ function dropbox_list_folder(string $token, string $path): array {
 }
 
 /**
+ * Like dropbox_list_folder(), but returns each sub-folder with its Dropbox file
+ * ID ('id:…'), which stays the same when the folder is renamed — so a folder can
+ * be tracked across status/_CK renames.
+ *
+ * @return array<int,array{id:string,name:string}>
+ * @throws RuntimeException on API error
+ */
+function dropbox_list_folder_entries(string $token, string $path): array {
+    $out    = [];
+    $cursor = null;
+    do {
+        if ($cursor) {
+            $url     = 'https://api.dropboxapi.com/2/files/list_folder/continue';
+            $payload = json_encode(['cursor' => $cursor]);
+        } else {
+            $url     = 'https://api.dropboxapi.com/2/files/list_folder';
+            $payload = json_encode(['path' => $path, 'recursive' => false]);
+        }
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_POST           => true,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_HTTPHEADER     => ['Authorization: Bearer ' . $token, 'Content-Type: application/json'],
+            CURLOPT_POSTFIELDS     => $payload,
+        ]);
+        $body = curl_exec($ch);
+        $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        if ($code !== 200) {
+            throw new RuntimeException("Dropbox list_folder failed (HTTP $code): $body");
+        }
+        $data = json_decode($body, true);
+        foreach ($data['entries'] ?? [] as $entry) {
+            if (($entry['.tag'] ?? '') === 'folder' && !empty($entry['id'])) {
+                $out[] = ['id' => $entry['id'], 'name' => $entry['name']];
+            }
+        }
+        $cursor  = $data['cursor']   ?? null;
+        $hasMore = $data['has_more'] ?? false;
+    } while ($hasMore && $cursor);
+
+    return $out;
+}
+
+/**
  * List the sub-folder names of MANY folders at once (parallel curl_multi), for
  * pages that would otherwise make one sequential list_folder call per folder.
  * A folder whose listing fails maps to null; a paged listing (has_more) falls

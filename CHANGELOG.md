@@ -20,6 +20,27 @@ Running log of notable changes and current build state. Module-level "active / p
 
 ---
 
+## 2026-09 — CK tracker (Leads → ✅ CK)
+- New page `modules/leads/ck_tracker.php`, replacing the Java "Groups & CK →
+  Missing CK" (`MissingCK.bat`). Lists every top-level booking folder in
+  `/001_Safari` with days to arrival, stage (Progress → Deposit/Balance/…), days
+  in that stage, and days waiting for the CK since booking finished. Urgency
+  bands for folders without `_CK`: red < 60 days to arrival, amber 60–90
+  (supplier penalties), grey > 90. Tabs: Missing CK / In booking / CK done / All;
+  filters by sales person (sellers default to their own), started trips, other
+  destinations (Kenya/Uganda/… — left out by the old script).
+- **Set CK / Remove CK** renames the Dropbox folder (`…_CK`), syncs the
+  requests (private `practice_code` or GRP members' `group_folder` + url) and
+  records who did it. Anyone with Leads access can use it.
+- History in `ck_folders` / `ck_events` (migration `058_ck_tracking.sql`, also
+  created lazily). Folders are keyed by Dropbox file ID, so renames are tracked.
+  Changes come from a scan of `/001_Safari` on each page visit, from BackOffice
+  status changes (with the user), and from `ck_cron.php?token=…` (MEMO_CRON_TOKEN,
+  or CK_CRON_TOKEN if defined) for the external cron service. The first scan is a
+  baseline: existing stages/CKs show "before tracking".
+- Phase 2 (planned): run the safariagent checks automatically when a folder
+  reaches Deposit/Balance/Balance-Cash, and reset the CK when the booking changes.
+
 ## 2026-09 — Itinerary map: start/end airports + layout (ITI)
 - The map now shows the trip **start and end** — the arrival/departure airport —
   in addition to the overnight stops. Airports are derived from the first/last
