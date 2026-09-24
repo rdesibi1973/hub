@@ -35,8 +35,9 @@ $showOther = !empty($_GET['other']);   // include Kenya/Uganda/… (left out by 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array($_POST['action'] ?? '', ['ck_on', 'ck_off', 'run_check'], true)) {
     try {
         if ($_POST['action'] === 'run_check') {
+            // Shown on the row itself (the page reopens scrolled to it, the top flash is out of view).
             $res = ck_request_check($db, [(int)($_POST['ck_id'] ?? 0)], 'manual');
-            flash($res['msg'], $res['ok'] ? 'info' : 'error');
+            $_SESSION['ck_row_msg'] = ['id' => (int)($_POST['ck_id'] ?? 0)] + $res;
         } else {
             $token = dropbox_get_access_token();
             $res   = ck_set_marker($db, $token, (int)($_POST['ck_id'] ?? 0), $_POST['action'] === 'ck_on', $uid);
@@ -50,6 +51,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array($_POST['action'] ?? '', ['
     header('Location: ck_tracker.php' . ($rq ? '?' . http_build_query($rq) : '') . '#ck' . (int)($_POST['ck_id'] ?? 0));
     exit;
 }
+
+// ── Status poll (JS): is a running check finished? ────────────────────────────
+if (isset($_GET['status'])) {
+    $ids = array_values(array_filter(array_map('intval', explode(',', (string)($_GET['ids'] ?? '')))));
+    $out = [];
+    if ($ids) {
+        $in = implode(',', array_fill(0, count($ids), '?'));
+        $st = $db->prepare("SELECT id, check_requested_at, last_check_id FROM ck_folders WHERE id IN ($in)");
+        $st->execute($ids);
+        foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $f) {
+            $out[$f['id']] = ['running' => $f['check_requested_at'] !== null, 'check' => (int)$f['last_check_id']];
+        }
+    }
+    header('Content-Type: application/json');
+    echo json_encode($out);
+    exit;
+}
+$rowMsg = $_SESSION['ck_row_msg'] ?? null;
+unset($_SESSION['ck_row_msg']);
 
 // ── Scan Dropbox (records any change since the last scan) ─────────────────────
 $scanError = '';
@@ -221,6 +241,7 @@ $extra_css = '
 .ck-actions form{display:inline}
 .ck-btn{font-size:.72rem;font-weight:700;border-radius:6px;padding:4px 10px;cursor:pointer;border:1px solid #1A6B3A;background:#1A6B3A;color:#fff;white-space:nowrap}
 .ck-btn.run{background:#fff;color:#1a3a5c;border-color:#b9cbe0;font-weight:600}
+.ck-rep{font-size:.7rem;text-decoration:none;margin-left:6px;white-space:nowrap}
 .ck-chk{font-size:.68rem;font-weight:700;border-radius:6px;padding:2px 7px;white-space:nowrap;text-decoration:none;display:inline-block}
 .ck-btn.off{background:#fff;color:#a33;border-color:#e4b9b9;font-weight:600}
 .ck-hist summary{font-size:.7rem;color:var(--grey-mid);cursor:pointer;margin-top:4px}
@@ -314,7 +335,8 @@ include 'includes/header.php';
       <td>
         <?php if ($r['chk_overall']): $cs = $CHK_STYLE[$r['chk_overall']] ?? $CHK_STYLE['grey']; ?>
           <a class="ck-chk" style="color:<?= $cs[0] ?>;background:<?= $cs[1] ?>" href="ck_report.php?id=<?= (int)$r['last_check_id'] ?>" target="_blank"
-             title="<?= h($r['chk_error'] ?: 'Open the SafariCheck report') ?>"><?= $cs[2] ?> <?= h(strtoupper($r['chk_overall'])) ?></a>
+             title="<?= h($r['chk_error'] ?: 'Open the SafariCheck report in a new tab') ?>"><?= $cs[2] ?> <?= h(strtoupper($r['chk_overall'])) ?></a>
+          <a class="ck-rep" href="ck_report.php?id=<?= (int)$r['last_check_id'] ?>" target="_blank">📄 Open report</a>
           <div class="ck-sub">
             <?php if ($r['chk_red'] || $r['chk_yellow']): ?><?= (int)$r['chk_red'] ?> red · <?= (int)$r['chk_yellow'] ?> to check<br><?php endif; ?>
             <?= h(date('d M H:i', strtotime($r['chk_at']))) ?>
@@ -322,8 +344,16 @@ include 'includes/header.php';
         <?php else: ?>
           <span class="ck-sub">not checked</span>
         <?php endif; ?>
-        <?php if ($r['check_requested_at']): ?>
-          <div class="ck-sub" style="color:#1a3a5c" title="Requested <?= h($r['check_requested_at']) ?>">⏳ check running…</div>
+        <?php if ($r['check_requested_at']):
+            $age = (strtotime(ck_now()) - strtotime($r['check_requested_at'])) / 60; ?>
+          <?php if ($age <= 10): ?>
+            <div class="ck-sub ck-running" data-ck="<?= $id ?>" data-check="<?= (int)$r['last_check_id'] ?>" style="color:#1a3a5c">⏳ check running (started <?= h(date('H:i', strtotime($r['check_requested_at']))) ?>) — the page refreshes by itself</div>
+          <?php else: ?>
+            <div class="ck-sub" style="color:#a33" title="Requested <?= h($r['check_requested_at']) ?>">⚠ check did not finish — try again</div>
+          <?php endif; ?>
+        <?php endif; ?>
+        <?php if ($rowMsg && $rowMsg['id'] === $id && !$rowMsg['ok']): ?>
+          <div class="ck-sub" style="color:#a33"><?= h($rowMsg['msg']) ?></div>
         <?php endif; ?>
       </td>
       <td>
@@ -356,7 +386,7 @@ include 'includes/header.php';
           <input type="hidden" name="action" value="run_check">
           <input type="hidden" name="ck_id" value="<?= $id ?>">
           <input type="hidden" name="return_qs" value="<?= h(http_build_query($qsKeep)) ?>">
-          <button class="ck-btn run" type="submit" title="Run the SafariCheck on this folder now (about 2 minutes)">▶ Check</button>
+          <button class="ck-btn run" type="submit" title="Run the SafariCheck again on this folder now (about 2 minutes). To see the last result, click the coloured badge / Open report."><?= $r['chk_overall'] ? '↻ Re-check' : '▶ Run check' ?></button>
         </form>
         <?php if (!empty($events[$id])): ?>
           <details class="ck-hist">
@@ -390,6 +420,26 @@ function fallbackCopy(t, el) {
   var ta = document.createElement('textarea'); ta.value = t; document.body.appendChild(ta);
   ta.select(); try { document.execCommand('copy'); flashCopied(el); } catch (e) {} document.body.removeChild(ta);
 }
+// While a check is running, poll its status and reload when the result is in.
+(function () {
+  var rows = Array.prototype.slice.call(document.querySelectorAll('.ck-running'));
+  if (!rows.length) return;
+  var ids = rows.map(function (r) { return r.getAttribute('data-ck'); }).join(',');
+  var tries = 0;
+  var timer = setInterval(function () {
+    if (++tries > 40) { clearInterval(timer); return; }   // ~10 minutes
+    fetch('ck_tracker.php?status=1&ids=' + ids, {credentials: 'same-origin'})
+      .then(function (r) { return r.json(); })
+      .then(function (st) {
+        var done = rows.some(function (r) {
+          var s = st[r.getAttribute('data-ck')];
+          return s && (!s.running || s.check !== parseInt(r.getAttribute('data-check'), 10));
+        });
+        if (done) { clearInterval(timer); location.reload(); }
+      })
+      .catch(function () {});
+  }, 15000);
+})();
 function flashCopied(el) { var o = el.textContent; el.textContent = '✓ Copied'; setTimeout(function(){ el.textContent = o; }, 1200); }
 </script>
 
