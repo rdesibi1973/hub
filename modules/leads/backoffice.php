@@ -1035,11 +1035,13 @@ include 'includes/header.php';
 <form method="GET" class="filters">
   <div>
     <label>Folder</label>
-    <select name="root">
+    <div style="display:flex;gap:14px;align-items:center;min-height:36px">
       <?php foreach (['2026'=>'2026','001_Safari'=>'001_Safari','Contracts'=>'Contracts','All'=>'All'] as $val=>$lbl): ?>
-        <option value="<?= h($val) ?>" <?= $root===$val?'selected':'' ?>><?= h($lbl) ?></option>
+        <label style="font-weight:400;font-size:.82rem;display:flex;align-items:center;gap:5px;white-space:nowrap;margin:0;cursor:pointer">
+          <input type="radio" name="root" value="<?= h($val) ?>" <?= $root===$val?'checked':'' ?>> <?= h($lbl) ?>
+        </label>
       <?php endforeach; ?>
-    </select>
+    </div>
   </div>
   <div>
     <label>Search</label>
