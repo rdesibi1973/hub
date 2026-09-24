@@ -6,9 +6,10 @@ require_once 'includes/mail_helper.php';
 requireLogin();
 
 $cu   = current_user();
-$stmt = db()->prepare("SELECT agent_id FROM users WHERE id=?");
+$stmt = db()->prepare("SELECT agent_id, email, full_name FROM users WHERE id=?");
 $stmt->execute([$cu['id']]);
-$my_agent_id = (int)($stmt->fetchColumn() ?: 0);
+$me          = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+$my_agent_id = (int)($me['agent_id'] ?? 0);
 // Rename / BackOffice links: BackOffice is admin + manager only.
 $canManage = in_array($cu['role_name'] ?? '', ['admin', 'manager'], true);
 
@@ -63,11 +64,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 echo json_encode(['ok'=>false,'msg'=>'Missing required fields.']); exit;
             }
             if (!$row) { ob_end_clean(); echo json_encode(['ok'=>false,'msg'=>'Request not found.']); exit; }
-            $from_name  = $row['agent_name']  ?? 'Savannah Explorers';
-            $from_email = $row['agent_email'] ?? '';
+            // Sent from the logged-in user (who is chasing the payment), not the
+            // request owner — matches the signature send_hub_email() appends.
+            $from_name  = trim($me['full_name'] ?? '') ?: 'Savannah Explorers';
+            $from_email = trim($me['email'] ?? '');
             if (!$from_email) {
                 ob_end_clean();
-                echo json_encode(['ok'=>false,'msg'=>'No email address found for the agent linked to this request.']); exit;
+                echo json_encode(['ok'=>false,'msg'=>'Your user account has no email address — set it in your profile.']); exit;
             }
             $attachments = []; $attachment_names = [];
             if (!empty($_FILES['attachments']['name'][0])) {
@@ -135,6 +138,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         // Only manual notes can be removed here (never the logged email history).
         $del = db()->prepare("DELETE FROM request_notes WHERE id=? AND note_type='manual'");
         $del->execute([$note_id]);
+        echo json_encode(['ok'=>true]);
+        exit;
+    }
+
+    // ── Edit a manual note (never the logged email history) ──────────────────
+    if ($action === 'edit_note') {
+        $note_id = (int)$_POST['note_id'];
+        $body    = trim($_POST['body'] ?? '');
+        if ($note_id <= 0 || $body === '') { echo json_encode(['ok'=>false,'msg'=>'Empty note.']); exit; }
+        $upd = db()->prepare("UPDATE request_notes SET body=? WHERE id=? AND note_type='manual'");
+        $upd->execute([$body, $note_id]);
         echo json_encode(['ok'=>true]);
         exit;
     }
@@ -258,12 +272,69 @@ usort($rows, function ($a, $b) {
     return strcasecmp($a['customer_name'] ?? '', $b['customer_name'] ?? '');
 });
 
+// Count how many requests share each group_folder (to flag GRP clusters).
+$groupCounts = [];
+foreach ($rows as $r) {
+    $gf = trim($r['group_folder'] ?? '');
+    if ($gf !== '') $groupCounts[$gf] = ($groupCounts[$gf] ?? 0) + 1;
+}
+
+// GRP opener = the group's earliest-confirmed booking (lowest id as tie-break /
+// when no confirmation date), looked up over the whole group, paid or not.
+$grpOpener = [];
+$multiGrps = array_keys(array_filter($groupCounts, fn($c) => $c > 1));
+if ($multiGrps) {
+    $st = db()->prepare(
+        "SELECT group_folder, id FROM requests
+          WHERE group_folder IN (" . implode(',', array_fill(0, count($multiGrps), '?')) . ")
+            AND (payment_status IS NULL OR payment_status != 'Cancelled')
+          ORDER BY confirmation_date IS NULL, confirmation_date, id"
+    );
+    $st->execute($multiGrps);
+    foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $g) {
+        $grpOpener[$g['group_folder']] ??= (int)$g['id'];
+    }
+}
+
+// Keep a GRP's unpaid bookings together, at the position of its first row:
+// the opener first, then the other members by confirmation order.
+$confKey = fn($r) => [$r['confirmation_date'] === null || $r['confirmation_date'] === '' ? 1 : 0,
+                      (string)$r['confirmation_date'], (int)$r['id']];
+$members = [];
+foreach ($rows as $r) {
+    $gf = trim($r['group_folder'] ?? '');
+    if ($gf !== '' && $groupCounts[$gf] > 1) $members[$gf][] = $r;
+}
+foreach ($members as $gf => &$list) {
+    $op = $grpOpener[$gf] ?? 0;
+    usort($list, fn($a, $b) => [(int)$a['id'] !== $op ? 1 : 0, $confKey($a)] <=> [(int)$b['id'] !== $op ? 1 : 0, $confKey($b)]);
+}
+unset($list);
+$ordered = [];
+foreach ($rows as $r) {
+    $gf = trim($r['group_folder'] ?? '');
+    if ($gf !== '' && $groupCounts[$gf] > 1) {
+        if (!isset($members[$gf])) continue;          // cluster already emitted
+        foreach ($members[$gf] as $i => $m) {
+            $m['_grp_first'] = $i === 0;
+            $m['_grp_last']  = $i === count($members[$gf]) - 1;
+            $m['_month_ts']  = $r['start_ts'];            // whole cluster under one month
+            $ordered[] = $m;
+        }
+        unset($members[$gf]);
+    } else {
+        $ordered[] = $r;
+    }
+}
+$rows = $ordered;
+
 // Group rows by arrival month (English month name); no-date rows in a final bucket.
 $byMonth = [];
 foreach ($rows as $r) {
-    if ($r['start_ts'] !== null) {
-        $key   = date('Y-m', $r['start_ts']);
-        $label = date('F Y', $r['start_ts']);
+    $mts = array_key_exists('_month_ts', $r) ? $r['_month_ts'] : $r['start_ts'];
+    if ($mts !== null) {
+        $key   = date('Y-m', $mts);
+        $label = date('F Y', $mts);
     } else {
         $key   = '9999-99';
         $label = 'No arrival date';
@@ -272,13 +343,6 @@ foreach ($rows as $r) {
     $byMonth[$key]['rows'][] = $r;
 }
 ksort($byMonth);
-
-// Count how many requests share each group_folder (to flag GRP clusters).
-$groupCounts = [];
-foreach ($rows as $r) {
-    $gf = trim($r['group_folder'] ?? '');
-    if ($gf !== '') $groupCounts[$gf] = ($groupCounts[$gf] ?? 0) + 1;
-}
 
 // Email templates for the reminder modal.
 $stmt = db()->prepare(
@@ -323,7 +387,11 @@ $extra_css  = '
 .pay-table{width:100%;border-collapse:collapse}
 .pay-table th{text-align:left;font-size:.68rem;text-transform:uppercase;letter-spacing:.05em;color:var(--grey-mid);padding:8px 10px;border-bottom:1px solid var(--grey-lt)}
 .pay-table td{padding:8px 10px;border-bottom:1px solid var(--grey-lt);font-size:.83rem;vertical-align:top}
-.pay-row.grp td:first-child{border-left:3px solid #cbb;}
+.pay-row.grp td{background:#f2f2f2}
+.pay-row.grp td:first-child{border-left:3px solid #aaa;}
+.pay-row.grp-first td{border-top:2px solid #bbb}
+.pay-row.grp-last td{border-bottom:2px solid #bbb}
+.pay-row.grp-sub td:nth-child(2){padding-left:24px}
 .note-preview{color:var(--grey-mid);font-size:.76rem;max-width:280px;display:inline-block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:middle}
 .overdue-pill{background:#f8d7da;color:#842029;font-size:.66rem;font-weight:700;padding:1px 6px;border-radius:8px;margin-left:6px}
 .status-deposit{background:#fff3cd;color:#856404}
@@ -430,7 +498,7 @@ include 'includes/header.php';
           $pc          = trim($r['practice_code'] ?? '');
           $mailSubject = folder_mail_subject(stripos($pc, '_END') !== false ? $pc : $folderMain);
       ?>
-        <tr class="pay-row<?= $isGrp ? ' grp' : '' ?>" style="cursor:pointer"
+        <tr class="pay-row<?= $isGrp ? ' grp' . (!empty($r['_grp_first']) ? ' grp-first' : ' grp-sub') . (!empty($r['_grp_last']) ? ' grp-last' : '') : '' ?>" style="cursor:pointer"
             onclick="openRequest(<?= (int)$r['id'] ?>)"
             data-reqid="<?= (int)$r['id'] ?>"
             data-agent="<?= (int)$r['agent_id'] ?>"
@@ -446,7 +514,7 @@ include 'includes/header.php';
           <td>
             <span style="font-weight:600"><?= h($r['customer_name']) ?></span>
             <?php if ($agency): ?><span style="font-size:.73rem;color:var(--grey-mid)">(<?= h($agency) ?>)</span><?php endif; ?>
-            <?php if ($isGrp): ?><span style="font-size:.66rem;color:#8a6d3b;background:#fcf3e3;border-radius:6px;padding:1px 5px;margin-left:4px">GROUP</span><?php endif; ?>
+            <?php if ($isGrp): ?><span style="font-size:.66rem;color:#8a6d3b;background:#fcf3e3;border-radius:6px;padding:1px 5px;margin-left:4px"><?= (int)$r['id'] === ($grpOpener[$gf] ?? 0) ? 'GROUP · opener' : 'GROUP' ?></span><?php endif; ?>
             <div style="font-size:.7rem;color:var(--grey-mid);margin-top:2px">👤 <?= h($r['agent_name'] ?: '— no agent —') ?></div>
           </td>
           <td style="font-family:monospace;font-size:.76rem">
@@ -593,20 +661,32 @@ function openNotes(id, customer) {
   loadNotes();
 }
 
-function loadNotes() {
+var notesById = {};
+// syncRow: after an edit/delete, refresh the row's "Latest note" from the list.
+function loadNotes(syncRow) {
   fetch('payments.php', {
     method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'},
     body:'action=get_notes&request_id=' + notesReqId
   }).then(function(r){return r.json();}).then(function(d) {
     if (!d.ok || !d.notes.length) {
       document.getElementById('notesList').innerHTML = '<p style="color:var(--grey-mid);text-align:center;padding:16px">No notes yet.</p>';
+      if (syncRow && d.ok) clearNoteBadge(notesReqId);
       return;
     }
+    if (syncRow) {
+      var top = d.notes[0];
+      updateNoteBadge(notesReqId, d.notes.length,
+        top.note_type === 'email_sent' ? '📧 ' + (top.subject || '') : (top.body || ''), top.user_name || '');
+    }
+    notesById = {};
     document.getElementById('notesList').innerHTML = d.notes.map(function(n) {
+      notesById[n.id] = n;
       var isEmail = n.note_type === 'email_sent';
       var author  = n.user_name ? esc(n.user_name) : (isEmail ? 'System' : 'Unknown user');
       var meta = '<strong style="color:var(--grey-dk)">👤 ' + author + '</strong> · ' + esc(n.created_at);
       var del  = isEmail ? '' :
+        '<button type="button" title="Edit note" onclick="editNote(' + n.id + ')" ' +
+        'style="background:none;border:none;color:var(--grey-dk);cursor:pointer;font-size:.85rem;line-height:1">✎</button>' +
         '<button type="button" title="Delete note" onclick="delNote(' + n.id + ')" ' +
         'style="background:none;border:none;color:var(--red);cursor:pointer;font-size:.9rem;line-height:1">×</button>';
       return '<div class="note-card ' + (isEmail ? 'email-sent' : 'manual') + '">' +
@@ -616,7 +696,7 @@ function loadNotes() {
           '<span style="display:flex;gap:8px;align-items:center"><small style="color:var(--grey-mid)">' + meta + '</small>' + del + '</span>' +
         '</div>' +
         (n.subject ? '<strong style="font-size:.82rem">' + esc(n.subject) + '</strong>' : '') +
-        (n.body ? '<div style="font-size:.8rem;color:var(--grey-dk);margin-top:4px;max-height:160px;overflow-y:auto">' + n.body + '</div>' : '') +
+        (n.body ? '<div id="noteBody' + n.id + '" style="font-size:.8rem;color:var(--grey-dk);margin-top:4px;max-height:160px;overflow-y:auto">' + n.body + '</div>' : '') +
       '</div>';
     }).join('');
   });
@@ -644,18 +724,52 @@ function delNote(id) {
   fetch('payments.php', {
     method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'},
     body:'action=delete_note&note_id=' + id
-  }).then(function(r){return r.json();}).then(function(){ loadNotes(); });
+  }).then(function(r){return r.json();}).then(function(){ loadNotes(true); });
+}
+
+// Inline edit of a manual note: swap its body for a textarea + Save / Cancel.
+function editNote(id) {
+  var n = notesById[id], box = document.getElementById('noteBody' + id);
+  if (!n || !box) return;
+  box.style.maxHeight = 'none';
+  box.innerHTML =
+    '<textarea class="m-input" rows="3" style="resize:vertical"></textarea>' +
+    '<div style="text-align:right;margin-top:6px;display:flex;gap:6px;justify-content:flex-end">' +
+      '<button type="button" class="btn btn-outline btn-sm" onclick="loadNotes()">Cancel</button>' +
+      '<button type="button" class="btn btn-red btn-sm">Save</button>' +
+    '</div>';
+  var ta = box.querySelector('textarea');
+  ta.value = n.body || '';
+  ta.focus();
+  box.querySelector('.btn-red').onclick = function() {
+    var body = ta.value.trim();
+    if (!body) { alert('The note cannot be empty — use × to delete it.'); return; }
+    this.disabled = true;
+    fetch('payments.php', {
+      method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'},
+      body:'action=edit_note&note_id=' + id + '&body=' + encodeURIComponent(body)
+    }).then(function(r){return r.json();}).then(function(d) {
+      if (!d.ok) { alert(d.msg || 'Could not save note.'); loadNotes(); return; }
+      loadNotes(true);
+    }).catch(function(err){ alert('Error: ' + err.message); loadNotes(); });
+  };
+}
+
+function clearNoteBadge(reqId) {
+  var td = document.querySelector('tr[data-reqid="' + reqId + '"] td.col-note');
+  if (td) td.innerHTML = '<span style="color:var(--grey-lt)">—</span>';
 }
 
 // Refresh the row's note badge + preview without a full reload.
-function updateNoteBadge(reqId, count, lastBody) {
+function updateNoteBadge(reqId, count, lastBody, author) {
   var tr = document.querySelector('tr[data-reqid="' + reqId + '"]');
   if (!tr) return;
   var td = tr.querySelector('td.col-note'); // "Latest note" column
   if (!td) return;
+  var by = author === undefined ? CURRENT_USER : author;
   td.innerHTML =
     '<span class="note-preview" title="' + esc(lastBody) + '">' + esc(lastBody.substring(0, 60)) + '</span> ' +
-    (CURRENT_USER ? '<span style="font-size:.68rem;color:var(--grey-mid)">— ' + esc(CURRENT_USER) + '</span> ' : '') +
+    (by ? '<span style="font-size:.68rem;color:var(--grey-mid)">— ' + esc(by) + '</span> ' : '') +
     '<span class="badge" style="background:#fff3cd;color:#856404;cursor:pointer" onclick="event.stopPropagation();openNotes(' + reqId + ', \'\')">' + count + '</span>';
 }
 
