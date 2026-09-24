@@ -31,6 +31,25 @@ $view      = isset($VIEWS[$_GET['view'] ?? '']) ? $_GET['view'] : 'missing';
 $showPast  = !empty($_GET['past']);    // include trips that already started
 $showOther = !empty($_GET['other']);   // include Kenya/Uganda/… (left out by MissingCK.bat)
 
+// ── Run the automatic check on one or more folders (JS, no page reload) ───────
+// Each folder is dispatched as its own GitHub run, so several checks run in
+// parallel and a new one can be started while others are still running.
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'run_check' && !empty($_POST['ajax'])) {
+    $ids = array_values(array_unique(array_filter(array_map('intval',
+               explode(',', (string)($_POST['ck_ids'] ?? $_POST['ck_id'] ?? ''))))));
+    $out = [];
+    foreach ($ids as $cid) {
+        try {
+            $out[$cid] = ck_request_check($db, [$cid], 'manual');
+        } catch (Throwable $e) {
+            $out[$cid] = ['ok' => false, 'msg' => $e->getMessage()];
+        }
+    }
+    header('Content-Type: application/json');
+    echo json_encode(['ok' => (bool)$ids, 'results' => (object)$out, 'at' => date('H:i', strtotime(ck_now()))]);
+    exit;
+}
+
 // ── Actions: set / remove _CK, run the automatic check ────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array($_POST['action'] ?? '', ['ck_on', 'ck_off', 'run_check'], true)) {
     try {
@@ -58,10 +77,18 @@ if (isset($_GET['status'])) {
     $out = [];
     if ($ids) {
         $in = implode(',', array_fill(0, count($ids), '?'));
-        $st = $db->prepare("SELECT id, check_requested_at, last_check_id FROM ck_folders WHERE id IN ($in)");
+        $st = $db->prepare("SELECT f.id, f.check_requested_at, f.last_check_id,
+                                   c.overall, c.n_red, c.n_yellow, c.created_at, c.error
+                            FROM ck_folders f LEFT JOIN ck_checks c ON c.id = f.last_check_id
+                            WHERE f.id IN ($in)");
         $st->execute($ids);
         foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $f) {
-            $out[$f['id']] = ['running' => $f['check_requested_at'] !== null, 'check' => (int)$f['last_check_id']];
+            $out[$f['id']] = [
+                'running' => $f['check_requested_at'] !== null, 'check' => (int)$f['last_check_id'],
+                'overall' => $f['overall'], 'red' => (int)$f['n_red'], 'yellow' => (int)$f['n_yellow'],
+                'at' => $f['created_at'] ? date('d M H:i', strtotime($f['created_at'])) : '',
+                'error' => $f['error'],
+            ];
         }
     }
     header('Content-Type: application/json');
@@ -276,6 +303,8 @@ include 'includes/header.php';
       <a href="<?= h($link(['view' => $k])) ?>" class="<?= $view === $k ? 'on' : '' ?>"><?= h($label) ?></a>
     <?php endforeach; ?>
   </div>
+  <button type="button" id="ckRunSel" class="ck-btn run" disabled
+          title="Run the SafariCheck on every ticked row. Each runs in parallel (about 2 minutes); results appear in their rows.">↻ Re-check selected (<span id="ckSelN">0</span>)</button>
   <form method="get" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-left:auto">
     <input type="hidden" name="view" value="<?= h($view) ?>">
     <label>Sales
@@ -296,7 +325,7 @@ include 'includes/header.php';
 <?php else: ?>
 <table class="ck-table">
   <thead><tr>
-    <th>Arrival</th><th>Booking</th><th>Sales</th><th>Stage</th><th>Check</th>
+    <th><input type="checkbox" id="ckSelAll" title="Select all rows"> Arrival</th><th>Booking</th><th>Sales</th><th>Stage</th><th>Check</th>
     <th><?= $view === 'done' ? 'CK' : 'Waiting for CK' ?></th><th></th>
   </tr></thead>
   <tbody>
@@ -307,6 +336,7 @@ include 'includes/header.php';
   ?>
     <tr id="ck<?= $id ?>" class="<?= $r['missing'] && $r['band'] ? 'b-' . $r['band'] : '' ?>">
       <td class="ck-arr">
+        <input type="checkbox" class="ck-sel" value="<?= $id ?>" title="Select for Re-check selected">
         <b><?= h($fmtD($r['start_date'])) ?: '—' ?></b>
         <?php if ($r['to_arrival'] !== null): ?>
           <small class="<?= h($r['band'] ?? 'grey') ?>"><?= $r['to_arrival'] >= 0 ? 'in ' . $r['to_arrival'] . ' d' : 'started' ?></small>
@@ -332,7 +362,8 @@ include 'includes/header.php';
           <?= $r['in_stage'] !== null ? 'for ' . $r['in_stage'] . ' d' : '<span title="Already in this stage when tracking started">before tracking</span>' ?>
         </div>
       </td>
-      <td>
+      <td class="ck-chkcell" data-ck="<?= $id ?>">
+        <div class="ck-result">
         <?php if ($r['chk_overall']): $cs = $CHK_STYLE[$r['chk_overall']] ?? $CHK_STYLE['grey']; ?>
           <a class="ck-chk" style="color:<?= $cs[0] ?>;background:<?= $cs[1] ?>" href="ck_report.php?id=<?= (int)$r['last_check_id'] ?>" target="_blank"
              title="<?= h($r['chk_error'] ?: 'Open the SafariCheck report in a new tab') ?>"><?= $cs[2] ?> <?= h(strtoupper($r['chk_overall'])) ?></a>
@@ -344,10 +375,11 @@ include 'includes/header.php';
         <?php else: ?>
           <span class="ck-sub">not checked</span>
         <?php endif; ?>
+        </div>
         <?php if ($r['check_requested_at']):
             $age = (strtotime(ck_now()) - strtotime($r['check_requested_at'])) / 60; ?>
           <?php if ($age <= 10): ?>
-            <div class="ck-sub ck-running" data-ck="<?= $id ?>" data-check="<?= (int)$r['last_check_id'] ?>" style="color:#1a3a5c">⏳ check running (started <?= h(date('H:i', strtotime($r['check_requested_at']))) ?>) — the page refreshes by itself</div>
+            <div class="ck-sub ck-running" data-ck="<?= $id ?>" data-check="<?= (int)$r['last_check_id'] ?>" style="color:#1a3a5c">⏳ check running (started <?= h(date('H:i', strtotime($r['check_requested_at']))) ?>) — the result appears here</div>
           <?php else: ?>
             <div class="ck-sub" style="color:#a33" title="Requested <?= h($r['check_requested_at']) ?>">⚠ check did not finish — try again</div>
           <?php endif; ?>
@@ -382,7 +414,7 @@ include 'includes/header.php';
             <button class="ck-btn" type="submit">✅ Set CK</button>
           <?php endif; ?>
         </form>
-        <form method="post" style="margin-top:4px">
+        <form method="post" style="margin-top:4px" class="ck-runform">
           <input type="hidden" name="action" value="run_check">
           <input type="hidden" name="ck_id" value="<?= $id ?>">
           <input type="hidden" name="return_qs" value="<?= h(http_build_query($qsKeep)) ?>">
@@ -420,25 +452,108 @@ function fallbackCopy(t, el) {
   var ta = document.createElement('textarea'); ta.value = t; document.body.appendChild(ta);
   ta.select(); try { document.execCommand('copy'); flashCopied(el); } catch (e) {} document.body.removeChild(ta);
 }
-// While a check is running, poll its status and reload when the result is in.
+// Automatic checks: start one (row button) or many (ticked rows) without
+// reloading the page; each running row is polled and updated in place when
+// its result is in, so more checks can be started meanwhile.
 (function () {
-  var rows = Array.prototype.slice.call(document.querySelectorAll('.ck-running'));
-  if (!rows.length) return;
-  var ids = rows.map(function (r) { return r.getAttribute('data-ck'); }).join(',');
-  var tries = 0;
-  var timer = setInterval(function () {
-    if (++tries > 40) { clearInterval(timer); return; }   // ~10 minutes
-    fetch('ck_tracker.php?status=1&ids=' + ids, {credentials: 'same-origin'})
+  var STYLE = <?= json_encode($CHK_STYLE, JSON_UNESCAPED_UNICODE) ?>;
+  var running = {};        // ck id -> {prev: last check id before the run, since: ms}
+  var timer = null;
+  function esc(s) { var d = document.createElement('div'); d.textContent = s == null ? '' : s; return d.innerHTML; }
+  function cell(id) { return document.querySelector('.ck-chkcell[data-ck="' + id + '"]'); }
+  function note(id, html, color) {
+    var c = cell(id); if (!c) return;
+    var n = c.querySelector('.ck-running, .ck-note');
+    if (!n) { n = document.createElement('div'); c.appendChild(n); }
+    n.className = 'ck-sub ck-note'; n.style.color = color || '#1a3a5c'; n.innerHTML = html;
+  }
+  function showResult(id, s) {
+    var c = cell(id); if (!c) return;
+    var st = STYLE[s.overall] || STYLE.grey;
+    c.querySelector('.ck-result').innerHTML =
+      '<a class="ck-chk" style="color:' + st[0] + ';background:' + st[1] + '" href="ck_report.php?id=' + s.check +
+      '" target="_blank" title="' + esc(s.error || 'Open the SafariCheck report in a new tab') + '">' + st[2] + ' ' +
+      esc(String(s.overall || '').toUpperCase()) + '</a> <a class="ck-rep" href="ck_report.php?id=' + s.check +
+      '" target="_blank">📄 Open report</a><div class="ck-sub">' +
+      (s.red || s.yellow ? s.red + ' red · ' + s.yellow + ' to check<br>' : '') + esc(s.at) + '</div>';
+    note(id, '✓ new result', '#1A6B3A');
+  }
+  function poll() {
+    var ids = Object.keys(running);
+    if (!ids.length) { clearInterval(timer); timer = null; return; }
+    fetch('ck_tracker.php?status=1&ids=' + ids.join(','), {credentials: 'same-origin'})
       .then(function (r) { return r.json(); })
       .then(function (st) {
-        var done = rows.some(function (r) {
-          var s = st[r.getAttribute('data-ck')];
-          return s && (!s.running || s.check !== parseInt(r.getAttribute('data-check'), 10));
+        ids.forEach(function (id) {
+          var s = st[id], r = running[id];
+          if (s && (!s.running || s.check !== r.prev)) {
+            delete running[id];
+            if (s.check && s.check !== r.prev) showResult(id, s);
+            else note(id, '⚠ check did not finish — try again', '#a33');
+          } else if (Date.now() - r.since > 12 * 60000) {
+            delete running[id];
+            note(id, '⚠ check did not finish — try again', '#a33');
+          }
         });
-        if (done) { clearInterval(timer); location.reload(); }
       })
       .catch(function () {});
-  }, 15000);
+  }
+  function watch(id, prev, since) {
+    running[id] = {prev: prev, since: since || Date.now()};
+    if (!timer) timer = setInterval(poll, 15000);
+  }
+  function start(ids) {
+    if (!ids.length) return;
+    var fd = new FormData();
+    fd.append('action', 'run_check'); fd.append('ajax', '1'); fd.append('ck_ids', ids.join(','));
+    ids.forEach(function (id) { note(id, '⏳ starting check…'); });
+    fetch('ck_tracker.php', {method: 'POST', body: fd, credentials: 'same-origin'})
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        ids.forEach(function (id) {
+          var res = (d.results || {})[id] || {ok: false, msg: 'not started'};
+          var a = cell(id) && cell(id).querySelector('.ck-chk');
+          var prev = a ? parseInt((a.getAttribute('href').match(/id=(\d+)/) || [0, 0])[1], 10) : 0;
+          if (res.ok) {
+            note(id, '⏳ check running (started ' + esc(d.at) + ') — the result appears here');
+            watch(id, prev);
+          } else {
+            note(id, '⚠ ' + esc(res.msg || 'could not start the check'), '#a33');
+          }
+        });
+      })
+      .catch(function (e) { ids.forEach(function (id) { note(id, '⚠ ' + esc(e.message), '#a33'); }); });
+  }
+  // Rows already running when the page opened.
+  document.querySelectorAll('.ck-running').forEach(function (r) {
+    watch(r.getAttribute('data-ck'), parseInt(r.getAttribute('data-check'), 10));
+  });
+  // Row button.
+  document.querySelectorAll('.ck-runform').forEach(function (f) {
+    f.addEventListener('submit', function (e) {
+      e.preventDefault();
+      start([f.querySelector('input[name="ck_id"]').value]);
+    });
+  });
+  // Selection.
+  var boxes = Array.prototype.slice.call(document.querySelectorAll('.ck-sel'));
+  var all = document.getElementById('ckSelAll'), btn = document.getElementById('ckRunSel');
+  function picked() { return boxes.filter(function (b) { return b.checked; }).map(function (b) { return b.value; }); }
+  function refresh() {
+    var n = picked().length;
+    document.getElementById('ckSelN').textContent = n;
+    btn.disabled = !n;
+    if (all) all.checked = n && n === boxes.length;
+  }
+  boxes.forEach(function (b) { b.addEventListener('change', refresh); });
+  if (all) all.addEventListener('change', function () { boxes.forEach(function (b) { b.checked = all.checked; }); refresh(); });
+  btn.addEventListener('click', function () {
+    var ids = picked();
+    if (ids.length > 10 && !confirm('Start ' + ids.length + ' checks now?')) return;
+    start(ids);
+    boxes.forEach(function (b) { b.checked = false; });
+    refresh();
+  });
 })();
 function flashCopied(el) { var o = el.textContent; el.textContent = '✓ Copied'; setTimeout(function(){ el.textContent = o; }, 1200); }
 </script>
