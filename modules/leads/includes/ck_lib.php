@@ -67,6 +67,36 @@ function ck_ensure_schema(PDO $db): void {
         created_at DATETIME NOT NULL,
         KEY idx_ck_events_folder (ck_folder_id, created_at)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    // SafariCheck results posted by the cloud runner (safariagent ci_check.py).
+    $db->exec("CREATE TABLE IF NOT EXISTS ck_checks (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        ck_folder_id INT NOT NULL,
+        created_at DATETIME NOT NULL,
+        trigger_src VARCHAR(12) NULL,
+        folder_name VARCHAR(255) NULL,
+        overall VARCHAR(8) NULL,
+        n_red INT NOT NULL DEFAULT 0,
+        n_yellow INT NOT NULL DEFAULT 0,
+        n_green INT NOT NULL DEFAULT 0,
+        n_grey INT NOT NULL DEFAULT 0,
+        fingerprint VARCHAR(40) NULL,
+        checks_json MEDIUMTEXT NULL,
+        facts_json MEDIUMTEXT NULL,
+        files_json MEDIUMTEXT NULL,
+        report_html MEDIUMTEXT NULL,
+        error TEXT NULL,
+        KEY idx_ck_checks_folder (ck_folder_id, created_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    // Columns added after the first release (MySQL: no ADD COLUMN IF NOT EXISTS).
+    $have = $db->query("SHOW COLUMNS FROM ck_folders")->fetchAll(PDO::FETCH_COLUMN);
+    foreach ([
+        'check_requested_at' => 'DATETIME NULL',
+        'check_trigger'      => 'VARCHAR(12) NULL',
+        'last_check_id'      => 'INT NULL',
+        'last_checked_at'    => 'DATETIME NULL',
+    ] as $col => $def) {
+        if (!in_array($col, $have, true)) $db->exec("ALTER TABLE ck_folders ADD COLUMN $col $def");
+    }
     $done = true;
 }
 
@@ -141,8 +171,12 @@ function ck_log(PDO $db, int $folderId, string $event, ?string $from, ?string $t
  * Bring a tracked folder up to date with its current name: log what changed
  * (rename, stage, _CK) and update the row. Shared by the Dropbox scan and by
  * renames done from the Hub (which know the user).
+ *
+ * Returns true when this change means "booking just finished" (first move to
+ * Deposit/Balance/Balance-Cash/Paid) — the moment the automatic check is due.
  */
-function ck_apply(PDO $db, array $row, string $newName, string $source, ?int $userId, string $now): void {
+function ck_apply(PDO $db, array $row, string $newName, string $source, ?int $userId, string $now): bool {
+    $bookingDone = false;
     $id       = (int)$row['id'];
     $newStage = ck_stage($newName);
     $newCk    = ck_has_marker($newName);
@@ -162,6 +196,7 @@ function ck_apply(PDO $db, array $row, string $newName, string $source, ?int $us
         $set['stage_since'] = $now;
         if (in_array($newStage, CK_DONE_STAGES, true) && empty($row['booking_done_at'])) {
             $set['booking_done_at'] = $now;
+            $bookingDone = true;
         }
     }
     if ((bool)$row['has_ck'] !== $newCk) {
@@ -174,6 +209,7 @@ function ck_apply(PDO $db, array $row, string $newName, string $source, ?int $us
     $cols = implode(', ', array_map(fn($c) => "$c = ?", array_keys($set)));
     $db->prepare("UPDATE ck_folders SET $cols WHERE id = ?")
        ->execute([...array_values($set), $id]);
+    return $bookingDone;
 }
 
 /**
@@ -199,6 +235,7 @@ function ck_scan(PDO $db, string $token): array {
          ck_at, first_seen_at, last_seen_at)
         VALUES (?,?,?,?,?,?,?,?,?,?,?)");
 
+    $toCheck = [];   // folders whose booking just finished -> automatic check
     $db->beginTransaction();
     try {
         $seenIds = [];
@@ -217,14 +254,16 @@ function ck_scan(PDO $db, string $token): array {
                     $now, $now,
                 ]);
                 if ($ins->rowCount()) {
-                    ck_log($db, (int)$db->lastInsertId(), 'first_seen', null, $e['name'], null, 'scan', $now);
+                    $newId = (int)$db->lastInsertId();
+                    ck_log($db, $newId, 'first_seen', null, $e['name'], null, 'scan', $now);
+                    if (!$initial && in_array($stage, CK_DONE_STAGES, true)) $toCheck[] = $newId;
                     $stats['new']++;
                 }
                 continue;
             }
             $changed = $r['folder_name'] !== $e['name'] || (int)$r['gone'] === 1;
             if ($changed) {
-                ck_apply($db, $r, $e['name'], 'scan', null, $now);
+                if (ck_apply($db, $r, $e['name'], 'scan', null, $now)) $toCheck[] = (int)$r['id'];
                 $stats['changed']++;
             } else {
                 $db->prepare("UPDATE ck_folders SET last_seen_at = ? WHERE id = ?")->execute([$now, (int)$r['id']]);
@@ -242,6 +281,11 @@ function ck_scan(PDO $db, string $token): array {
         $db->rollBack();
         throw $ex;
     }
+    if ($toCheck) {
+        try { ck_request_check($db, $toCheck, 'stage'); }
+        catch (Throwable $ig) { /* stays pending — the nightly run picks it up */ }
+    }
+    $stats['checks'] = count($toCheck);
     return $stats;
 }
 
@@ -254,7 +298,9 @@ function ck_record_rename(PDO $db, string $oldName, string $newName, ?int $userI
     $st = $db->prepare("SELECT * FROM ck_folders WHERE folder_name = ? AND gone = 0 LIMIT 1");
     $st->execute([$oldName]);
     $row = $st->fetch(PDO::FETCH_ASSOC);
-    if ($row) ck_apply($db, $row, $newName, 'hub', $userId, ck_now());
+    if ($row && ck_apply($db, $row, $newName, 'hub', $userId, ck_now())) {
+        try { ck_request_check($db, [(int)$row['id']], 'stage'); } catch (Throwable $ig) {}
+    }
 }
 
 /** Dropbox web URL from an API path (same shape as backoffice.php). */
@@ -307,7 +353,64 @@ function ck_set_marker(PDO $db, string $token, int $folderId, bool $on, ?int $us
         return ['ok' => false, 'msg' => 'Dropbox rename failed — nothing changed (the folder may have been renamed meanwhile; reload). ' . $e->getMessage()];
     }
     $n = ck_sync_requests($db, $old, $new);
-    ck_apply($db, $row, $new, 'hub', $userId, ck_now());
+    if (ck_apply($db, $row, $new, 'hub', $userId, ck_now())) {
+        try { ck_request_check($db, [(int)$row['id']], 'stage'); } catch (Throwable $ig) {}
+    }
     return ['ok' => true, 'msg' => ($on ? '✅ CK set: ' : '↩ CK removed: ') . $new
                                    . ($n ? " ($n request" . ($n === 1 ? '' : 's') . ' updated)' : '')];
+}
+
+// ── Automatic SafariCheck (safariagent on GitHub Actions) ─────────────────────
+// Server-only settings in includes/config.php:
+//   CK_AGENT_TOKEN   token the runner sends to ck_agent_api.php (GitHub secret HUB_TOKEN)
+//   CK_GITHUB_TOKEN  fine-grained GitHub token, "Actions: read and write" on the repo
+//   CK_GITHUB_REPO   'owner/repo' of the safariagent repository
+// Without the GitHub settings the request stays pending and the nightly run does it.
+
+/** Top-level files and invoices/*.pdf are the only files the checks open. */
+function ck_agent_file_allowed(string $rel): bool {
+    if ($rel === '' || strpos($rel, '..') !== false || strpos($rel, "\\") !== false) return false;
+    $parts = explode('/', trim($rel, '/'));
+    $name  = strtolower(end($parts));
+    if (count($parts) === 1) {
+        return (bool)preg_match('/\.(xlsx|xlsm|docx|pdf)$/', $name) && strpos($name, '~$') !== 0;
+    }
+    return count($parts) === 2 && strtolower($parts[0]) === 'invoices' && str_ends_with($name, '.pdf');
+}
+
+/** Start the GitHub workflow for these ck_folders ids. */
+function ck_github_dispatch(array $ids): array {
+    if (!defined('CK_GITHUB_TOKEN') || !defined('CK_GITHUB_REPO') || CK_GITHUB_TOKEN === '' || CK_GITHUB_REPO === '') {
+        return ['ok' => false, 'msg' => 'GitHub not configured — the check will run tonight.'];
+    }
+    $ch = curl_init('https://api.github.com/repos/' . CK_GITHUB_REPO . '/actions/workflows/ck.yml/dispatches');
+    curl_setopt_array($ch, [
+        CURLOPT_POST           => true,
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT        => 20,
+        CURLOPT_HTTPHEADER     => [
+            'Authorization: Bearer ' . CK_GITHUB_TOKEN,
+            'Accept: application/vnd.github+json',
+            'X-GitHub-Api-Version: 2022-11-28',
+            'User-Agent: SavannahHub-CK',
+            'Content-Type: application/json',
+        ],
+        CURLOPT_POSTFIELDS => json_encode(['ref' => 'main', 'inputs' => ['ids' => implode(',', array_map('intval', $ids))]]),
+    ]);
+    $body = curl_exec($ch);
+    $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    if ($code === 204) return ['ok' => true, 'msg' => 'Check started — result in about 2 minutes.'];
+    return ['ok' => false, 'msg' => "GitHub dispatch failed (HTTP $code) — the check will run tonight. " . substr((string)$body, 0, 200)];
+}
+
+/** Mark folders as waiting for a check and start the runner for them. */
+function ck_request_check(PDO $db, array $ids, string $trigger): array {
+    ck_ensure_schema($db);
+    $ids = array_values(array_unique(array_filter(array_map('intval', $ids))));
+    if (!$ids) return ['ok' => false, 'msg' => 'Nothing to check.'];
+    $in = implode(',', array_fill(0, count($ids), '?'));
+    $db->prepare("UPDATE ck_folders SET check_requested_at = ?, check_trigger = ? WHERE id IN ($in)")
+       ->execute([ck_now(), $trigger, ...$ids]);
+    return ck_github_dispatch($ids);
 }

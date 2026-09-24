@@ -20,6 +20,21 @@ Running log of notable changes and current build state. Module-level "active / p
 
 ---
 
+## 2026-09 — CK tracker: automatic SafariCheck (phase 2)
+- When a folder first reaches Deposit/Balance/Balance-Cash/Paid (booking done),
+  the Hub marks it for a check and starts the safariagent workflow on GitHub
+  Actions (`workflow_dispatch`, repo `CK_GITHUB_REPO`, token `CK_GITHUB_TOKEN`).
+  Also a **▶ Check** button per row, and a nightly run (pending requests +
+  upcoming folders without CK whose files changed — fingerprint of content hashes).
+- `ck_agent_api.php` (token `CK_AGENT_TOKEN`): queue / recursive listing / file
+  download / result. The runner has **no Dropbox credentials**; the API serves only
+  what the checks open (top-level xlsx/xlsm/docx/pdf and `invoices/*.pdf`) —
+  passports and everything else are recreated by the runner as empty placeholders
+  (only counted). Results in `ck_checks` (traffic light, checks, parsed booking
+  facts for phase 3, file list, HTML report shown sandboxed by `ck_report.php`).
+- CK tracker: Check column (🟢🟡🔴 + counts, link to report, ⏳ while running),
+  "Check RED" tab/tile.
+
 ## 2026-09 — CK tracker (Leads → ✅ CK)
 - New page `modules/leads/ck_tracker.php`, replacing the Java "Groups & CK →
   Missing CK" (`MissingCK.bat`). Lists every top-level booking folder in

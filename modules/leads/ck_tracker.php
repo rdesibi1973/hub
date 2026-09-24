@@ -22,6 +22,7 @@ ck_ensure_schema($db);
 
 $VIEWS = [
     'missing' => 'Missing CK',
+    'chkred'  => 'Check RED',
     'booking' => 'In booking',
     'done'    => 'CK done',
     'all'     => 'All',
@@ -30,12 +31,17 @@ $view      = isset($VIEWS[$_GET['view'] ?? '']) ? $_GET['view'] : 'missing';
 $showPast  = !empty($_GET['past']);    // include trips that already started
 $showOther = !empty($_GET['other']);   // include Kenya/Uganda/… (left out by MissingCK.bat)
 
-// ── Action: set / remove _CK ──────────────────────────────────────────────────
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array($_POST['action'] ?? '', ['ck_on', 'ck_off'], true)) {
+// ── Actions: set / remove _CK, run the automatic check ────────────────────────
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array($_POST['action'] ?? '', ['ck_on', 'ck_off', 'run_check'], true)) {
     try {
-        $token = dropbox_get_access_token();
-        $res   = ck_set_marker($db, $token, (int)($_POST['ck_id'] ?? 0), $_POST['action'] === 'ck_on', $uid);
-        flash($res['msg'], $res['ok'] ? 'info' : 'error');
+        if ($_POST['action'] === 'run_check') {
+            $res = ck_request_check($db, [(int)($_POST['ck_id'] ?? 0)], 'manual');
+            flash($res['msg'], $res['ok'] ? 'info' : 'error');
+        } else {
+            $token = dropbox_get_access_token();
+            $res   = ck_set_marker($db, $token, (int)($_POST['ck_id'] ?? 0), $_POST['action'] === 'ck_on', $uid);
+            flash($res['msg'], $res['ok'] ? 'info' : 'error');
+        }
     } catch (Throwable $e) {
         flash('Error — nothing was changed: ' . $e->getMessage(), 'error');
     }
@@ -54,8 +60,12 @@ try {
 }
 
 // ── Data ──────────────────────────────────────────────────────────────────────
-$folders = $db->query("SELECT f.*, u.full_name AS ck_by_name
-                       FROM ck_folders f LEFT JOIN users u ON u.id = f.ck_by
+$folders = $db->query("SELECT f.*, u.full_name AS ck_by_name,
+                              c.overall AS chk_overall, c.n_red AS chk_red, c.n_yellow AS chk_yellow,
+                              c.created_at AS chk_at, c.error AS chk_error
+                       FROM ck_folders f
+                       LEFT JOIN users u ON u.id = f.ck_by
+                       LEFT JOIN ck_checks c ON c.id = f.last_check_id
                        WHERE f.gone = 0")->fetchAll(PDO::FETCH_ASSOC);
 
 // Requests per folder: a private safari by practice_code, a GRP by group_folder.
@@ -120,14 +130,16 @@ $base = array_filter($rows, function ($r) use ($showPast, $showOther, $agentF) {
     if ($agentF !== '' && strcasecmp($r['agent'], $agentF) !== 0) return false;
     return true;
 });
-$counts = ['red' => 0, 'amber' => 0, 'grey' => 0, 'booking' => 0, 'done' => 0];
+$counts = ['red' => 0, 'amber' => 0, 'grey' => 0, 'booking' => 0, 'done' => 0, 'chkred' => 0];
 foreach ($base as $r) {
     if ($r['missing'] && $r['band']) $counts[$r['band']]++;
+    if ($r['missing'] && $r['chk_overall'] === 'red') $counts['chkred']++;
     if (in_array($r['stage'], CK_BOOKING_STAGES, true)) $counts['booking']++;
     if ((int)$r['has_ck']) $counts['done']++;
 }
 $list = array_filter($base, fn($r) => match ($view) {
     'missing' => $r['missing'],
+    'chkred'  => $r['missing'] && $r['chk_overall'] === 'red',
     'booking' => in_array($r['stage'], CK_BOOKING_STAGES, true),
     'done'    => (bool)(int)$r['has_ck'],
     default   => true,
@@ -151,6 +163,11 @@ $STAGE_STYLE = [
     'Progress'     => ['#6B7280', '#F3F4F6'], 'Confirmed' => ['#6B7280', '#F3F4F6'],
     'Provisional'  => ['#B26A00', '#FFF4E0'], 'Cancelled' => ['#a33', '#f7dede'],
 ];
+$CHK_STYLE = [
+    'green'  => ['#1A6B3A', '#E6F4EA', '🟢'], 'yellow' => ['#8a6d3b', '#fcf3e3', '🟡'],
+    'red'    => ['#a33', '#f7dede', '🔴'],    'grey'   => ['#6B7280', '#F3F4F6', '⚪'],
+    'error'  => ['#6B7280', '#F3F4F6', '⚠'],
+];
 $qsKeep = array_filter(['view' => $view, 'past' => $showPast ? '1' : '', 'other' => $showOther ? '1' : ''],
                        fn($v) => $v !== '');
 // An explicit (even empty = "All") agent choice is kept; otherwise sellers fall back to their own.
@@ -166,6 +183,7 @@ $evLabel = function (array $e): string {
         'renamed'    => 'Renamed → ' . $e['to_value'],
         'gone'       => 'Left 001_Safari',
         'back'       => 'Back in 001_Safari',
+        'check'      => 'Automatic check: ' . strtoupper((string)$e['to_value']),
         default      => $e['event'],
     };
 };
@@ -202,6 +220,8 @@ $extra_css = '
 .ck-actions a{font-size:.7rem;text-decoration:none;margin-right:8px;white-space:nowrap}
 .ck-actions form{display:inline}
 .ck-btn{font-size:.72rem;font-weight:700;border-radius:6px;padding:4px 10px;cursor:pointer;border:1px solid #1A6B3A;background:#1A6B3A;color:#fff;white-space:nowrap}
+.ck-btn.run{background:#fff;color:#1a3a5c;border-color:#b9cbe0;font-weight:600}
+.ck-chk{font-size:.68rem;font-weight:700;border-radius:6px;padding:2px 7px;white-space:nowrap;text-decoration:none;display:inline-block}
 .ck-btn.off{background:#fff;color:#a33;border-color:#e4b9b9;font-weight:600}
 .ck-hist summary{font-size:.7rem;color:var(--grey-mid);cursor:pointer;margin-top:4px}
 .ck-hist ul{list-style:none;margin:4px 0 0;padding:0;font-size:.7rem;color:var(--grey-dk)}
@@ -226,6 +246,7 @@ include 'includes/header.php';
   <a class="ck-tile grey"  href="<?= h($link(['view' => 'missing'])) ?>"><b><?= $counts['grey'] ?></b><span>No CK · more than 90 days</span></a>
   <a class="ck-tile blue"  href="<?= h($link(['view' => 'booking'])) ?>"><b><?= $counts['booking'] ?></b><span>Still in booking (PROGRESS)</span></a>
   <a class="ck-tile green" href="<?= h($link(['view' => 'done'])) ?>"><b><?= $counts['done'] ?></b><span>CK done</span></a>
+  <a class="ck-tile red"   href="<?= h($link(['view' => 'chkred'])) ?>"><b><?= $counts['chkred'] ?></b><span>No CK · automatic check RED</span></a>
 </div>
 
 <div class="ck-bar">
@@ -254,7 +275,7 @@ include 'includes/header.php';
 <?php else: ?>
 <table class="ck-table">
   <thead><tr>
-    <th>Arrival</th><th>Booking</th><th>Sales</th><th>Stage</th>
+    <th>Arrival</th><th>Booking</th><th>Sales</th><th>Stage</th><th>Check</th>
     <th><?= $view === 'done' ? 'CK' : 'Waiting for CK' ?></th><th></th>
   </tr></thead>
   <tbody>
@@ -291,6 +312,21 @@ include 'includes/header.php';
         </div>
       </td>
       <td>
+        <?php if ($r['chk_overall']): $cs = $CHK_STYLE[$r['chk_overall']] ?? $CHK_STYLE['grey']; ?>
+          <a class="ck-chk" style="color:<?= $cs[0] ?>;background:<?= $cs[1] ?>" href="ck_report.php?id=<?= (int)$r['last_check_id'] ?>" target="_blank"
+             title="<?= h($r['chk_error'] ?: 'Open the SafariCheck report') ?>"><?= $cs[2] ?> <?= h(strtoupper($r['chk_overall'])) ?></a>
+          <div class="ck-sub">
+            <?php if ($r['chk_red'] || $r['chk_yellow']): ?><?= (int)$r['chk_red'] ?> red · <?= (int)$r['chk_yellow'] ?> to check<br><?php endif; ?>
+            <?= h(date('d M H:i', strtotime($r['chk_at']))) ?>
+          </div>
+        <?php else: ?>
+          <span class="ck-sub">not checked</span>
+        <?php endif; ?>
+        <?php if ($r['check_requested_at']): ?>
+          <div class="ck-sub" style="color:#1a3a5c" title="Requested <?= h($r['check_requested_at']) ?>">⏳ check running…</div>
+        <?php endif; ?>
+      </td>
+      <td>
         <?php if ((int)$r['has_ck']): ?>
           <span style="color:#1A6B3A;font-weight:700">✅ CK</span>
           <div class="ck-sub"><?= $r['ck_at'] ? h($fmtD($r['ck_at'])) . ($r['ck_by_name'] ? ' · ' . h($r['ck_by_name']) : ' · in Dropbox') : 'before tracking' ?></div>
@@ -315,6 +351,12 @@ include 'includes/header.php';
           <?php else: ?>
             <button class="ck-btn" type="submit">✅ Set CK</button>
           <?php endif; ?>
+        </form>
+        <form method="post" style="margin-top:4px">
+          <input type="hidden" name="action" value="run_check">
+          <input type="hidden" name="ck_id" value="<?= $id ?>">
+          <input type="hidden" name="return_qs" value="<?= h(http_build_query($qsKeep)) ?>">
+          <button class="ck-btn run" type="submit" title="Run the SafariCheck on this folder now (about 2 minutes)">▶ Check</button>
         </form>
         <?php if (!empty($events[$id])): ?>
           <details class="ck-hist">

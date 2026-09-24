@@ -386,6 +386,60 @@ function dropbox_list_folder_entries(string $token, string $path): array {
 }
 
 /**
+ * Recursive listing of a folder: every file and sub-folder below $path, with
+ * its path relative to $path ('invoices/x.pdf') and, for files, the Dropbox
+ * content_hash (changes whenever the content changes).
+ *
+ * @return array<int,array{path:string,tag:string,hash:string,size:int}>
+ * @throws RuntimeException on API error (incl. path not found)
+ */
+function dropbox_list_recursive(string $token, string $path): array {
+    $out    = [];
+    $cursor = null;
+    $prefix = strtolower(rtrim($path, '/')) . '/';
+    do {
+        if ($cursor) {
+            $url     = 'https://api.dropboxapi.com/2/files/list_folder/continue';
+            $payload = json_encode(['cursor' => $cursor]);
+        } else {
+            $url     = 'https://api.dropboxapi.com/2/files/list_folder';
+            $payload = json_encode(['path' => $path, 'recursive' => true, 'limit' => 2000]);
+        }
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_POST           => true,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_HTTPHEADER     => ['Authorization: Bearer ' . $token, 'Content-Type: application/json'],
+            CURLOPT_POSTFIELDS     => $payload,
+        ]);
+        $body = curl_exec($ch);
+        $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        if ($code !== 200) {
+            throw new RuntimeException("Dropbox list_folder failed (HTTP $code): $body");
+        }
+        $data = json_decode($body, true);
+        foreach ($data['entries'] ?? [] as $e) {
+            $tag = $e['.tag'] ?? '';
+            if ($tag !== 'file' && $tag !== 'folder') continue;
+            $disp = (string)($e['path_display'] ?? '');
+            if (strpos(strtolower($disp), $prefix) !== 0) continue;   // the folder itself
+            $out[] = [
+                'path' => substr($disp, strlen($prefix)),
+                'tag'  => $tag,
+                'hash' => (string)($e['content_hash'] ?? ''),
+                'size' => (int)($e['size'] ?? 0),
+            ];
+        }
+        $cursor  = $data['cursor']   ?? null;
+        $hasMore = $data['has_more'] ?? false;
+    } while ($hasMore && $cursor);
+
+    return $out;
+}
+
+/**
  * List the sub-folder names of MANY folders at once (parallel curl_multi), for
  * pages that would otherwise make one sequential list_folder call per folder.
  * A folder whose listing fails maps to null; a paged listing (has_more) falls
