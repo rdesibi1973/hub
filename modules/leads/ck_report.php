@@ -20,7 +20,8 @@ $st->execute([$id]);
 $c = $st->fetch(PDO::FETCH_ASSOC);
 
 if (!empty($_GET['raw'])) {
-    header('Content-Security-Policy: sandbox allow-popups allow-modals allow-scripts');
+    // allow-top-navigation-to-custom-protocols: the report's 'Open folder' link (savannah://).
+    header('Content-Security-Policy: sandbox allow-popups allow-modals allow-scripts allow-top-navigation-to-custom-protocols');
     header('X-Content-Type-Options: nosniff');
     if (!$c) { http_response_code(404); echo 'Report not found.'; exit; }
     if ($c['report_html']) { echo $c['report_html']; exit; }
@@ -60,7 +61,7 @@ header('X-Frame-Options: SAMEORIGIN');
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({id: ID, csrf: CSRF, key: String(ev.data.key || ''),
                             fp: String(ev.data.fp || ''), title: String(ev.data.title || ''),
-                            on: !!ev.data.on})
+                            on: !!ev.data.on, note: String(ev.data.note || '')})
     });
   });
 })();

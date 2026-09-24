@@ -10,7 +10,8 @@
  * The Hub only stores the entries — fingerprints are computed by SafariCheck.
  *
  *   GET  ?id=<ck_checks.id>                         {ok, checks}
- *   POST {id, key, fp, title, on, csrf}             {ok, checks}
+ *   POST {id, key, fp, title, on, note, csrf}       {ok, checks}
+ *   (note: why an accepted ERROR is fine — the report requires it for errors)
  *
  * Called by ck_report.php (the page framing the report), never by the report.
  */
@@ -67,6 +68,8 @@ try {
             'by'    => ($cu['full_name'] ?? '') ?: ($cu['username'] ?? '?'),
             'at'    => ck_now('Y-m-d H:i'),
         ];
+        $note = trim(mb_substr((string)($in['note'] ?? ''), 0, 500));
+        if ($note !== '') $checks[$key]['note'] = $note;
     } else {
         unset($checks[$key]);
     }
