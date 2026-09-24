@@ -154,7 +154,7 @@ header {
   </a>
   <a href="reconcile.php" class="<?= $cur==='reconcile.php'?'active':'' ?>">🔗 Reconcile</a>
   <a href="import_folder.php" class="<?= $cur==='import_folder.php'?'active':'' ?>">📁 Import Group</a>
-  <a href="backoffice.php" class="<?= $cur==='backoffice.php'?'active':'' ?>">🛠 BackOffice</a>
+  <a href="backoffice.php" class="<?= in_array($cur, ['backoffice.php','grp_groups.php','relink_folders.php'], true)?'active':'' ?>">🛠 BackOffice</a>
   <?php endif; ?>
   <?php endif; // !isLeadsRestricted ?>
   <?php if (!isLeadsRestricted()): ?>

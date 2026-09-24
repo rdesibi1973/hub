@@ -14,9 +14,9 @@ require_once 'config.php';
 $pageTitle = 'Re-link Folders';
 $db = db();
 
-// ── Access: admin + manager only (mirrors backoffice.php) ─────────────────────
+// ── Access: admin only (BackOffice itself is admin + manager) ─────────────────
 $currentUser = current_user();
-if (!in_array($currentUser['role_name'] ?? '', ['admin','manager'], true)) {
+if (($currentUser['role_name'] ?? '') !== 'admin') {   // bulk re-link: admin only
     flash('Access denied.', 'error');
     header('Location: requests.php'); exit;
 }

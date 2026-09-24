@@ -1017,7 +1017,12 @@ include 'includes/header.php';
 
 <div class="page-header" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
   <h2>🛠 BackOffice — Bookings &amp; folders</h2>
-  <a href="relink_folders.php" class="btn btn-outline btn-sm" title="Refresh Dropbox links after moving folders to an archive">🔗 Re-link folders (bulk)</a>
+  <div style="display:flex;gap:8px;flex-wrap:wrap">
+    <a href="grp_groups.php" class="btn btn-outline btn-sm" title="All GRP group folders in 001_Safari by month, with their confirmed bookings and pax">👥 List GRP groups</a>
+    <?php if (($currentUser['role_name'] ?? '') === 'admin'): ?>
+    <a href="relink_folders.php" class="btn btn-outline btn-sm" title="Refresh Dropbox links after moving folders to an archive">🔗 Re-link folders (bulk)</a>
+    <?php endif; ?>
+  </div>
 </div>
 
 <form method="GET" class="filters">

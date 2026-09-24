@@ -340,6 +340,70 @@ function dropbox_list_folder(string $token, string $path): array {
 }
 
 /**
+ * List the sub-folder names of MANY folders at once (parallel curl_multi), for
+ * pages that would otherwise make one sequential list_folder call per folder.
+ * A folder whose listing fails maps to null; a paged listing (has_more) falls
+ * back to dropbox_list_folder().
+ *
+ * @param  string[] $paths  Full Dropbox paths
+ * @return array<string,string[]|null>  path => folder names (sorted) | null on error
+ */
+function dropbox_list_folders_multi(string $token, array $paths, int $concurrency = 8): array {
+    $out   = [];
+    $queue = array_values(array_unique($paths));
+    $mh    = curl_multi_init();
+    $live  = [];   // (int)handle => [handle, path]
+
+    $start = function (string $path) use ($token, $mh, &$live) {
+        $ch = curl_init('https://api.dropboxapi.com/2/files/list_folder');
+        curl_setopt_array($ch, [
+            CURLOPT_POST           => true,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT        => 30,
+            CURLOPT_HTTPHEADER     => [
+                'Authorization: Bearer ' . $token,
+                'Content-Type: application/json',
+            ],
+            CURLOPT_POSTFIELDS => json_encode(['path' => $path, 'recursive' => false]),
+        ]);
+        curl_multi_add_handle($mh, $ch);
+        $live[(int)$ch] = [$ch, $path];
+    };
+
+    while ($queue && count($live) < $concurrency) $start(array_shift($queue));
+    do {
+        curl_multi_exec($mh, $running);
+        if ($running) curl_multi_select($mh, 1.0);
+        while ($info = curl_multi_info_read($mh)) {
+            $ch = $info['handle'];
+            [, $path] = $live[(int)$ch];
+            unset($live[(int)$ch]);
+            $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            $data = $code === 200 ? json_decode((string)curl_multi_getcontent($ch), true) : null;
+            curl_multi_remove_handle($mh, $ch);
+            curl_close($ch);
+
+            if (!is_array($data)) {
+                $out[$path] = null;
+            } elseif (!empty($data['has_more'])) {
+                try { $out[$path] = dropbox_list_folder($token, $path); }
+                catch (Throwable $e) { $out[$path] = null; }
+            } else {
+                $names = [];
+                foreach ($data['entries'] ?? [] as $e) {
+                    if (($e['.tag'] ?? '') === 'folder') $names[] = $e['name'];
+                }
+                $out[$path] = $names;
+            }
+            if (is_array($out[$path])) sort($out[$path], SORT_NATURAL | SORT_FLAG_CASE);
+            if ($queue) $start(array_shift($queue));
+        }
+    } while ($running || $live);
+    curl_multi_close($mh);
+    return $out;
+}
+
+/**
  * Delete a file or folder in Dropbox (moves to trash).
  * Uses files/delete_v2 — the item is moved to Dropbox trash, not permanently erased.
  *
