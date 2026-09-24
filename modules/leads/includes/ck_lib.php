@@ -367,12 +367,14 @@ function ck_set_marker(PDO $db, string $token, int $folderId, bool $on, ?int $us
 //   CK_GITHUB_REPO   'owner/repo' of the safariagent repository
 // Without the GitHub settings the request stays pending and the nightly run does it.
 
-/** Top-level files and invoices/*.pdf are the only files the checks open. */
+/** Top-level files and invoices/*.pdf are the only files the checks open
+ *  (plus SafariCheck_confirmed.json, the human confirmations — ck_confirm.php). */
 function ck_agent_file_allowed(string $rel): bool {
     if ($rel === '' || strpos($rel, '..') !== false || strpos($rel, "\\") !== false) return false;
     $parts = explode('/', trim($rel, '/'));
     $name  = strtolower(end($parts));
     if (count($parts) === 1) {
+        if ($name === 'safaricheck_confirmed.json') return true;
         return (bool)preg_match('/\.(xlsx|xlsm|docx|pdf)$/', $name) && strpos($name, '~$') !== 0;
     }
     return count($parts) === 2 && strtolower($parts[0]) === 'invoices' && str_ends_with($name, '.pdf');
