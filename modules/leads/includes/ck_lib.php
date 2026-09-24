@@ -209,6 +209,19 @@ function ck_apply(PDO $db, array $row, string $newName, string $source, ?int $us
     $cols = implode(', ', array_map(fn($c) => "$c = ?", array_keys($set)));
     $db->prepare("UPDATE ck_folders SET $cols WHERE id = ?")
        ->execute([...array_values($set), $id]);
+
+    // The request follows its folder: a renamed folder (in Dropbox or from the
+    // Hub) updates practice_code/dropbox_url, and a new payment tag updates
+    // payment_status, so the two never drift apart.
+    if ($row['folder_name'] !== $newName) {
+        $ps = in_array($newStage, CK_DONE_STAGES, true) ? $newStage : null;
+        $db->prepare("UPDATE requests
+                         SET practice_code = ?, dropbox_url = ?,
+                             payment_status = IF(status = 'Booked' AND ? IS NOT NULL, ?, payment_status)
+                       WHERE practice_code IN (?, ?)")
+           ->execute([$newName, ck_url_from_path(CK_BASE . '/' . $newName), $ps, $ps,
+                      $row['folder_name'], $newName]);
+    }
     return $bookingDone;
 }
 

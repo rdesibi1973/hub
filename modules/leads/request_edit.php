@@ -67,6 +67,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $errors[] = 'Parent folder name cannot contain spaces. Please remove the space (e.g. use BALANCE_CK instead of BALANCE CK).';
     }
 
+    // ── Payment status ↔ folder tag (the folder is the source of truth) ──
+    // Changing the payment status retags the folder (renamed below); editing
+    // the folder's tag sets the payment status. Staff cannot rename folders,
+    // so for them the payment status must stay what the folder says.
+    require_once 'includes/payment_tag.php';
+    if (!$errors && ($v['status'] ?? '') === 'Booked') {
+        $oldPs = (string)($req['payment_status'] ?? '');
+        $newPs = (string)($v['payment_status'] ?? '');
+        if ($isRestricted) {
+            $fps = payment_status_from_folder((string)($req['practice_code'] ?? ''));
+            if ($newPs !== $oldPs && $fps !== '' && $newPs !== $fps) {
+                $errors[] = "Payment status must match the Dropbox folder ($fps). Ask a manager to change it.";
+            }
+        } elseif ($newPs !== $oldPs && $newPs !== '') {
+            $tagged = folder_with_payment_tag((string)($v['practice_code'] ?? ''), $newPs);
+            if ($tagged !== null) $v['practice_code'] = $tagged;
+        } elseif (($v['practice_code'] ?? '') !== ($req['practice_code'] ?? '')) {
+            $fps = payment_status_from_folder((string)$v['practice_code']);
+            if ($fps !== '') $v['payment_status'] = $fps;
+        }
+    }
+
     // ── Dropbox folder rename when practice_code changes (admin/manager only) ──
     // Triggered by ANY change to the Dropbox Folder field (including when driven by
     // a customer-name edit via JS). Uses old DB value → new POST value as from/to.

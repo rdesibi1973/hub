@@ -99,8 +99,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['set_payment_status'])
     $allowed = array_keys(PAYMENT_STATUSES);
     if ($rid) {
         $psVal = in_array($nps, $allowed, true) ? $nps : null;
-        $db->prepare('UPDATE requests SET payment_status = ? WHERE id = ? AND status = \'Booked\'')
-           ->execute([$psVal, $rid]);
+        // The Dropbox folder's tag is the source of truth: rename it to match,
+        // so payment_status and folder never drift apart.
+        require_once __DIR__ . '/../../modules/leads/dropbox_constants.php';
+        require_once __DIR__ . '/../../modules/leads/dropbox_helper.php';
+        require_once __DIR__ . '/../../modules/leads/includes/folder_parser.php';
+        require_once __DIR__ . '/../../modules/leads/includes/ck_lib.php';
+        require_once __DIR__ . '/../../modules/leads/includes/payment_tag.php';
+        $st = $db->prepare("SELECT * FROM requests WHERE id = ? AND status = 'Booked'");
+        $st->execute([$rid]);
+        $req = $st->fetch(PDO::FETCH_ASSOC);
+        $newName = ($req && $psVal) ? folder_with_payment_tag((string)$req['practice_code'], $psVal) : null;
+        if ($req && $newName !== null && $newName !== $req['practice_code']) {
+            try {
+                $res = payment_rename_folder($db, $req, $newName);
+            } catch (Throwable $e) {
+                $res = ['ok' => false, 'msg' => $e->getMessage()];
+            }
+            if (function_exists('flash')) {
+                flash($res['ok'] ? $res['msg'] : $res['msg'] . ' Payment status not changed.',
+                      $res['ok'] ? 'info' : 'error');
+            }
+        } elseif ($req) {
+            $db->prepare('UPDATE requests SET payment_status = ? WHERE id = ? AND status = \'Booked\'')
+               ->execute([$psVal, $rid]);
+        }
     }
     header('Location: ' . $_SERVER['REQUEST_URI']); exit;
 }
