@@ -377,7 +377,14 @@ function ck_agent_file_allowed(string $rel): bool {
         if ($name === 'safaricheck_confirmed.json') return true;
         return (bool)preg_match('/\.(xlsx|xlsm|docx|pdf)$/', $name) && strpos($name, '~$') !== 0;
     }
-    return count($parts) === 2 && strtolower($parts[0]) === 'invoices' && str_ends_with($name, '.pdf');
+    if (count($parts) !== 2) return false;
+    $dir = strtolower($parts[0]);
+    if ($dir === 'invoices') return str_ends_with($name, '.pdf');
+    // GRP: each confirmed client's sub-folder holds that client's Word programme
+    // (rooms sold). Only .docx, and never from the standard sub-folders.
+    $internal = ['passports', 'flights', 'intflights', 'bookings', 'vouchers', 'insurance',
+                 'complain', 'guestcomments', 'mails', 'old'];
+    return !in_array($dir, $internal, true) && str_ends_with($name, '.docx') && strpos($name, '~$') !== 0;
 }
 
 /** Start the GitHub workflow for these ck_folders ids. */
