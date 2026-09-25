@@ -436,3 +436,29 @@ function ck_request_check(PDO $db, array $ids, string $trigger): array {
        ->execute([ck_now(), $trigger, ...$ids]);
     return ck_github_dispatch($ids);
 }
+
+/**
+ * Nightly automatic check, started by the Hub itself (ck_cron.php, called
+ * every 30 min by cron-job.org): the first call after 05:00 Tanzania each day
+ * dispatches the runner on the Hub queue. GitHub's own `schedule` trigger is
+ * best-effort and was skipped, so it is not used.
+ */
+const CK_NIGHTLY_HOUR = 5;
+
+function ck_nightly_dispatch(PDO $db): string {
+    $db->exec("CREATE TABLE IF NOT EXISTS ck_meta (
+        k VARCHAR(40) PRIMARY KEY,
+        v VARCHAR(255) NULL
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    $today = ck_now('Y-m-d');
+    if ((int)ck_now('G') < CK_NIGHTLY_HOUR) return 'nightly: not yet (before ' . CK_NIGHTLY_HOUR . ':00)';
+    $st = $db->prepare("SELECT v FROM ck_meta WHERE k = 'nightly_last'");
+    $st->execute();
+    if ($st->fetchColumn() === $today) return "nightly: already started today";
+    $res = ck_github_dispatch([]);            // empty ids = the Hub queue
+    if ($res['ok']) {
+        $db->prepare("INSERT INTO ck_meta (k, v) VALUES ('nightly_last', ?)
+                      ON DUPLICATE KEY UPDATE v = VALUES(v)")->execute([$today]);
+    }
+    return 'nightly: ' . $res['msg'];
+}

@@ -1,7 +1,8 @@
 <?php
 // modules/leads/ck_cron.php
 // Scheduled CK-tracker scan, so stage / _CK changes made in Dropbox get their
-// real date even when nobody opens ck_tracker.php. Call from the external cron
+// real date even when nobody opens ck_tracker.php. It also starts the nightly
+// SafariCheck run once a day (ck_nightly_dispatch). Call from the external cron
 // service (same one as the memo reminders), e.g. every 30 min:
 //   https://hub.savannahexplorers.com/modules/leads/ck_cron.php?token=XXX
 //
@@ -27,6 +28,8 @@ header('Content-Type: text/plain');
 try {
     $s = ck_scan(db(), dropbox_get_access_token());
     echo ck_now() . " CK scan: {$s['seen']} folders, {$s['new']} new, {$s['changed']} changed, {$s['gone']} gone\n";
+    // Once a day (first call after 05:00 Tanzania): the nightly automatic check.
+    echo ck_now() . ' ' . ck_nightly_dispatch(db()) . "\n";
 } catch (Throwable $e) {
     http_response_code(500);
     echo 'CK scan failed: ' . $e->getMessage() . "\n";
