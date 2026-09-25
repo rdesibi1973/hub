@@ -1601,6 +1601,15 @@ function fallbackCopy(t, el) {
   document.body.removeChild(ta);
 }
 function flashCopied(el) { var o = el.textContent; el.textContent = '✓ Copied'; setTimeout(function(){ el.textContent = o; }, 1200); }
+// Opened from a request's "Confirm Safari" button (request_view.php):
+// show that request's confirm form straight away.
+(function () {
+  var id = <?= (int)($_GET['open_confirm'] ?? 0) ?>;
+  var f = id && document.getElementById('cs' + id);
+  if (!f) return;
+  f.style.display = 'block';
+  f.scrollIntoView({block: 'center'});
+})();
 </script>
 
 <?php if ($bookingEmail): ?>

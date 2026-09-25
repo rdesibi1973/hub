@@ -545,9 +545,25 @@ include 'includes/header.php';
     </div>
   </div>
   <div class="gap-8">
+    <?php
+      // Confirm Safari lives in BackOffice (admin/manager): same rule as there —
+      // a private booking not yet confirmed (no _START dates, not Booked/Cancelled/Lost).
+      $pcode = trim($r['practice_code'] ?? '');
+      $canConfirmHere = in_array(current_user()['role_name'] ?? '', ['admin', 'manager'], true)
+          && trim($r['group_folder'] ?? '') === '' && $pcode !== ''
+          && stripos($pcode, '_START') === false
+          && !in_array($r['status'] ?? '', ['Booked', 'Cancelled', 'Lost'], true);
+    ?>
+    <?php if ($canConfirmHere): ?>
+      <a href="backoffice.php?<?= h(http_build_query(['q' => $pcode, 'root' => 'All', 'open_confirm' => (int)$r['id']])) ?>"
+         class="btn btn-outline" style="color:#1A6B3A;border-color:#1A6B3A;font-weight:700"
+         title="Confirm this safari: set the dates, move the folder to 001_Safari, mark Booked">✅ Confirm Safari</a>
+    <?php endif; ?>
     <?php if (!isLeadsRestricted()): ?>
       <?php if ($invCount === 0): ?>
-        <a href="../invoices/invoice_add.php?request_id=<?= $r['id'] ?>" class="btn btn-outline">🧾 Create Invoice</a>
+        <?php if (($r['status'] ?? '') === 'Booked'): ?>
+          <a href="../invoices/invoice_add.php?request_id=<?= $r['id'] ?>" class="btn btn-outline">🧾 Create Invoice</a>
+        <?php endif; ?>
       <?php elseif ($invCount === 1): ?>
         <a href="../invoices/invoice_view.php?id=<?= $existingInv['id'] ?>" class="btn btn-outline">🧾 <?= h($existingInv['invoice_number']) ?></a>
       <?php else: ?>
