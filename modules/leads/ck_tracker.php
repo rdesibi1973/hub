@@ -373,6 +373,9 @@ $extra_css = '
 .ck-hist ul{list-style:none;margin:4px 0 0;padding:0;font-size:.7rem;color:var(--grey-dk)}
 .ck-hist li{padding:1px 0}
 .ck-hist li small{color:var(--grey-mid)}
+.ck-inprog{font-size:.68rem;font-weight:700;color:#1a3a5c;background:#eef3f9;border-radius:6px;padding:2px 7px;display:inline-block;margin-bottom:3px;white-space:nowrap}
+.ck-result.busy a{pointer-events:none;opacity:.4}
+.ck-result.busy .ck-rep{display:none}
 .ck-lastnote{font-size:.72rem;margin-top:4px;color:var(--grey-dk)}
 .ck-lastnote a{color:inherit;text-decoration:none}
 .ck-lastnote small{color:var(--grey-mid)}
@@ -486,8 +489,10 @@ include 'includes/header.php';
           <?= $r['in_stage'] !== null ? 'for ' . $r['in_stage'] . ' d' : '<span title="Already in this stage when tracking started">before tracking</span>' ?>
         </div>
       </td>
+      <?php $running = $r['check_requested_at'] && (strtotime(ck_now()) - strtotime($r['check_requested_at'])) / 60 <= 10; ?>
       <td class="ck-chkcell" data-ck="<?= $id ?>">
-        <div class="ck-result">
+        <?php if ($running): ?><div class="ck-inprog">⏳ Report in progress</div><?php endif; ?>
+        <div class="ck-result<?= $running ? ' busy' : '' ?>">
         <?php if ($r['chk_overall']): $cs = $CHK_STYLE[$r['chk_overall']] ?? $CHK_STYLE['grey']; ?>
           <a class="ck-chk" style="color:<?= $cs[0] ?>;background:<?= $cs[1] ?>" href="ck_report.php?id=<?= (int)$r['last_check_id'] ?>" target="_blank"
              title="<?= h($r['chk_error'] ?: 'Open the SafariCheck report in a new tab') ?>"><?= $cs[2] ?> <?= h(strtoupper($r['chk_overall'])) ?></a>
@@ -735,8 +740,20 @@ function fallbackCopy(t, el) {
     if (!n) { n = document.createElement('div'); c.appendChild(n); }
     n.className = 'ck-sub ck-note'; n.style.color = color || '#1a3a5c'; n.innerHTML = html;
   }
+  // While a check runs the old report is not the current one: grey out its
+  // badge, hide "Open report" and show "Report in progress".
+  function setBusy(id, on) {
+    var c = cell(id); if (!c) return;
+    c.querySelector('.ck-result').classList.toggle('busy', on);
+    var p = c.querySelector('.ck-inprog');
+    if (on && !p) {
+      p = document.createElement('div'); p.className = 'ck-inprog'; p.textContent = '⏳ Report in progress';
+      c.insertBefore(p, c.firstChild);
+    } else if (!on && p) { p.remove(); }
+  }
   function showResult(id, s) {
     var c = cell(id); if (!c) return;
+    setBusy(id, false);
     var st = STYLE[s.overall] || STYLE.grey;
     c.querySelector('.ck-result').innerHTML =
       '<a class="ck-chk" style="color:' + st[0] + ';background:' + st[1] + '" href="ck_report.php?id=' + s.check +
@@ -757,9 +774,10 @@ function fallbackCopy(t, el) {
           if (s && (!s.running || s.check !== r.prev)) {
             delete running[id];
             if (s.check && s.check !== r.prev) showResult(id, s);
-            else note(id, '⚠ check did not finish — try again', '#a33');
+            else { setBusy(id, false); note(id, '⚠ check did not finish — try again', '#a33'); }
           } else if (Date.now() - r.since > 12 * 60000) {
             delete running[id];
+            setBusy(id, false);
             note(id, '⚠ check did not finish — try again', '#a33');
           }
         });
@@ -774,7 +792,7 @@ function fallbackCopy(t, el) {
     if (!ids.length) return;
     var fd = new FormData();
     fd.append('action', 'run_check'); fd.append('ajax', '1'); fd.append('ck_ids', ids.join(','));
-    ids.forEach(function (id) { note(id, '⏳ starting check…'); });
+    ids.forEach(function (id) { setBusy(id, true); note(id, '⏳ starting check…'); });
     fetch('ck_tracker.php', {method: 'POST', body: fd, credentials: 'same-origin'})
       .then(function (r) { return r.json(); })
       .then(function (d) {
@@ -786,11 +804,12 @@ function fallbackCopy(t, el) {
             note(id, '⏳ check running (started ' + esc(d.at) + ') — the result appears here');
             watch(id, prev);
           } else {
+            setBusy(id, false);
             note(id, '⚠ ' + esc(res.msg || 'could not start the check'), '#a33');
           }
         });
       })
-      .catch(function (e) { ids.forEach(function (id) { note(id, '⚠ ' + esc(e.message), '#a33'); }); });
+      .catch(function (e) { ids.forEach(function (id) { setBusy(id, false); note(id, '⚠ ' + esc(e.message), '#a33'); }); });
   }
   // Rows already running when the page opened.
   document.querySelectorAll('.ck-running').forEach(function (r) {

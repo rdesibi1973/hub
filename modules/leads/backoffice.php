@@ -1038,7 +1038,8 @@ include 'includes/header.php';
     <div style="display:flex;gap:14px;align-items:center;min-height:36px">
       <?php foreach (['2026'=>'2026','001_Safari'=>'001_Safari','Contracts'=>'Contracts','All'=>'All'] as $val=>$lbl): ?>
         <label style="font-weight:400;font-size:.82rem;display:flex;align-items:center;gap:5px;white-space:nowrap;margin:0;cursor:pointer">
-          <input type="radio" name="root" value="<?= h($val) ?>" <?= $root===$val?'checked':'' ?>> <?= h($lbl) ?>
+          <?php /* the '2026' key becomes int 2026 in PHP arrays: compare as strings */ ?>
+          <input type="radio" name="root" value="<?= h($val) ?>" <?= $root === (string)$val ? 'checked' : '' ?>> <?= h($lbl) ?>
         </label>
       <?php endforeach; ?>
     </div>
@@ -1260,19 +1261,35 @@ include 'includes/header.php';
                 <input type="text" name="cs_grpcode" value="<?= h($pv['grpCode']) ?>" placeholder="from Start" spellcheck="false"
                        style="width:100%;font-family:monospace;font-size:.74rem;padding:4px 6px;border:1.5px solid var(--grey-lt);border-radius:5px"></label>
             </div>
-            <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:6px 10px;font-family:'Open Sans',sans-serif">
-              <label style="font-size:.66rem;color:var(--grey-mid)">Start (DDMMM)
-                <input type="text" name="cs_start" value="<?= h($pv['fStart']) ?>" placeholder="05JAN" spellcheck="false"
-                       style="width:100%;font-family:monospace;font-size:.74rem;padding:4px 6px;border:1.5px solid var(--grey-lt);border-radius:5px;text-transform:uppercase"></label>
-              <label style="font-size:.66rem;color:var(--grey-mid)">End (DDMMMYYYY)
-                <input type="text" name="cs_end" value="<?= h($pv['fEnd']) ?>" placeholder="18JAN2026" spellcheck="false"
-                       style="width:100%;font-family:monospace;font-size:.74rem;padding:4px 6px;border:1.5px solid var(--grey-lt);border-radius:5px;text-transform:uppercase"></label>
-              <label style="font-size:.66rem;color:var(--grey-mid)">Middle (DDMMM / NA)
-                <input type="text" name="cs_mid" value="<?= h($pv['fMid']) ?>" placeholder="NA" spellcheck="false"
-                       style="width:100%;font-family:monospace;font-size:.74rem;padding:4px 6px;border:1.5px solid var(--grey-lt);border-radius:5px;text-transform:uppercase"></label>
-              <label style="font-size:.66rem;color:var(--grey-mid)">Middle 2 (DDMMM / NA)
-                <input type="text" name="cs_mid2" value="<?= h($pv['fMid2']) ?>" placeholder="NA" spellcheck="false"
-                       style="width:100%;font-family:monospace;font-size:.74rem;padding:4px 6px;border:1.5px solid var(--grey-lt);border-radius:5px;text-transform:uppercase"></label>
+            <?php
+              // Vertical date rows: label | text field (type freely) | 📅 calendar
+              // (fills the field in the expected format) | NA for the middle dates.
+              $csDates = [
+                  ['cs_start', 'Start',    'DDMMM',     $pv['fStart'], '05JAN',     false],
+                  ['cs_mid',   'Middle',   'DDMMM / NA', $pv['fMid'],  'NA',        true],
+                  ['cs_mid2',  'Middle 2', 'DDMMM / NA', $pv['fMid2'], 'NA',        true],
+                  ['cs_end',   'End',      'DDMMMYYYY', $pv['fEnd'],   '18JAN2026', false],
+              ];
+            ?>
+            <div style="display:flex;flex-direction:column;gap:5px;font-family:'Open Sans',sans-serif">
+              <?php foreach ($csDates as [$fname, $flbl, $ffmt, $fval, $fph, $fna]): ?>
+              <div class="cs-date" style="display:flex;align-items:center;gap:6px">
+                <label for="<?= $fname . $rid ?>" style="font-size:.7rem;color:var(--grey-dk);width:130px;flex-shrink:0;margin:0">
+                  <?= h($flbl) ?> <span style="color:var(--grey-mid);font-size:.64rem">(<?= h($ffmt) ?>)</span></label>
+                <input type="text" id="<?= $fname . $rid ?>" name="<?= $fname ?>" value="<?= h($fval) ?>" placeholder="<?= h($fph) ?>" spellcheck="false"
+                       data-fmt="<?= $fname === 'cs_end' ? 'long' : 'short' ?>"
+                       style="width:130px;font-family:monospace;font-size:.74rem;padding:4px 6px;border:1.5px solid var(--grey-lt);border-radius:5px;text-transform:uppercase">
+                <span style="position:relative;display:inline-flex">
+                  <button type="button" class="btn btn-outline btn-sm" title="Pick from calendar" onclick="csPick(this)" style="padding:2px 7px">📅</button>
+                  <input type="date" tabindex="-1" aria-hidden="true" onchange="csPicked(this)"
+                         style="position:absolute;left:0;bottom:0;width:1px;height:1px;opacity:0;border:0;padding:0">
+                </span>
+                <?php if ($fna): ?>
+                  <button type="button" class="btn btn-outline btn-sm" title="No middle date" style="padding:2px 7px;font-size:.66rem"
+                          onclick="this.parentNode.querySelector('input[type=text]').value='NA'">NA</button>
+                <?php endif; ?>
+              </div>
+              <?php endforeach; ?>
             </div>
             <label style="font-size:.66rem;color:var(--grey-mid);display:block;margin-top:6px;font-family:'Open Sans',sans-serif">Destination
               <select name="cs_dest" style="width:100%;font-size:.74rem;padding:4px 6px;border:1.5px solid var(--grey-lt);border-radius:5px">
@@ -1432,6 +1449,36 @@ function toggleRename(id) {
 function toggleEl(elId) {
   var f = document.getElementById(elId);
   if (f) f.style.display = (f.style.display === 'none' || !f.style.display) ? 'block' : 'none';
+}
+
+// Confirm Safari dates: 📅 opens the native calendar on a hidden date input;
+// the picked day is written back as DDMMM (Start/Middle) or DDMMMYYYY (End).
+var CS_MON = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+function csParse(txt, fallbackYear) {
+  var m = /^(\d{1,2})([A-Z]{3})(\d{4})?$/.exec((txt || '').trim().toUpperCase());
+  if (!m || CS_MON.indexOf(m[2]) < 0) return null;
+  var y = m[3] || fallbackYear || new Date().getFullYear();
+  return y + '-' + String(CS_MON.indexOf(m[2]) + 1).padStart(2, '0') + '-' + m[1].padStart(2, '0');
+}
+function csPick(btn) {
+  var picker = btn.nextElementSibling;
+  var row    = btn.closest('.cs-date');
+  var txt    = row.querySelector('input[type=text]');
+  // Open the calendar on the typed date; DDMMM takes its year from End.
+  var endIn  = row.parentNode.querySelector('input[name=cs_end]');
+  var endIso = endIn ? csParse(endIn.value) : null;
+  var iso    = csParse(txt.value, endIso ? endIso.slice(0, 4) : null);
+  // Safari across New Year (e.g. 28DEC → 05JAN2027): Start belongs to the year before.
+  if (iso && endIso && iso > endIso && txt !== endIn) iso = (parseInt(iso.slice(0, 4), 10) - 1) + iso.slice(4);
+  iso = iso || endIso;
+  picker.value = iso || '';
+  try { picker.showPicker(); } catch (e) { picker.focus(); picker.click(); }
+}
+function csPicked(picker) {
+  if (!picker.value) return;
+  var p   = picker.value.split('-');               // YYYY-MM-DD
+  var txt = picker.closest('.cs-date').querySelector('input[type=text]');
+  txt.value = p[2] + CS_MON[parseInt(p[1], 10) - 1] + (txt.getAttribute('data-fmt') === 'long' ? p[0] : '');
 }
 // Copy text (Windows path or folder name) to the clipboard.
 function copyPath(el) {

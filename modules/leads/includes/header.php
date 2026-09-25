@@ -126,14 +126,19 @@ header {
 <!-- SUB-NAV — Lead Tracker sections -->
 <nav class="sub-nav">
   <?php $cur = basename($_SERVER['PHP_SELF']); ?>
-  <?php if (!isLeadsRestricted()): ?>
+  <?php
+  $isMgr = !isLeadsRestricted() && in_array($currentUser['role_name'] ?? '', ['admin','manager']);
+  if (!isLeadsRestricted()): ?>
   <a href="dashboard.php" class="<?= $cur==='dashboard.php' ? 'active':'' ?>">Dashboard</a>
+  <?php endif; ?>
+  <?php if ($isMgr): ?>
+  <a href="backoffice.php" class="<?= in_array($cur, ['backoffice.php','grp_groups.php','relink_folders.php'], true)?'active':'' ?>">🛠 BackOffice</a>
   <?php endif; ?>
   <a href="requests.php"  class="<?= in_array($cur,['requests.php','request_add.php','request_edit.php','request_view.php']) ? 'active':'' ?>"><?= isLeadsRestricted() ? 'My Requests' : 'Requests' ?></a>
   <a href="pipeline.php"  class="<?= $cur==='pipeline.php' ? 'active':'' ?>">🔥 Pipeline</a>
+  <a href="ck_tracker.php"      class="<?= $cur==='ck_tracker.php'?'active':'' ?>">✅ CK</a>
   <a href="booked.php"          class="<?= $cur==='booked.php'?'active':'' ?>">✈ Booked</a>
   <a href="payments.php"        class="<?= $cur==='payments.php'?'active':'' ?>">💳 Payments</a>
-  <a href="ck_tracker.php"      class="<?= $cur==='ck_tracker.php'?'active':'' ?>">✅ CK</a>
   <a href="email_templates.php" class="<?= $cur==='email_templates.php'?'active':'' ?>">📧 Templates</a>
   <?php if (isLeadsRestricted()): // sellers get a direct link to their own Sales Team card ?>
   <a href="reports.php?rtype=team" class="<?= $cur==='reports.php' ? 'active':'' ?>">👥 Sales Team</a>
@@ -142,9 +147,7 @@ header {
   <a href="reports.php"   class="<?= $cur==='reports.php' ? 'active':'' ?>">Reports</a>
   <a href="agents.php"    class="<?= $cur==='agents.php' ? 'active':'' ?>">Agents</a>
   <a href="agencies.php"  class="<?= $cur==='agencies.php' ? 'active':'' ?>">Agencies</a>
-  <a href="requests_import_list.php" class="<?= in_array($cur,['requests_import_list.php','request_import_edit.php','reports_import.php']) ? 'active':'' ?>">Historical</a>
-  <?php
-  if (in_array($currentUser['role_name'] ?? '', ['admin','manager'])):
+  <?php if ($isMgr):
     $stagingCount = (int)db()->query("SELECT COUNT(*) FROM lead_staging")->fetchColumn();
   ?>
   <a href="staging.php" class="<?= $cur==='staging.php'?'active':'' ?>" style="display:flex;align-items:center;gap:6px;">
@@ -153,9 +156,11 @@ header {
       <span id="incomingBadge" style="background:#C0211B;color:#fff;border-radius:10px;padding:1px 7px;font-size:.68rem;font-weight:700;line-height:1.6"><?= $stagingCount ?></span>
     <?php endif; ?>
   </a>
+  <?php endif; ?>
+  <a href="requests_import_list.php" class="<?= in_array($cur,['requests_import_list.php','request_import_edit.php','reports_import.php']) ? 'active':'' ?>">Historical</a>
+  <?php if ($isMgr): ?>
   <a href="reconcile.php" class="<?= $cur==='reconcile.php'?'active':'' ?>">🔗 Reconcile</a>
   <a href="import_folder.php" class="<?= $cur==='import_folder.php'?'active':'' ?>">📁 Import Group</a>
-  <a href="backoffice.php" class="<?= in_array($cur, ['backoffice.php','grp_groups.php','relink_folders.php'], true)?'active':'' ?>">🛠 BackOffice</a>
   <?php endif; ?>
   <?php endif; // !isLeadsRestricted ?>
   <?php if (!isLeadsRestricted()): ?>
