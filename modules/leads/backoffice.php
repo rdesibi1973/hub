@@ -999,6 +999,31 @@ if ($q !== '' && $inFiles) {
     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 }
 
+// CK tracker folder of each row (001_Safari only): "Open report" / "Re-check".
+// Matched like the CK tracker: exact folder name, else the name without status tags.
+$ckByReq = [];
+if ($rows) {
+    try {
+        require_once 'dropbox_helper.php';
+        ck_ensure_schema($db);
+        $ckRows = $db->query("SELECT f.id, f.folder_name, f.last_check_id, f.check_requested_at,
+                                     c.overall, c.created_at AS chk_at
+                              FROM ck_folders f LEFT JOIN ck_checks c ON c.id = f.last_check_id
+                              WHERE f.gone = 0")->fetchAll(PDO::FETCH_ASSOC);
+        $ckExact = $ckStem = [];
+        foreach ($ckRows as $f) {
+            $ckExact[mb_strtolower($f['folder_name'])] = $f;
+            $ckStem[dropbox_folder_stem($f['folder_name'])] = $f;
+        }
+        foreach ($rows as $r) {
+            $fn = trim(trim($r['group_folder'] ?? '') !== '' ? $r['group_folder'] : ($r['practice_code'] ?? ''));
+            if ($fn === '') continue;
+            $f = $ckExact[mb_strtolower($fn)] ?? $ckStem[dropbox_folder_stem($fn)] ?? null;
+            if ($f) $ckByReq[(int)$r['id']] = $f;
+        }
+    } catch (Throwable $e) { $ckByReq = []; }   // the CK links are optional
+}
+
 // Existing GRP names — autocomplete for the "Re-group" action.
 $existingGrps = [];
 if ($rows) {
@@ -1029,6 +1054,7 @@ include 'includes/header.php';
     <?php if (($currentUser['role_name'] ?? '') === 'admin'): ?>
     <a href="relink_folders.php" class="btn btn-outline btn-sm" title="Refresh Dropbox links after moving folders to an archive">🔗 Re-link folders (bulk)</a>
     <?php endif; ?>
+    <a href="request_add.php" class="btn btn-red btn-sm" title="Create a new request">＋ New Request</a>
   </div>
 </div>
 
@@ -1175,6 +1201,18 @@ include 'includes/header.php';
               <?php endif; ?>
             <?php endif; ?>
           </div>
+          <?php if ($ckF = $ckByReq[(int)$r['id']] ?? null):
+              $ckRun = $ckF['check_requested_at'] && (strtotime(ck_now()) - strtotime($ckF['check_requested_at'])) / 60 <= 10;
+              $ckCol = ['green' => '#1A6B3A', 'yellow' => '#8a6d3b', 'red' => '#a33'][$ckF['overall'] ?? ''] ?? '#6B7280'; ?>
+          <div class="bo-ck" data-ck="<?= (int)$ckF['id'] ?>" data-check="<?= (int)$ckF['last_check_id'] ?>" data-running="<?= $ckRun ? 1 : 0 ?>"
+               style="margin-top:3px;font-family:'Open Sans',sans-serif;font-size:.68rem">
+            <span class="bo-ck-rep"><?php if ($ckF['last_check_id']): ?>
+              <a href="ck_report.php?id=<?= (int)$ckF['last_check_id'] ?>" target="_blank" title="Last SafariCheck report" style="text-decoration:none;color:<?= $ckCol ?>;font-weight:700">📄 Open report · <?= h(strtoupper((string)$ckF['overall'])) ?> <span style="font-weight:400;color:var(--grey-mid)"><?= h(date('d M H:i', strtotime($ckF['chk_at']))) ?></span></a>
+            <?php else: ?><span style="color:var(--grey-mid)">not checked yet</span><?php endif; ?></span>
+            <a href="#" class="bo-ck-run" onclick="boRecheck(this);return false" title="Run the SafariCheck again on this folder (about 2 minutes)" style="text-decoration:none;margin-left:8px">↻ Re-check</a>
+            <a href="ck_tracker.php?view=all&amp;past=1&amp;other=1#ck<?= (int)$ckF['id'] ?>" target="_blank" title="Open this booking in the CK tracker" style="text-decoration:none;margin-left:8px">✅ CK tracker</a>
+          </div>
+          <?php endif; ?>
           <?php if ($folder !== '' && $canRegroup): ?>
           <?php $curGrp = trim($r['group_folder'] ?? ''); ?>
           <form method="POST" id="rg<?= (int)$r['id'] ?>" style="display:none;margin-top:6px;padding:8px;background:#f6f6f4;border-radius:6px"
@@ -1446,6 +1484,74 @@ function toggleRename(id) {
   if (f) f.style.display = (f.style.display === 'none' || !f.style.display) ? 'block' : 'none';
 }
 // Toggle any inline box (e.g. the re-group form) by full element id.
+// ── CK: Re-check a booking folder from its row (same endpoint as the CK tracker).
+// While it runs the old report link is hidden ("Report in progress"); the row is
+// polled and shows the new report when it is in.
+(function () {
+  var COL = {green: '#1A6B3A', yellow: '#8a6d3b', red: '#a33'};
+  var running = {};   // ck id -> {box, prev, since}
+  var timer = null;
+  function esc(s) { var d = document.createElement('div'); d.textContent = s == null ? '' : s; return d.innerHTML; }
+  function busy(box, on, msg) {
+    var rep = box.querySelector('.bo-ck-rep'), run = box.querySelector('.bo-ck-run');
+    if (on) {
+      box.dataset.old = box.dataset.old || rep.innerHTML;
+      rep.innerHTML = '<span style="color:#1a3a5c;font-weight:700">⏳ Report in progress</span>';
+      run.style.display = 'none';
+    } else {
+      if (msg) rep.innerHTML = msg; else if (box.dataset.old) rep.innerHTML = box.dataset.old;
+      delete box.dataset.old;
+      run.style.display = '';
+    }
+  }
+  function poll() {
+    var ids = Object.keys(running);
+    if (!ids.length) { clearInterval(timer); timer = null; return; }
+    fetch('ck_tracker.php?status=1&ids=' + ids.join(','), {credentials: 'same-origin'})
+      .then(function (r) { return r.json(); })
+      .then(function (st) {
+        ids.forEach(function (id) {
+          var s = st[id], r = running[id];
+          if (s && (!s.running || s.check !== r.prev)) {
+            delete running[id];
+            if (s.check && s.check !== r.prev) {
+              busy(r.box, false, '<a href="ck_report.php?id=' + s.check + '" target="_blank" style="text-decoration:none;font-weight:700;color:' +
+                (COL[s.overall] || '#6B7280') + '">📄 Open report · ' + esc(String(s.overall || '').toUpperCase()) +
+                ' <span style="font-weight:400;color:var(--grey-mid)">' + esc(s.at) + ' ✓ new</span></a>');
+              r.box.dataset.check = s.check;
+            } else {
+              busy(r.box, false);
+              r.box.insertAdjacentHTML('beforeend', ' <span style="color:#a33">⚠ check did not finish — try again</span>');
+            }
+          } else if (Date.now() - r.since > 12 * 60000) {
+            delete running[id];
+            busy(r.box, false);
+          }
+        });
+      }).catch(function () {});
+  }
+  function watch(box) {
+    running[box.dataset.ck] = {box: box, prev: parseInt(box.dataset.check || '0', 10), since: Date.now()};
+    busy(box, true);
+    if (!timer) timer = setInterval(poll, 15000);
+  }
+  window.boRecheck = function (a) {
+    var box = a.closest('.bo-ck');
+    var fd = new FormData();
+    fd.append('action', 'run_check'); fd.append('ajax', '1'); fd.append('ck_ids', box.dataset.ck);
+    busy(box, true);
+    fetch('ck_tracker.php', {method: 'POST', body: fd, credentials: 'same-origin'})
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        var res = (d.results || {})[box.dataset.ck] || {ok: false, msg: 'not started'};
+        if (res.ok) watch(box);
+        else { busy(box, false); box.insertAdjacentHTML('beforeend', ' <span style="color:#a33">⚠ ' + esc(res.msg || 'could not start the check') + '</span>'); }
+      })
+      .catch(function (e) { busy(box, false); box.insertAdjacentHTML('beforeend', ' <span style="color:#a33">⚠ ' + esc(e.message) + '</span>'); });
+  };
+  document.querySelectorAll('.bo-ck[data-running="1"]').forEach(watch);
+})();
+
 function toggleEl(elId) {
   var f = document.getElementById(elId);
   if (f) f.style.display = (f.style.display === 'none' || !f.style.display) ? 'block' : 'none';
