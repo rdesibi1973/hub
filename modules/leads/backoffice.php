@@ -420,6 +420,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array($act, ['change_status', 'r
         if ($act === 'change_status') {
             $target = trim($_POST['new_status'] ?? '');
             if (!isset($STATUS_MAP[$target])) { flash('Invalid target status.', 'error'); $ok = false; }
+            elseif (!$isGrp && $STATUS_MAP[$target]['status'] === 'Booked'
+                    && stripos($folder, '_START') === false) {
+                // A booking becomes Booked only through Confirm Safari (dates in the
+                // name, move to 001_Safari, booking email) — never by a bare retag.
+                flash('"' . $folder . '" is not confirmed yet (no dates in the folder name). '
+                    . 'Use "✅ Confirm Safari…" to confirm it.', 'error');
+                $ok = false;
+            }
             else {
                 $newFolder = bo_new_folder_name($folder, $STATUS_MAP[$target]['tag'], $KNOWN_TAGS);
                 $newStatus = $STATUS_MAP[$target]['status'];
