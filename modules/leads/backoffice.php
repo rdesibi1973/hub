@@ -1566,17 +1566,33 @@ function csParse(txt, fallbackYear) {
   var y = m[3] || fallbackYear || new Date().getFullYear();
   return y + '-' + String(CS_MON.indexOf(m[2]) + 1).padStart(2, '0') + '-' + m[1].padStart(2, '0');
 }
+// Full date (YYYY-MM-DD) of a date row: the day picked from the calendar if the
+// text still matches it, else the typed DDMMM[YYYY] with the given year hint.
+function csRowIso(txt, yearHint) {
+  var d = txt.dataset.iso;
+  if (d && csParse(txt.value, d.slice(0, 4)) === d) return d;
+  return csParse(txt.value, yearHint);
+}
 function csPick(btn) {
   var picker = btn.nextElementSibling;
   var row    = btn.closest('.cs-date');
   var txt    = row.querySelector('input[type=text]');
-  // Open the calendar on the typed date; DDMMM takes its year from End.
+  var rows   = Array.prototype.slice.call(row.parentNode.querySelectorAll('.cs-date'));
   var endIn  = row.parentNode.querySelector('input[name=cs_end]');
   var endIso = endIn ? csParse(endIn.value) : null;
-  var iso    = csParse(txt.value, endIso ? endIso.slice(0, 4) : null);
+  // The closest earlier date already set (Start, then Middle…): an empty field
+  // opens its calendar on that month, and it gives DDMMM dates their year.
+  var anchor = null;
+  rows.slice(0, rows.indexOf(row)).forEach(function (r) {
+    var t = r.querySelector('input[type=text]');
+    var d = csRowIso(t, endIso ? endIso.slice(0, 4) : (anchor ? anchor.slice(0, 4) : null));
+    if (d) anchor = d;
+  });
+  var year = endIso && txt !== endIn ? endIso.slice(0, 4) : (anchor ? anchor.slice(0, 4) : null);
+  var iso  = csRowIso(txt, year);
   // Safari across New Year (e.g. 28DEC → 05JAN2027): Start belongs to the year before.
   if (iso && endIso && iso > endIso && txt !== endIn) iso = (parseInt(iso.slice(0, 4), 10) - 1) + iso.slice(4);
-  iso = iso || endIso;
+  iso = iso || anchor || endIso;
   picker.value = iso || '';
   try { picker.showPicker(); } catch (e) { picker.focus(); picker.click(); }
 }
@@ -1585,6 +1601,7 @@ function csPicked(picker) {
   var p   = picker.value.split('-');               // YYYY-MM-DD
   var txt = picker.closest('.cs-date').querySelector('input[type=text]');
   txt.value = p[2] + CS_MON[parseInt(p[1], 10) - 1] + (txt.getAttribute('data-fmt') === 'long' ? p[0] : '');
+  txt.dataset.iso = picker.value;                  // keep the year for the next rows
 }
 // Copy text (Windows path or folder name) to the clipboard.
 function copyPath(el) {
