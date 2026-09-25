@@ -383,8 +383,11 @@ function ck_set_marker(PDO $db, string $token, int $folderId, bool $on, ?int $us
 /** Top-level files and invoices/*.pdf are the only files the checks open
  *  (plus SafariCheck_confirmed.json, the human confirmations — ck_confirm.php). */
 function ck_agent_file_allowed(string $rel): bool {
-    if ($rel === '' || strpos($rel, '..') !== false || strpos($rel, "\\") !== false) return false;
+    if ($rel === '' || strpos($rel, "\\") !== false) return false;
     $parts = explode('/', trim($rel, '/'));
+    // Block path traversal ('..' / '.' segments) — but a file NAME may contain
+    // '..' (e.g. 'KIBO PALACE..pdf'), which must still be served.
+    foreach ($parts as $p) if ($p === '' || $p === '.' || $p === '..') return false;
     $name  = strtolower(end($parts));
     if (count($parts) === 1) {
         if ($name === 'safaricheck_confirmed.json') return true;
