@@ -1345,7 +1345,7 @@ include 'includes/header.php';
               </select>
             </label>
             <div style="margin-top:8px;display:flex;gap:6px">
-              <button type="submit" class="btn btn-outline btn-sm">🔍 Check &amp; preview</button>
+              <button type="submit" class="btn btn-sm" style="background:#1A6B3A;border-color:#1A6B3A;color:#fff;font-weight:700">🔍 Check &amp; preview</button>
               <button type="button" class="btn btn-outline btn-sm" onclick="toggleEl('cs<?= $rid ?>')">Cancel</button>
             </div>
           </form>
@@ -1442,7 +1442,10 @@ include 'includes/header.php';
             <input type="hidden" name="show_all" value="<?= $showAll ? '1' : '' ?>">
             <input type="hidden" name="in_files" value="<?= $inFiles ? '1' : '' ?>">
             <select name="new_status" class="m-input" style="width:150px;padding:5px 8px;font-size:.8rem">
-              <?php foreach (array_keys($STATUS_MAP) as $st): ?>
+              <?php foreach ($STATUS_MAP as $st => $stDef):
+                  // Not confirmed yet (private, no dates): Booked statuses come only
+                  // from Confirm Safari, so they are not offered here.
+                  if (!$isGrp && $stDef['status'] === 'Booked' && stripos($folder, '_START') === false) continue; ?>
                 <option value="<?= h($st) ?>"><?= h($st) ?></option>
               <?php endforeach; ?>
             </select>
