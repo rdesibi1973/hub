@@ -31,6 +31,94 @@ $view      = isset($VIEWS[$_GET['view'] ?? '']) ? $_GET['view'] : 'missing';
 $showPast  = !empty($_GET['past']);    // include trips that already started
 $showOther = !empty($_GET['other']);   // include Kenya/Uganda/… (left out by MissingCK.bat)
 
+// ── Notes and emails on a folder (JS, like Payments) ──────────────────────────
+// A sent email is logged as a note too. send_modal.php posts the row id as
+// request_id: here it is the ck_folders id.
+$NOTE_ACTIONS = ['get_notes', 'add_note', 'edit_note', 'delete_note', 'send_email'];
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array($_POST['action'] ?? '', $NOTE_ACTIONS, true)) {
+    require_once 'includes/mail_helper.php';
+    header('Content-Type: application/json');
+    $action = $_POST['action'];
+    $fid    = (int)($_POST['ck_id'] ?? $_POST['request_id'] ?? 0);
+    $count  = function (int $fid) use ($db): int {
+        $st = $db->prepare("SELECT COUNT(*) FROM ck_notes WHERE ck_folder_id = ?");
+        $st->execute([$fid]);
+        return (int)$st->fetchColumn();
+    };
+    $folderOk = function (int $fid) use ($db): bool {
+        $st = $db->prepare("SELECT 1 FROM ck_folders WHERE id = ?");
+        $st->execute([$fid]);
+        return (bool)$st->fetchColumn();
+    };
+    try {
+        if ($action === 'get_notes') {
+            $st = $db->prepare("SELECT n.*, u.full_name AS user_name FROM ck_notes n
+                                LEFT JOIN users u ON u.id = n.created_by
+                                WHERE n.ck_folder_id = ? ORDER BY n.created_at DESC, n.id DESC");
+            $st->execute([$fid]);
+            echo json_encode(['ok' => true, 'notes' => $st->fetchAll(PDO::FETCH_ASSOC)]);
+        } elseif ($action === 'add_note') {
+            $body = trim($_POST['body'] ?? '');
+            if ($body === '' || !$folderOk($fid)) { echo json_encode(['ok' => false, 'msg' => 'Empty note.']); exit; }
+            $db->prepare("INSERT INTO ck_notes (ck_folder_id, created_by, note_type, body, created_at)
+                          VALUES (?, ?, 'manual', ?, ?)")->execute([$fid, $uid, $body, ck_now()]);
+            echo json_encode(['ok' => true, 'count' => $count($fid)]);
+        } elseif ($action === 'edit_note') {
+            // Only manual notes: the logged emails are history.
+            $body = trim($_POST['body'] ?? '');
+            if ($body === '') { echo json_encode(['ok' => false, 'msg' => 'Empty note.']); exit; }
+            $db->prepare("UPDATE ck_notes SET body = ? WHERE id = ? AND note_type = 'manual'")
+               ->execute([$body, (int)($_POST['note_id'] ?? 0)]);
+            echo json_encode(['ok' => true]);
+        } elseif ($action === 'delete_note') {
+            $db->prepare("DELETE FROM ck_notes WHERE id = ? AND note_type = 'manual'")
+               ->execute([(int)($_POST['note_id'] ?? 0)]);
+            echo json_encode(['ok' => true]);
+        } else { // send_email
+            set_time_limit(60);
+            $to      = trim($_POST['to'] ?? '');
+            $subject = trim($_POST['subject'] ?? '');
+            $body    = trim($_POST['body'] ?? '');
+            $addrs   = array_values(array_filter(array_map('trim', preg_split('/[,;]+/', $to))));
+            if (!$addrs || $subject === '' || trim(strip_tags($body)) === '') {
+                echo json_encode(['ok' => false, 'msg' => 'Missing required fields.']); exit;
+            }
+            foreach ($addrs as $a) {
+                if (!filter_var($a, FILTER_VALIDATE_EMAIL)) { echo json_encode(['ok' => false, 'msg' => 'Not a valid address: ' . $a]); exit; }
+            }
+            if (!$folderOk($fid)) { echo json_encode(['ok' => false, 'msg' => 'Folder not found.']); exit; }
+            $st = $db->prepare("SELECT email, full_name FROM users WHERE id = ?");
+            $st->execute([$uid]);
+            $me = $st->fetch(PDO::FETCH_ASSOC) ?: [];
+            $fromEmail = trim($me['email'] ?? '');
+            if ($fromEmail === '') { echo json_encode(['ok' => false, 'msg' => 'Your user account has no email address — set it in your profile.']); exit; }
+            $attachments = []; $attachNames = [];
+            if (!empty($_FILES['attachments']['name'][0])) {
+                foreach ($_FILES['attachments']['name'] as $i => $name) {
+                    if ($_FILES['attachments']['error'][$i] === UPLOAD_ERR_OK) {
+                        $attachments[] = ['tmp_path' => $_FILES['attachments']['tmp_name'][$i], 'name' => $name];
+                        $attachNames[] = $name;
+                    }
+                }
+            }
+            ob_start(); // PHPMailer may print warnings; keep the JSON clean
+            $sent = send_hub_email(implode(',', $addrs), $subject, $body,
+                                   trim($me['full_name'] ?? '') ?: 'Savannah Explorers', $fromEmail, $fromEmail, $attachments);
+            ob_end_clean();
+            if (!$sent) { echo json_encode(['ok' => false, 'msg' => 'Send failed. Check server mail configuration.']); exit; }
+            $note = $body . ($attachNames
+                ? "\n\n<p style='font-size:.8rem;color:#888'><strong>Attachments:</strong> " . h(implode(', ', $attachNames)) . '</p>' : '');
+            $db->prepare("INSERT INTO ck_notes (ck_folder_id, created_by, note_type, recipients, subject, body, created_at)
+                          VALUES (?, ?, 'email_sent', ?, ?, ?, ?)")
+               ->execute([$fid, $uid, mb_substr(implode(', ', $addrs), 0, 500), mb_substr($subject, 0, 255), $note, ck_now()]);
+            echo json_encode(['ok' => true, 'note_count' => $count($fid)]);
+        }
+    } catch (Throwable $e) {
+        echo json_encode(['ok' => false, 'msg' => 'Error: ' . $e->getMessage()]);
+    }
+    exit;
+}
+
 // ── Run the automatic check on one or more folders (JS, no page reload) ───────
 // Each folder is dispatched as its own GitHub run, so several checks run in
 // parallel and a new one can be started while others are still running.
@@ -109,7 +197,15 @@ try {
 // ── Data ──────────────────────────────────────────────────────────────────────
 $folders = $db->query("SELECT f.*, u.full_name AS ck_by_name,
                               c.overall AS chk_overall, c.n_red AS chk_red, c.n_yellow AS chk_yellow,
-                              c.created_at AS chk_at, c.error AS chk_error
+                              c.created_at AS chk_at, c.error AS chk_error,
+                              (SELECT COUNT(*) FROM ck_notes n WHERE n.ck_folder_id = f.id) AS note_count,
+                              -- \"type|text\": the body for a note, the subject for a sent email.
+                              (SELECT CONCAT(n2.note_type, '|', COALESCE(IF(n2.note_type = 'manual', n2.body, n2.subject), ''))
+                                 FROM ck_notes n2 WHERE n2.ck_folder_id = f.id
+                                 ORDER BY n2.created_at DESC, n2.id DESC LIMIT 1) AS last_note_raw,
+                              (SELECT u3.full_name FROM ck_notes n3 LEFT JOIN users u3 ON u3.id = n3.created_by
+                                 WHERE n3.ck_folder_id = f.id
+                                 ORDER BY n3.created_at DESC, n3.id DESC LIMIT 1) AS last_note_by
                        FROM ck_folders f
                        LEFT JOIN users u ON u.id = f.ck_by
                        LEFT JOIN ck_checks c ON c.id = f.last_check_id
@@ -146,7 +242,9 @@ foreach ($folders as $f) {
     $band = null;
     if ($toArrival !== null && $toArrival >= 0) $band = $toArrival < 60 ? 'red' : ($toArrival <= 90 ? 'amber' : 'grey');
 
+    [$nType, $nText] = array_pad(explode('|', (string)($f['last_note_raw'] ?? ''), 2), 2, '');
     $rows[] = $f + [
+        'last_note'  => $nType === 'email_sent' ? '📧 ' . $nText : $nText,
         'reqs'       => $reqs,
         'agent'      => $agent,
         'is_grp'     => stripos($f['folder_name'], 'GRP') !== false || isset($byGrp[$key]),
@@ -275,6 +373,25 @@ $extra_css = '
 .ck-hist ul{list-style:none;margin:4px 0 0;padding:0;font-size:.7rem;color:var(--grey-dk)}
 .ck-hist li{padding:1px 0}
 .ck-hist li small{color:var(--grey-mid)}
+.ck-lastnote{font-size:.72rem;margin-top:4px;color:var(--grey-dk)}
+.ck-lastnote a{color:inherit;text-decoration:none}
+.ck-lastnote small{color:var(--grey-mid)}
+.ck-ncount{background:#fff3cd;color:#856404;font-weight:700;border-radius:8px;padding:0 6px;font-size:.66rem}
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:200;display:flex;align-items:flex-start;justify-content:center;padding:40px 16px;overflow-y:auto}
+.modal-overlay.hidden{display:none}
+.modal-box{background:#fff;border-radius:10px;box-shadow:0 8px 40px rgba(0,0,0,.2);width:100%}
+.modal-header{padding:15px 24px;border-bottom:1px solid var(--grey-lt);display:flex;align-items:center;justify-content:space-between}
+.modal-header h3{font-family:"Merriweather",serif;font-size:.95rem;font-weight:700;margin:0;color:var(--black)}
+.modal-body{padding:22px 24px}
+.modal-footer{padding:14px 24px;border-top:1px solid var(--grey-lt);display:flex;justify-content:flex-end;gap:10px}
+.modal-close{background:none;border:none;font-size:1.3rem;cursor:pointer;color:var(--grey-mid);line-height:1;padding:0}
+.m-label{font-size:.72rem;font-weight:700;color:var(--grey-dk);display:block;margin-bottom:4px}
+.m-input{width:100%;padding:7px 10px;border:1.5px solid var(--grey-lt);border-radius:6px;font-family:"Open Sans",sans-serif;font-size:.82rem;color:var(--black);box-sizing:border-box}
+.m-input:focus{outline:none;border-color:var(--red)}
+.note-card{background:var(--off-white);border-radius:7px;padding:12px 16px;margin-bottom:10px;border-left:3px solid #e0a800}
+.note-card.email-sent{border-left-color:#1a3a5c}
+.attach-chip{display:inline-flex;align-items:center;gap:4px;background:var(--off-white);border:1px solid var(--grey-lt);border-radius:4px;padding:2px 8px;font-size:.72rem;margin:2px}
+.attach-chip button{background:none;border:none;cursor:pointer;color:var(--red);font-size:.9rem;line-height:1;padding:0 1px}
 @media (max-width:760px){.ck-table thead{display:none}.ck-table td{display:block;border:0;padding:4px 10px}.ck-table tr{display:block;border-bottom:1px solid var(--grey-lt);padding:6px 0}}
 ';
 include 'includes/header.php';
@@ -352,6 +469,13 @@ include 'includes/header.php';
           <a href="savannah://open?path=<?= h(implode('/', array_map('rawurlencode', explode('/', $rel)))) ?>" title="Open in Windows Explorer">📂 Open</a>
           <a href="#" data-copy="<?= h('%DROPBOX_HOME%\\' . str_replace('/', '\\', $rel)) ?>" onclick="copyPath(this);return false" title="Copy Windows path">📋 Copy path</a>
         </div>
+        <div class="ck-lastnote" data-ck="<?= $id ?>">
+          <?php if ((int)$r['note_count'] > 0): ?>
+            <a href="#" onclick="openNotes(<?= $id ?>);return false" title="<?= h(strip_tags($r['last_note'])) ?>">
+              <span class="ck-ncount"><?= (int)$r['note_count'] ?></span> <?= h(mb_strimwidth(strip_tags($r['last_note']), 0, 70, '…')) ?></a>
+            <?php if ($r['last_note_by']): ?><small>— <?= h($r['last_note_by']) ?></small><?php endif; ?>
+          <?php endif; ?>
+        </div>
       </td>
       <td><?= h($r['agent']) ?: '<span style="color:var(--grey-mid)">—</span>' ?></td>
       <td>
@@ -420,6 +544,10 @@ include 'includes/header.php';
           <input type="hidden" name="return_qs" value="<?= h(http_build_query($qsKeep)) ?>">
           <button class="ck-btn run" type="submit" title="Run the SafariCheck again on this folder now (about 2 minutes). To see the last result, click the coloured badge / Open report."><?= $r['chk_overall'] ? '↻ Re-check' : '▶ Run check' ?></button>
         </form>
+        <div style="margin-top:4px;display:flex;gap:4px">
+          <button type="button" class="ck-btn run" title="Notes on this booking (notes and emails sent from here)" onclick="openNotes(<?= $id ?>)">📝 Note</button>
+          <button type="button" class="ck-btn run" title="Email the booking team or a colleague — saved as a note" onclick="openSend(<?= $id ?>, <?= h(json_encode(ck_customer_label($r['folder_name']))) ?>, '', <?= h(json_encode('CK ' . ck_customer_label($r['folder_name']) . ($r['start_date'] ? ' — arrival ' . $fmtD($r['start_date']) : ''))) ?>)">✉ Mail</button>
+        </div>
         <?php if (!empty($events[$id])): ?>
           <details class="ck-hist">
             <summary>History (<?= count($events[$id]) ?>)</summary>
@@ -441,7 +569,147 @@ include 'includes/header.php';
 </p>
 <?php endif; ?>
 
+<?php
+// Email: no templates (they need a request); To suggests booking + colleagues.
+$templates = [];
+$send_to_suggestions = ['operations@savannahexplorers.com' => 'Booking / Operations'];
+foreach ($db->query("SELECT full_name, email FROM users
+                     WHERE is_active = 1 AND email IS NOT NULL AND email <> '' ORDER BY full_name") as $u) {
+    $send_to_suggestions[strtolower(trim($u['email']))] ??= $u['full_name'];
+}
+$send_ajax_url = 'ck_tracker.php';
+include 'includes/send_modal.php';
+?>
+
+<!-- ── Notes modal ─────────────────────────────────────────────────────────── -->
+<div class="modal-overlay hidden" id="notesOverlay" style="display:none">
+  <div class="modal-box" style="max-width:680px">
+    <div class="modal-header">
+      <h3>CK notes — <span id="notesCustomer"></span></h3>
+      <button type="button" class="modal-close" onclick="closeNotes()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div style="margin-bottom:14px">
+        <label class="m-label">Add a note (e.g. "asked booking to fix the Serengeti dates")</label>
+        <textarea id="newNote" class="m-input" rows="2" style="resize:vertical"></textarea>
+        <div style="text-align:right;margin-top:8px;display:flex;gap:6px;justify-content:flex-end">
+          <button type="button" class="btn btn-outline btn-sm" onclick="closeNotes();openSend(notesId, rowLabel(notesId), '', 'CK ' + rowLabel(notesId))">✉ Send an email instead</button>
+          <button type="button" class="btn btn-red btn-sm" id="btnAddNote" onclick="saveNote()">＋ Add note</button>
+        </div>
+      </div>
+      <div id="notesList" style="border-top:1px solid var(--grey-lt);padding-top:14px;min-height:60px"></div>
+    </div>
+  </div>
+</div>
+
 <script>
+// ── Notes on a folder: manual notes + emails sent from this page ──────────────
+var notesId = 0, notesById = {};
+var CURRENT_USER = <?= json_encode($cu['full_name'] ?? '') ?>;
+function escN(s) { var d = document.createElement('div'); d.textContent = s == null ? '' : s; return d.innerHTML; }
+function rowLabel(id) { var c = document.querySelector('#ck' + id + ' .ck-cust'); return c ? c.textContent : ''; }
+function notesPost(params) {
+  return fetch('ck_tracker.php', {
+    method: 'POST', credentials: 'same-origin',
+    headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+    body: new URLSearchParams(params).toString()
+  }).then(function (r) { return r.json(); });
+}
+document.querySelector('#notesOverlay .modal-box').addEventListener('click', function (e) { e.stopPropagation(); });
+function closeNotes() { document.getElementById('notesOverlay').style.display = 'none'; }
+function openNotes(id) {
+  notesId = id;
+  document.getElementById('notesCustomer').textContent = rowLabel(id);
+  document.getElementById('newNote').value = '';
+  document.getElementById('notesList').innerHTML = '<p style="color:var(--grey-mid);text-align:center;padding:16px">Loading…</p>';
+  document.getElementById('notesOverlay').style.display = 'flex';
+  loadNotes();
+}
+function loadNotes() {
+  notesPost({action: 'get_notes', ck_id: notesId}).then(function (d) {
+    var list = document.getElementById('notesList');
+    var notes = d.ok ? d.notes : [];
+    if (notes.length) {
+      var top = notes[0];
+      setLastNote(notesId, notes.length, top.note_type === 'email_sent' ? '📧 ' + (top.subject || '') : (top.body || ''), top.user_name || '');
+    } else {
+      setLastNote(notesId, 0);
+    }
+    if (!notes.length) { list.innerHTML = '<p style="color:var(--grey-mid);text-align:center;padding:16px">No notes yet.</p>'; return; }
+    notesById = {};
+    list.innerHTML = notes.map(function (n) {
+      notesById[n.id] = n;
+      var isEmail = n.note_type === 'email_sent';
+      var meta = '<strong style="color:var(--grey-dk)">👤 ' + escN(n.user_name || 'Unknown user') + '</strong> · ' + escN(n.created_at);
+      var tools = isEmail ? '' :
+        '<button type="button" title="Edit note" onclick="editNote(' + n.id + ')" style="background:none;border:none;color:var(--grey-dk);cursor:pointer;font-size:.85rem">✎</button>' +
+        '<button type="button" title="Delete note" onclick="delNote(' + n.id + ')" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:.9rem">×</button>';
+      // Manual notes are plain text; a sent email's body is its HTML.
+      var body = isEmail ? (n.body || '') : escN(n.body).replace(/\n/g, '<br>');
+      return '<div class="note-card ' + (isEmail ? 'email-sent' : '') + '">' +
+        '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;gap:8px">' +
+          '<span class="badge" style="background:' + (isEmail ? '#e8eef5;color:#1a3a5c' : '#fff3cd;color:#856404') + '">' +
+            (isEmail ? '📧 Email sent' : '📝 Note') + '</span>' +
+          '<span style="display:flex;gap:8px;align-items:center"><small style="color:var(--grey-mid)">' + meta + '</small>' + tools + '</span>' +
+        '</div>' +
+        (isEmail && n.recipients ? '<div style="font-size:.74rem;color:var(--grey-mid)">To: ' + escN(n.recipients) + '</div>' : '') +
+        (n.subject ? '<strong style="font-size:.82rem">' + escN(n.subject) + '</strong>' : '') +
+        '<div id="noteBody' + n.id + '" style="font-size:.8rem;color:var(--grey-dk);margin-top:4px;max-height:220px;overflow-y:auto">' + body + '</div>' +
+      '</div>';
+    }).join('');
+  });
+}
+function saveNote() {
+  var body = document.getElementById('newNote').value.trim();
+  if (!body) return;
+  var btn = document.getElementById('btnAddNote');
+  btn.disabled = true;
+  notesPost({action: 'add_note', ck_id: notesId, body: body}).then(function (d) {
+    btn.disabled = false;
+    if (!d.ok) { alert(d.msg || 'Could not save the note.'); return; }
+    document.getElementById('newNote').value = '';
+    loadNotes();
+  }).catch(function (e) { btn.disabled = false; alert('Error: ' + e.message); });
+}
+function delNote(id) {
+  if (!confirm('Delete this note?')) return;
+  notesPost({action: 'delete_note', note_id: id}).then(loadNotes);
+}
+function editNote(id) {
+  var n = notesById[id], box = document.getElementById('noteBody' + id);
+  if (!n || !box) return;
+  box.style.maxHeight = 'none';
+  box.innerHTML = '<textarea class="m-input" rows="3" style="resize:vertical"></textarea>' +
+    '<div style="margin-top:6px;display:flex;gap:6px;justify-content:flex-end">' +
+      '<button type="button" class="btn btn-outline btn-sm" onclick="loadNotes()">Cancel</button>' +
+      '<button type="button" class="btn btn-red btn-sm">Save</button></div>';
+  var ta = box.querySelector('textarea');
+  ta.value = n.body || ''; ta.focus();
+  box.querySelector('.btn-red').onclick = function () {
+    var body = ta.value.trim();
+    if (!body) { alert('The note cannot be empty — use × to delete it.'); return; }
+    this.disabled = true;
+    notesPost({action: 'edit_note', note_id: id, body: body}).then(function (d) {
+      if (!d.ok) alert(d.msg || 'Could not save the note.');
+      loadNotes();
+    });
+  };
+}
+// The row's latest-note line under the booking name.
+function setLastNote(id, count, text, by) {
+  var el = document.querySelector('.ck-lastnote[data-ck="' + id + '"]');
+  if (!el) return;
+  if (!count) { el.innerHTML = ''; return; }
+  var plain = String(text || '').replace(/<[^>]*>/g, '');
+  el.innerHTML = '<a href="#" onclick="openNotes(' + id + ');return false" title="' + escN(plain) + '">' +
+    '<span class="ck-ncount">' + count + '</span> ' + escN(plain.length > 70 ? plain.substring(0, 69) + '…' : plain) + '</a>' +
+    (by ? ' <small>— ' + escN(by) + '</small>' : '');
+}
+// After an email is sent from the Mail button: it is the row's latest note.
+window.onEmailSent = function (id, subject, d) {
+  if (d && d.note_count) setLastNote(id, d.note_count, '📧 ' + subject, CURRENT_USER);
+};
+
 function copyPath(el) {
   var t = el.getAttribute('data-copy');
   if (navigator.clipboard && window.isSecureContext) {

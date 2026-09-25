@@ -3,7 +3,7 @@
 // API for the SafariCheck cloud runner (safariagent ci_check.py on GitHub
 // Actions). The runner never gets Dropbox credentials: it lists and downloads
 // the booking files through here, and only the files the checks open are
-// served (top-level Excel/Word/PDF, invoices/*.pdf) — never passports.
+// served (top-level Excel/Word/PDF, invoices/*.pdf, bookings/*.eml) — never passports.
 //
 // Auth: header X-CK-Token (or ?token=) = CK_AGENT_TOKEN from includes/config.php.
 //

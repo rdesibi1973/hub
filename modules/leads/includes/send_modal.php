@@ -2,8 +2,12 @@
 /**
  * Shared Send Email Modal
  * Requires: $templates (array with id, name, category), $send_ajax_url (string)
+ * Optional: $send_to_suggestions (['email' => 'label', ...]) — offered in the To
+ *           field, which then accepts several comma-separated addresses;
+ *           an empty $templates hides the template picker.
  * Usage: include 'includes/send_modal.php';
  */
+$send_to_suggestions = $send_to_suggestions ?? [];
 if (is_file(__DIR__ . '/../../../includes/signature_helper.php')) {
     require_once __DIR__ . '/../../../includes/signature_helper.php';
 }
@@ -28,11 +32,21 @@ ksort($tpl_by_cat);
     <div class="modal-body">
       <input type="hidden" id="send_req_id">
 
-      <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:12px;align-items:flex-end;margin-bottom:14px">
+      <div style="display:grid;grid-template-columns:<?= $templates ? '1fr 1fr auto' : '1fr' ?>;gap:12px;align-items:flex-end;margin-bottom:14px">
         <div>
-          <label class="m-label">To</label>
-          <input type="email" id="send_to" class="m-input" autocomplete="off">
+          <label class="m-label">To<?php if ($send_to_suggestions): ?> <span style="font-weight:400;color:var(--grey-mid)">— several addresses separated by commas</span><?php endif; ?></label>
+          <?php if ($send_to_suggestions): ?>
+            <input type="email" multiple id="send_to" class="m-input" autocomplete="off" list="send_to_list">
+            <datalist id="send_to_list">
+              <?php foreach ($send_to_suggestions as $addr => $label): ?>
+                <option value="<?= h($addr) ?>"><?= h($label) ?></option>
+              <?php endforeach; ?>
+            </datalist>
+          <?php else: ?>
+            <input type="email" id="send_to" class="m-input" autocomplete="off">
+          <?php endif; ?>
         </div>
+        <?php if ($templates): ?>
         <div>
           <label class="m-label">Template</label>
           <select id="send_tpl" class="m-input">
@@ -47,6 +61,7 @@ ksort($tpl_by_cat);
           </select>
         </div>
         <button type="button" class="btn btn-outline btn-sm" onclick="loadTemplate()">Load</button>
+        <?php endif; ?>
       </div>
 
       <div style="margin-bottom:14px">
@@ -204,7 +219,7 @@ ksort($tpl_by_cat);
     document.getElementById('send_req_id').value        = id;
     document.getElementById('sendCustomer').textContent = customer;
     document.getElementById('send_to').value            = to || '';
-    document.getElementById('send_tpl').value           = '';
+    if (document.getElementById('send_tpl')) document.getElementById('send_tpl').value = '';
     document.getElementById('send_subject').value       = subject || '';
     document.getElementById('sendAlert').style.display  = 'none';
     document.getElementById('btnSend').disabled         = false;

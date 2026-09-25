@@ -87,6 +87,18 @@ function ck_ensure_schema(PDO $db): void {
         error TEXT NULL,
         KEY idx_ck_checks_folder (ck_folder_id, created_at)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    // Notes and sent emails on a folder (migration 059).
+    $db->exec("CREATE TABLE IF NOT EXISTS ck_notes (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        ck_folder_id INT NOT NULL,
+        created_by INT NULL,
+        note_type VARCHAR(12) NOT NULL,
+        recipients VARCHAR(500) NULL,
+        subject VARCHAR(255) NULL,
+        body MEDIUMTEXT NULL,
+        created_at DATETIME NOT NULL,
+        KEY idx_ck_notes_folder (ck_folder_id, created_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
     // Columns added after the first release (MySQL: no ADD COLUMN IF NOT EXISTS).
     $have = $db->query("SHOW COLUMNS FROM ck_folders")->fetchAll(PDO::FETCH_COLUMN);
     foreach ([
@@ -396,6 +408,8 @@ function ck_agent_file_allowed(string $rel): bool {
     if (count($parts) !== 2) return false;
     $dir = strtolower($parts[0]);
     if ($dir === 'invoices') return str_ends_with($name, '.pdf');
+    // Supplier booking emails (transfer check). Never anything else in bookings/.
+    if ($dir === 'bookings') return str_ends_with($name, '.eml');
     // GRP: each confirmed client's sub-folder holds that client's Word programme
     // (rooms sold). Only .docx, and never from the standard sub-folders.
     $internal = ['passports', 'flights', 'intflights', 'bookings', 'vouchers', 'insurance',

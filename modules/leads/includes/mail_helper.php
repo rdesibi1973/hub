@@ -74,7 +74,10 @@ function send_hub_email(
         $mail->isMail();
         $mail->CharSet    = 'UTF-8';
         $mail->setFrom($from_email, $from_name);
-        $mail->addAddress($to);
+        // Several recipients may be given, separated by commas or semicolons.
+        foreach (preg_split('/[,;]+/', $to) as $addr) {
+            if (trim($addr) !== '') $mail->addAddress(trim($addr));
+        }
         if ($reply_to) $mail->addReplyTo($reply_to);
         // BCC the sending account so it keeps a copy of outgoing hub mail
         if (filter_var($from_email, FILTER_VALIDATE_EMAIL)) {
