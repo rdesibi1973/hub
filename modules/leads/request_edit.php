@@ -27,6 +27,14 @@ if ($isRestricted) {
 }
 
 $agents = $db->query("SELECT * FROM agents WHERE active=1 ORDER BY name")->fetchAll();
+// Keep the request's own agent in the list even if deactivated (someone who
+// left but sold this booking): otherwise the select shows "Unassigned" and
+// saving the form would silently wipe the seller.
+if (!empty($req['agent_id']) && !in_array((int)$req['agent_id'], array_map('intval', array_column($agents, 'id')), true)) {
+    $st = $db->prepare("SELECT * FROM agents WHERE id = ?");
+    $st->execute([(int)$req['agent_id']]);
+    if ($own = $st->fetch()) $agents[] = $own;
+}
 $errors = [];
 
 // Fields editable by admin/manager (full set)
@@ -392,7 +400,7 @@ include 'includes/header.php';
         <select name="agent_id">
           <option value="">— Unassigned —</option>
           <?php foreach ($agents as $ag): ?>
-            <option value="<?= $ag['id'] ?>" <?= (string)$v['agent_id']===(string)$ag['id']?'selected':'' ?>><?= h($ag['name']) ?></option>
+            <option value="<?= $ag['id'] ?>" <?= (string)$v['agent_id']===(string)$ag['id']?'selected':'' ?>><?= h($ag['name']) ?><?= empty($ag['active']) ? ' (inactive)' : '' ?></option>
           <?php endforeach; ?>
         </select>
       </div>
