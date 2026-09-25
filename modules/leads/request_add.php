@@ -56,6 +56,17 @@ $v = [
 // Staff: default (and lock) the Assigned Agent to their own agent.
 if ($lockAgent) $v['agent_id'] = (string)$staffAgentId;
 
+// Everyone else: default (not locked) to the logged-in user's own agent, so
+// the person entering the request becomes its owner unless they pick another.
+if (!$lockAgent) {
+    $st = $db->prepare('SELECT agent_id FROM users WHERE id = ?');
+    $st->execute([(int)(current_user()['id'] ?? 0)]);
+    $myAgent = (int)($st->fetchColumn() ?: 0);
+    foreach ($agents as $a) {
+        if ((int)$a['id'] === $myAgent) { $v['agent_id'] = (string)$myAgent; break; }
+    }
+}
+
 function toCamelCaseRa(string $name): string {
     $name = trim($name);
     if (strpos($name, ' ') === false && strpos($name, '-') === false) return $name;
@@ -98,8 +109,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // (definite/possible) block until the user ticks "Create anyway".
     if (!$errors && empty($_POST['dup_override'])) {
         require_once 'includes/dup_check.php';
+        // Agency requests: the same agency contact sends many requests, so a
+        // shared email / WhatsApp is not a duplicate — check the name only.
+        $isAgency = $v['channel'] === 'agency';
         $dupCandidates = array_values(array_filter(
-            find_duplicate_candidates($db, $v['customer_name'], $v['email'], $v['whatsapp']),
+            find_duplicate_candidates($db, $v['customer_name'],
+                                      $isAgency ? '' : $v['email'], $isAgency ? '' : $v['whatsapp']),
             fn($c) => $c['severity'] !== 'weak'
         ));
         if ($dupCandidates) {
@@ -539,6 +554,8 @@ function updateChannel() {
   const ch = channelValue();
   document.getElementById('agencyRow').style.display = (ch === 'agency') ? 'block' : 'none';
   if (ch !== 'agency') clearAgency();   // leaving Agency channel — drop any selection
+  // Email / WhatsApp duplicate checks apply to direct clients only.
+  (window.dupRechecks || []).forEach(function (f) { f(); });
   updateFolderPreview();
 }
 
@@ -663,6 +680,8 @@ function dupTargetHtml(m){
 
   function check(){
     const tail = tailOf(waField.value);
+    // Agency: the agency contact's number repeats across requests — no check.
+    if (channelValue() === 'agency') { lastTail = ''; waWarn.style.display = 'none'; return; }
     if (tail.length < 7) { lastTail = ''; waWarn.style.display = 'none'; return; }
     if (tail === lastTail) return; // already checked
     lastTail = tail;
@@ -682,6 +701,7 @@ function dupTargetHtml(m){
     waWarn.style.display = '';
   }
 
+  (window.dupRechecks = window.dupRechecks || []).push(check);
   waField.addEventListener('input', function(){ clearTimeout(debounce); debounce = setTimeout(check, 500); });
   waField.addEventListener('blur', function(){ clearTimeout(debounce); check(); });
   if (waField.value.trim()) check(); // re-populated form after a validation error
@@ -699,9 +719,12 @@ function dupTargetHtml(m){
   let lastCheckedEmail = '';
 
   // Check on blur (visual feedback while filling form)
-  emailField.addEventListener('blur', function(){
-    const val = this.value.trim();
-    if (!val || !val.includes('@')) {
+  emailField.addEventListener('blur', emailCheck);
+  (window.dupRechecks = window.dupRechecks || []).push(emailCheck);
+  function emailCheck(){
+    const val = emailField.value.trim();
+    // Agency: the agency contact's email repeats across requests — no check.
+    if (!val || !val.includes('@') || channelValue() === 'agency') {
       emailDupMatches = [];
       lastCheckedEmail = '';
       emailWarn.style.display = 'none';
@@ -709,7 +732,7 @@ function dupTargetHtml(m){
     }
     if (val === lastCheckedEmail) return; // already checked
     fetchEmailDups(val);
-  });
+  }
 
   function fetchEmailDups(email) {
     const excludeId = <?= json_encode((int)($v['id'] ?? 0)) ?>;
@@ -740,6 +763,7 @@ function dupTargetHtml(m){
     // If "Create anyway" is ticked, the server-side guard is overriding — don't
     // also prompt here.
     if (document.querySelector('input[name="dup_override"]:checked')) return;
+    if (channelValue() === 'agency') return;   // agency: no email duplicate check
     const currentEmail = emailField.value.trim();
     if (!currentEmail || !currentEmail.includes('@')) return; // no email, proceed
 
