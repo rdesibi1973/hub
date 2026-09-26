@@ -1345,7 +1345,7 @@ include 'includes/header.php';
               </select>
             </label>
             <div style="margin-top:8px;display:flex;gap:6px">
-              <button type="submit" class="btn btn-sm" style="background:#1A6B3A;border-color:#1A6B3A;color:#fff;font-weight:700">🔍 Check &amp; Book</button>
+              <button type="submit" class="btn btn-sm" style="background:#1A6B3A;border-color:#1A6B3A;color:#fff;font-weight:700">🔍 Check &amp; Parse Excel</button>
               <button type="button" class="btn btn-outline btn-sm" onclick="toggleEl('cs<?= $rid ?>')">Cancel</button>
             </div>
           </form>
