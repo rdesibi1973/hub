@@ -861,6 +861,7 @@ include 'includes/header.php';
               title="Re-read the folder and recompute the next free ProgNumber (e.g. after adding files in Dropbox)">↻</button>
       <button type="button" class="btn btn-red btn-sm" id="cp-copy" onclick="copyPrograms()">Copy Programs</button>
       <button type="button" class="btn btn-outline btn-sm" onclick="document.querySelectorAll('.cp-prog').forEach(c=>c.checked=false)">Clear</button>
+      <a href="<?= h($sUrl) ?>" class="btn btn-outline btn-sm" title="Open the folder in Windows Explorer">📂 Open Folder</a>
       <?php if (!empty($canConfirmHere)): ?>
         <a href="backoffice.php?<?= h(http_build_query(['q' => $pcode, 'root' => 'All', 'open_confirm' => (int)$r['id']])) ?>"
            class="btn btn-outline btn-sm" style="color:#1A6B3A;border-color:#1A6B3A;font-weight:700"
