@@ -20,6 +20,15 @@ Running log of notable changes and current build state. Module-level "active / p
 
 ---
 
+## 2026-09 — ITI: import STO sample programmes (Wetu Word exports)
+- `modules/iti/iti_import_sto.php` (button "Import STO" on Programs → Sample): reads the Wetu
+  Word exports in Dropbox (`/itineraries/SafariClassic/it/Agenzia/2026-27/STO`) and creates Sample
+  programmes — days, day titles and texts, transfers, activities, meals, included / not included,
+  route (subtitle) and introduction (new `intro_<lang>` column). Fills lodge / destination
+  descriptions only where empty; unknown lodges/places kept as free text. Preview before import;
+  re-import replaces (tracked by new `source_ref` column). Parser handles Italian-localised Word
+  styles (Titolo1…) and content controls. Prices are not imported (they come from the Calc Excel).
+
 ## 2026-09 — Agent API phase 2: rates, fill_calc, Calc checks
 - `get_rates`: program prices read from the Calc template pax sheets (H9 rack, H10 sto,
   H11 single, H13/H14 discounts) + flight routes and activities/transfers with **cost and sale**
