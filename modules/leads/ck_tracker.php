@@ -30,6 +30,7 @@ $VIEWS = [
 $view      = isset($VIEWS[$_GET['view'] ?? '']) ? $_GET['view'] : 'missing';
 $showPast  = !empty($_GET['past']);    // include trips that already started
 $showOther = !empty($_GET['other']);   // include Kenya/Uganda/… (left out by MissingCK.bat)
+$q         = trim((string)($_GET['q'] ?? ''));   // search: overrides view and filters
 
 // ── Notes and emails on a folder (JS, like Payments) ──────────────────────────
 // A sent email is logged as a note too. send_modal.php posts the row id as
@@ -154,7 +155,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array($_POST['action'] ?? '', ['
         flash('Error — nothing was changed: ' . $e->getMessage(), 'error');
     }
     parse_str((string)($_POST['return_qs'] ?? ''), $rq);
-    $rq = array_intersect_key($rq, array_flip(['view', 'past', 'other', 'agent']));
+    $rq = array_intersect_key($rq, array_flip(['view', 'past', 'other', 'agent', 'q']));
     header('Location: ck_tracker.php' . ($rq ? '?' . http_build_query($rq) : '') . '#ck' . (int)($_POST['ck_id'] ?? 0));
     exit;
 }
@@ -269,7 +270,17 @@ if (isLeadsRestricted()) {
 $agentF = array_key_exists('agent', $_GET) ? trim($_GET['agent']) : $myAgent;
 
 // Base filter (past / other destinations / agent), then the view.
-$base = array_filter($rows, function ($r) use ($showPast, $showOther, $agentF) {
+// A search looks at every folder (all views, past trips, other destinations, all sales).
+$qMatch = function (array $r) use ($q): bool {
+    $hay = [$r['folder_name'], $r['agent']];
+    foreach ($r['reqs'] as $x) { $hay[] = $x['customer_name']; $hay[] = $x['practice_code']; $hay[] = $x['group_folder']; }
+    foreach (preg_split('/\s+/', $q) as $w) {
+        if (mb_stripos(implode(' | ', array_map('strval', $hay)), $w) === false) return false;
+    }
+    return true;
+};
+$base = array_filter($rows, function ($r) use ($showPast, $showOther, $agentF, $q, $qMatch) {
+    if ($q !== '') return $qMatch($r);
     if (!$showPast && $r['to_arrival'] !== null && $r['to_arrival'] < 0) return false;
     if (!$showOther && $r['other']) return false;
     if ($agentF !== '' && strcasecmp($r['agent'], $agentF) !== 0) return false;
@@ -282,7 +293,7 @@ foreach ($base as $r) {
     if (in_array($r['stage'], CK_BOOKING_STAGES, true)) $counts['booking']++;
     if ((int)$r['has_ck']) $counts['done']++;
 }
-$list = array_filter($base, fn($r) => match ($view) {
+$list = $q !== '' ? $base : array_filter($base, fn($r) => match ($view) {
     'missing' => $r['missing'],
     'chkred'  => $r['missing'] && $r['chk_overall'] === 'red',
     'booking' => in_array($r['stage'], CK_BOOKING_STAGES, true),
@@ -313,11 +324,12 @@ $CHK_STYLE = [
     'red'    => ['#a33', '#f7dede', '🔴'],    'grey'   => ['#6B7280', '#F3F4F6', '⚪'],
     'error'  => ['#6B7280', '#F3F4F6', '⚠'],
 ];
-$qsKeep = array_filter(['view' => $view, 'past' => $showPast ? '1' : '', 'other' => $showOther ? '1' : ''],
+$qsKeep = array_filter(['view' => $view, 'past' => $showPast ? '1' : '', 'other' => $showOther ? '1' : '', 'q' => $q],
                        fn($v) => $v !== '');
 // An explicit (even empty = "All") agent choice is kept; otherwise sellers fall back to their own.
 if (array_key_exists('agent', $_GET)) $qsKeep['agent'] = $agentF;
-$link = fn(array $over) => 'ck_tracker.php?' . http_build_query(array_filter(array_merge($qsKeep, $over), fn($v) => $v !== null));
+// Tiles and tabs leave the search.
+$link = fn(array $over) => 'ck_tracker.php?' . http_build_query(array_filter(array_merge($qsKeep, ['q' => null], $over), fn($v) => $v !== null));
 $fmtD = fn(?string $d) => $d ? date('d M y', strtotime($d)) : '';
 $evLabel = function (array $e): string {
     return match ($e['event']) {
@@ -420,13 +432,17 @@ include 'includes/header.php';
 <div class="ck-bar">
   <div class="ck-tabs" style="display:flex;gap:6px;flex-wrap:wrap">
     <?php foreach ($VIEWS as $k => $label): ?>
-      <a href="<?= h($link(['view' => $k])) ?>" class="<?= $view === $k ? 'on' : '' ?>"><?= h($label) ?></a>
+      <a href="<?= h($link(['view' => $k])) ?>" class="<?= $view === $k && $q === '' ? 'on' : '' ?>"><?= h($label) ?></a>
     <?php endforeach; ?>
   </div>
   <button type="button" id="ckRunSel" class="ck-btn run" disabled
           title="Run the SafariCheck on every ticked row. Each runs in parallel (about 2 minutes); results appear in their rows.">↻ Re-check selected (<span id="ckSelN">0</span>)</button>
   <form method="get" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-left:auto">
     <input type="hidden" name="view" value="<?= h($view) ?>">
+    <input type="search" name="q" value="<?= h($q) ?>" placeholder="🔍 Search customer, folder, code…" spellcheck="false"
+           title="Searches every folder: all tabs, started trips, other destinations, all sales"
+           style="font-size:.78rem;padding:5px 9px;border:1.5px solid var(--grey-lt);border-radius:6px;width:220px">
+    <?php if ($q !== ''): ?><a href="<?= h($link([])) ?>" style="font-size:.75rem;text-decoration:none">✕ clear</a><?php endif; ?>
     <label>Sales
       <select name="agent" onchange="this.form.submit()">
         <option value="">All</option>
@@ -441,7 +457,7 @@ include 'includes/header.php';
 </div>
 
 <?php if (!$list): ?>
-  <p style="color:var(--grey-mid);padding:20px">Nothing to show<?= $view === 'missing' ? ' — every booked folder has its CK 🎉' : '' ?>.</p>
+  <p style="color:var(--grey-mid);padding:20px"><?php if ($q !== ''): ?>No folder in 001_Safari matches “<?= h($q) ?>”.<?php else: ?>Nothing to show<?= $view === 'missing' ? ' — every booked folder has its CK 🎉' : '' ?>.<?php endif; ?></p>
 <?php else: ?>
 <table class="ck-table">
   <thead><tr>

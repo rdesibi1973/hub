@@ -797,6 +797,91 @@ include 'includes/header.php';
     }
     </script>
 
+    <?php
+    // CK check: the request's top-level folder in /001_Safari (the private folder
+    // or its GRP), as tracked by ck_tracker.php. Run / report reuse that page.
+    $ckRow = null;
+    try {
+        require_once 'dropbox_helper.php';
+        require_once 'includes/ck_lib.php';
+        ck_ensure_schema(db());
+        $ckKeys = [];
+        if (preg_match('#^/001_Safari/([^/]+)#i', $dbxPath, $m)) $ckKeys[] = $m[1];
+        if (trim($r['group_folder'] ?? '') !== '') $ckKeys[] = trim($r['group_folder']);
+        if (trim($r['practice_code'] ?? '') !== '') $ckKeys[] = trim($r['practice_code']);
+        $ckKeys = array_unique(array_map('dropbox_folder_stem', $ckKeys));
+        if ($ckKeys) {
+            $ckAll = db()->query("SELECT f.id, f.folder_name, f.has_ck, f.check_requested_at, f.last_check_id,
+                                         c.overall, c.n_red, c.n_yellow, c.created_at AS chk_at
+                                  FROM ck_folders f LEFT JOIN ck_checks c ON c.id = f.last_check_id
+                                  WHERE f.gone = 0")->fetchAll(PDO::FETCH_ASSOC);
+            foreach ($ckKeys as $k) {
+                foreach ($ckAll as $f) {
+                    if (dropbox_folder_stem($f['folder_name']) === $k) { $ckRow = $f; break 2; }
+                }
+            }
+        }
+    } catch (Throwable $e) { $ckRow = null; }
+    ?>
+    <div class="detail-label">CK check</div>
+    <div class="detail-value" id="rv-ck">
+      <?php if ($ckRow):
+          $ckId  = (int)$ckRow['id'];
+          $ckRun = $ckRow['check_requested_at'] && (strtotime(ck_now()) - strtotime($ckRow['check_requested_at'])) / 60 <= 10;
+          $ckSty = ['green' => ['#1A6B3A', '#E6F4EA', '🟢'], 'yellow' => ['#8a6d3b', '#fcf3e3', '🟡'],
+                    'red' => ['#a33', '#f7dede', '🔴'], 'grey' => ['#6B7280', '#F3F4F6', '⚪'], 'error' => ['#6B7280', '#F3F4F6', '⚠']];
+      ?>
+        <span id="rv-ck-result">
+        <?php if ($ckRow['overall']): $cs = $ckSty[$ckRow['overall']] ?? $ckSty['grey']; ?>
+          <a href="ck_report.php?id=<?= (int)$ckRow['last_check_id'] ?>" target="_blank"
+             style="font-size:.72rem;font-weight:700;border-radius:6px;padding:2px 8px;text-decoration:none;color:<?= $cs[0] ?>;background:<?= $cs[1] ?>"><?= $cs[2] ?> <?= h(strtoupper($ckRow['overall'])) ?></a>
+          <a href="ck_report.php?id=<?= (int)$ckRow['last_check_id'] ?>" target="_blank" style="margin-left:8px;font-size:.8rem;text-decoration:none">📄 Open report</a>
+          <span style="font-size:.75rem;color:var(--grey-mid);margin-left:6px">
+            <?php if ($ckRow['n_red'] || $ckRow['n_yellow']): ?><?= (int)$ckRow['n_red'] ?> red · <?= (int)$ckRow['n_yellow'] ?> to check · <?php endif; ?><?= h(date('d M H:i', strtotime($ckRow['chk_at']))) ?>
+          </span>
+        <?php else: ?>
+          <span class="text-muted">not checked yet</span>
+        <?php endif; ?>
+        </span>
+        <button type="button" class="btn btn-outline btn-sm" id="rv-ck-run" onclick="rvRunCheck()" style="margin-left:10px;padding:2px 9px;font-size:.75rem"
+                title="Run the SafariCheck on <?= h($ckRow['folder_name']) ?> now (about 2 minutes)"<?= $ckRun ? ' disabled' : '' ?>><?= $ckRow['overall'] ? '↻ Re-check' : '▶ Run check' ?></button>
+        <?php if ((int)$ckRow['has_ck']): ?><span style="color:#1A6B3A;font-weight:700;font-size:.8rem;margin-left:8px">✅ CK</span><?php endif; ?>
+        <a href="ck_tracker.php?<?= h(http_build_query(['q' => $ckRow['folder_name']])) ?>" style="margin-left:10px;font-size:.8rem;text-decoration:none" title="Open this folder in the CK tracker">CK tracker →</a>
+        <div id="rv-ck-status" style="font-size:.75rem;color:#1a3a5c;margin-top:3px"><?= $ckRun ? '⏳ check running — the result appears here' : '' ?></div>
+        <script>
+        (function () {
+          var CKID = <?= $ckId ?>, prev = <?= (int)$ckRow['last_check_id'] ?>, timer = null, since = 0;
+          var st = document.getElementById('rv-ck-status'), btn = document.getElementById('rv-ck-run');
+          function poll() {
+            fetch('ck_tracker.php?status=1&ids=' + CKID, {credentials: 'same-origin'}).then(r => r.json()).then(function (d) {
+              var s = d[CKID];
+              if (s && (!s.running || s.check !== prev)) {
+                clearInterval(timer);
+                if (s.check && s.check !== prev) { st.textContent = '✓ new result — reloading…'; setTimeout(function () { location.reload(); }, 600); }
+                else { st.style.color = '#a33'; st.textContent = '⚠ check did not finish — try again'; btn.disabled = false; }
+              } else if (Date.now() - since > 12 * 60000) {
+                clearInterval(timer); st.style.color = '#a33'; st.textContent = '⚠ check did not finish — try again'; btn.disabled = false;
+              }
+            }).catch(function () {});
+          }
+          function watch() { since = Date.now(); timer = setInterval(poll, 15000); }
+          window.rvRunCheck = function () {
+            btn.disabled = true; st.style.color = '#1a3a5c'; st.textContent = '⏳ starting check…';
+            var fd = new FormData(); fd.append('action', 'run_check'); fd.append('ajax', '1'); fd.append('ck_ids', CKID);
+            fetch('ck_tracker.php', {method: 'POST', body: fd, credentials: 'same-origin'}).then(r => r.json()).then(function (d) {
+              var res = (d.results || {})[CKID] || {ok: false, msg: 'not started'};
+              if (res.ok) { st.textContent = '⏳ check running (started ' + d.at + ') — about 2 minutes, the result appears here'; watch(); }
+              else { st.style.color = '#a33'; st.textContent = '⚠ ' + (res.msg || 'could not start the check'); btn.disabled = false; }
+            }).catch(function (e) { st.style.color = '#a33'; st.textContent = '⚠ ' + e.message; btn.disabled = false; });
+          };
+          <?php if ($ckRun): ?>watch();<?php endif; ?>
+        })();
+        </script>
+      <?php else: ?>
+        <span class="text-muted">— folder not in 001_Safari (the check runs on confirmed bookings)</span>
+      <?php endif; ?>
+    </div>
+
   </div>
 </div>
 
