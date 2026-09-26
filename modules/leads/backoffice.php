@@ -16,6 +16,7 @@ require_once 'config.php';
 require_once 'includes/folder_parser.php';
 require_once 'includes/safari_check.php';
 require_once 'includes/ck_lib.php';
+require_once 'includes/postpone_lib.php';
 $pageTitle = 'BackOffice';
 $db = db();
 
@@ -30,6 +31,7 @@ if (!in_array($currentUser['role_name'] ?? '', ['admin','manager'], true)) {
 // Created lazily (MySQL: no IF NOT EXISTS) so the listing query can always read it.
 try { $db->exec("ALTER TABLE requests ADD COLUMN pre_confirm_json TEXT NULL DEFAULT NULL"); }
 catch (PDOException $ignored) {}
+pp_ensure_schema($db);   // postponement columns (read by the listing below)
 
 // ── Target status → folder tag + DB status/payment_status ─────────────────────
 // Mirrors the Java tool and api_rename_folder.php. A null 'ps' clears payment_status.
@@ -485,6 +487,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array($act, ['change_status', 'r
 }
 
 // ── Action: re-group a booking (fix a wrong private/GRP confirmation) ──────────
+// ── Reschedule (new dates) / Postpone (no dates yet) — includes/postpone_lib.php ──
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array($_POST['action'] ?? '', ['reschedule', 'postpone'], true)) {
+    $st = $db->prepare("SELECT * FROM requests WHERE id = ?");
+    $st->execute([(int)($_POST['request_id'] ?? 0)]);
+    $r = $st->fetch(PDO::FETCH_ASSOC);
+    try {
+        if (!$r) throw new RuntimeException('Request not found.');
+        if (trim($r['group_folder'] ?? '') !== '') throw new RuntimeException('Group bookings cannot be rescheduled/postponed here yet.');
+        require_once 'dropbox_helper.php';
+        $uid   = (int)($currentUser['id'] ?? 0) ?: null;
+        $uname = trim($currentUser['full_name'] ?? '');
+        $res = $_POST['action'] === 'reschedule'
+            ? pp_reschedule($db, $r, [strtoupper(trim($_POST['cs_start'] ?? '')), strtoupper(trim($_POST['cs_mid'] ?? 'NA')),
+                                      strtoupper(trim($_POST['cs_mid2'] ?? 'NA')), strtoupper(trim($_POST['cs_end'] ?? ''))],
+                            $CONFIRM_MONTHS, $uid, $uname)
+            : pp_postpone($db, $r, trim($_POST['pp_until'] ?? ''), $uid, $uname);
+    } catch (Throwable $e) {
+        $res = ['ok' => false, 'msg' => 'Dropbox/DB error — ' . $e->getMessage()];
+    }
+    flash($res['msg'], $res['ok'] ? 'info' : 'error');
+    if (!empty($res['email'])) $_SESSION['bo_mail'] = $res['email'];   // opened after the redirect
+    // The folder name changed: come back searching by customer name.
+    $back = http_build_query(['q' => $r['customer_name'] ?? '', 'root' => 'All']);
+    header('Location: backoffice.php?' . $back); exit;
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'regroup') {
     $reqId = (int)($_POST['request_id'] ?? 0);
     $type  = trim($_POST['regroup_type'] ?? 'private');   // private | grp
@@ -891,6 +919,11 @@ if (($_GET['mail_for'] ?? '') !== '') {
         $bookingEmail['request_id'] = $mid;
     }
 }
+// Reschedule / Postpone leave their booking-team email in the session.
+if (!$bookingEmail && !empty($_SESSION['bo_mail']) && is_array($_SESSION['bo_mail'])) {
+    $bookingEmail = $_SESSION['bo_mail'];
+    unset($_SESSION['bo_mail']);
+}
 
 // ── Search ────────────────────────────────────────────────────────────────────
 // Folder-root filter: which Dropbox root the request's folder lives in
@@ -947,7 +980,7 @@ if ($q !== '' && $inFiles) {
         $vals = array_values($segs);
         $stmt = $db->prepare(
             "SELECT r.id, r.customer_name, r.practice_code, r.group_folder, r.status, r.payment_status,
-                    r.dropbox_url, r.pre_confirm_json, a.name AS agent_name
+                    r.dropbox_url, r.pre_confirm_json, r.postpone_until, a.name AS agent_name
              FROM requests r LEFT JOIN agents a ON a.id = r.agent_id
              WHERE r.practice_code IN ($in) OR r.group_folder IN ($in)
              ORDER BY r.id DESC LIMIT 60");
@@ -990,7 +1023,7 @@ if ($q !== '' && $inFiles) {
     // '*' acts as a wildcard (like the old Java search): turn '*' into a SQL '%'.
     $like   = '%' . str_replace('*', '%', $q) . '%';
     $sql    = "SELECT r.id, r.customer_name, r.practice_code, r.group_folder, r.status, r.payment_status,
-                      r.dropbox_url, r.pre_confirm_json, a.name AS agent_name
+                      r.dropbox_url, r.pre_confirm_json, r.postpone_until, a.name AS agent_name
                FROM requests r LEFT JOIN agents a ON a.id = r.agent_id
                WHERE (r.customer_name LIKE ? OR r.practice_code LIKE ? OR r.group_folder LIKE ?)";
     $params = [$like, $like, $like];
@@ -1057,6 +1090,7 @@ include 'includes/header.php';
 <div class="page-header" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
   <h2>🛠 BackOffice — Bookings &amp; folders</h2>
   <div style="display:flex;gap:8px;flex-wrap:wrap">
+    <a href="postponed.php" class="btn btn-outline btn-sm" title="Postponed safaris waiting for new dates, with their deadline">⏸ Postponed</a>
     <a href="grp_groups.php" class="btn btn-outline btn-sm" title="All GRP group folders in 001_Safari by month, with their confirmed bookings and pax">👥 List GRP groups</a>
     <a href="ck_tracker.php" class="btn btn-outline btn-sm" title="Confirmed bookings missing the _CK, by days to arrival">✅ Missing CK</a>
     <?php if (($currentUser['role_name'] ?? '') === 'admin'): ?>
@@ -1172,6 +1206,12 @@ include 'includes/header.php';
         $preRb       = json_decode($r['pre_confirm_json'] ?? '', true);
         $canRollback = is_array($preRb) && !empty($preRb['name'])
                      && in_array(strtoupper($preRb['action'] ?? 'NONE'), ['NONE', 'ADD', 'CREATE'], true);
+        // Reschedule: a confirmed private safari (dated) or a postponed one.
+        // Postpone: a dated one only.
+        $ppSplit       = (!$isGrp && ($r['status'] ?? '') === 'Booked') ? pp_split($pcode) : null;
+        $canReschedule = $ppSplit !== null;
+        $canPostpone   = $ppSplit !== null && $ppSplit['dated'];
+        $isPostponed   = $ppSplit !== null && !$ppSplit['dated'];
     ?>
       <?php $isCancelled = in_array($r['status'] ?? '', ['Cancelled', 'Lost'], true); ?>
       <tr<?= $isCancelled ? ' style="background:#fcf0f0"' : '' ?>>
@@ -1203,6 +1243,12 @@ include 'includes/header.php';
               <?php endif; ?>
               <?php if ($canRegroup): ?>
               <a href="#" onclick="toggleEl('rg<?= (int)$r['id'] ?>');return false" title="Fix a wrong confirmation: move this booking between private and a group" style="font-size:.68rem;text-decoration:none;margin-left:8px">👥 Re-group…</a>
+              <?php endif; ?>
+              <?php if ($canReschedule): ?>
+              <a href="#" onclick="toggleEl('rs<?= (int)$r['id'] ?>');return false" title="Move the safari to new dates (folder renamed, booking team emailed)" style="font-size:.68rem;text-decoration:none;margin-left:8px;color:#1a3a5c;font-weight:600">📅 Reschedule…</a>
+              <?php endif; ?>
+              <?php if ($canPostpone): ?>
+              <a href="#" onclick="toggleEl('pp<?= (int)$r['id'] ?>');return false" title="Postpone without new dates yet (folder to 00_POSTPONED, reminders before the deadline)" style="font-size:.68rem;text-decoration:none;margin-left:8px;color:#B26A00;font-weight:600">⏸ Postpone…</a>
               <?php endif; ?>
               <?php if ($canRollback): ?>
               <a href="#" onclick="toggleEl('rb<?= (int)$r['id'] ?>');return false" title="Undo the confirmation: move the folder back and restore the request" style="font-size:.68rem;text-decoration:none;margin-left:8px;color:#B26A00;font-weight:600">↩ Rollback…</a>
@@ -1430,6 +1476,61 @@ include 'includes/header.php';
             <?php endif; ?>
           </div>
           <?php endif; ?>
+
+          <?php if ($canReschedule): $rid = (int)$r['id']; ?>
+          <form method="POST" id="rs<?= $rid ?>" style="display:none;margin-top:6px;padding:10px;background:#eef3f9;border:1px solid #cfdcec;border-radius:8px">
+            <input type="hidden" name="action" value="reschedule">
+            <input type="hidden" name="request_id" value="<?= $rid ?>">
+            <div style="font-size:.68rem;color:#1a3a5c;font-weight:600;margin-bottom:6px">
+              📅 Reschedule — new dates as in the Excel<?= $isPostponed
+                ? ' · postponed until ' . h(date('d M Y', strtotime($r['postpone_until'] ?? 'now')))
+                : ' · now ' . h(pp_dates_label($pcode)) ?></div>
+            <div style="display:flex;flex-direction:column;gap:5px;font-family:'Open Sans',sans-serif">
+              <?php foreach ([['cs_start', 'Start', 'DDMMM', '', false], ['cs_mid', 'Middle', 'DDMMM / NA', 'NA', true],
+                              ['cs_mid2', 'Middle 2', 'DDMMM / NA', 'NA', true], ['cs_end', 'End', 'DDMMMYYYY', '', false]]
+                             as [$fname, $flbl, $ffmt, $fval, $fna]): ?>
+              <div class="cs-date" style="display:flex;align-items:center;gap:6px">
+                <label style="font-size:.7rem;color:var(--grey-dk);width:130px;flex-shrink:0;margin:0"><?= h($flbl) ?>
+                  <span style="color:var(--grey-mid);font-size:.64rem">(<?= h($ffmt) ?>)</span></label>
+                <input type="text" name="<?= $fname ?>" value="<?= h($fval) ?>" spellcheck="false" data-fmt="<?= $fname === 'cs_end' ? 'long' : 'short' ?>"
+                       style="width:130px;font-family:monospace;font-size:.74rem;padding:4px 6px;border:1.5px solid var(--grey-lt);border-radius:5px;text-transform:uppercase">
+                <span style="position:relative;display:inline-flex">
+                  <button type="button" class="btn btn-outline btn-sm" title="Pick from calendar" onclick="csPick(this)" style="padding:2px 7px">📅</button>
+                  <input type="date" tabindex="-1" aria-hidden="true" onchange="csPicked(this)"
+                         style="position:absolute;left:0;bottom:0;width:1px;height:1px;opacity:0;border:0;padding:0">
+                </span>
+                <?php if ($fna): ?>
+                  <button type="button" class="btn btn-outline btn-sm" style="padding:2px 7px;font-size:.66rem"
+                          onclick="this.parentNode.querySelector('input[type=text]').value='NA'">NA</button>
+                <?php endif; ?>
+              </div>
+              <?php endforeach; ?>
+            </div>
+            <div style="margin-top:8px;display:flex;gap:6px;align-items:center">
+              <button type="submit" class="btn btn-sm" style="background:#1a3a5c;border-color:#1a3a5c;color:#fff;font-weight:700"
+                      onclick="return confirm('Rename the Dropbox folder to the new dates and update the Hub?')">📅 Reschedule</button>
+              <button type="button" class="btn btn-outline btn-sm" onclick="toggleEl('rs<?= $rid ?>')">Cancel</button>
+              <span style="font-size:.66rem;color:var(--grey-mid)">Payment tag / _CK are kept · the booking-team email opens next</span>
+            </div>
+          </form>
+          <?php endif; ?>
+
+          <?php if ($canPostpone): ?>
+          <form method="POST" id="pp<?= (int)$r['id'] ?>" style="display:none;margin-top:6px;padding:10px;background:#fff7ec;border:1px solid #f0d9b5;border-radius:8px"
+                onsubmit="return confirm('Postpone: replace the dates with _POSTPONED and move the folder to 001_Safari/00_POSTPONED?')">
+            <input type="hidden" name="action" value="postpone">
+            <input type="hidden" name="request_id" value="<?= (int)$r['id'] ?>">
+            <div style="font-size:.68rem;color:#B26A00;font-weight:600;margin-bottom:6px">⏸ Postpone <?= h(pp_dates_label($pcode)) ?> — new dates not known yet</div>
+            <label style="font-size:.7rem;color:var(--grey-dk)">New dates due by
+              <input type="date" name="pp_until" value="<?= h(date('Y-m-d', strtotime('+12 months'))) ?>" required
+                     style="font-size:.74rem;padding:3px 6px;border:1.5px solid var(--grey-lt);border-radius:5px;margin-left:6px"></label>
+            <div style="font-size:.64rem;color:var(--grey-mid);margin-top:4px">Default: 12 months from today. The agent and the admins are reminded 60 and 30 days before, and when it passes.</div>
+            <div style="margin-top:8px;display:flex;gap:6px">
+              <button type="submit" class="btn btn-sm" style="background:#B26A00;border-color:#B26A00;color:#fff;font-weight:700">⏸ Postpone</button>
+              <button type="button" class="btn btn-outline btn-sm" onclick="toggleEl('pp<?= (int)$r['id'] ?>')">Cancel</button>
+            </div>
+          </form>
+          <?php endif; ?>
         </td>
         <td><span class="badge"><?= h($psLabel) ?></span></td>
         <td>
@@ -1632,8 +1733,10 @@ function flashCopied(el) { var o = el.textContent; el.textContent = '✓ Copied'
 // Opened from a request's "Confirm Safari" button (request_view.php):
 // show that request's confirm form straight away.
 (function () {
+  // open_confirm=<id> (request_view) or open=rs<id> / pp<id> (postponed.php)
   var id = <?= (int)($_GET['open_confirm'] ?? 0) ?>;
-  var f = id && document.getElementById('cs' + id);
+  var other = <?= json_encode(preg_match('/^(rs|pp)\d+$/', (string)($_GET['open'] ?? '')) ? (string)$_GET['open'] : '') ?>;
+  var f = (id && document.getElementById('cs' + id)) || (other && document.getElementById(other));
   if (!f) return;
   f.style.display = 'block';
   f.scrollIntoView({block: 'center'});

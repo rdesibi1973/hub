@@ -559,6 +559,26 @@ include 'includes/header.php';
          class="btn btn-outline" style="color:#1A6B3A;border-color:#1A6B3A;font-weight:700"
          title="Confirm this safari: set the dates, move the folder to 001_Safari, mark Booked">✅ Confirm Safari</a>
     <?php endif; ?>
+    <?php
+      // Reschedule / Postpone (BackOffice, admin/manager): confirmed private safaris.
+      require_once 'includes/postpone_lib.php';
+      $ppS = (in_array(current_user()['role_name'] ?? '', ['admin', 'manager'], true)
+              && ($r['status'] ?? '') === 'Booked' && trim($r['group_folder'] ?? '') === '')
+             ? pp_split($pcode) : null;
+      $boQ = ['q' => $r['customer_name'], 'root' => 'All'];
+    ?>
+    <?php if (!empty($r['postpone_until'])): ?>
+      <span class="btn btn-outline" style="cursor:default;color:#B26A00;border-color:#B26A00;font-weight:700"
+            title="Postponed — new dates due by this date">⏸ Postponed until <?= h(date('d M Y', strtotime($r['postpone_until']))) ?></span>
+    <?php endif; ?>
+    <?php if ($ppS): ?>
+      <a href="backoffice.php?<?= h(http_build_query($boQ + ['open' => 'rs' . (int)$r['id']])) ?>" class="btn btn-outline"
+         style="color:#1a3a5c;border-color:#1a3a5c" title="Move the safari to new dates">📅 Reschedule</a>
+      <?php if ($ppS['dated']): ?>
+      <a href="backoffice.php?<?= h(http_build_query($boQ + ['open' => 'pp' . (int)$r['id']])) ?>" class="btn btn-outline"
+         style="color:#B26A00;border-color:#B26A00" title="Postpone without new dates yet">⏸ Postpone</a>
+      <?php endif; ?>
+    <?php endif; ?>
     <?php if (!isLeadsRestricted()): ?>
       <?php if ($invCount === 0): ?>
         <?php if (($r['status'] ?? '') === 'Booked'): ?>

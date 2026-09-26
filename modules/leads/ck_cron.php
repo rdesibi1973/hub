@@ -30,6 +30,11 @@ try {
     echo ck_now() . " CK scan: {$s['seen']} folders, {$s['new']} new, {$s['changed']} changed, {$s['gone']} gone\n";
     // Once a day (first call after 05:00 Tanzania): the nightly automatic check.
     echo ck_now() . ' ' . ck_nightly_dispatch(db()) . "\n";
+    // Postponed safaris: reminders 60 / 30 days before the deadline and when it
+    // passes (each sent once; see includes/postpone_lib.php).
+    require_once __DIR__ . '/../../includes/mail_helper.php';
+    require_once __DIR__ . '/includes/postpone_lib.php';
+    echo ck_now() . ' ' . pp_send_reminders(db()) . "\n";
 } catch (Throwable $e) {
     http_response_code(500);
     echo 'CK scan failed: ' . $e->getMessage() . "\n";
