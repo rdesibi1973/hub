@@ -36,6 +36,7 @@ function sto_style_levels(ZipArchive $zip): array {
         $id = $st->getAttributeNS(STO_W, 'styleId');
         foreach ($st->getElementsByTagNameNS(STO_W, 'name') as $nm) {
             if (preg_match('/^heading\s*(\d)$/i', trim($nm->getAttributeNS(STO_W, 'val')), $m)) $map[$id] = 'Heading' . $m[1];
+            elseif (preg_match('/^list paragraph$/i', trim($nm->getAttributeNS(STO_W, 'val'))))  $map[$id] = 'ListParagraph';
             break;
         }
     }
@@ -163,7 +164,8 @@ function sto_parse_docx(string $path): array {
         }
 
         if ($sec === 'intro') {
-            if (!preg_match('/^Pasti\s/u', $t)) $prog['intro'][] = $t;
+            // List items keep a "- " marker; the document renders runs of them as a bulleted list.
+            if (!preg_match('/^Pasti\s/u', $t)) $prog['intro'][] = ($st === 'ListParagraph' ? '- ' : '') . $t;
         } elseif ($sec === 'include' || $sec === 'exclude') {
             $prog[$sec][] = $t;
         } elseif ($sec === 'day' && $sub) {

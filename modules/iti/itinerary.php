@@ -30,6 +30,15 @@ $id = (int)$program['id'];
 $lang = $_GET['lang'] ?? $program['display_language'] ?? 'en';
 if (!in_array($lang, ITI_LANGS)) $lang = 'en';
 
+// Etnia layout (the programme document) unless the old page is asked for with &layout=classic.
+if (($_GET['layout'] ?? '') !== 'classic') {
+    require_once __DIR__ . '/includes/iti_doc.php';
+    if (!in_array($lang, ITI_LANGUAGES, true)) $lang = 'it';
+    $D = iti_doc_data($id, $lang);
+    iti_doc_page($D, iti_doc_lang_bar($lang, ['token' => $token], '<a href="#" onclick="window.print();return false">🖨 PDF</a>'));
+    exit;
+}
+
 $curr = $_GET['curr'] ?? $program['display_currency'] ?? 'USD';
 if (!in_array($curr, ITI_CURRENCIES)) $curr = 'USD';
 
