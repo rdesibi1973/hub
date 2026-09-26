@@ -17,6 +17,6 @@ CREATE TABLE IF NOT EXISTS agent_audit_log (
     KEY idx_request (request_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- Dedicated Hub user the API key acts as (AGENT_API_USER, default 'claude-agent').
+-- Dedicated Hub user the API key acts as (AGENT_API_USER, default 'claude_agent').
 -- Create it from Admin → Users (so the password is hashed by the Hub), role
 -- 'manager', agent = Roberto's agent if requests should default to him.

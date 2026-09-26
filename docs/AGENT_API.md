@@ -16,9 +16,9 @@ without driving the web UI.
 2. In the **server-only** root `includes/config.php` add:
    ```php
    define('AGENT_API_KEY',  '<the key>');
-   define('AGENT_API_USER', 'claude-agent');   // Hub username the key acts as
+   define('AGENT_API_USER', 'claude_agent');   // Hub username the key acts as
    ```
-3. In Hub → Admin → Users create user `claude-agent` (active, role `manager`,
+3. In Hub → Admin → Users create user `claude_agent` (active, role `manager`,
    agent = the agent new requests should default to, e.g. Roberto).
 4. Optional: run `migrations/060_agent_api.sql` (the audit table is otherwise created on first call).
 

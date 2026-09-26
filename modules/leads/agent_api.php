@@ -6,7 +6,7 @@
  * Spec + examples: docs/AGENT_API.md.
  *
  * Auth: header X-Agent-Key = AGENT_API_KEY (includes/config.php, never in the repo).
- * The key acts as the Hub user AGENT_API_USER (username; default 'claude-agent').
+ * The key acts as the Hub user AGENT_API_USER (username; default 'claude_agent').
  * HTTPS only, 60 requests/min, every call written to agent_audit_log.
  * Outbound / folder-moving actions (confirm_booking, send_booking_email) are
  * dry-runs unless the body carries "confirm": true.
@@ -108,7 +108,7 @@ $rl->execute([date('Y-m-d H:i:s', time() - 60)]);
 if ((int)$rl->fetchColumn() >= AGENT_RATE_PER_MIN) agent_fail('Rate limit exceeded (' . AGENT_RATE_PER_MIN . '/min)', 429);
 
 // The Hub user the key acts as.
-$agentUsername = defined('AGENT_API_USER') ? (string)AGENT_API_USER : 'claude-agent';
+$agentUsername = defined('AGENT_API_USER') ? (string)AGENT_API_USER : 'claude_agent';
 $us = $db->prepare("SELECT u.id, u.username, u.full_name, u.agent_id, u.role_id, r.name AS role_name
                     FROM users u LEFT JOIN roles r ON r.id = u.role_id
                     WHERE u.username = ? AND u.is_active = 1 LIMIT 1");
