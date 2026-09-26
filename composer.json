@@ -1,5 +1,12 @@
 {
     "require": {
-        "dompdf/dompdf": "^2.0"
+        "dompdf/dompdf": "^2.0",
+        "phpoffice/phpword": "^1.4",
+        "phpoffice/phpspreadsheet": "^1.29"
+    },
+    "config": {
+        "platform": {
+            "php": "8.0.30"
+        }
     }
 }
