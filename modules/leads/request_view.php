@@ -881,8 +881,6 @@ function copyPrograms() {
   result.style.display = 'none'; result.innerHTML = '';
   if (!progs.length) { status.textContent = 'Select at least one program.'; return; }
   if (!prognum || prognum === '…') { status.textContent = 'Wait for the ProgNumber to load…'; return; }
-  if (!confirm('Copy ' + progs.length + ' program(s) into this booking\'s Dropbox folder?')) return;
-
   status.textContent = 'Copying…'; btn.disabled = true;
   var fd = new FormData();
   fd.append('action', 'copy_programs');

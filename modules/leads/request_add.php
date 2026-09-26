@@ -23,11 +23,38 @@ if ($staffAgentId) {
 }
 $lockAgent = ($isRestricted && $staffAgent !== null);   // restrict + default the Agent field
 
-// Agency list for the searchable picker (id / display name / short code).
+// Emails per agency, offered as suggestions for the Email field: contacts first
+// (primary on top), then the free-text agencies.email list. Deduped, lowercase key.
+$agencyEmails = [];
+$addAgencyEmail = function ($agencyId, $email, $label) use (&$agencyEmails) {
+    $email = trim($email);
+    if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) return;
+    $key = strtolower($email);
+    if (isset($agencyEmails[$agencyId][$key])) return;
+    $agencyEmails[$agencyId][$key] = ['email' => $email, 'label' => $label];
+};
+try {
+    $cstmt = $db->query("SELECT agency_id, name, email FROM agency_contacts
+                          WHERE email IS NOT NULL AND email <> ''
+                          ORDER BY is_primary DESC, name ASC");
+    foreach ($cstmt->fetchAll() as $c) {
+        $addAgencyEmail((int)$c['agency_id'], $c['email'], $c['name']);
+    }
+} catch (PDOException $e) {
+    // agency_contacts table not migrated yet — degrade gracefully.
+}
+foreach ($agencies as $a) {
+    foreach (preg_split('/[,;\s]+/', (string)($a['email'] ?? '')) as $em) {
+        $addAgencyEmail((int)$a['id'], $em, '');
+    }
+}
+
+// Agency list for the searchable picker (id / display name / short code / emails).
 $agencyJs = array_map(fn($a) => [
-    'id'    => (int)$a['id'],
-    'nome'  => $a['nome'],
-    'short' => $a['short_name'] ?: $a['nome'],
+    'id'     => (int)$a['id'],
+    'nome'   => $a['nome'],
+    'short'  => $a['short_name'] ?: $a['nome'],
+    'emails' => array_values($agencyEmails[(int)$a['id']] ?? []),
 ], $agencies);
 
 $errors = [];
@@ -290,7 +317,9 @@ include 'includes/header.php';
       <div class="form-group">
         <label for="email">Email</label>
         <input type="email" id="email" name="email" value="<?= h($v['email']) ?>"
-               placeholder="e.g. john@example.com" autocomplete="off">
+               placeholder="e.g. john@example.com" autocomplete="off" list="agency_email_list">
+        <datalist id="agency_email_list"></datalist>
+        <div id="agency-email-chips" style="display:none;margin-top:6px;font-size:.78rem"></div>
         <div id="email-dup-warning" style="display:none;margin-top:6px"></div>
       </div>
 
@@ -863,6 +892,7 @@ function selectAgency(id) {
   hidden.dataset.short = a.short || '';
   if (search) search.value = a.nome;
   if (list) list.style.display = 'none';
+  applyAgencyEmails(a);
   updateFolderPreview();
 }
 
@@ -871,7 +901,64 @@ function clearAgency() {
   if (hidden) { hidden.value = ''; hidden.dataset.short = ''; }
   if (search) search.value = '';
   if (list) list.style.display = 'none';
+  applyAgencyEmails(null);
 }
+
+// ── Agency emails → Email field ───────────────────────────────────────────────
+// The agency's emails are offered as suggestions (datalist + clickable chips);
+// the field stays free text. We only auto-fill when the field is empty or still
+// holds the value we filled ourselves — a typed email is never overwritten.
+let agencyAutoEmail = '';
+
+function applyAgencyEmails(a) {
+  const field = document.getElementById('email');
+  const dl    = document.getElementById('agency_email_list');
+  const chips = document.getElementById('agency-email-chips');
+  if (!field || !dl || !chips) return;
+  const emails = (a && a.emails) || [];
+
+  dl.innerHTML = emails.map(e =>
+    '<option value="' + escAg(e.email) + '">' + escAg(e.label || '') + '</option>').join('');
+
+  const cur = field.value.trim();
+  const untouched = (cur === '' || cur === agencyAutoEmail);
+  if (untouched) {
+    field.value = emails.length ? emails[0].email : '';
+    agencyAutoEmail = field.value;
+  }
+  renderAgencyEmailChips(emails);
+}
+
+function renderAgencyEmailChips(emails) {
+  const field = document.getElementById('email');
+  const chips = document.getElementById('agency-email-chips');
+  if (!emails.length) { chips.style.display = 'none'; chips.innerHTML = ''; return; }
+  const cur = field.value.trim().toLowerCase();
+  chips.innerHTML = '<span style="color:var(--grey-mid)">Agency emails:</span> ' + emails.map(e => {
+    const on = e.email.toLowerCase() === cur;
+    return '<button type="button" class="agency-email-chip" data-email="' + escAg(e.email) + '"'
+      + ' title="' + escAg(e.label || 'Use this email') + '"'
+      + ' style="margin:2px 4px 0 0;padding:2px 8px;border-radius:12px;cursor:pointer;font-size:.76rem;'
+      + 'border:1px solid ' + (on ? '#16A34A' : 'var(--grey-lt)') + ';background:' + (on ? '#F0FDF4' : '#fff') + '">'
+      + escAg(e.email) + (e.label ? ' <span style="color:var(--grey-mid)">· ' + escAg(e.label) + '</span>' : '')
+      + '</button>';
+  }).join('');
+  chips.style.display = 'block';
+  chips.querySelectorAll('.agency-email-chip').forEach(btn => {
+    btn.addEventListener('click', function () {
+      field.value = this.dataset.email;
+      agencyAutoEmail = field.value;   // picked from the agency list → replaceable on agency change
+      renderAgencyEmailChips(emails);
+    });
+  });
+}
+
+// Keep the chip highlight in sync while typing.
+document.getElementById('email').addEventListener('input', function () {
+  const id = parseInt(document.getElementById('agency_id').value, 10);
+  const a  = id ? window.AGENCIES.find(x => x.id === id) : null;
+  renderAgencyEmailChips((a && a.emails) || []);
+});
 
 function agencyKeydown(e) {
   if (e.key === 'Escape') { const { list } = agencyEls(); if (list) list.style.display = 'none'; }
@@ -944,8 +1031,13 @@ document.getElementById('request-form').addEventListener('submit', function (e) 
   }
 }, true);
 
-// Init on load (after a POST error, restore skip state)
+// Init on load (after a POST error, restore skip state + agency email suggestions)
 updateChannel();
+(function () {
+  const id = parseInt(document.getElementById('agency_id').value, 10);
+  const a  = id ? window.AGENCIES.find(x => x.id === id) : null;
+  if (a) applyAgencyEmails(a);
+})();
 onDropboxSkipChange();
 </script>
 
