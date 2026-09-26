@@ -138,21 +138,6 @@ function bo_do_rename(PDO $db, string $token, array $r, bool $isGrp,
 $CONFIRM_DESTINATIONS = bs_confirm_destinations();
 $CONFIRM_MONTHS       = bs_confirm_months();
 
-/** Restore the request row to its pre-confirmation state (used by rollback). */
-function bo_rollback_db(PDO $db, int $id, string $name, string $path, array $pre): void {
-    $status = $pre['status'] ?? '';
-    // Never leave it Booked after a rollback; fall back to Inquiry if unknown.
-    if ($status === '' || strcasecmp($status, 'Booked') === 0) $status = 'Inquiry';
-    $pay   = $pre['pay']   ?? null;
-    $group = trim($pre['group'] ?? '');
-    $db->prepare(
-        "UPDATE requests
-         SET practice_code=?, group_folder=?, dropbox_url=?, status=?, payment_status=?,
-             confirmation_date=NULL, pre_confirm_json=NULL
-         WHERE id=?"
-    )->execute([$name, ($group !== '' ? $group : null), bo_url_from_path($path), $status, ($pay !== '' ? $pay : null), $id]);
-}
-
 /**
  * Re-group a confirmed booking that was filed under the wrong grouping: move ONLY
  * this booking's Dropbox folder and sync the DB. $targetGrp === '' → make it a
@@ -441,68 +426,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'rollb
         'in_files' => !empty($_POST['in_files']) ? '1' : '',
     ], fn($x) => $x !== ''));
 
-    $stmt = $db->prepare("SELECT id, customer_name, practice_code, group_folder, dropbox_url, pre_confirm_json
-                          FROM requests WHERE id = ?");
-    $stmt->execute([$reqId]);
-    $r   = $stmt->fetch(PDO::FETCH_ASSOC);
-    $pre = $r ? json_decode($r['pre_confirm_json'] ?? '', true) : null;
-
-    if (!$r) {
-        flash('Request not found.', 'error');
-    } elseif (!$pre || empty($pre['name']) || empty($pre['path'])) {
-        flash('No rollback data stored for this booking (only Hub-confirmed bookings can be rolled back).', 'error');
-    } else {
-        require_once 'dropbox_helper.php';
-        try {
-            $token    = dropbox_get_access_token();
-            $act      = strtoupper($pre['action'] ?? 'NONE');
-            $origName = $pre['name'];
-            $destPath = $pre['path'];                        // e.g. /2026/CustName(Ag-Handler)
-            $group    = trim($r['group_folder'] ?? '');
-            $member   = trim($r['practice_code'] ?? '');
-
-            if (dropbox_path_exists($token, $destPath)) {
-                flash('The original location "' . $destPath . '" already exists — resolve it manually; nothing changed.', 'error');
-            } elseif ($act === 'CREATE') {
-                // Safe only while this is the group's sole member (authoritative: the DB).
-                $cnt = $db->prepare("SELECT COUNT(*) FROM requests WHERE group_folder = ?");
-                $cnt->execute([$group]);
-                $members = (int)$cnt->fetchColumn();
-                if ($group === '') {
-                    flash('Missing group folder — cannot roll back automatically.', 'error');
-                } elseif ($members > 1) {
-                    flash('This group has ' . $members . ' members — remove the others first, then roll back the last one.', 'error');
-                } else {
-                    // Move the member's loose files back to the group root, drop the empty
-                    // subfolder, then move the (renamed) group folder back to its source.
-                    $sub     = trim($pre['sub'] ?? $member);
-                    $grpPath = '/001_Safari/' . $group;
-                    $subPath = $grpPath . '/' . $sub;
-                    foreach (dropbox_list_files($token, $subPath) as $fn) {
-                        try { dropbox_move_folder($token, $subPath . '/' . $fn, $grpPath . '/' . $fn); }
-                        catch (Throwable $ig) { /* best-effort per file */ }
-                    }
-                    try { dropbox_delete_folder($token, $subPath); } catch (Throwable $ig) { /* empty subfolder */ }
-                    dropbox_move_folder($token, $grpPath, $destPath);
-                    bo_rollback_db($db, $reqId, $origName, $destPath, $pre);
-                    flash('↩ Rolled back "' . ($r['customer_name'] ?? 'Booking') . '" — single-member group undone, folder restored to ' . $destPath . '.', 'info');
-                }
-            } else {
-                // NONE / ADD — a single folder move back to the source path.
-                $curPath = bo_path_from_url($r['dropbox_url'] ?? '');
-                if ($curPath === '') {
-                    $curPath = ($act === 'ADD' && $group !== '')
-                        ? '/001_Safari/' . $group . '/' . $member
-                        : '/001_Safari/' . $member;
-                }
-                dropbox_move_folder($token, $curPath, $destPath);
-                bo_rollback_db($db, $reqId, $origName, $destPath, $pre);
-                flash('↩ Rolled back "' . ($r['customer_name'] ?? 'Booking') . '" — folder restored to ' . $destPath . '.', 'info');
-            }
-        } catch (Throwable $e) {
-            flash('Dropbox/DB error — nothing was changed: ' . $e->getMessage(), 'error');
-        }
-    }
+    // Logic in includes/booking_service.php (shared with the Agent API rollback_booking).
+    $res = bs_rollback($db, $reqId, true);
+    flash($res['msg'], $res['ok'] ? 'info' : 'error');
     header('Location: backoffice.php' . ($backQs ? '?' . $backQs : '')); exit;
 }
 

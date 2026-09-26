@@ -7,7 +7,8 @@
  *   Copy programs   : bs_copy_programs(), bs_next_prognum()   (request_view.php, API copy_program)
  *   Confirm Safari  : bs_confirm_plan() → bs_confirm_checks() / bs_confirm_commit()
  *                                                     (backoffice.php, API confirm_*)
- *   Booking email   : bo_booking_email(), bs_send_mail()      (backoffice.php, ajax_booking_email.php, API)
+ *   Rollback        : bs_rollback()                   (backoffice.php, API rollback_booking)
+ *   Booking email   : bo_booking_email(), bs_send_mail()     (backoffice.php, ajax_booking_email.php, API)
  *
  * Requires the leads config.php (db(), DROPBOX_BASE_PATH, …) to be loaded first.
  * Dropbox helpers are loaded lazily, as the pages did before.
@@ -754,6 +755,121 @@ function bs_confirm_commit(PDO $db, array $plan, bool $proceed): array {
 
     } catch (Throwable $e) {
         return $fail('Dropbox/DB error — nothing was changed: ' . $e->getMessage());
+    }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+//  Rollback a confirmation
+// ════════════════════════════════════════════════════════════════════════════
+
+/** Restore the request row to its pre-confirmation state (used by rollback). */
+function bo_rollback_db(PDO $db, int $id, string $name, string $path, array $pre): void {
+    $status = $pre['status'] ?? '';
+    // Never leave it Booked after a rollback; fall back to Inquiry if unknown.
+    if ($status === '' || strcasecmp($status, 'Booked') === 0) $status = 'Inquiry';
+    $pay   = $pre['pay']   ?? null;
+    $group = trim($pre['group'] ?? '');
+    $db->prepare(
+        "UPDATE requests
+         SET practice_code=?, group_folder=?, dropbox_url=?, status=?, payment_status=?,
+             confirmation_date=NULL, pre_confirm_json=NULL
+         WHERE id=?"
+    )->execute([$name, ($group !== '' ? $group : null), bo_url_from_path($path), $status, ($pay !== '' ? $pay : null), $id]);
+}
+
+/**
+ * Undo a Hub confirmation: move the folder back to where it was before Confirm Safari
+ * and restore the request row from pre_confirm_json. $commit = false → only checks
+ * and reports what would happen (nothing moved).
+ *
+ * Returns ['ok'=>bool, 'msg'=>string, 'action'=>NONE|ADD|CREATE, 'from'=>path, 'to'=>path,
+ *          'restore'=>['name','status','payment_status','group']].
+ */
+function bs_rollback(PDO $db, int $reqId, bool $commit): array {
+    $fail = function (string $msg, array $extra = []) { return array_merge(['ok' => false, 'msg' => $msg], $extra); };
+
+    $stmt = $db->prepare("SELECT id, customer_name, practice_code, group_folder, dropbox_url, pre_confirm_json
+                          FROM requests WHERE id = ?");
+    $stmt->execute([$reqId]);
+    $r   = $stmt->fetch(PDO::FETCH_ASSOC);
+    $pre = $r ? json_decode($r['pre_confirm_json'] ?? '', true) : null;
+
+    if (!$r) return $fail('Request not found.');
+    if (!$pre || empty($pre['name']) || empty($pre['path'])) {
+        return $fail('No rollback data stored for this booking (only Hub-confirmed bookings can be rolled back).');
+    }
+
+    $cust     = $r['customer_name'] ?: 'Booking';
+    $act      = strtoupper($pre['action'] ?? 'NONE');
+    $origName = $pre['name'];
+    $destPath = $pre['path'];                        // e.g. /2026/CustName(Ag-Handler)
+    $group    = trim($r['group_folder'] ?? '');
+    $member   = trim($r['practice_code'] ?? '');
+    $preStat  = (string)($pre['status'] ?? '');
+    $restore  = [
+        'name'           => $origName,
+        'status'         => ($preStat === '' || strcasecmp($preStat, 'Booked') === 0) ? 'Inquiry' : $preStat,
+        'payment_status' => $pre['pay'] ?? null,
+        'group'          => trim($pre['group'] ?? '') !== '' ? trim($pre['group']) : null,
+    ];
+
+    // Where the folder is now.
+    if ($act === 'CREATE') {
+        $curPath = '/001_Safari/' . $group;          // the whole (renamed) GRP folder moves back
+    } else {
+        $curPath = bo_path_from_url($r['dropbox_url'] ?? '');
+        if ($curPath === '') {
+            $curPath = ($act === 'ADD' && $group !== '')
+                ? '/001_Safari/' . $group . '/' . $member
+                : '/001_Safari/' . $member;
+        }
+    }
+    $info = ['action' => $act, 'from' => $curPath, 'to' => $destPath, 'restore' => $restore];
+
+    require_once __DIR__ . '/../dropbox_helper.php';
+    try {
+        $token = dropbox_get_access_token();
+
+        if (dropbox_path_exists($token, $destPath)) {
+            return $fail('The original location "' . $destPath . '" already exists — resolve it manually; nothing changed.', $info);
+        }
+        if ($act === 'CREATE') {
+            // Safe only while this is the group's sole member (authoritative: the DB).
+            if ($group === '') return $fail('Missing group folder — cannot roll back automatically.', $info);
+            $cnt = $db->prepare("SELECT COUNT(*) FROM requests WHERE group_folder = ?");
+            $cnt->execute([$group]);
+            $members = (int)$cnt->fetchColumn();
+            if ($members > 1) {
+                return $fail('This group has ' . $members . ' members — remove the others first, then roll back the last one.', $info);
+            }
+        }
+        if (!$commit) {
+            return array_merge(['ok' => true, 'msg' => 'Would move "' . $curPath . '" back to "' . $destPath
+                              . '" and set status → ' . $restore['status'] . '.'], $info);
+        }
+
+        if ($act === 'CREATE') {
+            // Move the member's loose files back to the group root, drop the empty
+            // subfolder, then move the (renamed) group folder back to its source.
+            $sub     = trim($pre['sub'] ?? $member);
+            $subPath = $curPath . '/' . $sub;
+            foreach (dropbox_list_files($token, $subPath) as $fn) {
+                try { dropbox_move_folder($token, $subPath . '/' . $fn, $curPath . '/' . $fn); }
+                catch (Throwable $ig) { /* best-effort per file */ }
+            }
+            try { dropbox_delete_folder($token, $subPath); } catch (Throwable $ig) { /* empty subfolder */ }
+            dropbox_move_folder($token, $curPath, $destPath);
+            bo_rollback_db($db, $reqId, $origName, $destPath, $pre);
+            return array_merge(['ok' => true, 'msg' => '↩ Rolled back "' . $cust . '" — single-member group undone, folder restored to ' . $destPath . '.'], $info);
+        }
+
+        // NONE / ADD — a single folder move back to the source path.
+        dropbox_move_folder($token, $curPath, $destPath);
+        bo_rollback_db($db, $reqId, $origName, $destPath, $pre);
+        return array_merge(['ok' => true, 'msg' => '↩ Rolled back "' . $cust . '" — folder restored to ' . $destPath . '.'], $info);
+
+    } catch (Throwable $e) {
+        return $fail('Dropbox/DB error — nothing was changed: ' . $e->getMessage(), $info);
     }
 }
 

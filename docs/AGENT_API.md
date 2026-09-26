@@ -31,8 +31,8 @@ without driving the web UI.
 | HTTPS only | Plain HTTP → 403. |
 | Rate limit | 60 calls/min → 429. |
 | Audit | Every call (including failures and dry-runs) → `agent_audit_log` (action, request_id, user, HTTP code, dry_run, payload, result, IP). |
-| Dry-run by default | `confirm_booking` and `send_booking_email` do nothing unless the body has `"confirm": true`. |
-| No deletes | No delete endpoint. Undo a confirm with BackOffice → Rollback. |
+| Dry-run by default | `confirm_booking`, `send_booking_email` and `rollback_booking` do nothing unless the body has `"confirm": true`. |
+| No deletes | No delete endpoint. Undo a confirm with `rollback_booking` (or BackOffice → Rollback). |
 
 Responses: `{"ok": true, …}` or `{"ok": false, "error": "…", …}` with a matching HTTP code
 (400 bad input, 403 auth, 404 not found, 409 duplicate / blocked, 422 partial, 429 rate, 5xx server/Dropbox).
@@ -89,6 +89,13 @@ snapshot stored for Rollback.
 "Thanks"), `sender_name`. Without `"confirm": true` → returns the email that *would* be sent.
 Signed with the request agent's name, signature and Reply-To.
 
+### `rollback_booking` (POST)
+`request_id`. Undoes a Hub confirmation exactly like BackOffice → Rollback…: moves the folder
+back to where it was before Confirm Safari and restores name, status (never Booked → Inquiry),
+payment status and group. Without `"confirm": true` → returns `from`, `to` and `restore` only.
+409 if there is no confirm snapshot, the original location already exists, or a GRP still has
+other members.
+
 ## Example — Fiorini (TVT)
 
 ```bash
@@ -101,6 +108,8 @@ curl -sH "$H" -X POST "$U?action=confirm_preview" -d '{"request_id":2958,"start"
 curl -sH "$H" -X POST "$U?action=confirm_booking" -d '{"request_id":2958,"start":"2027-01-19","mid":"2027-01-22","end":"2027-01-28","confirm":true}'
 curl -sH "$H" -X POST "$U?action=send_booking_email" -d '{"request_id":2958}'                  # dry-run
 curl -sH "$H" -X POST "$U?action=send_booking_email" -d '{"request_id":2958,"confirm":true}'
+curl -sH "$H" -X POST "$U?action=rollback_booking" -d '{"request_id":2958}'                    # dry-run
+curl -sH "$H" -X POST "$U?action=rollback_booking" -d '{"request_id":2958,"confirm":true}'
 ```
 
 ## Not in v1 yet (build order §4–7 of the handoff)

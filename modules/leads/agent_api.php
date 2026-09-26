@@ -78,7 +78,7 @@ function agent_ensure_schema(PDO $db): void {
 function agent_audit(PDO $db, string $action, $reqId, array $payload, string $resultJson, int $code): void {
     global $agentUser;
     agent_ensure_schema($db);
-    $dry = in_array($action, ['confirm_booking', 'send_booking_email'], true) && empty($payload['confirm']);
+    $dry = in_array($action, ['confirm_booking', 'send_booking_email', 'rollback_booking'], true) && empty($payload['confirm']);
     $db->prepare("INSERT INTO agent_audit_log (ts, action, request_id, user_id, http_code, dry_run, payload_json, result_json, ip)
                   VALUES (?,?,?,?,?,?,?,?,?)")
        ->execute([
@@ -492,10 +492,25 @@ try {
         agent_out(['ok' => true, 'dry_run' => false, 'message' => 'Sent', 'email' => $email]);
     }
 
+    // ── rollback_booking ─────────────────────────────────────────────────────
+    // Undo a Hub confirmation (same as BackOffice "Rollback…"): folder back to its
+    // pre-confirm location, status restored. Dry-run unless "confirm": true.
+    case 'rollback_booking': {
+        agent_require_method('POST');
+        $r   = agent_request($db, $in['request_id'] ?? 0);
+        $go  = !empty($in['confirm']);
+        $res = bs_rollback($db, (int)$r['id'], $go);
+        $out = ['ok' => $res['ok'], 'dry_run' => !$go, 'message' => $res['msg']];
+        foreach (['action', 'from', 'to', 'restore'] as $k) { if (isset($res[$k])) $out[$k] = $res[$k]; }
+        if (!$res['ok']) { $out['error'] = $res['msg']; agent_out($out, 409); }
+        if (!$go) $out['message'] .= ' Dry run — nothing moved. Resend with "confirm": true to roll back.';
+        agent_out($out);
+    }
+
     default:
         agent_fail('Unknown action "' . $agentAction . '"', 400, ['actions' => [
             'find_requests', 'list_agencies', 'create_request', 'update_request', 'list_standard_programs',
-            'copy_program', 'confirm_preview', 'confirm_booking', 'send_booking_email',
+            'copy_program', 'confirm_preview', 'confirm_booking', 'send_booking_email', 'rollback_booking',
         ]]);
     }
 } catch (Throwable $e) {
