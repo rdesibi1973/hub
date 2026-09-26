@@ -321,8 +321,7 @@ include __DIR__ . '/../../includes/layout_header.php';
         <td>
           <div class="gap-8" style="white-space:nowrap;">
             <a href="program_edit.php?id=<?= $p['id'] ?>" class="btn btn-outline btn-sm">✏️ Edit</a>
-            <a href="program_doc.php?id=<?= $p['id'] ?>" class="btn btn-outline btn-sm" target="_blank">📄 Document</a>
-            <a href="program_view.php?id=<?= $p['id'] ?>" class="btn btn-outline btn-sm">👁 Preview</a>
+            <a href="program_doc.php?id=<?= $p['id'] ?>" class="btn btn-outline btn-sm" target="_blank">👁 Preview</a>
             <?php if ($can_edit): ?>
             <a href="programs.php?type=<?= $tab ?>&action=duplicate&id=<?= $p['id'] ?>&dest_type=<?= $tab ?>"
                class="btn btn-outline btn-sm"
