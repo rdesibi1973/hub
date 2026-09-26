@@ -20,6 +20,19 @@ Running log of notable changes and current build state. Module-level "active / p
 
 ---
 
+## 2026-09 — Agent API v1 (Claude runs the booking workflow)
+- `api/agent/index.php?action=…` → `modules/leads/agent_api.php`: find_requests,
+  list_agencies, create_request, update_request, list_standard_programs, copy_program,
+  confirm_preview, confirm_booking, send_booking_email. Key `AGENT_API_KEY`
+  (header `X-Agent-Key`) acting as Hub user `AGENT_API_USER`; HTTPS only, 60/min,
+  every call in `agent_audit_log`; confirm/email are dry-runs without `"confirm": true`.
+  See `docs/AGENT_API.md`.
+- Refactor: request creation, Copy Programs and Confirm Safari (+ booking email
+  template/sender) moved into `modules/leads/includes/booking_service.php`, now used
+  by `request_add.php`, `request_view.php`, `backoffice.php`, `ajax_booking_email.php`
+  and the API — one implementation for UI and agent.
+- Not yet: rate tables / `get_rates`, `fill_calc`, new Calc validations (handoff §4–6).
+
 ## 2026-09 — CK tracker: automatic SafariCheck (phase 2)
 - When a folder first reaches Deposit/Balance/Balance-Cash/Paid (booking done),
   the Hub marks it for a check and starts the safariagent workflow on GitHub

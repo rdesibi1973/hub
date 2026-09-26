@@ -19,7 +19,7 @@
  *
  * Private safaris only (a GRP's dates live on the shared group folder).
  * Requires: config.php, dropbox_helper.php, includes/folder_parser.php,
- * includes/ck_lib.php, and backoffice.php's bo_confirmed_name / bo_url_from_path
+ * includes/ck_lib.php, and includes/booking_service.php's bo_confirmed_name / bo_url_from_path
  * / bo_path_from_url / $CONFIRM_MONTHS for the actions.
  */
 

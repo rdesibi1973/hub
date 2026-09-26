@@ -17,6 +17,7 @@ require_once 'includes/folder_parser.php';
 require_once 'includes/safari_check.php';
 require_once 'includes/ck_lib.php';
 require_once 'includes/postpone_lib.php';
+require_once 'includes/booking_service.php';
 $pageTitle = 'BackOffice';
 $db = db();
 
@@ -60,12 +61,6 @@ function bo_new_folder_name(string $folder, string $newTag, array $knownTags): s
         }
     }
     return $folder . '_' . $newTag;
-}
-
-/** Rebuild a Dropbox web URL from an API path_display ('/001_Safari/Foo/Bar'). */
-function bo_url_from_path(string $path): string {
-    $enc = implode('/', array_map('rawurlencode', explode('/', ltrim($path, '/'))));
-    return 'https://www.dropbox.com/home/' . $enc;
 }
 
 // Folder suffix → [status, payment_status]. "Contains" match, longest first
@@ -138,189 +133,10 @@ function bo_do_rename(PDO $db, string $token, array $r, bool $isGrp,
     return ['ok' => true, 'msg' => '✔ ' . $r['customer_name'] . ': renamed to "' . $newFolder . '".'];
 }
 
-/** API path ('/001_Safari/…') from a stored dropbox_url, or '' if unparseable. */
-function bo_path_from_url(string $url): string {
-    $url = trim($url);
-    if ($url === '') return '';
-    $p = parse_url($url, PHP_URL_PATH);
-    if (!$p) return '';
-    $p = urldecode($p);
-    $p = preg_replace('#^/?home/#i', '', ltrim($p, '/')); // strip leading /home/
-    $p = trim((string)$p, '/');
-    return $p !== '' ? '/' . $p : '';
-}
-
-// ── Confirm Safari: destinations + folder-name builder (ports the Java tool) ──
-// label => [folder suffix inserted inside (), requests.destination value].
-$CONFIRM_DESTINATIONS = [
-    'Safari / Safari & Beach — Tanzania' => ['',             'Tanzania'],
-    'Trekking Kilimanjaro / Meru'        => ['-TREK',        'Tanzania'],
-    'Only Zanzibar'                      => ['-ZNZ',         'Tanzania'],
-    'Safari Kenya-Tanzania'              => ['-TZ-KENYA',    'Kenya'],
-    'Safari Kenya'                       => ['-KENYA',       'Kenya'],
-    'Uganda'                             => ['-UGANDA',      'Uganda'],
-    'Namibia'                            => ['-NAMIBIA',     'Namibia'],
-    'South Africa'                       => ['-SOUTHAFRICA', 'South Africa'],
-    'Rwanda'                             => ['-RWANDA',      'Rwanda'],
-    'Madagascar'                         => ['-MADAGASCAR',  'Madagascar'],
-    'Botswana'                           => ['-BOTSWANA',    'Botswana'],
-    'Staff / Internal'                   => ['-STAFF',       'Staff'],
-];
-
-$CONFIRM_MONTHS = ['JAN'=>'01','FEB'=>'02','MAR'=>'03','APR'=>'04','MAY'=>'05','JUN'=>'06',
-                   'JUL'=>'07','AUG'=>'08','SEP'=>'09','OCT'=>'10','NOV'=>'11','DEC'=>'12'];
-
-/**
- * Build the confirmed folder name from the entered dates, mirroring the Java
- * "Confirm Safari" rules exactly:
- *   {MM}_{START}_{custname}_START{START}[_MIDT{MID}][_MIDT{MID2}]_END{END}_PROGRESS
- * with the destination suffix inserted before the last ')'. Hard-format errors
- * (bad month / wrong length) are returned in $errors and yield null.
- *
- * $start/$mid/$mid2 are DDMMM (e.g. 05JAN); $end is DDMMMYYYY (e.g. 18JAN2026).
- * "NA" or empty middles are skipped.
- */
-function bo_confirmed_name(string $custname, string $start, string $mid, string $mid2,
-                           string $end, string $destSuffix, array $months, array &$errors): ?string {
-    $errors = [];
-    $custname = trim($custname);
-    $start = strtoupper(trim($start));
-    $mid   = strtoupper(trim($mid));
-    $mid2  = strtoupper(trim($mid2));
-    $end   = strtoupper(trim($end));
-
-    $monOf = function (string $s) use ($months): string {
-        foreach ($months as $abbr => $num) { if (strpos($s, $abbr) !== false) return $num; }
-        return '00';
-    };
-
-    // Start date: DDMMM, valid month, exactly 5 chars.
-    $month = $monOf($start);
-    if ($month === '00') { $errors[] = 'Start Date month is wrong — use DDMMM, e.g. 05JAN.'; }
-    if (strpos($start, 'NA') !== false || strlen($start) !== 5) {
-        $errors[] = 'Start Date must be DDMMM (5 characters), e.g. 05JAN.';
-    }
-
-    // End date: DDMMMYYYY, valid month, exactly 9 chars.
-    $endMonth = $monOf($end);
-    if ($endMonth === '00') { $errors[] = 'End Date month is wrong — use DDMMMYYYY, e.g. 18JAN2026.'; }
-    if (strpos($end, 'NA') !== false || strlen($end) !== 9) {
-        $errors[] = 'End Date must be DDMMMYYYY (9 characters), e.g. 18JAN2026.';
-    }
-
-    // Middle dates (optional): DDMMM. Middle 2 only considered if middle 1 is set.
-    $hasMid  = ($mid  !== '' && strpos($mid, 'NA')  === false);
-    $hasMid2 = $hasMid && ($mid2 !== '' && strpos($mid2, 'NA') === false);
-    if ($hasMid  && strlen($mid)  !== 5) { $errors[] = 'Middle Date must be DDMMM (5 characters), e.g. 10JAN.'; }
-    if ($hasMid2 && strlen($mid2) !== 5) { $errors[] = 'Middle Date 2 must be DDMMM (5 characters), e.g. 12JAN.'; }
-
-    if ($errors) return null;
-
-    $name = $month . '_' . $start . '_' . $custname . '_START' . $start;
-    if ($hasMid)  $name .= '_MIDT' . $mid;
-    if ($hasMid2) $name .= '_MIDT' . $mid2;
-    $name .= '_END' . $end . '_PROGRESS';
-
-    if ($destSuffix !== '') {
-        $close = strrpos($name, ')');
-        if ($close !== false) {
-            $name = substr($name, 0, $close) . $destSuffix . substr($name, $close);
-        }
-    }
-    return $name;
-}
-
-/** Insert "_GRP{code}" before the first '(' of the customer folder (Java CREATE rule). */
-function bo_grp_insert(string $cust, string $code): string {
-    $paren = strpos($cust, '(');
-    return $paren !== false
-        ? substr($cust, 0, $paren) . '_GRP' . $code . substr($cust, $paren)
-        : $cust . '_GRP' . $code;
-}
-
-/** Valid GRP code = 4 digits DDMM, day 1-31, month 1-12 (mirrors the Java check). */
-function bo_grp_code_valid(string $code): bool {
-    if (!preg_match('/^\d{4}$/', $code)) return false;
-    $d = (int)substr($code, 0, 2); $m = (int)substr($code, 2);
-    return $d >= 1 && $d <= 31 && $m >= 1 && $m <= 12;
-}
-
-/** 'DDMM' from a Y-m-d start date, or '' if not parseable. */
-function bo_grp_code_from_ymd(?string $ymd): string {
-    if (!$ymd) return '';
-    $ts = strtotime($ymd);
-    return $ts !== false ? date('dm', $ts) : '';
-}
-
-/** Existing GRP folder names under /001_Safari whose name contains "GRP{code}". */
-function bo_find_grps(string $token, string $code): array {
-    if ($code === '' || !function_exists('dropbox_list_folder')) return [];
-    try { $all = dropbox_list_folder($token, '/001_Safari'); }
-    catch (Throwable $e) { return []; }
-    $needle = 'GRP' . $code;
-    $out = [];
-    foreach ($all as $name) { if (stripos($name, $needle) !== false) $out[] = $name; }
-    sort($out, SORT_NATURAL | SORT_FLAG_CASE);
-    return $out;
-}
-
-/**
- * Build the post-confirmation booking-notification email (ports the Java
- * showSafariBookingEmailDialog template). $grpMain != '' → the "added to group"
- * variant. Returns ['to','cc','subject','body'] (to/cc comma-separated).
- */
-function bo_booking_email(string $folder, string $agentEmail, string $grpMain, string $sessionFullName): array {
-    // Agent code = last token inside the last (…) block, e.g. "(GoWorld-PS-Roberto)" → "Roberto".
-    $agentCode = '';
-    if (preg_match_all('/\(([^)]+)\)/', $folder, $m) && !empty($m[1])) {
-        $parts = array_values(array_filter(array_map('trim', explode('-', (string)end($m[1]))), fn($x) => $x !== ''));
-        if ($parts) $agentCode = (string)end($parts);
-    }
-    $grpAdd  = ($grpMain !== '');
-    $fnLower = strtolower(trim($sessionFullName));
-
-    $to = ['accountant@savannahexplorers.com', 'glady@savannahexplorers.com', 'operations@savannahexplorers.com'];
-    $addNuru = in_array(strtolower($agentCode), ['roberto','robertocapri','eleonoraongaro','alessia','daniela'], true)
-            || in_array($fnLower, ['roberto','roberto capri','alessia','daniela'], true);
-    if ($addNuru) $to[] = 'nuru@savannahexplorers.com';
-
-    $cc = [];
-    if ($agentEmail !== '') $cc[] = $agentEmail;
-    $cc[] = 'savannah.explorers@gmail.com';
-    $cc[] = 'saruni@savannahexplorers.com';
-
-    if ($grpAdd) {
-        $subject = $grpMain . '\\' . $folder;
-    } else {
-        $cust = preg_replace('/^\d+_\d+[A-Za-z]+_/', '', $folder);
-        $cust = preg_replace('/_START.+$/', '', $cust);
-        $subject = $cust . ' safari bookings';
-    }
-
-    $agentDisplay = $sessionFullName !== '' ? $sessionFullName : $agentCode;
-    $b  = "Hi Glady/Lydia,\n";
-    if ($grpAdd) {
-        $b .= "         this customer has been added to group " . $grpMain . ",\n";
-        $b .= "         please check the extra services to book as in the excel file (transfers, hotels, Zanzibar, etc. — if any)\n\n";
-        $b .= "Dropbox folder is   " . $grpMain . "\\" . $folder . "\n\n";
-    } else {
-        $b .= "         you can book for this safari as in the excel file\n\n";
-        $b .= "Dropbox folder is   " . $folder . "\n\n";
-    }
-    $b .= "Kindly check domestic flights, invoices, transfers and activities are correctly"
-        . " booked and invoiced for the correct price/date/pax before saving."
-        . " Put invoice details and your name in Excel after it's checked.\n\n";
-    if ($addNuru) $b .= "Nuru - prepare the final program when bookings are completed\n\n";
-    $b .= "Esther - prepare the not paid invoice\n";
-    $b .= "\nThanks\nBest Regards,\n" . $agentDisplay;
-
-    return [
-        'to'      => implode(', ', array_values(array_unique($to))),
-        'cc'      => implode(', ', array_values(array_unique($cc))),
-        'subject' => $subject,
-        'body'    => $b,
-    ];
-}
+// Confirm Safari helpers (bo_confirmed_name, bo_grp_*, bo_booking_email, …) live in
+// includes/booking_service.php, shared with the Agent API.
+$CONFIRM_DESTINATIONS = bs_confirm_destinations();
+$CONFIRM_MONTHS       = bs_confirm_months();
 
 /** Restore the request row to its pre-confirmation state (used by rollback). */
 function bo_rollback_db(PDO $db, int $id, string $name, string $path, array $pre): void {
@@ -550,26 +366,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'regro
 }
 
 // ── Confirm Safari: preview (build name + checks) / commit (move + DB) ────────
+// The logic lives in includes/booking_service.php (shared with the Agent API).
 $previewFor  = 0;      // request_id whose inline preview panel to render
 $previewData = null;   // ['new_name','errors','checks','dates']
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST'
     && in_array($_POST['action'] ?? '', ['confirm_preview', 'confirm_safari'], true)) {
 
-    $reqId    = (int)($_POST['request_id'] ?? 0);
-    $action   = $_POST['action'];
-    $fStart   = strtoupper(trim($_POST['cs_start'] ?? ''));
-    $fMid     = strtoupper(trim($_POST['cs_mid']   ?? ''));
-    $fMid2    = strtoupper(trim($_POST['cs_mid2']  ?? ''));
-    $fEnd     = strtoupper(trim($_POST['cs_end']   ?? ''));
-    $fDestKey = $_POST['cs_dest'] ?? '';
-    [$destSuffix, $destValue] = $CONFIRM_DESTINATIONS[$fDestKey] ?? ['', ''];
-
-    $grpAction = strtoupper(trim($_POST['cs_grp'] ?? 'NONE'));
-    if (!in_array($grpAction, ['NONE', 'CREATE', 'ADD'], true)) $grpAction = 'NONE';
-    $grpCode   = preg_replace('/\D/', '', $_POST['cs_grpcode'] ?? '');   // digits only (DDMM)
-    $grpMain   = trim($_POST['cs_grpmain'] ?? '');                       // chosen existing GRP (ADD)
-    $proceed   = !empty($_POST['cs_proceed']);                           // "Proceed anyway" override
+    $reqId   = (int)($_POST['request_id'] ?? 0);
+    $action  = $_POST['action'];
+    $proceed = !empty($_POST['cs_proceed']);                           // "Proceed anyway" override
 
     // Preserve the search context so the list re-renders / the redirect returns here.
     $_GET['q']        = trim($_POST['q'] ?? '');
@@ -578,245 +384,49 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'
     $_GET['in_files'] = !empty($_POST['in_files']) ? '1' : '';
     $backQs = http_build_query(array_filter(['q'=>$_GET['q'], 'root'=>$_GET['root'], 'show_all'=>$_GET['show_all'], 'in_files'=>$_GET['in_files']]));
 
-    $stmt = $db->prepare("SELECT id, customer_name, practice_code, group_folder, dropbox_url, status, payment_status
-                          FROM requests WHERE id = ?");
-    $stmt->execute([$reqId]);
-    $r = $stmt->fetch(PDO::FETCH_ASSOC);
-    $oldFolder = $r ? trim($r['practice_code'] ?? '') : '';
+    $plan = bs_confirm_plan($db, $reqId, [
+        'start'   => $_POST['cs_start']   ?? '',
+        'mid'     => $_POST['cs_mid']     ?? '',
+        'mid2'    => $_POST['cs_mid2']    ?? '',
+        'end'     => $_POST['cs_end']     ?? '',
+        'dest'    => $_POST['cs_dest']    ?? '',
+        'grp'     => $_POST['cs_grp']     ?? 'NONE',
+        'grpcode' => $_POST['cs_grpcode'] ?? '',
+        'grpmain' => $_POST['cs_grpmain'] ?? '',
+    ]);
 
-    if (!$r) {
-        flash('Request not found.', 'error');
+    if (!$plan['found']) {
+        flash($plan['error'], 'error');
         header('Location: backoffice.php' . ($backQs ? '?' . $backQs : '')); exit;
     }
-    if ($oldFolder === '') {
-        flash('This request has no folder (practice_code) to confirm.', 'error');
-        header('Location: backoffice.php' . ($backQs ? '?' . $backQs : '')); exit;
-    }
-    $confirmedMailId = 0;   // set on a successful confirm → open the booking email after redirect
 
-    // GRP code defaults to DDMM derived from the Start date when left blank.
-    $deriveCode = function (string $start) use ($CONFIRM_MONTHS): string {
-        $s = strtoupper(trim($start));
-        if (strlen($s) < 5 || !ctype_digit(substr($s, 0, 2))) return '';
-        foreach ($CONFIRM_MONTHS as $ab => $num) { if (strpos($s, $ab) !== false) return substr($s, 0, 2) . $num; }
-        return '';
-    };
-    if ($grpAction !== 'NONE' && $grpCode === '') $grpCode = $deriveCode($fStart);
-
-    // ── Build the target name(s) + validate per booking type ──────────────────
-    $errs       = [];
-    $newName    = null;   // GRP main / private confirmed folder (NONE, CREATE)
-    $subName    = null;   // CREATE: member subfolder = original practice_code
-    $memberName = null;   // ADD:    member folder that moves into the GRP (unchanged)
-    $pd         = ['start_date' => null, 'end_date' => null];
-
-    if ($grpAction === 'ADD') {
-        // No dates: the customer folder keeps its name and moves into the existing GRP.
-        $memberName = $oldFolder;
-        if ($grpCode === '')                 $errs[] = 'Enter the GRP code (DDMM) to find the existing group.';
-        elseif (!bo_grp_code_valid($grpCode)) $errs[] = 'GRP code must be 4 digits DDMM (e.g. 2306 = 23 Jun).';
-    } else {
-        $custForName = $oldFolder;
-        if ($grpAction === 'CREATE') {
-            if (!bo_grp_code_valid($grpCode)) $errs[] = 'GRP code must be 4 digits DDMM (e.g. 2306 = 23 Jun).';
-            else $custForName = bo_grp_insert($oldFolder, $grpCode);
-        }
-        $buildErr = [];
-        $newName  = bo_confirmed_name($custForName, $fStart, $fMid, $fMid2, $fEnd, $destSuffix, $CONFIRM_MONTHS, $buildErr);
-        $errs     = array_merge($errs, $buildErr);
-        if ($newName !== null) { $pd = parse_folder_dates($newName); $subName = $oldFolder; }
-    }
-
-    $csFields = [
-        'fStart'    => $fStart, 'fMid' => $fMid, 'fMid2' => $fMid2, 'fEnd' => $fEnd,
-        'fDestKey'  => $fDestKey, 'grpAction' => $grpAction, 'grpCode' => $grpCode, 'grpMain' => $grpMain,
-    ];
-
-    if ($errs) {
+    if ($plan['errs']) {
         // Hard format error — show it in the inline panel, move nothing.
         $previewFor  = $reqId;
-        $previewData = ['new_name' => $newName, 'errors' => $errs, 'checks' => [],
-                        'fields' => $csFields, 'block' => true, 'can_override' => false, 'grps' => []];
+        $previewData = ['new_name' => $plan['new_name'], 'errors' => $plan['errs'], 'checks' => [],
+                        'fields' => $plan['fields'], 'block' => true, 'can_override' => false, 'grps' => []];
         // fall through to render
-    } else {
-        require_once 'dropbox_helper.php';
-
-        // Resolve the folder's current Dropbox path (url first — no search lag).
-        $token = null; $curPath = null; $dbxErr = '';
-        try {
-            $token   = dropbox_get_access_token();
-            $curPath = bo_path_from_url($r['dropbox_url'] ?? '');
-            if ($curPath === '' || !dropbox_path_exists($token, $curPath)) {
-                $curPath = dropbox_find_folder($token, $oldFolder);
-            }
-        } catch (Throwable $e) { $dbxErr = $e->getMessage(); }
-
-        // Existing GRP folders for this date/code.
-        $grps = ($grpAction !== 'NONE' && $token) ? bo_find_grps($token, $grpCode) : [];
-
-        // ADD: auto-select the single match; resolve the group dates for the checks.
-        if ($grpAction === 'ADD') {
-            if (count($grps) === 1) $grpMain = $grps[0];
-            $csFields['grpMain'] = $grpMain;
-            if ($grpMain !== '') {
-                $gpd = parse_folder_dates($grpMain);
-                $pd  = ['start_date' => $gpd['start_date'], 'end_date' => $gpd['end_date']];
-            }
-        }
-
-        // ── Decide whether the confirmation is blocked ────────────────────────
-        $block = false; $canOverride = false; $blockMsg = '';
-        if ($grpAction === 'CREATE' && $grps) {
-            $block = true; $canOverride = true;
-            $blockMsg = 'A GRP already exists for ' . $grpCode . ': ' . implode(', ', $grps)
-                      . '. Add to it instead — or tick “Proceed anyway” to create a second GRP.';
-        } elseif ($grpAction === 'ADD' && !$grps) {
-            $block = true; $canOverride = false;
-            $blockMsg = 'No existing GRP found for code ' . $grpCode . ' in 001_Safari. Use “Create new GRP” instead.';
-        } elseif ($grpAction === 'ADD' && count($grps) > 1 && ($grpMain === '' || !in_array($grpMain, $grps, true))) {
-            $block = true; $canOverride = false;
-            $blockMsg = 'Several GRP folders match ' . $grpCode . ' — choose one below.';
-        }
-
+    } elseif ($action === 'confirm_safari') {
         // ── COMMIT ────────────────────────────────────────────────────────────
-        if ($action === 'confirm_safari') {
-            // Re-enforce the block server-side (CREATE dup requires the override).
-            if ($block && !($canOverride && $proceed)) {
-                flash($blockMsg !== '' ? $blockMsg : 'Confirmation is blocked — review the checks.', 'error');
-                header('Location: backoffice.php' . ($backQs ? '?' . $backQs : '')); exit;
-            }
-            try {
-                if ($token === null) throw new RuntimeException($dbxErr ?: 'No Dropbox token.');
-                if ($curPath === null || $curPath === '') {
-                    flash('Could not find "' . $oldFolder . '" in Dropbox — nothing changed. Verify the folder, then retry.', 'error');
-                } else {
-                    try { $db->exec("ALTER TABLE requests ADD COLUMN confirmation_date DATE NULL DEFAULT NULL"); } catch (PDOException $ig) {}
-                    try { $db->exec("ALTER TABLE requests ADD COLUMN group_folder VARCHAR(255) NULL DEFAULT NULL"); } catch (PDOException $ig) {}
-
-                    // Snapshot the pre-confirmation state so this can be rolled back exactly.
-                    $preConfirm = json_encode([
-                        'name'   => $oldFolder,
-                        'path'   => $curPath,
-                        'status' => $r['status'] ?? '',
-                        'pay'    => $r['payment_status'] ?? null,
-                        'action' => $grpAction,
-                        'group'  => trim($r['group_folder'] ?? ''),
-                        'sub'    => $subName,
-                    ], JSON_UNESCAPED_UNICODE);
-
-                    if ($grpAction === 'ADD') {
-                        $destPath = '/001_Safari/' . $grpMain . '/' . $memberName;
-                        if (dropbox_path_exists($token, $destPath)) {
-                            flash('"' . $memberName . '" already exists inside GRP "' . $grpMain . '" — nothing changed.', 'error');
-                        } else {
-                            dropbox_move_folder($token, $curPath, $destPath);
-                            $gpd = parse_folder_dates($grpMain);
-                            $db->prepare(
-                                "UPDATE requests
-                                 SET practice_code=?, group_folder=?, dropbox_url=?, status='Booked', confirmation_date=CURDATE(),
-                                     start_date=COALESCE(?, start_date),
-                                     destination=CASE WHEN ?<>'' THEN ? ELSE destination END,
-                                     pre_confirm_json=?
-                                 WHERE id=?"
-                            )->execute([$memberName, $grpMain, bo_url_from_path($destPath), $gpd['start_date'], $destValue, $destValue, $preConfirm, $reqId]);
-                            $confirmedMailId = $reqId;
-                            flash('✔ ' . ($r['customer_name'] ?? 'Booking') . ' added to GRP "' . $grpMain . '" (status → Booked).', 'info');
-                        }
-                    } else { // NONE or CREATE — move to a top-level 001_Safari folder
-                        $newPath = '/001_Safari/' . $newName;
-                        if (dropbox_path_exists($token, $newPath)) {
-                            flash('A folder named "' . $newName . '" already exists in 001_Safari — nothing changed.', 'error');
-                        } else {
-                            dropbox_move_folder($token, $curPath, $newPath);
-
-                            if ($grpAction === 'CREATE') {
-                                // Create the member subfolder and move the loose docs (keep the group xlsx at GRP root).
-                                $subPath = $newPath . '/' . $subName;
-                                dropbox_create_folder($token, $subPath, false);
-                                foreach (dropbox_list_files($token, $newPath) as $fn) {
-                                    if (preg_match('/\.xlsx?$/i', $fn)) continue;         // group calc stays at GRP root
-                                    try { dropbox_move_folder($token, $newPath . '/' . $fn, $subPath . '/' . $fn); }
-                                    catch (Throwable $ig) { /* best-effort per file */ }
-                                }
-                                $db->prepare(
-                                    "UPDATE requests
-                                     SET practice_code=?, group_folder=?, dropbox_url=?, status='Booked', confirmation_date=CURDATE(),
-                                         start_date=COALESCE(?, start_date),
-                                         destination=CASE WHEN ?<>'' THEN ? ELSE destination END,
-                                         pre_confirm_json=?
-                                     WHERE id=?"
-                                )->execute([$subName, $newName, bo_url_from_path($subPath), $pd['start_date'], $destValue, $destValue, $preConfirm, $reqId]);
-                                $confirmedMailId = $reqId;
-                                flash('✔ ' . ($r['customer_name'] ?? 'Booking') . ' — new GRP "' . $newName . '" created (status → Booked).', 'info');
-                            } else { // NONE
-                                $db->prepare(
-                                    "UPDATE requests
-                                     SET practice_code=?, dropbox_url=?, status='Booked', confirmation_date=CURDATE(),
-                                         start_date=COALESCE(?, start_date),
-                                         destination=CASE WHEN ?<>'' THEN ? ELSE destination END,
-                                         pre_confirm_json=?
-                                     WHERE id=?"
-                                )->execute([$newName, bo_url_from_path($newPath), $pd['start_date'], $destValue, $destValue, $preConfirm, $reqId]);
-                                $confirmedMailId = $reqId;
-                                flash('✔ ' . ($r['customer_name'] ?? 'Booking') . ' confirmed → "' . $newName . '" (status → Booked).', 'info');
-                            }
-                        }
-                    }
-                }
-            } catch (Throwable $e) {
-                flash('Dropbox/DB error — nothing was changed: ' . $e->getMessage(), 'error');
-            }
-            $qsParts = $backQs;
-            if ($confirmedMailId) {
-                $qsParts .= ($qsParts ? '&' : '') . 'mail_for=' . $confirmedMailId . '&mail_action=' . rawurlencode($grpAction);
-            }
-            header('Location: backoffice.php' . ($qsParts ? '?' . $qsParts : '')); exit;
+        $res = bs_confirm_commit($db, $plan, $proceed);
+        flash($res['msg'], $res['ok'] ? 'info' : 'error');
+        $qsParts = $backQs;
+        if ($res['ok']) {
+            // open the booking email after redirect
+            $qsParts .= ($qsParts ? '&' : '') . 'mail_for=' . $reqId . '&mail_action=' . rawurlencode($plan['grp_action']);
         }
-
+        header('Location: backoffice.php' . ($qsParts ? '?' . $qsParts : '')); exit;
+    } else {
         // ── PREVIEW: run non-blocking QC + GRP checks, render inline ───────────
-        $checks = [];
-        try {
-            $xlsx   = ($token && $curPath) ? sc_fetch_calc_xlsx($token, $curPath) : null;
-            $checks = sc_run_checks([
-                'xlsx_path'  => $xlsx,
-                'start'      => $pd['start_date'],
-                'end'        => $pd['end_date'],
-                'today'      => date('Y-m-d'),
-                'grp_action' => $grpAction,
-                'grp_code'   => $grpCode,
-            ]);
-            if ($xlsx) @unlink($xlsx);
-        } catch (Throwable $e) {
-            $checks[] = ['level' => 'info', 'msg' => 'Excel checks skipped — ' . $e->getMessage()];
-        }
-        if ($dbxErr !== '') {
-            $checks[] = ['level' => 'info', 'msg' => 'Dropbox error while checking: ' . $dbxErr];
-        } elseif (!$curPath) {
-            array_unshift($checks, ['level' => 'warn',
-                'msg' => 'Folder "' . $oldFolder . '" not found in Dropbox search yet (new folders can lag ~1h). You can still confirm if you know it exists.']);
-        }
-
-        // GRP existence check lines.
-        if ($grpAction === 'CREATE') {
-            $checks[] = $grps
-                ? ['level' => 'warn', 'msg' => $blockMsg]
-                : ['level' => 'ok',   'msg' => 'No existing GRP for ' . $grpCode . ' — safe to create a new group.'];
-        } elseif ($grpAction === 'ADD') {
-            if (!$grps)                  $checks[] = ['level' => 'warn', 'msg' => $blockMsg];
-            elseif (count($grps) === 1)  $checks[] = ['level' => 'ok',   'msg' => 'Will add to existing GRP: ' . $grps[0] . '.'];
-            elseif ($grpMain !== '')     $checks[] = ['level' => 'ok',   'msg' => 'Will add to GRP: ' . $grpMain . '.'];
-            else                          $checks[] = ['level' => 'warn', 'msg' => $blockMsg];
-        }
-
         $previewFor  = $reqId;
         $previewData = [
-            'new_name'     => ($grpAction === 'ADD') ? ($grpMain !== '' ? $grpMain . ' / ' . $memberName : '(choose a GRP)') : $newName,
+            'new_name'     => bs_confirm_display_name($plan),
             'errors'       => [],
-            'checks'       => $checks,
-            'fields'       => $csFields,
-            'block'        => $block,
-            'can_override' => $canOverride,
-            'grps'         => $grps,
+            'checks'       => bs_confirm_checks($plan),
+            'fields'       => $plan['fields'],
+            'block'        => $plan['block'],
+            'can_override' => $plan['can_override'],
+            'grps'         => $plan['grps'],
         ];
     }
 }

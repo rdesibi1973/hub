@@ -2,6 +2,7 @@
 require_once 'config.php';
 require_once 'dropbox_helper.php';
 require_once 'notifications.php';
+require_once 'includes/booking_service.php';
 $pageTitle = 'New Request';
 $db = db();
 
@@ -94,11 +95,6 @@ if (!$lockAgent) {
     }
 }
 
-function toCamelCaseRa(string $name): string {
-    $name = trim($name);
-    if (strpos($name, ' ') === false && strpos($name, '-') === false) return $name;
-    return implode('', array_map('ucfirst', array_map('mb_strtolower', preg_split('/[\s\-]+/', $name))));
-}
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
@@ -131,141 +127,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!array_key_exists($v['status'], STATUSES)) $errors[] = 'Invalid status.';
     if ($v['channel'] === 'agency' && !$v['agency_id']) $errors[] = 'Please select an agency.';
 
-    // ── Duplicate check BEFORE inserting (same checks as Incoming) ──────────────
-    // Name + email + phone against requests and lead_staging. Strong matches
-    // (definite/possible) block until the user ticks "Create anyway".
-    if (!$errors && empty($_POST['dup_override'])) {
-        require_once 'includes/dup_check.php';
-        // Agency requests: the same agency contact sends many requests, so a
-        // shared email / WhatsApp is not a duplicate — check the name only.
-        $isAgency = $v['channel'] === 'agency';
-        $dupCandidates = array_values(array_filter(
-            find_duplicate_candidates($db, $v['customer_name'],
-                                      $isAgency ? '' : $v['email'], $isAgency ? '' : $v['whatsapp']),
-            fn($c) => $c['severity'] !== 'weak'
-        ));
-        if ($dupCandidates) {
-            $errors[] = 'Possible duplicate found — review the matches below, then tick "Create anyway" if this really is a new booking.';
-        }
-    }
-
+    // ── Duplicate check → Dropbox folder → INSERT → notify (includes/booking_service.php) ──
+    // Strong duplicate matches (definite/possible) block until "Create anyway" is ticked.
     if (!$errors) {
-
-        // ── Build folder name ─────────────────────────────────────────────────
-        $agStmt = $db->prepare("SELECT name FROM agents WHERE id = ? LIMIT 1");
-        $agStmt->execute([$v['agent_id']]);
-        $agRow     = $agStmt->fetch();
-        $agentName = $agRow ? str_replace(' ', '', $agRow['name']) : 'Unknown';
-
-        $agencyNome = '';
-        if ($v['channel'] === 'agency' && $v['agency_id']) {
-            $agencyStmt = $db->prepare("SELECT nome, short_name FROM agencies WHERE id = ? LIMIT 1");
-            $agencyStmt->execute([$v['agency_id']]);
-            $agencyRow = $agencyStmt->fetch();
-            if ($agencyRow) {
-                $raw        = $agencyRow['short_name'] ?: $agencyRow['nome'];
-                $agencyNome = preg_replace('/[^\w\-]/', '', $raw);
-            }
-        }
-
-        $namePart = toCamelCaseRa($v['customer_name']);
-        switch ($v['channel']) {
-            case 'agency': $suffix = "({$agencyNome}-{$agentName})"; break;
-            case 'sb':     $suffix = "({$agentName}-SB)";            break;
-            case 'other':  $suffix = "({$agentName})";               break;
-            default:       $suffix = "({$agentName}-Drct)";          break;
-        }
-        $folderName    = $namePart . $suffix;
-        $dropboxPath   = DROPBOX_BASE_PATH . '/' . $folderName;
-        $dropboxWebUrl = 'https://www.dropbox.com/home' . $dropboxPath;
-
-        // ── Create Dropbox folder (unless "already exists" flag is set) ─────
-        if (!$dropboxSkip) {
-        try {
-            $token = dropbox_get_access_token();
-            dropbox_create_folder($token, $dropboxPath, true); // throwOnConflict=true
-
-            foreach (['bookings','complain','flights','guestcomments','insurance',
-                      'IntFlights','invoices','mails','old','passports','vouchers'] as $sub) {
-                try { dropbox_create_folder($token, $dropboxPath . '/' . $sub); }
-                catch (RuntimeException $e) { /* non-blocking */ }
-            }
-
-            $waDigits = preg_replace('/\D/', '', $v['whatsapp']);
-            $txtContent =
-                "CUSTOMER:\r\n\r\n"
-              . "Name:        " . $v['customer_name'] . "\r\n"
-              . "Email:       " . $v['email'] . "\r\n"
-              . "WhatsApp:    " . $v['whatsapp'] . "\r\n\r\n\r\n"
-              . "REQUEST DETAILS:\r\n\r\n"
-              . $v['initial_request'] . "\r\n\r\n\r\n"
-              . "WHATSAPP link\r\n"
-              . "Add phone number with international code without + or spaces and use the following link to chat with customer on whatsapp web\r\n"
-              . "https://web.whatsapp.com/send?phone=" . $waDigits . "\r\n\r\n"
-              . "CUSTOMERS FULL NAMES:\r\n\r\n\r\n\r\n"
-              . "ARRIVAL/DEPARTURE DETAILS - FLIGHTS:\r\n\r\n\r\n\r\n\r\n\r\n"
-              . "DIETARY RESTRICTIONS:\r\n\r\n\r\n\r\n"
-              . "NOTES:\r\n\r\n";
-            dropbox_upload_text($token, $dropboxPath . '/CustomerInfo.txt', $txtContent);
-
-        } catch (RuntimeException $e) {
-            $msg = $e->getMessage();
-            if (strpos($msg, 'already exists') !== false) {
-                $errors[] = "Dropbox folder already exists: <strong>{$folderName}</strong> — check for duplicates before proceeding.";
-            } else {
-                $errors[] = "Dropbox error: {$msg}";
-            }
-        }
-        } // end !$dropboxSkip
-    }
-
-    if (!$errors) {
-
-        // ── INSERT ────────────────────────────────────────────────────────────
-        $db->prepare("
-            INSERT INTO requests
-              (practice_code, date_received, customer_name, email, whatsapp, source, agent_id,
-               destination, period, pax, status, value_usd, commission_pct, commission_usd,
-               date_paid, initial_request, dropbox_url, notes)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-        ")->execute([
-            $folderName,
-            $v['date_received'],
-            $v['customer_name'],
-            $v['email']           ?: null,
-            $v['whatsapp']        ?: null,
-            $v['source'],
-            $v['agent_id']        ?: null,
-            $v['destination']     ?: null,
-            $v['period']          ?: null,
-            $v['pax']             ?: null,
-            $v['status'],
-            $v['value_usd']       !== '' ? $v['value_usd']      : null,
-            $v['commission_pct']  !== '' ? $v['commission_pct'] : null,
-            $v['commission_usd']  !== '' ? $v['commission_usd'] : null,
-            $v['date_paid']       ?: null,
-            $dropboxSkip ? null : ($v['initial_request'] ?: null),
-            $dropboxWebUrl,
-            $v['notes']           ?: null,
+        $res = bs_create_request($db, $v, [
+            'dropbox_skip'    => $dropboxSkip,
+            'dup_override'    => !empty($_POST['dup_override']),
+            'notify_agent'    => !empty($_POST['notify_agent']),
+            'creator_user_id' => (int)(current_user()['id'] ?? 0),
         ]);
-        $newReqId = (int)$db->lastInsertId();
 
-        // ── Notify agent ──────────────────────────────────────────────────────
-        $doNotify = !empty($_POST['notify_agent']);
-        $cu       = current_user();
-        $notif    = notify_agent_new_request(
-            $db, (int)$v['agent_id'], (int)($cu['id'] ?? 0),
-            $newReqId, $v['customer_name'], $folderName, $doNotify
-        );
+        if (!$res['ok']) {
+            $dupCandidates = $res['dup_candidates'];
+            foreach ($res['errors'] as $er) {
+                $errors[] = $res['error_code'] === 'folder_exists'
+                    ? 'Dropbox folder already exists: <strong>' . h($res['folder_name']) . '</strong> — check for duplicates before proceeding.'
+                    : h($er);
+            }
+        } else {
+            $folderName = $res['folder_name'];
+            $notif      = $res['notify'];
+            $flashMsg = "Request created. 📁 Folder: {$folderName}"
+                      . ($dropboxSkip ? " — Dropbox folder skipped (already exists)." : '')
+                      . ($notif['sent'] ? " — ✉ Notification sent to agent." : '');
+            flash($flashMsg);
+            if ($notif['error']) flash('⚠ ' . htmlspecialchars($notif['error']), 'error');
 
-        $flashMsg = "Request created. 📁 Folder: {$folderName}"
-                  . ($dropboxSkip ? " — Dropbox folder skipped (already exists)." : '')
-                  . ($notif['sent'] ? " — ✉ Notification sent to agent." : '');
-        flash($flashMsg);
-        if ($notif['error']) flash('⚠ ' . htmlspecialchars($notif['error']), 'error');
-
-        header('Location: request_view.php?id=' . $newReqId);
-        exit;
+            header('Location: request_view.php?id=' . $res['request_id']);
+            exit;
+        }
     }
 }
 

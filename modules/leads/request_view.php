@@ -3,35 +3,10 @@ ob_start();
 require_once 'config.php';
 require_once 'includes/folder_parser.php';
 require_once 'includes/mail_helper.php';
+require_once 'includes/booking_service.php';
 requireLogin();
 
-/**
- * Current Dropbox path of a request's folder, e.g. '/001_Safari/00_2026/Foo'.
- * Trusts dropbox_url (kept fresh by confirm / rename / re-group / "Re-link folder"),
- * so a folder moved by hand into an archive still resolves once re-linked.
- * Falls back to the group/practice construction when no URL is stored.
- */
-function req_folder_path(array $r): string {
-    $leaf = trim($r['practice_code'] ?? '');
-    if (!empty($r['dropbox_url']) && preg_match('#dropbox\.com/home(/.*)?$#i', $r['dropbox_url'], $m)) {
-        $p = rtrim(urldecode($m[1] ?? ''), '/');
-        if ($p !== '') {
-            // If the link points only to a parent container (…/001_Safari or
-            // …/001_Safari/00_2026), append the booking folder so it opens the
-            // real folder. A link already ending in the booking folder is kept.
-            $segs = explode('/', ltrim($p, '/'));
-            $last = (string)end($segs);
-            if ($leaf !== '' && !folder_is_booking_leaf($last)) {
-                $p .= '/' . $leaf;
-            }
-            return $p;
-        }
-    }
-    if (!empty($r['group_folder']) && $leaf !== '') {
-        return '/001_Safari/' . $r['group_folder'] . '/' . $leaf;
-    }
-    return '';
-}
+// req_folder_path() lives in includes/booking_service.php.
 
 $id  = (int)($_GET['id'] ?? 0);
 $db  = db();
@@ -116,71 +91,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     // ── Copy standard program templates into the request folder ────────────────
     if ($action === 'copy_programs') {
         try {
-            $req_id   = (int)($_POST['request_id'] ?? 0);
-            $prognum  = trim($_POST['prognum'] ?? '');
             $programs = $_POST['programs'] ?? [];
             if (!is_array($programs)) $programs = [];
-
-            if ($prognum === '' || preg_match('#[\\\\/:*?"<>|]#', $prognum)) {
-                echo json_encode(['ok'=>false,'msg'=>'Enter a valid ProgNumber (no \\ / : * ? " < > |).']); exit;
+            $prognum = trim($_POST['prognum'] ?? '');
+            if ($prognum === '') {
+                echo json_encode(['ok'=>false,'msg'=>'Enter a valid ProgNumber (no \ / : * ? " < > |).']); exit;
             }
-            if (!$programs) { echo json_encode(['ok'=>false,'msg'=>'Select at least one program.']); exit; }
-
-            $rq = $db->prepare("SELECT id, practice_code, group_folder, dropbox_url, start_date FROM requests WHERE id=?");
-            $rq->execute([$req_id]);
-            $rr = $rq->fetch(PDO::FETCH_ASSOC);
-            if (!$rr) { echo json_encode(['ok'=>false,'msg'=>'Request not found.']); exit; }
-
-            // Destination = the request's real Dropbox folder — works whether the booking
-            // is still pre-confirmation (/YYYY/…) or already confirmed (/001_Safari/…).
-            $destDir = req_folder_path($rr);
-            $folderName = trim($rr['practice_code'] ?? '');
-            if ($destDir === '' || $folderName === '') {
-                echo json_encode(['ok'=>false,'msg'=>'This request has no Dropbox folder yet — cannot copy programs.']); exit;
-            }
-
-            // {YEAR} for the group-template sources (Duma-GRP / Simba-GRP live under /YYYY/GRUPPI-…):
-            // folder year if pre-confirmation, else the booking's start year, else current year.
-            $seg = explode('/', ltrim($destDir, '/'));
-            if (isset($seg[0]) && preg_match('/^\d{4}$/', $seg[0]))          $year = $seg[0];
-            elseif (!empty($rr['start_date']) && preg_match('/^(\d{4})/', $rr['start_date'], $ym)) $year = $ym[1];
-            else                                                             $year = date('Y');
-
-            // Flatten the grouped program map by label.
-            $groups = require 'includes/std_programs.php';
-            $byLabel = [];
-            foreach ($groups as $progs) foreach ($progs as $label => $files) $byLabel[$label] = $files;
-
-            require_once 'dropbox_helper.php';
-            $token = dropbox_get_access_token();
-
-            $copied = []; $skipped = []; $missing = []; $unknown = [];
-            foreach ($programs as $label) {
-                if (!isset($byLabel[$label])) { $unknown[] = $label; continue; }
-                foreach ($byLabel[$label] as $f) {
-                    $src = str_replace('{YEAR}', $year, $f['src']);
-                    $dst = $destDir . '/' . $prognum . '_' . $folderName . '_' . $f['dst'];
-                    $res = dropbox_copy_file($token, $src, $dst);
-                    $base = $prognum . '_' . $folderName . '_' . $f['dst'];
-                    if      ($res === 'copied')      $copied[]  = $base;
-                    elseif  ($res === 'exists')      $skipped[] = $base;
-                    else                              $missing[] = basename($src); // src_missing
-                }
-            }
-
-            $parts = [];
-            if ($copied)  $parts[] = count($copied) . ' copied';
-            if ($skipped) $parts[] = count($skipped) . ' skipped (already there)';
-            if ($missing) $parts[] = count($missing) . ' template(s) missing';
-            if ($unknown) $parts[] = count($unknown) . ' unknown';
-            echo json_encode([
-                'ok'      => true,
-                'summary' => $parts ? implode(', ', $parts) : 'Nothing to do',
-                'copied'  => $copied,
-                'skipped' => $skipped,
-                'missing' => $missing,
-                'unknown' => $unknown,
-            ]);
+            $res = bs_copy_programs($db, (int)($_POST['request_id'] ?? 0), $prognum, $programs);
+            echo json_encode($res);
         } catch (Throwable $e) {
             echo json_encode(['ok'=>false,'msg'=>'Error: '.$e->getMessage()]);
         }
@@ -201,14 +119,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
             require_once 'dropbox_helper.php';
             $token = dropbox_get_access_token();
-            $max = 0;
-            foreach (dropbox_list_files($token, $destDir) as $fn) {
-                if (preg_match('/^(\d{1,3})_/', $fn, $mm)) {
-                    $n = (int)$mm[1];
-                    if ($n > $max) $max = $n;
-                }
-            }
-            echo json_encode(['ok'=>true, 'next'=>str_pad((string)($max + 1), 2, '0', STR_PAD_LEFT)]);
+            echo json_encode(['ok'=>true, 'next'=>bs_next_prognum($token, $destDir)]);
         } catch (Throwable $e) {
             echo json_encode(['ok'=>false]);
         }
