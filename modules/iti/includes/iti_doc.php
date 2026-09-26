@@ -203,7 +203,6 @@ function iti_doc_data(int $id, string $lang): ?array {
     }
 
     $n = count($out);
-    $consultant = function_exists('iti_get_consultant') ? iti_get_consultant($p['created_by'] ?? '') : null;
     return [
         'lang'     => $lang,
         'T'        => $T,
@@ -219,9 +218,8 @@ function iti_doc_data(int $id, string $lang): ?array {
         'price_notes' => trim((string)($p['price_notes_' . $lang] ?? ($p['price_notes'] ?? ''))),
         'terms'    => $terms,
         'logo'     => iti_setting('logo_url', 'https://hub.savannahexplorers.com/modules/iti/uploads/logo/logo_1781526818.png'),
+        // Office and emergencies only (no personal contact of the consultant).
         'contacts' => [
-            ['name' => ($consultant['full_name'] ?? 'Roberto De Sibi') . ' — Savannah Explorers Ltd',
-             'phone' => $consultant['whatsapp'] ?? '+255 784 453 520', 'email' => $consultant['email'] ?? 'savannah.explorers@gmail.com'],
             ['name' => 'Savannah Explorers Ltd — ' . $T['office'],
              'phone' => iti_setting('office_phone', '+255 768 900 199'), 'email' => iti_setting('office_email', 'info@savannahexplorers.com')],
             ['name' => $T['emergency'], 'phone' => iti_setting('emergency_phone', '+255 768 900 199 · +255 747 777 315'), 'email' => ''],
