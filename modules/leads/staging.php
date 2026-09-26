@@ -150,6 +150,7 @@ select:focus,input:focus{outline:none;border-color:#C0211B;box-shadow:0 0 0 2px 
     </h2>
     <div class="sub">Auto-imported from HubSpot — review before adding to Requests</div>
   </div>
+  <a href="request_add.php" class="btn btn-red">+ New Request</a>
 </div>
 
 <!-- HubSpot Sync Panel -->
