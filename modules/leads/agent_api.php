@@ -19,6 +19,7 @@ date_default_timezone_set('Africa/Dar_es_Salaam');
 require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/includes/booking_service.php';
 require_once __DIR__ . '/includes/postpone_lib.php';   // booking_cc_agent_email()
+require_once __DIR__ . '/includes/calc_service.php';   // get_rates, fill_calc
 // AGENT_API_KEY / AGENT_API_USER live in the root includes/config.php (server-only).
 if (!defined('AGENT_API_KEY') && is_file(__DIR__ . '/../../includes/config.php')) {
     require_once __DIR__ . '/../../includes/config.php';
@@ -78,7 +79,7 @@ function agent_ensure_schema(PDO $db): void {
 function agent_audit(PDO $db, string $action, $reqId, array $payload, string $resultJson, int $code): void {
     global $agentUser;
     agent_ensure_schema($db);
-    $dry = in_array($action, ['confirm_booking', 'send_booking_email', 'rollback_booking'], true) && empty($payload['confirm']);
+    $dry = in_array($action, ['confirm_booking', 'send_booking_email', 'rollback_booking', 'fill_calc'], true) && empty($payload['confirm']);
     $db->prepare("INSERT INTO agent_audit_log (ts, action, request_id, user_id, http_code, dry_run, payload_json, result_json, ip)
                   VALUES (?,?,?,?,?,?,?,?,?)")
        ->execute([
@@ -492,6 +493,46 @@ try {
         agent_out(['ok' => true, 'dry_run' => false, 'message' => 'Sent', 'email' => $email]);
     }
 
+    // ── get_rates ────────────────────────────────────────────────────────────
+    // Program prices from the Calc template (per pax sheet) + flight routes and
+    // activities/transfers (sale + cost) valid on `date` (default today).
+    case 'get_rates': {
+        $date = preg_match('/^\d{4}-\d{2}-\d{2}$/', (string)($in['date'] ?? '')) ? $in['date'] : date('Y-m-d');
+        $out  = ['ok' => true, 'date' => $date];
+        $prog = trim((string)($in['program'] ?? ''));
+        if ($prog !== '') {
+            require_once __DIR__ . '/dropbox_helper.php';
+            try { $out['program'] = array_merge(['program' => $prog], calc_program_prices(dropbox_get_access_token(), $prog)); }
+            catch (InvalidArgumentException $e) { agent_fail($e->getMessage(), 400); }
+        }
+        $q = trim((string)($in['route'] ?? $in['q'] ?? ''));
+        $out['flights']    = calc_flight_rates($db, $q, $date);
+        $out['activities'] = calc_activity_rates($db, trim((string)($in['activity'] ?? $in['q'] ?? '')), $date);
+        agent_out($out);
+    }
+
+    // ── fill_calc ────────────────────────────────────────────────────────────
+    // Fill the booking's *_Calc.xlsx server-side with the house rules; dry-run
+    // (built + verified on a copy) unless "confirm": true.
+    case 'fill_calc': {
+        agent_require_method('POST');
+        $r = agent_request($db, $in['request_id'] ?? 0);
+        require_once __DIR__ . '/dropbox_helper.php';
+        try {
+            $res = calc_fill($db, $in, !empty($in['confirm']));
+        } catch (InvalidArgumentException $e) {
+            agent_fail($e->getMessage(), 400);
+        } catch (RuntimeException $e) {
+            agent_fail($e->getMessage(), stripos($e->getMessage(), 'changed in Dropbox') !== false ? 409 : 502);
+        }
+        if (empty($res['verify']['passed'])) {
+            $res['ok'] = false;
+            $res['error'] = 'Verification found errors — see verify.checks.';
+            agent_out($res, 422);
+        }
+        agent_out($res);
+    }
+
     // ── rollback_booking ─────────────────────────────────────────────────────
     // Undo a Hub confirmation (same as BackOffice "Rollback…"): folder back to its
     // pre-confirm location, status restored. Dry-run unless "confirm": true.
@@ -510,7 +551,8 @@ try {
     default:
         agent_fail('Unknown action "' . $agentAction . '"', 400, ['actions' => [
             'find_requests', 'list_agencies', 'create_request', 'update_request', 'list_standard_programs',
-            'copy_program', 'confirm_preview', 'confirm_booking', 'send_booking_email', 'rollback_booking',
+            'copy_program', 'get_rates', 'fill_calc', 'confirm_preview', 'confirm_booking', 'send_booking_email',
+            'rollback_booking',
         ]]);
     }
 } catch (Throwable $e) {

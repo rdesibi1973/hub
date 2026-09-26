@@ -70,6 +70,44 @@ Program codes by group (`DumaShort`, `BeachDumaShort`, …) and the Confirm Safa
 `request_id`, `program` (or `programs: [...]`), optional `prognum` (default: next free number).
 Returns `copied`, `skipped` (already there), `missing` (template not found), `unknown`.
 
+### `get_rates` (GET)
+`program?` (e.g. `DumaShort`), `route?` / `activity?` / `q?` (text filter), `date?` (default today).
+- `program.sheets[]`: prices read from the program's **Calc template** (the single source of truth),
+  per pax sheet: `rack` (H9), `sto` (H10), `single_suppl` (H11), `teen_discount` (H13), `child_discount` (H14).
+- `flights[]`: `route`, `sale_pp` (rate_pax), `cost_pp` (cost_pax) valid on `date`.
+- `activities[]`: activities / transfers / safari-fixed with `sale`, `cost`, `per` (pax|fixed).
+
+Costs are edited in Hub → Pricing → Jeep, Activities & Flights (new "Cost" column).
+
+### `fill_calc` (POST)
+Fills the booking's `NN_<folder>_<Prog>_Calc.xlsx` server-side (PhpSpreadsheet) with the house rules,
+recalculates, and verifies the result the way the Hub parser reads it. **Dry-run** (built and verified
+on a copy) unless `"confirm": true`; then uploaded with Dropbox `mode=update` + `rev` (409 if the file
+changed meanwhile, e.g. saved from Excel), re-downloaded and re-verified.
+
+| Field | Rule applied |
+|---|---|
+| `pax_sheet` (or `adults`/`teens`/`children`) | all other sheets deleted (names with trailing spaces handled) |
+| — | H6:I14 cleared |
+| `price_components` `[1625,255,70]` | F9 = `=1625+255+70` (never a hardcoded total) |
+| `start_date` | A17 = date; A18+ `=SUM(A{n-1}+1)` extended to the last day, same format |
+| `days[]` | from row 17 + `row_offset`; each: `label` (B), `flight` = route id/name → C `=<cost_pp>*$B$1` from the rate table (or `flight_cost_pp`, warned if not in the table), `activity` `{rate: name/id}` (cost from table) or `{amount, desc}` → H/I, `hotel` → K, `repeat` n |
+| `guests[]` `{name,title,country}` | rows 43+ A/B/F, upper case; country ITALY inferred for -PS/-LAM agencies |
+| `room_type` | A37; default `1 DBL` for MR+MRS |
+| `adults_teen_chd` | A35; default "2 adults" |
+| `arrival`, `departure` | A51, A56 |
+| `mid_date` | first beach night, for the hotel-on-every-beach-night check |
+| `file` | which Calc if the folder has several |
+
+Returns `verify`: `passed`, `checks[]` (see below), `price_to_customer`, `total_price`, `total_costs`,
+`margin` (B10), `to_price_pp` (D10). HTTP 422 if a check has level `error`.
+
+### Calc checks (also in Confirm preview, UI + API)
+`error`: more than one pax sheet · a beach night (≥ MIDT) without hotel · formula cells with no saved
+value (Hub would read End = Start). `warn`: H6:I14 not empty · F9 not a formula · flight cost not in the
+rate table / not `=cost*$B$1` · other nights without hotel · guests / country / title / room type missing.
+`confirm_booking` blocks on `error` unless `"force": true`; the BackOffice shows them (red ✖) but never blocks.
+
 ### `confirm_preview` (POST)
 `request_id`, `start`, `end`, optional `mid`, `mid2`, `dest`, `grp` (`NONE`|`CREATE`|`ADD`),
 `grp_code` (DDMM), `grp_main`.
@@ -104,6 +142,8 @@ curl -sH "$H" "$U?action=find_requests&q=Fiorini"
 curl -sH "$H" "$U?action=list_agencies&q=TVT"
 curl -sH "$H" -X POST "$U?action=create_request" -d '{"customer_name":"Patrizia Fiorini","agency_id":164,"agent":"Roberto","initial_request":"Duma Short + Zanzibar, 2 pax, Jan 2027","pax":2,"destination":"Safari & Beach"}'
 curl -sH "$H" -X POST "$U?action=copy_program" -d '{"request_id":2958,"program":"DumaShort"}'
+curl -sH "$H" "$U?action=get_rates&program=DumaShort&q=Zanzibar"
+curl -sH "$H" -X POST "$U?action=fill_calc" -d @fiorini_calc.json                      # dry-run; add "confirm":true to write
 curl -sH "$H" -X POST "$U?action=confirm_preview" -d '{"request_id":2958,"start":"2027-01-19","mid":"2027-01-22","end":"2027-01-28"}'
 curl -sH "$H" -X POST "$U?action=confirm_booking" -d '{"request_id":2958,"start":"2027-01-19","mid":"2027-01-22","end":"2027-01-28","confirm":true}'
 curl -sH "$H" -X POST "$U?action=send_booking_email" -d '{"request_id":2958}'                  # dry-run
@@ -112,11 +152,22 @@ curl -sH "$H" -X POST "$U?action=rollback_booking" -d '{"request_id":2958}'     
 curl -sH "$H" -X POST "$U?action=rollback_booking" -d '{"request_id":2958,"confirm":true}'
 ```
 
-## Not in v1 yet (build order §4–7 of the handoff)
+`fiorini_calc.json`:
+```json
+{"request_id":2958,"pax_sheet":"2PAX","start_date":"2027-01-19","mid_date":"2027-01-22",
+ "price_components":[1625,255,70],
+ "days":[{"row_offset":3,"label":"Karatu-Manyara-Arusha-znz","flight":"Arusha-Zanzibar",
+          "activity":{"amount":60,"desc":"transfer ZNZ airport-Riu Palace"},"hotel":"Riu Palace Nungwi - own arrangement"},
+         {"label":"zanzibar","hotel":"Riu Palace Nungwi - own arrangement","repeat":5},
+         {"label":"zanzibar-home","activity":{"amount":60,"desc":"transfer Riu Palace-ZNZ airport"}}],
+ "guests":[{"name":"Patrizia Fiorini","title":"MRS"},{"name":"Giuseppe Saccone","title":"MR"}],
+ "arrival":"ET 815 19 JAN AT 10.40 JRO (ET 737 MXP-ADD 18 JAN)",
+ "departure":"ET 812 28 JAN AT 19.10 ZNZ (ET 736 ADD-MXP 29 JAN)"}
+```
 
-- Rate tables + `get_rates` + admin page
-- `fill_calc` (PhpSpreadsheet, Dropbox rev-checked upload, recalculation, post-upload verification)
-- New Calc validations in Confirm preview (single pax sheet, H6:I14, F9 formula, beach-night hotels,
-  flight cost vs rate table, cached values, guests/country) — the API already treats any check with
-  level `error` as blocking.
+## Server requirement
+`fill_calc` and `get_rates.program` need **PhpSpreadsheet 1.29** (PHP 8.0 on BlueHost; 2.x needs 8.1)
+in the Hub root `vendor/` — see `composer.json`. Everything else works without it.
+
+## Not yet
 - MCP server / connector wrapper

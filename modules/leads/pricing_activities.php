@@ -9,6 +9,10 @@ if (!in_array($cu['role_name'] ?? '', ['admin','manager'])) {
     header('Location: requests.php'); exit;
 }
 
+// Cost columns (what we pay) next to the sale rate — used by the Agent API fill_calc.
+try { $db->exec("ALTER TABLE flight_routes  ADD COLUMN cost_pax DECIMAL(10,2) NULL DEFAULT NULL AFTER rate_pax"); } catch (PDOException $ignored) {}
+try { $db->exec("ALTER TABLE activity_rates ADD COLUMN cost     DECIMAL(10,2) NULL DEFAULT NULL AFTER rate"); } catch (PDOException $ignored) {}
+
 // ── AJAX actions ──────────────────────────────────────────────────────────────
 $action = $_POST['action'] ?? '';
 if ($action) {
@@ -46,15 +50,16 @@ if ($action) {
         $validFrom= preg_match('/^\d{4}-\d{2}-\d{2}$/', $_POST['valid_from']??'') ? $_POST['valid_from'] : null;
         $validTo  = preg_match('/^\d{4}-\d{2}-\d{2}$/', $_POST['valid_to']??'') ? $_POST['valid_to'] : null;
         $rate     = max(0, (float)($_POST['rate'] ?? 0));
+        $cost     = trim($_POST['cost'] ?? '') === '' ? null : max(0, (float)$_POST['cost']);
         $active   = (int)(!empty($_POST['active']));
         $notes    = substr(trim($_POST['notes']??''), 0, 200);
         if (!$name || !$cat || !$validFrom) { echo json_encode(['ok'=>false,'error'=>'Missing fields']); exit; }
         if ($id) {
-            $db->prepare("UPDATE activity_rates SET name=?,category=?,item_type=?,valid_from=?,valid_to=?,rate=?,active=?,notes=? WHERE id=?")
-               ->execute([$name,$cat,$itype,$validFrom,$validTo,$rate,$active,$notes,$id]);
+            $db->prepare("UPDATE activity_rates SET name=?,category=?,item_type=?,valid_from=?,valid_to=?,rate=?,cost=?,active=?,notes=? WHERE id=?")
+               ->execute([$name,$cat,$itype,$validFrom,$validTo,$rate,$cost,$active,$notes,$id]);
         } else {
-            $db->prepare("INSERT INTO activity_rates (name,category,item_type,valid_from,valid_to,rate,active,notes) VALUES (?,?,?,?,?,?,?,?)")
-               ->execute([$name,$cat,$itype,$validFrom,$validTo,$rate,$active,$notes]);
+            $db->prepare("INSERT INTO activity_rates (name,category,item_type,valid_from,valid_to,rate,cost,active,notes) VALUES (?,?,?,?,?,?,?,?,?)")
+               ->execute([$name,$cat,$itype,$validFrom,$validTo,$rate,$cost,$active,$notes]);
         }
         echo json_encode(['ok'=>true]); exit;
     }
@@ -74,15 +79,16 @@ if ($action) {
         $validFrom  = preg_match('/^\d{4}-\d{2}-\d{2}$/', $_POST['valid_from']??'') ? $_POST['valid_from'] : null;
         $validTo    = preg_match('/^\d{4}-\d{2}-\d{2}$/', $_POST['valid_to']??'') ? $_POST['valid_to'] : null;
         $ratePax    = max(0, (float)($_POST['rate_pax'] ?? 0));
+        $costPax    = trim($_POST['cost_pax'] ?? '') === '' ? null : max(0, (float)$_POST['cost_pax']);
         $active     = (int)(!empty($_POST['active']));
         $notes      = substr(trim($_POST['notes']??''), 0, 200);
         if (!$routeName || !$validFrom) { echo json_encode(['ok'=>false,'error'=>'Missing fields']); exit; }
         if ($id) {
-            $db->prepare("UPDATE flight_routes SET route_name=?,origin=?,destination=?,airline=?,valid_from=?,valid_to=?,rate_pax=?,active=?,notes=? WHERE id=?")
-               ->execute([$routeName,$origin,$dest,$airline,$validFrom,$validTo,$ratePax,$active,$notes,$id]);
+            $db->prepare("UPDATE flight_routes SET route_name=?,origin=?,destination=?,airline=?,valid_from=?,valid_to=?,rate_pax=?,cost_pax=?,active=?,notes=? WHERE id=?")
+               ->execute([$routeName,$origin,$dest,$airline,$validFrom,$validTo,$ratePax,$costPax,$active,$notes,$id]);
         } else {
-            $db->prepare("INSERT INTO flight_routes (route_name,origin,destination,airline,valid_from,valid_to,rate_pax,active,notes) VALUES (?,?,?,?,?,?,?,?,?)")
-               ->execute([$routeName,$origin,$dest,$airline,$validFrom,$validTo,$ratePax,$active,$notes]);
+            $db->prepare("INSERT INTO flight_routes (route_name,origin,destination,airline,valid_from,valid_to,rate_pax,cost_pax,active,notes) VALUES (?,?,?,?,?,?,?,?,?,?)")
+               ->execute([$routeName,$origin,$dest,$airline,$validFrom,$validTo,$ratePax,$costPax,$active,$notes]);
         }
         echo json_encode(['ok'=>true]); exit;
     }
@@ -184,7 +190,7 @@ include 'includes/header.php';
         <button class="btn-add" onclick="openActivity(null)">+ Add Rate</button>
       </div>
       <table class="pt">
-        <thead><tr><th>Name</th><th>Category</th><th>Type</th><th>Valid From</th><th>Valid To</th><th>Rate</th><th>Status</th><th></th></tr></thead>
+        <thead><tr><th>Name</th><th>Category</th><th>Type</th><th>Valid From</th><th>Valid To</th><th>Rate (sale)</th><th>Cost</th><th>Status</th><th></th></tr></thead>
         <tbody>
         <?php
         $catLabels = ['activity'=>'Activity','transfer'=>'Transfer','safari_fixed'=>'Safari Fixed'];
@@ -198,6 +204,7 @@ include 'includes/header.php';
           <td><?= h($r['valid_from']) ?></td>
           <td><?= $r['valid_to'] ? h($r['valid_to']) : '<span style="color:#9ca3af">open</span>' ?></td>
           <td style="font-weight:700;color:#C0211B;">$<?= number_format($r['rate'],2) ?></td>
+          <td style="color:#6b7280;"><?= isset($r['cost']) && $r['cost'] !== null ? '$' . number_format($r['cost'],2) : '<span style="color:#9ca3af">—</span>' ?></td>
           <td><span class="badge <?= $r['active']?'badge-on':'badge-off' ?>"><?= $r['active']?'Active':'Off' ?></span></td>
           <td style="white-space:nowrap;">
             <button class="btn-edit" onclick="openActivity(<?= json_encode($r) ?>)">Edit</button>
@@ -205,7 +212,7 @@ include 'includes/header.php';
           </td>
         </tr>
         <?php endforeach; ?>
-        <?php if (!$activityRates): ?><tr><td colspan="8" style="color:#9ca3af;text-align:center;">No rates yet.</td></tr><?php endif; ?>
+        <?php if (!$activityRates): ?><tr><td colspan="9" style="color:#9ca3af;text-align:center;">No rates yet.</td></tr><?php endif; ?>
         </tbody>
       </table>
     </div>
@@ -219,7 +226,7 @@ include 'includes/header.php';
         <button class="btn-add" onclick="openFlight(null)">+ Add Route</button>
       </div>
       <table class="pt">
-        <thead><tr><th>Route</th><th>Origin</th><th>Destination</th><th>Airline</th><th>Valid From</th><th>Valid To</th><th>$/pax</th><th>Status</th><th></th></tr></thead>
+        <thead><tr><th>Route</th><th>Origin</th><th>Destination</th><th>Airline</th><th>Valid From</th><th>Valid To</th><th>$/pax (sale)</th><th>Cost/pax</th><th>Status</th><th></th></tr></thead>
         <tbody>
         <?php foreach ($flightRoutes as $r): ?>
         <tr>
@@ -230,6 +237,7 @@ include 'includes/header.php';
           <td><?= h($r['valid_from']) ?></td>
           <td><?= $r['valid_to'] ? h($r['valid_to']) : '<span style="color:#9ca3af">open</span>' ?></td>
           <td style="font-weight:700;color:#C0211B;">$<?= number_format($r['rate_pax'],2) ?></td>
+          <td style="color:#6b7280;"><?= isset($r['cost_pax']) && $r['cost_pax'] !== null ? '$' . number_format($r['cost_pax'],2) : '<span style="color:#9ca3af">—</span>' ?></td>
           <td><span class="badge <?= $r['active']?'badge-on':'badge-off' ?>"><?= $r['active']?'Active':'Off' ?></span></td>
           <td style="white-space:nowrap;">
             <button class="btn-edit" onclick="openFlight(<?= json_encode($r) ?>)">Edit</button>
@@ -237,7 +245,7 @@ include 'includes/header.php';
           </td>
         </tr>
         <?php endforeach; ?>
-        <?php if (!$flightRoutes): ?><tr><td colspan="9" style="color:#9ca3af;text-align:center;">No routes yet.</td></tr><?php endif; ?>
+        <?php if (!$flightRoutes): ?><tr><td colspan="10" style="color:#9ca3af;text-align:center;">No routes yet.</td></tr><?php endif; ?>
         </tbody>
       </table>
     </div>
@@ -336,7 +344,8 @@ function openActivity(r) {
         {v:'safari_fixed',l:'Safari Fixed (Emergency, Medivac…)'}
       ], r ? r.category : 'activity')
     + fs('Pricing','a_itype',[{v:'pax',l:'$/pax'},{v:'fixed',l:'Fixed total'}], r ? r.item_type : 'pax')
-    + fi('Rate $','a_rate','number', r ? r.rate : '', true)
+    + fi('Rate $ (sale)','a_rate','number', r ? r.rate : '', true)
+    + fi('Cost $ (what we pay)','a_cost','number', r && r.cost !== null ? r.cost : '')
     + fi('Valid From','a_from','date', r ? r.valid_from : '', true)
     + fi('Valid To','a_to','date', r ? (r.valid_to||'') : '')
     + '</div>'
@@ -347,7 +356,7 @@ function openActivity(r) {
   openModal(r ? 'Edit Activity Rate' : 'New Activity Rate', body, function() {
     post({action:'save_activity', id: r ? r.id : 0,
       name:fv('a_name'), category:fv('a_cat'), item_type:fv('a_itype'),
-      rate:fv('a_rate'), valid_from:fv('a_from'), valid_to:fv('a_to'),
+      rate:fv('a_rate'), cost:fv('a_cost'), valid_from:fv('a_from'), valid_to:fv('a_to'),
       notes:fv('a_notes'), active: document.getElementById('a_active').checked ? 1 : 0});
   });
 }
@@ -363,7 +372,8 @@ function openFlight(r) {
     + fi('Airline','f_airline','text', r ? r.airline : '')
     + fi('Origin','f_origin','text', r ? r.origin : '')
     + fi('Destination','f_dest','text', r ? r.destination : '')
-    + fi('Rate $/pax','f_rate','number', r ? r.rate_pax : '', true)
+    + fi('Rate $/pax (sale)','f_rate','number', r ? r.rate_pax : '', true)
+    + fi('Cost $/pax (what we pay)','f_cost','number', r && r.cost_pax !== null ? r.cost_pax : '')
     + fi('Valid From','f_from','date', r ? r.valid_from : '', true)
     + fi('Valid To','f_to','date', r ? (r.valid_to||'') : '')
     + fc('Active','f_active', r ? r.active : true)
@@ -373,7 +383,7 @@ function openFlight(r) {
     post({action:'save_flight', id: r ? r.id : 0,
       route_name:fv('f_name'), airline:fv('f_airline'),
       origin:fv('f_origin'), destination:fv('f_dest'),
-      rate_pax:fv('f_rate'), valid_from:fv('f_from'), valid_to:fv('f_to'),
+      rate_pax:fv('f_rate'), cost_pax:fv('f_cost'), valid_from:fv('f_from'), valid_to:fv('f_to'),
       notes:fv('f_notes'), active: document.getElementById('f_active').checked ? 1 : 0});
   });
 }

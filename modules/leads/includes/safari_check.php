@@ -33,6 +33,17 @@ function sc_ref_split(string $ref): array {
  * @return array<string,string>
  */
 function sc_xlsx_cells(string $path, ?string $sheetName = null): array {
+    $full = sc_xlsx_sheet($path, $sheetName);
+    return $full['v'];
+}
+
+/**
+ * Like sc_xlsx_cells() but also returns the formulas:
+ *   ['v' => ref→cached value (non-empty only), 'f' => ref→formula text ('=' + text;
+ *    '=(shared)' for a shared-formula child whose text lives on the master cell)].
+ * A formula cell with no cached value appears in 'f' but not in 'v'.
+ */
+function sc_xlsx_sheet(string $path, ?string $sheetName = null): array {
     $zip = new ZipArchive();
     if ($zip->open($path) !== true) throw new RuntimeException('Cannot open Excel file.');
     $read = function (string $name) use ($zip) { return $zip->getFromName($name); };
@@ -84,9 +95,9 @@ function sc_xlsx_cells(string $path, ?string $sheetName = null): array {
 
     $sheetXml = $read($target);
     $zip->close();
-    if ($sheetXml === false) return [];
+    if ($sheetXml === false) return ['v' => [], 'f' => []];
 
-    $cells = [];
+    $cells = []; $formulas = [];
     $dom = new DOMDocument();
     libxml_use_internal_errors(true);
     $dom->loadXML($sheetXml);
@@ -96,13 +107,19 @@ function sc_xlsx_cells(string $path, ?string $sheetName = null): array {
         if ($ref === '') continue;
         $type = $c->getAttribute('t');
         $val  = '';
+        $vNode = null; $fNode = null;
+        foreach ($c->childNodes as $ch) {
+            if ($ch->nodeType !== XML_ELEMENT_NODE) continue;
+            if ($ch->localName === 'v' && !$vNode) $vNode = $ch;
+            if ($ch->localName === 'f' && !$fNode) $fNode = $ch;
+        }
+        if ($fNode) {
+            $ft = trim($fNode->textContent);
+            $formulas[strtoupper($ref)] = '=' . ($ft !== '' ? $ft : '(shared)');
+        }
         if ($type === 'inlineStr') {
             foreach ($c->getElementsByTagName('t') as $t) $val .= $t->textContent;
         } else {
-            $vNode = null;
-            foreach ($c->childNodes as $ch) {
-                if ($ch->nodeType === XML_ELEMENT_NODE && $ch->localName === 'v') { $vNode = $ch; break; }
-            }
             $raw = $vNode ? $vNode->textContent : '';
             if ($type === 's') { $val = $shared[(int)$raw] ?? ''; }
             else               { $val = $raw; }
@@ -110,7 +127,7 @@ function sc_xlsx_cells(string $path, ?string $sheetName = null): array {
         $val = trim($val);
         if ($val !== '') $cells[strtoupper($ref)] = $val;
     }
-    return $cells;
+    return ['v' => $cells, 'f' => $formulas];
 }
 
 /** Value at column letter + row from a cells map, '' if absent. */
@@ -476,4 +493,131 @@ function sc_fetch_calc_xlsx(string $token, string $folderPath): ?string {
     if ($tmp === false) return null;
     if (file_put_contents($tmp, $bytes) === false) { @unlink($tmp); return null; }
     return $tmp;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Calc house rules (Roberto's rules — see docs/AGENT_API.md, fill_calc)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** 'A1'-style ref for column letter + row. */
+function sc_ref(string $col, int $row): string { return strtoupper($col) . $row; }
+
+/**
+ * Itinerary day rows of a calc sheet: rows between the DATE header and the
+ * "Totals" row whose DATE cell holds a date or a formula (the A18+ cascade).
+ * Each: ['row'=>int, 'date'=>Y-m-d|null (cached, else A17 + offset)].
+ */
+function sc_calc_day_rows(array $v, array $f): array {
+    $hdr = 16;
+    foreach ($v as $ref => $val) {
+        if (strcasecmp(trim($val), 'DATE') === 0) { list($c, $r) = sc_ref_split($ref); if ($c === 'A') { $hdr = $r; break; } }
+    }
+    $rows = [];
+    $first = null;
+    for ($r = $hdr + 1; $r < $hdr + 40; $r++) {
+        $a = sc_cell($v, 'A', $r);
+        if ($a !== '' && stripos($a, 'total') === 0) break;
+        $isFormula = isset($f[sc_ref('A', $r)]);
+        $d = $a !== '' ? sc_parse_xlsx_date($a) : null;
+        if ($d === null && !$isFormula) continue;
+        if ($first === null && $d !== null) $first = ['row' => $r, 'date' => $d];
+        if ($d === null && $first !== null) {
+            $d = date('Y-m-d', strtotime($first['date'] . ' +' . ($r - $first['row']) . ' days'));
+        }
+        $rows[] = ['row' => $r, 'date' => $d];
+    }
+    return $rows;
+}
+
+/**
+ * House-rule checks on a single-booking calc. Levels: 'error' (must fix — blocks
+ * the Agent API confirm unless forced), 'warn', 'ok', 'info'.
+ * $ctx: mid (Y-m-d of the last MIDT, i.e. first beach night, or null),
+ *       flight_costs (float[] known cost_pax values, or null to skip).
+ */
+function sc_calc_rule_checks(string $path, array $ctx = []): array {
+    $res = [];
+    $sheets = sc_xlsx_sheets($path);
+    if (sc_has_recap($sheets)) {
+        return [['level' => 'info', 'msg' => 'Group calc (RECAP) — single-booking calc rules skipped.']];
+    }
+
+    // 1) Only the confirmed pax sheet.
+    $pax = [];
+    foreach ($sheets as $s) { if (stripos($s, 'PAX') !== false) $pax[] = trim($s); }
+    if (count($pax) > 1) {
+        $res[] = ['level' => 'error', 'msg' => 'Calc still has ' . count($pax) . ' pax sheets (' . implode(', ', $pax) . ') — keep only the confirmed one.'];
+    }
+
+    $full = sc_xlsx_sheet($path);
+    $v = $full['v']; $f = $full['f'];
+
+    // 2) H6:I14 (teen/child price, rack, sto, single supp, discounts) must be cleared.
+    $left = [];
+    foreach (['H', 'I'] as $col) {
+        for ($r = 6; $r <= 14; $r++) {
+            $ref = sc_ref($col, $r);
+            if (isset($v[$ref]) || isset($f[$ref])) $left[] = $ref;
+        }
+    }
+    if ($left) $res[] = ['level' => 'warn', 'msg' => 'H6:I14 not cleared (' . implode(', ', $left) . ') — remove rack/sto/single/discount block.'];
+
+    // 3) F9 (Price to customer) = formula of its components.
+    if (!isset($f['F9'])) {
+        $res[] = ['level' => 'warn', 'msg' => 'F9 (Price to customer) is ' . (isset($v['F9']) ? 'a fixed number (' . $v['F9'] . ')' : 'empty')
+                 . ' — write it as a formula of its components, e.g. =1625+255+70.'];
+    }
+
+    // 4) Hotel on every night (col K); the last day (departure) has none.
+    $days = sc_calc_day_rows($v, $f);
+    $mid  = $ctx['mid'] ?? null;
+    $missBeach = []; $missOther = [];
+    foreach ($days as $i => $d) {
+        if ($i === count($days) - 1) break;
+        if (sc_cell($v, 'K', $d['row']) !== '') continue;
+        $lbl = ($d['date'] ? sc_fmt($d['date']) : 'row ' . $d['row']);
+        if ($mid && $d['date'] && $d['date'] >= $mid) $missBeach[] = $lbl;
+        else                                           $missOther[] = $lbl;
+    }
+    if ($missBeach) $res[] = ['level' => 'error', 'msg' => 'No hotel (col K) on beach night(s): ' . implode(', ', $missBeach) . '.'];
+    if ($missOther) $res[] = ['level' => 'warn',  'msg' => 'No hotel (col K) on night(s): ' . implode(', ', $missOther) . '.'];
+
+    // 5) Flight cost (col C) = <cost_pp>*$B$1 with a cost from the rate table.
+    $known = isset($ctx['flight_costs']) && is_array($ctx['flight_costs']) ? $ctx['flight_costs'] : null;
+    foreach ($days as $d) {
+        $ref = sc_ref('C', $d['row']);
+        if (isset($f[$ref])) {
+            if (preg_match('/^=\s*([\d.]+)\s*\*\s*\$B\$1\s*$/i', $f[$ref], $m)) {
+                if ($known !== null && $known && !in_array((float)$m[1], $known, true)) {
+                    $res[] = ['level' => 'warn', 'msg' => 'Flight cost ' . $m[1] . ' pp in ' . $ref . ' is not in the flight rate table.'];
+                }
+            }
+        } elseif (isset($v[$ref]) && is_numeric($v[$ref])) {
+            $res[] = ['level' => 'warn', 'msg' => 'Flight cost in ' . $ref . ' is a fixed number — use =<cost_pp>*$B$1.'];
+        }
+    }
+
+    // 6) Every formula must carry a saved value (the Hub parser reads saved values).
+    $noVal = [];
+    foreach ($f as $ref => $ftxt) { if (!isset($v[$ref])) $noVal[] = $ref; }
+    if ($noVal) {
+        $res[] = ['level' => 'error', 'msg' => count($noVal) . ' formula cell(s) have no saved value (e.g. ' . implode(', ', array_slice($noVal, 0, 4))
+                 . ') — the file was not recalculated; Hub would read the dates wrong. Open & save it in Excel, or use fill_calc.'];
+    }
+
+    // 7) Guests (row 43+: name A, MR/MRS B, country F) and room type (A37).
+    $guests = 0; $noCountry = []; $noTitle = [];
+    for ($r = 43; $r <= 49; $r++) {
+        if (sc_cell($v, 'A', $r) === '') continue;
+        $guests++;
+        if (sc_cell($v, 'F', $r) === '') $noCountry[] = sc_cell($v, 'A', $r);
+        if (sc_cell($v, 'B', $r) === '') $noTitle[]   = sc_cell($v, 'A', $r);
+    }
+    if (!$guests)   $res[] = ['level' => 'warn', 'msg' => 'No guest names in the Calc (row 43+).'];
+    if ($noCountry) $res[] = ['level' => 'warn', 'msg' => 'Country missing for: ' . implode(', ', $noCountry) . '.'];
+    if ($noTitle)   $res[] = ['level' => 'warn', 'msg' => 'MR/MRS missing for: ' . implode(', ', $noTitle) . '.'];
+    if (sc_cell($v, 'A', 37) === '') $res[] = ['level' => 'warn', 'msg' => 'Room type (A37) is empty.'];
+
+    if (!$res) $res[] = ['level' => 'ok', 'msg' => 'Calc house rules: all OK.'];
+    return $res;
 }

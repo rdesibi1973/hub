@@ -20,6 +20,17 @@ Running log of notable changes and current build state. Module-level "active / p
 
 ---
 
+## 2026-09 — Agent API phase 2: rates, fill_calc, Calc checks
+- `get_rates`: program prices read from the Calc template pax sheets (H9 rack, H10 sto,
+  H11 single, H13/H14 discounts) + flight routes and activities/transfers with **sale and cost**
+  (new `cost_pax` / `cost` columns, editable in Pricing → Jeep, Activities & Flights).
+- `fill_calc`: fills the booking Calc server-side (PhpSpreadsheet 1.29) with the house rules —
+  single pax sheet, H6:I14 cleared, F9 as formula, date cascade, flight cost from the rate table,
+  hotels, guests, room type, flights — recalculates (saved values for the Hub parser), uploads with a
+  Dropbox rev check and re-verifies. Dry-run unless `"confirm": true`.
+- Confirm preview (UI + API) gains Calc house-rule checks; `error` level shown as red ✖ and blocks
+  the API confirm unless forced. `rollback_booking` added to the API (logic shared with BackOffice).
+
 ## 2026-09 — Agent API v1 (Claude runs the booking workflow)
 - `api/agent/index.php?action=…` → `modules/leads/agent_api.php`: find_requests,
   list_agencies, create_request, update_request, list_standard_programs, copy_program,

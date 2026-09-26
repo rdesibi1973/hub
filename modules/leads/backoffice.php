@@ -965,8 +965,8 @@ include 'includes/header.php';
                 <ul style="margin:0 0 8px 0;padding:0;list-style:none;font-size:.72rem;line-height:1.5">
                   <?php foreach ($previewData['checks'] as $ck):
                         $lv = $ck['level'] ?? 'info';
-                        $ic = $lv === 'ok' ? '✓' : ($lv === 'warn' ? '⚠' : 'ℹ');
-                        $cl = $lv === 'ok' ? '#1A6B3A' : ($lv === 'warn' ? '#B26A00' : '#666'); ?>
+                        $ic = $lv === 'ok' ? '✓' : ($lv === 'warn' ? '⚠' : ($lv === 'error' ? '✖' : 'ℹ'));
+                        $cl = $lv === 'ok' ? '#1A6B3A' : ($lv === 'warn' ? '#B26A00' : ($lv === 'error' ? '#C0211B' : '#666')); ?>
                     <li style="color:<?= $cl ?>"><?= $ic ?> <?= h($ck['msg']) ?></li>
                   <?php endforeach; ?>
                 </ul>

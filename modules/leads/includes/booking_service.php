@@ -602,6 +602,33 @@ function bs_confirm_display_name(array $plan): ?string {
 }
 
 /**
+ * Y-m-d of the last _MIDTddMON in a confirmed folder name (= first night of the
+ * last leg, e.g. the first beach night), resolved against the END date; or null.
+ */
+function bs_last_midt(?string $name, ?string $endYmd): ?string {
+    if (!$name || !$endYmd) return null;
+    if (!preg_match_all('/_MIDT(\d{2})([A-Z]{3})/i', $name, $m) || !$m[0]) return null;
+    $months = bs_confirm_months();
+    $mon = $months[strtoupper(end($m[2]))] ?? null;
+    if (!$mon) return null;
+    $day = (int)end($m[1]);
+    $y   = (int)substr($endYmd, 0, 4);
+    if ((int)$mon > (int)substr($endYmd, 5, 2)) $y--;   // MIDT in Dec, END in Jan
+    return sprintf('%04d-%02d-%02d', $y, (int)$mon, $day);
+}
+
+/** Active flight cost_pax values from the rate table (floats), or null if unavailable. */
+function bs_known_flight_costs(): ?array {
+    try {
+        $rows = db()->query("SELECT DISTINCT cost_pax FROM flight_routes WHERE active = 1 AND cost_pax IS NOT NULL")
+                    ->fetchAll(PDO::FETCH_COLUMN);
+    } catch (Throwable $e) { return null; }   // column not created yet
+    $out = [];
+    foreach ($rows as $c) $out[] = (float)$c;
+    return $out;
+}
+
+/**
  * Advisory pre-flight checks for a format-valid plan: Excel QC (dates, flights),
  * Dropbox reachability and GRP existence. Each: ['level'=>ok|warn|info|…,'msg'].
  */
@@ -618,6 +645,13 @@ function bs_confirm_checks(array $plan): array {
             'grp_action' => $plan['grp_action'],
             'grp_code'   => $plan['grp_code'],
         ]);
+        // House rules of the Calc (single pax sheet, F9 formula, beach-night hotels, …).
+        if ($xlsx && $plan['grp_action'] !== 'ADD') {
+            $checks = array_merge($checks, sc_calc_rule_checks($xlsx, [
+                'mid'          => bs_last_midt($plan['new_name'], $plan['pd']['end_date']),
+                'flight_costs' => bs_known_flight_costs(),
+            ]));
+        }
         if ($xlsx) @unlink($xlsx);
     } catch (Throwable $e) {
         $checks[] = ['level' => 'info', 'msg' => 'Excel checks skipped — ' . $e->getMessage()];
