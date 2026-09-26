@@ -4,7 +4,7 @@
  *
  *   calc_rates()        get_rates: program prices (from the Calc template's pax
  *                       sheets: H9 rack, H10 sto, H11 single, H13/H14 discounts),
- *                       flight routes and activities/transfers (sale + cost).
+ *                       flight routes and activities/transfers (cost + sale).
  *   calc_fill()         fill_calc: fills the booking's *_Calc.xlsx with Roberto's
  *                       rules, recalculates, uploads (rev-checked), re-verifies.
  *
@@ -23,12 +23,16 @@ function calc_require_spreadsheet(): void {
     }
 }
 
-/** Cost columns next to the sale rates (created lazily, like the rest of the Hub). */
+/** Sale-price columns next to the cost rates (created lazily, like the rest of the Hub). */
 function calc_rates_schema(PDO $db): void {
     static $done = false;
     if ($done) return;
-    try { $db->exec("ALTER TABLE flight_routes  ADD COLUMN cost_pax DECIMAL(10,2) NULL DEFAULT NULL AFTER rate_pax"); } catch (PDOException $ignored) {}
-    try { $db->exec("ALTER TABLE activity_rates ADD COLUMN cost     DECIMAL(10,2) NULL DEFAULT NULL AFTER rate"); } catch (PDOException $ignored) {}
+    // rate_pax / rate are COSTS (the quote module adds the markup on them); the
+    // sale price sits next to them. (Early phase-2 builds named these cost_pax / cost.)
+    try { $db->exec("ALTER TABLE flight_routes  CHANGE COLUMN cost_pax sale_pax DECIMAL(10,2) NULL DEFAULT NULL"); } catch (PDOException $ignored) {}
+    try { $db->exec("ALTER TABLE activity_rates CHANGE COLUMN cost     sale     DECIMAL(10,2) NULL DEFAULT NULL"); } catch (PDOException $ignored) {}
+    try { $db->exec("ALTER TABLE flight_routes  ADD COLUMN sale_pax DECIMAL(10,2) NULL DEFAULT NULL AFTER rate_pax"); } catch (PDOException $ignored) {}
+    try { $db->exec("ALTER TABLE activity_rates ADD COLUMN sale     DECIMAL(10,2) NULL DEFAULT NULL AFTER rate"); } catch (PDOException $ignored) {}
     $done = true;
 }
 
@@ -43,7 +47,7 @@ function calc_valid_sql(): string {
 
 function calc_flight_rates(PDO $db, string $q, string $date): array {
     calc_rates_schema($db);
-    $sql  = "SELECT id, route_name, origin, destination, airline, valid_from, valid_to, rate_pax, cost_pax, notes
+    $sql  = "SELECT id, route_name, origin, destination, airline, valid_from, valid_to, rate_pax, sale_pax, notes
              FROM flight_routes WHERE " . calc_valid_sql();
     $args = [$date, $date];
     if ($q !== '') {
@@ -56,8 +60,8 @@ function calc_flight_rates(PDO $db, string $q, string $date): array {
     foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
         $out[] = ['id' => (int)$r['id'], 'route' => $r['route_name'], 'origin' => $r['origin'],
                   'destination' => $r['destination'], 'airline' => $r['airline'],
-                  'sale_pp' => $r['rate_pax'] !== null ? (float)$r['rate_pax'] : null,
-                  'cost_pp' => $r['cost_pax'] !== null ? (float)$r['cost_pax'] : null,
+                  'cost_pp' => $r['rate_pax'] !== null ? (float)$r['rate_pax'] : null,
+                  'sale_pp' => $r['sale_pax'] !== null ? (float)$r['sale_pax'] : null,
                   'valid_from' => $r['valid_from'], 'valid_to' => $r['valid_to'], 'notes' => $r['notes']];
     }
     return $out;
@@ -65,7 +69,7 @@ function calc_flight_rates(PDO $db, string $q, string $date): array {
 
 function calc_activity_rates(PDO $db, string $q, string $date): array {
     calc_rates_schema($db);
-    $sql  = "SELECT id, name, category, item_type, valid_from, valid_to, rate, cost, notes
+    $sql  = "SELECT id, name, category, item_type, valid_from, valid_to, rate, sale, notes
              FROM activity_rates WHERE " . calc_valid_sql();
     $args = [$date, $date];
     if ($q !== '') { $sql .= " AND (name LIKE ? OR notes LIKE ?)"; $l = '%' . $q . '%'; array_push($args, $l, $l); }
@@ -75,8 +79,8 @@ function calc_activity_rates(PDO $db, string $q, string $date): array {
     foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
         $out[] = ['id' => (int)$r['id'], 'name' => $r['name'], 'category' => $r['category'],
                   'per' => $r['item_type'] === 'pax' ? 'pax' : 'fixed',
-                  'sale' => $r['rate'] !== null ? (float)$r['rate'] : null,
-                  'cost' => $r['cost'] !== null ? (float)$r['cost'] : null,
+                  'cost' => $r['rate'] !== null ? (float)$r['rate'] : null,
+                  'sale' => $r['sale'] !== null ? (float)$r['sale'] : null,
                   'valid_from' => $r['valid_from'], 'valid_to' => $r['valid_to'], 'notes' => $r['notes']];
     }
     return $out;

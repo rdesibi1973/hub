@@ -74,10 +74,10 @@ Returns `copied`, `skipped` (already there), `missing` (template not found), `un
 `program?` (e.g. `DumaShort`), `route?` / `activity?` / `q?` (text filter), `date?` (default today).
 - `program.sheets[]`: prices read from the program's **Calc template** (the single source of truth),
   per pax sheet: `rack` (H9), `sto` (H10), `single_suppl` (H11), `teen_discount` (H13), `child_discount` (H14).
-- `flights[]`: `route`, `sale_pp` (rate_pax), `cost_pp` (cost_pax) valid on `date`.
-- `activities[]`: activities / transfers / safari-fixed with `sale`, `cost`, `per` (pax|fixed).
+- `flights[]`: `route`, `cost_pp` (rate_pax — what we pay, written in the Calc), `sale_pp` (sale_pax — price to agency) valid on `date`.
+- `activities[]`: activities / transfers / safari-fixed with `cost` (rate), `sale`, `per` (pax|fixed).
 
-Costs are edited in Hub → Pricing → Jeep, Activities & Flights (new "Cost" column).
+The existing rates in Hub → Pricing → Jeep, Activities & Flights are **costs** (quotes add the markup on them); the new "Sale" column holds the price to the agency.
 
 ### `fill_calc` (POST)
 Fills the booking's `NN_<folder>_<Prog>_Calc.xlsx` server-side (PhpSpreadsheet) with the house rules,

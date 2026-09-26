@@ -533,7 +533,7 @@ function sc_calc_day_rows(array $v, array $f): array {
  * House-rule checks on a single-booking calc. Levels: 'error' (must fix — blocks
  * the Agent API confirm unless forced), 'warn', 'ok', 'info'.
  * $ctx: mid (Y-m-d of the last MIDT, i.e. first beach night, or null),
- *       flight_costs (float[] known cost_pax values, or null to skip).
+ *       flight_costs (float[] known flight costs = flight_routes.rate_pax, or null to skip).
  */
 function sc_calc_rule_checks(string $path, array $ctx = []): array {
     $res = [];

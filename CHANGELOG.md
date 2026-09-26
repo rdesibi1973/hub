@@ -22,8 +22,8 @@ Running log of notable changes and current build state. Module-level "active / p
 
 ## 2026-09 — Agent API phase 2: rates, fill_calc, Calc checks
 - `get_rates`: program prices read from the Calc template pax sheets (H9 rack, H10 sto,
-  H11 single, H13/H14 discounts) + flight routes and activities/transfers with **sale and cost**
-  (new `cost_pax` / `cost` columns, editable in Pricing → Jeep, Activities & Flights).
+  H11 single, H13/H14 discounts) + flight routes and activities/transfers with **cost and sale**
+  (existing `rate_pax` / `rate` are costs; new `sale_pax` / `sale` columns, editable in Pricing).
 - `fill_calc`: fills the booking Calc server-side (PhpSpreadsheet 1.29) with the house rules —
   single pax sheet, H6:I14 cleared, F9 as formula, date cascade, flight cost from the rate table,
   hotels, guests, room type, flights — recalculates (saved values for the Hub parser), uploads with a

@@ -617,12 +617,12 @@ function bs_last_midt(?string $name, ?string $endYmd): ?string {
     return sprintf('%04d-%02d-%02d', $y, (int)$mon, $day);
 }
 
-/** Active flight cost_pax values from the rate table (floats), or null if unavailable. */
+/** Active flight costs (rate_pax) from the rate table (floats), or null if unavailable. */
 function bs_known_flight_costs(): ?array {
     try {
-        $rows = db()->query("SELECT DISTINCT cost_pax FROM flight_routes WHERE active = 1 AND cost_pax IS NOT NULL")
+        $rows = db()->query("SELECT DISTINCT rate_pax FROM flight_routes WHERE active = 1 AND rate_pax IS NOT NULL")
                     ->fetchAll(PDO::FETCH_COLUMN);
-    } catch (Throwable $e) { return null; }   // column not created yet
+    } catch (Throwable $e) { return null; }
     $out = [];
     foreach ($rows as $c) $out[] = (float)$c;
     return $out;
