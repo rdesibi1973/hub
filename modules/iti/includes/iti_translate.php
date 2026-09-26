@@ -10,6 +10,8 @@
  * newer PHP than the server's 8.0). Key: ANTHROPIC_API_KEY in includes/config.php.
  */
 
+require_once __DIR__ . '/iti_texts.php';
+
 const ITI_TR_MODEL = 'claude-opus-5';
 
 /** One Messages API call: [id => text] (source lang) → [id => text] (target lang). */
@@ -110,97 +112,27 @@ function iti_tr_call(array $items, string $from, string $to): array {
  */
 function iti_translate_program(int $id, string $to): array {
     $db = db();
-    $p = iti_get_program($id);
-    if (!$p) throw new RuntimeException('Program not found.');
-    $from = in_array($p['display_language'] ?? '', ITI_LANGUAGES, true) ? $p['display_language'] : 'it';
-    if ($from === $to) return ['filled' => 0, 'from' => $from];
-
-    // Imported samples carry the source title in title_en too (NOT NULL column): treat it as missing.
-    if ($to === 'en' && trim((string)$p['title_en']) !== '' && $p['title_en'] === ($p['title_' . $from] ?? null)) {
-        $db->prepare("UPDATE iti_programs SET title_en = '' WHERE id = ?")->execute([$id]);
-        $p['title_en'] = '';
-    }
-
-    $items = [];   // key => source text
-    $targets = []; // key => [table, id column value, column]
-    $want = function (string $key, ?string $src, $tgt, string $table, int $rowId, string $col) use (&$items, &$targets) {
-        if (trim((string)$src) === '' || trim((string)$tgt) !== '') return;
-        $items[$key] = (string)$src;
-        $targets[$key] = [$table, $rowId, $col];
-    };
-
-    foreach (['title', 'subtitle', 'intro'] as $f) {
-        if (array_key_exists($f . '_' . $from, $p)) $want('p_' . $f, $p[$f . '_' . $from], $p[$f . '_' . $to] ?? '', 'iti_programs', $id, $f . '_' . $to);
-    }
-    $days = iti_get_days($id);
-    $lodgeIds = []; $destIds = [];
-    foreach ($days as $d) {
-        $did = (int)$d['id'];
-        $want('d' . $did . '_t', $d['day_title_' . $from] ?? '', $d['day_title_' . $to] ?? '', 'iti_program_days', $did, 'day_title_' . $to);
-        $want('d' . $did . '_n', $d['narrative_' . $from] ?? '', $d['narrative_' . $to] ?? '', 'iti_program_days', $did, 'narrative_' . $to);
-        if (!empty($d['end_lodge_id']))   $lodgeIds[(int)$d['end_lodge_id']] = true;
-        if (!empty($d['destination_id'])) $destIds[(int)$d['destination_id']] = true;
-        try {
-            $st = $db->prepare('SELECT * FROM iti_day_activities WHERE program_day_id = ?');
-            $st->execute([$did]);
-            foreach ($st->fetchAll() as $a) {
-                $srcTxt = trim((string)($a['custom_note_' . $from] ?? '')) ?: trim((string)($a['activity_custom'] ?? ''));
-                if (empty($a['activity_id']) && array_key_exists('custom_note_' . $to, $a)) {
-                    $want('a' . (int)$a['id'], $srcTxt, $a['custom_note_' . $to], 'iti_day_activities', (int)$a['id'], 'custom_note_' . $to);
-                }
-            }
-        } catch (PDOException $e) { /* no custom_note columns */ }
-    }
-    $st = $db->prepare('SELECT * FROM iti_program_inclusions WHERE program_id = ?');
-    $st->execute([$id]);
-    foreach ($st->fetchAll() as $r) {
-        $want('i' . (int)$r['id'], $r['text_' . $from] ?? '', $r['text_' . $to] ?? '', 'iti_program_inclusions', (int)$r['id'], 'text_' . $to);
-    }
-    foreach (['iti_lodges' => $lodgeIds, 'iti_destinations' => $destIds] as $table => $ids) {
-        if (!$ids) continue;
-        foreach ($db->query('SELECT * FROM ' . $table . ' WHERE id IN (' . implode(',', array_map('intval', array_keys($ids))) . ')')->fetchAll() as $r) {
-            $want($table . (int)$r['id'], $r['description_' . $from] ?? '', $r['description_' . $to] ?? '', $table, (int)$r['id'], 'description_' . $to);
-        }
-    }
-    if (!$items) return ['filled' => 0, 'from' => $from];
+    $c = iti_texts_collect($db, $id, $to, false);
+    if (!$c['items']) return ['filled' => 0, 'from' => $c['from']];
 
     // Batches of ~12k characters so each request stays well inside max_tokens.
     $batches = []; $cur = []; $size = 0;
-    foreach ($items as $k => $txt) {
-        if ($cur && $size + mb_strlen($txt) > 12000) { $batches[] = $cur; $cur = []; $size = 0; }
-        $cur[$k] = $txt; $size += mb_strlen($txt);
+    foreach ($c['items'] as $k => $it) {
+        if ($cur && $size + mb_strlen($it['source']) > 12000) { $batches[] = $cur; $cur = []; $size = 0; }
+        $cur[$k] = $it['source']; $size += mb_strlen($it['source']);
     }
     if ($cur) $batches[] = $cur;
 
     $filled = 0;
     foreach ($batches as $batch) {
-        foreach (iti_tr_call($batch, $from, $to) as $k => $txt) {
-            list($table, $rowId, $col) = $targets[$k];
-            if (!preg_match('/^[a-z_]+$/', $table) || !preg_match('/^[a-z_]+$/', $col)) continue;
-            // Write only if still empty (never overwrite an edited translation).
-            $db->prepare("UPDATE {$table} SET {$col} = ? WHERE id = ? AND ({$col} IS NULL OR {$col} = '')")->execute([$txt, $rowId]);
-            $filled++;
-        }
+        $r = iti_texts_save($db, $id, $to, iti_tr_call($batch, $c['from'], $to), false);
+        $filled += $r['written'];
     }
-    return ['filled' => $filled, 'from' => $from];
+    return ['filled' => $filled, 'from' => $c['from']];
 }
 
 /** How many texts of the programme are still missing in $to (for the "Translate" button). */
 function iti_translate_missing(int $id, string $to): int {
-    $p = iti_get_program($id);
-    if (!$p) return 0;
-    $from = in_array($p['display_language'] ?? '', ITI_LANGUAGES, true) ? $p['display_language'] : 'it';
-    if ($from === $to) return 0;
-    $n = 0;
-    foreach (['title', 'subtitle', 'intro'] as $f) {
-        $tgt = trim((string)($p[$f . '_' . $to] ?? ''));
-        if ($f === 'title' && $to === 'en' && $tgt === trim((string)($p['title_' . $from] ?? ''))) $tgt = '';
-        if (trim((string)($p[$f . '_' . $from] ?? '')) !== '' && $tgt === '') $n++;
-    }
-    foreach (iti_get_days($id) as $d) {
-        foreach (['day_title', 'narrative'] as $f) {
-            if (trim((string)($d[$f . '_' . $from] ?? '')) !== '' && trim((string)($d[$f . '_' . $to] ?? '')) === '') $n++;
-        }
-    }
-    return $n;
+    try { return count(iti_texts_collect(db(), $id, $to, false)['items']); }
+    catch (Throwable $e) { return 0; }
 }

@@ -134,6 +134,19 @@ payment status and group. Without `"confirm": true` → returns `from`, `to` and
 409 if there is no confirm snapshot, the original location already exists, or a GRP still has
 other members.
 
+### `iti_programs` (GET)
+`q?`, `type?` (`sample`|`personal`) → ITI programmes: id, title, language, days, published, public_url.
+
+### `iti_texts` (GET)
+`program_id`, `lang` (`en`|`it`|`fr`|`es`|`de`), `all?` → `from` (source language) and `items[]` `{key, source, target}`:
+the texts to translate — programme title/route/intro, day titles and texts, activity notes, included / not included,
+and the descriptions of the programme's lodges and destinations. Without `all`, only those still empty in `lang`.
+
+### `iti_save_texts` (POST)
+`program_id`, `lang`, `texts` `{"<key>": "<translation>", …}`, `overwrite?` (default false: only empty fields are written,
+so edited translations are kept). Dry-run unless `"confirm": true`. Lets Claude translate programmes in a session
+(no Anthropic API billing); the Hub "Translate" button does the same through the API when `ANTHROPIC_API_KEY` is set.
+
 ## Example — Fiorini (TVT)
 
 ```bash

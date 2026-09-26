@@ -20,6 +20,7 @@ require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/includes/booking_service.php';
 require_once __DIR__ . '/includes/postpone_lib.php';   // booking_cc_agent_email()
 require_once __DIR__ . '/includes/calc_service.php';   // get_rates, fill_calc
+require_once __DIR__ . '/../iti/includes/iti_texts.php'; // ITI programme translations
 // AGENT_API_KEY / AGENT_API_USER live in the root includes/config.php (server-only).
 if (!defined('AGENT_API_KEY') && is_file(__DIR__ . '/../../includes/config.php')) {
     require_once __DIR__ . '/../../includes/config.php';
@@ -79,7 +80,7 @@ function agent_ensure_schema(PDO $db): void {
 function agent_audit(PDO $db, string $action, $reqId, array $payload, string $resultJson, int $code): void {
     global $agentUser;
     agent_ensure_schema($db);
-    $dry = in_array($action, ['confirm_booking', 'send_booking_email', 'rollback_booking', 'fill_calc'], true) && empty($payload['confirm']);
+    $dry = in_array($action, ['confirm_booking', 'send_booking_email', 'rollback_booking', 'fill_calc', 'iti_save_texts'], true) && empty($payload['confirm']);
     $db->prepare("INSERT INTO agent_audit_log (ts, action, request_id, user_id, http_code, dry_run, payload_json, result_json, ip)
                   VALUES (?,?,?,?,?,?,?,?,?)")
        ->execute([
@@ -533,6 +534,56 @@ try {
         agent_out($res);
     }
 
+    // ── ITI programmes: list / texts to translate / save translations ────────
+    case 'iti_programs': {
+        $q = trim((string)($in['q'] ?? ''));
+        $sql = "SELECT id, program_type, title_it, title_en, display_language, duration_days, status, is_published, public_token
+                  FROM iti_programs WHERE status <> 'cancelled'";
+        $args = [];
+        if ($q !== '') { $sql .= " AND (title_it LIKE ? OR title_en LIKE ? OR ref_number LIKE ?)"; $l = '%' . $q . '%'; array_push($args, $l, $l, $l); }
+        if (!empty($in['type'])) { $sql .= " AND program_type = ?"; $args[] = $in['type']; }
+        $st = $db->prepare($sql . " ORDER BY updated_at DESC LIMIT 100");
+        $st->execute($args);
+        $rows = [];
+        foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $rows[] = ['id' => (int)$r['id'], 'type' => $r['program_type'], 'title' => $r['title_it'] ?: $r['title_en'],
+                       'language' => $r['display_language'], 'days' => (int)$r['duration_days'], 'status' => $r['status'],
+                       'published' => (bool)$r['is_published'],
+                       'public_url' => $r['is_published'] && $r['public_token']
+                           ? 'https://hub.savannahexplorers.com/modules/iti/itinerary.php?token=' . $r['public_token'] : null];
+        }
+        agent_out(['ok' => true, 'programs' => $rows]);
+    }
+
+    case 'iti_texts': {
+        $pid = (int)($in['program_id'] ?? 0);
+        $to  = (string)($in['lang'] ?? '');
+        try { $c = iti_texts_collect($db, $pid, $to, !empty($in['all'])); }
+        catch (InvalidArgumentException $e) { agent_fail($e->getMessage(), 400); }
+        $items = [];
+        foreach ($c['items'] as $k => $it) $items[] = ['key' => $k, 'source' => $it['source'], 'target' => $it['target']];
+        agent_out(['ok' => true, 'program_id' => $pid, 'from' => $c['from'], 'to' => $to, 'count' => count($items), 'items' => $items]);
+    }
+
+    case 'iti_save_texts': {
+        agent_require_method('POST');
+        $pid = (int)($in['program_id'] ?? 0);
+        $to  = (string)($in['lang'] ?? '');
+        $texts = isset($in['texts']) && is_array($in['texts']) ? $in['texts'] : [];
+        if (!$texts) agent_fail('texts is required: {"<key>": "<translated text>", …} (keys from iti_texts)');
+        try {
+            if (empty($in['confirm'])) {
+                $c = iti_texts_collect($db, $pid, $to, true);
+                $known = array_intersect(array_keys($texts), array_keys($c['targets']));
+                agent_out(['ok' => true, 'dry_run' => true, 'would_write' => count($known),
+                           'unknown' => array_values(array_diff(array_keys($texts), array_keys($c['targets']))),
+                           'message' => 'Dry run — nothing saved. Resend with "confirm": true to save.']);
+            }
+            $r = iti_texts_save($db, $pid, $to, $texts, !empty($in['overwrite']));
+        } catch (InvalidArgumentException $e) { agent_fail($e->getMessage(), 400); }
+        agent_out(array_merge(['ok' => true, 'dry_run' => false], $r));
+    }
+
     // ── rollback_booking ─────────────────────────────────────────────────────
     // Undo a Hub confirmation (same as BackOffice "Rollback…"): folder back to its
     // pre-confirm location, status restored. Dry-run unless "confirm": true.
@@ -552,7 +603,7 @@ try {
         agent_fail('Unknown action "' . $agentAction . '"', 400, ['actions' => [
             'find_requests', 'list_agencies', 'create_request', 'update_request', 'list_standard_programs',
             'copy_program', 'get_rates', 'fill_calc', 'confirm_preview', 'confirm_booking', 'send_booking_email',
-            'rollback_booking',
+            'rollback_booking', 'iti_programs', 'iti_texts', 'iti_save_texts',
         ]]);
     }
 } catch (Throwable $e) {
