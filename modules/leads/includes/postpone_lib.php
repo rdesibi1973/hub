@@ -89,6 +89,23 @@ function pp_booking_email(array $r, string $subject, string $body, string $agent
     return ['to' => $to, 'cc' => $cc, 'subject' => $subject, 'body' => $body, 'request_id' => (int)$r['id']];
 }
 
+/**
+ * Agents NOT copied on booking-team emails. Roberto's user email is the shared
+ * info@ inbox and he already gets every booking email through
+ * savannah.explorers@gmail.com (always in Cc), so copying him again only
+ * duplicates it.
+ */
+const BOOKING_CC_SKIP_AGENTS = ['roberto'];
+
+/** The agent's email for the Cc of a booking-team email ('' = don't copy). */
+function booking_cc_agent_email(PDO $db, $agentId): string {
+    if (!$agentId) return '';
+    $st = $db->prepare("SELECT name FROM agents WHERE id = ?");
+    $st->execute([(int)$agentId]);
+    if (in_array(strtolower(trim((string)$st->fetchColumn())), BOOKING_CC_SKIP_AGENTS, true)) return '';
+    return pp_agent_email($db, $agentId);
+}
+
 function pp_agent_email(PDO $db, $agentId): string {
     if (!$agentId) return '';
     $st = $db->prepare("SELECT email FROM users WHERE agent_id = ? AND email IS NOT NULL AND email <> '' ORDER BY is_active DESC, id LIMIT 1");
@@ -149,7 +166,7 @@ function pp_reschedule(PDO $db, array $r, array $dates, array $months, ?int $uid
     $subj  = preg_replace('/_START.*$/', '', preg_replace('/^\d+_\d+[A-Z]+_/', '', $new))
            . " safari RESCHEDULED $to";
     return ['ok' => true, 'msg' => "✔ {$r['customer_name']} rescheduled to $to → \"$new\".",
-            'email' => pp_booking_email($r, $subj, $body, pp_agent_email($db, $r['agent_id'] ?? null))];
+            'email' => pp_booking_email($r, $subj, $body, booking_cc_agent_email($db, $r['agent_id'] ?? null))];
 }
 
 /** B. Postpone without new dates, until $until (Y-m-d). */
@@ -186,7 +203,7 @@ function pp_postpone(PDO $db, array $r, string $until, ?int $uid, string $userNa
            . "\nFolder: " . PP_DIR . "/$new\n\nThanks,\n$userName";
     return ['ok' => true, 'msg' => "✔ {$r['customer_name']} postponed until $untilTxt → " . PP_DIR . "/$new.",
             'email' => pp_booking_email($r, $sp['cust'] . " safari POSTPONED ($from)", $body,
-                                        pp_agent_email($db, $r['agent_id'] ?? null))];
+                                        booking_cc_agent_email($db, $r['agent_id'] ?? null))];
 }
 
 /**

@@ -905,12 +905,8 @@ if (($_GET['mail_for'] ?? '') !== '') {
     $ms->execute([$mid]);
     $mr = $ms->fetch(PDO::FETCH_ASSOC);
     if ($mr) {
-        $agentEmail = '';
-        if (!empty($mr['agent_id'])) {
-            $es = $db->prepare("SELECT email FROM users WHERE agent_id = ? AND email IS NOT NULL AND email <> '' ORDER BY id ASC LIMIT 1");
-            $es->execute([(int)$mr['agent_id']]);
-            $agentEmail = (string)($es->fetchColumn() ?: '');
-        }
+        // Agent in Cc — except agents who already get it another way (Roberto).
+        $agentEmail = booking_cc_agent_email($db, $mr['agent_id'] ?? null);
         $grpMain = '';
         $folder  = trim($mr['practice_code'] ?? '');
         if     ($mact === 'ADD')    { $grpMain = trim($mr['group_folder'] ?? ''); }
