@@ -857,8 +857,15 @@ include 'includes/header.php';
         <input type="text" id="cp-prognum" value="…" readonly title="Set automatically to the next free number"
                style="width:56px;font-family:monospace;padding:5px 7px;border:1.5px solid var(--grey-lt);border-radius:5px;margin-left:4px;background:#f0f0ee;color:var(--grey-dk)">
       </label>
+      <button type="button" class="btn btn-outline btn-sm" onclick="loadNextProg()" style="padding:3px 8px"
+              title="Re-read the folder and recompute the next free ProgNumber (e.g. after adding files in Dropbox)">↻</button>
       <button type="button" class="btn btn-red btn-sm" id="cp-copy" onclick="copyPrograms()">Copy Programs</button>
       <button type="button" class="btn btn-outline btn-sm" onclick="document.querySelectorAll('.cp-prog').forEach(c=>c.checked=false)">Clear</button>
+      <?php if (!empty($canConfirmHere)): ?>
+        <a href="backoffice.php?<?= h(http_build_query(['q' => $pcode, 'root' => 'All', 'open_confirm' => (int)$r['id']])) ?>"
+           class="btn btn-outline btn-sm" style="color:#1A6B3A;border-color:#1A6B3A;font-weight:700"
+           title="Confirm this safari: set the dates, move the folder to 001_Safari, mark Booked">✅ Confirm Safari</a>
+      <?php endif; ?>
       <span id="cp-status" style="font-size:.8rem;color:var(--grey-mid)"></span>
     </div>
     <div id="cp-result" style="margin-top:12px;font-size:.78rem;display:none"></div>
@@ -913,6 +920,7 @@ function loadNextProg() {
     el.style.background = '#fff';
     if (!el.value || el.value === '…') el.value = '01';
   }
+  el.value = '…';   // show it is being recomputed
   var fd = new FormData();
   fd.append('action', 'next_prognum');
   fd.append('request_id', '<?= (int)$r['id'] ?>');
