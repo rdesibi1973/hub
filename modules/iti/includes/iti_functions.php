@@ -49,6 +49,12 @@ define('ITI_PROGRAM_STATUS_BADGE', [
     'confirmed' => 'badge-green',
     'cancelled' => 'badge-red',
 ]);
+define('ITI_REQUEST_STATUS_BADGE', [
+    'open'      => 'badge-grey',
+    'quoted'    => 'badge-amber',
+    'confirmed' => 'badge-green',
+    'cancelled' => 'badge-red',
+]);
 
 // ── Helper: escape HTML ───────────────────────────────────────────────────────
 if (!function_exists('h')) {
@@ -778,11 +784,16 @@ function iti_get_prices(int $program_id): array {
 }
 
 // ── INCLUSIONS ────────────────────────────────────────────────────────────────
+// Each row carries its own texts (text_xx, program override / custom text), the
+// linked standard texts (std_xx) and display_text in the current language.
 function iti_get_inclusions(int $program_id): array {
     $lang = iti_lang();
-    $col  = "COALESCE(NULLIF(pi.text_{$lang},''), NULLIF(si.text_{$lang},''), pi.text_en, si.text_en) AS display_text";
+    $cols = "COALESCE(NULLIF(pi.text_{$lang},''), NULLIF(si.text_{$lang},''), NULLIF(pi.text_en,''), si.text_en) AS display_text";
+    foreach (ITI_LANGUAGES as $l) {
+        $cols .= ", pi.text_{$l}, si.text_{$l} AS std_{$l}";
+    }
     $st   = db()->prepare(
-        "SELECT pi.id, pi.item_type, pi.sort_order, {$col}
+        "SELECT pi.id, pi.item_type, pi.sort_order, pi.standard_inclusion_id, {$cols}
            FROM iti_program_inclusions pi
            LEFT JOIN iti_standard_inclusions si ON si.id = pi.standard_inclusion_id
           WHERE pi.program_id = ?
@@ -790,6 +801,160 @@ function iti_get_inclusions(int $program_id): array {
     );
     $st->execute([$program_id]);
     return $st->fetchAll();
+}
+
+// ── DUPLICATE ────────────────────────────────────────────────────────────────
+// Live column names of a table (cached); [] if the table does not exist.
+// Copies are built from SHOW COLUMNS so columns added later are not forgotten.
+function iti_table_columns(string $table): array {
+    static $cache = array();
+    if (!isset($cache[$table])) {
+        $cache[$table] = array();
+        try {
+            foreach (db()->query('SHOW COLUMNS FROM `' . $table . '`')->fetchAll(PDO::FETCH_ASSOC) as $c) {
+                $cache[$table][] = $c['Field'];
+            }
+        } catch (PDOException $e) {
+            $cache[$table] = array();
+        }
+    }
+    return $cache[$table];
+}
+
+// INSERT ... SELECT one table's rows where $fk_col = $old_fk, re-parented to $new_fk.
+// $set overrides columns with fixed values; id / timestamps are left to their defaults.
+// Returns [old_id => new_id].
+function iti_copy_rows(string $table, string $fk_col, int $old_fk, int $new_fk, array $set = array()): array {
+    $db   = db();
+    $cols = iti_table_columns($table);
+    if (!$cols) return array();
+    $skip = array('id', 'created_at', 'updated_at', $fk_col);
+    $copy = array();
+    foreach ($cols as $c) {
+        if (!in_array($c, $skip, true) && !array_key_exists($c, $set)) $copy[] = $c;
+    }
+    $set_cols = array();
+    foreach (array_keys($set) as $c) {
+        if (in_array($c, $cols, true)) $set_cols[] = $c;
+    }
+
+    $ins_cols = array_merge(array($fk_col), $set_cols, $copy);
+    $sel      = array_merge(array('?'), array_fill(0, count($set_cols), '?'), array_map(function ($c) { return '`' . $c . '`'; }, $copy));
+    $ins      = $db->prepare('INSERT INTO `' . $table . '` (`' . implode('`,`', $ins_cols) . '`) SELECT ' . implode(',', $sel)
+                           . ' FROM `' . $table . '` WHERE id = ?');
+    $params = array($new_fk);
+    foreach ($set_cols as $c) $params[] = $set[$c];
+
+    $ids = $db->prepare('SELECT id FROM `' . $table . '` WHERE `' . $fk_col . '` = ? ORDER BY id');
+    $ids->execute(array($old_fk));
+    $map = array();
+    foreach ($ids->fetchAll(PDO::FETCH_COLUMN) as $old_id) {
+        $ins->execute(array_merge($params, array((int)$old_id)));
+        $map[(int)$old_id] = (int)$db->lastInsertId();
+    }
+    return $map;
+}
+
+// Full copy of a program: header, days (+ activities, flights, transfers), prices,
+// supplements, discounts, inclusions and the dedicated T&C. All-or-nothing.
+// $set overrides header columns (e.g. request_id, display_language). Returns the new id.
+function iti_duplicate_program(int $src_id, string $dest_type, string $created_by, array $set = array()): int {
+    $db  = db();
+    $src = iti_get_program($src_id);
+    if (!$src) throw new RuntimeException('Program #' . $src_id . ' not found.');
+
+    $hdr = array_merge(array(
+        'program_type'      => $dest_type,
+        'sample_program_id' => $src_id,
+        'title_en'          => trim(($src['title_en'] ?? '') . ' (copy)'),
+        'status'            => 'draft',
+        'created_by'        => $created_by,
+        'request_id'        => null,
+        'lead_request_id'   => null,
+        'is_published'      => 0,
+        'public_token'      => null,
+        'published_at'      => null,
+    ), $set);
+
+    $db->beginTransaction();
+    try {
+        // Header: same technique as the child tables, keyed on the row's own id.
+        $cols = iti_table_columns('iti_programs');
+        $copy = array(); $set_cols = array(); $params = array();
+        foreach ($cols as $c) {
+            if (in_array($c, array('id', 'created_at', 'updated_at'), true)) continue;
+            if (array_key_exists($c, $hdr)) { $set_cols[] = $c; $params[] = $hdr[$c]; }
+            else $copy[] = $c;
+        }
+        $sel = array_merge(array_fill(0, count($set_cols), '?'), array_map(function ($c) { return '`' . $c . '`'; }, $copy));
+        $params[] = $src_id;
+        $db->prepare('INSERT INTO iti_programs (`' . implode('`,`', array_merge($set_cols, $copy)) . '`) SELECT '
+                     . implode(',', $sel) . ' FROM iti_programs WHERE id = ?')->execute($params);
+        $new_id = (int)$db->lastInsertId();
+
+        $day_map = iti_copy_rows('iti_program_days', 'program_id', $src_id, $new_id);
+        foreach ($day_map as $old_day => $new_day) {
+            foreach (array('iti_day_activities', 'iti_day_flights', 'iti_day_transfers') as $t) {
+                iti_copy_rows($t, 'program_day_id', $old_day, $new_day);
+            }
+        }
+        foreach (array('iti_program_prices', 'iti_price_supplements', 'iti_price_discounts', 'iti_program_inclusions') as $t) {
+            iti_copy_rows($t, 'program_id', $src_id, $new_id);
+        }
+
+        // Dedicated T&C: copy it and point the new program at its own copy.
+        $tc_map = iti_copy_rows('iti_terms_conditions', 'program_id', $src_id, $new_id);
+        if (!empty($src['terms_id']) && isset($tc_map[(int)$src['terms_id']]) && !array_key_exists('terms_id', $set)) {
+            $db->prepare('UPDATE iti_programs SET terms_id = ? WHERE id = ?')->execute(array($tc_map[(int)$src['terms_id']], $new_id));
+        }
+
+        $db->commit();
+        return $new_id;
+    } catch (Exception $e) {
+        if ($db->inTransaction()) $db->rollBack();
+        throw $e;
+    }
+}
+
+// ── LINK TO HUB LEADS REQUESTS ───────────────────────────────────────────────
+// iti_programs.lead_request_id → requests.id (migration 062, also created lazily here).
+function iti_ensure_lead_link(): void {
+    static $done = false;
+    if ($done) return;
+    $done = true;
+    $db = db();
+    if ($db->query("SHOW COLUMNS FROM iti_programs LIKE 'lead_request_id'")->fetch()) return;
+    $db->exec('ALTER TABLE iti_programs ADD COLUMN lead_request_id INT NULL DEFAULT NULL, ADD KEY idx_prog_lead_request (lead_request_id)');
+    try {
+        $db->exec('ALTER TABLE iti_programs ADD CONSTRAINT fk_prog_lead_request FOREIGN KEY (lead_request_id) REFERENCES requests (id) ON DELETE SET NULL');
+    } catch (PDOException $e) {
+        error_log('iti_ensure_lead_link: FK not created: ' . $e->getMessage());
+    }
+}
+
+// Hub leads request (id, customer_name, period, pax) or false.
+function iti_get_lead_request(int $id) {
+    if ($id <= 0) return false;
+    $st = db()->prepare('SELECT id, customer_name, period, pax, status FROM requests WHERE id = ?');
+    $st->execute(array($id));
+    return $st->fetch();
+}
+
+// Request view "Clone from Sample": personal copy linked to the ITI request.
+function iti_clone_sample_to_personal(int $sample_id, int $request_id, string $price_cat, string $lang, string $currency): int {
+    $cu = current_user();
+    $sample = iti_get_program($sample_id);
+    try {
+        return iti_duplicate_program($sample_id, 'personal', $cu['username'] ?? 'system', array(
+            'request_id'       => $request_id,
+            'title_en'         => $sample['title_en'] ?? '',
+            'display_language' => $lang,
+            'display_currency' => $currency,
+        ));
+    } catch (Exception $e) {
+        error_log('iti_clone_sample_to_personal(' . $sample_id . '): ' . $e->getMessage());
+        return 0;
+    }
 }
 
 // ── REQUESTS ─────────────────────────────────────────────────────────────────

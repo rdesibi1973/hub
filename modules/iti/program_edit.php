@@ -16,6 +16,21 @@ if (!$id) { iti_flash_set('error','No program specified.'); iti_redirect('progra
 $program = iti_get_program($id);
 if (!$program) { iti_flash_set('error','Program not found.'); iti_redirect('programs.php'); }
 
+// ── AJAX: search Hub leads requests by id / customer name ──
+if (($_GET['ajax'] ?? '') === 'lead_search') {
+    header('Content-Type: application/json');
+    $q = trim($_GET['q'] ?? '');
+    $out = [];
+    if ($q !== '') {
+        $st = $db->prepare('SELECT id, customer_name, period, pax FROM requests WHERE id = ? OR customer_name LIKE ? ORDER BY id DESC LIMIT 15');
+        $st->execute([(int)$q, '%' . $q . '%']);
+        $out = $st->fetchAll();
+    }
+    echo json_encode($out);
+    exit;
+}
+iti_ensure_lead_link();
+
 // ── SALVA GIORNO (POST) ──────────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $sub = $_POST['_sub'] ?? '';
@@ -46,6 +61,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $_POST['status']??'draft',
             $id,
         ]);
+        // Hub leads request link (personal programs)
+        if (isset($_POST['lead_request_id'])) {
+            iti_ensure_lead_link();
+            $lead_id = (int)preg_replace('/\D/', '', (string)$_POST['lead_request_id']);
+            if ($lead_id && !iti_get_lead_request($lead_id)) {
+                iti_flash_set('error', "Program header saved, but Hub request #{$lead_id} does not exist: link not changed.");
+                iti_redirect("program_edit.php?id={$id}&tab=info");
+            }
+            $db->prepare('UPDATE iti_programs SET lead_request_id=? WHERE id=?')->execute([$lead_id ?: null, $id]);
+        }
         iti_flash_set('success','Program header saved.');
         iti_redirect("program_edit.php?id={$id}&tab=info");
     }
@@ -427,20 +452,36 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     // ── Salva inclusi ──
     if ($sub === 'inclusions') {
-        $db->prepare('DELETE FROM iti_program_inclusions WHERE program_id=?')->execute([$id]);
-        $items     = $_POST['inc_type']  ?? [];
-        $texts_en  = $_POST['inc_en']    ?? [];
-        $texts_it  = $_POST['inc_it']    ?? [];
-        $texts_fr  = $_POST['inc_fr']    ?? [];
-        $texts_es  = $_POST['inc_es']    ?? [];
-        $texts_de  = $_POST['inc_de']    ?? [];
-        $std_ids   = $_POST['inc_std']   ?? [];
-        foreach ($items as $i => $type) {
-            if (trim($texts_en[$i] ?? '') === '') continue;
-            $db->prepare('INSERT INTO iti_program_inclusions (program_id,item_type,standard_inclusion_id,text_en,text_it,text_fr,text_es,text_de,sort_order) VALUES (?,?,?,?,?,?,?,?,?)')
-               ->execute([$id,$type,$std_ids[$i]??null,$texts_en[$i],$texts_it[$i]??'',$texts_fr[$i]??'',$texts_es[$i]??'',$texts_de[$i]??'',$i]);
+        $items   = $_POST['inc_type'] ?? [];
+        $std_ids = $_POST['inc_std']  ?? [];
+        $texts   = [];
+        foreach (ITI_LANGUAGES as $l) $texts[$l] = $_POST['inc_' . $l] ?? [];
+
+        $db->beginTransaction();
+        try {
+            $db->prepare('DELETE FROM iti_program_inclusions WHERE program_id=?')->execute([$id]);
+            $ins = $db->prepare('INSERT INTO iti_program_inclusions (program_id,item_type,standard_inclusion_id,text_en,text_it,text_fr,text_es,text_de,sort_order) VALUES (?,?,?,?,?,?,?,?,?)');
+            $n = 0;
+            foreach ($items as $i => $type) {
+                $type   = $type === 'exclusion' ? 'exclusion' : 'inclusion';
+                $std_id = (int)($std_ids[$i] ?? 0) ?: null;   // '' → NULL (INT FK, strict mode)
+                $row    = [];
+                $has    = $std_id !== null;
+                foreach (ITI_LANGUAGES as $l) {
+                    $row[$l] = trim($texts[$l][$i] ?? '');
+                    if ($row[$l] !== '') $has = true;
+                    $row[$l] = $row[$l] === '' ? null : mb_substr($row[$l], 0, 255);
+                }
+                if (!$has) continue;   // empty row
+                $ins->execute([$id, $type, $std_id, $row['en'], $row['it'], $row['fr'], $row['es'], $row['de'], ++$n]);
+            }
+            $db->commit();
+            iti_flash_set('success','Inclusions saved.');
+        } catch (Exception $e) {
+            if ($db->inTransaction()) $db->rollBack();
+            error_log('ITI save inclusions program #' . $id . ': ' . $e->getMessage());
+            iti_flash_set('error','Inclusions NOT saved (nothing was changed): ' . $e->getMessage());
         }
-        iti_flash_set('success','Inclusions saved.');
         iti_redirect("program_edit.php?id={$id}&tab=inclusions");
     }
 
@@ -674,6 +715,19 @@ include __DIR__ . '/../../includes/layout_header.php';
         <input type="text" name="ref_number" maxlength="60"
                placeholder="e.g. SE-2025-001"
                value="<?= h($program['ref_number'] ?? '') ?>">
+      </div>
+      <?php $lead = iti_get_lead_request((int)($program['lead_request_id'] ?? 0)); ?>
+      <div class="form-group">
+        <label>Hub Request</label>
+        <input type="text" name="lead_request_id" id="lead-req-input" list="lead-req-list" autocomplete="off"
+               placeholder="Request # or customer name"
+               value="<?= $lead ? (int)$lead['id'] : '' ?>">
+        <datalist id="lead-req-list"></datalist>
+        <span class="form-hint" id="lead-req-hint">
+          <?php if ($lead): ?>
+            <a href="<?= h(BASE_URL) ?>/modules/leads/request_view.php?id=<?= (int)$lead['id'] ?>" target="_blank">#<?= (int)$lead['id'] ?> <?= h($lead['customer_name']) ?></a>
+          <?php else: ?>Not linked<?php endif; ?>
+        </span>
       </div>
       <div class="form-group">
         <label>Start Date</label>
@@ -1413,18 +1467,21 @@ include __DIR__ . '/../../includes/layout_header.php';
 
 <?php foreach (['inclusion' => '✅ Included','exclusion' => '❌ Excluded'] as $type => $label): ?>
 <div class="form-section-title" style="<?= $type==='exclusion'?'margin-top:28px;':'' ?>"><?= $label ?></div>
-<?php $items = array_filter($inclusions, fn($i) => $i['item_type'] === $type); ?>
 <div id="inc-list-<?= $type ?>">
-<?php foreach (array_values($items) as $idx => $inc): ?>
+<?php foreach ($inclusions as $inc): if ($inc['item_type'] !== $type) continue; ?>
+<?php /* Values = this program's own text; placeholder = linked standard text (used when the field is left empty). FR/ES/DE are kept in hidden fields. */ ?>
 <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;" class="inc-row">
   <input type="hidden" name="inc_type[]"  value="<?= $type ?>">
-  <input type="hidden" name="inc_std[]"   value="<?= $inc['standard_inclusion_id'] ?? '' ?>">
-  <input type="text"   name="inc_en[]"    value="<?= h($inc['resolved_en'] ?? '') ?>"
+  <input type="hidden" name="inc_std[]"   value="<?= (int)($inc['standard_inclusion_id'] ?? 0) ?: '' ?>">
+  <input type="text"   name="inc_en[]"    value="<?= h($inc['text_en'] ?? '') ?>"
          style="flex:1;padding:8px 11px;border:1.5px solid var(--grey-lt);border-radius:6px;font-size:.83rem;"
-         placeholder="English text">
-  <input type="text"   name="inc_it[]"    value="<?= h($inc['resolved_it'] ?? '') ?>"
-         style="width:180px;padding:8px 11px;border:1.5px solid var(--grey-lt);border-radius:6px;font-size:.83rem;"
-         placeholder="Italiano">
+         placeholder="<?= h(($inc['std_en'] ?? '') !== '' ? $inc['std_en'] : 'English text') ?>">
+  <input type="text"   name="inc_it[]"    value="<?= h($inc['text_it'] ?? '') ?>"
+         style="flex:1;padding:8px 11px;border:1.5px solid var(--grey-lt);border-radius:6px;font-size:.83rem;"
+         placeholder="<?= h(($inc['std_it'] ?? '') !== '' ? $inc['std_it'] : 'Italiano') ?>">
+  <?php foreach (['fr','es','de'] as $l): ?>
+  <input type="hidden" name="inc_<?= $l ?>[]" value="<?= h($inc['text_' . $l] ?? '') ?>">
+  <?php endforeach; ?>
   <button type="button" onclick="this.closest('.inc-row').remove()" class="btn btn-danger btn-sm">✕</button>
 </div>
 <?php endforeach; ?>
@@ -1467,16 +1524,46 @@ function switchLang(prefix, lang) {
   document.getElementById(`${prefix}-${lang}`).classList.add('active');
   event.target.classList.add('active');
 }
+// Hub Request field: suggest leads requests while typing (value = request id)
+(function () {
+  var input = document.getElementById('lead-req-input');
+  var list  = document.getElementById('lead-req-list');
+  if (!input || !list) return;
+  var timer = null;
+  input.addEventListener('input', function () {
+    clearTimeout(timer);
+    var q = input.value.trim();
+    if (q.length < 2) return;
+    timer = setTimeout(function () {
+      fetch('program_edit.php?id=<?= $id ?>&ajax=lead_search&q=' + encodeURIComponent(q), {credentials: 'same-origin'})
+        .then(function (r) { return r.json(); })
+        .then(function (rows) {
+          var html = '';
+          for (var i = 0; i < rows.length; i++) {
+            var label = '#' + rows[i].id + ' ' + rows[i].customer_name + (rows[i].period ? ' (' + rows[i].period + ')' : '');
+            html += '<option value="' + rows[i].id + '" label="' + label.replace(/"/g, '&quot;') + '">' + label.replace(/</g, '&lt;') + '</option>';
+          }
+          list.innerHTML = html;
+        })
+        .catch(function () {});
+    }, 250);
+  });
+})();
+
 function addIncRow(type) {
-  const list = document.getElementById('inc-list-' + type);
-  const div  = document.createElement('div');
+  var list = document.getElementById('inc-list-' + type);
+  var div  = document.createElement('div');
+  var inp  = 'flex:1;padding:8px 11px;border:1.5px solid var(--grey-lt);border-radius:6px;font-size:.83rem;';
   div.className = 'inc-row';
   div.style.cssText = 'display:flex;gap:8px;align-items:center;margin-bottom:8px;';
-  div.innerHTML = `<input type="hidden" name="inc_type[]" value="${type}">
-    <input type="hidden" name="inc_std[]" value="">
-    <input type="text" name="inc_en[]" style="flex:1;padding:8px 11px;border:1.5px solid var(--grey-lt);border-radius:6px;font-size:.83rem;" placeholder="English text">
-    <input type="text" name="inc_it[]" style="width:180px;padding:8px 11px;border:1.5px solid var(--grey-lt);border-radius:6px;font-size:.83rem;" placeholder="Italiano">
-    <button type="button" onclick="this.closest('.inc-row').remove()" class="btn btn-danger btn-sm">✕</button>`;
+  div.innerHTML = '<input type="hidden" name="inc_type[]" value="' + type + '">'
+    + '<input type="hidden" name="inc_std[]" value="">'
+    + '<input type="text" name="inc_en[]" style="' + inp + '" placeholder="English text">'
+    + '<input type="text" name="inc_it[]" style="' + inp + '" placeholder="Italiano">'
+    + '<input type="hidden" name="inc_fr[]" value="">'
+    + '<input type="hidden" name="inc_es[]" value="">'
+    + '<input type="hidden" name="inc_de[]" value="">'
+    + '<button type="button" onclick="this.closest(\'.inc-row\').remove()" class="btn btn-danger btn-sm">✕</button>';
   list.appendChild(div);
 }
 

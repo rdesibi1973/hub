@@ -79,62 +79,28 @@ if ($action === 'duplicate' && $id && $can_edit) {
         ? $_GET['dest_type']
         : $tab;
 
-    $src = iti_get_program($id);
-    if ($src) {
-        $db->prepare(
-            'INSERT INTO iti_programs
-             (program_type,sample_program_id,terms_id,
-              ref_number,
-              title_en,title_it,title_fr,title_es,title_de,
-              subtitle_en,subtitle_it,subtitle_fr,subtitle_es,subtitle_de,
-              duration_days,pax_adults,pax_children,flights_included,
-              status,display_language,display_currency,created_by)
-             SELECT ?,id,terms_id,
-              ref_number,
-              CONCAT(title_en," (copy)"),title_it,title_fr,title_es,title_de,
-              subtitle_en,subtitle_it,subtitle_fr,subtitle_es,subtitle_de,
-              duration_days,pax_adults,pax_children,flights_included,
-              "draft",display_language,display_currency,?
-             FROM iti_programs WHERE id=?'
-        )->execute([$dest_type, $_cu['username'] ?? 'system', $id]);
-        $new_id = (int)$db->lastInsertId();
-
-        foreach (iti_get_program_days($id) as $day) {
-            $db->prepare(
-                'INSERT INTO iti_program_days
-                 (program_id,day_number,day_title_en,day_title_it,day_title_fr,day_title_es,day_title_de,
-                  start_lodge_id,start_destination_id,end_lodge_id,end_lodge_custom,transfer_route_id,
-                  narrative_en,narrative_it,narrative_fr,narrative_es,narrative_de,
-                  own_arrangement,own_arrangement_nights,
-                  meal_breakfast,meal_lunch,meal_dinner,meal_all_inclusive,meal_game_package)
-                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
-            )->execute([
-                $new_id,$day['day_number'],
-                $day['day_title_en'],$day['day_title_it'],$day['day_title_fr'],
-                $day['day_title_es'],$day['day_title_de'],
-                $day['start_lodge_id'],$day['start_destination_id'],$day['end_lodge_id'],
-                $day['end_lodge_custom']??null,$day['transfer_route_id'],
-                $day['narrative_en'],$day['narrative_it'],$day['narrative_fr'],
-                $day['narrative_es'],$day['narrative_de'],
-                $day['own_arrangement']??0,$day['own_arrangement_nights']??0,
-                $day['meal_breakfast'],$day['meal_lunch'],$day['meal_dinner'],
-                $day['meal_all_inclusive']??0,$day['meal_game_package']??0,
-            ]);
-            $new_day_id = (int)$db->lastInsertId();
-            foreach (iti_get_day_activities((int)$day['id']) as $a) {
-                $db->prepare('INSERT INTO iti_day_activities (program_day_id,activity_id,sort_order,custom_note_en,custom_note_it,custom_note_fr,custom_note_es,custom_note_de) VALUES (?,?,?,?,?,?,?,?)')->execute([$new_day_id,$a['activity_id'],$a['sort_order'],$a['custom_note_en'],$a['custom_note_it'],$a['custom_note_fr'],$a['custom_note_es'],$a['custom_note_de']]);
-            }
-            foreach (iti_get_day_flights((int)$day['id']) as $fl) {
-                $db->prepare('INSERT INTO iti_day_flights (program_day_id,flight_route_id,departure_time,arrival_time,sort_order,note_en,note_it,note_fr,note_es,note_de) VALUES (?,?,?,?,?,?,?,?,?,?)')->execute([$new_day_id,$fl['flight_route_id'],$fl['departure_time'],$fl['arrival_time'],$fl['sort_order'],$fl['note_en'],$fl['note_it'],$fl['note_fr'],$fl['note_es'],$fl['note_de']]);
-            }
+    // From a Hub leads request ("Create from sample"): personal copy linked to it, sample title kept.
+    $lead_id = (int)($_GET['lead_request_id'] ?? 0);
+    $set     = [];
+    if ($lead_id) {
+        iti_ensure_lead_link();
+        $lead = iti_get_lead_request($lead_id);
+        if (!$lead) {
+            iti_flash_set('error', "Hub request #{$lead_id} not found.");
+            iti_redirect("programs.php?type={$tab}");
         }
-        foreach (iti_get_program_prices($id) as $cat => $p) {
-            $db->prepare('INSERT INTO iti_program_prices (program_id,price_category,price_per_pax_usd,price_per_pax_eur,single_suppl_usd,single_suppl_eur,child_price_usd,child_price_eur,min_pax,valid_from,valid_to,notes) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)')->execute([$new_id,$cat,$p['price_per_pax_usd'],$p['price_per_pax_eur'],$p['single_suppl_usd'],$p['single_suppl_eur'],$p['child_price_usd'],$p['child_price_eur'],$p['min_pax'],$p['valid_from'],$p['valid_to'],$p['notes']]);
-        }
-        foreach (iti_get_program_inclusions($id) as $inc) {
-            $db->prepare('INSERT INTO iti_program_inclusions (program_id,item_type,standard_inclusion_id,text_en,text_it,text_fr,text_es,text_de,sort_order) VALUES (?,?,?,?,?,?,?,?,?)')->execute([$new_id,$inc['item_type'],$inc['standard_inclusion_id'],$inc['text_en'],$inc['text_it'],$inc['text_fr'],$inc['text_es'],$inc['text_de'],$inc['sort_order']]);
-        }
-
+        $src_p     = iti_get_program($id);
+        $dest_type = 'personal';
+        $set       = ['lead_request_id' => $lead_id, 'title_en' => $src_p['title_en'] ?? ''];
+    }
+    try {
+        $new_id = iti_duplicate_program($id, $dest_type, $_cu['username'] ?? 'system', $set);
+    } catch (Exception $e) {
+        error_log('ITI duplicate program #' . $id . ': ' . $e->getMessage());
+        iti_flash_set('error', 'Duplicate failed, nothing was copied: ' . $e->getMessage());
+        iti_redirect("programs.php?type={$tab}");
+    }
+    if ($new_id) {
         $dest_label = $dest_type === 'personal' ? 'Personal' : 'Sample';
         iti_flash_set('success', "Program duplicated as {$dest_label}.");
         iti_redirect("program_edit.php?id={$new_id}");

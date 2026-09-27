@@ -961,6 +961,56 @@ loadNextProg();
 </div>
 <?php endif; ?>
 
+<!-- ITINERARIES (ITI programs linked via iti_programs.lead_request_id) -->
+<?php
+$itiPrograms = []; $itiSamples = [];
+try {
+    $st = $db->prepare("SELECT id, title_en, status, start_date, is_published FROM iti_programs WHERE lead_request_id = ? ORDER BY id DESC");
+    $st->execute([$r['id']]);
+    $itiPrograms = $st->fetchAll();
+} catch (PDOException $e) { /* column created on first use of the ITI module */ }
+$itiCanCreate = in_array($cu['role_name'] ?? '', ['admin', 'manager']);
+if ($itiCanCreate) {
+    $itiSamples = $db->query("SELECT id, title_en, duration_days FROM iti_programs WHERE program_type='sample' AND status!='cancelled' ORDER BY title_en")->fetchAll();
+}
+?>
+<?php if ($itiPrograms || $itiCanCreate): ?>
+<div class="section-label">Itineraries</div>
+<div class="table-wrap" style="max-width:860px;margin-bottom:20px">
+  <?php if ($itiPrograms): ?>
+  <table style="width:100%;border-collapse:collapse;font-size:.85rem;">
+    <tbody>
+      <?php foreach ($itiPrograms as $ip): ?>
+      <tr style="border-bottom:1px solid #f3f4f6;">
+        <td style="padding:8px 14px;font-weight:600;"><a href="../iti/program_edit.php?id=<?= (int)$ip['id'] ?>" style="color:var(--black);text-decoration:none;"><?= h($ip['title_en']) ?></a></td>
+        <td style="padding:8px 14px;color:var(--grey-mid);font-size:.8rem;"><?= $ip['start_date'] ? date('d M Y', strtotime($ip['start_date'])) : '—' ?></td>
+        <td style="padding:8px 14px;font-size:.78rem;"><?= h($ip['status']) ?><?= $ip['is_published'] ? ' · published' : '' ?></td>
+        <td style="padding:8px 14px;display:flex;gap:8px;justify-content:flex-end;">
+          <a href="../iti/program_edit.php?id=<?= (int)$ip['id'] ?>" class="btn btn-outline" style="font-size:.75rem;padding:4px 10px;">✏️ Edit</a>
+          <a href="../iti/program_doc.php?id=<?= (int)$ip['id'] ?>" target="_blank" class="btn btn-outline" style="font-size:.75rem;padding:4px 10px;">👁 Preview</a>
+        </td>
+      </tr>
+      <?php endforeach; ?>
+    </tbody>
+  </table>
+  <?php endif; ?>
+  <?php if ($itiCanCreate && $itiSamples): ?>
+  <form method="GET" action="../iti/programs.php" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:12px 14px;<?= $itiPrograms ? 'border-top:1px solid #f3f4f6;' : '' ?>">
+    <input type="hidden" name="action" value="duplicate">
+    <input type="hidden" name="type" value="personal">
+    <input type="hidden" name="dest_type" value="personal">
+    <input type="hidden" name="lead_request_id" value="<?= (int)$r['id'] ?>">
+    <select name="id" style="padding:6px 10px;border:1.5px solid #e5e7eb;border-radius:6px;font-size:.82rem;min-width:260px;">
+      <?php foreach ($itiSamples as $s): ?>
+      <option value="<?= (int)$s['id'] ?>"><?= h($s['title_en']) ?> (<?= (int)$s['duration_days'] ?>d)</option>
+      <?php endforeach; ?>
+    </select>
+    <button type="submit" class="btn btn-outline" style="font-size:.75rem;padding:5px 12px;">📋 Create from sample</button>
+  </form>
+  <?php endif; ?>
+</div>
+<?php endif; ?>
+
 <!-- QUOTES -->
 <?php if (!empty($linkedQuotes)): ?>
 <div class="section-label">Quotes</div>
