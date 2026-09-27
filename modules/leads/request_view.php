@@ -232,14 +232,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 }
 
 // Reasons a request can be marked Lost (slug => label). Used by the status
-// handler below and the "Lost" modal in the view. Kept inline because the
-// shared config.php lives only on the server.
-$LOST_REASONS = [
-    'insufficient_budget' => 'Insufficient budget',
-    'trip_postponed'      => 'Trip postponed',
-    'no_more_replies'     => 'No more replies',
-    'other'               => 'Other',
-];
+// handler below, the "Lost" modal in the view and the inline status in requests.php.
+$LOST_REASONS = require __DIR__ . '/includes/lost_reasons.php';
 
 // ── Inline status update ────────────────────────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['quick_status'])) {

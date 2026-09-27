@@ -340,7 +340,10 @@ include 'includes/header.php';
             <?php endif; ?>
           </td>
           <td class="text-muted"><?= $r['pax'] ?: '—' ?></td>
-          <td><span class="badge <?= STATUSES[$r['status']] ?? '' ?>"><?= h($r['status']) ?></span><?php
+          <?php $canStatus = !$isStaff || (int)$r['agent_id'] === (int)$staffAgentId
+                           || in_array(current_user()['role_name'] ?? '', ['accountant'], true); ?>
+          <td><span class="badge <?= STATUSES[$r['status']] ?? '' ?><?= $canStatus ? ' st-click' : '' ?>"
+                <?php if ($canStatus): ?>data-id="<?= (int)$r['id'] ?>" data-status="<?= h($r['status']) ?>" title="Click to change status" onclick="stOpen(this)"<?php endif; ?>><?= h($r['status']) ?></span><?php
             if ($r['status'] === 'Booked' && !empty($r['confirmation_date'])):
                 echo ' <span style="font-size:.72rem;color:#2E6B3E;white-space:nowrap;">'
                    . date('d M Y', strtotime($r['confirmation_date']))
@@ -417,6 +420,98 @@ function bulkDelete() {
     statusMap[el.value] = el.dataset.status || '';
   });
   deleteSelectedRequests(folderMap, statusMap);
+}
+</script>
+
+<!-- ── Inline status change (click on the status badge) ───────────────────── -->
+<style>
+.st-click{cursor:pointer}
+.st-click:hover{outline:2px solid rgba(192,33,27,.35);outline-offset:1px}
+#st-menu{display:none;position:absolute;z-index:9990;background:#fff;border:1px solid var(--grey-lt);border-radius:8px;
+         box-shadow:0 8px 24px rgba(0,0,0,.15);padding:4px;min-width:150px}
+#st-menu button{display:block;width:100%;text-align:left;background:none;border:0;padding:6px 10px;font-size:.82rem;cursor:pointer;border-radius:5px}
+#st-menu button:hover{background:#f5f5f5}
+#st-menu button.cur{font-weight:700}
+</style>
+<div id="st-menu"></div>
+<?php $LOST_REASONS = require __DIR__ . '/includes/lost_reasons.php'; ?>
+<div id="st-lost" style="display:none;position:fixed;inset:0;z-index:9998;background:rgba(0,0,0,.45);align-items:center;justify-content:center;">
+  <div style="background:#fff;border-radius:10px;max-width:420px;width:calc(100% - 40px);padding:22px 24px;box-shadow:0 12px 40px rgba(0,0,0,.25);">
+    <h3 style="margin:0 0 4px;font-family:'Merriweather',serif;font-size:1.05rem;color:var(--red-dk);">Mark as Lost</h3>
+    <p style="margin:0 0 14px;font-size:.82rem;color:var(--grey-mid);">Why was this request lost?</p>
+    <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px;">
+      <?php foreach ($LOST_REASONS as $slug => $label): ?>
+      <label style="display:flex;align-items:center;gap:9px;font-size:.86rem;color:var(--grey-dk);cursor:pointer;">
+        <input type="radio" name="st_lost_reason" value="<?= h($slug) ?>"> <?= h($label) ?>
+      </label>
+      <?php endforeach; ?>
+    </div>
+    <label style="display:block;font-size:.78rem;color:var(--grey-mid);margin-bottom:5px;">Note (optional)</label>
+    <textarea id="st-lost-note" rows="3" style="width:100%;box-sizing:border-box;font-size:.85rem;padding:8px 10px;border:1.5px solid var(--grey-lt);border-radius:6px;resize:vertical;" placeholder="Add any detail…"></textarea>
+    <div id="st-lost-err" style="display:none;color:var(--red-dk);font-size:.78rem;margin-top:8px;">Please choose a reason.</div>
+    <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:18px;">
+      <button type="button" class="btn btn-outline" style="font-size:.82rem;" onclick="stLostClose()">Cancel</button>
+      <button type="button" class="btn" style="font-size:.82rem;background:var(--red);color:#fff;" onclick="stLostConfirm()">Confirm Lost</button>
+    </div>
+  </div>
+</div>
+<script>
+// Click a status badge → pick a new status → saved through request_view.php
+// (same handler, permissions and Lost-reason rules as the request page).
+var ST_LIST = <?= json_encode(array_keys(STATUSES)) ?>;
+var stBadge = null;
+function stOpen(badge) {
+  stBadge = badge;
+  var menu = document.getElementById('st-menu'), html = '';
+  for (var i = 0; i < ST_LIST.length; i++) {
+    var s = ST_LIST[i];
+    html += '<button type="button" class="' + (s === badge.dataset.status ? 'cur' : '') + '" data-s="' + s.replace(/"/g, '&quot;') + '">'
+          + (s === badge.dataset.status ? '✓ ' : '') + s.replace(/</g, '&lt;') + '</button>';
+  }
+  menu.innerHTML = html;
+  var r = badge.getBoundingClientRect();
+  menu.style.left = (r.left + window.scrollX) + 'px';
+  menu.style.top  = (r.bottom + window.scrollY + 4) + 'px';
+  menu.style.display = 'block';
+}
+document.addEventListener('click', function (e) {
+  var menu = document.getElementById('st-menu');
+  if (e.target.closest && e.target.closest('#st-menu button')) {
+    var s = e.target.closest('button').dataset.s;
+    menu.style.display = 'none';
+    if (!stBadge || s === stBadge.dataset.status) return;
+    if (s === 'Lost') { stLostOpen(); return; }
+    stSave(s, '', '');
+    return;
+  }
+  if (!e.target.classList || !e.target.classList.contains('st-click')) menu.style.display = 'none';
+});
+function stLostOpen() {
+  document.querySelectorAll('input[name="st_lost_reason"]').forEach(function (r) { r.checked = false; });
+  document.getElementById('st-lost-note').value = '';
+  document.getElementById('st-lost-err').style.display = 'none';
+  document.getElementById('st-lost').style.display = 'flex';
+}
+function stLostClose() { document.getElementById('st-lost').style.display = 'none'; }
+function stLostConfirm() {
+  var c = document.querySelector('input[name="st_lost_reason"]:checked');
+  if (!c) { document.getElementById('st-lost-err').style.display = 'block'; return; }
+  stLostClose();
+  stSave('Lost', c.value, document.getElementById('st-lost-note').value);
+}
+function stSave(status, reason, note) {
+  var fd = new FormData();
+  fd.append('quick_status', status);
+  fd.append('lost_reason', reason);
+  fd.append('lost_note', note);
+  stBadge.style.opacity = '.5';
+  fetch('request_view.php?id=' + stBadge.dataset.id, { method: 'POST', body: fd, headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+    .then(function (r) { return r.json(); })
+    .then(function (j) {
+      if (j && j.ok) { location.reload(); }
+      else { stBadge.style.opacity = ''; alert((j && j.message) || 'Could not change the status.'); }
+    })
+    .catch(function (e) { stBadge.style.opacity = ''; alert('Could not change the status: ' + e.message); });
 }
 </script>
 
