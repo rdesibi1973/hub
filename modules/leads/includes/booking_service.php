@@ -593,6 +593,25 @@ function bs_confirm_plan(PDO $db, int $reqId, array $in): array {
     return $plan;
 }
 
+/** Stable id of a pre-flight check (level + message) for the "Accept" checkboxes. */
+function bs_check_id(array $c): string {
+    return substr(md5(($c['level'] ?? '') . '|' . ($c['msg'] ?? '')), 0, 12);
+}
+
+/**
+ * Non-green checks (warn / error / info) not in $accepted — confirmation is blocked
+ * until each is accepted. Returns [id => message].
+ */
+function bs_checks_unaccepted(array $checks, array $accepted): array {
+    $out = [];
+    foreach ($checks as $c) {
+        if (($c['level'] ?? 'info') === 'ok') continue;
+        $id = bs_check_id($c);
+        if (!in_array($id, $accepted, true)) $out[$id] = $c['msg'] ?? '';
+    }
+    return $out;
+}
+
 /** Name shown in the preview panel for a (format-valid) plan. */
 function bs_confirm_display_name(array $plan): ?string {
     if ($plan['grp_action'] === 'ADD') {

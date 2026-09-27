@@ -391,8 +391,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'
         $previewData = ['new_name' => $plan['new_name'], 'errors' => $plan['errs'], 'checks' => [],
                         'fields' => $plan['fields'], 'block' => true, 'can_override' => false, 'grps' => []];
         // fall through to render
+    } elseif ($action === 'confirm_safari'
+              && ($missingAcc = bs_checks_unaccepted($ckNow = bs_confirm_checks($plan), (array)($_POST['cs_accept'] ?? [])))) {
+        // Checks are blocking: every non-green check must be accepted. Re-show the panel.
+        $previewFor  = $reqId;
+        $previewData = [
+            'new_name' => bs_confirm_display_name($plan), 'errors' => [], 'checks' => $ckNow,
+            'fields' => $plan['fields'], 'block' => $plan['block'], 'can_override' => $plan['can_override'],
+            'grps' => $plan['grps'], 'accepted' => (array)($_POST['cs_accept'] ?? []),
+            'accept_msg' => count($missingAcc) . ' check(s) not accepted — tick "Accept" on each one (or fix it), then confirm.',
+        ];
     } elseif ($action === 'confirm_safari') {
-        // ── COMMIT ────────────────────────────────────────────────────────────
+        // ── COMMIT (all checks accepted) ──────────────────────────────────────
         $res = bs_confirm_commit($db, $plan, $proceed);
         flash($res['msg'], $res['ok'] ? 'info' : 'error');
         $qsParts = $backQs;
@@ -961,15 +971,27 @@ include 'includes/header.php';
               <div style="font-size:.66rem;color:var(--grey-mid);margin-bottom:2px"><?= $pv['grpAction']==='ADD' ? 'Will file under' : 'New folder name' ?></div>
               <div class="bo-folder" style="font-size:.74rem;margin-bottom:8px">📁 <?= h($previewData['new_name']) ?></div>
               <?php if (!empty($previewData['checks'])): ?>
-                <div style="font-size:.66rem;color:var(--grey-mid);margin-bottom:3px">Pre-flight checks (advisory)</div>
+                <?php $pvAcc = (array)($previewData['accepted'] ?? []); ?>
+                <div style="font-size:.66rem;color:var(--grey-mid);margin-bottom:3px">Pre-flight checks — fix each one, or tick <strong>Accept</strong> to go ahead anyway</div>
                 <ul style="margin:0 0 8px 0;padding:0;list-style:none;font-size:.72rem;line-height:1.5">
                   <?php foreach ($previewData['checks'] as $ck):
                         $lv = $ck['level'] ?? 'info';
                         $ic = $lv === 'ok' ? '✓' : ($lv === 'warn' ? '⚠' : ($lv === 'error' ? '✖' : 'ℹ'));
-                        $cl = $lv === 'ok' ? '#1A6B3A' : ($lv === 'warn' ? '#B26A00' : ($lv === 'error' ? '#C0211B' : '#666')); ?>
-                    <li style="color:<?= $cl ?>"><?= $ic ?> <?= h($ck['msg']) ?></li>
+                        $cl = $lv === 'ok' ? '#1A6B3A' : ($lv === 'warn' ? '#B26A00' : ($lv === 'error' ? '#C0211B' : '#666'));
+                        $ckId = bs_check_id($ck); ?>
+                    <li style="color:<?= $cl ?>;display:flex;gap:8px;align-items:flex-start;justify-content:space-between;padding:2px 0;border-bottom:1px dashed #eee">
+                      <span><?= $ic ?> <?= h($ck['msg']) ?></span>
+                      <?php if ($lv !== 'ok'): ?>
+                        <label style="white-space:nowrap;font-weight:600;color:#374151;cursor:pointer">
+                          <input type="checkbox" name="cs_accept[]" value="<?= h($ckId) ?>" form="csform<?= $rid ?>" class="csacc<?= $rid ?>"
+                                 <?= in_array($ckId, $pvAcc, true) ? 'checked' : '' ?> onchange="csAccCheck(<?= $rid ?>)"> Accept</label>
+                      <?php endif; ?>
+                    </li>
                   <?php endforeach; ?>
                 </ul>
+                <?php if (!empty($previewData['accept_msg'])): ?>
+                  <div style="font-size:.7rem;color:#C0211B;font-weight:600;margin-bottom:6px">✖ <?= h($previewData['accept_msg']) ?></div>
+                <?php endif; ?>
               <?php endif; ?>
 
               <?php if ($pvGrpMult): ?>
@@ -987,23 +1009,24 @@ include 'includes/header.php';
                 <!-- Blocked, no override (e.g. ADD but no GRP exists): must fix the form above. -->
                 <div style="font-size:.7rem;color:#B26A00;font-weight:600">Cannot confirm yet — adjust the booking type / GRP code above and re-check.</div>
               <?php else: ?>
-                <form method="POST" onsubmit="return confirm('<?= $pv['grpAction']==='ADD' ? 'Move the folder into the GRP and mark Booked?' : 'Move the Dropbox folder to 001_Safari and mark Booked?' ?>');" style="margin:0">
+                <form method="POST" id="csform<?= $rid ?>" onsubmit="return confirm('<?= $pv['grpAction']==='ADD' ? 'Move the folder into the GRP and mark Booked?' : 'Move the Dropbox folder to 001_Safari and mark Booked?' ?>');" style="margin:0">
                   <input type="hidden" name="action" value="confirm_safari">
                   <?php $csHidden(); ?>
                   <input type="hidden" name="cs_grpmain" value="<?= h($pv['grpMain']) ?>">
                   <?php if ($pvBlock && $pvOverride): ?>
                     <label style="display:flex;gap:6px;align-items:flex-start;font-size:.7rem;color:#B26A00;margin-bottom:6px;font-weight:600">
-                      <input type="checkbox" name="cs_proceed" value="1" onchange="document.getElementById('csbtn<?= $rid ?>').disabled=!this.checked" style="margin-top:2px">
+                      <input type="checkbox" name="cs_proceed" value="1" id="csproc<?= $rid ?>" onchange="csAccCheck(<?= $rid ?>)" style="margin-top:2px">
                       Proceed anyway — a GRP already exists for this date; create a second one deliberately.
                     </label>
                     <button type="submit" id="csbtn<?= $rid ?>" class="btn btn-red btn-sm" disabled>Continue anyway</button>
                   <?php else: ?>
                     <div style="display:flex;gap:6px;align-items:center">
-                      <button type="submit" class="btn btn-red btn-sm"><?= $pv['grpAction']==='ADD' ? '✅ Add to GRP' : '✅ Confirm now' ?></button>
-                      <span style="font-size:.66rem;color:var(--grey-mid)">Warnings do not block — confirm when you're satisfied.</span>
+                      <button type="submit" id="csbtn<?= $rid ?>" class="btn btn-red btn-sm"><?= $pv['grpAction']==='ADD' ? '✅ Add to GRP' : '✅ Confirm now' ?></button>
+                      <span id="csnote<?= $rid ?>" style="font-size:.66rem;color:var(--grey-mid)"></span>
                     </div>
                   <?php endif; ?>
                 </form>
+                <script>document.addEventListener('DOMContentLoaded', function () { csAccCheck(<?= $rid ?>); });</script>
               <?php endif; ?>
             <?php endif; ?>
           </div>
@@ -1123,6 +1146,19 @@ include 'includes/header.php';
 <?php endif; ?>
 
 <script>
+// Confirm Safari: the confirm button is enabled only when every non-green check is accepted
+// (and, for a duplicate GRP, "Proceed anyway" is ticked). The server re-checks on submit.
+function csAccCheck(rid) {
+  var btn = document.getElementById('csbtn' + rid);
+  if (!btn) return;
+  var boxes = document.querySelectorAll('.csacc' + rid), open = 0;
+  for (var i = 0; i < boxes.length; i++) { if (!boxes[i].checked) open++; }
+  var proc = document.getElementById('csproc' + rid);
+  btn.disabled = open > 0 || (proc && !proc.checked);
+  var note = document.getElementById('csnote' + rid);
+  if (note) note.textContent = open > 0 ? (open + ' check(s) to accept before confirming') : '';
+}
+
 function toggleRename(id) {
   var f = document.getElementById('rn' + id);
   if (f) f.style.display = (f.style.display === 'none' || !f.style.display) ? 'block' : 'none';
