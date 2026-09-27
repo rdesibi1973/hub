@@ -743,6 +743,8 @@ include 'includes/header.php';
         $canReschedule = $ppSplit !== null;
         $canPostpone   = $ppSplit !== null && $ppSplit['dated'];
         $isPostponed   = $ppSplit !== null && !$ppSplit['dated'];
+        // Change to (status retag) only applies to folders under 001_Safari.
+        $inSafari      = strpos($r['dropbox_url'] ?? '', $ROOT_MAP['001_Safari']) !== false;
     ?>
       <?php $isCancelled = in_array($r['status'] ?? '', ['Cancelled', 'Lost'], true); ?>
       <tr<?= $isCancelled ? ' style="background:#fcf0f0"' : '' ?>>
@@ -1073,6 +1075,7 @@ include 'includes/header.php';
         </td>
         <td><span class="badge"><?= h($psLabel) ?></span></td>
         <td>
+          <?php if ($inSafari): ?>
           <form method="POST" style="display:flex;gap:6px;align-items:center;margin:0"
                 onsubmit="return confirm('<?= $isGrp ? 'GROUP: this renames the shared group folder and updates ALL its bookings.\\n\\n' : '' ?>Rename the Dropbox folder and set to ' + this.new_status.value + '?\n\nThis renames the real Dropbox folder.');">
             <input type="hidden" name="action" value="change_status">
@@ -1090,6 +1093,9 @@ include 'includes/header.php';
             </select>
             <button type="submit" class="btn btn-red btn-sm"><?= $isGrp ? 'Apply (group)' : 'Apply' ?></button>
           </form>
+          <?php else: ?>
+          <span style="color:var(--grey-mid)">—</span>
+          <?php endif; ?>
         </td>
       </tr>
     <?php endforeach; ?>
