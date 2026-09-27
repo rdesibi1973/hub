@@ -79,6 +79,11 @@ Returns `copied`, `skipped` (already there), `missing` (template not found), `un
 
 The existing rates in Hub → Pricing → Jeep, Activities & Flights are **costs** (quotes add the markup on them); the new "Sale" column holds the price to the agency.
 
+### `update_rate` (POST)
+`type` (`flight`|`activity`|`jeep`), `id` (from `get_rates`), and any of `cost` (what we pay — `rate_pax` / `rate`),
+`sale` (price to agency; not for jeep), `valid_from`, `valid_to` (YYYY-MM-DD or null), `active` (bool), `notes`.
+Returns `before` / `after`; dry-run unless `"confirm": true`.
+
 ### `fill_calc` (POST)
 Fills the booking's `NN_<folder>_<Prog>_Calc.xlsx` server-side (PhpSpreadsheet) with the house rules,
 recalculates, and verifies the result the way the Hub parser reads it. **Dry-run** (built and verified

@@ -80,7 +80,7 @@ function agent_ensure_schema(PDO $db): void {
 function agent_audit(PDO $db, string $action, $reqId, array $payload, string $resultJson, int $code): void {
     global $agentUser;
     agent_ensure_schema($db);
-    $dry = in_array($action, ['confirm_booking', 'send_booking_email', 'rollback_booking', 'fill_calc', 'iti_save_texts'], true) && empty($payload['confirm']);
+    $dry = in_array($action, ['confirm_booking', 'send_booking_email', 'rollback_booking', 'fill_calc', 'iti_save_texts', 'update_rate'], true) && empty($payload['confirm']);
     $db->prepare("INSERT INTO agent_audit_log (ts, action, request_id, user_id, http_code, dry_run, payload_json, result_json, ip)
                   VALUES (?,?,?,?,?,?,?,?,?)")
        ->execute([
@@ -512,6 +512,62 @@ try {
         agent_out($out);
     }
 
+    // ── update_rate ──────────────────────────────────────────────────────────
+    // Change one rate row: flight (flight_routes), activity (activity_rates) or jeep
+    // (jeep_rates). Fields: cost (what we pay), sale (price to agency), valid_from,
+    // valid_to, active, notes. Dry-run (before/after) unless "confirm": true.
+    case 'update_rate': {
+        agent_require_method('POST');
+        calc_rates_schema($db);
+        $types = [
+            'flight'   => ['table' => 'flight_routes',  'cols' => ['cost' => 'rate_pax', 'sale' => 'sale_pax', 'valid_from' => 'valid_from', 'valid_to' => 'valid_to', 'active' => 'active', 'notes' => 'notes'], 'name' => 'route_name'],
+            'activity' => ['table' => 'activity_rates', 'cols' => ['cost' => 'rate',     'sale' => 'sale',     'valid_from' => 'valid_from', 'valid_to' => 'valid_to', 'active' => 'active', 'notes' => 'notes'], 'name' => 'name'],
+            'jeep'     => ['table' => 'jeep_rates',     'cols' => ['cost' => 'rate',                           'valid_from' => 'valid_from', 'valid_to' => 'valid_to',                     'notes' => 'notes'], 'name' => 'type'],
+        ];
+        $type = (string)($in['type'] ?? '');
+        if (!isset($types[$type])) agent_fail('type must be flight, activity or jeep');
+        $cfg = $types[$type];
+        $rid = (int)($in['id'] ?? 0);
+        $st = $db->prepare('SELECT * FROM ' . $cfg['table'] . ' WHERE id = ?');
+        $st->execute([$rid]);
+        $before = $st->fetch(PDO::FETCH_ASSOC);
+        if (!$before) agent_fail(ucfirst($type) . ' rate ' . $rid . ' not found (ids: get_rates)', 404);
+
+        $set = []; $args = []; $after = $before;
+        foreach ($cfg['cols'] as $field => $col) {
+            if (!array_key_exists($field, $in)) continue;
+            $v = $in[$field];
+            if ($field === 'cost' || $field === 'sale') {
+                if ($v === null || $v === '') { if ($field === 'cost') agent_fail('cost cannot be empty'); $v = null; }
+                elseif (!is_numeric($v) || (float)$v < 0) agent_fail($field . ' must be a number ≥ 0');
+                else $v = round((float)$v, 2);
+            } elseif ($field === 'valid_from' || $field === 'valid_to') {
+                if ($v === null || $v === '') { if ($field === 'valid_from') agent_fail('valid_from cannot be empty'); $v = null; }
+                elseif (!preg_match('/^\d{4}-\d{2}-\d{2}$/', (string)$v)) agent_fail($field . ' must be YYYY-MM-DD');
+            } elseif ($field === 'active') {
+                $v = !empty($v) ? 1 : 0;
+            } else {
+                $v = mb_substr(trim((string)$v), 0, 200);
+            }
+            $set[] = $col . ' = ?'; $args[] = $v; $after[$col] = $v;
+        }
+        if (!$set) agent_fail('Nothing to change — give cost, sale, valid_from, valid_to, active or notes', 400, ['fields' => array_keys($cfg['cols'])]);
+
+        $summary = function (array $r) use ($cfg) {
+            $out = ['id' => (int)$r['id'], 'name' => $r[$cfg['name']] ?? ''];
+            foreach ($cfg['cols'] as $field => $col) $out[$field] = $r[$col] ?? null;
+            return $out;
+        };
+        if (empty($in['confirm'])) {
+            agent_out(['ok' => true, 'dry_run' => true, 'type' => $type, 'before' => $summary($before), 'after' => $summary($after),
+                       'message' => 'Dry run — nothing saved. Resend with "confirm": true to save.']);
+        }
+        $args[] = $rid;
+        $db->prepare('UPDATE ' . $cfg['table'] . ' SET ' . implode(', ', $set) . ' WHERE id = ?')->execute($args);
+        $st->execute([$rid]);
+        agent_out(['ok' => true, 'dry_run' => false, 'type' => $type, 'before' => $summary($before), 'after' => $summary($st->fetch(PDO::FETCH_ASSOC))]);
+    }
+
     // ── fill_calc ────────────────────────────────────────────────────────────
     // Fill the booking's *_Calc.xlsx server-side with the house rules; dry-run
     // (built + verified on a copy) unless "confirm": true.
@@ -603,7 +659,7 @@ try {
         agent_fail('Unknown action "' . $agentAction . '"', 400, ['actions' => [
             'find_requests', 'list_agencies', 'create_request', 'update_request', 'list_standard_programs',
             'copy_program', 'get_rates', 'fill_calc', 'confirm_preview', 'confirm_booking', 'send_booking_email',
-            'rollback_booking', 'iti_programs', 'iti_texts', 'iti_save_texts',
+            'rollback_booking', 'iti_programs', 'iti_texts', 'iti_save_texts', 'update_rate',
         ]]);
     }
 } catch (Throwable $e) {
