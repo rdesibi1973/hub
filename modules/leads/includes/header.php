@@ -158,13 +158,8 @@ header {
   </a>
   <?php endif; ?>
   <a href="requests_import_list.php" class="<?= in_array($cur,['requests_import_list.php','request_import_edit.php','reports_import.php']) ? 'active':'' ?>">Historical</a>
-  <?php if ($isMgr): ?>
-  <a href="reconcile.php" class="<?= $cur==='reconcile.php'?'active':'' ?>">🔗 Reconcile</a>
-  <a href="import_folder.php" class="<?= $cur==='import_folder.php'?'active':'' ?>">📁 Import Group</a>
-  <?php endif; ?>
   <?php endif; // !isLeadsRestricted ?>
   <?php if (!isLeadsRestricted()): ?>
-  <a href="pricing.php" class="<?= in_array($cur,['pricing.php','pricing_lodge.php','pricing_activities.php']) ? 'active':'' ?>">Pricing</a>
   <a href="../iti/index.php" class="">🗺️ Itineraries</a>
   <?php endif; ?>
   <?php if (in_array($currentUser['role_name'] ?? '', ['admin','manager'])): ?>
