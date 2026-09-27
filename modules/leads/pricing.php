@@ -78,6 +78,7 @@ include 'includes/header.php';
     <h2 class="page-title">Pricing</h2>
     <p class="page-sub">Manage lodge prices, seasons and room types</p>
   </div>
+  <a href="pricing_activities.php" class="btn btn-outline btn-sm" style="align-self:center">✈️ Flights, Jeep &amp; Activities →</a>
 </div>
 
 <!-- Lodge list -->

@@ -164,7 +164,7 @@ header {
   <?php endif; ?>
   <?php endif; // !isLeadsRestricted ?>
   <?php if (!isLeadsRestricted()): ?>
-  <a href="pricing.php" class="<?= in_array($cur,['pricing.php','pricing_lodge.php']) ? 'active':'' ?>">Pricing</a>
+  <a href="pricing.php" class="<?= in_array($cur,['pricing.php','pricing_lodge.php','pricing_activities.php']) ? 'active':'' ?>">Pricing</a>
   <a href="../iti/index.php" class="">🗺️ Itineraries</a>
   <?php endif; ?>
   <?php if (in_array($currentUser['role_name'] ?? '', ['admin','manager'])): ?>
