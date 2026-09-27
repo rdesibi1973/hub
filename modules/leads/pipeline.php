@@ -13,9 +13,9 @@ $myAgentId = (int)($stmt->fetchColumn() ?: 0);
 $canSeeAll    = in_array($myRole, ['admin','manager']);
 
 // ── AJAX: move card ───────────────────────────────────────────────────────
-// Moving a card normally updates pipeline_column only. Exception: dragging a
-// lead into QUOTED or HOT auto-promotes its status (a lead reaching either of
-// those columns has been quoted). QUOTED fires from NEW or WIP; HOT from any.
+// Status and column stay in step (see "Group cards" below): dropping a card sets
+// the status of its column — NEW/WIP → Inquiry, QUOTED → Quoted, HOT → Hot-Quoted.
+// CONFIRMED only moves the card. Closed statuses (Booked/Lost/Cancelled) are kept.
 if ($_SERVER['REQUEST_METHOD'] === 'POST'
     && ($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '') === 'XMLHttpRequest') {
     header('Content-Type: application/json');
@@ -26,14 +26,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'
     if (!$id || !in_array($col, $allowed, true)) {
         echo json_encode(['ok'=>false,'message'=>'Invalid params']); exit;
     }
-    // Auto-status on drop:
-    //  - into HOT          → 'Hot-Quoted' (a lead in the hot column has been quoted
-    //                        and is heating up); can also be set manually via the LOV.
-    //  - NEW/WIP → QUOTED  → 'Quoted' (a lead reaching QUOTED has been quoted).
-    // Never overwrite a closed/dead status (Booked/Lost/Cancelled).
-    $newStatus = null;
-    if ($col === 'hot')                                            $newStatus = 'Hot-Quoted';
-    elseif ($col === 'quoted' && in_array($from, ['new','wip'], true)) $newStatus = 'Quoted';
+    $colStatus = ['new' => 'Inquiry', 'wip' => 'Inquiry', 'quoted' => 'Quoted', 'hot' => 'Hot-Quoted'];
+    $newStatus = $colStatus[$col] ?? null;
 
     if ($newStatus !== null) {
         $sql  = "UPDATE requests SET pipeline_column=?,
@@ -51,7 +45,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'
         $args[] = $staffAgentId;
     }
     $db->prepare($sql)->execute($args);
-    echo json_encode(['ok'=>true, 'status'=>$newStatus]); exit;
+    // Report the status actually stored (a closed status is left unchanged).
+    $st = $db->prepare("SELECT status FROM requests WHERE id=?");
+    $st->execute([$id]);
+    echo json_encode(['ok'=>true, 'status'=>$newStatus !== null ? $st->fetchColumn() : null]); exit;
 }
 
 // ── Filters ────────────────────────────────────────────────────────────────
@@ -117,13 +114,21 @@ foreach ($columns as $colKey => $colDef) {
     foreach ($colDef['default_statuses'] as $s) $statusToCol[$s] = $colKey;
 }
 
-// Group cards into columns:
-// - explicit pipeline_column wins if it's a known column
-// - fallback: derive from status
+// Group cards into columns — the status decides; only HOT and WIP are manual:
+// - pipeline_column 'booked'          → CONFIRMED
+// - Hot / Hot-Quoted                  → HOT
+// - Quoted                            → QUOTED (HOT if it was moved there by hand)
+// - Inquiry                           → NEW    (WIP if it was moved there by hand)
+// So a status change made anywhere (request page, list, edit, API) moves the card.
 $byCol = array_fill_keys(array_keys($columns), []);
 foreach ($rows as $r) {
     $explicit = $r['pipeline_column'];
-    $colKey   = (isset($columns[$explicit])) ? $explicit : ($statusToCol[$r['status']] ?? null);
+    $status   = $r['status'];
+    if ($explicit === 'booked')                           $colKey = 'booked';
+    elseif (in_array($status, ['Hot', 'Hot-Quoted'], true)) $colKey = 'hot';
+    elseif ($status === 'Quoted')                          $colKey = ($explicit === 'hot') ? 'hot' : 'quoted';
+    elseif ($status === 'Inquiry')                         $colKey = ($explicit === 'wip') ? 'wip' : 'new';
+    else                                                   $colKey = $statusToCol[$status] ?? null;
     if ($colKey) $byCol[$colKey][] = $r;
 }
 
