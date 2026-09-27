@@ -280,7 +280,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array($act, ['change_status', 'r
     $qs = array_filter([
         'q'        => trim($_POST['q'] ?? ''),
         'root'     => trim($_POST['root'] ?? ''),
-        'show_all' => !empty($_POST['show_all']) ? '1' : '',
         'in_files' => !empty($_POST['in_files']) ? '1' : '',
     ], fn($x) => $x !== '');
     header('Location: backoffice.php' . ($qs ? '?' . http_build_query($qs) : ''));
@@ -343,7 +342,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'regro
     $qs = array_filter([
         'q'        => trim($_POST['q'] ?? ''),
         'root'     => trim($_POST['root'] ?? ''),
-        'show_all' => !empty($_POST['show_all']) ? '1' : '',
         'in_files' => !empty($_POST['in_files']) ? '1' : '',
     ], fn($x) => $x !== '');
     header('Location: backoffice.php' . ($qs ? '?' . http_build_query($qs) : ''));
@@ -365,9 +363,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'
     // Preserve the search context so the list re-renders / the redirect returns here.
     $_GET['q']        = trim($_POST['q'] ?? '');
     $_GET['root']     = trim($_POST['root'] ?? '2026');
-    $_GET['show_all'] = !empty($_POST['show_all']) ? '1' : '';
     $_GET['in_files'] = !empty($_POST['in_files']) ? '1' : '';
-    $backQs = http_build_query(array_filter(['q'=>$_GET['q'], 'root'=>$_GET['root'], 'show_all'=>$_GET['show_all'], 'in_files'=>$_GET['in_files']]));
+    $backQs = http_build_query(array_filter(['q'=>$_GET['q'], 'root'=>$_GET['root'], 'in_files'=>$_GET['in_files']]));
 
     $plan = bs_confirm_plan($db, $reqId, [
         'start'   => $_POST['cs_start']   ?? '',
@@ -432,7 +429,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'rollb
     $backQs = http_build_query(array_filter([
         'q'        => trim($_POST['q'] ?? ''),
         'root'     => trim($_POST['root'] ?? ''),
-        'show_all' => !empty($_POST['show_all']) ? '1' : '',
         'in_files' => !empty($_POST['in_files']) ? '1' : '',
     ], fn($x) => $x !== ''));
 
@@ -481,7 +477,6 @@ $CONTRACTS_ROOT = '/000_Contracts';
 
 $q       = trim($_GET['q'] ?? '');
 $root    = $_GET['root'] ?? '2026';
-$showAll = !empty($_GET['show_all']);   // include Cancelled/Lost bookings too
 $inFiles = !empty($_GET['in_files']);   // search file names inside the folders (Dropbox)
 if ($root !== 'All' && $root !== 'Contracts' && !isset($ROOT_MAP[$root])) $root = '2026';
 
@@ -569,9 +564,6 @@ if ($q !== '' && $inFiles) {
                FROM requests r LEFT JOIN agents a ON a.id = r.agent_id
                WHERE (r.customer_name LIKE ? OR r.practice_code LIKE ? OR r.group_folder LIKE ?)";
     $params = [$like, $like, $like];
-    if (!$showAll) {
-        $sql .= " AND r.status NOT IN ('Cancelled','Lost')";
-    }
     if (isset($ROOT_MAP[$root])) {
         $sql     .= " AND LOCATE(?, r.dropbox_url) > 0";
         $params[] = $ROOT_MAP[$root];
@@ -660,9 +652,6 @@ include 'includes/header.php';
   </div>
   <div>
     <label>&nbsp;</label>
-    <label style="font-weight:400;font-size:.82rem;display:flex;align-items:center;gap:6px;white-space:nowrap">
-      <input type="checkbox" name="show_all" value="1" <?= $showAll?'checked':'' ?>> Show cancelled / lost
-    </label>
     <label style="font-weight:400;font-size:.82rem;display:flex;align-items:center;gap:6px;white-space:nowrap;margin-top:4px"
            title="Search Dropbox for a FILE with this name (e.g. INV-002461) and show the folder that contains it">
       <input type="checkbox" name="in_files" value="1" <?= $inFiles?'checked':'' ?>> Search file names (inside folders)
@@ -817,7 +806,6 @@ include 'includes/header.php';
             <input type="hidden" name="request_id" value="<?= (int)$r['id'] ?>">
             <input type="hidden" name="q" value="<?= h($q) ?>">
             <input type="hidden" name="root" value="<?= h($root) ?>">
-            <input type="hidden" name="show_all" value="<?= $showAll ? '1' : '' ?>">
             <input type="hidden" name="in_files" value="<?= $inFiles ? '1' : '' ?>">
             <div style="font-size:.68rem;color:var(--grey-mid);margin-bottom:4px">Now: <?= $curGrp !== '' ? 'group “' . h($curGrp) . '”' : 'private (no group)' ?></div>
             <select name="regroup_type" onchange="var g=document.getElementById('rgn<?= (int)$r['id'] ?>');g.style.display=this.value==='grp'?'block':'none'" style="font-size:.72rem;padding:3px 5px;margin-bottom:4px">
@@ -840,7 +828,6 @@ include 'includes/header.php';
             <input type="hidden" name="request_id" value="<?= (int)$r['id'] ?>">
             <input type="hidden" name="q" value="<?= h($q) ?>">
             <input type="hidden" name="root" value="<?= h($root) ?>">
-            <input type="hidden" name="show_all" value="<?= $showAll ? '1' : '' ?>">
             <input type="hidden" name="in_files" value="<?= $inFiles ? '1' : '' ?>">
             <input type="text" name="new_name" value="<?= h($folder) ?>" spellcheck="false"
                    style="width:100%;font-family:monospace;font-size:.72rem;padding:5px 7px;border:1.5px solid var(--grey-lt);border-radius:5px">
@@ -858,7 +845,6 @@ include 'includes/header.php';
             <input type="hidden" name="request_id" value="<?= (int)$r['id'] ?>">
             <input type="hidden" name="q" value="<?= h($q) ?>">
             <input type="hidden" name="root" value="<?= h($root) ?>">
-            <input type="hidden" name="show_all" value="<?= $showAll ? '1' : '' ?>">
             <input type="hidden" name="in_files" value="<?= $inFiles ? '1' : '' ?>">
             <div style="font-size:.68rem;color:#B26A00;margin-bottom:6px">↩ Move the folder back to <span style="font-family:monospace"><?= h($preRb['path'] ?? '') ?></span> and restore the request to un-booked.</div>
             <div style="display:flex;gap:6px">
@@ -880,7 +866,6 @@ include 'includes/header.php';
             <input type="hidden" name="request_id" value="<?= $rid ?>">
             <input type="hidden" name="q" value="<?= h($q) ?>">
             <input type="hidden" name="root" value="<?= h($root) ?>">
-            <input type="hidden" name="show_all" value="<?= $showAll ? '1' : '' ?>">
             <input type="hidden" name="in_files" value="<?= $inFiles ? '1' : '' ?>">
             <div style="font-size:.68rem;color:#1A6B3A;font-weight:600;margin-bottom:6px">✅ Confirm Safari — enter dates as in the Excel</div>
             <div style="display:flex;gap:8px;margin-bottom:6px;font-family:'Open Sans',sans-serif">
@@ -946,7 +931,7 @@ include 'includes/header.php';
             $pvGrps     = $previewData['grps'] ?? [];
             $pvGrpMult  = ($pv['grpAction'] === 'ADD' && count($pvGrps) > 1 && $pv['grpMain'] === '');
             // Common hidden fields carried into the confirm/re-preview submit.
-            $csHidden = function () use ($rid, $pv, $q, $root, $showAll) { ?>
+            $csHidden = function () use ($rid, $pv, $q, $root) { ?>
                 <input type="hidden" name="request_id" value="<?= $rid ?>">
                 <input type="hidden" name="cs_start" value="<?= h($pv['fStart']) ?>">
                 <input type="hidden" name="cs_mid"   value="<?= h($pv['fMid']) ?>">
@@ -957,7 +942,6 @@ include 'includes/header.php';
                 <input type="hidden" name="cs_grpcode" value="<?= h($pv['grpCode']) ?>">
                 <input type="hidden" name="q" value="<?= h($q) ?>">
                 <input type="hidden" name="root" value="<?= h($root) ?>">
-                <input type="hidden" name="show_all" value="<?= $showAll ? '1' : '' ?>">
                 <input type="hidden" name="in_files" value="<?= $inFiles ? '1' : '' ?>">
             <?php };
           ?>
@@ -1095,7 +1079,6 @@ include 'includes/header.php';
             <input type="hidden" name="request_id" value="<?= (int)$r['id'] ?>">
             <input type="hidden" name="q" value="<?= h($q) ?>">
             <input type="hidden" name="root" value="<?= h($root) ?>">
-            <input type="hidden" name="show_all" value="<?= $showAll ? '1' : '' ?>">
             <input type="hidden" name="in_files" value="<?= $inFiles ? '1' : '' ?>">
             <select name="new_status" class="m-input" style="width:150px;padding:5px 8px;font-size:.8rem">
               <?php foreach ($STATUS_MAP as $st => $stDef):
