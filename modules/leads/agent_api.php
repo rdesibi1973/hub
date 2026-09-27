@@ -80,7 +80,7 @@ function agent_ensure_schema(PDO $db): void {
 function agent_audit(PDO $db, string $action, $reqId, array $payload, string $resultJson, int $code): void {
     global $agentUser;
     agent_ensure_schema($db);
-    $dry = in_array($action, ['confirm_booking', 'send_booking_email', 'rollback_booking', 'fill_calc', 'iti_save_texts', 'update_rate'], true) && empty($payload['confirm']);
+    $dry = in_array($action, ['confirm_booking', 'send_booking_email', 'rollback_booking', 'fill_calc', 'iti_save_texts', 'update_rate', 'replace_flight_rates'], true) && empty($payload['confirm']);
     $db->prepare("INSERT INTO agent_audit_log (ts, action, request_id, user_id, http_code, dry_run, payload_json, result_json, ip)
                   VALUES (?,?,?,?,?,?,?,?,?)")
        ->execute([
@@ -568,6 +568,53 @@ try {
         agent_out(['ok' => true, 'dry_run' => false, 'type' => $type, 'before' => $summary($before), 'after' => $summary($st->fetch(PDO::FETCH_ASSOC))]);
     }
 
+    // ── replace_flight_rates ─────────────────────────────────────────────────
+    // Replace the whole flight_routes table with a new price list. The old rows are
+    // returned (and kept in the audit log) as a backup. Dry-run unless "confirm": true.
+    // routes: [{route, origin, destination, airline?, cost, sale?, valid_from, valid_to?, notes?}, …]
+    case 'replace_flight_rates': {
+        agent_require_method('POST');
+        calc_rates_schema($db);
+        $routes = isset($in['routes']) && is_array($in['routes']) ? $in['routes'] : [];
+        if (!$routes) agent_fail('routes is required');
+        $rows = [];
+        foreach ($routes as $i => $r) {
+            $name = trim((string)($r['route'] ?? ''));
+            if ($name === '') agent_fail('routes[' . $i . ']: route is required');
+            if (!isset($r['cost']) || !is_numeric($r['cost']) || (float)$r['cost'] < 0) agent_fail('routes[' . $i . ']: cost must be a number ≥ 0');
+            if (isset($r['sale']) && $r['sale'] !== null && !is_numeric($r['sale'])) agent_fail('routes[' . $i . ']: sale must be a number');
+            $vf = (string)($r['valid_from'] ?? '');
+            $vt = isset($r['valid_to']) && $r['valid_to'] !== '' ? (string)$r['valid_to'] : null;
+            if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $vf) || ($vt !== null && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $vt))) {
+                agent_fail('routes[' . $i . ']: valid_from / valid_to must be YYYY-MM-DD');
+            }
+            $rows[] = [mb_substr($name, 0, 200), mb_substr(trim((string)($r['origin'] ?? '')), 0, 100) ?: null,
+                       mb_substr(trim((string)($r['destination'] ?? '')), 0, 100) ?: null,
+                       mb_substr(trim((string)($r['airline'] ?? '')), 0, 100) ?: null,
+                       $vf, $vt, round((float)$r['cost'], 2),
+                       isset($r['sale']) && $r['sale'] !== null ? round((float)$r['sale'], 2) : null,
+                       mb_substr(trim((string)($r['notes'] ?? '')), 0, 200) ?: null];
+        }
+        $old = $db->query('SELECT * FROM flight_routes ORDER BY id')->fetchAll(PDO::FETCH_ASSOC);
+        if (empty($in['confirm'])) {
+            agent_out(['ok' => true, 'dry_run' => true, 'delete' => count($old), 'insert' => count($rows),
+                       'message' => 'Dry run — nothing changed. Resend with "confirm": true to replace the table.']);
+        }
+        $db->beginTransaction();
+        try {
+            $db->exec('DELETE FROM flight_routes');
+            $ins = $db->prepare('INSERT INTO flight_routes (route_name, origin, destination, airline, valid_from, valid_to, rate_pax, sale_pax, active, notes)
+                                 VALUES (?,?,?,?,?,?,?,?,1,?)');
+            foreach ($rows as $row) $ins->execute($row);
+            $db->commit();
+        } catch (Throwable $e) {
+            $db->rollBack();
+            throw $e;
+        }
+        agent_out(['ok' => true, 'dry_run' => false, 'deleted' => count($old), 'inserted' => count($rows),
+                   'flights' => calc_flight_rates($db, '', date('Y-m-d')), 'old_rows_backup' => $old]);
+    }
+
     // ── fill_calc ────────────────────────────────────────────────────────────
     // Fill the booking's *_Calc.xlsx server-side with the house rules; dry-run
     // (built + verified on a copy) unless "confirm": true.
@@ -659,7 +706,7 @@ try {
         agent_fail('Unknown action "' . $agentAction . '"', 400, ['actions' => [
             'find_requests', 'list_agencies', 'create_request', 'update_request', 'list_standard_programs',
             'copy_program', 'get_rates', 'fill_calc', 'confirm_preview', 'confirm_booking', 'send_booking_email',
-            'rollback_booking', 'iti_programs', 'iti_texts', 'iti_save_texts', 'update_rate',
+            'rollback_booking', 'iti_programs', 'iti_texts', 'iti_save_texts', 'update_rate', 'replace_flight_rates',
         ]]);
     }
 } catch (Throwable $e) {
