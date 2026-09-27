@@ -172,7 +172,7 @@ include 'includes/header.php';
           <td style="font-weight:700;color:#C0211B;">$<?= number_format($r['rate'],2) ?></td>
           <td style="color:#6b7280;font-size:.78rem;"><?= h($r['notes']) ?></td>
           <td style="white-space:nowrap;">
-            <button class="btn-edit" onclick="openJeep(<?= json_encode($r) ?>)">Edit</button>
+            <button class="btn-edit" onclick="openJeep(<?= h(json_encode($r)) ?>)">Edit</button>
             <button class="btn-del"  onclick="delJeep(<?= $r['id'] ?>)">Del</button>
           </td>
         </tr>
@@ -208,7 +208,7 @@ include 'includes/header.php';
           <td style="color:#6b7280;"><?= isset($r['sale']) && $r['sale'] !== null ? '$' . number_format($r['sale'],2) : '<span style="color:#9ca3af">—</span>' ?></td>
           <td><span class="badge <?= $r['active']?'badge-on':'badge-off' ?>"><?= $r['active']?'Active':'Off' ?></span></td>
           <td style="white-space:nowrap;">
-            <button class="btn-edit" onclick="openActivity(<?= json_encode($r) ?>)">Edit</button>
+            <button class="btn-edit" onclick="openActivity(<?= h(json_encode($r)) ?>)">Edit</button>
             <button class="btn-del"  onclick="delActivity(<?= $r['id'] ?>)">Del</button>
           </td>
         </tr>
@@ -241,7 +241,7 @@ include 'includes/header.php';
           <td style="color:#6b7280;"><?= isset($r['sale_pax']) && $r['sale_pax'] !== null ? '$' . number_format($r['sale_pax'],2) : '<span style="color:#9ca3af">—</span>' ?></td>
           <td><span class="badge <?= $r['active']?'badge-on':'badge-off' ?>"><?= $r['active']?'Active':'Off' ?></span></td>
           <td style="white-space:nowrap;">
-            <button class="btn-edit" onclick="openFlight(<?= json_encode($r) ?>)">Edit</button>
+            <button class="btn-edit" onclick="openFlight(<?= h(json_encode($r)) ?>)">Edit</button>
             <button class="btn-del"  onclick="delFlight(<?= $r['id'] ?>)">Del</button>
           </td>
         </tr>

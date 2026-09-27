@@ -192,7 +192,7 @@ select:focus,input:focus{outline:none;border-color:#C0211B;box-shadow:0 0 0 2px 
     <a href="staging.php?dup=clean"    class="stage-badge badge-clean">🟢 Clean <?= $nClean ?></a>
   <?php endif; ?>
   <div style="margin-left:auto;display:flex;gap:8px;">
-    <select onchange="location='staging.php?src='+this.value+(<?= json_encode($filterDup?'&dup='.$filterDup:'') ?>)" style="width:auto;padding:5px 10px;font-size:.78rem;">
+    <select onchange="location='staging.php?src='+this.value+(<?= h(json_encode($filterDup?'&dup='.$filterDup:'')) ?>)" style="width:auto;padding:5px 10px;font-size:.78rem;">
       <option value="">All Sources</option>
       <option value="Form" <?= $filterSrc==='Form'?'selected':'' ?>>Form</option>
       <option value="iBot" <?= $filterSrc==='iBot'?'selected':'' ?>>iBot</option>
