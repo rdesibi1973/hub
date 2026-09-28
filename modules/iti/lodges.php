@@ -6,6 +6,7 @@
 require_once __DIR__ . '/../../includes/auth.php';
 require_login();
 require_once __DIR__ . '/includes/iti_functions.php';
+iti_ensure_final_schema();   // phone / email / address / emergency_phone
 
 $db       = db();
 $_cu      = current_user();
@@ -24,6 +25,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit) {
         'website'        => trim($_POST['website']   ?? ''),
         'latitude'       => ($_POST['latitude']  ?? '') !== '' ? (float)$_POST['latitude']  : null,
         'longitude'      => ($_POST['longitude'] ?? '') !== '' ? (float)$_POST['longitude'] : null,
+        'phone'          => trim($_POST['phone'] ?? '') ?: null,
+        'email'          => trim($_POST['email'] ?? '') ?: null,
+        'address'        => trim($_POST['address'] ?? '') ?: null,
+        'emergency_phone'=> trim($_POST['emergency_phone'] ?? '') ?: null,
         'is_active'      => isset($_POST['is_active']) ? 1 : 0,
     ];
     foreach (ITI_LANGS as $lang) {
@@ -40,13 +45,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit) {
             'INSERT INTO iti_lodges
              (destination_id,name,category,lodge_type,
               description_en,description_it,description_fr,description_es,description_de,
-              website,latitude,longitude,is_active)
-             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)'
+              website,latitude,longitude,phone,email,address,emergency_phone,is_active)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
         )->execute([
             $fields['destination_id'], $fields['name'], $fields['category'], $fields['lodge_type'],
             $fields['description_en'], $fields['description_it'], $fields['description_fr'],
             $fields['description_es'], $fields['description_de'],
-            $fields['website'], $fields['latitude'], $fields['longitude'], $fields['is_active'],
+            $fields['website'], $fields['latitude'], $fields['longitude'],
+            $fields['phone'], $fields['email'], $fields['address'], $fields['emergency_phone'], $fields['is_active'],
         ]);
         iti_flash_set('success', '"' . $fields['name'] . '" created.');
         iti_redirect('lodges.php');
@@ -56,12 +62,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit) {
             'UPDATE iti_lodges SET
              destination_id=?,name=?,category=?,lodge_type=?,
              description_en=?,description_it=?,description_fr=?,description_es=?,description_de=?,
-             website=?,latitude=?,longitude=?,is_active=? WHERE id=?'
+             website=?,latitude=?,longitude=?,phone=?,email=?,address=?,emergency_phone=?,is_active=? WHERE id=?'
         )->execute([
             $fields['destination_id'], $fields['name'], $fields['category'], $fields['lodge_type'],
             $fields['description_en'], $fields['description_it'], $fields['description_fr'],
             $fields['description_es'], $fields['description_de'],
-            $fields['website'], $fields['latitude'], $fields['longitude'], $fields['is_active'], $id,
+            $fields['website'], $fields['latitude'], $fields['longitude'],
+            $fields['phone'], $fields['email'], $fields['address'], $fields['emergency_phone'], $fields['is_active'], $id,
         ]);
         iti_flash_set('success', 'Lodge updated.');
         iti_redirect('lodges.php');
@@ -78,6 +85,16 @@ $row = null;
 if (in_array($action, ['edit','view']) && $id) {
     $row = iti_get_lodge($id);
     if (!$row) { iti_flash_set('error', 'Lodge not found.'); iti_redirect('lodges.php'); }
+}
+$lodge_aliases = null;
+if ($action === 'edit' && $row) {
+    try {
+        $st = $db->prepare('SELECT alias, meal_basis FROM iti_lodge_aliases WHERE lodge_id = ? ORDER BY alias');
+        $st->execute([$id]);
+        $lodge_aliases = $st->fetchAll();
+    } catch (PDOException $e) {
+        $lodge_aliases = null;   // table not created yet
+    }
 }
 
 // ── Lista ───────────────────────────────────────────────────
@@ -154,6 +171,40 @@ include __DIR__ . '/../../includes/layout_header.php';
       <input type="url" name="website" placeholder="https://…" value="<?= h($row['website'] ?? '') ?>">
     </div>
   </div>
+
+  <div class="form-section-title">Supplier contacts <span style="font-weight:400;font-size:.8rem;color:var(--grey-mid)">for the final programme's supplier list</span></div>
+  <div class="form-grid">
+    <div class="form-group">
+      <label>Phone</label>
+      <input type="text" name="phone" maxlength="80" placeholder="+255 …" value="<?= h($row['phone'] ?? '') ?>">
+    </div>
+    <div class="form-group">
+      <label>Emergency phone</label>
+      <input type="text" name="emergency_phone" maxlength="80" placeholder="+255 …" value="<?= h($row['emergency_phone'] ?? '') ?>">
+    </div>
+    <div class="form-group">
+      <label>Email</label>
+      <input type="email" name="email" maxlength="160" value="<?= h($row['email'] ?? '') ?>">
+    </div>
+    <div class="form-group">
+      <label>Address</label>
+      <input type="text" name="address" maxlength="255" value="<?= h($row['address'] ?? '') ?>">
+    </div>
+  </div>
+
+  <?php if ($action === 'edit' && $lodge_aliases !== null): ?>
+  <div class="form-section-title">Calc aliases <span style="font-weight:400;font-size:.8rem;color:var(--grey-mid)">hotel texts in the Calc Excel that mean this lodge</span></div>
+  <div style="font-size:.82rem;margin-bottom:18px;">
+    <?php if ($lodge_aliases): ?>
+      <?php foreach ($lodge_aliases as $a): ?>
+        <span class="badge" style="background:var(--off-white);color:var(--grey-dk);margin:0 4px 4px 0;"><?= h($a['alias']) ?><?= $a['meal_basis'] ? ' · ' . h($a['meal_basis']) : '' ?></span>
+      <?php endforeach; ?>
+    <?php else: ?>
+      <span style="color:var(--grey-mid);">None yet.</span>
+    <?php endif; ?>
+    <a href="aliases.php?type=lodge&amp;lodge_id=<?= $id ?>" style="margin-left:6px;">Manage aliases →</a>
+  </div>
+  <?php endif; ?>
 
   <div class="form-section-title">Location <span style="font-weight:400;font-size:.8rem;color:var(--grey-mid)">for the itinerary map</span></div>
   <div class="form-grid">

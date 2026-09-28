@@ -432,6 +432,18 @@ function iti_get_lodges(int $destination_id = null): array {
     return $st->fetchAll();
 }
 
+// One lodge (any status) with its destination name; used by lodges.php Edit.
+function iti_get_lodge(int $id): array|false {
+    $st = db()->prepare(
+        'SELECT l.*, d.name_en AS dest_name_en
+           FROM iti_lodges l
+           LEFT JOIN iti_destinations d ON d.id = l.destination_id
+          WHERE l.id = ?'
+    );
+    $st->execute([$id]);
+    return $st->fetch();
+}
+
 // ── PROGRAMS ─────────────────────────────────────────────────────────────────
 // $filters: ['q' => string, 'status' => string]
 function iti_get_programs(string $type = null, array $filters = []): array {
@@ -940,6 +952,289 @@ function iti_get_lead_request(int $id) {
     return $st->fetch();
 }
 
+// ── FINAL PROGRAMME (confirmed booking) — data model ─────────────────────────
+// Migration 063, also created lazily here: the live ITI schema differs from the
+// repo SQL, so each column / table is checked before it is added (MySQL on
+// BlueHost: no IF NOT EXISTS on ADD COLUMN). DDL commits implicitly: never call
+// this inside a transaction.
+if (!defined('ITI_MEAL_BASIS')) {
+    define('ITI_MEAL_BASIS', array('BB' => 'Bed & Breakfast', 'HB' => 'Half Board', 'FB' => 'Full Board', 'AI' => 'All Inclusive'));
+}
+const ITI_FINAL_SCHEMA_VERSION = '1';
+
+// ADD COLUMN unless it exists. True when it was added.
+function iti_add_column(string $table, string $col, string $ddl): bool {
+    $db = db();
+    if ($db->query('SHOW COLUMNS FROM `' . $table . '` LIKE ' . $db->quote($col))->fetch()) return false;
+    $db->exec('ALTER TABLE `' . $table . '` ADD COLUMN `' . $col . '` ' . $ddl);
+    return true;
+}
+
+// CREATE TABLE unless it exists; foreign keys are added one by one and only
+// logged when they fail (e.g. a live id column with another type).
+function iti_create_table(string $table, string $body, array $fks = array()): void {
+    $db = db();
+    if ($db->query('SHOW TABLES LIKE ' . $db->quote($table))->fetch()) return;
+    $db->exec('CREATE TABLE `' . $table . '` (' . $body . ') ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci');
+    foreach ($fks as $fk) {
+        try {
+            $db->exec('ALTER TABLE `' . $table . '` ADD ' . $fk);
+        } catch (PDOException $e) {
+            error_log('iti_create_table ' . $table . ': FK not created: ' . $e->getMessage());
+        }
+    }
+}
+
+function iti_ensure_final_schema(): void {
+    static $done = false;
+    if ($done) return;
+    $done = true;
+    if (iti_setting('final_schema_version') === ITI_FINAL_SCHEMA_VERSION) return;
+    $db = db();
+    iti_ensure_lead_link();
+
+    // Programme: proposal vs final (built from the booking's Calc), versions.
+    iti_add_column('iti_programs', 'stage', "ENUM('proposal','final') NOT NULL DEFAULT 'proposal'");
+    iti_add_column('iti_programs', 'start_date', 'DATE NULL DEFAULT NULL');
+    iti_add_column('iti_programs', 'hub_program_code', 'VARCHAR(80) NULL DEFAULT NULL');
+    iti_add_column('iti_programs', 'source_calc_path', 'VARCHAR(512) NULL DEFAULT NULL');
+    iti_add_column('iti_programs', 'source_calc_rev', 'VARCHAR(64) NULL DEFAULT NULL');
+    iti_add_column('iti_programs', 'generated_at', 'DATETIME NULL DEFAULT NULL');
+    iti_add_column('iti_programs', 'generated_by', 'INT NULL DEFAULT NULL');
+    iti_add_column('iti_programs', 'superseded_by', 'INT UNSIGNED NULL DEFAULT NULL');
+    iti_add_column('iti_programs', 'superseded_at', 'DATETIME NULL DEFAULT NULL');
+    foreach (array('ADD KEY idx_prog_lead_stage (lead_request_id, stage)', 'ADD KEY idx_prog_code (hub_program_code)') as $k) {
+        try { $db->exec('ALTER TABLE iti_programs ' . $k); } catch (PDOException $e) { /* already there */ }
+    }
+
+    // Per-night booking state, from the Calc INVOICE / CHECKED columns.
+    iti_add_column('iti_program_days', 'booking_ref', 'VARCHAR(100) NULL DEFAULT NULL');
+    iti_add_column('iti_program_days', 'booked_status', 'VARCHAR(40) NULL DEFAULT NULL');
+    iti_add_column('iti_program_days', 'booked_by', 'VARCHAR(60) NULL DEFAULT NULL');
+    iti_add_column('iti_program_days', 'needs_review', 'TINYINT(1) NOT NULL DEFAULT 0');
+    iti_add_column('iti_program_days', 'review_note', 'VARCHAR(255) NULL DEFAULT NULL');
+
+    // Supplier contacts (Supplier list / Useful numbers of the final programme).
+    $newPhone = iti_add_column('iti_lodges', 'phone', 'VARCHAR(80) NULL DEFAULT NULL');
+    iti_add_column('iti_lodges', 'email', 'VARCHAR(160) NULL DEFAULT NULL');
+    iti_add_column('iti_lodges', 'address', 'VARCHAR(255) NULL DEFAULT NULL');
+    iti_add_column('iti_lodges', 'emergency_phone', 'VARCHAR(80) NULL DEFAULT NULL');
+    if ($newPhone) {
+        // One-off: copy phone/address from the voucher lodge directory (migration 054),
+        // only where its name key matches exactly one lodge.
+        try {
+            $db->exec("UPDATE iti_lodges l
+                         JOIN (SELECT v.id AS vid, MIN(l2.id) AS lid
+                                 FROM iti_voucher_lodges v
+                                 JOIN iti_lodges l2 ON LOWER(l2.name) LIKE CONCAT('%', v.name_key, '%')
+                                WHERE v.is_active = 1
+                                GROUP BY v.id HAVING COUNT(*) = 1) m ON m.lid = l.id
+                         JOIN iti_voucher_lodges v ON v.id = m.vid
+                          SET l.phone = COALESCE(NULLIF(l.phone, ''), v.phone),
+                              l.address = COALESCE(NULLIF(l.address, ''), v.address)");
+        } catch (PDOException $e) {
+            error_log('iti_ensure_final_schema: lodge contacts not copied: ' . $e->getMessage());
+        }
+    }
+
+    iti_create_table('iti_program_booking',
+        'program_id INT UNSIGNED NOT NULL PRIMARY KEY,
+         room_config VARCHAR(100) NULL,
+         pax_adults TINYINT NOT NULL DEFAULT 0,
+         pax_teen TINYINT NOT NULL DEFAULT 0,
+         pax_child TINYINT NOT NULL DEFAULT 0,
+         arrival_details TEXT NULL,
+         departure_details TEXT NULL,
+         extra_details TEXT NULL,
+         show_prices TINYINT(1) NOT NULL DEFAULT 1,
+         price_text VARCHAR(255) NULL,
+         updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP',
+        array('CONSTRAINT fk_pbk_prog FOREIGN KEY (program_id) REFERENCES iti_programs (id) ON DELETE CASCADE'));
+
+    iti_create_table('iti_program_guests',
+        'id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+         program_id INT UNSIGNED NOT NULL,
+         sort_order SMALLINT NOT NULL DEFAULT 0,
+         full_name VARCHAR(160) NOT NULL,
+         title VARCHAR(10) NULL,
+         dob DATE NULL,
+         passport VARCHAR(40) NULL,
+         country VARCHAR(80) NULL,
+         KEY idx_pg_prog (program_id, sort_order)',
+        array('CONSTRAINT fk_pg_prog FOREIGN KEY (program_id) REFERENCES iti_programs (id) ON DELETE CASCADE'));
+
+    // Calc free text → master data. A NULL target = "known text, nothing to show"
+    // (e.g. 'emergency' / 'medivac' in ACTIVITY DESC, 'Serengeti' = no transfer).
+    iti_create_table('iti_lodge_aliases',
+        "id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+         alias VARCHAR(150) NOT NULL,
+         lodge_id INT UNSIGNED NULL,
+         meal_basis ENUM('BB','HB','FB','AI') NULL,
+         created_by VARCHAR(80) NULL,
+         created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+         UNIQUE KEY uq_lodge_alias (alias),
+         KEY idx_la_lodge (lodge_id)",
+        array('CONSTRAINT fk_la_lodge FOREIGN KEY (lodge_id) REFERENCES iti_lodges (id) ON DELETE CASCADE'));
+    iti_create_table('iti_activity_aliases',
+        'id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+         alias VARCHAR(150) NOT NULL,
+         activity_id INT UNSIGNED NULL,
+         created_by VARCHAR(80) NULL,
+         created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+         UNIQUE KEY uq_activity_alias (alias),
+         KEY idx_aa_act (activity_id)',
+        array('CONSTRAINT fk_aa_act FOREIGN KEY (activity_id) REFERENCES iti_activities (id) ON DELETE CASCADE'));
+    iti_create_table('iti_route_aliases',
+        'id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+         alias VARCHAR(150) NOT NULL,
+         transfer_route_id INT UNSIGNED NULL,
+         flight_route_id INT UNSIGNED NULL,
+         created_by VARCHAR(80) NULL,
+         created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+         UNIQUE KEY uq_route_alias (alias),
+         KEY idx_ra_tr (transfer_route_id),
+         KEY idx_ra_fl (flight_route_id)',
+        array('CONSTRAINT fk_ra_tr FOREIGN KEY (transfer_route_id) REFERENCES iti_transfer_routes (id) ON DELETE CASCADE',
+              'CONSTRAINT fk_ra_fl FOREIGN KEY (flight_route_id) REFERENCES iti_flight_routes (id) ON DELETE CASCADE'));
+
+    try { iti_set_setting('final_schema_version', ITI_FINAL_SCHEMA_VERSION); } catch (Exception $e) { /* retried next time */ }
+}
+
+// ── CALC ALIASES ─────────────────────────────────────────────────────────────
+// The Calc Excel is free text ("Kifaru ", "Arusha Explorers in HB", "Maasai+Olduvai").
+// Rule: never guess — a text without an alias is shown for review and the user's
+// mapping is saved as a new alias, so each text is asked once.
+const ITI_ALIAS_TYPES = array(
+    'lodge'    => array('table' => 'iti_lodge_aliases',    'label' => 'Lodges'),
+    'activity' => array('table' => 'iti_activity_aliases', 'label' => 'Activities'),
+    'route'    => array('table' => 'iti_route_aliases',    'label' => 'Routes (PARK/OVERNIGHT)'),
+);
+
+// Lower-case, trimmed, inner spaces collapsed (non-breaking spaces included).
+function iti_alias_norm(string $s): string {
+    $s = preg_replace('/[\s\x{00A0}]+/u', ' ', $s);
+    return trim(mb_strtolower((string)$s, 'UTF-8'));
+}
+
+// ACTIVITY DESC / FEES DESC may join several items with '+' ("Maasai+Olduvai"):
+// each part is its own alias.
+function iti_alias_parts(string $s): array {
+    $out = array();
+    foreach (explode('+', $s) as $p) {
+        $p = iti_alias_norm($p);
+        if ($p !== '' && !in_array($p, $out, true)) $out[] = $p;
+    }
+    return $out;
+}
+
+// The alias row for a Calc text, or null when the text is not mapped yet.
+// A row whose target columns are all NULL means "known, nothing to show".
+function iti_alias_lookup(string $type, string $text) {
+    if (!array_key_exists($type, ITI_ALIAS_TYPES)) return null;
+    $alias = iti_alias_norm($text);
+    if ($alias === '') return null;
+    $st = db()->prepare('SELECT * FROM `' . ITI_ALIAS_TYPES[$type]['table'] . '` WHERE alias = ?');
+    $st->execute(array($alias));
+    $row = $st->fetch(PDO::FETCH_ASSOC);
+    return $row ? $row : null;
+}
+
+// Insert or replace one alias. $targets: lodge_id | activity_id | transfer_route_id
+// + flight_route_id (null / 0 = nothing); $meal only for lodges.
+function iti_alias_save(string $type, string $text, array $targets, ?string $meal, string $user): void {
+    if (!array_key_exists($type, ITI_ALIAS_TYPES)) throw new InvalidArgumentException('Unknown alias type: ' . $type);
+    $alias = iti_alias_norm($text);
+    if ($alias === '') throw new InvalidArgumentException('Empty alias.');
+    if (mb_strlen($alias) > 150) throw new InvalidArgumentException('Alias longer than 150 characters.');
+    $cols = array('lodge' => array('lodge_id'), 'activity' => array('activity_id'),
+                  'route' => array('transfer_route_id', 'flight_route_id'));
+    $row = array('alias' => $alias);
+    foreach ($cols[$type] as $c) {
+        $v = isset($targets[$c]) ? (int)$targets[$c] : 0;
+        $row[$c] = $v > 0 ? $v : null;
+    }
+    if ($type === 'lodge') $row['meal_basis'] = ($meal !== null && array_key_exists($meal, ITI_MEAL_BASIS)) ? $meal : null;
+    $row['created_by'] = $user;
+    $upd = array();
+    foreach (array_keys($row) as $c) if ($c !== 'alias') $upd[] = '`' . $c . '` = VALUES(`' . $c . '`)';
+    db()->prepare('INSERT INTO `' . ITI_ALIAS_TYPES[$type]['table'] . '` (`' . implode('`,`', array_keys($row)) . '`) VALUES ('
+                  . implode(',', array_fill(0, count($row), '?')) . ') ON DUPLICATE KEY UPDATE ' . implode(', ', $upd))
+        ->execute(array_values($row));
+}
+
+// Seed from the texts found in the 27 Calc templates (/itineraries/SafariClassic/it)
+// and the TouristTrophy pilot. A lodge / activity alias is created only when its
+// name pattern matches exactly ONE active record; existing aliases are never
+// touched. Routes are not seeded (labels like 'Serengeti' are ambiguous): they
+// are mapped from the review screen. Returns [type, alias, result] rows.
+function iti_seed_aliases(string $user): array {
+    $db = db();
+    $lodges = array(   // alias => [LIKE pattern on iti_lodges.name, meal basis]
+        'arusha explorers hb'           => array('%Arusha Explorers%', 'HB'),
+        'arusha explorers in hb'        => array('%Arusha Explorers%', 'HB'),
+        'arusha explorers-hb'           => array('%Arusha Explorers%', 'HB'),
+        'chanya lodge hb'               => array('%Chanya%', 'HB'),
+        'chanya lodge in hb'            => array('%Chanya%', 'HB'),
+        'planet lodge in hb'            => array('%Planet Lodge%', 'HB'),
+        'eileen'                        => array('%Eileen%', null),
+        "eileen's tree"                 => array('%Eileen%', null),
+        'katikati'                      => array('%Katikati%', null),
+        'kifaru'                        => array('%Kifaru%', null),
+        'kontiki'                       => array('%Kontiki%', null),
+        "lion's paw"                    => array('%Lion%Paw%', null),
+        'marera view lodge'             => array('%Marera%', null),
+        'natron river camp (wildlands)' => array('%Natron River%', null),
+        'oldeani'                       => array('%Oldeani%', null),
+        'olea africana'                 => array('%Olea Africana%', null),
+        'olea africana lodge'           => array('%Olea Africana%', null),
+        'orangi'                        => array('%Orangi%', null),
+        'pure migration'                => array('%Pure Migration%', null),
+        'pure migration ndutu'          => array('%Pure Migration%', null),
+        'roika'                         => array('%Roika%', null),
+        'sopa ngorongoro'               => array('%Ngorongoro Sopa%', null),
+        'tarangire safari lodge'        => array('Tarangire Safari Lodge', null),
+        'tarangirepure lodge'           => array('%Tarangire Pure%', null),
+    );
+    $activities = array(   // alias => LIKE pattern on name_en / name_it; null = not an activity
+        'emergency'                     => null,
+        'medivac'                       => null,
+        'amref'                         => null,
+        'gates'                         => null,
+        'mto wa mbu'                    => '%Mto wa Mbu%',
+        'mto wa mbu visit'              => '%Mto wa Mbu%',
+        'iraqw boma'                    => '%Iraqw%',
+        'olduvai'                       => '%Olduvai%',
+        'olduvai george'                => '%Olduvai%',
+        'maasai'                        => '%Maasai%',
+        'marera garden and coffee tour' => '%Coffee%',
+        'town tour'                     => '%Town Tour%',
+        'lunch boxes'                   => '%Lunch%',
+        'lunch box'                     => '%Lunch%',
+    );
+    $out = array();
+    $exists = function ($type, $alias) { return iti_alias_lookup($type, $alias) !== null; };
+    $one = function ($sql, array $params) use ($db) {
+        $st = $db->prepare($sql);
+        $st->execute($params);
+        $ids = $st->fetchAll(PDO::FETCH_COLUMN);
+        return count($ids) === 1 ? (int)$ids[0] : (count($ids) ? -count($ids) : 0);
+    };
+    foreach ($lodges as $alias => $spec) {
+        if ($exists('lodge', $alias)) { $out[] = array('lodge', $alias, 'exists'); continue; }
+        $id = $one('SELECT id FROM iti_lodges WHERE is_active = 1 AND name LIKE ?', array($spec[0]));
+        if ($id > 0) { iti_alias_save('lodge', $alias, array('lodge_id' => $id), $spec[1], $user); $out[] = array('lodge', $alias, 'added'); }
+        else $out[] = array('lodge', $alias, $id < 0 ? (-$id) . ' lodges match — map it by hand' : 'no lodge matches');
+    }
+    foreach ($activities as $alias => $like) {
+        if ($exists('activity', $alias)) { $out[] = array('activity', $alias, 'exists'); continue; }
+        if ($like === null) { iti_alias_save('activity', $alias, array(), null, $user); $out[] = array('activity', $alias, 'added (not shown)'); continue; }
+        $id = $one('SELECT id FROM iti_activities WHERE is_active = 1 AND (name_en LIKE ? OR name_it LIKE ?)', array($like, $like));
+        if ($id > 0) { iti_alias_save('activity', $alias, array('activity_id' => $id), null, $user); $out[] = array('activity', $alias, 'added'); }
+        else $out[] = array('activity', $alias, $id < 0 ? (-$id) . ' activities match — map it by hand' : 'no activity matches');
+    }
+    return $out;
+}
+
 // Request view "Clone from Sample": personal copy linked to the ITI request.
 function iti_clone_sample_to_personal(int $sample_id, int $request_id, string $price_cat, string $lang, string $currency): int {
     $cu = current_user();
@@ -1100,6 +1395,7 @@ function iti_nav(string $current = '', array $breadcrumbs = []): void {
         'Transfers'    => ITI_MODULE_URL . '/transfers.php',
         'Activities'   => ITI_MODULE_URL . '/activities.php',
         'Airlines'     => ITI_MODULE_URL . '/airlines.php',
+        'Aliases'      => ITI_MODULE_URL . '/aliases.php',
         'Vouchers'     => ITI_MODULE_URL . '/vouchers.php',
         'Settings'     => ITI_MODULE_URL . '/settings.php',
     ];
