@@ -35,7 +35,12 @@ echo.
 echo Test: paste this into your browser address bar and press Enter:
 echo     savannah://open?path=001_Safari
 echo.
-if defined DROPBOX_HOME (echo DROPBOX_HOME = %DROPBOX_HOME%) else (echo WARNING: DROPBOX_HOME is not set on this PC - Open will not work until it is.)
+REM Check DROPBOX_HOME (offer to detect/set it if missing or wrong).
+if exist "%~dp0set-dropbox-home.cmd" (
+  call "%~dp0set-dropbox-home.cmd" /install || echo WARNING: DROPBOX_HOME is not set correctly - Open will not work until it is.
+) else (
+  if defined DROPBOX_HOME (echo DROPBOX_HOME = %DROPBOX_HOME%) else (echo WARNING: DROPBOX_HOME is not set on this PC - Open will not work until it is.)
+)
 echo.
 pause
 exit /b 0

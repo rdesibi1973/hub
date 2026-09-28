@@ -36,8 +36,18 @@ lines.
 The first time a browser sees a `savannah://` link it may ask
 "Open Savannah Protocol?" — tick "Always allow" and confirm.
 
-Requires the `DROPBOX_HOME` environment variable to be set (same one the old
-BackOffice tool used).
+Requires the `DROPBOX_HOME` environment variable (same one the old BackOffice
+tool used) = the Dropbox root folder, the one containing `001_Safari`
+(e.g. `C:\Dropbox`). `install.cmd` checks it at the end and, if it is missing or
+wrong, runs `set-dropbox-home.cmd`.
+
+### DROPBOX_HOME — `set-dropbox-home.cmd`
+Double-click it any time to check / set the variable (current user, no admin,
+via `setx`). It auto-detects the folder containing `001_Safari`, trying in order:
+the folders above the script itself (when run from inside Dropbox), the path in
+Dropbox's `info.json`, `%USERPROFILE%\Dropbox`, `C:\Dropbox`, `D:\Dropbox` — and
+asks to confirm; otherwise you type the path. After setting it, **close all
+browser windows** and reopen the browser, or the handler won't see the value.
 
 ## Uninstall
 Double-click **`uninstall.cmd`**.
@@ -46,6 +56,8 @@ Double-click **`uninstall.cmd`**.
 - `savannah-open.js` — the launcher (validates the path, opens Explorer).
 - `install.cmd` — copies the launcher to `%LOCALAPPDATA%\SavannahTools` and
   registers the handler in HKCU (pure batch + reg.exe).
+- `set-dropbox-home.cmd` — check / detect / set `DROPBOX_HOME` (also run by
+  `install.cmd`).
 - `uninstall.cmd` — remove it.
 
 ## Security

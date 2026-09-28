@@ -33,7 +33,7 @@ if (/[:*?"<>|]/.test(rel))         { warn("Blocked: invalid characters."); WScri
 
 var root = sh.ExpandEnvironmentStrings("%DROPBOX_HOME%");
 if (!root || root === "%DROPBOX_HOME%") {
-  warn("DROPBOX_HOME is not set on this PC. Ask IT to set it (same as the old BackOffice tool).");
+  warn("DROPBOX_HOME is not set on this PC. Run set-dropbox-home.cmd (in the savannah-open folder), then restart the browser.");
   WScript.Quit();
 }
 root = root.replace(/\\+$/, "");
