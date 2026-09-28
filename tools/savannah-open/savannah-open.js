@@ -1,5 +1,6 @@
 // savannah-open.js — open a Dropbox folder in Explorer from a "savannah://" link.
 // Run by the protocol handler as:  wscript.exe savannah-open.js "<url>"
+// With "&open=calc" it opens the folder's quotation Excel instead (see pickCalc).
 //
 // Uses JScript via wscript.exe (no PowerShell) to avoid antivirus heuristics that
 // flag browser-spawned powershell.exe command lines. Security: the path is decoded,
@@ -15,6 +16,7 @@ if (WScript.Arguments.length === 0) { WScript.Quit(); }
 var url = WScript.Arguments(0);
 
 // ── Extract the relative path from the URL ──────────────────────────────────
+var wantCalc = /[?&]open=calc(&|$)/i.test(url);
 var rel, m = /[?&]path=([^&]+)/.exec(url);
 if (m) { rel = m[1]; }
 else   { rel = url.replace(/^savannah:(\/\/)?(open\/?)?/i, ""); }
@@ -45,7 +47,44 @@ if (full.substring(0, root.length).toLowerCase() !== root.toLowerCase()) {
 var explorer = sh.ExpandEnvironmentStrings("%SystemRoot%") + "\\explorer.exe";
 function openExplorer(args) { sh.Run('"' + explorer + '" ' + args, 1, false); }
 
-if (fso.FolderExists(full)) {
+// ── Pick the booking's quotation Excel (same rule as Hub's fill_calc) ──────
+// Top-level "*_Calc.xlsx", else any .xlsx/.xlsm/.xls; Office lock files (~$)
+// skipped; if several, the highest leading number (natural sort, descending).
+function natCmp(a, b) {
+  var ra = a.toLowerCase().match(/\d+|\D+/g) || [], rb = b.toLowerCase().match(/\d+|\D+/g) || [];
+  for (var i = 0; i < ra.length && i < rb.length; i++) {
+    if (ra[i] === rb[i]) continue;
+    var na = /^\d/.test(ra[i]), nb = /^\d/.test(rb[i]);
+    if (na && nb) return parseInt(ra[i], 10) - parseInt(rb[i], 10);
+    return ra[i] < rb[i] ? -1 : 1;
+  }
+  return ra.length - rb.length;
+}
+// Listing via Shell.Application: JScript's Enumerator over FSO .Files returns
+// nothing on Windows 11 24H2 (JScript9Legacy). System.FileName always carries
+// the extension, even with "Hide extensions for known file types" on.
+function pickCalc(dir) {
+  var calc = [], any = [];
+  var items = WScript.CreateObject("Shell.Application").NameSpace(dir).Items();
+  for (var i = 0; i < items.Count; i++) {
+    var it = items.Item(i);
+    if (it.IsFolder) continue;
+    var n = String(it.ExtendedProperty("System.FileName") || it.Name);
+    if (n.indexOf("~$") === 0) continue;
+    if (/_calc\.xlsx$/i.test(n)) calc.push(n);
+    else if (/\.(xlsx|xlsm|xls)$/i.test(n)) any.push(n);
+  }
+  var c = calc.length ? calc : any;
+  if (!c.length) return null;
+  c.sort(natCmp);
+  return dir + "\\" + c[c.length - 1];
+}
+
+if (wantCalc && fso.FolderExists(full)) {
+  var xl = pickCalc(full);
+  if (xl) openExplorer('"' + xl + '"');   // Explorer hands the file to Excel
+  else { warn("No Excel (*_Calc.xlsx) found in:\n" + full + "\n\nOpening the folder instead."); openExplorer('"' + full + '"'); }
+} else if (fso.FolderExists(full)) {
   openExplorer('"' + full + '"');
 } else if (fso.FileExists(full)) {
   openExplorer('/select,"' + full + '"');

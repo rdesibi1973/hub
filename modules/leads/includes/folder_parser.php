@@ -336,6 +336,15 @@ function savannah_open_url(array $r): string {
     return 'savannah://open?path=' . $enc;
 }
 
+/**
+ * savannah:// URL that opens the request's quotation Excel ('' if unknown).
+ * The local handler picks the file: top-level *_Calc.xlsx, highest number wins.
+ */
+function savannah_calc_url(array $r): string {
+    $u = savannah_open_url($r);
+    return $u === '' ? '' : $u . '&open=calc';
+}
+
 /** Windows path with a %DROPBOX_HOME% prefix, for the Copy-path button. */
 function savannah_local_path(array $r): string {
     $rel = folder_rel_path($r);

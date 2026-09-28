@@ -20,6 +20,15 @@ Running log of notable changes and current build state. Module-level "active / p
 
 ---
 
+## 2026-09 — "📊 Open Excel" link next to "📂 Open folder"
+- BackOffice, Payments and Request view: new link that opens the booking's quotation Excel
+  (`savannah://open?path=<folder>&open=calc`). The local handler picks the file with the same rule
+  as `fill_calc`: top-level `*_Calc.xlsx` (Office `~$` lock files skipped), else any
+  `.xlsx/.xlsm/.xls`; if several, the highest leading number wins. No Excel → it opens the folder.
+- `tools/savannah-open/savannah-open.js`: new `open=calc` mode; lists files via Shell.Application
+  (JScript `Enumerator` over FSO `.Files` returns nothing on Windows 11 24H2). **Re-run
+  `install.cmd` on each PC** to get it — an old handler ignores `open=calc` and just opens the folder.
+
 ## 2026-09 — ITI: import STO sample programmes (Wetu Word exports)
 - `modules/iti/iti_import_sto.php` (button "Import STO" on Programs → Sample): reads the Wetu
   Word exports in Dropbox (`/itineraries/SafariClassic/it/Agenzia/2026-27/STO`) and creates Sample

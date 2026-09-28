@@ -639,6 +639,7 @@ include 'includes/header.php';
       <?php if ($dbxPath): ?>
         <?php $sUrl = 'savannah://open?path=' . implode('/', array_map('rawurlencode', explode('/', ltrim($dbxPath, '/')))); ?>
         <a href="<?= h($sUrl) ?>" title="Open the folder in Windows Explorer">📂 Open Folder</a>
+        <a href="<?= h($sUrl . '&open=calc') ?>" title="Open the quotation Excel (*_Calc.xlsx; if several, the highest number)" style="margin-left:12px">📊 Open Excel</a>
       <?php else: ?>
         <span class="text-muted">— not set yet</span>
       <?php endif; ?>
@@ -872,6 +873,7 @@ include 'includes/header.php';
       <button type="button" class="btn btn-red btn-sm" id="cp-copy" onclick="copyPrograms()">Copy Programs</button>
       <button type="button" class="btn btn-outline btn-sm" onclick="document.querySelectorAll('.cp-prog').forEach(c=>c.checked=false)">Clear</button>
       <a href="<?= h($sUrl) ?>" class="btn btn-outline btn-sm" title="Open the folder in Windows Explorer">📂 Open Folder</a>
+      <a href="<?= h($sUrl . '&open=calc') ?>" class="btn btn-outline btn-sm" title="Open the quotation Excel (*_Calc.xlsx; if several, the highest number)">📊 Open Excel</a>
       <?php if (!empty($canConfirmHere)): ?>
         <a href="backoffice.php?<?= h(http_build_query(['q' => $pcode, 'root' => 'All', 'open_confirm' => (int)$r['id']])) ?>"
            class="btn btn-outline btn-sm" style="color:#1A6B3A;border-color:#1A6B3A;font-weight:700"

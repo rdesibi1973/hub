@@ -531,6 +531,7 @@ include 'includes/header.php';
               <a href="request_view.php?id=<?= (int)$r['id'] ?>" target="_blank" title="Open the booking request in the Hub">🔗 Open Request</a>
               <?php if ($sPath !== ''): ?>
                 <a href="<?= h($sUrl) ?>" title="Open in Windows Explorer">📂 Open</a>
+                <a href="<?= h(savannah_calc_url($r)) ?>" title="Open the quotation Excel (*_Calc.xlsx; if several, the highest number)">📊 Excel</a>
                 <a href="#" data-path="<?= h($sPath) ?>" onclick="copyPath(this);return false" title="Copy Windows path">📋 Copy path</a>
               <?php endif; ?>
               <?php if ($boFolder !== ''): ?>

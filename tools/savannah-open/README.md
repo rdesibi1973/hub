@@ -13,6 +13,14 @@ you click a link like:
 
 Explorer opens `%DROPBOX_HOME%\001_Safari\SmithJohn(BTG-Roberto)_..._BALANCE`.
 
+Adding `&open=calc` (the Hub's **📊 Excel** link) opens the folder's quotation
+Excel instead: the top-level `*_Calc.xlsx` (else any `.xlsx/.xlsm/.xls`; Office
+`~$` lock files skipped); if there are several, the one with the highest leading
+number (e.g. `10_…_Calc.xlsx` beats `2_…_Calc.xlsx`). No Excel → the folder opens.
+
+**Updating:** after a new version of `savannah-open.js`, run `install.cmd` again
+on each PC (it copies the launcher into `%LOCALAPPDATA%\SavannahTools`).
+
 The handler is a small JScript file run by `wscript.exe` (no PowerShell) — this
 avoids antivirus heuristics that flag browser-spawned `powershell.exe` command
 lines.
