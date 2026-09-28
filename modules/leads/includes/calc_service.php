@@ -13,6 +13,8 @@
  * Keep PHP-7 style (no match / arrow functions / str_contains).
  */
 
+require_once __DIR__ . '/calc_reader.php';   // calc_pick_file(), shared Calc reader
+
 /** Load PhpSpreadsheet or throw a clear error. */
 function calc_require_spreadsheet(): void {
     if (class_exists('\PhpOffice\PhpSpreadsheet\Spreadsheet')) return;
@@ -249,17 +251,9 @@ function calc_fill(PDO $db, array $in, bool $commit): array {
     if ($dir === '') throw new InvalidArgumentException('This request has no Dropbox folder.');
 
     $token = dropbox_get_access_token();
-    $cands = [];
-    foreach (dropbox_list_files($token, $dir) as $fn) { if (preg_match('/_calc\.xlsx$/i', $fn)) $cands[] = $fn; }
-    $file = trim((string)($in['file'] ?? ''));
-    if ($file !== '') {
-        if (!in_array($file, $cands, true)) throw new InvalidArgumentException('File "' . $file . '" not found. Calc files: ' . implode(', ', $cands));
-    } else {
-        if (!$cands) throw new InvalidArgumentException('No *_Calc.xlsx in ' . $dir . ' — run copy_program first.');
-        rsort($cands, SORT_NATURAL | SORT_FLAG_CASE);
-        $file = $cands[0];
-        if (count($cands) > 1) $warnings[] = 'Several Calc files — used ' . $file . ' (pass "file" to choose).';
-    }
+    $pick  = calc_pick_file(dropbox_list_files($token, $dir), (string)($in['file'] ?? ''), $dir);
+    $file  = $pick['file'];
+    $warnings = array_merge($warnings, $pick['warnings']);
     $path = $dir . '/' . $file;
     $dl = calc_dbx_download($token, $path);
     if ($dl === null) throw new RuntimeException('Could not download ' . $path);
