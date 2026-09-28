@@ -637,23 +637,6 @@ try {
         agent_out($res);
     }
 
-    // ── read_calc ────────────────────────────────────────────────────────────
-    // Read-only: the booking's Calc as data (days, guests, arrival/departure,
-    // prices, Dropbox rev). 422 when the Calc is not finalised (several pax
-    // sheets, none marked CONF) or is a group calc.
-    case 'read_calc': {
-        $r = agent_request($db, $in['request_id'] ?? 0);
-        require_once __DIR__ . '/dropbox_helper.php';
-        try {
-            $res = calc_read_request($db, (int)$r['id'], (string)($in['file'] ?? ''), (string)($in['sheet'] ?? ''));
-        } catch (InvalidArgumentException $e) {
-            agent_fail($e->getMessage(), 422);
-        } catch (RuntimeException $e) {
-            agent_fail($e->getMessage(), 502);
-        }
-        agent_out(array_merge(['ok' => true], $res));
-    }
-
     // ── ITI programmes: list / texts to translate / save translations ────────
     case 'iti_programs': {
         $q = trim((string)($in['q'] ?? ''));
@@ -722,7 +705,7 @@ try {
     default:
         agent_fail('Unknown action "' . $agentAction . '"', 400, ['actions' => [
             'find_requests', 'list_agencies', 'create_request', 'update_request', 'list_standard_programs',
-            'copy_program', 'get_rates', 'fill_calc', 'read_calc', 'confirm_preview', 'confirm_booking', 'send_booking_email',
+            'copy_program', 'get_rates', 'fill_calc', 'confirm_preview', 'confirm_booking', 'send_booking_email',
             'rollback_booking', 'iti_programs', 'iti_texts', 'iti_save_texts', 'update_rate', 'replace_flight_rates',
         ]]);
     }

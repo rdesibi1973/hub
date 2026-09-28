@@ -1008,8 +1008,6 @@ if ($itiCanCreate) {
       <?php endforeach; ?>
     </select>
     <button type="submit" class="btn btn-outline" style="font-size:.75rem;padding:5px 12px;">📋 Create from sample</button>
-    <a href="../iti/program_final.php?request_id=<?= (int)$r['id'] ?>" class="btn btn-outline" style="font-size:.75rem;padding:5px 12px;margin-left:auto;"
-       title="Build the final programme from this booking's Calc (lodges, dates, guests)">🧩 Final programme from Calc</a>
   </form>
   <?php endif; ?>
 </div>

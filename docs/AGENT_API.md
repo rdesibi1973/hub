@@ -112,21 +112,6 @@ changed meanwhile, e.g. saved from Excel), re-downloaded and re-verified.
 Returns `verify`: `passed`, `checks[]` (see below), `price_to_customer`, `total_price`, `total_costs`,
 `margin` (B10), `to_price_pp` (D10). HTTP 422 if a check has level `error`.
 
-### `read_calc` (GET)
-Read-only. `request_id`, optional `file` (which Calc if the folder has several), `sheet` (pax sheet
-name). Reads the booking's Calc (no PhpSpreadsheet needed) and returns:
-`file`, `calc_path`, `calc_rev` (Dropbox rev — compare later to spot changes), `sheet`,
-`pax` `{adults, teen, child}`, `pax_text` ("3 adults"), `room_config` (A37), `extra_details`,
-`start_date`, `end_date`, `nights`,
-`days[]` `{row, date, label, flight_cost, park_fees_desc, activity_desc, hotel_text, invoice, checked}`,
-`guests[]` `{name, title, dob, country, tba}` (no passport numbers), `guests_tba`, `arrival`, `departure`,
-`price_to_customer` (F9), `price_total`, `price_sto`, `warnings[]`.
-- Day dates = the hard-typed date (A17, or a date typed later after a gap) + row offset; a formula's
-  saved value is only compared (warning if different).
-- Several pax sheets: the one whose name contains **CONF** is read (warning); none or several
-  marked → 422 "not finalised". Group calcs (RECAP) → 422.
-- `flight_cost` is the saved FLIGHTS amount of that day (e.g. `=215*$B$1` → 430 for 2 pax).
-
 ### Calc checks (also in Confirm preview, UI + API)
 `error`: more than one pax sheet · a beach night (≥ MIDT) without hotel · formula cells with no saved
 value (Hub would read End = Start). `warn`: H6:I14 not empty · F9 not a formula · flight cost not in the
@@ -182,7 +167,6 @@ curl -sH "$H" -X POST "$U?action=create_request" -d '{"customer_name":"Patrizia 
 curl -sH "$H" -X POST "$U?action=copy_program" -d '{"request_id":2958,"program":"DumaShort"}'
 curl -sH "$H" "$U?action=get_rates&program=DumaShort&q=Zanzibar"
 curl -sH "$H" -X POST "$U?action=fill_calc" -d @fiorini_calc.json                      # dry-run; add "confirm":true to write
-curl -sH "$H" "$U?action=read_calc&request_id=2958"                                     # the Calc as data (read-only)
 curl -sH "$H" -X POST "$U?action=confirm_preview" -d '{"request_id":2958,"start":"2027-01-19","mid":"2027-01-22","end":"2027-01-28"}'
 curl -sH "$H" -X POST "$U?action=confirm_booking" -d '{"request_id":2958,"start":"2027-01-19","mid":"2027-01-22","end":"2027-01-28","confirm":true}'
 curl -sH "$H" -X POST "$U?action=send_booking_email" -d '{"request_id":2958}'                  # dry-run
@@ -205,9 +189,8 @@ curl -sH "$H" -X POST "$U?action=rollback_booking" -d '{"request_id":2958,"confi
 ```
 
 ## Server requirement
-`fill_calc` and `get_rates.program` need **PhpSpreadsheet 1.29** in the Hub root `vendor/` — see
-`composer.json` (the Hub runs on PHP 8.3 since 28 Sep 2026). Everything else, `read_calc` included,
-works without it.
+`fill_calc` and `get_rates.program` need **PhpSpreadsheet 1.29** (PHP 8.0 on BlueHost; 2.x needs 8.1)
+in the Hub root `vendor/` — see `composer.json`. Everything else works without it.
 
 ## Not yet
 - MCP server / connector wrapper

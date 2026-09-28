@@ -97,13 +97,6 @@ if ($type === 'lodge') {
 
 $seed = $_SESSION['iti_alias_seed'] ?? null;
 unset($_SESSION['iti_alias_seed']);
-if ($seed) {
-    // Texts still to map first, then the ones added / already there.
-    usort($seed, function ($a, $b) {
-        $ok = function ($s) { return strpos($s[2], 'added') === 0 || $s[2] === 'exists'; };
-        return ((int)$ok($a) - (int)$ok($b)) ?: strcmp($a[0] . $a[1], $b[0] . $b[1]);
-    });
-}
 
 $page_title = 'Calc aliases — Itinerary Builder';
 $extra_css = iti_extra_css();
@@ -130,7 +123,7 @@ include __DIR__ . '/../../includes/layout_header.php';
 <?php if ($seed): ?>
 <div class="form-card" style="margin-bottom:18px;">
   <div class="form-section-title">Seed result</div>
-  <div class="table-wrap">
+  <div class="table-wrap" style="max-height:320px;overflow:auto;">
     <table>
       <thead><tr><th>Type</th><th>Alias</th><th>Result</th></tr></thead>
       <tbody>

@@ -1208,8 +1208,9 @@ function iti_seed_aliases(string $user): array {
         'maasai'                        => '%Maasai%',
         'marera garden and coffee tour' => '%Coffee%',
         'town tour'                     => '%Town Tour%',
-        'lunch boxes'                   => '%Lunch%',
-        'lunch box'                     => '%Lunch%',
+        // Picnic lunch cost line (not included in the previous night's hotel), not an activity.
+        'lunch boxes'                   => null,
+        'lunch box'                     => null,
     );
     $out = array();
     $exists = function ($type, $alias) { return iti_alias_lookup($type, $alias) !== null; };
