@@ -20,6 +20,20 @@ Running log of notable changes and current build state. Module-level "active / p
 
 ---
 
+## 2026-09 — Kilimanjaro Calc templates → .xlsx, safari layout
+- The 7 Kili templates in `/itineraries/Kili/it/Trekking/` (`*_CalcPrice.xls`) converted to
+  `*_Calc.xlsx` with the safari Calc layout, so Safari check, Payments, fill_calc and "📊 Excel"
+  handle them: TOT PAX B1 / Adults B2 / Teenagers B3 / Children B4 / Jeeps B5, Totals on row 30,
+  Tot price / Deposit (30%) / Balance in F10:F12, rack / sto / single supp in H9:H11,
+  teen / child price + discount in H6:H7 / H13:H14, guests from row 43. Trek parameters (days,
+  porters, guides, cooker) stay in H1:I4; the trek cost block is G33:H45.
+- Formula changes: trek costs and hotels count all pax (B1, was adults only — children were
+  ignored); Total Price `=SUM(B7:B8)*(1+D1)` (bank commission counted once — B7 already holds it);
+  Price pp TO divided by TOT PAX; deposit 30% of Tot price (was 30% + 1.5% bank commission).
+  With adults only, every computed value is unchanged (checked sheet by sheet).
+- `std_programs.php`: Trekking programs copy the new files as `…_Calc.xlsx`. The old `.xls` are
+  still in the folder — archive them once this is deployed.
+
 ## 2026-09 — "📊 Open Excel" link next to "📂 Open folder"
 - BackOffice, Payments and Request view: new link that opens the booking's quotation Excel
   (`savannah://open?path=<folder>&open=calc`). The local handler picks the file with the same rule

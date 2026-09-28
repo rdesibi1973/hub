@@ -58,13 +58,13 @@ return [
     ],
 
     'Trekking' => [
-        'Machame-9 days'    => [['src'=>$KI.'SavannahExplorers_MachameRoute.docx','dst'=>'MachameRoute.docx'], ['src'=>$KI.'MACHAME_7gg_CalcPrice.xls','dst'=>'Machame7gg.xls']],
-        'Machame-8 days'    => [['src'=>$KI.'SavannahExplorers_MachameRoute_8gg.docx','dst'=>'MachameRoute8gg.docx'], ['src'=>$KI.'MACHAME_6gg_CalcPrice.xls','dst'=>'Macheme6gg.xls']],
-        'Marangu-8 days'    => [['src'=>$KI.'SavannahExplorers_MaranguRoute.doc','dst'=>'MaranguRoute.doc'], ['src'=>$KI.'MARANGU_5&6gg_CalcPrice.xls','dst'=>'MARANGU_5&6gg_CalcPrice.xls']],
-        'Marangu-7 days'    => [['src'=>$KI.'SavannahExplorers_MaranguRoute.doc','dst'=>'MaranguRoute7Days.doc'], ['src'=>$KI.'MARANGU_5&6gg_CalcPrice.xls','dst'=>'MARANGU_5gg_CalcPrice.xls']],
-        'Rongai-8days'      => [['src'=>$KI.'SavannahExplorers_RongaiRoute.doc','dst'=>'RongaiRoute.doc'], ['src'=>$KI.'RONGAI_5&6gg_CalcPrice.xls','dst'=>'RONGAI_5&6gg_CalcPrice.xls']],
-        'Lemosho-9 days'    => [['src'=>$KI.'SavannahExplorers_LemoshoRoute.doc','dst'=>'LemoshoRoute.doc'], ['src'=>$KI.'LEMOSHO_7gg_CalcPrice.xls','dst'=>'LEMOSHO_7gg_CalcPrice.xls']],
-        'Lemosho-10 days'   => [['src'=>$KI.'SavannahExplorers_LemoshoRoute_10days.docx','dst'=>'LemoshoRoute_10gg.docx'], ['src'=>$KI.'LEMOSHO_8gg_CalcPrice.xls','dst'=>'LEMOSHO_8gg_CalcPrice.xls']],
+        'Machame-9 days'    => [['src'=>$KI.'SavannahExplorers_MachameRoute.docx','dst'=>'MachameRoute.docx'], ['src'=>$KI.'MACHAME_7gg_Calc.xlsx','dst'=>'Machame7gg_Calc.xlsx']],
+        'Machame-8 days'    => [['src'=>$KI.'SavannahExplorers_MachameRoute_8gg.docx','dst'=>'MachameRoute8gg.docx'], ['src'=>$KI.'MACHAME_6gg_Calc.xlsx','dst'=>'Machame6gg_Calc.xlsx']],
+        'Marangu-8 days'    => [['src'=>$KI.'SavannahExplorers_MaranguRoute.doc','dst'=>'MaranguRoute.doc'], ['src'=>$KI.'MARANGU_5&6gg_Calc.xlsx','dst'=>'Marangu5&6gg_Calc.xlsx']],
+        'Marangu-7 days'    => [['src'=>$KI.'SavannahExplorers_MaranguRoute.doc','dst'=>'MaranguRoute7Days.doc'], ['src'=>$KI.'MARANGU_5&6gg_Calc.xlsx','dst'=>'Marangu5gg_Calc.xlsx']],
+        'Rongai-8days'      => [['src'=>$KI.'SavannahExplorers_RongaiRoute.doc','dst'=>'RongaiRoute.doc'], ['src'=>$KI.'RONGAI_5&6gg_Calc.xlsx','dst'=>'Rongai5&6gg_Calc.xlsx']],
+        'Lemosho-9 days'    => [['src'=>$KI.'SavannahExplorers_LemoshoRoute.doc','dst'=>'LemoshoRoute.doc'], ['src'=>$KI.'LEMOSHO_7gg_Calc.xlsx','dst'=>'Lemosho7gg_Calc.xlsx']],
+        'Lemosho-10 days'   => [['src'=>$KI.'SavannahExplorers_LemoshoRoute_10days.docx','dst'=>'LemoshoRoute_10gg.docx'], ['src'=>$KI.'LEMOSHO_8gg_Calc.xlsx','dst'=>'Lemosho8gg_Calc.xlsx']],
     ],
 
     'LUX & Classic Safari' => [
