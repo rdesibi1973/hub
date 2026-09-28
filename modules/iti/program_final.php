@@ -10,6 +10,7 @@ require_once __DIR__ . '/../../includes/auth.php';
 require_login();
 require_once __DIR__ . '/includes/iti_functions.php';
 require_once __DIR__ . '/includes/iti_final.php';
+require_once __DIR__ . '/../leads/dropbox_constants.php';   // DROPBOX_* keys (server-only file, like iti_import_sto.php)
 require_once __DIR__ . '/../leads/dropbox_helper.php';
 require_once __DIR__ . '/../leads/includes/booking_service.php';
 require_once __DIR__ . '/../leads/includes/calc_service.php';
