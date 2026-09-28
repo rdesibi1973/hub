@@ -120,6 +120,11 @@ function iti_final_plan(PDO $db, array $calc, int $sampleId): array {
 
         // Activities: ACTIVITY DESC + FEES DESC, split on '+'.
         foreach (array_merge(iti_alias_parts($cd['activity_desc']), iti_alias_parts($cd['park_fees_desc'])) as $part) {
+            // Picnic lunch cost line, never an activity: not asked, no alias needed.
+            if (preg_match('/^lunch ?box(es)?$/', iti_alias_norm($part))) {
+                $d['acts'][] = array('text' => $part, 'state' => 'nothing', 'activity_id' => null);
+                continue;
+            }
             $a = iti_alias_lookup('activity', $part);
             if ($a === null) {
                 $unmapped['activity'][$part] = $part;
