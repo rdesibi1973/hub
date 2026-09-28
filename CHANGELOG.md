@@ -39,6 +39,9 @@ Running log of notable changes and current build state. Module-level "active / p
   (`savannah://open?path=<folder>&open=calc`). The local handler picks the file with the same rule
   as `fill_calc`: top-level `*_Calc.xlsx` (Office `~$` lock files skipped), else any
   `.xlsx/.xlsm/.xls`; if several, the highest leading number wins. No Excel → it opens the folder.
+  Also on every other "📂 Open": BackOffice contract / file-search folders, CK tracker, GRP groups.
+  A GRP member's link carries `&up=1`: no Excel in the member's sub-folder → the group's Calc
+  (same rule as Payments).
 - `tools/savannah-open/savannah-open.js`: new `open=calc` mode; lists files via Shell.Application
   (JScript `Enumerator` over FSO `.Files` returns nothing on Windows 11 24H2). **Re-run
   `install.cmd` on each PC** to get it — an old handler ignores `open=calc` and just opens the folder.

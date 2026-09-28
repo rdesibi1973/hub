@@ -77,11 +77,16 @@ function grp_key(string $folder): string {
     return preg_replace('/(_(balance-cash|balance_cash|balance|deposit|paid|progress|confirmed|provisional|cancelled|ck))+$/', '', $k);
 }
 
-/** savannah:// open link + %DROPBOX_HOME% Windows path for an API path. */
-function grp_links(string $path): array {
-    $rel = ltrim($path, '/');
+/**
+ * savannah:// open link + %DROPBOX_HOME% Windows path + open-Excel link for an API path.
+ * $member: a customer sub-folder — the Excel link falls back to the group's Calc (&up=1).
+ */
+function grp_links(string $path, bool $member = false): array {
+    $rel  = ltrim($path, '/');
+    $open = 'savannah://open?path=' . implode('/', array_map('rawurlencode', explode('/', $rel)));
     return [
-        'savannah://open?path=' . implode('/', array_map('rawurlencode', explode('/', $rel))),
+        $open,
+        $open . '&open=calc' . ($member ? '&up=1' : ''),
         '%DROPBOX_HOME%\\' . str_replace('/', '\\', $rel),
     ];
 }
@@ -204,7 +209,7 @@ include 'includes/header.php';
     </h3>
 
     <?php foreach ($list as $g):
-        [$gOpen, $gWin] = grp_links($g['path']);
+        [$gOpen, $gCalc, $gWin] = grp_links($g['path']);
         $nMem = count($g['members']);
     ?>
       <div class="grp-card">
@@ -230,6 +235,7 @@ include 'includes/header.php';
 
         <div class="grp-actions" style="margin-top:6px">
           <a href="<?= h($gOpen) ?>" title="Open the group folder in Windows Explorer">📂 Open</a>
+          <a href="<?= h($gCalc) ?>" title="Open the group's quotation Excel (*_Calc.xlsx; if several, the highest number)">📊 Excel</a>
           <a href="#" data-copy="<?= h($gWin) ?>" onclick="copyPath(this);return false" title="Copy Windows path">📋 Copy path</a>
           <a href="#" data-copy="<?= h($g['name']) ?>" onclick="copyPath(this);return false" title="Copy the folder name">📄 Copy folder name</a>
           <a href="backoffice.php?root=001_Safari&amp;show_all=1&amp;q=<?= rawurlencode($g['name']) ?>" title="Open this group in the BackOffice search (rename, status…)">🛠 BackOffice</a>
@@ -242,7 +248,7 @@ include 'includes/header.php';
         <?php else: ?>
           <ul class="grp-members">
             <?php foreach ($g['members'] as $m):
-                [$mOpen, $mWin] = grp_links($g['path'] . '/' . $m['folder']);
+                [$mOpen, $mCalc, $mWin] = grp_links($g['path'] . '/' . $m['folder'], true);
                 $r = $m['req'];
             ?>
               <li>
@@ -253,6 +259,7 @@ include 'includes/header.php';
                       <a href="request_view.php?id=<?= (int)$r['id'] ?>" target="_blank" title="<?= h($r['customer_name']) ?>">🔗 Open Request</a>
                     <?php endif; ?>
                     <a href="<?= h($mOpen) ?>" title="Open in Windows Explorer">📂 Open</a>
+                    <a href="<?= h($mCalc) ?>" title="Open the Excel (own *_Calc.xlsx, else the group's)">📊 Excel</a>
                     <a href="#" data-copy="<?= h($mWin) ?>" onclick="copyPath(this);return false" title="Copy Windows path">📋 Copy path</a>
                   </div>
                 </div>

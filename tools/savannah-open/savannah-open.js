@@ -17,6 +17,7 @@ var url = WScript.Arguments(0);
 
 // ── Extract the relative path from the URL ──────────────────────────────────
 var wantCalc = /[?&]open=calc(&|$)/i.test(url);
+var calcUp   = /[?&]up=1(&|$)/.test(url);   // GRP member: Calc may be in the group folder
 var rel, m = /[?&]path=([^&]+)/.exec(url);
 if (m) { rel = m[1]; }
 else   { rel = url.replace(/^savannah:(\/\/)?(open\/?)?/i, ""); }
@@ -82,6 +83,10 @@ function pickCalc(dir) {
 
 if (wantCalc && fso.FolderExists(full)) {
   var xl = pickCalc(full);
+  if (!xl && calcUp) {
+    var up = full.substring(0, full.lastIndexOf("\\"));
+    if (up.length > root.length && fso.FolderExists(up)) xl = pickCalc(up);
+  }
   if (xl) openExplorer('"' + xl + '"');   // Explorer hands the file to Excel
   else { warn("No Excel (*_Calc.xlsx) found in:\n" + full + "\n\nOpening the folder instead."); openExplorer('"' + full + '"'); }
 } else if (fso.FolderExists(full)) {

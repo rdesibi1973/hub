@@ -486,6 +486,7 @@ include 'includes/header.php';
             <a href="request_view.php?id=<?= (int)$q['id'] ?>" target="_blank">🔗 <?= h($q['customer_name']) ?><?= (int)$q['pax'] ? ' · ' . (int)$q['pax'] . ' pax' : '' ?></a>
           <?php endforeach; ?>
           <a href="savannah://open?path=<?= h(implode('/', array_map('rawurlencode', explode('/', $rel)))) ?>" title="Open in Windows Explorer">📂 Open</a>
+          <a href="<?= h(savannah_calc_url_for($rel)) ?>" title="Open the quotation Excel (*_Calc.xlsx; if several, the highest number)">📊 Excel</a>
           <a href="#" data-copy="<?= h('%DROPBOX_HOME%\\' . str_replace('/', '\\', $rel)) ?>" onclick="copyPath(this);return false" title="Copy Windows path">📋 Copy path</a>
         </div>
         <div class="ck-lastnote" data-ck="<?= $id ?>">

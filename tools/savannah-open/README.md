@@ -16,7 +16,9 @@ Explorer opens `%DROPBOX_HOME%\001_Safari\SmithJohn(BTG-Roberto)_..._BALANCE`.
 Adding `&open=calc` (the Hub's **📊 Excel** link) opens the folder's quotation
 Excel instead: the top-level `*_Calc.xlsx` (else any `.xlsx/.xlsm/.xls`; Office
 `~$` lock files skipped); if there are several, the one with the highest leading
-number (e.g. `10_…_Calc.xlsx` beats `2_…_Calc.xlsx`). No Excel → the folder opens.
+number (e.g. `10_…_Calc.xlsx` beats `2_…_Calc.xlsx`). With `&up=1` (a GRP
+member's sub-folder) and no Excel there, the parent (group) folder is tried.
+No Excel → the folder opens.
 
 **Updating:** after a new version of `savannah-open.js`, run `install.cmd` again
 on each PC (it copies the launcher into `%LOCALAPPDATA%\SavannahTools`).

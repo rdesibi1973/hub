@@ -688,6 +688,7 @@ include 'includes/header.php';
           <td>
             <div style="font-family:'Open Sans',sans-serif">
               <a href="<?= h($cOpen) ?>" title="Open in Windows Explorer" style="font-size:.68rem;text-decoration:none">📂 Open</a>
+              <a href="<?= h(savannah_calc_url_for($cRel)) ?>" title="Open the Excel in this folder (*_Calc.xlsx, else the highest-numbered .xlsx)" style="font-size:.68rem;text-decoration:none;margin-left:8px">📊 Excel</a>
               <a href="#" data-copy="<?= h($cWin) ?>" onclick="copyPath(this);return false" title="Copy Windows path" style="font-size:.68rem;text-decoration:none;margin-left:8px">📋 Copy path</a>
             </div>
           </td>
@@ -1121,6 +1122,7 @@ include 'includes/header.php';
           <td>
             <div style="font-family:'Open Sans',sans-serif">
               <a href="<?= h($oOpen) ?>" title="Open the folder in Windows Explorer" style="font-size:.68rem;text-decoration:none">📂 Open folder</a>
+              <a href="<?= h(savannah_calc_url_for($oDir)) ?>" title="Open the quotation Excel (*_Calc.xlsx; if several, the highest number)" style="font-size:.68rem;text-decoration:none;margin-left:8px">📊 Excel</a>
               <a href="#" data-copy="<?= h($oWin) ?>" onclick="copyPath(this);return false" title="Copy Windows path of the folder" style="font-size:.68rem;text-decoration:none;margin-left:8px">📋 Copy path</a>
             </div>
           </td>

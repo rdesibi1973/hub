@@ -341,8 +341,21 @@ function savannah_open_url(array $r): string {
  * The local handler picks the file: top-level *_Calc.xlsx, highest number wins.
  */
 function savannah_calc_url(array $r): string {
-    $u = savannah_open_url($r);
-    return $u === '' ? '' : $u . '&open=calc';
+    return savannah_calc_url_for(folder_rel_path($r));
+}
+
+/**
+ * Same, for a relative Dropbox path. When the parent folder is itself a booking
+ * (a GRP member's sub-folder), "&up=1" lets the handler fall back to the group's
+ * Calc — the rule Payments uses (cp_payments_for_request).
+ */
+function savannah_calc_url_for(string $rel): string {
+    $rel = trim($rel, '/');
+    if ($rel === '') return '';
+    $segs = explode('/', $rel);
+    $url  = 'savannah://open?path=' . implode('/', array_map('rawurlencode', $segs)) . '&open=calc';
+    if (count($segs) > 2 && folder_is_booking_leaf($segs[count($segs) - 2])) $url .= '&up=1';
+    return $url;
 }
 
 /** Windows path with a %DROPBOX_HOME% prefix, for the Copy-path button. */
