@@ -67,7 +67,7 @@ CREATE TABLE IF NOT EXISTS iti_program_booking (
   CONSTRAINT fk_pbk_prog FOREIGN KEY (program_id) REFERENCES iti_programs (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Guests (Calc rows 43+; 'TBA' allowed).
+-- Guests (Calc rows 43+; 'TBA' allowed). Passport numbers are deliberately NOT stored.
 CREATE TABLE IF NOT EXISTS iti_program_guests (
   id          INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
   program_id  INT UNSIGNED NOT NULL,
@@ -75,8 +75,7 @@ CREATE TABLE IF NOT EXISTS iti_program_guests (
   full_name   VARCHAR(160) NOT NULL,
   title       VARCHAR(10) NULL,                         -- MR / MRS / MS
   dob         DATE NULL,
-  passport    VARCHAR(40) NULL,
-  country     VARCHAR(80) NULL,
+  country     VARCHAR(80) NULL,                         -- no passport numbers (not stored in the Hub for now)
   KEY idx_pg_prog (program_id, sort_order),
   CONSTRAINT fk_pg_prog FOREIGN KEY (program_id) REFERENCES iti_programs (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

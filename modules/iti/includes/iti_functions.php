@@ -1051,6 +1051,7 @@ function iti_ensure_final_schema(): void {
          updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP',
         array('CONSTRAINT fk_pbk_prog FOREIGN KEY (program_id) REFERENCES iti_programs (id) ON DELETE CASCADE'));
 
+    // Guests from the Calc (rows 43+). Passport numbers are deliberately not stored.
     iti_create_table('iti_program_guests',
         'id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
          program_id INT UNSIGNED NOT NULL,
@@ -1058,7 +1059,6 @@ function iti_ensure_final_schema(): void {
          full_name VARCHAR(160) NOT NULL,
          title VARCHAR(10) NULL,
          dob DATE NULL,
-         passport VARCHAR(40) NULL,
          country VARCHAR(80) NULL,
          KEY idx_pg_prog (program_id, sort_order)',
         array('CONSTRAINT fk_pg_prog FOREIGN KEY (program_id) REFERENCES iti_programs (id) ON DELETE CASCADE'));
