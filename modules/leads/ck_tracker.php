@@ -594,11 +594,7 @@ include 'includes/header.php';
 <?php
 // Email: no templates (they need a request); To suggests booking + colleagues.
 $templates = [];
-$send_to_suggestions = ['operations@savannahexplorers.com' => 'Booking / Operations'];
-foreach ($db->query("SELECT full_name, email FROM users
-                     WHERE is_active = 1 AND email IS NOT NULL AND email <> '' ORDER BY full_name") as $u) {
-    $send_to_suggestions[strtolower(trim($u['email']))] ??= $u['full_name'];
-}
+$send_to_suggestions = ck_mail_suggestions($db);
 $send_ajax_url = 'ck_tracker.php';
 include 'includes/send_modal.php';
 ?>

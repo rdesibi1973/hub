@@ -417,6 +417,18 @@ function ck_agent_file_allowed(string $rel): bool {
     return !in_array($dir, $internal, true) && str_ends_with($name, '.docx') && strpos($name, '~$') !== 0;
 }
 
+/** CK emails (tracker / report "Mail"): the booking team first, then every active user. */
+const CK_BOOKING_EMAIL = 'operations@savannahexplorers.com';
+
+function ck_mail_suggestions(PDO $db): array {
+    $out = [CK_BOOKING_EMAIL => 'Booking / Operations'];
+    foreach ($db->query("SELECT full_name, email FROM users
+                         WHERE is_active = 1 AND email IS NOT NULL AND email <> '' ORDER BY full_name") as $u) {
+        $out[strtolower(trim($u['email']))] ??= $u['full_name'];
+    }
+    return $out;
+}
+
 /** Start the GitHub workflow for these ck_folders ids. */
 function ck_github_dispatch(array $ids): array {
     if (!defined('CK_GITHUB_TOKEN') || !defined('CK_GITHUB_REPO') || CK_GITHUB_TOKEN === '' || CK_GITHUB_REPO === '') {

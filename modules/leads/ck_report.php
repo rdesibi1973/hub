@@ -16,7 +16,7 @@ $db = db();
 ck_ensure_schema($db);
 $id = (int)($_GET['id'] ?? 0);
 
-$st = $db->prepare("SELECT c.report_html, c.error, c.folder_name, c.created_at, c.trigger_src, c.files_json,
+$st = $db->prepare("SELECT c.report_html, c.error, c.folder_name, c.created_at, c.trigger_src, c.files_json, c.checks_json,
                            c.ck_folder_id, f.folder_name AS cur_folder, f.gone,
                            f.last_check_id, f.check_requested_at
                     FROM ck_checks c LEFT JOIN ck_folders f ON f.id = c.ck_folder_id
@@ -85,9 +85,24 @@ $TRIGGERS = ['manual' => 'manual re-check', 'nightly' => 'nightly run', 'stage' 
 $runAt    = date('D d M Y, H:i', strtotime($c['created_at']));
 $running  = $c['check_requested_at'] && (strtotime(ck_now()) - strtotime($c['check_requested_at'])) <= 12 * 60;
 $newer    = (int)$c['last_check_id'] > $id ? (int)$c['last_check_id'] : 0;
+
+// "Mail" (e.g. to booking: "please book / save the transfers"): the Hub send
+// dialog, sent through ck_tracker.php, which logs it in the folder's CK notes.
+// Subject = the folder; body = the open errors / checks of this report.
+$mailFolder = (string)($c['cur_folder'] ?: $c['folder_name']);
+$esc   = fn($s) => htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8');
+$items = '';
+foreach (json_decode((string)$c['checks_json'], true) ?: [] as $k) {
+    if (!in_array($k['status'] ?? '', ['red', 'yellow'], true) || !empty($k['confirmed'])) continue;
+    $items .= '<li><strong>' . $esc($k['section'] ?? '') . ' — ' . $esc($k['title'] ?? '') . '</strong>'
+            . (($k['detail'] ?? '') !== '' ? '<br>' . nl2br($esc($k['detail'])) : '') . '</li>';
+}
+$mailBody = '<p>Folder: <strong>' . $esc($mailFolder) . '</strong></p>'
+          . ($items ? '<p>Open points from the SafariCheck of ' . $esc($runAt) . ':</p><ul>' . $items . '</ul>' : '<p><br></p>');
 ?><!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="assets/style.css">
 <title>SafariCheck — <?= htmlspecialchars((string)$c['folder_name'], ENT_QUOTES, 'UTF-8') ?></title>
 <style>
 html,body{margin:0;height:100%;background:#f6f3f2;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
@@ -99,6 +114,23 @@ body{display:flex;flex-direction:column}
 .runbar button{font:inherit;font-weight:700;color:#fff;background:#1a3a5c;border:0;border-radius:4px;padding:3px 10px;margin-left:6px;cursor:pointer}
 .runbar button:disabled{opacity:.6;cursor:default}
 iframe{border:0;width:100%;flex:1 1 auto;display:block}
+.runbar .mailbtn{margin-left:auto}
+.runbar .mailok{color:#1A6B3A;font-weight:700}
+/* Hub send dialog (send_modal.php) — same as ck_tracker.php */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:200;display:flex;align-items:flex-start;justify-content:center;padding:40px 16px;overflow-y:auto}
+.modal-overlay.hidden{display:none}
+.modal-box{background:#fff;border-radius:10px;box-shadow:0 8px 40px rgba(0,0,0,.2);width:100%}
+.modal-header{padding:15px 24px;border-bottom:1px solid var(--grey-lt);display:flex;align-items:center;justify-content:space-between}
+.modal-header h3{font-family:"Merriweather",serif;font-size:.95rem;font-weight:700;margin:0;color:var(--black)}
+.modal-body{padding:22px 24px}
+.modal-footer{padding:14px 24px;border-top:1px solid var(--grey-lt);display:flex;justify-content:flex-end;gap:10px}
+.modal-close{background:none;border:none;font-size:1.3rem;cursor:pointer;color:var(--grey-mid);line-height:1;padding:0}
+.m-label{font-size:.72rem;font-weight:700;color:var(--grey-dk);display:block;margin-bottom:4px}
+.m-input{width:100%;padding:7px 10px;border:1.5px solid var(--grey-lt);border-radius:6px;font-family:"Open Sans",sans-serif;font-size:.82rem;color:var(--black);box-sizing:border-box}
+.m-input:focus{outline:none;border-color:var(--red)}
+.attach-chip{display:inline-flex;align-items:center;gap:4px;background:var(--off-white);border:1px solid var(--grey-lt);border-radius:4px;padding:2px 8px;font-size:.72rem;margin:2px}
+.attach-chip button{background:none;border:none;cursor:pointer;color:var(--red);font-size:.9rem;line-height:1;padding:0 1px}
+.ql-editor ul,.ql-editor ol{padding-left:1.5em}
 </style>
 </head><body>
 <div class="runbar">
@@ -111,8 +143,29 @@ iframe{border:0;width:100%;flex:1 1 auto;display:block}
   <?php else: ?>
     <span class="warn" id="chg" hidden></span>
   <?php endif; ?>
+  <?php if (!empty($c['ck_folder_id'])): ?>
+    <span class="mailbtn"><span class="mailok" id="mailOk"></span>
+      <button type="button" onclick="openCkMail()" title="Email the booking team or a colleague — saved in the CK notes">✉ Mail</button></span>
+  <?php endif; ?>
 </div>
 <iframe id="rep" src="ck_report.php?id=<?= $id ?>&amp;raw=1"></iframe>
+<?php if (!empty($c['ck_folder_id'])):
+    $templates = [];
+    $send_to_suggestions = ck_mail_suggestions($db);
+    $send_ajax_url = 'ck_tracker.php';
+    include 'includes/send_modal.php'; ?>
+<script>
+function openCkMail() {
+  openSend(<?= (int)$c['ck_folder_id'] ?>, <?= json_encode(ck_customer_label($mailFolder)) ?>,
+           <?= json_encode(CK_BOOKING_EMAIL) ?>, <?= json_encode($mailFolder) ?>);
+  var q = window.Quill && Quill.find(document.getElementById('send-quill'));
+  if (q) q.clipboard.dangerouslyPasteHTML(0, <?= json_encode($mailBody, JSON_UNESCAPED_UNICODE) ?>);
+}
+window.onEmailSent = function () {
+  document.getElementById('mailOk').textContent = '✓ Mail sent — saved in the CK notes ';
+};
+</script>
+<?php endif; ?>
 <script>
 (function () {
   var ID = <?= $id ?>, CSRF = <?= json_encode(csrf_token()) ?>;
