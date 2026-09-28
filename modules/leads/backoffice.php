@@ -599,6 +599,21 @@ if ($rows) {
     } catch (Throwable $e) { $ckByReq = []; }   // the CK links are optional
 }
 
+// Invoices of each row (not for restricted staff): one → the invoice, several → the list.
+$invByReq = [];
+if ($rows && !isLeadsRestricted()) {
+    try {
+        $ids = array_map(fn($r) => (int)$r['id'], $rows);
+        $in  = implode(',', array_fill(0, count($ids), '?'));
+        $st  = $db->prepare("SELECT g.request_id, g.n, g.first_id, i.invoice_number AS first_no
+                             FROM (SELECT request_id, COUNT(*) AS n, MIN(id) AS first_id
+                                   FROM invoices WHERE request_id IN ($in) GROUP BY request_id) g
+                             JOIN invoices i ON i.id = g.first_id");
+        $st->execute($ids);
+        foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $iv) $invByReq[(int)$iv['request_id']] = $iv;
+    } catch (Throwable $e) { $invByReq = []; }   // the invoice link is optional
+}
+
 // Existing GRP names — autocomplete for the "Re-group" action.
 $existingGrps = [];
 if ($rows) {
@@ -765,6 +780,15 @@ include 'includes/header.php';
           <?php $sPath = savannah_local_path($r); $sUrl = savannah_open_url($r); ?>
           <div style="margin-top:3px;font-family:'Open Sans',sans-serif">
             <a href="request_view.php?id=<?= (int)$r['id'] ?>" target="_blank" title="Open the booking request in the Hub" style="font-size:.68rem;text-decoration:none">🔗 Open Request</a>
+            <?php if ($iv = $invByReq[(int)$r['id']] ?? null): ?>
+              <?php if ((int)$iv['n'] === 1): ?>
+              <a href="../invoices/invoice_view.php?id=<?= (int)$iv['first_id'] ?>" target="_blank" title="Open the invoice" style="font-size:.68rem;text-decoration:none;margin-left:8px">🧾 <?= h($iv['first_no']) ?></a>
+              <?php else: ?>
+              <a href="../invoices/invoices.php?request_id=<?= (int)$r['id'] ?>" target="_blank" title="Open the invoices of this booking" style="font-size:.68rem;text-decoration:none;margin-left:8px">🧾 <?= (int)$iv['n'] ?> Invoices</a>
+              <?php endif; ?>
+            <?php elseif (!isLeadsRestricted() && ($r['status'] ?? '') === 'Booked'): ?>
+              <a href="../invoices/invoice_add.php?request_id=<?= (int)$r['id'] ?>" target="_blank" title="Create the invoice for this booking" style="font-size:.68rem;text-decoration:none;margin-left:8px;color:#C0211B">🧾 + Invoice</a>
+            <?php endif; ?>
             <?php if ($sPath !== ''): ?>
               <a href="<?= h($sUrl) ?>" title="Open in Windows Explorer" style="font-size:.68rem;text-decoration:none;margin-left:8px">📂 Open</a>
               <a href="<?= h(savannah_calc_url($r)) ?>" title="Open the quotation Excel (*_Calc.xlsx; if several, the highest number)" style="font-size:.68rem;text-decoration:none;margin-left:8px">📊 Excel</a>
