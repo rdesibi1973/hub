@@ -9,6 +9,8 @@
  *   2. Those Excel dates agree with the Start / End dates being confirmed.
  *   3. The ARRIVAL flight details in the Excel land on (around) the Start date.
  *   4. The DEPARTURE flight details in the Excel leave on (around) the End date.
+ *      Booking-system flight lines are read exactly (sc_gds_check, the rules of
+ *      safariagent gds.py); free text falls back to "a date near Start / End".
  *
  * All checks are advisory: they never block a confirmation, they only surface
  * warnings for a human to judge. The Excel is the per-booking "*_Calc.xlsx".
@@ -305,6 +307,113 @@ function sc_dates_in_text(string $text, string $anchor): array {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+//  Flight lines in booking-system (GDS / Amadeus) format — port of the
+//  safariagent gds.py rules, so the Hub and SafariCheck judge a flight alike:
+//    "2 . AF  874 R  06DEC CDGJRO HK4  1035  2125"   "8 TK 566 V 01FEB 1 ISTJRO HK6 1710 0015+1"
+//  Arrival = the flight entering the trip area, departure = the one leaving it;
+//  OK on the Start / End day, or the next day before 06:00 (night flight).
+// ─────────────────────────────────────────────────────────────────────────────
+
+const SC_AREA = ['JRO','ARK','ZNZ','DAR','SEU','MYW','MWZ','TKQ','LKY','MFA','PMA','TBO','IRI',
+                 'NBO','WIL','MBA','MYD','LAU','UKA','KGL','EBB',
+                 'JNB','CPT','WDH','MUB','BBK','VFA','LVI','TNR','NOS','DIE'];
+const SC_NIGHT_LIMIT = '06:00';
+
+/**
+ * Flight segments in the text (other lines ignored); the year of each DDMON is
+ * the one closest to $anchor (Y-m-d).
+ * @return array<int,array{flight:string,org:string,dst:string,dep:string,dep_time:string,arr:string,arr_time:string}>
+ */
+function sc_gds_segments(string $text, string $anchor): array {
+    static $mon = ['JAN'=>1,'FEB'=>2,'MAR'=>3,'APR'=>4,'MAY'=>5,'JUN'=>6,
+                   'JUL'=>7,'AUG'=>8,'SEP'=>9,'OCT'=>10,'NOV'=>11,'DEC'=>12];
+    $head = '/(?<![A-Z0-9])([A-Z][A-Z0-9]|[0-9][A-Z])\s*(\d{1,4})\s+(?:[A-Z]\s+)?(\d{1,2})('
+          . implode('|', array_keys($mon)) . ')\s+(?:\d\s+)?([A-Z]{3})([A-Z]{3})\b(?:\s*\*?[A-Z]{2}\d{1,2}\b)?/';
+    $segs = [];
+    foreach (preg_split('/\R/', $text) as $raw) {
+        $line = strtoupper(str_replace("\xC2\xA0", ' ', $raw));
+        if (!preg_match_all($head, $line, $mm, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) continue;
+        foreach ($mm as $i => $m) {
+            $from = $m[0][1] + strlen($m[0][0]);
+            $to   = isset($mm[$i + 1]) ? $mm[$i + 1][0][1] : strlen($line);
+            preg_match_all('/(?<![\d.])([#+]?)(\d{4})(\+\d)?(?![\d.])/', substr($line, $from, $to - $from), $tt, PREG_SET_ORDER);
+            if (count($tt) < 2) continue;
+            $d = $tt[count($tt) - 2]; $a = $tt[count($tt) - 1];
+            if ((int)substr($d[2], 0, 2) > 23 || (int)substr($d[2], 2) > 59
+             || (int)substr($a[2], 0, 2) > 23 || (int)substr($a[2], 2) > 59) continue;
+            $dates = sc_dates_in_text($m[3][0] . $m[4][0], $anchor);
+            if (!$dates) continue;
+            $depT = substr($d[2], 0, 2) . ':' . substr($d[2], 2);
+            $arrT = substr($a[2], 0, 2) . ':' . substr($a[2], 2);
+            if (!empty($a[3]))      $days = (int)substr($a[3], 1);
+            elseif ($a[1] === '#')  $days = 1;                       // Amadeus: arrives next day
+            else                    $days = $arrT < $depT ? 1 : 0;
+            $segs[] = [
+                'flight' => $m[1][0] . ' ' . (ltrim($m[2][0], '0') ?: '0'),
+                'org' => $m[5][0], 'dst' => $m[6][0],
+                'dep' => $dates[0], 'dep_time' => $depT,
+                'arr' => date('Y-m-d', strtotime($dates[0] . ' +' . $days . ' days')), 'arr_time' => $arrT,
+            ];
+        }
+    }
+    return $segs;
+}
+
+/** $b continues $a's journey (same airport, within a day). */
+function sc_gds_connects(array $a, array $b): bool {
+    $g = sc_days_between($a['arr'], $b['dep']);
+    return $b['org'] === $a['dst'] && $g !== null && $g >= 0 && $g <= 1;
+}
+
+/** The arrival segment: first entering the area, followed through connections inside it. */
+function sc_gds_arrival(array $segs): ?array {
+    foreach ($segs as $i => $s) {
+        if (!in_array($s['dst'], SC_AREA, true) || in_array($s['org'], SC_AREA, true)) continue;
+        $last = $s;
+        for ($j = $i + 1; $j < count($segs); $j++) {
+            if (!in_array($segs[$j]['dst'], SC_AREA, true) || !sc_gds_connects($last, $segs[$j])) break;
+            $last = $segs[$j];
+        }
+        return $last;
+    }
+    return null;
+}
+
+/** The departure segment: first leaving the area, walked back through connections inside it. */
+function sc_gds_departure(array $segs): ?array {
+    foreach ($segs as $i => $s) {
+        if (!in_array($s['org'], SC_AREA, true) || in_array($s['dst'], SC_AREA, true)) continue;
+        $first = $s;
+        for ($j = $i - 1; $j >= 0; $j--) {
+            if (!in_array($segs[$j]['org'], SC_AREA, true) || !sc_gds_connects($segs[$j], $first)) break;
+            $first = $segs[$j];
+        }
+        return $first;
+    }
+    return null;
+}
+
+/**
+ * Check the ARRIVAL ($arrival=true, vs $day = Start) or DEPARTURE (vs End) block
+ * when it has booking-system lines: a check row, or null to fall back.
+ */
+function sc_gds_check(string $text, string $day, bool $arrival): ?array {
+    $segs = sc_gds_segments($text, $day);
+    $s = $arrival ? sc_gds_arrival($segs) : sc_gds_departure($segs);
+    if ($s === null) return null;
+    $d = $arrival ? $s['arr'] : $s['dep'];
+    $t = $arrival ? $s['arr_time'] : $s['dep_time'];
+    $what = $s['flight'] . ' ' . $s['org'] . '→' . $s['dst'] . ($arrival ? ' lands ' : ' leaves ') . sc_fmt($d) . ' ' . $t;
+    $label = $arrival ? 'Start' : 'End';
+    $g = sc_days_between($day, $d);
+    if ($g === 0) return ['level' => 'ok', 'msg' => $what . ' — on the ' . $label . ' date.'];
+    if ($g === 1 && $t < SC_NIGHT_LIMIT) {
+        return ['level' => 'ok', 'msg' => $what . ' — night ' . ($arrival ? 'arrival' : 'departure') . ' after the ' . $label . ' date ' . sc_fmt($day) . '.'];
+    }
+    return ['level' => 'warn', 'msg' => $what . ' — but the ' . $label . ' date is ' . sc_fmt($day) . '.'];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 //  Orchestration
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -428,6 +537,8 @@ function sc_run_checks(array $ctx): array {
     if ($start) {
         if (trim($blocks['arrival']) === '') {
             $res[] = ['level' => 'info', 'msg' => 'No ARRIVAL flight details filled in the Excel.'];
+        } elseif ($g = sc_gds_check($blocks['arrival'], $start, true)) {
+            $res[] = $g;
         } else {
             $ad = sc_dates_in_text($blocks['arrival'], $start);
             $hit = false;
@@ -444,6 +555,8 @@ function sc_run_checks(array $ctx): array {
     if ($end) {
         if (trim($blocks['departure']) === '') {
             $res[] = ['level' => 'info', 'msg' => 'No DEPARTURE flight details filled in the Excel.'];
+        } elseif ($g = sc_gds_check($blocks['departure'], $end, false)) {
+            $res[] = $g;
         } else {
             $dd = sc_dates_in_text($blocks['departure'], $end);
             $hit = false;
