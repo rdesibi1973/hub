@@ -726,7 +726,7 @@ include 'includes/header.php';
     <?php
     // CK check: the request's top-level folder in /001_Safari (the private folder
     // or its GRP), as tracked by ck_tracker.php. Run / report reuse that page.
-    $ckRow = null;
+    $ckRow = null; $ckOther = false;
     try {
         require_once 'dropbox_helper.php';
         require_once 'includes/ck_lib.php';
@@ -747,6 +747,7 @@ include 'includes/header.php';
                 }
             }
         }
+        if ($ckRow && ck_is_other_destination($ckRow['folder_name'])) { $ckRow = null; $ckOther = true; }   // no CK outside Tanzania
     } catch (Throwable $e) { $ckRow = null; }
     ?>
     <div class="detail-label">CK check</div>
@@ -804,7 +805,7 @@ include 'includes/header.php';
         })();
         </script>
       <?php else: ?>
-        <span class="text-muted">— folder not in 001_Safari (the check runs on confirmed bookings)</span>
+        <span class="text-muted"><?= $ckOther ? '— no CK outside Tanzania' : '— folder not in 001_Safari (the check runs on confirmed bookings)' ?></span>
       <?php endif; ?>
     </div>
 

@@ -24,10 +24,12 @@ const CK_DONE_STAGES = ['Deposit', 'Balance', 'Balance-Cash', 'Paid'];
 const CK_BOOKING_STAGES = ['Progress', 'Confirmed'];
 
 /**
- * Destinations the old MissingCK.bat left out of the report (handled apart).
- * Matched anywhere in the folder name, case-insensitive.
+ * No CK outside Tanzania: folders for these destinations are left out of the CK
+ * tracker, the request / BackOffice CK links and the automatic checks.
+ * Matched anywhere in the folder name, case-insensitive; a trip combined with
+ * Tanzania ("TZ-KENYA") is a Tanzania trip.
  */
-const CK_OTHER_DEST = ['KENYA', 'UGANDA', 'NAMIBIA', 'SUDAFRICA', 'SOUTHAFRICA', 'MADAGASCAR'];
+const CK_OTHER_DEST = ['KENYA', 'UGANDA', 'NAMIBIA', 'SUDAFRICA', 'SOUTHAFRICA', 'MADAGASCAR', 'RWANDA', 'BOTSWANA'];
 
 /** Office time (the server runs on another timezone), 'Y-m-d H:i:s' or other format. */
 function ck_now(string $fmt = 'Y-m-d H:i:s'): string {
@@ -162,6 +164,7 @@ function ck_customer_label(string $name): string {
 
 function ck_is_other_destination(string $name): bool {
     $up = strtoupper($name);
+    if (preg_match('/(?<![A-Z])TZ(?![A-Z])/', $up)) return false;   // TZ-KENYA: Tanzania too
     foreach (CK_OTHER_DEST as $d) if (strpos($up, $d) !== false) return true;
     return false;
 }
@@ -459,6 +462,16 @@ function ck_github_dispatch(array $ids): array {
 function ck_request_check(PDO $db, array $ids, string $trigger): array {
     ck_ensure_schema($db);
     $ids = array_values(array_unique(array_filter(array_map('intval', $ids))));
+    if ($ids) {   // no CK outside Tanzania
+        $in = implode(',', array_fill(0, count($ids), '?'));
+        $st = $db->prepare("SELECT id, folder_name FROM ck_folders WHERE id IN ($in)");
+        $st->execute($ids);
+        $ids = [];
+        foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $f) {
+            if (!ck_is_other_destination($f['folder_name'])) $ids[] = (int)$f['id'];
+        }
+        if (!$ids) return ['ok' => false, 'msg' => 'No CK outside Tanzania — nothing to check.'];
+    }
     if (!$ids) return ['ok' => false, 'msg' => 'Nothing to check.'];
     $in = implode(',', array_fill(0, count($ids), '?'));
     $db->prepare("UPDATE ck_folders SET check_requested_at = ?, check_trigger = ? WHERE id IN ($in)")

@@ -29,7 +29,6 @@ $VIEWS = [
 ];
 $view      = isset($VIEWS[$_GET['view'] ?? '']) ? $_GET['view'] : 'missing';
 $showPast  = !empty($_GET['past']);    // include trips that already started
-$showOther = !empty($_GET['other']);   // include Kenya/Uganda/… (left out by MissingCK.bat)
 $q         = trim((string)($_GET['q'] ?? ''));   // search: overrides view and filters
 
 // ── Notes and emails on a folder (JS, like Payments) ──────────────────────────
@@ -155,7 +154,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array($_POST['action'] ?? '', ['
         flash('Error — nothing was changed: ' . $e->getMessage(), 'error');
     }
     parse_str((string)($_POST['return_qs'] ?? ''), $rq);
-    $rq = array_intersect_key($rq, array_flip(['view', 'past', 'other', 'agent', 'q']));
+    $rq = array_intersect_key($rq, array_flip(['view', 'past', 'agent', 'q']));
     header('Location: ck_tracker.php' . ($rq ? '?' . http_build_query($rq) : '') . '#ck' . (int)($_POST['ck_id'] ?? 0));
     exit;
 }
@@ -269,8 +268,9 @@ if (isLeadsRestricted()) {
 }
 $agentF = array_key_exists('agent', $_GET) ? trim($_GET['agent']) : $myAgent;
 
-// Base filter (past / other destinations / agent), then the view.
-// A search looks at every folder (all views, past trips, other destinations, all sales).
+// Base filter (destination / past / agent), then the view. Folders outside
+// Tanzania never show (no CK there); a search looks at every other folder
+// (all views, past trips, all sales).
 $qMatch = function (array $r) use ($q): bool {
     $hay = [$r['folder_name'], $r['agent']];
     foreach ($r['reqs'] as $x) { $hay[] = $x['customer_name']; $hay[] = $x['practice_code']; $hay[] = $x['group_folder']; }
@@ -279,10 +279,10 @@ $qMatch = function (array $r) use ($q): bool {
     }
     return true;
 };
-$base = array_filter($rows, function ($r) use ($showPast, $showOther, $agentF, $q, $qMatch) {
+$base = array_filter($rows, function ($r) use ($showPast, $agentF, $q, $qMatch) {
+    if ($r['other']) return false;
     if ($q !== '') return $qMatch($r);
     if (!$showPast && $r['to_arrival'] !== null && $r['to_arrival'] < 0) return false;
-    if (!$showOther && $r['other']) return false;
     if ($agentF !== '' && strcasecmp($r['agent'], $agentF) !== 0) return false;
     return true;
 });
@@ -324,7 +324,7 @@ $CHK_STYLE = [
     'red'    => ['#a33', '#f7dede', '🔴'],    'grey'   => ['#6B7280', '#F3F4F6', '⚪'],
     'error'  => ['#6B7280', '#F3F4F6', '⚠'],
 ];
-$qsKeep = array_filter(['view' => $view, 'past' => $showPast ? '1' : '', 'other' => $showOther ? '1' : '', 'q' => $q],
+$qsKeep = array_filter(['view' => $view, 'past' => $showPast ? '1' : '', 'q' => $q],
                        fn($v) => $v !== '');
 // An explicit (even empty = "All") agent choice is kept; otherwise sellers fall back to their own.
 if (array_key_exists('agent', $_GET)) $qsKeep['agent'] = $agentF;
@@ -442,7 +442,7 @@ include 'includes/header.php';
   <form method="get" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-left:auto">
     <input type="hidden" name="view" value="<?= h($view) ?>">
     <input type="search" name="q" value="<?= h($q) ?>" placeholder="🔍 Search customer, folder, code…" spellcheck="false"
-           title="Searches every folder: all tabs, started trips, other destinations, all sales"
+           title="Searches every folder: all tabs, started trips, all sales (Tanzania trips only)"
            style="font-size:.78rem;padding:5px 9px;border:1.5px solid var(--grey-lt);border-radius:6px;width:220px">
     <?php if ($q !== ''): ?><a href="<?= h($link([])) ?>" style="font-size:.75rem;text-decoration:none">✕ clear</a><?php endif; ?>
     <label>Sales
@@ -454,7 +454,6 @@ include 'includes/header.php';
       </select>
     </label>
     <label title="Trips that already started"><input type="checkbox" name="past" value="1" <?= $showPast ? 'checked' : '' ?> onchange="this.form.submit()"> Started trips</label>
-    <label title="Kenya, Uganda, Namibia, South Africa, Madagascar — left out of the old Missing CK list"><input type="checkbox" name="other" value="1" <?= $showOther ? 'checked' : '' ?> onchange="this.form.submit()"> Other destinations</label>
   </form>
 </div>
 

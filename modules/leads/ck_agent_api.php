@@ -68,6 +68,7 @@ try {
                  ORDER BY f.start_date");
             $st->execute([ck_now('Y-m-d')]);
             foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $f) {
+                if (ck_is_other_destination($f['folder_name'])) continue;   // no CK outside Tanzania
                 $pending = $f['check_requested_at'] !== null;
                 $out[] = ['id' => (int)$f['id'], 'folder' => $f['folder_name'],
                           'trigger' => $pending ? ($f['check_trigger'] ?: 'manual') : 'nightly',

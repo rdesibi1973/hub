@@ -594,7 +594,7 @@ if ($rows) {
             $fn = trim(trim($r['group_folder'] ?? '') !== '' ? $r['group_folder'] : ($r['practice_code'] ?? ''));
             if ($fn === '') continue;
             $f = $ckExact[mb_strtolower($fn)] ?? $ckStem[dropbox_folder_stem($fn)] ?? null;
-            if ($f) $ckByReq[(int)$r['id']] = $f;
+            if ($f && !ck_is_other_destination($f['folder_name'])) $ckByReq[(int)$r['id']] = $f;   // no CK outside Tanzania
         }
     } catch (Throwable $e) { $ckByReq = []; }   // the CK links are optional
 }
