@@ -257,16 +257,11 @@ foreach ($folders as $f) {
     ];
 }
 
-// Agents present (for the filter). Sellers default to their own name.
+// Agents present (for the filter). Everyone starts on All; a seller picks
+// their own name in "Sales" to see only their bookings.
 $agents = array_values(array_unique(array_filter(array_column($rows, 'agent'))));
 natcasesort($agents);
-$myAgent = '';
-if (isLeadsRestricted()) {
-    $st = $db->prepare("SELECT a.name FROM users u JOIN agents a ON a.id = u.agent_id WHERE u.id = ?");
-    $st->execute([$uid]);
-    $myAgent = (string)($st->fetchColumn() ?: '');
-}
-$agentF = array_key_exists('agent', $_GET) ? trim($_GET['agent']) : $myAgent;
+$agentF = trim((string)($_GET['agent'] ?? ''));
 
 // Base filter (destination / past / agent), then the view. Folders outside
 // Tanzania never show (no CK there); a search looks at every other folder
@@ -326,8 +321,8 @@ $CHK_STYLE = [
 ];
 $qsKeep = array_filter(['view' => $view, 'past' => $showPast ? '1' : '', 'q' => $q],
                        fn($v) => $v !== '');
-// An explicit (even empty = "All") agent choice is kept; otherwise sellers fall back to their own.
-if (array_key_exists('agent', $_GET)) $qsKeep['agent'] = $agentF;
+// The chosen agent is kept by the tabs, tiles and links.
+if ($agentF !== '') $qsKeep['agent'] = $agentF;
 // Tiles and tabs leave the search.
 $link = fn(array $over) => 'ck_tracker.php?' . http_build_query(array_filter(array_merge($qsKeep, ['q' => null], $over), fn($v) => $v !== null));
 $fmtD = fn(?string $d) => $d ? date('d M y', strtotime($d)) : '';
