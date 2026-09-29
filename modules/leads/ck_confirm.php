@@ -57,9 +57,12 @@ try {
     if (!hash_equals(csrf_token(), (string)($in['csrf'] ?? ''))) {
         ck_confirm_out(['ok' => false, 'msg' => 'Session expired — reload the page.'], 403);
     }
-    $key = mb_substr(trim((string)($in['key'] ?? '')), 0, 300);
+    // The key exactly as the report has it: SafariCheck builds it from the check
+    // title, which can end with a space (sheet "3PAX "); trimming it here stored
+    // the tick under another key, so the report dropped it.
+    $key = mb_substr((string)($in['key'] ?? ''), 0, 300);
     $fp  = (string)($in['fp'] ?? '');
-    if ($key === '' || !preg_match('/^[0-9a-f]{40}$/', $fp)) ck_confirm_out(['ok' => false, 'msg' => 'Bad request'], 400);
+    if (trim($key) === '' ||!preg_match('/^[0-9a-f]{40}$/', $fp)) ck_confirm_out(['ok' => false, 'msg' => 'Bad request'], 400);
 
     $cu = current_user();
     $title = mb_substr((string)($in['title'] ?? ''), 0, 300);
