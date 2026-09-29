@@ -487,7 +487,7 @@ include 'includes/header.php';
     <?php if (!isLeadsRestricted()): ?>
       <?php if ($invCount === 0): ?>
         <?php if (($r['status'] ?? '') === 'Booked'): ?>
-          <a href="../invoices/invoice_add.php?request_id=<?= $r['id'] ?>" class="btn btn-outline">🧾 Create Invoice</a>
+          <a href="../invoices/invoices.php?request_id=<?= $r['id'] ?>" class="btn btn-outline" title="Invoices of this request: create from Excel or manually">🧾 Create Invoice</a>
         <?php endif; ?>
       <?php elseif ($invCount === 1): ?>
         <a href="../invoices/invoice_view.php?id=<?= $existingInv['id'] ?>" class="btn btn-outline">🧾 <?= h($existingInv['invoice_number']) ?></a>

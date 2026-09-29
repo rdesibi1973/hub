@@ -1,12 +1,18 @@
 <?php
 require_once 'config.php';
-$pageTitle = 'New Invoice';
+require_once __DIR__ . '/includes/invoice_calc.php';
 $db = db();
 
-$errors = [];
+// ?from=excel: the lines are filled from the request's Calc Excel.
+$fromExcel = ($_GET['from'] ?? '') === 'excel';
+$pageTitle = $fromExcel ? 'New Invoice from Excel' : 'New Invoice';
+
+$errors     = [];
+$checkFails = [];   // failed Excel checks (key => message), shown with an "ignore" checkbox
 
 // ── Pre-fill from request ─────────────────────────────────────────────────
 $prefill = [];
+$req = null;
 $requestId = (int)($_GET['request_id'] ?? 0);
 if ($requestId) {
     $s = $db->prepare("SELECT r.*, a.name AS agent_name FROM requests r LEFT JOIN agents a ON a.id=r.agent_id WHERE r.id=?");
@@ -76,12 +82,13 @@ if ($requestId) {
         }
 
         // ── 3. Description ────────────────────────────────────────────────────
-        $desc  = $req['customer_name'];
-        $desc .= $req['pax'] ? ' ' . $req['pax'] . ' pax' : '';
-        $desc .= ' trip in ' . $dest;
-        if ($startStr && $endStr) $desc .= ' from ' . $startStr . ' until ' . $endStr;
-        elseif ($startStr)        $desc .= ' from ' . $startStr;
-        $prefill['item_desc'] = $desc;
+        // "<customer> <N> pax <tail>": the Excel fill rebuilds it with TOT PAX.
+        $tail = ' trip in ' . $dest;
+        if ($startStr && $endStr) $tail .= ' from ' . $startStr . ' until ' . $endStr;
+        elseif ($startStr)        $tail .= ' from ' . $startStr;
+        $prefill['desc_head'] = $req['customer_name'];
+        $prefill['desc_tail'] = $tail;
+        $prefill['item_desc'] = $req['customer_name'] . ($req['pax'] ? ' ' . $req['pax'] . ' pax' : '') . $tail;
 
         // ── 4. Bill To: try to find agency from folder parentheses ────────────
         // Folder format: CustomerName(AgencyShortName-AgentName)
@@ -168,6 +175,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
     if (empty($items)) $errors[] = 'At least one item is required.';
 
+    // ── Excel checks (request invoices): pax = TOT PAX, total = Tot price ──
+    $calc = null; $ignored = [];
+    if (!$errors && $reqId) {
+        $rs = $db->prepare("SELECT id, customer_name, practice_code, group_folder, dropbox_url FROM requests WHERE id=?");
+        $rs->execute([$reqId]);
+        $reqRow = $rs->fetch(PDO::FETCH_ASSOC);
+        if ($reqRow) {
+            $calc   = ic_read_request($reqRow, trim($_POST['calc_sheet'] ?? ''));
+            $fails  = ic_check($calc, $items, $currency);
+            $ignore = array_filter((array)($_POST['ignore'] ?? []));
+            $ignored = array_values(array_intersect_key($fails, $ignore));
+            if (array_diff_key($fails, $ignore)) {
+                $checkFails = $fails;
+                $errors[]   = 'The invoice does not match the Calc Excel. Fix it, or tick the difference to ignore it and create the invoice again.';
+            }
+        }
+    }
+
     if (!$errors) {
         $invNum = generate_invoice_number($db, $issuer);
         $uid    = current_user()['id'];
@@ -190,10 +215,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         recalculate_invoice($db, $invId);
         sync_request_value($db, $invId);
+        if ($calc !== null) ic_log($db, $invId, $reqId, $calc, $ignored, $fromExcel, $uid);
 
         flash("Invoice {$invNum} created.");
         header("Location: invoice_view.php?id=$invId"); exit;
     }
+}
+
+// ── Form values: what was posted (redisplay after an error), else the defaults ──
+$isPost = $_SERVER['REQUEST_METHOD'] === 'POST';
+$fv = function (string $k, $default = '') use ($isPost) {
+    return $isPost ? ($_POST[$k] ?? $default) : $default;
+};
+if ($isPost) {
+    $initItems = $items;
+} elseif (!empty($prefill['item_desc'])) {
+    $initItems = [['description' => $prefill['item_desc'], 'quantity' => (float)($prefill['item_qty'] ?? 1), 'unit_price' => (float)($prefill['item_price'] ?? 0)]];
+} else {
+    $initItems = [];
 }
 
 include 'includes/header.php';
@@ -201,19 +240,31 @@ include 'includes/header.php';
 
 <div class="page-header">
   <div>
-    <h2>New Invoice</h2>
-    <div class="sub"><a href="invoices.php" style="color:var(--grey-mid);text-decoration:none">← Invoices</a></div>
+    <h2><?= $fromExcel ? 'New Invoice from Excel' : 'New Invoice' ?></h2>
+    <div class="sub">
+      <a href="invoices.php<?= $requestId ? '?request_id=' . $requestId : '' ?>" style="color:var(--grey-mid);text-decoration:none">← Invoices</a>
+      <?php if ($req): ?>&nbsp;·&nbsp; <a href="../leads/request_view.php?id=<?= $requestId ?>" style="color:var(--grey-mid)"><?= h($req['customer_name']) ?></a><?php endif; ?>
+    </div>
   </div>
 </div>
 
 <?php if ($errors): ?>
-  <div class="flash flash-error"><?= implode('<br>', array_map('h', $errors)) ?></div>
+  <div class="flash flash-error">
+    <?= implode('<br>', array_map('h', $errors)) ?>
+    <?php foreach ($checkFails as $key => $msg): ?>
+      <label style="display:flex;align-items:center;gap:8px;margin-top:8px;font-weight:600;cursor:pointer">
+        <input type="checkbox" name="ignore[<?= h($key) ?>]" value="1" form="invForm" style="width:16px;height:16px" <?= !empty($_POST['ignore'][$key]) ? 'checked' : '' ?>>
+        <?= h($msg) ?>
+      </label>
+    <?php endforeach; ?>
+  </div>
 <?php endif; ?>
 
 <form method="POST" id="invForm">
 
 <!-- Hidden fields -->
 <input type="hidden" name="request_id"  value="<?= (int)($prefill['request_id'] ?? 0) ?>">
+<input type="hidden" name="calc_sheet"  id="calcSheet" value="<?= h($fv('calc_sheet')) ?>">
 
 <div class="form-card">
 
@@ -223,7 +274,7 @@ include 'includes/header.php';
       <label>Issuer *</label>
       <select name="issuer" id="issuerSel" onchange="updateInvNum()">
         <?php foreach (INV_ISSUERS as $iss): ?>
-          <option value="<?= h($iss) ?>"><?= h($iss) ?></option>
+          <option value="<?= h($iss) ?>" <?= $fv('issuer') === $iss ? 'selected' : '' ?>><?= h($iss) ?></option>
         <?php endforeach; ?>
       </select>
     </div>
@@ -236,24 +287,24 @@ include 'includes/header.php';
       <label>Currency *</label>
       <select name="currency" id="currency" onchange="recalcAll()">
         <?php foreach (INV_CURRENCIES as $c): ?>
-          <option value="<?= $c ?>"><?= $c ?></option>
+          <option value="<?= $c ?>" <?= $fv('currency') === $c ? 'selected' : '' ?>><?= $c ?></option>
         <?php endforeach; ?>
       </select>
     </div>
     <div class="form-group">
       <label>Terms</label>
-      <input type="text" name="terms" value="Due on Receipt" list="termsList">
+      <input type="text" name="terms" value="<?= h($fv('terms', 'Due on Receipt')) ?>" list="termsList">
       <datalist id="termsList">
         <?php foreach (INV_TERMS_OPTS as $t): ?><option value="<?= h($t) ?>"><?php endforeach; ?>
       </datalist>
     </div>
     <div class="form-group">
       <label>Issue Date *</label>
-      <input type="date" name="issue_date" value="<?= date('Y-m-d') ?>" required>
+      <input type="date" name="issue_date" value="<?= h($fv('issue_date', date('Y-m-d'))) ?>" required>
     </div>
     <div class="form-group">
       <label>Due Date</label>
-      <input type="date" name="due_date">
+      <input type="date" name="due_date" value="<?= h($fv('due_date')) ?>">
     </div>
   </div>
 
@@ -264,22 +315,25 @@ include 'includes/header.php';
       <label>Bill To *</label>
       <div style="position:relative;">
         <input type="text" id="billToSearch" name="bill_to_name" required autocomplete="off"
-               value="<?= h($prefill['bill_to_name'] ?? '') ?>"
+               value="<?= h($fv('bill_to_name', $prefill['bill_to_name'] ?? '')) ?>"
                placeholder="Type to search agencies, or enter name manually…">
         <div id="billToDrop"></div>
       </div>
-      <input type="hidden" id="billToSourceType" name="bill_to_source_type" value="<?= h($prefill['bill_to_type'] ?? '') ?>">
-      <input type="hidden" id="billToSourceId"   name="bill_to_source_id"   value="<?= h($prefill['bill_to_id'] ?? '') ?>">
+      <input type="hidden" id="billToSourceType" name="bill_to_source_type" value="<?= h($fv('bill_to_source_type', $prefill['bill_to_type'] ?? '')) ?>">
+      <input type="hidden" id="billToSourceId"   name="bill_to_source_id"   value="<?= h($fv('bill_to_source_id', $prefill['bill_to_id'] ?? '')) ?>">
     </div>
 
     <div class="form-group full">
       <label>Address</label>
-      <textarea name="bill_to_address" id="billToAddress" rows="3" placeholder="Auto-filled from selection, or enter manually"><?= h($prefill['bill_to_address'] ?? '') ?></textarea>
+      <textarea name="bill_to_address" id="billToAddress" rows="3" placeholder="Auto-filled from selection, or enter manually"><?= h($fv('bill_to_address', $prefill['bill_to_address'] ?? '')) ?></textarea>
     </div>
   </div>
 
   <!-- ── Line Items ── -->
   <div class="form-section">Line Items</div>
+  <?php if ($req): ?>
+    <div id="calcPanel" class="calc-panel">📊 Reading the Calc Excel…</div>
+  <?php endif; ?>
   <table class="items-table">
     <thead>
       <tr>
@@ -318,14 +372,14 @@ include 'includes/header.php';
   <div class="form-grid">
     <div class="form-group full">
       <label>Notes (shown on invoice)</label>
-      <textarea name="notes"><?= h(INV_DEFAULT_NOTES) ?></textarea>
+      <textarea name="notes"><?= h($fv('notes', INV_DEFAULT_NOTES)) ?></textarea>
     </div>
     <div class="form-group full">
       <label>
         Terms &amp; Conditions
         <span id="tcBadge" style="display:none;margin-left:8px;font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.07em;padding:2px 8px;border-radius:4px;background:#EDE7F6;color:#6A1B9A;vertical-align:middle;">Agency — 45 days</span>
       </label>
-      <textarea name="terms_conditions" id="tcTextarea" class="tall"><?= h($prefill['tc'] ?? INV_DEFAULT_TC) ?></textarea>
+      <textarea name="terms_conditions" id="tcTextarea" class="tall"><?= h($fv('terms_conditions', $prefill['tc'] ?? INV_DEFAULT_TC)) ?></textarea>
     </div>
   </div>
 
@@ -334,14 +388,14 @@ include 'includes/header.php';
   <div class="form-grid">
     <div class="form-group full">
       <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-weight:600;">
-        <input type="checkbox" name="follow_up" id="followUpCheck" value="1" onchange="onAddFollowUpToggle()" style="width:17px;height:17px;cursor:pointer;">
+        <input type="checkbox" name="follow_up" id="followUpCheck" value="1" onchange="onAddFollowUpToggle()" style="width:17px;height:17px;cursor:pointer;" <?= $fv('follow_up') ? 'checked' : '' ?>>
         <span>&#9873; Flag for payment follow-up</span>
         <span style="font-weight:400;color:var(--grey-mid);font-size:.78rem;">— for extra services billed on an already-settled trip</span>
       </label>
     </div>
     <div class="form-group full" id="followUpNoteWrap" style="display:none;">
       <label>Follow-up note</label>
-      <textarea name="follow_up_note" id="followUpNote" maxlength="255" rows="3" placeholder="e.g. ask for payment together with practice TRA1408…"></textarea>
+      <textarea name="follow_up_note" id="followUpNote" maxlength="255" rows="3" placeholder="e.g. ask for payment together with practice TRA1408…"><?= h($fv('follow_up_note')) ?></textarea>
     </div>
   </div>
 
@@ -365,6 +419,11 @@ include 'includes/header.php';
 .bt-badge.customer { background:#E8F0FE;color:#1D6FA4; }
 .bt-badge.agency   { background:#EDE7F6;color:#6A1B9A; }
 #addBillToPanel input, #addBillToPanel select { display:none; }
+.calc-panel { border:1.5px solid var(--grey-lt);background:var(--off-white);border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:.8rem;line-height:1.7; }
+.calc-panel select { font-size:.78rem;padding:2px 6px;border:1px solid var(--grey-lt);border-radius:5px; }
+.calc-panel .ck-ok  { color:#1A6B3A;font-weight:600; }
+.calc-panel .ck-bad { color:#C0211B;font-weight:600; }
+.calc-panel .ck-off { color:var(--grey-mid); }
 </style>
 
 <script>
@@ -483,6 +542,7 @@ function addItem(desc, qty, price, lockQty) {
    +'<td style="text-align:center;vertical-align:top"><button type="button" onclick="removeItem(this)" class="btn btn-danger btn-sm" title="Remove">✕</button></td>';
   tr.querySelector('.qty-input').addEventListener('input', calcRow);
   tr.querySelector('.price-input').addEventListener('input', calcRow);
+  tr.querySelector('.desc-input').addEventListener('input', updateCalcCheck);
   tbody.appendChild(tr);
   recalcAll();
 }
@@ -512,6 +572,7 @@ function recalcAll() {
   });
   document.getElementById('subtotalDisplay').textContent = fmtAmt(total);
   document.getElementById('totalDisplay').textContent    = fmtAmt(total);
+  updateCalcCheck();
 }
 
 function fmtAmt(n) {
@@ -528,18 +589,121 @@ function onAddFollowUpToggle() {
   document.getElementById('followUpNoteWrap').style.display = checked ? 'block' : 'none';
 }
 
-// Init TC badge if page was pre-filled with an agency
+// Init TC badge if page was pre-filled with an agency (the T&C text is already set)
 (function() {
-  var t = document.getElementById('billToSourceType').value;
-  if (t) applyTcForType(t);
+  if (document.getElementById('billToSourceType').value === 'agency') {
+    document.getElementById('tcBadge').style.display = 'inline-block';
+  }
 })();
+onAddFollowUpToggle();
 
-// Pre-populate if coming from a request
-<?php if (!empty($prefill['item_desc'])): ?>
-addItem(<?= json_encode($prefill['item_desc']) ?>, <?= (float)($prefill['item_qty'] ?? 1) ?>, <?= (float)($prefill['item_price'] ?? 0) ?>);
+// ── Calc Excel: values, live check, fill lines ────────────────────────────
+// The server re-checks on Create (pax = TOT PAX, total = Tot price in USD).
+var CALC_REQ  = <?= $req ? (int)$requestId : 0 ?>;
+var CALC_FILL = <?= ($fromExcel && !$isPost) ? 'true' : 'false' ?>;   // fill the lines once loaded
+var DESC_HEAD = <?= json_encode($prefill['desc_head'] ?? '') ?>;
+var DESC_TAIL = <?= json_encode($prefill['desc_tail'] ?? '') ?>;
+var calcData  = null;
+
+function money0(n) {
+  n = parseFloat(n);
+  return '$' + n.toLocaleString('en-US', {minimumFractionDigits: n % 1 ? 2 : 0, maximumFractionDigits: 2});
+}
+
+function loadCalc(sheet) {
+  var panel = document.getElementById('calcPanel');
+  if (!CALC_REQ || !panel) return;
+  panel.innerHTML = '📊 Reading the Calc Excel…';
+  fetch('ajax_calc.php?request_id=' + CALC_REQ + '&sheet=' + encodeURIComponent(sheet || ''))
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      calcData = d;
+      if (d.status === 'ok') document.getElementById('calcSheet').value = d.sheet;
+      renderCalc();
+      if (d.status === 'ok' && CALC_FILL) fillFromExcel();
+    })
+    .catch(function(e) { panel.innerHTML = '⚠ Could not read the Calc Excel: ' + escHtml(String(e)); });
+}
+
+function sheetPicker(d) {
+  if (!d.sheets || d.sheets.length < 2) return '<strong>' + escHtml(d.sheet) + '</strong>';
+  var cur = d.status === 'ok' ? d.sheet : '';
+  return '<select onchange="loadCalc(this.value)">'
+    + (cur ? '' : '<option value="">— choose the sheet —</option>')
+    + d.sheets.map(function(s) {
+        return '<option value="' + escAttr(s) + '"' + (s === cur ? ' selected' : '') + '>' + escHtml(s) + '</option>';
+      }).join('')
+    + '</select>';
+}
+
+function renderCalc() {
+  var d = calcData, panel = document.getElementById('calcPanel');
+  if (!d || !panel) return;
+  if (d.status === 'ambiguous') {
+    panel.innerHTML = '📊 <strong>' + escHtml(d.file) + '</strong> · ' + escHtml(d.msg) + ' ' + sheetPicker(d);
+    return;
+  }
+  if (d.status !== 'ok') { panel.innerHTML = '⚠ Calc Excel not checked — ' + escHtml(d.msg || 'not readable'); return; }
+  var mix = [];
+  if (d.teen)  mix.push(d.teen + ' teen');
+  if (d.child) mix.push(d.child + ' child');
+  panel.innerHTML =
+      '📊 <strong>' + escHtml(d.file) + '</strong> · sheet ' + sheetPicker(d)
+    + ' &nbsp;<a href="#" onclick="fillFromExcel();return false" title="Replace the lines with the Excel values">↻ Fill lines from Excel</a><br>'
+    + 'TOT PAX <strong>' + (d.pax === null ? '?' : d.pax) + '</strong>' + (mix.length ? ' (' + d.adults + ' adults, ' + mix.join(', ') + ')' : '')
+    + ' · Price to customer <strong>' + (d.price_pp === null ? '?' : money0(d.price_pp)) + '</strong>'
+    + ' · Tot price <strong>' + (d.total === null ? '?' : money0(d.total)) + '</strong>'
+    + '<div id="calcCheck"></div>';
+  updateCalcCheck();
+}
+
+// Same rules as ic_check(): the first line is the trip line.
+function updateCalcCheck() {
+  var box = document.getElementById('calcCheck');
+  if (!box || !calcData || calcData.status !== 'ok') return;
+  var d = calcData, out = [];
+  var row = document.querySelector('#itemsBody tr');
+  var qty = row ? parseInt(row.querySelector('.qty-input').value, 10) || 0 : 0;
+  var m   = row ? row.querySelector('.desc-input').value.match(/(\d+)\s*pax\b/i) : null;
+  var dPax = m ? parseInt(m[1], 10) : null;
+  if (d.pax !== null && qty === d.pax && dPax === d.pax) out.push('<span class="ck-ok">✓ Pax ' + d.pax + '</span>');
+  else out.push('<span class="ck-bad">✗ Pax: Excel ' + (d.pax === null ? '?' : d.pax) + ', invoice qty ' + qty
+              + (dPax === null ? ', no "N pax" in the description' : ', description ' + dPax + ' pax') + '</span>');
+  if (document.getElementById('currency').value !== 'USD') {
+    out.push('<span class="ck-off">Total not checked (the Excel is in USD)</span>');
+  } else {
+    var sum = 0;
+    document.querySelectorAll('#itemsBody .total-cell').forEach(function(c) { sum += parseFloat(c.dataset.val) || 0; });
+    if (d.total !== null && Math.abs(sum - d.total) <= 1) out.push('<span class="ck-ok">✓ Total ' + money0(d.total) + '</span>');
+    else out.push('<span class="ck-bad">✗ Total: Excel ' + (d.total === null ? '?' : money0(d.total)) + ', invoice ' + money0(sum) + '</span>');
+  }
+  box.innerHTML = out.join(' &nbsp;·&nbsp; ');
+}
+
+// Trip line: TOT PAX × Price to customer (else Tot price / pax); teen / child
+// discount lines with their count, rate left to fill in.
+function fillFromExcel() {
+  var d = calcData;
+  if (!d || d.status !== 'ok') return;
+  CALC_FILL = true;   // keep filling when the sheet is changed
+  var pax  = d.pax || 1;
+  var rate = d.price_pp !== null ? d.price_pp : (d.total !== null ? Math.round(d.total / pax * 100) / 100 : '');
+  document.getElementById('itemsBody').innerHTML = '';
+  addItem(DESC_HEAD + ' ' + pax + ' pax' + DESC_TAIL, pax, rate);
+  if (d.teen)  addItem('Teenager discount', d.teen, '');
+  if (d.child) addItem('Child discount', d.child, '');
+}
+
+// Lines: the posted ones after an error, else the request pre-fill (replaced by
+// the Excel values in "from Excel" mode).
+<?php if ($initItems): ?>
+  <?php foreach ($initItems as $it): ?>
+addItem(<?= json_encode($it['description']) ?>, <?= json_encode((float)$it['quantity']) ?>, <?= json_encode((float)$it['unit_price']) ?>);
+  <?php endforeach; ?>
 <?php else: ?>
 addItem();
 <?php endif; ?>
+loadCalc(document.getElementById('calcSheet').value);
 </script>
 
 <?php include 'includes/footer.php'; ?>

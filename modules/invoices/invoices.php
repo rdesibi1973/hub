@@ -60,7 +60,8 @@ include 'includes/header.php';
     <?php endif; ?>
     <?php if ($freqid): ?>
       <a href="invoices.php" class="btn btn-grey">✕ Clear filter</a>
-      <a href="invoice_add.php?request_id=<?= $freqid ?>" class="btn btn-red">+ New Invoice for this request</a>
+      <a href="invoice_add.php?request_id=<?= $freqid ?>&amp;from=excel" class="btn btn-red" title="Fill the invoice from the Calc Excel (TOT PAX, Price to customer, Tot price)">📊 Create Invoice from Excel</a>
+      <a href="invoice_add.php?request_id=<?= $freqid ?>" class="btn btn-outline">+ New Invoice for this request</a>
     <?php endif; ?>
   </div>
 </div>

@@ -296,6 +296,16 @@ if ($inv['request_id']) {
 }
 
 $sym = $inv['currency'] === 'EUR' ? '€' : '$';
+
+// Excel checks ignored when the invoice was created (see includes/invoice_calc.php).
+$excelBypass = null;
+try {
+    $xb = $db->prepare("SELECT c.bypassed, c.created_at, u.full_name AS user_name FROM invoice_excel_checks c
+                        LEFT JOIN users u ON u.id = c.created_by
+                        WHERE c.invoice_id=? AND c.bypassed IS NOT NULL ORDER BY c.id DESC LIMIT 1");
+    $xb->execute([$id]);
+    $excelBypass = $xb->fetch() ?: null;
+} catch (PDOException $e) { /* table not created yet: no invoice checked so far */ }
 ?>
 
 <div class="page-header">
@@ -333,6 +343,14 @@ $sym = $inv['currency'] === 'EUR' ? '€' : '$';
     <?php endif; ?>
   </div>
 </div>
+
+<?php if ($excelBypass): ?>
+<div style="max-width:860px;margin-bottom:16px;border:1.5px solid #E0A800;background:#FFF8E1;border-radius:8px;padding:10px 16px;font-size:.8rem;">
+  ⚠ Created with Excel differences ignored
+  <span style="color:var(--grey-mid)">— <?= h($excelBypass['user_name'] ?? '?') ?>, <?= date('d M Y H:i', strtotime($excelBypass['created_at'])) ?></span>
+  <div style="margin-top:4px"><?= nl2br(h(str_replace('Ignore ', '', $excelBypass['bypassed']))) ?></div>
+</div>
+<?php endif; ?>
 
 <!-- ── PAYMENT FOLLOW-UP ───────────────────────────────────────────────── -->
 <?php if ($inv['status'] !== 'Cancelled'): ?>
