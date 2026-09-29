@@ -18,8 +18,9 @@ $id = (int)($_GET['id'] ?? 0);
 
 $st = $db->prepare("SELECT c.report_html, c.error, c.folder_name, c.created_at, c.trigger_src, c.files_json, c.checks_json,
                            c.ck_folder_id, f.folder_name AS cur_folder, f.gone,
-                           f.last_check_id, f.check_requested_at
+                           f.last_check_id, f.check_requested_at, f.has_ck, f.ck_at, u.full_name AS ck_by_name
                     FROM ck_checks c LEFT JOIN ck_folders f ON f.id = c.ck_folder_id
+                    LEFT JOIN users u ON u.id = f.ck_by
                     WHERE c.id = ?");
 $st->execute([$id]);
 $c = $st->fetch(PDO::FETCH_ASSOC);
@@ -136,6 +137,9 @@ iframe{border:0;width:100%;flex:1 1 auto;display:block}
 <div class="runbar">
   <span>🕒 Check run <b><?= htmlspecialchars($runAt, ENT_QUOTES, 'UTF-8') ?></b> (Tanzania time)<?php
     if (!empty($c['trigger_src'])): ?> · <?= htmlspecialchars($TRIGGERS[$c['trigger_src']] ?? $c['trigger_src'], ENT_QUOTES, 'UTF-8') ?><?php endif; ?></span>
+  <span><?php if (!empty($c['has_ck'])): ?>✅ <b>CK set</b><?= $c['ck_at'] ? ' ' . htmlspecialchars(date('d M Y H:i', strtotime($c['ck_at'])), ENT_QUOTES, 'UTF-8') : '' ?>
+    · <?= $c['ck_by_name'] ? 'by ' . htmlspecialchars($c['ck_by_name'], ENT_QUOTES, 'UTF-8') : ($c['ck_at'] ? 'renamed in Dropbox (user unknown)' : 'before tracking') ?>
+  <?php else: ?>⬜ No CK yet<?php endif; ?></span>
   <?php if ($running): ?>
     <span class="warn">⏳ A re-check is running — this report is from the previous run; the new one appears in the CK tracker in about 2 minutes.</span>
   <?php elseif ($newer): ?>

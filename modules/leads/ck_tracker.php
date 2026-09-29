@@ -341,6 +341,8 @@ $evLabel = function (array $e): string {
         'gone'       => 'Left 001_Safari',
         'back'       => 'Back in 001_Safari',
         'check'      => 'Automatic check: ' . strtoupper((string)$e['to_value']),
+        'confirmed'  => '☑ Ticked: ' . $e['to_value'] . ($e['from_value'] ? ' — “' . $e['from_value'] . '”' : ''),
+        'unconfirmed'=> '☐ Unticked: ' . $e['to_value'] . ($e['from_value'] ? ' (' . $e['from_value'] . ')' : ''),
         default      => $e['event'],
     };
 };

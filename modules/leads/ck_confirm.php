@@ -42,11 +42,12 @@ try {
     $post = $_SERVER['REQUEST_METHOD'] === 'POST';
     $in   = $post ? (json_decode((string)file_get_contents('php://input'), true) ?: []) : $_GET;
 
-    $st = $db->prepare("SELECT f.folder_name FROM ck_checks c JOIN ck_folders f ON f.id = c.ck_folder_id
+    $st = $db->prepare("SELECT f.id, f.folder_name FROM ck_checks c JOIN ck_folders f ON f.id = c.ck_folder_id
                         WHERE c.id = ? AND f.gone = 0");
     $st->execute([(int)($in['id'] ?? 0)]);
-    $folder = $st->fetchColumn();
-    if (!$folder) ck_confirm_out(['ok' => false, 'msg' => 'Folder not found (moved or archived?)'], 404);
+    $frow = $st->fetch(PDO::FETCH_ASSOC);
+    if (!$frow) ck_confirm_out(['ok' => false, 'msg' => 'Folder not found (moved or archived?)'], 404);
+    $folder = $frow['folder_name'];
 
     $token = dropbox_get_access_token();
     $path  = CK_BASE . '/' . $folder . '/' . CK_CONFIRM_FILE;
@@ -60,22 +61,36 @@ try {
     $fp  = (string)($in['fp'] ?? '');
     if ($key === '' || !preg_match('/^[0-9a-f]{40}$/', $fp)) ck_confirm_out(['ok' => false, 'msg' => 'Bad request'], 400);
 
+    $cu = current_user();
+    $title = mb_substr((string)($in['title'] ?? ''), 0, 300);
     if (!empty($in['on'])) {
-        $cu = current_user();
         $checks[$key] = [
             'fp'    => $fp,
-            'title' => mb_substr((string)($in['title'] ?? ''), 0, 300),
+            'title' => $title,
             'by'    => ($cu['full_name'] ?? '') ?: ($cu['username'] ?? '?'),
             'at'    => ck_now('Y-m-d H:i'),
         ];
         $note = trim(mb_substr((string)($in['note'] ?? ''), 0, 500));
         if ($note !== '') $checks[$key]['note'] = $note;
     } else {
+        $was = $checks[$key] ?? null;
         unset($checks[$key]);
     }
     dropbox_upload_text($token, $path, json_encode(
         ['version' => 1, 'checks' => (object)$checks],
         JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+    // History (CK tracker → History): who ticked / unticked what, and the note.
+    // The JSON file keeps only the current ticks; this keeps the trail.
+    try {
+        $on = !empty($in['on']);
+        ck_log($db, (int)$frow['id'], $on ? 'confirmed' : 'unconfirmed',
+               $on ? (($checks[$key]['note'] ?? '') !== '' ? mb_substr($checks[$key]['note'], 0, 255) : null)
+                   : (isset($was['by']) ? mb_substr('was ' . $was['by'] . ' ' . ($was['at'] ?? ''), 0, 255) : null),
+               mb_substr($title !== '' ? $title : $key, 0, 255),
+               isset($cu['id']) ? (int)$cu['id'] : null, 'hub', ck_now());
+    } catch (Throwable $e) {
+        error_log('ck_confirm: history not written: ' . $e->getMessage());
+    }
     ck_confirm_out(['ok' => true, 'checks' => (object)$checks]);
 } catch (Throwable $e) {
     ck_confirm_out(['ok' => false, 'msg' => $e->getMessage()], 500);
