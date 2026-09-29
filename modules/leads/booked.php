@@ -173,6 +173,7 @@ $extra_css  = '
 .attach-chip{display:inline-flex;align-items:center;gap:4px;background:var(--off-white);border:1px solid var(--grey-lt);border-radius:4px;padding:2px 8px;font-size:.72rem;margin:2px}
 .attach-chip button{background:none;border:none;cursor:pointer;color:var(--red);font-size:.9rem;line-height:1;padding:0 1px}
 .row-link{cursor:pointer}
+.folder-actions a{font-size:.68rem;font-weight:400;text-decoration:none;margin-right:8px;white-space:nowrap}
 .row-link:hover td{background:#f5f0ee}
 .status-deposit{background:#fff3e0;color:#c45000}
 .status-balance{background:#f3e5f5;color:#6a1b9a}
@@ -252,6 +253,14 @@ include 'includes/header.php';
           <?php $agency = folder_agency($r); if ($agency): ?>
             <span style="font-size:.73rem;color:var(--grey-mid);margin-left:4px">(<?= h($agency) ?>)</span>
           <?php endif; ?>
+          <?php $sUrl = savannah_open_url($r); ?>
+          <div class="folder-actions" onclick="event.stopPropagation()" style="margin-top:3px">
+            <a href="request_view.php?id=<?= (int)$r['id'] ?>" target="_blank" title="Open the booking request in the Hub">🔗 Open Request</a>
+            <?php if ($sUrl !== ''): ?>
+              <a href="<?= h($sUrl) ?>" title="Open in Windows Explorer">📂 Open</a>
+              <a href="<?= h(savannah_calc_url($r)) ?>" title="Open the quotation Excel (*_Calc.xlsx; if several, the highest number)">📊 Excel</a>
+            <?php endif; ?>
+          </div>
         </td>
         <td style="text-align:center"><?= (int)$r['pax'] ?></td>
         <td><?= h($r['agent_name'] ?? '') ?></td>
