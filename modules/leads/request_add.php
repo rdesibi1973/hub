@@ -384,13 +384,13 @@ include 'includes/header.php';
 
       <div class="form-group full">
         <label for="initial_request" id="initial_request_label">Initial Request *</label>
-        <textarea id="initial_request" name="initial_request" class="tall"
+        <textarea id="initial_request" name="initial_request" class="tall" data-strip-quotes
                   placeholder="Paste the original email, form submission, or WhatsApp message here…"><?= h($v['initial_request']) ?></textarea>
       </div>
 
       <div class="form-group full">
         <label for="notes">Internal Notes</label>
-        <textarea id="notes" name="notes"
+        <textarea id="notes" name="notes" data-strip-quotes
                   placeholder="Any internal notes…"><?= h($v['notes']) ?></textarea>
       </div>
 
@@ -433,6 +433,7 @@ include 'includes/header.php';
       <a href="requests.php" class="btn btn-outline">Cancel</a>
     </div>
   </form>
+  <?php include 'includes/email_quotes.php'; ?>
 </div>
 
 <!-- Add Agency modal -->

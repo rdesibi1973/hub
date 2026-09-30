@@ -563,12 +563,12 @@ include 'includes/header.php';
 
       <div class="form-group full">
         <label>Initial Request</label>
-        <textarea name="initial_request" class="tall"><?= h($v['initial_request']) ?></textarea>
+        <textarea name="initial_request" class="tall" data-strip-quotes><?= h($v['initial_request']) ?></textarea>
       </div>
 
       <div class="form-group full">
         <label>Internal Notes</label>
-        <textarea name="notes"><?= h($v['notes']) ?></textarea>
+        <textarea name="notes" data-strip-quotes><?= h($v['notes']) ?></textarea>
       </div>
 
     </div>
@@ -585,6 +585,7 @@ include 'includes/header.php';
     </div>
 
   </form>
+  <?php include 'includes/email_quotes.php'; ?>
 </div>
 
 <script>
