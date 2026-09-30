@@ -34,17 +34,21 @@ ksort($tpl_by_cat);
 
       <div style="display:grid;grid-template-columns:<?= $templates ? '1fr 1fr auto' : '1fr' ?>;gap:12px;align-items:flex-end;margin-bottom:14px">
         <div>
-          <label class="m-label">To<?php if ($send_to_suggestions): ?> <span style="font-weight:400;color:var(--grey-mid)">— several addresses separated by commas</span><?php endif; ?></label>
-          <?php if ($send_to_suggestions): ?>
-            <input type="email" multiple id="send_to" class="m-input" autocomplete="off" list="send_to_list">
-            <datalist id="send_to_list">
-              <?php foreach ($send_to_suggestions as $addr => $label): ?>
-                <option value="<?= h($addr) ?>"><?= h($label) ?></option>
-              <?php endforeach; ?>
-            </datalist>
-          <?php else: ?>
-            <input type="email" id="send_to" class="m-input" autocomplete="off">
-          <?php endif; ?>
+          <label class="m-label">To <span style="font-weight:400;color:var(--grey-mid)">— several addresses separated by commas</span></label>
+          <?php /* Plain text, not type=email: browsers handle a list of addresses
+                   (and a datalist on it) inconsistently. "+ Add…" appends. */ ?>
+          <div style="display:flex;gap:8px">
+            <input type="text" id="send_to" class="m-input" autocomplete="off" spellcheck="false"
+                   placeholder="name@example.com, other@example.com">
+            <?php if ($send_to_suggestions): ?>
+              <select class="m-input" style="width:auto;flex:none" onchange="addSendTo(this)" title="Add a recipient to the list">
+                <option value="">＋ Add…</option>
+                <?php foreach ($send_to_suggestions as $addr => $label): ?>
+                  <option value="<?= h($addr) ?>"><?= h($label !== '' && $label !== $addr ? $label . ' — ' . $addr : $addr) ?></option>
+                <?php endforeach; ?>
+              </select>
+            <?php endif; ?>
+          </div>
         </div>
         <?php if ($templates): ?>
         <div>
@@ -235,6 +239,19 @@ ksort($tpl_by_cat);
     document.getElementById('sendOverlay').style.display = 'none';
   };
 
+  // ── Recipients: comma-separated list; "+ Add…" appends (no duplicates) ─────
+  function sendToList() {
+    return document.getElementById('send_to').value.split(/[,;]+/)
+      .map(function(a) { return a.trim(); }).filter(Boolean);
+  }
+  window.addSendTo = function(sel) {
+    var addr = sel.value, list = sendToList();
+    sel.value = '';
+    if (!addr) return;
+    if (list.map(function(a) { return a.toLowerCase(); }).indexOf(addr.toLowerCase()) < 0) list.push(addr);
+    document.getElementById('send_to').value = list.join(', ');
+  };
+
   // ── Load template with params detection ────────────────────────────────────
   window.loadTemplate = function() {
     var sel    = document.getElementById('send_tpl');
@@ -266,6 +283,14 @@ ksort($tpl_by_cat);
     var btn  = document.getElementById('btnSend');
     var alrt = document.getElementById('sendAlert');
     alrt.style.display = 'none';
+    var to = sendToList();
+    var bad = to.filter(function(a) { return !/^[^\s@,;]+@[^\s@,;]+\.[^\s@,;]+$/.test(a); });
+    if (!to.length || bad.length) {
+      alrt.style.cssText = 'display:block;background:#ffebee;color:#c62828;margin-top:12px;padding:10px 14px;border-radius:6px;font-size:.82rem';
+      alrt.textContent = to.length ? 'Not a valid address: ' + bad.join(', ') : 'Enter at least one recipient.';
+      return;
+    }
+    document.getElementById('send_to').value = to.join(', ');
     btn.disabled = true;
     btn.textContent = 'Sending…';
 

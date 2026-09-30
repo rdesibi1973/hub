@@ -738,8 +738,8 @@ $mailBody    = "Greetings from Savannah Explorers.\r\nKindly find your attached 
     <div style="display:flex;flex-direction:column;gap:14px;">
 
       <div>
-        <label style="font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#888;display:block;margin-bottom:4px;">To</label>
-        <input id="mailTo" type="email" value="<?= h($mailTo) ?>"
+        <label style="font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#888;display:block;margin-bottom:4px;">To <span style="font-weight:400;font-style:italic;text-transform:none;letter-spacing:0;">(several addresses separated by commas)</span></label>
+        <input id="mailTo" type="text" autocomplete="off" spellcheck="false" value="<?= h($mailTo) ?>"
                style="width:100%;padding:9px 12px;border:1.5px solid #E8E8E8;border-radius:7px;font-family:inherit;font-size:.85rem;outline:none;"
                onfocus="this.style.borderColor='#C0211B'" onblur="this.style.borderColor='#E8E8E8'">
       </div>
