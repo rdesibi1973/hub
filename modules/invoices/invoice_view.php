@@ -117,7 +117,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $dbTag = $tagMap[$newLabel];
         try {
             $reqRow = $db->prepare(
-                "SELECT r.id, r.practice_code, r.dropbox_url, r.status
+                "SELECT r.id, r.practice_code, r.dropbox_url, r.status, r.group_folder
                  FROM invoices i JOIN requests r ON r.id = i.request_id WHERE i.id = ?"
             );
             $reqRow->execute([$invId]);
@@ -235,7 +235,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                    ->execute([$newName, $newUrl, (int)$req['id']]);
             }
 
-            ob_end_clean(); echo json_encode(['ok'=>true,'new_name'=>$newName,'new_tag'=>$dbTag,'new_url'=>$newUrl]); exit;
+            // GRP client: the parent folder's tag follows the client furthest
+            // behind with payments (includes/grp_status.php).
+            $groupMsg = '';
+            if (trim($req['group_folder'] ?? '') !== '') {
+                require_once __DIR__ . '/../../modules/leads/includes/grp_status.php';
+                try {
+                    $groupMsg = grp_sync_parent_tag($db, $token, $req['group_folder'])['msg'];
+                } catch (\Throwable $g) {
+                    $groupMsg = 'Group folder not updated: ' . $g->getMessage();
+                }
+            }
+
+            ob_end_clean(); echo json_encode(['ok'=>true,'new_name'=>$newName,'new_tag'=>$dbTag,'new_url'=>$newUrl,'group_msg'=>$groupMsg]); exit;
         } catch (\Throwable $e) {
             ob_end_clean(); echo json_encode(['ok'=>false,'error'=>$e->getMessage()]); exit;
         }
@@ -612,8 +624,8 @@ async function updateFolderStatus() {
       document.getElementById('folderName').textContent = d.new_name;
       var badge = document.getElementById('folderTagBadge');
       badge.textContent = d.new_tag; badge.style.display = 'inline';
-      msg.style.color = 'var(--green)'; msg.textContent = '✓ Folder renamed successfully';
-      setTimeout(function(){ msg.style.display='none'; }, 3000);
+      msg.style.color = 'var(--green)'; msg.textContent = '✓ Folder renamed successfully' + (d.group_msg ? ' · ' + d.group_msg : '');
+      setTimeout(function(){ msg.style.display='none'; }, d.group_msg ? 8000 : 3000);
     } else {
       msg.style.color = 'var(--red)'; msg.textContent = '✗ ' + d.error;
     }

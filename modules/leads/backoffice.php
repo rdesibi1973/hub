@@ -89,7 +89,8 @@ function bo_status_from_name(string $name, array $tagStatus): array {
 /**
  * Rename a booking's Dropbox folder (private = its own folder; group = the shared
  * parent) and sync the DB. When $setStatus, also writes status/payment_status
- * (for a group, to every request in it, rebuilding each sub's dropbox_url).
+ * (for a group: status only — each client keeps its own payment_status —
+ * to every request in it, rebuilding each sub's dropbox_url).
  * Dropbox move happens first; the DB is only touched if it succeeds.
  */
 function bo_do_rename(PDO $db, string $token, array $r, bool $isGrp,
@@ -105,18 +106,21 @@ function bo_do_rename(PDO $db, string $token, array $r, bool $isGrp,
     dropbox_move_folder($token, $curPath, $newPath);   // subfolders move with the parent
 
     if ($isGrp) {
-        $subs = $db->prepare("SELECT id, practice_code FROM requests WHERE group_folder = ?");
+        // Each client keeps its own payment_status (its invoice / sub-folder):
+        // the group tag only sets the booking status, and never revives a
+        // cancelled client unless the whole group is cancelled.
+        $subs = $db->prepare("SELECT id, practice_code, status FROM requests WHERE group_folder = ?");
         $subs->execute([$folder]);
         $rowsG = $subs->fetchAll(PDO::FETCH_ASSOC);
-        $upd = $setStatus
-            ? $db->prepare("UPDATE requests SET group_folder=?, dropbox_url=?, status=?, payment_status=? WHERE id=?")
-            : $db->prepare("UPDATE requests SET group_folder=?, dropbox_url=? WHERE id=?");
+        $upd   = $db->prepare("UPDATE requests SET group_folder=?, dropbox_url=? WHERE id=?");
+        $updSt = $db->prepare("UPDATE requests SET group_folder=?, dropbox_url=?, status=? WHERE id=?");
         $n = 0;
         foreach ($rowsG as $g) {
             $sub    = trim($g['practice_code'] ?? '');
             $subUrl = bo_url_from_path($sub !== '' ? $newPath . '/' . $sub : $newPath);
-            if ($setStatus) $upd->execute([$newFolder, $subUrl, $newStatus, $newPs, (int)$g['id']]);
-            else            $upd->execute([$newFolder, $subUrl, (int)$g['id']]);
+            $keep   = ($g['status'] ?? '') === 'Cancelled' && $newStatus !== 'Cancelled';
+            if ($setStatus && $newStatus !== null && !$keep) $updSt->execute([$newFolder, $subUrl, $newStatus, (int)$g['id']]);
+            else                                              $upd->execute([$newFolder, $subUrl, (int)$g['id']]);
             $n++;
         }
         return ['ok' => true, 'msg' => '✔ Group "' . $newFolder . '": renamed (' . $n . ' booking(s) updated).'];

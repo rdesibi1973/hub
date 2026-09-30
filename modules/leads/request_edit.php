@@ -56,6 +56,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $reassignError = '';
 
     foreach ($editableFields as $f) {
+        // initial_request is posted only when edited (see the form's submit
+        // handler): the server firewall (ModSecurity) rejects some pasted
+        // client emails, which blocked every save of those requests.
+        if ($f === 'initial_request' && !array_key_exists($f, $_POST)) continue;
         $v[$f] = trim($_POST[$f] ?? '');
     }
 
@@ -356,7 +360,7 @@ include 'includes/header.php';
 <?php endif; ?>
 
 <div class="form-card">
-  <form method="POST">
+  <form method="POST" onsubmit="var t = this.elements['initial_request']; if (t && t.value === t.defaultValue) t.disabled = true;">
 
     <div class="form-section-title" style="margin-top:0">Request Details</div>
     <div class="form-grid">
