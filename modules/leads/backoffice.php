@@ -201,6 +201,54 @@ function bo_do_regroup(PDO $db, string $token, array $r, string $targetGrp): arr
     return ['ok' => true, 'msg' => $msg];
 }
 
+// ── AJAX: "✉ Mail" on a row (send_modal.php) — sent from the logged-in user ──
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'send_email') {
+    require_once 'includes/mail_helper.php';
+    header('Content-Type: application/json');
+    set_time_limit(60);
+    ob_start();
+    try {
+        $reqId   = (int)($_POST['request_id'] ?? 0);
+        $to      = trim($_POST['to']      ?? '');
+        $subject = trim($_POST['subject'] ?? '');
+        $body    = trim($_POST['body']    ?? '');
+        if (!$to || !$subject || !$body) {
+            ob_end_clean(); echo json_encode(['ok'=>false,'msg'=>'Missing required fields.']); exit;
+        }
+        $stmt = $db->prepare("SELECT id FROM requests WHERE id = ?");
+        $stmt->execute([$reqId]);
+        if (!$stmt->fetchColumn()) { ob_end_clean(); echo json_encode(['ok'=>false,'msg'=>'Request not found.']); exit; }
+        $stmt = $db->prepare("SELECT email, full_name FROM users WHERE id = ?");
+        $stmt->execute([(int)$currentUser['id']]);
+        $me        = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+        $fromName  = trim($me['full_name'] ?? '') ?: 'Savannah Explorers';
+        $fromEmail = trim($me['email'] ?? '');
+        if (!$fromEmail) {
+            ob_end_clean(); echo json_encode(['ok'=>false,'msg'=>'Your user account has no email address — set it in your profile.']); exit;
+        }
+        $attachments = [];
+        if (!empty($_FILES['attachments']['name'][0])) {
+            foreach ($_FILES['attachments']['name'] as $i => $name) {
+                if ($_FILES['attachments']['error'][$i] === UPLOAD_ERR_OK) {
+                    $attachments[] = ['tmp_path' => $_FILES['attachments']['tmp_name'][$i], 'name' => $name];
+                }
+            }
+        }
+        $sent = send_hub_email($to, $subject, $body, $fromName, $fromEmail, $fromEmail, $attachments);
+        ob_end_clean();
+        if ($sent) {
+            log_email_note($db, $reqId, (int)$currentUser['id'], $subject, $body);
+            echo json_encode(['ok'=>true]);
+        } else {
+            echo json_encode(['ok'=>false,'msg'=>'Send failed. Check server mail configuration.']);
+        }
+    } catch (Throwable $e) {
+        ob_end_clean();
+        echo json_encode(['ok'=>false,'msg'=>'Error: ' . $e->getMessage()]);
+    }
+    exit;
+}
+
 // ── Actions: change status / free rename ──────────────────────────────────────
 $act = $_POST['action'] ?? '';
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array($act, ['change_status', 'rename'], true)) {
@@ -520,7 +568,7 @@ if ($q !== '' && $inFiles) {
         $in   = implode(',', array_fill(0, count($segs), '?'));
         $vals = array_values($segs);
         $stmt = $db->prepare(
-            "SELECT r.id, r.customer_name, r.practice_code, r.group_folder, r.status, r.payment_status,
+            "SELECT r.id, r.customer_name, r.email, r.practice_code, r.group_folder, r.status, r.payment_status,
                     r.dropbox_url, r.pre_confirm_json, r.postpone_until, a.name AS agent_name
              FROM requests r LEFT JOIN agents a ON a.id = r.agent_id
              WHERE r.practice_code IN ($in) OR r.group_folder IN ($in)
@@ -563,7 +611,7 @@ if ($q !== '' && $inFiles) {
     // ── Bookings: search the requests table ────────────────────────────────────
     // '*' acts as a wildcard (like the old Java search): turn '*' into a SQL '%'.
     $like   = '%' . str_replace('*', '%', $q) . '%';
-    $sql    = "SELECT r.id, r.customer_name, r.practice_code, r.group_folder, r.status, r.payment_status,
+    $sql    = "SELECT r.id, r.customer_name, r.email, r.practice_code, r.group_folder, r.status, r.payment_status,
                       r.dropbox_url, r.pre_confirm_json, r.postpone_until, a.name AS agent_name
                FROM requests r LEFT JOIN agents a ON a.id = r.agent_id
                WHERE (r.customer_name LIKE ? OR r.practice_code LIKE ? OR r.group_folder LIKE ?)";
@@ -636,6 +684,20 @@ $extra_css = '
 .bo-table td{padding:8px 10px;border-bottom:1px solid var(--grey-lt);font-size:.83rem;vertical-align:middle}
 .bo-folder{font-family:monospace;font-size:.75rem;word-break:break-all}
 .bo-grp{font-size:.66rem;color:#8a6d3b;background:#fcf3e3;border-radius:6px;padding:1px 5px;margin-left:4px}
+/* Hub send dialog (send_modal.php) — same as ck_tracker.php */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:200;display:flex;align-items:flex-start;justify-content:center;padding:40px 16px;overflow-y:auto}
+.modal-overlay.hidden{display:none}
+.modal-box{background:#fff;border-radius:10px;box-shadow:0 8px 40px rgba(0,0,0,.2);width:100%}
+.modal-header{padding:15px 24px;border-bottom:1px solid var(--grey-lt);display:flex;align-items:center;justify-content:space-between}
+.modal-header h3{font-family:"Merriweather",serif;font-size:.95rem;font-weight:700;margin:0;color:var(--black)}
+.modal-body{padding:22px 24px}
+.modal-footer{padding:14px 24px;border-top:1px solid var(--grey-lt);display:flex;justify-content:flex-end;gap:10px}
+.modal-close{background:none;border:none;font-size:1.3rem;cursor:pointer;color:var(--grey-mid);line-height:1;padding:0}
+.m-label{font-size:.72rem;font-weight:700;color:var(--grey-dk);display:block;margin-bottom:4px}
+.m-input{width:100%;padding:7px 10px;border:1.5px solid var(--grey-lt);border-radius:6px;font-family:"Open Sans",sans-serif;font-size:.82rem;color:var(--black);box-sizing:border-box}
+.m-input:focus{outline:none;border-color:var(--red)}
+.attach-chip{display:inline-flex;align-items:center;gap:4px;background:var(--off-white);border:1px solid var(--grey-lt);border-radius:4px;padding:2px 8px;font-size:.72rem;margin:2px}
+.attach-chip button{background:none;border:none;cursor:pointer;color:var(--red);font-size:.9rem;line-height:1;padding:0 1px}
 ';
 include 'includes/header.php';
 ?>
@@ -707,7 +769,6 @@ include 'includes/header.php';
           <td>
             <div style="font-family:'Open Sans',sans-serif">
               <a href="<?= h($cOpen) ?>" title="Open in Windows Explorer" style="font-size:.68rem;text-decoration:none">📂 Open</a>
-              <a href="<?= h(savannah_calc_url_for($cRel)) ?>" title="Open the Excel in this folder (*_Calc.xlsx, else the highest-numbered .xlsx)" style="font-size:.68rem;text-decoration:none;margin-left:8px">📊 Excel</a>
               <a href="#" data-copy="<?= h($cWin) ?>" onclick="copyPath(this);return false" title="Copy Windows path" style="font-size:.68rem;text-decoration:none;margin-left:8px">📋 Copy path</a>
             </div>
           </td>
@@ -800,6 +861,9 @@ include 'includes/header.php';
             <?php endif; ?>
             <?php if ($folder !== ''): ?>
               <a href="#" data-copy="<?= h($folder) ?>" onclick="copyPath(this);return false" title="Copy the folder name (to paste into an email)" style="font-size:.68rem;text-decoration:none;margin-left:<?= $sPath!==''?'8px':'0' ?>">📄 Copy folder name</a>
+              <?php // Subject as on Payments: the client's own folder when dated, else the main one, cut at END.
+                    $mailSubject = folder_mail_subject(stripos($pcode, '_END') !== false ? $pcode : $folder); ?>
+              <a href="#" onclick="openSend(<?= (int)$r['id'] ?>, <?= h(json_encode($r['customer_name'] ?? '')) ?>, <?= h(json_encode($r['email'] ?? '')) ?>, <?= h(json_encode($mailSubject)) ?>);return false" title="Email the client (folder name as subject)" style="font-size:.68rem;text-decoration:none;margin-left:8px">✉ Mail</a>
               <a href="#" onclick="toggleRename(<?= (int)$r['id'] ?>);return false" title="Rename the Dropbox folder" style="font-size:.68rem;text-decoration:none;margin-left:8px">✏ Rename…</a>
               <?php if ($canConfirm): ?>
               <a href="#" onclick="toggleEl('cs<?= (int)$r['id'] ?>');return false" title="Confirm this safari: set dates, move to 001_Safari, mark Booked" style="font-size:.68rem;text-decoration:none;margin-left:8px;color:#1A6B3A;font-weight:600">✅ Confirm Safari…</a>
@@ -1150,7 +1214,9 @@ include 'includes/header.php';
           <td>
             <div style="font-family:'Open Sans',sans-serif">
               <a href="<?= h($oOpen) ?>" title="Open the folder in Windows Explorer" style="font-size:.68rem;text-decoration:none">📂 Open folder</a>
+              <?php if (!$isContracts): ?>
               <a href="<?= h(savannah_calc_url_for($oDir)) ?>" title="Open the quotation Excel (*_Calc.xlsx; if several, the highest number)" style="font-size:.68rem;text-decoration:none;margin-left:8px">📊 Excel</a>
+              <?php endif; ?>
               <a href="#" data-copy="<?= h($oWin) ?>" onclick="copyPath(this);return false" title="Copy Windows path of the folder" style="font-size:.68rem;text-decoration:none;margin-left:8px">📋 Copy path</a>
             </div>
           </td>
@@ -1330,6 +1396,12 @@ function flashCopied(el) { var o = el.textContent; el.textContent = '✓ Copied'
   f.scrollIntoView({block: 'center'});
 })();
 </script>
+
+<?php if ($rows) {
+    $templates     = [];   // no template picker here: subject = folder name, free body
+    $send_ajax_url = 'backoffice.php';
+    include 'includes/send_modal.php';
+} ?>
 
 <?php if ($bookingEmail): ?>
 <!-- Post-confirmation booking email (ports the Java "Send Booking Email" dialog). -->
