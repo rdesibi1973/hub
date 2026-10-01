@@ -17,6 +17,10 @@ require_once __DIR__ . '/dropbox_helper.php';
 require_once __DIR__ . '/includes/folder_parser.php';
 require_once __DIR__ . '/includes/ck_lib.php';
 
+// Never cacheable: the host's nginx served the runner a stale folder listing.
+header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+header('Pragma: no-cache');
+
 function ck_api_out(array $data, int $code = 200): void {
     http_response_code($code);
     header('Content-Type: application/json');
