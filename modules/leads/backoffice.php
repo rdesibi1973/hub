@@ -1399,6 +1399,7 @@ function flashCopied(el) { var o = el.textContent; el.textContent = '✓ Copied'
 
 <?php if ($rows) {
     $templates     = [];   // no template picker here: subject = folder name, free body
+    $send_to_suggestions = ck_mail_suggestions($db);   // "+ Add…": booking team + colleagues
     $send_ajax_url = 'backoffice.php';
     include 'includes/send_modal.php';
 } ?>
