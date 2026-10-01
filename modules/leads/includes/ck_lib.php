@@ -414,10 +414,13 @@ function ck_agent_file_allowed(string $rel): bool {
     // Supplier booking emails (transfer check). Never anything else in bookings/.
     if ($dir === 'bookings') return str_ends_with($name, '.eml');
     // GRP: each confirmed client's sub-folder holds that client's Word programme
-    // (rooms sold). Only .docx, and never from the standard sub-folders.
+    // (rooms sold) and their invoice ('Invoice SE-....pdf'). Only those, and
+    // never from the standard sub-folders.
     $internal = ['passports', 'flights', 'intflights', 'bookings', 'vouchers', 'insurance',
                  'complain', 'guestcomments', 'mails', 'old'];
-    return !in_array($dir, $internal, true) && str_ends_with($name, '.docx') && strpos($name, '~$') !== 0;
+    if (in_array($dir, $internal, true)) return false;
+    if (str_ends_with($name, '.pdf')) return str_contains($name, 'invoice');
+    return str_ends_with($name, '.docx') && strpos($name, '~$') !== 0;
 }
 
 /** CK emails (tracker / report "Mail"): the booking team first, then every active user. */
