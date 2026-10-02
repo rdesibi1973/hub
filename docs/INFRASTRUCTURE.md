@@ -28,8 +28,10 @@
 
 Two paths, both pull from `main`:
 
-1. **`DeployHub.bat`** (Windows, on Roberto's PC) — the usual route. The script lives on the local machine, **not** in the repo.
-2. **`git pull` on the server** via SSH — direct alternative.
+1. **`DeployHub.bat`** (Windows, on Roberto's PC, `C:\Dropbox\Exchange\Savannah-Hub\`) — the usual route; `bin\hub-push.bat` does push + deploy in one go. The scripts live on the local machine, **not** in the repo.
+2. **On the server** via SSH — direct alternative.
+
+The server's `deploy.sh` runs `git fetch` + `git checkout origin/main -- .`: the server HEAD stays on an old commit (normal), and files deleted in git are **not** deleted on the server. Verify with `git diff origin/main --stat -- modules migrations` on the server (empty = deployed). BlueHost SSH (port 2222) often refuses repeated connections — wait and retry.
 
 Notes:
 - **MySQL changes take effect immediately** on page reload — no deploy needed for SQL-only fixes.
@@ -40,7 +42,8 @@ Notes:
 
 All live secrets sit in server-only config that is **git-ignored** (see `.gitignore`):
 
-- `includes/config.php` (root) — excluded from repo. Holds e.g. `API_IMPORT_KEY` (checked via the `X-Hub-Token` header).
+- `includes/config.php` (root) — excluded from repo. Holds e.g. `API_IMPORT_KEY` (checked via the `X-Hub-Token` header), `AGENT_API_KEY` / `AGENT_API_USER` (Agent API, header `X-Agent-Key`), `AGENT_MEMO_USER` (whose Memo Board Claude writes to), `MEMO_CRON_TOKEN` (memo reminder cron).
+- `api.txt` (repo root on Roberto's PC, git-ignored) — local copy of the Agent API key for Claude sessions.
 - `modules/leads/config.php` — excluded from repo. Holds live DB, Dropbox and HubSpot credentials, plus `API_KEY` (checked via the `X-Api-Key` header) and any external keys (e.g. `ANTHROPIC_API_KEY` used by `modules/iti/iti_fix_destinations.php`).
 
 To edit a secret: change it **on the server** (outside the repo, no git deploy). The Java GUI sends its API key as `api.key` in `config.properties`, which must sit in the same directory as the JAR.
@@ -49,7 +52,8 @@ To edit a secret: change it **on the server** (outside the repo, no git deploy).
 
 ## 6. Build / dependencies
 
-- **PHP**: target BlueHost's PHP 7.x — avoid `match()` and arrow functions (`fn()`), which are PHP 8+.
-- **Composer**: `dompdf/dompdf ^2.0` (PDF generation), autoload at `vendor/autoload.php`.
+- **PHP**: the server runs **PHP 8.3** since 28 Sep 2026 (was 8.0.30); `composer.json` pins the platform to 8.3. PHP 8 constructs are fine; keep the style of the file you edit. Local syntax check: `C:\Utility\PHP\php.exe -l <file>`.
+- **Database**: MySQL (not MariaDB) — no `ADD COLUMN IF NOT EXISTS`.
+- **Composer**: `dompdf/dompdf ^2.0` (invoice PDFs), `phpoffice/phpspreadsheet ^1.29` (Calc fill / rates), `phpoffice/phpword ^1.4`; autoload at `vendor/autoload.php`.
 - **Git-ignored** (per `.gitignore`): server-only `includes/config.php`, NetBeans build artifacts (`build/`, `dist/`, `nbproject/private/`), `SavannahExplorersGUI/`, PHP `error_log` files, and Dropbox "conflicted copy" PHP files.
 - **Java source files** require `git add -f` (NetBeans patterns in `.gitignore` would otherwise exclude them).

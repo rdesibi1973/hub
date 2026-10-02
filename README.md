@@ -14,7 +14,7 @@ Operational management platform for **Savannah Explorers Ltd** (Arusha-based saf
 | Hosting | BlueHost shared hosting (`box2233.bluehost.com`, account `savannp5`) |
 | Server path | `/home4/savannp5/public_html/hub/` |
 | Database | `savannp5_savannah_leads` (collation `utf8_unicode_ci`) |
-| Stack | PHP 8 (BlueHost-compatible subset), MySQL, vanilla JS, HTML/CSS |
+| Stack | PHP 8.3 (since 28 Sep 2026), MySQL (not MariaDB), vanilla JS, HTML/CSS |
 | Config | `includes/config.php` and `modules/leads/config.php` — **kept off the repo** |
 
 All UI, messages, and documentation are in **English**.
@@ -172,12 +172,13 @@ include __DIR__ . '/includes/header.php';
 ### BlueHost / server specifics
 - Server timezone is US-based; every PHP entrypoint calls `date_default_timezone_set('Africa/Dar_es_Salaam')` for EAT
 - MySQL frequently drops with `ERROR 2006 (HY000)` and auto-reconnects — normal
-- PHP CLI not available for syntax checking; use Node.js for JS validation
+- Syntax-check PHP locally before committing: `C:\Utility\PHP\php.exe -l <file>` (on Roberto's PC); JS with Node.js (`node --check`) or Python `esprima`
 - `set_time_limit()` may be in `disable_functions` — wrap with `@`
 - Error logging: `ini_set('error_log', dirname(__DIR__, 2) . '/wetu_errors.log')` pattern at hub root
 
 ### PHP patterns
-- Avoid PHP 8-only constructs (`match`, arrow functions, `str_contains/ends_with/starts_with`) for BlueHost compatibility
+- The server runs PHP 8.3 (since 28 Sep 2026; it was 8.0.30), so PHP 8 constructs (`match`, `fn`, `str_contains/ends_with/starts_with`) are fine. Match the style of the file you edit: some files (e.g. `modules/memo/`, `grp_status.php`) are kept PHP-7 style on purpose
+- MySQL, not MariaDB: no `ADD COLUMN IF NOT EXISTS` / `DROP COLUMN IF EXISTS` — guard with `INFORMATION_SCHEMA` or try/catch
 - `ob_start()` at top of AJAX handlers to prevent PHP warnings corrupting JSON
 - `db()` is a function with a static variable — never use `global $pdo` in leads context
 - Two `mail_helper.php` files (root and `modules/leads/includes/`); shared utilities need `function_exists()` guards in both
@@ -196,7 +197,8 @@ include __DIR__ . '/includes/header.php';
 local edit → git push (Windows PC) → DeployHub.bat → SSH to server → deploy.sh
 ```
 
-`deploy.sh` runs `git fetch` + `git reset --hard origin/main` (preserves `config.php`).
+`deploy.sh` runs `git fetch` + `git checkout origin/main -- .` (preserves `config.php`). The server's own HEAD therefore stays on an old commit and `git status` there shows many staged files — that is normal. To verify a deploy, on the server: `git diff origin/main --stat -- modules migrations` (empty = deployed).
+`bin\hub-push.bat` = push + deploy in one go (ends with `pause`); `DeployHub.bat` = deploy only.
 
 - **Deploy is manual** — run `DeployHub.bat` after each push. Claude never auto-deploys.
 - **`DeployHub.bat` is additive** — deletions are NOT propagated; deleted files must be removed manually on the server via SSH (`rm`).
@@ -213,7 +215,7 @@ There is **no local dev environment** — the Hub runs only against BlueHost (th
 
 Implications:
 - No XAMPP / Docker / local LAMP setup is maintained. PHP behaviour (mail via `isMail()`, BlueHost `disable_functions`, US server timezone, MySQL auto-drop) can only be reproduced on the server.
-- PHP cannot be lint-checked locally via CLI (not installed on BlueHost either). JS is validated with Node.js; Python is used for regex/logic simulations before committing.
+- PHP is lint-checked locally with `C:\Utility\PHP\php.exe -l` (PHP CLI on Roberto's PC; there is no local DB or web server). JS is validated with Node.js or Python `esprima`; Python is used for regex/logic simulations before committing. UI changes can be previewed with a static page + mocked AJAX.
 - Because there is only one database, **test changes carefully** — there is no staging DB. Schema changes go through migrations (§7) applied in phpMyAdmin or via SSH `mysql`.
 
 > If a local sandbox is ever needed, the minimum would be PHP 8 + MySQL with a `config.php` pointing at a throwaway copy of the schema (`db_schema.sql`) — but mail, Dropbox, HubSpot, and Wetu integrations would not function without their live credentials.
