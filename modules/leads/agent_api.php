@@ -1178,6 +1178,23 @@ try {
                    'opened_next' => $opened ? agent_memo_rows($db, "m.id IN (" . implode(',', array_map('intval', $opened)) . ")", []) : []]);
     }
 
+    // ── routine_status / routine_done ────────────────────────────────────────
+    // The owner's recurring checks (Memo Board top strip): due / count / last done.
+    case 'routine_status': {
+        $owner = agent_memo_owner($db);
+        agent_out(['ok' => true, 'owner' => $owner['full_name'], 'routines' => memo_routines_status($db, $owner['id'])]);
+    }
+
+    case 'routine_done': {
+        agent_require_method('POST');
+        $owner = agent_memo_owner($db);
+        $key   = (string)($in['key'] ?? '');
+        if (!memo_routine_done($db, $owner['id'], $key, (string)($in['note'] ?? ''), 'claude')) {
+            agent_fail('key must be one of: ' . implode(', ', array_keys(MEMO_ROUTINES)));
+        }
+        agent_out(['ok' => true, 'routines' => memo_routines_status($db, $owner['id'])]);
+    }
+
     // ── import_zoho_invoice ──────────────────────────────────────────────────
     // Bring an old Zoho invoice (e.g. INV-002417) into Hub with its original
     // number. Fields as api_import.php; Claude reads the Zoho PDF itself.
@@ -1234,6 +1251,7 @@ try {
             'rollback_booking', 'iti_programs', 'iti_texts', 'iti_save_texts', 'update_rate', 'replace_flight_rates',
             'find_invoices', 'get_invoice', 'add_invoice_payment', 'cancel_invoice_payment', 'update_folder_status',
             'save_invoice_pdf', 'import_zoho_invoice', 'memo_list', 'memo_save', 'memo_set_status',
+            'routine_status', 'routine_done',
         ]]);
     }
 } catch (Throwable $e) {

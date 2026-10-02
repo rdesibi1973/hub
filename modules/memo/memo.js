@@ -584,8 +584,56 @@
 
   shareModal.addEventListener('click', function (e) { if (e.target === shareModal) { window.memoShareClose(); } });
 
+  // ---------- routines (recurring checks, admin / manager) ----------
+  var routinesBox = document.getElementById('memoRoutines');
+
+  function ago(h) {
+    if (h === null || h === undefined) { return 'never'; }
+    h = Number(h);
+    if (h < 1)  { return Math.max(1, Math.round(h * 60)) + ' min ago'; }
+    if (h < 48) { return Math.round(h) + 'h ago'; }
+    return Math.round(h / 24) + ' days ago';
+  }
+
+  function renderRoutines(list) {
+    routinesBox.innerHTML = '';
+    for (var i = 0; i < list.length; i++) {
+      var r = list[i];
+      var hot = r.key === 'leads' ? r.count > 0 : (r.due && r.count > 0);
+      var el = document.createElement('div');
+      el.className = 'memo-routine' + (hot ? ' is-hot' : (r.due ? ' is-due' : ''));
+      el.title = r.hint + ' Every ' + (r.every_hours >= 24 ? Math.round(r.every_hours / 24) + ' days' : r.every_hours + 'h') + '.';
+      var html = '<div class="memo-routine-head">🔁 ' + esc(r.title);
+      if (r.count !== null && r.count !== undefined) {
+        html += '<span class="memo-routine-count' + (Number(r.count) === 0 ? ' zero' : '') + '">' + esc(r.count) + '</span>';
+      }
+      html += '</div>';
+      html += '<div class="memo-routine-last">Last check: ' + esc(ago(r.hours_since)) +
+        (r.last_source === 'claude' ? ' (Claude)' : '') +
+        (r.last_note ? ' — ' + esc(r.last_note) : '') + '</div>';
+      var ext = /^https?:/.test(r.link);
+      html += '<div class="memo-routine-actions"><a href="' + esc(r.link) + '"' + (ext ? ' target="_blank" rel="noopener"' : '') +
+        '>Open</a><button type="button" data-key="' + esc(r.key) + '">✓ Done</button></div>';
+      el.innerHTML = html;
+      el.querySelector('button').addEventListener('click', function () {
+        post('routine_done', { key: this.getAttribute('data-key') }, function (res) {
+          if (res && res.ok) { renderRoutines(res.routines || []); }
+        });
+      });
+      routinesBox.appendChild(el);
+    }
+  }
+
+  function loadRoutines() {
+    get('routines', {}, function (res) {
+      if (res && res.ok) { renderRoutines(res.routines || []); }
+    });
+  }
+
   // ---------- init ----------
   initQuill();
   load();
+  loadRoutines();
+  setInterval(loadRoutines, 5 * 60 * 1000);
   openFromUrl();
 })();

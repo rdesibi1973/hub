@@ -156,6 +156,22 @@ $extra_css = '
 .memo-modal input[type="number"] { width:100%; box-sizing:border-box; padding:7px 8px; border:1px solid #ccc; border-radius:4px; font-size:14px; }
 .memo-check { display:flex; align-items:center; gap:8px; margin-top:8px; font-size:.8rem; color:#444; }
 .memo-check input { width:15px; height:15px; accent-color:#C0211B; }
+
+/* routines: recurring checks */
+.memo-routines { display:flex; flex-wrap:wrap; gap:10px; margin-bottom:14px; }
+.memo-routines:empty { display:none; }
+.memo-routine { flex:1 1 200px; max-width:280px; background:#fff; border:1.5px solid #E8E8E8; border-left:5px solid #43A047;
+  border-radius:8px; padding:9px 12px; font-size:.78rem; color:#444; }
+.memo-routine.is-due { border-left-color:#E0A800; background:#FFFBEA; }
+.memo-routine.is-hot { border-left-color:#C0211B; background:#FFF5F4; }
+.memo-routine-head { display:flex; align-items:center; gap:6px; font-weight:700; color:#2b2b2b; font-size:.82rem; }
+.memo-routine-count { margin-left:auto; background:#C0211B; color:#fff; border-radius:10px; padding:0 7px; font-size:.72rem; }
+.memo-routine-count.zero { background:#E0E0E0; color:#666; }
+.memo-routine-last { margin-top:3px; color:#777; font-size:.72rem; }
+.memo-routine-actions { margin-top:6px; display:flex; gap:6px; }
+.memo-routine-actions a, .memo-routine-actions button { font-size:.72rem; border:none; cursor:pointer; background:rgba(0,0,0,.08);
+  color:#333; padding:3px 8px; border-radius:4px; text-decoration:none; font-family:inherit; }
+.memo-routine-actions button:hover, .memo-routine-actions a:hover { background:rgba(0,0,0,.16); }
 ';
 
 include __DIR__ . '/../../includes/layout_header.php';
@@ -184,10 +200,12 @@ include __DIR__ . '/../../includes/layout_header.php';
       <div class="memo-help-item"><strong>⏳ Waiting for</strong>Set the status to <em>Waiting for…</em> and who you are waiting for; the due date becomes the follow-up date. Add an email reminder to be nudged.</div>
       <div class="memo-help-item"><strong>🔗 Booking / invoice</strong>Link a memo to a booking or an invoice. With <em>Close automatically</em> the memo is closed as soon as a payment is recorded on that invoice. 🏦 AfrAsia = Savannah Holidays invoice: check the bank yourself.</div>
       <div class="memo-help-item"><strong>➜ Next step</strong>A next step (e.g. pay the supplier) stays hidden and appears on the board when the memo is done.</div>
+      <div class="memo-help-item"><strong>🔁 Routines</strong>The cards on top are your recurring checks (incoming leads, mail, payments, AfrAsia account). They turn yellow when it is time to check again, red when leads are waiting. Click ✓ Done after checking; Claude can tick them too.</div>
       <div class="memo-help-item"><strong>🗑 Delete</strong>Open a memo, click Edit, then Delete. Deletion is permanent.</div>
     </div>
   </div>
 
+  <div id="memoRoutines" class="memo-routines"></div>
   <div id="memoBoard" class="memo-board"></div>
 </div>
 

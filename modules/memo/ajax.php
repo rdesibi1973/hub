@@ -259,6 +259,18 @@ if ($action === 'set_status') {
     out(true, array());
 }
 
+// ---------- routines — recurring checks (admin / manager only) ----------
+$isManager = in_array(isset($_SESSION['role_name']) ? $_SESSION['role_name'] : '', array('admin', 'manager'), true);
+if ($action === 'routines') {
+    out(true, array('routines' => $isManager ? memo_routines_status($pdo, $uid) : array()));
+}
+if ($action === 'routine_done') {
+    if (!$isManager) { out(false, array('error' => 'Not allowed')); }
+    $key = isset($_POST['key']) ? (string)$_POST['key'] : '';
+    if (!memo_routine_done($pdo, $uid, $key, isset($_POST['note']) ? $_POST['note'] : '')) { out(false, array('error' => 'Unknown routine')); }
+    out(true, array('routines' => memo_routines_status($pdo, $uid)));
+}
+
 // ---------- prefill — a new follow-up memo from an invoice (?invoice=SE-2026-0012) ----------
 if ($action === 'prefill') {
     $inv = memo_find_invoice($pdo, isset($_GET['invoice']) ? $_GET['invoice'] : '');

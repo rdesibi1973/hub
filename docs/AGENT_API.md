@@ -272,6 +272,21 @@ reminder gets an email reminder at 08:00 that day. Created memos are marked 🤖
 
 `add_invoice_payment` returns `memos_closed[]` (memos closed automatically by that payment).
 
+### Routines — `routine_status` (GET) / `routine_done` (POST)
+Recurring checks on top of the Memo Board (definitions: `MEMO_ROUTINES` in `memo_lib.php`):
+
+| key | every | count |
+|---|---|---|
+| `leads` — assign Incoming Leads | 3 h | rows in `lead_staging` |
+| `mail` — Gmail + Bluehost, new requests → create & assign | 3 h | — |
+| `payments` — payments to request (Payments page) | 3 days | — |
+| `afrasia` — check the AfrAsia account | 3 days | SH invoices with open balance |
+
+`routine_status` → `routines[]` `{key, title, every_hours, last_done, hours_since, due, count, attention}`.
+`routine_done` `{key, note?}` records the check (shown as "(Claude)" on the board). Typical round:
+read `routine_status`, do the due ones (e.g. Gmail via the connector → `find_requests` / `create_request`),
+then `routine_done` with a short note ("3 new mails, 1 request created").
+
 ```bash
 curl -sH "$H" -X POST "$U?action=memo_save" -d '{"ext_key":"cn-asilia","title":"Credit note Asilia","status":"waiting","waiting_on":"Glady (Asilia)","due_date":"2026-10-06","body":"Mail sent 2 Oct asking for the CN"}'
 curl -sH "$H" -X POST "$U?action=memo_save" -d '{"title":"Balance Etnia – Rossi","status":"waiting","waiting_on":"Etnia","invoice_number":"SH-2026-0041","auto_close_on_payment":true,"due_date":"2026-10-05","next_steps":[{"title":"Pay Lake Natron Camp","days_after":2}]}'

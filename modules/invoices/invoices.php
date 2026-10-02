@@ -19,6 +19,8 @@ if ($fissuer && in_array($fissuer, INV_ISSUERS))           { $where[] = 'i.issue
 if ($fyear > 0) { $where[] = 'YEAR(i.issue_date) = ?'; $params[] = $fyear; }
 if ($fcurr && in_array($fcurr, INV_CURRENCIES))            { $where[] = 'i.currency = ?'; $params[] = $fcurr; }
 if ($freqid)                                               { $where[] = 'i.request_id = ?'; $params[] = $freqid; }
+// ?unpaid=1 (Memo Board "AfrAsia account" check): open balance, not cancelled.
+if (!empty($_GET['unpaid']))                               { $where[] = "i.status <> 'Cancelled' AND i.balance_due > 0.005"; }
 
 $sql = "SELECT i.*, u.full_name AS created_by_name
         FROM invoices i

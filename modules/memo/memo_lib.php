@@ -43,6 +43,91 @@ function memo_schema(PDO $pdo) {
     }
 }
 
+// ── Routines: recurring checks shown on top of the board ─────────────────────
+// key => title, every (hours), link, hint. A routine is "due" when it was last
+// done more than `every` hours ago; routines with a live count (memo_routine_count)
+// also show how many items are waiting. Shown to admin / manager only.
+const MEMO_ROUTINES = array(
+    'leads'    => array('title' => 'Assign Incoming Leads',          'every' => 3,
+                        'link'  => '../leads/staging.php',
+                        'hint'  => 'Incoming Leads (HubSpot) waiting to be assigned.'),
+    'mail'     => array('title' => 'Check mail for new requests',    'every' => 3,
+                        'link'  => 'https://mail.google.com/',
+                        'hint'  => 'Gmail + Bluehost: new requests → create and assign them.'),
+    'payments' => array('title' => 'Payments to request',            'every' => 72,
+                        'link'  => '../leads/payments.php',
+                        'hint'  => 'Bookings with deposit / balance still to be paid.'),
+    'afrasia'  => array('title' => 'Check the AfrAsia account',      'every' => 72,
+                        'link'  => '../invoices/invoices.php?issuer=Savannah+Holidays+Ltd&unpaid=1&year=0',
+                        'hint'  => 'Savannah Holidays invoices with an open balance: check the bank yourself.'),
+);
+
+function memo_routine_schema(PDO $pdo) {
+    static $done = false;
+    if ($done) { return; }
+    $done = true;
+    $pdo->exec("CREATE TABLE IF NOT EXISTS memo_routine_log (
+        id          INT AUTO_INCREMENT PRIMARY KEY,
+        user_id     INT NOT NULL,
+        routine_key VARCHAR(30) NOT NULL,
+        done_at     DATETIME NOT NULL,
+        note        VARCHAR(255) NULL,
+        source      VARCHAR(20) NULL,
+        KEY idx_routine (user_id, routine_key, done_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+}
+
+/** Live count for a routine, or null when it has none. */
+function memo_routine_count(PDO $pdo, $key) {
+    try {
+        if ($key === 'leads') {
+            return (int)$pdo->query("SELECT COUNT(*) FROM lead_staging")->fetchColumn();
+        }
+        if ($key === 'afrasia') {
+            return (int)$pdo->query("SELECT COUNT(*) FROM invoices
+                                     WHERE issuer = 'Savannah Holidays Ltd' AND status <> 'Cancelled' AND balance_due > 0.005")->fetchColumn();
+        }
+    } catch (PDOException $e) { /* table missing: no count */ }
+    return null;
+}
+
+/**
+ * The routines for a user: [{key, title, hint, link, every_hours, last_done, last_note,
+ * hours_since, due, count, attention}]. attention = due, or items waiting (leads).
+ */
+function memo_routines_status(PDO $pdo, $userId) {
+    memo_routine_schema($pdo);
+    $last = $pdo->prepare("SELECT done_at, note, source FROM memo_routine_log
+                           WHERE user_id = ? AND routine_key = ? ORDER BY done_at DESC LIMIT 1");
+    $out = array();
+    foreach (MEMO_ROUTINES as $key => $r) {
+        $last->execute(array((int)$userId, $key));
+        $l     = $last->fetch(PDO::FETCH_ASSOC);
+        $hours = $l ? (time() - strtotime($l['done_at'])) / 3600 : null;
+        $due   = $hours === null || $hours >= $r['every'];
+        $count = memo_routine_count($pdo, $key);
+        $out[] = array(
+            'key' => $key, 'title' => $r['title'], 'hint' => $r['hint'], 'link' => $r['link'],
+            'every_hours' => $r['every'],
+            'last_done' => $l ? $l['done_at'] : null, 'last_note' => $l ? $l['note'] : null,
+            'last_source' => $l ? $l['source'] : null,
+            'hours_since' => $hours === null ? null : round($hours, 1),
+            'due' => $due, 'count' => $count,
+            'attention' => $due || ($key === 'leads' && $count > 0),
+        );
+    }
+    return $out;
+}
+
+/** Record a routine as done now. False for an unknown key. */
+function memo_routine_done(PDO $pdo, $userId, $key, $note = '', $source = null) {
+    if (!isset(MEMO_ROUTINES[$key])) { return false; }
+    memo_routine_schema($pdo);
+    $pdo->prepare("INSERT INTO memo_routine_log (user_id, routine_key, done_at, note, source) VALUES (?, ?, ?, ?, ?)")
+        ->execute(array((int)$userId, $key, date('Y-m-d H:i:s'), trim((string)$note) !== '' ? mb_substr(trim($note), 0, 255) : null, $source));
+    return true;
+}
+
 /** Plain text → the HTML the board stores (paragraphs, escaped). */
 function memo_text_to_html($text) {
     $text = trim((string)$text);
