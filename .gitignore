@@ -24,3 +24,6 @@ modules/iti/uploads/profiles/*
 !modules/iti/uploads/logo/.gitkeep
 !modules/iti/uploads/profiles/.gitkeep
 !modules/iti/uploads/.htaccess
+
+# Claude agent API key (local only - never commit)
+api.txt

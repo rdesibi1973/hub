@@ -12,7 +12,6 @@
  *   body        string
  */
 require_once 'config.php';
-require_once __DIR__ . '/includes/invoice_html.php';   // buildInvoiceHtml()
 
 header('Content-Type: application/json');
 
@@ -57,43 +56,18 @@ if (empty($toList)) {
     exit;
 }
 
-// ── Load invoice + items ──────────────────────────────────────────────────────
-$stmt = $db->prepare("SELECT * FROM invoices WHERE id = ?");
-$stmt->execute([$invoiceId]);
-$inv = $stmt->fetch(PDO::FETCH_ASSOC);
+// ── Load invoice + render PDF (includes/invoice_service.php) ─────────────────
+$inv = inv_get($db, $invoiceId);
 if (!$inv) {
     echo json_encode(['ok' => false, 'error' => 'Invoice not found']);
     exit;
 }
-
-$itemStmt = $db->prepare("SELECT * FROM invoice_items WHERE invoice_id = ? ORDER BY sort_order, id");
-$itemStmt->execute([$invoiceId]);
-$items = $itemStmt->fetchAll(PDO::FETCH_ASSOC);
-
-$payStmt = $db->prepare("SELECT * FROM invoice_payments WHERE invoice_id = ? AND cancelled_at IS NULL ORDER BY payment_date");
-$payStmt->execute([$invoiceId]);
-$payments = $payStmt->fetchAll(PDO::FETCH_ASSOC);
-
-// ── Generate PDF ──────────────────────────────────────────────────────────────
-$vendorAutoload = __DIR__ . '/../../vendor/autoload.php';
-if (!file_exists($vendorAutoload)) {
-    echo json_encode(['ok' => false, 'error' => 'PDF library not installed. Run: composer install']);
+try {
+    $pdfData = inv_pdf($inv, inv_items($db, $invoiceId), inv_payments($db, $invoiceId, true));
+} catch (Throwable $e) {
+    echo json_encode(['ok' => false, 'error' => $e->getMessage()]);
     exit;
 }
-require_once $vendorAutoload;
-
-use Dompdf\Dompdf;
-use Dompdf\Options;
-
-$options = new Options();
-$options->set('isHtml5ParserEnabled', true);
-$options->set('isRemoteEnabled', false);   // no external resources
-
-$dompdf = new Dompdf($options);
-$dompdf->loadHtml(buildInvoiceHtml($inv, $items, $payments));
-$dompdf->setPaper('A4', 'portrait');
-$dompdf->render();
-$pdfData = $dompdf->output();
 
 // ── Compose multipart email ───────────────────────────────────────────────────
 $filename    = 'Invoice_' . preg_replace('/[^A-Za-z0-9_-]/', '_', $inv['invoice_number']) . '.pdf';

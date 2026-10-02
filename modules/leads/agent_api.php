@@ -11,7 +11,8 @@
  * Outbound / folder-moving actions (confirm_booking, send_booking_email) are
  * dry-runs unless the body carries "confirm": true.
  *
- * All logic lives in includes/booking_service.php, shared with the Hub pages.
+ * All logic lives in includes/booking_service.php (invoices:
+ * ../invoices/includes/invoice_service.php), shared with the Hub pages.
  */
 ob_start();
 date_default_timezone_set('Africa/Dar_es_Salaam');
@@ -80,7 +81,8 @@ function agent_ensure_schema(PDO $db): void {
 function agent_audit(PDO $db, string $action, $reqId, array $payload, string $resultJson, int $code): void {
     global $agentUser;
     agent_ensure_schema($db);
-    $dry = in_array($action, ['confirm_booking', 'send_booking_email', 'rollback_booking', 'fill_calc', 'iti_save_texts', 'update_rate', 'replace_flight_rates'], true) && empty($payload['confirm']);
+    $dry = in_array($action, ['confirm_booking', 'send_booking_email', 'rollback_booking', 'fill_calc', 'iti_save_texts', 'update_rate', 'replace_flight_rates',
+                              'cancel_invoice_payment', 'update_folder_status', 'import_zoho_invoice'], true) && empty($payload['confirm']);
     $db->prepare("INSERT INTO agent_audit_log (ts, action, request_id, user_id, http_code, dry_run, payload_json, result_json, ip)
                   VALUES (?,?,?,?,?,?,?,?,?)")
        ->execute([
@@ -220,6 +222,72 @@ function agent_user_for_agent(PDO $db, $agentId): array {
     $st->execute([(int)$agentId]);
     $u = $st->fetch(PDO::FETCH_ASSOC);
     return $u ? ['id' => (int)$u['id'], 'full_name' => (string)$u['full_name']] : ['id' => 0, 'full_name' => ''];
+}
+
+// ── Invoices (logic in modules/invoices/includes/invoice_service.php) ────────
+/** Loaded only by the invoice actions. */
+function agent_invoice_lib(): void {
+    require_once __DIR__ . '/../invoices/includes/invoice_service.php';
+}
+
+/** Invoice by invoice_id or invoice_number, or fail 404. Audits its request_id. */
+function agent_invoice(PDO $db, array $in): array {
+    global $agentReqId;
+    agent_invoice_lib();
+    $id  = (int)($in['invoice_id'] ?? 0);
+    $num = trim((string)($in['invoice_number'] ?? ''));
+    if (!$id && $num !== '') {
+        $st = $db->prepare("SELECT id FROM invoices WHERE invoice_number = ?");
+        $st->execute([$num]);
+        $id = (int)($st->fetchColumn() ?: 0);
+        if (!$id) agent_fail('Invoice ' . $num . ' not found', 404);
+    }
+    if ($id <= 0) agent_fail('invoice_id (or invoice_number) is required');
+    $inv = inv_get($db, $id);
+    if (!$inv) agent_fail('Invoice ' . $id . ' not found', 404);
+    if (!empty($inv['request_id'])) $agentReqId = (int)$inv['request_id'];
+    return $inv;
+}
+
+/** Compact public shape of an invoice row. */
+function agent_invoice_out(array $i): array {
+    return [
+        'id'         => (int)$i['id'],
+        'number'     => $i['invoice_number'],
+        'issuer'     => $i['issuer'],
+        'bill_to'    => $i['bill_to_name'],
+        'currency'   => $i['currency'],
+        'issue_date' => $i['issue_date'],
+        'due_date'   => $i['due_date'] ?? null,
+        'total'      => round((float)$i['total'], 2),
+        'paid'       => round((float)$i['amount_paid'], 2),
+        'balance'    => round((float)$i['balance_due'], 2),
+        'status'     => $i['status'],
+        'request_id' => !empty($i['request_id']) ? (int)$i['request_id'] : null,
+        'follow_up'  => !empty($i['follow_up']),
+    ];
+}
+
+/** The invoice's Dropbox folder as data, or null when no request / folder is linked. */
+function agent_invoice_folder(PDO $db, int $invId): ?array {
+    $r = inv_linked_request($db, $invId);
+    if (!$r) return null;
+    return [
+        'request_id'     => (int)$r['id'],
+        'customer_name'  => $r['customer_name'],
+        'folder'         => $r['practice_code'],
+        'current_tag'    => $r['practice_code'] ? folder_current_tag($r['practice_code']) : '',
+        'payment_status' => $r['payment_status'] ?? null,
+        'group_folder'   => $r['group_folder'] ?? null,
+        'dropbox_path'   => req_folder_path($r),
+    ];
+}
+
+/** 'YYYY-MM-DD' or fail. */
+function agent_iso_date($v, string $field): string {
+    $v = trim((string)$v);
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $v) || !strtotime($v)) agent_fail($field . ' must be YYYY-MM-DD');
+    return $v;
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -719,11 +787,269 @@ try {
         agent_out($out);
     }
 
+    // ── find_invoices ────────────────────────────────────────────────────────
+    case 'find_invoices': {
+        agent_invoice_lib();
+        $where = []; $args = [];
+        $q = trim((string)($in['q'] ?? ''));
+        if ($q !== '') {
+            $where[] = "(i.invoice_number LIKE ? OR i.bill_to_name LIKE ? OR r.customer_name LIKE ? OR r.practice_code LIKE ?)";
+            $like = '%' . $q . '%';
+            array_push($args, $like, $like, $like, $like);
+        }
+        if ((int)($in['request_id'] ?? 0) > 0) { $where[] = "i.request_id = ?"; $args[] = (int)$in['request_id']; }
+        $status = trim((string)($in['status'] ?? ''));
+        if ($status !== '') {
+            if (!array_key_exists($status, INV_STATUSES)) agent_fail('status must be one of: ' . implode(', ', array_keys(INV_STATUSES)));
+            $where[] = "i.status = ?"; $args[] = $status;
+        }
+        if (!empty($in['unpaid'])) $where[] = "i.status <> 'Cancelled' AND i.balance_due > 0.005";
+        if (!$where) agent_fail('Give at least one filter: q (number / customer / folder), request_id, status or unpaid');
+        $limit = max(1, min(100, (int)($in['limit'] ?? 50)));
+        $st = $db->prepare("SELECT i.*, r.practice_code FROM invoices i LEFT JOIN requests r ON r.id = i.request_id
+                            WHERE " . implode(' AND ', $where) . " ORDER BY i.issue_date DESC, i.id DESC LIMIT " . $limit);
+        $st->execute($args);
+        $rows = [];
+        foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $i) {
+            $rows[] = array_merge(agent_invoice_out($i), ['folder' => $i['practice_code']]);
+        }
+        agent_out(['ok' => true, 'count' => count($rows), 'invoices' => $rows]);
+    }
+
+    // ── get_invoice ──────────────────────────────────────────────────────────
+    case 'get_invoice': {
+        $inv = agent_invoice($db, $in);
+        $id  = (int)$inv['id'];
+        $items = [];
+        foreach (inv_items($db, $id) as $it) {
+            $items[] = ['description' => $it['description'], 'quantity' => (float)$it['quantity'],
+                        'unit_price' => (float)$it['unit_price'], 'line_total' => (float)$it['line_total']];
+        }
+        $pays = [];
+        foreach (inv_payments($db, $id) as $p) {
+            $pays[] = ['id' => (int)$p['id'], 'date' => $p['payment_date'], 'amount' => (float)$p['amount'],
+                       'method' => $p['method'], 'reference' => $p['reference'], 'notes' => $p['notes'],
+                       'cancelled' => !empty($p['cancelled_at']), 'cancelled_at' => $p['cancelled_at'],
+                       'cancellation_reason' => $p['cancellation_reason']];
+        }
+        $cns = [];
+        foreach (inv_credit_notes($db, $id) as $c) {
+            $cns[] = ['id' => (int)$c['id'], 'number' => $c['cn_number'], 'date' => $c['issue_date'],
+                      'total' => (float)$c['total'], 'status' => $c['status'], 'reason' => $c['reason']];
+        }
+        agent_out(['ok' => true,
+            'invoice' => array_merge(agent_invoice_out($inv), [
+                'bill_to_address' => $inv['bill_to_address'], 'terms' => $inv['terms'], 'notes' => $inv['notes'],
+                'terms_conditions' => $inv['terms_conditions'], 'follow_up_note' => $inv['follow_up_note'] ?? null,
+                'created_by' => $inv['created_by_name'], 'created_at' => $inv['created_at'], 'updated_at' => $inv['updated_at'],
+            ]),
+            'items' => $items, 'payments' => $pays, 'credit_notes' => $cns,
+            'folder' => agent_invoice_folder($db, $id),
+            'pdf_name' => inv_pdf_dropbox_name($inv),
+            'methods' => INV_METHODS, 'folder_statuses' => array_keys(FOLDER_TAG_OPTIONS),
+        ]);
+    }
+
+    // ── add_invoice_payment ──────────────────────────────────────────────────
+    // Same as "Record Payment" on the invoice page. A payment with the same
+    // amount and reference (or, with no reference, the same date) is refused
+    // unless "allow_duplicate": true; more than the balance unless "allow_overpayment".
+    case 'add_invoice_payment': {
+        agent_require_method('POST');
+        $inv = agent_invoice($db, $in);
+        $id  = (int)$inv['id'];
+        if ($inv['status'] === 'Cancelled') agent_fail('Invoice ' . $inv['invoice_number'] . ' is Cancelled — no payments can be added', 409);
+        $date = isset($in['date']) && $in['date'] !== '' ? agent_iso_date($in['date'], 'date') : date('Y-m-d');
+        if (!isset($in['amount']) || !is_numeric($in['amount']) || (float)$in['amount'] <= 0) agent_fail('amount must be a number > 0');
+        $amount = round((float)$in['amount'], 2);
+        $method = trim((string)($in['method'] ?? 'Bank Transfer'));
+        foreach (INV_METHODS as $m) { if (strcasecmp($m, $method) === 0) $method = $m; }
+        if (!in_array($method, INV_METHODS, true)) agent_fail('method must be one of: ' . implode(', ', INV_METHODS));
+        $ref   = mb_substr(trim((string)($in['reference'] ?? '')), 0, 100);
+        $notes = mb_substr(trim((string)($in['notes'] ?? '')), 0, 255);
+
+        $dup = inv_find_duplicate_payment($db, $id, $amount, $date, $ref);
+        if ($dup && empty($in['allow_duplicate'])) {
+            agent_fail('A payment of ' . fmt_money($amount, $inv['currency']) . ($ref !== '' ? ' with reference "' . $ref . '"' : ' on ' . $date)
+                       . ' is already recorded (payment ' . $dup['id'] . ', ' . $dup['payment_date'] . ')', 409,
+                       ['duplicate' => ['id' => (int)$dup['id'], 'date' => $dup['payment_date'], 'amount' => (float)$dup['amount'],
+                                        'method' => $dup['method'], 'reference' => $dup['reference']],
+                        'hint' => 'Resend with "allow_duplicate": true only if it really is a second payment.']);
+        }
+        $balance = round((float)$inv['balance_due'], 2);
+        if ($amount > $balance + 0.005 && empty($in['allow_overpayment'])) {
+            agent_fail('Amount ' . fmt_money($amount, $inv['currency']) . ' is more than the balance due ' . fmt_money($balance, $inv['currency']), 409,
+                       ['invoice' => agent_invoice_out($inv), 'hint' => 'Resend with "allow_overpayment": true if that is intended.']);
+        }
+        try {
+            $pid = inv_add_payment($db, $id, $date, $amount, $method, $ref, $notes);
+        } catch (InvalidArgumentException $e) {
+            agent_fail($e->getMessage());
+        }
+        agent_out(['ok' => true, 'payment_id' => $pid,
+                   'message' => 'Payment of ' . fmt_money($amount, $inv['currency']) . ' recorded.',
+                   'invoice' => agent_invoice_out(inv_get($db, $id)), 'folder' => agent_invoice_folder($db, $id)]);
+    }
+
+    // ── cancel_invoice_payment ───────────────────────────────────────────────
+    case 'cancel_invoice_payment': {
+        agent_require_method('POST');
+        $inv    = agent_invoice($db, $in);
+        $id     = (int)$inv['id'];
+        $pid    = (int)($in['payment_id'] ?? 0);
+        $reason = mb_substr(trim((string)($in['reason'] ?? '')), 0, 255);
+        if ($pid <= 0)      agent_fail('payment_id is required (see get_invoice.payments)');
+        if ($reason === '') agent_fail('reason is required');
+        $st = $db->prepare("SELECT * FROM invoice_payments WHERE id = ? AND invoice_id = ?");
+        $st->execute([$pid, $id]);
+        $p = $st->fetch(PDO::FETCH_ASSOC);
+        if (!$p) agent_fail('Payment ' . $pid . ' not found on invoice ' . $inv['invoice_number'], 404);
+        if (!empty($p['cancelled_at'])) agent_fail('Payment ' . $pid . ' is already cancelled (' . $p['cancelled_at'] . ')', 409);
+        $payment = ['id' => $pid, 'date' => $p['payment_date'], 'amount' => (float)$p['amount'],
+                    'method' => $p['method'], 'reference' => $p['reference']];
+        if (empty($in['confirm'])) {
+            agent_out(['ok' => true, 'dry_run' => true, 'payment' => $payment, 'reason' => $reason,
+                       'balance_after' => round((float)$inv['balance_due'] + (float)$p['amount'], 2),
+                       'message' => 'Dry run — nothing cancelled. Resend with "confirm": true to cancel the payment.']);
+        }
+        inv_cancel_payment($db, $pid, $id, $reason);
+        agent_out(['ok' => true, 'dry_run' => false, 'payment' => $payment, 'reason' => $reason,
+                   'invoice' => agent_invoice_out(inv_get($db, $id)), 'folder' => agent_invoice_folder($db, $id)]);
+    }
+
+    // ── update_folder_status ─────────────────────────────────────────────────
+    // Rename the invoice's Dropbox folder to …_DEPOSIT / _BALANCE / _PAID …
+    // (same as "Update Folder" on the invoice page). Preview unless "confirm": true.
+    case 'update_folder_status': {
+        agent_require_method('POST');
+        $inv   = agent_invoice($db, $in);
+        $id    = (int)$inv['id'];
+        $label = strtoupper(trim((string)($in['status'] ?? '')));
+        if ($label === 'PAID') $label = 'FULLY PAID';
+        if (!array_key_exists($label, FOLDER_TAG_OPTIONS)) agent_fail('status must be one of: ' . implode(', ', array_keys(FOLDER_TAG_OPTIONS)));
+        $folder = agent_invoice_folder($db, $id);
+        if (!$folder || !$folder['folder']) agent_fail('Invoice ' . $inv['invoice_number'] . ' has no linked request / Dropbox folder', 409);
+        $preview = ['current' => $folder['folder'], 'new_name' => inv_folder_new_name($folder['folder'], $label),
+                    'new_tag' => FOLDER_TAG_OPTIONS[$label], 'group_folder' => $folder['group_folder']];
+        if ($preview['new_name'] === $preview['current']) {
+            agent_out(array_merge(['ok' => true, 'dry_run' => empty($in['confirm']), 'unchanged' => true,
+                                   'message' => 'Folder already has the ' . $preview['new_tag'] . ' tag — nothing to do.'], $preview));
+        }
+        if (empty($in['confirm'])) {
+            agent_out(array_merge(['ok' => true, 'dry_run' => true,
+                                   'message' => 'Dry run — nothing renamed. Resend with "confirm": true to rename the folder.'], $preview));
+        }
+        try {
+            $res = inv_update_folder_status($db, $id, $label);
+        } catch (Throwable $e) {
+            agent_fail($e->getMessage(), 502, $preview);
+        }
+        agent_out(['ok' => true, 'dry_run' => false, 'old_name' => $preview['current'], 'new_name' => $res['new_name'],
+                   'new_tag' => $res['new_tag'], 'dropbox_url' => $res['new_url'], 'group_msg' => $res['group_msg'],
+                   'folder' => agent_invoice_folder($db, $id)]);
+    }
+
+    // ── save_invoice_pdf ─────────────────────────────────────────────────────
+    // Render the invoice PDF (Dompdf, same layout as the emailed one) and upload
+    // it as "Invoice <number>.pdf" into the booking folder. An existing file is
+    // kept unless "overwrite": true. Optional folder_path overrides the folder.
+    case 'save_invoice_pdf': {
+        agent_require_method('POST');
+        $inv = agent_invoice($db, $in);
+        $id  = (int)$inv['id'];
+        require_once __DIR__ . '/dropbox_helper.php';
+        $token = dropbox_get_access_token();
+
+        $dir = rtrim(trim((string)($in['folder_path'] ?? '')), '/');
+        if ($dir !== '') {
+            if ($dir[0] !== '/') agent_fail('folder_path must be a full Dropbox path starting with /');
+            if (!dropbox_path_exists($token, $dir)) agent_fail('folder_path ' . $dir . ' not found in Dropbox', 404);
+        } else {
+            $r = inv_linked_request($db, $id);
+            if (!$r || !$r['practice_code']) agent_fail('Invoice ' . $inv['invoice_number'] . ' has no linked request / folder — pass folder_path', 409);
+            $dir = req_folder_path($r);
+            if ($dir === '' || !dropbox_path_exists($token, $dir)) {
+                $dir = (string)dropbox_find_folder($token, $r['practice_code']);
+                if ($dir === '') agent_fail('Folder ' . $r['practice_code'] . ' not found in Dropbox — pass folder_path', 404);
+            }
+        }
+        $path      = $dir . '/' . inv_pdf_dropbox_name($inv);
+        $overwrite = !empty($in['overwrite']);
+        $exists    = dropbox_path_exists($token, $path);
+        if ($exists && !$overwrite) {
+            agent_fail('File already exists: ' . $path, 409, ['path' => $path, 'hint' => 'Resend with "overwrite": true to replace it (Dropbox keeps the old version).']);
+        }
+        try {
+            $pdf = inv_pdf($inv, inv_items($db, $id), inv_payments($db, $id, true));
+        } catch (RuntimeException $e) {
+            agent_fail($e->getMessage(), 500);
+        }
+        try {
+            $meta = dropbox_upload_text($token, $path, $pdf, $overwrite ? 'overwrite' : 'add');
+        } catch (RuntimeException $e) {
+            agent_fail($e->getMessage(), stripos($e->getMessage(), 'conflict') !== false ? 409 : 502, ['path' => $path]);
+        }
+        agent_out(['ok' => true, 'path' => $meta['path_display'] ?? $path, 'size' => $meta['size'] ?? strlen($pdf),
+                   'rev' => $meta['rev'] ?? null, 'overwritten' => $exists,
+                   'invoice' => agent_invoice_out($inv)]);
+    }
+
+    // ── import_zoho_invoice ──────────────────────────────────────────────────
+    // Bring an old Zoho invoice (e.g. INV-002417) into Hub with its original
+    // number. Fields as api_import.php; Claude reads the Zoho PDF itself.
+    // Dry-run unless "confirm": true.
+    case 'import_zoho_invoice': {
+        agent_require_method('POST');
+        agent_invoice_lib();
+        $num = trim((string)($in['invoice_number'] ?? ''));
+        if ($num === '') agent_fail('invoice_number is required (the Zoho number, e.g. INV-002417)');
+        $st = $db->prepare("SELECT id FROM invoices WHERE invoice_number = ?");
+        $st->execute([$num]);
+        if ($dupId = (int)($st->fetchColumn() ?: 0)) {
+            agent_fail('Invoice ' . $num . ' already exists in Hub', 409, ['invoice_id' => $dupId]);
+        }
+        if ((int)($in['request_id'] ?? 0) > 0) agent_request($db, $in['request_id']);
+        $in['issue_date'] = agent_iso_date($in['issue_date'] ?? '', 'issue_date');
+        if (!empty($in['due_date']))     $in['due_date']     = agent_iso_date($in['due_date'], 'due_date');
+        if (!empty($in['payment_date'])) $in['payment_date'] = agent_iso_date($in['payment_date'], 'payment_date');
+        $items = isset($in['items']) && is_array($in['items']) ? $in['items'] : [];
+        if (!$items) agent_fail('items is required: [{description, quantity, unit_price, line_total?}, …]');
+        $sum = 0.0;
+        foreach ($items as $k => $it) {
+            if (trim((string)($it['description'] ?? '')) === '') agent_fail('items[' . $k . ']: description is required');
+            $qty = (float)($it['quantity'] ?? 1);
+            $sum += round((float)($it['line_total'] ?? $qty * (float)($it['unit_price'] ?? 0)), 2);
+        }
+        $sum = round($sum, 2);
+        if (isset($in['total']) && abs((float)$in['total'] - $sum) > 0.01) {
+            agent_fail('Items add up to ' . $sum . ', not the given total ' . $in['total'], 422);
+        }
+        $paid = round((float)($in['payment_amount'] ?? 0), 2);
+        $body = array_merge($in, ['invoice_number_mode' => 'original', 'invoice_number' => $num]);
+        $summary = ['invoice_number' => $num, 'bill_to' => $in['bill_to_name'] ?? '', 'currency' => $in['currency'] ?? 'USD',
+                    'issue_date' => $in['issue_date'], 'items' => count($items), 'total' => $sum,
+                    'paid' => $paid, 'balance' => round($sum - $paid, 2), 'request_id' => $agentReqId];
+        if (empty($in['confirm'])) {
+            agent_out(['ok' => true, 'dry_run' => true, 'would_create' => $summary,
+                       'message' => 'Dry run — nothing created. Resend with "confirm": true to import.']);
+        }
+        try {
+            $res = inv_import($db, $body, (int)$agentUser['id']);
+        } catch (InvalidArgumentException $e) {
+            agent_fail($e->getMessage(), 422);
+        } catch (DomainException $e) {
+            agent_fail($e->getMessage(), 409);
+        }
+        agent_out(['ok' => true, 'dry_run' => false, 'invoice' => agent_invoice_out(inv_get($db, $res['invoice_id']))]);
+    }
+
     default:
         agent_fail('Unknown action "' . $agentAction . '"', 400, ['actions' => [
             'find_requests', 'list_agencies', 'create_request', 'update_request', 'list_standard_programs',
             'copy_program', 'get_rates', 'fill_calc', 'read_calc', 'confirm_preview', 'confirm_booking', 'send_booking_email',
             'rollback_booking', 'iti_programs', 'iti_texts', 'iti_save_texts', 'update_rate', 'replace_flight_rates',
+            'find_invoices', 'get_invoice', 'add_invoice_payment', 'cancel_invoice_payment', 'update_folder_status',
+            'save_invoice_pdf', 'import_zoho_invoice',
         ]]);
     }
 } catch (Throwable $e) {

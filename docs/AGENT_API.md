@@ -31,7 +31,7 @@ without driving the web UI.
 | HTTPS only | Plain HTTP → 403. |
 | Rate limit | 60 calls/min → 429. |
 | Audit | Every call (including failures and dry-runs) → `agent_audit_log` (action, request_id, user, HTTP code, dry_run, payload, result, IP). |
-| Dry-run by default | `confirm_booking`, `send_booking_email` and `rollback_booking` do nothing unless the body has `"confirm": true`. |
+| Dry-run by default | `confirm_booking`, `send_booking_email`, `rollback_booking`, `cancel_invoice_payment`, `update_folder_status` and `import_zoho_invoice` (among others) do nothing unless the body has `"confirm": true`. |
 | No deletes | No delete endpoint. Undo a confirm with `rollback_booking` (or BackOffice → Rollback). |
 
 Responses: `{"ok": true, …}` or `{"ok": false, "error": "…", …}` with a matching HTTP code
@@ -172,6 +172,71 @@ and the descriptions of the programme's lodges and destinations. Without `all`, 
 so edited translations are kept). Dry-run unless `"confirm": true`. Lets Claude translate programmes in a session
 (no Anthropic API billing); the Hub "Translate" button does the same through the API when `ANTHROPIC_API_KEY` is set.
 
+## Invoices
+
+Same logic as the invoice page (`modules/invoices/invoice_view.php`), shared through
+`modules/invoices/includes/invoice_service.php`. Every invoice action takes `invoice_id`
+**or** `invoice_number` (e.g. `SE-2026-0012`); the audit row carries the invoice's `request_id`.
+
+### `find_invoices` (GET)
+`q` (invoice number / bill-to / customer / folder substring), `request_id`, `status`
+(`New`|`Partially Paid`|`Fully Paid`|`Cancelled`), `unpaid=1` (balance > 0, not cancelled), `limit` ≤ 100.
+At least one filter. → `invoices[]` `{id, number, issuer, bill_to, currency, issue_date, due_date,
+total, paid, balance, status, request_id, folder, follow_up}`.
+
+### `get_invoice` (GET)
+→ `invoice` (+ address, terms, notes, T&C, created/updated), `items[]`, `payments[]`
+(`{id, date, amount, method, reference, notes, cancelled, cancelled_at, cancellation_reason}`, cancelled
+ones included), `credit_notes[]`, `folder` (`{request_id, folder, current_tag, payment_status,
+group_folder, dropbox_path}` or null), `pdf_name`, `methods`, `folder_statuses`.
+
+### `add_invoice_payment` (POST)
+`date` (YYYY-MM-DD, default today), `amount`* (> 0), `method` (`Bank Transfer`|`Credit Card`|`Cash`|`Other`,
+default Bank Transfer), `reference`, `notes`. Recalculates the invoice (status New → Partially / Fully Paid)
+and the request value (`recalculate_invoice` + `sync_request_value`).
+- **409 duplicate** when an active payment has the same amount and the same reference (no reference:
+  the same date) — resend with `"allow_duplicate": true` only if it is really a second payment.
+- **409** when the amount is more than the balance due — `"allow_overpayment": true` to accept it.
+- **409** on a Cancelled invoice.
+Returns `payment_id`, the updated `invoice` and `folder` (to decide the next `update_folder_status`).
+The folder is **not** renamed automatically.
+
+### `cancel_invoice_payment` (POST)
+`payment_id`*, `reason`*. The payment is kept, marked cancelled, and the invoice recalculated.
+Without `"confirm": true` → returns the payment and `balance_after` only.
+
+### `update_folder_status` (POST)
+`status`* = `PROGRESS`|`PROVISIONAL`|`DEPOSIT`|`BALANCE`|`BALANCE-CASH`|`FULLY PAID` (`PAID` accepted).
+Renames the booking's Dropbox folder tag (`_CK` stays last), sets `requests.payment_status`
+(DEPOSIT → Deposit, BALANCE → Balance, BALANCE-CASH → Balance-Cash, PAID → Paid), and re-tags the GRP
+parent folder. Without `"confirm": true` → `current` and `new_name` only. Same tag already → `unchanged`.
+
+### `save_invoice_pdf` (POST)
+Renders the PDF server-side (Dompdf — the same layout as the emailed invoice) and uploads it as
+`Invoice <number>.pdf` (the name *Invoice Check — Dropbox* looks for) into the booking folder
+(GRP client: the client sub-folder). `overwrite` (default false: 409 if the file exists; Dropbox keeps
+the old version when overwritten), `folder_path` (optional full Dropbox path, overrides the folder).
+Returns `path`, `size`, `rev`, `overwritten`.
+
+### `import_zoho_invoice` (POST)
+Brings an old Zoho invoice into Hub with its **original number** (Claude reads the Zoho PDF and sends the
+fields): `invoice_number`* (e.g. `INV-002417`), `bill_to_name`*, `issue_date`*, `items[]`*
+`{description, quantity, unit_price, line_total?}`, `issuer` (Savannah Explorers Ltd), `currency` (USD|EUR),
+`request_id`, `bill_to_address`, `due_date`, `terms`, `notes`, `terms_conditions`, `total` (checked against the
+items: 422 if different), `payment_amount`, `payment_date`, `payment_method`, `payment_reference`.
+409 if the number already exists. Without `"confirm": true` → `would_create` summary only.
+(The web importer `modules/invoices/api_import.php` uses the same code.)
+
+```bash
+curl -sH "$H" "$U?action=find_invoices&q=Fiorini"
+curl -sH "$H" "$U?action=get_invoice&invoice_number=SE-2026-0012"
+curl -sH "$H" -X POST "$U?action=add_invoice_payment" -d '{"invoice_id":412,"date":"2026-10-01","amount":1950,"reference":"FT2627401","notes":"Deposit"}'
+curl -sH "$H" -X POST "$U?action=update_folder_status" -d '{"invoice_id":412,"status":"DEPOSIT"}'                 # preview
+curl -sH "$H" -X POST "$U?action=update_folder_status" -d '{"invoice_id":412,"status":"DEPOSIT","confirm":true}'
+curl -sH "$H" -X POST "$U?action=save_invoice_pdf" -d '{"invoice_id":412,"overwrite":true}'
+curl -sH "$H" -X POST "$U?action=cancel_invoice_payment" -d '{"invoice_id":412,"payment_id":901,"reason":"Recorded twice","confirm":true}'
+```
+
 ## Example — Fiorini (TVT)
 
 ```bash
@@ -206,8 +271,8 @@ curl -sH "$H" -X POST "$U?action=rollback_booking" -d '{"request_id":2958,"confi
 
 ## Server requirement
 `fill_calc` and `get_rates.program` need **PhpSpreadsheet 1.29** in the Hub root `vendor/` — see
-`composer.json` (the Hub runs on PHP 8.3 since 28 Sep 2026). Everything else, `read_calc` included,
-works without it.
+`composer.json` (the Hub runs on PHP 8.3 since 28 Sep 2026). `save_invoice_pdf` needs **dompdf**
+(same `vendor/`, already used by the invoice email). Everything else, `read_calc` included, works without them.
 
 ## Not yet
 - MCP server / connector wrapper

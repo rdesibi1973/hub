@@ -3,29 +3,7 @@ require_once 'config.php';
 $db  = db();
 $id  = (int)($_GET['id'] ?? 0);
 
-// ── Folder status helpers (defined here so AJAX handler can use them) ─────
-const FOLDER_TAG_OPTIONS = [
-    'PROGRESS'     => 'PROGRESS',
-    'PROVISIONAL'  => 'PROVISIONAL',
-    'DEPOSIT'      => 'DEPOSIT',
-    'BALANCE'      => 'BALANCE',
-    'BALANCE-CASH' => 'BALANCE-CASH',
-    'FULLY PAID'   => 'PAID',
-];
-function folder_current_tag(string $name): string {
-    // If the folder ends with _CK, look at the status tag that precedes it
-    if (str_ends_with($name, '_CK')) $name = substr($name, 0, -3);
-    foreach (['BALANCE-CASH','BALANCE','DEPOSIT','PROGRESS','PROVISIONAL','PAID','CK','CANCELLED','BOOKED'] as $tag) {
-        if (str_ends_with($name, '_'.$tag)) return $tag;
-    }
-    return '';
-}
-function folder_strip_tag(string $name): string {
-    foreach (['_BALANCE-CASH','_BALANCE','_DEPOSIT','_PROGRESS','_PROVISIONAL','_PAID','_CK','_CANCELLED','_BOOKED'] as $tag) {
-        if (str_ends_with($name, $tag)) return substr($name, 0, -strlen($tag));
-    }
-    return $name;
-}
+// Payments / folder status logic: includes/invoice_service.php (shared with the Agent API).
 
 // ── AJAX: cancel payment ──────────────────────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
@@ -39,10 +17,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $reason = trim($_POST['reason'] ?? '');
         if (!$pid || !$reason) { ob_end_clean(); echo json_encode(['ok'=>false,'error'=>'Missing data']); exit; }
         try {
-            $db->prepare("UPDATE invoice_payments SET cancelled_at=NOW(), cancellation_reason=? WHERE id=? AND invoice_id=?")
-               ->execute([$reason, $pid, $invId]);
-            recalculate_invoice($db, $invId);
-            sync_request_value($db, $invId);
+            inv_cancel_payment($db, $pid, $invId, $reason);
             ob_end_clean(); echo json_encode(['ok'=>true]);
         } catch (\Throwable $e) { ob_end_clean(); echo json_encode(['ok'=>false,'error'=>$e->getMessage()]); }
         exit;
@@ -109,145 +84,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     if ($action === 'update_folder') {
         $invId    = (int)($_POST['invoice_id'] ?? 0);
         $newLabel = trim($_POST['folder_status'] ?? '');
-        $tagMap   = ['PROGRESS'=>'PROGRESS','PROVISIONAL'=>'PROVISIONAL','DEPOSIT'=>'DEPOSIT',
-                     'BALANCE'=>'BALANCE','BALANCE-CASH'=>'BALANCE-CASH','FULLY PAID'=>'PAID'];
-        if (!array_key_exists($newLabel, $tagMap)) {
+        if (!array_key_exists($newLabel, FOLDER_TAG_OPTIONS)) {
             ob_end_clean(); echo json_encode(['ok'=>false,'error'=>'Invalid status selected.']); exit;
         }
-        $dbTag = $tagMap[$newLabel];
         try {
-            $reqRow = $db->prepare(
-                "SELECT r.id, r.practice_code, r.dropbox_url, r.status, r.group_folder
-                 FROM invoices i JOIN requests r ON r.id = i.request_id WHERE i.id = ?"
-            );
-            $reqRow->execute([$invId]);
-            $req = $reqRow->fetch();
-            if (!$req || !$req['practice_code']) {
-                ob_end_clean(); echo json_encode(['ok'=>false,'error'=>'No linked Dropbox folder found.']); exit;
-            }
-
-            $oldName  = $req['practice_code'];
-            // Preserve _CK suffix: strip it before removing the status tag,
-            // then re-append it after the new status tag (e.g. _DEPOSIT_CK → _BALANCE_CK)
-            $hasCK    = str_ends_with($oldName, '_CK');
-            $baseName = folder_strip_tag($hasCK ? substr($oldName, 0, -3) : $oldName);
-            $newName  = $baseName . '_' . $dbTag . ($hasCK ? '_CK' : '');
-
-            // ── Rename folder in Dropbox ───────────────────────────────────
-            $dropboxPrefix = 'https://www.dropbox.com/home';
-            $oldUrl        = $req['dropbox_url'] ?? '';
-            $fromPath = $toPath = '';
-
-            if (str_starts_with($oldUrl, $dropboxPrefix)) {
-                $apiPath   = urldecode(substr($oldUrl, strlen($dropboxPrefix)));
-                $lastSlash = strrpos($apiPath, '/');
-                if ($lastSlash !== false) {
-                    $parentPath = substr($apiPath, 0, $lastSlash);
-                    $fromPath   = $apiPath;
-                    $toPath     = $parentPath . '/' . $newName;
-                }
-            }
-            if ($fromPath === '') {
-                $parentPath = ($req['status'] === 'Booked') ? '/001_Safari' : '/2026';
-                $fromPath   = $parentPath . '/' . $oldName;
-                $toPath     = $parentPath . '/' . $newName;
-            }
-
-            require_once __DIR__ . '/../../modules/leads/dropbox_constants.php';
-            require_once __DIR__ . '/../../modules/leads/dropbox_helper.php';
-            $token = dropbox_get_access_token();
-            if ($fromPath === '' || $toPath === '') {
-                ob_end_clean();
-                echo json_encode(['ok'=>false,'error'=>'Cannot build Dropbox path. dropbox_url in DB: ' . $oldUrl]);
-                exit;
-            }
-
-            // Resolve the real Dropbox path by searching for the folder name,
-            // because the stored dropbox_url may have wrong case or subfolder.
-            $realFromPath = dropbox_find_folder($token, $oldName);
-            if ($realFromPath !== null) {
-                // Derive toPath from real parent
-                $realParent = substr($realFromPath, 0, strrpos($realFromPath, '/'));
-                $toPath     = $realParent . '/' . $newName;
-                $fromPath   = $realFromPath;
-            }
-
-            try {
-                dropbox_move_folder($token, $fromPath, $toPath);
-            } catch (\Throwable $dbx) {
-                // If folder not found, the stored dropbox_url parent is stale (e.g. folder was
-                // confirmed into 001_Safari but DB still says /2026/).
-                // Retry by swapping /2026/ ↔ /001_Safari/ before giving up.
-                $retried = false;
-                if (str_contains($dbx->getMessage(), 'not_found')) {
-                    $altFrom = null;
-                    if (str_starts_with($fromPath, '/2026/')) {
-                        $altFrom = '/001_Safari/' . $oldName;
-                        $altTo   = '/001_Safari/' . $newName;
-                    } elseif (str_starts_with($fromPath, '/001_Safari/')) {
-                        $altFrom = '/2026/' . $oldName;
-                        $altTo   = '/2026/'  . $newName;
-                    }
-                    if ($altFrom !== null) {
-                        try {
-                            dropbox_move_folder($token, $altFrom, $altTo);
-                            // Use the alternate paths for the URL rebuild below
-                            $fromPath = $altFrom;
-                            $toPath   = $altTo;
-                            $retried  = true;
-                        } catch (\Throwable $ignored) {}
-                    }
-                }
-                if (!$retried) {
-                    ob_end_clean();
-                    echo json_encode(['ok'=>false,'error'=>$dbx->getMessage() . ' | from: ' . $fromPath . ' | to: ' . $toPath]);
-                    exit;
-                }
-            }
-
-            // ── Update DB ──────────────────────────────────────────────────
-            // Rebuild dropbox_url from the path that actually succeeded ($toPath),
-            // so stale /2026/ URLs get corrected to /001_Safari/ after a retry.
-            $newUrl = '';
-            if ($toPath !== '') {
-                $newUrl = 'https://www.dropbox.com/home' . $toPath;
-            } elseif ($oldUrl !== '') {
-                $lastSlash = strrpos($oldUrl, '/');
-                $newUrl    = substr($oldUrl, 0, $lastSlash + 1) . rawurlencode($newName);
-            }
-
-            // Derive payment_status from the new folder tag
-            $psMap = [
-                'DEPOSIT'      => 'Deposit',
-                'BALANCE'      => 'Balance',
-                'BALANCE-CASH' => 'Balance-Cash',
-                'PAID'         => 'Paid',
-                'PROGRESS'     => null,
-                'PROVISIONAL'  => null,
-            ];
-            $newPs = array_key_exists($dbTag, $psMap) ? $psMap[$dbTag] : false;
-
-            if ($newPs !== false) {
-                $db->prepare("UPDATE requests SET practice_code=?, dropbox_url=?, payment_status=? WHERE id=?")
-                   ->execute([$newName, $newUrl, $newPs, (int)$req['id']]);
-            } else {
-                $db->prepare("UPDATE requests SET practice_code=?, dropbox_url=? WHERE id=?")
-                   ->execute([$newName, $newUrl, (int)$req['id']]);
-            }
-
-            // GRP client: the parent folder's tag follows the client furthest
-            // behind with payments (includes/grp_status.php).
-            $groupMsg = '';
-            if (trim($req['group_folder'] ?? '') !== '') {
-                require_once __DIR__ . '/../../modules/leads/includes/grp_status.php';
-                try {
-                    $groupMsg = grp_sync_parent_tag($db, $token, $req['group_folder'])['msg'];
-                } catch (\Throwable $g) {
-                    $groupMsg = 'Group folder not updated: ' . $g->getMessage();
-                }
-            }
-
-            ob_end_clean(); echo json_encode(['ok'=>true,'new_name'=>$newName,'new_tag'=>$dbTag,'new_url'=>$newUrl,'group_msg'=>$groupMsg]); exit;
+            $res = inv_update_folder_status($db, $invId, $newLabel);
+            ob_end_clean(); echo json_encode(['ok'=>true,'new_name'=>$res['new_name'],'new_tag'=>$res['new_tag'],'new_url'=>$res['new_url'],'group_msg'=>$res['group_msg']]); exit;
         } catch (\Throwable $e) {
             ob_end_clean(); echo json_encode(['ok'=>false,'error'=>$e->getMessage()]); exit;
         }
@@ -268,29 +110,19 @@ if (isset($_POST['add_payment'])) {
     if (!in_array($method, INV_METHODS)) $pErrors[] = 'Invalid payment method.';
 
     if (!$pErrors) {
-        $db->prepare("INSERT INTO invoice_payments (invoice_id,payment_date,amount,method,reference,notes) VALUES (?,?,?,?,?,?)")
-           ->execute([$id,$payDate,$amount,$method,$ref?:null,$notes?:null]);
-        recalculate_invoice($db, $id);
-        sync_request_value($db, $id);
+        inv_add_payment($db, $id, $payDate, $amount, $method, $ref, $notes);
         flash("Payment of " . fmt_money($amount, '') . " recorded.");
         header("Location: invoice_view.php?id=$id"); exit;
     }
 }
 
 // ── Load invoice ──────────────────────────────────────────────────────────
-$s = $db->prepare("SELECT i.*, u.full_name AS created_by_name FROM invoices i LEFT JOIN users u ON u.id=i.created_by WHERE i.id=?");
-$s->execute([$id]);
-$inv = $s->fetch();
+$inv = inv_get($db, $id);
 if (!$inv) { flash('Invoice not found.','error'); header('Location: invoices.php'); exit; }
 
-$items = $db->prepare("SELECT * FROM invoice_items WHERE invoice_id=? ORDER BY sort_order,id");
-$items->execute([$id]); $items = $items->fetchAll();
-
-$payments = $db->prepare("SELECT * FROM invoice_payments WHERE invoice_id=? ORDER BY payment_date, id");
-$payments->execute([$id]); $payments = $payments->fetchAll();
-
-$creditNotes = $db->prepare("SELECT * FROM credit_notes WHERE invoice_id=? ORDER BY issue_date, id");
-$creditNotes->execute([$id]); $creditNotes = $creditNotes->fetchAll();
+$items       = inv_items($db, $id);
+$payments    = inv_payments($db, $id);
+$creditNotes = inv_credit_notes($db, $id);
 
 $pageTitle = $inv['invoice_number'];
 include 'includes/header.php';

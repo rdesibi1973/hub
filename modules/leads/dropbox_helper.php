@@ -77,13 +77,14 @@ function dropbox_create_folder(string $token, string $path, bool $throwOnConflic
 }
 
 /**
- * Upload a small text file to Dropbox (overwrites if exists).
+ * Upload a small file (text or binary) to Dropbox; overwrites if it exists
+ * unless $mode = 'add'.
  * @param  string $token   Access token
  * @param  string $path    Full Dropbox path, e.g. '/2026/SmithJohn(BTG-Roberto)/CustomerInfo.txt'
  * @param  string $content File content as plain text
  * @return array           Dropbox file metadata
  */
-function dropbox_upload_text(string $token, string $path, string $content): array {
+function dropbox_upload_text(string $token, string $path, string $content, string $mode = 'overwrite'): array {
     $ch = curl_init('https://content.dropboxapi.com/2/files/upload');
     curl_setopt_array($ch, [
         CURLOPT_POST           => true,
@@ -93,7 +94,7 @@ function dropbox_upload_text(string $token, string $path, string $content): arra
             'Content-Type: application/octet-stream',
             'Dropbox-API-Arg: ' . json_encode([
                 'path'       => $path,
-                'mode'       => 'overwrite',
+                'mode'       => $mode,   // 'add': fails (409) if the file exists
                 'autorename' => false,
                 'mute'       => false,
             ]),
