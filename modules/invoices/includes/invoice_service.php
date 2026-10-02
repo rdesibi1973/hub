@@ -326,10 +326,11 @@ function inv_find_duplicate_payment(PDO $db, int $invId, float $amount, string $
 }
 
 /**
- * Record a payment, then recalculate the invoice and the request value.
+ * Record a payment, then recalculate the invoice and the request value, and
+ * close the Memo Board follow-ups waiting for it ($closedMemos receives them).
  * Returns the new payment id; InvalidArgumentException on bad input.
  */
-function inv_add_payment(PDO $db, int $invId, string $date, float $amount, string $method, string $ref = '', string $notes = ''): int {
+function inv_add_payment(PDO $db, int $invId, string $date, float $amount, string $method, string $ref = '', string $notes = '', ?array &$closedMemos = null): int {
     if ($amount <= 0) throw new InvalidArgumentException('Amount must be greater than zero.');
     if (!in_array($method, INV_METHODS, true)) throw new InvalidArgumentException('Invalid payment method.');
     $db->prepare("INSERT INTO invoice_payments (invoice_id,payment_date,amount,method,reference,notes) VALUES (?,?,?,?,?,?)")
@@ -337,6 +338,17 @@ function inv_add_payment(PDO $db, int $invId, string $date, float $amount, strin
     $pid = (int)$db->lastInsertId();
     recalculate_invoice($db, $invId);
     sync_request_value($db, $invId);
+
+    // A memo problem must never undo / fail the payment.
+    $closedMemos = [];
+    try {
+        require_once __DIR__ . '/../../memo/memo_lib.php';
+        $cur = $db->prepare("SELECT currency FROM invoices WHERE id=?");
+        $cur->execute([$invId]);
+        $closedMemos = memo_on_payment($db, $invId, $amount, (string)$cur->fetchColumn(), $date, $ref);
+    } catch (\Throwable $e) {
+        error_log('memo_on_payment failed for invoice ' . $invId . ': ' . $e->getMessage());
+    }
     return $pid;
 }
 

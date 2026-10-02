@@ -27,15 +27,19 @@ require_once __DIR__ . '/../../includes/mail_helper.php'; // adjust if your mail
 // $pdo comes from db.php (global PDO connection).
 $now = date('Y-m-d H:i:s');
 
-// Pull due reminders: only OPEN, not deleted, due now or earlier.
+require_once __DIR__ . '/memo_lib.php';
+memo_schema($pdo);
+
+// Pull due reminders: only active (open / in progress / waiting), not deleted, due now or earlier.
 // For one-shot (recur_rule='none') we additionally require reminder_sent = 0.
 $sql =
-    "SELECT m.id, m.user_id, m.title, m.body, m.type, m.due_date, " .
-    "m.reminder_at, m.recur_rule, m.reminder_emails, u.email AS user_email, u.full_name AS user_name " .
+    "SELECT m.id, m.user_id, m.title, m.body, m.type, m.due_date, m.status, m.waiting_on, m.request_id, m.invoice_id, " .
+    "m.reminder_at, m.recur_rule, m.reminder_emails, u.email AS user_email, u.full_name AS user_name, " .
+    memo_link_columns() . " " .
     "FROM memos m " .
-    "JOIN users u ON u.id = m.user_id " .
+    "JOIN users u ON u.id = m.user_id " . memo_link_joins() .
     "WHERE m.deleted_at IS NULL " .
-    "AND m.status = 'open' " .
+    "AND m.status IN ('open','doing','waiting') " .
     "AND m.reminder_at IS NOT NULL " .
     "AND m.reminder_at <= ? " .
     "AND ( m.recur_rule <> 'none' OR m.reminder_sent = 0 )";
@@ -78,8 +82,22 @@ foreach ($rows as $r) {
         $html .= '<div style="white-space:pre-wrap;border-left:3px solid #C0211B;padding-left:10px;color:#444;">'
                . htmlspecialchars($bodyTxt) . '</div>';
     }
+    if ($r['status'] === 'waiting') {
+        $html .= '<p><strong>Waiting for:</strong> ' . htmlspecialchars($r['waiting_on'] ?: '—') . ' — time to follow up.</p>';
+    }
+    $hub = 'https://hub.savannahexplorers.com/modules/';
+    if (!empty($r['invoice_id'])) {
+        $html .= '<p>Invoice: <a href="' . $hub . 'invoices/invoice_view.php?id=' . (int)$r['invoice_id'] . '">'
+               . htmlspecialchars($r['inv_number']) . '</a> — balance ' . htmlspecialchars($r['inv_currency']) . ' '
+               . number_format((float)$r['inv_balance'], 2)
+               . ($r['inv_issuer'] === 'Savannah Holidays Ltd' ? ' — <strong>AfrAsia account: check the bank yourself</strong>' : '') . '</p>';
+    }
+    if (!empty($r['request_id'])) {
+        $html .= '<p>Booking: <a href="' . $hub . 'leads/request_view.php?id=' . (int)$r['request_id'] . '">'
+               . htmlspecialchars($r['req_folder'] ?: $r['req_customer']) . '</a></p>';
+    }
     if (!empty($r['due_date'])) {
-        $html .= '<p style="color:#777;">Due: ' . htmlspecialchars($r['due_date']) . '</p>';
+        $html .= '<p style="color:#777;">' . ($r['status'] === 'waiting' ? 'Follow up on: ' : 'Due: ') . htmlspecialchars($r['due_date']) . '</p>';
     }
     $html .= '<p style="color:#999;font-size:12px;">Savannah Explorers Hub — Memo Board</p>';
 

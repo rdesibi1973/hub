@@ -7,6 +7,7 @@ date_default_timezone_set('Africa/Dar_es_Salaam');
 
 require_once __DIR__ . '/../../includes/auth.php';
 require_once __DIR__ . '/../../includes/db.php';
+require_once __DIR__ . '/memo_lib.php';
 
 start_session();
 
@@ -25,6 +26,7 @@ if ($uid <= 0) { out(false, array('error' => 'Not authenticated')); }
 
 $action = isset($_POST['action']) ? $_POST['action'] : (isset($_GET['action']) ? $_GET['action'] : '');
 $now    = date('Y-m-d H:i:s');
+memo_schema($pdo);
 
 function parse_dt($v) {
     $v = trim((string)$v);
@@ -76,6 +78,40 @@ function clean_emails($v) {
     return implode(', ', array_values($out));
 }
 
+// Follow-up fields from the form: status, waiting_on, request / invoice link, auto-close.
+function followup_fields($pdo) {
+    $status = clean_enum(isset($_POST['status']) ? $_POST['status'] : '', array('open','doing','waiting'), 'open');
+    $waitOn = trim(isset($_POST['waiting_on']) ? (string)$_POST['waiting_on'] : '');
+    $reqId  = isset($_POST['request_id']) ? intval($_POST['request_id']) : 0;
+    $invTxt = trim(isset($_POST['invoice']) ? (string)$_POST['invoice'] : '');
+    $invId  = null;
+    $inv    = memo_find_invoice($pdo, $invTxt);
+    if ($invTxt !== '' && !$inv) { out(false, array('error' => 'Invoice "' . $invTxt . '" not found')); }
+    if ($inv) {
+        $invId = (int)$inv['id'];
+        if ($reqId <= 0 && $inv['request_id']) { $reqId = (int)$inv['request_id']; }
+    }
+    if ($reqId > 0) {
+        $chk = $pdo->prepare("SELECT id FROM requests WHERE id = ?");
+        $chk->execute(array($reqId));
+        if (!$chk->fetch()) { out(false, array('error' => 'Request #' . $reqId . ' not found')); }
+    }
+    return array(
+        'status'     => $status,
+        'waiting_on' => $status === 'waiting' && $waitOn !== '' ? mb_substr($waitOn, 0, 120) : null,
+        'request_id' => $reqId > 0 ? $reqId : null,
+        'invoice_id' => $invId,
+        'auto_close' => ($invId && !empty($_POST['auto_close'])) ? 'payment' : null,
+    );
+}
+
+// The single "next step" of the form (title + days after).
+function next_step_from_form() {
+    $t = trim(isset($_POST['next_title']) ? (string)$_POST['next_title'] : '');
+    if ($t === '') { return array(); }
+    return array(array('title' => $t, 'days_after' => isset($_POST['next_days']) ? $_POST['next_days'] : 0));
+}
+
 // Returns: is_owner=1 if owner; can_edit=1 if owner or shared with can_edit; 0 if no access.
 function memo_access($pdo, $memo_id, $uid) {
     $stmt = $pdo->prepare(
@@ -103,6 +139,8 @@ if ($action === 'list') {
         "SELECT m.id, m.user_id, m.title, m.body, m.type, m.status, m.priority,
                 m.pinned, m.color, m.due_date, m.reminder_at, m.reminder_emails, m.reminder_sent,
                 m.recur_rule, m.sort_order, m.created_at, m.updated_at,
+                m.waiting_on, m.request_id, m.invoice_id, m.auto_close, m.parent_id, m.next_offset_days, m.source,
+                " . memo_link_columns() . ",
                 (m.user_id = ?) AS is_owner,
                 MAX(CASE WHEN ms.id IS NOT NULL THEN ms.can_edit ELSE 0 END) AS shared_can_edit,
                 (EXISTS (SELECT 1 FROM memo_shares WHERE memo_id = m.id)) AS is_shared,
@@ -111,7 +149,7 @@ if ($action === 'list') {
          LEFT JOIN memo_shares ms
                ON ms.memo_id = m.id
               AND (ms.shared_with_user_id = ? OR ms.shared_with_user_id IS NULL)
-         LEFT JOIN users u ON u.id = m.user_id
+         LEFT JOIN users u ON u.id = m.user_id" . memo_link_joins() . "
          WHERE m.deleted_at IS NULL
            AND (m.user_id = ? OR ms.id IS NOT NULL)
          GROUP BY m.id
@@ -144,13 +182,20 @@ if ($action === 'create') {
     $remind    = parse_dt(isset($_POST['reminder_at'])  ? $_POST['reminder_at']: '');
     $remEmails = $remind ? clean_emails(isset($_POST['reminder_emails']) ? $_POST['reminder_emails'] : '') : null;
 
+    $f = followup_fields($pdo);
+
     $stmt = $pdo->prepare(
         "INSERT INTO memos " .
-        "(user_id, title, body, type, status, priority, pinned, color, due_date, reminder_at, reminder_emails, reminder_sent, recur_rule, sort_order, created_at, updated_at) " .
-        "VALUES (?, ?, ?, ?, 'open', ?, 0, ?, ?, ?, ?, 0, ?, 0, ?, ?)"
+        "(user_id, title, body, type, status, priority, pinned, color, due_date, reminder_at, reminder_emails, reminder_sent, recur_rule, sort_order, " .
+        " waiting_on, request_id, invoice_id, auto_close, created_at, updated_at) " .
+        "VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, 0, ?, 0, ?, ?, ?, ?, ?, ?)"
     );
-    $stmt->execute(array($uid, $title, $body, $type, $priority, $color, $due, $remind, $remEmails, $recur, $now, $now));
-    out(true, array('id' => intval($pdo->lastInsertId())));
+    $stmt->execute(array($uid, $title, $body, $type, $f['status'], $priority, $color, $due, $remind, $remEmails, $recur,
+                         $f['waiting_on'], $f['request_id'], $f['invoice_id'], $f['auto_close'], $now, $now));
+    $newId = intval($pdo->lastInsertId());
+    $steps = next_step_from_form();
+    if ($steps) { memo_set_next_steps($pdo, $newId, $steps); }
+    out(true, array('id' => $newId));
 }
 
 // ---------- update ----------
@@ -173,12 +218,22 @@ if ($action === 'update') {
     $remind    = parse_dt(isset($_POST['reminder_at'])  ? $_POST['reminder_at']: '');
     $remEmails = $remind ? clean_emails(isset($_POST['reminder_emails']) ? $_POST['reminder_emails'] : '') : null;
 
+    $f = followup_fields($pdo);
+    // Status from the form only while the memo is active (done / archived stay as they are).
+    $cur = $pdo->prepare("SELECT status FROM memos WHERE id=?");
+    $cur->execute(array($id));
+    $curStatus = (string)$cur->fetchColumn();
+    $status = in_array($curStatus, array('open','doing','waiting'), true) ? $f['status'] : $curStatus;
+
     $stmt = $pdo->prepare(
         "UPDATE memos SET title=?, body=?, type=?, priority=?, color=?, due_date=?, " .
-        "reminder_at=?, reminder_emails=?, recur_rule=?, reminder_sent=0, updated_at=? " .
+        "reminder_at=?, reminder_emails=?, recur_rule=?, reminder_sent=0, " .
+        "status=?, waiting_on=?, request_id=?, invoice_id=?, auto_close=?, updated_at=? " .
         "WHERE id=?"
     );
-    $stmt->execute(array($title, $body, $type, $priority, $color, $due, $remind, $remEmails, $recur, $now, $id));
+    $stmt->execute(array($title, $body, $type, $priority, $color, $due, $remind, $remEmails, $recur,
+                         $status, $f['waiting_on'], $f['request_id'], $f['invoice_id'], $f['auto_close'], $now, $id));
+    if (isset($_POST['next_title'])) { memo_set_next_steps($pdo, $id, next_step_from_form()); }
     out(true, array());
 }
 
@@ -195,10 +250,24 @@ if ($action === 'set_status') {
     $id  = isset($_POST['id']) ? intval($_POST['id']) : 0;
     $access = memo_access($pdo, $id, $uid);
     if (!$access || !$access['can_edit']) { out(false, array('error' => 'Not allowed')); }
-    $st  = clean_enum(isset($_POST['status']) ? $_POST['status'] : '', array('open','done','archived'), 'open');
+    $st  = clean_enum(isset($_POST['status']) ? $_POST['status'] : '', array('open','doing','waiting','done','archived'), 'open');
+    if ($st === 'done') {
+        out(true, array('opened_next' => memo_close($pdo, $id)));
+    }
     $stmt = $pdo->prepare("UPDATE memos SET status=?, updated_at=? WHERE id=? AND deleted_at IS NULL");
     $stmt->execute(array($st, $now, $id));
     out(true, array());
+}
+
+// ---------- prefill — a new follow-up memo from an invoice (?invoice=SE-2026-0012) ----------
+if ($action === 'prefill') {
+    $inv = memo_find_invoice($pdo, isset($_GET['invoice']) ? $_GET['invoice'] : '');
+    if (!$inv) { out(false, array('error' => 'Invoice not found')); }
+    $st = $pdo->prepare("SELECT i.id, i.invoice_number, i.bill_to_name, i.issuer, i.currency, i.balance_due, i.request_id,
+                                r.customer_name, r.practice_code
+                         FROM invoices i LEFT JOIN requests r ON r.id = i.request_id WHERE i.id = ?");
+    $st->execute(array((int)$inv['id']));
+    out(true, array('invoice' => $st->fetch(PDO::FETCH_ASSOC)));
 }
 
 // ---------- reorder (only own memos) ----------

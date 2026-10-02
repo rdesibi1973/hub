@@ -9,6 +9,7 @@
   var modal   = document.getElementById('memoModal');
   var dragId  = null;
   var memoQuill = null;
+  var nextByParent = {};   // parent memo id -> its pending next steps
 
   // ---------- Quill ----------
   function initQuill() {
@@ -103,8 +104,18 @@
     var d = new Date(); d.setHours(0,0,0,0); return d;
   }
 
-  function render(memos) {
+  function render(all) {
     board.innerHTML = '';
+    // Pending next steps are not on the board: they are shown on their parent card.
+    nextByParent = {};
+    var memos = [];
+    for (var n = 0; n < all.length; n++) {
+      if (all[n].status === 'pending') {
+        var pid = String(all[n].parent_id);
+        if (!nextByParent[pid]) { nextByParent[pid] = []; }
+        nextByParent[pid].push(all[n]);
+      } else { memos.push(all[n]); }
+    }
     if (memos.length === 0) {
       board.innerHTML = '<p class="memo-empty">No memos yet. Click &ldquo;+ New memo&rdquo; to start.</p>';
       return;
@@ -112,15 +123,23 @@
 
     var todaySt = todayStr();
 
-    var overdue = [], todayArr = [], upcoming = [], nodate = [];
+    var overdue = [], todayArr = [], upcoming = [], nodate = [], waiting = [];
     for (var i = 0; i < memos.length; i++) {
       var m = memos[i];
+      if (m.status === 'waiting') { waiting.push(m); continue; }
       if (!m.due_date) { nodate.push(m); continue; }
       if (m.due_date < todaySt && m.status !== 'done') { overdue.push(m); }
       else if (m.due_date === todaySt) { todayArr.push(m); }
       else { upcoming.push(m); }
     }
 
+    // Waiting: earliest follow-up first, no date last.
+    waiting.sort(function (a, b) {
+      if (!a.due_date) { return b.due_date ? 1 : 0; }
+      if (!b.due_date) { return -1; }
+      return a.due_date < b.due_date ? -1 : (a.due_date > b.due_date ? 1 : 0);
+    });
+    renderGroup('Waiting for / to follow up', waiting, 'waiting');
     renderGroup('Forever',   nodate,   'nodate');
     renderGroup('Expired',  overdue,  'overdue');
     renderGroup('Today',    todayArr, 'today');
@@ -153,6 +172,8 @@
     var card = document.createElement('div');
     card.className = 'memo-card prio-' + esc(m.priority) +
       (m.status === 'done'       ? ' is-done'    : '') +
+      (m.status === 'waiting'    ? ' is-waiting' : '') +
+      (m.status === 'doing'      ? ' is-doing'   : '') +
       (Number(m.pinned) === 1    ? ' is-pinned'  : '') +
       (isOverdue                 ? ' is-overdue' : '');
     card.setAttribute('draggable', isOwner ? 'true' : 'false');
@@ -168,11 +189,20 @@
     } else {
       html += '<span style="font-size:.68rem;color:#888;">by ' + esc(m.owner_name || '') + '</span>';
     }
+    if (m.source === 'claude') {
+      html += '<span class="memo-badge-claude" title="Created by Claude">🤖 Claude</span>';
+    }
     if (isShared && isOwner) {
       html += '<span class="memo-share-badge">Shared</span>';
     }
     html += '</div>';
 
+    if (m.status === 'waiting') {
+      html += '<div><span class="memo-status memo-status-waiting">⏳ Waiting' +
+        (m.waiting_on ? ': ' + esc(m.waiting_on) : '') + '</span></div>';
+    } else if (m.status === 'doing') {
+      html += '<div><span class="memo-status memo-status-doing">▶ In progress</span></div>';
+    }
     html += '<div class="memo-card-title">' + esc(m.title) + '</div>';
     if (m.body) { html += '<div class="memo-card-body">' + m.body + '</div>'; }
 
@@ -180,13 +210,36 @@
     if (m.due_date) {
       var dueCls = isOverdue ? ' memo-meta-overdue' : '';
       meta += '<span class="memo-meta-item' + dueCls + '">' +
-        (isOverdue ? '⚠ ' : '') + 'Due ' + esc(m.due_date) + '</span>';
+        (isOverdue ? '⚠ ' : '') + (m.status === 'waiting' ? 'Follow up ' : 'Due ') + esc(m.due_date) + '</span>';
+    }
+    if (m.request_id) {
+      meta += '<a class="memo-link" href="../leads/request_view.php?id=' + esc(m.request_id) + '" title="' +
+        esc(m.req_folder || '') + '">📁 ' + esc(m.req_customer || ('#' + m.request_id)) + '</a>';
+    }
+    if (m.invoice_id) {
+      meta += '<a class="memo-link" href="../invoices/invoice_view.php?id=' + esc(m.invoice_id) + '">🧾 ' +
+        esc(m.inv_number || ('#' + m.invoice_id)) +
+        (m.inv_balance !== null && m.inv_balance !== undefined && Number(m.inv_balance) > 0
+          ? ' · bal ' + esc(Number(m.inv_balance).toFixed(2)) : '') + '</a>';
+      if (m.auto_close === 'payment' && m.status !== 'done') {
+        meta += '<span class="memo-meta-item" title="Closed automatically when a payment is recorded">⚡ auto-close</span>';
+      }
+      if (m.inv_issuer === 'Savannah Holidays Ltd') {
+        meta += '<span class="memo-badge-afr" title="Savannah Holidays invoice: payment arrives on the AfrAsia account — check the bank yourself, not the accountant">🏦 AfrAsia</span>';
+      }
     }
     if (m.reminder_at) {
       var rec = (m.recur_rule && m.recur_rule !== 'none') ? ' (' + esc(m.recur_rule) + ')' : '';
       meta += '<span class="memo-meta-item">✉ ' + esc(m.reminder_at.substring(0,16)) + rec + '</span>';
     }
     if (meta) { html += '<div class="memo-card-meta">' + meta + '</div>'; }
+
+    var steps = nextByParent[String(m.id)] || [];
+    for (var s = 0; s < steps.length; s++) {
+      html += '<div class="memo-next">➜ Then: ' + esc(steps[s].title) +
+        (Number(steps[s].next_offset_days) > 0 ? ' <span style="color:#888">(+' + esc(steps[s].next_offset_days) + 'd)</span>' : '') +
+        '</div>';
+    }
 
     html += '<div class="memo-card-actions">';
     if (canEdit) {
@@ -221,7 +274,10 @@
     var doneBtn = card.querySelector('[data-act="done"]');
     if (doneBtn) { doneBtn.addEventListener('click', function (e) {
       e.stopPropagation();
-      post('set_status', { id: m.id, status: 'done' }, function () { load(); });
+      post('set_status', { id: m.id, status: 'done' }, function (res) {
+        if (res && res.opened_next && res.opened_next.length) { alert('Next step is now on the board.'); }
+        load();
+      });
     }); }
     var reopenBtn = card.querySelector('[data-act="reopen"]');
     if (reopenBtn) { reopenBtn.addEventListener('click', function (e) {
@@ -275,6 +331,17 @@
     document.getElementById('m_priority').value = m ? (m.priority || 'normal') : 'normal';
     document.getElementById('m_color').value    = m && m.color ? m.color : '';
     document.getElementById('m_due_date').value = m && m.due_date ? m.due_date : '';
+    var active = !m || m.status === 'open' || m.status === 'doing' || m.status === 'waiting';
+    document.getElementById('m_status').value     = m && active ? m.status : 'open';
+    document.getElementById('m_status').disabled  = !active;
+    document.getElementById('m_waiting_on').value = m && m.waiting_on ? m.waiting_on : '';
+    document.getElementById('m_request_id').value = m && m.request_id ? m.request_id : '';
+    document.getElementById('m_invoice').value    = m && m.invoice_id ? (m.inv_number || m.invoice_id) : '';
+    document.getElementById('m_auto_close').checked = !!(m && m.auto_close === 'payment');
+    var step = m ? (nextByParent[String(m.id)] || [])[0] : null;
+    document.getElementById('m_next_title').value = step ? step.title : '';
+    document.getElementById('m_next_days').value  = step ? (step.next_offset_days || 0) : 0;
+    syncFollowupFields();
 
     var bodyHtml = m ? (m.body || '') : '';
     document.getElementById('m_body').value = bodyHtml;
@@ -314,6 +381,46 @@
 
   function closeModal() { modal.style.display = 'none'; }
 
+  // Waiting: show "who" and call the date the follow-up date; auto-close needs an invoice.
+  function syncFollowupFields() {
+    var waiting = document.getElementById('m_status').value === 'waiting';
+    document.getElementById('m_waiting_wrap').style.display = waiting ? 'block' : 'none';
+    document.getElementById('m_due_label').textContent = waiting ? 'Follow up on' : 'Due date';
+    var hasInv = document.getElementById('m_invoice').value.replace(/\s+/g, '') !== '';
+    document.getElementById('m_auto_close_wrap').style.display = hasInv ? 'flex' : 'none';
+  }
+  document.getElementById('m_status').addEventListener('change', syncFollowupFields);
+  document.getElementById('m_invoice').addEventListener('input', syncFollowupFields);
+
+  // ?new=payment&invoice=SH-2026-0041 (from the invoice page): a memo waiting for that payment.
+  function openFromUrl() {
+    var q = window.location.search;
+    var inv = (q.match(/[?&]invoice=([^&]+)/) || [])[1];
+    if (!/[?&]new=/.test(q)) { return; }
+    // Drop the parameters so a reload does not open the form again.
+    if (window.history && window.history.replaceState) { window.history.replaceState(null, '', window.location.pathname); }
+    if (!inv) { openModal(null); return; }
+    get('prefill', { invoice: decodeURIComponent(inv) }, function (res) {
+      openModal(null);
+      if (!res || !res.ok || !res.invoice) { return; }
+      var i = res.invoice;
+      var sym = i.currency === 'EUR' ? '€' : '$';
+      document.getElementById('m_title').value = 'Payment ' + i.invoice_number + ' — ' + (i.customer_name || i.bill_to_name) +
+        ' (' + sym + Number(i.balance_due).toFixed(2) + ')';
+      document.getElementById('m_status').value     = 'waiting';
+      document.getElementById('m_waiting_on').value = i.bill_to_name || '';
+      document.getElementById('m_invoice').value    = i.invoice_number;
+      document.getElementById('m_request_id').value = i.request_id || '';
+      document.getElementById('m_auto_close').checked = true;
+      var d = new Date(); d.setDate(d.getDate() + 3);
+      document.getElementById('m_due_date').value = d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+      if (i.issuer === 'Savannah Holidays Ltd') {
+        document.getElementById('m_priority').value = 'high';
+      }
+      syncFollowupFields();
+    });
+  }
+
   function save() {
     var id    = document.getElementById('m_id').value;
     var title = document.getElementById('m_title').value.replace(/^\s+|\s+$/g, '');
@@ -343,7 +450,14 @@
       due_date:        document.getElementById('m_due_date').value,
       reminder_at:     reminderAt,
       reminder_emails: reminderEmails,
-      recur_rule:      document.getElementById('m_recur_rule').value
+      recur_rule:      document.getElementById('m_recur_rule').value,
+      status:          document.getElementById('m_status').value,
+      waiting_on:      document.getElementById('m_waiting_on').value,
+      request_id:      document.getElementById('m_request_id').value.replace(/[^0-9]/g, ''),
+      invoice:         document.getElementById('m_invoice').value.replace(/^\s+|\s+$/g, ''),
+      auto_close:      document.getElementById('m_auto_close').checked ? 1 : 0,
+      next_title:      document.getElementById('m_next_title').value,
+      next_days:       document.getElementById('m_next_days').value
     };
     if (id) { data.id = id; }
 
@@ -473,4 +587,5 @@
   // ---------- init ----------
   initQuill();
   load();
+  openFromUrl();
 })();

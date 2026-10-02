@@ -237,6 +237,47 @@ curl -sH "$H" -X POST "$U?action=save_invoice_pdf" -d '{"invoice_id":412,"overwr
 curl -sH "$H" -X POST "$U?action=cancel_invoice_payment" -d '{"invoice_id":412,"payment_id":901,"reason":"Recorded twice","confirm":true}'
 ```
 
+## Memo Board (follow-ups)
+
+Claude writes to **one** user's Memo Board: `AGENT_MEMO_USER` (Hub username) in the server-only
+`includes/config.php`; if not defined, the active user sharing the API user's agent (Roberto).
+Memos stay private to that user unless shared in the Hub. Logic: `modules/memo/memo_lib.php`
+(columns added on first use, or run `migrations/064_memo_followups.sql`).
+
+| Status | Meaning |
+|---|---|
+| `open` / `doing` | to do / in progress |
+| `waiting` | waiting for someone (`waiting_on`); `due_date` = follow-up date; shown first on the board |
+| `pending` | a next step — hidden until its parent is done, then opened with due = today + `days_after` |
+| `done` / `archived` | closed |
+
+### `memo_list` (GET)
+`status` (comma list, default `open,doing,waiting`), `q`, `request_id`, `invoice_id`, `ext_key`,
+`follow_up_due=1` (due date today or earlier). → `memos[]` `{id, title, status, waiting_on, due_date,
+reminder_at, priority, body (text), request_id, folder, invoice_id, invoice_number, invoice_balance,
+afrasia, auto_close_on_payment, next_steps[], source, ext_key}`.
+
+### `memo_save` (POST)
+Creates, or updates when `id` / `ext_key` matches (use `ext_key` such as `cn-asilia-glady` so repeated runs
+update instead of duplicating). Fields: `title`*, `body` (plain text), `status` (`open`|`doing`|`waiting`),
+`waiting_on`, `due_date`, `reminder_at` (`YYYY-MM-DD HH:MM` EAT, email), `priority`, `request_id`,
+`invoice_id` or `invoice_number` (request taken from the invoice), `auto_close_on_payment` (closed when a
+payment is recorded on that invoice — by the Hub page or `add_invoice_payment`), `next_steps[]`
+`{title, days_after?, body?}` (replaces the pending ones), `ext_key`. A `waiting` memo with a `due_date` and no
+reminder gets an email reminder at 08:00 that day. Created memos are marked 🤖 Claude.
+
+### `memo_set_status` (POST)
+`id` or `ext_key`, `status` (`open`|`doing`|`waiting`|`done`|`archived`), `note` (appended when done).
+`done` opens the next steps → `opened_next[]`.
+
+`add_invoice_payment` returns `memos_closed[]` (memos closed automatically by that payment).
+
+```bash
+curl -sH "$H" -X POST "$U?action=memo_save" -d '{"ext_key":"cn-asilia","title":"Credit note Asilia","status":"waiting","waiting_on":"Glady (Asilia)","due_date":"2026-10-06","body":"Mail sent 2 Oct asking for the CN"}'
+curl -sH "$H" -X POST "$U?action=memo_save" -d '{"title":"Balance Etnia – Rossi","status":"waiting","waiting_on":"Etnia","invoice_number":"SH-2026-0041","auto_close_on_payment":true,"due_date":"2026-10-05","next_steps":[{"title":"Pay Lake Natron Camp","days_after":2}]}'
+curl -sH "$H" "$U?action=memo_list&follow_up_due=1"
+```
+
 ## Example — Fiorini (TVT)
 
 ```bash

@@ -283,6 +283,71 @@ function agent_invoice_folder(PDO $db, int $invId): ?array {
     ];
 }
 
+// ── Memo Board (logic in modules/memo/memo_lib.php) ─────────────────────────
+/**
+ * The Hub user whose Memo Board Claude writes to: AGENT_MEMO_USER (username)
+ * in includes/config.php, else the active user sharing the API user's agent.
+ */
+function agent_memo_owner(PDO $db): array {
+    global $agentUser;
+    require_once __DIR__ . '/../memo/memo_lib.php';
+    memo_schema($db);
+    if (defined('AGENT_MEMO_USER')) {
+        $st = $db->prepare("SELECT id, username, full_name FROM users WHERE username = ? AND is_active = 1");
+        $st->execute([(string)AGENT_MEMO_USER]);
+    } else {
+        $st = $db->prepare("SELECT id, username, full_name FROM users
+                            WHERE agent_id = ? AND id <> ? AND is_active = 1 ORDER BY id LIMIT 1");
+        $st->execute([(int)($agentUser['agent_id'] ?? 0), (int)$agentUser['id']]);
+    }
+    $u = $st->fetch(PDO::FETCH_ASSOC);
+    if (!$u) agent_fail('Memo owner not found — define AGENT_MEMO_USER (Hub username) in includes/config.php', 500);
+    return ['id' => (int)$u['id'], 'username' => $u['username'], 'full_name' => $u['full_name']];
+}
+
+/** One of the owner's memos by id or ext_key, or null. */
+function agent_memo_find(PDO $db, int $ownerId, array $in): ?array {
+    if ((int)($in['id'] ?? 0) > 0) {
+        $st = $db->prepare("SELECT * FROM memos WHERE id = ? AND user_id = ? AND deleted_at IS NULL");
+        $st->execute([(int)$in['id'], $ownerId]);
+    } elseif (trim((string)($in['ext_key'] ?? '')) !== '') {
+        $st = $db->prepare("SELECT * FROM memos WHERE ext_key = ? AND user_id = ? AND deleted_at IS NULL ORDER BY id DESC LIMIT 1");
+        $st->execute([trim($in['ext_key']), $ownerId]);
+    } else {
+        return null;
+    }
+    $m = $st->fetch(PDO::FETCH_ASSOC);
+    return $m ?: null;
+}
+
+/** Public shape of memo rows (with links and pending next steps). */
+function agent_memo_rows(PDO $db, string $where, array $args): array {
+    $st = $db->prepare("SELECT m.*, " . memo_link_columns() . " FROM memos m" . memo_link_joins() . " WHERE " . $where
+                     . " ORDER BY (m.due_date IS NULL), m.due_date, m.id LIMIT 200");
+    $st->execute($args);
+    $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+    $out = [];
+    foreach ($rows as $m) {
+        $next = $db->prepare("SELECT id, title, next_offset_days FROM memos WHERE parent_id = ? AND status = 'pending' AND deleted_at IS NULL ORDER BY id");
+        $next->execute([(int)$m['id']]);
+        $out[] = [
+            'id' => (int)$m['id'], 'title' => $m['title'], 'status' => $m['status'], 'waiting_on' => $m['waiting_on'],
+            'due_date' => $m['due_date'], 'reminder_at' => $m['reminder_at'], 'priority' => $m['priority'],
+            'body' => trim(html_entity_decode(strip_tags(str_replace(['</p>', '<br>'], "\n", (string)$m['body'])), ENT_QUOTES, 'UTF-8')),
+            'request_id' => $m['request_id'] ? (int)$m['request_id'] : null, 'folder' => $m['req_folder'],
+            'invoice_id' => $m['invoice_id'] ? (int)$m['invoice_id'] : null, 'invoice_number' => $m['inv_number'],
+            'invoice_balance' => $m['inv_balance'] !== null ? (float)$m['inv_balance'] : null,
+            'afrasia' => $m['inv_issuer'] === 'Savannah Holidays Ltd',
+            'auto_close_on_payment' => $m['auto_close'] === 'payment',
+            'parent_id' => $m['parent_id'] ? (int)$m['parent_id'] : null,
+            'next_steps' => array_map(function ($n) { return ['id' => (int)$n['id'], 'title' => $n['title'], 'days_after' => (int)$n['next_offset_days']]; },
+                                      $next->fetchAll(PDO::FETCH_ASSOC)),
+            'source' => $m['source'], 'ext_key' => $m['ext_key'], 'updated_at' => $m['updated_at'],
+        ];
+    }
+    return $out;
+}
+
 /** 'YYYY-MM-DD' or fail. */
 function agent_iso_date($v, string $field): string {
     $v = trim((string)$v);
@@ -882,12 +947,14 @@ try {
                        ['invoice' => agent_invoice_out($inv), 'hint' => 'Resend with "allow_overpayment": true if that is intended.']);
         }
         try {
-            $pid = inv_add_payment($db, $id, $date, $amount, $method, $ref, $notes);
+            $closedMemos = [];
+            $pid = inv_add_payment($db, $id, $date, $amount, $method, $ref, $notes, $closedMemos);
         } catch (InvalidArgumentException $e) {
             agent_fail($e->getMessage());
         }
         agent_out(['ok' => true, 'payment_id' => $pid,
                    'message' => 'Payment of ' . fmt_money($amount, $inv['currency']) . ' recorded.',
+                   'memos_closed' => $closedMemos,
                    'invoice' => agent_invoice_out(inv_get($db, $id)), 'folder' => agent_invoice_folder($db, $id)]);
     }
 
@@ -994,6 +1061,123 @@ try {
                    'invoice' => agent_invoice_out($inv)]);
     }
 
+    // ── memo_list ────────────────────────────────────────────────────────────
+    // The owner's Memo Board: active memos (open / doing / waiting) by default.
+    case 'memo_list': {
+        $owner  = agent_memo_owner($db);
+        $where  = "m.user_id = ? AND m.deleted_at IS NULL";
+        $args   = [$owner['id']];
+        $status = array_filter(array_map('trim', explode(',', (string)($in['status'] ?? 'open,doing,waiting'))));
+        $status = array_values(array_intersect($status, MEMO_STATUSES));
+        if (!$status) agent_fail('status must be a comma list of: ' . implode(', ', MEMO_STATUSES));
+        $where .= " AND m.status IN (" . implode(',', array_fill(0, count($status), '?')) . ")";
+        $args = array_merge($args, $status);
+        $q = trim((string)($in['q'] ?? ''));
+        if ($q !== '') { $where .= " AND (m.title LIKE ? OR m.body LIKE ? OR m.waiting_on LIKE ?)"; array_push($args, "%$q%", "%$q%", "%$q%"); }
+        if ((int)($in['request_id'] ?? 0) > 0) { $where .= " AND m.request_id = ?"; $args[] = (int)$in['request_id']; }
+        if ((int)($in['invoice_id'] ?? 0) > 0) { $where .= " AND m.invoice_id = ?"; $args[] = (int)$in['invoice_id']; }
+        if (trim((string)($in['ext_key'] ?? '')) !== '') { $where .= " AND m.ext_key = ?"; $args[] = trim($in['ext_key']); }
+        if (!empty($in['follow_up_due'])) { $where .= " AND m.due_date <= ?"; $args[] = date('Y-m-d'); }
+        $rows = agent_memo_rows($db, $where, $args);
+        agent_out(['ok' => true, 'owner' => $owner['full_name'], 'count' => count($rows), 'memos' => $rows]);
+    }
+
+    // ── memo_save ────────────────────────────────────────────────────────────
+    // Create, or update when id / ext_key matches one of the owner's memos.
+    case 'memo_save': {
+        agent_require_method('POST');
+        $owner = agent_memo_owner($db);
+        $cur   = agent_memo_find($db, $owner['id'], $in);
+        if ((int)($in['id'] ?? 0) > 0 && !$cur) agent_fail('Memo ' . (int)$in['id'] . ' not found on ' . $owner['full_name'] . "'s board", 404);
+        $f = [];   // column => value, only for the fields given (update) / all (create)
+        $has = function ($k) use ($in) { return array_key_exists($k, $in); };
+
+        if ($has('title') || !$cur) {
+            $t = trim((string)($in['title'] ?? ''));
+            if ($t === '') agent_fail('title is required');
+            $f['title'] = mb_substr($t, 0, 255);
+        }
+        if ($has('body'))      $f['body'] = memo_text_to_html($in['body']);
+        if ($has('status') || !$cur) {
+            $s = (string)($in['status'] ?? 'open');
+            if (!in_array($s, ['open', 'doing', 'waiting'], true)) agent_fail('status must be open, doing or waiting (use memo_set_status to close)');
+            $f['status'] = $s;
+        }
+        if ($has('waiting_on')) $f['waiting_on'] = trim((string)$in['waiting_on']) !== '' ? mb_substr(trim($in['waiting_on']), 0, 120) : null;
+        if ($has('priority')) {
+            if (!in_array($in['priority'], ['low', 'normal', 'high'], true)) agent_fail('priority must be low, normal or high');
+            $f['priority'] = $in['priority'];
+        }
+        if ($has('due_date'))  $f['due_date'] = $in['due_date'] ? agent_iso_date($in['due_date'], 'due_date') : null;
+        if ($has('reminder_at')) {
+            $r = trim((string)$in['reminder_at']);
+            if ($r !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}$/', $r)) agent_fail('reminder_at must be "YYYY-MM-DD HH:MM" (EAT)');
+            $f['reminder_at'] = $r !== '' ? str_replace('T', ' ', $r) . ':00' : null;
+            $f['reminder_sent'] = 0;
+        }
+        if ($has('request_id')) {
+            $f['request_id'] = (int)$in['request_id'] > 0 ? (int)agent_request($db, $in['request_id'])['id'] : null;
+        }
+        if ($has('invoice_id') || $has('invoice_number')) {
+            $inv = memo_find_invoice($db, $in['invoice_id'] ?? $in['invoice_number'] ?? '');
+            if (!$inv && trim((string)($in['invoice_id'] ?? $in['invoice_number'] ?? '')) !== '') agent_fail('Invoice not found', 404);
+            $f['invoice_id'] = $inv ? (int)$inv['id'] : null;
+            if ($inv && $inv['request_id'] && !array_key_exists('request_id', $f) && (!$cur || !$cur['request_id'])) $f['request_id'] = (int)$inv['request_id'];
+        }
+        if ($has('auto_close_on_payment')) $f['auto_close'] = !empty($in['auto_close_on_payment']) ? 'payment' : null;
+        if ($has('ext_key')) $f['ext_key'] = trim((string)$in['ext_key']) !== '' ? mb_substr(trim($in['ext_key']), 0, 120) : null;
+
+        // Waiting with a follow-up date and no reminder → email reminder that morning at 08:00.
+        $status = $f['status'] ?? ($cur['status'] ?? 'open');
+        $due    = array_key_exists('due_date', $f) ? $f['due_date'] : ($cur['due_date'] ?? null);
+        $rem    = array_key_exists('reminder_at', $f) ? $f['reminder_at'] : ($cur['reminder_at'] ?? null);
+        if ($status === 'waiting' && $due && !$rem && !$has('reminder_at')) { $f['reminder_at'] = $due . ' 08:00:00'; $f['reminder_sent'] = 0; }
+        $invId = array_key_exists('invoice_id', $f) ? $f['invoice_id'] : ($cur['invoice_id'] ?? null);
+        if (($f['auto_close'] ?? null) === 'payment' && !$invId) agent_fail('auto_close_on_payment needs an invoice (invoice_id or invoice_number)');
+
+        $now = date('Y-m-d H:i:s');
+        if ($cur) {
+            $id = (int)$cur['id'];
+            if ($f) {
+                $f['updated_at'] = $now;
+                $db->prepare("UPDATE memos SET " . implode(', ', array_map(function ($c) { return $c . ' = ?'; }, array_keys($f))) . " WHERE id = ?")
+                   ->execute(array_merge(array_values($f), [$id]));
+            }
+        } else {
+            $f += ['user_id' => $owner['id'], 'type' => 'todo', 'priority' => 'normal', 'pinned' => 0, 'reminder_sent' => 0,
+                   'recur_rule' => 'none', 'sort_order' => 0, 'source' => 'claude', 'created_at' => $now, 'updated_at' => $now];
+            $db->prepare("INSERT INTO memos (" . implode(', ', array_keys($f)) . ") VALUES (" . implode(',', array_fill(0, count($f), '?')) . ")")
+               ->execute(array_values($f));
+            $id = (int)$db->lastInsertId();
+        }
+        if ($has('next_steps')) {
+            if (!is_array($in['next_steps'])) agent_fail('next_steps must be a list of {title, days_after?, body?}');
+            memo_set_next_steps($db, $id, $in['next_steps']);
+        }
+        $row = agent_memo_rows($db, "m.id = ?", [$id]);
+        agent_out(['ok' => true, 'created' => !$cur, 'owner' => $owner['full_name'], 'memo' => $row[0] ?? null]);
+    }
+
+    // ── memo_set_status ──────────────────────────────────────────────────────
+    // done → closes it (optional note appended) and opens its next steps.
+    case 'memo_set_status': {
+        agent_require_method('POST');
+        $owner = agent_memo_owner($db);
+        $cur   = agent_memo_find($db, $owner['id'], $in);
+        if (!$cur) agent_fail('Memo not found (give id or ext_key)', 404);
+        $s = (string)($in['status'] ?? '');
+        if (!in_array($s, ['open', 'doing', 'waiting', 'done', 'archived'], true)) agent_fail('status must be open, doing, waiting, done or archived');
+        $opened = [];
+        if ($s === 'done') {
+            $opened = memo_close($db, $cur['id'], (string)($in['note'] ?? ''));
+        } else {
+            $db->prepare("UPDATE memos SET status = ?, updated_at = ? WHERE id = ?")->execute([$s, date('Y-m-d H:i:s'), (int)$cur['id']]);
+        }
+        $row = agent_memo_rows($db, "m.id = ?", [(int)$cur['id']]);
+        agent_out(['ok' => true, 'memo' => $row[0] ?? null,
+                   'opened_next' => $opened ? agent_memo_rows($db, "m.id IN (" . implode(',', array_map('intval', $opened)) . ")", []) : []]);
+    }
+
     // ── import_zoho_invoice ──────────────────────────────────────────────────
     // Bring an old Zoho invoice (e.g. INV-002417) into Hub with its original
     // number. Fields as api_import.php; Claude reads the Zoho PDF itself.
@@ -1049,7 +1233,7 @@ try {
             'copy_program', 'get_rates', 'fill_calc', 'read_calc', 'confirm_preview', 'confirm_booking', 'send_booking_email',
             'rollback_booking', 'iti_programs', 'iti_texts', 'iti_save_texts', 'update_rate', 'replace_flight_rates',
             'find_invoices', 'get_invoice', 'add_invoice_payment', 'cancel_invoice_payment', 'update_folder_status',
-            'save_invoice_pdf', 'import_zoho_invoice',
+            'save_invoice_pdf', 'import_zoho_invoice', 'memo_list', 'memo_save', 'memo_set_status',
         ]]);
     }
 } catch (Throwable $e) {

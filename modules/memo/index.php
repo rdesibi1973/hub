@@ -138,6 +138,24 @@ $extra_css = '
 .memo-share-toggle input[type="checkbox"] { width:15px; height:15px; accent-color:#C0211B; cursor:pointer; }
 .memo-share-toggle span { font-size:.75rem; color:#555; white-space:nowrap; }
 .memo-share-hint { font-size:.75rem; color:#888; margin-top:8px; line-height:1.4; }
+
+/* follow-ups: status, links, next step */
+.memo-group-waiting .memo-group-label { color:#6A1B9A; }
+.memo-card.is-waiting { border-top:3px dashed #8E24AA; }
+.memo-card.is-doing   { border-top:3px solid #1E88E5; }
+.memo-status { font-size:.66rem; font-weight:700; padding:1px 6px; border-radius:3px; }
+.memo-status-waiting { background:#F3E5F5; color:#6A1B9A; }
+.memo-status-doing   { background:#E3F2FD; color:#1565C0; }
+.memo-link { font-size:.68rem; color:#1565C0; background:rgba(255,255,255,.7); padding:2px 6px; border-radius:4px; text-decoration:none; }
+.memo-link:hover { text-decoration:underline; }
+.memo-badge-afr { font-size:.66rem; font-weight:700; background:#FFF3E0; color:#E65100; padding:2px 6px; border-radius:4px; }
+.memo-badge-claude { font-size:.63rem; background:rgba(0,0,0,.08); color:#555; padding:1px 5px; border-radius:3px; }
+.memo-next { margin-top:6px; font-size:.72rem; color:#555; border-top:1px dashed rgba(0,0,0,.15); padding-top:5px; }
+.memo-modal .memo-box { margin-top:12px; padding:10px 12px; background:#f7f5f2; border-radius:6px; }
+.memo-modal .memo-box label:first-child { margin-top:0; }
+.memo-modal input[type="number"] { width:100%; box-sizing:border-box; padding:7px 8px; border:1px solid #ccc; border-radius:4px; font-size:14px; }
+.memo-check { display:flex; align-items:center; gap:8px; margin-top:8px; font-size:.8rem; color:#444; }
+.memo-check input { width:15px; height:15px; accent-color:#C0211B; }
 ';
 
 include __DIR__ . '/../../includes/layout_header.php';
@@ -163,6 +181,9 @@ include __DIR__ . '/../../includes/layout_header.php';
       <div class="memo-help-item"><strong>✉ Email reminder</strong>Tick "Send email reminder", set a date &amp; time, and choose Once / Daily / Weekly / Monthly. An email is sent to your account at that time (checked every 15 min). You can also add extra recipients under &ldquo;Also send to&rdquo;.</div>
       <div class="memo-help-item"><strong>🎨 Priority &amp; color</strong>High priority adds a red bar on the left edge. Choose a card color to visually group memos.</div>
       <div class="memo-help-item"><strong>👥 Share</strong>Click the Share button on a card to share it with everyone or with specific users. You can choose whether they can only view or also edit.</div>
+      <div class="memo-help-item"><strong>⏳ Waiting for</strong>Set the status to <em>Waiting for…</em> and who you are waiting for; the due date becomes the follow-up date. Add an email reminder to be nudged.</div>
+      <div class="memo-help-item"><strong>🔗 Booking / invoice</strong>Link a memo to a booking or an invoice. With <em>Close automatically</em> the memo is closed as soon as a payment is recorded on that invoice. 🏦 AfrAsia = Savannah Holidays invoice: check the bank yourself.</div>
+      <div class="memo-help-item"><strong>➜ Next step</strong>A next step (e.g. pay the supplier) stays hidden and appears on the board when the memo is done.</div>
       <div class="memo-help-item"><strong>🗑 Delete</strong>Open a memo, click Edit, then Delete. Deletion is permanent.</div>
     </div>
   </div>
@@ -178,6 +199,21 @@ include __DIR__ . '/../../includes/layout_header.php';
 
     <label>Title</label>
     <input type="text" id="m_title" maxlength="255" placeholder="Short title">
+
+    <div class="memo-row">
+      <div>
+        <label>Status</label>
+        <select id="m_status">
+          <option value="open">To do</option>
+          <option value="doing">In progress</option>
+          <option value="waiting">Waiting for…</option>
+        </select>
+      </div>
+      <div id="m_waiting_wrap" style="flex:2;display:none;">
+        <label>Waiting for (who)</label>
+        <input type="text" id="m_waiting_on" maxlength="120" placeholder="e.g. Glady (Asilia)">
+      </div>
+    </div>
 
     <label>Notes</label>
     <div id="m_body_editor" class="memo-quill"></div>
@@ -205,8 +241,40 @@ include __DIR__ . '/../../includes/layout_header.php';
         </select>
       </div>
       <div>
-        <label>Due date</label>
+        <label id="m_due_label">Due date</label>
         <input type="date" id="m_due_date">
+      </div>
+    </div>
+
+    <!-- Link to a booking / invoice -->
+    <div class="memo-box">
+      <div class="memo-row">
+        <div>
+          <label>Booking (request #)</label>
+          <input type="text" id="m_request_id" placeholder="e.g. 2958">
+        </div>
+        <div>
+          <label>Invoice #</label>
+          <input type="text" id="m_invoice" placeholder="e.g. SH-2026-0041">
+        </div>
+      </div>
+      <label class="memo-check" id="m_auto_close_wrap">
+        <input type="checkbox" id="m_auto_close">
+        <span>Close automatically when a payment is recorded on this invoice</span>
+      </label>
+    </div>
+
+    <!-- Next step: appears on the board when this memo is done -->
+    <div class="memo-box">
+      <div class="memo-row">
+        <div style="flex:3">
+          <label>Then (next step, appears when this is done)</label>
+          <input type="text" id="m_next_title" maxlength="255" placeholder="e.g. Pay the supplier">
+        </div>
+        <div>
+          <label>Due after (days)</label>
+          <input type="number" id="m_next_days" min="0" max="365" value="0">
+        </div>
       </div>
     </div>
 

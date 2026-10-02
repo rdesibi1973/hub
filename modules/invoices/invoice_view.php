@@ -110,8 +110,10 @@ if (isset($_POST['add_payment'])) {
     if (!in_array($method, INV_METHODS)) $pErrors[] = 'Invalid payment method.';
 
     if (!$pErrors) {
-        inv_add_payment($db, $id, $payDate, $amount, $method, $ref, $notes);
-        flash("Payment of " . fmt_money($amount, '') . " recorded.");
+        $closedMemos = [];
+        inv_add_payment($db, $id, $payDate, $amount, $method, $ref, $notes, $closedMemos);
+        flash("Payment of " . fmt_money($amount, '') . " recorded."
+              . ($closedMemos ? ' Memo closed: ' . implode(', ', array_column($closedMemos, 'title')) . '.' : ''));
         header("Location: invoice_view.php?id=$id"); exit;
     }
 }
@@ -169,6 +171,10 @@ try {
     <a href="invoice_edit.php?id=<?= $id ?>" class="btn btn-outline">Edit</a>
     <a href="#" class="btn btn-outline" onclick="openMailModal();return false;">✉ Mail</a>
     <a href="invoice_pdf.php?id=<?= $id ?>&download=1" class="btn btn-outline" target="_blank">🖨 PDF</a>
+    <?php if ($inv['status'] !== 'Cancelled' && (float)$inv['balance_due'] > 0): ?>
+      <a href="../memo/index.php?new=payment&invoice=<?= urlencode($inv['invoice_number']) ?>" class="btn btn-outline"
+         title="Memo Board: wait for this payment, closed automatically when it is recorded">⏳ Follow-up</a>
+    <?php endif; ?>
     <?php if ($inv['status'] !== 'Cancelled'): ?>
       <a href="cn_add.php?invoice_id=<?= $id ?>" class="btn btn-outline">+ Credit Note</a>
     <?php endif; ?>
