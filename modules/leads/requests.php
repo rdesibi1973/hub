@@ -92,7 +92,8 @@ $where  = ['1=1'];
 $params = [];
 
 if ($search) {
-    $where[]  = '(r.customer_name LIKE ? OR r.practice_code LIKE ?)';
+    $where[]  = '(r.customer_name LIKE ? OR r.practice_code LIKE ? OR r.email LIKE ?)';
+    $params[] = "%$search%";
     $params[] = "%$search%";
     $params[] = "%$search%";
 }
@@ -188,7 +189,7 @@ include 'includes/header.php';
 <form method="GET" class="filters">
   <div>
     <label>Search</label>
-    <input type="text" name="q" placeholder="Customer or practice code…" value="<?= h($search) ?>">
+    <input type="text" name="q" placeholder="Customer, practice code or email…" value="<?= h($search) ?>">
   </div>
   <div>
     <label>Status</label>
