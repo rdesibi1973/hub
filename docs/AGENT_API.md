@@ -195,6 +195,8 @@ day header and programme cover (destination).
 `lodge_id` + one of: `photos` [ordered final list, ≤ 12, first = main] | `add` [appended] ; `remove?` [];
 `download?` (default **true**: web links are downloaded, checked as images, shrunk to 2000 px and stored in
 `uploads/lodges/`; `false` keeps them as links). Photos already on the lodge stay as they are.
+`uploads?` [{`name`, `content_base64`}] sends our own photo files (no web link), appended after the links
+(base64 omitted from the audit log). Keep a body under ~8 MB: send a few files per call, then `add`/`uploads` again.
 Dry-run (returns `plan[]` `{url, action: keep|download|link}` and `remove[]`) unless `"confirm": true`.
 With confirm → `photos[]` (final, local URLs) and `errors[]` (links that could not be downloaded; 422 if any).
 Removed photos stored in `uploads/` are deleted. Only public http(s) hosts are fetched (no private addresses),

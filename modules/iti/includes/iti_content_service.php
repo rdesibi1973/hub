@@ -145,8 +145,20 @@ function iti_cs_set_photos(PDO $db, string $kind, int $id, array $in, bool $go):
     $download = !array_key_exists('download', $in) || !empty($in['download']);
     $name = $isLodge ? $row['name'] : ($row['code'] . '-' . $row['name_en']);
 
+    // Files sent in the body (our own photos, no web link): appended after the links.
+    $files = [];
+    foreach ((array)($in['uploads'] ?? []) as $i => $f) {
+        $b = is_array($f) ? base64_decode((string)($f['content_base64'] ?? ''), true) : false;
+        if ($b === false || $b === '') throw new InvalidArgumentException('uploads[' . $i . ']: content_base64 missing or not base64');
+        if (strlen($b) > ITI_PHOTO_MAX_BYTES) throw new InvalidArgumentException('uploads[' . $i . ']: larger than 15 MB');
+        $files[] = ['name' => (string)($f['name'] ?? ('upload-' . $i)), 'data' => $b];
+    }
+    if (!$isLodge && $files) $want = [];                         // cover: the uploaded one wins
+    if (count($want) + count($files) > $max) throw new InvalidArgumentException('At most ' . $max . ' photos (got ' . (count($want) + count($files)) . ')');
+
     $plan = [];
     foreach ($want as $u) $plan[] = ['url' => $u, 'action' => in_array($u, $old, true) ? 'keep' : ($download ? 'download' : 'link')];
+    foreach ($files as $i => $f) $plan[] = ['url' => $f['name'], 'action' => 'upload', 'file' => $i, 'bytes' => strlen($f['data'])];
     $removed = array_values(array_diff($old, $want));
     $res = ['id' => $id, 'name' => $isLodge ? $row['name'] : $row['name_en'], 'before' => $old, 'plan' => $plan, 'remove' => $removed];
     if (!$go) return $res;
@@ -154,8 +166,16 @@ function iti_cs_set_photos(PDO $db, string $kind, int $id, array $in, bool $go):
     $final = []; $errors = [];
     if (function_exists('set_time_limit')) @set_time_limit(300);
     foreach ($plan as $p) {
-        if ($p['action'] !== 'download') { $final[] = $p['url']; continue; }
         $err = null;
+        if ($p['action'] === 'upload') {
+            $tmp = tempnam(sys_get_temp_dir(), 'itiup');
+            file_put_contents($tmp, $files[$p['file']]['data']);
+            $local = iti_photo_store($tmp, $p['url'], $sub, $name, false, $err);
+            if (is_file($tmp)) @unlink($tmp);
+            if ($local !== null) $final[] = $local; else $errors[] = $err ?: ($p['url'] . ': failed');
+            continue;
+        }
+        if ($p['action'] !== 'download') { $final[] = $p['url']; continue; }
         $local = iti_photo_fetch($p['url'], $sub, $name, $err);
         if ($local !== null) $final[] = $local; else $errors[] = $err ?: ($p['url'] . ': failed');
     }

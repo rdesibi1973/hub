@@ -93,6 +93,12 @@ function agent_audit(PDO $db, string $action, $reqId, array $payload, string $re
                                    'subject' => $m['subject'] ?? null, 'name' => $m['name'] ?? null,
                                    'saved_to' => $res['saved_to'] ?? null], JSON_UNESCAPED_UNICODE);
     }
+    if (!empty($payload['uploads']) && is_array($payload['uploads'])) {      // ITI photos sent as files
+        foreach ($payload['uploads'] as &$u) {
+            if (is_array($u) && isset($u['content_base64'])) $u['content_base64'] = '[' . strlen((string)$u['content_base64']) . ' chars]';
+        }
+        unset($u);
+    }
     if (!empty($payload['attachments']) && is_array($payload['attachments'])) {
         foreach ($payload['attachments'] as &$a) {
             if (is_array($a) && isset($a['content_base64'])) $a['content_base64'] = '[' . strlen((string)$a['content_base64']) . ' chars]';
