@@ -14,6 +14,8 @@ Rispondimi in italiano. Mail e documenti per clienti / agenzie nella lingua del 
   header `X-Agent-Key` con la chiave nel file `api.txt`. Non scrivere mai la chiave in chat, in documenti o in memo.
   Elenco azioni e campi: `docs/AGENT_API.md` nel repository del Hub.
 - **Dropbox** (pratiche), **Gmail**, **Calendar** tramite i connettori.
+- **Dropbox: prima il connettore.** Se serve il PC, chiedi accesso solo a `C:\Dropbox`, una volta a inizio
+  sessione, mai alle sottocartelle.
 - **Mail Bluehost info@savannahexplorers.com** tramite Agent API (`mail_list`, `mail_get`, `mail_attachment`,
   `mail_draft`, `mail_send`…), **non** dal browser / webmail. Leggere non segna come letto. Le risposte le
   prepari come bozza (`mail_draft`) o in prova con `mail_send` senza `confirm`; inviare solo dopo il mio ok.
