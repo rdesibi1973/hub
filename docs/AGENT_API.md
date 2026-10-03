@@ -173,6 +173,43 @@ and the descriptions of the programme's lodges and destinations. Without `all`, 
 so edited translations are kept). Dry-run unless `"confirm": true`. Lets Claude translate programmes in a session
 (no Anthropic API billing); the Hub "Translate" button does the same through the API when `ANTHROPIC_API_KEY` is set.
 
+### ITI master data — lodges and destinations
+Code: `modules/iti/includes/iti_content_service.php` (+ `iti_photos.php`, shared with the Lodges / Destinations pages).
+Photos are what the magazine layout (`&layout=mag`) shows: lodge card and stays (lodge, first photo = main),
+day header and programme cover (destination).
+
+#### `iti_lodges` (GET)
+`q?` (lodge / destination name), `destination?` (id, name or code), `active?` (`1` default, `0`, `all`),
+`missing?` (`photos` | `coords` | `website` | `description_<lang>`), `limit?` ≤ 300 →
+`lodges[]` `{id, name, destination_id, destination, category, type, website, latitude, longitude, photos[], description_langs[], active}`.
+
+#### `iti_lodge` (GET)
+`lodge_id` → the same plus `phone, emergency_phone, email, address, description_<lang>` (all 5).
+
+#### `iti_destinations` / `iti_destination` (GET)
+`q?`, `active?`, `missing?` (`photo` | `coords` | `description_<lang>`) → `destinations[]`
+`{id, code, name, region, latitude, longitude, cover_photo, lodges, description_langs[], active}`;
+`iti_destination` (`destination_id`) adds `name_<lang>` and `description_<lang>`.
+
+#### `iti_lodge_photos` (POST)
+`lodge_id` + one of: `photos` [ordered final list, ≤ 12, first = main] | `add` [appended] ; `remove?` [];
+`download?` (default **true**: web links are downloaded, checked as images, shrunk to 2000 px and stored in
+`uploads/lodges/`; `false` keeps them as links). Photos already on the lodge stay as they are.
+Dry-run (returns `plan[]` `{url, action: keep|download|link}` and `remove[]`) unless `"confirm": true`.
+With confirm → `photos[]` (final, local URLs) and `errors[]` (links that could not be downloaded; 422 if any).
+Removed photos stored in `uploads/` are deleted. Only public http(s) hosts are fetched (no private addresses),
+≤ 15 MB, ≤ 3 redirects, 25 s each.
+
+#### `iti_destination_photo` (POST)
+`destination_id`, `photo` (one link) — or `remove: [<current>]` to clear. Same download and dry-run rules;
+the new photo replaces the old cover.
+
+#### `iti_update_lodge` / `iti_update_destination` (POST)
+`lodge_id` / `destination_id`, `fields` `{…}`. Lodge: `website, phone, emergency_phone, email, address,
+description_<lang>, latitude, longitude`. Destination: `name_<lang>, description_<lang>, region, latitude, longitude`.
+Returns `changes` `{field: {from, to}}` (only what differs). Dry-run unless `"confirm": true`.
+Name, destination and category of a lodge stay on the Lodges page.
+
 ## Invoices
 
 Same logic as the invoice page (`modules/invoices/invoice_view.php`), shared through

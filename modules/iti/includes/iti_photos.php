@@ -7,7 +7,15 @@
  * The browser already shrinks big photos before upload (see iti_photo_editor());
  * the server shrinks again to ITI_PHOTO_MAX_SIDE when GD is there, and fixes the
  * EXIF rotation of phone pictures. The first photo of a list is the main one.
+ * iti_photo_fetch() downloads a photo from a web link (Agent API: photos taken
+ * from the lodges' websites) with the same checks and resizing.
+ *
+ * Self-contained (no iti_functions.php): the Agent API loads it next to the
+ * leads config, which has its own db().
  */
+if (!defined('ITI_MODULE_URL')) {
+    define('ITI_MODULE_URL', (defined('BASE_URL') ? BASE_URL : 'https://hub.savannahexplorers.com') . '/modules/iti');
+}
 
 const ITI_PHOTO_MAX_SIDE  = 2000;              // px, longest side
 const ITI_PHOTO_MAX_BYTES = 15 * 1024 * 1024;  // per uploaded file
@@ -30,8 +38,12 @@ function iti_photos_schema(): void {
     if ($done) return;
     $done = true;
     try {
-        iti_add_column('iti_lodges', 'photos', 'TEXT NULL DEFAULT NULL');
-        iti_add_column('iti_destinations', 'cover_photo', 'VARCHAR(255) NULL DEFAULT NULL');
+        $db = db();
+        foreach ([['iti_lodges', 'photos', 'TEXT NULL DEFAULT NULL'], ['iti_destinations', 'cover_photo', 'VARCHAR(255) NULL DEFAULT NULL']] as $c) {
+            if (!$db->query('SHOW COLUMNS FROM `' . $c[0] . '` LIKE ' . $db->quote($c[1]))->fetch()) {
+                $db->exec('ALTER TABLE `' . $c[0] . '` ADD COLUMN `' . $c[1] . '` ' . $c[2]);
+            }
+        }
     } catch (PDOException $e) {
         error_log('iti_photos_schema: ' . $e->getMessage());
     }
@@ -58,10 +70,7 @@ function iti_photo_slug(string $s): string {
     return $s !== '' ? substr($s, 0, 40) : 'photo';
 }
 
-/**
- * Save one uploaded image. Returns its public URL, or null with $err set.
- * JPEG/PNG/WEBP/GIF in; JPEG out when GD can resize, else the file as it came.
- */
+/** Save one uploaded image (form). Returns its public URL, or null with $err set. */
 function iti_photo_save(array $file, string $sub, string $prefix, ?string &$err = null): ?string {
     $err = null;
     if (($file['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_NO_FILE || empty($file['tmp_name'])) return null;
@@ -70,16 +79,26 @@ function iti_photo_save(array $file, string $sub, string $prefix, ?string &$err 
              ? $file['name'] . ': too large for the server.' : $file['name'] . ': upload failed (code ' . $file['error'] . ').';
         return null;
     }
-    if ($file['size'] > ITI_PHOTO_MAX_BYTES) { $err = $file['name'] . ': larger than 15 MB.'; return null; }
-    $info = @getimagesize($file['tmp_name']);
+    return iti_photo_store($file['tmp_name'], (string)$file['name'], $sub, $prefix, true, $err);
+}
+
+/**
+ * Store an image file into uploads/<sub>/: checks it is a real JPG/PNG/WEBP/GIF,
+ * then JPEG ≤ ITI_PHOTO_MAX_SIDE when GD can, else the file as it came.
+ * $uploaded: the file came from a form (move_uploaded_file) or a download (rename).
+ */
+function iti_photo_store(string $path, string $label, string $sub, string $prefix, bool $uploaded, ?string &$err = null): ?string {
+    $err = null;
+    if (@filesize($path) > ITI_PHOTO_MAX_BYTES) { $err = $label . ': larger than 15 MB.'; return null; }
+    $info = @getimagesize($path);
     $exts = [IMAGETYPE_JPEG => 'jpg', IMAGETYPE_PNG => 'png', IMAGETYPE_WEBP => 'webp', IMAGETYPE_GIF => 'gif'];
-    if (!$info || !isset($exts[$info[2]])) { $err = $file['name'] . ': not a JPG, PNG, WEBP or GIF image.'; return null; }
+    if (!$info || !isset($exts[$info[2]])) { $err = $label . ': not a JPG, PNG, WEBP or GIF image.'; return null; }
 
     $dir = iti_photo_dir($sub);
     if (!is_dir($dir) && !@mkdir($dir, 0755, true)) { $err = 'Cannot create the folder uploads/' . $sub . '.'; return null; }
     $base = iti_photo_slug($prefix) . '_' . date('ymdHis') . '_' . bin2hex(random_bytes(3));
 
-    $img = iti_photo_load($file['tmp_name'], $info[2]);
+    $img = iti_photo_load($path, $info[2]);
     if ($img) {
         $img = iti_photo_fit($img, ITI_PHOTO_MAX_SIDE);
         $name = $base . '.jpg';
@@ -89,8 +108,91 @@ function iti_photo_save(array $file, string $sub, string $prefix, ?string &$err 
     }
     // No GD (or it failed): keep the original file.
     $name = $base . '.' . $exts[$info[2]];
-    if (!move_uploaded_file($file['tmp_name'], $dir . '/' . $name)) { $err = $file['name'] . ': could not be saved.'; return null; }
+    $ok = $uploaded ? move_uploaded_file($path, $dir . '/' . $name) : @rename($path, $dir . '/' . $name);
+    if (!$ok) { $err = $label . ': could not be saved.'; return null; }
     return iti_photo_url_base($sub) . '/' . $name;
+}
+
+/** Download an image from a web link and store it like an upload. Returns its URL, or null with $err set. */
+function iti_photo_fetch(string $url, string $sub, string $prefix, ?string &$err = null): ?string {
+    $err = null;
+    $tmp = tempnam(sys_get_temp_dir(), 'itiph');
+    if ($tmp === false) { $err = 'No temp file.'; return null; }
+    try {
+        if (!iti_photo_download($url, $tmp, $err)) return null;
+        return iti_photo_store($tmp, $url, $sub, $prefix, false, $err);
+    } finally {
+        if (is_file($tmp)) @unlink($tmp);
+    }
+}
+
+/**
+ * GET a public http(s) URL into $dest. Refuses hosts that resolve to private /
+ * reserved addresses (no requests into the server's own network), pins the
+ * checked IP for the request, follows at most 3 redirects (each re-checked),
+ * stops past ITI_PHOTO_MAX_BYTES, 25 s timeout.
+ */
+function iti_photo_download(string $url, string $dest, ?string &$err = null): bool {
+    if (!function_exists('curl_init')) { $err = 'cURL is not available on the server.'; return false; }
+    for ($hop = 0; $hop <= 3; $hop++) {
+        $p = parse_url($url);
+        $scheme = strtolower((string)($p['scheme'] ?? ''));
+        $host = (string)($p['host'] ?? '');
+        if (!in_array($scheme, ['http', 'https'], true) || $host === '' || isset($p['user'])) { $err = $url . ': not a public http(s) link.'; return false; }
+        $port = (int)($p['port'] ?? ($scheme === 'https' ? 443 : 80));
+        $ips = filter_var($host, FILTER_VALIDATE_IP) ? [$host] : (gethostbynamel($host) ?: []);
+        if (!$ips) { $err = $url . ': host not found.'; return false; }
+        foreach ($ips as $ip) {
+            if (!filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) { $err = $url . ': private address refused.'; return false; }
+        }
+        $fh = fopen($dest, 'wb');
+        if (!$fh) { $err = 'Cannot write the temp file.'; return false; }
+        $size = 0; $location = '';
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_RESOLVE        => [$host . ':' . $port . ':' . $ips[0]],
+            CURLOPT_FOLLOWLOCATION => false,
+            CURLOPT_PROTOCOLS      => CURLPROTO_HTTP | CURLPROTO_HTTPS,
+            CURLOPT_CONNECTTIMEOUT => 10,
+            CURLOPT_TIMEOUT        => 25,
+            CURLOPT_USERAGENT      => 'Mozilla/5.0 (compatible; SavannahExplorersHub/1.0; +https://www.savannahexplorers.com)',
+            CURLOPT_HTTPHEADER     => ['Accept: image/webp,image/jpeg,image/png,image/*;q=0.8'],
+            CURLOPT_HEADERFUNCTION => function ($c, $h) use (&$location) {
+                if (stripos($h, 'Location:') === 0) $location = trim(substr($h, 9));
+                return strlen($h);
+            },
+            CURLOPT_WRITEFUNCTION  => function ($c, $data) use ($fh, &$size) {
+                $size += strlen($data);
+                if ($size > ITI_PHOTO_MAX_BYTES) return 0;   // abort
+                return fwrite($fh, $data);
+            },
+        ]);
+        $ok   = curl_exec($ch);
+        $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $cerr = curl_error($ch);
+        curl_close($ch);
+        fclose($fh);
+        if (in_array($code, [301, 302, 303, 307, 308], true) && $location !== '') {
+            $url = iti_photo_abs_url($location, $url);
+            continue;
+        }
+        if ($size > ITI_PHOTO_MAX_BYTES) { $err = $url . ': larger than 15 MB.'; return false; }
+        if (!$ok || $code !== 200) { $err = $url . ': download failed (' . ($code ?: $cerr) . ').'; return false; }
+        return true;
+    }
+    $err = $url . ': too many redirects.';
+    return false;
+}
+
+/** Resolve a redirect Location against the URL it came from. */
+function iti_photo_abs_url(string $loc, string $base): string {
+    if (preg_match('~^https?://~i', $loc)) return $loc;
+    $b = parse_url($base);
+    $root = $b['scheme'] . '://' . $b['host'] . (isset($b['port']) ? ':' . $b['port'] : '');
+    if (strpos($loc, '//') === 0) return $b['scheme'] . ':' . $loc;
+    if (strpos($loc, '/') === 0) return $root . $loc;
+    $dir = isset($b['path']) ? preg_replace('~/[^/]*$~', '/', $b['path']) : '/';
+    return $root . $dir . $loc;
 }
 
 /** GD image from a file, EXIF rotation applied (JPEG); null without GD. */

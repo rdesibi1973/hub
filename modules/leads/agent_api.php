@@ -22,6 +22,7 @@ require_once __DIR__ . '/includes/booking_service.php';
 require_once __DIR__ . '/includes/postpone_lib.php';   // booking_cc_agent_email()
 require_once __DIR__ . '/includes/calc_service.php';   // get_rates, fill_calc
 require_once __DIR__ . '/../iti/includes/iti_texts.php'; // ITI programme translations
+require_once __DIR__ . '/../iti/includes/iti_content_service.php'; // ITI lodges / destinations / photos
 // AGENT_API_KEY / AGENT_API_USER live in the root includes/config.php (server-only).
 if (!defined('AGENT_API_KEY') && is_file(__DIR__ . '/../../includes/config.php')) {
     require_once __DIR__ . '/../../includes/config.php';
@@ -82,7 +83,8 @@ function agent_audit(PDO $db, string $action, $reqId, array $payload, string $re
     global $agentUser;
     agent_ensure_schema($db);
     $dry = in_array($action, ['confirm_booking', 'send_booking_email', 'rollback_booking', 'fill_calc', 'iti_save_texts', 'update_rate', 'replace_flight_rates',
-                              'cancel_invoice_payment', 'update_folder_status', 'import_zoho_invoice', 'mail_send', 'mail_move'], true) && empty($payload['confirm']);
+                              'cancel_invoice_payment', 'update_folder_status', 'import_zoho_invoice', 'mail_send', 'mail_move',
+                              'iti_lodge_photos', 'iti_destination_photo', 'iti_update_lodge', 'iti_update_destination'], true) && empty($payload['confirm']);
     // Mail: keep who/what in the log, not message bodies or attachment content.
     if (in_array($action, ['mail_get', 'mail_attachment'], true) && $code === 200) {
         $res = json_decode($resultJson, true);
@@ -882,6 +884,53 @@ try {
         agent_out(array_merge(['ok' => true, 'dry_run' => false], $r));
     }
 
+    // ── ITI master data: lodges / destinations, photos, texts ────────────────
+    case 'iti_lodges':
+        agent_out(['ok' => true, 'lodges' => iti_cs_lodges($db, $in)]);
+
+    case 'iti_lodge': {
+        $r = iti_cs_lodge_row($db, (int)($in['lodge_id'] ?? $in['id'] ?? 0));
+        if (!$r) agent_fail('Lodge not found', 404);
+        agent_out(['ok' => true, 'lodge' => iti_cs_lodge_out($r, true)]);
+    }
+
+    case 'iti_destinations':
+        agent_out(['ok' => true, 'destinations' => iti_cs_destinations($db, $in)]);
+
+    case 'iti_destination': {
+        $r = iti_cs_destination_row($db, (int)($in['destination_id'] ?? $in['id'] ?? 0));
+        if (!$r) agent_fail('Destination not found', 404);
+        agent_out(['ok' => true, 'destination' => iti_cs_destination_out($r, true)]);
+    }
+
+    // Photos from web links (downloaded into the Hub). Dry-run unless "confirm": true.
+    case 'iti_lodge_photos':
+    case 'iti_destination_photo': {
+        agent_require_method('POST');
+        $lodge = $agentAction === 'iti_lodge_photos';
+        $go = !empty($in['confirm']);
+        try {
+            $r = iti_cs_set_photos($db, $lodge ? 'lodge' : 'destination', (int)($in[$lodge ? 'lodge_id' : 'destination_id'] ?? 0), $in, $go);
+        } catch (InvalidArgumentException $e) { agent_fail($e->getMessage(), 400); }
+        if (!$go) agent_out(array_merge(['ok' => true, 'dry_run' => true], $r, ['message' => 'Dry run — nothing downloaded or saved. Resend with "confirm": true.']));
+        agent_out(array_merge(['ok' => !$r['errors'] || $r['photos'], 'dry_run' => false], $r), $r['errors'] ? 422 : 200);
+    }
+
+    // Texts / contacts / coordinates. Dry-run unless "confirm": true.
+    case 'iti_update_lodge':
+    case 'iti_update_destination': {
+        agent_require_method('POST');
+        $lodge = $agentAction === 'iti_update_lodge';
+        $fields = isset($in['fields']) && is_array($in['fields']) ? $in['fields'] : [];
+        if (!$fields) agent_fail('fields is required: {"<column>": "<value>", …}');
+        $go = !empty($in['confirm']);
+        try {
+            $r = iti_cs_update($db, $lodge ? 'lodge' : 'destination', (int)($in[$lodge ? 'lodge_id' : 'destination_id'] ?? 0), $fields, $go);
+        } catch (InvalidArgumentException $e) { agent_fail($e->getMessage(), 400); }
+        agent_out(array_merge(['ok' => true, 'dry_run' => !$go], $r,
+            $go ? [] : ['message' => 'Dry run — nothing saved. Resend with "confirm": true.']));
+    }
+
     // ── rollback_booking ─────────────────────────────────────────────────────
     // Undo a Hub confirmation (same as BackOffice "Rollback…"): folder back to its
     // pre-confirm location, status restored. Dry-run unless "confirm": true.
@@ -1426,6 +1475,8 @@ try {
             'find_requests', 'list_agencies', 'create_request', 'update_request', 'list_standard_programs',
             'copy_program', 'get_rates', 'fill_calc', 'read_calc', 'confirm_preview', 'confirm_booking', 'send_booking_email',
             'rollback_booking', 'iti_programs', 'iti_texts', 'iti_save_texts', 'update_rate', 'replace_flight_rates',
+            'iti_lodges', 'iti_lodge', 'iti_destinations', 'iti_destination', 'iti_lodge_photos', 'iti_destination_photo',
+            'iti_update_lodge', 'iti_update_destination',
             'find_invoices', 'get_invoice', 'add_invoice_payment', 'cancel_invoice_payment', 'update_folder_status',
             'save_invoice_pdf', 'import_zoho_invoice', 'memo_list', 'memo_save', 'memo_set_status',
             'routine_status', 'routine_done',
