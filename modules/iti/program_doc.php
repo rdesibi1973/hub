@@ -43,4 +43,13 @@ if (!empty($program['is_published']) && !empty($program['public_token'])) {
     $extra .= '<a href="itinerary.php?token=' . h($program['public_token']) . '&lang=' . h($lang) . '" target="_blank">🔗 Public link</a>';
 }
 $extra .= '<a href="#" onclick="window.print();return false">🖨 Print / PDF</a>';
-iti_doc_page($D, iti_doc_lang_bar($lang, ['id' => $id], $extra));
+$mag = ($_GET['layout'] ?? '') === 'mag';
+$extra .= $mag ? '<a href="?id=' . $id . '&lang=' . h($lang) . '">Etnia layout</a>'
+               : '<a href="?id=' . $id . '&lang=' . h($lang) . '&layout=mag">📷 Magazine layout</a>';
+$keep = $mag ? ['id' => $id, 'layout' => 'mag'] : ['id' => $id];
+if ($mag) {
+    require_once __DIR__ . '/includes/iti_mag.php';
+    iti_mag_page($D, iti_doc_lang_bar($lang, $keep, $extra));
+} else {
+    iti_doc_page($D, iti_doc_lang_bar($lang, $keep, $extra));
+}

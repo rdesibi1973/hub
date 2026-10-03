@@ -2,7 +2,8 @@
 /**
  * iti_doc.php — the programme document in the "Etnia" layout (the Word programme
  * sent to agencies), rendered as HTML for the internal preview (program_doc.php)
- * and the public link (p.php). The Word export reuses iti_doc_data().
+ * and the public link (itinerary.php). iti_mag.php renders the same data in the
+ * photo "magazine" layout (?layout=mag).
  *
  * Sections: header · the safari at a glance (intro + day table) · prices (when
  * present) · included / not included · day by day (transfer · meals, text,
@@ -10,6 +11,7 @@
  *
  * Keep PHP-7 style (no match / arrow functions / str_contains).
  */
+require_once __DIR__ . '/iti_photos.php';
 
 /** UI strings per language. */
 function iti_doc_labels(string $lang): array {
@@ -109,6 +111,8 @@ function iti_doc_data(int $id, string $lang): ?array {
     if ($lodgeIds) {
         $in = implode(',', array_keys($lodgeIds));
         foreach ($db->query("SELECT * FROM iti_lodges WHERE id IN ($in)")->fetchAll() as $r) $lodges[(int)$r['id']] = $r;
+        // The lodge's own area (its destination), shown on the lodge card / stays.
+        foreach ($lodges as $r) if (!empty($r['destination_id'])) $destIds[(int)$r['destination_id']] = true;
     }
     if ($destIds) {
         $in = implode(',', array_keys($destIds));
@@ -131,18 +135,24 @@ function iti_doc_data(int $id, string $lang): ?array {
             if ($name !== '') $acts[] = $name;
         }
 
-        $lodgeName = ''; $lodgeDesc = '';
+        $lodgeName = ''; $lodgeDesc = ''; $lodgePhotos = []; $lodgeUrl = ''; $lodgeKey = ''; $lodgeArea = '';
         if (!empty($d['end_lodge_id']) && isset($lodges[(int)$d['end_lodge_id']])) {
             $lr = $lodges[(int)$d['end_lodge_id']];
             $lodgeName = $lr['name'];
+            $lodgeKey  = 'L' . $lr['id'];
+            if (!empty($lr['destination_id']) && isset($dests[(int)$lr['destination_id']])) $lodgeArea = iti_doc_pick($dests[(int)$lr['destination_id']], 'name', $lang);
+            $lodgePhotos = iti_photos_decode($lr['photos'] ?? null);
+            $lodgeUrl  = trim((string)($lr['website'] ?? ''));
             if (empty($seenLodge[$lr['id']])) { $lodgeDesc = iti_doc_pick($lr, 'description', $lang); $seenLodge[$lr['id']] = true; }
         } elseif (!empty($d['end_lodge_custom'])) {
             $lodgeName = $d['end_lodge_custom'];
+            $lodgeKey  = 'C' . strtolower(trim($lodgeName));
         }
-        $destName = ''; $destDesc = '';
+        $destName = ''; $destDesc = ''; $destPhoto = '';
         if (!empty($d['destination_id']) && isset($dests[(int)$d['destination_id']])) {
             $dr = $dests[(int)$d['destination_id']];
             $destName = iti_doc_pick($dr, 'name', $lang);
+            $destPhoto = trim((string)($dr['cover_photo'] ?? ''));
             if (empty($seenDest[$dr['id']])) { $destDesc = iti_doc_pick($dr, 'description', $lang); $seenDest[$dr['id']] = true; }
         } elseif (!empty($d['destination_custom'])) {
             $destName = $d['destination_custom'];
@@ -159,8 +169,13 @@ function iti_doc_data(int $id, string $lang): ?array {
             'narrative'  => iti_doc_pick($d, 'narrative', $lang),
             'dest'       => $destName,
             'dest_desc'  => $destDesc,
+            'dest_photo' => $destPhoto,
             'lodge'      => $lodgeName,
+            'lodge_key'  => $lodgeKey,
+            'lodge_area' => $lodgeArea,
             'lodge_desc' => $lodgeDesc,
+            'lodge_photos' => $lodgePhotos,
+            'lodge_url'  => $lodgeUrl,
             'activities' => $acts,
         ];
     }
@@ -217,6 +232,8 @@ function iti_doc_data(int $id, string $lang): ?array {
         'prices'   => $prices,
         'price_notes' => trim((string)($p['price_notes_' . $lang] ?? ($p['price_notes'] ?? ''))),
         'terms'    => $terms,
+        // Route map (airports + numbered overnight stops), used by the magazine layout.
+        'map'      => iti_get_program_map($days),
         'logo'     => iti_setting('logo_url', 'https://hub.savannahexplorers.com/modules/iti/uploads/logo/logo_1781526818.png'),
         // Office and emergencies only (no personal contact of the consultant).
         'contacts' => [
