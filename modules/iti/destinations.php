@@ -6,6 +6,7 @@
 require_once __DIR__ . '/../../includes/auth.php';
 require_login();
 require_once __DIR__ . '/includes/iti_functions.php';
+require_once __DIR__ . '/includes/iti_photos.php';
 
 $db       = db();
 $_cu      = current_user();
@@ -15,7 +16,13 @@ $action = $_REQUEST['action'] ?? '';
 $id     = (int)($_REQUEST['id'] ?? 0);
 
 // ── POST ────────────────────────────────────────────────────
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit && $action === 'delete' && $id) {
+    $db->prepare('UPDATE iti_destinations SET is_active=0 WHERE id=?')->execute([$id]);
+    iti_flash_set('success', 'Destination deactivated.');
+    iti_redirect('destinations.php');
+}
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit) {
+    iti_photos_schema();
     $fields = [];
     // Ordine DEVE corrispondere esattamente alle colonne nelle query INSERT/UPDATE
     $fields['code']        = strtoupper(trim($_POST['code']       ?? ''));
@@ -29,13 +36,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit) {
     $fields['country']     = trim($_POST['country']    ?? 'Tanzania');
     $fields['latitude']    = ($_POST['latitude']  ?? '') !== '' ? (float)$_POST['latitude']  : null;
     $fields['longitude']   = ($_POST['longitude'] ?? '') !== '' ? (float)$_POST['longitude'] : null;
-    $fields['cover_photo'] = trim($_POST['cover_photo'] ?? '');
+    $fields['cover_photo'] = '';   // set below, after validation (upload / link / kept)
     $fields['sort_order']  = (int)($_POST['sort_order'] ?? 0);
     $fields['is_active']   = isset($_POST['is_active']) ? 1 : 0;
 
     if ($fields['name_en'] === '' || $fields['code'] === '') {
         iti_flash_set('error', 'Name (EN) and Code are required.');
         iti_redirect('destinations.php' . ($id ? "?action=edit&id={$id}" : '?action=add'));
+    }
+
+    // Cover photo: one photo, a new upload or link replaces the old one.
+    $photo_errors = [];
+    if ($action === 'add' || ($action === 'edit' && $id)) {
+        $old = [];
+        if ($action === 'edit') {
+            $st = $db->prepare('SELECT cover_photo FROM iti_destinations WHERE id = ?');
+            $st->execute([$id]);
+            $c = trim((string)$st->fetchColumn());
+            if ($c !== '') $old[] = $c;
+        }
+        $cover = iti_photos_from_post($old, 'destinations', $fields['code'] . '-' . $fields['name_en'], 1, $photo_errors);
+        $fields['cover_photo'] = $cover ? $cover[0] : '';
     }
 
     if ($action === 'add') {
@@ -46,7 +67,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit) {
               region,country,latitude,longitude,cover_photo,sort_order,is_active)
              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
         )->execute(array_values($fields));
-        iti_flash_set('success', 'Destination "' . $fields['name_en'] . '" created.');
+        iti_flash_set($photo_errors ? 'error' : 'success', 'Destination "' . $fields['name_en'] . '" created.' . ($photo_errors ? ' Photo: ' . implode(' ', $photo_errors) : ''));
         iti_redirect('destinations.php');
 
     } elseif ($action === 'edit' && $id) {
@@ -57,12 +78,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit) {
              region=?,country=?,latitude=?,longitude=?,cover_photo=?,sort_order=?,is_active=?
              WHERE id=?'
         )->execute([...array_values($fields), $id]);
+        if ($photo_errors) {
+            iti_flash_set('error', 'Destination saved, but the photo was not: ' . implode(' ', $photo_errors));
+            iti_redirect("destinations.php?action=edit&id={$id}");
+        }
         iti_flash_set('success', 'Destination updated.');
-        iti_redirect('destinations.php');
-
-    } elseif ($action === 'delete' && $id) {
-        $db->prepare('UPDATE iti_destinations SET is_active=0 WHERE id=?')->execute([$id]);
-        iti_flash_set('success', 'Destination deactivated.');
         iti_redirect('destinations.php');
     }
 }
@@ -116,7 +136,7 @@ include __DIR__ . '/../../includes/layout_header.php';
 </div>
 
 <div class="form-card">
-<form method="POST" action="destinations.php?action=<?= h($action) ?><?= $id ? "&id={$id}" : '' ?>">
+<form method="POST" action="destinations.php?action=<?= h($action) ?><?= $id ? "&id={$id}" : '' ?>" enctype="multipart/form-data">
 
   <div class="form-section-title">Identification</div>
   <div class="form-grid">
@@ -143,7 +163,7 @@ include __DIR__ . '/../../includes/layout_header.php';
     </div>
   </div>
 
-  <div class="form-section-title">Coordinates &amp; Media</div>
+  <div class="form-section-title">Coordinates</div>
   <div class="form-grid">
     <div class="form-group">
       <label>Latitude</label>
@@ -153,11 +173,10 @@ include __DIR__ . '/../../includes/layout_header.php';
       <label>Longitude</label>
       <input type="number" name="longitude" step="0.000001" placeholder="35.735683" value="<?= $row['longitude'] ?? '' ?>">
     </div>
-    <div class="form-group full">
-      <label>Cover Photo URL</label>
-      <input type="url" name="cover_photo" placeholder="https://…" value="<?= h($row['cover_photo'] ?? '') ?>">
-    </div>
   </div>
+
+  <div class="form-section-title">Cover photo <span style="font-weight:400;font-size:.8rem;color:var(--grey-mid)">day header and programme cover — landscape, at least 1600 px wide</span></div>
+  <?= iti_photo_editor(!empty($row['cover_photo']) ? [$row['cover_photo']] : [], 1, 'Wide landscape shot without text on it.') ?>
 
   <div class="form-section-title">Name <span style="font-weight:400;font-size:.8rem;color:var(--grey-mid)">× 5 languages</span></div>
   <div class="form-grid">
@@ -192,13 +211,14 @@ include __DIR__ . '/../../includes/layout_header.php';
     <a href="destinations.php" class="btn btn-outline">Cancel</a>
     <?php if ($action==='edit' && $can_edit): ?>
     <div style="margin-left:auto;">
-      <form method="POST" action="destinations.php?action=delete&id=<?= $id ?>" style="display:inline;">
-        <button class="btn btn-danger btn-sm" onclick="return confirm('Deactivate this destination?')">Deactivate</button>
-      </form>
+      <button type="submit" form="deactivate-form" class="btn btn-danger btn-sm" onclick="return confirm('Deactivate this destination?')">Deactivate</button>
     </div>
     <?php endif; ?>
   </div>
 </form>
+<?php if ($action==='edit' && $can_edit): ?>
+<form id="deactivate-form" method="POST" action="destinations.php?action=delete&id=<?= $id ?>"></form>
+<?php endif; ?>
 </div>
 
 <?php else: ?>
@@ -248,9 +268,12 @@ include __DIR__ . '/../../includes/layout_header.php';
       <?php foreach ($destinations as $d): ?>
       <tr>
         <td><span style="font-family:monospace;font-weight:700;background:var(--off-white);padding:2px 8px;border-radius:4px;font-size:.8rem;"><?= h($d['code']) ?></span></td>
-        <td>
-          <div style="font-weight:600;"><?= h($d['name_en']) ?></div>
+        <td style="display:flex;gap:10px;align-items:center;">
+          <div style="width:54px;height:36px;flex:none;border-radius:4px;background:#eee center/cover no-repeat<?= !empty($d['cover_photo']) ? ";background-image:url('" . h($d['cover_photo']) . "')" : '' ?>"></div>
+          <div>
+          <div style="font-weight:600;"><?= h($d['name_en']) ?><?php if (empty($d['cover_photo'])): ?> <span style="font-size:.68rem;font-weight:400;color:var(--grey-mid);">· no photo</span><?php endif; ?></div>
           <?php if ($d['name_it'] && $d['name_it']!==$d['name_en']): ?><div style="font-size:.72rem;color:var(--grey-mid);"><?= h($d['name_it']) ?></div><?php endif; ?>
+          </div>
         </td>
         <td class="text-muted"><?= h($d['region'] ?? '—') ?></td>
         <td class="text-muted"><?= h($d['country']) ?></td>

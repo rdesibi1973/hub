@@ -6,6 +6,7 @@
 require_once __DIR__ . '/../../includes/auth.php';
 require_login();
 require_once __DIR__ . '/includes/iti_functions.php';
+require_once __DIR__ . '/includes/iti_photos.php';
 iti_ensure_final_schema();   // phone / email / address / emergency_phone
 
 $db       = db();
@@ -16,7 +17,13 @@ $action = $_REQUEST['action'] ?? '';
 $id     = (int)($_REQUEST['id'] ?? 0);
 
 // ── POST ────────────────────────────────────────────────────
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit && $action === 'delete' && $id) {
+    $db->prepare('UPDATE iti_lodges SET is_active=0 WHERE id=?')->execute([$id]);
+    iti_flash_set('success', 'Lodge deactivated.');
+    iti_redirect('lodges.php');
+}
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit) {
+    iti_photos_schema();
     $fields = [
         'destination_id' => (int)($_POST['destination_id'] ?? 0),
         'name'           => trim($_POST['name']      ?? ''),
@@ -40,21 +47,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit) {
         iti_redirect('lodges.php' . ($id ? "?action=edit&id={$id}" : '?action=add'));
     }
 
+    // Photos (first = main): kept / reordered ones + pasted links + uploads.
+    $photo_errors = [];
+    if ($action === 'add' || ($action === 'edit' && $id)) {
+        $old = [];
+        if ($action === 'edit') {
+            $st = $db->prepare('SELECT photos FROM iti_lodges WHERE id = ?');
+            $st->execute([$id]);
+            $old = iti_photos_decode($st->fetchColumn());
+        }
+        $photos = iti_photos_from_post($old, 'lodges', $fields['name'], 12, $photo_errors);
+        $fields['photos'] = $photos ? json_encode($photos, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) : null;
+    }
+
     if ($action === 'add') {
         $db->prepare(
             'INSERT INTO iti_lodges
              (destination_id,name,category,lodge_type,
               description_en,description_it,description_fr,description_es,description_de,
-              website,latitude,longitude,phone,email,address,emergency_phone,is_active)
-             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+              website,latitude,longitude,phone,email,address,emergency_phone,is_active,photos)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
         )->execute([
             $fields['destination_id'], $fields['name'], $fields['category'], $fields['lodge_type'],
             $fields['description_en'], $fields['description_it'], $fields['description_fr'],
             $fields['description_es'], $fields['description_de'],
             $fields['website'], $fields['latitude'], $fields['longitude'],
-            $fields['phone'], $fields['email'], $fields['address'], $fields['emergency_phone'], $fields['is_active'],
+            $fields['phone'], $fields['email'], $fields['address'], $fields['emergency_phone'], $fields['is_active'], $fields['photos'],
         ]);
-        iti_flash_set('success', '"' . $fields['name'] . '" created.');
+        iti_flash_set($photo_errors ? 'error' : 'success', '"' . $fields['name'] . '" created.' . ($photo_errors ? ' Photos: ' . implode(' ', $photo_errors) : ''));
         iti_redirect('lodges.php');
 
     } elseif ($action === 'edit' && $id) {
@@ -62,20 +82,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit) {
             'UPDATE iti_lodges SET
              destination_id=?,name=?,category=?,lodge_type=?,
              description_en=?,description_it=?,description_fr=?,description_es=?,description_de=?,
-             website=?,latitude=?,longitude=?,phone=?,email=?,address=?,emergency_phone=?,is_active=? WHERE id=?'
+             website=?,latitude=?,longitude=?,phone=?,email=?,address=?,emergency_phone=?,is_active=?,photos=? WHERE id=?'
         )->execute([
             $fields['destination_id'], $fields['name'], $fields['category'], $fields['lodge_type'],
             $fields['description_en'], $fields['description_it'], $fields['description_fr'],
             $fields['description_es'], $fields['description_de'],
             $fields['website'], $fields['latitude'], $fields['longitude'],
-            $fields['phone'], $fields['email'], $fields['address'], $fields['emergency_phone'], $fields['is_active'], $id,
+            $fields['phone'], $fields['email'], $fields['address'], $fields['emergency_phone'], $fields['is_active'], $fields['photos'], $id,
         ]);
+        if ($photo_errors) {
+            iti_flash_set('error', 'Lodge saved, but some photos were not: ' . implode(' ', $photo_errors));
+            iti_redirect("lodges.php?action=edit&id={$id}");
+        }
         iti_flash_set('success', 'Lodge updated.');
-        iti_redirect('lodges.php');
-
-    } elseif ($action === 'delete' && $id) {
-        $db->prepare('UPDATE iti_lodges SET is_active=0 WHERE id=?')->execute([$id]);
-        iti_flash_set('success', 'Lodge deactivated.');
         iti_redirect('lodges.php');
     }
 }
@@ -140,7 +159,7 @@ include __DIR__ . '/../../includes/layout_header.php';
 </div>
 
 <div class="form-card">
-<form method="POST" action="lodges.php?action=<?= h($action) ?><?= $id?"&id={$id}":'' ?>">
+<form method="POST" action="lodges.php?action=<?= h($action) ?><?= $id?"&id={$id}":'' ?>" enctype="multipart/form-data">
 
   <div class="form-section-title">Lodge Details</div>
   <div class="form-grid">
@@ -171,6 +190,9 @@ include __DIR__ . '/../../includes/layout_header.php';
       <input type="url" name="website" placeholder="https://…" value="<?= h($row['website'] ?? '') ?>">
     </div>
   </div>
+
+  <div class="form-section-title">Photos <span style="font-weight:400;font-size:.8rem;color:var(--grey-mid)">for the client programme — lodge card and stays</span></div>
+  <?= iti_photo_editor(iti_photos_decode($row['photos'] ?? null), 12, 'The first photo is the main one: rooms, main area, view.') ?>
 
   <div class="form-section-title">Supplier contacts <span style="font-weight:400;font-size:.8rem;color:var(--grey-mid)">for the final programme's supplier list</span></div>
   <div class="form-grid">
@@ -257,13 +279,14 @@ include __DIR__ . '/../../includes/layout_header.php';
     <a href="lodges.php" class="btn btn-outline">Cancel</a>
     <?php if ($action==='edit' && $can_edit): ?>
     <div style="margin-left:auto;">
-      <form method="POST" action="lodges.php?action=delete&id=<?= $id ?>" style="display:inline;">
-        <button class="btn btn-danger btn-sm" onclick="return confirm('Deactivate this lodge?')">Deactivate</button>
-      </form>
+      <button type="submit" form="deactivate-form" class="btn btn-danger btn-sm" onclick="return confirm('Deactivate this lodge?')">Deactivate</button>
     </div>
     <?php endif; ?>
   </div>
 </form>
+<?php if ($action==='edit' && $can_edit): ?>
+<form id="deactivate-form" method="POST" action="lodges.php?action=delete&id=<?= $id ?>"></form>
+<?php endif; ?>
 </div>
 
 <?php else: ?>
@@ -319,9 +342,13 @@ include __DIR__ . '/../../includes/layout_header.php';
     <?php if ($lodges): ?>
       <?php foreach ($lodges as $l): ?>
       <tr>
-        <td>
-          <div style="font-weight:600;"><?= h($l['name']) ?></div>
+        <td style="display:flex;gap:10px;align-items:center;">
+          <?php $lph = iti_photos_decode($l['photos'] ?? null); ?>
+          <div style="width:54px;height:40px;flex:none;border-radius:4px;background:#eee center/cover no-repeat<?= $lph ? ";background-image:url('" . h($lph[0]) . "')" : '' ?>" title="<?= count($lph) ?> photo<?= count($lph) !== 1 ? 's' : '' ?>"></div>
+          <div>
+          <div style="font-weight:600;"><?= h($l['name']) ?><?php if (!$lph): ?> <span style="font-size:.68rem;font-weight:400;color:var(--grey-mid);">· no photos</span><?php endif; ?></div>
           <?php if ($l['website']): ?><div style="font-size:.7rem;"><a href="<?= h($l['website']) ?>" target="_blank" style="color:var(--blue);">🔗 website</a></div><?php endif; ?>
+          </div>
         </td>
         <td>
           <div style="font-size:.83rem;"><?= h($l['dest_name_en']) ?></div>
