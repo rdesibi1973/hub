@@ -288,6 +288,7 @@ include __DIR__ . '/../../includes/layout_header.php';
           <div class="gap-8" style="white-space:nowrap;">
             <a href="program_edit.php?id=<?= $p['id'] ?>" class="btn btn-outline btn-sm">✏️ Edit</a>
             <a href="program_doc.php?id=<?= $p['id'] ?>" class="btn btn-outline btn-sm" target="_blank">👁 Preview</a>
+            <a href="program_doc.php?id=<?= $p['id'] ?>&amp;layout=mag" class="btn btn-outline btn-sm" target="_blank">📷 Magazine</a>
             <?php if ($can_edit): ?>
             <a href="programs.php?type=<?= $tab ?>&action=duplicate&id=<?= $p['id'] ?>&dest_type=<?= $tab ?>"
                class="btn btn-outline btn-sm"

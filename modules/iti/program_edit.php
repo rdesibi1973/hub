@@ -645,6 +645,7 @@ include __DIR__ . '/../../includes/layout_header.php';
     <button type="button" id="btn-save-current" onclick="saveCurrentDay()" class="btn btn-red btn-sm">💾 Save</button>
     <?php endif; ?>
     <a href="program_doc.php?id=<?= $id ?>" class="btn btn-outline btn-sm" target="_blank">👁 Preview</a>
+    <a href="program_doc.php?id=<?= $id ?>&amp;layout=mag" class="btn btn-outline btn-sm" target="_blank">📷 Magazine</a>
     <?php if ($program['is_published']): ?>
     <a href="<?= h($public_url) ?>" target="_blank" class="btn btn-green btn-sm">🔗 Public Link</a>
     <form method="POST" action="program_edit.php?id=<?= $id ?>" style="display:inline;">
