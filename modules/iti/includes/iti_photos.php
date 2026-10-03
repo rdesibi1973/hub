@@ -98,7 +98,7 @@ function iti_photo_store(string $path, string $label, string $sub, string $prefi
     if (!is_dir($dir) && !@mkdir($dir, 0755, true)) { $err = 'Cannot create the folder uploads/' . $sub . '.'; return null; }
     $base = iti_photo_slug($prefix) . '_' . date('ymdHis') . '_' . bin2hex(random_bytes(3));
 
-    $img = iti_photo_load($path, $info[2]);
+    $img = iti_photo_mem_ok((int)$info[0], (int)$info[1]) ? iti_photo_load($path, $info[2]) : null;
     if ($img) {
         $img = iti_photo_fit($img, ITI_PHOTO_MAX_SIDE);
         $name = $base . '.jpg';
@@ -193,6 +193,20 @@ function iti_photo_abs_url(string $loc, string $base): string {
     if (strpos($loc, '/') === 0) return $root . $loc;
     $dir = isset($b['path']) ? preg_replace('~/[^/]*$~', '/', $b['path']) : '/';
     return $root . $dir . $loc;
+}
+
+/**
+ * Enough memory to decode a w×h image with GD (≈ 5 bytes/pixel + the resized copy)?
+ * Raises memory_limit up to 512M when needed; false = keep the original file instead.
+ */
+function iti_photo_mem_ok(int $w, int $h): bool {
+    $need = (int)($w * $h * 5.5) + 40 * 1024 * 1024;
+    $lim = trim((string)ini_get('memory_limit'));
+    if ($lim === '-1') return true;
+    $bytes = (int)$lim * (stripos($lim, 'G') ? 1073741824 : (stripos($lim, 'M') ? 1048576 : (stripos($lim, 'K') ? 1024 : 1)));
+    if (memory_get_usage() + $need <= $bytes) return true;
+    if ($need + memory_get_usage() > 512 * 1048576) return false;
+    return @ini_set('memory_limit', '512M') !== false;
 }
 
 /** GD image from a file, EXIF rotation applied (JPEG); null without GD. */
