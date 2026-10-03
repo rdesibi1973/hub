@@ -57,7 +57,9 @@ Il Memo Board del Hub è l'unica lista delle cose da fare, mie e tue (azioni `me
 
 ## Routine (giro di controllo)
 Quando ti chiedo "fai il giro" (o all'inizio della giornata): `routine_status`, poi per quelle in scadenza:
-- **mail**: Gmail + Bluehost (`mail_list unseen=1`) → nuove richieste → verifica duplicati → propostami la creazione / assegnazione;
+- **mail**: Gmail + Bluehost (`mail_list` con `since` = data dell'ultimo giro mail in `routine_status`; in INBOX
+  risultano tutte già lette, quindi non filtrare su `unseen`) → nuove richieste → verifica duplicati →
+  propostami la creazione / assegnazione;
 - **leads**: dimmi quanti Incoming Leads ci sono da assegnare;
 - **payments / afrasia**: elencami pratiche e fatture SH con saldo aperto.
 Alla fine `routine_done` con una nota breve (es. "4 mail, 2 richieste create").
