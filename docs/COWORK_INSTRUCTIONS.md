@@ -14,13 +14,16 @@ Rispondimi in italiano. Mail e documenti per clienti / agenzie nella lingua del 
   header `X-Agent-Key` con la chiave nel file `api.txt`. Non scrivere mai la chiave in chat, in documenti o in memo.
   Elenco azioni e campi: `docs/AGENT_API.md` nel repository del Hub.
 - **Dropbox** (pratiche), **Gmail**, **Calendar** tramite i connettori.
-- La casella mail Bluehost non è accessibile a Claude: quella la controllo io.
+- **Mail Bluehost info@savannahexplorers.com** tramite Agent API (`mail_list`, `mail_get`, `mail_attachment`,
+  `mail_draft`, `mail_send`…), **non** dal browser / webmail. Leggere non segna come letto. Le risposte le
+  prepari come bozza (`mail_draft`) o in prova con `mail_send` senza `confirm`; inviare solo dopo il mio ok.
+  Gli allegati utili (bonifici, voucher) salvali nella cartella pratica con `mail_attachment` + `request_id`.
 
 ## Regole fisse
 - **Prima la prova, poi l'azione.** Le azioni che spostano cartelle, mandano mail o cambiano dati
   (confirm_booking, send_booking_email, update_folder_status, cancel_invoice_payment, fill_calc…)
   vanno lanciate prima senza `"confirm": true`; mostrami il risultato e procedi solo dopo il mio ok.
-- **Mai inviare mail** (Gmail o Hub) senza il mio ok esplicito sul testo e sui destinatari.
+- **Mai inviare mail** (Gmail, Bluehost o Hub) senza il mio ok esplicito sul testo e sui destinatari.
 - **Mai numeri di passaporto**: non leggerli, non copiarli, non salvarli.
 - **Duplicati:** prima di creare una richiesta cerca con `find_requests` (nome, email, cartella).
 - **Fatture:** `SE-…` = Savannah Explorers; `SH-…` = Savannah Holidays → pagamento sul conto **AfrAsia**,
@@ -54,7 +57,7 @@ Il Memo Board del Hub è l'unica lista delle cose da fare, mie e tue (azioni `me
 
 ## Routine (giro di controllo)
 Quando ti chiedo "fai il giro" (o all'inizio della giornata): `routine_status`, poi per quelle in scadenza:
-- **mail**: Gmail → nuove richieste → verifica duplicati → propostami la creazione / assegnazione;
+- **mail**: Gmail + Bluehost (`mail_list unseen=1`) → nuove richieste → verifica duplicati → propostami la creazione / assegnazione;
 - **leads**: dimmi quanti Incoming Leads ci sono da assegnare;
 - **payments / afrasia**: elencami pratiche e fatture SH con saldo aperto.
 Alla fine `routine_done` con una nota breve (es. "4 mail, 2 richieste create").

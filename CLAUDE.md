@@ -35,7 +35,8 @@ outdated — this file wins where they disagree (PHP version, local lint).
 - Timezone: every entry point sets `Africa/Dar_es_Salaam` (server is US).
 - AJAX/JSON handlers: `ob_start()` first so warnings don't break JSON.
 - Server-only, never in git: `includes/config.php`, `modules/leads/config.php`, `api.txt` (agent key).
-  Constants there: `AGENT_API_KEY`, `AGENT_API_USER`, `AGENT_MEMO_USER`, `MEMO_CRON_TOKEN`, Dropbox/HubSpot keys.
+  Constants there: `AGENT_API_KEY`, `AGENT_API_USER`, `AGENT_MEMO_USER`, `MEMO_CRON_TOKEN`,
+  `MAILBOX_USER` / `MAILBOX_PASS` (info@ over IMAP, `includes/mailbox_service.php`), Dropbox/HubSpot keys.
 
 ## Git and deploy
 - Commit / push / deploy **only when Roberto asks**. Commit message ends with the Co-Authored-By line.

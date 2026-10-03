@@ -31,8 +31,9 @@ without driving the web UI.
 | HTTPS only | Plain HTTP → 403. |
 | Rate limit | 60 calls/min → 429. |
 | Audit | Every call (including failures and dry-runs) → `agent_audit_log` (action, request_id, user, HTTP code, dry_run, payload, result, IP). |
-| Dry-run by default | `confirm_booking`, `send_booking_email`, `rollback_booking`, `cancel_invoice_payment`, `update_folder_status` and `import_zoho_invoice` (among others) do nothing unless the body has `"confirm": true`. |
-| No deletes | No delete endpoint. Undo a confirm with `rollback_booking` (or BackOffice → Rollback). |
+| Dry-run by default | `confirm_booking`, `send_booking_email`, `rollback_booking`, `cancel_invoice_payment`, `update_folder_status`, `import_zoho_invoice`, `mail_send` and `mail_move` (among others) do nothing unless the body has `"confirm": true`. |
+| No deletes | No delete endpoint (mail included). Undo a confirm with `rollback_booking` (or BackOffice → Rollback). |
+| Mailbox | The key also reads `info@` (`mail_*`): keep `api.txt` as private as the mailbox password. |
 
 Responses: `{"ok": true, …}` or `{"ok": false, "error": "…", …}` with a matching HTTP code
 (400 bad input, 403 auth, 404 not found, 409 duplicate / blocked, 422 partial, 429 rate, 5xx server/Dropbox).
@@ -284,13 +285,76 @@ Recurring checks on top of the Memo Board (definitions: `MEMO_ROUTINES` in `memo
 
 `routine_status` → `routines[]` `{key, title, every_hours, last_done, hours_since, due, count, attention}`.
 `routine_done` `{key, note?}` records the check (shown as "(Claude)" on the board). Typical round:
-read `routine_status`, do the due ones (e.g. Gmail via the connector → `find_requests` / `create_request`),
+read `routine_status`, do the due ones (e.g. Gmail via the connector and Bluehost via `mail_list unseen=1`
+→ `find_requests` / `create_request`),
 then `routine_done` with a short note ("3 new mails, 1 request created").
 
 ```bash
 curl -sH "$H" -X POST "$U?action=memo_save" -d '{"ext_key":"cn-asilia","title":"Credit note Asilia","status":"waiting","waiting_on":"Glady (Asilia)","due_date":"2026-10-06","body":"Mail sent 2 Oct asking for the CN"}'
 curl -sH "$H" -X POST "$U?action=memo_save" -d '{"title":"Balance Etnia – Rossi","status":"waiting","waiting_on":"Etnia","invoice_number":"SH-2026-0041","auto_close_on_payment":true,"due_date":"2026-10-05","next_steps":[{"title":"Pay Lake Natron Camp","days_after":2}]}'
 curl -sH "$H" "$U?action=memo_list&follow_up_due=1"
+```
+
+## Mailbox info@ (IMAP)
+
+Lets Claude read and answer `info@savannahexplorers.com` without logging in to the BlueHost
+webmail. Logic: root `includes/mailbox_service.php` (PHP imap extension, on BlueHost). The mailbox
+is on the same server, so IMAP goes to `localhost`.
+
+**Setup (server, once)** — in the server-only root `includes/config.php`:
+```php
+define('MAILBOX_USER', 'info@savannahexplorers.com');
+define('MAILBOX_PASS', '<mailbox password>');
+// optional: define('MAILBOX_IMAP', '{localhost:993/imap/ssl/novalidate-cert}');
+// optional: define('MAILBOX_NAME', 'Savannah Explorers');   // From name
+// optional: define('MAILBOX_SENT', 'INBOX.Sent'); define('MAILBOX_DRAFTS', 'INBOX.Drafts');
+```
+Without them every `mail_*` action answers 503. If the mailbox password is changed in cPanel,
+update `MAILBOX_PASS` too (calls then fail with "IMAP login failed").
+
+Messages are addressed by `folder` (default `INBOX`; BlueHost names: `INBOX.Sent`, `INBOX.Archive`, …)
++ `uid`. Reading never marks a message as seen unless `mark_seen: true`. There is no delete.
+The audit log keeps who/subject for `mail_get` / `mail_attachment`, not bodies or files.
+
+### `mail_folders` (GET)
+→ `folders[]` `{name, messages, unseen}`.
+
+### `mail_list` (GET)
+`folder`, `unseen=1`, `flagged=1`, `from`, `to`, `subject`, `q` (full text), `since` / `before`
+(YYYY-MM-DD), `limit` ≤ 100 (default 30), `offset`. Newest first.
+→ `total`, `messages[]` `{uid, date, from, to, subject, seen, flagged, answered, size, has_attachments}`.
+
+### `mail_get` (GET)
+`uid`*, `folder`, `mark_seen=1`. → `message` `{uid, date, from[], reply_to[], to[], cc[], subject,
+message_id, in_reply_to, references, seen, flagged, answered, body (plain text; HTML converted),
+body_truncated, has_html, attachments[] {part, name, mime, size, inline}}` (small inline images such as
+signature logos are left out).
+
+### `mail_attachment` (GET)
+`uid`*, `part`* (from `mail_get`), `folder`. → `attachment {name, mime, size, content_base64}` (≤ 10 MB).
+With `request_id` (booking folder) or `folder_path` (full Dropbox path) the file is **saved to Dropbox**
+instead → `saved_to`; `save_as` renames it; an existing file is kept unless `overwrite: true`.
+
+### `mail_flag` (POST)
+`uid` or `uids[]`, `folder`, `seen` and/or `flagged` (true/false).
+
+### `mail_move` (POST)
+`uid` or `uids[]`, `folder`, `to_folder`* (must exist). Dry-run unless `"confirm": true`.
+
+### `mail_draft` (POST) / `mail_send` (POST)
+From `info@`. `to`, `cc`, `bcc` (string or list), `subject`, `body` (plain text) or `body_html`,
+`attachments[]` `{name, content_base64}` (≤ 10 MB each). For a reply give `reply_to_uid` (+ `reply_folder`):
+`to` defaults to the sender (Reply-To), `subject` to "Re: …", and the reply is threaded (In-Reply-To / References).
+- `mail_draft` saves it in **Drafts** — nothing is sent; Roberto sends it from webmail / phone.
+- `mail_send` is a dry-run (→ `email` preview) unless `"confirm": true`; then it sends, keeps a copy in
+  **Sent** and marks the original as answered.
+
+```bash
+curl -sH "$H" "$U?action=mail_list&unseen=1&limit=20"
+curl -sH "$H" "$U?action=mail_get&uid=48213"
+curl -sH "$H" "$U?action=mail_attachment&uid=48213&part=2&request_id=2958"        # → booking folder
+curl -sH "$H" -X POST "$U?action=mail_draft" -d '{"reply_to_uid":48213,"body":"Dear Anna,\nthank you …"}'
+curl -sH "$H" -X POST "$U?action=mail_flag"  -d '{"uids":[48213,48214],"seen":true}'
 ```
 
 ## Example — Fiorini (TVT)

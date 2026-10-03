@@ -82,7 +82,21 @@ function agent_audit(PDO $db, string $action, $reqId, array $payload, string $re
     global $agentUser;
     agent_ensure_schema($db);
     $dry = in_array($action, ['confirm_booking', 'send_booking_email', 'rollback_booking', 'fill_calc', 'iti_save_texts', 'update_rate', 'replace_flight_rates',
-                              'cancel_invoice_payment', 'update_folder_status', 'import_zoho_invoice'], true) && empty($payload['confirm']);
+                              'cancel_invoice_payment', 'update_folder_status', 'import_zoho_invoice', 'mail_send', 'mail_move'], true) && empty($payload['confirm']);
+    // Mail: keep who/what in the log, not message bodies or attachment content.
+    if (in_array($action, ['mail_get', 'mail_attachment'], true) && $code === 200) {
+        $res = json_decode($resultJson, true);
+        $m   = $res['message'] ?? $res['attachment'] ?? [];
+        $resultJson = json_encode(['ok' => true, 'logged' => 'content omitted', 'uid' => $m['uid'] ?? null,
+                                   'subject' => $m['subject'] ?? null, 'name' => $m['name'] ?? null,
+                                   'saved_to' => $res['saved_to'] ?? null], JSON_UNESCAPED_UNICODE);
+    }
+    if (!empty($payload['attachments']) && is_array($payload['attachments'])) {
+        foreach ($payload['attachments'] as &$a) {
+            if (is_array($a) && isset($a['content_base64'])) $a['content_base64'] = '[' . strlen((string)$a['content_base64']) . ' chars]';
+        }
+        unset($a);
+    }
     $db->prepare("INSERT INTO agent_audit_log (ts, action, request_id, user_id, http_code, dry_run, payload_json, result_json, ip)
                   VALUES (?,?,?,?,?,?,?,?,?)")
        ->execute([
@@ -281,6 +295,37 @@ function agent_invoice_folder(PDO $db, int $invId): ?array {
         'group_folder'   => $r['group_folder'] ?? null,
         'dropbox_path'   => req_folder_path($r),
     ];
+}
+
+/** A request's Dropbox folder (searched by folder name if it moved), or fail 404. */
+function agent_request_dropbox_dir(string $token, array $r): string {
+    $dir = req_folder_path($r);
+    if ($dir === '' || !dropbox_path_exists($token, $dir)) {
+        $dir = (string)dropbox_find_folder($token, $r['practice_code']);
+        if ($dir === '') agent_fail('Folder ' . $r['practice_code'] . ' not found in Dropbox — pass folder_path', 404);
+    }
+    return $dir;
+}
+
+// ── Mailbox info@ (logic in includes/mailbox_service.php) ───────────────────
+/** Loaded only by the mail actions; fails 503 when the mailbox isn't configured. */
+function agent_mail_lib(): void {
+    require_once __DIR__ . '/../../includes/mailbox_service.php';
+    if (!mbx_configured()) {
+        agent_fail(function_exists('imap_open')
+            ? 'Mailbox not configured — define MAILBOX_USER / MAILBOX_PASS in includes/config.php (see docs/AGENT_API.md)'
+            : 'PHP imap extension not available on this server', 503);
+    }
+}
+
+/** UIDs from "uid" or "uids" (number, list or "1,2,3"), or fail. */
+function agent_mail_uids(array $in): array {
+    $v = $in['uids'] ?? ($in['uid'] ?? []);
+    $list = is_array($v) ? $v : preg_split('/[\s,]+/', (string)$v);
+    $uids = array_values(array_unique(array_filter(array_map('intval', $list), function ($u) { return $u > 0; })));
+    if (!$uids) agent_fail('uid (or uids) is required');
+    if (count($uids) > 100) agent_fail('At most 100 uids per call');
+    return $uids;
 }
 
 // ── Memo Board (logic in modules/memo/memo_lib.php) ─────────────────────────
@@ -1034,11 +1079,7 @@ try {
         } else {
             $r = inv_linked_request($db, $id);
             if (!$r || !$r['practice_code']) agent_fail('Invoice ' . $inv['invoice_number'] . ' has no linked request / folder — pass folder_path', 409);
-            $dir = req_folder_path($r);
-            if ($dir === '' || !dropbox_path_exists($token, $dir)) {
-                $dir = (string)dropbox_find_folder($token, $r['practice_code']);
-                if ($dir === '') agent_fail('Folder ' . $r['practice_code'] . ' not found in Dropbox — pass folder_path', 404);
-            }
+            $dir = agent_request_dropbox_dir($token, $r);
         }
         $path      = $dir . '/' . inv_pdf_dropbox_name($inv);
         $overwrite = !empty($in['overwrite']);
@@ -1244,6 +1285,142 @@ try {
         agent_out(['ok' => true, 'dry_run' => false, 'invoice' => agent_invoice_out(inv_get($db, $res['invoice_id']))]);
     }
 
+    // ── Mailbox info@ ────────────────────────────────────────────────────────
+    // IMAP on the BlueHost mailbox, so Claude doesn't log in to webmail.
+    // Reading never marks as seen unless "mark_seen": true. No delete action.
+    case 'mail_folders': {
+        agent_mail_lib();
+        agent_out(['ok' => true, 'mailbox' => (string)MAILBOX_USER, 'folders' => mbx_folders()]);
+    }
+
+    case 'mail_list': {
+        agent_mail_lib();
+        foreach (['since', 'before'] as $k) if (!empty($in[$k])) $in[$k] = agent_iso_date($in[$k], $k);
+        $flt = [
+            'unseen'  => !empty($in['unseen']) && $in['unseen'] !== '0',
+            'flagged' => !empty($in['flagged']) && $in['flagged'] !== '0',
+            'from' => $in['from'] ?? '', 'to' => $in['to'] ?? '', 'subject' => $in['subject'] ?? '',
+            'text' => $in['q'] ?? '', 'since' => $in['since'] ?? '', 'before' => $in['before'] ?? '',
+        ];
+        $res = mbx_list((string)($in['folder'] ?? 'INBOX'), $flt, (int)($in['limit'] ?? 30), (int)($in['offset'] ?? 0));
+        agent_out(['ok' => true] + $res);
+    }
+
+    case 'mail_get': {
+        agent_mail_lib();
+        $uid = (int)($in['uid'] ?? 0);
+        if ($uid <= 0) agent_fail('uid is required');
+        $folder = (string)($in['folder'] ?? 'INBOX');
+        $markSeen = !empty($in['mark_seen']) && $in['mark_seen'] !== '0';
+        $msg = mbx_get($folder, $uid, $markSeen);
+        if (!$msg) agent_fail('Message uid ' . $uid . ' not found in ' . $folder, 404);
+        agent_out(['ok' => true, 'message' => $msg]);
+    }
+
+    // Returns the file as base64, or with request_id / folder_path saves it to
+    // Dropbox (booking folder) instead. Existing file kept unless "overwrite": true.
+    case 'mail_attachment': {
+        agent_mail_lib();
+        $uid  = (int)($in['uid'] ?? 0);
+        $part = trim((string)($in['part'] ?? ''));
+        if ($uid <= 0 || !preg_match('/^\d+(\.\d+)*$/', $part)) agent_fail('uid and part (from mail_get attachments) are required');
+        $folder = (string)($in['folder'] ?? 'INBOX');
+        try {
+            $att = mbx_attachment($folder, $uid, $part);
+        } catch (RuntimeException $e) {
+            agent_fail($e->getMessage(), 413);
+        }
+        if (!$att) agent_fail('Attachment ' . $part . ' not found in message ' . $uid, 404);
+        $info = ['uid' => $uid, 'part' => $part, 'name' => $att['name'], 'mime' => $att['mime'], 'size' => $att['size']];
+
+        $dir = rtrim(trim((string)($in['folder_path'] ?? '')), '/');
+        if ($dir === '' && (int)($in['request_id'] ?? 0) <= 0) {
+            agent_out(['ok' => true, 'attachment' => $info + ['content_base64' => base64_encode($att['content'])]]);
+        }
+        require_once __DIR__ . '/dropbox_helper.php';
+        $token = dropbox_get_access_token();
+        if ($dir !== '') {
+            if ($dir[0] !== '/') agent_fail('folder_path must be a full Dropbox path starting with /');
+            if (!dropbox_path_exists($token, $dir)) agent_fail('folder_path ' . $dir . ' not found in Dropbox', 404);
+        } else {
+            $r = agent_request($db, $in['request_id']);
+            if (!$r['practice_code']) agent_fail('Request ' . $r['id'] . ' has no folder — pass folder_path', 409);
+            $dir = agent_request_dropbox_dir($token, $r);
+        }
+        $name = trim((string)($in['save_as'] ?? '')) ?: $att['name'];
+        $name = trim(str_replace(['/', '\\', ':', '*', '?', '"', '<', '>', '|'], '_', $name));
+        $path = $dir . '/' . $name;
+        $overwrite = !empty($in['overwrite']);
+        $exists = dropbox_path_exists($token, $path);
+        if ($exists && !$overwrite) {
+            agent_fail('File already exists: ' . $path, 409, ['path' => $path, 'hint' => 'Use save_as for another name, or "overwrite": true.']);
+        }
+        try {
+            $meta = dropbox_upload_text($token, $path, $att['content'], $overwrite ? 'overwrite' : 'add');
+        } catch (RuntimeException $e) {
+            agent_fail($e->getMessage(), 502, ['path' => $path]);
+        }
+        agent_out(['ok' => true, 'attachment' => $info, 'saved_to' => $meta['path_display'] ?? $path, 'overwritten' => $exists]);
+    }
+
+    case 'mail_flag': {
+        agent_require_method('POST');
+        agent_mail_lib();
+        $uids = agent_mail_uids($in);
+        $seen = array_key_exists('seen', $in) ? (bool)$in['seen'] : null;
+        $flag = array_key_exists('flagged', $in) ? (bool)$in['flagged'] : null;
+        if ($seen === null && $flag === null) agent_fail('Give seen and/or flagged (true / false)');
+        $folder = (string)($in['folder'] ?? 'INBOX');
+        mbx_flag($folder, $uids, $seen, $flag);
+        agent_out(['ok' => true, 'folder' => $folder, 'uids' => $uids, 'seen' => $seen, 'flagged' => $flag]);
+    }
+
+    // Move to another existing folder (e.g. INBOX.Archive). Dry-run unless "confirm": true.
+    case 'mail_move': {
+        agent_require_method('POST');
+        agent_mail_lib();
+        $uids = agent_mail_uids($in);
+        $folder = (string)($in['folder'] ?? 'INBOX');
+        $to = trim((string)($in['to_folder'] ?? ''));
+        if ($to === '') agent_fail('to_folder is required (see mail_folders)');
+        if ($to === $folder) agent_fail('to_folder is the same as folder');
+        if (empty($in['confirm'])) {
+            agent_out(['ok' => true, 'dry_run' => true, 'would_move' => ['from' => $folder, 'to' => $to, 'uids' => $uids],
+                       'message' => 'Dry run — nothing moved. Resend with "confirm": true.']);
+        }
+        try {
+            mbx_move($folder, $uids, $to);
+        } catch (InvalidArgumentException $e) {
+            agent_fail($e->getMessage(), 404);
+        }
+        agent_out(['ok' => true, 'dry_run' => false, 'moved' => ['from' => $folder, 'to' => $to, 'uids' => $uids]]);
+    }
+
+    // Save a message in Drafts: Roberto reviews and sends it from webmail / phone.
+    case 'mail_draft':
+    // Send from info@ (copy in Sent, original marked answered). Dry-run unless "confirm": true.
+    case 'mail_send': {
+        agent_require_method('POST');
+        agent_mail_lib();
+        try {
+            $composed = mbx_compose($in);
+        } catch (InvalidArgumentException $e) {
+            agent_fail($e->getMessage());
+        }
+        $email = $composed['summary'];
+        if ($agentAction === 'mail_draft') {
+            $box = mbx_save_draft($composed);
+            agent_out(['ok' => true, 'saved_in' => $box, 'email' => $email]);
+        }
+        if (empty($in['confirm'])) {
+            agent_out(['ok' => true, 'dry_run' => true, 'email' => $email,
+                       'message' => 'Dry run — not sent. Resend with "confirm": true to send.']);
+        }
+        $res = mbx_send($composed);
+        agent_out(['ok' => true, 'dry_run' => false, 'message' => 'Sent', 'sent_folder' => $res['sent_folder'],
+                   'warning' => $res['warning'], 'email' => $email]);
+    }
+
     default:
         agent_fail('Unknown action "' . $agentAction . '"', 400, ['actions' => [
             'find_requests', 'list_agencies', 'create_request', 'update_request', 'list_standard_programs',
@@ -1252,6 +1429,7 @@ try {
             'find_invoices', 'get_invoice', 'add_invoice_payment', 'cancel_invoice_payment', 'update_folder_status',
             'save_invoice_pdf', 'import_zoho_invoice', 'memo_list', 'memo_save', 'memo_set_status',
             'routine_status', 'routine_done',
+            'mail_folders', 'mail_list', 'mail_get', 'mail_attachment', 'mail_flag', 'mail_move', 'mail_draft', 'mail_send',
         ]]);
     }
 } catch (Throwable $e) {
