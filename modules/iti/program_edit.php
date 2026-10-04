@@ -631,7 +631,7 @@ include __DIR__ . '/../../includes/layout_header.php';
 <!-- Page header -->
 <div class="page-header" style="margin-bottom:16px;">
   <div>
-    <h2><?= h($program['title_en']) ?> <a href="program_edit.php?id=<?= $id ?>&tab=info" title="Edit title" style="font-size:.75rem;font-weight:400;color:var(--grey-mid);text-decoration:none;vertical-align:middle;">✏️</a></h2>
+    <h2><?= h(($one_lang && trim((string)($program['title_' . $one_lang] ?? '')) !== '') ? $program['title_' . $one_lang] : $program['title_en']) ?> <a href="#prog-details-wrap" onclick="editProgTitle();return false;" title="Edit title" style="font-size:.75rem;font-weight:400;color:var(--grey-mid);text-decoration:none;vertical-align:middle;">✏️</a></h2>
     <div class="sub">
       <?= $program['program_type']==='sample'?'Sample':'Personal' ?>
       &nbsp;·&nbsp; <?= iti_duration_label((int)$program['duration_days']) ?>
@@ -1517,6 +1517,13 @@ include __DIR__ . '/../../includes/layout_header.php';
 </main>
 
 <script>
+// Pencil next to the title: open Program Details and put the cursor in the title.
+function editProgTitle() {
+    var body = document.getElementById('prog-details-body');
+    if (body.style.display === 'none') toggleProgDetails();
+    var f = body.querySelector('input[name^="title_"]:not([type="hidden"])');
+    if (f) { f.scrollIntoView({block: 'center'}); f.focus(); f.select(); }
+}
 function toggleProgDetails() {
     var body  = document.getElementById('prog-details-body');
     var arrow = document.getElementById('prog-details-arrow');
