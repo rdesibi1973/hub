@@ -195,7 +195,7 @@ function iti_mag_css(): string {
 /* Stays */
 .mag-stays{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:18px}
 .mag-stay{background:#fff;border:1px solid var(--line);border-radius:4px;overflow:hidden}
-.mag-stay-img{aspect-ratio:4/3;background:var(--sand) center/cover no-repeat}
+.mag-stay-img{display:block;width:100%;aspect-ratio:4/3;object-fit:cover;background:var(--sand)}
 .mag-stay-b{padding:12px 14px 14px}
 .mag-stay-day{font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:var(--red);font-weight:700}
 .mag-stay-name{font-family:"Cormorant Garamond",Georgia,serif;font-size:21px;font-weight:600;line-height:1.15;margin:3px 0 4px}
@@ -204,8 +204,8 @@ function iti_mag_css(): string {
 /* Days */
 .mag-day{padding:56px 0 8px;border-top:1px solid var(--line)}
 .mag-day:first-of-type{border-top:0}
-.mag-hero{position:relative;margin:0 0 26px;border-radius:4px;overflow:hidden;aspect-ratio:21/8;background:var(--sand)}
-.mag-hero img{width:100%;height:100%;object-fit:cover}
+.mag-hero{position:relative;margin:0 0 26px;border-radius:4px;overflow:hidden;aspect-ratio:2/1;background:var(--sand)}
+.mag-hero img{width:100%;height:100%;object-fit:cover;object-position:50% 30%}   /* animals / faces sit high in the frame */
 .mag-hero figcaption{position:absolute;left:0;right:0;bottom:0;padding:44px 26px 18px;color:#fff;background:linear-gradient(180deg,rgba(0,0,0,0),rgba(0,0,0,.65))}
 .mag-dayhead{display:grid;grid-template-columns:auto 1fr;gap:22px;align-items:end;margin:0 0 14px}
 .mag-dayno{font-family:"Cormorant Garamond",Georgia,serif;font-size:84px;line-height:.78;color:var(--red);font-weight:600}
@@ -226,12 +226,12 @@ function iti_mag_css(): string {
 /* Lodge card */
 .mag-lodge{margin:26px 0 0;background:var(--sand);border-radius:4px;overflow:hidden;display:grid;grid-template-columns:1.1fr 1fr}
 .mag-lodge-ph{display:grid;grid-template-columns:2fr 1fr;grid-template-rows:1fr 1fr;gap:3px;min-height:280px}
-.mag-lodge-ph div{background:#d9cfbf center/cover no-repeat}
-.mag-lodge-ph div:first-child{grid-row:1/3}
+.mag-lodge-ph img{display:block;width:100%;height:100%;object-fit:cover;background:#d9cfbf;min-height:0}
+.mag-lodge-ph img:first-child{grid-row:1/3}
 .mag-lodge-ph.one{grid-template-columns:1fr;grid-template-rows:1fr}
-.mag-lodge-ph.one div:first-child{grid-row:auto}
+.mag-lodge-ph.one img:first-child{grid-row:auto}
 .mag-lodge-ph.two{grid-template-rows:1fr}
-.mag-lodge-ph.two div:first-child{grid-row:auto}
+.mag-lodge-ph.two img:first-child{grid-row:auto}
 .mag-lodge-b{padding:22px 26px}
 .mag-lodge-b h4{font-family:"Cormorant Garamond",Georgia,serif;font-size:28px;line-height:1.1;margin:4px 0 10px;font-weight:600}
 .mag-lodge-b p{font-size:14px}
@@ -312,7 +312,7 @@ function iti_mag_render(array $D, string $publicUrl = ''): string {
     ob_start(); ?>
 <div class="mag" lang="<?= h($D['lang']) ?>">
 
-  <section class="mag-cover"<?= $cover !== '' ? ' style="background-image:url(\'' . h($cover) . '\')"' : '' ?>>
+  <section class="mag-cover"<?= $cover !== '' ? ' style="background-image:url(\'' . h(iti_photo_variant($cover, 1600)) . '\')"' : '' ?>>
     <?php if ($D['logo']): ?><img class="mag-cover-logo" src="<?= h($D['logo']) ?>" alt="Savannah Explorers"><?php endif; ?>
     <div class="mag-cover-in">
       <div class="mag-kicker"><?= h($T['kicker']) ?></div>
@@ -338,7 +338,7 @@ function iti_mag_render(array $D, string $publicUrl = ''): string {
     <?php if ($D['prices']): ?><a href="#mag-prices"><?= h($M['prices_nav']) ?></a><?php endif; ?>
     <a href="#mag-info"><?= h($M['info_nav']) ?></a>
     <span style="flex:1"></span>
-    <a href="#" onclick="window.print();return false" style="background:var(--red);color:#fff">⤓ <?= h($M['pdf']) ?></a>
+    <a href="#" onclick="magPrint(this);return false" style="background:var(--red);color:#fff">⤓ <?= h($M['pdf']) ?></a>
   </div></nav>
 
   <div class="mag-wrap">
@@ -382,7 +382,7 @@ function iti_mag_render(array $D, string $publicUrl = ''): string {
         <div class="mag-stays">
           <?php foreach ($stays as $s): ?>
             <a class="mag-stay" href="#day-<?= (int)$s['day'] ?>" style="text-decoration:none;color:inherit">
-              <div class="mag-stay-img"<?= $s['photo'] !== '' ? ' style="background-image:url(\'' . h($s['photo']) . '\')"' : '' ?>></div>
+              <?php if ($s['photo'] !== ''): ?><img class="mag-stay-img" src="<?= h(iti_photo_variant($s['photo'], 480)) ?>" alt="<?= h($s['lodge']) ?>" loading="lazy" decoding="async"><?php else: ?><div class="mag-stay-img"></div><?php endif; ?>
               <div class="mag-stay-b">
                 <div class="mag-stay-day"><?= h($T['day']) ?> <?= (int)$s['day'] ?><?= $s['nights'] > 1 ? '–' . ((int)$s['day'] + $s['nights'] - 1) : '' ?></div>
                 <div class="mag-stay-name"><?= h($s['lodge']) ?></div>
@@ -407,7 +407,7 @@ function iti_mag_render(array $D, string $publicUrl = ''): string {
       ?>
       <article class="mag-day" id="day-<?= (int)$d['n'] ?>">
         <?php if ($photo !== ''): ?>
-          <figure class="mag-hero"><img src="<?= h($photo) ?>" alt="<?= h($d['dest']) ?>" loading="lazy">
+          <figure class="mag-hero"><img src="<?= h(iti_photo_variant($photo, 1600)) ?>"<?= ($ss = iti_photo_srcset($photo)) !== '' ? ' srcset="' . h($ss) . '" sizes="(max-width: 760px) 100vw, 930px"' : '' ?> alt="<?= h($d['dest']) ?>" loading="lazy" decoding="async">
             <figcaption><div class="mag-dayhead"><div class="mag-dayno"><small><?= h($T['day']) ?><?= !empty($d['date']) ? ' · ' . h(iti_mag_date($d['date'], $M, false, true)) : '' ?></small><?= (int)$d['n'] ?></div><h3><?= h($d['title']) ?></h3></div></figcaption>
           </figure>
         <?php else: ?>
@@ -438,7 +438,7 @@ function iti_mag_render(array $D, string $publicUrl = ''): string {
           <div class="mag-lodge<?= $ph ? '' : ' noph' ?>">
             <?php if ($ph): ?>
               <div class="mag-lodge-ph<?= count($ph) === 1 ? ' one' : (count($ph) === 2 ? ' two' : '') ?>">
-                <?php foreach ($ph as $u): ?><div style="background-image:url('<?= h($u) ?>')"></div><?php endforeach; ?>
+                <?php foreach ($ph as $k => $u): ?><img src="<?= h(iti_photo_variant($u, $k === 0 ? 960 : 480)) ?>" alt="<?= h($d['lodge']) ?>" loading="lazy" decoding="async"><?php endforeach; ?>
               </div>
             <?php endif; ?>
             <div class="mag-lodge-b">
@@ -514,6 +514,18 @@ function iti_mag_render(array $D, string $publicUrl = ''): string {
 /** Leaflet map from the data-map JSON (iti_get_program_map()). Static fallback if Leaflet is missing. */
 function iti_mag_map_js(): string {
     return <<<'JS'
+// "Download PDF": photos load as you scroll, so load them all first, then print (max 15 s).
+function magPrint(btn) {
+  var imgs = Array.prototype.slice.call(document.querySelectorAll('.mag img'));
+  imgs.forEach(function (i) { i.loading = 'eager'; });
+  var label = btn ? btn.innerHTML : '';
+  if (btn) btn.innerHTML = '…';
+  var done = false, go = function () { if (done) return; done = true; if (btn) btn.innerHTML = label; window.print(); };
+  Promise.all(imgs.map(function (i) {
+    return i.complete && i.naturalWidth ? null : new Promise(function (r) { i.addEventListener('load', r); i.addEventListener('error', r); });
+  })).then(go);
+  setTimeout(go, 15000);
+}
 (function(){
   var el = document.getElementById('mag-map');
   if (!el || !window.L) return;
@@ -534,6 +546,7 @@ function iti_mag_map_js(): string {
   map.fitBounds(L.latLngBounds(line).pad(0.12));
   // Print: open collapsed parts and refit the map to the printed size.
   window.addEventListener('beforeprint', function(){
+    document.querySelectorAll('.mag img[loading="lazy"]').forEach(function(i){ i.loading = 'eager'; });
     document.querySelectorAll('.mag details').forEach(function(d){ d.open = true; });
     map.invalidateSize(); map.fitBounds(L.latLngBounds(line).pad(0.12));
   });

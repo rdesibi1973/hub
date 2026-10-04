@@ -58,6 +58,57 @@ function iti_photos_schema(): void {
     }
 }
 
+// ── Smaller copies for the web pages (uploads/_w<width>/<sub>/<name>, made once by img.php) ──
+const ITI_PHOTO_WIDTHS = [480, 960, 1600];
+
+/** "…/uploads/lodges/x.jpg" → ['lodges', 'x.jpg'] for our own photos, else null. */
+function iti_photo_own(string $url): ?array {
+    $base = ITI_MODULE_URL . '/uploads/';
+    if (strpos($url, $base) !== 0) return null;
+    if (!preg_match('~^(lodges|destinations)/([A-Za-z0-9][A-Za-z0-9._-]*\.(?:jpe?g|png|webp|gif))$~i', substr($url, strlen($base)), $m)) return null;
+    return [$m[1], $m[2]];
+}
+
+/** URL of the $w-px copy of a photo (static file once made, img.php until then); other URLs unchanged. */
+function iti_photo_variant(string $url, int $w): string {
+    $own = iti_photo_own($url);
+    if (!$own || !in_array($w, ITI_PHOTO_WIDTHS, true)) return $url;
+    $name = preg_replace('/\.\w+$/', '', $own[1]) . '.jpg';
+    if (is_file(dirname(__DIR__) . '/uploads/_w' . $w . '/' . $own[0] . '/' . $name)) {
+        return ITI_MODULE_URL . '/uploads/_w' . $w . '/' . $own[0] . '/' . $name;
+    }
+    return ITI_MODULE_URL . '/img.php?f=' . rawurlencode($own[0] . '/' . $own[1]) . '&w=' . $w;
+}
+
+/** srcset for <img>: the copies + the full photo (the browser picks by screen size / print). */
+function iti_photo_srcset(string $url): string {
+    if (!iti_photo_own($url)) return '';
+    $out = [];
+    foreach (ITI_PHOTO_WIDTHS as $w) $out[] = iti_photo_variant($url, $w) . ' ' . $w . 'w';
+    $out[] = $url . ' 2000w';
+    return implode(', ', $out);
+}
+
+/** Make (once) the $w-px JPEG copy of uploads/<sub>/<name>; returns its path or null. */
+function iti_photo_make_variant(string $sub, string $name, int $w): ?string {
+    if (!in_array($w, ITI_PHOTO_WIDTHS, true) || !preg_match('~^(lodges|destinations)$~', $sub)
+        || !preg_match('~^[A-Za-z0-9][A-Za-z0-9._-]*\.(?:jpe?g|png|webp|gif)$~i', $name)) return null;
+    $src = dirname(__DIR__) . '/uploads/' . $sub . '/' . $name;
+    if (!is_file($src)) return null;
+    $out = dirname(__DIR__) . '/uploads/_w' . $w . '/' . $sub . '/' . preg_replace('/\.\w+$/', '', $name) . '.jpg';
+    if (is_file($out) && filemtime($out) >= filemtime($src)) return $out;
+    $info = @getimagesize($src);
+    if (!$info) return null;
+    if ($info[0] <= $w && $info[2] === IMAGETYPE_JPEG) return $src;   // already small enough
+    $img = iti_photo_mem_ok((int)$info[0], (int)$info[1]) ? iti_photo_load($src, $info[2]) : null;
+    if (!$img) return $info[2] === IMAGETYPE_JPEG ? $src : null;
+    $img = iti_photo_fit($img, $w);
+    if (!is_dir(dirname($out))) @mkdir(dirname($out), 0755, true);
+    $ok = imageinterlace($img, true) !== null && imagejpeg($img, $out, 80);
+    imagedestroy($img);
+    return $ok ? $out : null;
+}
+
 function iti_photo_dir(string $sub): string { return dirname(__DIR__) . '/uploads/' . $sub; }
 function iti_photo_url_base(string $sub): string { return ITI_MODULE_URL . '/uploads/' . $sub; }
 
