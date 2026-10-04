@@ -772,60 +772,6 @@ include __DIR__ . '/../../includes/layout_header.php';
           </div>
         <?php endif; ?>
       </div>
-      <div class="form-group" style="grid-column:1/-1;">
-        <details <?= $terms_override ? 'open' : '' ?> style="border:1px solid var(--grey-lt);border-radius:8px;padding:0;">
-          <summary style="cursor:pointer;padding:10px 14px;font-weight:600;font-size:.82rem;background:#f7f7f6;border-radius:8px;">
-            📜 Dedicated T&amp;C for this program <?= $terms_override ? '— active' : '(optional override)' ?>
-          </summary>
-          <div style="padding:14px;">
-            <p style="font-size:.76rem;color:var(--grey-mid);margin:0 0 10px;">
-              Create T&amp;C that apply <strong>only to this program</strong>. This does not change the standard library.
-              <?php if (!$terms_override): ?> Pre-fill from a standard version below if you wish, then edit.<?php endif; ?>
-            </p>
-            <form method="POST" action="program_edit.php?id=<?= $id ?>" id="ovr-form">
-              <input type="hidden" name="_sub" value="terms_override">
-              <input type="hidden" name="ovr_version" value="<?= h($terms_override['name'] ?? '') ?>">
-
-              <?php if (!$terms_override): ?>
-              <div class="form-group">
-                <label>Pre-fill from standard version</label>
-                <select id="ovr-prefill">
-                  <option value="">— start blank —</option>
-                  <?php foreach ($terms as $t): ?>
-                  <option value="<?= $t['id'] ?>"><?= h($t['name']) ?></option>
-                  <?php endforeach; ?>
-                </select>
-              </div>
-              <?php endif; ?>
-
-              <div class="lang-tabs" style="display:flex;gap:4px;margin-bottom:8px;flex-wrap:wrap;">
-                <?php $i=0; foreach (['en'=>'English','it'=>'Italiano','fr'=>'Français','es'=>'Español','de'=>'Deutsch'] as $code=>$name): ?>
-                  <button type="button" class="ovr-lang-tab" data-lang="<?= $code ?>" style="padding:5px 12px;border-radius:6px;font-size:.74rem;font-weight:600;background:<?= $i===0?'var(--grey-dk);color:#fff':'#f0f0ef;color:#333' ?>;border:none;cursor:pointer;"><?= $name ?></button>
-                <?php $i++; endforeach; ?>
-              </div>
-              <?php $i=0; foreach (['en','it','fr','es','de'] as $code): ?>
-                <div class="ovr-lang-pane" data-lang="<?= $code ?>" style="display:<?= $i===0?'block':'none' ?>;">
-                  <div class="ovr-quill" id="ovr_quill_<?= $code ?>" style="background:#fff;min-height:200px;"><?= $terms_override['content_'.$code] ?? '' ?></div>
-                  <textarea name="ovr_text_<?= $code ?>" id="ovr_ta_<?= $code ?>" style="display:none;"></textarea>
-                </div>
-              <?php $i++; endforeach; ?>
-
-              <div style="margin-top:12px;display:flex;gap:8px;">
-                <button type="submit" class="btn btn-red btn-sm">💾 Save dedicated T&amp;C</button>
-              </div>
-            </form>
-            <?php if ($terms_override): ?>
-            <form method="POST" action="program_edit.php?id=<?= $id ?>" style="margin-top:8px;"
-                  onsubmit="return confirm('Remove the dedicated T&C for this program? You can then pick a standard version.');">
-              <input type="hidden" name="_sub" value="terms_override_remove">
-              <button type="submit" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:.76rem;text-decoration:underline;padding:0;">Remove dedicated T&amp;C</button>
-            </form>
-            <?php endif; ?>
-          </div>
-        </details>
-      </div>
-      <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/quill/1.3.7/quill.snow.css">
-      <script src="https://cdnjs.cloudflare.com/ajax/libs/quill/1.3.7/quill.min.js"></script>
       <script>
       (function(){
         var tabs  = document.querySelectorAll('.ovr-lang-tab');
@@ -932,6 +878,62 @@ include __DIR__ . '/../../includes/layout_header.php';
       <?php endif; ?>
     </div>
   </form>
+  <div style="margin-top:16px;">
+      <div class="form-group" style="grid-column:1/-1;">
+        <details <?= $terms_override ? 'open' : '' ?> style="border:1px solid var(--grey-lt);border-radius:8px;padding:0;">
+          <summary style="cursor:pointer;padding:10px 14px;font-weight:600;font-size:.82rem;background:#f7f7f6;border-radius:8px;">
+            📜 Dedicated T&amp;C for this program <?= $terms_override ? '— active' : '(optional override)' ?>
+          </summary>
+          <div style="padding:14px;">
+            <p style="font-size:.76rem;color:var(--grey-mid);margin:0 0 10px;">
+              Create T&amp;C that apply <strong>only to this program</strong>. This does not change the standard library.
+              <?php if (!$terms_override): ?> Pre-fill from a standard version below if you wish, then edit.<?php endif; ?>
+            </p>
+            <form method="POST" action="program_edit.php?id=<?= $id ?>" id="ovr-form">
+              <input type="hidden" name="_sub" value="terms_override">
+              <input type="hidden" name="ovr_version" value="<?= h($terms_override['name'] ?? '') ?>">
+
+              <?php if (!$terms_override): ?>
+              <div class="form-group">
+                <label>Pre-fill from standard version</label>
+                <select id="ovr-prefill">
+                  <option value="">— start blank —</option>
+                  <?php foreach ($terms as $t): ?>
+                  <option value="<?= $t['id'] ?>"><?= h($t['name']) ?></option>
+                  <?php endforeach; ?>
+                </select>
+              </div>
+              <?php endif; ?>
+
+              <div class="lang-tabs" style="display:flex;gap:4px;margin-bottom:8px;flex-wrap:wrap;">
+                <?php $i=0; foreach (['en'=>'English','it'=>'Italiano','fr'=>'Français','es'=>'Español','de'=>'Deutsch'] as $code=>$name): ?>
+                  <button type="button" class="ovr-lang-tab" data-lang="<?= $code ?>" style="padding:5px 12px;border-radius:6px;font-size:.74rem;font-weight:600;background:<?= $i===0?'var(--grey-dk);color:#fff':'#f0f0ef;color:#333' ?>;border:none;cursor:pointer;"><?= $name ?></button>
+                <?php $i++; endforeach; ?>
+              </div>
+              <?php $i=0; foreach (['en','it','fr','es','de'] as $code): ?>
+                <div class="ovr-lang-pane" data-lang="<?= $code ?>" style="display:<?= $i===0?'block':'none' ?>;">
+                  <div class="ovr-quill" id="ovr_quill_<?= $code ?>" style="background:#fff;min-height:200px;"><?= $terms_override['content_'.$code] ?? '' ?></div>
+                  <textarea name="ovr_text_<?= $code ?>" id="ovr_ta_<?= $code ?>" style="display:none;"></textarea>
+                </div>
+              <?php $i++; endforeach; ?>
+
+              <div style="margin-top:12px;display:flex;gap:8px;">
+                <button type="submit" class="btn btn-red btn-sm">💾 Save dedicated T&amp;C</button>
+              </div>
+            </form>
+            <?php if ($terms_override): ?>
+            <form method="POST" action="program_edit.php?id=<?= $id ?>" style="margin-top:8px;"
+                  onsubmit="return confirm('Remove the dedicated T&C for this program? You can then pick a standard version.');">
+              <input type="hidden" name="_sub" value="terms_override_remove">
+              <button type="submit" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:.76rem;text-decoration:underline;padding:0;">Remove dedicated T&amp;C</button>
+            </form>
+            <?php endif; ?>
+          </div>
+        </details>
+      </div>
+      <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/quill/1.3.7/quill.snow.css">
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/quill/1.3.7/quill.min.js"></script>
+  </div>
   </div>
 </div>
 
