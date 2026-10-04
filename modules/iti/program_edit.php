@@ -648,6 +648,7 @@ include __DIR__ . '/../../includes/layout_header.php';
     <a href="program_doc.php?id=<?= $id ?>&amp;layout=mag" class="btn btn-outline btn-sm" target="_blank">📷 Magazine</a>
     <?php if ($program['is_published']): ?>
     <a href="<?= h($public_url) ?>" target="_blank" class="btn btn-green btn-sm">🔗 Public Link</a>
+    <button type="button" class="btn btn-outline btn-sm" onclick="navigator.clipboard.writeText(<?= h(json_encode($public_url)) ?>).then(()=>{this.textContent='✔ Copiato'})">📋 Copy link</button>
     <form method="POST" action="program_edit.php?id=<?= $id ?>" style="display:inline;">
       <input type="hidden" name="_sub" value="unpublish">
       <button class="btn btn-outline btn-sm">Unpublish</button>
@@ -658,7 +659,7 @@ include __DIR__ . '/../../includes/layout_header.php';
       <button class="btn btn-red btn-sm">🚀 Publish</button>
     </form>
     <?php endif; ?>
-    <a href="export_word.php?id=<?= $id ?>" class="btn btn-outline btn-sm">⬇ Export .docx</a>
+    <a href="export_mag_word.php?id=<?= $id ?>" class="btn btn-outline btn-sm">⬇ Word</a>
     <?php if ($program['status'] !== 'cancelled'): ?>
     <form method="POST" action="program_edit.php?id=<?= $id ?>" style="display:inline;"
           onsubmit="return confirm('Cancel this program?')">
@@ -917,6 +918,8 @@ include __DIR__ . '/../../includes/layout_header.php';
       <?php if ($program['is_published']): ?>
       <div style="margin-left:auto;display:flex;align-items:center;gap:8px;">
         <span style="font-size:.78rem;color:var(--green);font-weight:700;">🟢 Published</span>
+        <input type="text" readonly value="<?= h($public_url) ?>" onclick="this.select()" style="width:360px;font-size:.75rem;">
+        <button type="button" class="btn btn-outline btn-sm" onclick="navigator.clipboard.writeText(<?= h(json_encode($public_url)) ?>).then(()=>{this.textContent='✔ Copiato'})">📋 Copy</button>
         <a href="<?= h($public_url) ?>" target="_blank" class="btn btn-green btn-sm">Open public link</a>
       </div>
       <?php endif; ?>
