@@ -90,6 +90,76 @@ function iti_doc_duration(string $transfer): string {
     return '';
 }
 
+/** Destinations that give safari photos: active, with photos, not towns / airports / airstrips. */
+function iti_doc_scenic_dests(PDO $db): array {
+    static $cache = null;
+    if ($cache !== null) return $cache;
+    $towns = ['ARU', 'KAR', 'MWB', 'MKY', 'MSH', 'MCH', 'MRG', 'LEM', 'RNG', 'TVT', 'ISB', 'NAM', 'DOD', 'IRG', 'KSZ', 'DRSM'];
+    $townWords = ['arusha', 'karatu', 'moshi', 'mto wa mbu', 'dar es salaam', 'dodoma', 'iringa', 'namanga'];
+    $generic = '/\b(national park|conservation area|parco nazionale|parc national|parque nacional|nationalpark|area di conservazione|'
+             . 'lake|lago|lac|see|mount|monte|mont|island|isola|île|isla|insel|gorge|gola|crater|cratere|cratère|krater)\b/u';
+    $cache = [];
+    foreach ($db->query('SELECT * FROM iti_destinations WHERE is_active = 1')->fetchAll(PDO::FETCH_ASSOC) as $r) {
+        $photos = iti_dest_photos($r);
+        if (!$photos || in_array($r['region'], ['Airports', 'Airstrips', 'International', 'Other'], true) || in_array($r['code'], $towns, true)) continue;
+        $keys = [];
+        foreach (ITI_LANGUAGES as $l) {
+            $full = mb_strtolower(trim((string)($r['name_' . $l] ?? '')));
+            if ($full === '') continue;
+            $keys[$full] = true;
+            $short = trim(preg_replace('/\s+/u', ' ', preg_replace($generic, ' ', $full)));
+            // "Arusha National Park" → not just "arusha" (that is the town).
+            if (mb_strlen($short) >= 4 && !in_array($short, $townWords, true)) $keys[$short] = true;
+        }
+        $cache[(int)$r['id']] = ['photos' => $photos, 'keys' => array_keys($keys), 'park' => $r['region'] === 'National Parks'];
+    }
+    return $cache;
+}
+
+/**
+ * Safari photos for the days and the cover. A day shows the place its drive goes to
+ * (the destination named last in its title / transfers: "Arusha – Tarangire" → Tarangire),
+ * else its destination, else its lodge's area; towns and airports never; no photo twice.
+ * The cover is a photo of the park where most days are spent. Returns the cover URL.
+ */
+function iti_doc_day_photos(PDO $db, array &$days, array $p): string {
+    $sc = iti_doc_scenic_dests($db);
+    $cands = []; $count = [];
+    foreach ($days as $i => $d) {
+        $text = mb_strtolower($d['title'] . ' ' . implode(' ', $d['transfers']));
+        $hits = [];
+        foreach ($sc as $id => $s) {
+            foreach ($s['keys'] as $k) {
+                $pos = mb_strrpos($text, $k);
+                if ($pos !== false && (!isset($hits[$id]) || $pos > $hits[$id])) $hits[$id] = $pos;
+            }
+        }
+        arsort($hits);                                   // last named first
+        $c = array_keys($hits);
+        foreach ($d['_photo_ids'] as $id) if (isset($sc[$id]) && !in_array($id, $c, true)) $c[] = $id;
+        $cands[$i] = $c;
+        if ($c && $sc[$c[0]]['park']) $count[$c[0]] = ($count[$c[0]] ?? 0) + 1;
+        unset($days[$i]['_photo_ids']);
+    }
+    $used = []; $cover = '';
+    if ($count) {
+        arsort($count);
+        $cd = $sc[key($count)];
+        $cover = $cd['photos'][0];
+        if (count($cd['photos']) > 1) $used[$cover] = true;   // keep it for the cover when the park has more
+    }
+    foreach ($days as $i => $d) {
+        foreach ($cands[$i] as $id) {
+            foreach ($sc[$id]['photos'] as $u) {
+                if (isset($used[$u])) continue;
+                $days[$i]['dest_photo'] = $u; $used[$u] = true;
+                continue 3;
+            }
+        }
+    }
+    return $cover;
+}
+
 /**
  * Everything the document needs, in $lang:
  * program, days[] (title, transfer, duration, meals, narrative, destination, lodge, activities),
@@ -148,19 +218,18 @@ function iti_doc_data(int $id, string $lang): ?array {
             $lodgeName = $d['end_lodge_custom'];
             $lodgeKey  = 'C' . strtolower(trim($lodgeName));
         }
-        $destName = ''; $destDesc = ''; $destPhoto = '';
+        $destName = ''; $destDesc = '';
         if (!empty($d['destination_id']) && isset($dests[(int)$d['destination_id']])) {
             $dr = $dests[(int)$d['destination_id']];
             $destName = iti_doc_pick($dr, 'name', $lang);
-            $destPhoto = trim((string)($dr['cover_photo'] ?? ''));
             if (empty($seenDest[$dr['id']])) { $destDesc = iti_doc_pick($dr, 'description', $lang); $seenDest[$dr['id']] = true; }
         } elseif (!empty($d['destination_custom'])) {
             $destName = $d['destination_custom'];
         }
-        // No destination photo (free-text destination, or none set): the cover of the lodge's own destination.
-        if ($destPhoto === '' && isset($lr) && $lodgeKey === 'L' . $lr['id'] && !empty($lr['destination_id']) && isset($dests[(int)$lr['destination_id']])) {
-            $destPhoto = trim((string)($dests[(int)$lr['destination_id']]['cover_photo'] ?? ''));
-        }
+        // For the day photo (iti_doc_day_photos): the day's destination and the lodge's own destination.
+        $photoIds = [];
+        if (!empty($d['destination_id'])) $photoIds[] = (int)$d['destination_id'];
+        if (isset($lr) && $lodgeKey === 'L' . $lr['id'] && !empty($lr['destination_id'])) $photoIds[] = (int)$lr['destination_id'];
 
         $title = iti_doc_pick($d, 'day_title', $lang);
         if ($title === '') $title = $destName !== '' ? $destName : ($lodgeName !== '' ? $lodgeName : '');
@@ -178,7 +247,8 @@ function iti_doc_data(int $id, string $lang): ?array {
             'narrative'  => iti_doc_pick($d, 'narrative', $lang),
             'dest'       => $destName,
             'dest_desc'  => $destDesc,
-            'dest_photo' => $destPhoto,
+            'dest_photo' => '',            // set by iti_doc_day_photos() below
+            '_photo_ids' => $photoIds,
             'lodge'      => $lodgeName,
             'lodge_key'  => $lodgeKey,
             'lodge_area' => $lodgeArea,
@@ -188,6 +258,8 @@ function iti_doc_data(int $id, string $lang): ?array {
             'activities' => $acts,
         ];
     }
+
+    $cover = iti_doc_day_photos($db, $out, $p);
 
     // Included / not included: this programme's rows, text in $lang with fallbacks.
     $incl = []; $excl = [];
@@ -243,6 +315,7 @@ function iti_doc_data(int $id, string $lang): ?array {
         'terms'    => $terms,
         // Route map (airports + numbered overnight stops), used by the magazine layout.
         'map'      => iti_get_program_map($days),
+        'cover'    => $cover,
         'logo'     => iti_setting('logo_url', 'https://hub.savannahexplorers.com/modules/iti/uploads/logo/logo_1781526818.png'),
         // Office and emergencies only (no personal contact of the consultant).
         'contacts' => [

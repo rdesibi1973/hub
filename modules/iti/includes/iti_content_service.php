@@ -47,7 +47,7 @@ function iti_cs_destination_out(array $r, bool $full = false): array {
         'id' => (int)$r['id'], 'code' => $r['code'], 'name' => $r['name_en'], 'region' => $r['region'],
         'latitude' => $r['latitude'] !== null ? (float)$r['latitude'] : null,
         'longitude' => $r['longitude'] !== null ? (float)$r['longitude'] : null,
-        'cover_photo' => $r['cover_photo'] ?: null, 'lodges' => (int)($r['n_lodges'] ?? 0),
+        'cover_photo' => $r['cover_photo'] ?: null, 'photos' => iti_dest_photos($r), 'lodges' => (int)($r['n_lodges'] ?? 0),
         'description_langs' => [], 'active' => (bool)$r['is_active'],
     ];
     foreach (ITI_CS_LANGS as $l) if (trim((string)($r['description_' . $l] ?? '')) !== '') $out['description_langs'][] = $l;
@@ -99,7 +99,7 @@ function iti_cs_destinations(PDO $db, array $f): array {
     if ($act !== 'all') { $w[] = 'd.is_active = ?'; $a[] = (int)$act; }
     if (($q = trim((string)($f['q'] ?? ''))) !== '') { $w[] = '(d.name_en LIKE ? OR d.name_it LIKE ? OR d.code = ? OR d.region LIKE ?)'; array_push($a, "%$q%", "%$q%", strtoupper($q), "%$q%"); }
     $miss = (string)($f['missing'] ?? '');
-    if ($miss === 'photo')  $w[] = "(d.cover_photo IS NULL OR d.cover_photo = '')";
+    if ($miss === 'photo' || $miss === 'photos') $w[] = "(d.cover_photo IS NULL OR d.cover_photo = '')";
     if ($miss === 'coords') $w[] = '(d.latitude IS NULL OR d.longitude IS NULL)';
     if (preg_match('/^description_(en|it|fr|es|de)$/', $miss)) $w[] = "(d.$miss IS NULL OR d.$miss = '')";
     $st = $db->prepare('SELECT d.*, (SELECT COUNT(*) FROM iti_lodges l WHERE l.destination_id = d.id AND l.is_active = 1) AS n_lodges
@@ -117,7 +117,8 @@ function iti_cs_destination_row(PDO $db, int $id): ?array {
 }
 
 /**
- * Set the photos of a lodge (list, ≤ 12, first = main) or the cover of a destination (1).
+ * Set the photos of a lodge or a destination (list, ≤ 12, first = main / cover).
+ * Destination: "photo" = a new cover, put first (the others stay as gallery).
  * $in: photos [ordered final list] | add [append] , remove [drop], download (default true:
  * web links are copied into uploads/, false: kept as links).
  * Returns the plan; with $go the downloads happen and the row is written. Photos that
@@ -128,16 +129,15 @@ function iti_cs_set_photos(PDO $db, string $kind, int $id, array $in, bool $go):
     $row = $isLodge ? iti_cs_lodge_row($db, $id) : iti_cs_destination_row($db, $id);
     if (!$row) throw new InvalidArgumentException(($isLodge ? 'Lodge ' : 'Destination ') . $id . ' not found');
     $sub = $isLodge ? 'lodges' : 'destinations';
-    $max = $isLodge ? ITI_CS_LODGE_MAX_PHOTOS : 1;
-    $old = $isLodge ? iti_photos_decode($row['photos'] ?? null) : (trim((string)$row['cover_photo']) !== '' ? [trim((string)$row['cover_photo'])] : []);
+    $max = ITI_CS_LODGE_MAX_PHOTOS;
+    $old = $isLodge ? iti_photos_decode($row['photos'] ?? null) : iti_dest_photos($row);
     $clean = function ($v) { $o = []; foreach ((array)$v as $u) { $u = trim((string)$u); if ($u !== '') $o[] = $u; } return $o; };
 
     if (array_key_exists('photos', $in))      $want = $clean($in['photos']);
-    elseif (array_key_exists('photo', $in))   $want = $clean([$in['photo']]);
+    elseif (array_key_exists('photo', $in))   $want = array_merge($clean([$in['photo']]), $old);
     else                                      $want = array_merge($old, $clean($in['add'] ?? []));
     $drop = $clean($in['remove'] ?? []);
     $want = array_values(array_diff(array_unique($want), $drop));
-    if (!$isLodge && count($want) > 1) $want = [end($want)];   // cover: the new one wins
     if (count($want) > $max) throw new InvalidArgumentException('At most ' . $max . ' photos (got ' . count($want) . ')');
     foreach ($want as $u) {
         if (!in_array($u, $old, true) && !preg_match('~^https?://~i', $u)) throw new InvalidArgumentException('Not a web link: ' . $u);
@@ -153,7 +153,6 @@ function iti_cs_set_photos(PDO $db, string $kind, int $id, array $in, bool $go):
         if (strlen($b) > ITI_PHOTO_MAX_BYTES) throw new InvalidArgumentException('uploads[' . $i . ']: larger than 15 MB');
         $files[] = ['name' => (string)($f['name'] ?? ('upload-' . $i)), 'data' => $b];
     }
-    if (!$isLodge && $files) $want = [];                         // cover: the uploaded one wins
     if (count($want) + count($files) > $max) throw new InvalidArgumentException('At most ' . $max . ' photos (got ' . (count($want) + count($files)) . ')');
 
     $plan = [];
@@ -183,7 +182,8 @@ function iti_cs_set_photos(PDO $db, string $kind, int $id, array $in, bool $go):
         $db->prepare('UPDATE iti_lodges SET photos = ? WHERE id = ?')
            ->execute([$final ? json_encode($final, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) : null, $id]);
     } else {
-        $db->prepare('UPDATE iti_destinations SET cover_photo = ? WHERE id = ?')->execute([$final ? $final[0] : '', $id]);
+        $db->prepare('UPDATE iti_destinations SET photos = ?, cover_photo = ? WHERE id = ?')
+           ->execute([$final ? json_encode($final, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) : null, $final ? $final[0] : '', $id]);
     }
     foreach ($removed as $u) iti_photo_unlink($u, $sub);
     return array_merge($res, ['photos' => $final, 'errors' => $errors]);

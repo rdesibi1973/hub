@@ -32,6 +32,14 @@ function iti_photos_decode($json): array {
     return $out;
 }
 
+/** A destination's photos: its gallery (photos JSON), else the single cover_photo. First = cover. */
+function iti_dest_photos(array $row): array {
+    $list = iti_photos_decode($row['photos'] ?? null);
+    $cover = trim((string)($row['cover_photo'] ?? ''));
+    if (!$list && $cover !== '') $list = [$cover];
+    return $list;
+}
+
 /** The photo columns, added when the live database lacks them (called on save). */
 function iti_photos_schema(): void {
     static $done = false;
@@ -39,7 +47,8 @@ function iti_photos_schema(): void {
     $done = true;
     try {
         $db = db();
-        foreach ([['iti_lodges', 'photos', 'TEXT NULL DEFAULT NULL'], ['iti_destinations', 'cover_photo', 'VARCHAR(255) NULL DEFAULT NULL']] as $c) {
+        foreach ([['iti_lodges', 'photos', 'TEXT NULL DEFAULT NULL'], ['iti_destinations', 'cover_photo', 'VARCHAR(255) NULL DEFAULT NULL'],
+                  ['iti_destinations', 'photos', 'TEXT NULL DEFAULT NULL']] as $c) {
             if (!$db->query('SHOW COLUMNS FROM `' . $c[0] . '` LIKE ' . $db->quote($c[1]))->fetch()) {
                 $db->exec('ALTER TABLE `' . $c[0] . '` ADD COLUMN `' . $c[1] . '` ' . $c[2]);
             }

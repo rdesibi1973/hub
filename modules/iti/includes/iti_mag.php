@@ -112,6 +112,7 @@ function iti_mag_pax(array $D, array $M): string {
 /** Cover photo: the destination where most days are spent, else the first lodge photo. */
 function iti_mag_cover(array $D): string {
     if (!empty($D['program']['cover_photo'])) return (string)$D['program']['cover_photo'];
+    if (!empty($D['cover'])) return (string)$D['cover'];   // safari photo chosen by iti_doc_day_photos()
     $count = []; $photo = [];
     foreach ($D['days'] as $d) {
         if ($d['dest_photo'] === '') continue;
@@ -165,6 +166,7 @@ function iti_mag_css(): string {
 .mag-nav a:hover{background:var(--sand)}
 .mag-nav a.d{min-width:30px;text-align:center;padding:5px 8px;color:var(--mute)}
 .mag-nav .sep{width:1px;height:18px;background:var(--line);margin:0 6px;flex:none}
+.mag-nav .lbl{flex:none;font-size:10.5px;letter-spacing:.18em;text-transform:uppercase;font-weight:700;color:var(--mute);margin:0 2px 0 4px}
 
 /* Sections */
 .mag-sec{padding:64px 0 8px}
@@ -330,7 +332,8 @@ function iti_mag_render(array $D, string $publicUrl = ''): string {
     <a href="#mag-overview"><?= h($M['overview']) ?></a>
     <?php if ($hasMap || $stays): ?><a href="#mag-route"><?= h($M['route']) ?></a><?php endif; ?>
     <span class="sep"></span>
-    <?php foreach ($D['days'] as $d): ?><a class="d" href="#day-<?= (int)$d['n'] ?>"><?= (int)$d['n'] ?></a><?php endforeach; ?>
+    <span class="lbl"><?= h($M['days_nav']) ?></span>
+    <?php foreach ($D['days'] as $d): ?><a class="d" href="#day-<?= (int)$d['n'] ?>" title="<?= h($T['day'] . ' ' . $d['n'] . ($d['title'] !== '' ? ' · ' . $d['title'] : '')) ?>"><?= (int)$d['n'] ?></a><?php endforeach; ?>
     <span class="sep"></span>
     <?php if ($D['prices']): ?><a href="#mag-prices"><?= h($M['prices_nav']) ?></a><?php endif; ?>
     <a href="#mag-info"><?= h($M['info_nav']) ?></a>

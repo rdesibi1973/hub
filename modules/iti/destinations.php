@@ -50,13 +50,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit) {
     if ($action === 'add' || ($action === 'edit' && $id)) {
         $old = [];
         if ($action === 'edit') {
-            $st = $db->prepare('SELECT cover_photo FROM iti_destinations WHERE id = ?');
+            $st = $db->prepare('SELECT * FROM iti_destinations WHERE id = ?');
             $st->execute([$id]);
-            $c = trim((string)$st->fetchColumn());
-            if ($c !== '') $old[] = $c;
+            $old = iti_dest_photos($st->fetch() ?: []);
         }
-        $cover = iti_photos_from_post($old, 'destinations', $fields['code'] . '-' . $fields['name_en'], 1, $photo_errors);
-        $fields['cover_photo'] = $cover ? $cover[0] : '';
+        $gallery = iti_photos_from_post($old, 'destinations', $fields['code'] . '-' . $fields['name_en'], 12, $photo_errors);
+        $fields['cover_photo'] = $gallery ? $gallery[0] : '';
     }
 
     if ($action === 'add') {
@@ -67,6 +66,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit) {
               region,country,latitude,longitude,cover_photo,sort_order,is_active)
              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
         )->execute(array_values($fields));
+        if (isset($gallery)) $db->prepare('UPDATE iti_destinations SET photos = ? WHERE id = ?')
+                                ->execute([$gallery ? json_encode($gallery, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) : null, (int)$db->lastInsertId()]);
         iti_flash_set($photo_errors ? 'error' : 'success', 'Destination "' . $fields['name_en'] . '" created.' . ($photo_errors ? ' Photo: ' . implode(' ', $photo_errors) : ''));
         iti_redirect('destinations.php');
 
@@ -78,6 +79,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit) {
              region=?,country=?,latitude=?,longitude=?,cover_photo=?,sort_order=?,is_active=?
              WHERE id=?'
         )->execute([...array_values($fields), $id]);
+        if (isset($gallery)) $db->prepare('UPDATE iti_destinations SET photos = ? WHERE id = ?')
+                                ->execute([$gallery ? json_encode($gallery, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) : null, $id]);
         if ($photo_errors) {
             iti_flash_set('error', 'Destination saved, but the photo was not: ' . implode(' ', $photo_errors));
             iti_redirect("destinations.php?action=edit&id={$id}");
@@ -175,8 +178,8 @@ include __DIR__ . '/../../includes/layout_header.php';
     </div>
   </div>
 
-  <div class="form-section-title">Cover photo <span style="font-weight:400;font-size:.8rem;color:var(--grey-mid)">day header and programme cover — landscape, at least 1600 px wide</span></div>
-  <?= iti_photo_editor(!empty($row['cover_photo']) ? [$row['cover_photo']] : [], 1, 'Wide landscape shot without text on it.') ?>
+  <div class="form-section-title">Photos <span style="font-weight:400;font-size:.8rem;color:var(--grey-mid)">safari photos for the day headers and the programme cover — landscape, at least 1600 px wide</span></div>
+  <?= iti_photo_editor($row ? iti_dest_photos($row) : [], 12, 'The first is the cover. Each programme day uses a different one: wildlife, landscapes, no text on the photo.') ?>
 
   <div class="form-section-title">Name <span style="font-weight:400;font-size:.8rem;color:var(--grey-mid)">× 5 languages</span></div>
   <div class="form-grid">
