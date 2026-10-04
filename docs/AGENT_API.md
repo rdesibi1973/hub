@@ -224,7 +224,7 @@ Every key optional: `day_title_<lang>`, `narrative_<lang>`, `end_lodge_id` | `en
 `start_custom`, `transfer_route_id`, `transfer_custom`, `meal_breakfast` / `meal_lunch` / `meal_dinner` /
 `meal_all_inclusive` (0/1), and three lists — each one given **replaces** the day's list (`[]` = none):
 - `transfers`: `["Dar airport – Serena Hotel, about 40 min", …]` (text shown on the day, programme language);
-- `activities`: `[{activity_id} | {activity: "<name>"} | {custom: "<text>"}, + note_<lang>?]` (see `iti_activities`);
+- `activities`: `[{activity_id} | {activity: "<name>"} | {custom: "<text>", text_<lang>?: "<translation>"}]` (see `iti_activities`; a catalogue activity shows its own name);
 - `flights`: `[{flight_route_id | custom, airline?, dep?: "07:40", arr?: "10:05", note_<lang>?}]` (see `iti_flight_routes`).
 `iti_program` returns `structure[]`: the stored days in this same shape (with ids), to edit and send back.
 Flights are shown on the day (magazine, Word) as "✈ Dar Es Salaam → Ruaha · Auric Air · 07:40–10:05".

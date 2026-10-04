@@ -13,7 +13,7 @@
  *   start_lodge_id, start_destination_id, start_custom, transfer_route_id, transfer_custom,
  *   meal_breakfast / meal_lunch / meal_dinner / meal_all_inclusive (0/1),
  *   transfers  [ "Dar airport – Serena Hotel, 40 min" … ]                 (replaces the day's list)
- *   activities [ {activity_id} | {activity: "<name>"} | {custom: "<text>"} , note_<lang>? … ]
+ *   activities [ {activity_id} | {activity: "<name>"} | {custom: "<text>", text_<lang>?: "<translation>"} … ]
  *   flights    [ {flight_route_id | custom, airline?, dep?: "07:40", arr?: "10:05", note_<lang>?} … ]
  */
 
@@ -89,7 +89,14 @@ function iti_pb_day_item(PDO $db, array $f): array {
             elseif (!empty($a['activity']))     $row['activity_id'] = iti_pb_lookup($db, 'activity', (string)$a['activity']);
             elseif (trim((string)($a['custom'] ?? '')) !== '') $row['activity_custom'] = mb_substr(trim((string)$a['custom']), 0, 200);
             else throw new InvalidArgumentException('activity needs activity_id, activity (name) or custom');
-            foreach (ITI_PS_LANGS as $l) if (isset($a['note_' . $l])) $row['custom_note_' . $l] = trim((string)$a['note_' . $l]);
+            // A custom activity's text per language (custom_note_<lang>, as the translations write it);
+            // catalogue activities show their own name, so no text is taken for them.
+            foreach (ITI_PS_LANGS as $l) {
+                $t = $a['text_' . $l] ?? null;
+                if ($t === null || trim((string)$t) === '') continue;
+                if ($row['activity_id']) throw new InvalidArgumentException('text_' . $l . ' is only for custom activities (a catalogue activity shows its own name) — use {custom, text_' . $l . '}');
+                $row['custom_note_' . $l] = trim((string)$t);
+            }
             $acts[] = $row;
         }
         $children['activities'] = $acts;
@@ -248,7 +255,7 @@ function iti_pb_days_raw(PDO $db, int $pid): array {
         $row['activities'] = [];
         foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $a) {
             $x = $a['activity_id'] ? ['activity_id' => (int)$a['activity_id'], 'name' => $a['activity_name']] : ['custom' => $a['activity_custom']];
-            foreach (ITI_PS_LANGS as $l) if (trim((string)$a['custom_note_' . $l]) !== '') $x['note_' . $l] = $a['custom_note_' . $l];
+            foreach (ITI_PS_LANGS as $l) if (trim((string)$a['custom_note_' . $l]) !== '') $x['text_' . $l] = $a['custom_note_' . $l];
             $row['activities'][] = $x;
         }
         $q = $db->prepare('SELECT f.*, r.from_airport, r.to_airport FROM iti_day_flights f LEFT JOIN iti_flight_routes r ON r.id = f.flight_route_id WHERE f.program_day_id = ? ORDER BY f.sort_order, f.id'); $q->execute([$id]);
