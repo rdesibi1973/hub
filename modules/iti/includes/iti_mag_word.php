@@ -37,6 +37,13 @@ function iti_mw_img(string $url, int $maxW, array &$tmp): ?string {
         if (!iti_photo_download($url, $t, $err)) { @unlink($t); return null; }
         $tmp[] = $t; $src = $t;
     }
+    // Our own photos: the shrunk copy is kept in uploads/_word/<width>/ and reused next time.
+    $cache = null;
+    if (strpos($src, dirname(__DIR__) . '/uploads/') === 0) {
+        $cache = dirname(__DIR__) . '/uploads/_word/' . $maxW . '/' . str_replace('/', '__', substr($src, strlen(dirname(__DIR__) . '/uploads/')));
+        $cache = preg_replace('/\.\w+$/', '', $cache) . '.jpg';
+        if (is_file($cache) && filemtime($cache) >= filemtime($src)) return $cache;
+    }
     $info = @getimagesize($src);
     if (!$info) return null;
     if (!function_exists('imagecreatetruecolor') || $info[0] <= $maxW) {
@@ -46,6 +53,10 @@ function iti_mw_img(string $url, int $maxW, array &$tmp): ?string {
     $img = function_exists('iti_photo_load') && iti_photo_mem_ok((int)$info[0], (int)$info[1]) ? iti_photo_load($src, $info[2]) : null;
     if (!$img) return in_array($info[2], [IMAGETYPE_JPEG, IMAGETYPE_PNG], true) ? $src : null;
     $img = iti_photo_fit($img, $maxW);
+    if ($cache !== null && (is_dir(dirname($cache)) || @mkdir(dirname($cache), 0755, true)) && imagejpeg($img, $cache, 80)) {
+        imagedestroy($img);
+        return $cache;
+    }
     $out = tempnam(sys_get_temp_dir(), 'mwim') . '.jpg';
     imagejpeg($img, $out, 80);
     imagedestroy($img);

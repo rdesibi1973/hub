@@ -23,6 +23,7 @@ modules/iti/uploads/logo/*
 modules/iti/uploads/profiles/*
 modules/iti/uploads/lodges/*
 modules/iti/uploads/destinations/*
+modules/iti/uploads/_word/
 !modules/iti/uploads/logo/.gitkeep
 !modules/iti/uploads/profiles/.gitkeep
 !modules/iti/uploads/.htaccess
