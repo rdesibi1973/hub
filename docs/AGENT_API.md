@@ -254,6 +254,12 @@ Removed photos stored in `uploads/` are deleted. Only public http(s) hosts are f
 `destination_id`, `photo` (one link) — or `remove: [<current>]` to clear. Same download and dry-run rules;
 the new photo replaces the old cover.
 
+#### `iti_create_lodge` (POST)
+`fields`: `name`*, `destination_id`*, `category` (`budget`|`mid`|`luxury`|`ultra_luxury`), `lodge_type`
+(`lodge`|`tented_camp`|`hotel`|`mobile_camp`|`house`) + any field of `iti_update_lodge`. A name that already exists
+(exact or contained) → 400 with the existing lodge. Dry-run unless `"confirm": true`; then `created` (the lodge).
+Photos afterwards with `iti_lodge_photos`.
+
 #### `iti_update_lodge` / `iti_update_destination` (POST)
 `lodge_id` / `destination_id`, `fields` `{…}`. Lodge: `website, phone, emergency_phone, email, address,
 description_<lang>, latitude, longitude`. Destination: `name_<lang>, description_<lang>, region, latitude, longitude`.

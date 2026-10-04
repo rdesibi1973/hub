@@ -85,7 +85,8 @@ function agent_audit(PDO $db, string $action, $reqId, array $payload, string $re
     $dry = in_array($action, ['confirm_booking', 'send_booking_email', 'rollback_booking', 'fill_calc', 'iti_save_texts', 'update_rate', 'replace_flight_rates',
                               'cancel_invoice_payment', 'update_folder_status', 'import_zoho_invoice', 'mail_send', 'mail_move',
                               'iti_lodge_photos', 'iti_destination_photo', 'iti_update_lodge', 'iti_update_destination',
-                              'iti_create_personal', 'iti_update_program', 'iti_update_day', 'iti_publish', 'iti_final_from_calc', 'iti_save_alias'], true) && empty($payload['confirm']);
+                              'iti_create_personal', 'iti_update_program', 'iti_update_day', 'iti_publish', 'iti_final_from_calc', 'iti_save_alias',
+                              'iti_create_lodge'], true) && empty($payload['confirm']);
     // Mail: keep who/what in the log, not message bodies or attachment content.
     if (in_array($action, ['mail_get', 'mail_attachment'], true) && $code === 200) {
         $res = json_decode($resultJson, true);
@@ -930,6 +931,15 @@ try {
         agent_out(array_merge(['ok' => !$r['errors'] || $r['photos'], 'dry_run' => false], $r), $r['errors'] ? 422 : 200);
     }
 
+    // New lodge (name, destination_id, category, type, website, contacts, descriptions). Dry-run unless "confirm": true.
+    case 'iti_create_lodge': {
+        agent_require_method('POST');
+        $go = !empty($in['confirm']);
+        try { $r = iti_cs_create_lodge($db, isset($in['fields']) && is_array($in['fields']) ? $in['fields'] : [], $go); }
+        catch (InvalidArgumentException $e) { agent_fail($e->getMessage(), 400); }
+        agent_out(array_merge(['ok' => true, 'dry_run' => !$go], $r, $go ? [] : ['message' => 'Dry run — nothing saved. Resend with "confirm": true.']));
+    }
+
     // Texts / contacts / coordinates. Dry-run unless "confirm": true.
     case 'iti_update_lodge':
     case 'iti_update_destination': {
@@ -1542,7 +1552,7 @@ try {
             'copy_program', 'get_rates', 'fill_calc', 'read_calc', 'confirm_preview', 'confirm_booking', 'send_booking_email',
             'rollback_booking', 'iti_programs', 'iti_texts', 'iti_save_texts', 'update_rate', 'replace_flight_rates',
             'iti_lodges', 'iti_lodge', 'iti_destinations', 'iti_destination', 'iti_lodge_photos', 'iti_destination_photo',
-            'iti_update_lodge', 'iti_update_destination', 'iti_samples', 'iti_program', 'iti_create_personal', 'iti_update_program',
+            'iti_update_lodge', 'iti_update_destination', 'iti_create_lodge', 'iti_samples', 'iti_program', 'iti_create_personal', 'iti_update_program',
             'iti_update_day', 'iti_publish', 'iti_calc_plan', 'iti_final_from_calc', 'iti_save_alias',
             'find_invoices', 'get_invoice', 'add_invoice_payment', 'cancel_invoice_payment', 'update_folder_status',
             'save_invoice_pdf', 'import_zoho_invoice', 'memo_list', 'memo_save', 'memo_set_status',

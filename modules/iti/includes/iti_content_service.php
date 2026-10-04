@@ -190,6 +190,49 @@ function iti_cs_set_photos(PDO $db, string $kind, int $id, array $in, bool $go):
 }
 
 /**
+ * New lodge. $f: name*, destination_id*, category (budget|mid|luxury|ultra_luxury), lodge_type
+ * (lodge|tented_camp|hotel|mobile_camp|house) + any editable field (website, contacts, lat/lng,
+ * description_<lang>). Refuses a name that already exists. Returns the plan; with $go the new id.
+ */
+function iti_cs_create_lodge(PDO $db, array $f, bool $go): array {
+    iti_photos_schema();
+    $name = trim((string)($f['name'] ?? ''));
+    $did = (int)($f['destination_id'] ?? 0);
+    if ($name === '' || !$did) throw new InvalidArgumentException('name and destination_id are required');
+    if (!iti_cs_destination_row($db, $did)) throw new InvalidArgumentException('destination_id ' . $did . ' not found');
+    $st = $db->prepare('SELECT id, name FROM iti_lodges WHERE name = ? OR name LIKE ?');
+    $st->execute([$name, '%' . $name . '%']);
+    if ($dup = $st->fetch(PDO::FETCH_ASSOC)) throw new InvalidArgumentException('Lodge already exists: #' . $dup['id'] . ' ' . $dup['name']);
+    $cat = (string)($f['category'] ?? 'mid');
+    $type = (string)($f['lodge_type'] ?? 'lodge');
+    if (!in_array($cat, ['budget', 'mid', 'luxury', 'ultra_luxury'], true)) throw new InvalidArgumentException('category: budget|mid|luxury|ultra_luxury');
+    if (!in_array($type, ['lodge', 'tented_camp', 'hotel', 'mobile_camp', 'house'], true)) throw new InvalidArgumentException('lodge_type: lodge|tented_camp|hotel|mobile_camp|house');
+    $row = ['destination_id' => $did, 'name' => $name, 'category' => $cat, 'lodge_type' => $type, 'is_active' => 1];
+    foreach (ITI_CS_LANGS as $l) $row['description_' . $l] = '';
+    $extra = array_diff_key($f, array_flip(['name', 'destination_id', 'category', 'lodge_type']));
+    if ($extra) {
+        $allowed = array_merge(iti_cs_editable('lodge'), ['latitude', 'longitude']);
+        $bad = array_values(array_diff(array_keys($extra), $allowed));
+        if ($bad) throw new InvalidArgumentException('Not settable: ' . implode(', ', $bad));
+        foreach ($extra as $k => $v) $row[$k] = ($k === 'latitude' || $k === 'longitude') ? ($v === '' || $v === null ? null : round((float)$v, 6)) : trim((string)$v);
+    }
+    $cols = iti_table_columns_cs($db, 'iti_lodges');
+    $row = array_intersect_key($row, array_flip($cols));
+    if (!$go) return ['would_create' => $row];
+    $db->prepare('INSERT INTO iti_lodges (`' . implode('`,`', array_keys($row)) . '`) VALUES (' . implode(',', array_fill(0, count($row), '?')) . ')')
+       ->execute(array_values($row));
+    $id = (int)$db->lastInsertId();
+    return ['created' => iti_cs_lodge_out(iti_cs_lodge_row($db, $id), true)];
+}
+
+/** Column names of a table (self-contained: the API has no iti_functions.php here). */
+function iti_table_columns_cs(PDO $db, string $table): array {
+    $out = [];
+    foreach ($db->query('SHOW COLUMNS FROM `' . $table . '`')->fetchAll(PDO::FETCH_ASSOC) as $c) $out[] = $c['Field'];
+    return $out;
+}
+
+/**
  * Change texts / contacts / coordinates of a lodge or destination. $fields: any of
  * iti_cs_editable($kind) + latitude, longitude ("" or null clears). Returns the diff;
  * with $go it is written.
