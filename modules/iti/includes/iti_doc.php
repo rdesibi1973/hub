@@ -94,7 +94,7 @@ function iti_doc_duration(string $transfer): string {
 function iti_doc_scenic_dests(PDO $db): array {
     static $cache = null;
     if ($cache !== null) return $cache;
-    $towns = ['ARU', 'KAR', 'MWB', 'MKY', 'MSH', 'MCH', 'MRG', 'LEM', 'RNG', 'TVT', 'ISB', 'NAM', 'DOD', 'IRG', 'KSZ', 'DRSM'];
+    $towns = ['KAR', 'MWB', 'MKY', 'MSH', 'MCH', 'MRG', 'LEM', 'RNG', 'TVT', 'ISB', 'NAM', 'DOD', 'IRG', 'KSZ', 'DRSM'];
     $townWords = ['arusha', 'karatu', 'moshi', 'mto wa mbu', 'dar es salaam', 'dodoma', 'iringa', 'namanga'];
     $generic = '/\b(national park|conservation area|parco nazionale|parc national|parque nacional|nationalpark|area di conservazione|'
              . 'lake|lago|lac|see|mount|monte|mont|island|isola|île|isla|insel|gorge|gola|crater|cratere|cratère|krater)\b/u';
