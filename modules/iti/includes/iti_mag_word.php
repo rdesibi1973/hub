@@ -146,12 +146,15 @@ function iti_mag_word_build(array $D): array {
     $rows = [[ucfirst($T['days']), $D['duration']]];
     if ($dateRange !== '') $rows[] = [$M['dates'], $dateRange];
     if ($routeNames) $rows[] = [$M['destinations'], implode(', ', $routeNames)];
-    if ($lodges) $rows[] = [$M['lodges'], count($lodges) . ' · ' . $nNights . ' ' . ($nNights === 1 ? $T['night1'] : $T['nights'])];
+    if ($lodges) $rows[] = [$M['lodges'], implode("
+", iti_mag_lodge_nights($stays, $T))];
     if ($paxLabel !== '') $rows[] = [ucfirst($T['pax']), $paxLabel];
     foreach ($rows as $r) {
         $tb->addRow();
         $tb->addCell(2600, ['bgColor' => $SAND])->addText($r[0], 'mwSmall', 'mwTight');
-        $tb->addCell(7100, ['bgColor' => $SAND])->addText($r[1], ['name' => 'Calibri', 'size' => 10.5, 'bold' => true], 'mwTight');
+        $run = $tb->addCell(7100, ['bgColor' => $SAND])->addTextRun('mwTight');
+        foreach (explode("
+", $r[1]) as $k => $line) { if ($k) $run->addTextBreak(); $run->addText($line, ['name' => 'Calibri', 'size' => 10.5, 'bold' => true]); }
     }
 
     // ── Route: map + legend, stays ───────────────────────

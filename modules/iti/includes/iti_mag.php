@@ -109,6 +109,15 @@ function iti_mag_pax(array $D, array $M): string {
     return implode(' · ', $out);
 }
 
+/** Accommodation summary: ["Mdonya Old River Camp · 5 notti", …] in stay order (nights added up per lodge). */
+function iti_mag_lodge_nights(array $stays, array $T): array {
+    $n = [];
+    foreach ($stays as $s) $n[$s['lodge']] = ($n[$s['lodge']] ?? 0) + $s['nights'];
+    $out = [];
+    foreach ($n as $lodge => $k) $out[] = $lodge . ' · ' . $k . ' ' . ($k === 1 ? $T['night1'] : $T['nights']);
+    return $out;
+}
+
 /** Cover photo: the destination where most days are spent, else the first lodge photo. */
 function iti_mag_cover(array $D): string {
     if (!empty($D['program']['cover_photo'])) return (string)$D['program']['cover_photo'];
@@ -353,7 +362,7 @@ function iti_mag_render(array $D, string $publicUrl = ''): string {
           <dl>
             <dt><?= h(ucfirst($T['days'])) ?></dt><dd><?= h($D['duration']) ?></dd>
             <?php if ($routeNames): ?><dt><?= h($M['destinations']) ?></dt><dd><?= h(implode(', ', $routeNames)) ?></dd><?php endif; ?>
-            <?php if ($lodgeNames): ?><dt><?= h($M['lodges']) ?></dt><dd><?= count($lodgeNames) ?> · <?= $nNights ?> <?= h($nNights === 1 ? $T['night1'] : $T['nights']) ?></dd><?php endif; ?>
+            <?php if ($lodgeNames): ?><dt><?= h($M['lodges']) ?></dt><dd><?= implode('<br>', array_map('h', iti_mag_lodge_nights($stays, $T))) ?></dd><?php endif; ?>
             <?php if ($dateRange !== ''): ?><dt><?= h($M['dates']) ?></dt><dd><?= h($dateRange) ?></dd><?php endif; ?>
             <?php if ($paxLabel !== ''): ?><dt><?= h(ucfirst($T['pax'])) ?></dt><dd><?= h($paxLabel) ?></dd><?php endif; ?>
           </dl>
