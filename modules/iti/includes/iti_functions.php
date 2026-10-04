@@ -12,6 +12,8 @@ if (!defined('DB_HOST')) {
 
 static $_iti_pdo = null;
 
+// The Agent API loads this file next to the leads config, which already has db().
+if (!function_exists('db')) {
 function db(): PDO {
     global $_iti_pdo;
     if ($_iti_pdo === null) {
@@ -32,11 +34,12 @@ function db(): PDO {
     }
     return $_iti_pdo;
 }
+}
 
 // ── Costanti ──────────────────────────────────────────────────────────────────
 define('ITI_VERSION',    '1.0.0');
 define('ITI_BASE_URL',   BASE_URL . '/modules/iti');
-define('ITI_MODULE_URL', BASE_URL . '/modules/iti');
+if (!defined('ITI_MODULE_URL')) define('ITI_MODULE_URL', BASE_URL . '/modules/iti');   // iti_photos.php may define it first
 define('ITI_LANGUAGES',  ['en', 'it', 'fr', 'es', 'de']);
 define('ITI_CURRENCIES', ['USD', 'EUR']);
 define('ITI_BRANDS', [

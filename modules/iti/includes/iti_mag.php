@@ -18,27 +18,42 @@ function iti_mag_labels(string $lang): array {
                  'days_nav' => 'Giorni', 'prices_nav' => 'Quote', 'info_nav' => 'Info', 'see_day' => 'vedi giorno',
                  'website' => 'Sito web', 'start' => 'Arrivo', 'end' => 'Partenza', 'km' => 'km in linea d\'aria',
                  'destinations' => 'Destinazioni', 'lodges' => 'Sistemazioni', 'online' => 'Itinerario digitale',
-                 'about_dest' => 'La destinazione', 'pdf' => 'Scarica PDF', 'private' => 'Safari privato con guida'],
+                 'about_dest' => 'La destinazione', 'pdf' => 'Scarica PDF', 'private' => 'Safari privato con guida',
+                 'adult' => 'adulto', 'adults' => 'adulti', 'child' => 'bambino', 'children' => 'bambini', 'dates' => 'Date',
+                 'months' => ['gennaio', 'febbraio', 'marzo', 'aprile', 'maggio', 'giugno', 'luglio', 'agosto', 'settembre', 'ottobre', 'novembre', 'dicembre'],
+                 'wdays' => ['dom', 'lun', 'mar', 'mer', 'gio', 'ven', 'sab']],
         'en' => ['overview' => 'Your journey', 'facts' => 'At a glance', 'route' => 'The route', 'stays' => 'Where you stay',
                  'days_nav' => 'Days', 'prices_nav' => 'Rates', 'info_nav' => 'Info', 'see_day' => 'see day',
                  'website' => 'Website', 'start' => 'Arrival', 'end' => 'Departure', 'km' => 'km as the crow flies',
                  'destinations' => 'Destinations', 'lodges' => 'Accommodation', 'online' => 'Digital itinerary',
-                 'about_dest' => 'The destination', 'pdf' => 'Download PDF', 'private' => 'Private guided safari'],
+                 'about_dest' => 'The destination', 'pdf' => 'Download PDF', 'private' => 'Private guided safari',
+                 'adult' => 'adult', 'adults' => 'adults', 'child' => 'child', 'children' => 'children', 'dates' => 'Dates',
+                 'months' => ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'],
+                 'wdays' => ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']],
         'fr' => ['overview' => 'Votre voyage', 'facts' => 'En bref', 'route' => 'L\'itinéraire', 'stays' => 'Vos hébergements',
                  'days_nav' => 'Jours', 'prices_nav' => 'Tarifs', 'info_nav' => 'Infos', 'see_day' => 'voir jour',
                  'website' => 'Site web', 'start' => 'Arrivée', 'end' => 'Départ', 'km' => 'km à vol d\'oiseau',
                  'destinations' => 'Destinations', 'lodges' => 'Hébergements', 'online' => 'Itinéraire numérique',
-                 'about_dest' => 'La destination', 'pdf' => 'Télécharger le PDF', 'private' => 'Safari privé avec guide'],
+                 'about_dest' => 'La destination', 'pdf' => 'Télécharger le PDF', 'private' => 'Safari privé avec guide',
+                 'adult' => 'adulte', 'adults' => 'adultes', 'child' => 'enfant', 'children' => 'enfants', 'dates' => 'Dates',
+                 'months' => ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'],
+                 'wdays' => ['dim', 'lun', 'mar', 'mer', 'jeu', 'ven', 'sam']],
         'es' => ['overview' => 'Tu viaje', 'facts' => 'En breve', 'route' => 'El recorrido', 'stays' => 'Alojamientos',
                  'days_nav' => 'Días', 'prices_nav' => 'Precios', 'info_nav' => 'Info', 'see_day' => 'ver día',
                  'website' => 'Sitio web', 'start' => 'Llegada', 'end' => 'Salida', 'km' => 'km en línea recta',
                  'destinations' => 'Destinos', 'lodges' => 'Alojamientos', 'online' => 'Itinerario digital',
-                 'about_dest' => 'El destino', 'pdf' => 'Descargar PDF', 'private' => 'Safari privado con guía'],
+                 'about_dest' => 'El destino', 'pdf' => 'Descargar PDF', 'private' => 'Safari privado con guía',
+                 'adult' => 'adulto', 'adults' => 'adultos', 'child' => 'niño', 'children' => 'niños', 'dates' => 'Fechas',
+                 'months' => ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'],
+                 'wdays' => ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb']],
         'de' => ['overview' => 'Ihre Reise', 'facts' => 'Auf einen Blick', 'route' => 'Die Route', 'stays' => 'Ihre Unterkünfte',
                  'days_nav' => 'Tage', 'prices_nav' => 'Preise', 'info_nav' => 'Infos', 'see_day' => 'siehe Tag',
                  'website' => 'Webseite', 'start' => 'Ankunft', 'end' => 'Abreise', 'km' => 'km Luftlinie',
                  'destinations' => 'Reiseziele', 'lodges' => 'Unterkünfte', 'online' => 'Digitale Reiseroute',
-                 'about_dest' => 'Das Reiseziel', 'pdf' => 'PDF herunterladen', 'private' => 'Private Safari mit Guide'],
+                 'about_dest' => 'Das Reiseziel', 'pdf' => 'PDF herunterladen', 'private' => 'Private Safari mit Guide',
+                 'adult' => 'Erwachsener', 'adults' => 'Erwachsene', 'child' => 'Kind', 'children' => 'Kinder', 'dates' => 'Reisedaten',
+                 'months' => ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'],
+                 'wdays' => ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa']],
     ];
     return isset($L[$lang]) ? $L[$lang] : $L['en'];
 }
@@ -63,6 +78,35 @@ function iti_mag_stays(array $days): array {
     foreach ($stays as &$s) if ($s['photo'] === '' && isset($photo[$s['lodge']])) $s['photo'] = $photo[$s['lodge']];
     unset($s);
     return $stays;
+}
+
+/** "2027-03-12" → "12 marzo 2027" ($year) / "gio 12 marzo" ($wday). */
+function iti_mag_date(string $ymd, array $M, bool $year = true, bool $wday = false): string {
+    $t = strtotime($ymd);
+    if (!$t) return '';
+    return ($wday ? $M['wdays'][(int)date('w', $t)] . ' ' : '') . (int)date('j', $t) . ' ' . $M['months'][(int)date('n', $t) - 1] . ($year ? ' ' . date('Y', $t) : '');
+}
+
+/** Travel dates of the cover: "12 – 17 marzo 2027" (or across months / years). */
+function iti_mag_date_range(array $D, array $M): string {
+    $days = $D['days'];
+    if (!$days || empty($days[0]['date'])) return '';
+    $a = $days[0]['date']; $b = $days[count($days) - 1]['date'];
+    if (substr($a, 0, 7) === substr($b, 0, 7)) return (int)substr($a, 8) . ' – ' . iti_mag_date($b, $M);
+    if (substr($a, 0, 4) === substr($b, 0, 4)) return iti_mag_date($a, $M, false) . ' – ' . iti_mag_date($b, $M);
+    return iti_mag_date($a, $M) . ' – ' . iti_mag_date($b, $M);
+}
+
+/** "2 adulti · 1 bambino" for personal programmes ('' for samples). */
+function iti_mag_pax(array $D, array $M): string {
+    if (!empty($D['pax_label'])) return (string)$D['pax_label'];
+    $p = $D['program'];
+    if (($p['program_type'] ?? '') !== 'personal') return '';
+    $a = (int)($p['pax_adults'] ?? 0); $c = (int)($p['pax_children'] ?? 0);
+    $out = [];
+    if ($a) $out[] = $a . ' ' . ($a === 1 ? $M['adult'] : $M['adults']);
+    if ($c) $out[] = $c . ' ' . ($c === 1 ? $M['child'] : $M['children']);
+    return implode(' · ', $out);
 }
 
 /** Cover photo: the destination where most days are spent, else the first lodge photo. */
@@ -261,6 +305,8 @@ function iti_mag_render(array $D, string $publicUrl = ''): string {
     $nNights = 0; foreach ($stays as $s) $nNights += $s['nights'];
     $lodgeNames = []; foreach ($stays as $s) $lodgeNames[$s['lodge']] = true;
     $seenLodge = []; $seenDestPhoto = [];
+    $paxLabel = iti_mag_pax($D, $M);
+    $dateRange = iti_mag_date_range($D, $M);
     ob_start(); ?>
 <div class="mag" lang="<?= h($D['lang']) ?>">
 
@@ -272,9 +318,10 @@ function iti_mag_render(array $D, string $publicUrl = ''): string {
       <?php if ($D['subtitle'] !== ''): ?><p class="mag-cover-sub"><?= h($D['subtitle']) ?></p><?php endif; ?>
       <?php if ($routeNames): ?><p class="mag-cover-route"><?= h(implode(' · ', $routeNames)) ?></p><?php endif; ?>
       <div class="mag-pills">
+        <?php if ($dateRange !== ''): ?><span class="mag-pill"><?= h($dateRange) ?></span><?php endif; ?>
         <span class="mag-pill"><?= h($D['duration']) ?></span>
         <span class="mag-pill"><?= h($M['private']) ?></span>
-        <?php if (!empty($D['pax_label'])): ?><span class="mag-pill"><?= h($D['pax_label']) ?></span><?php endif; ?>
+        <?php if ($paxLabel !== ''): ?><span class="mag-pill"><?= h($paxLabel) ?></span><?php endif; ?>
       </div>
     </div>
   </section>
@@ -304,7 +351,8 @@ function iti_mag_render(array $D, string $publicUrl = ''): string {
             <dt><?= h(ucfirst($T['days'])) ?></dt><dd><?= h($D['duration']) ?></dd>
             <?php if ($routeNames): ?><dt><?= h($M['destinations']) ?></dt><dd><?= h(implode(', ', $routeNames)) ?></dd><?php endif; ?>
             <?php if ($lodgeNames): ?><dt><?= h($M['lodges']) ?></dt><dd><?= count($lodgeNames) ?> · <?= $nNights ?> <?= h($nNights === 1 ? $T['night1'] : $T['nights']) ?></dd><?php endif; ?>
-            <?php if (!empty($D['pax_label'])): ?><dt><?= h(ucfirst($T['pax'])) ?></dt><dd><?= h($D['pax_label']) ?></dd><?php endif; ?>
+            <?php if ($dateRange !== ''): ?><dt><?= h($M['dates']) ?></dt><dd><?= h($dateRange) ?></dd><?php endif; ?>
+            <?php if ($paxLabel !== ''): ?><dt><?= h(ucfirst($T['pax'])) ?></dt><dd><?= h($paxLabel) ?></dd><?php endif; ?>
           </dl>
         </aside>
       </div>
@@ -357,10 +405,10 @@ function iti_mag_render(array $D, string $publicUrl = ''): string {
       <article class="mag-day" id="day-<?= (int)$d['n'] ?>">
         <?php if ($photo !== ''): ?>
           <figure class="mag-hero"><img src="<?= h($photo) ?>" alt="<?= h($d['dest']) ?>" loading="lazy">
-            <figcaption><div class="mag-dayhead"><div class="mag-dayno"><small><?= h($T['day']) ?></small><?= (int)$d['n'] ?></div><h3><?= h($d['title']) ?></h3></div></figcaption>
+            <figcaption><div class="mag-dayhead"><div class="mag-dayno"><small><?= h($T['day']) ?><?= !empty($d['date']) ? ' · ' . h(iti_mag_date($d['date'], $M, false, true)) : '' ?></small><?= (int)$d['n'] ?></div><h3><?= h($d['title']) ?></h3></div></figcaption>
           </figure>
         <?php else: ?>
-          <div class="mag-dayhead"><div class="mag-dayno"><small><?= h($T['day']) ?></small><?= (int)$d['n'] ?></div><h3><?= h($d['title']) ?></h3></div>
+          <div class="mag-dayhead"><div class="mag-dayno"><small><?= h($T['day']) ?><?= !empty($d['date']) ? ' · ' . h(iti_mag_date($d['date'], $M, false, true)) : '' ?></small><?= (int)$d['n'] ?></div><h3><?= h($d['title']) ?></h3></div>
         <?php endif; ?>
 
         <div class="mag-chips">

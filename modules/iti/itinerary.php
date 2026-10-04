@@ -30,19 +30,21 @@ $id = (int)$program['id'];
 $lang = $_GET['lang'] ?? $program['display_language'] ?? 'en';
 if (!in_array($lang, ITI_LANGS)) $lang = 'en';
 
-// Etnia layout (the programme document) unless the old page is asked for with &layout=classic.
-if (($_GET['layout'] ?? '') !== 'classic') {
+// Magazine layout (photos) by default; &layout=etnia = the text programme document,
+// &layout=classic = the old page below.
+$layout = $_GET['layout'] ?? '';
+if ($layout !== 'classic') {
     require_once __DIR__ . '/includes/iti_doc.php';
     if (!in_array($lang, ITI_LANGUAGES, true)) $lang = 'it';
     $D = iti_doc_data($id, $lang);
-    if (($_GET['layout'] ?? '') === 'mag') {
+    if ($layout !== 'etnia') {
         require_once __DIR__ . '/includes/iti_mag.php';
         $self = 'https://' . ($_SERVER['HTTP_HOST'] ?? 'hub.savannahexplorers.com') . strtok($_SERVER['REQUEST_URI'] ?? '', '?')
-              . '?token=' . rawurlencode($token) . '&lang=' . $lang . '&layout=mag';
-        iti_mag_page($D, iti_doc_lang_bar($lang, ['token' => $token, 'layout' => 'mag']), $self);
+              . '?token=' . rawurlencode($token) . '&lang=' . $lang;
+        iti_mag_page($D, iti_doc_lang_bar($lang, ['token' => $token]), $self);
         exit;
     }
-    iti_doc_page($D, iti_doc_lang_bar($lang, ['token' => $token], '<a href="#" onclick="window.print();return false">🖨 PDF</a>'));
+    iti_doc_page($D, iti_doc_lang_bar($lang, ['token' => $token, 'layout' => 'etnia'], '<a href="#" onclick="window.print();return false">🖨 PDF</a>'));
     exit;
 }
 

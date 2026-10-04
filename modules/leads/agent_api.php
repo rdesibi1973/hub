@@ -84,7 +84,8 @@ function agent_audit(PDO $db, string $action, $reqId, array $payload, string $re
     agent_ensure_schema($db);
     $dry = in_array($action, ['confirm_booking', 'send_booking_email', 'rollback_booking', 'fill_calc', 'iti_save_texts', 'update_rate', 'replace_flight_rates',
                               'cancel_invoice_payment', 'update_folder_status', 'import_zoho_invoice', 'mail_send', 'mail_move',
-                              'iti_lodge_photos', 'iti_destination_photo', 'iti_update_lodge', 'iti_update_destination'], true) && empty($payload['confirm']);
+                              'iti_lodge_photos', 'iti_destination_photo', 'iti_update_lodge', 'iti_update_destination',
+                              'iti_create_personal', 'iti_update_program', 'iti_update_day', 'iti_publish', 'iti_final_from_calc', 'iti_save_alias'], true) && empty($payload['confirm']);
     // Mail: keep who/what in the log, not message bodies or attachment content.
     if (in_array($action, ['mail_get', 'mail_attachment'], true) && $code === 200) {
         $res = json_decode($resultJson, true);
@@ -156,6 +157,12 @@ $in = $agentPayload;
 
 function agent_require_method(string $m): void {
     if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== $m) agent_fail('Use ' . $m . ' for this action', 405);
+}
+
+/** ITI programme services (iti_functions.php + Calc → final programme), loaded only for those actions. */
+function agent_iti_lib(): void {
+    require_once __DIR__ . '/../iti/includes/iti_program_service.php';
+    require_once __DIR__ . '/../iti/includes/iti_final.php';
 }
 
 /** Request row by id or fail 404. */
@@ -937,6 +944,58 @@ try {
             $go ? [] : ['message' => 'Dry run — nothing saved. Resend with "confirm": true.']));
     }
 
+    // ── ITI personal programmes: samples, create (proposal), Calc → final, edit, publish ──
+    case 'iti_samples':
+        agent_iti_lib();
+        agent_out(['ok' => true, 'samples' => iti_ps_samples($db, trim((string)($in['q'] ?? '')))]);
+
+    case 'iti_program': {
+        agent_iti_lib();
+        try { agent_out(['ok' => true, 'program' => iti_ps_program_out($db, (int)($in['program_id'] ?? 0), (string)($in['lang'] ?? ''))]); }
+        catch (InvalidArgumentException $e) { agent_fail($e->getMessage(), 404); }
+    }
+
+    case 'iti_create_personal':
+    case 'iti_update_program':
+    case 'iti_update_day':
+    case 'iti_publish':
+    case 'iti_save_alias': {
+        agent_require_method('POST');
+        agent_iti_lib();
+        $go = !empty($in['confirm']);
+        $who = (string)($agentUser['username'] ?? 'claude_agent');
+        if (!empty($in['lead_request_id'])) $agentReqId = (int)$in['lead_request_id'];
+        try {
+            switch ($agentAction) {
+                case 'iti_create_personal': $r = iti_ps_create_personal($db, $in, $who, $go); break;
+                case 'iti_update_program':  $r = iti_ps_update_program($db, (int)($in['program_id'] ?? 0), (array)($in['fields'] ?? []), $go); break;
+                case 'iti_update_day':      $r = iti_ps_update_day($db, (int)($in['program_id'] ?? 0), (int)($in['day'] ?? 0), (array)($in['fields'] ?? []), $go); break;
+                case 'iti_publish':         $r = iti_ps_publish($db, (int)($in['program_id'] ?? 0), !array_key_exists('publish', $in) || !empty($in['publish']), $go); break;
+                default:                    $r = $go ? iti_ps_save_alias($in, $who) : ['would_save' => ['type' => $in['type'] ?? null, 'text' => $in['text'] ?? null]];
+            }
+        } catch (InvalidArgumentException $e) { agent_fail($e->getMessage(), 400); }
+        agent_out(array_merge(['ok' => true, 'dry_run' => !$go], $r, $go ? [] : ['message' => 'Dry run — nothing saved. Resend with "confirm": true.']));
+    }
+
+    // Calc of a Hub request → final programme. GET: the plan; POST + confirm: generate.
+    case 'iti_calc_plan':
+    case 'iti_final_from_calc': {
+        agent_iti_lib();
+        $r = agent_request($db, $in['request_id'] ?? 0);
+        try {
+            $plan = iti_ps_calc_plan($db, (int)$r['id'], $in);
+            $public = array_filter($plan, function ($k) { return $k[0] !== '_'; }, ARRAY_FILTER_USE_KEY);
+            if ($agentAction === 'iti_calc_plan' || empty($in['confirm'])) {
+                agent_out(array_merge(['ok' => true, 'dry_run' => true], $public,
+                    ['message' => $plan['blocking'] ? 'Map the unmapped texts with iti_save_alias, then generate.' : 'Ready — POST iti_final_from_calc with "confirm": true to generate.']));
+            }
+            agent_require_method('POST');
+            $res = iti_ps_calc_generate($db, (int)$r['id'], $plan, ['id' => $agentUser['id'] ?? null, 'username' => $agentUser['username'] ?? 'claude_agent']);
+        } catch (InvalidArgumentException $e) { agent_fail($e->getMessage(), 400); }
+        catch (RuntimeException $e) { agent_fail($e->getMessage(), 409); }
+        agent_out(array_merge(['ok' => true, 'dry_run' => false], $res));
+    }
+
     // ── rollback_booking ─────────────────────────────────────────────────────
     // Undo a Hub confirmation (same as BackOffice "Rollback…"): folder back to its
     // pre-confirm location, status restored. Dry-run unless "confirm": true.
@@ -1482,7 +1541,8 @@ try {
             'copy_program', 'get_rates', 'fill_calc', 'read_calc', 'confirm_preview', 'confirm_booking', 'send_booking_email',
             'rollback_booking', 'iti_programs', 'iti_texts', 'iti_save_texts', 'update_rate', 'replace_flight_rates',
             'iti_lodges', 'iti_lodge', 'iti_destinations', 'iti_destination', 'iti_lodge_photos', 'iti_destination_photo',
-            'iti_update_lodge', 'iti_update_destination',
+            'iti_update_lodge', 'iti_update_destination', 'iti_samples', 'iti_program', 'iti_create_personal', 'iti_update_program',
+            'iti_update_day', 'iti_publish', 'iti_calc_plan', 'iti_final_from_calc', 'iti_save_alias',
             'find_invoices', 'get_invoice', 'add_invoice_payment', 'cancel_invoice_payment', 'update_folder_status',
             'save_invoice_pdf', 'import_zoho_invoice', 'memo_list', 'memo_save', 'memo_set_status',
             'routine_status', 'routine_done',

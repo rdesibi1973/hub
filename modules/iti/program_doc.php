@@ -43,6 +43,7 @@ if (!empty($program['is_published']) && !empty($program['public_token'])) {
     $extra .= '<a href="itinerary.php?token=' . h($program['public_token']) . '&lang=' . h($lang) . '" target="_blank">🔗 Public link</a>';
 }
 $extra .= '<a href="#" onclick="window.print();return false">🖨 Print / PDF</a>';
+$extra .= '<a href="export_mag_word.php?id=' . $id . '&lang=' . h($lang) . '">📄 Word</a>';   // editable, for agencies (Hub only)
 $mag = ($_GET['layout'] ?? '') === 'mag';
 $extra .= $mag ? '<a href="?id=' . $id . '&lang=' . h($lang) . '">Etnia layout</a>'
                : '<a href="?id=' . $id . '&lang=' . h($lang) . '&layout=mag">📷 Magazine layout</a>';

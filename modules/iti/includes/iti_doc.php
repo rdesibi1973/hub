@@ -160,8 +160,13 @@ function iti_doc_data(int $id, string $lang): ?array {
 
         $title = iti_doc_pick($d, 'day_title', $lang);
         if ($title === '') $title = $destName !== '' ? $destName : ($lodgeName !== '' ? $lodgeName : '');
+        $date = null;   // real date when the programme has a start date (personal / final)
+        if (!empty($p['start_date']) && preg_match('/^\d{4}-\d{2}-\d{2}$/', (string)$p['start_date'])) {
+            $date = date('Y-m-d', strtotime($p['start_date'] . ' +' . ((int)$d['day_number'] - 1) . ' days'));
+        }
         $out[] = [
             'n'          => (int)$d['day_number'],
+            'date'       => $date,
             'title'      => $title,
             'transfers'  => $transfers,
             'duration'   => $transfers ? iti_doc_duration($transfers[0]) : '',
