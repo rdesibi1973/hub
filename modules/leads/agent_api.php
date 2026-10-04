@@ -163,6 +163,7 @@ function agent_require_method(string $m): void {
 function agent_iti_lib(): void {
     require_once __DIR__ . '/../iti/includes/iti_program_service.php';
     require_once __DIR__ . '/../iti/includes/iti_final.php';
+    require_once __DIR__ . '/dropbox_helper.php';          // Calc read from Dropbox
 }
 
 /** Request row by id or fail 404. */
