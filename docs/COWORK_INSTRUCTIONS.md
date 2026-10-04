@@ -38,12 +38,33 @@ Rispondimi in italiano. Mail e documenti per clienti / agenzie nella lingua del 
 ## Flusso di una pratica
 1. Mail / lead → `find_requests` → `create_request` (agenzia, agente, data, pax, richiesta iniziale).
 2. Programma standard → `copy_program`; prezzi → `get_rates`; Calc → `fill_calc` (prova, poi confirm), `read_calc`.
+   Programma per il cliente (proposta) → vedi **Programmi per il cliente** sotto.
 3. Conferma → `confirm_preview`, poi `confirm_booking` (cartella in `/001_Safari`, stato Booked) → `send_booking_email`.
+   Poi programma finale dal Calc (sotto).
 4. Fattura (creata nel Hub) → pagamenti `add_invoice_payment` → `update_folder_status` → `save_invoice_pdf`.
 5. Prima della partenza: CK (documenti, voli, voucher).
 
 Cartelle Dropbox: richieste in `/2026/<Nome>(<Agenzia>-<Agente>)`, pratiche confermate in `/001_Safari/`
 con le date e lo stato pagamento nel nome (`_DEPOSIT`, `_BALANCE`, `_PAID`, `_CK` in fondo).
+
+## Programmi per il cliente (layout Magazine)
+Si lavora solo sui programmi **personal**; i sample non si toccano via API. Ogni scrittura: prima senza `confirm`,
+mostrami il risultato, poi confirm dopo il mio ok.
+- **Proposta:** `iti_samples` (scegli il sample più vicino alla richiesta, dimmi quale e perché) →
+  `iti_create_personal` con `sample_id`, `lead_request_id` e `fields`: `title_<lingua>` (es. "Simba Safari – Famiglia Rossi"),
+  `start_date`, `pax_adults`, `pax_children`, `display_language`, prezzi in `price_table_json`
+  (`[{label, price, currency}]`, dal Calc o da `get_rates`) e `price_notes_<lingua>`.
+  Modifiche richieste dal cliente → `iti_update_day` (testi, lodge con `end_lodge`, pasti) / `iti_update_program`.
+- **Finale (dopo la conferma):** `iti_calc_plan` con `request_id` → se `blocking` non è vuoto, proponimi per ogni
+  testo il lodge / attività giusti (`iti_lodges`, …) e salvali con `iti_save_alias` dopo il mio ok →
+  `iti_final_from_calc` (prova, poi confirm). Se manca il sample per il codice del Calc, dimmelo: non inventarlo.
+- **Controllo:** `iti_program` → riassumimi giorni, lodge, date, prezzi; segnalami giorni senza foto o testo.
+  Anteprima interna: `links.preview`. Word modificabile per l'agenzia: `links.word` (serve il login Hub: lo scarico io).
+- **Invio:** `iti_publish` (prova, poi confirm) → `links.public` è il link per il cliente (Magazine con "Scarica PDF").
+  Il link lo metto io nella mail; tu preparala come bozza (`mail_draft`).
+- **Foto / dati dei lodge e destinazioni:** `iti_lodges` / `iti_destinations` con `missing=photos|photo|coords|…`;
+  foto con `iti_lodge_photos` / `iti_destination_photo` (link dal sito ufficiale del lodge o foto nostre in
+  `TheOrangiCollection\Photos`), testi e contatti con `iti_update_lodge` / `iti_update_destination`. Sempre prova prima.
 
 ## Memo Board: non perdere il filo
 Il Memo Board del Hub è l'unica lista delle cose da fare, mie e tue (azioni `memo_*`, scrivono sulla mia bacheca).
