@@ -415,6 +415,7 @@ function iti_mag_render(array $D, string $publicUrl = ''): string {
         <?php endif; ?>
 
         <div class="mag-chips">
+          <?php foreach ($d['flights'] ?? [] as $fl): ?><span class="mag-chip"><b>✈</b><?= h($fl) ?></span><?php endforeach; ?>
           <?php foreach ($d['transfers'] as $tr): ?><span class="mag-chip"><b>⇢</b><?= h($tr) ?></span><?php endforeach; ?>
           <span class="mag-chip"><b><?= h($T['meals']) ?></b><?= h($d['meals']) ?></span>
           <?php if ($d['lodge'] !== ''): ?><span class="mag-chip"><b><?= h($T['overnight']) ?></b><?= h($d['lodge']) ?></span><?php endif; ?>

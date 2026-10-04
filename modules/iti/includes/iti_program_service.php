@@ -12,6 +12,7 @@
  */
 require_once __DIR__ . '/iti_functions.php';
 require_once __DIR__ . '/iti_doc.php';
+require_once __DIR__ . '/iti_program_build.php';   // days, inclusions, master data, save as sample
 
 const ITI_PS_LANGS = ['en', 'it', 'fr', 'es', 'de'];
 
@@ -40,7 +41,7 @@ function iti_ps_program_out(PDO $db, int $id, string $lang = ''): array {
     $days = [];
     foreach ($D['days'] as $d) {
         $days[] = ['day' => $d['n'], 'date' => $d['date'] ?? null, 'title' => $d['title'], 'destination' => $d['dest'], 'lodge' => $d['lodge'],
-                   'meals' => $d['meals'], 'transfers' => $d['transfers'], 'activities' => $d['activities'],
+                   'meals' => $d['meals'], 'flights' => $d['flights'] ?? [], 'transfers' => $d['transfers'], 'activities' => $d['activities'],
                    'narrative' => $d['narrative'], 'lodge_photos' => count($d['lodge_photos']), 'dest_photo' => $d['dest_photo'] !== ''];
     }
     return [
@@ -53,6 +54,7 @@ function iti_ps_program_out(PDO $db, int $id, string $lang = ''): array {
         'duration' => $D['duration'], 'published' => (bool)$p['is_published'],
         'prices' => $D['prices'], 'price_notes' => $D['price_notes'],
         'included' => $D['incl'], 'excluded' => $D['excl'], 'days' => $days,
+        'structure' => iti_pb_days_raw($db, $id),   // the days as stored (ids), same shape iti_set_days takes
         'links' => iti_ps_links($p, $lang),
     ];
 }
@@ -129,16 +131,18 @@ function iti_ps_personal(int $id): array {
 }
 
 /**
- * Proposal: copy a sample into a personal programme for a client.
- * $in: sample_id*, lead_request_id?, fields? {title_it, subtitle_it, intro_it, start_date, pax_adults,
- * pax_children, display_language, display_currency, price_table_json, price_notes_it…}.
+ * Proposal for a client: a copy of a sample, or a blank programme (no sample_id) for trips with
+ * no matching sample. $in: sample_id?, lead_request_id?, fields? {title_<lang>, subtitle_<lang>,
+ * intro_<lang>, start_date, pax_adults, pax_children, display_language, display_currency,
+ * price_table_json, price_notes_<lang>}, days? [day items, see iti_program_build.php] (replace
+ * the sample's days). Blank programme: title_<display_language> and days[] are required.
  */
 function iti_ps_create_personal(PDO $db, array $in, string $who, bool $go): array {
     iti_ps_schema();          // before anything caches the column list
     iti_ensure_final_schema();
     $sid = (int)($in['sample_id'] ?? 0);
     $s = $sid ? iti_get_program($sid) : null;
-    if (!$s || $s['program_type'] !== 'sample') throw new InvalidArgumentException('sample_id: not a sample programme (see iti_samples)');
+    if ($sid && (!$s || $s['program_type'] !== 'sample')) throw new InvalidArgumentException('sample_id: not a sample programme (see iti_samples)');
     $set = iti_ps_header_values(isset($in['fields']) && is_array($in['fields']) ? $in['fields'] : []);
     $set['stage'] = 'proposal';
     if (!empty($in['lead_request_id'])) {
@@ -148,12 +152,48 @@ function iti_ps_create_personal(PDO $db, array $in, string $who, bool $go): arra
         if (!$req) throw new InvalidArgumentException('lead_request_id ' . (int)$in['lead_request_id'] . ' not found');
         $set['lead_request_id'] = (int)$req['id'];
     }
-    $lang = $set['display_language'] ?? $s['display_language'];
-    // A copy keeps the sample's title unless one is given ("(copy)" is for the Hub button only).
-    foreach (ITI_PS_LANGS as $l) if (!array_key_exists('title_' . $l, $set)) $set['title_' . $l] = $s['title_' . $l];
-    $plan = ['sample' => ['id' => $sid, 'title' => iti_doc_pick($s, 'title', $lang), 'days' => (int)$s['duration_days']], 'set' => $set];
+    $days = isset($in['days']) && is_array($in['days']) ? array_values($in['days']) : null;
+    $items = [];
+    foreach ((array)$days as $i => $d) {   // validate now, so a dry run reports the errors
+        try { $items[] = iti_pb_day_item($db, (array)$d); }
+        catch (InvalidArgumentException $e) { throw new InvalidArgumentException('days[' . $i . '] (day ' . ($i + 1) . '): ' . $e->getMessage()); }
+    }
+    if ($s) {
+        $lang = $set['display_language'] ?? $s['display_language'];
+        // A copy keeps the sample's title unless one is given ("(copy)" is for the Hub button only).
+        foreach (ITI_PS_LANGS as $l) if (!array_key_exists('title_' . $l, $set)) $set['title_' . $l] = $s['title_' . $l];
+        $plan = ['sample' => ['id' => $sid, 'title' => iti_doc_pick($s, 'title', $lang), 'days' => (int)$s['duration_days']], 'set' => $set];
+    } else {
+        $lang = $set['display_language'] ?? 'it';
+        $set['display_language'] = $lang;
+        if (trim((string)($set['title_' . $lang] ?? '')) === '') throw new InvalidArgumentException('Blank programme: fields.title_' . $lang . ' is required');
+        if (!$items) throw new InvalidArgumentException('Blank programme: days[] is required');
+        foreach (ITI_PS_LANGS as $l) if (!isset($set['title_' . $l]) || $set['title_' . $l] === '') $set['title_' . $l] = $set['title_' . $lang];   // NOT NULL columns
+        $plan = ['sample' => null, 'set' => $set];
+    }
+    if ($days !== null) $plan['days'] = count($items);
     if (!$go) return $plan;
-    $id = iti_duplicate_program($sid, 'personal', $who, $set);
+
+    try {
+        if ($s) {                                            // iti_duplicate_program / iti_pb_set_days: own transactions
+            $id = iti_duplicate_program($sid, 'personal', $who, $set);
+            if ($days !== null) iti_pb_set_days($db, $id, $days, true);
+        } else {
+            $db->beginTransaction();
+            $row = $set + ['program_type' => 'personal', 'status' => 'draft', 'created_by' => $who, 'duration_days' => count($items),
+                           'is_published' => 0, 'brand' => 'savannah_explorers'];
+            $row = array_intersect_key($row, array_flip(iti_table_columns('iti_programs')));
+            $db->prepare('INSERT INTO iti_programs (`' . implode('`,`', array_keys($row)) . '`) VALUES (' . implode(',', array_fill(0, count($row), '?')) . ')')
+               ->execute(array_values($row));
+            $id = (int)$db->lastInsertId();
+            foreach ($items as $i => $it) {
+                $db->prepare('INSERT INTO iti_program_days (program_id, day_number) VALUES (?, ?)')->execute([$id, $i + 1]);
+                iti_pb_day_write($db, (int)$db->lastInsertId(), $it);
+            }
+            iti_pb_renumber($db, $id);
+            $db->commit();
+        }
+    } catch (Throwable $e) { if ($db->inTransaction()) $db->rollBack(); throw $e; }
     return $plan + ['program' => iti_ps_program_out($db, $id, $lang)];
 }
 
@@ -176,9 +216,9 @@ function iti_ps_update_program(PDO $db, int $id, array $fields, bool $go): array
 }
 
 /**
- * Change one day of a personal programme. $fields: day_title_<lang>, narrative_<lang>,
- * end_lodge_id | end_lodge (name, looked up), end_lodge_custom, destination_id,
- * destination_custom, meal_breakfast / meal_lunch / meal_dinner (0/1).
+ * Change one day of a personal programme: any day item key (see iti_program_build.php) —
+ * texts, lodge, destination, meals, transfer route, and the transfers / activities / flights
+ * lists (each one given replaces the day's list). Returns the column diff and the lists replaced.
  */
 function iti_ps_update_day(PDO $db, int $pid, int $dayNo, array $fields, bool $go): array {
     iti_ps_personal($pid);
@@ -186,45 +226,20 @@ function iti_ps_update_day(PDO $db, int $pid, int $dayNo, array $fields, bool $g
     $st->execute([$pid, $dayNo]);
     $day = $st->fetch(PDO::FETCH_ASSOC);
     if (!$day) throw new InvalidArgumentException('Day ' . $dayNo . ' not found in program ' . $pid);
-
-    if (isset($fields['end_lodge'])) {   // lodge by name → id
-        $q = $db->prepare('SELECT id, name FROM iti_lodges WHERE is_active = 1 AND name LIKE ? ORDER BY CHAR_LENGTH(name) LIMIT 2');
-        $q->execute(['%' . trim((string)$fields['end_lodge']) . '%']);
-        $hits = $q->fetchAll(PDO::FETCH_ASSOC);
-        if (count($hits) !== 1) throw new InvalidArgumentException('end_lodge "' . $fields['end_lodge'] . '": ' . (count($hits) ? 'more than one lodge matches — use end_lodge_id' : 'no lodge — see iti_lodges'));
-        $fields['end_lodge_id'] = (int)$hits[0]['id'];
-        unset($fields['end_lodge']);
-    }
-    $allowed = ['end_lodge_id', 'end_lodge_custom', 'destination_id', 'destination_custom', 'meal_breakfast', 'meal_lunch', 'meal_dinner'];
-    foreach (ITI_PS_LANGS as $l) { $allowed[] = 'day_title_' . $l; $allowed[] = 'narrative_' . $l; }
-    $allowed = array_values(array_intersect($allowed, iti_table_columns('iti_program_days')));
-    $bad = array_values(array_diff(array_keys($fields), $allowed));
-    if ($bad) throw new InvalidArgumentException('Not editable: ' . implode(', ', $bad) . ' — allowed: ' . implode(', ', $allowed) . ', end_lodge');
-
+    $item = iti_pb_day_item($db, $fields);
     $changes = [];
-    foreach ($fields as $k => $v) {
-        if ($k === 'end_lodge_id' || $k === 'destination_id') {
-            $v = $v ? (int)$v : null;
-            if ($v) {
-                $t = $k === 'end_lodge_id' ? 'iti_lodges' : 'iti_destinations';
-                $c = $db->prepare("SELECT COUNT(*) FROM $t WHERE id = ?"); $c->execute([$v]);
-                if (!$c->fetchColumn()) throw new InvalidArgumentException($k . ' ' . $v . ' not found');
-            }
-        } elseif (strpos($k, 'meal_') === 0) {
-            $v = empty($v) ? 0 : 1;
-        } else {
-            $v = trim((string)$v);
-            if ($v === '' && in_array($k, ['end_lodge_custom', 'destination_custom'], true)) $v = null;
-        }
+    foreach ($item['cols'] as $k => $v) {
         if ((string)($day[$k] ?? '') !== (string)$v) $changes[$k] = ['from' => $day[$k] ?? null, 'to' => $v];
     }
-    if ($go && $changes) {
-        $sets = []; $args = [];
-        foreach ($changes as $k => $c) { $sets[] = '`' . $k . '` = ?'; $args[] = $c['to']; }
-        $args[] = (int)$day['id'];
-        $db->prepare('UPDATE iti_program_days SET ' . implode(', ', $sets) . ' WHERE id = ?')->execute($args);
+    $item['cols'] = array_intersect_key($item['cols'], $changes);
+    $lists = [];
+    foreach (['transfers', 'activities', 'flights'] as $k) if ($item[$k] !== null) $lists[$k] = count($item[$k]);
+    if ($go && ($item['cols'] || $lists)) {
+        $db->beginTransaction();
+        try { iti_pb_day_write($db, (int)$day['id'], $item); $db->commit(); }
+        catch (Throwable $e) { $db->rollBack(); throw $e; }
     }
-    return ['program_id' => $pid, 'day' => $dayNo, 'changes' => $changes];
+    return ['program_id' => $pid, 'day' => $dayNo, 'changes' => $changes, 'lists_replaced' => $lists];
 }
 
 /** Publish (token + public link) or unpublish a personal programme. */

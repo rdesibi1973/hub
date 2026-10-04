@@ -35,6 +35,11 @@ without driving the web UI.
 | No deletes | No delete endpoint (mail included). Undo a confirm with `rollback_booking` (or BackOffice → Rollback). |
 | Mailbox | The key also reads `info@` (`mail_*`): keep `api.txt` as private as the mailbox password. |
 
+**Server firewall (Mod_Security):** some bodies with accents / en dashes or certain words get HTTP 406 before reaching
+the API (the reply is then `{"ok": false, "error_code": "firewall", …}`), and many 406 in a row can block the IP for a
+few minutes. Send JSON with `\uXXXX` escapes (`ensure_ascii`), or wrap the body as `{"b64": "<base64 of the UTF-8 JSON>"}`;
+for GET, add `&b64=<base64 of a JSON object of the parameters>`.
+
 Responses: `{"ok": true, …}` or `{"ok": false, "error": "…", …}` with a matching HTTP code
 (400 bad input, 403 auth, 404 not found, 409 duplicate / blocked, 422 partial, 429 rate, 5xx server/Dropbox).
 
@@ -48,6 +53,9 @@ At least one filter. Use it as the duplicate check before `create_request`.
 `q` → `[{id, name, short_name, type}]`.
 
 ### `create_request` (POST)
+**Dry-run unless `"confirm": true`** (since Oct 2026): the dry run checks the fields and the duplicates and returns
+`folder_name`, `dropbox_path` and `values`; no folder, no request.
+
 Same fields as the New Request form:
 `customer_name`*, `initial_request`*, `channel` (`agency`|`direct`|`sb`|`other`, default agency),
 `agency_id` **or** `agency_short`, `agent_id` **or** `agent` (default: the API user's agent),
@@ -84,6 +92,10 @@ The existing rates in Hub → Pricing → Jeep, Activities & Flights are **costs
 `type` (`flight`|`activity`|`jeep`), `id` (from `get_rates`), and any of `cost` (what we pay — `rate_pax` / `rate`),
 `sale` (price to agency; not for jeep), `valid_from`, `valid_to` (YYYY-MM-DD or null), `active` (bool), `notes`.
 Returns `before` / `after`; dry-run unless `"confirm": true`.
+
+### `add_flight_rates` (POST)
+`routes[]` as `replace_flight_rates`, appended to the price list (other rows untouched; a row with the same `route` and
+`valid_from` is skipped and reported). Dry-run unless `"confirm": true`.
 
 ### `replace_flight_rates` (POST)
 `routes[]` `{route, origin, destination, airline?, cost, sale?, valid_from, valid_to?, notes?}` — replaces the whole
@@ -205,6 +217,49 @@ Copies the sample (days, activities, prices, inclusions, terms) as a draft propo
 `program_id`, `day` (number), `fields`: `day_title_<lang>`, `narrative_<lang>`, `end_lodge_id` **or** `end_lodge`
 (name, must match one lodge), `end_lodge_custom`, `destination_id`, `destination_custom`, `meal_breakfast` /
 `meal_lunch` / `meal_dinner` (0/1) → `changes`. Dry-run unless confirm.
+
+#### Day items (used by `iti_create_personal` `days[]`, `iti_set_days`, `iti_add_day`, `iti_update_day`)
+Every key optional: `day_title_<lang>`, `narrative_<lang>`, `end_lodge_id` | `end_lodge` (name), `end_lodge_custom`,
+`destination_id` | `destination` (name or code), `destination_custom`, `start_lodge_id`, `start_destination_id`,
+`start_custom`, `transfer_route_id`, `transfer_custom`, `meal_breakfast` / `meal_lunch` / `meal_dinner` /
+`meal_all_inclusive` (0/1), and three lists — each one given **replaces** the day's list (`[]` = none):
+- `transfers`: `["Dar airport – Serena Hotel, about 40 min", …]` (text shown on the day, programme language);
+- `activities`: `[{activity_id} | {activity: "<name>"} | {custom: "<text>"}, + note_<lang>?]` (see `iti_activities`);
+- `flights`: `[{flight_route_id | custom, airline?, dep?: "07:40", arr?: "10:05", note_<lang>?}]` (see `iti_flight_routes`).
+`iti_program` returns `structure[]`: the stored days in this same shape (with ids), to edit and send back.
+Flights are shown on the day (magazine, Word) as "✈ Dar Es Salaam → Ruaha · Auric Air · 07:40–10:05".
+
+#### `iti_create_personal` without a sample
+No `sample_id` = blank programme for a trip with no matching sample: `fields.title_<display_language>` and `days[]`
+are required. With a `sample_id`, `days[]` (optional) replaces the sample's days.
+
+#### `iti_set_days` (POST)
+`program_id`, `days[]` (ordered day items) → replaces all the days (and their transfers / activities / flights) in one
+transaction; `duration_days` follows. Dry-run (counts, validation errors) unless `"confirm": true`.
+
+#### `iti_add_day` / `iti_delete_day` (POST)
+`program_id`, `after_day` (0 = at the start) + `fields` (day item) / `day` → the following days are renumbered.
+Dry-run unless confirm.
+
+#### `iti_inclusions` (GET) / `iti_update_inclusions` (POST)
+`iti_inclusions` → the standard rows `{std_id, text_<lang>}` by `included` / `excluded`.
+`iti_update_inclusions`: `program_id`, `included[]` and / or `excluded[]` — items `{std_id}`, `{text_<lang>…}` or a
+plain string (programme language). Each list given replaces that list in one transaction; an empty list is refused.
+
+#### Master data: `iti_flight_routes`, `iti_activities`, `iti_transfer_routes` (GET) and `iti_create_…` (POST)
+- `iti_flight_routes` `q? from? to?` (airport name or code); `iti_create_flight_route` `fields`: `from_airport`*,
+  `to_airport`*, `from_code`, `to_code`, `operator`, `flight_type` (`scheduled`|`charter`), `duration_min`, `notes_<lang>`.
+- `iti_activities` `q? destination?`; `iti_create_activity` `fields`: `name_en` / `name_it`*, `activity_type`
+  (`game_drive`|`walking_safari`|`cultural`|`boat`|`balloon`|`hiking`|`beach`|`other`), `destination_id` | `destination`,
+  `description_<lang>`, `duration_hours`.
+- `iti_transfer_routes` `from? to?`; `iti_create_transfer_route` `fields`: `from_destination`*, `to_destination`*
+  (id, name or code), `duration_min`, `distance_km`, `road_type` (`tarmac`|`gravel`|`mixed`), `notes_<lang>`.
+Duplicates are refused with the existing id. Dry-run unless confirm.
+
+#### `iti_save_as_sample` (POST)
+`program_id` (a finished personal programme), `title` or `title_<lang>` (required), `code?` (Calc code) → a new sample:
+same days / lists, client data removed (dates, pax, prices, request, publication). The personal programme is not changed.
+Dry-run unless confirm.
 
 #### `iti_publish` (POST)
 `program_id`, `publish?` (default true; false = unpublish) → `links.public`. Dry-run unless confirm.

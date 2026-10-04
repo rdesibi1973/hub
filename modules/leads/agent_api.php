@@ -86,7 +86,9 @@ function agent_audit(PDO $db, string $action, $reqId, array $payload, string $re
                               'cancel_invoice_payment', 'update_folder_status', 'import_zoho_invoice', 'mail_send', 'mail_move',
                               'iti_lodge_photos', 'iti_destination_photo', 'iti_update_lodge', 'iti_update_destination',
                               'iti_create_personal', 'iti_update_program', 'iti_update_day', 'iti_publish', 'iti_final_from_calc', 'iti_save_alias',
-                              'iti_create_lodge'], true) && empty($payload['confirm']);
+                              'iti_create_lodge', 'iti_set_days', 'iti_add_day', 'iti_delete_day', 'iti_update_inclusions',
+                              'iti_create_flight_route', 'iti_create_activity', 'iti_create_transfer_route', 'iti_save_as_sample',
+                              'create_request', 'add_flight_rates'], true) && empty($payload['confirm']);
     // Mail: keep who/what in the log, not message bodies or attachment content.
     if (in_array($action, ['mail_get', 'mail_attachment'], true) && $code === 200) {
         $res = json_decode($resultJson, true);
@@ -150,9 +152,20 @@ if ($method === 'POST') {
     $raw = (string)file_get_contents('php://input');
     $agentPayload = $raw === '' ? [] : json_decode($raw, true);
     if (!is_array($agentPayload)) agent_fail('Body must be a JSON object');
+    // {"b64": "<base64 of the UTF-8 JSON body>"}: same request, but the server firewall
+    // (Mod_Security) does not see accents / words that it sometimes blocks.
+    if (isset($agentPayload['b64']) && count($agentPayload) === 1) {
+        $agentPayload = json_decode((string)base64_decode((string)$agentPayload['b64'], true), true);
+        if (!is_array($agentPayload)) agent_fail('b64 must be the base64 of a JSON object');
+    }
 } else {
     $agentPayload = $_GET;
     unset($agentPayload['action']);
+    if (isset($agentPayload['b64'])) {   // ?b64=<base64 of a JSON object of the query parameters>
+        $q = json_decode((string)base64_decode(strtr((string)$agentPayload['b64'], '-_', '+/'), true), true);
+        if (!is_array($q)) agent_fail('b64 must be the base64 of a JSON object');
+        $agentPayload = $q;
+    }
 }
 $in = $agentPayload;
 
@@ -165,6 +178,29 @@ function agent_iti_lib(): void {
     require_once __DIR__ . '/../iti/includes/iti_program_service.php';
     require_once __DIR__ . '/../iti/includes/iti_final.php';
     require_once __DIR__ . '/dropbox_helper.php';          // Calc read from Dropbox
+}
+
+/** routes[] {route, origin, destination, airline?, cost, sale?, valid_from, valid_to?, notes?} → flight_routes rows (or 400). */
+function agent_flight_rate_rows(array $routes): array {
+    $rows = [];
+    foreach ($routes as $i => $r) {
+        $name = trim((string)($r['route'] ?? ''));
+        if ($name === '') agent_fail('routes[' . $i . ']: route is required');
+        if (!isset($r['cost']) || !is_numeric($r['cost']) || (float)$r['cost'] < 0) agent_fail('routes[' . $i . ']: cost must be a number ≥ 0');
+        if (isset($r['sale']) && $r['sale'] !== null && !is_numeric($r['sale'])) agent_fail('routes[' . $i . ']: sale must be a number');
+        $vf = (string)($r['valid_from'] ?? '');
+        $vt = isset($r['valid_to']) && $r['valid_to'] !== '' ? (string)$r['valid_to'] : null;
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $vf) || ($vt !== null && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $vt))) {
+            agent_fail('routes[' . $i . ']: valid_from / valid_to must be YYYY-MM-DD');
+        }
+        $rows[] = [mb_substr($name, 0, 200), mb_substr(trim((string)($r['origin'] ?? '')), 0, 100) ?: null,
+                   mb_substr(trim((string)($r['destination'] ?? '')), 0, 100) ?: null,
+                   mb_substr(trim((string)($r['airline'] ?? '')), 0, 100) ?: null,
+                   $vf, $vt, round((float)$r['cost'], 2),
+                   isset($r['sale']) && $r['sale'] !== null ? round((float)$r['sale'], 2) : null,
+                   mb_substr(trim((string)($r['notes'] ?? '')), 0, 200) ?: null];
+    }
+    return $rows;
 }
 
 /** Request row by id or fail 404. */
@@ -523,7 +559,12 @@ try {
             'dup_override'    => !empty($in['dup_override']),
             'notify_agent'    => !empty($in['notify_agent']),    // default: no email to the agent
             'creator_user_id' => (int)$agentUser['id'],
+            'dry_run'         => empty($in['confirm']),          // checks + folder name only
         ]);
+        if ($res['ok'] && !empty($res['dry_run'])) {
+            agent_out(['ok' => true, 'dry_run' => true, 'folder_name' => $res['folder_name'], 'dropbox_path' => $res['dropbox_path'],
+                       'values' => $res['values'], 'message' => 'Dry run — no folder, no request. Resend with "confirm": true to create.']);
+        }
         if (!$res['ok']) {
             $code = $res['error_code'] === 'duplicate' || $res['error_code'] === 'folder_exists' ? 409 : 400;
             if ($res['error_code'] === 'dropbox') $code = 502;
@@ -772,24 +813,7 @@ try {
         calc_rates_schema($db);
         $routes = isset($in['routes']) && is_array($in['routes']) ? $in['routes'] : [];
         if (!$routes) agent_fail('routes is required');
-        $rows = [];
-        foreach ($routes as $i => $r) {
-            $name = trim((string)($r['route'] ?? ''));
-            if ($name === '') agent_fail('routes[' . $i . ']: route is required');
-            if (!isset($r['cost']) || !is_numeric($r['cost']) || (float)$r['cost'] < 0) agent_fail('routes[' . $i . ']: cost must be a number ≥ 0');
-            if (isset($r['sale']) && $r['sale'] !== null && !is_numeric($r['sale'])) agent_fail('routes[' . $i . ']: sale must be a number');
-            $vf = (string)($r['valid_from'] ?? '');
-            $vt = isset($r['valid_to']) && $r['valid_to'] !== '' ? (string)$r['valid_to'] : null;
-            if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $vf) || ($vt !== null && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $vt))) {
-                agent_fail('routes[' . $i . ']: valid_from / valid_to must be YYYY-MM-DD');
-            }
-            $rows[] = [mb_substr($name, 0, 200), mb_substr(trim((string)($r['origin'] ?? '')), 0, 100) ?: null,
-                       mb_substr(trim((string)($r['destination'] ?? '')), 0, 100) ?: null,
-                       mb_substr(trim((string)($r['airline'] ?? '')), 0, 100) ?: null,
-                       $vf, $vt, round((float)$r['cost'], 2),
-                       isset($r['sale']) && $r['sale'] !== null ? round((float)$r['sale'], 2) : null,
-                       mb_substr(trim((string)($r['notes'] ?? '')), 0, 200) ?: null];
-        }
+        $rows = agent_flight_rate_rows($routes);
         $old = $db->query('SELECT * FROM flight_routes ORDER BY id')->fetchAll(PDO::FETCH_ASSOC);
         if (empty($in['confirm'])) {
             agent_out(['ok' => true, 'dry_run' => true, 'delete' => count($old), 'insert' => count($rows),
@@ -808,6 +832,31 @@ try {
         }
         agent_out(['ok' => true, 'dry_run' => false, 'deleted' => count($old), 'inserted' => count($rows),
                    'flights' => calc_flight_rates($db, '', date('Y-m-d')), 'old_rows_backup' => $old]);
+    }
+
+    // Add flight rates to the price list (other rows untouched; same route + valid_from = skipped).
+    // routes: as replace_flight_rates. Dry-run unless "confirm": true.
+    case 'add_flight_rates': {
+        agent_require_method('POST');
+        calc_rates_schema($db);
+        $routes = isset($in['routes']) && is_array($in['routes']) ? $in['routes'] : [];
+        if (!$routes) agent_fail('routes is required');
+        $rows = agent_flight_rate_rows($routes);
+        $chk = $db->prepare('SELECT id FROM flight_routes WHERE route_name = ? AND valid_from = ?');
+        $new = []; $skip = [];
+        foreach ($rows as $row) {
+            $chk->execute([$row[0], $row[4]]);
+            if ($id = $chk->fetchColumn()) $skip[] = ['route' => $row[0], 'valid_from' => $row[4], 'existing_id' => (int)$id];
+            else $new[] = $row;
+        }
+        if (empty($in['confirm'])) {
+            agent_out(['ok' => true, 'dry_run' => true, 'insert' => count($new), 'skipped' => $skip,
+                       'message' => 'Dry run — nothing changed. Resend with "confirm": true.']);
+        }
+        $ins = $db->prepare('INSERT INTO flight_routes (route_name, origin, destination, airline, valid_from, valid_to, rate_pax, sale_pax, active, notes)
+                             VALUES (?,?,?,?,?,?,?,?,1,?)');
+        foreach ($new as $row) $ins->execute($row);
+        agent_out(['ok' => true, 'dry_run' => false, 'inserted' => count($new), 'skipped' => $skip]);
     }
 
     // ── fill_calc ────────────────────────────────────────────────────────────
@@ -984,6 +1033,57 @@ try {
                 case 'iti_publish':         $r = iti_ps_publish($db, (int)($in['program_id'] ?? 0), !array_key_exists('publish', $in) || !empty($in['publish']), $go); break;
                 default:                    $r = $go ? iti_ps_save_alias($in, $who) : ['would_save' => ['type' => $in['type'] ?? null, 'text' => $in['text'] ?? null]];
             }
+        } catch (InvalidArgumentException $e) { agent_fail($e->getMessage(), 400); }
+        agent_out(array_merge(['ok' => true, 'dry_run' => !$go], $r, $go ? [] : ['message' => 'Dry run — nothing saved. Resend with "confirm": true.']));
+    }
+
+    // Days of a personal programme: replace all / add / delete (transfers, activities, flights per day).
+    case 'iti_set_days':
+    case 'iti_add_day':
+    case 'iti_delete_day':
+    case 'iti_update_inclusions':
+    case 'iti_save_as_sample': {
+        agent_require_method('POST');
+        agent_iti_lib();
+        $go = !empty($in['confirm']);
+        $pid = (int)($in['program_id'] ?? 0);
+        try {
+            switch ($agentAction) {
+                case 'iti_set_days':          $r = iti_pb_set_days($db, $pid, (array)($in['days'] ?? []), $go); break;
+                case 'iti_add_day':           $r = iti_pb_add_day($db, $pid, (int)($in['after_day'] ?? -1), (array)($in['fields'] ?? []), $go); break;
+                case 'iti_delete_day':        $r = iti_pb_delete_day($db, $pid, (int)($in['day'] ?? 0), $go); break;
+                case 'iti_update_inclusions': $r = iti_pb_update_inclusions($db, $pid, $in, $go); break;
+                default:                      $r = iti_pb_save_as_sample($db, $pid, $in, (string)($agentUser['username'] ?? 'claude_agent'), $go);
+            }
+        } catch (InvalidArgumentException $e) { agent_fail($e->getMessage(), 400); }
+        if ($go && $agentAction !== 'iti_save_as_sample') $r['program'] = iti_ps_program_out($db, $pid);
+        agent_out(array_merge(['ok' => true, 'dry_run' => !$go], $r, $go ? [] : ['message' => 'Dry run — nothing saved. Resend with "confirm": true.']));
+    }
+
+    // Master data for the days: lists (GET) and new rows (POST, dry-run unless confirm).
+    case 'iti_inclusions':
+        agent_iti_lib();
+        agent_out(['ok' => true] + iti_pb_standard_inclusions($db));
+    case 'iti_flight_routes':
+        agent_iti_lib();
+        agent_out(['ok' => true, 'flight_routes' => iti_pb_flight_routes($db, $in)]);
+    case 'iti_activities':
+        agent_iti_lib();
+        agent_out(['ok' => true, 'activities' => iti_pb_activities($db, $in)]);
+    case 'iti_transfer_routes':
+        agent_iti_lib();
+        agent_out(['ok' => true, 'transfer_routes' => iti_pb_transfer_routes($db, $in)]);
+    case 'iti_create_flight_route':
+    case 'iti_create_activity':
+    case 'iti_create_transfer_route': {
+        agent_require_method('POST');
+        agent_iti_lib();
+        $go = !empty($in['confirm']);
+        $f = isset($in['fields']) && is_array($in['fields']) ? $in['fields'] : [];
+        try {
+            if ($agentAction === 'iti_create_flight_route')  $r = iti_pb_create_flight_route($db, $f, $go);
+            elseif ($agentAction === 'iti_create_activity')  $r = iti_pb_create_activity($db, $f, $go);
+            else                                             $r = iti_pb_create_transfer_route($db, $f, $go);
         } catch (InvalidArgumentException $e) { agent_fail($e->getMessage(), 400); }
         agent_out(array_merge(['ok' => true, 'dry_run' => !$go], $r, $go ? [] : ['message' => 'Dry run — nothing saved. Resend with "confirm": true.']));
     }
@@ -1554,6 +1654,9 @@ try {
             'iti_lodges', 'iti_lodge', 'iti_destinations', 'iti_destination', 'iti_lodge_photos', 'iti_destination_photo',
             'iti_update_lodge', 'iti_update_destination', 'iti_create_lodge', 'iti_samples', 'iti_program', 'iti_create_personal', 'iti_update_program',
             'iti_update_day', 'iti_publish', 'iti_calc_plan', 'iti_final_from_calc', 'iti_save_alias',
+            'iti_set_days', 'iti_add_day', 'iti_delete_day', 'iti_inclusions', 'iti_update_inclusions', 'iti_save_as_sample',
+            'iti_flight_routes', 'iti_create_flight_route', 'iti_activities', 'iti_create_activity',
+            'iti_transfer_routes', 'iti_create_transfer_route', 'add_flight_rates',
             'find_invoices', 'get_invoice', 'add_invoice_payment', 'cancel_invoice_payment', 'update_folder_status',
             'save_invoice_pdf', 'import_zoho_invoice', 'memo_list', 'memo_save', 'memo_set_status',
             'routine_status', 'routine_done',

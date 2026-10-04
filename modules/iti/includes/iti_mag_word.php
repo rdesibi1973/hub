@@ -211,6 +211,7 @@ function iti_mag_word_build(array $D): array {
         $hr->addText((string)$d['n'] . '  ', 'mwDayNo');
         $hr->addText($d['title'], 'mwH3');
         $chips = $s->addTextRun(['spaceAfter' => 140]);
+        foreach ($d['flights'] ?? [] as $t) { $chips->addText('✈ ', 'mwChipB'); $chips->addText($t . '     ', 'mwChip'); }
         foreach ($d['transfers'] as $t) { $chips->addText('⇢ ', 'mwChipB'); $chips->addText($t . '     ', 'mwChip'); }
         $chips->addText($T['meals'] . ' ', 'mwChipB'); $chips->addText($d['meals'] . '     ', 'mwChip');
         if ($d['lodge'] !== '') { $chips->addText($T['overnight'] . ' ', 'mwChipB'); $chips->addText($d['lodge'], 'mwChip'); }

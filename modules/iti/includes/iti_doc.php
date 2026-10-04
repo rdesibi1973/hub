@@ -191,6 +191,9 @@ function iti_doc_data(int $id, string $lang): ?array {
         foreach ($db->query("SELECT * FROM iti_destinations WHERE id IN ($in)")->fetchAll() as $r) $dests[(int)$r['id']] = $r;
     }
 
+    // Internal flights of a day → "Dar es Salaam → Ruaha · Auric Air · 07:40–10:05".
+    $fltSt = $db->prepare('SELECT f.*, r.from_airport, r.to_airport, r.operator FROM iti_day_flights f
+                             LEFT JOIN iti_flight_routes r ON r.id = f.flight_route_id WHERE f.program_day_id = ? ORDER BY f.sort_order, f.id');
     $actSt = $db->prepare('SELECT da.*, a.name_en, a.name_it, a.name_fr, a.name_es, a.name_de
                              FROM iti_day_activities da LEFT JOIN iti_activities a ON a.id = da.activity_id
                             WHERE da.program_day_id = ? ORDER BY da.sort_order, da.id');
@@ -199,6 +202,20 @@ function iti_doc_data(int $id, string $lang): ?array {
     foreach ($days as $d) {
         $transfers = [];
         foreach (iti_get_day_transfers((int)$d['id']) as $t) { if (trim($t['description']) !== '') $transfers[] = trim($t['description']); }
+        $flights = [];
+        $fltSt->execute([(int)$d['id']]);
+        foreach ($fltSt->fetchAll() as $f) {
+            $route = $f['flight_route_id'] ? trim($f['from_airport'] . ' → ' . $f['to_airport']) : trim((string)$f['flight_custom']);
+            if ($route === '') continue;
+            $parts = [$route];
+            $air = trim((string)($f['airline_company'] ?: ($f['operator'] ?? '')));
+            if ($air !== '') $parts[] = $air;
+            $t = trim(substr((string)$f['departure_time'], 0, 5) . ($f['arrival_time'] ? '–' . substr((string)$f['arrival_time'], 0, 5) : ''), '–');
+            if ($t !== '') $parts[] = $t;
+            $note = trim((string)($f['note_' . $lang] ?? ''));
+            if ($note !== '') $parts[] = $note;
+            $flights[] = implode(' · ', $parts);
+        }
         $acts = [];
         $actSt->execute([(int)$d['id']]);
         foreach ($actSt->fetchAll() as $a) {
@@ -244,6 +261,7 @@ function iti_doc_data(int $id, string $lang): ?array {
             'date'       => $date,
             'title'      => $title,
             'transfers'  => $transfers,
+            'flights'    => $flights,
             'duration'   => $transfers ? iti_doc_duration($transfers[0]) : '',
             'meals'      => iti_doc_meals($d, $T),
             'narrative'  => iti_doc_pick($d, 'narrative', $lang),

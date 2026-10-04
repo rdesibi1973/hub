@@ -1,0 +1,2 @@
+# Mod_Security answers 406 with an HTML page; give the Agent API clients a JSON explanation instead.
+ErrorDocument 406 /api/agent/blocked.json

@@ -174,6 +174,10 @@ function bs_create_request(PDO $db, array $v, array $opt = []): array {
     $dropboxWebUrl = 'https://www.dropbox.com/home' . $dropboxPath;
     $out['folder_name']  = $folderName;
     $out['dropbox_path'] = $dropboxPath;
+    if (!empty($opt['dry_run'])) {   // Agent API: report what would be created, write nothing
+        $out['ok'] = true; $out['dry_run'] = true; $out['values'] = $v;
+        return $out;
+    }
 
     // ── Dropbox folder (unless "already exists" flag is set) ──────────────────
     if (!$dropboxSkip) {
