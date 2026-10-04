@@ -157,6 +157,10 @@ function iti_doc_data(int $id, string $lang): ?array {
         } elseif (!empty($d['destination_custom'])) {
             $destName = $d['destination_custom'];
         }
+        // No destination photo (free-text destination, or none set): the cover of the lodge's own destination.
+        if ($destPhoto === '' && isset($lr) && $lodgeKey === 'L' . $lr['id'] && !empty($lr['destination_id']) && isset($dests[(int)$lr['destination_id']])) {
+            $destPhoto = trim((string)($dests[(int)$lr['destination_id']]['cover_photo'] ?? ''));
+        }
 
         $title = iti_doc_pick($d, 'day_title', $lang);
         if ($title === '') $title = $destName !== '' ? $destName : ($lodgeName !== '' ? $lodgeName : '');
