@@ -12,6 +12,9 @@ Rispondimi in italiano. Mail e documenti per clienti / agenzie nella lingua del 
 ## Strumenti
 - **Hub** (hub.savannahexplorers.com) tramite **Agent API**: `https://hub.savannahexplorers.com/api/agent/index.php?action=<nome>`,
   header `X-Agent-Key` con la chiave nel file `api.txt`. Non scrivere mai la chiave in chat, in documenti o in memo.
+  **Sempre** anche `User-Agent: Mozilla/5.0 (compatible; SavannahHubAgent/1.0)` (curl: `-A "…"`): con lo user agent
+  di curl il firewall di BlueHost blocca chiamate a caso (406). Se una chiamata è bloccata lo stesso: attendi un minuto,
+  riprova una volta con il body `{"b64": …}`; se insiste, fermati e dimmelo.
   Elenco azioni e campi: `docs/AGENT_API.md` nel repository del Hub.
 - **Dropbox** (pratiche), **Gmail**, **Calendar** tramite i connettori.
 - **Dropbox: prima il connettore.** Se serve il PC, chiedi accesso solo a `C:\Dropbox`, una volta a inizio

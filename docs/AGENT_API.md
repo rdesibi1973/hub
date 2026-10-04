@@ -35,10 +35,13 @@ without driving the web UI.
 | No deletes | No delete endpoint (mail included). Undo a confirm with `rollback_booking` (or BackOffice → Rollback). |
 | Mailbox | The key also reads `info@` (`mail_*`): keep `api.txt` as private as the mailbox password. |
 
-**Server firewall (Mod_Security):** some bodies with accents / en dashes or certain words get HTTP 406 before reaching
-the API (the reply is then `{"ok": false, "error_code": "firewall", …}`), and many 406 in a row can block the IP for a
-few minutes. Send JSON with `\uXXXX` escapes (`ensure_ascii`), or wrap the body as `{"b64": "<base64 of the UTF-8 JSON>"}`;
-for GET, add `&b64=<base64 of a JSON object of the parameters>`.
+**Server firewall (Mod_Security) — always send `User-Agent: Mozilla/5.0 (compatible; SavannahHubAgent/1.0)`.**
+BlueHost's firewall scores requests: the default `curl/…` or `Python-urllib/…` user agent from a cloud IP starts with a
+high score, and then even plain calls (`iti_lodges&q=Mdonya`) can cross the threshold and get HTTP 406, seemingly at
+random (access log, 4 Oct 2026: 9 of ~110 curl calls blocked, 0 of the calls with the agent user agent). Many 406 in a
+row can block the IP for a few minutes. With curl: `-A "Mozilla/5.0 (compatible; SavannahHubAgent/1.0)"`.
+If a call is still blocked: send JSON with `\uXXXX` escapes (`ensure_ascii`), or wrap the body as
+`{"b64": "<base64 of the UTF-8 JSON>"}` (GET: `&b64=<base64 of a JSON object of the parameters>`), wait a minute, retry once.
 
 Responses: `{"ok": true, …}` or `{"ok": false, "error": "…", …}` with a matching HTTP code
 (400 bad input, 403 auth, 404 not found, 409 duplicate / blocked, 422 partial, 429 rate, 5xx server/Dropbox).
