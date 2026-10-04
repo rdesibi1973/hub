@@ -33,6 +33,8 @@ if (!in_array($lang, ITI_LANGS)) $lang = 'en';
 // Magazine layout (photos) by default; &layout=etnia = the text programme document,
 // &layout=classic = the old page below.
 $layout = $_GET['layout'] ?? '';
+$personal = ($program['program_type'] ?? '') === 'personal';
+if ($personal && in_array($program['display_language'] ?? '', ITI_LANGUAGES, true)) $lang = $program['display_language'];
 if ($layout !== 'classic') {
     require_once __DIR__ . '/includes/iti_doc.php';
     if (!in_array($lang, ITI_LANGUAGES, true)) $lang = 'it';
@@ -41,7 +43,7 @@ if ($layout !== 'classic') {
         require_once __DIR__ . '/includes/iti_mag.php';
         $self = 'https://' . ($_SERVER['HTTP_HOST'] ?? 'hub.savannahexplorers.com') . strtok($_SERVER['REQUEST_URI'] ?? '', '?')
               . '?token=' . rawurlencode($token) . '&lang=' . $lang;
-        iti_mag_page($D, iti_doc_lang_bar($lang, ['token' => $token]), $self);
+        iti_mag_page($D, $personal ? '' : iti_doc_lang_bar($lang, ['token' => $token]), $self);
         exit;
     }
     iti_doc_page($D, iti_doc_lang_bar($lang, ['token' => $token, 'layout' => 'etnia'], '<a href="#" onclick="window.print();return false">🖨 PDF</a>'));

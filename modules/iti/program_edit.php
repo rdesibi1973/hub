@@ -573,6 +573,11 @@ $current_flights   = $all_days_data[(int)($days[0]['id'] ?? 0)]['flights']   ?? 
 $current_transfers = $all_days_data[(int)($days[0]['id'] ?? 0)]['transfers'] ?? [];
 
 $public_url = BASE_URL . '/modules/iti/itinerary.php?token=' . ($program['public_token'] ?? '');
+// A personal programme is for one client in one language: only that language is shown
+// (the other languages are posted back unchanged in hidden fields).
+$one_lang   = $program['program_type'] === 'personal' && in_array($program['display_language'] ?? '', ITI_LANGS, true) ? $program['display_language'] : null;
+$edit_langs = $one_lang ? [$one_lang] : ITI_LANGS;
+$inc_langs  = $one_lang ? [$one_lang] : ['en', 'it'];
 
 $page_title = 'Edit: ' . $program['title_en'] . ' — ITI Builder';
 $extra_css = iti_extra_css();
@@ -692,6 +697,7 @@ include __DIR__ . '/../../includes/layout_header.php';
     <div class="form-section-title" style="margin-top:16px;font-size:.75rem;">✏️ Title &amp; Subtitle</div>
     <div class="form-grid" style="margin-bottom:8px;">
       <?php foreach (ITI_LANGS as $lang): ?>
+      <?php if (!in_array($lang, $edit_langs, true)): ?><input type="hidden" name="title_<?= $lang ?>" value="<?= h($program["title_{$lang}"] ?? '') ?>"><?php continue; endif; ?>
       <div class="form-group">
         <label><?= ITI_LANG_LABELS[$lang] ?><?= $lang==='en'?' <span style="color:var(--red)">*</span>':'' ?></label>
         <input type="text" name="title_<?= $lang ?>" maxlength="200"
@@ -702,6 +708,7 @@ include __DIR__ . '/../../includes/layout_header.php';
     </div>
     <div class="form-grid" style="margin-bottom:16px;">
       <?php foreach (ITI_LANGS as $lang): ?>
+      <?php if (!in_array($lang, $edit_langs, true)): ?><input type="hidden" name="subtitle_<?= $lang ?>" value="<?= h($program["subtitle_{$lang}"] ?? '') ?>"><?php continue; endif; ?>
       <div class="form-group">
         <label style="color:var(--grey-mid);"><?= ITI_LANG_LABELS[$lang] ?> subtitle</label>
         <input type="text" name="subtitle_<?= $lang ?>" maxlength="255"
@@ -1185,12 +1192,18 @@ include __DIR__ . '/../../includes/layout_header.php';
       <!-- 4. DAY TITLE & DESCRIPTION -->
       <div style="padding:14px 20px;border-bottom:1px solid var(--grey-lt);">
         <div style="font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--grey-mid);margin-bottom:10px;">📝 Day title &amp; description</div>
+        <?php if (count($edit_langs) > 1): ?>
         <div class="lang-tabs" id="narr-tabs">
-          <?php foreach (ITI_LANGS as $i => $lang): ?>
+          <?php foreach ($edit_langs as $i => $lang): ?>
           <div class="lang-tab <?= $i===0?'active':'' ?>" onclick="switchLang('narr','<?= $lang ?>')"><?= strtoupper($lang) ?></div>
           <?php endforeach; ?>
         </div>
-        <?php foreach (ITI_LANGS as $i => $lang): ?>
+        <?php endif; ?>
+        <?php foreach (ITI_LANGS as $lang): ?>
+        <?php if (!in_array($lang, $edit_langs, true)): ?>
+          <input type="hidden" name="day_title_<?= $lang ?>" value="<?= h($current_day_data["day_title_{$lang}"] ?? '') ?>">
+          <textarea name="narrative_<?= $lang ?>" style="display:none;"><?= h($current_day_data["narrative_{$lang}"] ?? '') ?></textarea>
+          <?php continue; endif; $i = array_search($lang, $edit_langs, true); ?>
         <div class="lang-panel <?= $i===0?'active':'' ?>" id="narr-<?= $lang ?>">
           <div class="form-group" style="margin-bottom:10px;">
             <label style="font-size:.75rem;"><?= ITI_LANG_LABELS[$lang] ?> — Title</label>
@@ -1477,14 +1490,14 @@ include __DIR__ . '/../../includes/layout_header.php';
 <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;" class="inc-row">
   <input type="hidden" name="inc_type[]"  value="<?= $type ?>">
   <input type="hidden" name="inc_std[]"   value="<?= (int)($inc['standard_inclusion_id'] ?? 0) ?: '' ?>">
-  <input type="text"   name="inc_en[]"    value="<?= h($inc['text_en'] ?? '') ?>"
+  <?php foreach (ITI_LANGS as $l): ?>
+  <?php if (in_array($l, $inc_langs, true)): ?>
+  <input type="text"   name="inc_<?= $l ?>[]" value="<?= h($inc['text_' . $l] ?? '') ?>"
          style="flex:1;padding:8px 11px;border:1.5px solid var(--grey-lt);border-radius:6px;font-size:.83rem;"
-         placeholder="<?= h(($inc['std_en'] ?? '') !== '' ? $inc['std_en'] : 'English text') ?>">
-  <input type="text"   name="inc_it[]"    value="<?= h($inc['text_it'] ?? '') ?>"
-         style="flex:1;padding:8px 11px;border:1.5px solid var(--grey-lt);border-radius:6px;font-size:.83rem;"
-         placeholder="<?= h(($inc['std_it'] ?? '') !== '' ? $inc['std_it'] : 'Italiano') ?>">
-  <?php foreach (['fr','es','de'] as $l): ?>
+         placeholder="<?= h(($inc['std_' . $l] ?? '') !== '' ? $inc['std_' . $l] : ITI_LANG_LABELS[$l]) ?>">
+  <?php else: ?>
   <input type="hidden" name="inc_<?= $l ?>[]" value="<?= h($inc['text_' . $l] ?? '') ?>">
+  <?php endif; ?>
   <?php endforeach; ?>
   <button type="button" onclick="this.closest('.inc-row').remove()" class="btn btn-danger btn-sm">✕</button>
 </div>
@@ -1554,6 +1567,7 @@ function switchLang(prefix, lang) {
   });
 })();
 
+var INC_LANGS = <?= json_encode($inc_langs) ?>, INC_LANGS_ALL = <?= json_encode(ITI_LANGS) ?>, INC_LABELS = <?= json_encode(ITI_LANG_LABELS, JSON_UNESCAPED_UNICODE) ?>;
 function addIncRow(type) {
   var list = document.getElementById('inc-list-' + type);
   var div  = document.createElement('div');
@@ -1562,11 +1576,11 @@ function addIncRow(type) {
   div.style.cssText = 'display:flex;gap:8px;align-items:center;margin-bottom:8px;';
   div.innerHTML = '<input type="hidden" name="inc_type[]" value="' + type + '">'
     + '<input type="hidden" name="inc_std[]" value="">'
-    + '<input type="text" name="inc_en[]" style="' + inp + '" placeholder="English text">'
-    + '<input type="text" name="inc_it[]" style="' + inp + '" placeholder="Italiano">'
-    + '<input type="hidden" name="inc_fr[]" value="">'
-    + '<input type="hidden" name="inc_es[]" value="">'
-    + '<input type="hidden" name="inc_de[]" value="">'
+    + INC_LANGS_ALL.map(function (l) {
+        return INC_LANGS.indexOf(l) >= 0
+          ? '<input type="text" name="inc_' + l + '[]" style="' + inp + '" placeholder="' + INC_LABELS[l] + '">'
+          : '<input type="hidden" name="inc_' + l + '[]" value="">';
+      }).join('')
     + '<button type="button" onclick="this.closest(\'.inc-row\').remove()" class="btn btn-danger btn-sm">✕</button>';
   list.appendChild(div);
 }
