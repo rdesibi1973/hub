@@ -118,7 +118,7 @@ function iti_mag_word_build(array $D): array {
     $s->addText($T['kicker'], 'mwKicker', 'mwTight');
     $s->addText($D['title'], 'mwH1', ['spaceAfter' => 80]);
     if ($D['subtitle'] !== '') $s->addText($D['subtitle'], ['name' => 'Calibri', 'size' => 13, 'color' => $INK], ['spaceAfter' => 100]);
-    if ($routeNames) $s->addText(implode(' · ', $routeNames), 'mwRoute', ['spaceAfter' => 100]);
+    if ($routeNames && $D['subtitle'] === '') $s->addText(implode(' · ', $routeNames), 'mwRoute', ['spaceAfter' => 100]);
     $facts = array_filter([$dateRange, $D['duration'], $M['private'], $paxLabel]);
     $s->addText(implode('   ·   ', $facts), ['name' => 'Calibri', 'size' => 10, 'bold' => true, 'color' => $RED], ['spaceAfter' => 240]);
     if (($c = iti_mag_cover($D)) !== '' && ($ci = iti_mw_img($c, 1400, $tmp))) $s->addImage($ci, ['width' => $W, 'alignment' => 'center']);

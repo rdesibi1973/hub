@@ -173,6 +173,54 @@ and the descriptions of the programme's lodges and destinations. Without `all`, 
 so edited translations are kept). Dry-run unless `"confirm": true`. Lets Claude translate programmes in a session
 (no Anthropic API billing); the Hub "Translate" button does the same through the API when `ANTHROPIC_API_KEY` is set.
 
+### ITI personal programmes (Cowork)
+Code: `modules/iti/includes/iti_program_service.php` (+ `iti_final.php` for the Calc). Only **personal**
+programmes are changed; samples stay on the Hub pages. Every response with a programme carries `links`:
+`preview` (internal, magazine), `edit`, `word` (editable .docx for agencies, Hub login), `public` (client link,
+magazine layout — only once published).
+
+Typical flows:
+- **Proposal:** `iti_samples` → `iti_create_personal` (sample + client data) → `iti_update_program` / `iti_update_day`
+  for the client's changes → `iti_publish` → send `links.public`.
+- **Final (after booking):** `iti_calc_plan` (reads the request's `*_Calc.xlsx` from Dropbox) → if `unmapped`,
+  `iti_save_alias` for each text → `iti_final_from_calc` with confirm → `iti_publish`.
+
+#### `iti_samples` (GET)
+`q?` → `samples[]` `{id, code (Calc code), title, route, language, days}`.
+
+#### `iti_program` (GET)
+`program_id`, `lang?` → header (title, subtitle, intro, start_date, pax, prices, included / excluded), `days[]`
+(`day, date, title, destination, lodge, meals, transfers, activities, narrative, lodge_photos, dest_photo`) and `links`.
+
+#### `iti_create_personal` (POST)
+`sample_id`, `lead_request_id?` (Hub request), `fields?` — any of `title_<lang>`, `subtitle_<lang>`, `intro_<lang>`,
+`start_date` (YYYY-MM-DD: dates appear on the cover and on each day), `pax_adults`, `pax_children`,
+`display_language`, `display_currency`, `price_table_json` (`[{label, price, currency}]`), `price_notes_<lang>`.
+Copies the sample (days, activities, prices, inclusions, terms) as a draft proposal. Dry-run unless `"confirm": true`.
+
+#### `iti_update_program` (POST)
+`program_id`, `fields` (same list) → `changes`. Dry-run unless confirm.
+
+#### `iti_update_day` (POST)
+`program_id`, `day` (number), `fields`: `day_title_<lang>`, `narrative_<lang>`, `end_lodge_id` **or** `end_lodge`
+(name, must match one lodge), `end_lodge_custom`, `destination_id`, `destination_custom`, `meal_breakfast` /
+`meal_lunch` / `meal_dinner` (0/1) → `changes`. Dry-run unless confirm.
+
+#### `iti_publish` (POST)
+`program_id`, `publish?` (default true; false = unpublish) → `links.public`. Dry-run unless confirm.
+
+#### `iti_calc_plan` (GET) / `iti_final_from_calc` (POST)
+`request_id`, `sample_id?` (default: the sample whose Calc code matches the file name), `lang?`, `file?`, `sheet?`.
+Plan: `calc` (file, rev, pax), `sample`, `nights[]` (date, label, hotel text → lodge, state, meal, activities,
+from_sample_day, flags), `unmapped` {lodge|activity|route: {norm: text}}, `blocking`, `existing_finals`.
+`iti_final_from_calc` with `"confirm": true` generates the final programme (an older final of the request is
+superseded) → `program_id`, `program`. 409 when the Calc cannot be read.
+
+#### `iti_save_alias` (POST)
+`type` (`lodge`|`activity`|`route`), `text` (the Calc text), `lodge_id` (+ `meal_basis` BB|HB|FB|AI) |
+`activity_id` | `transfer_route_id` / `flight_route_id`. A lodge alias without `lodge_id` = own arrangement
+(shown as free text). Dry-run unless confirm.
+
 ### ITI master data — lodges and destinations
 Code: `modules/iti/includes/iti_content_service.php` (+ `iti_photos.php`, shared with the Lodges / Destinations pages).
 Photos are what the magazine layout (`&layout=mag`) shows: lodge card and stays (lodge, first photo = main),

@@ -316,7 +316,7 @@ function iti_mag_render(array $D, string $publicUrl = ''): string {
       <div class="mag-kicker"><?= h($T['kicker']) ?></div>
       <h1><?= h($D['title']) ?></h1>
       <?php if ($D['subtitle'] !== ''): ?><p class="mag-cover-sub"><?= h($D['subtitle']) ?></p><?php endif; ?>
-      <?php if ($routeNames): ?><p class="mag-cover-route"><?= h(implode(' · ', $routeNames)) ?></p><?php endif; ?>
+      <?php if ($routeNames && $D['subtitle'] === ''): ?><p class="mag-cover-route"><?= h(implode(' · ', $routeNames)) ?></p><?php endif; ?>
       <div class="mag-pills">
         <?php if ($dateRange !== ''): ?><span class="mag-pill"><?= h($dateRange) ?></span><?php endif; ?>
         <span class="mag-pill"><?= h($D['duration']) ?></span>
