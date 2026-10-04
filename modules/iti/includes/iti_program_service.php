@@ -73,8 +73,22 @@ function iti_ps_samples(PDO $db, string $q = ''): array {
     return $out;
 }
 
+/** Price table + notes of the programme document (read by iti_doc_data()), added once if missing. */
+function iti_ps_schema(): void {
+    static $done = false;
+    if ($done) return;
+    $done = true;
+    try {
+        iti_add_column('iti_programs', 'price_table_json', 'TEXT NULL DEFAULT NULL');
+        foreach (ITI_PS_LANGS as $l) iti_add_column('iti_programs', 'price_notes_' . $l, 'TEXT NULL DEFAULT NULL');
+    } catch (PDOException $e) {
+        error_log('iti_ps_schema: ' . $e->getMessage());
+    }
+}
+
 /** Header fields an agent may set, limited to the columns the live table really has. */
 function iti_ps_header_fields(): array {
+    iti_ps_schema();
     $f = ['display_language', 'display_currency', 'start_date', 'pax_adults', 'pax_children', 'price_table_json', 'price_notes'];
     foreach (ITI_PS_LANGS as $l) foreach (['title', 'subtitle', 'intro', 'price_notes'] as $k) $f[] = $k . '_' . $l;
     return array_values(array_intersect($f, iti_table_columns('iti_programs')));
@@ -120,6 +134,7 @@ function iti_ps_personal(int $id): array {
  * pax_children, display_language, display_currency, price_table_json, price_notes_it…}.
  */
 function iti_ps_create_personal(PDO $db, array $in, string $who, bool $go): array {
+    iti_ps_schema();          // before anything caches the column list
     iti_ensure_final_schema();
     $sid = (int)($in['sample_id'] ?? 0);
     $s = $sid ? iti_get_program($sid) : null;
