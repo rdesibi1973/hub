@@ -94,14 +94,14 @@ function iti_doc_duration(string $transfer): string {
 function iti_doc_scenic_dests(PDO $db): array {
     static $cache = null;
     if ($cache !== null) return $cache;
-    $towns = ['KAR', 'MWB', 'MKY', 'MSH', 'MCH', 'MRG', 'LEM', 'RNG', 'TVT', 'ISB', 'NAM', 'DOD', 'IRG', 'KSZ', 'DRSM'];
+    $towns = ['KAR', 'MWB', 'MKY', 'MSH', 'MCH', 'MRG', 'LEM', 'RNG', 'TVT', 'ISB', 'NAM', 'DOD', 'IRG', 'KSZ'];   // Arusha Town and Dar es Salaam have city / landscape photos
     $townWords = ['arusha', 'karatu', 'moshi', 'mto wa mbu', 'dar es salaam', 'dodoma', 'iringa', 'namanga'];
     $generic = '/\b(national park|conservation area|parco nazionale|parc national|parque nacional|nationalpark|area di conservazione|'
              . 'lake|lago|lac|see|mount|monte|mont|island|isola|île|isla|insel|gorge|gola|crater|cratere|cratère|krater|town|città|ville|ciudad|stadt)\b/u';
     $cache = [];
     foreach ($db->query('SELECT * FROM iti_destinations WHERE is_active = 1')->fetchAll(PDO::FETCH_ASSOC) as $r) {
         $photos = iti_dest_photos($r);
-        if (!$photos || in_array($r['region'], ['Airports', 'Airstrips', 'International', 'Other'], true) || in_array($r['code'], $towns, true)) continue;
+        if (!$photos || in_array($r['region'], ['Airports', 'Airstrips', 'International'], true) || in_array($r['code'], $towns, true)) continue;
         $keys = [];
         foreach (ITI_LANGUAGES as $l) {
             $full = mb_strtolower(trim((string)($r['name_' . $l] ?? '')));
