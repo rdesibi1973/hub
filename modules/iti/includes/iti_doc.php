@@ -97,7 +97,7 @@ function iti_doc_scenic_dests(PDO $db): array {
     $towns = ['KAR', 'MWB', 'MKY', 'MSH', 'MCH', 'MRG', 'LEM', 'RNG', 'TVT', 'ISB', 'NAM', 'DOD', 'IRG', 'KSZ', 'DRSM'];
     $townWords = ['arusha', 'karatu', 'moshi', 'mto wa mbu', 'dar es salaam', 'dodoma', 'iringa', 'namanga'];
     $generic = '/\b(national park|conservation area|parco nazionale|parc national|parque nacional|nationalpark|area di conservazione|'
-             . 'lake|lago|lac|see|mount|monte|mont|island|isola|île|isla|insel|gorge|gola|crater|cratere|cratère|krater)\b/u';
+             . 'lake|lago|lac|see|mount|monte|mont|island|isola|île|isla|insel|gorge|gola|crater|cratere|cratère|krater|town|città|ville|ciudad|stadt)\b/u';
     $cache = [];
     foreach ($db->query('SELECT * FROM iti_destinations WHERE is_active = 1')->fetchAll(PDO::FETCH_ASSOC) as $r) {
         $photos = iti_dest_photos($r);
@@ -109,7 +109,9 @@ function iti_doc_scenic_dests(PDO $db): array {
             $keys[$full] = true;
             $short = trim(preg_replace('/\s+/u', ' ', preg_replace($generic, ' ', $full)));
             // "Arusha National Park" → not just "arusha" (that is the town).
-            if (mb_strlen($short) >= 4 && !in_array($short, $townWords, true)) $keys[$short] = true;
+            // "Arusha" alone means the town (Arusha Town), never "Arusha National Park".
+            $isTown = stripos((string)$r['name_en'], 'town') !== false;
+            if (mb_strlen($short) >= 4 && ($isTown || !in_array($short, $townWords, true))) $keys[$short] = true;
         }
         $cache[(int)$r['id']] = ['photos' => $photos, 'keys' => array_keys($keys), 'park' => $r['region'] === 'National Parks'];
     }
