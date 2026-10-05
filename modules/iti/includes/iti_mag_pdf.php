@@ -143,7 +143,8 @@ td{vertical-align:top}
 </table>
 <?php endif; ?>
 <?php if ($stays): ?>
-<h3 style="margin-top:16px"><?= h($M['stays']) ?></h3>
+<?php if ($mapImg !== ''): ?><div class="brk"></div><?php endif; /* own page: the heading stayed alone under the map */ ?>
+<h3><?= h($M['stays']) ?></h3>
 <table class="stays">
 <?php foreach ($stays as $st): $ph = $st['photo'] !== '' ? iti_mp_img($st['photo'], 700, $tmp, 'width:110pt') : ''; ?>
 <tr class="nobrk"><td style="width:120pt"><?= $ph ?></td><td>
