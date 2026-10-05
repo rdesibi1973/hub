@@ -62,7 +62,10 @@ mostrami il risultato, poi confirm dopo il mio ok.
   testo il lodge / attività giusti (`iti_lodges`, …) e salvali con `iti_save_alias` dopo il mio ok →
   `iti_final_from_calc` (prova, poi confirm). Se manca il sample per il codice del Calc, dimmelo: non inventarlo.
 - **Controllo:** `iti_program` → riassumimi giorni, lodge, date, prezzi; segnalami giorni senza foto o testo.
-  Anteprima interna: `links.preview`. Word modificabile per l'agenzia: `links.word` (serve il login Hub: lo scarico io).
+  Anteprima interna: `links.preview`.
+- **File Word / PDF:** `iti_document` con `program_id`, `format` (`pdf` o `docx` = Word modificabile per l'agenzia),
+  `lang?` → il file in base64 (salvalo e dammelo); con `save: true` (o `request_id` / `folder_path`) lo carica
+  nella cartella pratica in Dropbox. Se il file c'è già, chiedimi prima di usare `overwrite: true`.
 - **Invio:** `iti_publish` (prova, poi confirm) → `links.public` è il link per il cliente (Magazine con "Scarica PDF").
   Il link lo metto io nella mail; tu preparala come bozza (`mail_draft`).
 - **Foto / dati dei lodge e destinazioni:** `iti_lodges` / `iti_destinations` con `missing=photos|photo|coords|…`;

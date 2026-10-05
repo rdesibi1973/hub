@@ -24,6 +24,7 @@ function iti_ps_links(array $p, string $lang = ''): array {
         'preview' => $base . '/program_doc.php?id=' . (int)$p['id'] . '&lang=' . $lang . '&layout=mag',
         'edit'    => $base . '/program_edit.php?id=' . (int)$p['id'],
         'word'    => $base . '/export_mag_word.php?id=' . (int)$p['id'] . '&lang=' . $lang,
+        'pdf'     => $base . '/export_mag_word.php?id=' . (int)$p['id'] . '&lang=' . $lang . '&format=pdf',
         'public'  => null,
     ];
     if (!empty($p['is_published']) && !empty($p['public_token'])) {

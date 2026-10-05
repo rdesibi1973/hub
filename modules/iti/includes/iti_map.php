@@ -192,25 +192,57 @@ function iti_render_itinerary_map(array $points, string $outFile): bool {
     $numPt   = 12 * $SS;
 
     // ── Labels (drawn before markers so markers sit on top) ──────────
+    // Each name goes right, left, above or below its marker (also slightly shifted),
+    // at the first spot that overlaps no marker and no label already placed. If none
+    // is free, a shorter name is tried, then the name is left out (the legend has it).
     $r = 15 * $SS;
+    $halfOf = function (array $g) use ($r, $numPt, $ttfBold, $SS) {
+        [$nw0, ] = iti_map_text_size(implode(' & ', $g['labels']), $numPt, $ttfBold);
+        return max($r, $nw0 / 2 + 8 * $SS);   // must match the marker loop
+    };
+    $boxes = [];   // occupied areas [x1, y1, x2, y2]: markers first, then the labels placed
+    foreach ($groups as $g) {
+        $hw = $halfOf($g) + 3 * $SS;
+        $boxes[] = [$g['px'][0] - $hw, $g['px'][1] - $r - 3 * $SS, $g['px'][0] + $hw, $g['px'][1] + $r + 3 * $SS];
+    }
+    $free = function (array $b) use (&$boxes, $W, $H, $SS) {
+        if ($b[0] < 4 * $SS || $b[1] < 3 * $SS || $b[2] > ($W - 4) * $SS || $b[3] > $H * $SS - 18 * $SS) return false;
+        foreach ($boxes as $o) {
+            if ($b[0] < $o[2] && $b[2] > $o[0] && $b[1] < $o[3] && $b[3] > $o[1]) return false;
+        }
+        return true;
+    };
+    $cut = function (string $s, int $max) {
+        $len = function_exists('mb_strlen') ? mb_strlen($s) : strlen($s);
+        if ($len <= $max) return $s;
+        return function_exists('mb_substr') ? rtrim(mb_substr($s, 0, $max - 1)) . '…' : substr($s, 0, $max - 3) . '...';
+    };
     foreach ($groups as $g) {
         [$cx, $cy] = $g['px'];
-        $name = $g['name'];
-        if ($name === '') continue;
-        $nlen = function_exists('mb_strlen') ? mb_strlen($name) : strlen($name);
-        if ($nlen > 28) {
-            $name = function_exists('mb_substr') ? mb_substr($name, 0, 27) . '…' : substr($name, 0, 27) . '...';
-        }
+        if ($g['name'] === '') continue;
         $numLabel = implode(' & ', $g['labels']);
-        $label = $numLabel === '' ? $name : $numLabel . '. ' . $name;
-        [$tw, $th]  = iti_map_text_size($label, $labelPt, $ttf);
-        [$nw0, ]    = iti_map_text_size($numLabel, $numPt, $ttfBold);
-        $halfW = max($r, $nw0 / 2 + 8 * $SS); // must match the marker loop
-        $tx = $cx + $halfW + 6 * $SS;
-        if ($tx + $tw > $W * $SS - 6 * $SS) $tx = $cx - $halfW - 6 * $SS - $tw; // flip to left edge
-        $ty = $cy - $th / 2;
-        $ty = max(3 * $SS, min($ty, $H * $SS - $th - 3 * $SS));
-        iti_map_text($img, $tx, $ty, $label, $labelPt, $ttf, $BLACK, $WHITE);
+        $halfW = $halfOf($g);
+        $gap = 6 * $SS;
+        foreach ([28, 18] as $max) {
+            $name  = $cut($g['name'], $max);
+            $label = $numLabel === '' ? $name : $numLabel . '. ' . $name;
+            [$tw, $th] = iti_map_text_size($label, $labelPt, $ttf);
+            $mid = $cy - $th / 2;
+            $cands = [
+                [$cx + $halfW + $gap, $mid], [$cx - $halfW - $gap - $tw, $mid],                    // right, left
+                [$cx - $tw / 2, $cy - $r - $gap - $th], [$cx - $tw / 2, $cy + $r + $gap],            // above, below
+                [$cx + $halfW + $gap, $mid - $th - 2 * $SS], [$cx + $halfW + $gap, $mid + $th + 2 * $SS],
+                [$cx - $halfW - $gap - $tw, $mid - $th - 2 * $SS], [$cx - $halfW - $gap - $tw, $mid + $th + 2 * $SS],
+            ];
+            foreach ($cands as $p) {
+                $b = [$p[0] - 2 * $SS, $p[1] - 2 * $SS, $p[0] + $tw + 2 * $SS, $p[1] + $th + 4 * $SS];
+                if ($free($b)) {
+                    $boxes[] = $b;
+                    iti_map_text($img, $p[0], $p[1], $label, $labelPt, $ttf, $BLACK, $WHITE);
+                    continue 3;
+                }
+            }
+        }
     }
 
     // ── Markers: pill, white ring, label (slate for airports) ────────

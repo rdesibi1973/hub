@@ -90,9 +90,9 @@ function agent_audit(PDO $db, string $action, $reqId, array $payload, string $re
                               'iti_create_flight_route', 'iti_create_activity', 'iti_create_transfer_route', 'iti_save_as_sample',
                               'create_request', 'add_flight_rates'], true) && empty($payload['confirm']);
     // Mail: keep who/what in the log, not message bodies or attachment content.
-    if (in_array($action, ['mail_get', 'mail_attachment'], true) && $code === 200) {
+    if (in_array($action, ['mail_get', 'mail_attachment', 'iti_document'], true) && $code === 200) {
         $res = json_decode($resultJson, true);
-        $m   = $res['message'] ?? $res['attachment'] ?? [];
+        $m   = $res['message'] ?? $res['attachment'] ?? $res['file'] ?? [];
         $resultJson = json_encode(['ok' => true, 'logged' => 'content omitted', 'uid' => $m['uid'] ?? null,
                                    'subject' => $m['subject'] ?? null, 'name' => $m['name'] ?? null,
                                    'saved_to' => $res['saved_to'] ?? null], JSON_UNESCAPED_UNICODE);
@@ -1015,6 +1015,57 @@ try {
         catch (InvalidArgumentException $e) { agent_fail($e->getMessage(), 404); }
     }
 
+    // The programme as a file (magazine layout): PDF (default) or Word. Returned as base64,
+    // or with save / request_id / folder_path uploaded to the booking folder in Dropbox
+    // (an existing file is kept unless "overwrite": true).
+    case 'iti_document': {
+        agent_iti_lib();
+        require_once __DIR__ . '/../iti/includes/iti_export.php';
+        $pid = (int)($in['program_id'] ?? 0);
+        try {
+            $f = iti_export_file($pid, (string)($in['lang'] ?? ''), (string)($in['format'] ?? 'pdf'));
+        } catch (InvalidArgumentException $e) { agent_fail($e->getMessage(), stripos($e->getMessage(), 'not found') !== false ? 404 : 400); }
+        catch (Throwable $e) { agent_fail('Document not generated: ' . $e->getMessage(), 500); }
+        $info = ['program_id' => $pid, 'name' => $f['name'], 'mime' => $f['mime'], 'size' => strlen($f['content']),
+                 'format' => $f['format'], 'lang' => $f['lang']];
+
+        $dir = rtrim(trim((string)($in['folder_path'] ?? '')), '/');
+        $rid = (int)($in['request_id'] ?? 0);
+        if ($dir === '' && $rid <= 0 && !empty($in['save'])) {
+            $p = iti_get_program($pid);
+            $rid = (int)($p['lead_request_id'] ?? 0);
+            if ($rid <= 0) agent_fail('Program ' . $pid . ' has no linked Hub request — pass request_id or folder_path', 409, ['file' => $info]);
+        }
+        if ($dir === '' && $rid <= 0) {
+            agent_out(['ok' => true, 'file' => $info + ['content_base64' => base64_encode($f['content'])]]);
+        }
+        require_once __DIR__ . '/dropbox_helper.php';
+        $token = dropbox_get_access_token();
+        if ($dir !== '') {
+            if ($dir[0] !== '/') agent_fail('folder_path must be a full Dropbox path starting with /');
+            if (!dropbox_path_exists($token, $dir)) agent_fail('folder_path ' . $dir . ' not found in Dropbox', 404);
+        } else {
+            $r = agent_request($db, $rid);
+            if (!$r['practice_code']) agent_fail('Request ' . $r['id'] . ' has no folder — pass folder_path', 409);
+            $dir = agent_request_dropbox_dir($token, $r);
+        }
+        $name = trim((string)($in['save_as'] ?? '')) ?: $f['name'];
+        $name = trim(str_replace(['/', '\\', ':', '*', '?', '"', '<', '>', '|'], '_', $name));
+        if (!preg_match('/\.' . $f['format'] . '$/i', $name)) $name .= '.' . $f['format'];
+        $path = $dir . '/' . $name;
+        $overwrite = !empty($in['overwrite']);
+        $exists = dropbox_path_exists($token, $path);
+        if ($exists && !$overwrite) {
+            agent_fail('File already exists: ' . $path, 409, ['path' => $path, 'hint' => 'Use save_as for another name, or "overwrite": true (Dropbox keeps the old version).']);
+        }
+        try {
+            $meta = dropbox_upload_text($token, $path, $f['content'], $overwrite ? 'overwrite' : 'add');
+        } catch (RuntimeException $e) {
+            agent_fail($e->getMessage(), 502, ['path' => $path]);
+        }
+        agent_out(['ok' => true, 'file' => $info, 'saved_to' => $meta['path_display'] ?? $path, 'overwritten' => $exists]);
+    }
+
     case 'iti_create_personal':
     case 'iti_update_program':
     case 'iti_update_day':
@@ -1652,7 +1703,7 @@ try {
             'copy_program', 'get_rates', 'fill_calc', 'read_calc', 'confirm_preview', 'confirm_booking', 'send_booking_email',
             'rollback_booking', 'iti_programs', 'iti_texts', 'iti_save_texts', 'update_rate', 'replace_flight_rates',
             'iti_lodges', 'iti_lodge', 'iti_destinations', 'iti_destination', 'iti_lodge_photos', 'iti_destination_photo',
-            'iti_update_lodge', 'iti_update_destination', 'iti_create_lodge', 'iti_samples', 'iti_program', 'iti_create_personal', 'iti_update_program',
+            'iti_update_lodge', 'iti_update_destination', 'iti_create_lodge', 'iti_samples', 'iti_program', 'iti_document', 'iti_create_personal', 'iti_update_program',
             'iti_update_day', 'iti_publish', 'iti_calc_plan', 'iti_final_from_calc', 'iti_save_alias',
             'iti_set_days', 'iti_add_day', 'iti_delete_day', 'iti_inclusions', 'iti_update_inclusions', 'iti_save_as_sample',
             'iti_flight_routes', 'iti_create_flight_route', 'iti_activities', 'iti_create_activity',

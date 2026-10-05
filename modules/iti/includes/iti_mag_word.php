@@ -237,13 +237,11 @@ function iti_mag_word_build(array $D): array {
         if ($d['lodge'] !== '' && !isset($seenLodge[$lk])) {
             $seenLodge[$lk] = (int)$d['n'];
             $card = $s->addTable(['cellMargin' => 110]);
-            $card->addRow();
-            $ph = array_slice($d['lodge_photos'], 0, 2);
-            if ($ph) {
-                $pc = $card->addCell(4300, ['bgColor' => $SAND, 'valign' => 'top']);
-                foreach ($ph as $u) if ($pi = iti_mw_img($u, 700, $tmp)) { $pc->addImage($pi, ['width' => 200]); }
-            }
-            $cc = $card->addCell($ph ? 5400 : 9700, ['bgColor' => $SAND, 'valign' => 'top']);
+            $card->addRow(null, ['cantSplit' => true]);   // photo and text stay together on one page
+            // One photo beside the text: a second one stacked below left an empty sand box.
+            $pi = $d['lodge_photos'] ? iti_mw_img($d['lodge_photos'][0], 700, $tmp) : null;
+            if ($pi) $card->addCell(4300, ['bgColor' => $SAND, 'valign' => 'top'])->addImage($pi, ['width' => 200]);
+            $cc = $card->addCell($pi ? 5400 : 9700, ['bgColor' => $SAND, 'valign' => 'top']);
             $cc->addText($T['overnight'], 'mwKicker', 'mwTight');
             $cc->addText($d['lodge'], 'mwH3', ['spaceAfter' => 80]);
             iti_mw_paras($cc, $d['lodge_desc'], 'mwSmall', 'mwP');
@@ -312,18 +310,4 @@ function iti_mag_word_build(array $D): array {
         }
     }
     return [$w, $tmp];
-}
-
-/** Send the .docx to the browser and clean the temp files. */
-function iti_mag_word_send(array $D, string $filename): void {
-    list($w, $tmp) = iti_mag_word_build($D);
-    $out = tempnam(sys_get_temp_dir(), 'mwdoc');
-    \PhpOffice\PhpWord\IOFactory::createWriter($w, 'Word2007')->save($out);
-    foreach ($tmp as $f) if (is_file($f)) @unlink($f);
-    if (ob_get_length()) ob_end_clean();
-    header('Content-Type: application/vnd.openxmlformats-officedocument.wordprocessingml.document');
-    header('Content-Disposition: attachment; filename="' . $filename . '"');
-    header('Content-Length: ' . filesize($out));
-    readfile($out);
-    @unlink($out);
 }
