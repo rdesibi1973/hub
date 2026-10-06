@@ -83,7 +83,7 @@ function agent_audit(PDO $db, string $action, $reqId, array $payload, string $re
     global $agentUser;
     agent_ensure_schema($db);
     $dry = in_array($action, ['confirm_booking', 'send_booking_email', 'rollback_booking', 'fill_calc', 'iti_save_texts', 'update_rate', 'replace_flight_rates',
-                              'cancel_invoice_payment', 'update_folder_status', 'import_zoho_invoice', 'mail_send', 'mail_move',
+                              'cancel_invoice_payment', 'update_folder_status', 'import_zoho_invoice', 'create_invoice', 'update_invoice', 'mail_send', 'mail_move',
                               'iti_lodge_photos', 'iti_destination_photo', 'iti_update_lodge', 'iti_update_destination',
                               'iti_create_personal', 'iti_update_program', 'iti_update_day', 'iti_publish', 'iti_final_from_calc', 'iti_save_alias',
                               'iti_create_lodge', 'iti_set_days', 'iti_add_day', 'iti_delete_day', 'iti_update_inclusions',
@@ -314,6 +314,54 @@ function agent_invoice(PDO $db, array $in): array {
     if (!$inv) agent_fail('Invoice ' . $id . ' not found', 404);
     if (!empty($inv['request_id'])) $agentReqId = (int)$inv['request_id'];
     return $inv;
+}
+
+/**
+ * Invoice input from the API body ($in['fields'] or top level) for inv_prepare():
+ * issuer "SE" / "SH" shorthand, bill-to filled from agency_id / customer_id (agency → 45-day T&C
+ * on a new invoice), dates checked, request_id must exist.
+ */
+function agent_invoice_input(PDO $db, array $in, bool $isNew): array {
+    $src = isset($in['fields']) && is_array($in['fields']) ? $in['fields'] + ['items' => $in['items'] ?? null] : $in;
+    $keys = ['issuer', 'currency', 'bill_to_name', 'bill_to_address', 'customer_id', 'request_id', 'issue_date', 'due_date',
+             'terms', 'notes', 'terms_conditions', 'follow_up', 'follow_up_note'];
+    $out = [];
+    foreach ($keys as $k) if (array_key_exists($k, $src)) $out[$k] = is_string($src[$k]) ? trim($src[$k]) : $src[$k];
+    if (isset($src['items']) && is_array($src['items'])) $out['items'] = array_values($src['items']);
+    if (isset($out['issuer'])) {
+        $short = ['SE' => 'Savannah Explorers Ltd', 'SH' => 'Savannah Holidays Ltd'];
+        $u = strtoupper((string)$out['issuer']);
+        if (isset($short[$u])) $out['issuer'] = $short[$u];
+    }
+    foreach (['issue_date', 'due_date'] as $k) if (!empty($out[$k])) $out[$k] = agent_iso_date($out[$k], $k);
+    if (!empty($out['request_id'])) agent_request($db, $out['request_id']);
+
+    if ((int)($src['agency_id'] ?? 0) > 0) {
+        $st = $db->prepare("SELECT id, nome, COALESCE(address,'') AS address FROM agencies WHERE id = ?");
+        $st->execute([(int)$src['agency_id']]);
+        $a = $st->fetch(PDO::FETCH_ASSOC);
+        if (!$a) agent_fail('Agency ' . (int)$src['agency_id'] . ' not found (see list_agencies)', 404);
+        if (empty($out['bill_to_name']))    $out['bill_to_name'] = $a['nome'];
+        if (!isset($out['bill_to_address'])) $out['bill_to_address'] = $a['address'];
+        if ($isNew && !isset($out['terms_conditions'])) $out['terms_conditions'] = INV_AGENCY_TC;
+        $out['customer_id'] = 0;
+    } elseif ((int)($out['customer_id'] ?? 0) > 0) {
+        $st = $db->prepare("SELECT id, name, CONCAT_WS(', ', NULLIF(address,''), NULLIF(city,''), NULLIF(country,'')) AS addr FROM customers WHERE id = ?");
+        $st->execute([(int)$out['customer_id']]);
+        $c = $st->fetch(PDO::FETCH_ASSOC);
+        if (!$c) agent_fail('Customer ' . (int)$out['customer_id'] . ' not found', 404);
+        if (empty($out['bill_to_name']))    $out['bill_to_name'] = $c['name'];
+        if (!isset($out['bill_to_address'])) $out['bill_to_address'] = (string)$c['addr'];
+    }
+    return $out;
+}
+
+/** Prepared lines → API shape. */
+function agent_invoice_items_out(array $items): array {
+    $out = [];
+    foreach ($items as $it) $out[] = ['description' => $it['description'], 'quantity' => (float)$it['quantity'],
+                                      'unit_price' => (float)$it['unit_price'], 'line_total' => (float)$it['line_total']];
+    return $out;
 }
 
 /** Compact public shape of an invoice row. */
@@ -1561,6 +1609,126 @@ try {
         agent_out(['ok' => true, 'dry_run' => false, 'invoice' => agent_invoice_out(inv_get($db, $res['invoice_id']))]);
     }
 
+    // ── create_invoice ───────────────────────────────────────────────────────
+    // Same as "New Invoice" (invoice_add.php): number SE-/SH-YYYY-NNNN, status New.
+    // A request invoice is checked against the Calc Excel (pax, total) like the page:
+    // a difference blocks it unless its key is in "ignore_checks". Dry-run unless "confirm": true.
+    case 'create_invoice': {
+        agent_require_method('POST');
+        agent_invoice_lib();
+        $prep = inv_prepare(agent_invoice_input($db, $in, true));
+        if ($prep['errors']) agent_fail(implode(' ', $prep['errors']), 422);
+        $f = $prep['fields']; $items = $prep['items'];
+        $total = inv_items_total($items);
+        if (isset($in['total']) && abs((float)$in['total'] - $total) > 0.01) {
+            agent_fail('Items add up to ' . $total . ', not the given total ' . $in['total'], 422);
+        }
+        // The same request already billed for the same amount → probably a double.
+        if ($f['request_id'] && empty($in['allow_duplicate'])) {
+            $st = $db->prepare("SELECT * FROM invoices WHERE request_id = ? AND status <> 'Cancelled' AND ABS(total - ?) < 0.005 AND currency = ?");
+            $st->execute([$f['request_id'], $total, $f['currency']]);
+            if ($dup = $st->fetch(PDO::FETCH_ASSOC)) {
+                agent_fail('Request ' . $f['request_id'] . ' already has invoice ' . $dup['invoice_number'] . ' for ' . fmt_money($total, $f['currency']), 409,
+                           ['duplicate' => agent_invoice_out($dup), 'hint' => 'Resend with "allow_duplicate": true if it really is a second invoice.']);
+            }
+        }
+        // Calc Excel check (request invoices only), as on the page.
+        $calc = null; $check = null; $ignored = [];
+        if ($f['request_id']) {
+            require_once __DIR__ . '/../invoices/includes/invoice_calc.php';
+            $calc  = ic_read_request(agent_request($db, $f['request_id']), trim((string)($in['calc_sheet'] ?? '')));
+            $fails = ic_check($calc, $items, $f['currency']);
+            $ign   = $in['ignore_checks'] ?? [];
+            $ign   = $ign === true ? array_keys($fails) : array_map('strval', (array)$ign);
+            $ignored = array_values(array_intersect_key($fails, array_flip($ign)));
+            $check = ['status' => $calc['status'], 'file' => $calc['file'] ?? '', 'sheet' => $calc['sheet'] ?? '',
+                      'sheets' => $calc['sheets'] ?? [], 'excel_pax' => $calc['pax'] ?? null, 'excel_total' => $calc['total'] ?? null,
+                      'failed' => $fails, 'ignored' => array_keys(array_intersect_key($fails, array_flip($ign)))];
+            $blocking = array_diff_key($fails, array_flip($ign));
+            if ($blocking && !empty($in['confirm'])) {
+                agent_fail('The invoice does not match the Calc Excel', 409, ['calc_check' => $check,
+                           'hint' => 'Fix the lines, or resend with "ignore_checks": ["' . implode('","', array_keys($blocking)) . '"] (calc_sheet to pick another sheet).']);
+            }
+        }
+        $summary = ['issuer' => $f['issuer'], 'number_prefix' => $f['issuer'] === 'Savannah Explorers Ltd' ? 'SE' : 'SH',
+                    'bill_to' => $f['bill_to_name'], 'bill_to_address' => $f['bill_to_address'], 'currency' => $f['currency'],
+                    'issue_date' => $f['issue_date'], 'due_date' => $f['due_date'], 'terms' => $f['terms'],
+                    'terms_conditions' => $f['terms_conditions'], 'request_id' => $f['request_id'],
+                    'items' => agent_invoice_items_out($items), 'total' => $total];
+        if (empty($in['confirm'])) {
+            agent_out(['ok' => true, 'dry_run' => true, 'would_create' => $summary, 'calc_check' => $check,
+                       'message' => 'Dry run — nothing created. Resend with "confirm": true to create the invoice.']);
+        }
+        $res = inv_create($db, $f, $items, (int)$agentUser['id']);
+        if ($calc !== null) {
+            try { ic_log($db, $res['invoice_id'], $f['request_id'], $calc, $ignored, false, (int)$agentUser['id']); }
+            catch (Throwable $e) { error_log('ic_log failed for invoice ' . $res['invoice_id'] . ': ' . $e->getMessage()); }
+        }
+        agent_out(['ok' => true, 'dry_run' => false, 'invoice' => agent_invoice_out(inv_get($db, $res['invoice_id'])),
+                   'items' => agent_invoice_items_out($items), 'calc_check' => $check,
+                   'folder' => agent_invoice_folder($db, $res['invoice_id'])]);
+    }
+
+    // ── update_invoice ───────────────────────────────────────────────────────
+    // Same as "Edit Invoice": only the fields given change; "items" replaces all the lines.
+    // Not on a Cancelled invoice; the issuer stays (it is in the number); currency only
+    // without payments; a total below what is paid needs "allow_overpaid". Dry-run unless "confirm": true.
+    case 'update_invoice': {
+        agent_require_method('POST');
+        $inv = agent_invoice($db, $in);
+        $id  = (int)$inv['id'];
+        if ($inv['status'] === 'Cancelled') agent_fail('Invoice ' . $inv['invoice_number'] . ' is Cancelled — it cannot be edited', 409);
+        $input = agent_invoice_input($db, $in, false);
+        unset($input['request_id']);
+        $src = isset($in['fields']) && is_array($in['fields']) ? $in['fields'] : $in;
+        if (array_key_exists('request_id', $src)) {      // 0 / null = unlink
+            $input['request_id'] = (int)$src['request_id'];
+            if ($input['request_id'] > 0) agent_request($db, $input['request_id']);
+        }
+        if (!array_diff(array_keys($input), ['customer_id']) && empty($src['agency_id'])) {
+            agent_fail('Nothing to change: give fields (bill_to_name, bill_to_address, issue_date, due_date, terms, notes, terms_conditions, currency, request_id, follow_up…) and/or items');
+        }
+        $prep = inv_prepare($input, $inv);
+        if ($prep['errors']) agent_fail(implode(' ', $prep['errors']), 422);
+        $f = $prep['fields'];
+        if ($f['issuer'] !== $inv['issuer']) {
+            agent_fail('The issuer cannot change: ' . $inv['invoice_number'] . ' is a ' . $inv['issuer'] . ' number. Cancel it and create a new invoice instead.', 409);
+        }
+        $paid = round((float)$inv['amount_paid'], 2);
+        if ($f['currency'] !== $inv['currency'] && count(inv_payments($db, $id, true)) > 0) {
+            agent_fail('The currency cannot change: invoice ' . $inv['invoice_number'] . ' has payments', 409);
+        }
+        $oldItems = inv_items($db, $id);
+        $newTotal = $prep['items'] !== null ? inv_items_total($prep['items']) : round((float)$inv['total'], 2);
+        if (isset($in['total']) && abs((float)$in['total'] - $newTotal) > 0.01) {
+            agent_fail('Items add up to ' . $newTotal . ', not the given total ' . $in['total'], 422);
+        }
+        if ($newTotal < $paid - 0.005 && empty($in['allow_overpaid'])) {
+            agent_fail('New total ' . fmt_money($newTotal, $f['currency']) . ' is below the amount already paid ' . fmt_money($paid, $inv['currency']), 409,
+                       ['hint' => 'Resend with "allow_overpaid": true if intended (then issue a credit note for the refund).']);
+        }
+        $changes = [];
+        foreach ($f as $k => $v) {
+            $old = $inv[$k] ?? null;
+            if ((string)$old !== (string)$v && !($old === null && $v === null)) $changes[$k] = ['from' => $old, 'to' => $v];
+        }
+        if ($prep['items'] !== null) {
+            $changes['items'] = ['from' => agent_invoice_items_out($oldItems), 'to' => agent_invoice_items_out($prep['items'])];
+            $changes['total'] = ['from' => round((float)$inv['total'], 2), 'to' => $newTotal];
+        }
+        if (!$changes) agent_out(['ok' => true, 'unchanged' => true, 'invoice' => agent_invoice_out($inv)]);
+        if (empty($in['confirm'])) {
+            agent_out(['ok' => true, 'dry_run' => true, 'invoice' => agent_invoice_out($inv), 'changes' => $changes,
+                       'balance_after' => round($newTotal - $paid, 2),
+                       'message' => 'Dry run — nothing saved. Resend with "confirm": true to save.']);
+        }
+        inv_update($db, $id, $f, $prep['items']);
+        $after = inv_get($db, $id);
+        agent_out(['ok' => true, 'dry_run' => false, 'changes' => $changes, 'invoice' => agent_invoice_out($after),
+                   'folder' => agent_invoice_folder($db, $id),
+                   'hint' => 'The PDF in Dropbox is not updated: run save_invoice_pdf with "overwrite": true if it was saved before.']);
+    }
+
     // ── Mailbox info@ ────────────────────────────────────────────────────────
     // IMAP on the BlueHost mailbox, so Claude doesn't log in to webmail.
     // Reading never marks as seen unless "mark_seen": true. No delete action.
@@ -1709,7 +1877,7 @@ try {
             'iti_flight_routes', 'iti_create_flight_route', 'iti_activities', 'iti_create_activity',
             'iti_transfer_routes', 'iti_create_transfer_route', 'add_flight_rates',
             'find_invoices', 'get_invoice', 'add_invoice_payment', 'cancel_invoice_payment', 'update_folder_status',
-            'save_invoice_pdf', 'import_zoho_invoice', 'memo_list', 'memo_save', 'memo_set_status',
+            'save_invoice_pdf', 'import_zoho_invoice', 'create_invoice', 'update_invoice', 'memo_list', 'memo_save', 'memo_set_status',
             'routine_status', 'routine_done',
             'mail_folders', 'mail_list', 'mail_get', 'mail_attachment', 'mail_flag', 'mail_move', 'mail_draft', 'mail_send',
         ]]);

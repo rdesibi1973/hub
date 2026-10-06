@@ -31,7 +31,7 @@ without driving the web UI.
 | HTTPS only | Plain HTTP → 403. |
 | Rate limit | 60 calls/min → 429. |
 | Audit | Every call (including failures and dry-runs) → `agent_audit_log` (action, request_id, user, HTTP code, dry_run, payload, result, IP). |
-| Dry-run by default | `confirm_booking`, `send_booking_email`, `rollback_booking`, `cancel_invoice_payment`, `update_folder_status`, `import_zoho_invoice`, `mail_send` and `mail_move` (among others) do nothing unless the body has `"confirm": true`. |
+| Dry-run by default | `confirm_booking`, `send_booking_email`, `rollback_booking`, `cancel_invoice_payment`, `update_folder_status`, `import_zoho_invoice`, `create_invoice`, `update_invoice`, `mail_send` and `mail_move` (among others) do nothing unless the body has `"confirm": true`. |
 | No deletes | No delete endpoint (mail included). Undo a confirm with `rollback_booking` (or BackOffice → Rollback). |
 | Mailbox | The key also reads `info@` (`mail_*`): keep `api.txt` as private as the mailbox password. |
 
@@ -398,6 +398,33 @@ items: 422 if different), `payment_amount`, `payment_date`, `payment_method`, `p
 409 if the number already exists. Without `"confirm": true` → `would_create` summary only.
 (The web importer `modules/invoices/api_import.php` uses the same code.)
 
+### `create_invoice` (POST)
+Same as **New Invoice** (`invoice_add.php`, shared `inv_prepare` / `inv_create`): number `SE-YYYY-NNNN`
+(Savannah Explorers Ltd) or `SH-YYYY-NNNN` (Savannah Holidays Ltd — paid on AfrAsia), status New.
+Fields (top level or in `fields`): `items[]`* `{description, quantity (default 1), unit_price}` (negative
+price = discount line; the first line is the trip line "<Customer> N pax trip in …"), `issuer` (`SE`|`SH` or the
+full name, default SE), `currency` (USD|EUR, default USD), `request_id`, `bill_to_name`* — or `agency_id`
+(name, address and the agency T&C, 45 days) / `customer_id` (name, address) —, `bill_to_address`,
+`issue_date` (default today), `due_date`, `terms` (default Due on Receipt), `notes`, `terms_conditions`
+(default 60-day T&C), `follow_up`, `follow_up_note`, `total?` (checked against the items: 422 if different).
+- With `request_id` the lines are checked against the booking's **Calc Excel** like the page: `failed`
+  keys `pax` (TOT PAX = trip line qty and "N pax"), `total` (Tot price, USD only), `excel` (Calc not read).
+  A failed check blocks the create (409) unless its key is in `ignore_checks` (`["pax"]`, or `true` = all);
+  `calc_sheet` picks the sheet when several fit. Ignored checks are logged on the invoice, as on the page.
+- **409 duplicate** when the request already has an invoice (not cancelled) with the same total and currency —
+  `"allow_duplicate": true` for a real second invoice.
+Dry-run unless `"confirm": true` → `would_create` + `calc_check`. Then → `invoice`, `items`, `calc_check`, `folder`.
+The PDF is not saved: follow with `save_invoice_pdf`.
+
+### `update_invoice` (POST)
+Same as **Edit Invoice**. `invoice_id` / `invoice_number`, then only the fields to change (same names as
+`create_invoice`, top level or in `fields`; `request_id: 0` unlinks) and/or `items` (replaces **all** the lines).
+Refused (409): a Cancelled invoice; another `issuer` (it is in the number — cancel and create a new one);
+another `currency` once payments exist; a new total below the amount paid unless `"allow_overpaid": true`
+(then issue the credit note on the Hub page). Payments and status are recalculated, and the request value.
+Dry-run unless `"confirm": true` → `changes {field: {from, to}}` (items / total included), `balance_after`.
+The Dropbox PDF is not updated — `save_invoice_pdf` with `"overwrite": true` afterwards.
+
 ```bash
 curl -sH "$H" "$U?action=find_invoices&q=Fiorini"
 curl -sH "$H" "$U?action=get_invoice&invoice_number=SE-2026-0012"
@@ -405,6 +432,8 @@ curl -sH "$H" -X POST "$U?action=add_invoice_payment" -d '{"invoice_id":412,"dat
 curl -sH "$H" -X POST "$U?action=update_folder_status" -d '{"invoice_id":412,"status":"DEPOSIT"}'                 # preview
 curl -sH "$H" -X POST "$U?action=update_folder_status" -d '{"invoice_id":412,"status":"DEPOSIT","confirm":true}'
 curl -sH "$H" -X POST "$U?action=save_invoice_pdf" -d '{"invoice_id":412,"overwrite":true}'
+curl -sH "$H" -X POST "$U?action=create_invoice" -d '{"request_id":873,"agency_id":12,"issuer":"SE","items":[{"description":"Rossi 4 pax trip in Tanzania from 10 Feb until 16 Feb 2027","quantity":4,"unit_price":2450}]}'   # dry run
+curl -sH "$H" -X POST "$U?action=update_invoice" -d '{"invoice_number":"SE-2026-0012","due_date":"2026-12-01","confirm":true}'
 curl -sH "$H" -X POST "$U?action=cancel_invoice_payment" -d '{"invoice_id":412,"payment_id":901,"reason":"Recorded twice","confirm":true}'
 ```
 

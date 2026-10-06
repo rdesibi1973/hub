@@ -40,47 +40,17 @@ $billToList = $db->query("
 
 // ── Handle POST ───────────────────────────────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $issuer     = $_POST['issuer']      ?? $inv['issuer'];
-    $currency   = $_POST['currency']    ?? $inv['currency'];
-    $billToName = trim($_POST['bill_to_name'] ?? '');
-    $billToAddr = trim($_POST['bill_to_address'] ?? '');
-    $customerId = (int)($_POST['customer_id'] ?? 0) ?: null;
-    $reqId      = (int)($_POST['request_id'] ?? 0) ?: null;
-    $issueDate  = $_POST['issue_date']  ?? $inv['issue_date'];
-    $dueDate    = $_POST['due_date']    ?: null;
-    $terms      = trim($_POST['terms']  ?? $inv['terms']);
-    $notes      = trim($_POST['notes']  ?? '');
-    $tc         = trim($_POST['terms_conditions'] ?? '');
-
-    if (!$billToName) $errors[] = 'Bill To name is required.';
-    if (!$issueDate)  $errors[] = 'Issue date is required.';
-
-    $newItems = [];
-    foreach ($_POST['items'] ?? [] as $item) {
-        $desc  = trim($item['description'] ?? '');
-        $qty   = (float)($item['quantity']   ?? 1);
-        $price = (float)($item['unit_price'] ?? 0);
-        if ($desc) $newItems[] = ['description'=>$desc,'quantity'=>$qty,'unit_price'=>$price,'line_total'=>round($qty*$price,2)];
-    }
-    if (empty($newItems)) $errors[] = 'At least one item is required.';
+    // Same rules as the Agent API (update_invoice); fields not posted keep their value.
+    $post = $_POST;
+    $post['items'] = array_values((array)($_POST['items'] ?? []));
+    $post['customer_id'] = (int)($_POST['customer_id'] ?? 0);
+    $post['request_id']  = (int)($_POST['request_id'] ?? 0);
+    foreach (['bill_to_name', 'bill_to_address', 'due_date', 'notes', 'terms_conditions'] as $k) $post[$k] = $_POST[$k] ?? '';
+    $prep   = inv_prepare($post, $inv);
+    $errors = $prep['errors'];
 
     if (!$errors) {
-        $db->prepare("UPDATE invoices SET
-            customer_id=?, request_id=?, bill_to_name=?, bill_to_address=?, issuer=?, currency=?,
-            issue_date=?, due_date=?, terms=?, notes=?, terms_conditions=?, updated_at=NOW()
-            WHERE id=?")
-           ->execute([$customerId,$reqId,$billToName,$billToAddr?:null,$issuer,$currency,
-                      $issueDate,$dueDate,$terms,$notes?:null,$tc?:null,$id]);
-
-        // Replace items
-        $db->prepare("DELETE FROM invoice_items WHERE invoice_id=?")->execute([$id]);
-        $sort = 0;
-        foreach ($newItems as $item) {
-            $db->prepare("INSERT INTO invoice_items (invoice_id,sort_order,description,quantity,unit_price,line_total) VALUES (?,?,?,?,?,?)")
-               ->execute([$id,$sort++,$item['description'],$item['quantity'],$item['unit_price'],$item['line_total']]);
-        }
-        recalculate_invoice($db, $id);
-        sync_request_value($db, $id);
+        inv_update($db, $id, $prep['fields'], $prep['items']);
 
         flash("Invoice {$inv['invoice_number']} updated.");
         header("Location: invoice_view.php?id=$id"); exit;

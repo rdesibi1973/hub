@@ -361,6 +361,126 @@ function inv_cancel_payment(PDO $db, int $paymentId, int $invId, string $reason)
     return $st->rowCount() > 0;
 }
 
+// ── Create / edit (invoice_add.php, invoice_edit.php, Agent API) ─────────────
+/**
+ * Invoice header + lines from input $in, ready for inv_create() / inv_update().
+ * $cur = the invoice being edited (keys missing from $in keep its values), null for a new one.
+ * Lines: $in['items'] = [{description, quantity?, unit_price}] — required for a new invoice,
+ * optional on edit (absent = unchanged → 'items' null).
+ * Returns ['fields' => [...], 'items' => ?[...], 'errors' => [...]].
+ */
+function inv_prepare(array $in, ?array $cur = null): array {
+    $get = function (string $k, $def) use ($in, $cur) {
+        if (array_key_exists($k, $in)) return $in[$k];
+        return $cur !== null && array_key_exists($k, $cur) ? $cur[$k] : $def;
+    };
+    $str = function (string $k, $def) use ($get) { return trim((string)$get($k, $def)); };
+    $f = [
+        'issuer'           => $str('issuer', INV_ISSUERS[0]),
+        'currency'         => strtoupper($str('currency', 'USD')),
+        'bill_to_name'     => $str('bill_to_name', ''),
+        'bill_to_address'  => $str('bill_to_address', '') ?: null,
+        'customer_id'      => (int)$get('customer_id', 0) ?: null,
+        'request_id'       => (int)$get('request_id', 0) ?: null,
+        'issue_date'       => $str('issue_date', date('Y-m-d')),
+        'due_date'         => $str('due_date', '') ?: null,
+        'terms'            => $str('terms', 'Due on Receipt'),
+        'notes'            => $str('notes', INV_DEFAULT_NOTES) ?: null,
+        'terms_conditions' => $str('terms_conditions', INV_DEFAULT_TC) ?: null,
+        'follow_up'        => !empty($get('follow_up', 0)) ? 1 : 0,
+    ];
+    $note = $f['follow_up'] ? mb_substr($str('follow_up_note', ''), 0, 255) : '';
+    $f['follow_up_note'] = $note !== '' ? $note : null;
+
+    $errors = [];
+    if ($f['bill_to_name'] === '')                       $errors[] = 'Bill To name is required.';
+    if (!in_array($f['issuer'], INV_ISSUERS, true))      $errors[] = 'Invalid issuer (' . implode(' / ', INV_ISSUERS) . ').';
+    if (!in_array($f['currency'], INV_CURRENCIES, true)) $errors[] = 'Invalid currency (' . implode(' / ', INV_CURRENCIES) . ').';
+    foreach (['issue_date', 'due_date'] as $k) {
+        if ($f[$k] !== null && (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $f[$k]) || !strtotime($f[$k]))) $errors[] = $k . ' must be YYYY-MM-DD.';
+    }
+
+    $items = null;
+    if ($cur === null || array_key_exists('items', $in)) {
+        $items = [];
+        foreach ((array)($in['items'] ?? []) as $it) {
+            $desc = trim((string)($it['description'] ?? ''));
+            if ($desc === '') continue;
+            $qty = (float)($it['quantity'] ?? 1);
+            if ($qty == (int)$qty) $qty = (int)$qty;
+            $price = (float)($it['unit_price'] ?? 0);
+            $items[] = ['description' => $desc, 'quantity' => $qty, 'unit_price' => $price, 'line_total' => round($qty * $price, 2)];
+        }
+        if (!$items) $errors[] = 'At least one item is required.';
+    }
+    return ['fields' => $f, 'items' => $items, 'errors' => $errors];
+}
+
+/** Sum of prepared lines. */
+function inv_items_total(array $items): float {
+    $s = 0.0;
+    foreach ($items as $it) $s += (float)$it['line_total'];
+    return round($s, 2);
+}
+
+function inv_write_items(PDO $db, int $invId, array $items): void {
+    $db->prepare("DELETE FROM invoice_items WHERE invoice_id=?")->execute([$invId]);
+    $st = $db->prepare("INSERT INTO invoice_items (invoice_id,sort_order,description,quantity,unit_price,line_total) VALUES (?,?,?,?,?,?)");
+    foreach (array_values($items) as $i => $it) {
+        $st->execute([$invId, $i, $it['description'], $it['quantity'], $it['unit_price'], $it['line_total']]);
+    }
+}
+
+/** New invoice (status New) from inv_prepare() output; numbered SE-/SH-YYYY-NNNN. Returns [id, number]. */
+function inv_create(PDO $db, array $f, array $items, ?int $createdBy): array {
+    $db->beginTransaction();
+    try {
+        $num = generate_invoice_number($db, $f['issuer']);
+        $db->prepare("INSERT INTO invoices
+            (invoice_number, request_id, customer_id, bill_to_name, bill_to_address,
+             issuer, currency, issue_date, due_date, terms, notes, terms_conditions,
+             status, follow_up, follow_up_note, created_by)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'New',?,?,?)")
+           ->execute([$num, $f['request_id'], $f['customer_id'], $f['bill_to_name'], $f['bill_to_address'],
+                      $f['issuer'], $f['currency'], $f['issue_date'], $f['due_date'], $f['terms'],
+                      $f['notes'], $f['terms_conditions'], $f['follow_up'], $f['follow_up_note'], $createdBy]);
+        $id = (int)$db->lastInsertId();
+        inv_write_items($db, $id, $items);
+        recalculate_invoice($db, $id);
+        sync_request_value($db, $id);
+        $db->commit();
+    } catch (\Throwable $e) {
+        if ($db->inTransaction()) $db->rollBack();
+        throw $e;
+    }
+    return ['invoice_id' => $id, 'invoice_number' => $num];
+}
+
+/** Save an edited invoice; $items null = lines unchanged. Recalculates the invoice and the request value(s). */
+function inv_update(PDO $db, int $id, array $f, ?array $items): void {
+    $s = $db->prepare("SELECT request_id FROM invoices WHERE id=?");
+    $s->execute([$id]);
+    $oldReq = (int)$s->fetchColumn();
+    $db->beginTransaction();
+    try {
+        $db->prepare("UPDATE invoices SET
+            customer_id=?, request_id=?, bill_to_name=?, bill_to_address=?, issuer=?, currency=?,
+            issue_date=?, due_date=?, terms=?, notes=?, terms_conditions=?, follow_up=?, follow_up_note=?, updated_at=NOW()
+            WHERE id=?")
+           ->execute([$f['customer_id'], $f['request_id'], $f['bill_to_name'], $f['bill_to_address'], $f['issuer'], $f['currency'],
+                      $f['issue_date'], $f['due_date'], $f['terms'], $f['notes'], $f['terms_conditions'],
+                      $f['follow_up'], $f['follow_up_note'], $id]);
+        if ($items !== null) inv_write_items($db, $id, $items);
+        recalculate_invoice($db, $id);
+        sync_request_value($db, $id);
+        if ($oldReq && $oldReq !== (int)$f['request_id']) sync_request_value($db, 0, $oldReq);   // unlinked request
+        $db->commit();
+    } catch (\Throwable $e) {
+        if ($db->inTransaction()) $db->rollBack();
+        throw $e;
+    }
+}
+
 // ── Dropbox folder status (…_DEPOSIT / _BALANCE / _PAID …) ───────────────────
 function folder_current_tag(string $name): string {
     // If the folder ends with _CK, look at the status tag that precedes it

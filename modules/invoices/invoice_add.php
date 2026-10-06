@@ -144,36 +144,12 @@ $billToList = $db->query("
 
 // ── Handle POST ───────────────────────────────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $issuer     = $_POST['issuer']      ?? INV_ISSUERS[0];
-    $currency   = $_POST['currency']    ?? 'USD';
-    $billToName = trim($_POST['bill_to_name'] ?? '');
-    $billToAddr = trim($_POST['bill_to_address'] ?? '');
-    $customerId = (int)($_POST['customer_id'] ?? 0) ?: null;
-    $reqId      = (int)($_POST['request_id'] ?? 0) ?: null;
-    $issueDate  = $_POST['issue_date']  ?? date('Y-m-d');
-    $dueDate    = $_POST['due_date']    ?: null;
-    $terms      = trim($_POST['terms']  ?? 'Due on Receipt');
-    $notes      = trim($_POST['notes']  ?? INV_DEFAULT_NOTES);
-    $tc         = trim($_POST['terms_conditions'] ?? INV_DEFAULT_TC);
-    $followUp   = !empty($_POST['follow_up']) ? 1 : 0;
-    $followNote = trim($_POST['follow_up_note'] ?? '');
-    if (strlen($followNote) > 255) $followNote = substr($followNote, 0, 255);
-    if (!$followUp) $followNote = '';
-
-    if (!$billToName)                   $errors[] = 'Bill To name is required.';
-    if (!in_array($issuer, INV_ISSUERS))$errors[] = 'Invalid issuer.';
-    if (!in_array($currency, INV_CURRENCIES)) $errors[] = 'Invalid currency.';
-    if (!$issueDate)                    $errors[] = 'Issue date is required.';
-
-    $items = [];
-    foreach ($_POST['items'] ?? [] as $item) {
-        $desc  = trim($item['description'] ?? '');
-        $qty   = (float)($item['quantity']   ?? 1);
-        if ($qty == (int)$qty) $qty = (int)$qty;
-        $price = (float)($item['unit_price'] ?? 0);
-        if ($desc) $items[] = ['description'=>$desc,'quantity'=>$qty,'unit_price'=>$price,'line_total'=>round($qty*$price,2)];
-    }
-    if (empty($items)) $errors[] = 'At least one item is required.';
+    // Validation and lines: same rules as the Agent API (create_invoice).
+    $prep     = inv_prepare(array_merge($_POST, ['items' => array_values((array)($_POST['items'] ?? []))]));
+    $errors   = $prep['errors'];
+    $items    = $prep['items'];
+    $reqId    = $prep['fields']['request_id'];
+    $currency = $prep['fields']['currency'];
 
     // ── Excel checks (request invoices): pax = TOT PAX, total = Tot price ──
     $calc = null; $ignored = [];
@@ -194,27 +170,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if (!$errors) {
-        $invNum = generate_invoice_number($db, $issuer);
         $uid    = current_user()['id'];
-
-        $db->prepare("INSERT INTO invoices
-            (invoice_number, request_id, customer_id, bill_to_name, bill_to_address,
-             issuer, currency, issue_date, due_date, terms, notes, terms_conditions,
-             status, follow_up, follow_up_note, created_by)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'New',?,?,?)")
-           ->execute([$invNum,$reqId,$customerId,$billToName,$billToAddr?:null,
-                      $issuer,$currency,$issueDate,$dueDate,$terms,
-                      $notes?:null,$tc?:null,$followUp,$followNote?:null,$uid]);
-
-        $invId = (int)$db->lastInsertId();
-
-        $sort = 0;
-        foreach ($items as $item) {
-            $db->prepare("INSERT INTO invoice_items (invoice_id,sort_order,description,quantity,unit_price,line_total) VALUES (?,?,?,?,?,?)")
-               ->execute([$invId,$sort++,$item['description'],$item['quantity'],$item['unit_price'],$item['line_total']]);
-        }
-        recalculate_invoice($db, $invId);
-        sync_request_value($db, $invId);
+        $res    = inv_create($db, $prep['fields'], $items, $uid);
+        $invId  = $res['invoice_id'];
+        $invNum = $res['invoice_number'];
         if ($calc !== null) ic_log($db, $invId, $reqId, $calc, $ignored, $fromExcel, $uid);
 
         flash("Invoice {$invNum} created.");
