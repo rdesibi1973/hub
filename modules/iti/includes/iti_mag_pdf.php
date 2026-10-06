@@ -30,6 +30,32 @@ function iti_mp_img(string $url, int $maxW, array &$tmp, string $style): string 
     return $f ? '<img src="' . h($f) . '" style="' . $style . '">' : '';
 }
 
+/**
+ * <img> of a photo cut to a wide band ($ratio = width / height, centred), for the day photos:
+ * a full-height photo cannot break across pages, so it pushed each day onto a new page.
+ * Falls back to the whole photo when GD cannot crop.
+ */
+function iti_mp_img_band(string $url, int $maxW, float $ratio, array &$tmp, string $style): string {
+    $f = iti_mw_img($url, $maxW, $tmp);
+    if (!$f) return '';
+    $info = @getimagesize($f);
+    $img = ($info && function_exists('imagecreatetruecolor')) ? iti_photo_load($f, $info[2]) : null;
+    if (!$img) return '<img src="' . h($f) . '" style="' . $style . '">';
+    $w = imagesx($img); $h = imagesy($img);
+    $bh = (int)round($w / $ratio);
+    if ($bh < $h) {
+        $band = imagecreatetruecolor($w, $bh);
+        imagecopy($band, $img, 0, 0, 0, (int)round(($h - $bh) * 0.45), $w, $bh);   // a little above centre: horizon / animals
+        imagedestroy($img);
+        $img = $band;
+    }
+    $out = tempnam(sys_get_temp_dir(), 'mpband') . '.jpg';
+    imagejpeg($img, $out, 82);
+    imagedestroy($img);
+    $tmp[] = $out;
+    return '<img src="' . h($out) . '" style="' . $style . '">';
+}
+
 /** Full HTML for Dompdf. $tmp collects temp files to delete after rendering. */
 function iti_mag_pdf_html(array $D, array &$tmp): string {
     $T = $D['T'];
@@ -135,13 +161,22 @@ td{vertical-align:top}
 <h2><?= h($M['route']) ?></h2>
 <?= $mapImg ?>
 <table class="legend" style="margin-top:6px">
-<?php foreach ($map['legend'] as $l):
-        $ap = $l['role'] !== 'stop';
-        $sub = $ap ? ($l['role'] === 'start' ? $M['start'] : $M['end']) . ($l['code'] ? ' · ' . $l['code'] : '') : '';
-        if ($l['dist'] !== null) $sub .= ($sub !== '' ? ' · ' : '') . '≈ ' . number_format($l['dist'], 0, ',', '.') . ' ' . $M['km']; ?>
-<tr><td class="num"<?= $ap ? ' style="color:#231F1C"' : '' ?>><?= $ap ? '✈' : (int)$l['num'] ?></td>
-<td><?= h($l['name']) ?><?= $sub !== '' ? '<br><span class="small">' . h($sub) . '</span>' : '' ?></td></tr>
-<?php endforeach; ?>
+<?php // Two columns (top to bottom, then the right column), so a long legend stays on the map's page.
+    $leg = array_values($map['legend']);
+    $half = (int)ceil(count($leg) / 2);
+    for ($r = 0; $r < $half; $r++): ?>
+<tr>
+<?php   foreach ([$r, $r + $half] as $k):
+            if (!isset($leg[$k])) { echo '<td class="num"></td><td style="width:46%"></td>'; continue; }
+            $l = $leg[$k];
+            $ap = $l['role'] !== 'stop';
+            $sub = $ap ? ($l['role'] === 'start' ? $M['start'] : $M['end']) . ($l['code'] ? ' · ' . $l['code'] : '') : '';
+            if ($l['dist'] !== null) $sub .= ($sub !== '' ? ' · ' : '') . '≈ ' . number_format($l['dist'], 0, ',', '.') . ' ' . $M['km']; ?>
+<td class="num"<?= $ap ? ' style="color:#231F1C"' : '' ?>><?= $ap ? '✈' : (int)$l['num'] ?></td>
+<td style="width:46%"><?= h($l['name']) ?><?= $sub !== '' ? '<br><span class="small">' . h($sub) . '</span>' : '' ?></td>
+<?php   endforeach; ?>
+</tr>
+<?php endfor; ?>
 </table>
 <?php endif; ?>
 <?php if ($stays): ?>
@@ -165,13 +200,13 @@ td{vertical-align:top}
 <?php
     $seenLodge = []; $seenPhoto = []; $prevKey = '';
     foreach (iti_mag_compact_days($D['days'], $T, $M) as $i => $d):   // beach days in one hotel → one block
-        if ($i > 0) echo '<div class="dayrule"></div>';
-        if ($d['dest_photo'] !== '' && empty($seenPhoto[$d['dest_photo']])) {
-            $seenPhoto[$d['dest_photo']] = true;
-            echo iti_mp_img($d['dest_photo'], 1400, $tmp, 'width:100%;margin:0 0 8px');
-        } ?>
+        if ($i > 0) echo '<div class="dayrule"></div>'; ?>
 <div class="day">
 <div class="nobrk">
+<?php   if ($d['dest_photo'] !== '' && empty($seenPhoto[$d['dest_photo']])) {   // the photo stays with its day's heading
+            $seenPhoto[$d['dest_photo']] = true;
+            echo iti_mp_img_band($d['dest_photo'], 1400, 2.4, $tmp, 'width:100%;margin:0 0 8px');   // wide band: days share pages
+        } ?>
 <p class="kick"><?= h(iti_mag_day_kicker($d, $T, $M)) ?></p>
 <div><span class="dayno"><?= h(iti_mag_day_no($d)) ?></span>&nbsp;&nbsp;<span class="daytitle"><?= h($d['title']) ?></span></div>
 <div class="chips">

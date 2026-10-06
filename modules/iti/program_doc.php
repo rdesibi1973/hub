@@ -15,6 +15,9 @@ if (!$program) { iti_flash_set('error', 'Program not found.'); iti_redirect('pro
 
 $lang = $_GET['lang'] ?? $program['display_language'] ?? 'it';
 if (!in_array($lang, ITI_LANGUAGES, true)) $lang = 'it';
+// A personal programme is written in one language: always show that one, no other languages.
+$personal = ($program['program_type'] ?? '') === 'personal';
+if ($personal && in_array($program['display_language'] ?? '', ITI_LANGUAGES, true)) $lang = $program['display_language'];
 
 // Translate the missing texts of this language (Claude), then reload.
 $msg = '';
@@ -44,6 +47,9 @@ if (!empty($program['is_published']) && !empty($program['public_token'])) {
 }
 $extra .= '<a href="export_mag_word.php?id=' . $id . '&lang=' . h($lang) . '">📄 Word</a>';   // editable, for agencies (Hub only)
 $extra .= '<a href="export_mag_word.php?id=' . $id . '&lang=' . h($lang) . '&format=pdf">📕 PDF</a>';   // magazine, rendered on the server
-if (($program['program_type'] ?? '') === 'personal') $extra .= '<a href="export_mag_word.php?id=' . $id . '&lang=' . h($lang) . '&format=guide" title="Day by day + transfers and accommodation, no photos / intro / prices">🧭 Guide PDF</a>';
+if ($personal) $extra .= '<a href="export_mag_word.php?id=' . $id . '&lang=' . h($lang) . '&format=guide" title="Day by day + transfers and accommodation, no photos / intro / prices">🧭 Guide PDF</a>';
 require_once __DIR__ . '/includes/iti_mag.php';
-iti_mag_page($D, iti_doc_lang_bar($lang, ['id' => $id], $extra));
+// Published personal programme: the printed page carries the link to the digital itinerary (as the PDF does).
+$pub = ($personal && !empty($program['is_published']) && !empty($program['public_token']))
+     ? ITI_MODULE_URL . '/itinerary.php?token=' . $program['public_token'] . '&lang=' . $lang : '';
+iti_mag_page($D, iti_doc_lang_bar($lang, ['id' => $id], $extra, $personal ? [$lang] : null), $pub);

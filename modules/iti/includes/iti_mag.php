@@ -366,11 +366,11 @@ function iti_mag_css(): string {
   .mag-cover{height:297mm;min-height:0;break-after:page}
   .mag-cover-in{padding:0 16mm 22mm}.mag-cover-logo{top:14mm;left:16mm}
   .mag-sec{padding:10mm 0 2mm}
-  #mag-overview,#mag-route,#mag-days,#mag-prices{break-before:page;padding-top:0}
+  /* One continuous document: only the cover has its own page, the sections and days follow on. */
   .leaflet-control-zoom{display:none}
   .mag-day{padding:9mm 0 2mm;break-inside:auto}
-  .mag-hero{break-after:avoid}
-  .mag-hero,.mag-lodge,.mag-stay,.mag-again,.mag-aside,tr,.mag-lists li{break-inside:avoid}
+  .mag-hero{break-after:avoid;aspect-ratio:3/1}   /* lower band: a tall photo + heading left half-empty pages */
+  .mag-hero,.mag-lodge-ph,.mag-stay,.mag-again,tr,.mag-lists li{break-inside:avoid}
   .mag-dayhead,.mag-sec h2,.mag-sec h3{break-after:avoid}
   .mag-stays{break-before:avoid}
   .mag-map{height:110mm}

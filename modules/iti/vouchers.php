@@ -23,6 +23,19 @@ require_once __DIR__ . '/includes/voucher_lib.php';
 $db  = db();
 $_cu = current_user();
 
+// ── From an ITI program (editor button): no upload, the vouchers straight from the Hub data ──
+if (!empty($_GET['program_id'])) {
+    require_once __DIR__ . '/includes/voucher_program.php';
+    $pid = (int)$_GET['program_id'];
+    try {
+        voucher_send_file(voucher_render_file(voucher_model_from_program($db, $pid), (string)($_GET['format'] ?? 'pdf')));
+    } catch (Throwable $e) {
+        iti_flash_set('error', 'Vouchers not generated: ' . $e->getMessage());
+        iti_redirect('program_edit.php?id=' . $pid . '&tab=info');
+    }
+    exit;
+}
+
 function voucher_tmp_base(): string
 {
     $base = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'hub_vouchers';
@@ -144,34 +157,11 @@ if ($step === 'generate' && !$error) {
             voucher_save_directory($db, $model);
         }
 
-        $slug  = preg_replace('/[^A-Za-z0-9._-]+/', '_', $model['ref']);
-        $slug  = trim($slug, '_') ?: 'vouchers';
-        $fname = $slug . '-vouchers';
-
-        $vendor = __DIR__ . '/../../vendor/autoload.php';
-        if (!is_file($vendor)) { http_response_code(500); exit('vendor/ not installed on server.'); }
-        require_once $vendor;
-
-        if ($format === 'word') {
-            $phpWord = voucher_render_word($model);
-            header('Content-Type: application/vnd.openxmlformats-officedocument.wordprocessingml.document');
-            header('Content-Disposition: attachment; filename="' . $fname . '.docx"');
-            header('Cache-Control: max-age=0');
-            \PhpOffice\PhpWord\IOFactory::createWriter($phpWord, 'Word2007')->save('php://output');
-            exit;
+        try {
+            voucher_send_file(voucher_render_file($model, $format));
+        } catch (RuntimeException $e) {
+            http_response_code(500); exit($e->getMessage());
         }
-
-        $options = new \Dompdf\Options();
-        $options->set('isHtml5ParserEnabled', true);
-        $options->set('isRemoteEnabled', false);
-        $options->set('defaultFont', 'DejaVu Sans');
-        $dompdf = new \Dompdf\Dompdf($options);
-        $dompdf->loadHtml(voucher_render_html($model), 'UTF-8');
-        $dompdf->setPaper('A4', 'portrait');
-        $dompdf->render();
-        header('Content-Type: application/pdf');
-        header('Content-Disposition: attachment; filename="' . $fname . '.pdf"');
-        echo $dompdf->output();
         exit;
     }
 }

@@ -379,9 +379,9 @@ function iti_doc_paras(string $txt): string {
 }
 
 /** Language switch links (keeps the other query parameters). */
-function iti_doc_lang_bar(string $lang, array $keep, string $extra = ''): string {
+function iti_doc_lang_bar(string $lang, array $keep, string $extra = '', ?array $langs = null): string {
     $out = '<div class="etn-bar">';
-    foreach (ITI_LANGUAGES as $l) {
+    foreach ($langs ?? ITI_LANGUAGES as $l) {   // $langs: only these buttons (a personal programme shows just its own language)
         $q = http_build_query(array_merge($keep, ['lang' => $l]));
         $out .= '<a href="?' . h($q) . '"' . ($l === $lang ? ' class="on"' : '') . '>' . strtoupper($l) . '</a>';
     }

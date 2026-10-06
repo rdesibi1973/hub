@@ -732,6 +732,7 @@ include __DIR__ . '/../../includes/layout_header.php';
     <a href="export_mag_word.php?id=<?= $id ?>&format=pdf" class="btn btn-outline btn-sm">📕 PDF</a>
     <?php if (($program['program_type'] ?? '') === 'personal'): ?>
     <a href="export_mag_word.php?id=<?= $id ?>&format=guide" class="btn btn-outline btn-sm" title="PDF for the safari guide: day by day + transfers and accommodation, no photos / intro / prices">🧭 Guide PDF</a>
+    <a href="vouchers.php?program_id=<?= $id ?>" class="btn btn-outline btn-sm" title="Accommodation, flight and transfer vouchers of this program (PDF, English) — needs the start date">🎟 Vouchers</a>
     <?php endif; ?>
     <?php if ($program['status'] !== 'cancelled'): ?>
     <form method="POST" action="program_edit.php?id=<?= $id ?>" style="display:inline;"

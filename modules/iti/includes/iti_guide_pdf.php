@@ -5,6 +5,8 @@
  * transfers / flights and the accommodation (check-in / check-out), then the day by day.
  * Same data as the client documents (iti_doc_data()).
  *
+ * Black and white only (printed on a B/W printer): black text, grey rules, no colours.
+ *
  * Keep PHP-7 style (no match / arrow functions / str_contains).
  */
 require_once __DIR__ . '/iti_mag_pdf.php';   // iti_mp_paras() + iti_mag.php helpers
@@ -54,30 +56,30 @@ function iti_guide_pdf_html(array $D): string {
 <html lang="<?= h($D['lang']) ?>"><head><meta charset="utf-8"><title><?= h($D['title']) ?></title>
 <style>
 @page{size:A4;margin:14mm 14mm 16mm}
-body{font-family:"DejaVu Sans",sans-serif;font-size:9.5pt;line-height:1.4;color:#231F1C;margin:0}
-#foot{position:fixed;bottom:-10mm;left:0;right:0;text-align:center;font-size:7.5pt;color:#6F675F}
-.kick{font-size:7pt;font-weight:bold;color:#B3241C;text-transform:uppercase;letter-spacing:1.5px;margin:0}
+body{font-family:"DejaVu Sans",sans-serif;font-size:9.5pt;line-height:1.4;color:#000;margin:0}
+#foot{position:fixed;bottom:-10mm;left:0;right:0;text-align:center;font-size:7.5pt;color:#444}
+.kick{font-size:7pt;font-weight:bold;color:#000;text-transform:uppercase;letter-spacing:1.5px;margin:0}
 h1{font-size:17pt;line-height:1.15;margin:3px 0 4px}
-h2{font-size:11.5pt;margin:16px 0 6px;color:#B3241C}
+h2{font-size:11.5pt;margin:16px 0 6px;color:#000}
 p{margin:0 0 6px}
 ul{margin:0 0 6px 14px;padding:0}
 li{margin:0 0 2px}
 .facts{font-size:9pt;margin:0 0 4px}
-.facts b{color:#6F675F;font-weight:normal}
+.facts b{color:#444;font-weight:normal}
 table{border-collapse:collapse;width:100%}
 td{vertical-align:top}
-.grid td{padding:4px 6px;border-bottom:1px solid #E6DDD0}
-.grid tr.hd td{font-size:7pt;font-weight:bold;color:#6F675F;text-transform:uppercase;border-bottom:2px solid #231F1C}
-.n{width:26px;font-weight:bold;color:#B3241C}
+.grid td{padding:4px 6px;border-bottom:1px solid #999}
+.grid tr.hd td{font-size:7pt;font-weight:bold;color:#444;text-transform:uppercase;border-bottom:2px solid #000}
+.n{width:26px;font-weight:bold;color:#000}
 .nw{white-space:nowrap}
 .brk{page-break-before:always}
-.day{border-top:1px solid #E6DDD0;padding:8px 0 4px}
+.day{border-top:1px solid #999;padding:8px 0 4px}
 .dhead{font-size:11pt;font-weight:bold;margin:0 0 3px}
-.dhead span{color:#B3241C}
+.dhead span{color:#000}
 .meta{font-size:8.5pt;margin:0 0 5px}
 .meta td{padding:1px 8px 1px 0}
-.lbl{width:90px;font-size:7pt;font-weight:bold;color:#6F675F;text-transform:uppercase}
-.small{font-size:8pt;color:#6F675F}
+.lbl{width:90px;font-size:7pt;font-weight:bold;color:#444;text-transform:uppercase}
+.small{font-size:8pt;color:#444}
 </style></head><body>
 <div id="foot"><?= h($foot) ?></div>
 

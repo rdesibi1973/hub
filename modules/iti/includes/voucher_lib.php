@@ -960,6 +960,12 @@ function voucher_apply_directory(PDO $db, array &$model): void
 //  Rendering — shared bits
 // ─────────────────────────────────────────────────────────────────────────────
 
+/** "Adults 2" — or the model's own line ("Adults 2, Teenagers 1, Children 1") for a program. */
+function voucher_pax_line(array $model): string
+{
+    return !empty($model['pax_line']) ? (string)$model['pax_line'] : 'Adults ' . (int)$model['adults'];
+}
+
 function voucher_travellers_line(array $model): string
 {
     $parts = [];
@@ -1032,7 +1038,7 @@ function voucher_render_html(array $model): string
     $h = fn($s) => htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8');
     $c = $model['consultant'];
     $travellers = voucher_travellers_line($model);
-    $adults = (int)$model['adults'];
+    $paxLine = voucher_pax_line($model);
     $ref = $model['ref'];
 
     // Branded header (logo + company contacts), embedded once as base64.
@@ -1072,7 +1078,7 @@ function voucher_render_html(array $model): string
         $body =
             $tel . $addr . $gps
           . '<div class="v-row">Travellers: ' . $h($travellers) . '</div>'
-          . '<div class="v-row v-sub">(Adults ' . $adults . ')&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Your Ref no.:</div>'
+          . '<div class="v-row v-sub">(' . $h($paxLine) . ')&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Your Ref no.:</div>'
           . '<div class="v-row">Check In: ' . $h(voucher_fmt_date($a['checkin']))
           . '&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Check Out: ' . $h(voucher_fmt_date($a['checkout']))
           . ' (' . $nights . ')</div>'
@@ -1090,7 +1096,7 @@ function voucher_render_html(array $model): string
         $arr = trim(($f['arr_airport'] ?? '') . ($f['arr_time'] !== '' ? ', ' . $f['arr_time'] : ''));
         $body =
             '<div class="v-row">Travellers: ' . $h($travellers) . '</div>'
-          . '<div class="v-row v-sub">(Adults ' . $adults . ')&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Your Ref no.:</div>'
+          . '<div class="v-row v-sub">(' . $h($paxLine) . ')&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Your Ref no.:</div>'
           . '<div class="v-label">FLIGHT DETAILS:</div>'
           . '<div class="v-row">Date: ' . $h(voucher_fmt_date($f['date'])) . '</div>'
           . ($f['airline'] !== '' ? '<div class="v-row">Airline: ' . $h($f['airline']) . '</div>' : '')
@@ -1111,7 +1117,7 @@ function voucher_render_html(array $model): string
         }
         $body =
             '<div class="v-row">Travellers: ' . $h($travellers) . '</div>'
-          . '<div class="v-row v-sub">(Adults ' . $adults . ')&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Your Ref no.:</div>'
+          . '<div class="v-row v-sub">(' . $h($paxLine) . ')&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Your Ref no.:</div>'
           . '<div class="v-label">INCLUDED SERVICES:</div>'
           . '<div class="v-row">Pick Up: ' . $h(voucher_fmt_date($t['date'])) . ', ' . $h($t['from']) . '</div>'
           . '<div class="v-row">Drop Off: ' . $h(voucher_fmt_date($t['date'])) . ', ' . $h($t['to']) . '</div>'
@@ -1166,7 +1172,7 @@ function voucher_render_word(array $model)
 
     $c = $model['consultant'];
     $travellers = voucher_travellers_line($model);
-    $adults = (int)$model['adults'];
+    $paxLine = voucher_pax_line($model);
     $ref = $model['ref'];
     $logo = voucher_logo_path();
     $contacts = voucher_company_contacts();
@@ -1200,7 +1206,7 @@ function voucher_render_word(array $model)
         if ($a['provider_address'] !== '') $s->addText($a['provider_address'], 'vBase');
         if ($a['gps'] !== '') $s->addText('GPS: ' . $a['gps'], 'vBase');
         $s->addText('Travellers: ' . $travellers, 'vBase');
-        $s->addText('(Adults ' . $adults . ')     Your Ref no.:', 'vSub', ['spaceAfter' => 60]);
+        $s->addText('(' . $paxLine . ')     Your Ref no.:', 'vSub', ['spaceAfter' => 60]);
         $nights = $a['nights'] === 1 ? '1 Night' : $a['nights'] . ' Nights';
         $s->addText('Check In: ' . voucher_fmt_date($a['checkin'])
                   . '     Check Out: ' . voucher_fmt_date($a['checkout']) . ' (' . $nights . ')', 'vBase', ['spaceAfter' => 120]);
@@ -1216,7 +1222,7 @@ function voucher_render_word(array $model)
         $s = $newSection();
         $addHead($s, 'FLIGHT VOUCHER', voucher_flight_headline($f));
         $s->addText('Travellers: ' . $travellers, 'vBase');
-        $s->addText('(Adults ' . $adults . ')     Your Ref no.:', 'vSub', ['spaceAfter' => 60]);
+        $s->addText('(' . $paxLine . ')     Your Ref no.:', 'vSub', ['spaceAfter' => 60]);
         $s->addText('FLIGHT DETAILS:', 'vLabel');
         $s->addText('Date: ' . voucher_fmt_date($f['date']), 'vBase');
         if ($f['airline'] !== '') $s->addText('Airline: ' . $f['airline'], 'vBase');
@@ -1231,7 +1237,7 @@ function voucher_render_word(array $model)
         $s = $newSection();
         $addHead($s, 'TRANSPORT VOUCHER - TRANSFER', voucher_transfer_headline($t));
         $s->addText('Travellers: ' . $travellers, 'vBase');
-        $s->addText('(Adults ' . $adults . ')     Your Ref no.:', 'vSub', ['spaceAfter' => 60]);
+        $s->addText('(' . $paxLine . ')     Your Ref no.:', 'vSub', ['spaceAfter' => 60]);
         $s->addText('INCLUDED SERVICES:', 'vLabel');
         $s->addText('Pick Up: ' . voucher_fmt_date($t['date']) . ', ' . $t['from'], 'vBase');
         $s->addText('Drop Off: ' . voucher_fmt_date($t['date']) . ', ' . $t['to'], 'vBase');
@@ -1250,4 +1256,52 @@ function voucher_render_word(array $model)
     }
 
     return $phpWord;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  File output (Hub page and Agent API)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The vouchers as a file: ['name', 'mime', 'content', 'format' (pdf|docx)].
+ * Needs vendor/autoload.php (Dompdf / PhpWord); RuntimeException when missing.
+ */
+function voucher_render_file(array $model, string $format): array
+{
+    $format = in_array(strtolower($format), ['word', 'docx'], true) ? 'docx' : 'pdf';
+    $vendor = __DIR__ . '/../../../vendor/autoload.php';
+    if (!is_file($vendor)) throw new RuntimeException('vendor/ not installed on server.');
+    require_once $vendor;
+    $slug = trim(preg_replace('/[^A-Za-z0-9._-]+/', '_', (string)$model['ref']), '_') ?: 'vouchers';
+    $name = $slug . '-vouchers.' . $format;
+    if ($format === 'docx') {
+        $out = tempnam(sys_get_temp_dir(), 'vch');
+        try {
+            \PhpOffice\PhpWord\IOFactory::createWriter(voucher_render_word($model), 'Word2007')->save($out);
+            $content = (string)file_get_contents($out);
+        } finally {
+            @unlink($out);
+        }
+        return ['name' => $name, 'mime' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'content' => $content, 'format' => 'docx'];
+    }
+    $options = new \Dompdf\Options();
+    $options->set('isHtml5ParserEnabled', true);
+    $options->set('isRemoteEnabled', false);
+    $options->set('defaultFont', 'DejaVu Sans');
+    $dompdf = new \Dompdf\Dompdf($options);
+    $dompdf->loadHtml(voucher_render_html($model), 'UTF-8');
+    $dompdf->setPaper('A4', 'portrait');
+    $dompdf->render();
+    return ['name' => $name, 'mime' => 'application/pdf', 'content' => (string)$dompdf->output(), 'format' => 'pdf'];
+}
+
+/** Send a file from voucher_render_file() as a download. */
+function voucher_send_file(array $f): void
+{
+    while (ob_get_level()) ob_end_clean();
+    header('Content-Type: ' . $f['mime']);
+    header('Content-Disposition: attachment; filename="' . $f['name'] . '"');
+    header('Content-Length: ' . strlen($f['content']));
+    header('Cache-Control: max-age=0');
+    echo $f['content'];
 }
