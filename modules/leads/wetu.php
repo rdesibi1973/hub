@@ -880,7 +880,7 @@ include __DIR__ . '/includes/header.php';
 
       <!-- Sample dropdown -->
       <div class="form-group">
-        <label class="form-label">Base Sample Programme <span style="color:#C0211B">*</span></label>
+        <label class="form-label">Base Sample Program <span style="color:#C0211B">*</span></label>
 
         <!-- Main dropdown (populated by JS) -->
         <select class="form-control" id="sample_id" name="sample_id"

@@ -173,13 +173,13 @@ function iti_final_plan(PDO $db, array $calc, int $sampleId): array {
             }
         }
         if ($d['flight_cost'] !== null && $d['flight_cost'] > 0 && !($d['route'] && $d['route']['flight_route_id']) && ($d['sample_index'] === null)) {
-            $days[$i]['flags'][] = 'The Calc has a flight cost this day — check the flight in the programme.';
+            $days[$i]['flags'][] = 'The Calc has a flight cost this day — check the flight in the program.';
         }
     }
     foreach ($unmapped['route'] as $t) $blocking[] = 'Route "' . $t . '" (a day not in the sample) has no route alias.';
 
     $flags = array();
-    if (!empty($calc['guests_tba'])) $flags[] = 'Guests not known yet (TBA) — the programme will say "to be defined".';
+    if (!empty($calc['guests_tba'])) $flags[] = 'Guests not known yet (TBA) — the program will say "to be defined".';
     if ($sampleId && count($sampleDays) !== count($days)) {
         $flags[] = 'The sample has ' . count($sampleDays) . ' days, the Calc ' . count($days) . ' — days are added / removed to match the Calc.';
     }
@@ -196,7 +196,7 @@ function iti_final_generate(PDO $db, int $requestId, array $calc, int $sampleId,
     iti_ensure_final_schema();
     if (!in_array($lang, ITI_LANGUAGES, true)) $lang = 'it';
     $plan = iti_final_plan($db, $calc, $sampleId);
-    if (!$sampleId) throw new RuntimeException('Choose the sample programme first.');
+    if (!$sampleId) throw new RuntimeException('Choose the sample program first.');
     if ($plan['blocking']) throw new RuntimeException('Map these Calc texts first: ' . implode(' ', $plan['blocking']));
     $sample = iti_get_program($sampleId);
     if (!$sample || $sample['program_type'] !== 'sample') throw new RuntimeException('Sample #' . $sampleId . ' not found.');

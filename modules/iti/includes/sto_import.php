@@ -309,7 +309,7 @@ function sto_import(PDO $db, array $prog, string $sourceRef, string $lang, bool 
         $st = $db->prepare('SELECT id FROM iti_programs WHERE source_ref = ? AND program_type = "sample" LIMIT 1');
         $st->execute([$sourceRef]);
         $pid = (int)($st->fetchColumn() ?: 0);
-        if ($pid && !$replace) throw new RuntimeException('Already imported as programme #' . $pid . ' (tick "replace" to overwrite).');
+        if ($pid && !$replace) throw new RuntimeException('Already imported as program #' . $pid . ' (tick "replace" to overwrite).');
 
         $title = preg_replace('/\s*STO\s*\d{4}.*$/i', '', $prog['title']);   // "DUMA SHORT IN ITALIANO STO 2026-27" → "DUMA SHORT IN ITALIANO"
         $title = trim($title) !== '' ? trim($title) : $prog['title'];

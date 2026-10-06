@@ -191,10 +191,10 @@ include __DIR__ . '/../../includes/layout_header.php';
     </div>
   </div>
 
-  <div class="form-section-title">Photos <span style="font-weight:400;font-size:.8rem;color:var(--grey-mid)">for the client programme — lodge card and stays</span></div>
+  <div class="form-section-title">Photos <span style="font-weight:400;font-size:.8rem;color:var(--grey-mid)">for the client program — lodge card and stays</span></div>
   <?= iti_photo_editor(iti_photos_decode($row['photos'] ?? null), 12, 'The first photo is the main one: rooms, main area, view.') ?>
 
-  <div class="form-section-title">Supplier contacts <span style="font-weight:400;font-size:.8rem;color:var(--grey-mid)">for the final programme's supplier list</span></div>
+  <div class="form-section-title">Supplier contacts <span style="font-weight:400;font-size:.8rem;color:var(--grey-mid)">for the final program's supplier list</span></div>
   <div class="form-grid">
     <div class="form-group">
       <label>Phone</label>

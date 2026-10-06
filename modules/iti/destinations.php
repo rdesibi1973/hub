@@ -178,8 +178,8 @@ include __DIR__ . '/../../includes/layout_header.php';
     </div>
   </div>
 
-  <div class="form-section-title">Photos <span style="font-weight:400;font-size:.8rem;color:var(--grey-mid)">safari photos for the day headers and the programme cover — landscape, at least 1600 px wide</span></div>
-  <?= iti_photo_editor($row ? iti_dest_photos($row) : [], 12, 'The first is the cover. Each programme day uses a different one: wildlife, landscapes, no text on the photo.') ?>
+  <div class="form-section-title">Photos <span style="font-weight:400;font-size:.8rem;color:var(--grey-mid)">safari photos for the day headers and the program cover — landscape, at least 1600 px wide</span></div>
+  <?= iti_photo_editor($row ? iti_dest_photos($row) : [], 12, 'The first is the cover. Each program day uses a different one: wildlife, landscapes, no text on the photo.') ?>
 
   <div class="form-section-title">Name <span style="font-weight:400;font-size:.8rem;color:var(--grey-mid)">× 5 languages</span></div>
   <div class="form-grid">

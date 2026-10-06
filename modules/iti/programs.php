@@ -204,7 +204,7 @@ include __DIR__ . '/../../includes/layout_header.php';
   </div>
   <?php if ($tab==='sample' && $can_edit): ?>
   <div style="display:flex;gap:6px">
-    <a href="iti_import_sto.php" class="btn btn-outline btn-sm" title="Create Sample programmes from the STO Word files in Dropbox">⬇ Import STO</a>
+    <a href="iti_import_sto.php" class="btn btn-outline btn-sm" title="Create Sample programs from the STO Word files in Dropbox">⬇ Import STO</a>
     <a href="programs.php?type=sample&action=add" class="btn btn-red btn-sm">+ New Sample</a>
   </div>
   <?php endif; ?>

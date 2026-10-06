@@ -1123,7 +1123,7 @@ function voucher_render_html(array $model): string
 
     $body = implode("\n", $blocks);
     if ($body === '') $body = '<div class="voucher"><div class="v-title">No vouchers</div>'
-        . '<div class="v-row">No booked accommodation or transfers were found in the programme.</div></div>';
+        . '<div class="v-row">No booked accommodation or transfers were found in the program.</div></div>';
 
     return '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><style>
       * { box-sizing: border-box; }
@@ -1246,7 +1246,7 @@ function voucher_render_word(array $model)
     if ($first) { // nothing added
         $s = $newSection();
         $s->addText('No vouchers', 'vTitle');
-        $s->addText('No booked accommodation or transfers were found in the programme.', 'vBase');
+        $s->addText('No booked accommodation or transfers were found in the program.', 'vBase');
     }
 
     return $phpWord;

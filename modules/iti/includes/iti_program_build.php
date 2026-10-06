@@ -311,11 +311,11 @@ function iti_pb_update_inclusions(PDO $db, int $pid, array $in, bool $go): array
             } else {
                 if (!is_array($x)) $x = ['text_' . $lang => (string)$x];
                 foreach (ITI_PS_LANGS as $l) if (isset($x['text_' . $l]) && trim((string)$x['text_' . $l]) !== '') $row['text_' . $l] = mb_substr(trim((string)$x['text_' . $l]), 0, 255);
-                if ($row['text_' . $lang] === null) throw new InvalidArgumentException($k . '[' . $i . ']: text_' . $lang . ' (the programme language) is required');
+                if ($row['text_' . $lang] === null) throw new InvalidArgumentException($k . '[' . $i . ']: text_' . $lang . ' (the program language) is required');
             }
             $rows[] = $row;
         }
-        if (!$rows) throw new InvalidArgumentException($k . ' is empty — send at least one item (a programme always lists what is ' . $k . ')');
+        if (!$rows) throw new InvalidArgumentException($k . ' is empty — send at least one item (a program always lists what is ' . $k . ')');
         $lists[$type] = $rows;
     }
     if (!$lists) throw new InvalidArgumentException('Send included[] and / or excluded[]');

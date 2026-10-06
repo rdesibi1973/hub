@@ -74,7 +74,7 @@ try {
     foreach ($st->fetchAll(PDO::FETCH_KEY_PAIR) as $ref => $pid) $imported[basename($ref)] = (int)$pid;
 } catch (PDOException $e) { /* source_ref not created yet */ }
 
-$pageTitle = 'Import STO programmes';
+$pageTitle = 'Import STO programs';
 include __DIR__ . '/../../includes/layout_header.php';
 ?>
 <style>
@@ -93,9 +93,9 @@ include __DIR__ . '/../../includes/layout_header.php';
 <div class="sto-wrap">
 <?php iti_nav('Programs', [['label' => 'Programs', 'url' => ITI_MODULE_URL . '/programs.php']]); ?>
 <?php iti_flash_render(); ?>
-<h2 style="margin:0 0 6px">Import STO sample programmes</h2>
+<h2 style="margin:0 0 6px">Import STO sample programs</h2>
 <p style="font-size:.84rem;color:var(--grey-mid);margin:0 0 14px">
-  Reads the Wetu Word exports in Dropbox and creates <strong>Sample</strong> programmes (days, day texts, transfers,
+  Reads the Wetu Word exports in Dropbox and creates <strong>Sample</strong> programs (days, day texts, transfers,
   activities, meals, included / not included). Lodge and destination descriptions are filled <strong>only where empty</strong>.
   Prices are not imported — they come from the Calc Excel.
 </p>
@@ -127,8 +127,8 @@ include __DIR__ . '/../../includes/layout_header.php';
   </div>
   <div class="sto-bar">
     <button class="btn btn-grey" name="action" value="preview">🔍 Preview (no changes)</button>
-    <button class="btn btn-red" name="action" value="import" onclick="return confirm('Import the selected programmes as Sample programmes?')">⬇ Import selected</button>
-    <label style="font-size:.8rem"><input type="checkbox" name="replace" value="1" <?= !empty($_POST['replace']) ? 'checked' : '' ?>> Replace programmes already imported</label>
+    <button class="btn btn-red" name="action" value="import" onclick="return confirm('Import the selected programs as Sample programs?')">⬇ Import selected</button>
+    <label style="font-size:.8rem"><input type="checkbox" name="replace" value="1" <?= !empty($_POST['replace']) ? 'checked' : '' ?>> Replace programs already imported</label>
   </div>
 </form>
 <?php endif; ?>
@@ -167,7 +167,7 @@ include __DIR__ . '/../../includes/layout_header.php';
     <?php if (!empty($r['error'])): ?>
       <div class="sto-err">✖ <?= h($r['error']) ?></div>
     <?php else: ?>
-      <div class="sto-ok">✔ <?= $r['replaced'] ? 'Replaced' : 'Created' ?> sample programme
+      <div class="sto-ok">✔ <?= $r['replaced'] ? 'Replaced' : 'Created' ?> sample program
         <a href="program_edit.php?id=<?= (int)$r['program_id'] ?>">#<?= (int)$r['program_id'] ?></a></div>
       <?php if ($r['filled']): ?><div style="font-size:.78rem">Descriptions filled: <?= h(implode(', ', $r['filled'])) ?></div><?php endif; ?>
       <?php if ($r['unmatched']): ?><div class="sto-miss" style="font-size:.78rem">⚠ Not in ITI (kept as text): <?= h(implode(', ', $r['unmatched'])) ?></div><?php endif; ?>

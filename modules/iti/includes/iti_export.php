@@ -27,7 +27,7 @@ function iti_export_file(int $id, string $lang, string $format): array {
     $program = $id > 0 ? iti_get_program($id) : false;
     if (!$program) throw new InvalidArgumentException('Program ' . $id . ' not found');
     if ($format === 'guide' && ($program['program_type'] ?? '') !== 'personal') {
-        throw new InvalidArgumentException('The guide sheet is only for personal programmes (program ' . $id . ' is a ' . ($program['program_type'] ?: 'sample') . ')');
+        throw new InvalidArgumentException('The guide sheet is only for personal programs (program ' . $id . ' is a ' . ($program['program_type'] ?: 'sample') . ')');
     }
     if ($lang === '') $lang = (string)($program['display_language'] ?? 'it');   // the guide sheet too: same language as the client's programme
     if (!in_array($lang, ITI_LANGUAGES, true)) $lang = 'it';
@@ -38,7 +38,7 @@ function iti_export_file(int $id, string $lang, string $format): array {
     @ini_set('memory_limit', '512M');
 
     $D = iti_doc_data($id, $lang);
-    $name = trim(preg_replace('/[^A-Za-z0-9]+/', '_', trim($D['title'])), '_') ?: 'Programme';
+    $name = trim(preg_replace('/[^A-Za-z0-9]+/', '_', trim($D['title'])), '_') ?: 'Program';
     if ($format === 'guide') {
         return ['name' => $name . '_GUIDE_' . strtoupper($lang) . '.pdf', 'mime' => 'application/pdf', 'content' => iti_guide_pdf_build($D),
                 'lang' => $lang, 'format' => 'pdf', 'title' => $D['title']];

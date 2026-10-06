@@ -145,7 +145,7 @@ function iti_ps_create_personal(PDO $db, array $in, string $who, bool $go): arra
     iti_ensure_final_schema();
     $sid = (int)($in['sample_id'] ?? 0);
     $s = $sid ? iti_get_program($sid) : null;
-    if ($sid && (!$s || $s['program_type'] !== 'sample')) throw new InvalidArgumentException('sample_id: not a sample programme (see iti_samples)');
+    if ($sid && (!$s || $s['program_type'] !== 'sample')) throw new InvalidArgumentException('sample_id: not a sample program (see iti_samples)');
     $set = iti_ps_header_values(isset($in['fields']) && is_array($in['fields']) ? $in['fields'] : []);
     $set['stage'] = 'proposal';
     if (!empty($in['lead_request_id'])) {
@@ -171,8 +171,8 @@ function iti_ps_create_personal(PDO $db, array $in, string $who, bool $go): arra
     } else {
         $lang = $set['display_language'] ?? 'it';
         $set['display_language'] = $lang;
-        if (trim((string)($set['title_' . $lang] ?? '')) === '') throw new InvalidArgumentException('Blank programme: fields.title_' . $lang . ' is required');
-        if (!$items) throw new InvalidArgumentException('Blank programme: days[] is required');
+        if (trim((string)($set['title_' . $lang] ?? '')) === '') throw new InvalidArgumentException('Blank program: fields.title_' . $lang . ' is required');
+        if (!$items) throw new InvalidArgumentException('Blank program: days[] is required');
         foreach (ITI_PS_LANGS as $l) if (!isset($set['title_' . $l]) || $set['title_' . $l] === '') $set['title_' . $l] = $set['title_' . $lang];   // NOT NULL columns
         $plan = ['sample' => null, 'set' => $set];
     }

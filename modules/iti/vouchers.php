@@ -326,7 +326,7 @@ include __DIR__ . '/../../includes/layout_header.php';
 <div class="page-header">
   <div>
     <h2>Voucher Generator</h2>
-    <div class="sub">Build guest vouchers from a WeTu programme + calc sheet</div>
+    <div class="sub">Build guest vouchers from a WeTu program + calc sheet</div>
   </div>
 </div>
 
@@ -353,7 +353,7 @@ include __DIR__ . '/../../includes/layout_header.php';
     <input type="file" id="vpick" accept=".docx,.xlsx" multiple hidden>
 
     <div class="form-group" style="margin-top:16px;">
-      <label>Word programme (.docx) — from WeTu</label>
+      <label>Word program (.docx) — from WeTu</label>
       <input type="file" id="f_docx" name="docx" accept=".docx" required>
     </div>
     <div class="form-group" style="margin-top:14px;">
@@ -364,7 +364,7 @@ include __DIR__ . '/../../includes/layout_header.php';
       <button type="submit" class="btn btn-red">Continue to review →</button>
     </div>
     <p style="color:var(--grey-mid);font-size:.8rem;margin-top:16px;line-height:1.6;">
-      The programme drives accommodations, transfers and flights (own-arrangement stays are skipped).
+      The program drives accommodations, transfers and flights (own-arrangement stays are skipped).
       The calc sheet supplies traveller names, room type and dietary notes. You can edit everything
       on the next screen before generating.
     </p>
