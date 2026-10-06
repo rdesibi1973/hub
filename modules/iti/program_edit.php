@@ -6,6 +6,8 @@
 require_once __DIR__ . '/../../includes/auth.php';
 require_login();
 require_once __DIR__ . '/includes/iti_functions.php';
+require_once __DIR__ . '/includes/iti_program_service.php';   // client price table (same rules as the Agent API)
+iti_ps_schema();
 
 $db   = db();
 $_cu  = current_user();
@@ -455,6 +457,39 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
         iti_flash_set('success','Prices saved.');
+        iti_redirect("program_edit.php?id={$id}&tab=prices");
+    }
+
+    // ── Price table of the client document ("Quote per persona") + notes ──
+    if ($sub === 'doc_prices') {
+        $rows = [];
+        $labels = $_POST['dp_label'] ?? [];
+        foreach ($labels as $i => $label) {
+            $label = trim((string)$label);
+            if ($label === '') continue;
+            $row   = ['label' => $label];
+            $price = str_replace([' ', ','], ['', '.'], trim((string)($_POST['dp_price'][$i] ?? '')));
+            if ($price !== '' && is_numeric($price)) {
+                $row['price']    = (float)$price;
+                $row['currency'] = ($_POST['dp_currency'][$i] ?? 'USD') === 'EUR' ? 'EUR' : 'USD';
+            }
+            $rows[] = $row;
+        }
+        $fields = ['price_table_json' => $rows];
+        foreach (ITI_PS_LANGS as $l) {
+            if (isset($_POST['dp_notes_' . $l])) $fields['price_notes_' . $l] = (string)$_POST['dp_notes_' . $l];
+        }
+        try {
+            $vals = iti_ps_header_values(array_intersect_key($fields, array_flip(iti_ps_header_fields())));
+            foreach ($vals as $k => $v) if ($v === '') $vals[$k] = null;
+            if ($vals) {
+                $db->prepare('UPDATE iti_programs SET `' . implode('`=?, `', array_keys($vals)) . '`=? WHERE id=?')
+                   ->execute(array_merge(array_values($vals), [$id]));
+            }
+            iti_flash_set('success', 'Client price table saved.');
+        } catch (Exception $e) {
+            iti_flash_set('error', 'Price table not saved: ' . $e->getMessage());
+        }
         iti_redirect("program_edit.php?id={$id}&tab=prices");
     }
 
@@ -1436,10 +1471,87 @@ include __DIR__ . '/../../includes/layout_header.php';
 
 <?php elseif ($active_tab === 'prices'): ?>
 <!-- ═══════════ TAB PRICES ═══════════ -->
+<?php
+  // Client price table ("Quote per persona" in Preview / Magazine / Word / PDF).
+  $dp_rows = json_decode((string)($program['price_table_json'] ?? ''), true);
+  if (!is_array($dp_rows)) $dp_rows = [];
+  $dp_lang  = in_array($program['display_language'] ?? '', ITI_PS_LANGS, true) ? $program['display_language'] : 'it';
+  $dp_langs = array_merge([$dp_lang], array_values(array_diff(ITI_PS_LANGS, [$dp_lang])));
+  $dp_cur   = ($program['display_currency'] ?? 'USD') === 'EUR' ? 'EUR' : 'USD';
+?>
+<form method="POST" action="program_edit.php?id=<?= $id ?>&tab=prices" style="margin-bottom:24px;">
+<input type="hidden" name="_sub" value="doc_prices">
+<div class="form-card">
+  <div class="form-section-title" style="margin-top:0;">Client price table (Quote per persona)</div>
+  <p class="form-hint" style="margin:0 0 12px;">Shown in Preview, Magazine, Word and PDF. A row without a price is printed as a text line. No rows = no price section.</p>
+  <table style="width:100%;max-width:820px;border-collapse:collapse;">
+    <thead>
+      <tr style="font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--grey-mid);">
+        <th style="padding:8px 6px;text-align:left;">Item</th>
+        <th style="padding:8px 6px;text-align:right;width:130px;">Per person</th>
+        <th style="padding:8px 6px;width:80px;">Currency</th>
+        <th style="width:110px;"></th>
+      </tr>
+    </thead>
+    <tbody id="dp-rows">
+    <?php foreach ($dp_rows ?: [[]] as $r): ?>
+      <tr class="dp-row" style="border-top:1px solid var(--grey-lt);">
+        <td style="padding:6px;"><input type="text" name="dp_label[]" maxlength="300" value="<?= h($r['label'] ?? '') ?>" placeholder="e.g. Pumba Safari" style="width:100%;"></td>
+        <td style="padding:6px;"><input type="number" name="dp_price[]" step="0.01" min="0" value="<?= isset($r['price']) ? h((string)$r['price']) : '' ?>" style="width:120px;text-align:right;"></td>
+        <td style="padding:6px;"><select name="dp_currency[]"><?php foreach (['USD','EUR'] as $c): ?><option<?= ($r['currency'] ?? $dp_cur) === $c ? ' selected' : '' ?>><?= $c ?></option><?php endforeach; ?></select></td>
+        <td style="padding:6px;white-space:nowrap;">
+          <button type="button" class="btn btn-outline btn-sm" onclick="dpMove(this,-1)" title="Up">↑</button>
+          <button type="button" class="btn btn-outline btn-sm" onclick="dpMove(this,1)" title="Down">↓</button>
+          <button type="button" class="btn btn-outline btn-sm" onclick="dpDel(this)" title="Remove">✕</button>
+        </td>
+      </tr>
+    <?php endforeach; ?>
+    </tbody>
+  </table>
+  <button type="button" class="btn btn-outline btn-sm" style="margin-top:8px;" onclick="dpAdd()">+ Add row</button>
+
+  <div class="form-group" style="margin-top:18px;max-width:820px;">
+    <label>Notes under the table (<?= strtoupper($dp_lang) ?>)</label>
+    <textarea name="dp_notes_<?= $dp_lang ?>" rows="4" style="width:100%;"><?= h($program['price_notes_' . $dp_lang] ?? '') ?></textarea>
+  </div>
+  <details style="max-width:820px;">
+    <summary style="cursor:pointer;font-size:.8rem;color:var(--grey-mid);">Notes in other languages</summary>
+    <?php foreach (array_slice($dp_langs, 1) as $l): ?>
+    <div class="form-group" style="margin-top:10px;">
+      <label><?= strtoupper($l) ?></label>
+      <textarea name="dp_notes_<?= $l ?>" rows="3" style="width:100%;"><?= h($program['price_notes_' . $l] ?? '') ?></textarea>
+    </div>
+    <?php endforeach; ?>
+  </details>
+
+  <div class="form-actions">
+    <button type="submit" class="btn btn-red">💾 Save price table</button>
+  </div>
+</div>
+</form>
+<script>
+function dpAdd() {
+  var tb = document.getElementById('dp-rows'), tr = tb.querySelector('.dp-row').cloneNode(true);
+  tr.querySelectorAll('input').forEach(function (i) { i.value = ''; });
+  tr.querySelector('select').value = <?= json_encode($dp_cur) ?>;
+  tb.appendChild(tr);
+  tr.querySelector('input').focus();
+}
+function dpDel(b) {
+  var tr = b.closest('tr'), tb = tr.parentNode;
+  if (tb.querySelectorAll('.dp-row').length > 1) tr.remove();
+  else tr.querySelectorAll('input').forEach(function (i) { i.value = ''; });
+}
+function dpMove(b, d) {
+  var tr = b.closest('tr'), sib = d < 0 ? tr.previousElementSibling : tr.nextElementSibling;
+  if (sib) tr.parentNode.insertBefore(tr, d < 0 ? sib : sib.nextSibling);
+}
+</script>
+
 <form method="POST" action="program_edit.php?id=<?= $id ?>&tab=prices">
 <input type="hidden" name="_sub" value="prices">
 <div class="form-card">
-  <div class="form-section-title" style="margin-top:0;">Prices per Person</div>
+  <div class="form-section-title" style="margin-top:0;">Rack / STO rates per person <span style="font-weight:400;text-transform:none;letter-spacing:0;">— internal, not printed in the client document</span></div>
   <div style="overflow-x:auto;">
   <table style="width:100%;border-collapse:collapse;">
     <thead>
