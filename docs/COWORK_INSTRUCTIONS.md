@@ -70,8 +70,8 @@ mostrami il risultato, poi confirm dopo il mio ok.
   Anteprima interna: `links.preview`.
 - **File PDF / Word:** `iti_document` con `program_id`, `format` = `pdf` (default; per cliente / agenzia) o `docx`
   (Word modificabile, per le agenzie che lo passano sulla loro carta intestata) o `guide` (PDF per la guida safari:
-  giorno per giorno + riepilogo transfer e alloggi, senza foto né prezzi; solo programmi personal, nella stessa lingua del programma per il cliente),
-  `lang?` (default la lingua del programma).
+  giorno per giorno + riepilogo transfer e alloggi, senza foto né prezzi; solo programmi personal),
+  `lang?` (default la lingua del programma, anche per `guide`: stessa lingua del programma del cliente).
   Risposta: `file.content_base64` → decodificalo e salvalo come `file.name`. Pochi MB, fino a un minuto: non riprovare
   subito se è lento. Non serve il login Hub (i `links.word` / `links.pdf` invece sì: non usarli).
   - In Dropbox: `save: true` (cartella della pratica collegata al programma) o `request_id` / `folder_path`;
