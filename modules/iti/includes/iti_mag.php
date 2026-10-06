@@ -89,24 +89,30 @@ function iti_mag_stays(array $days): array {
 /**
  * Day by day for the client document: consecutive days in the same hotel of a "beach / relax
  * stay" destination (Zanzibar, Pemba, Mafia… — iti_destinations.is_beach_stay) become one block
- * when the later days have the same room and no flight or transfer. The block keeps the first
- * day's text and photo and shows the meals of most of its days (the arrival day often differs).
+ * when the later days have the same room and no flight or transfer. The arrival day stays on its
+ * own (flight / transfer, check-in), and so does the departure day: the block starts on the
+ * first full day in the hotel. The block keeps that day's text and photo and shows the meals of
+ * most of its days.
  * The later days' texts follow: a text repeated on several days ("relax on the beach") once, a
  * text of one day only (an excursion) with its date ("gio 12 marzo: …"); a later day's activities
  * get their date too. A block has 'n_to' / 'date_to'; a single day has neither.
  */
 function iti_mag_compact_days(array $days, array $T, array $M): array {
     $out = []; $extra = []; $meals = [];   // per block: [when, text] of the later days; meals → days
+    $open = []; $prevKey = null;           // $open[i]: block i can take the next days (a full day in the hotel, not the arrival)
     foreach ($days as $d) {
         $i = count($out) - 1;
         $last = $i >= 0 ? $out[$i] : null;
         $key = $d['lodge_key'] !== '' ? $d['lodge_key'] : $d['lodge'];
-        $join = $last && !empty($d['beach']) && !empty($last['beach']) && $d['lodge'] !== ''
+        $stayDay = !empty($d['beach']) && $d['lodge'] !== '' && $key === $prevKey   // same hotel as the night before
+                && empty($d['flights']) && empty($d['transfers']);
+        $prevKey = $key;
+        $join = $last && !empty($open[$i]) && !empty($d['beach']) && $d['lodge'] !== ''
              && $key === ($last['lodge_key'] !== '' ? $last['lodge_key'] : $last['lodge'])
              && $d['n'] === (isset($last['n_to']) ? $last['n_to'] : $last['n']) + 1
              && ($d['room'] ?? '') === ($last['room'] ?? '')
              && empty($d['flights']) && empty($d['transfers']);
-        if (!$join) { $out[] = $d; $meals[count($out) - 1] = [$d['meals'] => 1]; continue; }
+        if (!$join) { $out[] = $d; $meals[count($out) - 1] = [$d['meals'] => 1]; $open[count($out) - 1] = $stayDay; continue; }
         $meals[$i][$d['meals']] = ($meals[$i][$d['meals']] ?? 0) + 1;
         $when = !empty($d['date']) ? iti_mag_date($d['date'], $M, false, true) : $T['day'] . ' ' . $d['n'];
         $txt = trim((string)$d['narrative']);
@@ -381,8 +387,9 @@ function iti_mag_css(): string {
 ';
 }
 
-/** The document body (HTML). $publicUrl: link to the digital itinerary, shown in the footer (PDF). */
-function iti_mag_render(array $D, string $publicUrl = ''): string {
+/** The document body (HTML). $publicUrl: link to the digital itinerary, shown in the footer (PDF).
+ *  $printBtn: the "Download PDF" button in the nav (the client's page; the Hub has its own PDF in the bar). */
+function iti_mag_render(array $D, string $publicUrl = '', bool $printBtn = true): string {
     $T = $D['T'];
     $M = iti_mag_labels($D['lang']);
     $stays = iti_mag_stays($D['days']);
@@ -425,7 +432,7 @@ function iti_mag_render(array $D, string $publicUrl = ''): string {
     <?php if ($D['prices']): ?><a href="#mag-prices"><?= h($M['prices_nav']) ?></a><?php endif; ?>
     <a href="#mag-info"><?= h($M['info_nav']) ?></a>
     <span style="flex:1"></span>
-    <a href="#" onclick="magPrint(this);return false" style="background:var(--red);color:#fff">⤓ <?= h($M['pdf']) ?></a>
+    <?php if ($printBtn): ?><a href="#" onclick="magPrint(this);return false" style="background:var(--red);color:#fff">⤓ <?= h($M['pdf']) ?></a><?php endif; ?>
   </div></nav>
 
   <div class="mag-wrap">
@@ -644,7 +651,7 @@ JS;
 }
 
 /** Full standalone HTML page (public link / internal preview). $bar: optional toolbar above the document. */
-function iti_mag_page(array $D, string $bar = '', string $publicUrl = ''): void {
+function iti_mag_page(array $D, string $bar = '', string $publicUrl = '', bool $printBtn = true): void {
     header('Content-Type: text/html; charset=utf-8');
     ?><!DOCTYPE html>
 <html lang="<?= h($D['lang']) ?>">
@@ -670,7 +677,7 @@ html,body{margin:0;background:#fffdf9}
 </head>
 <body>
 <?= $bar ?>
-<?= iti_mag_render($D, $publicUrl) ?>
+<?= iti_mag_render($D, $publicUrl, $printBtn) ?>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script><?= iti_mag_map_js() ?></script>
 </body>

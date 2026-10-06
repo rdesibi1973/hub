@@ -52,4 +52,4 @@ require_once __DIR__ . '/includes/iti_mag.php';
 // Published personal programme: the printed page carries the link to the digital itinerary (as the PDF does).
 $pub = ($personal && !empty($program['is_published']) && !empty($program['public_token']))
      ? ITI_MODULE_URL . '/itinerary.php?token=' . $program['public_token'] . '&lang=' . $lang : '';
-iti_mag_page($D, iti_doc_lang_bar($lang, ['id' => $id], $extra, $personal ? [$lang] : null), $pub);
+iti_mag_page($D, iti_doc_lang_bar($lang, ['id' => $id], $extra, $personal ? [$lang] : null), $pub, false);   // no nav PDF button: the bar has 📕 PDF
