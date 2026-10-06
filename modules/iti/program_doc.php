@@ -45,6 +45,7 @@ if (!empty($program['is_published']) && !empty($program['public_token'])) {
 $extra .= '<a href="#" onclick="window.print();return false">🖨 Print / PDF</a>';
 $extra .= '<a href="export_mag_word.php?id=' . $id . '&lang=' . h($lang) . '">📄 Word</a>';   // editable, for agencies (Hub only)
 $extra .= '<a href="export_mag_word.php?id=' . $id . '&lang=' . h($lang) . '&format=pdf">📕 PDF</a>';   // magazine, rendered on the server
+$extra .= '<a href="export_mag_word.php?id=' . $id . '&lang=' . h($lang) . '&format=guide" title="Day by day + transfers and accommodation, no photos / intro / prices">🧭 Guide PDF</a>';
 $mag = ($_GET['layout'] ?? '') === 'mag';
 $extra .= $mag ? '<a href="?id=' . $id . '&lang=' . h($lang) . '">Etnia layout</a>'
                : '<a href="?id=' . $id . '&lang=' . h($lang) . '&layout=mag">📷 Magazine layout</a>';

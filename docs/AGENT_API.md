@@ -206,13 +206,15 @@ Typical flows:
 #### `iti_program` (GET)
 `program_id`, `lang?` → header (title, subtitle, intro, start_date, pax, prices, included / excluded), `days[]`
 (`day, date, title, destination, lodge, meals, transfers, activities, narrative, lodge_photos, dest_photo`) and `links`
-(`preview`, `edit`, `word`, `pdf`, `public` — `word` / `pdf` need a Hub login).
+(`preview`, `edit`, `word`, `pdf`, `guide`, `public` — `word` / `pdf` / `guide` need a Hub login).
 
 #### `iti_document` (GET)
 The programme as a file in the magazine layout (cover, route map, stays, day by day with photos, prices,
 included / excluded, contacts, terms). `program_id`, `format?` (`pdf` default, rendered on the server with Dompdf;
-`docx` = editable Word for agencies), `lang?` (default: the programme's language).
-→ `file {program_id, name, mime, size, format, lang, content_base64}`. Decode and save it as `file.name`.
+`docx` = editable Word for agencies; `guide` = PDF for the safari guide: transfer / flight and accommodation
+recap with check-in / check-out, then the day by day — no photos, intro, prices, lodge descriptions or terms,
+file `…_GUIDE_<LANG>.pdf`), `lang?` (default: the programme's language; English for `guide`).
+→ `file {program_id, name, mime, size, format, lang, content_base64}` (`format` is the file type: `guide` → `pdf`). Decode and save it as `file.name`.
 To put it in Dropbox instead: `save: true` (the programme's `lead_request_id` folder), or `request_id` / `folder_path`;
 `save_as?` (file name), `overwrite?` (an existing file is kept unless true; Dropbox keeps the old version)
 → `file` (no content), `saved_to`, `overwritten`. The audit log omits the file content.
@@ -220,6 +222,7 @@ Photos make files of a few MB; generating can take up to a minute.
 ```bash
 curl -sH "$H" "$U?action=iti_document&program_id=412&format=pdf" | jq -r .file.content_base64 | base64 -d > prog.pdf
 curl -sH "$H" "$U?action=iti_document&program_id=412&format=docx&lang=en&save=1"      # → booking folder
+curl -sH "$H" "$U?action=iti_document&program_id=412&format=guide&save=1"            # guide sheet → booking folder
 ```
 
 #### `iti_create_personal` (POST)
