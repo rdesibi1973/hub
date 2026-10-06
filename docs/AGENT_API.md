@@ -227,7 +227,7 @@ curl -sH "$H" "$U?action=iti_document&program_id=412&format=guide&save=1"       
 
 #### `iti_create_personal` (POST)
 `sample_id`, `lead_request_id?` (Hub request), `fields?` — any of `title_<lang>`, `subtitle_<lang>`, `intro_<lang>`,
-`start_date` (YYYY-MM-DD: dates appear on the cover and on each day), `pax_adults`, `pax_children`,
+`start_date` (YYYY-MM-DD: dates appear on the cover and on each day), `pax_adults`, `pax_teens` (under 16), `pax_children` (under 12),
 `display_language`, `display_currency`, `price_table_json` (`[{label, price, currency}]`), `price_notes_<lang>`.
 Copies the sample (days, activities, prices, inclusions, terms) as a draft proposal. Dry-run unless `"confirm": true`.
 
@@ -236,12 +236,12 @@ Copies the sample (days, activities, prices, inclusions, terms) as a draft propo
 
 #### `iti_update_day` (POST)
 `program_id`, `day` (number), `fields`: `day_title_<lang>`, `narrative_<lang>`, `end_lodge_id` **or** `end_lodge`
-(name, must match one lodge), `end_lodge_custom`, `destination_id`, `destination_custom`, `meal_breakfast` /
+(name, must match one lodge), `end_lodge_custom`, `room_type`, `destination_id`, `destination_custom`, `meal_breakfast` /
 `meal_lunch` / `meal_dinner` (0/1) → `changes`. Dry-run unless confirm.
 
 #### Day items (used by `iti_create_personal` `days[]`, `iti_set_days`, `iti_add_day`, `iti_update_day`)
 Every key optional: `day_title_<lang>`, `narrative_<lang>`, `end_lodge_id` | `end_lodge` (name), `end_lodge_custom`,
-`destination_id` | `destination` (name or code), `destination_custom`, `start_lodge_id`, `start_destination_id`,
+`room_type` (free text in the programme language, e.g. "1 camera matrimoniale + 1 tripla"; shown next to the lodge, ignored with no overnight), `destination_id` | `destination` (name or code), `destination_custom`, `start_lodge_id`, `start_destination_id`,
 `start_custom`, `transfer_route_id`, `transfer_custom`, `meal_breakfast` / `meal_lunch` / `meal_dinner` /
 `meal_all_inclusive` (0/1), and three lists — each one given **replaces** the day's list (`[]` = none):
 - `transfers`: `["Dar airport – Serena Hotel, about 40 min", …]` (text shown on the day, programme language) or

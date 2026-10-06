@@ -194,7 +194,7 @@ function iti_mag_word_build(array $D): array {
             $cc = $tb->addCell(7100, ['valign' => 'center']);
             $cc->addText($T['day'] . ' ' . $st['day'] . ($st['nights'] > 1 ? '–' . ($st['day'] + $st['nights'] - 1) : ''), 'mwKicker', 'mwTight');
             $cc->addText($st['lodge'], 'mwH4', 'mwTight');
-            $cc->addText(($st['dest'] !== '' ? $st['dest'] . ' · ' : '') . $st['nights'] . ' ' . ($st['nights'] === 1 ? $T['night1'] : $T['nights']) . ' · ' . $st['meals'], 'mwSmall', 'mwTight');
+            $cc->addText(($st['dest'] !== '' ? $st['dest'] . ' · ' : '') . $st['nights'] . ' ' . ($st['nights'] === 1 ? $T['night1'] : $T['nights']) . ' · ' . $st['meals'] . ($st['room'] !== '' ? ' · ' . $st['room'] : ''), 'mwSmall', 'mwTight');
         }
     }
 
@@ -217,7 +217,7 @@ function iti_mag_word_build(array $D): array {
         foreach ($d['flights'] ?? [] as $t) { $chips->addText('✈ ', 'mwChipB'); $chips->addText($t . '     ', 'mwChip'); }
         foreach ($d['transfers'] as $t) { $chips->addText('⇢ ', 'mwChipB'); $chips->addText($t . '     ', 'mwChip'); }
         $chips->addText($T['meals'] . ' ', 'mwChipB'); $chips->addText($d['meals'] . '     ', 'mwChip');
-        if ($d['lodge'] !== '') { $chips->addText($T['overnight'] . ' ', 'mwChipB'); $chips->addText($d['lodge'], 'mwChip'); }
+        if ($d['lodge'] !== '') { $chips->addText($T['overnight'] . ' ', 'mwChipB'); $chips->addText($d['lodge'] . ($d['room'] !== '' ? ' · ' . $d['room'] : ''), 'mwChip'); }
         iti_mw_paras($s, $d['narrative']);
         if ($d['activities']) {
             $ar = $s->addTextRun('mwP');

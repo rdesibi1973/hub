@@ -1026,10 +1026,26 @@ function iti_create_table(string $table, string $body, array $fks = array()): vo
     }
 }
 
+// Teenagers (under 16) of a programme, next to adults / children (under 12), and the room type
+// of a night ("1 Double + 1 Twin", free text shown with the lodge); added once if missing.
+// Call it outside transactions (ALTER TABLE commits) and before iti_table_columns() caches the lists.
+function iti_ensure_pax_room(): void {
+    static $done = false;
+    if ($done) return;
+    $done = true;
+    try {
+        iti_add_column('iti_programs', 'pax_teens', 'TINYINT NOT NULL DEFAULT 0');
+        iti_add_column('iti_program_days', 'room_type', 'VARCHAR(100) NULL DEFAULT NULL');
+    } catch (PDOException $e) {
+        error_log('iti_ensure_pax_room: ' . $e->getMessage());
+    }
+}
+
 function iti_ensure_final_schema(): void {
     static $done = false;
     if ($done) return;
     $done = true;
+    iti_ensure_pax_room();   // own check, not tied to final_schema_version
     if (iti_setting('final_schema_version') === ITI_FINAL_SCHEMA_VERSION) return;
     $db = db();
     iti_ensure_lead_link();

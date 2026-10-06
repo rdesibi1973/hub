@@ -20,6 +20,7 @@ function iti_mag_labels(string $lang): array {
                  'destinations' => 'Destinazioni', 'lodges' => 'Sistemazioni', 'online' => 'Itinerario digitale',
                  'about_dest' => 'La destinazione', 'pdf' => 'Scarica PDF', 'private' => 'Safari privato con guida',
                  'adult' => 'adulto', 'adults' => 'adulti', 'child' => 'bambino', 'children' => 'bambini', 'dates' => 'Date',
+                 'teen' => 'ragazzo', 'teens' => 'ragazzi', 'teen_age' => '(sotto i 16 anni)', 'child_age' => '(sotto i 12 anni)',
                  'months' => ['gennaio', 'febbraio', 'marzo', 'aprile', 'maggio', 'giugno', 'luglio', 'agosto', 'settembre', 'ottobre', 'novembre', 'dicembre'],
                  'wdays' => ['dom', 'lun', 'mar', 'mer', 'gio', 'ven', 'sab']],
         'en' => ['overview' => 'Your journey', 'facts' => 'At a glance', 'route' => 'The route', 'stays' => 'Where you stay',
@@ -28,6 +29,7 @@ function iti_mag_labels(string $lang): array {
                  'destinations' => 'Destinations', 'lodges' => 'Accommodation', 'online' => 'Digital itinerary',
                  'about_dest' => 'The destination', 'pdf' => 'Download PDF', 'private' => 'Private guided safari',
                  'adult' => 'adult', 'adults' => 'adults', 'child' => 'child', 'children' => 'children', 'dates' => 'Dates',
+                 'teen' => 'teenager', 'teens' => 'teenagers', 'teen_age' => '(under 16)', 'child_age' => '(under 12)',
                  'months' => ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'],
                  'wdays' => ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']],
         'fr' => ['overview' => 'Votre voyage', 'facts' => 'En bref', 'route' => 'L\'itinéraire', 'stays' => 'Vos hébergements',
@@ -36,6 +38,7 @@ function iti_mag_labels(string $lang): array {
                  'destinations' => 'Destinations', 'lodges' => 'Hébergements', 'online' => 'Itinéraire numérique',
                  'about_dest' => 'La destination', 'pdf' => 'Télécharger le PDF', 'private' => 'Safari privé avec guide',
                  'adult' => 'adulte', 'adults' => 'adultes', 'child' => 'enfant', 'children' => 'enfants', 'dates' => 'Dates',
+                 'teen' => 'adolescent', 'teens' => 'adolescents', 'teen_age' => '(moins de 16 ans)', 'child_age' => '(moins de 12 ans)',
                  'months' => ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'],
                  'wdays' => ['dim', 'lun', 'mar', 'mer', 'jeu', 'ven', 'sam']],
         'es' => ['overview' => 'Tu viaje', 'facts' => 'En breve', 'route' => 'El recorrido', 'stays' => 'Alojamientos',
@@ -44,6 +47,7 @@ function iti_mag_labels(string $lang): array {
                  'destinations' => 'Destinos', 'lodges' => 'Alojamientos', 'online' => 'Itinerario digital',
                  'about_dest' => 'El destino', 'pdf' => 'Descargar PDF', 'private' => 'Safari privado con guía',
                  'adult' => 'adulto', 'adults' => 'adultos', 'child' => 'niño', 'children' => 'niños', 'dates' => 'Fechas',
+                 'teen' => 'adolescente', 'teens' => 'adolescentes', 'teen_age' => '(menos de 16 años)', 'child_age' => '(menos de 12 años)',
                  'months' => ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'],
                  'wdays' => ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb']],
         'de' => ['overview' => 'Ihre Reise', 'facts' => 'Auf einen Blick', 'route' => 'Die Route', 'stays' => 'Ihre Unterkünfte',
@@ -52,22 +56,24 @@ function iti_mag_labels(string $lang): array {
                  'destinations' => 'Reiseziele', 'lodges' => 'Unterkünfte', 'online' => 'Digitale Reiseroute',
                  'about_dest' => 'Das Reiseziel', 'pdf' => 'PDF herunterladen', 'private' => 'Private Safari mit Guide',
                  'adult' => 'Erwachsener', 'adults' => 'Erwachsene', 'child' => 'Kind', 'children' => 'Kinder', 'dates' => 'Reisedaten',
+                 'teen' => 'Jugendlicher', 'teens' => 'Jugendliche', 'teen_age' => '(unter 16)', 'child_age' => '(unter 12)',
                  'months' => ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'],
                  'wdays' => ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa']],
     ];
     return isset($L[$lang]) ? $L[$lang] : $L['en'];
 }
 
-/** Consecutive nights in the same lodge → one stay row (first day, nights, photo, …). */
+/** Consecutive nights in the same lodge (and room) → one stay row (first day, nights, photo, …). */
 function iti_mag_stays(array $days): array {
     $stays = []; $prevKey = ''; $prevN = -1;
     foreach ($days as $d) {
         if ($d['lodge'] === '') { $prevKey = ''; continue; }
-        $key = $d['lodge_key'] !== '' ? $d['lodge_key'] : $d['lodge'];
+        $room = isset($d['room']) ? $d['room'] : '';
+        $key = ($d['lodge_key'] !== '' ? $d['lodge_key'] : $d['lodge']) . '|' . $room;
         if ($stays && $key === $prevKey && $d['n'] === $prevN + 1) {
             $stays[count($stays) - 1]['nights']++;
         } else {
-            $stays[] = ['day' => $d['n'], 'lodge' => $d['lodge'], 'dest' => $d['lodge_area'] ?? '', 'nights' => 1,
+            $stays[] = ['day' => $d['n'], 'lodge' => $d['lodge'], 'dest' => $d['lodge_area'] ?? '', 'nights' => 1, 'room' => $room,
                         'meals' => $d['meals'], 'photo' => $d['lodge_photos'] ? $d['lodge_photos'][0] : ''];
         }
         $prevKey = $key; $prevN = $d['n'];
@@ -97,15 +103,16 @@ function iti_mag_date_range(array $D, array $M): string {
     return iti_mag_date($a, $M) . ' – ' . iti_mag_date($b, $M);
 }
 
-/** "2 adulti · 1 bambino" for personal programmes ('' for samples). */
+/** "2 adulti · 1 ragazzo (sotto i 16 anni) · 1 bambino (sotto i 12 anni)" for personal programmes ('' for samples). */
 function iti_mag_pax(array $D, array $M): string {
     if (!empty($D['pax_label'])) return (string)$D['pax_label'];
     $p = $D['program'];
     if (($p['program_type'] ?? '') !== 'personal') return '';
-    $a = (int)($p['pax_adults'] ?? 0); $c = (int)($p['pax_children'] ?? 0);
+    $a = (int)($p['pax_adults'] ?? 0); $t = (int)($p['pax_teens'] ?? 0); $c = (int)($p['pax_children'] ?? 0);
     $out = [];
     if ($a) $out[] = $a . ' ' . ($a === 1 ? $M['adult'] : $M['adults']);
-    if ($c) $out[] = $c . ' ' . ($c === 1 ? $M['child'] : $M['children']);
+    if ($t) $out[] = $t . ' ' . ($t === 1 ? $M['teen'] : $M['teens']) . ' ' . $M['teen_age'];
+    if ($c) $out[] = $c . ' ' . ($c === 1 ? $M['child'] : $M['children']) . ' ' . $M['child_age'];
     return implode(' · ', $out);
 }
 
@@ -395,7 +402,7 @@ function iti_mag_render(array $D, string $publicUrl = ''): string {
               <div class="mag-stay-b">
                 <div class="mag-stay-day"><?= h($T['day']) ?> <?= (int)$s['day'] ?><?= $s['nights'] > 1 ? '–' . ((int)$s['day'] + $s['nights'] - 1) : '' ?></div>
                 <div class="mag-stay-name"><?= h($s['lodge']) ?></div>
-                <div class="mag-stay-meta"><?= $s['dest'] !== '' ? h($s['dest']) . ' · ' : '' ?><?= (int)$s['nights'] ?> <?= h($s['nights'] === 1 ? $T['night1'] : $T['nights']) ?> · <?= h($s['meals']) ?></div>
+                <div class="mag-stay-meta"><?= $s['dest'] !== '' ? h($s['dest']) . ' · ' : '' ?><?= (int)$s['nights'] ?> <?= h($s['nights'] === 1 ? $T['night1'] : $T['nights']) ?> · <?= h($s['meals']) ?><?= $s['room'] !== '' ? ' · ' . h($s['room']) : '' ?></div>
               </div>
             </a>
           <?php endforeach; ?>
@@ -427,7 +434,7 @@ function iti_mag_render(array $D, string $publicUrl = ''): string {
           <?php foreach ($d['flights'] ?? [] as $fl): ?><span class="mag-chip"><b>✈</b><?= h($fl) ?></span><?php endforeach; ?>
           <?php foreach ($d['transfers'] as $tr): ?><span class="mag-chip"><b>⇢</b><?= h($tr) ?></span><?php endforeach; ?>
           <span class="mag-chip"><b><?= h($T['meals']) ?></b><?= h($d['meals']) ?></span>
-          <?php if ($d['lodge'] !== ''): ?><span class="mag-chip"><b><?= h($T['overnight']) ?></b><?= h($d['lodge']) ?></span><?php endif; ?>
+          <?php if ($d['lodge'] !== ''): ?><span class="mag-chip"><b><?= h($T['overnight']) ?></b><?= h($d['lodge']) ?><?= $d['room'] !== '' ? ' · ' . h($d['room']) : '' ?></span><?php endif; ?>
         </div>
 
         <div class="mag-daybody<?= $aside ? '' : ' solo' ?>">

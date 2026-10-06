@@ -39,6 +39,7 @@ function iti_mag_pdf_html(array $D, array &$tmp): string {
     $paxLabel = iti_mag_pax($D, $M);
     $stays = iti_mag_stays($D['days']);
     $foot = 'Savannah Explorers  ·  ' . ($D['contacts'][0]['phone'] ?? '') . '  ·  ' . ($D['contacts'][0]['email'] ?? '');
+    $pub = isset($D['public_url']) ? (string)$D['public_url'] : '';   // digital itinerary (published personal programme), set by iti_export_file()
 
     ob_start(); ?>
 <!DOCTYPE html>
@@ -95,6 +96,7 @@ td{vertical-align:top}
 <?php if ($D['subtitle'] !== ''): ?><p style="font-size:12pt"><?= h($D['subtitle']) ?></p>
 <?php elseif ($routeNames): ?><p class="serif" style="font-size:12pt;font-style:italic"><?= h(implode(' · ', $routeNames)) ?></p><?php endif; ?>
 <p class="facts"><?= h(implode('   ·   ', array_filter([$dateRange, $D['duration'], $M['private'], $paxLabel]))) ?></p>
+<?php if ($pub !== ''): ?><p class="small" style="margin:-8px 0 14px"><?= h($M['online']) ?>: <a href="<?= h($pub) ?>" style="color:#B3241C"><?= h($pub) ?></a></p><?php endif; ?>
 <?php if (($c = iti_mag_cover($D)) !== '') echo iti_mp_img($c, 1400, $tmp, 'width:100%'); ?>
 
 <?php /* ── The journey ── */ ?>
@@ -150,7 +152,7 @@ td{vertical-align:top}
 <tr class="nobrk"><td style="width:120pt"><?= $ph ?></td><td>
 <p class="kick"><?= h($T['day'] . ' ' . $st['day'] . ($st['nights'] > 1 ? '–' . ($st['day'] + $st['nights'] - 1) : '')) ?></p>
 <h4><?= h($st['lodge']) ?></h4>
-<span class="small"><?= h(($st['dest'] !== '' ? $st['dest'] . ' · ' : '') . $st['nights'] . ' ' . ($st['nights'] === 1 ? $T['night1'] : $T['nights']) . ' · ' . $st['meals']) ?></span>
+<span class="small"><?= h(($st['dest'] !== '' ? $st['dest'] . ' · ' : '') . $st['nights'] . ' ' . ($st['nights'] === 1 ? $T['night1'] : $T['nights']) . ' · ' . $st['meals'] . ($st['room'] !== '' ? ' · ' . $st['room'] : '')) ?></span>
 </td></tr>
 <?php endforeach; ?>
 </table>
@@ -176,7 +178,7 @@ td{vertical-align:top}
 <?php foreach ($d['flights'] ?? [] as $t) echo '<b>✈</b> ' . h($t) . ' &nbsp;&nbsp; ';
       foreach ($d['transfers'] as $t) echo '<b>⇢</b> ' . h($t) . ' &nbsp;&nbsp; '; ?>
 <b><?= h($T['meals']) ?></b> <?= h($d['meals']) ?>
-<?php if ($d['lodge'] !== ''): ?> &nbsp;&nbsp; <b><?= h($T['overnight']) ?></b> <?= h($d['lodge']) ?><?php endif; ?>
+<?php if ($d['lodge'] !== ''): ?> &nbsp;&nbsp; <b><?= h($T['overnight']) ?></b> <?= h($d['lodge']) ?><?= $d['room'] !== '' ? ' · ' . h($d['room']) : '' ?><?php endif; ?>
 </div>
 </div>
 <?= iti_mp_paras($d['narrative']) ?>
@@ -234,6 +236,7 @@ td{vertical-align:top}
 <tr class="hd"><td class="th"><?= h($T['ref']) ?></td><td class="th"><?= h($T['phone']) ?></td><td class="th"><?= h($T['email']) ?></td></tr>
 <?php foreach ($D['contacts'] as $c): ?><tr><td><?= h((string)$c['name']) ?></td><td><?= h((string)$c['phone']) ?></td><td><?= h((string)$c['email']) ?></td></tr><?php endforeach; ?>
 </table>
+<?php if ($pub !== ''): ?><p style="margin-top:10px"><span class="th"><?= h(mb_strtoupper($M['online'])) ?></span><br><a href="<?= h($pub) ?>" class="small" style="color:#B3241C"><?= h($pub) ?></a></p><?php endif; ?>
 <?php if ($D['terms'] !== ''): ?>
 <h3 style="margin-top:18px"><?= h($T['terms']) ?></h3>
 <div class="terms"><?= strpos($D['terms'], '<') !== false && function_exists('iti_sanitize_richtext') ? iti_sanitize_richtext($D['terms']) : iti_mp_paras(strip_tags($D['terms'])) ?></div>

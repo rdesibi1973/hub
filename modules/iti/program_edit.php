@@ -63,6 +63,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $_POST['status']??'draft',
             $id,
         ]);
+        if (isset($_POST['pax_teens'])) {   // column from iti_ps_schema()
+            $db->prepare('UPDATE iti_programs SET pax_teens=? WHERE id=?')->execute([max(0, (int)$_POST['pax_teens']), $id]);
+        }
         // Hub leads request link (personal programs)
         if (isset($_POST['lead_request_id'])) {
             iti_ensure_lead_link();
@@ -189,6 +192,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         'UPDATE iti_program_days SET own_arrangement=?,own_arrangement_nights=? WHERE id=?'
                     )->execute([$own_arr, $own_arr_nights, $day_id]);
                 } catch (\PDOException $oa_e) { /* columns not yet in DB — skip silently */ }
+
+                // Room type of the night (column added by iti_ps_schema()); only with an overnight.
+                if (isset($_POST['room_type'])) {
+                    $room = mb_substr(trim($_POST['room_type']), 0, 100);
+                    $db->prepare('UPDATE iti_program_days SET room_type=? WHERE id=?')
+                       ->execute([($end_id !== null || $end_txt !== null) && $room !== '' ? $room : null, $day_id]);
+                }
 
                 // ── Transfers: re-insert from array (unchanged texts keep their translations) ──
                 iti_transfers_replace($db, $day_id, array_values((array)($_POST['transfer_desc'] ?? [])));
@@ -610,6 +620,24 @@ $current_flights   = $all_days_data[(int)($days[0]['id'] ?? 0)]['flights']   ?? 
 $current_transfers = $all_days_data[(int)($days[0]['id'] ?? 0)]['transfers'] ?? [];
 
 $public_url = BASE_URL . '/modules/iti/itinerary.php?token=' . ($program['public_token'] ?? '');
+
+// Room field suggestions: rooms already typed in this programme, the Calc's room line (final
+// programme), then the usual room types in the programme's language.
+$room_suggestions = [];
+foreach ($days as $_d) if (trim((string)($_d['room_type'] ?? '')) !== '') $room_suggestions[] = trim($_d['room_type']);
+try {
+    $_rc = $db->prepare('SELECT room_config FROM iti_program_booking WHERE program_id = ?');
+    $_rc->execute([$id]);
+    if (($_v = trim((string)$_rc->fetchColumn())) !== '') $room_suggestions[] = $_v;
+} catch (\PDOException $e) { /* no booking table yet */ }
+$_rooms = [
+    'en' => ['Double Room', 'Twin Room', 'Single Room', 'Triple Room', 'Family Room', 'Suite'],
+    'it' => ['Camera matrimoniale', 'Camera doppia (letti separati)', 'Camera singola', 'Camera tripla', 'Camera familiare', 'Suite'],
+    'fr' => ['Chambre double', 'Chambre twin', 'Chambre individuelle', 'Chambre triple', 'Chambre familiale', 'Suite'],
+    'es' => ['Habitación doble', 'Habitación twin', 'Habitación individual', 'Habitación triple', 'Habitación familiar', 'Suite'],
+    'de' => ['Doppelzimmer', 'Zweibettzimmer', 'Einzelzimmer', 'Dreibettzimmer', 'Familienzimmer', 'Suite'],
+];
+$room_suggestions = array_values(array_unique(array_merge($room_suggestions, $_rooms[$program['display_language'] ?? 'en'] ?? $_rooms['en'])));
 // A personal programme is for one client in one language: only that language is shown
 // (the other languages are posted back unchanged in hidden fields).
 $one_lang   = $program['program_type'] === 'personal' && in_array($program['display_language'] ?? '', ITI_LANGS, true) ? $program['display_language'] : null;
@@ -673,7 +701,7 @@ include __DIR__ . '/../../includes/layout_header.php';
       <?= $program['program_type']==='sample'?'Sample':'Personal' ?>
       &nbsp;·&nbsp; <?= iti_duration_label((int)$program['duration_days']) ?>
       <?php if ($program['program_type'] === 'personal'): ?>
-      &nbsp;·&nbsp; <?= $program['pax_adults'] ?>A<?= $program['pax_children']?'+'.$program['pax_children'].'C':'' ?>
+      &nbsp;·&nbsp; <?= $program['pax_adults'] ?>A<?= !empty($program['pax_teens'])?'+'.$program['pax_teens'].'T':'' ?><?= $program['pax_children']?'+'.$program['pax_children'].'C':'' ?>
       <?php endif; ?>
       &nbsp;·&nbsp; <span class="badge <?= ITI_PROGRAM_STATUS_BADGE[$program['status']] ?? '' ?>"><?= h($program['status']) ?></span>
       <?php if (!empty($program['ref_number'])): ?>
@@ -891,11 +919,16 @@ include __DIR__ . '/../../includes/layout_header.php';
         <input type="number" name="pax_adults" min="1" value="<?= (int)$program['pax_adults'] ?>">
       </div>
       <div class="form-group">
-        <label>Children <span style="font-weight:400;color:var(--grey-mid);">(pax)</span></label>
+        <label>Teenagers <span style="font-weight:400;color:var(--grey-mid);">(under 16)</span></label>
+        <input type="number" name="pax_teens" min="0" value="<?= (int)($program['pax_teens'] ?? 0) ?>">
+      </div>
+      <div class="form-group">
+        <label>Children <span style="font-weight:400;color:var(--grey-mid);">(under 12)</span></label>
         <input type="number" name="pax_children" min="0" value="<?= (int)$program['pax_children'] ?>">
       </div>
       <?php else: ?>
       <input type="hidden" name="pax_adults"   value="<?= (int)$program['pax_adults'] ?>">
+      <input type="hidden" name="pax_teens"    value="<?= (int)($program['pax_teens'] ?? 0) ?>">
       <input type="hidden" name="pax_children" value="<?= (int)$program['pax_children'] ?>">
       <?php endif; ?>
       <div class="form-group" style="flex-direction:row;align-items:center;gap:10px;align-self:flex-end;">
@@ -1319,6 +1352,16 @@ include __DIR__ . '/../../includes/layout_header.php';
           <input type="hidden" name="end_lodge_id"     value="<?= h($acc_hidden_id) ?>">
           <input type="hidden" name="end_lodge_custom" value="<?= h($current_day_data['end_lodge_custom'] ?? '') ?>">
           <div class="iti-combo-drop" data-opts='<?= json_encode($acc_opts, JSON_HEX_APOS) ?>'></div>
+        </div>
+        <div style="margin-top:10px;max-width:480px;">
+          <label style="font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--grey-dk);display:block;margin-bottom:4px;">Room</label>
+          <input type="text" name="room_type" maxlength="100" list="room-type-list"
+                 value="<?= h($current_day_data['room_type'] ?? '') ?>"
+                 placeholder="e.g. 1 Double + 1 Twin — shown next to the lodge"
+                 style="width:100%;padding:7px 10px;border:1.5px solid var(--grey-lt);border-radius:6px;font-size:.85rem;">
+          <datalist id="room-type-list">
+            <?php foreach ($room_suggestions as $_r): ?><option value="<?= h($_r) ?>"><?php endforeach; ?>
+          </datalist>
         </div>
         </div>
       </div>

@@ -117,7 +117,7 @@ td{vertical-align:top}
         $out = $in !== '' ? iti_mag_date(date('Y-m-d', strtotime($byN[$st['day']]['date'] . ' +' . $st['nights'] . ' days')), $M, false, true) : ''; ?>
 <tr><td class="n nw"><?= h($st['day'] . ($last > $st['day'] ? '–' . $last : '')) ?></td>
 <?php if ($hasDates): ?><td class="nw"><?= h($in) ?></td><td class="nw"><?= h($out) ?></td><?php endif; ?>
-<td><b><?= h($st['lodge']) ?></b><?= $st['dest'] !== '' ? '<br><span class="small">' . h($st['dest']) . '</span>' : '' ?></td>
+<td><b><?= h($st['lodge']) ?></b><?= $st['room'] !== '' ? ' · ' . h($st['room']) : '' ?><?= $st['dest'] !== '' ? '<br><span class="small">' . h($st['dest']) . '</span>' : '' ?></td>
 <td><?= (int)$st['nights'] ?></td><td><?= h(ucfirst($st['meals'])) ?></td></tr>
 <?php endforeach; ?>
 </table>
@@ -134,7 +134,7 @@ td{vertical-align:top}
 <?php foreach ($d['transfers'] as $t): ?><tr><td class="lbl"><?= h($T['transfer']) ?></td><td><?= h($t) ?></td></tr><?php endforeach; ?>
 <?php if ($d['activities']): ?><tr><td class="lbl"><?= h($T['activities']) ?></td><td><?= h(implode(' · ', $d['activities'])) ?></td></tr><?php endif; ?>
 <tr><td class="lbl"><?= h($T['meals']) ?></td><td><?= h($d['meals']) ?></td></tr>
-<?php if ($d['lodge'] !== ''): ?><tr><td class="lbl"><?= h($T['overnight']) ?></td><td><b><?= h($d['lodge']) ?></b><?= ($d['lodge_area'] ?? '') !== '' ? ' <span class="small">· ' . h($d['lodge_area']) . '</span>' : '' ?></td></tr><?php endif; ?>
+<?php if ($d['lodge'] !== ''): ?><tr><td class="lbl"><?= h($T['overnight']) ?></td><td><b><?= h($d['lodge']) ?></b><?= $d['room'] !== '' ? ' · ' . h($d['room']) : '' ?><?= ($d['lodge_area'] ?? '') !== '' ? ' <span class="small">· ' . h($d['lodge_area']) . '</span>' : '' ?></td></tr><?php endif; ?>
 </table>
 <?= iti_mp_paras($d['narrative']) ?>
 </div>

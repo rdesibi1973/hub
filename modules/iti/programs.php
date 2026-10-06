@@ -289,7 +289,7 @@ include __DIR__ . '/../../includes/layout_header.php';
         <td style="font-size:.78rem;text-transform:uppercase;letter-spacing:.05em;color:var(--grey-mid);"><?= h($p['display_language']) ?></td>
         <td style="white-space:nowrap;"><?= iti_duration_label((int)$p['duration_days']) ?></td>
         <?php if ($tab==='personal'): ?>
-        <td style="font-size:.82rem;"><?= $p['pax_adults'] ?>A<?= $p['pax_children'] ? '+'.$p['pax_children'].'C' : '' ?></td>
+        <td style="font-size:.82rem;"><?= $p['pax_adults'] ?>A<?= !empty($p['pax_teens']) ? '+'.$p['pax_teens'].'T' : '' ?><?= $p['pax_children'] ? '+'.$p['pax_children'].'C' : '' ?></td>
         <?php endif; ?>
         <td><span class="badge <?= ITI_PROGRAM_STATUS_BADGE[$p['status']] ?? '' ?>"><?= h($p['status']) ?></span></td>
         <td style="font-size:.75rem;color:var(--grey-mid);white-space:nowrap;"><?= date('d M Y', strtotime($p['updated_at'])) ?></td>

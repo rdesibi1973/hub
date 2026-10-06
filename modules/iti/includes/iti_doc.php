@@ -278,6 +278,7 @@ function iti_doc_data(int $id, string $lang): ?array {
             'lodge_desc' => $lodgeDesc,
             'lodge_photos' => $lodgePhotos,
             'lodge_url'  => $lodgeUrl,
+            'room'       => $lodgeName !== '' ? trim((string)($d['room_type'] ?? '')) : '',   // "1 Double + 1 Twin", free text
             'activities' => $acts,
         ];
     }
@@ -424,7 +425,7 @@ function iti_doc_render(array $D): string {
   <table>
     <tr><th><?= h($T['day']) ?></th><th><?= h($T['route']) ?></th><th><?= h($T['overnight']) ?></th><th><?= h($T['board']) ?></th></tr>
     <?php foreach ($D['days'] as $d): ?>
-      <tr><td class="etn-n"><?= (int)$d['n'] ?></td><td><?= h($d['title']) ?></td><td><?= $d['lodge'] !== '' ? h($d['lodge']) : '—' ?></td><td><?= h(ucfirst($d['meals'])) ?></td></tr>
+      <tr><td class="etn-n"><?= (int)$d['n'] ?></td><td><?= h($d['title']) ?></td><td><?= $d['lodge'] !== '' ? h($d['lodge']) . ($d['room'] !== '' ? '<br><small>' . h($d['room']) . '</small>' : '') : '—' ?></td><td><?= h(ucfirst($d['meals'])) ?></td></tr>
     <?php endforeach; ?>
   </table>
 
@@ -463,7 +464,7 @@ function iti_doc_render(array $D): string {
       <?php if ($d['lodge'] !== ''): ?>
         <div class="etn-box">
           <div class="etn-box-lbl"><?= h($T['overnight']) ?></div>
-          <div class="etn-box-name"><?= h($d['lodge']) ?></div>
+          <div class="etn-box-name"><?= h($d['lodge']) ?><?= $d['room'] !== '' ? ' <span style="font-weight:400">· ' . h($d['room']) . '</span>' : '' ?></div>
           <?= iti_doc_paras($d['lodge_desc']) ?>
         </div>
       <?php endif; ?>

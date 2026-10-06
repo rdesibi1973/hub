@@ -46,6 +46,10 @@ function iti_export_file(int $id, string $lang, string $format): array {
     $name .= '_' . strtoupper($lang) . '.' . $format;
 
     if ($format === 'pdf') {
+        // Published personal programme: the PDF carries the link to the digital itinerary (public page).
+        if (($program['program_type'] ?? '') === 'personal' && !empty($program['is_published']) && !empty($program['public_token'])) {
+            $D['public_url'] = ITI_MODULE_URL . '/itinerary.php?token=' . $program['public_token'];
+        }
         $content = iti_mag_pdf_build($D);
         $mime = 'application/pdf';
     } else {

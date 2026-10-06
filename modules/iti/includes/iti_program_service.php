@@ -42,7 +42,7 @@ function iti_ps_program_out(PDO $db, int $id, string $lang = ''): array {
     $D = iti_doc_data($id, $lang);
     $days = [];
     foreach ($D['days'] as $d) {
-        $days[] = ['day' => $d['n'], 'date' => $d['date'] ?? null, 'title' => $d['title'], 'destination' => $d['dest'], 'lodge' => $d['lodge'],
+        $days[] = ['day' => $d['n'], 'date' => $d['date'] ?? null, 'title' => $d['title'], 'destination' => $d['dest'], 'lodge' => $d['lodge'], 'room' => $d['room'],
                    'meals' => $d['meals'], 'flights' => $d['flights'] ?? [], 'transfers' => $d['transfers'], 'activities' => $d['activities'],
                    'narrative' => $d['narrative'], 'lodge_photos' => count($d['lodge_photos']), 'dest_photo' => $d['dest_photo'] !== ''];
     }
@@ -52,7 +52,7 @@ function iti_ps_program_out(PDO $db, int $id, string $lang = ''): array {
         'lead_request_id' => isset($p['lead_request_id']) && $p['lead_request_id'] ? (int)$p['lead_request_id'] : null,
         'title' => $D['title'], 'subtitle' => $D['subtitle'], 'intro' => $D['intro'], 'language' => $lang,
         'currency' => $p['display_currency'] ?? null, 'start_date' => $p['start_date'] ?? null,
-        'pax_adults' => (int)($p['pax_adults'] ?? 0), 'pax_children' => (int)($p['pax_children'] ?? 0),
+        'pax_adults' => (int)($p['pax_adults'] ?? 0), 'pax_teens' => (int)($p['pax_teens'] ?? 0), 'pax_children' => (int)($p['pax_children'] ?? 0),
         'duration' => $D['duration'], 'published' => (bool)$p['is_published'],
         'prices' => $D['prices'], 'price_notes' => $D['price_notes'],
         'included' => $D['incl'], 'excluded' => $D['excl'], 'days' => $days,
@@ -77,7 +77,7 @@ function iti_ps_samples(PDO $db, string $q = ''): array {
     return $out;
 }
 
-/** Price table + notes of the programme document (read by iti_doc_data()), added once if missing. */
+/** Price table + notes of the programme document and the room type of each night (read by iti_doc_data()), added once if missing. */
 function iti_ps_schema(): void {
     static $done = false;
     if ($done) return;
@@ -85,6 +85,7 @@ function iti_ps_schema(): void {
     try {
         iti_add_column('iti_programs', 'price_table_json', 'TEXT NULL DEFAULT NULL');
         foreach (ITI_PS_LANGS as $l) iti_add_column('iti_programs', 'price_notes_' . $l, 'TEXT NULL DEFAULT NULL');
+        iti_ensure_pax_room();   // pax_teens, room_type
     } catch (PDOException $e) {
         error_log('iti_ps_schema: ' . $e->getMessage());
     }
@@ -93,7 +94,7 @@ function iti_ps_schema(): void {
 /** Header fields an agent may set, limited to the columns the live table really has. */
 function iti_ps_header_fields(): array {
     iti_ps_schema();
-    $f = ['display_language', 'display_currency', 'start_date', 'pax_adults', 'pax_children', 'price_table_json', 'price_notes'];
+    $f = ['display_language', 'display_currency', 'start_date', 'pax_adults', 'pax_teens', 'pax_children', 'price_table_json', 'price_notes'];
     foreach (ITI_PS_LANGS as $l) foreach (['title', 'subtitle', 'intro', 'price_notes'] as $k) $f[] = $k . '_' . $l;
     return array_values(array_intersect($f, iti_table_columns('iti_programs')));
 }
@@ -111,7 +112,7 @@ function iti_ps_header_values(array $fields): array {
             if ($v !== null && $v !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', (string)$v)) throw new InvalidArgumentException('start_date: YYYY-MM-DD');
             $v = $v === '' ? null : $v;
         }
-        if ($k === 'pax_adults' || $k === 'pax_children') $v = max(0, min(60, (int)$v));
+        if ($k === 'pax_adults' || $k === 'pax_teens' || $k === 'pax_children') $v = max(0, min(60, (int)$v));
         if ($k === 'price_table_json') {
             // [{"label": "2 partecipanti", "price": 2905, "currency": "USD"}, …]
             if (is_string($v)) $v = json_decode($v, true);
@@ -135,7 +136,7 @@ function iti_ps_personal(int $id): array {
 /**
  * Proposal for a client: a copy of a sample, or a blank programme (no sample_id) for trips with
  * no matching sample. $in: sample_id?, lead_request_id?, fields? {title_<lang>, subtitle_<lang>,
- * intro_<lang>, start_date, pax_adults, pax_children, display_language, display_currency,
+ * intro_<lang>, start_date, pax_adults, pax_teens (under 16), pax_children (under 12), display_language, display_currency,
  * price_table_json, price_notes_<lang>}, days? [day items, see iti_program_build.php] (replace
  * the sample's days). Blank programme: title_<display_language> and days[] are required.
  */

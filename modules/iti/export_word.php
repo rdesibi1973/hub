@@ -116,7 +116,7 @@ if (iti_field($program,'subtitle',$lang)) {
 $meta = [];
 $meta[] = iti_duration_label((int)$program['duration_days'],$lang);
 if ($req && $req['client_name']) $meta[] = $req['client_name'];
-$meta[] = $program['pax_adults'].'A'.($program['pax_children']?'+'.$program['pax_children'].'C':'');
+$meta[] = $program['pax_adults'].'A'.(!empty($program['pax_teens'])?'+'.$program['pax_teens'].'T':'').($program['pax_children']?'+'.$program['pax_children'].'C':'');
 if ($program['flights_included']) $meta[] = '✈ Flights included';
 $section->addText(implode('  ·  ',$meta), 'meta', ['spaceBefore'=>120,'spaceAfter'=>300]);
 

@@ -143,7 +143,7 @@ include __DIR__ . '/../../includes/layout_header.php';
     <?php endif; ?>
     <div class="meta">
       <div class="meta-item">📅 <?= iti_duration_label((int)$program['duration_days'], $lang) ?></div>
-      <div class="meta-item">👥 <?= $program['pax_adults'] ?> adult<?= $program['pax_adults']!=1?'s':'' ?><?= $program['pax_children']?' + '.$program['pax_children'].' child'.($program['pax_children']!=1?'ren':''):'' ?></div>
+      <div class="meta-item">👥 <?= $program['pax_adults'] ?> adult<?= $program['pax_adults']!=1?'s':'' ?><?= !empty($program['pax_teens'])?' + '.$program['pax_teens'].' teenager'.($program['pax_teens']!=1?'s':'').' (under 16)':'' ?><?= $program['pax_children']?' + '.$program['pax_children'].' child'.($program['pax_children']!=1?'ren':''):'' ?></div>
       <?php if ($program['flights_included']): ?><div class="meta-item">✈️ Flights included</div><?php endif; ?>
     </div>
   </div>
