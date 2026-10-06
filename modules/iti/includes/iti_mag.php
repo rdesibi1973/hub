@@ -17,7 +17,7 @@ function iti_mag_labels(string $lang): array {
         'it' => ['overview' => 'Il viaggio', 'facts' => 'In breve', 'route' => 'Il percorso', 'stays' => 'Le sistemazioni',
                  'days_nav' => 'Giorni', 'prices_nav' => 'Quote', 'info_nav' => 'Info', 'see_day' => 'vedi giorno',
                  'website' => 'Sito web', 'start' => 'Arrivo', 'end' => 'Partenza', 'km' => 'km in linea d\'aria',
-                 'destinations' => 'Destinazioni', 'lodges' => 'Sistemazioni', 'online' => 'Itinerario digitale',
+                 'destinations' => 'Destinazioni', 'lodges' => 'Sistemazioni', 'online' => 'Itinerario digitale', 'online_btn' => 'Apri l’itinerario digitale',
                  'about_dest' => 'La destinazione', 'pdf' => 'Scarica PDF', 'private' => 'Safari privato con guida',
                  'adult' => 'adulto', 'adults' => 'adulti', 'child' => 'bambino', 'children' => 'bambini', 'dates' => 'Date',
                  'teen' => 'ragazzo', 'teens' => 'ragazzi', 'teen_age' => '(minori di 16 anni)', 'child_age' => '(minori di 12 anni)',
@@ -26,7 +26,7 @@ function iti_mag_labels(string $lang): array {
         'en' => ['overview' => 'Your journey', 'facts' => 'At a glance', 'route' => 'The route', 'stays' => 'Where you stay',
                  'days_nav' => 'Days', 'prices_nav' => 'Rates', 'info_nav' => 'Info', 'see_day' => 'see day',
                  'website' => 'Website', 'start' => 'Arrival', 'end' => 'Departure', 'km' => 'km as the crow flies',
-                 'destinations' => 'Destinations', 'lodges' => 'Accommodation', 'online' => 'Digital itinerary',
+                 'destinations' => 'Destinations', 'lodges' => 'Accommodation', 'online' => 'Digital itinerary', 'online_btn' => 'Open the digital itinerary',
                  'about_dest' => 'The destination', 'pdf' => 'Download PDF', 'private' => 'Private guided safari',
                  'adult' => 'adult', 'adults' => 'adults', 'child' => 'child', 'children' => 'children', 'dates' => 'Dates',
                  'teen' => 'teenager', 'teens' => 'teenagers', 'teen_age' => '(under 16)', 'child_age' => '(under 12)',
@@ -35,7 +35,7 @@ function iti_mag_labels(string $lang): array {
         'fr' => ['overview' => 'Votre voyage', 'facts' => 'En bref', 'route' => 'L\'itinéraire', 'stays' => 'Vos hébergements',
                  'days_nav' => 'Jours', 'prices_nav' => 'Tarifs', 'info_nav' => 'Infos', 'see_day' => 'voir jour',
                  'website' => 'Site web', 'start' => 'Arrivée', 'end' => 'Départ', 'km' => 'km à vol d\'oiseau',
-                 'destinations' => 'Destinations', 'lodges' => 'Hébergements', 'online' => 'Itinéraire numérique',
+                 'destinations' => 'Destinations', 'lodges' => 'Hébergements', 'online' => 'Itinéraire numérique', 'online_btn' => 'Ouvrir l’itinéraire numérique',
                  'about_dest' => 'La destination', 'pdf' => 'Télécharger le PDF', 'private' => 'Safari privé avec guide',
                  'adult' => 'adulte', 'adults' => 'adultes', 'child' => 'enfant', 'children' => 'enfants', 'dates' => 'Dates',
                  'teen' => 'adolescent', 'teens' => 'adolescents', 'teen_age' => '(moins de 16 ans)', 'child_age' => '(moins de 12 ans)',
@@ -44,7 +44,7 @@ function iti_mag_labels(string $lang): array {
         'es' => ['overview' => 'Tu viaje', 'facts' => 'En breve', 'route' => 'El recorrido', 'stays' => 'Alojamientos',
                  'days_nav' => 'Días', 'prices_nav' => 'Precios', 'info_nav' => 'Info', 'see_day' => 'ver día',
                  'website' => 'Sitio web', 'start' => 'Llegada', 'end' => 'Salida', 'km' => 'km en línea recta',
-                 'destinations' => 'Destinos', 'lodges' => 'Alojamientos', 'online' => 'Itinerario digital',
+                 'destinations' => 'Destinos', 'lodges' => 'Alojamientos', 'online' => 'Itinerario digital', 'online_btn' => 'Abrir el itinerario digital',
                  'about_dest' => 'El destino', 'pdf' => 'Descargar PDF', 'private' => 'Safari privado con guía',
                  'adult' => 'adulto', 'adults' => 'adultos', 'child' => 'niño', 'children' => 'niños', 'dates' => 'Fechas',
                  'teen' => 'adolescente', 'teens' => 'adolescentes', 'teen_age' => '(menos de 16 años)', 'child_age' => '(menos de 12 años)',
@@ -53,7 +53,7 @@ function iti_mag_labels(string $lang): array {
         'de' => ['overview' => 'Ihre Reise', 'facts' => 'Auf einen Blick', 'route' => 'Die Route', 'stays' => 'Ihre Unterkünfte',
                  'days_nav' => 'Tage', 'prices_nav' => 'Preise', 'info_nav' => 'Infos', 'see_day' => 'siehe Tag',
                  'website' => 'Webseite', 'start' => 'Ankunft', 'end' => 'Abreise', 'km' => 'km Luftlinie',
-                 'destinations' => 'Reiseziele', 'lodges' => 'Unterkünfte', 'online' => 'Digitale Reiseroute',
+                 'destinations' => 'Reiseziele', 'lodges' => 'Unterkünfte', 'online' => 'Digitale Reiseroute', 'online_btn' => 'Digitale Reiseroute öffnen',
                  'about_dest' => 'Das Reiseziel', 'pdf' => 'PDF herunterladen', 'private' => 'Private Safari mit Guide',
                  'adult' => 'Erwachsener', 'adults' => 'Erwachsene', 'child' => 'Kind', 'children' => 'Kinder', 'dates' => 'Reisedaten',
                  'teen' => 'Jugendlicher', 'teens' => 'Jugendliche', 'teen_age' => '(unter 16)', 'child_age' => '(unter 12)',
@@ -599,7 +599,7 @@ function iti_mag_render(array $D, string $publicUrl = '', bool $printBtn = true)
     <div>
       <div class="mag-serif">Savannah Explorers</div>
       <?= h($D['contacts'][0]['phone'] ?? '') ?> · <a href="mailto:<?= h($D['contacts'][0]['email'] ?? '') ?>"><?= h($D['contacts'][0]['email'] ?? '') ?></a>
-      <?php if ($publicUrl !== ''): ?><br><?= h($M['online']) ?>: <a href="<?= h($publicUrl) ?>"><?= h($publicUrl) ?></a><?php endif; ?>
+      <?php if ($publicUrl !== ''): ?><br><a href="<?= h($publicUrl) ?>" target="_blank" style="display:inline-block;margin-top:10px;background:var(--red);color:#fff;font-weight:700;padding:7px 16px;border-radius:18px;text-decoration:none"><?= h($M['online_btn']) ?> →</a><?php endif; ?>
     </div>
   </div></footer>
 </div>
