@@ -33,6 +33,11 @@ Rispondimi in italiano. Mail e documenti per clienti / agenzie nella lingua del 
 - **Duplicati:** prima di creare una richiesta cerca con `find_requests` (nome, email, cartella).
 - **Fatture:** `SE-…` = Savannah Explorers; `SH-…` = Savannah Holidays → pagamento sul conto **AfrAsia**,
   lo controllo io (non l'accountant). Le vecchie fatture Zoho sono `INV-…` (`import_zoho_invoice`).
+- **Creare / modificare fatture:** `create_invoice` (con `request_id`, `agency_id` per le agenzie, `issuer` SE / SH,
+  `items`) e `update_invoice` (solo i campi da cambiare; `items` sostituisce tutte le righe). Sempre prova prima,
+  mostrami righe e totale, confirm solo dopo il mio ok. Se il controllo col Calc Excel fallisce (`calc_check`),
+  dimmi la differenza: non usare `ignore_checks` né `allow_duplicate` / `allow_overpaid` senza chiedermelo.
+  Dopo una creazione o modifica proponimi `save_invoice_pdf` (con `overwrite: true` se il PDF c'era già).
 - **Pagamenti:** `add_invoice_payment` rifiuta i doppioni (stesso importo + riferimento): non forzare
   `allow_duplicate` senza chiedermelo. Dopo un pagamento proponimi lo stato cartella giusto
   (DEPOSIT / BALANCE / FULLY PAID) e il PDF aggiornato in Dropbox (`save_invoice_pdf`).
@@ -41,10 +46,10 @@ Rispondimi in italiano. Mail e documenti per clienti / agenzie nella lingua del 
 ## Flusso di una pratica
 1. Mail / lead → `find_requests` → `create_request` (agenzia, agente, data, pax, richiesta iniziale).
 2. Programma standard → `copy_program`; prezzi → `get_rates`; Calc → `fill_calc` (prova, poi confirm), `read_calc`.
-   Programma per il cliente (proposta) → vedi **Programmi per il cliente** sotto.
+   Programma per il cliente (proposta, PDF / Word con `iti_document`) → vedi **Programmi per il cliente** sotto.
 3. Conferma → `confirm_preview`, poi `confirm_booking` (cartella in `/001_Safari`, stato Booked) → `send_booking_email`.
    Poi programma finale dal Calc (sotto).
-4. Fattura (creata nel Hub) → pagamenti `add_invoice_payment` → `update_folder_status` → `save_invoice_pdf`.
+4. Fattura (`create_invoice`, o creata da me nel Hub) → pagamenti `add_invoice_payment` → `update_folder_status` → `save_invoice_pdf`.
 5. Prima della partenza: CK (documenti, voli, voucher).
 
 Cartelle Dropbox: richieste in `/2026/<Nome>(<Agenzia>-<Agente>)`, pratiche confermate in `/001_Safari/`
@@ -63,11 +68,19 @@ mostrami il risultato, poi confirm dopo il mio ok.
   `iti_final_from_calc` (prova, poi confirm). Se manca il sample per il codice del Calc, dimmelo: non inventarlo.
 - **Controllo:** `iti_program` → riassumimi giorni, lodge, date, prezzi; segnalami giorni senza foto o testo.
   Anteprima interna: `links.preview`.
-- **File Word / PDF:** `iti_document` con `program_id`, `format` (`pdf` o `docx` = Word modificabile per l'agenzia),
-  `lang?` → il file in base64 (salvalo e dammelo); con `save: true` (o `request_id` / `folder_path`) lo carica
-  nella cartella pratica in Dropbox. Se il file c'è già, chiedimi prima di usare `overwrite: true`.
+- **File PDF / Word:** `iti_document` con `program_id`, `format` = `pdf` (default; per cliente / agenzia) o `docx`
+  (Word modificabile, per le agenzie che lo passano sulla loro carta intestata) o `guide` (PDF per la guida safari:
+  giorno per giorno + riepilogo transfer e alloggi, senza foto né prezzi; solo programmi personal, default inglese),
+  `lang?` (default la lingua del programma).
+  Risposta: `file.content_base64` → decodificalo e salvalo come `file.name`. Pochi MB, fino a un minuto: non riprovare
+  subito se è lento. Non serve il login Hub (i `links.word` / `links.pdf` invece sì: non usarli).
+  - In Dropbox: `save: true` (cartella della pratica collegata al programma) o `request_id` / `folder_path`;
+    se il file c'è già (409) chiedimi prima di usare `overwrite: true` o un altro `save_as`.
+  - Prima di generarlo fai il **Controllo** (sopra): il file fotografa il programma in quel momento, dopo ogni
+    modifica va rigenerato.
 - **Invio:** `iti_publish` (prova, poi confirm) → `links.public` è il link per il cliente (Magazine con "Scarica PDF").
-  Il link lo metto io nella mail; tu preparala come bozza (`mail_draft`).
+  Il link lo metto io nella mail; tu preparala come bozza (`mail_draft`), con il PDF in `attachments[]`
+  (`{name: file.name, content_base64}`) se te lo chiedo.
 - **Foto / dati dei lodge e destinazioni:** `iti_lodges` / `iti_destinations` con `missing=photos|photo|coords|…`;
   foto con `iti_lodge_photos` / `iti_destination_photo` (link dal sito ufficiale del lodge o foto nostre in
   `TheOrangiCollection\Photos`), testi e contatti con `iti_update_lodge` / `iti_update_destination`. Sempre prova prima.
