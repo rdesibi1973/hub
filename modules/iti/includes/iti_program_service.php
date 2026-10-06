@@ -28,9 +28,7 @@ function iti_ps_links(array $p, string $lang = ''): array {
         'guide'   => ($p['program_type'] ?? '') === 'personal' ? $base . '/export_mag_word.php?id=' . (int)$p['id'] . '&lang=' . $lang . '&format=guide' : null,
         'public'  => null,
     ];
-    if (!empty($p['is_published']) && !empty($p['public_token'])) {
-        $out['public'] = $base . '/itinerary.php?token=' . $p['public_token'] . '&lang=' . $lang;
-    }
+    if (($pub = iti_public_url($p)) !== '') $out['public'] = $pub . '&lang=' . $lang;   // personal: always (token on first use)
     return $out;
 }
 
@@ -53,7 +51,7 @@ function iti_ps_program_out(PDO $db, int $id, string $lang = ''): array {
         'title' => $D['title'], 'subtitle' => $D['subtitle'], 'intro' => $D['intro'], 'language' => $lang,
         'currency' => $p['display_currency'] ?? null, 'start_date' => $p['start_date'] ?? null,
         'pax_adults' => (int)($p['pax_adults'] ?? 0), 'pax_teens' => (int)($p['pax_teens'] ?? 0), 'pax_children' => (int)($p['pax_children'] ?? 0),
-        'duration' => $D['duration'], 'published' => (bool)$p['is_published'],
+        'duration' => $D['duration'], 'published' => iti_program_is_public($p),   // personal: always, until cancelled
         'prices' => $D['prices'], 'price_notes' => $D['price_notes'],
         'included' => $D['incl'], 'excluded' => $D['excl'], 'days' => $days,
         'structure' => iti_pb_days_raw($db, $id),   // the days as stored (ids), same shape iti_set_days takes

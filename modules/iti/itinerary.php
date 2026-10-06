@@ -15,7 +15,7 @@ if ($token === '') {
 
 // Cerca il programma per token
 $db  = db();
-$stmt = $db->prepare('SELECT * FROM iti_programs WHERE public_token=? AND is_published=1');
+$stmt = $db->prepare('SELECT * FROM iti_programs WHERE public_token=? AND ' . ITI_PUBLIC_SQL);   // personal: always on until cancelled
 $stmt->execute([$token]);
 $program = $stmt->fetch();
 

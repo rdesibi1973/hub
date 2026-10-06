@@ -619,7 +619,8 @@ $current_acts      = $all_days_data[(int)($days[0]['id'] ?? 0)]['acts']      ?? 
 $current_flights   = $all_days_data[(int)($days[0]['id'] ?? 0)]['flights']   ?? [];
 $current_transfers = $all_days_data[(int)($days[0]['id'] ?? 0)]['transfers'] ?? [];
 
-$public_url = BASE_URL . '/modules/iti/itinerary.php?token=' . ($program['public_token'] ?? '');
+$is_personal = ($program['program_type'] ?? '') === 'personal';
+$public_url = iti_public_url($program);   // personal: always on (token made on first use), no Publish step; sample: once published
 
 // Room field suggestions: rooms already typed in this programme, the Calc's room line (final
 // programme), then the usual room types in the programme's language.
@@ -715,9 +716,12 @@ include __DIR__ . '/../../includes/layout_header.php';
     <button type="button" id="btn-save-current" onclick="saveCurrentDay()" class="btn btn-red btn-sm">💾 Save</button>
     <?php endif; ?>
     <a href="program_doc.php?id=<?= $id ?>" class="btn btn-outline btn-sm" target="_blank" title="The program as the client sees it (translate missing texts there)">👁 Preview</a>
-    <?php if ($program['is_published']): ?>
+    <?php if ($public_url !== ''): ?>
     <a href="<?= h($public_url) ?>" target="_blank" class="btn btn-green btn-sm">🔗 Public Link</a>
     <button type="button" class="btn btn-outline btn-sm" onclick="navigator.clipboard.writeText(<?= h(json_encode($public_url)) ?>).then(()=>{this.textContent='✔ Copiato'})">📋 Copy link</button>
+    <?php endif; ?>
+    <?php if ($is_personal): /* no Publish / Unpublish: the link is always on until the program is cancelled */ ?>
+    <?php elseif ($program['is_published']): ?>
     <form method="POST" action="program_edit.php?id=<?= $id ?>" style="display:inline;">
       <input type="hidden" name="_sub" value="unpublish">
       <button class="btn btn-outline btn-sm">Unpublish</button>
@@ -942,9 +946,9 @@ include __DIR__ . '/../../includes/layout_header.php';
 
     <div class="form-actions">
       <button type="submit" class="btn btn-red">💾 Save</button>
-      <?php if ($program['is_published']): ?>
+      <?php if ($public_url !== ''): ?>
       <div style="margin-left:auto;display:flex;align-items:center;gap:8px;">
-        <span style="font-size:.78rem;color:var(--green);font-weight:700;">🟢 Published</span>
+        <span style="font-size:.78rem;color:var(--green);font-weight:700;">🟢 <?= $is_personal ? 'Online' : 'Published' ?></span>
         <input type="text" readonly value="<?= h($public_url) ?>" onclick="this.select()" style="width:360px;font-size:.75rem;">
         <button type="button" class="btn btn-outline btn-sm" onclick="navigator.clipboard.writeText(<?= h(json_encode($public_url)) ?>).then(()=>{this.textContent='✔ Copiato'})">📋 Copy</button>
         <a href="<?= h($public_url) ?>" target="_blank" class="btn btn-green btn-sm">Open public link</a>

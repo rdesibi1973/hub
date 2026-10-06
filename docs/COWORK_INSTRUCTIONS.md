@@ -78,7 +78,8 @@ mostrami il risultato, poi confirm dopo il mio ok.
     se il file c'è già (409) chiedimi prima di usare `overwrite: true` o un altro `save_as`.
   - Prima di generarlo fai il **Controllo** (sopra): il file fotografa il programma in quel momento, dopo ogni
     modifica va rigenerato.
-- **Invio:** `iti_publish` (prova, poi confirm) → `links.public` è il link per il cliente (Magazine con "Scarica PDF").
+- **Invio:** `links.public` è il link per il cliente (Magazine con "Scarica PDF"): per i programmi personal è sempre
+  attivo, non serve `iti_publish`. C'è anche nel PDF e nel Word.
   Il link lo metto io nella mail; tu preparala come bozza (`mail_draft`), con il PDF in `attachments[]`
   (`{name: file.name, content_base64}`) se te lo chiedo.
 - **Foto / dati dei lodge e destinazioni:** `iti_lodges` / `iti_destinations` con `missing=photos|photo|coords|…`;

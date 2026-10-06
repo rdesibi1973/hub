@@ -42,14 +42,11 @@ if ($missing > 0) {
 }
 if ($msg !== '') $extra .= '<span style="font-weight:600;color:' . (strpos($msg, '✖') === 0 ? '#C0211B' : '#1A6B3A') . '">' . h($msg) . '</span>';
 $extra .= '<a href="program_edit.php?id=' . $id . '">✏️ Edit</a>';
-if (!empty($program['is_published']) && !empty($program['public_token'])) {
-    $extra .= '<a href="itinerary.php?token=' . h($program['public_token']) . '&lang=' . h($lang) . '" target="_blank">🔗 Public link</a>';
-}
+$pub = iti_public_url($program);   // personal: always (token made on first use); sample: once published
+if ($pub !== '') $extra .= '<a href="' . h($pub) . '&lang=' . h($lang) . '" target="_blank">🔗 Public link</a>';
 $extra .= '<a href="export_mag_word.php?id=' . $id . '&lang=' . h($lang) . '">📄 Word</a>';   // editable, for agencies (Hub only)
 $extra .= '<a href="export_mag_word.php?id=' . $id . '&lang=' . h($lang) . '&format=pdf">📕 PDF</a>';   // magazine, rendered on the server
 if ($personal) $extra .= '<a href="export_mag_word.php?id=' . $id . '&lang=' . h($lang) . '&format=guide" title="Day by day + transfers and accommodation, no photos / intro / prices">🧭 Guide PDF</a>';
 require_once __DIR__ . '/includes/iti_mag.php';
-// Published personal programme: the printed page carries the link to the digital itinerary (as the PDF does).
-$pub = ($personal && !empty($program['is_published']) && !empty($program['public_token']))
-     ? ITI_MODULE_URL . '/itinerary.php?token=' . $program['public_token'] . '&lang=' . $lang : '';
-iti_mag_page($D, iti_doc_lang_bar($lang, ['id' => $id], $extra, $personal ? [$lang] : null), $pub, false);   // no nav PDF button: the bar has 📕 PDF
+// Personal programme: the printed page carries the link to the digital itinerary (as the PDF and the Word do).
+iti_mag_page($D, iti_doc_lang_bar($lang, ['id' => $id], $extra, $personal ? [$lang] : null), $personal ? $pub : '', false);   // no nav PDF button: the bar has 📕 PDF

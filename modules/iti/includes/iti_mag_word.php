@@ -133,7 +133,13 @@ function iti_mag_word_build(array $D): array {
     if ($D['subtitle'] !== '') $s->addText($D['subtitle'], ['name' => 'Calibri', 'size' => 13, 'color' => $INK], ['spaceAfter' => 100]);
     if ($routeNames && $D['subtitle'] === '') $s->addText(implode(' · ', $routeNames), 'mwRoute', ['spaceAfter' => 100]);
     $facts = array_filter([$dateRange, $D['duration'], $M['private'], $paxLabel]);
-    $s->addText(implode('   ·   ', $facts), ['name' => 'Calibri', 'size' => 10, 'bold' => true, 'color' => $RED], ['spaceAfter' => 240]);
+    $pub = isset($D['public_url']) ? (string)$D['public_url'] : '';   // digital itinerary (personal programme), set by iti_export_file()
+    $s->addText(implode('   ·   ', $facts), ['name' => 'Calibri', 'size' => 10, 'bold' => true, 'color' => $RED], ['spaceAfter' => $pub !== '' ? 60 : 240]);
+    if ($pub !== '') {
+        $pr = $s->addTextRun(['spaceAfter' => 240]);
+        $pr->addText($M['online'] . ': ', 'mwSmall');
+        $pr->addLink($pub, $pub, ['name' => 'Calibri', 'size' => 9, 'color' => $RED, 'underline' => 'single']);
+    }
     if (($c = iti_mag_cover($D)) !== '' && ($ci = iti_mw_img($c, 1400, $tmp))) $s->addImage($ci, ['width' => $W, 'alignment' => 'center']);
     $s->addPageBreak();
 
@@ -301,6 +307,10 @@ function iti_mag_word_build(array $D): array {
     foreach ($D['contacts'] as $c) {
         $ct->addRow();
         foreach ([$c['name'], $c['phone'], $c['email']] as $v) $ct->addCell(3230, ['borderBottomSize' => 4, 'borderBottomColor' => 'E6DDD0'])->addText((string)$v, 'mwBody', 'mwTight');
+    }
+    if ($pub !== '') {
+        $s->addText(mb_strtoupper($M['online']), 'mwTh', ['spaceBefore' => 200, 'spaceAfter' => 0]);
+        $s->addLink($pub, $pub, ['name' => 'Calibri', 'size' => 9, 'color' => $RED, 'underline' => 'single']);
     }
     if ($D['terms'] !== '') {
         $s->addTextBreak(1);

@@ -192,13 +192,14 @@ so edited translations are kept). Dry-run unless `"confirm": true`. Lets Claude 
 Code: `modules/iti/includes/iti_program_service.php` (+ `iti_final.php` for the Calc). Only **personal**
 programs are changed; samples stay on the Hub pages. Every response with a program carries `links`:
 `preview` (internal, magazine), `edit`, `word` (editable .docx for agencies, Hub login), `public` (client link,
-magazine layout — only once published).
+magazine layout). A personal program's public link is always on — no publishing step; the token is made the
+first time it is needed — until the program is cancelled. The PDF and the Word carry it too.
 
 Typical flows:
 - **Proposal:** `iti_samples` → `iti_create_personal` (sample + client data) → `iti_update_program` / `iti_update_day`
-  for the client's changes → `iti_publish` → send `links.public`.
+  for the client's changes → send `links.public`.
 - **Final (after booking):** `iti_calc_plan` (reads the request's `*_Calc.xlsx` from Dropbox) → if `unmapped`,
-  `iti_save_alias` for each text → `iti_final_from_calc` with confirm → `iti_publish`.
+  `iti_save_alias` for each text → `iti_final_from_calc` with confirm → `links.public`.
 
 #### `iti_samples` (GET)
 `q?` → `samples[]` `{id, code (Calc code), title, route, language, days}`.
@@ -285,6 +286,7 @@ Dry-run unless confirm.
 
 #### `iti_publish` (POST)
 `program_id`, `publish?` (default true; false = unpublish) → `links.public`. Dry-run unless confirm.
+Only needed for samples: a personal program's link is on without it (unpublish does not turn it off; cancel does).
 
 #### `iti_calc_plan` (GET) / `iti_final_from_calc` (POST)
 `request_id`, `sample_id?` (default: the sample whose Calc code matches the file name), `lang?`, `file?`, `sheet?`.

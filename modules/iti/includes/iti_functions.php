@@ -500,9 +500,32 @@ function iti_get_program(int $id): array|false {
     return $st->fetch();
 }
 
+// A personal program's public page is always on (its own link, no publishing step) until it is
+// cancelled; a sample needs Publish. Same rule in SQL (ITI_PUBLIC_SQL) and in PHP (iti_program_is_public()).
+const ITI_PUBLIC_SQL = "(is_published = 1 OR (program_type = 'personal' AND status <> 'cancelled'))";
+
+function iti_program_is_public(array $p): bool {
+    return !empty($p['is_published']) || (($p['program_type'] ?? '') === 'personal' && ($p['status'] ?? '') !== 'cancelled');
+}
+
+/**
+ * Link to the digital itinerary (public page), '' when there is none. A personal program gets
+ * its token the first time the link is needed (Hub page, PDF, Word, Agent API).
+ */
+function iti_public_url(array &$p): string {
+    if (!iti_program_is_public($p)) return '';
+    if (empty($p['public_token'])) {
+        db()->prepare('UPDATE iti_programs SET public_token = COALESCE(public_token, UUID()) WHERE id = ?')->execute([(int)$p['id']]);
+        $st = db()->prepare('SELECT public_token FROM iti_programs WHERE id = ?');
+        $st->execute([(int)$p['id']]);
+        $p['public_token'] = (string)$st->fetchColumn();
+    }
+    return ITI_MODULE_URL . '/itinerary.php?token=' . $p['public_token'];
+}
+
 function iti_get_program_by_token(string $token): array|false {
     $st = db()->prepare(
-        'SELECT * FROM iti_programs WHERE public_token = ? AND is_published = 1'
+        'SELECT * FROM iti_programs WHERE public_token = ? AND ' . ITI_PUBLIC_SQL
     );
     $st->execute([$token]);
     return $st->fetch();
