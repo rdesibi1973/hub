@@ -26,6 +26,9 @@ function iti_export_file(int $id, string $lang, string $format): array {
     if (!in_array($format, ITI_EXPORT_FORMATS, true)) throw new InvalidArgumentException('format must be pdf, docx or guide');
     $program = $id > 0 ? iti_get_program($id) : false;
     if (!$program) throw new InvalidArgumentException('Program ' . $id . ' not found');
+    if ($format === 'guide' && ($program['program_type'] ?? '') !== 'personal') {
+        throw new InvalidArgumentException('The guide sheet is only for personal programmes (program ' . $id . ' is a ' . ($program['program_type'] ?: 'sample') . ')');
+    }
     if ($lang === '') $lang = $format === 'guide' ? 'en' : (string)($program['display_language'] ?? 'it');
     if (!in_array($lang, ITI_LANGUAGES, true)) $lang = 'it';
 

@@ -12,7 +12,8 @@
  *   destination_id | destination (name or code), destination_custom,
  *   start_lodge_id, start_destination_id, start_custom, transfer_route_id, transfer_custom,
  *   meal_breakfast / meal_lunch / meal_dinner / meal_all_inclusive (0/1),
- *   transfers  [ "Dar airport – Serena Hotel, 40 min" … ]                 (replaces the day's list)
+ *   transfers  [ "Dar airport – Serena Hotel, 40 min" | {description, text_<lang>?} … ]  (replaces the day's list;
+ *              an unchanged text keeps its translations)
  *   activities [ {activity_id} | {activity: "<name>"} | {custom: "<text>", text_<lang>?: "<translation>"} … ]
  *   flights    [ {flight_route_id | custom, airline?, dep?: "07:40", arr?: "10:05", note_<lang>?} … ]
  */
@@ -77,7 +78,14 @@ function iti_pb_day_item(PDO $db, array $f): array {
     }
     if ($children['transfers'] !== null) {
         $tr = [];
-        foreach ($children['transfers'] as $t) { $t = trim(is_array($t) ? (string)($t['description'] ?? $t['text'] ?? '') : (string)$t); if ($t !== '') $tr[] = mb_substr($t, 0, 255); }
+        foreach ($children['transfers'] as $t) {
+            $txt = trim(is_array($t) ? (string)($t['description'] ?? $t['text'] ?? '') : (string)$t);
+            if ($txt === '') continue;
+            $row = ['description' => mb_substr($txt, 0, 255), 'tr' => []];
+            // {"description": "…", "text_en": "…"}: translations given with the transfer
+            if (is_array($t)) foreach (ITI_TEXT_LANGS as $l) if (trim((string)($t['text_' . $l] ?? '')) !== '') $row['tr'][$l] = mb_substr(trim((string)$t['text_' . $l]), 0, 500);
+            $tr[] = $row;
+        }
         $children['transfers'] = $tr;
     }
     if ($children['activities'] !== null) {
@@ -137,10 +145,7 @@ function iti_pb_day_write(PDO $db, int $dayId, array $item): void {
         $args[] = $dayId;
         $db->prepare('UPDATE iti_program_days SET ' . implode(', ', $sets) . ' WHERE id = ?')->execute($args);
     }
-    if ($item['transfers'] !== null) {
-        $db->prepare('DELETE FROM iti_day_transfers WHERE program_day_id = ?')->execute([$dayId]);
-        foreach ($item['transfers'] as $i => $t) $db->prepare('INSERT INTO iti_day_transfers (program_day_id, description, sort_order) VALUES (?,?,?)')->execute([$dayId, $t, $i + 1]);
-    }
+    if ($item['transfers'] !== null) iti_transfers_replace($db, $dayId, $item['transfers']);
     foreach (['activities' => 'iti_day_activities', 'flights' => 'iti_day_flights'] as $k => $t) {
         if ($item[$k] === null) continue;
         $db->prepare("DELETE FROM $t WHERE program_day_id = ?")->execute([$dayId]);

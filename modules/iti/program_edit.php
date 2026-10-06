@@ -190,14 +190,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     )->execute([$own_arr, $own_arr_nights, $day_id]);
                 } catch (\PDOException $oa_e) { /* columns not yet in DB — skip silently */ }
 
-                // ── Transfers: delete all then re-insert from array ──
-                $db->prepare('DELETE FROM iti_day_transfers WHERE program_day_id=?')->execute([$day_id]);
-                $tr_descs = $_POST['transfer_desc'] ?? [];
-                foreach (array_values($tr_descs) as $i => $desc) {
-                    $desc = trim($desc);
-                    if ($desc === '') continue;
-                    $db->prepare('INSERT INTO iti_day_transfers (program_day_id,description,sort_order) VALUES (?,?,?)')->execute([$day_id, $desc, $i+1]);
-                }
+                // ── Transfers: re-insert from array (unchanged texts keep their translations) ──
+                iti_transfers_replace($db, $day_id, array_values((array)($_POST['transfer_desc'] ?? [])));
 
                 // ── Activities: delete all then re-insert from array ──
                 $db->prepare('DELETE FROM iti_day_activities WHERE program_day_id=?')->execute([$day_id]);
@@ -708,7 +702,9 @@ include __DIR__ . '/../../includes/layout_header.php';
     </form>
     <?php endif; ?>
     <a href="export_mag_word.php?id=<?= $id ?>" class="btn btn-outline btn-sm">⬇ Word</a>
+    <?php if (($program['program_type'] ?? '') === 'personal'): ?>
     <a href="export_mag_word.php?id=<?= $id ?>&format=guide" class="btn btn-outline btn-sm" title="PDF for the safari guide: day by day + transfers and accommodation, no photos / intro / prices">🧭 Guide PDF</a>
+    <?php endif; ?>
     <?php if ($program['status'] !== 'cancelled'): ?>
     <form method="POST" action="program_edit.php?id=<?= $id ?>" style="display:inline;"
           onsubmit="return confirm('Cancel this program?')">

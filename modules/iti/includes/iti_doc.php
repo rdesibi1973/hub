@@ -201,7 +201,10 @@ function iti_doc_data(int $id, string $lang): ?array {
     $out = []; $seenLodge = []; $seenDest = [];
     foreach ($days as $d) {
         $transfers = [];
-        foreach (iti_get_day_transfers((int)$d['id']) as $t) { if (trim($t['description']) !== '') $transfers[] = trim($t['description']); }
+        foreach (iti_get_day_transfers((int)$d['id']) as $t) {   // translation in $lang, else the original text
+            $tx = trim((string)($t['description_' . $lang] ?? '')) ?: trim((string)$t['description']);
+            if ($tx !== '') $transfers[] = $tx;
+        }
         $flights = [];
         $fltSt->execute([(int)$d['id']]);
         foreach ($fltSt->fetchAll() as $f) {

@@ -4,7 +4,7 @@
  * translating them with Claude from the programme's source language.
  *
  * Covers: programme title / subtitle / intro, day titles and narratives, activity
- * notes, included / not included, and the descriptions of the programme's lodges
+ * notes, day transfers, included / not included, and the descriptions of the programme's lodges
  * and destinations. Only EMPTY target fields are written — edited translations are
  * never overwritten. Raw HTTP to the Messages API (the Anthropic PHP SDK needs a
  * newer PHP than the server's 8.0). Key: ANTHROPIC_API_KEY in includes/config.php.

@@ -12,6 +12,8 @@ if (!defined('DB_HOST')) {
 
 static $_iti_pdo = null;
 
+require_once __DIR__ . '/iti_texts.php';   // translatable texts, day transfers (iti_transfers_replace)
+
 // The Agent API loads this file next to the leads config, which already has db().
 if (!function_exists('db')) {
 function db(): PDO {

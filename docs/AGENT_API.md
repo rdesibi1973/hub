@@ -180,7 +180,7 @@ other members.
 
 ### `iti_texts` (GET)
 `program_id`, `lang` (`en`|`it`|`fr`|`es`|`de`), `all?` → `from` (source language) and `items[]` `{key, source, target}`:
-the texts to translate — programme title/route/intro, day titles and texts, activity notes, included / not included,
+the texts to translate — programme title/route/intro, day titles and texts, activity notes, day transfers (`t<id>`), included / not included,
 and the descriptions of the programme's lodges and destinations. Without `all`, only those still empty in `lang`.
 
 ### `iti_save_texts` (POST)
@@ -206,14 +206,14 @@ Typical flows:
 #### `iti_program` (GET)
 `program_id`, `lang?` → header (title, subtitle, intro, start_date, pax, prices, included / excluded), `days[]`
 (`day, date, title, destination, lodge, meals, transfers, activities, narrative, lodge_photos, dest_photo`) and `links`
-(`preview`, `edit`, `word`, `pdf`, `guide`, `public` — `word` / `pdf` / `guide` need a Hub login).
+(`preview`, `edit`, `word`, `pdf`, `guide` (personal only, else null), `public` — `word` / `pdf` / `guide` need a Hub login).
 
 #### `iti_document` (GET)
 The programme as a file in the magazine layout (cover, route map, stays, day by day with photos, prices,
 included / excluded, contacts, terms). `program_id`, `format?` (`pdf` default, rendered on the server with Dompdf;
 `docx` = editable Word for agencies; `guide` = PDF for the safari guide: transfer / flight and accommodation
 recap with check-in / check-out, then the day by day — no photos, intro, prices, lodge descriptions or terms,
-file `…_GUIDE_<LANG>.pdf`), `lang?` (default: the programme's language; English for `guide`).
+file `…_GUIDE_<LANG>.pdf`; **personal programmes only**, a sample → 400), `lang?` (default: the programme's language; English for `guide`).
 → `file {program_id, name, mime, size, format, lang, content_base64}` (`format` is the file type: `guide` → `pdf`). Decode and save it as `file.name`.
 To put it in Dropbox instead: `save: true` (the programme's `lead_request_id` folder), or `request_id` / `folder_path`;
 `save_as?` (file name), `overwrite?` (an existing file is kept unless true; Dropbox keeps the old version)
@@ -244,7 +244,8 @@ Every key optional: `day_title_<lang>`, `narrative_<lang>`, `end_lodge_id` | `en
 `destination_id` | `destination` (name or code), `destination_custom`, `start_lodge_id`, `start_destination_id`,
 `start_custom`, `transfer_route_id`, `transfer_custom`, `meal_breakfast` / `meal_lunch` / `meal_dinner` /
 `meal_all_inclusive` (0/1), and three lists — each one given **replaces** the day's list (`[]` = none):
-- `transfers`: `["Dar airport – Serena Hotel, about 40 min", …]` (text shown on the day, programme language);
+- `transfers`: `["Dar airport – Serena Hotel, about 40 min", …]` (text shown on the day, programme language) or
+  `[{description, text_<lang>?: "<translation>"}]`; a transfer whose text is unchanged keeps its translations;
 - `activities`: `[{activity_id} | {activity: "<name>"} | {custom: "<text>", text_<lang>?: "<translation>"}]` (see `iti_activities`; a catalogue activity shows its own name);
 - `flights`: `[{flight_route_id | custom, airline?, dep?: "07:40", arr?: "10:05", note_<lang>?}]` (see `iti_flight_routes`).
 `iti_program` returns `structure[]`: the stored days in this same shape (with ids), to edit and send back.

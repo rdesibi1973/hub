@@ -221,6 +221,7 @@ function iti_final_generate(PDO $db, int $requestId, array $calc, int $sampleId,
         'superseded_at'    => null,
     ));
 
+    iti_transfers_schema($db);   // DDL: before the transaction (transfer texts in every language below)
     try {
         $db->beginTransaction();
         $st = $db->prepare('SELECT * FROM iti_program_days WHERE program_id = ? ORDER BY day_number');
@@ -297,8 +298,8 @@ function iti_final_generate(PDO $db, int $requestId, array $calc, int $sampleId,
                 // Transfer / flight of an added day, from its route alias.
                 if ($d['route'] && $d['route']['transfer_route_id'] && ($r = $routeName($d['route']['transfer_route_id']))) {
                     $notes = iti_build_transfer_notes($r['f'], $r['t'], (int)$r['duration_min'], $r['distance_km'] !== null ? (int)$r['distance_km'] : 0);
-                    $db->prepare('INSERT INTO iti_day_transfers (program_day_id, description, sort_order) VALUES (?,?,1)')
-                       ->execute(array($dayId, $notes[$lang] ?? $notes['en']));
+                    $tr = array('description' => $notes[$lang] ?? $notes['en'], 'tr' => $notes);   // all languages at once
+                    iti_transfers_replace($db, $dayId, array($tr));
                 }
                 if ($d['route'] && $d['route']['flight_route_id']) {
                     $db->prepare('INSERT INTO iti_day_flights (program_day_id, flight_route_id, sort_order) VALUES (?,?,1)')
