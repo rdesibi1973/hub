@@ -471,7 +471,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         foreach ($labels as $i => $label) {
             $label = trim((string)$label);
             if ($label === '') continue;
-            $row   = ['label' => $label];
+            $row   = ['label' => $label, 'bold' => ($_POST['dp_bold'][$i] ?? '0') === '1'];
             $price = str_replace([' ', ','], ['', '.'], trim((string)($_POST['dp_price'][$i] ?? '')));
             if ($price !== '' && is_numeric($price)) {
                 $row['price']    = (float)$price;
@@ -1534,12 +1534,14 @@ include __DIR__ . '/../../includes/layout_header.php';
       </tr>
     </thead>
     <tbody id="dp-rows">
-    <?php foreach ($dp_rows ?: [[]] as $r): ?>
+    <?php foreach ($dp_rows ?: [[]] as $r): $dp_b = $r && iti_doc_price_bold($r); ?>
       <tr class="dp-row" style="border-top:1px solid var(--grey-lt);">
-        <td style="padding:6px;"><input type="text" name="dp_label[]" maxlength="300" value="<?= h($r['label'] ?? '') ?>" placeholder="e.g. Pumba Safari" style="width:100%;"></td>
+        <td style="padding:6px;"><input type="text" name="dp_label[]" maxlength="300" value="<?= h($r['label'] ?? '') ?>" placeholder="e.g. Pumba Safari" style="width:100%;<?= $dp_b ? 'font-weight:700;' : '' ?>">
+          <input type="hidden" name="dp_bold[]" value="<?= $dp_b ? '1' : '0' ?>"></td>
         <td style="padding:6px;"><input type="number" name="dp_price[]" step="0.01" min="0" value="<?= isset($r['price']) ? h((string)$r['price']) : '' ?>" style="width:120px;text-align:right;"></td>
         <td style="padding:6px;"><select name="dp_currency[]"><?php foreach (['USD','EUR'] as $c): ?><option<?= ($r['currency'] ?? $dp_cur) === $c ? ' selected' : '' ?>><?= $c ?></option><?php endforeach; ?></select></td>
         <td style="padding:6px;white-space:nowrap;">
+          <button type="button" class="btn btn-outline btn-sm" onclick="dpBold(this)" title="Bold row (e.g. Totale pratica)" style="font-weight:700;">B</button>
           <button type="button" class="btn btn-outline btn-sm" onclick="dpMove(this,-1)" title="Up">↑</button>
           <button type="button" class="btn btn-outline btn-sm" onclick="dpMove(this,1)" title="Down">↓</button>
           <button type="button" class="btn btn-outline btn-sm" onclick="dpDel(this)" title="Remove">✕</button>
@@ -1573,6 +1575,7 @@ include __DIR__ . '/../../includes/layout_header.php';
 function dpAdd() {
   var tb = document.getElementById('dp-rows'), tr = tb.querySelector('.dp-row').cloneNode(true);
   tr.querySelectorAll('input').forEach(function (i) { i.value = ''; });
+  dpSetBold(tr, false);
   tr.querySelector('select').value = <?= json_encode($dp_cur) ?>;
   tb.appendChild(tr);
   tr.querySelector('input').focus();
@@ -1581,6 +1584,14 @@ function dpDel(b) {
   var tr = b.closest('tr'), tb = tr.parentNode;
   if (tb.querySelectorAll('.dp-row').length > 1) tr.remove();
   else tr.querySelectorAll('input').forEach(function (i) { i.value = ''; });
+}
+function dpSetBold(tr, on) {
+  tr.querySelector('input[name="dp_bold[]"]').value = on ? '1' : '0';
+  tr.querySelector('input[name="dp_label[]"]').style.fontWeight = on ? '700' : '';
+}
+function dpBold(b) {
+  var tr = b.closest('tr');
+  dpSetBold(tr, tr.querySelector('input[name="dp_bold[]"]').value !== '1');
 }
 function dpMove(b, d) {
   var tr = b.closest('tr'), sib = d < 0 ? tr.previousElementSibling : tr.nextElementSibling;

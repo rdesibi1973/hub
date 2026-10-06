@@ -228,7 +228,7 @@ curl -sH "$H" "$U?action=iti_document&program_id=412&format=guide&save=1"       
 #### `iti_create_personal` (POST)
 `sample_id`, `lead_request_id?` (Hub request), `fields?` — any of `title_<lang>`, `subtitle_<lang>`, `intro_<lang>`,
 `start_date` (YYYY-MM-DD: dates appear on the cover and on each day), `pax_adults`, `pax_teens` (under 16), `pax_children` (under 12),
-`display_language`, `display_currency`, `price_table_json` (`[{label, price, currency}]`), `price_notes_<lang>`.
+`display_language`, `display_currency`, `price_table_json` (`[{label, price, currency, bold?}]`; `bold: true` prints the row in bold — a row starting "Totale pratica" / "Total booking" is bold unless `bold: false`), `price_notes_<lang>`.
 Copies the sample (days, activities, prices, inclusions, terms) as a draft proposal. Dry-run unless `"confirm": true`.
 
 #### `iti_update_program` (POST)

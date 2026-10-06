@@ -350,6 +350,15 @@ function iti_doc_data(int $id, string $lang): ?array {
     ];
 }
 
+/**
+ * A price-table row printed in bold: its own "bold" flag (Prices tab / Agent API), else a row
+ * that is the total of the booking ("Totale pratica (2 adulti + 2 ragazze)", "Total booking", …).
+ */
+function iti_doc_price_bold(array $pr): bool {
+    if (array_key_exists('bold', $pr)) return !empty($pr['bold']);
+    return (bool)preg_match('/^\s*(totale\s+(pratica|viaggio|complessivo)|total\s+(booking|trip|price|du\s+voyage|del\s+viaje)|prix\s+total|precio\s+total|gesamt)/iu', (string)($pr['label'] ?? ''));
+}
+
 /** Plain text with blank-line paragraphs → <p>…</p>; runs of "- item" paragraphs → <ul>. */
 function iti_doc_paras(string $txt): string {
     $out = ''; $list = [];
@@ -434,7 +443,7 @@ function iti_doc_render(array $D): string {
     <table style="max-width:460px">
       <tr><th><?= h($T['group']) ?></th><th><?= h($T['pp']) ?></th></tr>
       <?php foreach ($D['prices'] as $pr): ?>
-        <tr><td><?= h($pr['label'] ?? '') ?></td><td><?= h(isset($pr['price']) ? number_format((float)$pr['price'], 0, ',', '.') . ' ' . ($pr['currency'] ?? 'USD') : '') ?></td></tr>
+        <tr<?= iti_doc_price_bold($pr) ? ' style="font-weight:700"' : '' ?>><td><?= h($pr['label'] ?? '') ?></td><td><?= h(isset($pr['price']) ? number_format((float)$pr['price'], 0, ',', '.') . ' ' . ($pr['currency'] ?? 'USD') : '') ?></td></tr>
       <?php endforeach; ?>
     </table>
     <?php if ($D['price_notes'] !== ''): ?><div class="etn-sans" style="font-size:14px"><?= iti_doc_paras($D['price_notes']) ?></div><?php endif; ?>

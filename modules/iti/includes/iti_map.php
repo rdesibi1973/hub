@@ -1,7 +1,8 @@
 <?php
 /**
  * modules/iti/includes/iti_map.php
- * Self-contained static itinerary map (PHP GD, no external services).
+ * Static itinerary map (PHP GD) on the Esri World Topo basemap of the web map (tiles cached in
+ * uploads/_maptiles; plain background if they cannot be fetched).
  * Draws a branded route map — numbered red markers + connecting line + labels —
  * from the same points as the interactive preview (iti_get_program_map_points).
  *
@@ -82,6 +83,71 @@ function iti_map_pill($img, float $cx, float $cy, float $halfW, float $r, int $c
         (int)round($rc), (int)round($cy + $r), $color);
 }
 
+/** Web Mercator world coordinates, 0..1 (x from lng, y from lat, y down). */
+function iti_map_mx(float $lng): float { return ($lng + 180.0) / 360.0; }
+function iti_map_my(float $lat): float {
+    $lat = max(-85.0, min(85.0, $lat));
+    return (1.0 - log(tan(deg2rad($lat)) + 1.0 / cos(deg2rad($lat))) / M_PI) / 2.0;
+}
+
+/** One Esri World Topo tile (JPEG bytes), cached on disk for 90 days; null when it cannot be fetched. */
+function iti_map_tile(int $z, int $x, int $y): ?string {
+    $dir = __DIR__ . '/../uploads/_maptiles';
+    if (!is_dir($dir) && !@mkdir($dir, 0755, true)) $dir = sys_get_temp_dir() . '/iti_maptiles';
+    if (!is_dir($dir)) @mkdir($dir, 0755, true);
+    $f = $dir . '/' . $z . '_' . $x . '_' . $y . '.jpg';
+    if (is_file($f) && filesize($f) > 0 && filemtime($f) > time() - 90 * 86400) return (string)file_get_contents($f);
+    $url = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/' . $z . '/' . $y . '/' . $x;
+    $data = null;
+    if (function_exists('curl_init')) {
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 8, CURLOPT_CONNECTTIMEOUT => 4,
+                                CURLOPT_FOLLOWLOCATION => true, CURLOPT_USERAGENT => 'SavannahExplorersHub/1.0 (itinerary map)']);
+        $res = curl_exec($ch);
+        if ($res !== false && curl_getinfo($ch, CURLINFO_HTTP_CODE) === 200) $data = (string)$res;
+        curl_close($ch);
+    } else {
+        $res = @file_get_contents($url, false, stream_context_create(['http' => ['timeout' => 8, 'user_agent' => 'SavannahExplorersHub/1.0']]));
+        if ($res !== false) $data = $res;
+    }
+    if ($data === null || strlen($data) < 100) return null;
+    @file_put_contents($f, $data);
+    return $data;
+}
+
+/**
+ * Paint the topographic basemap on the supersampled canvas. ($wl, $wt) = world coords of the
+ * canvas top-left, $ppu = final pixels per world unit. True when most tiles were drawn.
+ */
+function iti_map_basemap($img, float $wl, float $wt, float $ppu, int $W, int $H, int $SS): bool {
+    if (!function_exists('imagecreatefromstring')) return false;
+    $z = (int)max(2, min(13, round(log($ppu / 256.0, 2))));
+    $n = 1 << $z;
+    $tx0 = (int)floor($wl * $n); $tx1 = (int)floor(($wl + $W / $ppu) * $n);
+    $ty0 = (int)floor($wt * $n); $ty1 = (int)floor(($wt + $H / $ppu) * $n);
+    $total = ($tx1 - $tx0 + 1) * ($ty1 - $ty0 + 1);
+    if ($total > 60) return false;
+    $side = $ppu * $SS / $n;   // canvas px per tile
+    $drawn = 0; $start = microtime(true);
+    for ($ty = $ty0; $ty <= $ty1; $ty++) {
+        for ($tx = $tx0; $tx <= $tx1; $tx++) {
+            if ($ty < 0 || $ty >= $n || microtime(true) - $start > 25) continue;
+            $data = iti_map_tile($z, (($tx % $n) + $n) % $n, $ty);
+            $t = $data !== null ? @imagecreatefromstring($data) : false;
+            if (!$t) continue;
+            $dx = ($tx / $n - $wl) * $ppu * $SS; $dy = ($ty / $n - $wt) * $ppu * $SS;
+            imagecopyresampled($img, $t, (int)floor($dx), (int)floor($dy), 0, 0, (int)ceil($side) + 1, (int)ceil($side) + 1, imagesx($t), imagesy($t));
+            imagedestroy($t);
+            $drawn++;
+        }
+    }
+    if (!$drawn) return false;
+    // Light wash so the red route and labels stay readable on the topo colours.
+    imagealphablending($img, true);
+    imagefilledrectangle($img, 0, 0, $W * $SS - 1, $H * $SS - 1, imagecolorallocatealpha($img, 255, 255, 255, 88));
+    return $drawn * 2 >= $total;
+}
+
 function iti_render_itinerary_map(array $points, string $outFile): bool {
     if (!function_exists('imagecreatetruecolor') || !function_exists('imagepng')) return false;
     $points = array_values($points);
@@ -101,27 +167,28 @@ function iti_render_itinerary_map(array $points, string $outFile): bool {
     $minLat -= $padLat; $maxLat += $padLat;
     $minLng -= $padLng; $maxLng += $padLng;
 
-    $midLat = ($minLat + $maxLat) / 2.0;
-    $cosMid = max(0.2, cos(deg2rad($midLat)));
+    // Web Mercator (0..1 world units), the projection of the basemap tiles.
+    $X0 = iti_map_mx($minLng); $X1 = iti_map_mx($maxLng);
+    $Y0 = iti_map_my($maxLat); $Y1 = iti_map_my($minLat);
 
     // ── Canvas geometry (supersampled for smooth edges) ──────────────
     $SS = 2;
     $W  = 900;  $M = 70;  $maxContentH = 560;
-    $geoW = ($maxLng - $minLng) * $cosMid;
-    $geoH = ($maxLat - $minLat);
+    $geoW = $X1 - $X0;
+    $geoH = $Y1 - $Y0;
     $availW = $W - 2 * $M;
-    $ppd = $availW / $geoW;
-    $contentH = $ppd * $geoH;
-    if ($contentH > $maxContentH) { $ppd = $maxContentH / $geoH; $contentH = $maxContentH; }
-    $contentW = $ppd * $geoW;
+    $ppu = $availW / $geoW;               // final pixels per world unit
+    $contentH = $ppu * $geoH;
+    if ($contentH > $maxContentH) { $ppu = $maxContentH / $geoH; $contentH = $maxContentH; }
+    $contentW = $ppu * $geoW;
     $H = (int)ceil($contentH + 2 * $M);
     $offX = $M + ($availW - $contentW) / 2.0;
     $offY = $M;
 
-    $project = function ($lat, $lng) use ($offX, $offY, $minLng, $maxLat, $cosMid, $ppd, $SS) {
+    $project = function ($lat, $lng) use ($offX, $offY, $X0, $Y0, $ppu, $SS) {
         return [
-            ($offX + ($lng - $minLng) * $cosMid * $ppd) * $SS,
-            ($offY + ($maxLat - $lat) * $ppd) * $SS,
+            ($offX + (iti_map_mx($lng) - $X0) * $ppu) * $SS,
+            ($offY + (iti_map_my($lat) - $Y0) * $ppu) * $SS,
         ];
     };
 
@@ -140,6 +207,8 @@ function iti_render_itinerary_map(array $points, string $outFile): bool {
     $SLATE = $c('1F5673'); // airport (start/end) pins
 
     imagefilledrectangle($img, 0, 0, $W * $SS - 1, $H * $SS - 1, $BG);
+    // Topographic basemap (same tiles as the web map); the plain background stays where a tile is missing.
+    $hasBase = iti_map_basemap($img, $X0 - $offX / $ppu, $Y0 - $offY / $ppu, $ppu, $W, $H, $SS);
     imagesetthickness($img, $SS);
     imagerectangle($img, $SS, $SS, $W * $SS - 1 - $SS, $H * $SS - 1 - $SS, $BORDER);
 
@@ -176,6 +245,7 @@ function iti_render_itinerary_map(array $points, string $outFile): bool {
 
     // ── Route line: white casing + red on top ───────────────────────
     if ($n >= 2) {
+        imageantialias($img, false);   // GD ignores the thickness while antialiasing (the supersampling smooths the line)
         imagesetthickness($img, (int)(7 * $SS));
         for ($i = 1; $i < $n; $i++)
             imageline($img, (int)$pts[$i-1][0], (int)$pts[$i-1][1], (int)$pts[$i][0], (int)$pts[$i][1], $WHITE);
@@ -183,6 +253,7 @@ function iti_render_itinerary_map(array $points, string $outFile): bool {
         for ($i = 1; $i < $n; $i++)
             imageline($img, (int)$pts[$i-1][0], (int)$pts[$i-1][1], (int)$pts[$i][0], (int)$pts[$i][1], $RED);
         imagesetthickness($img, $SS);
+        imageantialias($img, true);
     }
 
     // ── Fonts ────────────────────────────────────────────────────────
@@ -262,8 +333,8 @@ function iti_render_itinerary_map(array $points, string $outFile): bool {
     }
 
     // ── Footnote ─────────────────────────────────────────────────────
-    $foot = 'Approximate locations — not to scale';
-    iti_map_text($img, 6 * $SS, $H * $SS - (14 * $SS), $foot, 9 * $SS, $ttf, $GREY, $BG);
+    $foot = $hasBase ? 'Approximate locations · Tiles © Esri' : 'Approximate locations — not to scale';
+    iti_map_text($img, 6 * $SS, $H * $SS - (14 * $SS), $foot, 9 * $SS, $ttf, $hasBase ? $BLACK : $GREY, $hasBase ? $WHITE : $BG);
 
     // ── Downsample to final size and save ────────────────────────────
     $final = imagecreatetruecolor($W, $H);

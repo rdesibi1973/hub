@@ -25,6 +25,7 @@ modules/iti/uploads/lodges/*
 modules/iti/uploads/destinations/*
 modules/iti/uploads/_word/
 modules/iti/uploads/_w*/
+modules/iti/uploads/_maptiles/
 !modules/iti/uploads/logo/.gitkeep
 !modules/iti/uploads/profiles/.gitkeep
 !modules/iti/uploads/.htaccess

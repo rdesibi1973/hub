@@ -20,7 +20,7 @@ function iti_mag_labels(string $lang): array {
                  'destinations' => 'Destinazioni', 'lodges' => 'Sistemazioni', 'online' => 'Itinerario digitale',
                  'about_dest' => 'La destinazione', 'pdf' => 'Scarica PDF', 'private' => 'Safari privato con guida',
                  'adult' => 'adulto', 'adults' => 'adulti', 'child' => 'bambino', 'children' => 'bambini', 'dates' => 'Date',
-                 'teen' => 'ragazzo', 'teens' => 'ragazzi', 'teen_age' => '(sotto i 16 anni)', 'child_age' => '(sotto i 12 anni)',
+                 'teen' => 'ragazzo', 'teens' => 'ragazzi', 'teen_age' => '(minori di 16 anni)', 'child_age' => '(sotto i 12 anni)',
                  'months' => ['gennaio', 'febbraio', 'marzo', 'aprile', 'maggio', 'giugno', 'luglio', 'agosto', 'settembre', 'ottobre', 'novembre', 'dicembre'],
                  'wdays' => ['dom', 'lun', 'mar', 'mer', 'gio', 'ven', 'sab']],
         'en' => ['overview' => 'Your journey', 'facts' => 'At a glance', 'route' => 'The route', 'stays' => 'Where you stay',
@@ -103,7 +103,7 @@ function iti_mag_date_range(array $D, array $M): string {
     return iti_mag_date($a, $M) . ' – ' . iti_mag_date($b, $M);
 }
 
-/** "2 adulti · 1 ragazzo (sotto i 16 anni) · 1 bambino (sotto i 12 anni)" for personal programmes ('' for samples). */
+/** "2 adulti · 1 ragazzo (minori di 16 anni) · 1 bambino (sotto i 12 anni)" for personal programmes ('' for samples). */
 function iti_mag_pax(array $D, array $M): string {
     if (!empty($D['pax_label'])) return (string)$D['pax_label'];
     $p = $D['program'];
@@ -483,7 +483,7 @@ function iti_mag_render(array $D, string $publicUrl = ''): string {
         <table>
           <tr><th><?= h($T['group']) ?></th><th style="text-align:right"><?= h($T['pp']) ?></th></tr>
           <?php foreach ($D['prices'] as $pr): ?>
-            <tr><td><?= h($pr['label'] ?? '') ?></td><td class="num"><?= h(isset($pr['price']) ? number_format((float)$pr['price'], 0, ',', '.') . ' ' . ($pr['currency'] ?? 'USD') : '') ?></td></tr>
+            <tr<?= iti_doc_price_bold($pr) ? ' style="font-weight:700"' : '' ?>><td><?= h($pr['label'] ?? '') ?></td><td class="num"><?= h(isset($pr['price']) ? number_format((float)$pr['price'], 0, ',', '.') . ' ' . ($pr['currency'] ?? 'USD') : '') ?></td></tr>
           <?php endforeach; ?>
         </table>
         <?php if ($D['price_notes'] !== ''): ?><div class="mag-notes"><?= iti_doc_paras($D['price_notes']) ?></div><?php endif; ?>

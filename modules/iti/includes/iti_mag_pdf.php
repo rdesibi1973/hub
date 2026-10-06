@@ -211,8 +211,8 @@ td{vertical-align:top}
 <h2><?= h($T['prices']) ?></h2>
 <table class="prices">
 <tr class="hd"><td class="th"><?= h($T['group']) ?></td><td class="th" style="text-align:right"><?= h($T['pp']) ?></td></tr>
-<?php foreach ($D['prices'] as $pr): ?>
-<tr><td><?= h((string)($pr['label'] ?? '')) ?></td><td class="price"><?= isset($pr['price']) ? h(number_format((float)$pr['price'], 0, ',', '.') . ' ' . ($pr['currency'] ?? 'USD')) : '' ?></td></tr>
+<?php foreach ($D['prices'] as $pr): $bs = iti_doc_price_bold($pr) ? ' style="font-weight:bold"' : ''; ?>
+<tr><td<?= $bs ?>><?= h((string)($pr['label'] ?? '')) ?></td><td class="price"<?= $bs ?>><?= isset($pr['price']) ? h(number_format((float)$pr['price'], 0, ',', '.') . ' ' . ($pr['currency'] ?? 'USD')) : '' ?></td></tr>
 <?php endforeach; ?>
 </table>
 <?php if ($D['price_notes'] !== ''): ?><div style="margin-top:8px"><?= iti_mp_paras($D['price_notes'], 'small') ?></div><?php endif; ?>

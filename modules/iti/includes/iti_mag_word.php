@@ -104,6 +104,8 @@ function iti_mag_word_build(array $D): array {
     $w->addFontStyle('mwChip', ['name' => 'Calibri', 'size' => 9, 'color' => $INK]);
     $w->addFontStyle('mwChipB', ['name' => 'Calibri', 'size' => 9, 'bold' => true, 'color' => $RED]);
     $w->addFontStyle('mwPrice', ['name' => 'Georgia', 'size' => 13, 'color' => $INK]);
+    $w->addFontStyle('mwBodyB', ['name' => 'Calibri', 'size' => 10.5, 'color' => $INK, 'bold' => true]);   // bold price row (total)
+    $w->addFontStyle('mwPriceB', ['name' => 'Georgia', 'size' => 13, 'color' => $INK, 'bold' => true]);
     $w->addFontStyle('mwTh', ['name' => 'Calibri', 'size' => 8, 'bold' => true, 'color' => $MUTE, 'allCaps' => true]);
     $w->addParagraphStyle('mwP', ['spaceAfter' => 120, 'lineHeight' => 1.25]);
     $w->addParagraphStyle('mwTight', ['spaceAfter' => 0]);
@@ -267,9 +269,10 @@ function iti_mag_word_build(array $D): array {
         $pt->addCell(6000, ['borderBottomSize' => 12, 'borderBottomColor' => $INK])->addText($T['group'], 'mwTh', 'mwTight');
         $pt->addCell(3700, ['borderBottomSize' => 12, 'borderBottomColor' => $INK])->addText($T['pp'], 'mwTh', ['alignment' => 'right', 'spaceAfter' => 0]);
         foreach ($D['prices'] as $pr) {
+            $b = iti_doc_price_bold($pr) ? 'B' : '';   // e.g. "Totale pratica"
             $pt->addRow();
-            $pt->addCell(6000, ['borderBottomSize' => 4, 'borderBottomColor' => 'E6DDD0'])->addText((string)($pr['label'] ?? ''), 'mwBody', 'mwTight');
-            $pt->addCell(3700, ['borderBottomSize' => 4, 'borderBottomColor' => 'E6DDD0'])->addText(isset($pr['price']) ? number_format((float)$pr['price'], 0, ',', '.') . ' ' . ($pr['currency'] ?? 'USD') : '', 'mwPrice', ['alignment' => 'right', 'spaceAfter' => 0]);
+            $pt->addCell(6000, ['borderBottomSize' => 4, 'borderBottomColor' => 'E6DDD0'])->addText((string)($pr['label'] ?? ''), 'mwBody' . $b, 'mwTight');
+            $pt->addCell(3700, ['borderBottomSize' => 4, 'borderBottomColor' => 'E6DDD0'])->addText(isset($pr['price']) ? number_format((float)$pr['price'], 0, ',', '.') . ' ' . ($pr['currency'] ?? 'USD') : '', 'mwPrice' . $b, ['alignment' => 'right', 'spaceAfter' => 0]);
         }
         if ($D['price_notes'] !== '') { $s->addTextBreak(1); iti_mw_paras($s, $D['price_notes'], 'mwSmall'); }
         $s->addTextBreak(1);
