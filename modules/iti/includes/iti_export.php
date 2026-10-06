@@ -17,7 +17,7 @@ require_once __DIR__ . '/iti_guide_pdf.php';
 const ITI_EXPORT_FORMATS = ['pdf', 'docx', 'guide'];
 
 /**
- * Build the document of programme $id in $lang ('' = the programme's language; English for 'guide').
+ * Build the document of programme $id in $lang ('' = the programme's language, also for 'guide').
  * Returns ['name', 'mime', 'content', 'lang', 'format', 'title'] — format is the file type (pdf / docx).
  * InvalidArgumentException: unknown programme / format; RuntimeException: library missing.
  */
@@ -29,7 +29,7 @@ function iti_export_file(int $id, string $lang, string $format): array {
     if ($format === 'guide' && ($program['program_type'] ?? '') !== 'personal') {
         throw new InvalidArgumentException('The guide sheet is only for personal programmes (program ' . $id . ' is a ' . ($program['program_type'] ?: 'sample') . ')');
     }
-    if ($lang === '') $lang = $format === 'guide' ? 'en' : (string)($program['display_language'] ?? 'it');
+    if ($lang === '') $lang = (string)($program['display_language'] ?? 'it');   // the guide sheet too: same language as the client's programme
     if (!in_array($lang, ITI_LANGUAGES, true)) $lang = 'it';
 
     $vendor = dirname(__DIR__, 3) . '/vendor/autoload.php';

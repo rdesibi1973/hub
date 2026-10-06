@@ -213,7 +213,7 @@ The programme as a file in the magazine layout (cover, route map, stays, day by 
 included / excluded, contacts, terms). `program_id`, `format?` (`pdf` default, rendered on the server with Dompdf;
 `docx` = editable Word for agencies; `guide` = PDF for the safari guide: transfer / flight and accommodation
 recap with check-in / check-out, then the day by day — no photos, intro, prices, lodge descriptions or terms,
-file `…_GUIDE_<LANG>.pdf`; **personal programmes only**, a sample → 400), `lang?` (default: the programme's language; English for `guide`).
+file `…_GUIDE_<LANG>.pdf`; **personal programmes only**, a sample → 400), `lang?` (default: the programme's language, the guide sheet included).
 → `file {program_id, name, mime, size, format, lang, content_base64}` (`format` is the file type: `guide` → `pdf`). Decode and save it as `file.name`.
 To put it in Dropbox instead: `save: true` (the programme's `lead_request_id` folder), or `request_id` / `folder_path`;
 `save_as?` (file name), `overwrite?` (an existing file is kept unless true; Dropbox keeps the old version)
