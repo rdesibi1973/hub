@@ -462,7 +462,7 @@ function iti_get_programs(string $type = null, array $filters = []): array {
     }
     if (!empty($filters['q'])) {
         iti_search_where($filters['q'],
-            ['p.title_en','p.title_it','r.client_name','p.ref_number'],
+            ['p.title_en','p.title_it','r.client_name','lr.customer_name','lr.practice_code','p.ref_number'],
             $where, $params);
     }
     if (!empty($filters['ref'])) {
@@ -473,9 +473,13 @@ function iti_get_programs(string $type = null, array $filters = []): array {
         $where[] = 'p.display_language = ?';
         $params[] = $filters['lang'];
     }
-    $sql = 'SELECT p.*, r.client_name
+    // Client: the ITI request, else the linked Hub leads request (customer + agency).
+    iti_ensure_lead_link();
+    $sql = 'SELECT p.*, COALESCE(r.client_name, lr.customer_name) AS client_name, la.name AS agent_name
               FROM iti_programs p
-              LEFT JOIN iti_requests r ON r.id = p.request_id'
+              LEFT JOIN iti_requests r ON r.id = p.request_id
+              LEFT JOIN requests lr ON lr.id = p.lead_request_id
+              LEFT JOIN agents la ON la.id = lr.agent_id'
          . ($where ? ' WHERE ' . implode(' AND ', $where) : '')
          . ' ORDER BY p.updated_at DESC';
     $st = db()->prepare($sql);
@@ -953,6 +957,38 @@ function iti_get_lead_request(int $id) {
     $st = db()->prepare('SELECT id, customer_name, period, pax, status FROM requests WHERE id = ?');
     $st->execute(array($id));
     return $st->fetch();
+}
+
+// Ref. number of a client programme = the start of the request's Word / Calc file names,
+// e.g. "02_BRACHELENTE(GoWorld-Roberto)". The number comes from $file when it is such a
+// file (the Calc of a final programme), else from the highest "NN_" file in the request's
+// Dropbox folder (needs the leads Dropbox helpers + booking_service loaded), else "01".
+// Null when the request has no practice code.
+function iti_lead_ref_number(int $lead_id, string $file = '') {
+    if ($lead_id <= 0) return null;
+    $st = db()->prepare('SELECT id, practice_code, group_folder, dropbox_url FROM requests WHERE id = ?');
+    $st->execute(array($lead_id));
+    $r = $st->fetch(PDO::FETCH_ASSOC);
+    $practice = $r ? trim((string)$r['practice_code']) : '';
+    if ($practice === '') return null;
+
+    $num = '';
+    if ($file !== '' && preg_match('/^(\d{1,3})_/', basename($file), $m)) $num = $m[1];
+    if ($num === '' && function_exists('dropbox_list_files') && function_exists('req_folder_path') && defined('DROPBOX_REFRESH_TOKEN')) {
+        try {
+            $dir = req_folder_path($r);
+            if ($dir !== '') {
+                $max = 0;
+                foreach (dropbox_list_files(dropbox_get_access_token(), $dir) as $fn) {
+                    if (preg_match('/^(\d{1,3})_/', $fn, $m) && (int)$m[1] > $max) { $max = (int)$m[1]; $num = $m[1]; }
+                }
+            }
+        } catch (Exception $e) {
+            error_log('iti_lead_ref_number #' . $lead_id . ': ' . $e->getMessage());
+        }
+    }
+    if ($num === '') $num = '01';
+    return mb_substr(str_pad($num, 2, '0', STR_PAD_LEFT) . '_' . $practice, 0, 50);   // same cap as sto_import
 }
 
 // ── FINAL PROGRAMME (confirmed booking) — data model ─────────────────────────

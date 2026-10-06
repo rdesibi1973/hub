@@ -11,7 +11,7 @@ $db       = db();
 $_cu      = current_user();
 $can_edit = in_array($_cu['role_name'], ['admin', 'manager']);
 
-$tab    = in_array($_GET['type'] ?? '', ['sample','personal']) ? $_GET['type'] : 'sample';
+$tab    = in_array($_GET['type'] ?? '', ['sample','personal']) ? $_GET['type'] : 'personal';
 $action = $_REQUEST['action'] ?? '';
 $id     = (int)($_REQUEST['id'] ?? 0);
 
@@ -92,6 +92,15 @@ if ($action === 'duplicate' && $id && $can_edit) {
         $src_p     = iti_get_program($id);
         $dest_type = 'personal';
         $set       = ['lead_request_id' => $lead_id, 'title_en' => $src_p['title_en'] ?? ''];
+        // Ref. number like the client's Word / Calc files: "02_Name(Agency-Agent)".
+        require_once __DIR__ . '/../leads/dropbox_constants.php';
+        require_once __DIR__ . '/../leads/dropbox_helper.php';
+        require_once __DIR__ . '/../leads/includes/booking_service.php';
+        $set['ref_number'] = iti_lead_ref_number($lead_id);
+    } elseif ($dest_type === 'personal' && ($src_p = iti_get_program($id)) && $src_p['program_type'] === 'sample') {
+        $set = ['ref_number' => null];   // the sample's ref is not the client's; set it in the editor
+    } elseif ($dest_type === 'sample' && $tab === 'personal') {
+        $set = ['ref_number' => null];   // nor the client's ref a sample's
     }
     try {
         $new_id = iti_duplicate_program($id, $dest_type, $_cu['username'] ?? 'system', $set);

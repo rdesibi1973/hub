@@ -153,6 +153,8 @@ function iti_ps_create_personal(PDO $db, array $in, string $who, bool $go): arra
         if (!$req) throw new InvalidArgumentException('lead_request_id ' . (int)$in['lead_request_id'] . ' not found');
         $set['lead_request_id'] = (int)$req['id'];
     }
+    // Ref. number like the client's Word / Calc files ("02_Name(Agency-Agent)"), never the sample's.
+    $set['ref_number'] = isset($set['lead_request_id']) ? iti_lead_ref_number($set['lead_request_id']) : null;
     $days = isset($in['days']) && is_array($in['days']) ? array_values($in['days']) : null;
     $items = [];
     foreach ((array)$days as $i => $d) {   // validate now, so a dry run reports the errors

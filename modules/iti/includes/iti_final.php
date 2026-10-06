@@ -205,6 +205,7 @@ function iti_final_generate(PDO $db, int $requestId, array $calc, int $sampleId,
     $newId = iti_duplicate_program($sampleId, 'personal', (string)($who['username'] ?? 'system'), array(
         'title_en'         => $sample['title_en'],
         'lead_request_id'  => $requestId,
+        'ref_number'       => iti_lead_ref_number($requestId, (string)($calc['calc_path'] ?? '')),
         'stage'            => 'final',
         'start_date'       => $calc['start_date'],
         'duration_days'    => count($calc['days']),
