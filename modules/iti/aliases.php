@@ -116,7 +116,7 @@ include __DIR__ . '/../../includes/layout_header.php';
 <div class="page-header">
   <div>
     <h2>Calc aliases</h2>
-    <div class="sub">Master Data › How the Calc Excel's free text maps to ITI records — used to build the final program</div>
+    <div class="sub">Master Data › How the Calc Excel's free text maps to ITI records — used to build the program from the Calc</div>
   </div>
   <?php if ($can_edit): ?>
   <form method="POST" action="<?= h($back) ?>" style="margin:0;">

@@ -63,7 +63,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit) {
             if (!$calc) throw new RuntimeException('The Calc could not be read: ' . $calcErr);
             if (!$sample) throw new RuntimeException('Choose the sample program first.');
             $res = iti_final_generate($db, $rid, $calc, (int)$sample['id'], $lang, ['id' => $_cu['id'] ?? null, 'username' => $user]);
-            iti_flash_set('success', 'Final program #' . $res['program_id'] . ' generated'
+            iti_flash_set('success', 'Itinerary program #' . $res['program_id'] . ' generated'
                 . ($res['superseded'] ? ' — it replaces #' . implode(', #', $res['superseded']) : '') . '. Review the flagged days.');
         }
     } catch (Throwable $e) {
@@ -99,7 +99,7 @@ $badge = function (string $state): string {
     return '<span class="badge" style="background:' . $m[0] . ';color:' . $m[1] . ';">' . $m[2] . '</span>';
 };
 
-$page_title = 'Final program — ' . $req['customer_name'];
+$page_title = 'Itinerary program from Calc — ' . $req['customer_name'];
 $extra_css = iti_extra_css();
 include __DIR__ . '/../../includes/layout_header.php';
 ?>
@@ -109,7 +109,7 @@ include __DIR__ . '/../../includes/layout_header.php';
 
 <div class="page-header">
   <div>
-    <h2>Final program — <?= h($req['customer_name']) ?></h2>
+    <h2>Itinerary program from Calc — <?= h($req['customer_name']) ?></h2>
     <div class="sub">From the booking's Calc · Hub request #<?= $rid ?> · <?= h($req['practice_code']) ?></div>
   </div>
   <a href="../leads/request_view.php?id=<?= $rid ?>" class="btn btn-outline btn-sm">← Request</a>
@@ -123,7 +123,7 @@ include __DIR__ . '/../../includes/layout_header.php';
 
 <?php if ($finals): ?>
 <div class="form-card" style="margin-bottom:18px;">
-  <div class="form-section-title">Final programs of this request</div>
+  <div class="form-section-title">Programs built from the Calc of this request</div>
   <?php if ($calcChanged): ?>
     <div style="padding:8px 12px;margin-bottom:10px;border-radius:6px;background:#fff8e1;color:#8a6d00;font-size:.85rem;">
       ⚠ The Calc changed in Dropbox since the active version was generated — regenerate to include the changes.
@@ -251,8 +251,8 @@ include __DIR__ . '/../../includes/layout_header.php';
     </label>
     <?php $blocked = !$sample || $plan['blocking']; ?>
     <button type="submit" class="btn btn-red" <?= $blocked ? 'disabled title="Choose the sample and map every text first"' : '' ?>
-            onclick="return confirm('<?= $active ? 'Generate a new version? The current one is kept, marked superseded.' : 'Generate the final program?' ?>')">
-      <?= $active ? '↻ Regenerate from Calc' : '⚙ Generate final program' ?></button>
+            onclick="return confirm('<?= $active ? 'Generate a new version? The current one is kept, marked superseded.' : 'Generate the program from the Calc?' ?>')">
+      <?= $active ? '↻ Regenerate from Calc' : '⚙ Generate program' ?></button>
     <?php if ($blocked): ?><span style="font-size:.8rem;color:var(--red);"><?= !$sample ? 'Choose the sample first.' : count($plan['blocking']) . ' text(s) to map above.' ?></span><?php endif; ?>
   </form>
   <?php endif; ?>

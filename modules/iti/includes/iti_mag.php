@@ -86,6 +86,63 @@ function iti_mag_stays(array $days): array {
     return $stays;
 }
 
+/**
+ * Day by day for the client document: consecutive days in the same hotel of a "beach / relax
+ * stay" destination (Zanzibar, Pemba, Mafia… — iti_destinations.is_beach_stay) become one block
+ * when the later days have no flight or transfer. The block keeps the first day's text, photo and
+ * meals; the later days' texts follow: a text repeated on several days ("relax on the beach")
+ * once, a text of one day only (an excursion) with its date ("gio 12 marzo: …"); a later day's
+ * activities get their date too. A block has 'n_to' / 'date_to'; a single day has neither.
+ */
+function iti_mag_compact_days(array $days, array $T, array $M): array {
+    $out = []; $extra = [];   // per block: [when, text] of the later days
+    foreach ($days as $d) {
+        $i = count($out) - 1;
+        $last = $i >= 0 ? $out[$i] : null;
+        $key = $d['lodge_key'] !== '' ? $d['lodge_key'] : $d['lodge'];
+        $join = $last && !empty($d['beach']) && !empty($last['beach']) && $d['lodge'] !== ''
+             && $key === ($last['lodge_key'] !== '' ? $last['lodge_key'] : $last['lodge'])
+             && $d['n'] === (isset($last['n_to']) ? $last['n_to'] : $last['n']) + 1
+             && empty($d['flights']) && empty($d['transfers']);
+        if (!$join) { $out[] = $d; continue; }
+        $when = !empty($d['date']) ? iti_mag_date($d['date'], $M, false, true) : $T['day'] . ' ' . $d['n'];
+        $txt = trim((string)$d['narrative']);
+        if ($txt !== '') $extra[$i][] = [$when, $txt];
+        foreach ($d['activities'] as $a) {
+            if (!in_array($a, $out[$i]['activities'], true)) $out[$i]['activities'][] = $a . ' (' . $when . ')';
+        }
+        $out[$i]['n_to'] = $d['n'];
+        $out[$i]['date_to'] = $d['date'] ?? null;
+    }
+    foreach ($extra as $i => $rows) {
+        $first = trim((string)$out[$i]['narrative']);
+        $count = [];
+        foreach ($rows as $r) $count[$r[1]] = ($count[$r[1]] ?? 0) + 1;
+        $paras = $first !== '' ? [$first] : [];
+        $done = [$first => true];
+        foreach ($rows as $r) {
+            if (isset($done[$r[1]])) continue;
+            $done[$r[1]] = true;
+            $paras[] = $count[$r[1]] > 1 ? $r[1] : $r[0] . ': ' . $r[1];
+        }
+        $out[$i]['narrative'] = implode("\n\n", $paras);
+    }
+    return $out;
+}
+
+/** Day-head kicker: "Giorno · gio 12 marzo", or "Giorni · gio 12 marzo – dom 15 marzo" for a block. */
+function iti_mag_day_kicker(array $d, array $T, array $M): string {
+    if (empty($d['n_to'])) return $T['day'] . (!empty($d['date']) ? ' · ' . iti_mag_date($d['date'], $M, false, true) : '');
+    $s = function_exists('mb_convert_case') ? mb_convert_case($T['days'], MB_CASE_TITLE, 'UTF-8') : ucfirst($T['days']);
+    if (!empty($d['date']) && !empty($d['date_to'])) $s .= ' · ' . iti_mag_date($d['date'], $M, false, true) . ' – ' . iti_mag_date($d['date_to'], $M, false, true);
+    return $s;
+}
+
+/** Day number(s) of the day head: "9", or "9–12" for a block. */
+function iti_mag_day_no(array $d): string {
+    return (string)(int)$d['n'] . (!empty($d['n_to']) ? '–' . (int)$d['n_to'] : '');
+}
+
 /** "2027-03-12" → "12 marzo 2027" ($year) / "gio 12 marzo" ($wday). */
 function iti_mag_date(string $ymd, array $M, bool $year = true, bool $wday = false): string {
     $t = strtotime($ymd);
@@ -323,6 +380,7 @@ function iti_mag_render(array $D, string $publicUrl = ''): string {
     $nNights = 0; foreach ($stays as $s) $nNights += $s['nights'];
     $lodgeNames = []; foreach ($stays as $s) $lodgeNames[$s['lodge']] = true;
     $seenLodge = []; $seenDestPhoto = [];
+    $days = iti_mag_compact_days($D['days'], $T, $M);   // beach days in one hotel → one block
     $paxLabel = iti_mag_pax($D, $M);
     $dateRange = iti_mag_date_range($D, $M);
     ob_start(); ?>
@@ -349,7 +407,7 @@ function iti_mag_render(array $D, string $publicUrl = ''): string {
     <?php if ($hasMap || $stays): ?><a href="#mag-route"><?= h($M['route']) ?></a><?php endif; ?>
     <span class="sep"></span>
     <span class="lbl"><?= h($M['days_nav']) ?></span>
-    <?php foreach ($D['days'] as $d): ?><a class="d" href="#day-<?= (int)$d['n'] ?>" title="<?= h($T['day'] . ' ' . $d['n'] . ($d['title'] !== '' ? ' · ' . $d['title'] : '')) ?>"><?= (int)$d['n'] ?></a><?php endforeach; ?>
+    <?php foreach ($days as $d): ?><a class="d" href="#day-<?= (int)$d['n'] ?>" title="<?= h(iti_mag_day_kicker($d, $T, $M) . ($d['title'] !== '' ? ' · ' . $d['title'] : '')) ?>"><?= h(iti_mag_day_no($d)) ?></a><?php endforeach; ?>
     <span class="sep"></span>
     <?php if ($D['prices']): ?><a href="#mag-prices"><?= h($M['prices_nav']) ?></a><?php endif; ?>
     <a href="#mag-info"><?= h($M['info_nav']) ?></a>
@@ -413,21 +471,22 @@ function iti_mag_render(array $D, string $publicUrl = ''): string {
 
     <section class="mag-sec" id="mag-days">
       <div class="mag-kicker"><?= h($T['program']) ?></div>
-      <?php foreach ($D['days'] as $i => $d):
+      <?php foreach ($days as $i => $d):
           $photo = ($d['dest_photo'] !== '' && empty($seenDestPhoto[$d['dest_photo']])) ? $d['dest_photo'] : '';
           if ($photo !== '') $seenDestPhoto[$photo] = true;
           $lk = $d['lodge_key'] !== '' ? $d['lodge_key'] : $d['lodge'];
-          $prevSame = $i > 0 && $d['lodge'] !== '' && ($D['days'][$i - 1]['lodge_key'] !== '' ? $D['days'][$i - 1]['lodge_key'] : $D['days'][$i - 1]['lodge']) === $lk;
+          $prevSame = $i > 0 && $d['lodge'] !== '' && ($days[$i - 1]['lodge_key'] !== '' ? $days[$i - 1]['lodge_key'] : $days[$i - 1]['lodge']) === $lk;
           $firstLodge = $d['lodge'] !== '' && !isset($seenLodge[$lk]);
           $aside = $d['dest_desc'] !== '';
       ?>
       <article class="mag-day" id="day-<?= (int)$d['n'] ?>">
+        <?php for ($k = (int)$d['n'] + 1; $k <= (int)($d['n_to'] ?? 0); $k++): ?><span id="day-<?= $k ?>"></span><?php endfor; /* links to a day inside a block */ ?>
         <?php if ($photo !== ''): ?>
           <figure class="mag-hero"><img src="<?= h(iti_photo_variant($photo, 1600)) ?>"<?= ($ss = iti_photo_srcset($photo)) !== '' ? ' srcset="' . h($ss) . '" sizes="(max-width: 760px) 100vw, 930px"' : '' ?> alt="<?= h($d['dest']) ?>" loading="lazy" decoding="async">
-            <figcaption><div class="mag-dayhead"><div class="mag-dayno"><small><?= h($T['day']) ?><?= !empty($d['date']) ? ' · ' . h(iti_mag_date($d['date'], $M, false, true)) : '' ?></small><?= (int)$d['n'] ?></div><h3><?= h($d['title']) ?></h3></div></figcaption>
+            <figcaption><div class="mag-dayhead"><div class="mag-dayno"><small><?= h(iti_mag_day_kicker($d, $T, $M)) ?></small><?= h(iti_mag_day_no($d)) ?></div><h3><?= h($d['title']) ?></h3></div></figcaption>
           </figure>
         <?php else: ?>
-          <div class="mag-dayhead"><div class="mag-dayno"><small><?= h($T['day']) ?><?= !empty($d['date']) ? ' · ' . h(iti_mag_date($d['date'], $M, false, true)) : '' ?></small><?= (int)$d['n'] ?></div><h3><?= h($d['title']) ?></h3></div>
+          <div class="mag-dayhead"><div class="mag-dayno"><small><?= h(iti_mag_day_kicker($d, $T, $M)) ?></small><?= h(iti_mag_day_no($d)) ?></div><h3><?= h($d['title']) ?></h3></div>
         <?php endif; ?>
 
         <div class="mag-chips">

@@ -210,7 +210,7 @@ function iti_final_generate(PDO $db, int $requestId, array $calc, int $sampleId,
         'start_date'       => $calc['start_date'],
         'duration_days'    => count($calc['days']),
         'pax_adults'       => max(1, (int)$pax['adults']),
-        'pax_teens'        => (int)$pax['teen'],      // under 16 (column from iti_ensure_pax_room())
+        'pax_teens'        => (int)$pax['teen'],      // under 16 (column from iti_ensure_doc_columns())
         'pax_children'     => (int)$pax['child'],     // under 12
         'display_language' => $lang,
         'hub_program_code' => null,

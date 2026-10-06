@@ -1010,7 +1010,7 @@ if ($itiCanCreate) {
     </select>
     <button type="submit" class="btn btn-outline" style="font-size:.75rem;padding:5px 12px;">📋 Create from sample</button>
     <a href="../iti/program_final.php?request_id=<?= (int)$r['id'] ?>" class="btn btn-outline" style="font-size:.75rem;padding:5px 12px;margin-left:auto;"
-       title="Build the final program from this booking's Calc (lodges, dates, guests)">🧩 Final program from Calc</a>
+       title="Build the itinerary program from this request's Calc (lodges, dates, guests)">🧩 Itinerary program from Calc</a>
   </form>
   <?php endif; ?>
 </div>

@@ -85,7 +85,7 @@ function iti_ps_schema(): void {
     try {
         iti_add_column('iti_programs', 'price_table_json', 'TEXT NULL DEFAULT NULL');
         foreach (ITI_PS_LANGS as $l) iti_add_column('iti_programs', 'price_notes_' . $l, 'TEXT NULL DEFAULT NULL');
-        iti_ensure_pax_room();   // pax_teens, room_type
+        iti_ensure_doc_columns();   // pax_teens, room_type
     } catch (PDOException $e) {
         error_log('iti_ps_schema: ' . $e->getMessage());
     }

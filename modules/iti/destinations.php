@@ -7,6 +7,7 @@ require_once __DIR__ . '/../../includes/auth.php';
 require_login();
 require_once __DIR__ . '/includes/iti_functions.php';
 require_once __DIR__ . '/includes/iti_photos.php';
+iti_ensure_doc_columns();   // is_beach_stay
 
 $db       = db();
 $_cu      = current_user();
@@ -66,8 +67,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit) {
               region,country,latitude,longitude,cover_photo,sort_order,is_active)
              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
         )->execute(array_values($fields));
+        $new_id = (int)$db->lastInsertId();
         if (isset($gallery)) $db->prepare('UPDATE iti_destinations SET photos = ? WHERE id = ?')
-                                ->execute([$gallery ? json_encode($gallery, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) : null, (int)$db->lastInsertId()]);
+                                ->execute([$gallery ? json_encode($gallery, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) : null, $new_id]);
+        $db->prepare('UPDATE iti_destinations SET is_beach_stay = ? WHERE id = ?')->execute([isset($_POST['is_beach_stay']) ? 1 : 0, $new_id]);
         iti_flash_set($photo_errors ? 'error' : 'success', 'Destination "' . $fields['name_en'] . '" created.' . ($photo_errors ? ' Photo: ' . implode(' ', $photo_errors) : ''));
         iti_redirect('destinations.php');
 
@@ -79,6 +82,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit) {
              region=?,country=?,latitude=?,longitude=?,cover_photo=?,sort_order=?,is_active=?
              WHERE id=?'
         )->execute([...array_values($fields), $id]);
+        $db->prepare('UPDATE iti_destinations SET is_beach_stay = ? WHERE id = ?')->execute([isset($_POST['is_beach_stay']) ? 1 : 0, $id]);
         if (isset($gallery)) $db->prepare('UPDATE iti_destinations SET photos = ? WHERE id = ?')
                                 ->execute([$gallery ? json_encode($gallery, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) : null, $id]);
         if ($photo_errors) {
@@ -208,6 +212,13 @@ include __DIR__ . '/../../includes/layout_header.php';
            style="width:16px;height:16px;accent-color:var(--red);cursor:pointer;">
     <label for="is_active" style="margin:0;text-transform:none;font-size:.85rem;cursor:pointer;">Active</label>
   </div>
+  <div class="form-group" style="flex-direction:row;align-items:center;gap:10px;">
+    <input type="checkbox" name="is_beach_stay" value="1" id="is_beach_stay"
+           <?= !empty($row['is_beach_stay']) ? 'checked' : '' ?>
+           style="width:16px;height:16px;accent-color:var(--red);cursor:pointer;">
+    <label for="is_beach_stay" style="margin:0;text-transform:none;font-size:.85rem;cursor:pointer;">Beach / relax stay
+      <span style="color:var(--grey-mid);">— consecutive days in the same hotel here are shown as one block in the client program (web, PDF, Word)</span></label>
+  </div>
 
   <div class="form-actions">
     <button type="submit" class="btn btn-red"><?= $action==='add' ? '+ Create' : '💾 Save' ?></button>
@@ -274,7 +285,7 @@ include __DIR__ . '/../../includes/layout_header.php';
         <td style="display:flex;gap:10px;align-items:center;">
           <div style="width:54px;height:36px;flex:none;border-radius:4px;background:#eee center/cover no-repeat<?= !empty($d['cover_photo']) ? ";background-image:url('" . h($d['cover_photo']) . "')" : '' ?>"></div>
           <div>
-          <div style="font-weight:600;"><?= h($d['name_en']) ?><?php if (empty($d['cover_photo'])): ?> <span style="font-size:.68rem;font-weight:400;color:var(--grey-mid);">· no photo</span><?php endif; ?></div>
+          <div style="font-weight:600;"><?= h($d['name_en']) ?><?php if (!empty($d['is_beach_stay'])): ?> <span title="Beach / relax stay: days in one hotel shown as one block">🏖</span><?php endif; ?><?php if (empty($d['cover_photo'])): ?> <span style="font-size:.68rem;font-weight:400;color:var(--grey-mid);">· no photo</span><?php endif; ?></div>
           <?php if ($d['name_it'] && $d['name_it']!==$d['name_en']): ?><div style="font-size:.72rem;color:var(--grey-mid);"><?= h($d['name_it']) ?></div><?php endif; ?>
           </div>
         </td>

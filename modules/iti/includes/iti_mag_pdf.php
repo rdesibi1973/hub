@@ -164,7 +164,7 @@ td{vertical-align:top}
 <p class="kick" style="margin-bottom:10px"><?= h($T['program']) ?></p>
 <?php
     $seenLodge = []; $seenPhoto = []; $prevKey = '';
-    foreach ($D['days'] as $i => $d):
+    foreach (iti_mag_compact_days($D['days'], $T, $M) as $i => $d):   // beach days in one hotel → one block
         if ($i > 0) echo '<div class="dayrule"></div>';
         if ($d['dest_photo'] !== '' && empty($seenPhoto[$d['dest_photo']])) {
             $seenPhoto[$d['dest_photo']] = true;
@@ -172,8 +172,8 @@ td{vertical-align:top}
         } ?>
 <div class="day">
 <div class="nobrk">
-<p class="kick"><?= h($T['day'] . (!empty($d['date']) ? ' · ' . iti_mag_date($d['date'], $M, false, true) : '')) ?></p>
-<div><span class="dayno"><?= (int)$d['n'] ?></span>&nbsp;&nbsp;<span class="daytitle"><?= h($d['title']) ?></span></div>
+<p class="kick"><?= h(iti_mag_day_kicker($d, $T, $M)) ?></p>
+<div><span class="dayno"><?= h(iti_mag_day_no($d)) ?></span>&nbsp;&nbsp;<span class="daytitle"><?= h($d['title']) ?></span></div>
 <div class="chips">
 <?php foreach ($d['flights'] ?? [] as $t) echo '<b>✈</b> ' . h($t) . ' &nbsp;&nbsp; ';
       foreach ($d['transfers'] as $t) echo '<b>⇢</b> ' . h($t) . ' &nbsp;&nbsp; '; ?>

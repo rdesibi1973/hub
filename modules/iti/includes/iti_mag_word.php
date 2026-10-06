@@ -204,16 +204,16 @@ function iti_mag_word_build(array $D): array {
     $s->addPageBreak();
     $s->addText($T['program'], 'mwKicker', ['spaceAfter' => 120]);
     $seenLodge = []; $seenPhoto = []; $prevKey = '';
-    foreach ($D['days'] as $i => $d) {
+    foreach (iti_mag_compact_days($D['days'], $T, $M) as $i => $d) {   // beach days in one hotel → one block
         if ($i > 0) $s->addText('', null, ['borderBottomSize' => 6, 'borderBottomColor' => 'E6DDD0', 'spaceAfter' => 200]);
         if ($d['dest_photo'] !== '' && empty($seenPhoto[$d['dest_photo']])) {
             $seenPhoto[$d['dest_photo']] = true;
             if ($pi = iti_mw_img($d['dest_photo'], 1400, $tmp)) $s->addImage($pi, ['width' => $W, 'alignment' => 'center']);
         }
         $run = $s->addTextRun(['spaceAfter' => 0, 'keepNext' => true]);
-        $run->addText($T['day'] . (!empty($d['date']) ? ' · ' . iti_mag_date($d['date'], $M, false, true) : ''), 'mwKicker');
+        $run->addText(iti_mag_day_kicker($d, $T, $M), 'mwKicker');
         $hr = $s->addTextRun(['spaceAfter' => 100, 'keepNext' => true]);
-        $hr->addText((string)$d['n'] . '  ', 'mwDayNo');
+        $hr->addText(iti_mag_day_no($d) . '  ', 'mwDayNo');
         $hr->addText($d['title'], 'mwH3');
         $chips = $s->addTextRun(['spaceAfter' => 140]);
         foreach ($d['flights'] ?? [] as $t) { $chips->addText('✈ ', 'mwChipB'); $chips->addText($t . '     ', 'mwChip'); }

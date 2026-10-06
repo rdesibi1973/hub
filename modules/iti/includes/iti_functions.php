@@ -1026,18 +1026,25 @@ function iti_create_table(string $table, string $body, array $fks = array()): vo
     }
 }
 
-// Teenagers (under 16) of a programme, next to adults / children (under 12), and the room type
-// of a night ("1 Double + 1 Twin", free text shown with the lodge); added once if missing.
+// Columns of the client document, added once if missing: teenagers (under 16) of a program next to
+// adults / children (under 12); the room type of a night ("1 Double + 1 Twin", shown with the lodge);
+// "beach / relax stay" destinations, whose consecutive days in one hotel are shown as one block.
 // Call it outside transactions (ALTER TABLE commits) and before iti_table_columns() caches the lists.
-function iti_ensure_pax_room(): void {
+function iti_ensure_doc_columns(): void {
     static $done = false;
     if ($done) return;
     $done = true;
     try {
         iti_add_column('iti_programs', 'pax_teens', 'TINYINT NOT NULL DEFAULT 0');
         iti_add_column('iti_program_days', 'room_type', 'VARCHAR(100) NULL DEFAULT NULL');
+        if (iti_add_column('iti_destinations', 'is_beach_stay', 'TINYINT(1) NOT NULL DEFAULT 0')) {
+            // First run: the coast and islands (not Stone Town, a sightseeing stop).
+            db()->exec("UPDATE iti_destinations SET is_beach_stay = 1
+                         WHERE CONCAT_WS(' ', name_en, region, code) REGEXP 'zanzibar|pemba|mafia|pangani'
+                           AND name_en NOT LIKE '%stone town%'");
+        }
     } catch (PDOException $e) {
-        error_log('iti_ensure_pax_room: ' . $e->getMessage());
+        error_log('iti_ensure_doc_columns: ' . $e->getMessage());
     }
 }
 
@@ -1045,7 +1052,7 @@ function iti_ensure_final_schema(): void {
     static $done = false;
     if ($done) return;
     $done = true;
-    iti_ensure_pax_room();   // own check, not tied to final_schema_version
+    iti_ensure_doc_columns();   // own check, not tied to final_schema_version
     if (iti_setting('final_schema_version') === ITI_FINAL_SCHEMA_VERSION) return;
     $db = db();
     iti_ensure_lead_link();

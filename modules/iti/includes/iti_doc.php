@@ -169,6 +169,7 @@ function iti_doc_day_photos(PDO $db, array &$days, array $p): string {
  */
 function iti_doc_data(int $id, string $lang): ?array {
     $db = db();
+    iti_ensure_doc_columns();   // room_type, pax_teens, is_beach_stay (also from the public page)
     $p = iti_get_program($id);
     if (!$p) return null;
     $T = iti_doc_labels($lang);
@@ -253,6 +254,10 @@ function iti_doc_data(int $id, string $lang): ?array {
         if (!empty($d['destination_id'])) $photoIds[] = (int)$d['destination_id'];
         if (isset($lr) && $lodgeKey === 'L' . $lr['id'] && !empty($lr['destination_id'])) $photoIds[] = (int)$lr['destination_id'];
 
+        // Beach / relax stay: the lodge's area, else the day's destination (iti_mag_compact_days()).
+        $beachDest = (isset($lr) && $lodgeKey === 'L' . $lr['id'] && !empty($lr['destination_id'])) ? (int)$lr['destination_id'] : (int)($d['destination_id'] ?? 0);
+        $beach = $lodgeName !== '' && $beachDest && !empty($dests[$beachDest]['is_beach_stay']);
+
         $title = iti_doc_pick($d, 'day_title', $lang);
         if ($title === '') $title = $destName !== '' ? $destName : ($lodgeName !== '' ? $lodgeName : '');
         $date = null;   // real date when the programme has a start date (personal / final)
@@ -279,6 +284,7 @@ function iti_doc_data(int $id, string $lang): ?array {
             'lodge_photos' => $lodgePhotos,
             'lodge_url'  => $lodgeUrl,
             'room'       => $lodgeName !== '' ? trim((string)($d['room_type'] ?? '')) : '',   // "1 Double + 1 Twin", free text
+            'beach'      => $beach,
             'activities' => $acts,
         ];
     }
