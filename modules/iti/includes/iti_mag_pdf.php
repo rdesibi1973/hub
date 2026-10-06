@@ -150,7 +150,7 @@ td{vertical-align:top}
 <table class="stays">
 <?php foreach ($stays as $st): $ph = $st['photo'] !== '' ? iti_mp_img($st['photo'], 700, $tmp, 'width:110pt') : ''; ?>
 <tr class="nobrk"><td style="width:120pt"><?= $ph ?></td><td>
-<p class="kick"><?= h($T['day'] . ' ' . $st['day'] . ($st['nights'] > 1 ? '–' . ($st['day'] + $st['nights'] - 1) : '')) ?></p>
+<p class="kick"><?= h(iti_mag_stay_kicker($st, $T)) ?></p>
 <h4><?= h($st['lodge']) ?></h4>
 <span class="small"><?= h(($st['dest'] !== '' ? $st['dest'] . ' · ' : '') . $st['nights'] . ' ' . ($st['nights'] === 1 ? $T['night1'] : $T['nights']) . ' · ' . $st['meals'] . ($st['room'] !== '' ? ' · ' . $st['room'] : '')) ?></span>
 </td></tr>

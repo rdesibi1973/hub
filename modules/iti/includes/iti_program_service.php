@@ -21,7 +21,7 @@ function iti_ps_links(array $p, string $lang = ''): array {
     $lang = $lang !== '' ? $lang : (string)($p['display_language'] ?? 'it');
     $base = ITI_MODULE_URL;
     $out = [
-        'preview' => $base . '/program_doc.php?id=' . (int)$p['id'] . '&lang=' . $lang . '&layout=mag',
+        'preview' => $base . '/program_doc.php?id=' . (int)$p['id'] . '&lang=' . $lang,
         'edit'    => $base . '/program_edit.php?id=' . (int)$p['id'],
         'word'    => $base . '/export_mag_word.php?id=' . (int)$p['id'] . '&lang=' . $lang,
         'pdf'     => $base . '/export_mag_word.php?id=' . (int)$p['id'] . '&lang=' . $lang . '&format=pdf',

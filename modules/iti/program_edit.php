@@ -714,8 +714,7 @@ include __DIR__ . '/../../includes/layout_header.php';
     <?php if ($active_tab === 'days'): ?>
     <button type="button" id="btn-save-current" onclick="saveCurrentDay()" class="btn btn-red btn-sm">💾 Save</button>
     <?php endif; ?>
-    <a href="program_doc.php?id=<?= $id ?>" class="btn btn-outline btn-sm" target="_blank">👁 Preview</a>
-    <a href="program_doc.php?id=<?= $id ?>&amp;layout=mag" class="btn btn-outline btn-sm" target="_blank">📷 Magazine</a>
+    <a href="program_doc.php?id=<?= $id ?>" class="btn btn-outline btn-sm" target="_blank" title="The program as the client sees it (translate missing texts there)">👁 Preview</a>
     <?php if ($program['is_published']): ?>
     <a href="<?= h($public_url) ?>" target="_blank" class="btn btn-green btn-sm">🔗 Public Link</a>
     <button type="button" class="btn btn-outline btn-sm" onclick="navigator.clipboard.writeText(<?= h(json_encode($public_url)) ?>).then(()=>{this.textContent='✔ Copiato'})">📋 Copy link</button>
@@ -730,6 +729,7 @@ include __DIR__ . '/../../includes/layout_header.php';
     </form>
     <?php endif; ?>
     <a href="export_mag_word.php?id=<?= $id ?>" class="btn btn-outline btn-sm">⬇ Word</a>
+    <a href="export_mag_word.php?id=<?= $id ?>&format=pdf" class="btn btn-outline btn-sm">📕 PDF</a>
     <?php if (($program['program_type'] ?? '') === 'personal'): ?>
     <a href="export_mag_word.php?id=<?= $id ?>&format=guide" class="btn btn-outline btn-sm" title="PDF for the safari guide: day by day + transfers and accommodation, no photos / intro / prices">🧭 Guide PDF</a>
     <?php endif; ?>
@@ -1583,7 +1583,7 @@ function dpAdd() {
 function dpDel(b) {
   var tr = b.closest('tr'), tb = tr.parentNode;
   if (tb.querySelectorAll('.dp-row').length > 1) tr.remove();
-  else tr.querySelectorAll('input').forEach(function (i) { i.value = ''; });
+  else { tr.querySelectorAll('input').forEach(function (i) { i.value = ''; }); dpSetBold(tr, false); }
 }
 function dpSetBold(tr, on) {
   tr.querySelector('input[name="dp_bold[]"]').value = on ? '1' : '0';

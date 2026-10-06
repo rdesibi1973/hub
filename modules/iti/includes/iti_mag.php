@@ -4,8 +4,8 @@
  * route map, stays overview, day by day with destination photos and lodge
  * cards, prices, included / not included, contacts, terms.
  *
- * Same data as the Etnia layout (iti_doc_data() in iti_doc.php), so web, print
- * and PDF stay in step. Opened with ?layout=mag on program_doc.php / itinerary.php.
+ * Data from iti_doc_data() (iti_doc.php), the same for web, print
+ * and PDF stay in step. Used by program_doc.php (internal preview) and itinerary.php (public link).
  * Printing (browser or headless Chrome) gives an A4 PDF: cover page, then sections.
  *
  * Keep PHP-7 style (no match / arrow functions / str_contains).
@@ -20,7 +20,7 @@ function iti_mag_labels(string $lang): array {
                  'destinations' => 'Destinazioni', 'lodges' => 'Sistemazioni', 'online' => 'Itinerario digitale',
                  'about_dest' => 'La destinazione', 'pdf' => 'Scarica PDF', 'private' => 'Safari privato con guida',
                  'adult' => 'adulto', 'adults' => 'adulti', 'child' => 'bambino', 'children' => 'bambini', 'dates' => 'Date',
-                 'teen' => 'ragazzo', 'teens' => 'ragazzi', 'teen_age' => '(minori di 16 anni)', 'child_age' => '(sotto i 12 anni)',
+                 'teen' => 'ragazzo', 'teens' => 'ragazzi', 'teen_age' => '(minori di 16 anni)', 'child_age' => '(minori di 12 anni)',
                  'months' => ['gennaio', 'febbraio', 'marzo', 'aprile', 'maggio', 'giugno', 'luglio', 'agosto', 'settembre', 'ottobre', 'novembre', 'dicembre'],
                  'wdays' => ['dom', 'lun', 'mar', 'mer', 'gio', 'ven', 'sab']],
         'en' => ['overview' => 'Your journey', 'facts' => 'At a glance', 'route' => 'The route', 'stays' => 'Where you stay',
@@ -89,13 +89,14 @@ function iti_mag_stays(array $days): array {
 /**
  * Day by day for the client document: consecutive days in the same hotel of a "beach / relax
  * stay" destination (Zanzibar, Pemba, Mafia… — iti_destinations.is_beach_stay) become one block
- * when the later days have no flight or transfer. The block keeps the first day's text, photo and
- * meals; the later days' texts follow: a text repeated on several days ("relax on the beach")
- * once, a text of one day only (an excursion) with its date ("gio 12 marzo: …"); a later day's
- * activities get their date too. A block has 'n_to' / 'date_to'; a single day has neither.
+ * when the later days have the same room and no flight or transfer. The block keeps the first
+ * day's text and photo and shows the meals of most of its days (the arrival day often differs).
+ * The later days' texts follow: a text repeated on several days ("relax on the beach") once, a
+ * text of one day only (an excursion) with its date ("gio 12 marzo: …"); a later day's activities
+ * get their date too. A block has 'n_to' / 'date_to'; a single day has neither.
  */
 function iti_mag_compact_days(array $days, array $T, array $M): array {
-    $out = []; $extra = [];   // per block: [when, text] of the later days
+    $out = []; $extra = []; $meals = [];   // per block: [when, text] of the later days; meals → days
     foreach ($days as $d) {
         $i = count($out) - 1;
         $last = $i >= 0 ? $out[$i] : null;
@@ -103,8 +104,10 @@ function iti_mag_compact_days(array $days, array $T, array $M): array {
         $join = $last && !empty($d['beach']) && !empty($last['beach']) && $d['lodge'] !== ''
              && $key === ($last['lodge_key'] !== '' ? $last['lodge_key'] : $last['lodge'])
              && $d['n'] === (isset($last['n_to']) ? $last['n_to'] : $last['n']) + 1
+             && ($d['room'] ?? '') === ($last['room'] ?? '')
              && empty($d['flights']) && empty($d['transfers']);
-        if (!$join) { $out[] = $d; continue; }
+        if (!$join) { $out[] = $d; $meals[count($out) - 1] = [$d['meals'] => 1]; continue; }
+        $meals[$i][$d['meals']] = ($meals[$i][$d['meals']] ?? 0) + 1;
         $when = !empty($d['date']) ? iti_mag_date($d['date'], $M, false, true) : $T['day'] . ' ' . $d['n'];
         $txt = trim((string)$d['narrative']);
         if ($txt !== '') $extra[$i][] = [$when, $txt];
@@ -113,6 +116,9 @@ function iti_mag_compact_days(array $days, array $T, array $M): array {
         }
         $out[$i]['n_to'] = $d['n'];
         $out[$i]['date_to'] = $d['date'] ?? null;
+    }
+    foreach ($out as $i => $b) {   // a block shows the meals of most of its days (the arrival day often differs)
+        if (!empty($b['n_to'])) { arsort($meals[$i]); $out[$i]['meals'] = (string)key($meals[$i]); }
     }
     foreach ($extra as $i => $rows) {
         $first = trim((string)$out[$i]['narrative']);
@@ -138,6 +144,13 @@ function iti_mag_day_kicker(array $d, array $T, array $M): string {
     return $s;
 }
 
+/** Stay row kicker: "Giorno 3" for one night, "Giorni 3–7" for several. */
+function iti_mag_stay_kicker(array $st, array $T): string {
+    if ($st['nights'] <= 1) return $T['day'] . ' ' . $st['day'];
+    $days = function_exists('mb_convert_case') ? mb_convert_case($T['days'], MB_CASE_TITLE, 'UTF-8') : ucfirst($T['days']);
+    return $days . ' ' . $st['day'] . '–' . ($st['day'] + $st['nights'] - 1);
+}
+
 /** Day number(s) of the day head: "9", or "9–12" for a block. */
 function iti_mag_day_no(array $d): string {
     return (string)(int)$d['n'] . (!empty($d['n_to']) ? '–' . (int)$d['n_to'] : '');
@@ -160,7 +173,7 @@ function iti_mag_date_range(array $D, array $M): string {
     return iti_mag_date($a, $M) . ' – ' . iti_mag_date($b, $M);
 }
 
-/** "2 adulti · 1 ragazzo (minori di 16 anni) · 1 bambino (sotto i 12 anni)" for personal programmes ('' for samples). */
+/** "2 adulti · 1 ragazzo (minori di 16 anni) · 1 bambino (minori di 12 anni)" for personal programmes ('' for samples). */
 function iti_mag_pax(array $D, array $M): string {
     if (!empty($D['pax_label'])) return (string)$D['pax_label'];
     $p = $D['program'];
@@ -458,7 +471,7 @@ function iti_mag_render(array $D, string $publicUrl = ''): string {
             <a class="mag-stay" href="#day-<?= (int)$s['day'] ?>" style="text-decoration:none;color:inherit">
               <?php if ($s['photo'] !== ''): ?><img class="mag-stay-img" src="<?= h(iti_photo_variant($s['photo'], 480)) ?>" alt="<?= h($s['lodge']) ?>" loading="lazy" decoding="async"><?php else: ?><div class="mag-stay-img"></div><?php endif; ?>
               <div class="mag-stay-b">
-                <div class="mag-stay-day"><?= h($T['day']) ?> <?= (int)$s['day'] ?><?= $s['nights'] > 1 ? '–' . ((int)$s['day'] + $s['nights'] - 1) : '' ?></div>
+                <div class="mag-stay-day"><?= h(iti_mag_stay_kicker($s, $T)) ?></div>
                 <div class="mag-stay-name"><?= h($s['lodge']) ?></div>
                 <div class="mag-stay-meta"><?= $s['dest'] !== '' ? h($s['dest']) . ' · ' : '' ?><?= (int)$s['nights'] ?> <?= h($s['nights'] === 1 ? $T['night1'] : $T['nights']) ?> · <?= h($s['meals']) ?><?= $s['room'] !== '' ? ' · ' . h($s['room']) : '' ?></div>
               </div>

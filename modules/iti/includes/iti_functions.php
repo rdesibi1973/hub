@@ -1038,10 +1038,10 @@ function iti_ensure_doc_columns(): void {
         iti_add_column('iti_programs', 'pax_teens', 'TINYINT NOT NULL DEFAULT 0');
         iti_add_column('iti_program_days', 'room_type', 'VARCHAR(100) NULL DEFAULT NULL');
         if (iti_add_column('iti_destinations', 'is_beach_stay', 'TINYINT(1) NOT NULL DEFAULT 0')) {
-            // First run: the coast and islands (not Stone Town, a sightseeing stop).
+            // First run: the coast and islands (not Stone Town, a sightseeing stop, nor the airports).
             db()->exec("UPDATE iti_destinations SET is_beach_stay = 1
                          WHERE CONCAT_WS(' ', name_en, region, code) REGEXP 'zanzibar|pemba|mafia|pangani'
-                           AND name_en NOT LIKE '%stone town%'");
+                           AND name_en NOT LIKE '%stone town%' AND name_en NOT LIKE '%airport%' AND COALESCE(region, '') <> 'Airports'");
         }
     } catch (PDOException $e) {
         error_log('iti_ensure_doc_columns: ' . $e->getMessage());

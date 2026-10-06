@@ -1,7 +1,7 @@
 # Hub Agent API (v1)
 
 JSON API that lets Claude (Cowork / Claude Code / scheduled tasks) run the booking
-workflow — new request → copy standard programme → Confirm Safari → booking email —
+workflow — new request → copy standard program → Confirm Safari → booking email —
 without driving the web UI.
 
 - **Endpoint:** `https://hub.savannahexplorers.com/api/agent/index.php?action=<name>`
@@ -176,21 +176,21 @@ payment status and group. Without `"confirm": true` → returns `from`, `to` and
 other members.
 
 ### `iti_programs` (GET)
-`q?`, `type?` (`sample`|`personal`) → ITI programmes: id, title, language, days, published, public_url.
+`q?`, `type?` (`sample`|`personal`) → ITI programs: id, title, language, days, published, public_url.
 
 ### `iti_texts` (GET)
 `program_id`, `lang` (`en`|`it`|`fr`|`es`|`de`), `all?` → `from` (source language) and `items[]` `{key, source, target}`:
-the texts to translate — programme title/route/intro, day titles and texts, activity notes, day transfers (`t<id>`), included / not included,
-and the descriptions of the programme's lodges and destinations. Without `all`, only those still empty in `lang`.
+the texts to translate — program title/route/intro, day titles and texts, activity notes, day transfers (`t<id>`), included / not included,
+and the descriptions of the program's lodges and destinations. Without `all`, only those still empty in `lang`.
 
 ### `iti_save_texts` (POST)
 `program_id`, `lang`, `texts` `{"<key>": "<translation>", …}`, `overwrite?` (default false: only empty fields are written,
-so edited translations are kept). Dry-run unless `"confirm": true`. Lets Claude translate programmes in a session
+so edited translations are kept). Dry-run unless `"confirm": true`. Lets Claude translate programs in a session
 (no Anthropic API billing); the Hub "Translate" button does the same through the API when `ANTHROPIC_API_KEY` is set.
 
-### ITI personal programmes (Cowork)
+### ITI personal programs (Cowork)
 Code: `modules/iti/includes/iti_program_service.php` (+ `iti_final.php` for the Calc). Only **personal**
-programmes are changed; samples stay on the Hub pages. Every response with a programme carries `links`:
+programs are changed; samples stay on the Hub pages. Every response with a program carries `links`:
 `preview` (internal, magazine), `edit`, `word` (editable .docx for agencies, Hub login), `public` (client link,
 magazine layout — only once published).
 
@@ -209,13 +209,13 @@ Typical flows:
 (`preview`, `edit`, `word`, `pdf`, `guide` (personal only, else null), `public` — `word` / `pdf` / `guide` need a Hub login).
 
 #### `iti_document` (GET)
-The programme as a file in the magazine layout (cover, route map, stays, day by day with photos, prices,
+The program as a file in the magazine layout (cover, route map, stays, day by day with photos, prices,
 included / excluded, contacts, terms). `program_id`, `format?` (`pdf` default, rendered on the server with Dompdf;
 `docx` = editable Word for agencies; `guide` = PDF for the safari guide: transfer / flight and accommodation
 recap with check-in / check-out, then the day by day — no photos, intro, prices, lodge descriptions or terms,
-file `…_GUIDE_<LANG>.pdf`; **personal programmes only**, a sample → 400), `lang?` (default: the programme's language, the guide sheet included).
+file `…_GUIDE_<LANG>.pdf`; **personal programs only**, a sample → 400), `lang?` (default: the program's language, the guide sheet included).
 → `file {program_id, name, mime, size, format, lang, content_base64}` (`format` is the file type: `guide` → `pdf`). Decode and save it as `file.name`.
-To put it in Dropbox instead: `save: true` (the programme's `lead_request_id` folder), or `request_id` / `folder_path`;
+To put it in Dropbox instead: `save: true` (the program's `lead_request_id` folder), or `request_id` / `folder_path`;
 `save_as?` (file name), `overwrite?` (an existing file is kept unless true; Dropbox keeps the old version)
 → `file` (no content), `saved_to`, `overwritten`. The audit log omits the file content.
 Photos make files of a few MB; generating can take up to a minute.
@@ -241,10 +241,10 @@ Copies the sample (days, activities, prices, inclusions, terms) as a draft propo
 
 #### Day items (used by `iti_create_personal` `days[]`, `iti_set_days`, `iti_add_day`, `iti_update_day`)
 Every key optional: `day_title_<lang>`, `narrative_<lang>`, `end_lodge_id` | `end_lodge` (name), `end_lodge_custom`,
-`room_type` (free text in the programme language, e.g. "1 camera matrimoniale + 1 tripla"; shown next to the lodge, ignored with no overnight), `destination_id` | `destination` (name or code), `destination_custom`, `start_lodge_id`, `start_destination_id`,
+`room_type` (free text in the program language, e.g. "1 camera matrimoniale + 1 tripla"; shown next to the lodge, ignored with no overnight), `destination_id` | `destination` (name or code), `destination_custom`, `start_lodge_id`, `start_destination_id`,
 `start_custom`, `transfer_route_id`, `transfer_custom`, `meal_breakfast` / `meal_lunch` / `meal_dinner` /
 `meal_all_inclusive` (0/1), and three lists — each one given **replaces** the day's list (`[]` = none):
-- `transfers`: `["Dar airport – Serena Hotel, about 40 min", …]` (text shown on the day, programme language) or
+- `transfers`: `["Dar airport – Serena Hotel, about 40 min", …]` (text shown on the day, program language) or
   `[{description, text_<lang>?: "<translation>"}]`; a transfer whose text is unchanged keeps its translations;
 - `activities`: `[{activity_id} | {activity: "<name>"} | {custom: "<text>", text_<lang>?: "<translation>"}]` (see `iti_activities`; a catalogue activity shows its own name);
 - `flights`: `[{flight_route_id | custom, airline?, dep?: "07:40", arr?: "10:05", note_<lang>?}]` (see `iti_flight_routes`).
@@ -252,7 +252,7 @@ Every key optional: `day_title_<lang>`, `narrative_<lang>`, `end_lodge_id` | `en
 Flights are shown on the day (magazine, Word) as "✈ Dar Es Salaam → Ruaha · Auric Air · 07:40–10:05".
 
 #### `iti_create_personal` without a sample
-No `sample_id` = blank programme for a trip with no matching sample: `fields.title_<display_language>` and `days[]`
+No `sample_id` = blank program for a trip with no matching sample: `fields.title_<display_language>` and `days[]`
 are required. With a `sample_id`, `days[]` (optional) replaces the sample's days.
 
 #### `iti_set_days` (POST)
@@ -266,7 +266,7 @@ Dry-run unless confirm.
 #### `iti_inclusions` (GET) / `iti_update_inclusions` (POST)
 `iti_inclusions` → the standard rows `{std_id, text_<lang>}` by `included` / `excluded`.
 `iti_update_inclusions`: `program_id`, `included[]` and / or `excluded[]` — items `{std_id}`, `{text_<lang>…}` or a
-plain string (programme language). Each list given replaces that list in one transaction; an empty list is refused.
+plain string (program language). Each list given replaces that list in one transaction; an empty list is refused.
 
 #### Master data: `iti_flight_routes`, `iti_activities`, `iti_transfer_routes` (GET) and `iti_create_…` (POST)
 - `iti_flight_routes` `q? from? to?` (airport name or code); `iti_create_flight_route` `fields`: `from_airport`*,
@@ -279,8 +279,8 @@ plain string (programme language). Each list given replaces that list in one tra
 Duplicates are refused with the existing id. Dry-run unless confirm.
 
 #### `iti_save_as_sample` (POST)
-`program_id` (a finished personal programme), `title` or `title_<lang>` (required), `code?` (Calc code) → a new sample:
-same days / lists, client data removed (dates, pax, prices, request, publication). The personal programme is not changed.
+`program_id` (a finished personal program), `title` or `title_<lang>` (required), `code?` (Calc code) → a new sample:
+same days / lists, client data removed (dates, pax, prices, request, publication). The personal program is not changed.
 Dry-run unless confirm.
 
 #### `iti_publish` (POST)
@@ -290,7 +290,7 @@ Dry-run unless confirm.
 `request_id`, `sample_id?` (default: the sample whose Calc code matches the file name), `lang?`, `file?`, `sheet?`.
 Plan: `calc` (file, rev, pax), `sample`, `nights[]` (date, label, hotel text → lodge, state, meal, activities,
 from_sample_day, flags), `unmapped` {lodge|activity|route: {norm: text}}, `blocking`, `existing_finals`.
-`iti_final_from_calc` with `"confirm": true` generates the final programme (an older final of the request is
+`iti_final_from_calc` with `"confirm": true` generates the final program (an older final of the request is
 superseded) → `program_id`, `program`. 409 when the Calc cannot be read.
 
 #### `iti_save_alias` (POST)
@@ -301,7 +301,7 @@ superseded) → `program_id`, `program`. 409 when the Calc cannot be read.
 ### ITI master data — lodges and destinations
 Code: `modules/iti/includes/iti_content_service.php` (+ `iti_photos.php`, shared with the Lodges / Destinations pages).
 Photos are what the magazine layout (`&layout=mag`) shows: lodge card and stays (lodge, first photo = main),
-day header and programme cover (destination).
+day header and program cover (destination).
 
 #### `iti_lodges` (GET)
 `q?` (lodge / destination name), `destination?` (id, name or code), `active?` (`1` default, `0`, `all`),

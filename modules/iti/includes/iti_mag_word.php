@@ -194,7 +194,7 @@ function iti_mag_word_build(array $D): array {
             $pc = $tb->addCell(2600, ['valign' => 'center']);
             if ($st['photo'] !== '' && ($pi = iti_mw_img($st['photo'], 700, $tmp))) $pc->addImage($pi, ['width' => 120]);
             $cc = $tb->addCell(7100, ['valign' => 'center']);
-            $cc->addText($T['day'] . ' ' . $st['day'] . ($st['nights'] > 1 ? '–' . ($st['day'] + $st['nights'] - 1) : ''), 'mwKicker', 'mwTight');
+            $cc->addText(iti_mag_stay_kicker($st, $T), 'mwKicker', 'mwTight');
             $cc->addText($st['lodge'], 'mwH4', 'mwTight');
             $cc->addText(($st['dest'] !== '' ? $st['dest'] . ' · ' : '') . $st['nights'] . ' ' . ($st['nights'] === 1 ? $T['night1'] : $T['nights']) . ' · ' . $st['meals'] . ($st['room'] !== '' ? ' · ' . $st['room'] : ''), 'mwSmall', 'mwTight');
         }
