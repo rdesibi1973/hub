@@ -35,6 +35,12 @@ function voucher_prog_airport(?string $name, ?string $code): string
     return $code !== '' && strpos($name, '[') === false ? trim($name . ' [' . $code . ']') : $name;
 }
 
+/** Is this transfer end an airport / airstrip? ("Zanzibar Airport", "Aeroporto di Arusha", "Seronera airstrip") */
+function voucher_prog_is_airport(string $place): bool
+{
+    return (bool)preg_match('/\b(airport|aeroporto|a[ée]roport|aeropuerto|flughafen|airstrip|pista)\b|\[[A-Z]{3}\]/iu', $place);
+}
+
 /** "Kilimanjaro Airport – Arusha Explorers Lodge, about 1 h" → [from, to] (to = '' when not split). */
 function voucher_prog_split_transfer(string $txt): array
 {
@@ -155,18 +161,25 @@ function voucher_model_from_program(PDO $db, int $pid): array
             $arr = voucher_prog_airport($f['to_airport'] ?? '', $f['to_code'] ?? '');
             if (!$f['flight_route_id']) { list($dep, $arr) = voucher_prog_split_transfer((string)$f['flight_custom']); }
             $flights[] = [
-                'date' => $day, 'no' => '', 'airline' => trim((string)($f['airline_company'] ?: ($f['operator'] ?? ''))),
+                'date' => $day, 'no' => trim((string)($f['flight_no'] ?? '')), 'airline' => trim((string)($f['airline_company'] ?: ($f['operator'] ?? ''))),
                 'dep_airport' => $dep, 'dep_code' => voucher_airport_code($dep), 'dep_time' => substr((string)$f['departure_time'], 0, 5),
                 'arr_airport' => $arr, 'arr_code' => voucher_airport_code($arr), 'arr_time' => substr((string)$f['arrival_time'], 0, 5),
             ];
         }
-        $hasFlight = !empty($flights) && end($flights)['date'] === $day;
+        $dayFlights = array_values(array_filter($flights, function ($f) use ($day) { return $f['date'] === $day; }));
+        $hasFlight = (bool)$dayFlights;
         foreach (iti_get_day_transfers((int)$d['id']) as $tr) {
             $txt = trim((string)($tr['description_en'] ?? '')) ?: trim((string)$tr['description']);
             if ($txt === '') continue;
             list($from, $to) = voucher_prog_split_transfer($txt);
             if ($to === '') $warn[] = voucher_fmt_date($day) . ': transfer "' . $txt . '" — pick-up and drop-off not separated (written "A – B").';
-            $transfers[] = ['date' => $day, 'from' => $from, 'to' => $to, 'flight_no' => '', 'flight_time' => '',
+            // The day's flight on the transfer: from the airport = the flight landing (last), to the airport = the one leaving (first).
+            $fNo = ''; $fTime = '';
+            if ($dayFlights) {
+                if (voucher_prog_is_airport($from))   { $f = end($dayFlights); $fNo = $f['no']; $fTime = $f['arr_time']; }
+                elseif (voucher_prog_is_airport($to)) { $f = $dayFlights[0];   $fNo = $f['no']; $fTime = $f['dep_time']; }
+            }
+            $transfers[] = ['date' => $day, 'from' => $from, 'to' => $to, 'flight_no' => $fNo, 'flight_time' => $fTime,
                             'notes' => $to !== '' ? voucher_zanzibar_note($to, $hasFlight) : '', 'hotel_missing' => false];
         }
     }

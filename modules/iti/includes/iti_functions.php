@@ -1060,6 +1060,7 @@ function iti_ensure_doc_columns(): void {
     try {
         iti_add_column('iti_programs', 'pax_teens', 'TINYINT NOT NULL DEFAULT 0');
         iti_add_column('iti_program_days', 'room_type', 'VARCHAR(100) NULL DEFAULT NULL');
+        iti_add_column('iti_day_flights', 'flight_no', 'VARCHAR(20) NULL DEFAULT NULL');   // "UI 403": vouchers, guide, client docs
         if (iti_add_column('iti_destinations', 'is_beach_stay', 'TINYINT(1) NOT NULL DEFAULT 0')) {
             // First run: the coast and islands (not Stone Town, a sightseeing stop, nor the airports).
             db()->exec("UPDATE iti_destinations SET is_beach_stay = 1

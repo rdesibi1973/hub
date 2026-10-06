@@ -125,6 +125,7 @@ function iti_pb_day_item(PDO $db, array $f): array {
                 $row['flight_custom'] = mb_substr(trim((string)$x['custom']), 0, 200);
             } else throw new InvalidArgumentException('flight needs flight_route_id or custom');
             if (!empty($x['airline'])) $row['airline_company'] = mb_substr(trim((string)$x['airline']), 0, 100);
+            if (($no = trim((string)($x['flight_no'] ?? ''))) !== '') { iti_ensure_doc_columns(); $row['flight_no'] = mb_substr(strtoupper($no), 0, 20); }   // column added lazily
             foreach (['dep' => 'departure_time', 'arr' => 'arrival_time'] as $in => $col) {
                 $t = trim((string)($x[$in] ?? $x[$col] ?? ''));
                 if ($t === '') continue;
@@ -270,6 +271,7 @@ function iti_pb_days_raw(PDO $db, int $pid): array {
         foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $fl) {
             $x = $fl['flight_route_id'] ? ['flight_route_id' => (int)$fl['flight_route_id'], 'route' => $fl['from_airport'] . ' → ' . $fl['to_airport']] : ['custom' => $fl['flight_custom']];
             if ($fl['airline_company']) $x['airline'] = $fl['airline_company'];
+            if (!empty($fl['flight_no'])) $x['flight_no'] = $fl['flight_no'];
             if ($fl['departure_time']) $x['dep'] = substr($fl['departure_time'], 0, 5);
             if ($fl['arrival_time']) $x['arr'] = substr($fl['arrival_time'], 0, 5);
             $row['flights'][] = $x;

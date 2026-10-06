@@ -32,6 +32,7 @@ if (($_GET['ajax'] ?? '') === 'lead_search') {
     exit;
 }
 iti_ensure_lead_link();
+iti_ensure_doc_columns();   // iti_day_flights.flight_no, room_type…
 
 // ── SALVA GIORNO (POST) ──────────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -215,10 +216,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
 
                 // ── Flights: delete all then re-insert from array ──
+                // The form has no field for the per-language notes (note_it…, written by Cowork): keep them,
+                // matching each saved row to an old one with the same route / custom text.
+                $fl_noteCols = array_values(array_filter(iti_table_columns('iti_day_flights'), function ($c) { return strpos($c, 'note_') === 0; }));
+                $fl_old = [];
+                if ($fl_noteCols) {
+                    $q = $db->prepare('SELECT * FROM iti_day_flights WHERE program_day_id=? ORDER BY sort_order, id');
+                    $q->execute([$day_id]);
+                    $fl_old = $q->fetchAll(PDO::FETCH_ASSOC);
+                }
                 $db->prepare('DELETE FROM iti_day_flights WHERE program_day_id=?')->execute([$day_id]);
                 $fl_routes  = $_POST['flight_route_id']  ?? [];
                 $fl_customs = $_POST['flight_custom']    ?? [];
                 $fl_airline = $_POST['airline_company']  ?? [];
+                $fl_no      = $_POST['flight_no']        ?? [];
                 $fl_dep_h   = $_POST['dep_h']            ?? [];
                 $fl_dep_m   = $_POST['dep_m']            ?? [];
                 $fl_arr_h   = $_POST['arr_h']            ?? [];
@@ -231,11 +242,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $ah = $fl_arr_h[$i] ?? ''; $am = $fl_arr_m[$i] ?? '';
                     $dep = ($dh !== '' && $dm !== '') ? "{$dh}:{$dm}" : null;
                     $arr = ($ah !== '' && $am !== '') ? "{$ah}:{$am}" : null;
-                    $db->prepare('INSERT INTO iti_day_flights (program_day_id,flight_route_id,flight_custom,airline_company,departure_time,arrival_time,sort_order) VALUES (?,?,?,?,?,?,?)')->execute([
+                    $notes = [];
+                    foreach ($fl_old as $k => $o) {
+                        if ((int)$o['flight_route_id'] === $fid && ($fid || trim((string)$o['flight_custom']) === $cust)) {
+                            foreach ($fl_noteCols as $c) if ((string)$o[$c] !== '') $notes[$c] = $o[$c];
+                            unset($fl_old[$k]);
+                            break;
+                        }
+                    }
+                    $cols = array_merge(['program_day_id','flight_route_id','flight_custom','airline_company','flight_no','departure_time','arrival_time','sort_order'], array_keys($notes));
+                    $db->prepare('INSERT INTO iti_day_flights (`' . implode('`,`', $cols) . '`) VALUES (' . implode(',', array_fill(0, count($cols), '?')) . ')')->execute(array_merge([
                         $day_id, $fid ?: null, $cust ?: null,
                         trim($fl_airline[$i] ?? '') ?: null,
+                        mb_substr(strtoupper(trim($fl_no[$i] ?? '')), 0, 20) ?: null,
                         $dep, $arr, $i+1,
-                    ]);
+                    ], array_values($notes)));
                 }
 
                 iti_flash_set('success', 'Day saved.');
@@ -419,9 +440,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($day_id && ($flight_route_id || $flight_custom !== '')) {
             $ms = $db->prepare('SELECT COALESCE(MAX(sort_order),0) FROM iti_day_flights WHERE program_day_id=?');
             $ms->execute([$day_id]); $max_sort = (int)$ms->fetchColumn();
-            $db->prepare('INSERT INTO iti_day_flights (program_day_id,flight_route_id,flight_custom,airline_company,departure_time,arrival_time,sort_order) VALUES (?,?,?,?,?,?,?)')->execute([
+            $db->prepare('INSERT INTO iti_day_flights (program_day_id,flight_route_id,flight_custom,airline_company,flight_no,departure_time,arrival_time,sort_order) VALUES (?,?,?,?,?,?,?,?)')->execute([
                 $day_id, $flight_route_id ?: 0, $flight_custom ?: null,
                 trim($_POST['airline_company'] ?? '') ?: null,
+                mb_substr(strtoupper(trim($_POST['flight_no'] ?? '')), 0, 20) ?: null,
                 ($_POST['departure_time']??'')?:null,
                 ($_POST['arrival_time']??'')?:null,
                 $max_sort+1,
@@ -1458,6 +1480,8 @@ include __DIR__ . '/../../includes/layout_header.php';
           </div>
           <div class="iti-combo-drop" data-opts='<?= json_encode($airline_opts, JSON_HEX_APOS) ?>' data-no-clear="1"></div>
         </div>
+        <input type="text" name="flight_no[]" value="<?= h($fl['flight_no'] ?? '') ?>" placeholder="Flight no." maxlength="20" title="Flight number, e.g. UI 403 (vouchers, guide)"
+               style="padding:7px 10px;border:1.5px solid var(--grey-lt);border-radius:6px;font-size:.82rem;width:96px;text-transform:uppercase;">
         <?php
         // Helper: parse HH:MM from stored value
         $dep_parts = explode(':', $fl['departure_time'] ?? '');
@@ -1467,6 +1491,9 @@ include __DIR__ . '/../../includes/layout_header.php';
         // HH options 00-23, MM options 00-59 step 5
         $hours = array_map(fn($h)=>str_pad($h,2,'0',STR_PAD_LEFT), range(0,23));
         $mins  = array_map(fn($m)=>str_pad($m,2,'0',STR_PAD_LEFT), range(0,59,5));
+        // A time saved elsewhere (Cowork: 07:42) keeps its minutes on the next save.
+        foreach ([$dep_m, $arr_m] as $_m) if ($_m !== '' && !in_array($_m, $mins, true)) $mins[] = $_m;
+        sort($mins);
         ?>
         <div style="display:flex;align-items:center;gap:3px;">
           <select name="dep_h[]" style="padding:6px 4px;border:1.5px solid var(--grey-lt);border-radius:6px;font-size:.82rem;width:58px;">
@@ -1962,6 +1989,10 @@ function addFlightRow(dayId) {
     var airlineCombo = makeCombo({placeholder:'Airline…', name:'airline_company[]'}, '', '', airlineOptsJson, true);
     airlineCombo.style.cssText = 'min-width:160px;max-width:200px;';
     info.appendChild(airlineCombo);
+    var fno = mkInput('flight_no[]', 'text', 'Flight no.');
+    fno.maxLength = 20; fno.title = 'Flight number, e.g. UI 403 (vouchers, guide)';
+    fno.style.minWidth = ''; fno.style.width = '96px'; fno.style.textTransform = 'uppercase';
+    info.appendChild(fno);
     // Time selects HH:MM dep → arr
     var hours = [], mins = [];
     for(var h=0;h<24;h++) hours.push((h<10?'0':'')+h);

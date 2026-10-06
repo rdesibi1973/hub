@@ -209,6 +209,7 @@ function iti_doc_data(int $id, string $lang): ?array {
             if ($route === '') continue;
             $parts = [$route];
             $air = trim((string)($f['airline_company'] ?: ($f['operator'] ?? '')));
+            if (!empty($f['flight_no'])) $air = trim($air . ' ' . $f['flight_no']);   // "Auric Air UI 403"
             if ($air !== '') $parts[] = $air;
             $t = trim(substr((string)$f['departure_time'], 0, 5) . ($f['arrival_time'] ? '–' . substr((string)$f['arrival_time'], 0, 5) : ''), '–');
             if ($t !== '') $parts[] = $t;
