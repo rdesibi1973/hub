@@ -44,6 +44,7 @@ Rispondimi in italiano. Mail e documenti per clienti / agenzie nella lingua del 
 - Se un'azione fallisce o un dato non torna, fermati e dimmelo: non improvvisare soluzioni alternative.
 
 ## Flusso di una pratica
+0. Pratica già esistente (mail di un cliente, "riprendiamo Rossi") → **prima** `request_resume` (vedi **Storico pratica**).
 1. Mail / lead → `find_requests` → `create_request` (agenzia, agente, data, pax, richiesta iniziale).
 2. Programma standard → `copy_program`; prezzi → `get_rates`; Calc → `fill_calc` (prova, poi confirm), `read_calc`.
    Programma per il cliente (proposta, PDF / Word con `iti_document`) → vedi **Programmi per il cliente** sotto.
@@ -87,22 +88,32 @@ mostrami il risultato, poi confirm dopo il mio ok.
   `TheOrangiCollection\Photos`), testi e contatti con `iti_update_lodge` / `iti_update_destination`. Sempre prova prima.
 
 ## Storico pratica (Timeline)
-- **Quando riprendiamo una pratica:** `request_resume` (con `request_id` o nome in `q`) e riassumimi in 5 righe
-  dove eravamo (riepilogo, ultimi eventi, programmi, Calc, fatture, altre richieste dello stesso cliente).
-- **Durante il lavoro** registra con `timeline_add` (va scritto subito, senza confirm) gli eventi rilevanti:
-  richiesta del cliente, quotazione inviata con prezzo e programma (`refs.program_id`, `price_total`), modifiche,
-  chiamate, problemi. Metti sempre `session_url` (link di questa chat) e `source: "cowork"`. Gli eventi automatici
-  (Calc, conferma, fatture, pagamenti, stato cartella) li scrive il Hub da solo: non duplicarli.
-- **Mail del giro** su una pratica: `mail_get` con `request_id` la registra come `mail_received`; `mail_send` con
-  `request_id` come `mail_sent`.
-- **A fine lavoro** (o quando dico "parcheggia") aggiorna il riepilogo con `summary_set`: stato, cosa è stato
-  proposto (programma, prezzo, versione), cosa ha chiesto il cliente, prossimo passo e `waiting_on`. Prova prima, poi confirm.
+La memoria di ogni pratica è nel Hub (pagina richiesta → 🕓 Timeline), non nelle chat: qualsiasi chat nuova
+riparte da lì. Lo staff vede le stesse cose.
+- **Quando riprendiamo una pratica** (mail del cliente, "riprendiamo Rossi"): `request_resume` con `request_id`
+  o il nome in `q` (se risponde 409 con più `candidates`, chiedimi quale) e riassumimi in 5 righe dove eravamo:
+  riepilogo e prossimo passo, ultimi eventi, programmi, Calc, fatture, memo, altre richieste dello stesso cliente
+  (`client_history`). Poi leggi la mail nuova con `mail_get` + `request_id`.
+- **Durante il lavoro** registra con `timeline_add` (si scrive subito, senza confirm) i fatti che un collega
+  dovrebbe sapere: cosa chiede il cliente / l'agenzia, quotazione o programma inviato (con `refs.program_id`,
+  `price_total`, `currency`), modifiche concordate, telefonate, problemi con fornitori. Titolo di una riga, dettagli
+  nel `body`, sempre `source: "cowork"`. Gli eventi automatici (richiesta creata, copia programma, Calc, conferma,
+  programmi ITI, fatture, pagamenti, stato cartella) li scrive il Hub da solo: non duplicarli.
+- **Link della chat:** se ti ho dato il link di questa chat, mettilo in `session_url` (deve iniziare con
+  `https://claude.ai/`). Tu non lo conosci da solo: non inventarlo; se non c'è, lascialo vuoto.
+- **Mail su una pratica:** `mail_get` con `request_id` la registra come `mail_received` (una volta sola);
+  `mail_send` con `request_id` come `mail_sent`. Le bozze non vengono registrate.
+- **"Parcheggia" / fine lavoro:** aggiorna il riepilogo con `summary_set` (max 1500 caratteri): stato, cosa è stato
+  proposto (programma, prezzo, versione), cosa ha chiesto il cliente, prossimo passo, `waiting_on`
+  (`client` | `agency` | `supplier` | `us`). Prova prima, mostramelo, poi confirm. Il riepilogo precedente resta nello storico.
+- **Mai numeri di passaporto** nello storico o nel riepilogo (se compare un avviso in `warnings`, toglilo).
 
 ## Memo Board: non perdere il filo
 Il Memo Board del Hub è l'unica lista delle cose da fare, mie e tue (azioni `memo_*`, scrivono sulla mia bacheca).
 - **Quando iniziamo un lavoro** (una pratica, una fattura, una verifica) crea un memo `doing` con titolo chiaro,
   pratica / fattura collegata e `ext_key` stabile (es. `work-rossi-fattura`), così lo aggiorni invece di duplicarlo.
-- **"Parcheggia"** (o se ti dico che devo staccare): aggiorna il memo con dove siamo arrivati e il **prossimo passo esatto**.
+- **"Parcheggia"** (o se ti dico che devo staccare): aggiorna il memo con dove siamo arrivati e il **prossimo passo esatto**,
+  e se il lavoro riguarda una pratica anche il riepilogo della pratica (`summary_set`, vedi sopra).
 - **"Cosa avevo in sospeso?"**: `memo_list` e riassumimi i memo in corso e quelli in attesa da sollecitare.
 - **Finito**: chiudi il memo con `memo_set_status` `done` e una nota di una riga.
 - **Aspetto qualcuno** (mail senza risposta, credit note, conferma lodge): memo `waiting` con `waiting_on`
@@ -114,7 +125,8 @@ Il Memo Board del Hub è l'unica lista delle cose da fare, mie e tue (azioni `me
 Quando ti chiedo "fai il giro" (o all'inizio della giornata): `routine_status`, poi per quelle in scadenza:
 - **mail**: Gmail + Bluehost (`mail_list` con `since` = data dell'ultimo giro mail in `routine_status`; in INBOX
   risultano tutte già lette, quindi non filtrare su `unseen`) → nuove richieste → verifica duplicati →
-  propostami la creazione / assegnazione;
+  propostami la creazione / assegnazione; le mail su pratiche esistenti leggile con `mail_get` + `request_id`
+  (così finiscono nello storico) e dimmi cosa chiedono;
 - **leads**: dimmi quanti Incoming Leads ci sono da assegnare;
 - **payments / afrasia**: elencami pratiche e fatture SH con saldo aperto.
 Alla fine `routine_done` con una nota breve (es. "4 mail, 2 richieste create").
