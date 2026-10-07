@@ -100,6 +100,13 @@ td{vertical-align:top}
 .chips{font-size:8pt;margin:4px 0 9px}
 .chips b{color:#B3241C}
 .th{font-size:7pt;font-weight:bold;color:#6F675F;text-transform:uppercase}
+/* Inline "label  value" lines of a day and the trip recap: label as the red kickers, value in body text (same as the Word). */
+.lbl{font-size:7pt;font-weight:bold;color:#B3241C;text-transform:uppercase;letter-spacing:1.2px}
+.note{font-style:italic;color:#6F675F}
+.recap{margin-top:12px;border-top:2px solid #231F1C}
+.recap td{padding:6px 4px;border-bottom:1px solid #E6DDD0}
+.recap td.lbl{width:25%;padding-top:8px}
+.recap p{margin:0 0 2px}
 .dest{border-left:4px solid #B5822F;background:#FBF8F3;padding:7px 10px;margin:6px 0 10px}
 .dest p,.dest li{font-size:8.5pt;color:#4A433D}
 .lodge td{background:#F6F0E6;padding:8px}
@@ -131,14 +138,23 @@ td{vertical-align:top}
 <h2><?= h($M['overview']) ?></h2>
 <?= iti_mp_paras($D['intro']) ?>
 <?php
-    $rows = [[ucfirst($T['days']), $D['duration']]];
-    if ($dateRange !== '') $rows[] = [$M['dates'], $dateRange];
-    if ($routeNames) $rows[] = [$M['destinations'], implode(', ', $routeNames)];
-    if ($stays) $rows[] = [$M['lodges'], implode("\n", iti_mag_lodge_nights($stays, $T))];
-    if ($paxLabel !== '') $rows[] = [ucfirst($T['pax']), $paxLabel];
+    // Recap like the price table (and the Word): red caps labels, body-text values, lodges bold with their nights muted.
+    $rows = [[ucfirst($T['days']), [[$D['duration'], '']]]];
+    if ($dateRange !== '') $rows[] = [$M['dates'], [[$dateRange, '']]];
+    if ($routeNames) $rows[] = [$M['destinations'], [[implode(' · ', $routeNames), '']]];
+    if ($stays) {
+        $ln = [];
+        foreach (iti_mag_lodge_nights($stays, $T) as $line) {
+            $p = strrpos($line, ' · ');
+            $ln[] = $p !== false ? [substr($line, 0, $p), substr($line, $p + 3)] : [$line, ''];
+        }
+        $rows[] = [$M['lodges'], $ln];
+    }
+    if ($paxLabel !== '') $rows[] = [ucfirst($T['pax']), [[$paxLabel, '']]];
 ?>
-<table class="sand" style="margin-top:8px">
-<?php foreach ($rows as $r): ?><tr><td class="small" style="width:27%"><?= h($r[0]) ?></td><td><b><?= nl2br(h($r[1])) ?></b></td></tr><?php endforeach; ?>
+<table class="recap nobrk">
+<?php foreach ($rows as $r): ?><tr><td class="lbl"><?= h($r[0]) ?></td><td><?php foreach ($r[1] as $v): ?><p><?= count($r[1]) > 1 ? '<b>' . h($v[0]) . '</b>' : h($v[0]) ?><?= $v[1] !== '' ? ' <span class="note">&nbsp;·&nbsp; ' . h($v[1]) . '</span>' : '' ?></p><?php endforeach; ?></td></tr>
+<?php endforeach; ?>
 </table>
 
 <?php /* ── Route: map + legend, stays ── */
@@ -217,7 +233,7 @@ td{vertical-align:top}
 </div>
 </div>
 <?= iti_mp_paras($d['narrative']) ?>
-<?php if ($d['activities']): ?><p><span class="th"><?= h(mb_strtoupper($T['activities'])) ?></span>&nbsp;&nbsp; <?= h(implode(' · ', $d['activities'])) ?></p><?php endif; ?>
+<?php if ($d['activities']): ?><p><span class="lbl"><?= h($T['activities']) ?></span>&nbsp;&nbsp; <?= h(implode(' · ', $d['activities'])) ?></p><?php endif; ?>
 <?php if ($d['dest_desc'] !== ''): ?>
 <div class="dest"><p class="kick kickO"><?= h($M['about_dest']) ?></p><h4><?= h($d['dest']) ?></h4><?= iti_mp_paras($d['dest_desc']) ?></div>
 <?php endif; ?>
@@ -233,7 +249,7 @@ td{vertical-align:top}
 <?php if ($meta !== ''): ?><span class="small"><?= h($meta) ?></span><?php endif; ?></td>
 </tr></table>
 <?php   elseif ($d['lodge'] !== '' && $lk !== $prevKey): ?>
-<p><span class="th"><?= h(mb_strtoupper($T['overnight'])) ?></span>&nbsp;&nbsp; <span class="serif"><?= h($d['lodge']) ?></span> <span class="small">— <?= h($M['see_day'] . ' ' . $seenLodge[$lk]) ?></span></p>
+<p><span class="lbl"><?= h($T['overnight']) ?></span>&nbsp;&nbsp; <b><?= h($d['lodge']) ?></b> <span class="note">&nbsp;·&nbsp; <?= h($M['see_day'] . ' ' . $seenLodge[$lk]) ?></span></p>
 <?php   endif;
         $prevKey = $d['lodge'] !== '' ? $lk : ''; ?>
 </div>
