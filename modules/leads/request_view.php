@@ -1009,8 +1009,8 @@ if ($itiCanCreate) {
       <?php endforeach; ?>
     </select>
     <button type="submit" class="btn btn-outline" style="font-size:.75rem;padding:5px 12px;">📋 Create from sample</button>
-    <a href="../iti/program_final.php?request_id=<?= (int)$r['id'] ?>" class="btn btn-outline" style="font-size:.75rem;padding:5px 12px;"
-       title="Build the itinerary program from this request's Calc (lodges, dates, guests)">🧩 Create from Excel Calc</a>
+    <div style="flex-basis:100%;"><a href="../iti/program_final.php?request_id=<?= (int)$r['id'] ?>" class="btn btn-outline" style="font-size:.75rem;padding:5px 12px;"
+       title="Build the itinerary program from this request's Calc (lodges, dates, guests)">🧩 Create Itinerary Program from Excel Calc</a></div>
   </form>
   <?php endif; ?>
 </div>
