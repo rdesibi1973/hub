@@ -18,7 +18,7 @@ iti_ensure_final_schema();
 
 $db       = db();
 $_cu      = current_user();
-$can_edit = in_array($_cu['role_name'], ['admin', 'manager']);
+$can_edit = true;   // all staff since 7 Oct 2026 (was admin/manager)
 $user     = $_cu['username'] ?? 'system';
 $rid      = (int)($_REQUEST['request_id'] ?? 0);
 $self     = 'program_final.php?request_id=' . $rid;

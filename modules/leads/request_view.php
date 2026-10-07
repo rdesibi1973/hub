@@ -451,11 +451,10 @@ include 'includes/header.php';
   </div>
   <div class="gap-8">
     <?php
-      // Confirm Safari lives in BackOffice (admin/manager): same rule as there —
+      // Confirm Safari lives in BackOffice: same rule as there —
       // a private booking not yet confirmed (no _START dates, not Booked/Cancelled/Lost).
       $pcode = trim($r['practice_code'] ?? '');
-      $canConfirmHere = in_array(current_user()['role_name'] ?? '', ['admin', 'manager'], true)
-          && trim($r['group_folder'] ?? '') === '' && $pcode !== ''
+      $canConfirmHere = trim($r['group_folder'] ?? '') === '' && $pcode !== ''
           && stripos($pcode, '_START') === false
           && !in_array($r['status'] ?? '', ['Booked', 'Cancelled', 'Lost'], true);
     ?>
@@ -465,10 +464,9 @@ include 'includes/header.php';
          title="Confirm this safari: set the dates, move the folder to 001_Safari, mark Booked">✅ Confirm Safari</a>
     <?php endif; ?>
     <?php
-      // Reschedule / Postpone (BackOffice, admin/manager): confirmed private safaris.
+      // Reschedule / Postpone (BackOffice): confirmed private safaris.
       require_once 'includes/postpone_lib.php';
-      $ppS = (in_array(current_user()['role_name'] ?? '', ['admin', 'manager'], true)
-              && ($r['status'] ?? '') === 'Booked' && trim($r['group_folder'] ?? '') === '')
+      $ppS = (($r['status'] ?? '') === 'Booked' && trim($r['group_folder'] ?? '') === '')
              ? pp_split($pcode) : null;
       $boQ = ['q' => $r['customer_name'], 'root' => 'All'];
     ?>
@@ -972,7 +970,7 @@ try {
     $st->execute([$r['id']]);
     $itiPrograms = $st->fetchAll();
 } catch (PDOException $e) { /* column created on first use of the ITI module */ }
-$itiCanCreate = in_array($cu['role_name'] ?? '', ['admin', 'manager']);
+$itiCanCreate = true;   // all staff since 7 Oct 2026 (was admin/manager)
 if ($itiCanCreate) {
     $itiSamples = $db->query("SELECT id, title_en, duration_days FROM iti_programs WHERE program_type='sample' AND status!='cancelled' ORDER BY title_en")->fetchAll();
 }

@@ -15,11 +15,7 @@ require_once __DIR__ . '/../leads/dropbox_constants.php';
 require_once __DIR__ . '/../leads/dropbox_helper.php';
 
 $db  = db();
-$_cu = current_user();
-if (!in_array($_cu['role_name'] ?? '', ['admin', 'manager'], true)) {
-    iti_flash_set('error', 'Access denied.');
-    iti_redirect('programs.php');
-}
+$_cu = current_user();   // open to all staff since 7 Oct 2026 (was admin/manager)
 @set_time_limit(300);
 
 $folder = trim($_REQUEST['folder'] ?? '/itineraries/SafariClassic/it/Agenzia/2026-27/STO');

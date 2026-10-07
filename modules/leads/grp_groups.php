@@ -12,12 +12,8 @@ require_once 'dropbox_helper.php';
 $pageTitle = 'GRP groups';
 $db = db();
 
-// ── Access: admin + manager only (same as BackOffice) ─────────────────────────
+// ── Access: all staff, same as BackOffice ─────────────────────────────────────
 $currentUser = current_user();
-if (!in_array($currentUser['role_name'] ?? '', ['admin','manager'], true)) {
-    flash('Access denied.', 'error');
-    header('Location: requests.php'); exit;
-}
 
 $BASE     = '/001_Safari';
 $showPast = !empty($_GET['past']);   // include groups that already ended

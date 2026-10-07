@@ -131,9 +131,7 @@ header {
   if (!isLeadsRestricted()): ?>
   <a href="dashboard.php" class="<?= $cur==='dashboard.php' ? 'active':'' ?>">Dashboard</a>
   <?php endif; ?>
-  <?php if ($isMgr): ?>
-  <a href="backoffice.php" class="<?= in_array($cur, ['backoffice.php','grp_groups.php','relink_folders.php'], true)?'active':'' ?>">🛠 BackOffice</a>
-  <?php endif; ?>
+  <a href="backoffice.php" class="<?= in_array($cur, ['backoffice.php','grp_groups.php','relink_folders.php','postponed.php'], true)?'active':'' ?>">🛠 BackOffice</a>
   <a href="requests.php"  class="<?= in_array($cur,['requests.php','request_add.php','request_edit.php','request_view.php']) ? 'active':'' ?>"><?= isLeadsRestricted() ? 'My Requests' : 'Requests' ?></a>
   <a href="pipeline.php"  class="<?= $cur==='pipeline.php' ? 'active':'' ?>">🔥 Pipeline</a>
   <a href="ck_tracker.php"      class="<?= $cur==='ck_tracker.php'?'active':'' ?>">✅ CK Pipeline</a>
@@ -159,9 +157,7 @@ header {
   <?php endif; ?>
   <a href="requests_import_list.php" class="<?= in_array($cur,['requests_import_list.php','request_import_edit.php','reports_import.php']) ? 'active':'' ?>">Historical</a>
   <?php endif; // !isLeadsRestricted ?>
-  <?php if (!isLeadsRestricted()): ?>
   <a href="../iti/programs.php?type=personal" class="">🗺️ Itineraries</a>
-  <?php endif; ?>
   <?php if (in_array($currentUser['role_name'] ?? '', ['admin','manager'])): ?>
   <span style="display:inline-block;width:1px;background:#E8E8E8;margin:8px 4px;align-self:stretch;"></span>
   <a href="../invoices/booked_requests.php" class="">🧾 Invoices</a>

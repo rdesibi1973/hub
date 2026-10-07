@@ -9,7 +9,8 @@ require_once __DIR__ . '/includes/iti_functions.php';
 
 $db       = db();
 $_cu      = current_user();
-$can_edit = in_array($_cu['role_name'], ['admin', 'manager']);
+$can_edit = true;   // all staff since 7 Oct 2026 (was admin/manager)
+$can_purge = in_array($_cu['role_name'], ['admin', 'manager']);   // permanent delete stays admin/manager
 
 $tab    = in_array($_GET['type'] ?? '', ['sample','personal']) ? $_GET['type'] : 'personal';
 $action = $_REQUEST['action'] ?? '';
@@ -57,7 +58,7 @@ if ($action === 'delete' && $id && $can_edit) {
 }
 
 // ── HARD DELETE (permanent) ──────────────────────────────────
-if ($action === 'hard_delete' && $id && $can_edit) {
+if ($action === 'hard_delete' && $id && $can_purge) {
     // Verifica che sia cancelled prima di eliminare definitivamente
     $chk = $db->prepare("SELECT status FROM iti_programs WHERE id=?");
     $chk->execute([$id]);
@@ -314,7 +315,7 @@ include __DIR__ . '/../../includes/layout_header.php';
             <a href="programs.php?type=<?= $tab ?>&action=delete&id=<?= $p['id'] ?>"
                class="btn btn-danger btn-sm"
                onclick="return confirm('Delete «<?= h(addslashes($p['title_en'])) ?>»?')">🗑 Delete</a>
-            <?php else: ?>
+            <?php elseif ($can_purge): ?>
             <a href="programs.php?type=<?= $tab ?>&action=hard_delete&id=<?= $p['id'] ?>"
                class="btn btn-danger btn-sm"
                style="background:var(--red-dk,#7b1010);border-color:var(--red-dk,#7b1010);color:#fff;"

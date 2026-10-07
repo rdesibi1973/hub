@@ -12,11 +12,7 @@ require_once 'includes/postpone_lib.php';
 $pageTitle = 'Postponed safaris';
 $db = db();
 
-$currentUser = current_user();
-if (!in_array($currentUser['role_name'] ?? '', ['admin', 'manager'], true)) {
-    flash('Access denied.', 'error');
-    header('Location: requests.php'); exit;
-}
+$currentUser = current_user();   // all staff, same as BackOffice
 pp_ensure_schema($db);
 
 $rows = $db->query("SELECT r.id, r.customer_name, r.practice_code, r.payment_status, r.postponed_at,

@@ -21,12 +21,8 @@ require_once 'includes/booking_service.php';
 $pageTitle = 'BackOffice';
 $db = db();
 
-// ── Access: admin + manager only ──────────────────────────────────────────────
+// ── Access: all staff since 7 Oct 2026 (was admin + manager) ──────────────────
 $currentUser = current_user();
-if (!in_array($currentUser['role_name'] ?? '', ['admin','manager'], true)) {
-    flash('Access denied.', 'error');
-    header('Location: requests.php'); exit;
-}
 
 // Column that records the pre-confirmation state so a confirm can be rolled back.
 // Created lazily (MySQL: no IF NOT EXISTS) so the listing query can always read it.

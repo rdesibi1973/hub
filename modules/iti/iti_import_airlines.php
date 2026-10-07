@@ -10,7 +10,7 @@ require_once __DIR__ . '/includes/iti_functions.php';
 
 $db       = db();
 $_cu      = current_user();
-$can_edit = in_array($_cu['role_name'], ['admin', 'manager']);
+$can_edit = true;   // all staff since 7 Oct 2026 (was admin/manager)
 
 // Check table exists
 $table_ok = false;

@@ -11,7 +11,7 @@ iti_ensure_final_schema();   // phone / email / address / emergency_phone
 
 $db       = db();
 $_cu      = current_user();
-$can_edit = in_array($_cu['role_name'], ['admin', 'manager']);
+$can_edit = true;   // all staff since 7 Oct 2026 (was admin/manager)
 
 $action = $_REQUEST['action'] ?? '';
 $id     = (int)($_REQUEST['id'] ?? 0);
