@@ -45,8 +45,9 @@ function iti_export_file(int $id, string $lang, string $format): array {
     }
     $name .= '_' . strtoupper($lang) . '.' . $format;
 
-    // Personal programme: the PDF and the Word carry the link to the digital itinerary (public page).
-    if (($program['program_type'] ?? '') === 'personal') $D['public_url'] = iti_public_url($program);
+    // Personal programme: only the PDF carries the link to the digital itinerary (public page). The Word is the
+    // agencies' editable copy — they forgot to remove the link and it reached their end client, so it never has one.
+    if ($format === 'pdf' && ($program['program_type'] ?? '') === 'personal') $D['public_url'] = iti_public_url($program);
     if ($format === 'pdf') {
         $content = iti_mag_pdf_build($D);
         $mime = 'application/pdf';

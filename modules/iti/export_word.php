@@ -198,12 +198,7 @@ if (count($png_points) >= 2 && function_exists('imagecreatetruecolor')) {
             $ltbl->addCell(8500, ['valign'=>'center'])
                  ->addText($name, 'normal', ['spaceAfter'=>0]);
         }
-        if (($pub = iti_public_url($program)) !== '') {
-            $section->addText(iti_lbl_map_online($lang), 'small', ['alignment'=>'center','spaceBefore'=>100,'spaceAfter'=>20]);
-            $section->addLink($pub, $pub,
-                ['name'=>'Calibri','size'=>9,'color'=>$RED,'underline'=>'single'],
-                ['alignment'=>'center']);
-        }
+        // No link to the public page: the Word goes to agencies, who would pass it on to their client.
     } else {
         $map_tmp = null;
     }
