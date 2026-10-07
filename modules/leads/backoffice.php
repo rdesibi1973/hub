@@ -311,6 +311,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array($act, ['change_status', 'r
                     // CK tracker history: record the stage/_CK change with the user.
                     try { ck_record_rename($db, $folder, $newFolder, (int)($currentUser['id'] ?? 0) ?: null); }
                     catch (Throwable $ig) { /* tracking only — the next scan catches it */ }
+                    $tlTitle = 'Folder renamed' . ($setStatus && $newStatus !== null ? ' — status ' . $newStatus : '');
+                    if ($isGrp) {
+                        $tlIds = $db->prepare("SELECT id FROM requests WHERE group_folder = ?");
+                        $tlIds->execute([$newFolder]);
+                        foreach ($tlIds->fetchAll(PDO::FETCH_COLUMN) as $tlId) timeline_log((int)$tlId, 'status_change', 'Group ' . $tlTitle, ['body' => $folder . "\n→ " . $newFolder]);
+                    } else {
+                        timeline_log((int)$r['id'], 'status_change', $tlTitle, ['body' => $folder . "\n→ " . $newFolder]);
+                    }
                 }
                 flash($res['msg'], $res['ok'] ? 'info' : 'error');
             } catch (Throwable $e) {

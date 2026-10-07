@@ -110,6 +110,11 @@ if ($action === 'duplicate' && $id && $can_edit) {
         iti_flash_set('error', 'Duplicate failed, nothing was copied: ' . $e->getMessage());
         iti_redirect("programs.php?type={$tab}");
     }
+    if ($new_id && $lead_id) {
+        require_once __DIR__ . '/../leads/includes/timeline_service.php';
+        timeline_log($lead_id, 'program_update', 'Personal program created (#' . $new_id . ')',
+                     ['body' => 'From sample #' . $id . ': ' . ($src_p['title_en'] ?? ''), 'refs' => ['program_id' => (int)$new_id]]);
+    }
     if ($new_id) {
         $dest_label = $dest_type === 'personal' ? 'Personal' : 'Sample';
         iti_flash_set('success', "Program duplicated as {$dest_label}.");

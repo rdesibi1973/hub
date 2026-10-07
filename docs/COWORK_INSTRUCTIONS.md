@@ -86,6 +86,18 @@ mostrami il risultato, poi confirm dopo il mio ok.
   foto con `iti_lodge_photos` / `iti_destination_photo` (link dal sito ufficiale del lodge o foto nostre in
   `TheOrangiCollection\Photos`), testi e contatti con `iti_update_lodge` / `iti_update_destination`. Sempre prova prima.
 
+## Storico pratica (Timeline)
+- **Quando riprendiamo una pratica:** `request_resume` (con `request_id` o nome in `q`) e riassumimi in 5 righe
+  dove eravamo (riepilogo, ultimi eventi, programmi, Calc, fatture, altre richieste dello stesso cliente).
+- **Durante il lavoro** registra con `timeline_add` (va scritto subito, senza confirm) gli eventi rilevanti:
+  richiesta del cliente, quotazione inviata con prezzo e programma (`refs.program_id`, `price_total`), modifiche,
+  chiamate, problemi. Metti sempre `session_url` (link di questa chat) e `source: "cowork"`. Gli eventi automatici
+  (Calc, conferma, fatture, pagamenti, stato cartella) li scrive il Hub da solo: non duplicarli.
+- **Mail del giro** su una pratica: `mail_get` con `request_id` la registra come `mail_received`; `mail_send` con
+  `request_id` come `mail_sent`.
+- **A fine lavoro** (o quando dico "parcheggia") aggiorna il riepilogo con `summary_set`: stato, cosa è stato
+  proposto (programma, prezzo, versione), cosa ha chiesto il cliente, prossimo passo e `waiting_on`. Prova prima, poi confirm.
+
 ## Memo Board: non perdere il filo
 Il Memo Board del Hub è l'unica lista delle cose da fare, mie e tue (azioni `memo_*`, scrivono sulla mia bacheca).
 - **Quando iniziamo un lavoro** (una pratica, una fattura, una verifica) crea un memo `doing` con titolo chiaro,

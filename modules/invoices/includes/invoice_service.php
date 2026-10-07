@@ -5,7 +5,10 @@
  *
  * No session, no auth, no db(): callers pass the PDO. Functions that touch
  * Dropbox load modules/leads/dropbox_helper.php themselves.
+ * Writes on request-linked invoices are logged in the request timeline (tl_log_invoice).
  */
+
+require_once __DIR__ . '/../../leads/includes/timeline_service.php';
 
 const INV_STATUSES = [
     'New'            => 'inv-draft',
@@ -349,6 +352,8 @@ function inv_add_payment(PDO $db, int $invId, string $date, float $amount, strin
     } catch (\Throwable $e) {
         error_log('memo_on_payment failed for invoice ' . $invId . ': ' . $e->getMessage());
     }
+    tl_log_invoice($db, $invId, 'payment recorded',
+                   ['payment_id' => $pid, 'payment_amount' => $amount, 'payment_date' => $date, 'payment_reference' => $ref]);
     return $pid;
 }
 
@@ -358,7 +363,9 @@ function inv_cancel_payment(PDO $db, int $paymentId, int $invId, string $reason)
     $st->execute([$reason, $paymentId, $invId]);
     recalculate_invoice($db, $invId);
     sync_request_value($db, $invId);
-    return $st->rowCount() > 0;
+    $ok = $st->rowCount() > 0;
+    if ($ok) tl_log_invoice($db, $invId, 'payment cancelled', ['payment_id' => $paymentId, 'reason' => $reason]);
+    return $ok;
 }
 
 // ── Create / edit (invoice_add.php, invoice_edit.php, Agent API) ─────────────
@@ -453,6 +460,7 @@ function inv_create(PDO $db, array $f, array $items, ?int $createdBy): array {
         if ($db->inTransaction()) $db->rollBack();
         throw $e;
     }
+    tl_log_invoice($db, $id, 'created');
     return ['invoice_id' => $id, 'invoice_number' => $num];
 }
 
@@ -479,6 +487,7 @@ function inv_update(PDO $db, int $id, array $f, ?array $items): void {
         if ($db->inTransaction()) $db->rollBack();
         throw $e;
     }
+    tl_log_invoice($db, $id, 'updated');
 }
 
 // ── Dropbox folder status (…_DEPOSIT / _BALANCE / _PAID …) ───────────────────
@@ -632,6 +641,8 @@ function inv_update_folder_status(PDO $db, int $invId, string $newLabel): array 
         }
     }
 
+    timeline_log((int)$req['id'], 'status_change', 'Folder status → ' . $newLabel,
+                 ['body' => $oldName . "\n→ " . $newName, 'refs' => ['invoice_id' => $invId]]);
     return ['new_name' => $newName, 'new_tag' => $dbTag, 'new_url' => $newUrl, 'group_msg' => $groupMsg, 'unchanged' => false];
 }
 
@@ -765,5 +776,6 @@ function inv_import(PDO $db, array $body, ?int $createdBy = null): array {
         if ($db->inTransaction()) $db->rollBack();
         throw $e;
     }
+    tl_log_invoice($db, (int)$invId, 'imported');
     return ['invoice_id' => $invId, 'invoice_number' => $invNum];
 }

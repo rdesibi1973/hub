@@ -41,6 +41,11 @@ if (empty($toList)) {
 // Reply-To + signature from the logged-in user (includes/booking_service.php).
 $userId = function_exists('current_user') ? (int)(current_user()['id'] ?? 0) : 0;
 $res    = bs_send_mail($toList, $ccList, $subject, $body, $userId);
+if ($res['success'] && (int)($_POST['request_id'] ?? 0) > 0) {
+    timeline_log((int)$_POST['request_id'], 'mail_sent', 'Email: ' . $subject,
+                 ['body' => 'To: ' . implode(', ', $toList) . ($ccList ? "\nCc: " . implode(', ', $ccList) : ''),
+                  'refs' => ['mail_box' => 'hub']]);
+}
 
 echo json_encode($res['success']
     ? ['success' => true]

@@ -463,6 +463,14 @@ function calc_fill(PDO $db, array $in, bool $commit): array {
         $result['rev']     = (string)($meta['rev'] ?? '');
         $result['verify']  = calc_verify($tmpOut, $expect);
         $result['message'] = 'Calc written to Dropbox and re-verified.';
+        if (function_exists('timeline_log')) {
+            $vf = $result['verify'];
+            timeline_log((int)$in['request_id'], 'calc_update', 'Calc filled — ' . (is_array($keep) ? implode('/', $keep) : (string)$keep) . ', ' . $nDays . ' days from ' . $start,
+                ['body' => 'Total ' . ($vf['total_price'] !== null ? number_format($vf['total_price'], 2) : '?')
+                           . ($vf['to_price_pp'] !== null ? ' · TO price pp ' . number_format($vf['to_price_pp'], 2) : '')
+                           . ($vf['passed'] ? '' : "\nVerification found errors."),
+                 'refs' => ['calc_file' => basename($path), 'price_total' => $vf['total_price'], 'currency' => 'USD']]);
+        }
         return $result;
     } finally {
         @unlink($tmpIn); @unlink($tmpOut);

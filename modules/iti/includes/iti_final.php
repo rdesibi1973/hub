@@ -377,6 +377,10 @@ function iti_final_generate(PDO $db, int $requestId, array $calc, int $sampleId,
         }
         throw $e;
     }
+    require_once __DIR__ . '/../../leads/includes/timeline_service.php';
+    timeline_log($requestId, 'program_update', 'Final program generated from the Calc (#' . $newId . ')',
+                 array('body' => 'Calc: ' . (isset($calc['file']) ? $calc['file'] : '?') . ($old ? "\nReplaces program #" . implode(', #', (array)$old) : ''),
+                       'refs' => array('program_id' => $newId, 'calc_file' => isset($calc['file']) ? $calc['file'] : null)));
     return array('program_id' => $newId, 'superseded' => $old, 'plan' => $plan);
 }
 

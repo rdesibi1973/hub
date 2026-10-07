@@ -88,7 +88,7 @@ function agent_audit(PDO $db, string $action, $reqId, array $payload, string $re
                               'iti_create_personal', 'iti_update_program', 'iti_update_day', 'iti_publish', 'iti_final_from_calc', 'iti_save_alias',
                               'iti_create_lodge', 'iti_set_days', 'iti_add_day', 'iti_delete_day', 'iti_update_inclusions',
                               'iti_create_flight_route', 'iti_create_activity', 'iti_create_transfer_route', 'iti_save_as_sample',
-                              'create_request', 'add_flight_rates'], true) && empty($payload['confirm']);
+                              'create_request', 'add_flight_rates', 'timeline_update', 'summary_set'], true) && empty($payload['confirm']);
     // Mail: keep who/what in the log, not message bodies or attachment content.
     if (in_array($action, ['mail_get', 'mail_attachment', 'iti_document', 'iti_vouchers'], true) && $code === 200) {
         $res = json_decode($resultJson, true);
@@ -145,6 +145,8 @@ $us = $db->prepare("SELECT u.id, u.username, u.full_name, u.agent_id, u.role_id,
 $us->execute([$agentUsername]);
 $agentUser = $us->fetch(PDO::FETCH_ASSOC);
 if (!$agentUser) agent_fail('API user "' . $agentUsername . '" not found or inactive — create it in Hub (see docs/AGENT_API.md)', 500);
+// System timeline events written during this call record the API user (timeline_service.php).
+$GLOBALS['TL_ACTOR'] = ['user_id' => (int)$agentUser['id'], 'source' => 'api'];
 
 // ── Input ────────────────────────────────────────────────────────────────────
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
@@ -220,6 +222,12 @@ function agent_iti_file_out(PDO $db, array $in, int $pid, array $f, array $extra
         $meta = dropbox_upload_text($token, $path, $f['content'], $overwrite ? 'overwrite' : 'add');
     } catch (RuntimeException $e) {
         agent_fail($e->getMessage(), 502, ['path' => $path]);
+    }
+    $p = iti_get_program($pid);
+    $tlRid = (int)($p['lead_request_id'] ?? 0) ?: $rid;
+    if ($tlRid > 0) {
+        timeline_log($tlRid, 'program_update', 'Program file saved: ' . $name,
+                     ['refs' => ['program_id' => $pid, 'dropbox_path' => $meta['path_display'] ?? $path]]);
     }
     agent_out(['ok' => true, 'file' => $info, 'saved_to' => $meta['path_display'] ?? $path, 'overwritten' => $exists]);
 }
@@ -538,6 +546,62 @@ function agent_memo_rows(PDO $db, string $where, array $args): array {
     return $out;
 }
 
+// ── Request timeline (logic in includes/timeline_service.php) ───────────────
+/** Claude as the author of timeline events / summaries ("source": "cowork" to mark Cowork sessions). */
+function agent_tl_author(array $in): array {
+    global $agentUser;
+    return ['type' => 'claude', 'user_id' => (int)$agentUser['id'],
+            'source' => ($in['source'] ?? '') === 'cowork' ? 'cowork' : 'api'];
+}
+
+/** Addresses ([{name, email}] or strings) → "Name <a@b>, c@d". */
+function agent_tl_addr($list): string {
+    $out = [];
+    foreach ((array)$list as $a) {
+        if (is_array($a)) $out[] = trim(($a['name'] ?? '') !== '' ? $a['name'] . ' <' . ($a['email'] ?? '') . '>' : (string)($a['email'] ?? ''));
+        else $out[] = trim((string)$a);
+    }
+    return implode(', ', array_filter($out));
+}
+
+/** A mail as a Claude timeline event; a received message already logged (same Message-ID) is not logged again. */
+function agent_tl_log_mail(PDO $db, int $rid, string $type, string $subject, string $messageId, string $body, array $refs): ?int {
+    tl_schema($db);
+    if ($messageId !== '') {
+        $st = $db->prepare("SELECT id FROM request_timeline WHERE request_id = ? AND JSON_UNQUOTE(JSON_EXTRACT(refs, '$.mail_message_id')) = ? LIMIT 1");
+        $st->execute([$rid, $messageId]);
+        if ($dup = $st->fetchColumn()) return (int)$dup;
+        $refs['mail_message_id'] = $messageId;
+    }
+    try {
+        return tl_add($db, $rid, ['event_type' => $type, 'title' => tl_cut(($type === 'mail_received' ? 'Mail received: ' : 'Mail sent: ') . ($subject !== '' ? $subject : '(no subject)'), 200),
+                                  'body' => $body, 'refs' => array_filter($refs, function ($v) { return $v !== null && $v !== ''; })],
+                      ['type' => 'claude', 'user_id' => $GLOBALS['TL_ACTOR']['user_id'] ?? null, 'source' => 'api']);
+    } catch (Throwable $e) {
+        error_log('agent_tl_log_mail(' . $rid . '): ' . $e->getMessage());
+        return null;
+    }
+}
+
+/** The request for request_resume: request_id, or q (one match, as find_requests). */
+function agent_tl_resolve(PDO $db, array $in): array {
+    if ((int)($in['request_id'] ?? 0) > 0) return agent_request($db, $in['request_id']);
+    $q = trim((string)($in['q'] ?? ''));
+    if ($q === '') agent_fail('request_id or q is required');
+    $like = '%' . $q . '%';
+    $st = $db->prepare("SELECT r.*, a.name AS agent_name FROM requests r LEFT JOIN agents a ON a.id = r.agent_id
+                        WHERE r.customer_name LIKE ? OR r.practice_code LIKE ? OR r.group_folder LIKE ? OR r.email LIKE ?
+                        ORDER BY r.id DESC LIMIT 20");
+    $st->execute([$like, $like, $like, $like]);
+    $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+    if (!$rows) agent_fail('No request matches "' . $q . '"', 404);
+    if (count($rows) > 1) {
+        agent_fail(count($rows) . ' requests match "' . $q . '" — pass request_id', 409,
+                   ['candidates' => array_map('agent_request_out', $rows)]);
+    }
+    return agent_request($db, $rows[0]['id']);
+}
+
 /** 'YYYY-MM-DD' or fail. */
 function agent_iso_date($v, string $field): string {
     $v = trim((string)$v);
@@ -572,8 +636,13 @@ try {
         $st = $db->prepare("SELECT r.*, a.name AS agent_name FROM requests r LEFT JOIN agents a ON a.id = r.agent_id
                             WHERE " . implode(' AND ', $where) . " ORDER BY r.id DESC LIMIT " . $limit);
         $st->execute($args);
-        $rows = [];
-        foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) $rows[] = agent_request_out($r);
+        $found = $st->fetchAll(PDO::FETCH_ASSOC);
+        $act   = tl_activity_map($db, array_column($found, 'id'));
+        $rows  = [];
+        foreach ($found as $r) {
+            $a = $act[(int)$r['id']] ?? ['last_activity_at' => null, 'has_summary' => false];
+            $rows[] = agent_request_out($r) + ['last_activity_at' => $a['last_activity_at'], 'has_summary' => $a['has_summary']];
+        }
         agent_out(['ok' => true, 'count' => count($rows), 'requests' => $rows]);
     }
 
@@ -819,6 +888,8 @@ try {
         }
         $res = bs_send_mail($to, $cc, $subject, $body, $sender['id']);
         if (!$res['success']) agent_fail($res['message'], 502, ['email' => $email]);
+        timeline_log((int)$r['id'], 'mail_sent', 'Booking email: ' . $subject,
+                     ['body' => 'To: ' . implode(', ', $to) . ($cc ? "\nCc: " . implode(', ', $cc) : ''), 'refs' => ['mail_box' => 'hub']]);
         agent_out(['ok' => true, 'dry_run' => false, 'message' => 'Sent', 'email' => $email]);
     }
 
@@ -1545,7 +1616,8 @@ try {
             memo_set_next_steps($db, $id, $in['next_steps']);
         }
         $row = agent_memo_rows($db, "m.id = ?", [$id]);
-        agent_out(['ok' => true, 'created' => !$cur, 'owner' => $owner['full_name'], 'memo' => $row[0] ?? null]);
+        agent_out(['ok' => true, 'created' => !$cur, 'owner' => $owner['full_name'], 'memo' => $row[0] ?? null,
+                   'request_id' => $row[0]['request_id'] ?? null]);
     }
 
     // ── memo_set_status ──────────────────────────────────────────────────────
@@ -1783,7 +1855,15 @@ try {
         $markSeen = !empty($in['mark_seen']) && $in['mark_seen'] !== '0';
         $msg = mbx_get($folder, $uid, $markSeen);
         if (!$msg) agent_fail('Message uid ' . $uid . ' not found in ' . $folder, 404);
-        agent_out(['ok' => true, 'message' => $msg]);
+        // With request_id: a client email read in the mail round goes into that request's timeline (once per message).
+        $logged = null;
+        if ((int)($in['request_id'] ?? 0) > 0) {
+            $r = agent_request($db, $in['request_id']);
+            $logged = agent_tl_log_mail($db, (int)$r['id'], 'mail_received', $msg['subject'] ?? '', $msg['message_id'] ?? '',
+                'From: ' . agent_tl_addr($msg['from'] ?? []) . "\n" . 'Date: ' . ($msg['date'] ?? '') . "\n\n" . tl_cut((string)($msg['body'] ?? ''), 1500),
+                ['mail_box' => 'bluehost', 'mail_folder' => $folder, 'mail_uid' => $uid]);
+        }
+        agent_out(['ok' => true, 'message' => $msg] + ($logged !== null ? ['timeline_event_id' => $logged] : []));
     }
 
     // Returns the file as base64, or with request_id / folder_path saves it to
@@ -1877,17 +1957,102 @@ try {
             agent_fail($e->getMessage());
         }
         $email = $composed['summary'];
+        // Optional request_id: a confirmed send is logged in that request's timeline.
+        $mailReq = (int)($in['request_id'] ?? 0) > 0 ? agent_request($db, $in['request_id']) : null;
         if ($agentAction === 'mail_draft') {
             $box = mbx_save_draft($composed);
-            agent_out(['ok' => true, 'saved_in' => $box, 'email' => $email]);
+            agent_out(['ok' => true, 'saved_in' => $box, 'email' => $email, 'request_id' => $mailReq ? (int)$mailReq['id'] : null]);
         }
         if (empty($in['confirm'])) {
-            agent_out(['ok' => true, 'dry_run' => true, 'email' => $email,
+            agent_out(['ok' => true, 'dry_run' => true, 'email' => $email, 'request_id' => $mailReq ? (int)$mailReq['id'] : null,
                        'message' => 'Dry run — not sent. Resend with "confirm": true to send.']);
         }
         $res = mbx_send($composed);
+        $logged = null;
+        if ($mailReq) {
+            $logged = agent_tl_log_mail($db, (int)$mailReq['id'], 'mail_sent', (string)$email['subject'], '',
+                'To: ' . agent_tl_addr($email['to'] ?? []) . (!empty($email['cc']) ? "\nCc: " . agent_tl_addr($email['cc']) : '') . "\n\n"
+                . tl_cut((string)$email['body'], 1500),
+                ['mail_box' => 'bluehost', 'in_reply_to' => $email['in_reply_to'] ?? null]);
+        }
         agent_out(['ok' => true, 'dry_run' => false, 'message' => 'Sent', 'sent_folder' => $res['sent_folder'],
-                   'warning' => $res['warning'], 'email' => $email]);
+                   'warning' => $res['warning'], 'email' => $email] + ($logged !== null ? ['timeline_event_id' => $logged] : []));
+    }
+
+    // ── Request timeline ─────────────────────────────────────────────────────
+    // History + summary per request, so a new session can pick up a practice.
+    case 'timeline_list': {
+        $r = agent_request($db, $in['request_id'] ?? 0);
+        $since = null;
+        if (trim((string)($in['since'] ?? '')) !== '') {
+            $since = tl_datetime($in['since']);
+            if ($since === null) agent_fail('since must be "YYYY-MM-DD[ HH:MM]"');
+        }
+        $types = is_array($in['types'] ?? null) ? $in['types'] : array_filter(array_map('trim', explode(',', (string)($in['types'] ?? ''))));
+        $bad = array_diff($types, array_keys(TL_TYPES));
+        if ($bad) agent_fail('Unknown types: ' . implode(', ', $bad), 400, ['types' => array_keys(TL_TYPES)]);
+        $events = tl_list($db, (int)$r['id'], ['limit' => (int)($in['limit'] ?? 50), 'since' => $since, 'types' => $types,
+                                                'include_hidden' => !empty($in['include_hidden']) && $in['include_hidden'] !== '0',
+                                                'include_notes' => !isset($in['include_notes']) || !empty($in['include_notes'])]);
+        agent_out(['ok' => true, 'request' => agent_request_out($r), 'summary' => tl_summary_get($db, (int)$r['id']),
+                   'count' => count($events), 'events' => $events]);
+    }
+
+    // Append an event. Written directly (no confirm): events are append-only and can be hidden.
+    case 'timeline_add': {
+        agent_require_method('POST');
+        $r = agent_request($db, $in['request_id'] ?? 0);
+        $v = tl_event_input($in);
+        if ($v['errors']) agent_fail(implode(' ', $v['errors']), 400, ['types' => array_keys(TL_TYPES)]);
+        $id = tl_add($db, (int)$r['id'], $in, agent_tl_author($in));
+        agent_out(['ok' => true, 'event_id' => $id, 'event' => tl_event($db, $id), 'warnings' => $v['warnings']]);
+    }
+
+    // Change an event (title, body, next_step, event_at, refs, session_url, pinned, hidden).
+    // System events: only pinned / hidden. Preview unless "confirm": true.
+    case 'timeline_update': {
+        agent_require_method('POST');
+        $ev = tl_event($db, (int)($in['event_id'] ?? 0));
+        if (!$ev) agent_fail('event_id not found', 404);
+        $agentReqId = $ev['request_id'];
+        $fields = array_diff_key($in, ['event_id' => 1, 'confirm' => 1, 'source' => 1]);
+        if (!$fields) agent_fail('Nothing to change: give title, body, next_step, event_at, refs, session_url, pinned or hidden');
+        if (empty($in['confirm'])) {
+            if ($ev['author_type'] === 'system' && array_diff(array_keys($fields), ['pinned', 'hidden'])) agent_fail('System events: only pinned / hidden can change', 409);
+            $v = $ev['author_type'] === 'system' ? ['errors' => [], 'warnings' => []] : tl_event_input($fields, true);
+            if ($v['errors']) agent_fail(implode(' ', $v['errors']));
+            agent_out(['ok' => true, 'dry_run' => true, 'event' => $ev, 'changes' => $fields, 'warnings' => $v['warnings'],
+                       'message' => 'Dry run — nothing saved. Resend with "confirm": true.']);
+        }
+        try { $changed = tl_update($db, (int)$ev['id'], $fields, true); }
+        catch (InvalidArgumentException $e) { agent_fail($e->getMessage(), 409); }
+        agent_out(['ok' => true, 'dry_run' => false, 'changed' => $changed, 'event' => tl_event($db, (int)$ev['id'])]);
+    }
+
+    // Rewrite the "where are we" summary. Preview (with the current one) unless "confirm": true;
+    // the previous summary is kept as a note event.
+    case 'summary_set': {
+        agent_require_method('POST');
+        $r = agent_request($db, $in['request_id'] ?? 0);
+        $v = tl_summary_input($in);
+        if ($v['errors']) agent_fail(implode(' ', $v['errors']));
+        $prev = tl_summary_get($db, (int)$r['id']);
+        if (empty($in['confirm'])) {
+            agent_out(['ok' => true, 'dry_run' => true, 'previous' => $prev,
+                       'new' => ['summary' => $v['fields']['summary'], 'next_step' => $v['fields']['next_step'],
+                                 'waiting_on' => $v['fields']['waiting_on'], 'session_url' => $v['fields']['session_url']],
+                       'warnings' => $v['warnings'], 'message' => 'Dry run — nothing saved. Resend with "confirm": true.']);
+        }
+        $saved = tl_summary_set($db, (int)$r['id'], $in, agent_tl_author($in));
+        agent_out(['ok' => true, 'dry_run' => false, 'summary' => $saved, 'previous_kept_as_note' => $prev !== null, 'warnings' => $v['warnings']]);
+    }
+
+    // Everything to pick up a practice: request, summary, events, programs, Calc files,
+    // invoices, memos, other requests of the same client.
+    case 'request_resume': {
+        $r = agent_tl_resolve($db, $in);
+        require_once __DIR__ . '/dropbox_helper.php';   // Calc files in the folder
+        agent_out(['ok' => true] + tl_resume($db, $r));
     }
 
     default:
@@ -1905,6 +2070,7 @@ try {
             'save_invoice_pdf', 'import_zoho_invoice', 'create_invoice', 'update_invoice', 'memo_list', 'memo_save', 'memo_set_status',
             'routine_status', 'routine_done',
             'mail_folders', 'mail_list', 'mail_get', 'mail_attachment', 'mail_flag', 'mail_move', 'mail_draft', 'mail_send',
+            'timeline_list', 'timeline_add', 'timeline_update', 'summary_set', 'request_resume',
         ]]);
     }
 } catch (Throwable $e) {

@@ -18,6 +18,7 @@
 
 require_once __DIR__ . '/folder_parser.php';
 require_once __DIR__ . '/safari_check.php';
+require_once __DIR__ . '/timeline_service.php';   // timeline_log(): system events of the request history
 
 // ════════════════════════════════════════════════════════════════════════════
 //  Paths / URLs
@@ -251,6 +252,8 @@ function bs_create_request(PDO $db, array $v, array $opt = []): array {
     ]);
     $out['request_id'] = (int)$db->lastInsertId();
     $out['ok'] = true;
+    timeline_log($out['request_id'], 'client_request', $dropboxSkip ? 'Request imported from folder' : 'Request received',
+                 ['body' => tl_cut($v['initial_request'], 500), 'refs' => ['dropbox_path' => $dropboxPath ?? null]]);
 
     // ── Notify agent (non-fatal) ──────────────────────────────────────────────
     require_once __DIR__ . '/../notifications.php';
@@ -346,6 +349,11 @@ function bs_copy_programs(PDO $db, int $reqId, string $prognum, array $programs)
     if ($skipped) $parts[] = count($skipped) . ' skipped (already there)';
     if ($missing) $parts[] = count($missing) . ' template(s) missing';
     if ($unknown) $parts[] = count($unknown) . ' unknown';
+    if ($copied) {
+        $done = array_values(array_intersect($programs, array_keys($byLabel)));
+        timeline_log($reqId, 'program_update', 'Copied program ' . implode(', ', $done),
+                     ['body' => implode("\n", $copied), 'refs' => ['dropbox_path' => $destDir]]);
+    }
     return [
         'ok'       => true,
         'prognum'  => $prognum,
@@ -707,8 +715,19 @@ function bs_confirm_checks(array $plan): array {
  * first; the DB is only touched if it succeeds.
  *
  * Returns ['ok'=>bool, 'msg'=>string, 'folder'=>new practice_code, 'group_folder', 'dropbox_path'].
+ * A successful confirm is logged in the request timeline.
  */
 function bs_confirm_commit(PDO $db, array $plan, bool $proceed): array {
+    $res = bs_confirm_commit_run($db, $plan, $proceed);
+    if ($res['ok'] && !empty($plan['r']['id'])) {
+        timeline_log((int)$plan['r']['id'], 'confirmation', 'Booking confirmed — ' . $res['folder'],
+                     ['body' => ($res['group_folder'] ? 'Group: ' . $res['group_folder'] . "\n" : '') . 'Previous folder: ' . $plan['old_folder'],
+                      'refs' => ['dropbox_path' => $res['dropbox_path']]]);
+    }
+    return $res;
+}
+
+function bs_confirm_commit_run(PDO $db, array $plan, bool $proceed): array {
     $fail = function (string $msg) { return ['ok' => false, 'msg' => $msg]; };
     if (empty($plan['found']))  return $fail($plan['error'] ?: 'Request not found.');
     if (!empty($plan['errs']))  return $fail(implode(' ', $plan['errs']));
@@ -843,7 +862,13 @@ function bo_rollback_db(PDO $db, int $id, string $name, string $path, array $pre
  *          'restore'=>['name','status','payment_status','group']].
  */
 function bs_rollback(PDO $db, int $reqId, bool $commit): array {
-    $fail = function (string $msg, array $extra = []) { return array_merge(['ok' => false, 'msg' => $msg], $extra); };
+    $res = bs_rollback_run($db, $reqId, $commit);
+    if ($commit && $res['ok']) timeline_log($reqId, 'status_change', 'Confirmation rolled back', ['body' => trim(str_replace('↩', '', $res['msg']))]);
+    return $res;
+}
+
+function bs_rollback_run(PDO $db, int $reqId, bool $commit): array {
+    $fail =function (string $msg, array $extra = []) { return array_merge(['ok' => false, 'msg' => $msg], $extra); };
 
     $stmt = $db->prepare("SELECT id, customer_name, practice_code, group_folder, dropbox_url, pre_confirm_json
                           FROM requests WHERE id = ?");

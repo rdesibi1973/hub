@@ -1,7 +1,9 @@
 <?php
 require_once 'config.php';
+require_once 'includes/timeline_service.php';   // Last activity column (request_timeline / request_summary)
 $pageTitle = 'Requests';
 $db = db();
+tl_schema($db);
 
 // ── Staff: restrict to own requests ──────────────────────────────
 $isStaff      = isLeadsRestricted();
@@ -84,6 +86,7 @@ $allowedSorts = [
     'id_asc'    => 'r.id ASC',
     'date_desc' => 'r.date_received DESC, r.id DESC',
     'date_asc'  => 'r.date_received ASC,  r.id ASC',
+    'activity_desc' => 'last_activity_raw DESC, r.id DESC',   // '1000-01-01' = no activity, sorts last
 ];
 $orderBy = $allowedSorts[$sort] ?? $allowedSorts['id_desc'];
 
@@ -129,9 +132,14 @@ $sql = "
            (SELECT id   FROM invoices inv WHERE inv.request_id = r.id ORDER BY id LIMIT 1) AS invoice_id,
            (SELECT invoice_number FROM invoices inv WHERE inv.request_id = r.id ORDER BY id LIMIT 1) AS invoice_number,
            (SELECT COUNT(*) FROM request_todos td WHERE td.request_id = r.id AND td.done = 0) AS pending_todos,
-           (SELECT COUNT(*) FROM request_todos td WHERE td.request_id = r.id AND td.done = 0 AND td.due_at < NOW()) AS overdue_todos
+           (SELECT COUNT(*) FROM request_todos td WHERE td.request_id = r.id AND td.done = 0 AND td.due_at < NOW()) AS overdue_todos,
+           GREATEST(COALESCE((SELECT MAX(tl.event_at) FROM request_timeline tl WHERE tl.request_id = r.id AND tl.hidden = 0), '1000-01-01'),
+                    COALESCE(rs.updated_at, '1000-01-01'),
+                    COALESCE((SELECT MAX(rn.created_at) FROM request_notes rn WHERE rn.request_id = r.id), '1000-01-01')) AS last_activity_raw,
+           rs.summary AS tl_summary, rs.next_step AS tl_next_step
     FROM requests r
     LEFT JOIN agents a ON a.id = r.agent_id
+    LEFT JOIN request_summary rs ON rs.request_id = r.id
     WHERE " . implode(' AND ', $where) . "
     ORDER BY {$orderBy}
 ";
@@ -281,6 +289,15 @@ include 'includes/header.php';
             <span style="color:var(--red);font-size:.85em;"><?= $sortLabel ?></span>
           </a>
         </th>
+        <?php $actParams = http_build_query(array_filter([
+            'q' => $search, 'status' => $status, 'agent' => $agent ?: null, 'year' => $year ?: null,
+            'no_folder' => $no_folder ? 1 : null, 'sort' => $sort === 'activity_desc' ? 'id_desc' : 'activity_desc',
+            'date_from' => $date_from ?: null, 'date_to' => $date_to ?: null,
+          ], fn($v) => $v !== null && $v !== '' && $v !== 0)); ?>
+        <th style="white-space:nowrap;">
+          <a href="requests.php?<?= $actParams ?>" title="Sort by last timeline activity"
+             style="text-decoration:none;color:inherit;">Last activity<?= $sort === 'activity_desc' ? ' <span style="color:var(--red);font-size:.85em;">↓</span>' : '' ?></a>
+        </th>
         <th>Dropbox Folder</th>
         <th>Source</th>
       </tr>
@@ -373,6 +390,15 @@ include 'includes/header.php';
           <?php if (!$isStaff): ?><td class="text-right"><?= $r['value_usd'] ? '$'.number_format($r['value_usd'],0) : '—' ?></td><?php endif; ?>
           <td><?= h($r['agent_name'] ?? '—') ?></td>
           <td class="text-muted" style="white-space:nowrap"><?= date('d M Y', strtotime($r['date_received'])) ?></td>
+          <?php $lastAct = (string)($r['last_activity_raw'] ?? ''); $hasAct = $lastAct !== '' && strpos($lastAct, '1000-') !== 0; ?>
+          <td style="white-space:nowrap;font-size:.78rem;">
+            <?php if ($hasAct || $r['tl_summary']): ?>
+            <a href="request_view.php?id=<?= (int)$r['id'] ?>#timeline" style="color:var(--grey-dk);text-decoration:none;"
+               title="<?= h($r['tl_summary'] ? $r['tl_summary'] . ($r['tl_next_step'] ? "\n\nNext: " . $r['tl_next_step'] : '') : 'No summary yet') ?>">
+              <?= $hasAct ? date('d M Y', strtotime($lastAct)) : '—' ?><?= $r['tl_summary'] ? ' 🗒' : '' ?>
+            </a>
+            <?php else: ?><span class="text-muted">—</span><?php endif; ?>
+          </td>
           <td style="font-size:.75rem;color:var(--grey-mid)">
             <?php if ($r['practice_code']): ?>
               <?= h($r['practice_code']) ?>
@@ -384,7 +410,7 @@ include 'includes/header.php';
         </tr>
         <?php endforeach; ?>
       <?php else: ?>
-        <tr><td colspan="<?= $isStaff ? 11 : 14 ?>">
+        <tr><td colspan="<?= $isStaff ? 12 : 15 ?>">
           <div class="empty-state">
             <div class="icon">🔍</div>
             <p>No requests found<?= ($search||$status||$agent)?' for the selected filters.':' yet.' ?></p>

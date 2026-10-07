@@ -51,6 +51,8 @@ Responses: `{"ok": true, …}` or `{"ok": false, "error": "…", …}` with a ma
 ### `find_requests` (GET)
 `q` (name / folder / email substring), `status`, `agent` (id or name), `year` (received), `limit` ≤ 100.
 At least one filter. Use it as the duplicate check before `create_request`.
+Each row also has `last_activity_at` (latest timeline event, summary or note) and `has_summary` — see
+[Request timeline](#request-timeline).
 
 ### `list_agencies` (GET)
 `q` → `[{id, name, short_name, type}]`.
@@ -468,6 +470,8 @@ update instead of duplicating). Fields: `title`*, `body` (plain text), `status` 
 payment is recorded on that invoice — by the Hub page or `add_invoice_payment`), `next_steps[]`
 `{title, days_after?, body?}` (replaces the pending ones), `ext_key`. A `waiting` memo with a `due_date` and no
 reminder gets an email reminder at 08:00 that day. Created memos are marked 🤖 Claude.
+The reply has a top-level `request_id` when the memo is linked to a request (memos also appear in
+`request_resume`).
 
 ### `memo_set_status` (POST)
 `id` or `ext_key`, `status` (`open`|`doing`|`waiting`|`done`|`archived`), `note` (appended when done).
@@ -531,6 +535,9 @@ The audit log keeps who/subject for `mail_get` / `mail_attachment`, not bodies o
 message_id, in_reply_to, references, seen, flagged, answered, body (plain text; HTML converted),
 body_truncated, has_html, attachments[] {part, name, mime, size, inline}}` (small inline images such as
 signature logos are left out).
+With `request_id` the message is logged in that request's timeline as `mail_received` (sender, date,
+first 1500 characters; `refs.mail_message_id`) → `timeline_event_id`. Once per Message-ID: reading it again
+returns the same event. Use it in the mail round for client / agency emails about a request.
 
 ### `mail_attachment` (GET)
 `uid`*, `part`* (from `mail_get`), `folder`. → `attachment {name, mime, size, content_base64}` (≤ 10 MB).
@@ -550,6 +557,8 @@ From `info@`. `to`, `cc`, `bcc` (string or list), `subject`, `body` (plain text)
 - `mail_draft` saves it in **Drafts** — nothing is sent; Roberto sends it from webmail / phone.
 - `mail_send` is a dry-run (→ `email` preview) unless `"confirm": true`; then it sends, keeps a copy in
   **Sent** and marks the original as answered.
+- Optional `request_id`: a confirmed `mail_send` is logged in that request's timeline (`mail_sent`,
+  → `timeline_event_id`). Drafts are not logged.
 
 ```bash
 curl -sH "$H" "$U?action=mail_list&unseen=1&limit=20"
@@ -558,6 +567,87 @@ curl -sH "$H" "$U?action=mail_attachment&uid=48213&part=2&request_id=2958"      
 curl -sH "$H" -X POST "$U?action=mail_draft" -d '{"reply_to_uid":48213,"body":"Dear Anna,\nthank you …"}'
 curl -sH "$H" -X POST "$U?action=mail_flag"  -d '{"uids":[48213,48214],"seen":true}'
 ```
+
+## Request timeline
+
+A running history and a short "where are we" summary for each request, so a new session can pick
+up a practice that started weeks earlier in another chat. Staff see the same thing in the Hub
+(request page → 🕓 Timeline; requests list → Last activity). Logic: `modules/leads/includes/timeline_service.php`
+(tables created on first use, or run `migrations/065_request_timeline.sql`).
+
+- **Events** (`request_timeline`): append-only. Authors are `claude` (these actions), `user` (Hub page) or
+  `system` (automatic, below). An event can be hidden (soft delete), not deleted. The older Notes of the
+  request page (and template emails logged there) are merged in the list as read-only rows with
+  `source: "notes"` and an id like `"n123"`.
+- **Summary** (`request_summary`): one text per request, max 1500 characters, with `next_step` and
+  `waiting_on` (`client` | `agency` | `supplier` | `us`). Each save keeps the previous text as a
+  `note` event "Summary updated — previous version".
+- `session_url` must start with `https://claude.ai/`. A passport-like number next to "passport /
+  passaporto" gives a warning in `warnings[]` (not a block). Never write passport numbers.
+
+`event_type`: `note`, `client_request`, `quote_sent`, `program_update`, `calc_update`, `mail_sent`,
+`mail_received`, `call`, `confirmation`, `invoice`, `payment`, `supplier`, `status_change`, `issue`.
+
+`refs` (all optional, shown as links in the Hub): `program_id`, `program_version`, `calc_file`, `invoice_id`,
+`invoice_number`, `payment_id`, `mail_message_id`, `mail_box`, `memo_ext_key`, `price_total`, `currency`,
+`dropbox_path`.
+
+**Automatic events** (`author_type: system`, `source: auto`, only on real writes, never dry-runs; the
+same request + type + title within 60 s is logged once; a logging error never fails the action):
+
+| Trigger (Hub page or API) | Event |
+|---|---|
+| `create_request` / New Request / Import Group Folder | `client_request` "Request received" (first 500 chars of the initial request) |
+| `copy_program` / Copy programs | `program_update` "Copied program …" |
+| `fill_calc` with confirm | `calc_update` (+ `refs.calc_file`, `price_total`) |
+| `iti_create_personal`, "Create from sample" on a request, `iti_final_from_calc` / Final program page, `iti_publish`, `iti_document` / `iti_vouchers` saved to Dropbox | `program_update` (+ `refs.program_id`) |
+| `confirm_booking` / Confirm Safari | `confirmation` "Booking confirmed — <folder>" |
+| `rollback_booking` / Rollback | `status_change` "Confirmation rolled back" |
+| `send_booking_email` / BackOffice booking email | `mail_sent` |
+| `create_invoice`, `update_invoice`, `import_zoho_invoice`, invoice cancelled / restored (request invoices) | `invoice` |
+| `add_invoice_payment`, `cancel_invoice_payment` (and the invoice page) | `payment` |
+| `update_folder_status` / Update Folder, BackOffice status change, request status change | `status_change` |
+
+### `timeline_list` (GET)
+`request_id`*, `limit` (default 50, ≤ 500), `since` (`YYYY-MM-DD[ HH:MM]`), `types` (comma list),
+`include_hidden=1`, `include_notes=0` (leave out the older Notes). → `request`, `summary`, `events[]`
+newest first `{id, event_at, event_type, title, body, next_step, author_type, author, triggered_by, source,
+session_url, refs, pinned, hidden}`.
+
+### `timeline_add` (POST)
+`request_id`*, `event_type`*, `title`* (≤ 200), `body`, `next_step`, `event_at` (default now, EAT; can be in
+the past), `session_url`, `refs` {…}, `pinned`, `source: "cowork"` (else `api`). **Written directly — no
+confirm** (append-only, can be hidden). → `event_id`, `event`, `warnings[]`.
+
+### `timeline_update` (POST)
+`event_id`*, any of `title`, `body`, `next_step`, `event_at`, `session_url`, `refs`, `pinned`, `hidden`.
+System events: only `pinned` / `hidden`. Preview (`changes`) unless `"confirm": true`.
+
+### `summary_set` (POST)
+`request_id`*, `summary`* (≤ 1500), `next_step`, `waiting_on`, `session_url`, `source: "cowork"`.
+Preview with `previous` and `new` unless `"confirm": true`; then → `summary`, `previous_kept_as_note`.
+
+### `request_resume` (GET)
+`request_id`, or `q` (name / folder / email, as `find_requests`; several matches → 409 with
+`candidates[]`). Everything needed to pick up a practice:
+`request` `{id, customer_name, email, agency, agent, status, payment_status, period, pax, value_usd,
+destination, folder, group_folder, dropbox_path, date_received, confirmation_date, start_date, initial_request}`,
+`summary`, `events[]` (last 20, pinned first, Notes merged), `programs[]` `{program_id, title, type, stage,
+language, status, updated_at, public_link}`, `calc_files[]` (`*_Calc*.xlsx` in the folder; null without a
+folder), `invoices[]` `{invoice_number, total, amount_paid, balance_due, status, …}`, `memos[]`
+`{ext_key, title, status, waiting_on, due_date}`, `client_history[]` (other requests with the same email —
+or, without email, the same customer name — any year / agency), `last_activity_at`.
+
+```bash
+curl -sH "$H" "$U?action=request_resume&q=Rossi"
+curl -sH "$H" -X POST "$U?action=timeline_add" -d '{"request_id":2958,"event_type":"quote_sent","title":"Quote v2 sent — USD 6,450","body":"DumaShort 7n + Zanzibar 4n","refs":{"program_id":412,"price_total":6450,"currency":"USD"},"session_url":"https://claude.ai/chat/…","source":"cowork"}'
+curl -sH "$H" -X POST "$U?action=summary_set" -d '{"request_id":2958,"summary":"Quote v2 sent 6 Oct …","next_step":"Send v3 with Manyara","waiting_on":"us"}'   # preview; add "confirm":true
+```
+Italian text with accents or "–" can trip the server firewall (406): send the body as `{"b64": "<base64 of the JSON>"}`.
+
+**Backfill (once, optional)**: `php tools/timeline_backfill.php [--months=12] [--confirm]` over SSH seeds the
+last 12 months from `requests.notes`, confirmation dates, invoices and payments (dry-run without `--confirm`;
+safe to re-run).
 
 ## Example — Fiorini (TVT)
 

@@ -197,6 +197,12 @@ function iti_ps_create_personal(PDO $db, array $in, string $who, bool $go): arra
             $db->commit();
         }
     } catch (Throwable $e) { if ($db->inTransaction()) $db->rollBack(); throw $e; }
+    if (!empty($set['lead_request_id'])) {
+        require_once __DIR__ . '/../../leads/includes/timeline_service.php';
+        timeline_log((int)$set['lead_request_id'], 'program_update', 'Personal program created (#' . $id . ')',
+                     ['body' => $s ? 'From sample #' . $sid . ': ' . iti_doc_pick($s, 'title', $lang) : 'Built day by day (' . count($items) . ' days)',
+                      'refs' => ['program_id' => $id]]);
+    }
     return $plan + ['program' => iti_ps_program_out($db, $id, $lang)];
 }
 
@@ -253,6 +259,11 @@ function iti_ps_publish(PDO $db, int $id, bool $publish, bool $go): array {
                                      status = IF(status = 'draft', 'sent', status) WHERE id = ?")->execute([$id]);
         else          $db->prepare('UPDATE iti_programs SET is_published = 0 WHERE id = ?')->execute([$id]);
         $p = iti_get_program($id);
+        if (!empty($p['lead_request_id'])) {
+            require_once __DIR__ . '/../../leads/includes/timeline_service.php';
+            timeline_log((int)$p['lead_request_id'], 'program_update', ($publish ? 'Program published' : 'Program unpublished') . ' (#' . $id . ')',
+                         ['refs' => ['program_id' => $id]]);
+        }
     }
     return ['id' => $id, 'published' => $go ? (bool)$p['is_published'] : $publish, 'links' => iti_ps_links($p)];
 }

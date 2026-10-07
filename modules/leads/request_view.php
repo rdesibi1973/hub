@@ -256,6 +256,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['quick_status'])) {
         // Reason/note are stored only for Lost; cleared when leaving Lost.
         $reasonVal = ($newStatus === 'Lost') ? $lostReason : null;
         $noteVal   = ($newStatus === 'Lost' && $lostNote !== '') ? $lostNote : null;
+        $oldSt = $db->prepare("SELECT status FROM requests WHERE id=?");
+        $oldSt->execute([$id]);
+        $oldStatus = (string)$oldSt->fetchColumn();
 
         if (isLeadsRestricted()) {
             $db->prepare("UPDATE requests SET status=?, pipeline_column=IF(?='Booked',NULL,pipeline_column), lost_reason=?, lost_note=? WHERE id=? AND agent_id=?")
@@ -270,6 +273,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['quick_status'])) {
                       . ($noteVal !== null ? ': ' . $noteVal : '');
             $db->prepare("INSERT INTO request_notes (request_id, user_id, note) VALUES (?,?,?)")
                ->execute([$id, (int)($cu['id'] ?? 0), $noteText]);
+        }
+        if ($oldStatus !== '' && $oldStatus !== $newStatus) {
+            timeline_log($id, 'status_change', $oldStatus . ' → ' . $newStatus,
+                         ['body' => $newStatus === 'Lost' ? $LOST_REASONS[$lostReason] . ($noteVal !== null ? ': ' . $noteVal : '') : null]);
         }
         if ($isXhr) { header('Content-Type: application/json');
                       echo json_encode(['ok'=>true]); exit; }
@@ -331,6 +338,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action_note'])) {
     header("Location: request_view.php?id=$id#notes"); exit;
 }
 
+// ── Timeline POST (add event / summary / pin / hide) — includes/timeline_service.php ──
+$tlIsAdmin = function_exists('isLeadsAdmin') ? isLeadsAdmin() : in_array($cu['role_name'] ?? '', ['admin', 'manager'], true);
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action_tl'])) {
+    $tlAuthor = ['type' => 'user', 'user_id' => (int)($cu['id'] ?? 0), 'source' => 'hub'];
+    $tlBack   = 'request_view.php?id=' . $id . (!empty($_POST['tl_hidden']) ? '&tl_hidden=1' : '') . '#timeline';
+    try {
+        switch ($_POST['action_tl']) {
+            case 'add':
+                $tlIn = ['event_type' => $_POST['tl_type'] ?? 'note', 'title' => $_POST['tl_title'] ?? '',
+                         'body' => $_POST['tl_body'] ?? '', 'next_step' => $_POST['tl_next'] ?? ''];
+                if (trim((string)($_POST['tl_at'] ?? '')) !== '') $tlIn['event_at'] = $_POST['tl_at'];
+                $tlV = tl_event_input($tlIn);
+                tl_add($db, $id, $tlIn, $tlAuthor);
+                flash($tlV['warnings'] ? 'Event added. ' . implode(' ', $tlV['warnings']) : 'Event added to the timeline.', $tlV['warnings'] ? 'error' : 'success');
+                break;
+            case 'summary':
+                $tlV = tl_summary_input($_POST);
+                tl_summary_set($db, $id, ['summary' => $_POST['summary'] ?? '', 'next_step' => $_POST['next_step'] ?? '',
+                                          'waiting_on' => $_POST['waiting_on'] ?? '', 'session_url' => $_POST['session_url'] ?? ''], $tlAuthor);
+                flash($tlV['warnings'] ? 'Summary saved. ' . implode(' ', $tlV['warnings']) : 'Summary saved.', $tlV['warnings'] ? 'error' : 'success');
+                break;
+            case 'pin':
+            case 'hide':
+                $tlEv = tl_event($db, (int)($_POST['event_id'] ?? 0));
+                if (!$tlEv || $tlEv['request_id'] !== $id) throw new InvalidArgumentException('Event not found.');
+                $tlKey = $_POST['action_tl'] === 'pin' ? 'pinned' : 'hidden';
+                tl_update($db, $tlEv['id'], [$tlKey => empty($tlEv[$tlKey])], $tlIsAdmin);
+                break;
+        }
+    } catch (InvalidArgumentException $e) {
+        flash($e->getMessage(), 'error');
+    }
+    header('Location: ' . $tlBack); exit;
+}
+
 // ── To-Do POST ──────────────────────────────────────────────────────────────
 if (!function_exists('todo_sanitize_html')) {
     /** Whitelist the limited HTML produced by the Quill toolbar
@@ -387,6 +429,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action_todo'])) {
     }
     header("Location: request_view.php?id=$id#todos"); exit;
 }
+
+// ── Load timeline + summary (newest first, pinned on top, older Notes merged) ──
+$tlShowHidden = $tlIsAdmin && !empty($_GET['tl_hidden']);
+$tlEvents  = tl_list($db, $id, ['limit' => 200, 'include_notes' => true, 'pinned_first' => true, 'include_hidden' => $tlShowHidden]);
+$tlSummary = tl_summary_get($db, $id);
 
 // ── Load notes & todos ──────────────────────────────────────────────────────
 $notes = $db->prepare(
@@ -1173,6 +1220,224 @@ function deleteQuote(id, num) {
 .todo-add-form .tf-due-wrap .tf-sep { color:var(--grey-mid); font-weight:700; line-height:1; }
 .todo-add-form .tf-email { width:100%; }
 </style>
+
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+<!-- TIMELINE: summary + history (includes/timeline_service.php)               -->
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+<style>
+.tl-wrap { max-width:860px; margin-bottom:20px; }
+.tl-summary { background:#fff; border:1px solid var(--grey-lt); border-left:4px solid var(--red); border-radius:8px; padding:14px 16px; margin-bottom:14px; }
+.tl-summary-text { white-space:pre-wrap; font-size:.88rem; color:var(--black); line-height:1.5; }
+.tl-summary-meta { display:flex; flex-wrap:wrap; gap:8px 14px; align-items:center; margin-top:10px; font-size:.76rem; color:var(--grey-mid); }
+.tl-summary-meta strong { color:var(--grey-dk); }
+.tl-empty { color:var(--grey-mid); font-size:.83rem; }
+.tl-form { display:none; margin-top:10px; }
+.tl-form textarea, .tl-form input[type=text], .tl-form input[type=url], .tl-form input[type=datetime-local], .tl-form select {
+  width:100%; box-sizing:border-box; padding:7px 9px; border:1.5px solid var(--grey-lt); border-radius:6px; font-size:.84rem; font-family:inherit; background:#fff; }
+.tl-form .tl-row { display:flex; gap:8px; margin-bottom:8px; flex-wrap:wrap; }
+.tl-form .tl-row > * { flex:1; min-width:160px; }
+.tl-form label { display:block; font-size:.72rem; color:var(--grey-mid); margin-bottom:3px; }
+.tl-chips { display:flex; flex-wrap:wrap; gap:6px; margin:10px 0; }
+.tl-chip { border:1px solid var(--grey-lt); background:#fff; border-radius:12px; padding:3px 10px; font-size:.74rem; cursor:pointer; color:var(--grey-dk); }
+.tl-chip.on { background:var(--grey-dk); color:#fff; border-color:var(--grey-dk); }
+.tl-list { border:1px solid var(--grey-lt); border-radius:8px; background:#fff; }
+.tl-item { display:flex; gap:10px; padding:10px 14px; border-bottom:1px solid var(--grey-lt); font-size:.84rem; }
+.tl-item:last-child { border-bottom:none; }
+.tl-item.tl-pinned { background:#FFFBEF; }
+.tl-item.tl-hidden { opacity:.5; }
+.tl-when { flex:0 0 92px; color:var(--grey-mid); font-size:.74rem; line-height:1.35; }
+.tl-main { flex:1; min-width:0; }
+.tl-badge { display:inline-block; border-radius:10px; padding:1px 8px; font-size:.68rem; font-weight:700; border:1px solid; margin-right:6px; white-space:nowrap; }
+.tl-title { font-weight:600; color:var(--black); word-break:break-word; }
+.tl-by { color:var(--grey-mid); font-size:.74rem; margin-top:2px; }
+.tl-body { white-space:pre-wrap; word-break:break-word; color:var(--grey-dk); font-size:.82rem; margin-top:4px; }
+.tl-main details summary { cursor:pointer; color:var(--grey-mid); font-size:.74rem; margin-top:3px; }
+.tl-next { margin-top:4px; font-size:.8rem; color:#2E6B3E; }
+.tl-refs { margin-top:4px; display:flex; flex-wrap:wrap; gap:6px 10px; font-size:.74rem; }
+.tl-refs a { color:var(--blue, #1F5FA8); }
+.tl-actions { flex:0 0 auto; display:flex; gap:2px; align-items:flex-start; }
+.tl-actions button { background:none; border:none; cursor:pointer; opacity:.5; font-size:.9rem; padding:2px 4px; }
+.tl-actions button:hover { opacity:1; }
+@media (max-width:640px) { .tl-item { flex-wrap:wrap; } .tl-when { flex-basis:100%; } }
+</style>
+
+<a id="timeline"></a>
+<div class="section-label" style="margin-top:28px">🕓 Timeline</div>
+<div class="tl-wrap">
+
+  <div class="tl-summary">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">
+      <div style="font-size:.72rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--red-dk)">Where we are</div>
+      <button type="button" class="btn btn-outline btn-sm" onclick="tlToggle('tl-summary-form')"><?= $tlSummary ? 'Edit' : '+ Write summary' ?></button>
+    </div>
+    <?php if ($tlSummary): ?>
+      <div class="tl-summary-text" style="margin-top:6px"><?= h($tlSummary['summary']) ?></div>
+      <?php if ($tlSummary['next_step']): ?><div class="tl-next">➜ Next step: <?= h($tlSummary['next_step']) ?></div><?php endif; ?>
+      <div class="tl-summary-meta">
+        <?php if ($tlSummary['waiting_on']): ?><span>Waiting on <strong><?= h($tlSummary['waiting_on']) ?></strong></span><?php endif; ?>
+        <span>Updated <?= date('d M Y H:i', strtotime($tlSummary['updated_at'])) ?> by <?= h($tlSummary['updated_by'] ?: '—') ?></span>
+        <?php if ($tlSummary['session_url']): ?><a href="<?= h($tlSummary['session_url']) ?>" target="_blank" rel="noopener">Open chat ↗</a><?php endif; ?>
+      </div>
+    <?php else: ?>
+      <p class="tl-empty" style="margin:6px 0 0">No summary yet. Write the state of play and the next step, so anyone (or Claude) can pick it up.</p>
+    <?php endif; ?>
+    <form method="post" class="tl-form" id="tl-summary-form">
+      <input type="hidden" name="action_tl" value="summary">
+      <?php if ($tlShowHidden): ?><input type="hidden" name="tl_hidden" value="1"><?php endif; ?>
+      <label for="tl-sum">Summary (max <?= TL_SUMMARY_MAX ?> characters)</label>
+      <textarea id="tl-sum" name="summary" rows="5" maxlength="<?= TL_SUMMARY_MAX ?>" required><?= h($tlSummary['summary'] ?? '') ?></textarea>
+      <div class="tl-row" style="margin-top:8px">
+        <div><label for="tl-sum-next">Next step</label><input type="text" id="tl-sum-next" name="next_step" maxlength="500" value="<?= h($tlSummary['next_step'] ?? '') ?>"></div>
+        <div style="flex:0 0 160px;min-width:140px"><label for="tl-sum-wait">Waiting on</label>
+          <select id="tl-sum-wait" name="waiting_on">
+            <option value="">—</option>
+            <?php foreach (TL_WAITING_ON as $w): ?><option value="<?= h($w) ?>" <?= ($tlSummary['waiting_on'] ?? '') === $w ? 'selected' : '' ?>><?= h(ucfirst($w)) ?></option><?php endforeach; ?>
+          </select></div>
+      </div>
+      <input type="hidden" name="session_url" value="<?= h($tlSummary['session_url'] ?? '') ?>">
+      <div style="display:flex;gap:6px">
+        <button type="submit" class="btn btn-red btn-sm">Save summary</button>
+        <button type="button" class="btn btn-outline btn-sm" onclick="tlToggle('tl-summary-form')">Cancel</button>
+      </div>
+      <p class="tl-empty" style="margin:6px 0 0;font-size:.72rem">The previous summary is kept in the timeline. Never write passport numbers here.</p>
+    </form>
+  </div>
+
+  <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+    <button type="button" class="btn btn-outline btn-sm" onclick="tlOpenAdd('note')">+ Quick note</button>
+    <button type="button" class="btn btn-outline btn-sm" onclick="tlOpenAdd('')">+ Add event</button>
+    <?php if ($tlIsAdmin): ?>
+    <a class="btn btn-outline btn-sm" style="margin-left:auto" href="request_view.php?id=<?= (int)$id ?><?= $tlShowHidden ? '' : '&tl_hidden=1' ?>#timeline"><?= $tlShowHidden ? 'Hide hidden' : 'Show hidden' ?></a>
+    <?php endif; ?>
+  </div>
+  <form method="post" class="tl-form" id="tl-add-form" style="background:#fff;border:1px solid var(--grey-lt);border-radius:8px;padding:12px 14px">
+    <input type="hidden" name="action_tl" value="add">
+    <?php if ($tlShowHidden): ?><input type="hidden" name="tl_hidden" value="1"><?php endif; ?>
+    <div class="tl-row">
+      <div style="flex:0 0 190px"><label for="tl-type">Type</label>
+        <select id="tl-type" name="tl_type">
+          <?php foreach (TL_TYPES as $k => $t): if (in_array($k, ['status_change'], true)) continue; ?>
+          <option value="<?= h($k) ?>"><?= h($t[0]) ?></option>
+          <?php endforeach; ?>
+        </select></div>
+      <div style="flex:0 0 200px"><label for="tl-at">When</label><input type="datetime-local" id="tl-at" name="tl_at" value="<?= date('Y-m-d\TH:i') ?>"></div>
+      <div><label for="tl-title">Title</label><input type="text" id="tl-title" name="tl_title" maxlength="200" required placeholder="One line, e.g. Client asks for a 2nd quote with Zanzibar"></div>
+    </div>
+    <label for="tl-body">Details</label>
+    <textarea id="tl-body" name="tl_body" rows="3"></textarea>
+    <div class="tl-row" style="margin-top:8px">
+      <div><label for="tl-next">Next step</label><input type="text" id="tl-next" name="tl_next" maxlength="500"></div>
+    </div>
+    <div style="display:flex;gap:6px">
+      <button type="submit" class="btn btn-red btn-sm">Add to timeline</button>
+      <button type="button" class="btn btn-outline btn-sm" onclick="tlToggle('tl-add-form')">Cancel</button>
+    </div>
+  </form>
+
+  <?php
+    $tlTypesUsed = [];
+    foreach ($tlEvents as $e) $tlTypesUsed[$e['event_type']] = true;
+  ?>
+  <?php if (count($tlTypesUsed) > 1): ?>
+  <div class="tl-chips" id="tl-chips">
+    <button type="button" class="tl-chip on" data-type="">All</button>
+    <?php foreach (TL_TYPES as $k => $t): if (empty($tlTypesUsed[$k])) continue; ?>
+    <button type="button" class="tl-chip" data-type="<?= h($k) ?>"><?= h($t[0]) ?></button>
+    <?php endforeach; ?>
+  </div>
+  <?php endif; ?>
+
+  <?php if (!$tlEvents): ?>
+    <p class="tl-empty" style="margin-top:10px">No events yet.</p>
+  <?php else: ?>
+  <div class="tl-list" id="tl-list" style="margin-top:<?= count($tlTypesUsed) > 1 ? '0' : '10px' ?>">
+    <?php foreach ($tlEvents as $e):
+      $tt = TL_TYPES[$e['event_type']] ?? TL_TYPES['note'];
+      $isLegacy = !is_int($e['id']);
+      $refs = $e['refs'] ?: [];
+      $body = (string)($e['body'] ?? '');
+      $long = $body !== '' && (strlen($body) > 280 || substr_count($body, "\n") > 3);
+    ?>
+    <div class="tl-item<?= $e['pinned'] ? ' tl-pinned' : '' ?><?= $e['hidden'] ? ' tl-hidden' : '' ?>" data-type="<?= h($e['event_type']) ?>">
+      <div class="tl-when"><?= date('d M Y', strtotime($e['event_at'])) ?><br><?= date('H:i', strtotime($e['event_at'])) ?></div>
+      <div class="tl-main">
+        <div>
+          <span class="tl-badge" style="background:<?= $tt[1] ?>;color:<?= $tt[2] ?>;border-color:<?= $tt[3] ?>"><?= h($tt[0]) ?></span>
+          <?php if ($e['pinned']): ?><span title="Pinned">📌</span><?php endif; ?>
+          <span class="tl-title"><?= h($e['title']) ?></span>
+        </div>
+        <div class="tl-by">
+          <?= h($e['author'] ?: '—') ?><?= $e['author_type'] === 'system' && $e['triggered_by'] ? ' · by ' . h($e['triggered_by']) : '' ?>
+          <?= $isLegacy ? ' · from Notes' : '' ?><?= $e['hidden'] ? ' · hidden' : '' ?>
+        </div>
+        <?php if ($body !== ''): ?>
+          <?php if ($long): ?>
+          <details><summary>Details</summary><div class="tl-body"><?= h($body) ?></div></details>
+          <?php else: ?>
+          <div class="tl-body"><?= h($body) ?></div>
+          <?php endif; ?>
+        <?php endif; ?>
+        <?php if ($e['next_step']): ?><div class="tl-next">➜ <?= h($e['next_step']) ?></div><?php endif; ?>
+        <?php
+          $links = [];
+          if (!empty($refs['program_id']))   $links[] = '<a href="../iti/program_doc.php?id=' . (int)$refs['program_id'] . '" target="_blank">Program #' . (int)$refs['program_id'] . '</a>';
+          if (!empty($refs['invoice_id']))   $links[] = '<a href="../invoices/invoice_view.php?id=' . (int)$refs['invoice_id'] . '">' . h($refs['invoice_number'] ?? ('Invoice #' . (int)$refs['invoice_id'])) . '</a>';
+          elseif (!empty($refs['invoice_number'])) $links[] = '<span>' . h($refs['invoice_number']) . '</span>';
+          if (!empty($refs['calc_file']))    $links[] = '<span>📊 ' . h($refs['calc_file']) . '</span>';
+          if (isset($refs['price_total']) && $refs['price_total'] !== '') $links[] = '<span>' . h(($refs['currency'] ?? 'USD') . ' ' . number_format((float)$refs['price_total'], 0)) . '</span>';
+          if (!empty($refs['dropbox_path']) && is_string($refs['dropbox_path']) && $refs['dropbox_path'][0] === '/')
+                                             $links[] = '<a href="' . h(bo_url_from_path($refs['dropbox_path'])) . '" target="_blank" rel="noopener">Dropbox ↗</a>';
+          if (!empty($e['session_url']))     $links[] = '<a href="' . h($e['session_url']) . '" target="_blank" rel="noopener">Open chat ↗</a>';
+        ?>
+        <?php if ($links): ?><div class="tl-refs"><?= implode('', $links) ?></div><?php endif; ?>
+      </div>
+      <?php if (!$isLegacy): ?>
+      <div class="tl-actions">
+        <form method="post" style="display:inline">
+          <input type="hidden" name="action_tl" value="pin"><input type="hidden" name="event_id" value="<?= (int)$e['id'] ?>">
+          <?php if ($tlShowHidden): ?><input type="hidden" name="tl_hidden" value="1"><?php endif; ?>
+          <button type="submit" title="<?= $e['pinned'] ? 'Unpin' : 'Pin on top' ?>">📌</button>
+        </form>
+        <?php if ($tlIsAdmin): ?>
+        <form method="post" style="display:inline" <?= $e['hidden'] ? '' : 'onsubmit="return confirm(\'Hide this event? Admins can show it again.\')"' ?>>
+          <input type="hidden" name="action_tl" value="hide"><input type="hidden" name="event_id" value="<?= (int)$e['id'] ?>">
+          <?php if ($tlShowHidden): ?><input type="hidden" name="tl_hidden" value="1"><?php endif; ?>
+          <button type="submit" title="<?= $e['hidden'] ? 'Show again' : 'Hide' ?>"><?= $e['hidden'] ? '👁' : '🙈' ?></button>
+        </form>
+        <?php endif; ?>
+      </div>
+      <?php endif; ?>
+    </div>
+    <?php endforeach; ?>
+  </div>
+  <?php endif; ?>
+</div>
+<script>
+function tlToggle(id) {
+  var f = document.getElementById(id);
+  f.style.display = f.style.display === 'block' ? 'none' : 'block';
+  if (f.style.display === 'block') { var t = f.querySelector('textarea, input[type=text]'); if (t) t.focus(); }
+}
+function tlOpenAdd(type) {
+  var f = document.getElementById('tl-add-form');
+  f.style.display = 'block';
+  if (type) document.getElementById('tl-type').value = type;
+  document.getElementById('tl-title').focus();
+}
+(function () {
+  var chips = document.getElementById('tl-chips');
+  if (!chips) return;
+  chips.addEventListener('click', function (ev) {
+    var b = ev.target.closest('.tl-chip');
+    if (!b) return;
+    var type = b.getAttribute('data-type');
+    chips.querySelectorAll('.tl-chip').forEach(function (c) { c.classList.toggle('on', c === b); });
+    document.querySelectorAll('#tl-list .tl-item').forEach(function (it) {
+      it.style.display = (!type || it.getAttribute('data-type') === type) ? '' : 'none';
+    });
+  });
+})();
+</script>
 
 <a id="notes"></a>
 <div class="section-label" style="margin-top:28px">📝 Notes</div>

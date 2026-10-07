@@ -35,6 +35,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         // payment follow-up list (existing payment rows are kept for history).
         $db->prepare("UPDATE invoices SET status='Cancelled', balance_due=0, amount_paid=0, updated_at=NOW() WHERE id=?")->execute([$invId]);
         sync_request_value($db, $invId);
+        tl_log_invoice($db, $invId, 'cancelled');
         ob_end_clean(); echo json_encode(['ok'=>true]); exit;
     }
 
@@ -55,7 +56,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $db->prepare("UPDATE invoices SET status='New', updated_at=NOW() WHERE id=? AND status='Cancelled'")->execute([$invId]);
         recalculate_invoice($db, $invId);
         sync_request_value($db, $invId);
-        $finalStatus = $db->query("SELECT status FROM invoices WHERE id=$invId")->fetchColumn();
+        tl_log_invoice($db, $invId, 'restored');
+        $finalStatus =$db->query("SELECT status FROM invoices WHERE id=$invId")->fetchColumn();
         $warning = $finalStatus !== 'New'
             ? "Invoice has recorded payments — status has been set to \"$finalStatus\" instead of New. To revert to New, cancel all payments first."
             : null;
