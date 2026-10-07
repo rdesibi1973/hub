@@ -1,5 +1,6 @@
 <?php
 require_once 'config.php';
+require_once 'includes/folder_parser.php';   // parse_folder_dates(): start of a Booked trip from its folder
 requireLogin();
 
 $isStaff      = isLeadsRestricted();
@@ -84,7 +85,12 @@ $columns = [
 ];
 
 // ── Fetch all pipeline-visible requests ────────────────────────────────────
-$where  = ["(r.status IN ('Inquiry','Quoted','Hot','Hot-Quoted') OR r.pipeline_column = 'booked')"];
+// CONFIRMED also keeps every Booked request whose folder has no _CK marker yet (same token rule as
+// ck_has_marker()), until the CK is added — only trips not started yet, so old bookings never marked
+// CK do not pile up.
+$where  = ["(r.status IN ('Inquiry','Quoted','Hot','Hot-Quoted') OR r.pipeline_column = 'booked'
+            OR (r.status = 'Booked' AND COALESCE(r.practice_code, '') NOT REGEXP '_CK(_|$)'
+                AND (r.start_date IS NULL OR r.start_date >= CURDATE())))"];
 $params = [];
 
 if ($isStaff && $staffAgentId) {
@@ -97,7 +103,7 @@ if ($filterYear) {
 }
 
 $stmt = $db->prepare(
-    "SELECT r.id, r.customer_name, r.status, r.pipeline_column,
+    "SELECT r.id, r.customer_name, r.status, r.pipeline_column, r.practice_code, r.start_date,
             r.pax, r.destination, r.period, r.date_received, r.value_usd,
             a.name AS agent_name
      FROM requests r
@@ -115,7 +121,8 @@ foreach ($columns as $colKey => $colDef) {
 }
 
 // Group cards into columns — the status decides; only HOT and WIP are manual:
-// - pipeline_column 'booked'          → CONFIRMED
+// - Booked without _CK in the folder  → CONFIRMED (leaves the board once the CK is added)
+// - pipeline_column 'booked'          → CONFIRMED (a Booked one only until its CK)
 // - Hot / Hot-Quoted                  → HOT
 // - Quoted                            → QUOTED (HOT if it was moved there by hand)
 // - Inquiry                           → NEW    (WIP if it was moved there by hand)
@@ -124,7 +131,14 @@ $byCol = array_fill_keys(array_keys($columns), []);
 foreach ($rows as $r) {
     $explicit = $r['pipeline_column'];
     $status   = $r['status'];
-    if ($explicit === 'booked')                           $colKey = 'booked';
+    $hasCk    = (bool)preg_match('/_CK(?=_|$)/i', (string)$r['practice_code']);   // as ck_has_marker()
+    if ($status === 'Booked' && !$hasCk && empty($r['start_date']) && $explicit !== 'booked') {
+        // No start_date stored: take it from the folder name (…_START16SEP_END19SEP2026); a trip already started leaves the board.
+        $fd = parse_folder_dates((string)$r['practice_code']);
+        if ($fd['start_date'] !== null && $fd['start_date'] < date('Y-m-d')) continue;
+    }
+    if ($status === 'Booked')                             $colKey = $hasCk ? null : 'booked';
+    elseif ($explicit === 'booked')                       $colKey = 'booked';
     elseif (in_array($status, ['Hot', 'Hot-Quoted'], true)) $colKey = 'hot';
     elseif ($status === 'Quoted')                          $colKey = ($explicit === 'hot') ? 'hot' : 'quoted';
     elseif ($status === 'Inquiry')                         $colKey = ($explicit === 'wip') ? 'wip' : 'new';
@@ -313,6 +327,9 @@ include 'includes/header.php';
                   style="background:<?= $sbg[$st]??'#eee' ?>;color:<?= $sco[$st]??'#444' ?>">
               <?= h($stLabel) ?>
             </span>
+            <?php if ($st === 'Booked'): ?>
+            <span class="card-status-badge" style="background:#FBF3DC;color:#8A6A12" title="The card leaves the board when the folder gets _CK">CK pending</span>
+            <?php endif; ?>
             <?php if (!$isStaff && $r['agent_name']): ?>
             <span class="card-agent"><?= h($r['agent_name']) ?></span>
             <?php endif; ?>
