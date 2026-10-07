@@ -978,7 +978,7 @@ if ($itiCanCreate) {
 }
 ?>
 <?php if ($itiPrograms || $itiCanCreate): ?>
-<div class="section-label">Itineraries</div>
+<div class="section-label">Itineraries shortcut</div>
 <div class="table-wrap" style="max-width:860px;margin-bottom:20px">
   <?php if ($itiPrograms): ?>
   <table style="width:100%;border-collapse:collapse;font-size:.85rem;">
@@ -1009,8 +1009,8 @@ if ($itiCanCreate) {
       <?php endforeach; ?>
     </select>
     <button type="submit" class="btn btn-outline" style="font-size:.75rem;padding:5px 12px;">📋 Create from sample</button>
-    <a href="../iti/program_final.php?request_id=<?= (int)$r['id'] ?>" class="btn btn-outline" style="font-size:.75rem;padding:5px 12px;margin-left:auto;"
-       title="Build the itinerary program from this request's Calc (lodges, dates, guests)">🧩 Itinerary program from Calc</a>
+    <a href="../iti/program_final.php?request_id=<?= (int)$r['id'] ?>" class="btn btn-outline" style="font-size:.75rem;padding:5px 12px;"
+       title="Build the itinerary program from this request's Calc (lodges, dates, guests)">🧩 Create from Excel Calc</a>
   </form>
   <?php endif; ?>
 </div>
