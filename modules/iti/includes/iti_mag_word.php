@@ -89,6 +89,9 @@ function iti_mag_word_build(array $D): array {
 
     $w = new PhpWord();
     $w->getDocInfo()->setCreator('Savannah Explorers')->setTitle($D['title']);
+    // Proofing language = the programme's: Word no longer underlines Italian / French … words as misspelt.
+    $langs = ['it' => 'it-IT', 'en' => 'en-GB', 'fr' => 'fr-FR', 'es' => 'es-ES', 'de' => 'de-DE'];
+    $w->getSettings()->setThemeFontLang(new \PhpOffice\PhpWord\Style\Language($langs[$D['lang']] ?? 'en-GB'));
     $w->setDefaultFontName('Calibri');
     $w->setDefaultFontSize(10.5);
     $w->addFontStyle('mwBody', ['name' => 'Calibri', 'size' => 10.5, 'color' => $INK]);
@@ -107,6 +110,10 @@ function iti_mag_word_build(array $D): array {
     $w->addFontStyle('mwBodyB', ['name' => 'Calibri', 'size' => 10.5, 'color' => $INK, 'bold' => true]);   // bold price row (total)
     $w->addFontStyle('mwPriceB', ['name' => 'Georgia', 'size' => 13, 'color' => $INK, 'bold' => true]);
     $w->addFontStyle('mwTh', ['name' => 'Calibri', 'size' => 8, 'bold' => true, 'color' => $MUTE, 'allCaps' => true]);
+    // Inline "label  value" lines of a day (activities, overnight) and the recap table: the label as the
+    // red kickers, the value in body text (one family, one size).
+    $w->addFontStyle('mwLbl', ['name' => 'Calibri', 'size' => 8, 'bold' => true, 'color' => $RED, 'allCaps' => true, 'spacing' => 30]);
+    $w->addFontStyle('mwNote', ['name' => 'Calibri', 'size' => 10.5, 'italic' => true, 'color' => $MUTE]);
     $w->addParagraphStyle('mwP', ['spaceAfter' => 120, 'lineHeight' => 1.25]);
     $w->addParagraphStyle('mwTight', ['spaceAfter' => 0]);
     $w->addParagraphStyle('mwCenter', ['alignment' => 'center', 'spaceAfter' => 0]);
@@ -148,19 +155,33 @@ function iti_mag_word_build(array $D): array {
     $stays = iti_mag_stays($D['days']);
     $nNights = 0; $lodges = [];
     foreach ($stays as $st) { $nNights += $st['nights']; $lodges[$st['lodge']] = true; }
-    $tb = $s->addTable(['cellMargin' => 90, 'bgColor' => $SAND]);
-    $rows = [[ucfirst($T['days']), $D['duration']]];
-    if ($dateRange !== '') $rows[] = [$M['dates'], $dateRange];
-    if ($routeNames) $rows[] = [$M['destinations'], implode(', ', $routeNames)];
-    if ($lodges) $rows[] = [$M['lodges'], implode("
-", iti_mag_lodge_nights($stays, $T))];
-    if ($paxLabel !== '') $rows[] = [ucfirst($T['pax']), $paxLabel];
-    foreach ($rows as $r) {
-        $tb->addRow();
-        $tb->addCell(2600, ['bgColor' => $SAND])->addText($r[0], 'mwSmall', 'mwTight');
-        $run = $tb->addCell(7100, ['bgColor' => $SAND])->addTextRun('mwTight');
-        foreach (explode("
-", $r[1]) as $k => $line) { if ($k) $run->addTextBreak(); $run->addText($line, ['name' => 'Calibri', 'size' => 10.5, 'bold' => true]); }
+    // Recap: same look as the price table — red caps labels, body-text values, thin sand rules,
+    // an ink rule on top; lodge names bold with their nights muted.
+    $rows = [[ucfirst($T['days']), [[$D['duration'], '']]]];
+    if ($dateRange !== '') $rows[] = [$M['dates'], [[$dateRange, '']]];
+    if ($routeNames) $rows[] = [$M['destinations'], [[implode(' · ', $routeNames), '']]];
+    if ($lodges) {
+        $ln = [];
+        foreach (iti_mag_lodge_nights($stays, $T) as $line) {
+            $p = strrpos($line, ' · ');
+            $ln[] = $p !== false ? [substr($line, 0, $p), substr($line, $p + 3)] : [$line, ''];
+        }
+        $rows[] = [$M['lodges'], $ln];
+    }
+    if ($paxLabel !== '') $rows[] = [ucfirst($T['pax']), [[$paxLabel, '']]];
+    $s->addTextBreak(1);
+    $tb = $s->addTable(['cellMarginTop' => 90, 'cellMarginBottom' => 90, 'cellMarginLeft' => 0, 'cellMarginRight' => 80]);
+    $rule = ['borderBottomSize' => 4, 'borderBottomColor' => 'E6DDD0', 'valign' => 'top'];
+    foreach ($rows as $i => $r) {
+        $cs = $rule + ($i === 0 ? ['borderTopSize' => 12, 'borderTopColor' => $INK] : []);
+        $tb->addRow(null, ['cantSplit' => true]);
+        $tb->addCell(2400, $cs)->addText($r[0], 'mwLbl', ['spaceAfter' => 0, 'spaceBefore' => 30]);
+        $cell = $tb->addCell(7300, $cs);
+        foreach ($r[1] as $k => $v) {
+            $run = $cell->addTextRun(['spaceAfter' => $k < count($r[1]) - 1 ? 40 : 0]);
+            $run->addText($v[0], count($r[1]) > 1 ? 'mwBodyB' : 'mwBody');
+            if ($v[1] !== '') $run->addText('  ·  ' . $v[1], 'mwNote');
+        }
     }
 
     // ── Route: map + legend, stays ───────────────────────
@@ -227,7 +248,7 @@ function iti_mag_word_build(array $D): array {
         iti_mw_paras($s, $d['narrative']);
         if ($d['activities']) {
             $ar = $s->addTextRun('mwP');
-            $ar->addText(mb_strtoupper($T['activities']) . '   ', 'mwTh');
+            $ar->addText($T['activities'] . '   ', 'mwLbl');
             $ar->addText(implode(' · ', $d['activities']), 'mwBody');
         }
         if ($d['dest_desc'] !== '') {
@@ -256,9 +277,9 @@ function iti_mag_word_build(array $D): array {
             $s->addTextBreak(1);
         } elseif ($d['lodge'] !== '' && $lk !== $prevKey) {
             $r = $s->addTextRun('mwP');
-            $r->addText(mb_strtoupper($T['overnight']) . '   ', 'mwTh');
-            $r->addText($d['lodge'], ['name' => 'Georgia', 'size' => 11.5]);
-            $r->addText(' — ' . $M['see_day'] . ' ' . $seenLodge[$lk], 'mwSmall');
+            $r->addText($T['overnight'] . '   ', 'mwLbl');
+            $r->addText($d['lodge'], 'mwBodyB');
+            $r->addText('  ·  ' . $M['see_day'] . ' ' . $seenLodge[$lk], 'mwNote');
         }
         $prevKey = $d['lodge'] !== '' ? $lk : '';
     }
