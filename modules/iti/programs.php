@@ -111,6 +111,8 @@ if ($action === 'duplicate' && $id && $can_edit) {
         iti_redirect("programs.php?type={$tab}");
     }
     if ($new_id && $lead_id) {
+        require_once __DIR__ . '/includes/iti_terms.php';
+        iti_terms_apply(db(), (int)$new_id);   // T&C of the request's channel (direct 60 days / agency 45)
         require_once __DIR__ . '/../leads/includes/timeline_service.php';
         timeline_log($lead_id, 'program_update', 'Personal program created (#' . $new_id . ')',
                      ['body' => 'From sample #' . $id . ': ' . ($src_p['title_en'] ?? ''), 'refs' => ['program_id' => (int)$new_id]]);

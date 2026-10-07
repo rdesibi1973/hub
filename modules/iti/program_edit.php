@@ -75,7 +75,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 iti_flash_set('error', "Program header saved, but Hub request #{$lead_id} does not exist: link not changed.");
                 iti_redirect("program_edit.php?id={$id}&tab=info");
             }
+            $oldLead = (int)($db->query('SELECT lead_request_id FROM iti_programs WHERE id = ' . (int)$id)->fetchColumn() ?: 0);
             $db->prepare('UPDATE iti_programs SET lead_request_id=? WHERE id=?')->execute([$lead_id ?: null, $id]);
+            if ($lead_id && $lead_id !== $oldLead) {   // new request → its channel's T&C (direct 60 days / agency 45)
+                require_once __DIR__ . '/includes/iti_terms.php';
+                $tApplied = iti_terms_apply($db, $id);
+                if ($tApplied && $tApplied['changed']) $tMsg = ' T&C set to "' . $tApplied['name'] . '" (' . $tApplied['variant'] . ' client of the linked request).';
+            }
             // Linked to a request with no Ref. Number: use the client's Word / Calc prefix.
             if ($lead_id && trim($_POST['ref_number'] ?? '') === '') {
                 require_once __DIR__ . '/../leads/dropbox_constants.php';
@@ -85,7 +91,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if ($ref !== null) $db->prepare('UPDATE iti_programs SET ref_number=? WHERE id=?')->execute([$ref, $id]);
             }
         }
-        iti_flash_set('success','Program header saved.');
+        iti_flash_set('success','Program header saved.' . ($tMsg ?? ''));
         iti_redirect("program_edit.php?id={$id}&tab=info");
     }
 

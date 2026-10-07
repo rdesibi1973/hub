@@ -53,7 +53,7 @@ function iti_ps_program_out(PDO $db, int $id, string $lang = ''): array {
         'pax_adults' => (int)($p['pax_adults'] ?? 0), 'pax_teens' => (int)($p['pax_teens'] ?? 0), 'pax_children' => (int)($p['pax_children'] ?? 0),
         'duration' => $D['duration'], 'published' => iti_program_is_public($p),   // personal: always, until cancelled
         'prices' => $D['prices'], 'price_notes' => $D['price_notes'],
-        'included' => $D['incl'], 'excluded' => $D['excl'], 'days' => $days,
+        'included' => $D['incl'], 'excluded' => $D['excl'], 'terms' => iti_ps_terms_out($db, $p), 'days' => $days,
         'structure' => iti_pb_days_raw($db, $id),   // the days as stored (ids), same shape iti_set_days takes
         'links' => iti_ps_links($p, $lang),
     ];
@@ -99,6 +99,7 @@ function iti_ps_header_fields(): array {
 
 /** Normalise / validate header values; returns [column => value]. */
 function iti_ps_header_values(array $fields): array {
+    unset($fields['terms_variant']);   // handled by iti_ps_update_program()
     $allowed = iti_ps_header_fields();
     $bad = array_values(array_diff(array_keys($fields), $allowed));
     if ($bad) throw new InvalidArgumentException('Not editable: ' . implode(', ', $bad) . ' — allowed: ' . implode(', ', $allowed));
@@ -144,6 +145,8 @@ function iti_ps_create_personal(PDO $db, array $in, string $who, bool $go): arra
     $sid = (int)($in['sample_id'] ?? 0);
     $s = $sid ? iti_get_program($sid) : null;
     if ($sid && (!$s || $s['program_type'] !== 'sample')) throw new InvalidArgumentException('sample_id: not a sample program (see iti_samples)');
+    $tv = isset($in['fields']['terms_variant']) ? strtolower(trim((string)$in['fields']['terms_variant'])) : 'auto';
+    if (!in_array($tv, ['direct', 'agency', 'auto'], true)) throw new InvalidArgumentException('terms_variant: direct | agency | auto');
     $set = iti_ps_header_values(isset($in['fields']) && is_array($in['fields']) ? $in['fields'] : []);
     $set['stage'] = 'proposal';
     if (!empty($in['lead_request_id'])) {
@@ -175,6 +178,8 @@ function iti_ps_create_personal(PDO $db, array $in, string $who, bool $go): arra
         $plan = ['sample' => null, 'set' => $set];
     }
     if ($days !== null) $plan['days'] = count($items);
+    // T&C of the linked request's channel: direct client (Drct) 60 days, agency 45 days.
+    $plan['terms_variant'] = $tv !== 'auto' ? $tv : (isset($set['lead_request_id']) ? iti_terms_variant_for_request($db, $set['lead_request_id']) : null);
     if (!$go) return $plan;
 
     try {
@@ -197,23 +202,48 @@ function iti_ps_create_personal(PDO $db, array $in, string $who, bool $go): arra
             $db->commit();
         }
     } catch (Throwable $e) { if ($db->inTransaction()) $db->rollBack(); throw $e; }
+    if ($tv !== 'auto' || !empty($set['lead_request_id'])) iti_terms_apply($db, $id, $tv !== 'auto' ? $tv : null);
     if (!empty($set['lead_request_id'])) {
         require_once __DIR__ . '/../../leads/includes/timeline_service.php';
         timeline_log((int)$set['lead_request_id'], 'program_update', 'Personal program created (#' . $id . ')',
                      ['body' => $s ? 'From sample #' . $sid . ': ' . iti_doc_pick($s, 'title', $lang) : 'Built day by day (' . count($items) . ' days)',
                       'refs' => ['program_id' => $id]]);
     }
-    return $plan + ['program' => iti_ps_program_out($db, $id, $lang)];
+    $out = iti_ps_program_out($db, $id, $lang);
+    // program_id + links at the top too: callers looked for them there and found null.
+    return $plan + ['program_id' => $id, 'links' => $out['links'], 'terms' => $out['terms'], 'program' => $out];
 }
 
-/** Change header fields of a personal programme; returns the diff. */
+/**
+ * Change header fields of a personal programme; returns the diff. Besides the columns,
+ * fields.terms_variant = direct | agency | auto (auto = from the linked request) picks the
+ * standard T&C version (not with a dedicated T&C override).
+ */
 function iti_ps_update_program(PDO $db, int $id, array $fields, bool $go): array {
     $p = iti_ps_personal($id);
+    $variant = null;
+    if (array_key_exists('terms_variant', $fields)) {
+        $variant = strtolower(trim((string)$fields['terms_variant']));
+        if (!in_array($variant, ['direct', 'agency', 'auto'], true)) throw new InvalidArgumentException('terms_variant: direct | agency | auto');
+        unset($fields['terms_variant']);
+    }
     $vals = iti_ps_header_values($fields);
     $changes = [];
     foreach ($vals as $k => $v) {
         $cur = $p[$k] ?? null;
         if ((string)$cur !== (string)$v) $changes[$k] = ['from' => $cur, 'to' => $v];
+    }
+    if ($variant !== null) {
+        if (iti_terms_has_override($db, $id)) throw new InvalidArgumentException('Program ' . $id . ' has its own dedicated T&C (Hub editor → T&C): remove it there first');
+        $want = $variant === 'auto' ? iti_terms_variant_for_request($db, (int)($p['lead_request_id'] ?? 0)) : $variant;
+        if ($want === null) throw new InvalidArgumentException('terms_variant auto: the program has no linked request with a folder — use direct or agency');
+        $tr = iti_terms_row_for_variant($db, $want);
+        if (!$tr) throw new InvalidArgumentException('No active standard T&C named for "' . $want . '" (Hub → ITI Settings → T&C)');
+        if ((int)$p['terms_id'] !== (int)$tr['id']) {
+            $from = iti_terms_resolve($db, $p);
+            $changes['terms_id'] = ['from' => $p['terms_id'] !== null ? (int)$p['terms_id'] : null, 'to' => (int)$tr['id'],
+                                    'variant_from' => $from['variant'], 'variant_to' => $want, 'name' => $tr['name']];
+        }
     }
     if ($go && $changes) {
         $sets = []; $args = [];
@@ -222,6 +252,14 @@ function iti_ps_update_program(PDO $db, int $id, array $fields, bool $go): array
         $db->prepare('UPDATE iti_programs SET ' . implode(', ', $sets) . ' WHERE id = ?')->execute($args);
     }
     return ['id' => $id, 'changes' => $changes];
+}
+
+/** Which T&C a programme prints: variant (direct | agency | custom), version id / name, and why (program | request | default). */
+function iti_ps_terms_out(PDO $db, array $p): array {
+    $r = iti_terms_resolve($db, $p);
+    return ['variant' => $r['variant'], 'terms_id' => $r['row'] ? (int)$r['row']['id'] : null,
+            'name' => $r['row']['name'] ?? null, 'source' => $r['source'],
+            'request_variant' => iti_terms_variant_for_request($db, (int)($p['lead_request_id'] ?? 0))];
 }
 
 /**

@@ -14,6 +14,7 @@
  */
 
 require_once __DIR__ . '/calc_reader.php';   // calc_pick_file(), shared Calc reader
+require_once __DIR__ . '/calc_search.php';   // calc_search_where(): get_rates q / search
 
 /** Load PhpSpreadsheet or throw a clear error. */
 function calc_require_spreadsheet(): void {
@@ -52,10 +53,8 @@ function calc_flight_rates(PDO $db, string $q, string $date): array {
     $sql  = "SELECT id, route_name, origin, destination, airline, valid_from, valid_to, rate_pax, sale_pax, notes
              FROM flight_routes WHERE " . calc_valid_sql();
     $args = [$date, $date];
-    if ($q !== '') {
-        $sql .= " AND (route_name LIKE ? OR origin LIKE ? OR destination LIKE ? OR airline LIKE ?)";
-        $l = '%' . $q . '%'; array_push($args, $l, $l, $l, $l);
-    }
+    list($w, $wa) = calc_search_where($q, ['route_name', 'origin', 'destination', 'airline']);   // every word must match
+    if ($w !== '') { $sql .= ' AND ' . $w; $args = array_merge($args, $wa); }
     $st = $db->prepare($sql . " ORDER BY route_name, airline, valid_from DESC");
     $st->execute($args);
     $out = [];
@@ -74,7 +73,8 @@ function calc_activity_rates(PDO $db, string $q, string $date): array {
     $sql  = "SELECT id, name, category, item_type, valid_from, valid_to, rate, sale, notes
              FROM activity_rates WHERE " . calc_valid_sql();
     $args = [$date, $date];
-    if ($q !== '') { $sql .= " AND (name LIKE ? OR notes LIKE ?)"; $l = '%' . $q . '%'; array_push($args, $l, $l); }
+    list($w, $wa) = calc_search_where($q, ['name', 'category', 'notes']);
+    if ($w !== '') { $sql .= ' AND ' . $w; $args = array_merge($args, $wa); }
     $st = $db->prepare($sql . " ORDER BY category, name, valid_from DESC");
     $st->execute($args);
     $out = [];

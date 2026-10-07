@@ -8,6 +8,7 @@
  * Keep PHP-7 style (no match / arrow functions / str_contains).
  */
 require_once __DIR__ . '/iti_photos.php';
+require_once __DIR__ . '/iti_terms.php';   // T&C per channel (direct / agency), placeholder texts
 
 /** UI strings per language. */
 function iti_doc_labels(string $lang): array {
@@ -60,7 +61,7 @@ function iti_doc_labels(string $lang): array {
 function iti_doc_pick(array $row, string $field, string $lang): string {
     foreach (array_merge([$lang, 'en', 'it'], ITI_LANGUAGES) as $l) {
         $v = trim((string)($row[$field . '_' . $l] ?? ''));
-        if ($v !== '') return $v;
+        if ($v !== '' && !iti_is_placeholder_text($v)) return $v;   // the website blurb pasted as a description = empty
     }
     return '';
 }
@@ -301,21 +302,12 @@ function iti_doc_data(int $id, string $lang): ?array {
         if ($r['item_type'] === 'exclusion') $excl[] = $txt; else $incl[] = $txt;
     }
 
-    // Terms: the programme's own version, else the latest active general one.
+    // Terms: the programme's own version, else the linked request's (direct client 60 days /
+    // agency 45 days), else the latest active general one — iti_terms.php.
     $terms = '';
     try {
-        if (!empty($p['terms_id'])) {
-            $s = $db->prepare('SELECT * FROM iti_terms_conditions WHERE id = ?');
-            $s->execute([(int)$p['terms_id']]);
-            $tr = $s->fetch();
-        } else {
-            try {
-                $tr = $db->query('SELECT * FROM iti_terms_conditions WHERE is_active = 1 AND (program_id IS NULL OR program_id = 0) ORDER BY id DESC LIMIT 1')->fetch();
-            } catch (PDOException $e) {   // older schema without program_id
-                $tr = $db->query('SELECT * FROM iti_terms_conditions WHERE is_active = 1 ORDER BY id DESC LIMIT 1')->fetch();
-            }
-        }
-        if (!empty($tr)) $terms = iti_doc_pick($tr, 'content', $lang);
+        $tres = iti_terms_resolve($db, $p);
+        if (!empty($tres['row'])) $terms = iti_doc_pick($tres['row'], 'content', $lang);
     } catch (PDOException $e) { $terms = ''; }
 
     // Prices: optional JSON [{"label":"2 partecipanti","price":1625}, …] + notes (filled from the Calc Excel).

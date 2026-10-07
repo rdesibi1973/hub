@@ -85,7 +85,9 @@ Program codes by group (`DumaShort`, `BeachDumaShort`, …) and the Confirm Safa
 Returns `copied`, `skipped` (already there), `missing` (template not found), `unknown`.
 
 ### `get_rates` (GET)
-`program?` (e.g. `DumaShort`), `route?` / `activity?` / `q?` (text filter), `date?` (default today).
+`program?` (e.g. `DumaShort`), `q?` (alias `search`: filters flights **and** activities), `route?` / `activity?`
+(filter one list only), `date?` (default today). Every word of the filter must match ("Arusha Zanzibar" → routes with both);
+the reply echoes `filter {route, activity}`. Flights match route / origin / destination / airline, activities name / category / notes.
 - `program.sheets[]`: prices read from the program's **Calc template** (the single source of truth),
   per pax sheet: `rack` (H9), `sto` (H10), `single_suppl` (H11), `teen_discount` (H13), `child_discount` (H14).
 - `flights[]`: `route`, `cost_pp` (rate_pax — what we pay, written in the Calc), `sale_pp` (sale_pax — price to agency) valid on `date`.
@@ -178,7 +180,8 @@ payment status and group. Without `"confirm": true` → returns `from`, `to` and
 other members.
 
 ### `iti_programs` (GET)
-`q?`, `type?` (`sample`|`personal`) → ITI programs: id, title, language, days, published, public_url.
+`q?`, `type?` (`sample`|`personal`), `lead_request_id?` (alias `request_id`: the programs of one Hub request) →
+ITI programs: id, title, lead_request_id, language, days, published, public_url.
 
 ### `iti_texts` (GET)
 `program_id`, `lang` (`en`|`it`|`fr`|`es`|`de`), `all?` → `from` (source language) and `items[]` `{key, source, target}`:
@@ -208,8 +211,15 @@ Typical flows:
 
 #### `iti_program` (GET)
 `program_id`, `lang?` → header (title, subtitle, intro, start_date, pax, prices, included / excluded), `days[]`
-(`day, date, title, destination, lodge, meals, transfers, activities, narrative, lodge_photos, dest_photo`) and `links`
+(`day, date, title, destination, lodge, meals, transfers, activities, narrative, lodge_photos, dest_photo`), `terms` and `links`
 (`preview`, `edit`, `word`, `pdf`, `guide` (personal only, else null), `public` — `word` / `pdf` / `guide` need a Hub login).
+`terms` = the T&C the documents print: `{variant (direct | agency | custom), terms_id, name, source (program = chosen on the
+program | request = from the linked request | default), request_variant}`.
+
+**T&C per client type:** direct clients (request folder `Name(Agent-Drct)`) get the standard version named DIRECT —
+balance and cancellation penalties at **60 days**; agencies the version named AGENTS — **45 days**. Set on create, when the
+linked request changes (Hub editor) and on `iti_final_from_calc`; a program with its own dedicated T&C is never changed.
+With no T&C chosen, the documents use the linked request's version.
 
 #### `iti_document` (GET)
 The program as a file in the magazine layout (cover, route map, stays, day by day with photos, prices,
@@ -232,10 +242,14 @@ curl -sH "$H" "$U?action=iti_document&program_id=412&format=guide&save=1"       
 `sample_id`, `lead_request_id?` (Hub request), `fields?` — any of `title_<lang>`, `subtitle_<lang>`, `intro_<lang>`,
 `start_date` (YYYY-MM-DD: dates appear on the cover and on each day), `pax_adults`, `pax_teens` (under 16), `pax_children` (under 12),
 `display_language`, `display_currency`, `price_table_json` (`[{label, price, currency, bold?}]`; `bold: true` prints the row in bold — a row starting "Totale pratica" / "Total booking" is bold unless `bold: false`), `price_notes_<lang>`.
-Copies the sample (days, activities, prices, inclusions, terms) as a draft proposal. Dry-run unless `"confirm": true`.
+Copies the sample (days, activities, prices, inclusions) as a draft proposal, with the T&C of the request's client type
+(`fields.terms_variant` = `direct` | `agency` forces one). Dry-run unless `"confirm": true` (→ plan with `terms_variant`);
+confirmed → `program_id`, `links`, `terms` and the full `program`.
 
 #### `iti_update_program` (POST)
-`program_id`, `fields` (same list) → `changes`. Dry-run unless confirm.
+`program_id`, `fields` (same list, plus `terms_variant` = `direct` | `agency` | `auto` (from the linked request)) → `changes`
+(a T&C change shows as `terms_id` with `variant_from` / `variant_to`). Dry-run unless confirm. Refused when the program has
+its own dedicated T&C (edit those in the Hub).
 
 #### `iti_update_day` (POST)
 `program_id`, `day` (number), `fields`: `day_title_<lang>`, `narrative_<lang>`, `end_lodge_id` **or** `end_lodge`
@@ -310,16 +324,20 @@ day header and program cover (destination).
 
 #### `iti_lodges` (GET)
 `q?` (lodge / destination name), `destination?` (id, name or code), `active?` (`1` default, `0`, `all`),
-`missing?` (`photos` | `coords` | `website` | `description_<lang>`), `limit?` ≤ 300 →
+`missing?` (`photos` | `coords` | `website` | `description_<lang>` | `placeholder`), `limit?` ≤ 300 →
 `lodges[]` `{id, name, destination_id, destination, category, type, website, latitude, longitude, photos[], description_langs[], active}`.
 
 #### `iti_lodge` (GET)
 `lodge_id` → the same plus `phone, emergency_phone, email, address, description_<lang>` (all 5).
 
 #### `iti_destinations` / `iti_destination` (GET)
-`q?`, `active?`, `missing?` (`photo` | `coords` | `description_<lang>`) → `destinations[]`
+`q?`, `active?`, `missing?` (`photo` | `coords` | `description_<lang>` | `placeholder`) → `destinations[]`
 `{id, code, name, region, latitude, longitude, cover_photo, lodges, description_langs[], active}`;
 `iti_destination` (`destination_id`) adds `name_<lang>` and `description_<lang>`.
+
+`missing=description_<lang>` also lists texts that are only the website blurb ("Savannah Explorers - Tour Operator for Safari
+in Tanzania…"); `missing=placeholder` lists rows with that blurb in any language. The documents never print it (they fall back
+to another language or leave the box out).
 
 #### `iti_lodge_photos` (POST)
 `lodge_id` + one of: `photos` [ordered final list, ≤ 12, first = main] | `add` [appended] ; `remove?` [];

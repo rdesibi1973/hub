@@ -905,9 +905,13 @@ try {
             try { $out['program'] = array_merge(['program' => $prog], calc_program_prices(dropbox_get_access_token(), $prog)); }
             catch (InvalidArgumentException $e) { agent_fail($e->getMessage(), 400); }
         }
-        $q = trim((string)($in['route'] ?? $in['q'] ?? ''));
-        $out['flights']    = calc_flight_rates($db, $q, $date);
-        $out['activities'] = calc_activity_rates($db, trim((string)($in['activity'] ?? $in['q'] ?? '')), $date);
+        // q (alias search) filters both lists; route / activity filter one list each. Every word must match.
+        $any = trim((string)($in['q'] ?? $in['search'] ?? ''));
+        $rq  = trim((string)($in['route'] ?? '')) !== '' ? trim((string)$in['route']) : $any;
+        $aq  = trim((string)($in['activity'] ?? '')) !== '' ? trim((string)$in['activity']) : $any;
+        $out['filter']     = ['route' => $rq, 'activity' => $aq];
+        $out['flights']    = calc_flight_rates($db, $rq, $date);
+        $out['activities'] = calc_activity_rates($db, $aq, $date);
         agent_out($out);
     }
 
@@ -1064,16 +1068,19 @@ try {
     // ── ITI programmes: list / texts to translate / save translations ────────
     case 'iti_programs': {
         $q = trim((string)($in['q'] ?? ''));
-        $sql = "SELECT id, program_type, title_it, title_en, display_language, duration_days, status, is_published, public_token
+        $lead = (int)($in['lead_request_id'] ?? $in['request_id'] ?? 0);
+        $sql = "SELECT id, program_type, title_it, title_en, display_language, duration_days, status, is_published, public_token, lead_request_id
                   FROM iti_programs WHERE status <> 'cancelled'";
         $args = [];
         if ($q !== '') { $sql .= " AND (title_it LIKE ? OR title_en LIKE ? OR ref_number LIKE ?)"; $l = '%' . $q . '%'; array_push($args, $l, $l, $l); }
         if (!empty($in['type'])) { $sql .= " AND program_type = ?"; $args[] = $in['type']; }
+        if ($lead > 0) { $sql .= " AND lead_request_id = ?"; $args[] = $lead; $agentReqId = $lead; }
         $st = $db->prepare($sql . " ORDER BY updated_at DESC LIMIT 100");
         $st->execute($args);
         $rows = [];
         foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
             $rows[] = ['id' => (int)$r['id'], 'type' => $r['program_type'], 'title' => $r['title_it'] ?: $r['title_en'],
+                       'lead_request_id' => $r['lead_request_id'] ? (int)$r['lead_request_id'] : null,
                        'language' => $r['display_language'], 'days' => (int)$r['duration_days'], 'status' => $r['status'],
                        'published' => (bool)$r['is_published'],
                        'public_url' => $r['is_published'] && $r['public_token']

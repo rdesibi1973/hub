@@ -377,6 +377,8 @@ function iti_final_generate(PDO $db, int $requestId, array $calc, int $sampleId,
         }
         throw $e;
     }
+    require_once __DIR__ . '/iti_terms.php';
+    iti_terms_apply($db, (int)$newId);   // T&C of the request's channel (direct 60 days / agency 45)
     require_once __DIR__ . '/../../leads/includes/timeline_service.php';
     timeline_log($requestId, 'program_update', 'Final program generated from the Calc (#' . $newId . ')',
                  array('body' => 'Calc: ' . (isset($calc['file']) ? $calc['file'] : '?') . ($old ? "\nReplaces program #" . implode(', #', (array)$old) : ''),

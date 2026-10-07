@@ -8,6 +8,7 @@
  * Self-contained like iti_photos.php (the API has the leads db(), not iti_functions.php).
  */
 require_once __DIR__ . '/iti_photos.php';
+require_once __DIR__ . '/iti_terms.php';   // iti_placeholder_sql(): the website blurb counts as a missing description
 
 const ITI_CS_LANGS = ['en', 'it', 'fr', 'es', 'de'];
 const ITI_CS_LODGE_MAX_PHOTOS = 12;
@@ -59,7 +60,7 @@ function iti_cs_destination_out(array $r, bool $full = false): array {
 
 /**
  * Lodges. Filters: q (name / destination), destination (id or name), active (default 1, "all"),
- * missing: photos | coords | website | description_<lang> ; limit ≤ 300.
+ * missing: photos | coords | website | description_<lang> (empty or the website placeholder) | placeholder ; limit ≤ 300.
  */
 function iti_cs_lodges(PDO $db, array $f): array {
     iti_photos_schema();
@@ -75,7 +76,10 @@ function iti_cs_lodges(PDO $db, array $f): array {
     if ($miss === 'photos')  $w[] = "(l.photos IS NULL OR l.photos IN ('', '[]', 'null'))";
     if ($miss === 'coords')  $w[] = '(l.latitude IS NULL OR l.longitude IS NULL)';
     if ($miss === 'website') $w[] = "(l.website IS NULL OR l.website = '')";
-    if (preg_match('/^description_(en|it|fr|es|de)$/', $miss)) $w[] = "(l.$miss IS NULL OR l.$miss = '')";
+    if (preg_match('/^description_(en|it|fr|es|de)$/', $miss)) $w[] = "(l.$miss IS NULL OR l.$miss = '' OR " . iti_placeholder_sql("l.$miss") . ")";
+    if ($miss === 'placeholder') {   // any language holding the website blurb
+        $w[] = '(' . implode(' OR ', array_map(function ($l) { return iti_placeholder_sql('l.description_' . $l); }, ITI_CS_LANGS)) . ')';
+    }
     $limit = max(1, min(300, (int)($f['limit'] ?? 300)));
     $st = $db->prepare('SELECT l.*, d.name_en AS dest_name FROM iti_lodges l LEFT JOIN iti_destinations d ON d.id = l.destination_id'
                      . ($w ? ' WHERE ' . implode(' AND ', $w) : '') . ' ORDER BY d.sort_order, d.name_en, l.name LIMIT ' . $limit);
@@ -91,7 +95,8 @@ function iti_cs_lodge_row(PDO $db, int $id): ?array {
     return $r ?: null;
 }
 
-/** Destinations. Filters: q, active (default 1, "all"), missing: photo | coords | description_<lang>. */
+/** Destinations. Filters: q, active (default 1, "all"), missing: photo | coords |
+ * description_<lang> (empty or the website placeholder) | placeholder (in any language). */
 function iti_cs_destinations(PDO $db, array $f): array {
     iti_photos_schema();
     $w = []; $a = [];
@@ -101,7 +106,10 @@ function iti_cs_destinations(PDO $db, array $f): array {
     $miss = (string)($f['missing'] ?? '');
     if ($miss === 'photo' || $miss === 'photos') $w[] = "(d.cover_photo IS NULL OR d.cover_photo = '')";
     if ($miss === 'coords') $w[] = '(d.latitude IS NULL OR d.longitude IS NULL)';
-    if (preg_match('/^description_(en|it|fr|es|de)$/', $miss)) $w[] = "(d.$miss IS NULL OR d.$miss = '')";
+    if (preg_match('/^description_(en|it|fr|es|de)$/', $miss)) $w[] = "(d.$miss IS NULL OR d.$miss = '' OR " . iti_placeholder_sql("d.$miss") . ")";
+    if ($miss === 'placeholder') {   // any language holding the website blurb
+        $w[] = '(' . implode(' OR ', array_map(function ($l) { return iti_placeholder_sql('d.description_' . $l); }, ITI_CS_LANGS)) . ')';
+    }
     $st = $db->prepare('SELECT d.*, (SELECT COUNT(*) FROM iti_lodges l WHERE l.destination_id = d.id AND l.is_active = 1) AS n_lodges
                           FROM iti_destinations d' . ($w ? ' WHERE ' . implode(' AND ', $w) : '') . ' ORDER BY d.sort_order, d.name_en');
     $st->execute($a);
