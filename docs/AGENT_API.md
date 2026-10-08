@@ -194,7 +194,7 @@ renamed and every request of the group is updated. No email is sent (unlike Resc
   `dropbox_url`, `status` / `payment_status` (when the suffix matches), the CK tracker, and logs a
   `status_change` timeline event (on every request of a group). Same fields + `renamed: true`.
 - **Errors (nothing changed):** 404 request not found · 400 no folder, empty name, invalid characters
-  (`\ / : * ? " < > |`), identical name · 409 folder not found in Dropbox search, destination folder
+  (`\ / : * ? " < > |`), identical name · 409 folder not found in Dropbox (stored path, then search), destination folder
   already exists · 502 Dropbox/DB failure.
 - **Warnings (dry run, never blocking):** date tag malformed (`START29OC`), START / MIDT / END not in
   order (e.g. END before START) or spanning > 60 days, `_CK` not last, `MM_DDMON_` prefix ≠ START,

@@ -50,6 +50,23 @@ function bo_status_from_name(string $name, ?array $tagStatus = null): array {
 }
 
 /**
+ * Current Dropbox path of the folder being renamed ($folder: the booking folder, or the
+ * group parent). Tries the path in the stored dropbox_url first (exact, kept fresh by every
+ * rename), then Dropbox search — which lags for a folder renamed minutes ago. Null if not found.
+ */
+function fs_locate_folder(string $token, array $r, string $folder): ?string {
+    $p = bo_path_from_url((string)($r['dropbox_url'] ?? ''));
+    while ($p !== '' && $p !== '/') {
+        if (strcasecmp(basename($p), $folder) === 0) {
+            try { if (dropbox_path_exists($token, $p)) return $p; } catch (Throwable $ig) {}
+            break;
+        }
+        $p = rtrim(dirname($p), '/');   // group: the URL points to the client sub-folder
+    }
+    return dropbox_find_folder($token, $folder);
+}
+
+/**
  * Rename a booking's Dropbox folder (private = its own folder; group = the shared
  * parent) and sync the DB. When $setStatus, also writes status/payment_status
  * (for a group: status only — each client keeps its own payment_status —
@@ -60,7 +77,7 @@ function bo_status_from_name(string $name, ?array $tagStatus = null): array {
 function bo_do_rename(PDO $db, string $token, array $r, bool $isGrp,
                       string $folder, string $newFolder,
                       ?string $newStatus, $newPs, bool $setStatus): array {
-    $curPath = dropbox_find_folder($token, $folder);
+    $curPath = fs_locate_folder($token, $r, $folder);
     if ($curPath === null) {
         return ['ok' => false, 'msg' => 'Could not find the folder "' . $folder . '" in Dropbox. Check the name, then retry.'];
     }
@@ -230,7 +247,7 @@ function fs_rename_preview(PDO $db, array $v, string $token, bool $withCalc = tr
     $out = ['error' => null, 'code' => 200, 'dropbox_path_old' => null, 'dropbox_path_new' => null,
             'warnings' => fs_name_warnings($v['new_name'], $v['folder']), 'calc_dates' => null];
 
-    $curPath = dropbox_find_folder($token, $v['folder']);
+    $curPath = fs_locate_folder($token, $v['r'], $v['folder']);
     if ($curPath === null) {
         $out['error'] = 'Could not find the folder "' . $v['folder'] . '" in Dropbox (new folders can lag ~1h in search).';
         $out['code']  = 409;
