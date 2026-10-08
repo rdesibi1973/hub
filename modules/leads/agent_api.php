@@ -19,6 +19,7 @@ date_default_timezone_set('Africa/Dar_es_Salaam');
 
 require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/includes/booking_service.php';
+require_once __DIR__ . '/includes/folder_service.php';   // rename_folder (shared with BackOffice "Rename…")
 require_once __DIR__ . '/includes/postpone_lib.php';   // booking_cc_agent_email()
 require_once __DIR__ . '/includes/calc_service.php';   // get_rates, fill_calc
 require_once __DIR__ . '/../iti/includes/iti_texts.php'; // ITI programme translations
@@ -88,7 +89,7 @@ function agent_audit(PDO $db, string $action, $reqId, array $payload, string $re
                               'iti_create_personal', 'iti_update_program', 'iti_update_day', 'iti_publish', 'iti_final_from_calc', 'iti_save_alias',
                               'iti_create_lodge', 'iti_set_days', 'iti_add_day', 'iti_delete_day', 'iti_update_inclusions',
                               'iti_create_flight_route', 'iti_create_activity', 'iti_create_transfer_route', 'iti_save_as_sample',
-                              'create_request', 'add_flight_rates', 'timeline_update', 'summary_set'], true) && empty($payload['confirm']);
+                              'create_request', 'add_flight_rates', 'timeline_update', 'summary_set', 'rename_folder'], true) && empty($payload['confirm']);
     // Mail: keep who/what in the log, not message bodies or attachment content.
     if (in_array($action, ['mail_get', 'mail_attachment', 'iti_document', 'iti_vouchers'], true) && $code === 200) {
         $res = json_decode($resultJson, true);
@@ -1322,6 +1323,48 @@ try {
         if (!$res['ok']) { $out['error'] = $res['msg']; agent_out($out, 409); }
         if (!$go) $out['message'] .= ' Dry run — nothing moved. Resend with "confirm": true to roll back.';
         agent_out($out);
+    }
+
+    // ── rename_folder ────────────────────────────────────────────────────────
+    // Free rename of the booking folder, same as BackOffice "Rename…" (includes/folder_service.php):
+    // Dropbox + Hub (name, URL, status from the suffix) + CK tracker + timeline. No email.
+    // Dry-run (paths, status, warnings) unless "confirm": true.
+    case 'rename_folder': {
+        agent_require_method('POST');
+        $r = agent_request($db, $in['request_id'] ?? 0);
+        $v = fs_rename_validate($db, (int)$r['id'], (string)($in['new_name'] ?? ''));
+        if (!$v['ok']) agent_fail($v['error'], $v['code']);
+        $go = !empty($in['confirm']);
+        require_once __DIR__ . '/dropbox_helper.php';
+        try {
+            $pv = fs_rename_preview($db, $v, dropbox_get_access_token(), !$go);   // Calc check on the dry run only
+        } catch (Throwable $e) {
+            agent_fail('Dropbox error — nothing was changed: ' . $e->getMessage(), 502);
+        }
+        $out = [
+            'request_id'       => (int)$r['id'],
+            'current'          => $v['folder'],
+            'new_name'         => $v['new_name'],
+            'is_group'         => $v['is_group'],
+            'status_from_name' => ['matched' => $v['set_status'], 'status' => $v['status'],
+                                   // a group tag sets the status only: each client keeps its payment_status
+                                   'payment_status' => $v['is_group'] ? null : $v['ps'],
+                                   'current_status' => $r['status'], 'current_payment_status' => $r['payment_status'] ?? null],
+            'dropbox_path_old' => $pv['dropbox_path_old'],
+            'dropbox_path_new' => $pv['dropbox_path_new'],
+            'warnings'         => $pv['warnings'],
+        ];
+        if (!$go) $out['calc_dates'] = $pv['calc_dates'];
+        if ($pv['error'] !== null) agent_fail($pv['error'], $pv['code'], $out);
+        if (!$go) {
+            agent_out(array_merge(['ok' => true, 'dry_run' => true,
+                'message' => 'Dry run — nothing renamed. Resend with "confirm": true to rename the folder.'], $out));
+        }
+        $res = folder_rename($db, (int)$r['id'], $v['new_name'], (int)$agentUser['id']);
+        if (!$res['ok']) agent_fail($res['msg'], $res['code'], $out);
+        $out['dropbox_path_old'] = $res['dropbox_path_old'];
+        $out['dropbox_path_new'] = $res['dropbox_path_new'];
+        agent_out(array_merge(['ok' => true, 'dry_run' => false, 'renamed' => true, 'message' => $res['msg']], $out));
     }
 
     // ── find_invoices ────────────────────────────────────────────────────────

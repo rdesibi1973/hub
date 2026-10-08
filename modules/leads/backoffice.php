@@ -18,6 +18,7 @@ require_once 'includes/safari_check.php';
 require_once 'includes/ck_lib.php';
 require_once 'includes/postpone_lib.php';
 require_once 'includes/booking_service.php';
+require_once 'includes/folder_service.php';   // folder_rename, bo_do_rename, bo_status_from_name
 $pageTitle = 'BackOffice';
 $db = db();
 
@@ -59,79 +60,8 @@ function bo_new_folder_name(string $folder, string $newTag, array $knownTags): s
     return $folder . '_' . $newTag;
 }
 
-// Folder suffix → [status, payment_status]. "Contains" match, longest first
-// (tolerates a trailing _CK). Used to keep the DB in sync after a free rename.
-$BO_TAG_STATUS = [
-    '_BALANCE-CASH' => ['Booked',      'Balance-Cash'],
-    '_BALANCE_CASH' => ['Booked',      'Balance-Cash'],
-    '_BALANCE'      => ['Booked',      'Balance'],
-    '_DEPOSIT'      => ['Booked',      'Deposit'],
-    '_PAID'         => ['Booked',      'Paid'],
-    '_PROGRESS'     => ['Booked',      null],
-    '_CONFIRMED'    => ['Booked',      null],
-    '_PROVISIONAL'  => ['Provisional', null],
-    '_CANCELLED'    => ['Cancelled',   null],
-];
-
-/** Derive [status, payment_status, matched] from a folder name, or matched=false. */
-function bo_status_from_name(string $name, array $tagStatus): array {
-    $up = strtoupper($name);
-    foreach ($tagStatus as $tag => $sp) {
-        if (strpos($up, $tag) !== false) return ['status' => $sp[0], 'ps' => $sp[1], 'matched' => true];
-    }
-    return ['status' => null, 'ps' => null, 'matched' => false];
-}
-
-/**
- * Rename a booking's Dropbox folder (private = its own folder; group = the shared
- * parent) and sync the DB. When $setStatus, also writes status/payment_status
- * (for a group: status only — each client keeps its own payment_status —
- * to every request in it, rebuilding each sub's dropbox_url).
- * Dropbox move happens first; the DB is only touched if it succeeds.
- */
-function bo_do_rename(PDO $db, string $token, array $r, bool $isGrp,
-                      string $folder, string $newFolder,
-                      ?string $newStatus, $newPs, bool $setStatus): array {
-    $curPath = dropbox_find_folder($token, $folder);
-    if ($curPath === null) {
-        return ['ok' => false, 'msg' => 'Could not find the folder "' . $folder . '" in Dropbox. Check the name, then retry.'];
-    }
-    $parentDir = rtrim(substr($curPath, 0, strrpos($curPath, '/')), '/');
-    $newPath   = $parentDir . '/' . $newFolder;
-
-    dropbox_move_folder($token, $curPath, $newPath);   // subfolders move with the parent
-
-    if ($isGrp) {
-        // Each client keeps its own payment_status (its invoice / sub-folder):
-        // the group tag only sets the booking status, and never revives a
-        // cancelled client unless the whole group is cancelled.
-        $subs = $db->prepare("SELECT id, practice_code, status FROM requests WHERE group_folder = ?");
-        $subs->execute([$folder]);
-        $rowsG = $subs->fetchAll(PDO::FETCH_ASSOC);
-        $upd   = $db->prepare("UPDATE requests SET group_folder=?, dropbox_url=? WHERE id=?");
-        $updSt = $db->prepare("UPDATE requests SET group_folder=?, dropbox_url=?, status=? WHERE id=?");
-        $n = 0;
-        foreach ($rowsG as $g) {
-            $sub    = trim($g['practice_code'] ?? '');
-            $subUrl = bo_url_from_path($sub !== '' ? $newPath . '/' . $sub : $newPath);
-            $keep   = ($g['status'] ?? '') === 'Cancelled' && $newStatus !== 'Cancelled';
-            if ($setStatus && $newStatus !== null && !$keep) $updSt->execute([$newFolder, $subUrl, $newStatus, (int)$g['id']]);
-            else                                              $upd->execute([$newFolder, $subUrl, (int)$g['id']]);
-            $n++;
-        }
-        return ['ok' => true, 'msg' => '✔ Group "' . $newFolder . '": renamed (' . $n . ' booking(s) updated).'];
-    }
-
-    $newUrl = bo_url_from_path($newPath);
-    if ($setStatus) {
-        $db->prepare("UPDATE requests SET practice_code=?, dropbox_url=?, status=?, payment_status=? WHERE id=?")
-           ->execute([$newFolder, $newUrl, $newStatus, $newPs, (int)$r['id']]);
-    } else {
-        $db->prepare("UPDATE requests SET practice_code=?, dropbox_url=? WHERE id=?")
-           ->execute([$newFolder, $newUrl, (int)$r['id']]);
-    }
-    return ['ok' => true, 'msg' => '✔ ' . $r['customer_name'] . ': renamed to "' . $newFolder . '".'];
-}
+// Free rename / status sync: folder_rename(), bo_do_rename(), bo_status_from_name()
+// live in includes/folder_service.php, shared with the Agent API (rename_folder).
 
 // Confirm Safari helpers (bo_confirmed_name, bo_grp_*, bo_booking_email, …) live in
 // includes/booking_service.php, shared with the Agent API.
@@ -255,7 +185,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array($act, ['change_status', 'r
     $stmt->execute([$reqId]);
     $r = $stmt->fetch(PDO::FETCH_ASSOC);
 
-    if (!$r) {
+    if ($act === 'rename') {
+        // Free rename: validation, Dropbox + DB, CK tracker, timeline — includes/folder_service.php.
+        $res = folder_rename($db, $reqId, (string)($_POST['new_name'] ?? ''), (int)($currentUser['id'] ?? 0) ?: null);
+        flash($res['msg'], $res['ok'] ? 'info' : 'error');
+    } elseif (!$r) {
         flash('Request not found.', 'error');
     } elseif (($folder = ($isGrp = trim($r['group_folder'] ?? '') !== '')
                        ? trim($r['group_folder'])
@@ -263,39 +197,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array($act, ['change_status', 'r
         // tag lives on the parent for a group, on the folder itself for a private safari.
         flash('This request has no folder to rename.', 'error');
     } else {
-        // Work out the new folder name + whether/how to touch status.
+        // change_status: the new folder name + status come from the target status.
         $newFolder = '';
         $newStatus = null; $newPs = null; $setStatus = false;
         $ok = true;
 
-        if ($act === 'change_status') {
-            $target = trim($_POST['new_status'] ?? '');
-            if (!isset($STATUS_MAP[$target])) { flash('Invalid target status.', 'error'); $ok = false; }
-            elseif (!$isGrp && $STATUS_MAP[$target]['status'] === 'Booked'
-                    && stripos($folder, '_START') === false) {
-                // A booking becomes Booked only through Confirm Safari (dates in the
-                // name, move to 001_Safari, booking email) — never by a bare retag.
-                flash('"' . $folder . '" is not confirmed yet (no dates in the folder name). '
-                    . 'Use "✅ Confirm Safari…" to confirm it.', 'error');
-                $ok = false;
-            }
-            else {
-                $newFolder = bo_new_folder_name($folder, $STATUS_MAP[$target]['tag'], $KNOWN_TAGS);
-                $newStatus = $STATUS_MAP[$target]['status'];
-                $newPs     = $STATUS_MAP[$target]['ps'];
-                $setStatus = true;
-            }
-        } else { // rename
-            $newFolder = trim($_POST['new_name'] ?? '');
-            if ($newFolder === '') { flash('New name is empty.', 'error'); $ok = false; }
-            elseif (preg_match('#[\\\\/:*?"<>|]#', $newFolder)) { flash('Invalid characters in the new name (\\ / : * ? " < > | are not allowed).', 'error'); $ok = false; }
-            else {
-                // Keep the DB status in sync with the new name's suffix (if it has one).
-                $d = bo_status_from_name($newFolder, $BO_TAG_STATUS);
-                $setStatus = $d['matched'];
-                $newStatus = $d['status'];
-                $newPs     = $d['ps'];
-            }
+        $target = trim($_POST['new_status'] ?? '');
+        if (!isset($STATUS_MAP[$target])) { flash('Invalid target status.', 'error'); $ok = false; }
+        elseif (!$isGrp && $STATUS_MAP[$target]['status'] === 'Booked'
+                && stripos($folder, '_START') === false) {
+            // A booking becomes Booked only through Confirm Safari (dates in the
+            // name, move to 001_Safari, booking email) — never by a bare retag.
+            flash('"' . $folder . '" is not confirmed yet (no dates in the folder name). '
+                . 'Use "✅ Confirm Safari…" to confirm it.', 'error');
+            $ok = false;
+        }
+        else {
+            $newFolder = bo_new_folder_name($folder, $STATUS_MAP[$target]['tag'], $KNOWN_TAGS);
+            $newStatus = $STATUS_MAP[$target]['status'];
+            $newPs     = $STATUS_MAP[$target]['ps'];
+            $setStatus = true;
         }
 
         if ($ok && strcmp($newFolder, $folder) === 0) {
@@ -308,17 +229,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array($act, ['change_status', 'r
                 $token = dropbox_get_access_token();
                 $res   = bo_do_rename($db, $token, $r, $isGrp, $folder, $newFolder, $newStatus, $newPs, $setStatus);
                 if ($res['ok']) {
-                    // CK tracker history: record the stage/_CK change with the user.
-                    try { ck_record_rename($db, $folder, $newFolder, (int)($currentUser['id'] ?? 0) ?: null); }
-                    catch (Throwable $ig) { /* tracking only — the next scan catches it */ }
-                    $tlTitle = 'Folder renamed' . ($setStatus && $newStatus !== null ? ' — status ' . $newStatus : '');
-                    if ($isGrp) {
-                        $tlIds = $db->prepare("SELECT id FROM requests WHERE group_folder = ?");
-                        $tlIds->execute([$newFolder]);
-                        foreach ($tlIds->fetchAll(PDO::FETCH_COLUMN) as $tlId) timeline_log((int)$tlId, 'status_change', 'Group ' . $tlTitle, ['body' => $folder . "\n→ " . $newFolder]);
-                    } else {
-                        timeline_log((int)$r['id'], 'status_change', $tlTitle, ['body' => $folder . "\n→ " . $newFolder]);
-                    }
+                    fs_rename_record($db, (int)$r['id'], $isGrp, $folder, $newFolder,
+                                     $setStatus ? $newStatus : null, (int)($currentUser['id'] ?? 0) ?: null);
                 }
                 flash($res['msg'], $res['ok'] ? 'info' : 'error');
             } catch (Throwable $e) {

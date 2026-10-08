@@ -31,7 +31,7 @@ without driving the web UI.
 | HTTPS only | Plain HTTP → 403. |
 | Rate limit | 60 calls/min → 429. |
 | Audit | Every call (including failures and dry-runs) → `agent_audit_log` (action, request_id, user, HTTP code, dry_run, payload, result, IP). |
-| Dry-run by default | `confirm_booking`, `send_booking_email`, `rollback_booking`, `cancel_invoice_payment`, `update_folder_status`, `import_zoho_invoice`, `create_invoice`, `update_invoice`, `mail_send` and `mail_move` (among others) do nothing unless the body has `"confirm": true`. |
+| Dry-run by default | `confirm_booking`, `send_booking_email`, `rollback_booking`, `rename_folder`, `cancel_invoice_payment`, `update_folder_status`, `import_zoho_invoice`, `create_invoice`, `update_invoice`, `mail_send` and `mail_move` (among others) do nothing unless the body has `"confirm": true`. |
 | No deletes | No delete endpoint (mail included). Undo a confirm with `rollback_booking` (or BackOffice → Rollback). |
 | Mailbox | The key also reads `info@` (`mail_*`): keep `api.txt` as private as the mailbox password. |
 
@@ -178,6 +178,35 @@ back to where it was before Confirm Safari and restores name, status (never Book
 payment status and group. Without `"confirm": true` → returns `from`, `to` and `restore` only.
 409 if there is no confirm snapshot, the original location already exists, or a GRP still has
 other members.
+
+### `rename_folder` (POST)
+Free rename of the booking folder — the same as BackOffice → **Rename…** (shared code:
+`includes/folder_service.php`, `folder_rename()`). For a group the **group parent** (`group_folder`) is
+renamed and every request of the group is updated. No email is sent (unlike Reschedule).
+`request_id`*, `new_name`*, `confirm`.
+
+- **Without `"confirm": true` → dry run**, nothing changes. Returns `current`, `new_name`, `is_group`,
+  `status_from_name` `{matched, status, payment_status, current_status, current_payment_status}` (what the
+  new suffix sets: `_DEPOSIT` → Booked/Deposit, `_PAID` → Booked/Paid, `_CANCELLED` → Cancelled …; no
+  status tag → status untouched; a group sets the status only), `dropbox_path_old`, `dropbox_path_new`,
+  `warnings[]` and `calc_dates` `{start, end}` (the `*_Calc.xlsx` itinerary dates, or null).
+- **With `"confirm": true`** → renames the Dropbox folder, updates `practice_code` / `group_folder`,
+  `dropbox_url`, `status` / `payment_status` (when the suffix matches), the CK tracker, and logs a
+  `status_change` timeline event (on every request of a group). Same fields + `renamed: true`.
+- **Errors (nothing changed):** 404 request not found · 400 no folder, empty name, invalid characters
+  (`\ / : * ? " < > |`), identical name · 409 folder not found in Dropbox search, destination folder
+  already exists · 502 Dropbox/DB failure.
+- **Warnings (dry run, never blocking):** date tag malformed (`START29OC`), START / MIDT / END not in
+  order (e.g. END before START) or spanning > 60 days, `_CK` not last, `MM_DDMON_` prefix ≠ START,
+  `_CK` / status tag / START / END dropped from the current name, another request already using the name,
+  Calc start/end ≠ the new name's START/END.
+
+```bash
+curl -sA "Mozilla/5.0 (compatible; SavannahHubAgent/1.0)" -H "$H" -X POST "$U?action=rename_folder" \
+     -d '{"request_id":873,"new_name":"02_10FEB_Rossi(BTG-Roberto)_START10FEB_END16FEB2027_DEPOSIT"}'                  # dry run
+curl -sA "Mozilla/5.0 (compatible; SavannahHubAgent/1.0)" -H "$H" -X POST "$U?action=rename_folder" \
+     -d '{"request_id":873,"new_name":"02_10FEB_Rossi(BTG-Roberto)_START10FEB_END16FEB2027_DEPOSIT","confirm":true}'
+```
 
 ### `iti_programs` (GET)
 `q?`, `type?` (`sample`|`personal`), `lead_request_id?` (alias `request_id`: the programs of one Hub request) →

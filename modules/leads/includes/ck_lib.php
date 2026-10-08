@@ -339,7 +339,7 @@ function ck_url_from_path(string $path): string {
 /**
  * Keep the requests table in step after a top-level folder rename: a private
  * safari's practice_code, or every GRP member's group_folder + dropbox_url.
- * Mirrors bo_do_rename() in backoffice.php.
+ * Mirrors bo_do_rename() in includes/folder_service.php.
  */
 function ck_sync_requests(PDO $db, string $old, string $new): int {
     $n = 0;
