@@ -1188,16 +1188,26 @@ try {
 
     // The program as a file (magazine layout): PDF (default) or Word. Returned as base64,
     // or with save / request_id / folder_path uploaded to the booking folder in Dropbox
-    // (an existing file is kept unless "overwrite": true).
+    // (an existing file is kept unless "overwrite": true). File name = the ref_number
+    // (<ref>.docx / <ref>.pdf / <ref>_Guida.pdf) unless save_as; no ref_number → old name + warning.
     case 'iti_document': {
         agent_iti_lib();
         require_once __DIR__ . '/../iti/includes/iti_export.php';
         $pid = (int)($in['program_id'] ?? 0);
+        $fmt = (string)($in['format'] ?? 'pdf');
         try {
-            $f = iti_export_file($pid, (string)($in['lang'] ?? ''), (string)($in['format'] ?? 'pdf'));
+            $f = iti_export_file($pid, (string)($in['lang'] ?? ''), $fmt);
         } catch (InvalidArgumentException $e) { agent_fail($e->getMessage(), stripos($e->getMessage(), 'not found') !== false ? 404 : 400); }
         catch (Throwable $e) { agent_fail('Document not generated: ' . $e->getMessage(), 500); }
-        agent_iti_file_out($db, $in, $pid, $f, ['format' => $f['format'], 'lang' => $f['lang']]);
+        $extra = ['format' => $f['format'], 'lang' => $f['lang']];
+        $refName = iti_ps_document_name((array)iti_get_program($pid), $fmt);
+        if ($refName !== null) {
+            $f['name'] = $refName;
+        } elseif ((!empty($in['save']) || (int)($in['request_id'] ?? 0) > 0 || trim((string)($in['folder_path'] ?? '')) !== '')
+                  && trim((string)($in['save_as'] ?? '')) === '') {
+            $extra['warning'] = 'Program ' . $pid . ' has no ref_number — file named "' . $f['name'] . '". Set it with iti_update_program (fields.ref_number) and save again.';
+        }
+        agent_iti_file_out($db, $in, $pid, $f, $extra);
     }
 
     // Vouchers of a program (accommodation per stay, flights, transfers — English), built from the
@@ -1236,7 +1246,8 @@ try {
                 case 'iti_publish':         $r = iti_ps_publish($db, (int)($in['program_id'] ?? 0), !array_key_exists('publish', $in) || !empty($in['publish']), $go); break;
                 default:                    $r = $go ? iti_ps_save_alias($in, $who) : ['would_save' => ['type' => $in['type'] ?? null, 'text' => $in['text'] ?? null]];
             }
-        } catch (InvalidArgumentException $e) { agent_fail($e->getMessage(), 400); }
+        } catch (ItiRefException $e) { agent_fail($e->getMessage(), 409, $e->data); }   // ref_number not derivable: candidates
+        catch (InvalidArgumentException $e) { agent_fail($e->getMessage(), 400); }
         agent_out(array_merge(['ok' => true, 'dry_run' => !$go], $r, $go ? [] : ['message' => 'Dry run — nothing saved. Resend with "confirm": true.']));
     }
 

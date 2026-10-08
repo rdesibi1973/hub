@@ -40,6 +40,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     // ── Salva header programma ──
     if ($sub === 'header') {
+        try { $refNum = iti_ps_ref_check($_POST['ref_number'] ?? ''); }   // also the programme file name
+        catch (InvalidArgumentException $e) {
+            iti_flash_set('error', 'Program header not saved — ' . $e->getMessage());
+            iti_redirect("program_edit.php?id={$id}&tab=info");
+        }
         $db->prepare(
             'UPDATE iti_programs SET
              ref_number=?,
@@ -49,7 +54,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
              display_language=?,display_currency=?,terms_id=?,status=?
              WHERE id=?'
         )->execute([
-            trim($_POST['ref_number'] ?? '') ?: null,
+            $refNum,
             trim($_POST['title_en']),trim($_POST['title_it']),trim($_POST['title_fr']),
             trim($_POST['title_es']),trim($_POST['title_de']),
             trim($_POST['subtitle_en']),trim($_POST['subtitle_it']),trim($_POST['subtitle_fr']),
@@ -82,13 +87,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $tApplied = iti_terms_apply($db, $id);
                 if ($tApplied && $tApplied['changed']) $tMsg = ' T&C set to "' . $tApplied['name'] . '" (' . $tApplied['variant'] . ' client of the linked request).';
             }
-            // Linked to a request with no Ref. Number: use the client's Word / Calc prefix.
-            if ($lead_id && trim($_POST['ref_number'] ?? '') === '') {
+            // Linked to a request with no Ref. Number: the programme Word copy_program put in the
+            // request folder ("01_Name(Agency-Agent)_PumbaSafari"). None / several → left empty.
+            if ($lead_id && $refNum === null) {
                 require_once __DIR__ . '/../leads/dropbox_constants.php';
-                require_once __DIR__ . '/../leads/dropbox_helper.php';
-                require_once __DIR__ . '/../leads/includes/booking_service.php';
-                $ref = iti_lead_ref_number($lead_id);
-                if ($ref !== null) $db->prepare('UPDATE iti_programs SET ref_number=? WHERE id=?')->execute([$ref, $id]);
+                try {
+                    $ref = iti_ps_ref_from_request($db, $lead_id)['ref_number'];
+                    $db->prepare('UPDATE iti_programs SET ref_number=? WHERE id=?')->execute([$ref, $id]);
+                } catch (ItiRefException $e) {
+                    $tMsg = ($tMsg ?? '') . ' Ref. Number left empty: ' . (!empty($e->data['word_candidates'])
+                          ? 'several programme Words in the folder (' . implode(', ', $e->data['word_candidates']) . ') — type it.'
+                          : 'no programme Word from Copy Programs in the folder — type it.');
+                }
             }
         }
         iti_flash_set('success','Program header saved.' . ($tMsg ?? ''));
@@ -792,7 +802,7 @@ include __DIR__ . '/../../includes/layout_header.php';
     <span id="prog-details-arrow" style="font-size:.75rem;color:var(--grey-mid);">▼</span>
   </button>
   <div id="prog-details-body" style="display:none;padding:0 18px 18px;border-top:1px solid var(--grey-lt);">
-  <form method="POST" action="program_edit.php?id=<?= $id ?>&tab=<?= h($active_tab) ?>">
+  <form method="POST" action="program_edit.php?id=<?= $id ?>&tab=<?= h($active_tab) ?>" id="prog-details-form">
   <input type="hidden" name="_sub" value="header">
 
     <div class="form-section-title" style="margin-top:16px;font-size:.75rem;">✏️ Title &amp; Subtitle</div>
@@ -823,7 +833,8 @@ include __DIR__ . '/../../includes/layout_header.php';
       <div class="form-group">
         <label>Ref. Number</label>
         <input type="text" name="ref_number" maxlength="60"
-               placeholder="e.g. SE-2025-001"
+               placeholder="e.g. 01_Name(Agency-Agent)_PumbaSafari"
+               title="Name of the programme Word in the booking folder (no extension) — also the file name of the Word / PDF saved there"
                value="<?= h($program['ref_number'] ?? '') ?>">
       </div>
       <?php $lead = iti_get_lead_request((int)($program['lead_request_id'] ?? 0)); ?>
@@ -2089,17 +2100,38 @@ function toggleOA(checked) {
     if (n) n.value = checked ? (n.value > 0 ? n.value : '1') : '0';
 }
 
+// ── Program Details: unsaved changes ──
+// The header SAVE saves the days AND the Program Details panel when it was changed;
+// leaving the page with unsaved details asks first.
+var progDetailsDirty = false;
+(function() {
+    var f = document.getElementById('prog-details-form');
+    if (!f) return;
+    var mark = function() { progDetailsDirty = true; };
+    f.addEventListener('input', mark);
+    f.addEventListener('change', mark);
+    f.addEventListener('submit', function() { progDetailsDirty = false; });
+    window.addEventListener('beforeunload', function(e) {
+        if (!progDetailsDirty) return;
+        e.preventDefault();
+        e.returnValue = '';
+    });
+})();
+
 // ── Save current visible day from header button ──
 function saveCurrentDay() {
     var btn = document.getElementById('btn-save-current');
-    var forms = document.querySelectorAll('[id^="day-save-form-"]');
+    var forms = Array.prototype.slice.call(document.querySelectorAll('[id^="day-save-form-"]'));
+    var details = document.getElementById('prog-details-form');
+    if (progDetailsDirty && details) forms.push(details);   // Program Details changed: save it too
     if (!forms.length) return;
     if (btn) { btn.disabled = true; btn.textContent = '💾 Saving…'; }
 
     var i = 0;
     function saveNext() {
         if (i >= forms.length) {
-            // All days saved — reload to reflect changes
+            // All saved — reload to reflect changes
+            progDetailsDirty = false;
             window.location.reload();
             return;
         }

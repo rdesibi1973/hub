@@ -16,6 +16,94 @@ require_once __DIR__ . '/iti_program_build.php';   // days, inclusions, master d
 
 const ITI_PS_LANGS = ['en', 'it', 'fr', 'es', 'de'];
 
+/** ref_number cannot be derived from the request folder: carries the candidates for the API reply (409). */
+class ItiRefException extends InvalidArgumentException {
+    public $data = [];
+    public function __construct(string $msg, array $data = []) { parent::__construct($msg); $this->data = $data; }
+}
+
+/** Max length of iti_programs.ref_number (read once from the column, 60 if unknown). */
+function iti_ps_ref_max(): int {
+    static $max = null;
+    if ($max === null) {
+        $max = 60;
+        try {
+            $c = db()->query("SHOW COLUMNS FROM iti_programs LIKE 'ref_number'")->fetch(PDO::FETCH_ASSOC);
+            if ($c && preg_match('/\((\d+)\)/', (string)$c['Type'], $m)) $max = (int)$m[1];
+        } catch (Throwable $e) {}
+    }
+    return $max;
+}
+
+/**
+ * Validate a ref_number (it is also the name of the programme files in the booking folder):
+ * trimmed, '' → null, no \ / : * ? " < > |, at most the column length.
+ */
+function iti_ps_ref_check($v): ?string {
+    if ($v === null) return null;
+    $v = trim((string)$v);
+    if ($v === '') return null;
+    if (preg_match('#[\\\\/:*?"<>|]#', $v)) throw new InvalidArgumentException('ref_number: \\ / : * ? " < > | are not allowed (it becomes a file name)');
+    if (mb_strlen($v) > iti_ps_ref_max()) throw new InvalidArgumentException('ref_number: max ' . iti_ps_ref_max() . ' characters (' . mb_strlen($v) . ' given)');
+    return $v;
+}
+
+/**
+ * ref_number of a client programme = the name of the programme Word copy_program put in the
+ * request folder, without extension ("01_MarcoCiaolo(OceanoPoint-Roberto)_PumbaSafari").
+ * Exactly one copied Word → its name; with $calcFile → the Word of that Calc (same NN_ and
+ * programme). None / several → ItiRefException listing the candidates: never guessed.
+ * Returns ['ref_number', 'source' => 'word'|'calc_file', 'file'].
+ */
+function iti_ps_ref_from_request(PDO $db, int $rid, string $calcFile = ''): array {
+    require_once __DIR__ . '/../../leads/includes/booking_service.php';   // bs_copied_programs, req_folder_path
+    require_once __DIR__ . '/../../leads/dropbox_helper.php';
+    $st = $db->prepare('SELECT id, practice_code, group_folder, dropbox_url FROM requests WHERE id = ?');
+    $st->execute([$rid]);
+    $r = $st->fetch(PDO::FETCH_ASSOC);
+    $folder = $r ? trim((string)$r['practice_code']) : '';
+    $hint = 'Pass fields.ref_number, or calc_file (the Calc of the programme: same NN_ and programme as its Word).';
+    if ($folder === '') throw new ItiRefException('ref_number: request ' . $rid . ' has no folder — ' . $hint, ['request_id' => $rid, 'hint' => $hint]);
+    $dir = req_folder_path($r);
+    try { $files = dropbox_list_files(dropbox_get_access_token(), $dir); }
+    catch (Throwable $e) { throw new ItiRefException('ref_number: cannot read ' . $dir . ' (' . $e->getMessage() . ') — ' . $hint, ['request_id' => $rid, 'folder' => $dir, 'hint' => $hint]); }
+
+    $progs = bs_copied_programs($files, $folder);
+    $words = []; $calcs = [];
+    foreach ($progs as $pr) if ($pr['word_present']) $words[] = $pr['word'];
+    foreach ($files as $fn) if (preg_match('/_calc\.xlsx$/i', $fn)) $calcs[] = $fn;
+    $data = ['request_id' => $rid, 'folder' => $dir, 'word_candidates' => $words, 'calc_files' => $calcs, 'hint' => $hint];
+
+    $calcFile = basename(trim($calcFile));
+    if ($calcFile !== '') {
+        $pick = null;
+        foreach ($progs as $pr) if ($pr['calc'] !== null && strcasecmp($pr['calc'], $calcFile) === 0) $pick = $pr;
+        if (!$pick || $pick['word'] === null) throw new ItiRefException('ref_number: calc_file "' . $calcFile . '" is not a programme Calc copied by copy_program in this folder', $data);
+        $file = $pick['word']; $source = 'calc_file';
+    } elseif (count($words) === 1) {
+        $file = $words[0]; $source = 'word';
+    } else {
+        throw new ItiRefException('ref_number: ' . (count($words) ? count($words) . ' programme Words' : 'no programme Word')
+                                  . ' copied by copy_program in ' . $dir . ' — ' . $hint, $data);
+    }
+    $ref = preg_replace('/\.docx?$/i', '', $file);
+    try { $ref = iti_ps_ref_check($ref); }
+    catch (InvalidArgumentException $e) { throw new ItiRefException($e->getMessage() . ' — derived from ' . $file . '. ' . $hint, $data); }
+    return ['ref_number' => $ref, 'source' => $source, 'file' => $file];
+}
+
+/**
+ * File name of a programme document saved by the API: <ref_number>.docx / .pdf, guide sheet
+ * <ref_number>_Guida.pdf. Null when the programme has no ref_number.
+ */
+function iti_ps_document_name(array $p, string $format): ?string {
+    $ref = trim((string)($p['ref_number'] ?? ''));
+    if ($ref === '') return null;
+    $format = strtolower(trim($format));
+    if ($format === 'guide') return $ref . '_Guida.pdf';
+    return $ref . '.' . ($format === 'docx' || $format === 'word' ? 'docx' : 'pdf');
+}
+
 /** Public / internal links of a programme ($lang = display language). */
 function iti_ps_links(array $p, string $lang = ''): array {
     $lang = $lang !== '' ? $lang : (string)($p['display_language'] ?? 'it');
@@ -46,6 +134,7 @@ function iti_ps_program_out(PDO $db, int $id, string $lang = ''): array {
     }
     return [
         'id' => (int)$p['id'], 'type' => $p['program_type'], 'stage' => $p['stage'] ?? null, 'status' => $p['status'],
+        'ref_number' => isset($p['ref_number']) && $p['ref_number'] !== '' ? $p['ref_number'] : null,
         'sample_id' => $p['sample_program_id'] ? (int)$p['sample_program_id'] : null,
         'lead_request_id' => isset($p['lead_request_id']) && $p['lead_request_id'] ? (int)$p['lead_request_id'] : null,
         'title' => $D['title'], 'subtitle' => $D['subtitle'], 'intro' => $D['intro'], 'language' => $lang,
@@ -92,7 +181,7 @@ function iti_ps_schema(): void {
 /** Header fields an agent may set, limited to the columns the live table really has. */
 function iti_ps_header_fields(): array {
     iti_ps_schema();
-    $f = ['display_language', 'display_currency', 'start_date', 'pax_adults', 'pax_teens', 'pax_children', 'price_table_json', 'price_notes'];
+    $f = ['ref_number', 'display_language', 'display_currency', 'start_date', 'pax_adults', 'pax_teens', 'pax_children', 'price_table_json', 'price_notes'];
     foreach (ITI_PS_LANGS as $l) foreach (['title', 'subtitle', 'intro', 'price_notes'] as $k) $f[] = $k . '_' . $l;
     return array_values(array_intersect($f, iti_table_columns('iti_programs')));
 }
@@ -111,6 +200,7 @@ function iti_ps_header_values(array $fields): array {
             if ($v !== null && $v !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', (string)$v)) throw new InvalidArgumentException('start_date: YYYY-MM-DD');
             $v = $v === '' ? null : $v;
         }
+        if ($k === 'ref_number') { $out[$k] = iti_ps_ref_check($v); continue; }
         if ($k === 'pax_adults' || $k === 'pax_teens' || $k === 'pax_children') $v = max(0, min(60, (int)$v));
         if ($k === 'price_table_json') {
             // [{"label": "2 partecipanti", "price": 2905, "currency": "USD"}, …]
@@ -134,7 +224,7 @@ function iti_ps_personal(int $id): array {
 
 /**
  * Proposal for a client: a copy of a sample, or a blank programme (no sample_id) for trips with
- * no matching sample. $in: sample_id?, lead_request_id?, fields? {title_<lang>, subtitle_<lang>,
+ * no matching sample. $in: sample_id?, lead_request_id?, calc_file?, fields? {ref_number, title_<lang>, subtitle_<lang>,
  * intro_<lang>, start_date, pax_adults, pax_teens (under 16), pax_children (under 12), display_language, display_currency,
  * price_table_json, price_notes_<lang>}, days? [day items, see iti_program_build.php] (replace
  * the sample's days). Blank programme: title_<display_language> and days[] are required.
@@ -156,8 +246,13 @@ function iti_ps_create_personal(PDO $db, array $in, string $who, bool $go): arra
         if (!$req) throw new InvalidArgumentException('lead_request_id ' . (int)$in['lead_request_id'] . ' not found');
         $set['lead_request_id'] = (int)$req['id'];
     }
-    // Ref. number like the client's Word / Calc files ("02_Name(Agency-Agent)"), never the sample's.
-    $set['ref_number'] = isset($set['lead_request_id']) ? iti_lead_ref_number($set['lead_request_id']) : null;
+    // Ref. number = the programme Word copy_program put in the request folder (fields.ref_number wins),
+    // never the sample's. Not derivable → ItiRefException (409 with the candidates).
+    $ref = ['ref_number' => $set['ref_number'] ?? null, 'source' => isset($set['ref_number']) ? 'fields' : null];
+    if ($ref['ref_number'] === null && isset($set['lead_request_id'])) {
+        $ref = iti_ps_ref_from_request($db, $set['lead_request_id'], (string)($in['calc_file'] ?? ''));
+    }
+    $set['ref_number'] = $ref['ref_number'];
     $days = isset($in['days']) && is_array($in['days']) ? array_values($in['days']) : null;
     $items = [];
     foreach ((array)$days as $i => $d) {   // validate now, so a dry run reports the errors
@@ -178,6 +273,8 @@ function iti_ps_create_personal(PDO $db, array $in, string $who, bool $go): arra
         $plan = ['sample' => null, 'set' => $set];
     }
     if ($days !== null) $plan['days'] = count($items);
+    $plan['ref_number'] = $ref['ref_number'];
+    $plan['ref_source'] = $ref['source'] !== null ? $ref['source'] . (isset($ref['file']) ? ': ' . $ref['file'] : '') : null;
     // T&C of the linked request's channel: direct client (Drct) 60 days, agency 45 days.
     $plan['terms_variant'] = $tv !== 'auto' ? $tv : (isset($set['lead_request_id']) ? iti_terms_variant_for_request($db, $set['lead_request_id']) : null);
     if (!$go) return $plan;

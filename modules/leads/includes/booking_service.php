@@ -4,7 +4,8 @@
  * Agent API (agent_api.php).
  *
  *   Create request  : bs_create_request()            (request_add.php, API create_request)
- *   Copy programs   : bs_copy_programs(), bs_next_prognum()   (request_view.php, API copy_program)
+ *   Copy programs   : bs_copy_programs(), bs_next_prognum(), bs_copied_programs()
+ *                                                     (request_view.php, API copy_program / iti_create_personal)
  *   Confirm Safari  : bs_confirm_plan() → bs_confirm_checks() / bs_confirm_commit()
  *                                                     (backoffice.php, API confirm_*)
  *   Rollback        : bs_rollback()                   (backoffice.php, API rollback_booking)
@@ -291,9 +292,49 @@ function bs_next_prognum(string $token, string $destDir): string {
     return str_pad((string)($max + 1), 2, '0', STR_PAD_LEFT);
 }
 
+/** Name copy_program gives a template in the request folder: {ProgNumber}_{FolderName}_{dst}. */
+function bs_program_file_name(string $prognum, string $folderName, string $dst): string {
+    return $prognum . '_' . $folderName . '_' . $dst;
+}
+
+/**
+ * Programmes copy_program left in a request folder, recognised from the folder's file
+ * names ($files) by bs_program_file_name() + the std_programs.php map. One entry per
+ * (program, NN) found by its Word or its Calc:
+ *   ['label', 'prognum', 'word' (expected name), 'word_present', 'calc', 'calc_present'].
+ */
+function bs_copied_programs(array $files, string $folderName): array {
+    $have = [];
+    foreach ($files as $fn) $have[strtolower($fn)] = $fn;
+    $nums = [];
+    foreach ($files as $fn) if (preg_match('/^(\d{1,3})_/', $fn, $m)) $nums[$m[1]] = true;
+    $out = [];
+    foreach (bs_std_programs() as $progs) {
+        foreach ($progs as $label => $tpl) {
+            $wordDst = $calcDst = null;
+            foreach ($tpl as $f) {
+                if (preg_match('/\.docx?$/i', $f['dst'])) $wordDst = $f['dst'];
+                elseif (preg_match('/\.xlsx$/i', $f['dst'])) $calcDst = $f['dst'];
+            }
+            foreach (array_keys($nums) as $nn) {
+                $nn   = (string)$nn;
+                $word = $wordDst !== null ? bs_program_file_name($nn, $folderName, $wordDst) : null;
+                $calc = $calcDst !== null ? bs_program_file_name($nn, $folderName, $calcDst) : null;
+                $wp = $word !== null && isset($have[strtolower($word)]);
+                $cp = $calc !== null && isset($have[strtolower($calc)]);
+                if (!$wp && !$cp) continue;
+                $out[] = ['label' => $label, 'prognum' => $nn,
+                          'word' => $wp ? $have[strtolower($word)] : $word, 'word_present' => $wp,
+                          'calc' => $cp ? $have[strtolower($calc)] : $calc, 'calc_present' => $cp];
+            }
+        }
+    }
+    return $out;
+}
+
 /**
  * Copy standard program templates into a request's folder, renamed
- * {ProgNumber}_{FolderName}_{dst}. $prognum '' = next free number.
+ * {ProgNumber}_{FolderName}_{dst} (bs_program_file_name). $prognum '' = next free number.
  * Returns ['ok','msg','prognum','summary','copied','skipped','missing','unknown'].
  */
 function bs_copy_programs(PDO $db, int $reqId, string $prognum, array $programs): array {
@@ -336,7 +377,7 @@ function bs_copy_programs(PDO $db, int $reqId, string $prognum, array $programs)
         if (!isset($byLabel[$label])) { $unknown[] = $label; continue; }
         foreach ($byLabel[$label] as $f) {
             $src  = str_replace('{YEAR}', $year, $f['src']);
-            $base = $prognum . '_' . $folderName . '_' . $f['dst'];
+            $base = bs_program_file_name($prognum, $folderName, $f['dst']);
             $res  = dropbox_copy_file($token, $src, $destDir . '/' . $base);
             if      ($res === 'copied') $copied[]  = $base;
             elseif  ($res === 'exists') $skipped[] = $base;

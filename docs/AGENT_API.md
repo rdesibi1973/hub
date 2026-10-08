@@ -235,11 +235,18 @@ Typical flows:
 - **Final (after booking):** `iti_calc_plan` (reads the request's `*_Calc.xlsx` from Dropbox) → if `unmapped`,
   `iti_save_alias` for each text → `iti_final_from_calc` with confirm → `links.public`.
 
+**Ref. number and file names (rule).** A client programme is named like the programme Word that `copy_program`
+put in the request folder — same progressive number and prefix as its Calc:
+Calc `01_MarcoCiaolo(OceanoPoint-Roberto)_Pumba_Calc.xlsx`, Word `01_MarcoCiaolo(OceanoPoint-Roberto)_PumbaSafari.docx`
+→ `ref_number` = `01_MarcoCiaolo(OceanoPoint-Roberto)_PumbaSafari`, and every programme file the API saves in the booking
+folder is `<ref_number>.docx` / `<ref_number>.pdf` / `<ref_number>_Guida.pdf`. `ref_number`: max 60 characters (the column),
+no `\ / : * ? " < > |`. `iti_create_personal` sets it from the folder; `iti_update_program` changes it.
+
 #### `iti_samples` (GET)
 `q?` → `samples[]` `{id, code (Calc code), title, route, language, days}`.
 
 #### `iti_program` (GET)
-`program_id`, `lang?` → header (title, subtitle, intro, start_date, pax, prices, included / excluded), `days[]`
+`program_id`, `lang?` → `ref_number`, header (title, subtitle, intro, start_date, pax, prices, included / excluded), `days[]`
 (`day, date, title, destination, lodge, meals, transfers, activities, narrative, lodge_photos, dest_photo`), `terms` and `links`
 (`preview`, `edit`, `word`, `pdf`, `guide` (personal only, else null), `public` — `word` / `pdf` / `guide` need a Hub login).
 `terms` = the T&C the documents print: `{variant (direct | agency | custom), terms_id, name, source (program = chosen on the
@@ -260,23 +267,32 @@ file `…_GUIDE_<LANG>.pdf`; **personal programs only**, a sample → 400), `lan
 To put it in Dropbox instead: `save: true` (the program's `lead_request_id` folder), or `request_id` / `folder_path`;
 `save_as?` (file name), `overwrite?` (an existing file is kept unless true; Dropbox keeps the old version)
 → `file` (no content), `saved_to`, `overwritten`. The audit log omits the file content.
+**File name** (`file.name` and the saved file) = the `ref_number`: `<ref>.docx` (docx), `<ref>.pdf` (pdf),
+`<ref>_Guida.pdf` (guide); `save_as` overrides it. A program without `ref_number` keeps the old name
+(`<Title>_<LANG>.docx`) and the reply has `file.warning` — set it with `iti_update_program` first.
+The Word copied by `copy_program` has the same name as the `docx`: the first save → **409** (expected); ask Roberto
+before resending with `"overwrite": true`.
 Photos make files of a few MB; generating can take up to a minute.
 ```bash
 curl -sH "$H" "$U?action=iti_document&program_id=412&format=pdf" | jq -r .file.content_base64 | base64 -d > prog.pdf
-curl -sH "$H" "$U?action=iti_document&program_id=412&format=docx&lang=en&save=1"      # → booking folder
+curl -sH "$H" "$U?action=iti_document&program_id=412&format=docx&lang=en&save=1"      # → booking folder, <ref_number>.docx
 curl -sH "$H" "$U?action=iti_document&program_id=412&format=guide&save=1"            # guide sheet → booking folder
 ```
 
 #### `iti_create_personal` (POST)
-`sample_id`, `lead_request_id?` (Hub request), `fields?` — any of `title_<lang>`, `subtitle_<lang>`, `intro_<lang>`,
+`sample_id`, `lead_request_id?` (Hub request), `calc_file?`, `fields?` — any of `ref_number`, `title_<lang>`, `subtitle_<lang>`, `intro_<lang>`,
 `start_date` (YYYY-MM-DD: dates appear on the cover and on each day), `pax_adults`, `pax_teens` (under 16), `pax_children` (under 12),
 `display_language`, `display_currency`, `price_table_json` (`[{label, price, currency, bold?}]`; `bold: true` prints the row in bold — a row starting "Totale pratica" / "Total booking" is bold unless `bold: false`), `price_notes_<lang>`.
 Copies the sample (days, activities, prices, inclusions) as a draft proposal, with the T&C of the request's client type
-(`fields.terms_variant` = `direct` | `agency` forces one). Dry-run unless `"confirm": true` (→ plan with `terms_variant`);
-confirmed → `program_id`, `links`, `terms` and the full `program`.
+(`fields.terms_variant` = `direct` | `agency` forces one). Dry-run unless `"confirm": true` (→ plan with `terms_variant`,
+`ref_number` and `ref_source`); confirmed → `program_id`, `links`, `terms` and the full `program`.
+**ref_number:** `fields.ref_number` wins. Otherwise, with `lead_request_id`, it is the name (no extension) of the programme
+Word `copy_program` put in the request folder (`NN_<folder>_<Prog>Safari.docx`) when there is exactly one; `calc_file`
+(e.g. `01_…_Pumba_Calc.xlsx`) picks the Word of that Calc (same `NN_` and programme). None or several → **409**, nothing
+created, with `word_candidates`, `calc_files`, `folder` and `hint`: resend with `fields.ref_number` or `calc_file` — never guess.
 
 #### `iti_update_program` (POST)
-`program_id`, `fields` (same list, plus `terms_variant` = `direct` | `agency` | `auto` (from the linked request)) → `changes`
+`program_id`, `fields` (same list — `ref_number` included, see the rule above — plus `terms_variant` = `direct` | `agency` | `auto` (from the linked request)) → `changes`
 (a T&C change shows as `terms_id` with `variant_from` / `variant_to`). Dry-run unless confirm. Refused when the program has
 its own dedicated T&C (edit those in the Hub).
 

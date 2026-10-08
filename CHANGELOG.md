@@ -20,6 +20,31 @@ Running log of notable changes and current build state. Module-level "active / p
 
 ---
 
+## 2026-10 — ITI ref number and file names = the copy_program Word
+- Rule: a client programme's `ref_number` and every programme file saved in the booking folder are named
+  like the Word `copy_program` copied there (`01_Name(Agency-Agent)_PumbaSafari`). Shared naming:
+  `bs_program_file_name()` / `bs_copied_programs()` (`booking_service.php`).
+- API: `iti_update_program` edits `ref_number` (max 60, no `\ / : * ? " < > |`); `iti_create_personal`
+  derives it from the folder (exactly one copied Word, or `calc_file`; else 409 with the candidates);
+  `iti_document` saves `<ref>.docx` / `<ref>.pdf` / `<ref>_Guida.pdf` (warning if no ref); `iti_program`
+  returns `ref_number`. Documented in `docs/AGENT_API.md`.
+- ITI editor: the header 💾 Save also saves Program Details when changed (+ unsaved-changes warning);
+  Ref. Number validated; linking a request derives it with the same rule.
+
+## 2026-10 — Agent API `rename_folder` (free rename, shared with BackOffice "Rename…")
+- New `includes/folder_service.php`: the BackOffice free-rename logic (validation, `bo_do_rename`,
+  CK tracker, `status_change` timeline — on every request of a group) moved out of `backoffice.php`
+  into `folder_rename()` / `fs_rename_validate()` / `fs_rename_preview()` / `fs_rename_record()`.
+  BackOffice "Rename…" and "Change status" use it; behaviour unchanged.
+- API `rename_folder` (POST): `request_id`, `new_name`, `confirm`. Dry-run by default → `current`,
+  `new_name`, `is_group`, `status_from_name`, `dropbox_path_old/new`, `warnings` (date tags malformed or
+  out of order, `MM_DDMON_` prefix ≠ START, `_CK` not last, tags dropped, Calc dates ≠ new name).
+  With confirm: Dropbox + Hub (name, URL, status/payment_status from the suffix) + CK + timeline.
+  No email. Documented in `docs/AGENT_API.md`.
+- Fix (UI + API): the folder is located by its stored `dropbox_url` first, then Dropbox search —
+  search lags after a rename, so a second rename in a row failed with "not found".
+- Tested on request 530 (rename + back); first real use: 2608 END08SEP → END08NOV2026.
+
 ## 2026-09 — Kilimanjaro Calc templates → .xlsx, safari layout
 - The 7 Kili templates in `/itineraries/Kili/it/Trekking/` (`*_CalcPrice.xls`) converted to
   `*_Calc.xlsx` with the safari Calc layout, so Safari check, Payments, fill_calc and "📊 Excel"
