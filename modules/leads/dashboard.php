@@ -37,17 +37,19 @@ if ($period === 'year') {
 $db = db();
 
 // ── Stats ────────────────────────────────────────────────────────
+// received → date_received; booked/value → confirmation_date (closed in the period,
+// whenever received) — same split as reports.php
 $total = $db->prepare("SELECT COUNT(*) FROM requests WHERE date_received BETWEEN ? AND ?");
 $total->execute([$start, $end]);
 $totalCount = (int)$total->fetchColumn();
 
-$booked = $db->prepare("SELECT COUNT(*) FROM requests WHERE status='Booked' AND date_received BETWEEN ? AND ? AND (practice_code NOT LIKE '%-STAFF%' OR practice_code IS NULL)");
+$booked = $db->prepare("SELECT COUNT(*) FROM requests WHERE status='Booked' AND confirmation_date BETWEEN ? AND ? AND (practice_code NOT LIKE '%-STAFF%' OR practice_code IS NULL)");
 $booked->execute([$start, $end]);
 $bookedCount = (int)$booked->fetchColumn();
 
 $salesRate = $totalCount > 0 ? round($bookedCount / $totalCount * 100, 1) : 0;
 
-$value = $db->prepare("SELECT COALESCE(SUM(value_usd),0) FROM requests WHERE status='Booked' AND date_received BETWEEN ? AND ? AND (practice_code NOT LIKE '%-STAFF%' OR practice_code IS NULL)");
+$value = $db->prepare("SELECT COALESCE(SUM(value_usd),0) FROM requests WHERE status='Booked' AND confirmation_date BETWEEN ? AND ? AND (practice_code NOT LIKE '%-STAFF%' OR practice_code IS NULL)");
 $value->execute([$start, $end]);
 $totalValue = (float)$value->fetchColumn();
 
@@ -60,23 +62,30 @@ $lost->execute([$start, $end]);
 $lostCount = (int)$lost->fetchColumn();
 
 // ── Per-agent breakdown — sorted by total requests received ──────
+// total/comm by date_received, booked by confirmation_date (may exceed total)
 $byAgent = $db->prepare("
-    SELECT a.name,
-           COUNT(r.id)                          AS total,
-           SUM(r.status='Booked' AND (r.practice_code NOT LIKE '%-STAFF%' OR r.practice_code IS NULL)) AS booked,
-           COALESCE(SUM(r.commission_usd),0)    AS comm
-    FROM agents a
-    LEFT JOIN requests r ON r.agent_id = a.id
-          AND r.date_received BETWEEN ? AND ?
-    WHERE a.active = 1
-    GROUP BY a.id, a.name
-    HAVING total > 0
+    SELECT * FROM (
+        SELECT a.name,
+               (SELECT COUNT(*) FROM requests r
+                 WHERE r.agent_id = a.id AND r.date_received BETWEEN ? AND ?) AS total,
+               (SELECT COUNT(*) FROM requests r
+                 WHERE r.agent_id = a.id AND r.status = 'Booked'
+                   AND r.confirmation_date BETWEEN ? AND ?
+                   AND (r.practice_code NOT LIKE '%-STAFF%' OR r.practice_code IS NULL)) AS booked,
+               (SELECT COALESCE(SUM(r.commission_usd),0) FROM requests r
+                 WHERE r.agent_id = a.id AND r.date_received BETWEEN ? AND ?) AS comm
+        FROM agents a
+        WHERE a.active = 1
+    ) t
+    WHERE total > 0 OR booked > 0
     ORDER BY total DESC, booked DESC
 ");
-$byAgent->execute([$start, $end]);
+$byAgent->execute([$start, $end, $start, $end, $start, $end]);
 $agentRows = $byAgent->fetchAll();
 
-$maxTotal = $agentRows ? max(1, ...array_column($agentRows, 'total')) : 1;
+$maxTotal = $agentRows
+    ? max(1, ...array_map(fn($r) => max((int)$r['total'], (int)$r['booked']), $agentRows))
+    : 1;
 
 // ── Recent requests (last 10) ────────────────────────────────────
 $recent = $db->query("
@@ -222,7 +231,7 @@ function applyPeriod(val) {
     <?php if ($agentRows): ?>
       <?php foreach ($agentRows as $row):
         $totalPct  = round($row['total'] / $maxTotal * 100);
-        $bookedPct = $row['total'] > 0 ? round($row['booked'] / $maxTotal * 100) : 0;
+        $bookedPct = round($row['booked'] / $maxTotal * 100);
       ?>
       <div class="breakdown-row">
         <span class="breakdown-agent"><?= h($row['name']) ?></span>
