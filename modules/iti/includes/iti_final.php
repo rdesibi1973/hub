@@ -68,6 +68,24 @@ function iti_final_suggest_sample(array $samples, string $code, int $days, strin
     return $tie ? 0 : $best;
 }
 
+/**
+ * Title of a final programme: the sample's title without the internal language tag,
+ * in title case, then the customer — "PUMBA SAFARI IN ITALIANO" + "Marco Ciaolo"
+ * → "Pumba Safari – Marco Ciaolo". Empty sample title → ''.
+ */
+function iti_final_title(string $sampleTitle, string $customer): string {
+    $t = trim(preg_replace('/\s+(in\s+(italiano|english|inglese|fran[cç]ais|espa[nñ]ol|deutsch))\s*$/iu', '', $sampleTitle));
+    if ($t === '') return '';
+    if (mb_strtoupper($t, 'UTF-8') === $t) {      // all caps → title case, airport / season codes kept
+        $t = mb_convert_case(mb_strtolower($t, 'UTF-8'), MB_CASE_TITLE, 'UTF-8');
+        $t = preg_replace_callback('/\b(Znz|Jro|Ark|Sto|Dar)\b/u', function ($m) { return strtoupper($m[1]); }, $t);
+        // Small words inside the title stay lower case ("Kiboko Safari e Zanzibar").
+        $t = preg_replace_callback('/(?<=\s)(E|Ed|Da|Di|Del|In|And|Of|The)(?=\s)/u', function ($m) { return strtolower($m[1]); }, $t);
+    }
+    $customer = trim($customer);
+    return mb_substr($customer !== '' ? $t . ' – ' . $customer : $t, 0, 255);
+}
+
 /** Meal flags [breakfast, lunch, dinner, all_inclusive] for a meal basis code. */
 function iti_final_meals(?string $basis): ?array {
     $m = array('BB' => array(1, 0, 0, 0), 'HB' => array(1, 0, 1, 0), 'FB' => array(1, 1, 1, 0), 'AI' => array(1, 1, 1, 1));
@@ -260,8 +278,17 @@ function iti_final_generate(PDO $db, int $requestId, array $calc, int $sampleId,
     if (!$sample || $sample['program_type'] !== 'sample') throw new RuntimeException('Sample #' . $sampleId . ' not found.');
 
     $pax = $calc['pax'];
-    $newId = iti_duplicate_program($sampleId, 'personal', (string)($who['username'] ?? 'system'), array(
-        'title_en'         => $sample['title_en'],
+    // "Pumba Safari – Marco Ciaolo" in every language the sample has a title for.
+    $st = $db->prepare('SELECT customer_name FROM requests WHERE id = ?');
+    $st->execute(array($requestId));
+    $customer = (string)$st->fetchColumn();
+    $titles = array();
+    foreach (ITI_LANGUAGES as $l) {
+        if (!array_key_exists('title_' . $l, $sample)) continue;
+        $titles['title_' . $l] = (string)$sample['title_' . $l] !== '' ? iti_final_title((string)$sample['title_' . $l], $customer) : '';
+    }
+    if (empty($titles['title_en'])) $titles['title_en'] = iti_final_title((string)$sample['title_en'], $customer) ?: (string)$sample['title_en'];
+    $newId = iti_duplicate_program($sampleId, 'personal', (string)($who['username'] ?? 'system'), $titles + array(
         'lead_request_id'  => $requestId,
         'ref_number'       => iti_lead_ref_number($requestId, (string)($calc['calc_path'] ?? '')),
         'stage'            => 'final',
