@@ -7,14 +7,18 @@
  *   "(Agent-SB)"                             → sb
  *   "(Capri-…)", "(RobertoCapri)" (Roberto Capri's direct clients) → direct
  *   any "EleonoraOngaro" (blog referral, e.g. "(Nuru-EleonoraOngaro)", "(Anderson_EleonoraOngaro)") → direct
- *   "(Nuru-Trekk)" / "-Trek" / "-Tekk" (Nuru's trekking clients)  → direct
+ *   "(Nuru-Trekk)" / "(Roberto-Trek)" / "-Tekk" (trekking clients)  → direct
  *   "(AgencyShort-…-Agent)", first token = exactly one agency (short_name without its
  *   -PS / -LAM suffix, or name, compared without spaces/punctuation), or a token in
  *   $aliases (folder spellings checked by hand, Oct 2026)  → agency + agency_id
+ *   "(Agent-…-Agency)" (agent first, e.g. "(Sultan-Yeadimtravel)", "(Roberto-LAM-CREO)"):
+ *   the first later token naming one agency                → agency + agency_id
+ *   one-token "(Agency)" / "(Agency_Agent)" (e.g. "(SouriTrip)", "(GoWorld_Alex)"): the
+ *   first "_" part that names one agency and is not an agent name → agency + agency_id
  *
  * The LAST "(…)" block of the folder is read: a broken name like
  * "Claudiastefani(columbusvacanzeDaniela)(ColumbusVacanze-Daniela)" carries the real tag at the end.
- * Anything else (unknown agency, one-token block, no block) stays NULL. Only rows with
+ * Anything else (unknown agency, agent-only block, no block) stays NULL. Only rows with
  * channel IS NULL are touched. Dry run by default (prints counts); writes only with --confirm.
  * --list also prints each row that gets a channel.
  *
@@ -46,9 +50,13 @@ $aliases = [
     // duplicates merged Oct 2026 (kept the record with more data / the oldest; the others are attiva = 0)
     'sonotravel' => 74, 'libetiter' => 209, 'libetitertravel' => 209, 'mywayholiday' => 92,
     'mywayholidaytouroperator' => 92, 'kendirita' => 249, 'kendiritatours' => 249,
+    // spellings matched by hand, 9 Oct 2026
+    'avit' => 9, 'adriana' => 72, 'avventure' => 129, 'areatour' => 227, 'souritip' => 75, 'federicakailas' => 48,
 ];
 // First tokens (or a whole one-token block) that mean a direct client (not an agency).
 $directTokens = ['capri', 'robertocapri'];
+// Agents whose "(Agent-Trek)" folders are direct trekking clients.
+$trekAgents = ['nuru', 'roberto'];
 
 // Agency lookup (active agencies): normalised short_name (minus -PS / -LAM) / name → agency ids
 $agencyIdx = [];
@@ -57,6 +65,17 @@ foreach ($pdo->query("SELECT id, nome, short_name FROM agencies WHERE attiva = 1
         if (trim((string)$k) !== '') $agencyIdx[$norm($k)][(int)$a['id']] = true;
     }
 }
+// One token → agency id: exactly one active agency, else an alias, else null.
+$agencyOf = function ($tok) use ($norm, $agencyIdx, $aliases) {
+    $t = $norm($tok);
+    if ($t === '') return null;
+    $hit = $agencyIdx[$t] ?? [];
+    if (count($hit) === 1) return (int)key($hit);
+    return isset($aliases[$t]) ? $aliases[$t] : null;
+};
+// Agent names (normalised): "(Agent-Agency)" folders put the agent first.
+$agentIdx = [];
+foreach ($pdo->query("SELECT name FROM agents") as $a) $agentIdx[$norm($a['name'])] = true;
 
 $count = ['direct' => 0, 'sb' => 0, 'agency' => 0, 'unknown' => 0];
 $unknownTokens = [];
@@ -76,17 +95,26 @@ foreach ($rows as $r) {
             $channel = 'direct';
         } elseif (count($tokens) === 1 && in_array($norm($tokens[0]), $directTokens, true)) {
             $channel = 'direct';
-        } elseif (count($tokens) === 2 && $norm($tokens[0]) === 'nuru' && preg_match('/^t(r)?ek+$/i', $tokens[1])) {
+        } elseif (count($tokens) === 2 && in_array($norm($tokens[0]), $trekAgents, true) && preg_match('/^t(r)?ek+$/i', $tokens[1])) {
             $channel = 'direct';
         } elseif (in_array('SB', $tokens, true)) {
             $channel = 'sb';
         } elseif (count($tokens) >= 2) {
             $tok = $norm($tokens[0]);
-            $hit = $agencyIdx[$tok] ?? [];
             if (in_array($tok, $directTokens, true)) $channel = 'direct';
-            elseif (count($hit) === 1)          { $channel = 'agency'; $agencyId = (int)key($hit); }
-            elseif (isset($aliases[$tok]))  { $channel = 'agency'; $agencyId = $aliases[$tok]; }
-            else $unknownTokens[$tokens[0]] = ($unknownTokens[$tokens[0]] ?? 0) + 1;
+            elseif (($id = $agencyOf($tokens[0])) !== null) { $channel = 'agency'; $agencyId = $id; }
+            elseif (isset($agentIdx[$tok])) {   // "(Agent-…-Agency)"
+                foreach (array_slice($tokens, 1) as $t) {
+                    if (in_array(strtoupper($t), ['PS', 'LAM'], true)) continue;
+                    if (($id = $agencyOf($t)) !== null) { $channel = 'agency'; $agencyId = $id; break; }
+                }
+            }
+            if ($channel === null) $unknownTokens[$tokens[0]] = ($unknownTokens[$tokens[0]] ?? 0) + 1;
+        } elseif (count($tokens) === 1) {       // "(Agency)" / "(Agency_Agent)"
+            foreach (explode('_', $tokens[0]) as $t) {
+                if (isset($agentIdx[$norm($t)])) continue;
+                if (($id = $agencyOf($t)) !== null) { $channel = 'agency'; $agencyId = $id; break; }
+            }
         }
     }
     if ($channel === null) { $count['unknown']++; continue; }
