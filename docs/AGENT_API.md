@@ -559,7 +559,7 @@ Memos stay private to that user unless shared in the Hub. Logic: `modules/memo/m
 | `done` / `archived` | closed |
 
 **Morning digest (not an API action).** `modules/memo/cron_digest.php?token=MEMO_CRON_TOKEN`, called by
-cron-job.org Mon–Sat 07:20 EAT, emails the `AGENT_MEMO_USER` board to `MEMO_DIGEST_TO` (both in
+cron-job.org Mon–Sat 06:00 EAT (Africa/Nairobi), emails the `AGENT_MEMO_USER` board to `MEMO_DIGEST_TO` (both in
 `includes/config.php`) with subject `[Memo Hub] YYYY-MM-DD – N da sollecitare, M scaduti`: overdue,
 follow-ups due today, next 7 days, in progress, routines, and a last line
 `DIGEST-COUNTS: sollecitare=…; scaduti=…; attesa7=…; incorso=…; leads=…; sh_aperte=…`. Open memos

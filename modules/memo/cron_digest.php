@@ -1,6 +1,6 @@
 <?php
 // modules/memo/cron_digest.php — morning digest of the Memo Board, by email.
-// Called by cron-job.org Mon–Sat 07:20 EAT:
+// Called by cron-job.org Mon–Sat 06:00 EAT (Africa/Nairobi):
 //   https://hub.savannahexplorers.com/modules/memo/cron_digest.php?token=XXX
 //     &dry=1    → return the HTML instead of sending (nothing logged)
 //     &force=1  → send even if today's digest already went out
