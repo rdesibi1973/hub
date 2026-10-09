@@ -70,16 +70,16 @@ $dest_list = $dest_rows ?: [];
 // ── Helper: summary from LIVE table (requests) ───────────────────
 // total/by_dest  → date_received  (volume of incoming requests)
 // confirmed/sales/pax/commission → confirmation_date (closed deals)
-// rate → cohort conversion: of the requests received in the period, how many are Booked now
+// rate → confirmed in the period / received in the period (when received does not matter)
 function buildSummary(PDO $db, string $from, string $to, array $agents, array $dest_list): array {
     $rows = [];
-    $totals = ['agent' => 'TOTAL', 'total' => 0, 'confirmed' => 0, 'won' => 0, 'rate' => 0, 'by_dest' => [],
+    $totals = ['agent' => 'TOTAL', 'total' => 0, 'confirmed' => 0, 'rate' => 0, 'by_dest' => [],
                'sales_amount' => 0, 'booked_pax' => 0, 'commission_total' => 0];
 
     foreach ($agents as $ag) {
         // Query 1: total received + destination breakdown (date_received)
         $stmt1 = $db->prepare("
-            SELECT COUNT(*) AS total, SUM(status = 'Booked') AS won, destination
+            SELECT COUNT(*) AS total, destination
             FROM requests
             WHERE agent_id = ? AND date_received BETWEEN ? AND ?
               AND (practice_code NOT LIKE '%-STAFF%' OR practice_code IS NULL)
@@ -88,10 +88,9 @@ function buildSummary(PDO $db, string $from, string $to, array $agents, array $d
         $stmt1->execute([$ag['id'], $from, $to]);
         $recv_data = $stmt1->fetchAll();
 
-        $total = 0; $won = 0; $by_dest = [];
+        $total = 0; $by_dest = [];
         foreach ($recv_data as $d) {
             $total += (int)$d['total'];
-            $won   += (int)$d['won'];
             if ($d['destination'] !== null) {
                 $key = $d['destination'];
                 $by_dest[$key] = ($by_dest[$key] ?? 0) + (int)$d['total'];
@@ -117,16 +116,15 @@ function buildSummary(PDO $db, string $from, string $to, array $agents, array $d
         $booked_pax       = (int)($conf_data['booked_pax']       ?? 0);
         $commission_total = (float)($conf_data['commission_total'] ?? 0);
 
-        $rate = $total > 0 ? round($won / $total * 100, 1) : 0;
+        $rate = $total > 0 ? round($confirmed / $total * 100, 1) : 0;
         $rows[] = [
             'agent_id' => $ag['id'], 'agent' => $ag['name'],
-            'total' => $total, 'confirmed' => $confirmed, 'won' => $won, 'rate' => $rate,
+            'total' => $total, 'confirmed' => $confirmed, 'rate' => $rate,
             'by_dest' => $by_dest, 'sales_amount' => $sales_amount,
             'booked_pax' => $booked_pax, 'commission_total' => $commission_total,
         ];
         $totals['total']            += $total;
         $totals['confirmed']        += $confirmed;
-        $totals['won']              += $won;
         $totals['sales_amount']     += $sales_amount;
         $totals['booked_pax']       += $booked_pax;
         $totals['commission_total'] += $commission_total;
@@ -136,17 +134,16 @@ function buildSummary(PDO $db, string $from, string $to, array $agents, array $d
 
     // Unassigned
     $stmt1 = $db->prepare("
-        SELECT COUNT(*) AS total, SUM(status = 'Booked') AS won, destination
+        SELECT COUNT(*) AS total, destination
         FROM requests WHERE agent_id IS NULL AND date_received BETWEEN ? AND ?
               AND (practice_code NOT LIKE '%-STAFF%' OR practice_code IS NULL)
         GROUP BY destination
     ");
     $stmt1->execute([$from, $to]);
     $udata = $stmt1->fetchAll();
-    $u_total = 0; $u_won = 0; $u_dest = [];
+    $u_total = 0; $u_dest = [];
     foreach ($udata as $d) {
         $u_total += (int)$d['total'];
-        $u_won   += (int)$d['won'];
         if ($d['destination'] !== null)
             $u_dest[$d['destination']] = ($u_dest[$d['destination']] ?? 0) + (int)$d['total'];
     }
@@ -171,18 +168,18 @@ function buildSummary(PDO $db, string $from, string $to, array $agents, array $d
     if ($u_total > 0 || $u_conf > 0) {
         $rows[] = [
             'agent_id' => -1, 'agent' => 'Unassigned',
-            'total' => $u_total, 'confirmed' => $u_conf, 'won' => $u_won,
-            'rate' => $u_total > 0 ? round($u_won / $u_total * 100, 1) : 0,
+            'total' => $u_total, 'confirmed' => $u_conf,
+            'rate' => $u_total > 0 ? round($u_conf / $u_total * 100, 1) : 0,
             'by_dest' => $u_dest, 'sales_amount' => $u_sales,
             'booked_pax' => $u_pax, 'commission_total' => $u_comm,
         ];
-        $totals['total'] += $u_total; $totals['confirmed'] += $u_conf; $totals['won'] += $u_won;
+        $totals['total'] += $u_total; $totals['confirmed'] += $u_conf;
         $totals['sales_amount'] += $u_sales; $totals['booked_pax'] += $u_pax;
         $totals['commission_total'] += $u_comm;
         foreach ($u_dest as $k => $v)
             $totals['by_dest'][$k] = ($totals['by_dest'][$k] ?? 0) + $v;
     }
-    $totals['rate'] = $totals['total'] > 0 ? round($totals['won'] / $totals['total'] * 100, 1) : 0;
+    $totals['rate'] = $totals['total'] > 0 ? round($totals['confirmed'] / $totals['total'] * 100, 1) : 0;
     return ['rows' => $rows, 'totals' => $totals];
 }
 
@@ -1007,7 +1004,8 @@ include 'includes/header.php';
           <?php endif; ?>
         </td>
         <td class="text-right">
-          <?php $rate_color = $r['rate'] >= 10 ? 'var(--green)' : ($r['rate'] >= 5 ? 'var(--amber)' : 'var(--grey-mid)'); ?>
+          <?php // booked in period / received: company average ~20% (Oct 2025–Sep 2026)
+                $rate_color = $r['rate'] >= 20 ? 'var(--green)' : ($r['rate'] >= 10 ? 'var(--amber)' : 'var(--grey-mid)'); ?>
           <span style="font-weight:700;color:<?= $rate_color ?>"><?= $r['rate'] ?>%</span>
         </td>
         <?php if (!$is_history): ?>
