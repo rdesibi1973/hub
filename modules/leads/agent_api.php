@@ -992,12 +992,15 @@ try {
     // ── list_standard_programs ───────────────────────────────────────────────
     case 'list_standard_programs': {
         $groups = [];
+        $off = bs_std_programs_disabled();
         foreach (bs_std_programs() as $g => $progs) {
             $list = [];
             foreach ($progs as $label => $files) {
                 $dst = [];
                 foreach ($files as $f) $dst[] = $f['dst'];
-                $list[] = ['program' => $label, 'files' => $dst];
+                $row = ['program' => $label, 'files' => $dst];
+                if (isset($off[$label])) $row['disabled'] = $off[$label];
+                $list[] = $row;
             }
             $groups[] = ['group' => $g, 'programs' => $list];
         }
@@ -1012,7 +1015,7 @@ try {
                   : (isset($in['program']) ? [(string)$in['program']] : []);
         $res = bs_copy_programs($db, (int)$r['id'], (string)($in['prognum'] ?? ''), $programs);
         if (!$res['ok']) agent_fail($res['msg']);
-        if ($res['unknown'] || $res['missing']) {
+        if ($res['unknown'] || $res['missing'] || $res['disabled']) {
             agent_out(array_merge(['ok' => false, 'error' => 'Some programs were not copied: ' . $res['summary']], $res), 422);
         }
         agent_out($res);

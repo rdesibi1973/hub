@@ -369,6 +369,22 @@ function bs_std_programs(): array {
     return $groups;
 }
 
+/**
+ * Programs temporarily switched off: label => reason. Their checkbox is greyed out and
+ * copy refuses them; the std_programs.php entry stays so already-copied files are still
+ * recognised. Remove the line to re-enable once the template is back in Dropbox.
+ */
+function bs_std_programs_disabled(): array {
+    return [
+        'Chui'            => 'Template ChuiSafari_Calc.xlsx missing (not in it/ nor Agenzia/2026-27)',
+        'Baobab'          => 'Template BaobabDeluxe2025_Calc.xlsx missing (not in it/ nor Agenzia/2026-27)',
+        'Lux Duma'        => 'Template LUXDuma_Calc.xlsx missing (not in it/ nor Agenzia/2026-27)',
+        'Lux Pumba'       => 'Template LUXPumba_Calc.xlsx missing (not in it/ nor Agenzia/2026-27)',
+        'Duma+Pemba'      => 'Template Beach/DumaPemba_Calc.xlsx missing',
+        'Zanzibar Safari' => 'Template Beach/SavannahExplorers_ZanzibarSafari.docx missing',
+    ];
+}
+
 /** Next free ProgNumber in a Dropbox folder: max existing NN_ prefix + 1, 2 digits. */
 function bs_next_prognum(string $token, string $destDir): string {
     $max = 0;
@@ -424,7 +440,7 @@ function bs_copied_programs(array $files, string $folderName): array {
 /**
  * Copy standard program templates into a request's folder, renamed
  * {ProgNumber}_{FolderName}_{dst} (bs_program_file_name). $prognum '' = next free number.
- * Returns ['ok','msg','prognum','summary','copied','skipped','missing','unknown'].
+ * Returns ['ok','msg','prognum','summary','copied','skipped','missing','unknown','disabled'].
  */
 function bs_copy_programs(PDO $db, int $reqId, string $prognum, array $programs): array {
     $prognum = trim($prognum);
@@ -461,9 +477,11 @@ function bs_copy_programs(PDO $db, int $reqId, string $prognum, array $programs)
     $token = dropbox_get_access_token();
     if ($prognum === '') $prognum = bs_next_prognum($token, $destDir);
 
-    $copied = []; $skipped = []; $missing = []; $unknown = [];
+    $disabledMap = bs_std_programs_disabled();
+    $copied = []; $skipped = []; $missing = []; $unknown = []; $disabled = [];
     foreach ($programs as $label) {
         if (!isset($byLabel[$label])) { $unknown[] = $label; continue; }
+        if (isset($disabledMap[$label])) { $disabled[] = $label . ' — ' . $disabledMap[$label]; continue; }
         foreach ($byLabel[$label] as $f) {
             $src  = str_replace('{YEAR}', $year, $f['src']);
             $base = bs_program_file_name($prognum, $folderName, $f['dst']);
@@ -479,8 +497,9 @@ function bs_copy_programs(PDO $db, int $reqId, string $prognum, array $programs)
     if ($skipped) $parts[] = count($skipped) . ' skipped (already there)';
     if ($missing) $parts[] = count($missing) . ' template(s) missing';
     if ($unknown) $parts[] = count($unknown) . ' unknown';
+    if ($disabled) $parts[] = count($disabled) . ' disabled';
     if ($copied) {
-        $done = array_values(array_intersect($programs, array_keys($byLabel)));
+        $done = array_values(array_diff(array_intersect($programs, array_keys($byLabel)), array_keys($disabledMap)));
         timeline_log($reqId, 'program_update', 'Copied program ' . implode(', ', $done),
                      ['body' => implode("\n", $copied), 'refs' => ['dropbox_path' => $destDir]]);
     }
@@ -493,6 +512,7 @@ function bs_copy_programs(PDO $db, int $reqId, string $prognum, array $programs)
         'skipped'  => $skipped,
         'missing'  => $missing,
         'unknown'  => $unknown,
+        'disabled' => $disabled,
     ];
 }
 
