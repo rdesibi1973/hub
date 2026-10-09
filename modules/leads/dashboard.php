@@ -9,6 +9,12 @@ $pageTitle = 'Dashboard';
 $year   = (int)($_GET['year']   ?? date('Y'));
 $period = $_GET['period'] ?? date('m');       // 'year' | '01'..'12'  — default: current month
 $mode   = $_GET['mode']   ?? 'period';        // 'period' | 'ytd'
+// Normalize so the Period select always matches what is computed ('3' → '03', junk → current month)
+if ($period !== 'year') {
+    $p = (int)$period;
+    $period = ($p >= 1 && $p <= 12) ? str_pad($p, 2, '0', STR_PAD_LEFT) : date('m');
+}
+if ($mode !== 'ytd') $mode = 'period';
 
 $months = ['01'=>'January','02'=>'February','03'=>'March','04'=>'April',
            '05'=>'May','06'=>'June','07'=>'July','08'=>'August',
@@ -149,7 +155,7 @@ include 'includes/header.php';
 <!-- PERIOD FILTER BAR -->
 <div class="dash-filter-bar">
   <label>Year</label>
-  <select onchange="applyParam('year',this.value)">
+  <select autocomplete="off" onchange="applyParam('year',this.value)">
     <?php foreach ([(int)date('Y')-1, (int)date('Y'), (int)date('Y')+1] as $y): ?>
       <option value="<?= $y ?>" <?= $y == $year ? 'selected' : '' ?>><?= $y ?></option>
     <?php endforeach; ?>
@@ -158,7 +164,7 @@ include 'includes/header.php';
   <div class="dash-filter-sep"></div>
 
   <label>Period</label>
-  <select onchange="applyPeriod(this.value)">
+  <select autocomplete="off" onchange="applyPeriod(this.value)">
     <option value="year" <?= $period==='year' ? 'selected' : '' ?>>Full Year</option>
     <?php foreach ($months as $num => $name): ?>
       <option value="<?= $num ?>" <?= $period===$num ? 'selected' : '' ?>><?= $name ?></option>
@@ -169,13 +175,15 @@ include 'includes/header.php';
   <div class="dash-filter-sep"></div>
   <label>View</label>
   <div class="period-toggle">
-    <a href="<?= dashUrl(['mode'=>'period']) ?>" class="<?= $mode==='period' ? 'active' : '' ?>">This month</a>
+    <a href="<?= dashUrl(['mode'=>'period']) ?>" class="<?= $mode==='period' ? 'active' : '' ?>"><?= $months[$period] ?></a>
     <a href="<?= dashUrl(['mode'=>'ytd'])   ?>" class="<?= $mode==='ytd'    ? 'active' : '' ?>">YTD</a>
   </div>
   <?php endif; ?>
 </div>
 
 <script>
+// Back/forward cache can restore a stale select value: reload to resync with the URL
+window.addEventListener('pageshow', function (e) { if (e.persisted) location.reload(); });
 function applyParam(key, val) {
   var u = new URL(location.href);
   u.searchParams.set(key, val);
