@@ -36,7 +36,10 @@ Running log of notable changes and current build state. Module-level "active / p
 - `booking_service.php`: `bs_request_folder_name()` takes an optional direct tag (default "Drct");
   new `bs_folder_name_error()` (Name(Tag), exactly one "(…)" tag at the end, no "/" or "\");
   `bs_create_request()` options `direct_tag`, `folder_name` (validated), `initial_request_optional`.
-- Existing requests approved with `channel = NULL` are not changed (run `tools/backfill_request_channel.php`).
+- `tools/backfill_request_channel.php`: reads the LAST "(…)" tag (broken double-tag names); direct also for
+  `(RobertoCapri)`, any `EleonoraOngaro` tag and `(Nuru-Trekk|Trek|Tekk)`; `--list` prints each row filled.
+  Run on the server 9 Oct: 91 requests filled (86 direct, 5 agency), 561 still NULL (mostly one-word
+  `Client(Agent)` folders, unknown agency spellings, no folder). NULL-id lists kept in `~/channel_null_ids_20261009*.txt`.
 
 ## 2026-10-09 — Re-link a folder moved outside the Hub; agency edit; customer-name guard
 - `rename_folder` / BackOffice "Rename…": new `current_path` (re-link a folder moved or renamed outside the
