@@ -38,7 +38,7 @@ Running log of notable changes and current build state. Module-level "active / p
   `bs_create_request()` options `direct_tag`, `folder_name` (validated), `initial_request_optional`.
 - `tools/backfill_request_channel.php`: reads the LAST "(…)" tag (broken double-tag names); direct also for
   `(RobertoCapri)`, any `EleonoraOngaro` tag and `(Nuru-Trekk|Trek|Tekk)`; `--list` prints each row filled.
-  Run on the server 9 Oct: 91 requests filled (86 direct, 5 agency), 561 still NULL (mostly one-word
+  Run on the server 9 Oct: 91 requests filled in two runs (85 direct, 6 agency), 561 still NULL (mostly one-word
   `Client(Agent)` folders, unknown agency spellings, no folder). NULL-id lists kept in `~/channel_null_ids_20261009*.txt`.
 
 ## 2026-10-09 — Re-link a folder moved outside the Hub; agency edit; customer-name guard
