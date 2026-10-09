@@ -284,11 +284,25 @@ function fs_relink_books(array $v): bool {
 }
 
 /**
- * Files inside $dir (recursive) named "NN_<old name>…" for one of $oldNames → the same
- * with $newName. Returns [['from' => rel path, 'to' => rel path], …]. Requires dropbox_helper.php.
+ * Customer part of a folder name, as copy_program put it in the file names before the
+ * confirm: "07_27JUL_Rossi(BTG-Roberto)_START27JUL_…_PROGRESS" → "Rossi(BTG-Roberto)".
+ */
+function fs_name_core(string $name): string {
+    $s = preg_replace('/^\d{1,2}_\d{1,2}[A-Za-z]{3}_/', '', trim($name));
+    return (string)preg_replace('/_START.*$/i', '', (string)$s);
+}
+
+/**
+ * Files inside $dir (recursive) named "NN_<old>…", <old> = one of $oldNames or its customer
+ * part (fs_name_core) → "NN_<customer part of $newName>…" (the file prefix never carries the
+ * dates / status, as after a Hub confirm). Returns [['from' => rel path, 'to' => rel path], …].
+ * Requires dropbox_helper.php.
  */
 function fs_file_renames(string $token, string $dir, array $oldNames, string $newName): array {
-    $olds = array_values(array_unique(array_filter($oldNames, 'strlen')));
+    $newName = fs_name_core($newName);
+    $olds = [];
+    foreach ($oldNames as $o) { $olds[] = $o; $olds[] = fs_name_core($o); }
+    $olds = array_values(array_unique(array_filter($olds, 'strlen')));
     usort($olds, function ($a, $b) { return strlen($b) - strlen($a); });   // longest first
     $out = [];
     foreach (dropbox_list_recursive($token, $dir) as $e) {

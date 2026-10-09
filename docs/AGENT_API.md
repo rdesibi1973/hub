@@ -257,9 +257,11 @@ renamed and every request of the group is updated. No email is sent (unlike Resc
   A re-link whose suffix makes the request **Booked** (it was not) also sets `confirmation_date` = today (if empty)
   and `start_date` from the name — warning "Booked via re-link: no confirm snapshot, Rollback not available".
   The timeline event is "Folder re-linked" with `relinked from <stored path>`.
-- **`rename_files: true`** — also renames the files inside (recursive, e.g. `old/`) named `NN_<old name>…`
-  (`<old name>` = the stored name or the folder's current name) to `NN_<new_name>…` — e.g. the `_Calc.xlsx`
-  and Word copied by `copy_program`. Dry run lists them in `file_renames[{from, to}]`; with confirm →
+- **`rename_files: true`** — also renames the files inside (recursive, e.g. `old/`) named `NN_<old>…`
+  (`<old>` = the stored name, the folder's current name, or the customer part of either) to
+  `NN_<customer part of new_name>…` — e.g. the `_Calc.xlsx` and Word copied by `copy_program`. The customer part
+  drops the `MM_DDMON_` prefix and `_START…`: `01_LucaDeSanctis(LasciatiViaggiare-Daniela)_MigrazioneEstate_Calc.xlsx`,
+  as the files are named after a Hub confirm. Dry run lists them in `file_renames[{from, to}]`; with confirm →
   `files_renamed[]`, `files_failed{}` (a failed file never undoes the folder rename).
 - **Without `"confirm": true` → dry run**, nothing changes. Returns `current`, `new_name`, `is_group`, `relink`,
   `status_from_name` `{matched, status, payment_status, current_status, current_payment_status}` (what the
