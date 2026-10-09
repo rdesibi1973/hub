@@ -244,7 +244,9 @@ function iti_final_plan(PDO $db, array $calc, int $sampleId): array {
     foreach ($days as $i => $d) {
         if ($sampleId && $d['sample_index'] === null) {
             $days[$i]['flags'][] = 'Not in the sample: added from the Calc (text to review).';
-            if ($d['route'] && $d['route']['state'] === 'unmapped') {
+            // Routes only once every hotel is mapped: until then the alignment with the
+            // sample is not known and most days only look new.
+            if ($d['route'] && $d['route']['state'] === 'unmapped' && !$unmapped['lodge']) {
                 $unmapped['route'][iti_alias_norm($d['route']['text'])] = $d['route']['text'];
             }
         }
@@ -255,6 +257,7 @@ function iti_final_plan(PDO $db, array $calc, int $sampleId): array {
     foreach ($unmapped['route'] as $t) $blocking[] = 'Route "' . $t . '" (a day not in the sample) has no route alias.';
 
     $flags = array();
+    if ($unmapped['lodge'] && $sampleId) $flags[] = 'Map the hotels first: which days match the sample (and which routes are needed) depends on them.';
     if (!empty($calc['guests_tba'])) $flags[] = 'Guests not known yet (TBA) — the program will say "to be defined".';
     if ($sampleId && count($sampleDays) !== count($days)) {
         $flags[] = 'The sample has ' . count($sampleDays) . ' days, the Calc ' . count($days) . ' — days are added / removed to match the Calc.';
