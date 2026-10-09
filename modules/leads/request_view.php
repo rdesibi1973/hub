@@ -865,7 +865,7 @@ include 'includes/header.php';
 
 <!-- STANDARD PROGRAMS (Copy Programs) -->
 <?php if (!isLeadsRestricted() && $dbxPath): ?>
-<?php $stdPrograms = require 'includes/std_programs.php'; ?>
+<?php $stdPrograms = bs_std_programs(); $stdDisabled = bs_std_programs_disabled(); ?>
 <div class="section-label">Standard Programs</div>
 <div class="table-wrap" style="max-width:1100px;margin-bottom:20px">
   <div style="padding:18px 22px">
@@ -878,9 +878,15 @@ include 'includes/header.php';
       <div style="min-width:170px">
         <div style="font-weight:700;font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;color:var(--grey-mid);margin-bottom:8px"><?= h($groupName) ?></div>
         <?php foreach ($progs as $label => $files): ?>
+        <?php if (isset($stdDisabled[$label])): ?>
+        <label style="display:block;font-size:.8rem;margin-bottom:5px;color:var(--grey-mid);opacity:.55;cursor:not-allowed" title="Disabled: <?= h($stdDisabled[$label]) ?>">
+          <input type="checkbox" disabled style="vertical-align:middle;margin-right:5px"><?= h($label) ?>
+        </label>
+        <?php else: ?>
         <label style="display:block;font-size:.8rem;margin-bottom:5px;cursor:pointer">
           <input type="checkbox" class="cp-prog" value="<?= h($label) ?>" style="vertical-align:middle;margin-right:5px"><?= h($label) ?>
         </label>
+        <?php endif; ?>
         <?php endforeach; ?>
       </div>
       <?php endforeach; ?>
@@ -939,6 +945,7 @@ function copyPrograms() {
       html += list('Skipped (already there)', d.skipped, '#92400e');
       html += list('Templates missing', d.missing, '#C0211B');
       html += list('Unknown', d.unknown, '#C0211B');
+      html += list('Disabled', d.disabled, '#C0211B');
       result.innerHTML = html;
       result.style.display = html ? 'block' : 'none';
       loadNextProg();   // advance ProgNumber for the next program

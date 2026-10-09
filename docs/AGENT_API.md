@@ -142,6 +142,8 @@ curl -sH "$H" -X POST "$U?action=set_request_status" -d '{"request_ids":[2410,24
 
 ### `list_standard_programs` (GET)
 Program codes by group (`DumaShort`, `BeachDumaShort`, …) and the Confirm Safari `destinations`.
+A program with a `disabled` reason (template missing in Dropbox) is not copied: `copy_program`
+lists it under `disabled`. The switch-off list is `bs_std_programs_disabled()` in `booking_service.php`.
 
 ### `copy_program` (POST)
 `request_id`, `program` (or `programs: [...]`), optional `prognum` (default: next free number).
