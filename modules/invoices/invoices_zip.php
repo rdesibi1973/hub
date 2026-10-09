@@ -82,9 +82,7 @@ if ($tmpFile === false || $zip->open($tmpFile, ZipArchive::OVERWRITE) !== true) 
     zip_fail('Could not create the temporary ZIP file on the server.');
 }
 
-$options = new \Dompdf\Options();
-$options->set('isHtml5ParserEnabled', true);
-$options->set('isRemoteEnabled', false);
+$options = inv_doc_dompdf_options();   // includes/invoice_html.php
 
 $usedNames = [];
 $errors    = [];
