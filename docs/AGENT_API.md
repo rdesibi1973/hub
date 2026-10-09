@@ -352,10 +352,11 @@ Only needed for samples: a personal program's link is on without it (unpublish d
 
 #### `iti_calc_plan` (GET) / `iti_final_from_calc` (POST)
 `request_id`, `sample_id?` (default: the sample whose Calc code matches the file name), `lang?`, `file?`, `sheet?`.
-Plan: `calc` (file, rev, pax), `sample`, `nights[]` (date, label, hotel text → lodge, state, meal, activities,
-from_sample_day, flags), `unmapped` {lodge|activity|route: {norm: text}}, `blocking`, `existing_finals`.
-`iti_final_from_calc` with `"confirm": true` generates the final program (an older final of the request is
-superseded) → `program_id`, `program`. 409 when the Calc cannot be read.
+Plan: `calc` (file, files = every Calc of the folder, rev, pax), `sample`, `nights[]` (date, label, hotel text → lodge, state, meal, activities,
+from_sample_day, flags), `unmapped` {lodge|activity|route: {norm: text}}, `blocking`, `existing_finals` (id, calc_file,
+superseded_by). Several Calc files (e.g. the same safari with other lodges) → pass `file`; each file has its own final.
+`iti_final_from_calc` with `"confirm": true` generates the final program (an older final built from the same Calc
+file is superseded) → `program_id`, `program`. 409 when the Calc cannot be read.
 
 #### `iti_save_alias` (POST)
 `type` (`lodge`|`activity`|`route`), `text` (the Calc text), `lodge_id` (+ `meal_basis` BB|HB|FB|AI) |

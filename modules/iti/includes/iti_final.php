@@ -444,9 +444,11 @@ function iti_final_generate(PDO $db, int $requestId, array $calc, int $sampleId,
                                $g['dob'], $g['country'] !== '' ? mb_substr($g['country'], 0, 80) : null));
         }
 
-        // One active final per request: older ones are kept, marked superseded.
-        $st = $db->prepare("SELECT id FROM iti_programs WHERE lead_request_id = ? AND stage = 'final' AND superseded_by IS NULL AND id <> ?");
-        $st->execute(array($requestId, $newId));
+        // One active final per Calc file of the request (a request can have two Calc
+        // files, e.g. the same safari with other lodges): older ones are kept, marked superseded.
+        $st = $db->prepare("SELECT id FROM iti_programs WHERE lead_request_id = ? AND stage = 'final' AND superseded_by IS NULL AND id <> ?
+                              AND source_calc_path <=> ?");
+        $st->execute(array($requestId, $newId, $calc['calc_path'] ?? null));
         $old = array_map('intval', $st->fetchAll(PDO::FETCH_COLUMN));
         if ($old) {
             $db->prepare("UPDATE iti_programs SET superseded_by = ?, superseded_at = ? WHERE id IN (" . implode(',', $old) . ")")
@@ -479,7 +481,7 @@ function iti_final_generate(PDO $db, int $requestId, array $calc, int $sampleId,
 /** Final programmes of a request, newest first (active = not superseded). */
 function iti_final_list(PDO $db, int $requestId): array {
     iti_ensure_final_schema();
-    $st = $db->prepare("SELECT id, title_en, title_it, start_date, generated_at, source_calc_rev, superseded_by, superseded_at, status
+    $st = $db->prepare("SELECT id, title_en, title_it, start_date, generated_at, source_calc_path, source_calc_rev, superseded_by, superseded_at, status
                           FROM iti_programs WHERE lead_request_id = ? AND stage = 'final' ORDER BY id DESC");
     $st->execute(array($requestId));
     return $st->fetchAll(PDO::FETCH_ASSOC);

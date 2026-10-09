@@ -21,7 +21,8 @@ $_cu      = current_user();
 $can_edit = true;   // all staff since 7 Oct 2026 (was admin/manager)
 $user     = $_cu['username'] ?? 'system';
 $rid      = (int)($_REQUEST['request_id'] ?? 0);
-$self     = 'program_final.php?request_id=' . $rid;
+$file     = trim((string)($_REQUEST['file'] ?? ''));   // one of several Calc files of the folder ('' = the highest number)
+$self     = 'program_final.php?request_id=' . $rid . ($file !== '' ? '&file=' . rawurlencode($file) : '');
 
 $st = $db->prepare('SELECT id, customer_name, practice_code, status FROM requests WHERE id = ?');
 $st->execute([$rid]);
@@ -33,7 +34,7 @@ $lang = in_array($_REQUEST['lang'] ?? '', ITI_LANGUAGES, true) ? $_REQUEST['lang
 // ── Read the Calc (Dropbox) ─────────────────────────────────
 $calc = null; $calcErr = '';
 try {
-    $calc = calc_read_request($db, $rid, (string)($_REQUEST['file'] ?? ''), (string)($_REQUEST['sheet'] ?? ''));
+    $calc = calc_read_request($db, $rid, $file, (string)($_REQUEST['sheet'] ?? ''));
 } catch (Throwable $e) {
     $calcErr = $e->getMessage();
 }
@@ -75,7 +76,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit) {
 $plan   = $calc ? iti_final_plan($db, $calc, $sample ? (int)$sample['id'] : 0) : null;
 $finals = iti_final_list($db, $rid);
 $active = null;
-foreach ($finals as $f) { if (!$f['superseded_by']) { $active = $f; break; } }
+foreach ($finals as $f) {   // the active final of THIS Calc file
+    if (!$f['superseded_by'] && $calc && basename((string)$f['source_calc_path']) === $calc['file']) { $active = $f; break; }
+}
+$multiCalc = $calc && count($calc['candidates'] ?? []) > 1;
+if ($multiCalc) {   // the file picker replaces the reader's "several Calc files" warning
+    $calc['warnings'] = array_values(array_filter($calc['warnings'], function ($w) { return strpos($w, 'Several Calc files') !== 0; }));
+}
 $calcChanged = $active && $calc && $active['source_calc_rev'] && $active['source_calc_rev'] !== $calc['calc_rev'];
 
 $samples = []; $suggestedSample = 0;
@@ -132,11 +139,12 @@ include __DIR__ . '/../../includes/layout_header.php';
     </div>
   <?php endif; ?>
   <div class="table-wrap"><table>
-    <thead><tr><th>#</th><th>Generated</th><th>Start</th><th>State</th><th></th></tr></thead>
+    <thead><tr><th>#</th><th>Calc</th><th>Generated</th><th>Start</th><th>State</th><th></th></tr></thead>
     <tbody>
     <?php foreach ($finals as $f): ?>
       <tr style="<?= $f['superseded_by'] ? 'opacity:.55;' : '' ?>">
         <td>#<?= (int)$f['id'] ?></td>
+        <td style="font-size:.75rem;"><?= h($f['source_calc_path'] ? basename($f['source_calc_path']) : '—') ?></td>
         <td style="font-size:.8rem;"><?= h($f['generated_at'] ?? '') ?></td>
         <td style="font-size:.8rem;"><?= $fmtD($f['start_date']) ?></td>
         <td><?= $f['superseded_by'] ? '<span class="badge">superseded by #' . (int)$f['superseded_by'] . '</span>' : '<span class="badge status-booked">active</span>' ?></td>
@@ -154,6 +162,21 @@ include __DIR__ . '/../../includes/layout_header.php';
 <?php if ($calc): ?>
 <div class="form-card" style="margin-bottom:18px;">
   <div class="form-section-title">Calc</div>
+  <?php if ($multiCalc): ?>
+  <form method="GET" action="program_final.php" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px;">
+    <input type="hidden" name="request_id" value="<?= $rid ?>">
+    <input type="hidden" name="lang" value="<?= h($lang) ?>">
+    <span style="font-size:.85rem;"><?= count($calc['candidates']) ?> Calc files in the folder — each one gets its own program:</span>
+    <select name="file" onchange="this.form.submit()" style="max-width:520px;">
+      <?php foreach ($calc['candidates'] as $cf):
+        $has = false;
+        foreach ($finals as $f) { if (!$f['superseded_by'] && basename((string)$f['source_calc_path']) === $cf) { $has = (int)$f['id']; break; } } ?>
+        <option value="<?= h($cf) ?>" <?= $cf === $calc['file'] ? 'selected' : '' ?>><?= h($cf) ?><?= $has ? ' — program #' . $has : '' ?></option>
+      <?php endforeach; ?>
+    </select>
+    <noscript><button type="submit" class="btn btn-outline btn-sm">Open</button></noscript>
+  </form>
+  <?php endif; ?>
   <div style="font-size:.85rem;line-height:1.7;">
     <strong><?= h($calc['file']) ?></strong> · sheet <?= h($calc['sheet']) ?><br>
     <?= $fmtD($calc['start_date']) ?> → <?= $fmtD($calc['end_date']) ?> · <?= (int)$calc['nights'] ?> nights ·
