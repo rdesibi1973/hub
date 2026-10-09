@@ -446,7 +446,10 @@ function toCamelCase(name) {
     if (!name.includes(' ') && !name.includes('-')) return name;
     return name.split(/[\s\-]+/)
                .filter(p => p.length > 0)
-               .map(p => p.charAt(0).toUpperCase() + p.slice(1).toLowerCase())
+               .map(p => {   // mixed-case word kept ("DeSanctis"), as bs_camel_case()
+                   const mixed = p !== p.toLowerCase() && p !== p.toUpperCase();
+                   return p.charAt(0).toUpperCase() + (mixed ? p.slice(1) : p.slice(1).toLowerCase());
+               })
                .join('');
 }
 function channelValue() {

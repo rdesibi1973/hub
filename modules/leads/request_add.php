@@ -121,6 +121,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     // ── Validate ──────────────────────────────────────────────────────────────
     if (!$v['customer_name'])   $errors[] = 'Customer name is required.';
+    elseif ($ne = bs_customer_name_error($v['customer_name'])) $errors[] = $ne;
     if (!$v['date_received'])   $errors[] = 'Date received is required.';
     if (!$dropboxSkip && !$v['initial_request']) $errors[] = 'Initial Request is required.';
     if (!$v['agent_id'])        $errors[] = 'Please select an agent.';
@@ -201,6 +202,8 @@ include 'includes/header.php';
         <input type="text" id="customer_name" name="customer_name"
                value="<?= h($v['customer_name']) ?>"
                placeholder="e.g. John Brown" required autocomplete="off">
+        <div id="name-error" style="display:none;margin-top:6px;font-size:.8rem;color:#C0211B;font-weight:600">
+          Write only the client name — the Hub adds (Agency-Agent) itself.</div>
         <div id="dup-warning" style="display:none;margin-top:6px"></div>
       </div>
 
@@ -509,13 +512,36 @@ function updateFolderPreview() {
   row.style.display = 'block';
 }
 
+// Same as bs_camel_case() (includes/booking_service.php): mixed-case words keep their capitals.
 function toCamelCase(name) {
   name = name.trim();
   if (!name.includes(' ') && !name.includes('-')) return name;
   return name.split(/[\s\-]+/).filter(Boolean)
-    .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .map(w => {
+      const mixed = w !== w.toLowerCase() && w !== w.toUpperCase();
+      return w.charAt(0).toUpperCase() + (mixed ? w.slice(1) : w.slice(1).toLowerCase());
+    })
     .join('');
 }
+
+// Customer name guard (bs_customer_name_error): no "(Agency-Agent)" tag in the name.
+function customerNameBad() {
+  return /[()\[\]]/.test(document.getElementById('customer_name').value);
+}
+function showNameError() {
+  const bad = customerNameBad();
+  document.getElementById('name-error').style.display = bad ? 'block' : 'none';
+  document.getElementById('customer_name').style.borderColor = bad ? '#C0211B' : '';
+  return bad;
+}
+document.getElementById('customer_name').addEventListener('input', showNameError);
+document.getElementById('request-form').addEventListener('submit', function (e) {
+  if (showNameError()) {
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    document.getElementById('customer_name').focus();
+  }
+}, true);
 
 // ── Commission ────────────────────────────────────────────────────────────────
 function calcComm() {

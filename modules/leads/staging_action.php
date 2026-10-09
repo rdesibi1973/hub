@@ -2,7 +2,7 @@
 require_once 'config.php';
 require_once 'dropbox_helper.php';
 require_once 'notifications.php';
-require_once 'includes/booking_service.php';
+require_once 'includes/booking_service.php';   // bs_camel_case, bs_customer_name_error
 
 // Load the HubSpot sync as a library (skips its CLI block). Gives us
 // hs_mark_processed() / hs_ensure_processed_table() for the anti-reimport suppression list.
@@ -139,6 +139,12 @@ if ($action === 'approve') {
     $customerName = trim($_POST['customer_name_override'] ?? '') ?: fix_name_case($lead['customer_name']);
 
     $dest = trim($_POST['destination'] ?? '') ?: $lead['destination'];
+
+    // Customer name = the client only; the "(Agency-Agent)" tag belongs to the folder name.
+    if ($nameErr = bs_customer_name_error($customerName)) {
+        flash($nameErr . ' Fix the customer name of "' . $lead['customer_name'] . '" before approving.', 'error');
+        header('Location: staging.php'); exit;
+    }
 
     // Channel + agency (agency mandatory for channel agency, as in request_add.php).
     $channel  = $_POST['channel'] ?? '';
