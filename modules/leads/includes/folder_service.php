@@ -93,15 +93,18 @@ function bo_do_rename(PDO $db, string $token, array $r, bool $isGrp,
         $subs = $db->prepare("SELECT id, practice_code, status FROM requests WHERE group_folder = ?");
         $subs->execute([$folder]);
         $rowsG = $subs->fetchAll(PDO::FETCH_ASSOC);
-        $upd   = $db->prepare("UPDATE requests SET group_folder=?, dropbox_url=? WHERE id=?");
-        $updSt = $db->prepare("UPDATE requests SET group_folder=?, dropbox_url=?, status=? WHERE id=?");
+        $upd   = $db->prepare("UPDATE requests SET group_folder=?, practice_code=?, dropbox_url=? WHERE id=?");
+        $updSt = $db->prepare("UPDATE requests SET group_folder=?, practice_code=?, dropbox_url=?, status=? WHERE id=?");
         $n = 0;
         foreach ($rowsG as $g) {
             $sub    = trim($g['practice_code'] ?? '');
+            // Imported group (practice_code = group_folder): the folder itself, no sub-folder.
+            if ($sub === $folder) $sub = '';
             $subUrl = bo_url_from_path($sub !== '' ? $newPath . '/' . $sub : $newPath);
+            $code   = $sub !== '' ? $g['practice_code'] : ($g['practice_code'] === $folder ? $newFolder : $g['practice_code']);
             $keep   = ($g['status'] ?? '') === 'Cancelled' && $newStatus !== 'Cancelled';
-            if ($setStatus && $newStatus !== null && !$keep) $updSt->execute([$newFolder, $subUrl, $newStatus, (int)$g['id']]);
-            else                                              $upd->execute([$newFolder, $subUrl, (int)$g['id']]);
+            if ($setStatus && $newStatus !== null && !$keep) $updSt->execute([$newFolder, $code, $subUrl, $newStatus, (int)$g['id']]);
+            else                                              $upd->execute([$newFolder, $code, $subUrl, (int)$g['id']]);
             $n++;
         }
         return ['ok' => true, 'msg' => '✔ Group "' . $newFolder . '": renamed (' . $n . ' booking(s) updated).',

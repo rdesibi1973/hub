@@ -31,7 +31,7 @@ without driving the web UI.
 | HTTPS only | Plain HTTP → 403. |
 | Rate limit | 60 calls/min → 429. |
 | Audit | Every call (including failures and dry-runs) → `agent_audit_log` (action, request_id, user, HTTP code, dry_run, payload, result, IP). |
-| Dry-run by default | `confirm_booking`, `send_booking_email`, `rollback_booking`, `rename_folder`, `cancel_invoice_payment`, `update_folder_status`, `import_zoho_invoice`, `create_invoice`, `update_invoice`, `mail_send` and `mail_move` (among others) do nothing unless the body has `"confirm": true`. |
+| Dry-run by default | `update_request`, `confirm_booking`, `send_booking_email`, `rollback_booking`, `rename_folder`, `import_group_folder`, `move_group_folder`, `cancel_invoice_payment`, `update_folder_status`, `import_zoho_invoice`, `create_invoice`, `update_invoice`, `mail_send` and `mail_move` (among others) do nothing unless the body has `"confirm": true`. |
 | No deletes | No delete endpoint (mail included). Undo a confirm with `rollback_booking` (or BackOffice → Rollback). |
 | Mailbox | The key also reads `info@` (`mail_*`): keep `api.txt` as private as the mailbox password. |
 
@@ -39,12 +39,15 @@ without driving the web UI.
 BlueHost's firewall scores requests: the default `curl/…` or `Python-urllib/…` user agent from a cloud IP starts with a
 high score, and then even plain calls (`iti_lodges&q=Mdonya`) can cross the threshold and get HTTP 406, seemingly at
 random (access log, 4 Oct 2026: 9 of ~110 curl calls blocked, 0 of the calls with the agent user agent). Many 406 in a
-row can block the IP for a few minutes. With curl: `-A "Mozilla/5.0 (compatible; SavannahHubAgent/1.0)"`.
+row can block the IP for a few minutes. With curl: `-A "Mozilla/5.0 (compatible; SavannahHubAgent/1.0)"`
+(the examples write it as `-A "$UA"` with `UA="Mozilla/5.0 (compatible; SavannahHubAgent/1.0)"`).
 If a call is still blocked: send JSON with `\uXXXX` escapes (`ensure_ascii`), or wrap the body as
 `{"b64": "<base64 of the UTF-8 JSON>"}` (GET: `&b64=<base64 of a JSON object of the parameters>`), wait a minute, retry once.
 
 Responses: `{"ok": true, …}` or `{"ok": false, "error": "…", …}` with a matching HTTP code
 (400 bad input, 403 auth, 404 not found, 409 duplicate / blocked, 422 partial, 429 rate, 5xx server/Dropbox).
+Hub database down → **503** `{"ok": false, "error": "database unavailable"}` (since 9 Oct 2026; before, an HTML
+text): an outage, not a bad call — wait and retry, don't change the request.
 
 ## Actions
 
@@ -83,10 +86,19 @@ then the DB row (which also stores `channel` and, for agency requests, `agency_i
 only if it is really new.
 
 ### `update_request` (POST)
+**Dry-run unless `"confirm": true`** (since 9 Oct 2026; before, it wrote at the first call).
 `request_id` + any of `customer_name, email, whatsapp, source, destination, period, pax, value_usd,
-commission_pct, date_paid, initial_request, notes` (top level or inside `fields`). `commission_usd`
-is recomputed. Status / folder are **not** editable here (use `set_request_status` below,
-`confirm_booking` / BackOffice).
+commission_pct, date_paid, initial_request, notes` (top level or inside `fields`; `""` / `null` clears).
+`commission_usd` is recomputed when `value_usd` or `commission_pct` change. Status / folder are **not**
+editable here (use `set_request_status` below, `confirm_booking` / BackOffice).
+
+Dry run → `{dry_run: true, changes: {field: {from, to}}, ignored, request}` — only the fields that differ
+(`7890` = `7890.00`). With `confirm` → `{dry_run: false, updated: [fields], changes, ignored, request}`.
+
+```bash
+curl -sA "$UA" -H "$H" -X POST "$U?action=update_request" -d '{"request_id":3023,"pax":4,"value_usd":15780}'                 # dry run
+curl -sA "$UA" -H "$H" -X POST "$U?action=update_request" -d '{"request_id":3023,"pax":4,"value_usd":15780,"confirm":true}'
+```
 
 ### `set_request_status` (POST)
 **Dry-run unless `"confirm": true`.** Same rules as the status menu in the Hub
@@ -244,6 +256,71 @@ curl -sA "Mozilla/5.0 (compatible; SavannahHubAgent/1.0)" -H "$H" -X POST "$U?ac
      -d '{"request_id":873,"new_name":"02_10FEB_Rossi(BTG-Roberto)_START10FEB_END16FEB2027_DEPOSIT"}'                  # dry run
 curl -sA "Mozilla/5.0 (compatible; SavannahHubAgent/1.0)" -H "$H" -X POST "$U?action=rename_folder" \
      -d '{"request_id":873,"new_name":"02_10FEB_Rossi(BTG-Roberto)_START10FEB_END16FEB2027_DEPOSIT","confirm":true}'
+```
+
+### Il Diamante set departures — `move_group_folder` + `import_group_folder`
+Confirming a Diamante group (Panorama01, 05, 07, 10, PanoramaDavide …) = two steps: move the provisional
+folder `/itineraries/SafariClassic/it/Agenzia/Diamante/2027-Groups/<MM>_<DDMMM>_PanoramaNN_(Diamante-PS-Roberto)_START…_END…_PROVISIONAL`
+to `/001_Safari/` with `_PROVISIONAL` → `_BALANCE`, then import it as a Hub request (status Booked, payment
+Balance, pax, value) — the same as Hub → **Import Group Folder** (shared code: `includes/group_import_service.php`).
+`create_request` is not used for these groups. One call does both: `move_group_folder` with `import`.
+
+The imported request stores the folder name in both `practice_code` and `group_folder` and
+`dropbox_url` = `/001_Safari/<folder>`; later renames (payment tag, `_CK`) keep the three in step.
+
+#### `import_group_folder` (POST)
+**Dry-run unless `"confirm": true`.**
+- `folder`* — the folder name as it is in `/001_Safari` (name only, no path).
+- Optional overrides (default = read from the name by the Hub parser): `customer_name` (PanoramaNN),
+  `source` (tour operator, `Diamante`), `agent_id` (handler matched to an agent), `destination` (Tanzania),
+  `period`, `start_date` (YYYY-MM-DD), `status` (default **Booked**), `payment_status` (`''`|`Deposit`|`Balance`|
+  `Balance-Cash`|`Paid`; default from the suffix, else **Balance**), `pax`, `value_usd`, `notes`
+  (default "Handler · Agency code · TO").
+- `mode`: `create` (default) | `update` + `target_id` (overwrite an existing request with this folder).
+- `allow_duplicate` (default false).
+
+Checks (all in the dry run):
+- `blocking` `folder_missing` — the folder is not in `/001_Safari` → 404 on confirm.
+- Duplicates (`duplicates[]` `{id, customer_name, status, folder, start_date, period, level, reason}`, ranked):
+  `exact` (same folder already imported) → `blocking` `duplicate_exact`, 409 in `create` mode — use `mode: update`;
+  `high` (same group + dates with another suffix, or same name + start date) → `duplicate_high`, 409 unless
+  `allow_duplicate: true`; `low` (same name) → warning only. In `update` mode the target itself is not a duplicate.
+- Invalid values (status, payment status, date, pax / value not numbers, agent or target not found) → 400 `errors[]`.
+
+Dry run → `{dry_run: true, folder, mode, parsed, values (what will be written), duplicates, blocking[{code, message}], warnings}`.
+Confirm → `{dry_run: false, request_id, mode, request}` and a timeline event **"Group folder imported"**
+(`confirmation`, author the API user; the Hub page logs it too).
+
+```bash
+curl -sA "$UA" -H "$H" -X POST "$U?action=import_group_folder" -d '{"folder":"08_10AUG_Panorama10_(Diamante-PS-Roberto)_START10AUG_END17AUG2027_BALANCE","pax":2,"value_usd":7890}'
+curl -sA "$UA" -H "$H" -X POST "$U?action=import_group_folder" -d '{"folder":"…","pax":2,"value_usd":7890,"confirm":true}'
+curl -sA "$UA" -H "$H" -X POST "$U?action=import_group_folder" -d '{"folder":"…","mode":"update","target_id":3042,"pax":2,"confirm":true}'
+```
+
+#### `move_group_folder` (POST)
+**Dry-run unless `"confirm": true`.**
+- `source`* — the folder name (looked up in `…/Diamante/2027-Groups/`) or its full path under
+  `/itineraries/SafariClassic/it/Agenzia/Diamante/`. Must end with `_PROVISIONAL`.
+- `new_suffix` — `BALANCE` (default) | `DEPOSIT` | `PAID`: `_PROVISIONAL` at the end is replaced by it.
+- `new_name` — the full new name (overrides `new_suffix`; warning if it has no booking tag).
+- `import` — object with the `import_group_folder` fields (without `folder`): after the move, imports the
+  moved folder in the same call.
+
+Rules: destination = `/001_Safari/<new name>`; source missing → 404, destination already there → 409
+(both listed in `blocking` on the dry run). Name checked with the `rename_folder` rules (date tags, prefix =
+START, `_CK` last → `warnings`). Dropbox **move** (not copy + delete), returns the new `dropbox_path`.
+With `import`, the import is checked **before** moving (as `import_preview`; the folder-exists check runs
+after the move): an import that would be refused (400 / 409) means nothing is moved. If the import still fails after the
+move, the move stays done: **422** `{ok: false, moved: true, imported: false, import_error, dropbox_path}` — finish
+with `import_group_folder` on `new_name`.
+
+Dry run → `{dry_run: true, from, to, new_name, warnings, blocking, import_preview?}`.
+Confirm → `{dry_run: false, moved: true, from, to, new_name, dropbox_path, warnings}` + with `import`
+`{imported: true, request_id, mode, request}`.
+
+```bash
+curl -sA "$UA" -H "$H" -X POST "$U?action=move_group_folder" -d '{"source":"09_14SEP_Panorama14_(Diamante-PS-Roberto)_START14SEP_END21SEP2027_PROVISIONAL","import":{"pax":2,"value_usd":7890}}'   # dry run
+curl -sA "$UA" -H "$H" -X POST "$U?action=move_group_folder" -d '{"source":"09_14SEP_Panorama14_…_PROVISIONAL","import":{"pax":2,"value_usd":7890},"confirm":true}'
 ```
 
 ### `iti_programs` (GET)
@@ -715,7 +792,8 @@ same request + type + title within 60 s is logged once; a logging error never fa
 
 | Trigger (Hub page or API) | Event |
 |---|---|
-| `create_request` / New Request / Import Group Folder | `client_request` "Request received" (first 500 chars of the initial request) |
+| `create_request` / New Request | `client_request` "Request received" (first 500 chars of the initial request) |
+| `import_group_folder` (also via `move_group_folder`) / Import Group Folder | `confirmation` "Group folder imported" (folder, status, pax, value; `refs.dropbox_path`) |
 | `copy_program` / Copy programs | `program_update` "Copied program …" |
 | `fill_calc` with confirm | `calc_update` (+ `refs.calc_file`, `price_total`) |
 | `iti_create_personal`, "Create from sample" on a request, `iti_final_from_calc` / Final program page, `iti_publish`, `iti_document` / `iti_vouchers` saved to Dropbox | `program_update` (+ `refs.program_id`) |

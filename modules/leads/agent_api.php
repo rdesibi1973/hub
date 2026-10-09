@@ -17,9 +17,12 @@
 ob_start();
 date_default_timezone_set('Africa/Dar_es_Salaam');
 
+// includes/db.php: no connection → {"ok":false,"error":"database unavailable"} + 503, not the HTML text.
+define('DB_FAIL_JSON', true);
 require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/includes/booking_service.php';
 require_once __DIR__ . '/includes/folder_service.php';   // rename_folder (shared with BackOffice "Rename…")
+require_once __DIR__ . '/includes/group_import_service.php';   // import_group_folder / move_group_folder (shared with import_folder.php)
 require_once __DIR__ . '/includes/postpone_lib.php';   // booking_cc_agent_email()
 require_once __DIR__ . '/includes/calc_service.php';   // get_rates, fill_calc
 require_once __DIR__ . '/../iti/includes/iti_texts.php'; // ITI programme translations
@@ -90,7 +93,7 @@ function agent_audit(PDO $db, string $action, $reqId, array $payload, string $re
                               'iti_create_lodge', 'iti_set_days', 'iti_add_day', 'iti_delete_day', 'iti_update_inclusions',
                               'iti_create_flight_route', 'iti_create_activity', 'iti_create_transfer_route', 'iti_save_as_sample',
                               'create_request', 'add_flight_rates', 'timeline_update', 'summary_set', 'rename_folder',
-                              'set_request_status'], true) && empty($payload['confirm']);
+                              'set_request_status', 'update_request', 'import_group_folder', 'move_group_folder'], true) && empty($payload['confirm']);
     // Mail: keep who/what in the log, not message bodies or attachment content.
     if (in_array($action, ['mail_get', 'mail_attachment', 'iti_document', 'iti_vouchers'], true) && $code === 200) {
         $res = json_decode($resultJson, true);
@@ -747,31 +750,146 @@ try {
     // ── update_request ───────────────────────────────────────────────────────
     // Plain data fields only. Status / folder changes go through confirm_booking
     // (or the BackOffice), which keep the Dropbox folder and the DB in sync.
+    // Dry-run (changes {field: {from, to}}) unless "confirm": true.
     case 'update_request': {
         agent_require_method('POST');
         $r = agent_request($db, $in['request_id'] ?? 0);
         $allowed = ['customer_name','email','whatsapp','source','destination','period','pax',
                     'value_usd','commission_pct','date_paid','initial_request','notes'];
         $fields = isset($in['fields']) && is_array($in['fields']) ? $in['fields'] : $in;
-        $set = []; $args = []; $changed = [];
+        $new = [];
         foreach ($allowed as $f) {
             if (!array_key_exists($f, $fields)) continue;
             $val = $fields[$f];
-            $val = ($val === null || trim((string)$val) === '') ? null : trim((string)$val);
-            $set[] = $f . ' = ?'; $args[] = $val; $changed[] = $f;
+            $new[$f] = ($val === null || trim((string)$val) === '') ? null : trim((string)$val);
         }
-        $ignored = array_values(array_diff(array_keys($fields), array_merge($allowed, ['request_id', 'fields'])));
-        if (!$set) agent_fail('No updatable fields given', 400, ['updatable' => $allowed, 'ignored' => $ignored]);
+        $ignored = array_values(array_diff(array_keys($fields), array_merge($allowed, ['request_id', 'fields', 'confirm'])));
+        if (!$new) agent_fail('No updatable fields given', 400, ['updatable' => $allowed, 'ignored' => $ignored]);
         // Keep commission_usd consistent with value × pct.
-        $val = in_array('value_usd', $changed, true) ? $args[array_search('value_usd', $changed)] : $r['value_usd'];
-        $pct = in_array('commission_pct', $changed, true) ? $args[array_search('commission_pct', $changed)] : $r['commission_pct'];
-        if ($val !== null && $pct !== null && (in_array('value_usd', $changed, true) || in_array('commission_pct', $changed, true))) {
-            $set[] = 'commission_usd = ?'; $args[] = round((float)$val * (float)$pct / 100, 2);
+        if (array_key_exists('value_usd', $new) || array_key_exists('commission_pct', $new)) {
+            $val = array_key_exists('value_usd', $new) ? $new['value_usd'] : $r['value_usd'];
+            $pct = array_key_exists('commission_pct', $new) ? $new['commission_pct'] : $r['commission_pct'];
+            if ($val !== null && $pct !== null) $new['commission_usd'] = (string)round((float)$val * (float)$pct / 100, 2);
         }
-        $args[] = (int)$r['id'];
-        $db->prepare("UPDATE requests SET " . implode(', ', $set) . " WHERE id = ?")->execute($args);
-        $r = agent_request($db, $r['id']);
-        agent_out(['ok' => true, 'updated' => $changed, 'ignored' => $ignored, 'request' => agent_request_out($r)]);
+        // Only what differs (7890 = 7890.00).
+        $changes = [];
+        foreach ($new as $f => $to) {
+            $from = $r[$f] ?? null;
+            $same = ($from === null || $to === null) ? ($from === $to || (string)$from === (string)$to)
+                  : (is_numeric($from) && is_numeric($to) ? (float)$from == (float)$to : (string)$from === $to);
+            if (!$same) $changes[$f] = ['from' => $from, 'to' => $to];
+        }
+        if (empty($in['confirm'])) {
+            agent_out(['ok' => true, 'dry_run' => true, 'changes' => $changes, 'ignored' => $ignored, 'request' => agent_request_out($r),
+                       'message' => $changes ? 'Dry run — nothing saved. Resend with "confirm": true.' : 'Nothing would change.']);
+        }
+        if ($changes) {
+            $set = []; $args = [];
+            foreach ($changes as $f => $c) { $set[] = $f . ' = ?'; $args[] = $c['to']; }
+            $args[] = (int)$r['id'];
+            $db->prepare("UPDATE requests SET " . implode(', ', $set) . " WHERE id = ?")->execute($args);
+            $r = agent_request($db, $r['id']);
+        }
+        agent_out(['ok' => true, 'dry_run' => false, 'updated' => array_keys($changes), 'changes' => $changes,
+                   'ignored' => $ignored, 'request' => agent_request_out($r)]);
+    }
+
+    // ── import_group_folder ──────────────────────────────────────────────────
+    // A confirmed group folder already in /001_Safari → Hub request, same as "Import Group
+    // Folder" (includes/group_import_service.php). Dry-run unless "confirm": true.
+    case 'import_group_folder': {
+        agent_require_method('POST');
+        require_once __DIR__ . '/dropbox_helper.php';
+        try {
+            $p = gi_plan($db, $in, dropbox_get_access_token());
+        } catch (RuntimeException $e) {
+            agent_fail('Dropbox error — nothing was changed: ' . $e->getMessage(), 502);
+        }
+        if ($p['mode'] === 'update' && $p['target_id'] > 0) $agentReqId = $p['target_id'];
+        $out = ['folder' => $p['folder'], 'mode' => $p['mode'], 'target_id' => $p['target_id'] ?: null,
+                'parsed' => $p['parsed'], 'values' => $p['values'], 'duplicates' => $p['duplicates'],
+                'blocking' => $p['blocking'], 'warnings' => $p['warnings']];
+        if ($p['errors']) agent_fail(implode(' ', $p['errors']), 400, ['errors' => $p['errors']] + $out);
+        if (empty($in['confirm'])) {
+            agent_out(array_merge(['ok' => true, 'dry_run' => true], $out, ['message' => $p['blocking']
+                ? 'Dry run — blocked: ' . implode(' ', array_column($p['blocking'], 'message'))
+                : 'Dry run — nothing written. Resend with "confirm": true to import.']));
+        }
+        if ($p['blocking']) {
+            $code = in_array('folder_missing', array_column($p['blocking'], 'code'), true) ? 404 : 409;
+            agent_fail('Not imported: ' . implode(' ', array_column($p['blocking'], 'message')), $code, $out);
+        }
+        $rid = gi_import($db, $p['values'], $p['mode'], $p['target_id']);
+        $agentReqId = $rid;
+        agent_out(['ok' => true, 'dry_run' => false, 'request_id' => $rid, 'mode' => $p['mode'],
+                   'request' => agent_request_out(agent_request($db, $rid)), 'warnings' => $p['warnings']]);
+    }
+
+    // ── move_group_folder ────────────────────────────────────────────────────
+    // Provisional Il Diamante folder (…/Diamante/2027-Groups/…_PROVISIONAL) → /001_Safari with
+    // _PROVISIONAL → _BALANCE (or new_suffix / new_name); optional "import" runs
+    // import_group_folder on the moved folder. Dry-run unless "confirm": true.
+    case 'move_group_folder': {
+        agent_require_method('POST');
+        require_once __DIR__ . '/dropbox_helper.php';
+        if (isset($in['import']) && !is_array($in['import'])) agent_fail('import must be an object with the import_group_folder fields');
+        try {
+            $token = dropbox_get_access_token();
+            $mp    = gi_move_plan($db, $in, $token);
+        } catch (RuntimeException $e) {
+            agent_fail('Dropbox error — nothing was changed: ' . $e->getMessage(), 502);
+        }
+        $out = ['from' => $mp['from'], 'to' => $mp['to'], 'new_name' => $mp['new_name'],
+                'blocking' => $mp['blocking'], 'warnings' => $mp['warnings']];
+        if ($mp['errors']) agent_fail(implode(' ', $mp['errors']), 400, ['errors' => $mp['errors']] + $out);
+
+        // Import checked now on the new name (the folder is not in /001_Safari yet), so a move
+        // is never done when the import would be refused.
+        $imp = null;
+        if (isset($in['import'])) {
+            $imp = gi_plan($db, ['folder' => $mp['new_name']] + $in['import'], null);
+            $out['import_preview'] = ['mode' => $imp['mode'], 'target_id' => $imp['target_id'] ?: null, 'values' => $imp['values'],
+                                      'duplicates' => $imp['duplicates'], 'errors' => $imp['errors'],
+                                      'blocking' => $imp['blocking'], 'warnings' => $imp['warnings']];
+        }
+        $go = !empty($in['confirm']);
+        if (!$go) {
+            $all = array_merge(array_column($mp['blocking'], 'message'), $imp ? array_merge($imp['errors'], array_column($imp['blocking'], 'message')) : []);
+            agent_out(array_merge(['ok' => true, 'dry_run' => true], $out, ['message' => $all
+                ? 'Dry run — blocked: ' . implode(' ', $all)
+                : 'Dry run — nothing moved. Resend with "confirm": true to move' . ($imp ? ' and import' : '') . '.']));
+        }
+        if ($mp['blocking']) {
+            $code = in_array('source_missing', array_column($mp['blocking'], 'code'), true) ? 404 : 409;
+            agent_fail('Not moved: ' . implode(' ', array_column($mp['blocking'], 'message')), $code, $out);
+        }
+        if ($imp && $imp['errors']) agent_fail('Not moved — the import would fail: ' . implode(' ', $imp['errors']), 400, $out);
+        if ($imp && $imp['blocking']) agent_fail('Not moved — the import would be refused: ' . implode(' ', array_column($imp['blocking'], 'message')), 409, $out);
+
+        try {
+            $out['dropbox_path'] = gi_move_folder($token, $mp['from'], $mp['to']);
+        } catch (RuntimeException $e) {
+            agent_fail('Dropbox move failed — nothing was changed: ' . $e->getMessage(), 502, $out);
+        }
+        unset($out['blocking']);
+        $out = ['ok' => true, 'dry_run' => false, 'moved' => true] + $out;
+        if (!$imp) agent_out($out);
+
+        // The move stays done whatever happens to the import.
+        try {
+            $imp = gi_plan($db, ['folder' => $mp['new_name']] + $in['import'], $token);
+            if ($imp['errors'] || $imp['blocking']) {
+                throw new RuntimeException(implode(' ', array_merge($imp['errors'], array_column($imp['blocking'], 'message'))));
+            }
+            $rid = gi_import($db, $imp['values'], $imp['mode'], $imp['target_id']);
+            $agentReqId = $rid;
+            agent_out($out + ['imported' => true, 'request_id' => $rid, 'mode' => $imp['mode'],
+                              'request' => agent_request_out(agent_request($db, $rid))]);
+        } catch (Throwable $e) {
+            agent_out(['ok' => false] + $out + ['imported' => false, 'import_error' => $e->getMessage(),
+                              'error' => 'Folder moved, import failed: ' . $e->getMessage(),
+                              'hint' => 'The folder is moved. Retry with import_group_folder on "' . $mp['new_name'] . '".'], 422);
+        }
     }
 
     // ── set_request_status ───────────────────────────────────────────────────
@@ -2185,7 +2303,7 @@ try {
 
     default:
         agent_fail('Unknown action "' . $agentAction . '"', 400, ['actions' => [
-            'find_requests', 'list_agencies', 'create_request', 'update_request', 'list_standard_programs',
+            'find_requests', 'list_agencies', 'create_request', 'update_request', 'import_group_folder', 'move_group_folder', 'list_standard_programs',
             'copy_program', 'get_rates', 'fill_calc', 'read_calc', 'confirm_preview', 'confirm_booking', 'send_booking_email',
             'rollback_booking', 'iti_programs', 'iti_texts', 'iti_save_texts', 'update_rate', 'replace_flight_rates',
             'iti_lodges', 'iti_lodge', 'iti_destinations', 'iti_destination', 'iti_lodge_photos', 'iti_destination_photo',

@@ -68,6 +68,8 @@ function req_folder_path(array $r): string {
         }
     }
     if (!empty($r['group_folder']) && $leaf !== '') {
+        // Imported group (Import Group Folder): group_folder = practice_code = one folder.
+        if (trim($r['group_folder']) === $leaf) return '/001_Safari/' . $leaf;
         return '/001_Safari/' . $r['group_folder'] . '/' . $leaf;
     }
     return '';

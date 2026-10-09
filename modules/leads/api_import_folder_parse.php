@@ -9,12 +9,12 @@
  * Auth: session (requireLogin) — called from import_folder.php with the session cookie.
  * Method: POST  { "folder": "03_02MAR_Panorama05_(Diamante-PS-Roberto)_START02MAR_END09MAR2027_CONFIRMED" }
  *
- * Place this file in: /modules/leads/
+ * Logic: includes/group_import_service.php (shared with the Agent API import_group_folder).
  */
 
 ob_start();
 require_once 'config.php';
-require_once 'includes/folder_parser.php';
+require_once 'includes/group_import_service.php';
 requireLogin();
 header('Content-Type: application/json');
 
@@ -31,86 +31,8 @@ if ($folder === '') {
     exit;
 }
 
-$parsed = parse_import_folder($folder);
 $db     = db();
-
-// ── Suggest an agent by matching the handler name against the agents table ────
-$agentSuggestId   = null;
-$agentSuggestName = '';
-if ($parsed['handler'] !== '') {
-    $needle = strtolower(str_replace(' ', '', $parsed['handler']));
-    $agents = $db->query("SELECT id, name FROM agents WHERE active = 1")->fetchAll(PDO::FETCH_ASSOC);
-    foreach ($agents as $a) {
-        $cand = strtolower(str_replace(' ', '', $a['name']));
-        if ($cand === $needle || strpos($cand, $needle) === 0) {
-            $agentSuggestId   = (int)$a['id'];
-            $agentSuggestName = $a['name'];
-            break;
-        }
-    }
-}
-$parsed['agent_id_suggested']   = $agentSuggestId;
-$parsed['agent_name_suggested'] = $agentSuggestName;
-
-// ── Duplicate check ───────────────────────────────────────────────────────────
-// Match on: exact folder (group_folder/practice_code), folder stem (status-agnostic),
-// or same customer_name (+ start date when available).
-$stem      = $parsed['stem'];
-$name      = $parsed['customer_name'];
-$startDate = $parsed['start_date'];
-
-$sql = "SELECT id, customer_name, status, group_folder, practice_code, start_date,
-               period, confirmation_date
-        FROM requests
-        WHERE group_folder = ?
-           OR practice_code = ?
-           OR group_folder  LIKE ?
-           OR practice_code LIKE ?
-           OR (customer_name = ? AND ? <> '')";
-$stmt = $db->prepare($sql);
-$stmt->execute([$folder, $folder, $stem . '%', $stem . '%', $name, $name]);
-
-$seen    = [];
-$matches = [];
-foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
-    $id = (int)$row['id'];
-    if (isset($seen[$id])) continue;
-    $seen[$id] = true;
-
-    $level  = 'low';
-    $reason = 'Same customer name';
-
-    $rowFolder = (string)($row['group_folder'] ?: $row['practice_code']);
-    if ($rowFolder === $folder) {
-        $level  = 'exact';
-        $reason = 'Identical folder already imported';
-    } elseif ($stem !== '' && stripos($rowFolder, $stem) === 0) {
-        $level  = 'high';
-        $reason = 'Same group + dates (different status suffix)';
-    } elseif ($name !== '' && strcasecmp((string)$row['customer_name'], $name) === 0
-              && $startDate && $row['start_date'] === $startDate) {
-        $level  = 'high';
-        $reason = 'Same group name and start date';
-    }
-
-    $matches[] = [
-        'id'            => $id,
-        'customer_name' => $row['customer_name'],
-        'status'        => $row['status'],
-        'folder'        => $rowFolder,
-        'start_date'    => $row['start_date'],
-        'period'        => $row['period'],
-        'level'         => $level,
-        'reason'        => $reason,
-    ];
-}
-
-// Rank: exact → high → low
-$rank = ['exact' => 0, 'high' => 1, 'low' => 2];
-usort($matches, function ($a, $b) use ($rank) {
-    return $rank[$a['level']] <=> $rank[$b['level']];
-});
-
-$parsed['duplicates'] = $matches;
+$parsed = gi_parse($db, $folder);                              // fields + suggested agent
+$parsed['duplicates'] = gi_duplicates($db, $parsed, $folder);  // ranked exact → high → low
 
 echo json_encode($parsed);

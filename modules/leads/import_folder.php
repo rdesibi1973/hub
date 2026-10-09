@@ -11,10 +11,12 @@
  *   2. JS calls api_import_folder_parse.php → parsed fields + duplicate check.
  *   3. Operator reviews / edits the fields, resolves any duplicate, confirms.
  *   4. This page (POST) inserts a new request, or updates the chosen existing one.
+ *
+ * Logic: includes/group_import_service.php (shared with the Agent API import_group_folder).
  */
 
 require_once 'config.php';
-require_once 'includes/folder_parser.php';
+require_once 'includes/group_import_service.php';
 requireLogin();
 
 if (isLeadsRestricted()) {
@@ -27,93 +29,26 @@ $pageTitle = 'Import Group Folder';
 $db        = db();
 $errors    = [];
 
-// Allowed statuses: the standard set plus "Provisional" (used by folder tags).
-$allowedStatuses = array_keys(STATUSES);
-if (!in_array('Provisional', $allowedStatuses, true)) $allowedStatuses[] = 'Provisional';
+$allowedStatuses = gi_statuses();
 
 // ── POST: confirm + insert/update ─────────────────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $folder        = trim($_POST['group_folder']  ?? '');
-    $mode          = ($_POST['mode'] ?? 'create') === 'update' ? 'update' : 'create';
-    $targetId      = (int)($_POST['target_id']    ?? 0);
-    $customerName  = trim($_POST['customer_name'] ?? '');
-    $source        = trim($_POST['source']        ?? '');
-    $agentId       = (int)($_POST['agent_id']     ?? 0);
-    $destination   = trim($_POST['destination']   ?? '');
-    $period        = trim($_POST['period']        ?? '');
-    $startDate     = trim($_POST['start_date']    ?? '');
-    $status        = trim($_POST['status']        ?? 'Booked');
-    $paymentStatus = trim($_POST['payment_status'] ?? '');
-    $pax           = trim($_POST['pax']           ?? '');
-    $valueUsd      = trim($_POST['value_usd']     ?? '');
-    $notes         = trim($_POST['notes']         ?? '');
+    $v = [];
+    foreach (['group_folder', 'customer_name', 'source', 'agent_id', 'destination', 'period', 'start_date',
+              'payment_status', 'pax', 'value_usd', 'notes'] as $k) {
+        $v[$k] = trim((string)($_POST[$k] ?? ''));
+    }
+    $v['status']    = trim((string)($_POST['status'] ?? 'Booked'));
+    $v['mode']      = ($_POST['mode'] ?? 'create') === 'update' ? 'update' : 'create';
+    $v['target_id'] = (int)($_POST['target_id'] ?? 0);
 
-    // ── Validate ──────────────────────────────────────────────────────────────
-    if ($folder === '')        $errors[] = 'Folder name is missing.';
-    if ($customerName === '')  $errors[] = 'Group / customer name is required.';
-    if (!in_array($status, $allowedStatuses, true)) $errors[] = 'Invalid status.';
-    $allowedPayment = ['', 'Deposit', 'Balance', 'Balance-Cash', 'Paid'];
-    if (!in_array($paymentStatus, $allowedPayment, true)) $errors[] = 'Invalid payment status.';
-    if ($startDate !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $startDate)) {
-        $errors[] = 'Invalid start date.';
-    }
-    if ($agentId) {
-        $chk = $db->prepare("SELECT id FROM agents WHERE id = ?");
-        $chk->execute([$agentId]);
-        if (!$chk->fetch()) $errors[] = 'Selected agent no longer exists.';
-    }
-    if ($mode === 'update') {
-        $chk = $db->prepare("SELECT id FROM requests WHERE id = ?");
-        $chk->execute([$targetId]);
-        if (!$chk->fetch()) $errors[] = 'The request to update no longer exists.';
-    }
-
+    $errors = gi_validate($db, $v);
     if (!$errors) {
-        $dropboxUrl = 'https://www.dropbox.com/home/001_Safari/' . rawurlencode($folder);
-        $paxVal     = $pax      !== '' ? (int)$pax        : null;
-        $valVal     = $valueUsd !== '' ? (float)$valueUsd : null;
-        $startVal   = $startDate !== '' ? $startDate      : null;
-
-        if ($mode === 'update') {
-            $sql = "UPDATE requests SET
-                        practice_code     = ?,
-                        group_folder      = ?,
-                        customer_name     = ?,
-                        source            = ?,
-                        agent_id          = ?,
-                        destination       = ?,
-                        period            = ?,
-                        status            = ?,
-                        payment_status    = ?,
-                        start_date        = COALESCE(?, start_date),
-                        pax               = COALESCE(?, pax),
-                        value_usd         = COALESCE(?, value_usd),
-                        confirmation_date = CURDATE(),
-                        dropbox_url       = ?,
-                        notes             = ?
-                    WHERE id = ?";
-            $db->prepare($sql)->execute([
-                $folder, $folder, $customerName, $source ?: null, $agentId ?: null,
-                $destination ?: null, $period ?: null, $status, $paymentStatus ?: null,
-                $startVal, $paxVal, $valVal, $dropboxUrl, $notes ?: null, $targetId,
-            ]);
-            $reqId = $targetId;
-            flash("Group folder imported — updated request #{$reqId}. 📁 {$folder}");
-        } else {
-            $sql = "INSERT INTO requests
-                        (practice_code, group_folder, date_received, customer_name, source,
-                         agent_id, destination, period, pax, status, payment_status, value_usd,
-                         start_date, confirmation_date, notes, dropbox_url, created_at)
-                    VALUES (?,?,CURDATE(),?,?,?,?,?,?,?,?,?,?,CURDATE(),?,?,NOW())";
-            $db->prepare($sql)->execute([
-                $folder, $folder, $customerName, $source ?: null, $agentId ?: null,
-                $destination ?: null, $period ?: null, $paxVal, $status, $paymentStatus ?: null,
-                $valVal, $startVal, $notes ?: null, $dropboxUrl,
-            ]);
-            $reqId = (int)$db->lastInsertId();
-            flash("Group folder imported — created request #{$reqId}. 📁 {$folder}");
-        }
-
+        $folder = $v['group_folder'];
+        $reqId  = gi_import($db, $v, $v['mode'], $v['target_id']);
+        flash($v['mode'] === 'update'
+            ? "Group folder imported — updated request #{$reqId}. 📁 {$folder}"
+            : "Group folder imported — created request #{$reqId}. 📁 {$folder}");
         header('Location: request_view.php?id=' . $reqId);
         exit;
     }

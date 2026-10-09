@@ -345,10 +345,12 @@ function ck_sync_requests(PDO $db, string $old, string $new): int {
     $n = 0;
     $st = $db->prepare("SELECT id, practice_code FROM requests WHERE group_folder = ?");
     $st->execute([$old]);
-    $upd = $db->prepare("UPDATE requests SET group_folder = ?, dropbox_url = ? WHERE id = ?");
+    $upd = $db->prepare("UPDATE requests SET group_folder = ?, practice_code = ?, dropbox_url = ? WHERE id = ?");
     foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $g) {
         $sub = trim($g['practice_code'] ?? '');
-        $upd->execute([$new, ck_url_from_path(CK_BASE . '/' . $new . ($sub !== '' ? '/' . $sub : '')), (int)$g['id']]);
+        $self = $sub === $old;   // imported group: practice_code = group_folder = the folder itself
+        $upd->execute([$new, $self ? $new : $g['practice_code'],
+                       ck_url_from_path(CK_BASE . '/' . $new . ($sub !== '' && !$self ? '/' . $sub : '')), (int)$g['id']]);
         $n++;
     }
     $st = $db->prepare("UPDATE requests SET practice_code = ?, dropbox_url = ?

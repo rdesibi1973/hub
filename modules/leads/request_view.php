@@ -555,7 +555,12 @@ include 'includes/header.php';
 <div class="table-wrap" style="max-width:860px;margin-bottom:20px">
   <div class="detail-grid">
 
-    <?php if (!empty($r['group_folder'])): ?>
+    <?php
+    // Imported group folders (import_folder.php / API import_group_folder) store the same
+    // name in group_folder and practice_code: one folder, not a parent + sub-folder.
+    $selfGrp = !empty($r['group_folder']) && trim($r['group_folder']) === trim($r['practice_code'] ?? '');
+    ?>
+    <?php if (!empty($r['group_folder']) && !$selfGrp): ?>
     <div class="detail-label">GRP Folder</div>
     <div class="detail-value" style="font-size:.82rem;">
       <?= h($r['group_folder']) ?>
@@ -564,7 +569,7 @@ include 'includes/header.php';
 
     <div class="detail-label">Dropbox Folder</div>
     <div class="detail-value">
-      <?php if (!empty($r['group_folder']) && $r['practice_code']): ?>
+      <?php if (!empty($r['group_folder']) && $r['practice_code'] && !$selfGrp): ?>
         <span style="color:var(--grey-mid);font-size:.78rem;"><?= h($r['group_folder']) ?>/</span><?= h($r['practice_code']) ?>
       <?php else: ?>
         <?= $r['practice_code'] ? h($r['practice_code']) : '<span class="text-muted">—</span>' ?>
@@ -818,7 +823,10 @@ include 'includes/header.php';
         })();
         </script>
       <?php else: ?>
-        <span class="text-muted"><?= $ckOther ? '— no CK outside Tanzania' : '— folder not in 001_Safari (the check runs on confirmed bookings)' ?></span>
+        <span class="text-muted"><?= $ckOther ? '— no CK outside Tanzania'
+            : (preg_match('#^/001_Safari/[^/]+#i', $dbxPath)
+               ? '— not in the CK tracker yet (a folder moved to 001_Safari is picked up by the next scan)'
+               : '— folder not in 001_Safari (the check runs on confirmed bookings)') ?></span>
       <?php endif; ?>
     </div>
 

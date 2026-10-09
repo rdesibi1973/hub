@@ -20,6 +20,25 @@ Running log of notable changes and current build state. Module-level "active / p
 
 ---
 
+## 2026-10-09 — Agent API: Il Diamante group folders; update_request dry-run
+- New `includes/group_import_service.php` (`gi_parse`, `gi_duplicates`, `gi_validate`, `gi_import`, plus
+  `gi_plan` / `gi_move_plan` for the API): the logic of Import Group Folder, moved out of `import_folder.php`
+  and `api_import_folder_parse.php` (same behaviour; pax / value now checked as numbers). An import now logs
+  a "Group folder imported" timeline event.
+- API `import_group_folder` (folder in `/001_Safari` → request, Booked / Balance; duplicate rules exact → 409,
+  high → 409 unless `allow_duplicate`) and `move_group_folder` (`…/Diamante/2027-Groups/…_PROVISIONAL` →
+  `/001_Safari/…_BALANCE|_DEPOSIT|_PAID`, optional `import` in the same call). Both dry-run unless `"confirm": true`.
+- **Breaking for callers:** API `update_request` is now **dry-run unless `"confirm": true`** and returns
+  `changes {field: {from, to}}` (on 7 Oct it changed pax / value of #3023 at the first call).
+- API: Hub DB down → `{"ok":false,"error":"database unavailable"}` HTTP 503 instead of an HTML text
+  (`includes/db.php`, flag `DB_FAIL_JSON`).
+- Request view, imported groups (`group_folder` = `practice_code`, e.g. #3055, #3064): Dropbox folder no longer
+  shown as `<folder>/<folder>`; CK box says "not in the CK tracker yet" instead of "not in 001_Safari" when the
+  folder is in 001_Safari but not scanned yet. `req_folder_path()` fallback no longer doubles the name.
+- Fix: renaming an imported group (Rename… / `rename_folder`, group payment tag in `grp_status.php`, `_CK`
+  sync in `ck_lib.php`) wrote `dropbox_url = …/<new>/<old>` and left `practice_code` on the old name;
+  now both follow the new name.
+
 ## 2026-10 — ITI ref number and file names = the copy_program Word
 - Rule: a client programme's `ref_number` and every programme file saved in the booking folder are named
   like the Word `copy_program` copied there (`01_Name(Agency-Agent)_PumbaSafari`). Shared naming:
