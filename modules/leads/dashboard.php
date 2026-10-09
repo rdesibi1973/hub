@@ -53,7 +53,14 @@ $booked = $db->prepare("SELECT COUNT(*) FROM requests WHERE status='Booked' AND 
 $booked->execute([$start, $end]);
 $bookedCount = (int)$booked->fetchColumn();
 
-$salesRate = $totalCount > 0 ? round($bookedCount / $totalCount * 100, 1) : 0;
+// Sales rate = conversion of the requests received in the period (same cohort on both
+// sides): how many of them are Booked now, whenever confirmed. STAFF excluded from both.
+$conv = $db->prepare("SELECT COUNT(*) AS recv, COALESCE(SUM(status='Booked'),0) AS won FROM requests WHERE date_received BETWEEN ? AND ? AND (practice_code NOT LIKE '%-STAFF%' OR practice_code IS NULL)");
+$conv->execute([$start, $end]);
+$convRow   = $conv->fetch();
+$convRecv  = (int)$convRow['recv'];
+$convWon   = (int)$convRow['won'];
+$salesRate = $convRecv > 0 ? round($convWon / $convRecv * 100, 1) : 0;
 
 $value = $db->prepare("SELECT COALESCE(SUM(value_usd),0) FROM requests WHERE status='Booked' AND confirmation_date BETWEEN ? AND ? AND (practice_code NOT LIKE '%-STAFF%' OR practice_code IS NULL)");
 $value->execute([$start, $end]);
@@ -212,7 +219,7 @@ function applyPeriod(val) {
   <div class="stat-card amber">
     <div class="stat-label">Sales Rate</div>
     <div class="stat-value"><?= $salesRate ?>%</div>
-    <div class="stat-sub">booked / received</div>
+    <div class="stat-sub"><?= $convWon ?> of <?= $convRecv ?> received now booked</div>
   </div>
   <div class="stat-card green">
     <div class="stat-label">Value Sold</div>
