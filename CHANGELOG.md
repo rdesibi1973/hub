@@ -34,6 +34,21 @@ Running log of notable changes and current build state. Module-level "active / p
 - `bs_camel_case()` keeps mixed-case words (`Luca DeSanctis` → `LucaDeSanctis`, was `Lucadesanctis`); Incoming
   approve and `api_create_request.php` now use it instead of their own copies.
 
+## 2026-10-09 — Invoice PDF: one layout for the page and Dompdf
+- `modules/invoices/includes/invoice_html.php` is now the only invoice / credit note layout (tables + class
+  CSS, no flex / grid): `invoice_pdf.php` and `cn_pdf.php` (Print / Save as PDF) and Dompdf
+  (`inv_pdf()` → API `save_invoice_pdf`, `api_send_invoice_email.php`, `invoices_zip.php`) render the same body.
+- Dompdf PDFs now look like the printed page: logo + "Invoice", BALANCE DUE, issuer block, BILL TO, dates
+  (Terms / Due Date only when set — no more "Due Date: —", no Currency row), ITEM & DESCRIPTION, Sub Total /
+  Total / Payment Made / Balance Due, NOTES and TERMS & CONDITIONS side by side; SH: AfrAsia bank details per currency.
+- The design follows Chrome's print (background graphics off): no dark table header or grey Balance Due fill,
+  on screen too. SH bank-details block more compact (an SH invoice with 2 lines fits one A4 page) and never split.
+- Dompdf uses Open Sans like the page: static TTF in `modules/invoices/assets/fonts/` (300 / 400 / 600 / 700,
+  OFL), options from `inv_doc_dompdf_options()` (font folder in chroot, metrics cached in `sys_get_temp_dir()`).
+  Checked against the Chrome print of SE-2026-0177: same column positions and line positions within 1–2 pt.
+- `invoice_pdf.php` / `cn_pdf.php` now require login + invoices permission (`requireInvoiceAccess()`); before,
+  any invoice or credit note could be opened by id without logging in. File name unchanged.
+
 ## 2026-10-09 — Agent API: Il Diamante group folders; update_request dry-run
 - New `includes/group_import_service.php` (`gi_parse`, `gi_duplicates`, `gi_validate`, `gi_import`, plus
   `gi_plan` / `gi_move_plan` for the API): the logic of Import Group Folder, moved out of `import_folder.php`

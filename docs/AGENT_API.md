@@ -603,7 +603,8 @@ Renames the booking's Dropbox folder tag (`_CK` stays last), sets `requests.paym
 parent folder. Without `"confirm": true` → `current` and `new_name` only. Same tag already → `unchanged`.
 
 ### `save_invoice_pdf` (POST)
-Renders the PDF server-side (Dompdf — the same layout as the emailed invoice) and uploads it as
+Renders the PDF server-side (Dompdf) with the same layout as the invoice page's Print / Save as PDF, the
+emailed invoice and the ZIP export — one template, `modules/invoices/includes/invoice_html.php` — and uploads it as
 `Invoice <number>.pdf` (the name *Invoice Check — Dropbox* looks for) into the booking folder
 (GRP client: the client sub-folder). `overwrite` (default false: 409 if the file exists; Dropbox keeps
 the old version when overwritten), `folder_path` (optional full Dropbox path, overrides the folder).
