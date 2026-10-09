@@ -5,39 +5,54 @@ requireLogin();
 if (isLeadsRestricted()) { header('Location: requests.php'); exit; }
 $pageTitle = 'Dashboard';
 
-// ── Period resolution ────────────────────────────────────────────
-$year   = (int)($_GET['year']   ?? date('Y'));
-$period = $_GET['period'] ?? date('m');       // 'year' | '01'..'12'  — default: current month
-$mode   = $_GET['mode']   ?? 'period';        // 'period' | 'ytd'
-// Normalize so the Period select always matches what is computed ('3' → '03', junk → current month)
-if ($period !== 'year') {
-    $p = (int)$period;
-    $period = ($p >= 1 && $p <= 12) ? str_pad($p, 2, '0', STR_PAD_LEFT) : date('m');
-}
-if ($mode !== 'ytd') $mode = 'period';
+date_default_timezone_set('Africa/Dar_es_Salaam');   // "today" / YTD must follow Arusha, not the US server
 
-$months = ['01'=>'January','02'=>'February','03'=>'March','04'=>'April',
-           '05'=>'May','06'=>'June','07'=>'July','08'=>'August',
-           '09'=>'September','10'=>'October','11'=>'November','12'=>'December'];
+// ── Period resolution: one date range, default YTD ───────────────
+// ?from=YYYY-MM-DD&to=YYYY-MM-DD. Presets (YTD, full year, single months) just fill the range.
+$today = date('Y-m-d');
+$curY  = (int)date('Y');
+$isYmd = function ($s) {
+    if (!is_string($s) || !preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $s, $m)) return false;
+    return checkdate((int)$m[2], (int)$m[3], (int)$m[1]);
+};
+$start = $_GET['from'] ?? '';
+$end   = $_GET['to']   ?? '';
+if (!$isYmd($start) || !$isYmd($end)) { $start = "$curY-01-01"; $end = $today; }
+if ($start > $end) [$start, $end] = [$end, $start];
 
-if ($period === 'year') {
-    $start       = "$year-01-01";
-    $end         = "$year-12-31";
-    $periodLabel = "Full Year $year";
-    $showToggle  = false;
-    $mode        = 'period';
-} else {
-    $m = str_pad((int)$period, 2, '0', STR_PAD_LEFT);
-    $showToggle  = true;
-    if ($mode === 'ytd') {
-        $start       = "$year-01-01";
-        $end         = date('Y-m-t', strtotime("$year-$m-01"));
-        $periodLabel = "Jan – " . date('M Y', strtotime("$year-$m-01")) . " (YTD)";
-    } else {
-        $start       = "$year-$m-01";
-        $end         = date('Y-m-t', strtotime("$year-$m-01"));
-        $periodLabel = date('F Y', strtotime("$year-$m-01"));
+// Presets: [label, from, to]
+$presets = [
+    'ytd'      => ["YTD $curY",              "$curY-01-01", $today],
+    'ytd_prev' => ['YTD ' . ($curY - 1),     ($curY - 1) . '-01-01', ($curY - 1) . substr($today, 4)],
+    'year_prev'=> ['Full Year ' . ($curY - 1), ($curY - 1) . '-01-01', ($curY - 1) . '-12-31'],
+];
+if ($presets['ytd_prev'][2] === ($curY - 1) . '-02-29' && !checkdate(2, 29, $curY - 1)) $presets['ytd_prev'][2] = ($curY - 1) . '-02-28';
+$activePreset = null;
+foreach ($presets as $k => $p) if ($p[1] === $start && $p[2] === $end) { $activePreset = $k; break; }
+
+// Month quick-picks: this year up to the current month, then all of last year (newest first)
+$monthOpts = [];
+foreach ([$curY, $curY - 1] as $y) {
+    $lastM = $y === $curY ? (int)date('n') : 12;
+    for ($mm = $lastM; $mm >= 1; $mm--) {
+        $f = sprintf('%04d-%02d-01', $y, $mm);
+        $monthOpts[$y][] = [date('F Y', strtotime($f)), $f, date('Y-m-t', strtotime($f))];
     }
+}
+$isFullMonth = substr($start, 8) === '01' && $end === date('Y-m-t', strtotime($start));
+
+// Human label for the range
+$fmt = fn($d, $withYear = true) => date($withYear ? 'j M Y' : 'j M', strtotime($d));
+if ($activePreset === 'ytd') {
+    $periodLabel = "YTD $curY (1 Jan – " . $fmt($end, false) . ')';
+} elseif ($isFullMonth) {
+    $periodLabel = date('F Y', strtotime($start));
+} elseif (substr($start, 5) === '01-01' && substr($end, 5) === '12-31' && substr($start, 0, 4) === substr($end, 0, 4)) {
+    $periodLabel = 'Full Year ' . substr($start, 0, 4);
+} elseif ($activePreset === 'ytd_prev') {
+    $periodLabel = 'YTD ' . ($curY - 1) . ' (1 Jan – ' . $fmt($end, false) . ')';
+} else {
+    $periodLabel = $fmt($start, substr($start, 0, 4) !== substr($end, 0, 4)) . ' – ' . $fmt($end);
 }
 
 $db = db();
@@ -108,10 +123,8 @@ $recent = $db->query("
 ")->fetchAll();
 
 // ── URL helper ───────────────────────────────────────────────────
-function dashUrl($overrides = []) {
-    global $year, $period, $mode;
-    $params = array_merge(['year'=>$year,'period'=>$period,'mode'=>$mode], $overrides);
-    return '?' . http_build_query($params);
+function rangeUrl($from, $to) {
+    return '?' . http_build_query(['from' => $from, 'to' => $to]);
 }
 
 include 'includes/header.php';
@@ -126,12 +139,14 @@ include 'includes/header.php';
   font-size: .7rem; font-weight: 700; text-transform: uppercase;
   letter-spacing: .1em; color: var(--grey-mid);
 }
-.dash-filter-bar select {
+.dash-filter-bar select, .dash-filter-bar input[type=date] {
   font-family: 'Open Sans', sans-serif; font-size: .85rem; font-weight: 600;
   padding: 7px 12px; border: 1.5px solid var(--grey-lt); border-radius: 7px;
   background: var(--white); color: var(--black); cursor: pointer; transition: border-color .15s;
 }
-.dash-filter-bar select:focus { outline: none; border-color: var(--red); }
+.dash-filter-bar select:focus, .dash-filter-bar input[type=date]:focus { outline: none; border-color: var(--red); }
+.dash-filter-bar input[type=date] { cursor: text; padding: 6px 10px; }
+.dash-range-form { display: flex; align-items: center; gap: 8px; margin: 0; }
 .period-toggle { display: flex; background: var(--grey-lt); border-radius: 7px; overflow: hidden; }
 .period-toggle a {
   font-size: .72rem; font-weight: 700; text-transform: uppercase;
@@ -157,49 +172,42 @@ include 'includes/header.php';
   <a href="request_add.php" class="btn btn-red">+ New Request</a>
 </div>
 
-<!-- PERIOD FILTER BAR -->
+<!-- PERIOD FILTER BAR — one date range; presets and months just fill it -->
 <div class="dash-filter-bar">
-  <label>Year</label>
-  <select autocomplete="off" onchange="applyParam('year',this.value)">
-    <?php foreach ([(int)date('Y')-1, (int)date('Y'), (int)date('Y')+1] as $y): ?>
-      <option value="<?= $y ?>" <?= $y == $year ? 'selected' : '' ?>><?= $y ?></option>
-    <?php endforeach; ?>
-  </select>
-
-  <div class="dash-filter-sep"></div>
-
-  <label>Period</label>
-  <select autocomplete="off" onchange="applyPeriod(this.value)">
-    <option value="year" <?= $period==='year' ? 'selected' : '' ?>>Full Year</option>
-    <?php foreach ($months as $num => $name): ?>
-      <option value="<?= $num ?>" <?= $period===$num ? 'selected' : '' ?>><?= $name ?></option>
-    <?php endforeach; ?>
-  </select>
-
-  <?php if ($showToggle): ?>
-  <div class="dash-filter-sep"></div>
-  <label>View</label>
   <div class="period-toggle">
-    <a href="<?= dashUrl(['mode'=>'period']) ?>" class="<?= $mode==='period' ? 'active' : '' ?>"><?= $months[$period] ?></a>
-    <a href="<?= dashUrl(['mode'=>'ytd'])   ?>" class="<?= $mode==='ytd'    ? 'active' : '' ?>">YTD</a>
+    <?php foreach ($presets as $k => $p): ?>
+      <a href="<?= rangeUrl($p[1], $p[2]) ?>" class="<?= $activePreset === $k ? 'active' : '' ?>"><?= h($p[0]) ?></a>
+    <?php endforeach; ?>
   </div>
-  <?php endif; ?>
+
+  <div class="dash-filter-sep"></div>
+
+  <label>Month</label>
+  <select autocomplete="off" onchange="if (this.value) location.href = this.value">
+    <option value="">—</option>
+    <?php foreach ($monthOpts as $y => $opts): ?>
+      <optgroup label="<?= $y ?>">
+        <?php foreach ($opts as $o): ?>
+          <option value="<?= h(rangeUrl($o[1], $o[2])) ?>" <?= $o[1] === $start && $o[2] === $end ? 'selected' : '' ?>><?= h($o[0]) ?></option>
+        <?php endforeach; ?>
+      </optgroup>
+    <?php endforeach; ?>
+  </select>
+
+  <div class="dash-filter-sep"></div>
+
+  <form method="get" class="dash-range-form">
+    <label for="dash-from">From</label>
+    <input type="date" id="dash-from" name="from" value="<?= h($start) ?>" autocomplete="off" required>
+    <label for="dash-to">To</label>
+    <input type="date" id="dash-to" name="to" value="<?= h($end) ?>" autocomplete="off" required>
+    <button type="submit" class="btn btn-outline btn-sm">Apply</button>
+  </form>
 </div>
 
 <script>
-// Back/forward cache can restore a stale select value: reload to resync with the URL
+// Back/forward cache can restore stale filter values: reload to resync with the URL
 window.addEventListener('pageshow', function (e) { if (e.persisted) location.reload(); });
-function applyParam(key, val) {
-  var u = new URL(location.href);
-  u.searchParams.set(key, val);
-  location.href = u.toString();
-}
-function applyPeriod(val) {
-  var u = new URL(location.href);
-  u.searchParams.set('period', val);
-  if (val === 'year') u.searchParams.set('mode', 'period');
-  location.href = u.toString();
-}
 </script>
 
 <!-- STAT CARDS -->
