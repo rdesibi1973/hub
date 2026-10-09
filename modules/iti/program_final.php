@@ -78,15 +78,17 @@ $active = null;
 foreach ($finals as $f) { if (!$f['superseded_by']) { $active = $f; break; } }
 $calcChanged = $active && $calc && $active['source_calc_rev'] && $active['source_calc_rev'] !== $calc['calc_rev'];
 
-$samples = [];
+$samples = []; $suggestedSample = 0;
 if ($calc && !$sample) {
     $samples = $db->query("SELECT id, title_en, title_it, display_language, duration_days, hub_program_code FROM iti_programs
                             WHERE program_type = 'sample' AND status <> 'cancelled' ORDER BY title_en")->fetchAll();
+    $suggestedSample = iti_final_suggest_sample($samples, $code, count($calc['days']), $lang);
 }
 // Pickers for inline mapping (only when something is unmapped).
 $opt = ['lodge' => [], 'activity' => [], 'transfer' => [], 'flight' => []];
+$optName = ['lodge' => []];   // lodge names without the destination, for the preselected suggestion
 if ($plan && $plan['blocking']) {
-    foreach (iti_get_lodges() as $l) $opt['lodge'][$l['id']] = $l['name'] . ' — ' . $l['dest_name_en'];
+    foreach (iti_get_lodges() as $l) { $opt['lodge'][$l['id']] = $l['name'] . ' — ' . $l['dest_name_en']; $optName['lodge'][$l['id']] = $l['name']; }
     foreach (iti_get_activities() as $a) $opt['activity'][$a['id']] = $a['name_en'] . ($a['name_it'] && $a['name_it'] !== $a['name_en'] ? ' / ' . $a['name_it'] : '');
     foreach (iti_get_transfer_routes() as $r) $opt['transfer'][$r['id']] = $r['from_name'] . ' → ' . $r['to_name'];
     foreach (iti_get_flight_routes() as $r) $opt['flight'][$r['id']] = $r['from_airport'] . ' → ' . $r['to_airport'] . ($r['operator'] ? ' (' . $r['operator'] . ')' : '');
@@ -176,11 +178,12 @@ include __DIR__ . '/../../includes/layout_header.php';
       <span style="font-size:.85rem;">No sample is tagged “<?= h($code) ?>” yet — choose it once:</span>
       <select name="sample_id" style="min-width:320px;">
         <option value="">— select —</option>
-        <?php foreach ($samples as $s): ?>
-          <option value="<?= (int)$s['id'] ?>"><?= h($s['title_it'] ?: $s['title_en']) ?> (<?= (int)$s['duration_days'] ?>d, <?= h($s['display_language']) ?>)<?= $s['hub_program_code'] ? ' — now “' . h($s['hub_program_code']) . '”' : '' ?></option>
+        <?php foreach ($samples as $s): $sug = (int)$s['id'] === $suggestedSample; ?>
+          <option value="<?= (int)$s['id'] ?>"<?= $sug ? ' selected' : '' ?>><?= $sug ? '★ ' : '' ?>#<?= (int)$s['id'] ?> <?= h($s['title_it'] ?: $s['title_en']) ?> (<?= (int)$s['duration_days'] ?>d, <?= h($s['display_language']) ?>)<?= $s['hub_program_code'] ? ' — now “' . h($s['hub_program_code']) . '”' : '' ?></option>
         <?php endforeach; ?>
       </select>
       <button type="submit" class="btn btn-red btn-sm">Use this sample</button>
+      <?php if ($suggestedSample): ?><span style="font-size:.78rem;color:var(--grey-mid);">★ proposed: title contains “<?= h($code) ?>”<?= count($calc['days']) ? ', ' . count($calc['days']) . ' days like the Calc' : '' ?> — check it</span><?php endif; ?>
     </form>
   <?php endif; ?>
 </div>
@@ -198,10 +201,10 @@ include __DIR__ . '/../../includes/layout_header.php';
       <span style="min-width:90px;font-size:.75rem;color:var(--grey-mid);"><?= $lbl ?></span>
       <code style="min-width:220px;"><?= h($text) ?></code>
       <?php if ($type === 'lodge'): ?>
-        <select name="lodge_id" style="max-width:340px;"><?= iti_options($opt['lodge'], null, '— nothing (own arrangement / not a lodge) —') ?></select>
-        <select name="meal_basis"><?= iti_options(ITI_MEAL_BASIS, null, '— meal: lodge default —') ?></select>
+        <select name="lodge_id" style="max-width:340px;"><?= iti_options($opt['lodge'], iti_alias_suggest($text, $optName['lodge']), '— nothing (own arrangement / not a lodge) —') ?></select>
+        <select name="meal_basis"><?= iti_options(ITI_MEAL_BASIS, $plan['hints']['lodge_meal'][$text] ?? null, '— meal: lodge default —') ?></select>
       <?php elseif ($type === 'activity'): ?>
-        <select name="activity_id" style="max-width:380px;"><?= iti_options($opt['activity'], null, '— nothing (not an activity) —') ?></select>
+        <select name="activity_id" style="max-width:380px;"><?= iti_options($opt['activity'], iti_alias_suggest($text, $opt['activity']), '— nothing (not an activity) —') ?></select>
       <?php else: ?>
         <select name="transfer_route_id" style="max-width:260px;"><?= iti_options($opt['transfer'], null, '— no transfer —') ?></select>
         <select name="flight_route_id" style="max-width:260px;"><?= iti_options($opt['flight'], null, '— no flight —') ?></select>

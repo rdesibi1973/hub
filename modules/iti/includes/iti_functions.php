@@ -1215,6 +1215,58 @@ function iti_alias_parts(string $s): array {
     return $out;
 }
 
+// A Calc hotel text often ends with its meal basis: "Orangi River Luxury (FB)",
+// "Arusha Explorers in HB", "Kifaru - full board". Returns [base text, meal code|null];
+// the meal is null (and the text unchanged) when there is no such suffix.
+function iti_alias_split_meal(string $text): array {
+    $words = array('bed ?(?:&|and) ?breakfast' => 'BB', 'half ?board' => 'HB', 'full ?board' => 'FB', 'all ?inclusive' => 'AI');
+    $re = '/^(.*?)[\s,\-–\/]*(?:\(\s*|\bin\s+)?\b(BB|HB|FB|AI|' . implode('|', array_keys($words)) . ')\b\s*\)?\s*$/iu';
+    if (!preg_match($re, $text, $m) || trim($m[1]) === '') return array($text, null);
+    $meal = strtoupper($m[2]);
+    if (!isset(ITI_MEAL_BASIS[$meal])) {
+        foreach ($words as $w => $code) { if (preg_match('/^' . $w . '$/i', $m[2])) { $meal = $code; break; } }
+    }
+    return array(trim($m[1]), isset(ITI_MEAL_BASIS[$meal]) ? $meal : null);
+}
+
+/**
+ * Best match of a Calc text among $options [id => label], for preselecting the
+ * mapping pickers (the user still confirms with "Map"). Word overlap, with
+ * "natural" ~ "nature" (common stem of 5+ letters); generic words (lodge, camp…)
+ * do not count. Returns the id, or null when nothing is close or two tie.
+ */
+function iti_alias_suggest(string $text, array $options) {
+    static $generic = array('lodge', 'camp', 'hotel', 'tented', 'resort', 'the', 'and', 'in', 'of', 'at', 'di', 'del', 'della', 'e', 'a', 'il', 'la');
+    $words = function ($s) use ($generic) {
+        $s = iti_alias_norm(preg_replace('/[^\p{L}\p{N}]+/u', ' ', (string)$s));
+        return array_values(array_diff(array_unique(explode(' ', $s)), $generic, array('')));
+    };
+    $same = function ($a, $b) {
+        if ($a === $b) return true;
+        $n = min(strlen($a), strlen($b));
+        if ($n < 4) return false;
+        $k = 0;
+        while ($k < $n && $a[$k] === $b[$k]) $k++;
+        return $k === $n || $k >= 5;     // one is a prefix of the other, or a 5+ letter common stem
+    };
+    $t = $words($text);
+    if (!$t) return null;
+    $best = null; $bestScore = 0.0; $tie = false;
+    foreach ($options as $id => $label) {
+        $o = $words($label);
+        if (!$o) continue;
+        $hit = 0; $long = false;
+        foreach ($t as $w) {
+            foreach ($o as $ow) { if ($same($w, $ow)) { $hit++; if (strlen($w) >= 4) $long = true; break; } }
+        }
+        if (!$hit || !$long) continue;
+        $score = $hit / count($t) + 0.01 * $hit / count($o);   // tie-break: fewer extra words
+        if ($score > $bestScore + 1e-9) { $best = $id; $bestScore = $score; $tie = false; }
+        elseif (abs($score - $bestScore) <= 1e-9) $tie = true;
+    }
+    return ($best !== null && !$tie && $bestScore >= 0.5) ? $best : null;
+}
+
 // The alias row for a Calc text, or null when the text is not mapped yet.
 // A row whose target columns are all NULL means "known, nothing to show".
 function iti_alias_lookup(string $type, string $text) {

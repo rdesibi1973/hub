@@ -40,6 +40,34 @@ function iti_final_find_sample(PDO $db, string $code, string $lang) {
     return $r ? $r : null;
 }
 
+/**
+ * The sample to propose for a Calc code when none is tagged yet: the title must
+ * contain the code ("Pumba" → "PUMBA SAFARI IN ITALIANO"); then the same number of
+ * days as the Calc, the title starting with the code, the display language and not
+ * being tagged with another code count. Returns the sample id, or 0 (none / a tie).
+ * $samples = rows with id, title_en, title_it, duration_days, display_language, hub_program_code.
+ */
+function iti_final_suggest_sample(array $samples, string $code, int $days, string $lang): int {
+    $k = function ($s) { return preg_replace('/[^a-z0-9]+/', '', strtolower((string)$s)); };
+    $c = $k($code);
+    if ($c === '') return 0;
+    $best = 0; $bestScore = 0; $tie = false;
+    foreach ($samples as $s) {
+        $score = 0;
+        foreach (array($s['title_it'], $s['title_en']) as $t) {
+            $t = $k($t);
+            if ($t !== '' && strpos($t, $c) !== false) { $score = max($score, strpos($t, $c) === 0 ? 3 : 2); }
+        }
+        if (!$score) continue;
+        if ((int)$s['duration_days'] === $days) $score += 4;
+        if ($s['display_language'] === $lang) $score += 1;
+        if (!empty($s['hub_program_code']) && $s['hub_program_code'] !== $code) $score -= 2;
+        if ($score > $bestScore) { $best = (int)$s['id']; $bestScore = $score; $tie = false; }
+        elseif ($score === $bestScore) $tie = true;
+    }
+    return $tie ? 0 : $best;
+}
+
 /** Meal flags [breakfast, lunch, dinner, all_inclusive] for a meal basis code. */
 function iti_final_meals(?string $basis): ?array {
     $m = array('BB' => array(1, 0, 0, 0), 'HB' => array(1, 0, 1, 0), 'FB' => array(1, 1, 1, 0), 'AI' => array(1, 1, 1, 1));
@@ -47,20 +75,24 @@ function iti_final_meals(?string $basis): ?array {
 }
 
 /**
- * LCS alignment of two key lists. Returns [calcIndex => sampleIndex] for the
- * matched pairs (keys compared with ===; unique keys never match).
+ * Weighted LCS alignment of two key lists. Returns [calcIndex => sampleIndex] for
+ * the matched pairs. $score($a, $b) > 0 allows a pair (higher = better match);
+ * default: keys compared with ===.
  */
-function iti_final_align(array $a, array $b): array {
+function iti_final_align(array $a, array $b, ?callable $score = null): array {
+    if ($score === null) $score = function ($x, $y) { return $x === $y ? 1 : 0; };
     $n = count($a); $m = count($b);
     $L = array_fill(0, $n + 1, array_fill(0, $m + 1, 0));
+    $S = array();
     for ($i = $n - 1; $i >= 0; $i--) {
         for ($j = $m - 1; $j >= 0; $j--) {
-            $L[$i][$j] = ($a[$i] === $b[$j]) ? $L[$i + 1][$j + 1] + 1 : max($L[$i + 1][$j], $L[$i][$j + 1]);
+            $S[$i][$j] = $score($a[$i], $b[$j]);
+            $L[$i][$j] = max($L[$i + 1][$j], $L[$i][$j + 1], $S[$i][$j] > 0 ? $L[$i + 1][$j + 1] + $S[$i][$j] : 0);
         }
     }
     $map = array();
     for ($i = 0, $j = 0; $i < $n && $j < $m; ) {
-        if ($a[$i] === $b[$j]) { $map[$i] = $j; $i++; $j++; }
+        if ($S[$i][$j] > 0 && $L[$i][$j] === $L[$i + 1][$j + 1] + $S[$i][$j]) { $map[$i] = $j; $i++; $j++; }
         elseif ($L[$i + 1][$j] >= $L[$i][$j + 1]) $i++;
         else $j++;
     }
@@ -76,6 +108,7 @@ function iti_final_align(array $a, array $b): array {
 function iti_final_plan(PDO $db, array $calc, int $sampleId): array {
     iti_ensure_final_schema();
     $days = array(); $unmapped = array('lodge' => array(), 'activity' => array(), 'route' => array());
+    $hints = array('lodge_meal' => array());   // unmapped hotel text => meal from its suffix
     $n = count($calc['days']);
     $lodgeInfo = function ($id) use ($db) {
         static $cache = array();
@@ -94,14 +127,19 @@ function iti_final_plan(PDO $db, array $calc, int $sampleId): array {
                    'invoice' => $cd['invoice'], 'checked' => $cd['checked'], 'flight_cost' => $cd['flight_cost'],
                    'last' => $last, 'lodge_id' => null, 'lodge_name' => '', 'lodge_custom' => null, 'dest_id' => null,
                    'meal' => null, 'lodge_state' => 'none', 'acts' => array(), 'route' => null,
-                   'sample_index' => null, 'flags' => array());
+                   'sample_index' => null, 'sample_lodge' => null, 'flags' => array());
 
         // Lodge (every night; the departure day normally has none).
         if ($cd['hotel_text'] !== '') {
+            // "Orangi River Luxury (FB)": the alias is the hotel without the meal suffix
+            // (an older alias saved with the suffix still wins); the suffix sets the meal.
+            list($base, $mealSfx) = iti_alias_split_meal($cd['hotel_text']);
             $a = iti_alias_lookup('lodge', $cd['hotel_text']);
+            if ($a === null && $base !== $cd['hotel_text']) $a = iti_alias_lookup('lodge', $base);
             if ($a === null) {
                 $d['lodge_state'] = 'unmapped';
-                $unmapped['lodge'][iti_alias_norm($cd['hotel_text'])] = $cd['hotel_text'];
+                $unmapped['lodge'][iti_alias_norm($base)] = $base;
+                if ($mealSfx) $hints['lodge_meal'][$base] = $mealSfx;
             } elseif (!$a['lodge_id']) {
                 $d['lodge_state'] = 'nothing';
                 $d['lodge_custom'] = $cd['hotel_text'];        // e.g. "Riu Palace Nungwi - own arrangement"
@@ -112,7 +150,7 @@ function iti_final_plan(PDO $db, array $calc, int $sampleId): array {
                     $d['lodge_id'] = (int)$li['id']; $d['lodge_name'] = $li['name'];
                     $d['dest_id'] = $li['destination_id'] ? (int)$li['destination_id'] : null;
                 }
-                $d['meal'] = $a['meal_basis'] ?: null;
+                $d['meal'] = $mealSfx ?: ($a['meal_basis'] ?: null);
             }
         } elseif (!$last) {
             $d['flags'][] = 'Night without hotel in the Calc (col K).';
@@ -145,21 +183,41 @@ function iti_final_plan(PDO $db, array $calc, int $sampleId): array {
         $days[] = $d;
     }
 
-    // Align with the sample's days on the lodge sequence.
+    // Align with the sample's days on the lodge sequence. Same lodge = best match;
+    // same destination with another lodge (Kifaru in the sample, Orangi in the Calc)
+    // still keeps the sample day's text, flagged for review.
     $sampleDays = array();
     if ($sampleId) {
-        $st = $db->prepare('SELECT id, day_number, end_lodge_id FROM iti_program_days WHERE program_id = ? ORDER BY day_number');
+        $st = $db->prepare('SELECT d.id, d.day_number, d.end_lodge_id, l.name AS lodge_name, l.destination_id
+                              FROM iti_program_days d LEFT JOIN iti_lodges l ON l.id = d.end_lodge_id
+                             WHERE d.program_id = ? ORDER BY d.day_number');
         $st->execute(array($sampleId));
         $sampleDays = $st->fetchAll(PDO::FETCH_ASSOC);
         $ka = array(); $kb = array();
         foreach ($days as $i => $d) {
-            $ka[] = $d['lodge_id'] ? 'L' . $d['lodge_id'] : (($d['last'] && $d['hotel_text'] === '') ? 'END' : 'c' . $i);
+            $ka[] = array('l' => $d['lodge_id'], 'd' => $d['dest_id'], 'end' => $d['last'] && $d['hotel_text'] === '');
         }
         $m = count($sampleDays);
         foreach ($sampleDays as $j => $s) {
-            $kb[] = $s['end_lodge_id'] ? 'L' . $s['end_lodge_id'] : ($j === $m - 1 ? 'END' : 's' . $j);
+            $kb[] = array('l' => $s['end_lodge_id'] ? (int)$s['end_lodge_id'] : null,
+                          'd' => $s['destination_id'] ? (int)$s['destination_id'] : null,
+                          'end' => !$s['end_lodge_id'] && $j === $m - 1);
         }
-        foreach (iti_final_align($ka, $kb) as $i => $j) $days[$i]['sample_index'] = $j;
+        $score = function ($x, $y) {
+            if ($x['end'] && $y['end']) return 2;
+            if ($x['l'] && $x['l'] === $y['l']) return 2;
+            if ($x['d'] && $x['d'] === $y['d']) return 1;
+            return 0;
+        };
+        foreach (iti_final_align($ka, $kb, $score) as $i => $j) {
+            $days[$i]['sample_index'] = $j;
+            $s = $sampleDays[$j];
+            if ($days[$i]['lodge_id'] && $s['end_lodge_id'] && (int)$s['end_lodge_id'] !== $days[$i]['lodge_id']) {
+                $days[$i]['sample_lodge'] = (string)$s['lodge_name'];
+                $days[$i]['flags'][] = 'Lodge changed from the sample (' . $s['lodge_name'] . ' → ' . $days[$i]['lodge_name']
+                                     . '): the sample text is kept — check it does not name the old lodge.';
+            }
+        }
     }
 
     $blocking = array();
@@ -183,7 +241,7 @@ function iti_final_plan(PDO $db, array $calc, int $sampleId): array {
     if ($sampleId && count($sampleDays) !== count($days)) {
         $flags[] = 'The sample has ' . count($sampleDays) . ' days, the Calc ' . count($days) . ' — days are added / removed to match the Calc.';
     }
-    return array('days' => $days, 'blocking' => $blocking, 'unmapped' => $unmapped, 'flags' => $flags,
+    return array('days' => $days, 'blocking' => $blocking, 'unmapped' => $unmapped, 'hints' => $hints, 'flags' => $flags,
                  'sample_days' => count($sampleDays));
 }
 
@@ -276,8 +334,10 @@ function iti_final_generate(PDO $db, int $requestId, array $calc, int $sampleId,
                 'room_type'      => ($d['lodge_id'] || $d['lodge_custom']) && $calc['room_config'] !== '' ? mb_substr($calc['room_config'], 0, 100) : null,
                 'booked_status'  => $d['invoice'] !== '' ? mb_substr($d['invoice'], 0, 40) : null,
                 'booked_by'      => $d['checked'] !== '' ? mb_substr($d['checked'], 0, 60) : null,
-                'needs_review'   => $isNew ? 1 : 0,
-                'review_note'    => $isNew ? 'Added from the Calc (not in the sample): check title, text, transfer and meals.' : null,
+                'needs_review'   => ($isNew || $d['sample_lodge'] !== null) ? 1 : 0,
+                'review_note'    => $isNew ? 'Added from the Calc (not in the sample): check title, text, transfer and meals.'
+                                   : ($d['sample_lodge'] !== null ? mb_substr('Lodge changed from the sample (' . $d['sample_lodge'] . ' → '
+                                      . $d['lodge_name'] . '): check the text does not name the old lodge.', 0, 255) : null),
             );
             $meals = iti_final_meals($d['meal']);
             if ($isNew && $meals === null) $meals = array(1, 1, 1, 0);   // default full board, flagged for review
