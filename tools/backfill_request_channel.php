@@ -5,15 +5,20 @@
  *
  *   "(Agent-Drct…)"                          → direct
  *   "(Agent-SB)"                             → sb
- *   "(Capri-…)" (Roberto Capri's direct clients) → direct
+ *   "(Capri-…)", "(RobertoCapri)" (Roberto Capri's direct clients) → direct
+ *   any "EleonoraOngaro" (blog referral, e.g. "(Nuru-EleonoraOngaro)", "(Anderson_EleonoraOngaro)") → direct
+ *   "(Nuru-Trekk)" / "-Trek" / "-Tekk" (Nuru's trekking clients)  → direct
  *   "(AgencyShort-…-Agent)", first token = exactly one agency (short_name without its
  *   -PS / -LAM suffix, or name, compared without spaces/punctuation), or a token in
  *   $aliases (folder spellings checked by hand, Oct 2026)  → agency + agency_id
  *
+ * The LAST "(…)" block of the folder is read: a broken name like
+ * "Claudiastefani(columbusvacanzeDaniela)(ColumbusVacanze-Daniela)" carries the real tag at the end.
  * Anything else (unknown agency, one-token block, no block) stays NULL. Only rows with
  * channel IS NULL are touched. Dry run by default (prints counts); writes only with --confirm.
+ * --list also prints each row that gets a channel.
  *
- *   php tools/backfill_request_channel.php [--confirm]
+ *   php tools/backfill_request_channel.php [--confirm] [--list]
  *
  * CLI only (run over SSH on the server).
  */
@@ -24,6 +29,7 @@ require_once __DIR__ . '/../includes/config.php';
 require_once __DIR__ . '/../includes/db.php';
 
 $confirm = in_array('--confirm', $argv, true);
+$list    = in_array('--list', $argv, true);
 $norm = function ($s) { return strtolower(preg_replace('/[^a-z0-9]/i', '', (string)$s)); };
 
 // Folder spellings that differ from the agency record (normalised token → agency id).
@@ -41,8 +47,8 @@ $aliases = [
     'sonotravel' => 74, 'libetiter' => 209, 'libetitertravel' => 209, 'mywayholiday' => 92,
     'mywayholidaytouroperator' => 92, 'kendirita' => 249, 'kendiritatours' => 249,
 ];
-// First tokens that mean a direct client (not an agency).
-$directTokens = ['capri'];
+// First tokens (or a whole one-token block) that mean a direct client (not an agency).
+$directTokens = ['capri', 'robertocapri'];
 
 // Agency lookup (active agencies): normalised short_name (minus -PS / -LAM) / name → agency ids
 $agencyIdx = [];
@@ -61,9 +67,16 @@ $rows = $pdo->query("SELECT id, COALESCE(NULLIF(group_folder, ''), practice_code
 if ($confirm) $pdo->beginTransaction();
 foreach ($rows as $r) {
     $channel = null; $agencyId = null;
-    if (preg_match('/\(([^)]+)\)/', (string)$r['folder'], $m)) {
-        $tokens = array_values(array_filter(array_map('trim', explode('-', $m[1])), 'strlen'));
+    if (preg_match_all('/\(([^()]+)\)/', (string)$r['folder'], $mm)) {
+        $block  = end($mm[1]);   // last "(…)" block
+        $tokens = array_values(array_filter(array_map('trim', explode('-', $block)), 'strlen'));
         if (in_array('Drct', $tokens, true)) {
+            $channel = 'direct';
+        } elseif (strpos($norm($block), 'eleonoraongaro') !== false) {
+            $channel = 'direct';
+        } elseif (count($tokens) === 1 && in_array($norm($tokens[0]), $directTokens, true)) {
+            $channel = 'direct';
+        } elseif (count($tokens) === 2 && $norm($tokens[0]) === 'nuru' && preg_match('/^t(r)?ek+$/i', $tokens[1])) {
             $channel = 'direct';
         } elseif (in_array('SB', $tokens, true)) {
             $channel = 'sb';
@@ -78,6 +91,7 @@ foreach ($rows as $r) {
     }
     if ($channel === null) { $count['unknown']++; continue; }
     $count[$channel]++;
+    if ($list) echo '#' . $r['id'] . ' ' . $channel . ($agencyId ? ' ag=' . $agencyId : '') . '  ' . $r['folder'] . "\n";
     if ($confirm) $upd->execute([$channel, $agencyId, (int)$r['id']]);
 }
 if ($confirm) $pdo->commit();
