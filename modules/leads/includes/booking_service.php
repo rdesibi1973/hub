@@ -86,8 +86,12 @@ function bs_camel_case(string $name): string {
     return implode('', array_map('ucfirst', array_map('mb_strtolower', preg_split('/[\s\-]+/', $name))));
 }
 
-/** Folder name for a new request, e.g. "PatriziaFiorini(TVT-PS-Roberto)". */
-function bs_request_folder_name(PDO $db, string $customerName, string $channel, $agencyId, $agentId): string {
+/**
+ * Folder name for a new request, e.g. "PatriziaFiorini(TVT-PS-Roberto)".
+ * $directTag replaces "Drct" for a direct client, e.g. "EleonoraOngaro" (blog referral).
+ */
+function bs_request_folder_name(PDO $db, string $customerName, string $channel, $agencyId, $agentId,
+                                string $directTag = 'Drct'): string {
     $agStmt = $db->prepare("SELECT name FROM agents WHERE id = ? LIMIT 1");
     $agStmt->execute([$agentId]);
     $agRow     = $agStmt->fetch(PDO::FETCH_ASSOC);
@@ -109,9 +113,23 @@ function bs_request_folder_name(PDO $db, string $customerName, string $channel, 
         case 'agency': $suffix = "({$agencyNome}-{$agentName})"; break;
         case 'sb':     $suffix = "({$agentName}-SB)";            break;
         case 'other':  $suffix = "({$agentName})";               break;
-        default:       $suffix = "({$agentName}-Drct)";          break;
+        default:       $suffix = "({$agentName}-{$directTag})";  break;
     }
     return $namePart . $suffix;
+}
+
+/**
+ * Check a hand-edited request folder name: "Name(Tag)", exactly one "(…)" tag at the
+ * end, no path separators. Returns '' when valid, else the error message.
+ */
+function bs_folder_name_error(string $name): string {
+    $name = trim($name);
+    if ($name === '') return 'Folder name is empty.';
+    if (preg_match('#[/\\\\]#', $name)) return 'Folder name must not contain "/" or "\\".';
+    if (!preg_match('/^[^()]+\([^()]+\)$/u', $name)) {
+        return 'Folder name must be Name(Tag) with exactly one "(…)" tag at the end, e.g. MarioRossi(Roberto-Drct).';
+    }
+    return '';
 }
 
 /**
@@ -122,7 +140,10 @@ function bs_request_folder_name(PDO $db, string $customerName, string $channel, 
  *          agent_id, destination, period, pax, status, value_usd, commission_pct,
  *          commission_usd, date_paid, initial_request, notes  (strings, '' = empty)
  * $opt:    dropbox_skip (bool), dup_override (bool), notify_agent (bool),
- *          creator_user_id (int)
+ *          creator_user_id (int), dry_run (bool),
+ *          direct_tag (string, replaces "Drct" for channel direct — Incoming blog referral),
+ *          folder_name (string, explicit folder name; checked with bs_folder_name_error()),
+ *          initial_request_optional (bool — Incoming leads may arrive without text)
  *
  * Returns ['ok'=>bool, 'errors'=>[], 'error_code'=>''|'validation'|'duplicate'|'folder_exists'|'dropbox',
  *          'dup_candidates'=>[], 'request_id', 'folder_name', 'dropbox_path', 'notify'=>['sent','error']].
@@ -150,9 +171,15 @@ function bs_create_request(PDO $db, array $v, array $opt = []): array {
     $errors = [];
     if (!$v['customer_name'])   $errors[] = 'Customer name is required.';
     if (!$v['date_received'])   $errors[] = 'Date received is required.';
-    if (!$dropboxSkip && !$v['initial_request']) $errors[] = 'Initial Request is required.';
+    if (!$dropboxSkip && !$v['initial_request'] && empty($opt['initial_request_optional'])) {
+        $errors[] = 'Initial Request is required.';
+    }
     if (!$v['agent_id'])        $errors[] = 'Please select an agent.';
     if ($v['channel'] === 'agency' && !$v['agency_id']) $errors[] = 'Please select an agency.';
+    $directTag = trim((string)($opt['direct_tag'] ?? '')) ?: 'Drct';
+    if (!preg_match('/^[A-Za-z0-9]+$/', $directTag)) $errors[] = 'Invalid folder tag.';
+    $folderOverride = trim((string)($opt['folder_name'] ?? ''));
+    if ($folderOverride !== '' && ($fe = bs_folder_name_error($folderOverride)) !== '') $errors[] = $fe;
     if ($errors) { $out['errors'] = $errors; $out['error_code'] = 'validation'; return $out; }
 
     // ── Duplicate check BEFORE inserting (same checks as Incoming) ────────────
@@ -175,7 +202,8 @@ function bs_create_request(PDO $db, array $v, array $opt = []): array {
     }
 
     // ── Folder name ───────────────────────────────────────────────────────────
-    $folderName    = bs_request_folder_name($db, $v['customer_name'], $v['channel'], $v['agency_id'], $v['agent_id']);
+    $folderName    = $folderOverride !== '' ? $folderOverride
+                   : bs_request_folder_name($db, $v['customer_name'], $v['channel'], $v['agency_id'], $v['agent_id'], $directTag);
     $dropboxPath   = DROPBOX_BASE_PATH . '/' . $folderName;
     $dropboxWebUrl = 'https://www.dropbox.com/home' . $dropboxPath;
     $out['folder_name']  = $folderName;

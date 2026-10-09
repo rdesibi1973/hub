@@ -20,6 +20,24 @@ Running log of notable changes and current build state. Module-level "active / p
 
 ---
 
+## 2026-10-09 — Incoming approve: channel + agency, shared folder name
+- Bug: approving an Incoming lead never stored `agency_id` and stored `channel` only when the folder
+  field was empty — but the form always pre-filled it, so almost every approval got `channel = NULL`.
+  Agency leads got their "(Agency-Agent)" tag only by hand-typing it into the folder name (#2923).
+- `staging.php` approve form: Channel (Direct / Agency / SB / Other, default Direct) and, for Agency, the
+  searchable agency picker with ➕ Add (as `request_add.php`; agency mandatory). The folder preview follows
+  channel / agency / agent; a hand-edited name is marked "edited by hand" (↺ rebuild) and is the only case
+  where `folder_name_override` is sent. Eleonora Ongaro referral flag only for Direct (still "(Agent-EleonoraOngaro)",
+  channel direct).
+- `staging_action.php` approve now goes through `bs_create_request()` (own Dropbox / INSERT / notify code
+  removed): stores `channel` + `agency_id`, folder built by `bs_request_folder_name()`, logs the
+  "Request received" timeline event, CustomerInfo.txt gets the CUSTOMER block like New Request. The service's
+  duplicate check is skipped (the operator reviewed the drawer flags; the lead would match itself in `lead_staging`).
+- `booking_service.php`: `bs_request_folder_name()` takes an optional direct tag (default "Drct");
+  new `bs_folder_name_error()` (Name(Tag), exactly one "(…)" tag at the end, no "/" or "\");
+  `bs_create_request()` options `direct_tag`, `folder_name` (validated), `initial_request_optional`.
+- Existing requests approved with `channel = NULL` are not changed (run `tools/backfill_request_channel.php`).
+
 ## 2026-10-09 — Agent API: Il Diamante group folders; update_request dry-run
 - New `includes/group_import_service.php` (`gi_parse`, `gi_duplicates`, `gi_validate`, `gi_import`, plus
   `gi_plan` / `gi_move_plan` for the API): the logic of Import Group Folder, moved out of `import_folder.php`

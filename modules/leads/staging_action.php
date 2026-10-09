@@ -2,6 +2,7 @@
 require_once 'config.php';
 require_once 'dropbox_helper.php';
 require_once 'notifications.php';
+require_once 'includes/booking_service.php';
 
 // Load the HubSpot sync as a library (skips its CLI block). Gives us
 // hs_mark_processed() / hs_ensure_processed_table() for the anti-reimport suppression list.
@@ -132,96 +133,71 @@ if ($action === 'approve') {
     $doNotify   = !empty($_POST['notify_agent']); // checkbox
     if (!$agentId) { flash('Please select an agent.','error'); header('Location: staging.php'); exit; }
 
-    // Allow overriding the customer name and folder name from the form
+    // Allow overriding the customer name from the form.
     // An empty field falls back to the lead's name, case-fixed like the form
     // pre-fill (fixNameCase() in staging.php). A typed name is kept as entered.
     $customerName = trim($_POST['customer_name_override'] ?? '') ?: fix_name_case($lead['customer_name']);
 
     $dest = trim($_POST['destination'] ?? '') ?: $lead['destination'];
 
-    // Get agent
-    $agent = $db->prepare("SELECT * FROM agents WHERE id = ? LIMIT 1");
-    $agent->execute([$agentId]);
-    $agent = $agent->fetch();
-    if (!$agent) { flash('Agent not found.','error'); header('Location: staging.php'); exit; }
-
-    // Build folder name — consistent with api_create_request.php
-    function toCamelCaseSt(string $name): string {
-        $name = trim($name);
-        if (strpos($name, ' ') === false && strpos($name, '-') === false) return $name;
-        return implode('', array_map('ucfirst', array_map('mb_strtolower',
-            preg_split('/[\s\-]+/', $name))));
+    // Channel + agency (agency mandatory for channel agency, as in request_add.php).
+    $channel  = $_POST['channel'] ?? '';
+    $agencyId = (int)($_POST['agency_id'] ?? 0);
+    if (!in_array($channel, ['agency', 'direct', 'sb', 'other'], true)) {
+        flash('Please choose the channel (Agency / Direct / SB / Other).', 'error'); header('Location: staging.php'); exit;
     }
-    $agentName  = str_replace(' ', '', $agent['name']); // e.g. "RobertoCapri"
-    // Blog-referral flag: "EleonoraOngaro" suffix instead of the default "Drct".
-    $suffix     = !empty($_POST['eleonora_ongaro']) ? 'EleonoraOngaro' : 'Drct';
-    $folderName = trim($_POST['folder_name_override'] ?? '') ?: toCamelCaseSt($customerName) . "({$agentName}-{$suffix})";
-    $folderPath = DROPBOX_BASE_PATH . '/' . $folderName;
-
-    // Create Dropbox folder — block on conflict (folder already exists)
-    try {
-        $token = dropbox_get_access_token();
-        dropbox_create_folder($token, $folderPath, true); // throwOnConflict = true
-
-        // Subfolders
-        foreach (['bookings','complain','flights','guestcomments','insurance',
-                  'IntFlights','invoices','mails','old','passports','vouchers'] as $sub) {
-            try { dropbox_create_folder($token, $folderPath . '/' . $sub); }
-            catch (RuntimeException $e) { error_log("Subfolder $sub error: " . $e->getMessage()); }
+    if ($channel === 'agency') {
+        $agSt = $db->prepare("SELECT id FROM agencies WHERE id = ? LIMIT 1");
+        $agSt->execute([$agencyId]);
+        if (!$agencyId || !$agSt->fetchColumn()) {
+            flash('Please select an agency.', 'error'); header('Location: staging.php'); exit;
         }
+    } else {
+        $agencyId = 0;
+    }
 
-        // CustomerInfo.txt
-        $initReq = $lead['initial_request'] ?? '';
-        $waPhone = preg_replace('/\D/', '', $lead['phone'] ?? '');
-        $waLink  = $waPhone ? "https://web.whatsapp.com/send?phone=$waPhone" : "https://web.whatsapp.com/send?phone=";
-        $txtContent =
-            "REQUEST DETAILS:\r\n\r\n"
-          . $initReq . "\r\n\r\n\r\n"
-          . "WHATSAPP link\r\n"
-          . $waLink . "\r\n\r\n"
-          . "CUSTOMERS FULL NAMES:\r\n\r\n\r\n\r\n"
-          . "ARRIVAL/DEPARTURE DETAILS - FLIGHTS:\r\n\r\n\r\n\r\n\r\n\r\n"
-          . "DIETARY RESTRICTIONS:\r\n\r\n\r\n\r\n"
-          . "NOTES:\r\n\r\n";
-        dropbox_upload_text($token, $folderPath . '/CustomerInfo.txt', $txtContent);
+    // Blog-referral flag (direct clients only): "(Agent-EleonoraOngaro)" instead of "(Agent-Drct)".
+    $directTag = ($channel === 'direct' && !empty($_POST['eleonora_ongaro'])) ? 'EleonoraOngaro' : 'Drct';
 
-    } catch (RuntimeException $e) {
-        $msg = $e->getMessage();
-        if (strpos($msg, 'already exists') !== false) {
-            flash("Dropbox folder already exists: {$folderName} — Check for duplicates before proceeding.", 'error');
-        } else {
-            flash("Dropbox error: {$msg}", 'error');
-        }
+    // The folder name is built by bs_request_folder_name(). The form only sends
+    // folder_name_override when the operator edited it by hand; bs_create_request()
+    // validates it (exactly one "(…)" tag).
+    $folderOverride = trim($_POST['folder_name_override'] ?? '');
+
+    // Dropbox folder → INSERT → notify (includes/booking_service.php). The operator has
+    // already reviewed the duplicate flags in the drawer, and the lead itself sits in
+    // lead_staging (it would match itself), so the service's duplicate check is skipped.
+    $res = bs_create_request($db, [
+        'date_received'   => $lead['date_received'],
+        'customer_name'   => $customerName,
+        'email'           => $lead['email'] ?? '',
+        'whatsapp'        => $lead['phone'] ?? '',
+        'source'          => $lead['source'],
+        'channel'         => $channel,
+        'agency_id'       => $agencyId ?: '',
+        'agent_id'        => $agentId,
+        'destination'     => $dest ?? '',
+        'period'          => $lead['period'] ?? '',
+        'pax'             => $lead['pax'] ?? '',
+        'status'          => 'Inquiry',
+        'initial_request' => $lead['initial_request'] ?? '',
+        'notes'           => $lead['notes'] ?? '',
+    ], [
+        'dup_override'             => true,
+        'notify_agent'             => $doNotify,
+        'creator_user_id'          => (int)($currentUser['id'] ?? 0),
+        'direct_tag'               => $directTag,
+        'folder_name'              => $folderOverride,
+        'initial_request_optional' => true,
+    ]);
+    if (!$res['ok']) {
+        foreach ($res['errors'] as $er) flash($er, 'error');
         header('Location: staging.php'); exit;
     }
 
-    $dropboxWebUrl = 'https://www.dropbox.com/home' . $folderPath;
-
-    $db->prepare("
-        INSERT INTO requests
-            (date_received, customer_name, email, whatsapp, source, channel, agent_id,
-             destination, period, pax, status,
-             initial_request, notes, practice_code, dropbox_url, created_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?,'Inquiry',?,?,?,?,NOW())
-    ")->execute([
-        $lead['date_received'],
-        $customerName,
-        $lead['email']          ?: null,
-        $lead['phone']          ?: null,
-        $lead['source'],
-        // Website leads are direct; a blog referral or a hand-typed folder name stays unknown.
-        ($suffix === 'Drct' && trim($_POST['folder_name_override'] ?? '') === '') ? 'direct' : null,
-        $agentId,
-        $dest                   ?: null,
-        $lead['period']         ?: null,
-        $lead['pax'],
-        $lead['initial_request']?: null,
-        $lead['notes']          ?: null,
-        $folderName,
-        $dropboxWebUrl,
-    ]);
-
-    $newId = $db->lastInsertId();
+    $newId      = $res['request_id'];
+    $folderName = $res['folder_name'];
+    $notif      = $res['notify'];
     hs_mark_processed($db, $lead['hubspot_id'] ?? null, 'approved', $customerName);
     $db->prepare("DELETE FROM lead_staging WHERE id = ?")->execute([$stagingId]);
 
@@ -239,18 +215,11 @@ if ($action === 'approve') {
         }
     }
 
-    // ── Agent notification ────────────────────────────────────────────────
-    $notif = notify_agent_new_request(
-        $db, $agentId, (int)($currentUser['id'] ?? 0),
-        (int)$newId, $customerName, $folderName, $doNotify
-    );
-
     flash("Lead approved — Request #{$newId} created. Dropbox folder: {$folderName}"
         . ($notif['sent'] ? " — ✉ Notification sent to agent." : '')
         . $emailWarnMsg);
     if ($notif['error']) flash('⚠ ' . htmlspecialchars($notif['error']), 'error');
     if ($emailWarnMsg)   flash(htmlspecialchars($emailWarnMsg), 'error');
-    if ($notif['error']) flash('⚠ ' . htmlspecialchars($notif['error']), 'error');
 
     header("Location: request_view.php?id=$newId"); exit;
 

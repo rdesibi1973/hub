@@ -3,7 +3,7 @@
  * ajax_create_agency.php
  *
  * Session-authenticated "quick add" for an agency, used by the inline
- * "➕ Add Agency" button on request_add.php. Unlike api_create_agency.php
+ * "➕ Add Agency" button on request_add.php and staging.php (Incoming approve). Unlike api_create_agency.php
  * (which needs the X-Api-Key server key), this trusts the logged-in Hub
  * session, so no secret is exposed to the browser.
  *
