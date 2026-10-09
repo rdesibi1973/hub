@@ -493,8 +493,9 @@ function agent_memo_owner(PDO $db): array {
     require_once __DIR__ . '/../memo/memo_lib.php';
     memo_schema($db);
     if (defined('AGENT_MEMO_USER')) {
-        $st = $db->prepare("SELECT id, username, full_name FROM users WHERE username = ? AND is_active = 1");
-        $st->execute([(string)AGENT_MEMO_USER]);
+        $u = memo_owner($db);
+        if (!$u) agent_fail('Memo owner not found — define AGENT_MEMO_USER (Hub username) in includes/config.php', 500);
+        return ['id' => $u['id'], 'username' => $u['username'], 'full_name' => $u['full_name']];
     } else {
         $st = $db->prepare("SELECT id, username, full_name FROM users
                             WHERE agent_id = ? AND id <> ? AND is_active = 1 ORDER BY id LIMIT 1");
@@ -520,32 +521,9 @@ function agent_memo_find(PDO $db, int $ownerId, array $in): ?array {
     return $m ?: null;
 }
 
-/** Public shape of memo rows (with links and pending next steps). */
+/** Public shape of memo rows (with links and pending next steps) — memo_rows() in memo_lib.php. */
 function agent_memo_rows(PDO $db, string $where, array $args): array {
-    $st = $db->prepare("SELECT m.*, " . memo_link_columns() . " FROM memos m" . memo_link_joins() . " WHERE " . $where
-                     . " ORDER BY (m.due_date IS NULL), m.due_date, m.id LIMIT 200");
-    $st->execute($args);
-    $rows = $st->fetchAll(PDO::FETCH_ASSOC);
-    $out = [];
-    foreach ($rows as $m) {
-        $next = $db->prepare("SELECT id, title, next_offset_days FROM memos WHERE parent_id = ? AND status = 'pending' AND deleted_at IS NULL ORDER BY id");
-        $next->execute([(int)$m['id']]);
-        $out[] = [
-            'id' => (int)$m['id'], 'title' => $m['title'], 'status' => $m['status'], 'waiting_on' => $m['waiting_on'],
-            'due_date' => $m['due_date'], 'reminder_at' => $m['reminder_at'], 'priority' => $m['priority'],
-            'body' => trim(html_entity_decode(strip_tags(str_replace(['</p>', '<br>'], "\n", (string)$m['body'])), ENT_QUOTES, 'UTF-8')),
-            'request_id' => $m['request_id'] ? (int)$m['request_id'] : null, 'folder' => $m['req_folder'],
-            'invoice_id' => $m['invoice_id'] ? (int)$m['invoice_id'] : null, 'invoice_number' => $m['inv_number'],
-            'invoice_balance' => $m['inv_balance'] !== null ? (float)$m['inv_balance'] : null,
-            'afrasia' => $m['inv_issuer'] === 'Savannah Holidays Ltd',
-            'auto_close_on_payment' => $m['auto_close'] === 'payment',
-            'parent_id' => $m['parent_id'] ? (int)$m['parent_id'] : null,
-            'next_steps' => array_map(function ($n) { return ['id' => (int)$n['id'], 'title' => $n['title'], 'days_after' => (int)$n['next_offset_days']]; },
-                                      $next->fetchAll(PDO::FETCH_ASSOC)),
-            'source' => $m['source'], 'ext_key' => $m['ext_key'], 'updated_at' => $m['updated_at'],
-        ];
-    }
-    return $out;
+    return memo_rows($db, $where, $args);
 }
 
 // ── Request timeline (logic in includes/timeline_service.php) ───────────────

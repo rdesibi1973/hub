@@ -107,9 +107,11 @@
   function render(all) {
     board.innerHTML = '';
     // Pending next steps are not on the board: they are shown on their parent card.
+    // Archived memos are closed and hidden.
     nextByParent = {};
     var memos = [];
     for (var n = 0; n < all.length; n++) {
+      if (all[n].status === 'archived') { continue; }
       if (all[n].status === 'pending') {
         var pid = String(all[n].parent_id);
         if (!nextByParent[pid]) { nextByParent[pid] = []; }

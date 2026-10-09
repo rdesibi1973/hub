@@ -37,7 +37,8 @@ if (!function_exists('normalize_email_html')) {
 }
 
 /**
- * Send an HTML email via PHP mail().
+ * Send an HTML email via PHP mail(). With $body_text the mail is
+ * multipart/alternative (plain text + HTML, both UTF-8 base64).
  */
 function send_hub_email(
     string $to,
@@ -45,7 +46,8 @@ function send_hub_email(
     string $body_html,
     string $from_name,
     string $from_email,
-    string $reply_to = ''
+    string $reply_to = '',
+    string $body_text = ''
 ): bool {
     $body_html = normalize_email_html($body_html);
 
@@ -59,7 +61,17 @@ function send_hub_email(
     }
 
     $headers  = "MIME-Version: 1.0\r\n";
-    $headers .= "Content-Type: text/html; charset=UTF-8\r\n";
+    if ($body_text !== '') {
+        $boundary  = 'hub_' . bin2hex(random_bytes(12));
+        $headers  .= "Content-Type: multipart/alternative; boundary=\"{$boundary}\"\r\n";
+        $body_html = "--{$boundary}\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n"
+                   . chunk_split(base64_encode($body_text))
+                   . "--{$boundary}\r\nContent-Type: text/html; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n"
+                   . chunk_split(base64_encode($body_html))
+                   . "--{$boundary}--\r\n";
+    } else {
+        $headers .= "Content-Type: text/html; charset=UTF-8\r\n";
+    }
     $headers .= "From: =?UTF-8?B?" . base64_encode($from_name) . "?= <{$from_email}>\r\n";
     if ($reply_to) {
         $headers .= "Reply-To: {$reply_to}\r\n";

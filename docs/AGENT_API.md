@@ -558,6 +558,16 @@ Memos stay private to that user unless shared in the Hub. Logic: `modules/memo/m
 | `pending` | a next step — hidden until its parent is done, then opened with due = today + `days_after` |
 | `done` / `archived` | closed |
 
+**Morning digest (not an API action).** `modules/memo/cron_digest.php?token=MEMO_CRON_TOKEN`, called by
+cron-job.org Mon–Sat 07:20 EAT, emails the `AGENT_MEMO_USER` board to `MEMO_DIGEST_TO` (both in
+`includes/config.php`) with subject `[Memo Hub] YYYY-MM-DD – N da sollecitare, M scaduti`: overdue,
+follow-ups due today, next 7 days, in progress, routines, and a last line
+`DIGEST-COUNTS: sollecitare=…; scaduti=…; attesa7=…; incorso=…; leads=…; sh_aperte=…`. Open memos
+without a due date are left out. Once a day (`memo_digest_log`); `&force=1` resends, `&dry=1` shows
+the HTML without sending. The scheduled Cowork recap reads this email from Gmail instead of
+calling the API. Rows come from `memo_rows()` and `memo_routines_status()`, the same code as
+`memo_list` / `routine_status`.
+
 ### `memo_list` (GET)
 `status` (comma list, default `open,doing,waiting`), `q`, `request_id`, `invoice_id`, `ext_key`,
 `follow_up_due=1` (due date today or earlier). → `memos[]` `{id, title, status, waiting_on, due_date,
@@ -574,6 +584,12 @@ payment is recorded on that invoice — by the Hub page or `add_invoice_payment`
 reminder gets an email reminder at 08:00 that day. Created memos are marked 🤖 Claude.
 The reply has a top-level `request_id` when the memo is linked to a request (memos also appear in
 `request_resume`).
+
+**What not to put on the board.** A memo (or a `next_steps` entry) is something **Roberto** has to do or
+follow up. Never create memos for Claude's own work steps — API calls and Hub bookkeeping such as
+"register the payment (`add_invoice_payment`)", "update the invoice PDF (`save_invoice_pdf`)",
+"save in Inv4Agents", "update the Calc / folder": do them in the session, or say in the reply what is
+still to do. A payment memo with `auto_close_on_payment` needs no next steps for recording that payment.
 
 ### `memo_set_status` (POST)
 `id` or `ext_key`, `status` (`open`|`doing`|`waiting`|`done`|`archived`), `note` (appended when done).
