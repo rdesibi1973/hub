@@ -100,7 +100,18 @@ function bo_do_regroup(PDO $db, string $token, array $r, string $targetGrp): arr
     }
     $newPath = $newParent . '/' . $cust;
 
+    // Imported group (practice_code = group_folder): the folder is the group itself,
+    // so "into its own group" would nest it inside itself, and "private" is a DB-only change.
+    $selfGrp = trim($r['group_folder'] ?? '') === $cust;
+    if ($selfGrp && $newGroup !== null && strcasecmp($newGroup, $cust) === 0) {
+        return ['ok' => false, 'msg' => 'The booking is already in that location — nothing to change.'];
+    }
+
     if (strcasecmp($newPath, $curPath) === 0) {
+        if ($selfGrp && $newGroup === null) {
+            $db->prepare("UPDATE requests SET group_folder = NULL WHERE id = ?")->execute([(int)$r['id']]);
+            return ['ok' => true, 'msg' => '✔ ' . ($r['customer_name'] ?? 'Booking') . ': now private (no group) — folder not moved.'];
+        }
         return ['ok' => false, 'msg' => 'The booking is already in that location — nothing to change.'];
     }
 
