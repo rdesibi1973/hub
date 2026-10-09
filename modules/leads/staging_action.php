@@ -2,6 +2,7 @@
 require_once 'config.php';
 require_once 'dropbox_helper.php';
 require_once 'notifications.php';
+require_once 'includes/booking_service.php';   // bs_camel_case, bs_customer_name_error
 
 // Load the HubSpot sync as a library (skips its CLI block). Gives us
 // hs_mark_processed() / hs_ensure_processed_table() for the anti-reimport suppression list.
@@ -145,17 +146,22 @@ if ($action === 'approve') {
     $agent = $agent->fetch();
     if (!$agent) { flash('Agent not found.','error'); header('Location: staging.php'); exit; }
 
-    // Build folder name — consistent with api_create_request.php
-    function toCamelCaseSt(string $name): string {
-        $name = trim($name);
-        if (strpos($name, ' ') === false && strpos($name, '-') === false) return $name;
-        return implode('', array_map('ucfirst', array_map('mb_strtolower',
-            preg_split('/[\s\-]+/', $name))));
+    // Customer name = the client only; the "(Agency-Agent)" tag belongs to the folder name.
+    if ($nameErr = bs_customer_name_error($customerName)) {
+        flash($nameErr . ' Fix the customer name of "' . $lead['customer_name'] . '" before approving.', 'error');
+        header('Location: staging.php'); exit;
     }
+
+    // Build folder name — bs_camel_case() as New Request / api_create_request.php
     $agentName  = str_replace(' ', '', $agent['name']); // e.g. "RobertoCapri"
     // Blog-referral flag: "EleonoraOngaro" suffix instead of the default "Drct".
     $suffix     = !empty($_POST['eleonora_ongaro']) ? 'EleonoraOngaro' : 'Drct';
-    $folderName = trim($_POST['folder_name_override'] ?? '') ?: toCamelCaseSt($customerName) . "({$agentName}-{$suffix})";
+    $folderName = trim($_POST['folder_name_override'] ?? '') ?: bs_camel_case($customerName) . "({$agentName}-{$suffix})";
+    // A hand-typed folder name carries exactly one (…) tag: "Name(Agency-Agent)".
+    if (!preg_match('/^[^()]+\([^()]+\)$/', $folderName)) {
+        flash('Folder name "' . $folderName . '" must be ClientName(Agency-Agent) with a single (…) tag.', 'error');
+        header('Location: staging.php'); exit;
+    }
     $folderPath = DROPBOX_BASE_PATH . '/' . $folderName;
 
     // Create Dropbox folder — block on conflict (folder already exists)

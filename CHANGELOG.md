@@ -20,6 +20,20 @@ Running log of notable changes and current build state. Module-level "active / p
 
 ---
 
+## 2026-10-09 — Re-link a folder moved outside the Hub; agency edit; customer-name guard
+- `rename_folder` / BackOffice "Rename…": new `current_path` (re-link a folder moved or renamed outside the
+  Hub, e.g. #2923) and `rename_files` (also the `NN_<old name>…` Calc / Word files). Shared code in
+  `folder_service.php` (`fs_rename_validate`, `fs_relink_resolve`, `fs_file_renames`, `fs_allowed_roots`).
+  A re-link to Booked sets `confirmation_date` / `start_date` (no Rollback: no confirm snapshot). "Folder not
+  found" suggests `current_path` with up to 3 candidates; the BackOffice form reopens with the path field.
+- `update_request`: `agency_id` / `channel` (folder not renamed; warning with the suggested name,
+  `bs_agency_tag_hint()`). Edit Request: Channel + Agency fields (admin/manager).
+- Customer name guard (`bs_customer_name_error()`): no `( ) [ ]` in the name — New Request (inline),
+  `create_request`, Incoming approve, Edit Request, Java `api_create_request.php`. Incoming approve also
+  refuses a typed folder name with more than one `(…)` tag.
+- `bs_camel_case()` keeps mixed-case words (`Luca DeSanctis` → `LucaDeSanctis`, was `Lucadesanctis`); Incoming
+  approve and `api_create_request.php` now use it instead of their own copies.
+
 ## 2026-10-09 — Agent API: Il Diamante group folders; update_request dry-run
 - New `includes/group_import_service.php` (`gi_parse`, `gi_duplicates`, `gi_validate`, `gi_import`, plus
   `gi_plan` / `gi_move_plan` for the API): the logic of Import Group Folder, moved out of `import_folder.php`

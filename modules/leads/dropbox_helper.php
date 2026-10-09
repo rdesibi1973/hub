@@ -244,6 +244,32 @@ function dropbox_path_exists(string $token, string $path): bool {
 }
 
 /**
+ * Metadata of a Dropbox path (files/get_metadata): ['tag' => 'file'|'folder', 'name', 'path'
+ * (path_display, real case)], or null if not_found. Other errors throw.
+ */
+function dropbox_get_metadata(string $token, string $path): ?array {
+    if ($path === '' || $path === '/') return null;
+    $ch = curl_init('https://api.dropboxapi.com/2/files/get_metadata');
+    curl_setopt_array($ch, [
+        CURLOPT_POST           => true,
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_HTTPHEADER     => ['Authorization: Bearer ' . $token, 'Content-Type: application/json'],
+        CURLOPT_POSTFIELDS     => json_encode(['path' => $path]),
+    ]);
+    $body = curl_exec($ch);
+    $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+
+    $data = json_decode((string)$body, true) ?? [];
+    if ($code === 200) {
+        return ['tag' => (string)($data['.tag'] ?? ''), 'name' => (string)($data['name'] ?? ''),
+                'path' => (string)($data['path_display'] ?? $path)];
+    }
+    if ($code === 409 && stripos((string)($data['error_summary'] ?? ''), 'not_found') !== false) return null;
+    throw new RuntimeException("Dropbox get_metadata failed (HTTP $code): $body");
+}
+
+/**
  * List file names (not folders, one level deep) inside a Dropbox path.
  * Returns [] if the folder does not exist yet. Handles pagination.
  *

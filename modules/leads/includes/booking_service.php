@@ -79,11 +79,33 @@ function req_folder_path(array $r): string {
 //  Create request
 // ════════════════════════════════════════════════════════════════════════════
 
-/** "patrizia fiorini" → "PatriziaFiorini"; compact CamelCase is kept as-is. */
+/**
+ * "patrizia fiorini" → "PatriziaFiorini", "ROSSI mario" → "RossiMario"; compact CamelCase is
+ * kept as-is, and so is a mixed-case word ("Luca DeSanctis" → "LucaDeSanctis", not "Desanctis").
+ * Keep in step with toCamelCase() in request_add.php.
+ */
 function bs_camel_case(string $name): string {
     $name = trim($name);
     if (strpos($name, ' ') === false && strpos($name, '-') === false) return $name;
-    return implode('', array_map('ucfirst', array_map('mb_strtolower', preg_split('/[\s\-]+/', $name))));
+    $out = '';
+    foreach (preg_split('/[\s\-]+/', $name, -1, PREG_SPLIT_NO_EMPTY) as $w) {
+        $first = mb_strtoupper(mb_substr($w, 0, 1));
+        $rest  = mb_substr($w, 1);
+        $mixed = $w !== mb_strtolower($w) && $w !== mb_strtoupper($w);
+        $out  .= $first . ($mixed ? $rest : mb_strtolower($rest));
+    }
+    return $out;
+}
+
+/**
+ * Customer name guard: the client's name only — no "(Agency-Agent)" tag, which the Hub
+ * adds to the folder name itself. Returns the error message, or null when the name is fine.
+ */
+function bs_customer_name_error(string $name): ?string {
+    if (preg_match('/[()\[\]]/', $name)) {
+        return 'Write only the client name — the Hub adds (Agency-Agent) itself.';
+    }
+    return null;
 }
 
 /** Folder name for a new request, e.g. "PatriziaFiorini(TVT-PS-Roberto)". */
@@ -112,6 +134,38 @@ function bs_request_folder_name(PDO $db, string $customerName, string $channel, 
         default:       $suffix = "({$agentName}-Drct)";          break;
     }
     return $namePart . $suffix;
+}
+
+/**
+ * After an agency change: does the folder's (Agency-Agent) tag still name that agency?
+ * $r = request row (practice_code, group_folder, agent_id). Checks the last (…) group of
+ * the folder (group: the parent). Returns null when it matches (or nothing to compare),
+ * else ['message' => …, 'suggested_name' => folder name with the tag rebuilt].
+ * The folder itself is not renamed here: that is rename_folder / BackOffice "Rename…".
+ */
+function bs_agency_tag_hint(PDO $db, array $r, $agencyId): ?array {
+    $folder = trim((string)($r['group_folder'] ?? '')) ?: trim((string)($r['practice_code'] ?? ''));
+    if ($folder === '' || !(int)$agencyId) return null;
+    $st = $db->prepare("SELECT nome, short_name FROM agencies WHERE id = ?");
+    $st->execute([(int)$agencyId]);
+    $ag = $st->fetch(PDO::FETCH_ASSOC);
+    if (!$ag) return null;
+    $short = preg_replace('/[^\w\-]/', '', $ag['short_name'] ?: $ag['nome']);
+    if ($short === '' || !preg_match_all('/\(([^()]*)\)/', $folder, $m, PREG_OFFSET_CAPTURE)) return null;
+
+    $last = count($m[0]) - 1;
+    $tag  = $m[1][$last][0];
+    if (stripos($tag, $short . '-') === 0) return null;   // "TVT-PS-Roberto" names agency "TVT"
+
+    $st = $db->prepare("SELECT name FROM agents WHERE id = ?");
+    $st->execute([(int)($r['agent_id'] ?? 0)]);
+    $agent = str_replace(' ', '', (string)($st->fetchColumn() ?: ''));
+    if ($agent === '') { $p = strrpos($tag, '-'); $agent = $p === false ? $tag : substr($tag, $p + 1); }
+
+    $suggested = substr_replace($folder, '(' . $short . '-' . $agent . ')', $m[0][$last][1], strlen($m[0][$last][0]));
+    return ['message' => 'The folder tag (' . $tag . ') does not name agency ' . $short . '. Suggested folder name: '
+                       . $suggested . ' — rename it with rename_folder / BackOffice "Rename…".',
+            'suggested_name' => $suggested];
 }
 
 /**
@@ -149,6 +203,7 @@ function bs_create_request(PDO $db, array $v, array $opt = []): array {
     // ── Validate ──────────────────────────────────────────────────────────────
     $errors = [];
     if (!$v['customer_name'])   $errors[] = 'Customer name is required.';
+    elseif ($ne = bs_customer_name_error($v['customer_name'])) $errors[] = $ne;
     if (!$v['date_received'])   $errors[] = 'Date received is required.';
     if (!$dropboxSkip && !$v['initial_request']) $errors[] = 'Initial Request is required.';
     if (!$v['agent_id'])        $errors[] = 'Please select an agent.';

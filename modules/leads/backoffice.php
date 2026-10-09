@@ -198,8 +198,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array($act, ['change_status', 'r
 
     if ($act === 'rename') {
         // Free rename: validation, Dropbox + DB, CK tracker, timeline — includes/folder_service.php.
-        $res = folder_rename($db, $reqId, (string)($_POST['new_name'] ?? ''), (int)($currentUser['id'] ?? 0) ?: null);
+        $res = folder_rename($db, $reqId, (string)($_POST['new_name'] ?? ''), (int)($currentUser['id'] ?? 0) ?: null,
+                             ['current_path' => (string)($_POST['current_path'] ?? ''), 'rename_files' => !empty($_POST['rename_files'])]);
         flash($res['msg'], $res['ok'] ? 'info' : 'error');
+        // Folder moved outside the Hub: reopen the form with the "Current Dropbox path" field.
+        if (!$res['ok'] && (!empty($res['not_found']) || trim((string)($_POST['current_path'] ?? '')) !== '')) {
+            $_SESSION['bo_relink'] = ['id' => $reqId, 'new_name' => (string)($_POST['new_name'] ?? ''),
+                                      'current_path' => (string)($_POST['current_path'] ?? ''),
+                                      'candidates' => $res['candidates'] ?? []];
+        }
     } elseif (!$r) {
         flash('Request not found.', 'error');
     } elseif (($folder = ($isGrp = trim($r['group_folder'] ?? '') !== '')
@@ -248,6 +255,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array($act, ['change_status', 'r
                 flash('Dropbox/DB error — nothing was changed: ' . $e->getMessage(), 'error');
             }
         }
+    }
+    // Re-link needed: show the row here, whatever page the rename came from.
+    if (!empty($_SESSION['bo_relink']) && $r) {
+        header('Location: backoffice.php?' . http_build_query(['q' => $r['customer_name'] ?? '', 'root' => 'All']));
+        exit;
     }
     // Rename posted from the Payments page: go back there with its filters.
     if (($_POST['return_to'] ?? '') === 'payments') {
@@ -441,6 +453,10 @@ if (!$bookingEmail && !empty($_SESSION['bo_mail']) && is_array($_SESSION['bo_mai
     $bookingEmail = $_SESSION['bo_mail'];
     unset($_SESSION['bo_mail']);
 }
+// Rename failed because the folder was moved outside the Hub: that row's Rename form
+// opens with the "Current Dropbox path" field (re-link).
+$boRelink = (!empty($_SESSION['bo_relink']) && is_array($_SESSION['bo_relink'])) ? $_SESSION['bo_relink'] : null;
+unset($_SESSION['bo_relink']);
 
 // ── Search ────────────────────────────────────────────────────────────────────
 // Folder-root filter: which Dropbox root the request's folder lives in
@@ -845,15 +861,37 @@ include 'includes/header.php';
           </form>
           <?php endif; ?>
           <?php if ($folder !== ''): ?>
-          <form method="POST" id="rn<?= (int)$r['id'] ?>" style="display:none;margin-top:6px"
-                onsubmit="return confirm('<?= $isGrp ? 'GROUP: this renames the shared group folder and updates ALL its bookings.\\n\\n' : '' ?>Rename the real Dropbox folder to the new name?');">
+          <?php $rl = ($boRelink && (int)$boRelink['id'] === (int)$r['id']) ? $boRelink : null; ?>
+          <form method="POST" id="rn<?= (int)$r['id'] ?>"<?= $rl ? ' data-relink="1"' : '' ?> style="display:<?= $rl ? 'block' : 'none' ?>;margin-top:6px"
+                onsubmit="return confirm('<?= $isGrp ? 'GROUP: this renames the shared group folder and updates ALL its bookings.\\n\\n' : '' ?>' + (this.current_path.value.trim() ? 'Re-link the request to the folder at the current Dropbox path and rename it to the new name?' : 'Rename the real Dropbox folder to the new name?'));">
             <input type="hidden" name="action" value="rename">
             <input type="hidden" name="request_id" value="<?= (int)$r['id'] ?>">
             <input type="hidden" name="q" value="<?= h($q) ?>">
             <input type="hidden" name="root" value="<?= h($root) ?>">
             <input type="hidden" name="in_files" value="<?= $inFiles ? '1' : '' ?>">
-            <input type="text" name="new_name" value="<?= h($folder) ?>" spellcheck="false"
+            <input type="text" name="new_name" value="<?= h($rl ? $rl['new_name'] : $folder) ?>" spellcheck="false"
                    style="width:100%;font-family:monospace;font-size:.72rem;padding:5px 7px;border:1.5px solid var(--grey-lt);border-radius:5px">
+            <div class="bo-relink" style="display:<?= $rl ? 'block' : 'none' ?>;margin-top:4px">
+              <label style="font-size:.68rem;color:#8a6d3b;font-weight:600">Current Dropbox path
+                <span style="font-weight:400;color:var(--grey-mid)">— the folder was moved or renamed outside the Hub; paste where it is now</span></label>
+              <input type="text" name="current_path" value="<?= h($rl['current_path'] ?? '') ?>" spellcheck="false"
+                     placeholder="/001_Safari/07_27JUL_Name(Agency-Agent)_START…_PROGRESS" list="rlc<?= (int)$r['id'] ?>"
+                     style="width:100%;font-family:monospace;font-size:.72rem;padding:5px 7px;border:1.5px solid #e0c48a;border-radius:5px">
+              <?php if (!empty($rl['candidates'])): ?>
+              <datalist id="rlc<?= (int)$r['id'] ?>"><?php foreach ($rl['candidates'] as $c): ?><option value="<?= h($c) ?>"><?php endforeach; ?></datalist>
+              <div style="font-size:.68rem;color:var(--grey-mid);margin-top:2px">Possible matches:
+                <?php foreach ($rl['candidates'] as $c): ?>
+                  <a href="#" onclick="this.closest('form').current_path.value=this.dataset.p;return false" data-p="<?= h($c) ?>" style="font-family:monospace;margin-right:6px"><?= h($c) ?></a>
+                <?php endforeach; ?>
+              </div>
+              <?php endif; ?>
+            </div>
+            <label style="display:block;font-size:.68rem;margin-top:4px;font-weight:400;cursor:pointer">
+              <input type="checkbox" name="rename_files" value="1"> Also rename the files inside named <code>NN_&lt;old name&gt;…</code> (Calc, Word)
+            </label>
+            <?php if (!$rl): ?>
+            <a href="#" onclick="this.style.display='none';this.closest('form').querySelector('.bo-relink').style.display='block';return false" style="font-size:.66rem;color:var(--grey-mid)">Folder moved outside the Hub? Give its current path…</a>
+            <?php endif; ?>
             <div style="margin-top:4px;display:flex;gap:6px">
               <button type="submit" class="btn btn-red btn-sm">Rename</button>
               <button type="button" class="btn btn-outline btn-sm" onclick="toggleRename(<?= (int)$r['id'] ?>)">Cancel</button>
@@ -1176,6 +1214,11 @@ function toggleRename(id) {
   var f = document.getElementById('rn' + id);
   if (f) f.style.display = (f.style.display === 'none' || !f.style.display) ? 'block' : 'none';
 }
+// Re-link form reopened after "folder not found": bring it into view.
+(function () {
+  var f = document.querySelector('form[data-relink]');
+  if (f) { f.scrollIntoView({block: 'center'}); if (f.current_path) f.current_path.focus(); }
+})();
 // Toggle any inline box (e.g. the re-group form) by full element id.
 // ── CK: Re-check a booking folder from its row (same endpoint as the CK tracker).
 // While it runs the old report link is hidden ("Report in progress"); the row is

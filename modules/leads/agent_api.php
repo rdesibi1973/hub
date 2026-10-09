@@ -750,12 +750,14 @@ try {
     // ── update_request ───────────────────────────────────────────────────────
     // Plain data fields only. Status / folder changes go through confirm_booking
     // (or the BackOffice), which keep the Dropbox folder and the DB in sync.
+    // agency_id sets channel = agency (unless channel is given); the folder is not renamed
+    // here — a warning suggests the new name for rename_folder.
     // Dry-run (changes {field: {from, to}}) unless "confirm": true.
     case 'update_request': {
         agent_require_method('POST');
         $r = agent_request($db, $in['request_id'] ?? 0);
         $allowed = ['customer_name','email','whatsapp','source','destination','period','pax',
-                    'value_usd','commission_pct','date_paid','initial_request','notes'];
+                    'value_usd','commission_pct','date_paid','initial_request','notes','agency_id','channel'];
         $fields = isset($in['fields']) && is_array($in['fields']) ? $in['fields'] : $in;
         $new = [];
         foreach ($allowed as $f) {
@@ -765,6 +767,30 @@ try {
         }
         $ignored = array_values(array_diff(array_keys($fields), array_merge($allowed, ['request_id', 'fields', 'confirm'])));
         if (!$new) agent_fail('No updatable fields given', 400, ['updatable' => $allowed, 'ignored' => $ignored]);
+        if (isset($new['customer_name']) && $new['customer_name'] !== (string)($r['customer_name'] ?? '')
+            && ($ne = bs_customer_name_error($new['customer_name']))) {
+            agent_fail($ne, 400);
+        }
+        // Agency / channel (migration 067): agency_id must exist; channel ≠ agency drops the agency.
+        if (array_key_exists('channel', $new) && $new['channel'] !== null) {
+            $new['channel'] = strtolower($new['channel']);
+            if (!in_array($new['channel'], ['agency', 'direct', 'sb', 'other'], true)) agent_fail('channel must be agency, direct, sb or other');
+        }
+        if (array_key_exists('agency_id', $new) && $new['agency_id'] !== null) {
+            if (!ctype_digit($new['agency_id'])) agent_fail('agency_id must be a number — use list_agencies');
+            $st = $db->prepare("SELECT COUNT(*) FROM agencies WHERE id = ?");
+            $st->execute([(int)$new['agency_id']]);
+            if (!(int)$st->fetchColumn()) agent_fail('agency_id ' . $new['agency_id'] . ' not found — use list_agencies');
+            if (!array_key_exists('channel', $new)) $new['channel'] = 'agency';
+        }
+        if (array_key_exists('channel', $new)) {
+            $agencyAfter = array_key_exists('agency_id', $new) ? $new['agency_id'] : ($r['agency_id'] ?? null);
+            if ($new['channel'] === 'agency' && empty($agencyAfter)) agent_fail('channel agency needs agency_id');
+            if ($new['channel'] !== 'agency' && $new['channel'] !== null && !empty($agencyAfter)) {
+                if (array_key_exists('agency_id', $new)) agent_fail('agency_id is only for channel agency');
+                $new['agency_id'] = null;   // leaving the agency channel
+            }
+        }
         // Keep commission_usd consistent with value × pct.
         if (array_key_exists('value_usd', $new) || array_key_exists('commission_pct', $new)) {
             $val = array_key_exists('value_usd', $new) ? $new['value_usd'] : $r['value_usd'];
@@ -779,8 +805,14 @@ try {
                   : (is_numeric($from) && is_numeric($to) ? (float)$from == (float)$to : (string)$from === $to);
             if (!$same) $changes[$f] = ['from' => $from, 'to' => $to];
         }
+        $warnings = [];
+        if (isset($changes['agency_id']) && $changes['agency_id']['to'] !== null
+            && ($hint = bs_agency_tag_hint($db, $r, $changes['agency_id']['to']))) {
+            $warnings[] = $hint['message'];
+        }
         if (empty($in['confirm'])) {
-            agent_out(['ok' => true, 'dry_run' => true, 'changes' => $changes, 'ignored' => $ignored, 'request' => agent_request_out($r),
+            agent_out(['ok' => true, 'dry_run' => true, 'changes' => $changes, 'ignored' => $ignored, 'warnings' => $warnings,
+                       'request' => agent_request_out($r),
                        'message' => $changes ? 'Dry run — nothing saved. Resend with "confirm": true.' : 'Nothing would change.']);
         }
         if ($changes) {
@@ -791,7 +823,7 @@ try {
             $r = agent_request($db, $r['id']);
         }
         agent_out(['ok' => true, 'dry_run' => false, 'updated' => array_keys($changes), 'changes' => $changes,
-                   'ignored' => $ignored, 'request' => agent_request_out($r)]);
+                   'ignored' => $ignored, 'warnings' => $warnings, 'request' => agent_request_out($r)]);
     }
 
     // ── import_group_folder ──────────────────────────────────────────────────
@@ -1524,16 +1556,20 @@ try {
     // ── rename_folder ────────────────────────────────────────────────────────
     // Free rename of the booking folder, same as BackOffice "Rename…" (includes/folder_service.php):
     // Dropbox + Hub (name, URL, status from the suffix) + CK tracker + timeline. No email.
+    // current_path: re-link a folder moved outside the Hub; rename_files: also the NN_<name>… files.
     // Dry-run (paths, status, warnings) unless "confirm": true.
     case 'rename_folder': {
         agent_require_method('POST');
         $r = agent_request($db, $in['request_id'] ?? 0);
-        $v = fs_rename_validate($db, (int)$r['id'], (string)($in['new_name'] ?? ''));
+        $curIn = trim((string)($in['current_path'] ?? ''));
+        $v = fs_rename_validate($db, (int)$r['id'], (string)($in['new_name'] ?? ''), $curIn);
         if (!$v['ok']) agent_fail($v['error'], $v['code']);
-        $go = !empty($in['confirm']);
+        $go        = !empty($in['confirm']);
+        $withFiles = !empty($in['rename_files']);
         require_once __DIR__ . '/dropbox_helper.php';
         try {
-            $pv = fs_rename_preview($db, $v, dropbox_get_access_token(), !$go);   // Calc check on the dry run only
+            // Calc check and file list on the dry run only
+            $pv = fs_rename_preview($db, $v, dropbox_get_access_token(), !$go, $withFiles && !$go);
         } catch (Throwable $e) {
             agent_fail('Dropbox error — nothing was changed: ' . $e->getMessage(), 502);
         }
@@ -1542,24 +1578,36 @@ try {
             'current'          => $v['folder'],
             'new_name'         => $v['new_name'],
             'is_group'         => $v['is_group'],
+            'relink'           => $v['relink'],
             'status_from_name' => ['matched' => $v['set_status'], 'status' => $v['status'],
                                    // a group tag sets the status only: each client keeps its payment_status
                                    'payment_status' => $v['is_group'] ? null : $v['ps'],
                                    'current_status' => $r['status'], 'current_payment_status' => $r['payment_status'] ?? null],
             'dropbox_path_old' => $pv['dropbox_path_old'],
+            'current_path'     => $pv['current_path'],
             'dropbox_path_new' => $pv['dropbox_path_new'],
             'warnings'         => $pv['warnings'],
         ];
+        if ($curIn !== '' && !$v['relink']) $out['warnings'][] = 'current_path equals the stored path — plain rename.';
         if (!$go) $out['calc_dates'] = $pv['calc_dates'];
+        if (!$go && $withFiles) $out['file_renames'] = $pv['file_renames'];
+        if ($pv['candidates']) $out['candidates'] = $pv['candidates'];
         if ($pv['error'] !== null) agent_fail($pv['error'], $pv['code'], $out);
         if (!$go) {
             agent_out(array_merge(['ok' => true, 'dry_run' => true,
-                'message' => 'Dry run — nothing renamed. Resend with "confirm": true to rename the folder.'], $out));
+                'message' => 'Dry run — nothing ' . ($v['relink'] ? 're-linked' : 'renamed') . '. Resend with "confirm": true to '
+                           . ($v['relink'] ? 're-link' : 'rename') . ' the folder.'], $out));
         }
-        $res = folder_rename($db, (int)$r['id'], $v['new_name'], (int)$agentUser['id']);
-        if (!$res['ok']) agent_fail($res['msg'], $res['code'], $out);
-        $out['dropbox_path_old'] = $res['dropbox_path_old'];
+        $res = folder_rename($db, (int)$r['id'], $v['new_name'], (int)$agentUser['id'],
+                             ['current_path' => $curIn, 'rename_files' => $withFiles]);
+        if (!$res['ok']) {
+            if (!empty($res['candidates'])) $out['candidates'] = $res['candidates'];
+            agent_fail($res['msg'], $res['code'], $out);
+        }
         $out['dropbox_path_new'] = $res['dropbox_path_new'];
+        if ($v['relink']) $out['current_path'] = $res['dropbox_path_old'];
+        else              $out['dropbox_path_old'] = $res['dropbox_path_old'];
+        if ($withFiles) { $out['files_renamed'] = $res['files_renamed']; $out['files_failed'] = $res['files_failed']; }
         agent_out(array_merge(['ok' => true, 'dry_run' => false, 'renamed' => true, 'message' => $res['msg']], $out));
     }
 

@@ -85,19 +85,32 @@ Creates the Dropbox folder `/2026/<Name>(<AgencyShort>-<Agent>)` + subfolders + 
 then the DB row (which also stores `channel` and, for agency requests, `agency_id`). A likely duplicate → **409** with `dup_candidates`; resend with `"dup_override": true`
 only if it is really new.
 
+`customer_name` is the client's name only: a name with `(` `)` `[` `]` (e.g. `LucaDeSanctis(LasciatiViaggiare-Daniela)`)
+→ **400** "Write only the client name — the Hub adds (Agency-Agent) itself" (same rule on New Request, Incoming
+approve, Edit Request and the Java `api_create_request.php`). The folder name keeps a mixed-case word as typed:
+`Luca DeSanctis` → `LucaDeSanctis` (all-lower / ALL-CAPS words are capitalised: `mario ROSSI` → `MarioRossi`).
+
 ### `update_request` (POST)
 **Dry-run unless `"confirm": true`** (since 9 Oct 2026; before, it wrote at the first call).
 `request_id` + any of `customer_name, email, whatsapp, source, destination, period, pax, value_usd,
-commission_pct, date_paid, initial_request, notes` (top level or inside `fields`; `""` / `null` clears).
+commission_pct, date_paid, initial_request, notes, agency_id, channel` (top level or inside `fields`; `""` / `null` clears).
 `commission_usd` is recomputed when `value_usd` or `commission_pct` change. Status / folder are **not**
-editable here (use `set_request_status` below, `confirm_booking` / BackOffice).
+editable here (use `set_request_status` below, `confirm_booking` / BackOffice, `rename_folder`).
 
-Dry run → `{dry_run: true, changes: {field: {from, to}}, ignored, request}` — only the fields that differ
-(`7890` = `7890.00`). With `confirm` → `{dry_run: false, updated: [fields], changes, ignored, request}`.
+- `agency_id` must exist (`list_agencies`) and sets `channel` = `agency` unless `channel` is given.
+  `channel` is `agency|direct|sb|other`; `agency` needs an agency (given or already stored); another channel
+  clears the stored agency (`agency_id` + a non-agency channel together → 400).
+- The folder is **not** renamed: when the folder's `(Agency-Agent)` tag does not name the new agency,
+  `warnings[]` gives the suggested folder name — rename it with `rename_folder`.
+- A changed `customer_name` follows the `create_request` name rule (400 on `(` `)` `[` `]`).
+
+Dry run → `{dry_run: true, changes: {field: {from, to}}, ignored, warnings, request}` — only the fields that differ
+(`7890` = `7890.00`). With `confirm` → `{dry_run: false, updated: [fields], changes, ignored, warnings, request}`.
 
 ```bash
 curl -sA "$UA" -H "$H" -X POST "$U?action=update_request" -d '{"request_id":3023,"pax":4,"value_usd":15780}'                 # dry run
 curl -sA "$UA" -H "$H" -X POST "$U?action=update_request" -d '{"request_id":3023,"pax":4,"value_usd":15780,"confirm":true}'
+curl -sA "$UA" -H "$H" -X POST "$U?action=update_request" -d '{"request_id":2923,"agency_id":54,"customer_name":"LucaDeSanctis"}'   # dry run
 ```
 
 ### `set_request_status` (POST)
@@ -233,19 +246,35 @@ other members.
 Free rename of the booking folder — the same as BackOffice → **Rename…** (shared code:
 `includes/folder_service.php`, `folder_rename()`). For a group the **group parent** (`group_folder`) is
 renamed and every request of the group is updated. No email is sent (unlike Reschedule).
-`request_id`*, `new_name`*, `confirm`.
+`request_id`*, `new_name`*, `current_path`, `rename_files`, `confirm`.
 
-- **Without `"confirm": true` → dry run**, nothing changes. Returns `current`, `new_name`, `is_group`,
+- **`current_path` (re-link)** — the folder's real Dropbox path when it was moved or renamed **outside the
+  Hub** (the stored path no longer exists and its name is not found by search), e.g.
+  `/001_Safari/07_27JUL_Lucadesanctis(lasciativiaggiareDaniela)_START27JUL_END03AUG2027_PROGRESS`. The rename
+  starts from there. It must exist, be a folder, sit under `/2026`, `/2027` or `/001_Safari` (the inquiry root
+  `DROPBOX_BASE_PATH`, the next year, `CK_BASE`), and no other request may point to it (→ 409).
+  `new_name` may equal its basename: pure re-link, no Dropbox rename. Equal to the stored path → ignored.
+  A re-link whose suffix makes the request **Booked** (it was not) also sets `confirmation_date` = today (if empty)
+  and `start_date` from the name — warning "Booked via re-link: no confirm snapshot, Rollback not available".
+  The timeline event is "Folder re-linked" with `relinked from <stored path>`.
+- **`rename_files: true`** — also renames the files inside (recursive, e.g. `old/`) named `NN_<old name>…`
+  (`<old name>` = the stored name or the folder's current name) to `NN_<new_name>…` — e.g. the `_Calc.xlsx`
+  and Word copied by `copy_program`. Dry run lists them in `file_renames[{from, to}]`; with confirm →
+  `files_renamed[]`, `files_failed{}` (a failed file never undoes the folder rename).
+- **Without `"confirm": true` → dry run**, nothing changes. Returns `current`, `new_name`, `is_group`, `relink`,
   `status_from_name` `{matched, status, payment_status, current_status, current_payment_status}` (what the
-  new suffix sets: `_DEPOSIT` → Booked/Deposit, `_PAID` → Booked/Paid, `_CANCELLED` → Cancelled …; no
-  status tag → status untouched; a group sets the status only), `dropbox_path_old`, `dropbox_path_new`,
-  `warnings[]` and `calc_dates` `{start, end}` (the `*_Calc.xlsx` itinerary dates, or null).
+  new suffix sets: `_DEPOSIT` → Booked/Deposit, `_PAID` → Booked/Paid, `_PROGRESS` → Booked, `_CANCELLED` →
+  Cancelled …; no status tag → status untouched; a group sets the status only), `dropbox_path_old` (re-link:
+  the stored path), `current_path` (re-link: the real one), `dropbox_path_new`, `warnings[]` and `calc_dates`
+  `{start, end}` (the `*_Calc.xlsx` itinerary dates, or null).
 - **With `"confirm": true`** → renames the Dropbox folder, updates `practice_code` / `group_folder`,
   `dropbox_url`, `status` / `payment_status` (when the suffix matches), the CK tracker, and logs a
   `status_change` timeline event (on every request of a group). Same fields + `renamed: true`.
-- **Errors (nothing changed):** 404 request not found · 400 no folder, empty name, invalid characters
-  (`\ / : * ? " < > |`), identical name · 409 folder not found in Dropbox (stored path, then search), destination folder
-  already exists · 502 Dropbox/DB failure.
+- **Errors (nothing changed):** 404 request not found, `current_path` not in Dropbox · 400 no folder, empty name,
+  invalid characters (`\ / : * ? " < > |`), identical name (without `current_path`), `current_path` outside the
+  allowed roots or a file · 409 folder not found in Dropbox (stored path, then search: the message suggests
+  `current_path` and `candidates[]` lists up to 3 folders in `/001_Safari` found by the customer name),
+  `current_path` already used by another request, destination folder already exists · 502 Dropbox/DB failure.
 - **Warnings (dry run, never blocking):** date tag malformed (`START29OC`), START / MIDT / END not in
   order (e.g. END before START) or spanning > 60 days, `_CK` not last, `MM_DDMON_` prefix ≠ START,
   `_CK` / status tag / START / END dropped from the current name, another request already using the name,
@@ -256,7 +285,12 @@ curl -sA "Mozilla/5.0 (compatible; SavannahHubAgent/1.0)" -H "$H" -X POST "$U?ac
      -d '{"request_id":873,"new_name":"02_10FEB_Rossi(BTG-Roberto)_START10FEB_END16FEB2027_DEPOSIT"}'                  # dry run
 curl -sA "Mozilla/5.0 (compatible; SavannahHubAgent/1.0)" -H "$H" -X POST "$U?action=rename_folder" \
      -d '{"request_id":873,"new_name":"02_10FEB_Rossi(BTG-Roberto)_START10FEB_END16FEB2027_DEPOSIT","confirm":true}'
+# re-link a folder moved outside the Hub (dry run), fixing its name and the files inside
+curl -sA "Mozilla/5.0 (compatible; SavannahHubAgent/1.0)" -H "$H" -X POST "$U?action=rename_folder" \
+     -d '{"request_id":2923,"current_path":"/001_Safari/07_27JUL_Lucadesanctis(lasciativiaggiareDaniela)_START27JUL_END03AUG2027_PROGRESS","new_name":"07_27JUL_LucaDeSanctis(LasciatiViaggiare-Daniela)_START27JUL_END03AUG2027_PROGRESS","rename_files":true}'
 ```
+BackOffice → **Rename…**: when the folder is not found, the form reopens with a **Current Dropbox path** field
+(and the candidates); "Folder moved outside the Hub?" opens it directly. Checkbox = `rename_files`.
 
 ### Il Diamante set departures — `move_group_folder` + `import_group_folder`
 Confirming a Diamante group (Panorama01, 05, 07, 10, PanoramaDavide …) = two steps: move the provisional
