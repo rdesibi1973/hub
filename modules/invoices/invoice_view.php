@@ -1,5 +1,6 @@
 <?php
 require_once 'config.php';
+require_once __DIR__ . '/includes/invoice_calc.php';
 $db  = db();
 $id  = (int)($_GET['id'] ?? 0);
 
@@ -145,14 +146,19 @@ if ($inv['request_id']) {
 
 $sym = $inv['currency'] === 'EUR' ? '€' : '$';
 
-// Excel checks ignored when the invoice was created (see includes/invoice_calc.php).
+// Excel checks ignored when the invoice was created (see includes/invoice_calc.php),
+// re-checked on the current lines: an edit since then may have fixed them.
 $excelBypass = null;
 try {
-    $xb = $db->prepare("SELECT c.bypassed, c.created_at, u.full_name AS user_name FROM invoice_excel_checks c
+    $xb = $db->prepare("SELECT c.bypassed, c.excel_pax, c.excel_total, c.created_at, u.full_name AS user_name FROM invoice_excel_checks c
                         LEFT JOIN users u ON u.id = c.created_by
                         WHERE c.invoice_id=? AND c.bypassed IS NOT NULL ORDER BY c.id DESC LIMIT 1");
     $xb->execute([$id]);
     $excelBypass = $xb->fetch() ?: null;
+    if ($excelBypass) {
+        $excelBypass['bypassed'] = implode("\n", ic_bypass_now($excelBypass, $items, $inv['currency']));
+        if ($excelBypass['bypassed'] === '') $excelBypass = null;
+    }
 } catch (PDOException $e) { /* table not created yet: no invoice checked so far */ }
 ?>
 
