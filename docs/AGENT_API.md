@@ -49,10 +49,20 @@ Responses: `{"ok": true, …}` or `{"ok": false, "error": "…", …}` with a ma
 ## Actions
 
 ### `find_requests` (GET)
-`q` (name / folder / email substring), `status`, `agent` (id or name), `year` (received), `limit` ≤ 100.
-At least one filter. Use it as the duplicate check before `create_request`.
-Each row also has `last_activity_at` (latest timeline event, summary or note) and `has_summary` — see
-[Request timeline](#request-timeline).
+Filters (at least one): `q` (name / folder / email substring), `status` (one value or several
+comma-separated, e.g. `Quoted,Hot-Quoted`), `agent` (agent id, agent name, or Hub username such as
+`rdesibi`), `channel` (`agency`|`direct`|`sb`|`other`), `year` (received). `limit` ≤ 100.
+Use it as the duplicate check before `create_request`.
+
+Each row also has `channel`, `agency_id`, `agency_name`, `last_activity_at` (latest timeline event,
+summary or note) and `has_summary` — see [Request timeline](#request-timeline).
+`channel` / `agency_id` are stored since Oct 2026 (migration 067); older rows were filled from the
+folder name only where it is conclusive (`-Drct`, `-SB`, or a known agency short name), so on the
+rest they are `null` and a `channel` filter does not match them.
+
+```bash
+curl -sH "$H" "$U?action=find_requests&status=Quoted,Hot-Quoted&agent=rdesibi&channel=agency"
+```
 
 ### `list_agencies` (GET)
 `q` → `[{id, name, short_name, type}]`.
@@ -69,13 +79,41 @@ Same fields as the New Request form:
 `notify_agent` (default **false**), `dup_override` (default false).
 
 Creates the Dropbox folder `/2026/<Name>(<AgencyShort>-<Agent>)` + subfolders + `CustomerInfo.txt`,
-then the DB row. A likely duplicate → **409** with `dup_candidates`; resend with `"dup_override": true`
+then the DB row (which also stores `channel` and, for agency requests, `agency_id`). A likely duplicate → **409** with `dup_candidates`; resend with `"dup_override": true`
 only if it is really new.
 
 ### `update_request` (POST)
 `request_id` + any of `customer_name, email, whatsapp, source, destination, period, pax, value_usd,
 commission_pct, date_paid, initial_request, notes` (top level or inside `fields`). `commission_usd`
-is recomputed. Status / folder are **not** editable here (use `confirm_booking` / BackOffice).
+is recomputed. Status / folder are **not** editable here (use `set_request_status` below,
+`confirm_booking` / BackOffice).
+
+### `set_request_status` (POST)
+**Dry-run unless `"confirm": true`.** Same rules as the status menu in the Hub
+(`bs_set_request_status()` in `includes/booking_service.php`).
+
+- `request_id` **or** `request_ids` (array, max 50)
+- `status`: `Inquiry` | `Quoted` | `Hot-Quoted` | `Lost` | `Cancelled`
+- `lost_reason` — **required for Lost**: `insufficient_budget` | `trip_postponed` | `no_more_replies` |
+  `agent_request` | `other`; `lost_note` optional. Reason / note are kept only on Lost and cleared
+  when a request leaves Lost; Lost also adds a request note.
+
+Rules:
+- `Booked` → **409**: bookings go through `confirm_booking` (folder + DB together).
+- A request that is **Booked now** can only go to `Cancelled` (trip cancelled; the folder is not
+  moved). Any other status → **409** — use `rollback_booking` to reopen it.
+- All or nothing: every id is checked first; if one is unknown (404) or not allowed (409/400),
+  nothing changes and `errors` lists them per id.
+- A real change logs a `status_change` event in the request timeline (author: the API user).
+  Ids already in that status are reported as `changed: false` and left alone.
+
+Dry run → `{dry_run: true, to_change, unchanged, requests: [{request_id, old_status, new_status, changed}]}`;
+with `confirm` → `{changed, unchanged, requests}`.
+
+```bash
+curl -sH "$H" -X POST "$U?action=set_request_status" -d '{"request_ids":[2410,2411],"status":"Lost","lost_reason":"no_more_replies","lost_note":"No reply after 3 follow-ups"}'
+curl -sH "$H" -X POST "$U?action=set_request_status" -d '{"request_ids":[2410,2411],"status":"Lost","lost_reason":"no_more_replies","confirm":true}'
+```
 
 ### `list_standard_programs` (GET)
 Program codes by group (`DumaShort`, `BeachDumaShort`, …) and the Confirm Safari `destinations`.

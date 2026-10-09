@@ -233,51 +233,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
 // Reasons a request can be marked Lost (slug => label). Used by the status
 // handler below, the "Lost" modal in the view and the inline status in requests.php.
-$LOST_REASONS = require __DIR__ . '/includes/lost_reasons.php';
+$LOST_REASONS = bs_lost_reasons();
 
-// ── Inline status update ────────────────────────────────────────────────────
+// ── Inline status update — logic in bs_set_request_status() (booking_service.php) ──
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['quick_status'])) {
-    $newStatus    = trim($_POST['quick_status']);
-    $isXhr        = ($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '') === 'XMLHttpRequest';
-    $staffAgentId = isLeadsRestricted() ? getStaffAgentId() : 0;
-    $lostReason   = trim($_POST['lost_reason'] ?? '');
-    $lostNote     = trim($_POST['lost_note']   ?? '');
-
-    if (!array_key_exists($newStatus, STATUSES)) {
+    $newStatus = trim($_POST['quick_status']);
+    $isXhr     = ($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '') === 'XMLHttpRequest';
+    $res = bs_set_request_status($db, $id, $newStatus, trim($_POST['lost_reason'] ?? ''), trim($_POST['lost_note'] ?? ''),
+                                 (int)($cu['id'] ?? 0), ['restrict_agent_id' => isLeadsRestricted() ? ((int)getStaffAgentId() ?: -1) : 0]);
+    if (!$res['ok']) {
         if ($isXhr) { header('Content-Type: application/json');
-                      echo json_encode(['ok'=>false,'message'=>'Invalid status']); exit; }
-        flash('Invalid status.', 'error');
-    } elseif ($newStatus === 'Lost' && !array_key_exists($lostReason, $LOST_REASONS)) {
-        // A reason is mandatory when marking a request Lost.
-        if ($isXhr) { header('Content-Type: application/json');
-                      echo json_encode(['ok'=>false,'message'=>'Please choose a reason.']); exit; }
-        flash('Please choose a reason for marking this request as Lost.', 'error');
+                      echo json_encode(['ok'=>false,'message'=>$res['error']]); exit; }
+        flash($res['error_code'] === 'lost_reason' ? 'Please choose a reason for marking this request as Lost.' : $res['error'], 'error');
     } else {
-        // Reason/note are stored only for Lost; cleared when leaving Lost.
-        $reasonVal = ($newStatus === 'Lost') ? $lostReason : null;
-        $noteVal   = ($newStatus === 'Lost' && $lostNote !== '') ? $lostNote : null;
-        $oldSt = $db->prepare("SELECT status FROM requests WHERE id=?");
-        $oldSt->execute([$id]);
-        $oldStatus = (string)$oldSt->fetchColumn();
-
-        if (isLeadsRestricted()) {
-            $db->prepare("UPDATE requests SET status=?, pipeline_column=IF(?='Booked',NULL,pipeline_column), lost_reason=?, lost_note=? WHERE id=? AND agent_id=?")
-               ->execute([$newStatus, $newStatus, $reasonVal, $noteVal, $id, $staffAgentId]);
-        } else {
-            $db->prepare("UPDATE requests SET status=?, pipeline_column=IF(?='Booked',NULL,pipeline_column), lost_reason=?, lost_note=? WHERE id=?")
-               ->execute([$newStatus, $newStatus, $reasonVal, $noteVal, $id]);
-        }
-        // Log a timeline note so the reason is visible in the request history.
-        if ($newStatus === 'Lost') {
-            $noteText = 'Marked Lost — ' . $LOST_REASONS[$lostReason]
-                      . ($noteVal !== null ? ': ' . $noteVal : '');
-            $db->prepare("INSERT INTO request_notes (request_id, user_id, note) VALUES (?,?,?)")
-               ->execute([$id, (int)($cu['id'] ?? 0), $noteText]);
-        }
-        if ($oldStatus !== '' && $oldStatus !== $newStatus) {
-            timeline_log($id, 'status_change', $oldStatus . ' → ' . $newStatus,
-                         ['body' => $newStatus === 'Lost' ? $LOST_REASONS[$lostReason] . ($noteVal !== null ? ': ' . $noteVal : '') : null]);
-        }
         if ($isXhr) { header('Content-Type: application/json');
                       echo json_encode(['ok'=>true]); exit; }
         flash('Status updated to ' . $newStatus . '.');

@@ -89,7 +89,8 @@ function agent_audit(PDO $db, string $action, $reqId, array $payload, string $re
                               'iti_create_personal', 'iti_update_program', 'iti_update_day', 'iti_publish', 'iti_final_from_calc', 'iti_save_alias',
                               'iti_create_lodge', 'iti_set_days', 'iti_add_day', 'iti_delete_day', 'iti_update_inclusions',
                               'iti_create_flight_route', 'iti_create_activity', 'iti_create_transfer_route', 'iti_save_as_sample',
-                              'create_request', 'add_flight_rates', 'timeline_update', 'summary_set', 'rename_folder'], true) && empty($payload['confirm']);
+                              'create_request', 'add_flight_rates', 'timeline_update', 'summary_set', 'rename_folder',
+                              'set_request_status'], true) && empty($payload['confirm']);
     // Mail: keep who/what in the log, not message bodies or attachment content.
     if (in_array($action, ['mail_get', 'mail_attachment', 'iti_document', 'iti_vouchers'], true) && $code === 200) {
         $res = json_decode($resultJson, true);
@@ -623,18 +624,36 @@ try {
             $like = '%' . $q . '%';
             array_push($args, $like, $like, $like, $like);
         }
-        if (trim((string)($in['status'] ?? '')) !== '') { $where[] = "r.status = ?"; $args[] = trim($in['status']); }
+        // status: one value or several comma-separated ("Quoted,Hot-Quoted")
+        $statuses = array_values(array_filter(array_map('trim', explode(',', (string)($in['status'] ?? ''))), 'strlen'));
+        if ($statuses) {
+            $bad = defined('STATUSES') ? array_values(array_diff($statuses, array_keys(STATUSES))) : [];
+            if ($bad) agent_fail('Invalid status "' . implode('", "', $bad) . '"', 400, ['statuses' => array_keys(STATUSES)]);
+            $where[] = "r.status IN (" . implode(',', array_fill(0, count($statuses), '?')) . ")";
+            $args = array_merge($args, $statuses);
+        }
+        // agent: id, agent name (substring) or Hub username (rdesibi)
         $agent = trim((string)($in['agent'] ?? ''));
         if ($agent !== '') {
             if (ctype_digit($agent)) { $where[] = "r.agent_id = ?"; $args[] = (int)$agent; }
-            else                     { $where[] = "a.name LIKE ?";  $args[] = '%' . $agent . '%'; }
+            else {
+                $where[] = "(a.name LIKE ? OR r.agent_id IN (SELECT u.agent_id FROM users u WHERE u.username = ? AND u.agent_id IS NOT NULL))";
+                $args[] = '%' . $agent . '%'; $args[] = strtolower($agent);
+            }
+        }
+        // channel (migration 067; NULL on old rows whose folder name is not conclusive)
+        $channel = strtolower(trim((string)($in['channel'] ?? '')));
+        if ($channel !== '') {
+            if (!in_array($channel, ['agency', 'direct', 'sb', 'other'], true)) agent_fail('channel must be agency, direct, sb or other');
+            $where[] = "r.channel = ?"; $args[] = $channel;
         }
         if (preg_match('/^\d{4}$/', (string)($in['year'] ?? ''))) {
             $where[] = "YEAR(r.date_received) = ?"; $args[] = (int)$in['year'];
         }
-        if (!$where) agent_fail('Give at least one filter: q, status, agent or year');
+        if (!$where) agent_fail('Give at least one filter: q, status, agent, channel or year');
         $limit = max(1, min(100, (int)($in['limit'] ?? 50)));
-        $st = $db->prepare("SELECT r.*, a.name AS agent_name FROM requests r LEFT JOIN agents a ON a.id = r.agent_id
+        $st = $db->prepare("SELECT r.*, a.name AS agent_name, ag.nome AS agency_name
+                            FROM requests r LEFT JOIN agents a ON a.id = r.agent_id LEFT JOIN agencies ag ON ag.id = r.agency_id
                             WHERE " . implode(' AND ', $where) . " ORDER BY r.id DESC LIMIT " . $limit);
         $st->execute($args);
         $found = $st->fetchAll(PDO::FETCH_ASSOC);
@@ -642,7 +661,12 @@ try {
         $rows  = [];
         foreach ($found as $r) {
             $a = $act[(int)$r['id']] ?? ['last_activity_at' => null, 'has_summary' => false];
-            $rows[] = agent_request_out($r) + ['last_activity_at' => $a['last_activity_at'], 'has_summary' => $a['has_summary']];
+            $rows[] = agent_request_out($r) + [
+                'channel'          => $r['channel'] ?? null,
+                'agency_id'        => !empty($r['agency_id']) ? (int)$r['agency_id'] : null,
+                'agency_name'      => $r['agency_name'] ?? null,
+                'last_activity_at' => $a['last_activity_at'], 'has_summary' => $a['has_summary'],
+            ];
         }
         agent_out(['ok' => true, 'count' => count($rows), 'requests' => $rows]);
     }
@@ -770,6 +794,71 @@ try {
         $db->prepare("UPDATE requests SET " . implode(', ', $set) . " WHERE id = ?")->execute($args);
         $r = agent_request($db, $r['id']);
         agent_out(['ok' => true, 'updated' => $changed, 'ignored' => $ignored, 'request' => agent_request_out($r)]);
+    }
+
+    // ── set_request_status ───────────────────────────────────────────────────
+    // Same rules as the Hub status menu (bs_set_request_status). Booked only via
+    // confirm_booking; a Booked request can only go to Cancelled (folder untouched).
+    // All-or-nothing over up to 50 ids. Dry-run unless "confirm": true.
+    case 'set_request_status': {
+        agent_require_method('POST');
+        $ids = [];
+        if (isset($in['request_ids'])) {
+            if (!is_array($in['request_ids'])) agent_fail('request_ids must be an array of ids');
+            foreach ($in['request_ids'] as $v) { if ((int)$v > 0) $ids[(int)$v] = true; }
+            $ids = array_keys($ids);
+        } elseif ((int)($in['request_id'] ?? 0) > 0) {
+            $ids = [(int)$in['request_id']];
+        }
+        if (!$ids) agent_fail('request_id or request_ids is required');
+        if (count($ids) > 50) agent_fail('At most 50 request_ids per call');
+        if (count($ids) === 1) $agentReqId = $ids[0];
+
+        $status = trim((string)($in['status'] ?? ''));
+        if ($status === 'Booked') agent_fail('Booked is set by confirm_booking (folder + DB together), not here', 409);
+        $settable = ['Inquiry', 'Quoted', 'Hot-Quoted', 'Lost', 'Cancelled'];
+        if (!in_array($status, $settable, true)) agent_fail('status must be one of: ' . implode(', ', $settable), 400, ['statuses' => $settable]);
+        $reason = trim((string)($in['lost_reason'] ?? ''));
+        $note   = trim((string)($in['lost_note']   ?? ''));
+        if ($status === 'Lost' && !array_key_exists($reason, bs_lost_reasons())) {
+            agent_fail('lost_reason is required for Lost', 400, ['lost_reasons' => array_keys(bs_lost_reasons())]);
+        }
+        $opt = ['allowed' => $settable, 'from_booked' => ['Cancelled']];
+
+        // Check every id first: one bad id → nothing changes.
+        $rows = []; $errors = [];
+        foreach ($ids as $rid) {
+            $c = bs_status_check($db, $rid, $status, $reason, $opt);
+            if (!$c['ok']) { $errors[] = ['request_id' => $rid, 'error_code' => $c['error_code'], 'error' => $c['error']]; continue; }
+            $rows[] = ['request_id' => $rid, 'old_status' => $c['old_status'], 'new_status' => $status, 'changed' => $c['changed']];
+        }
+        if ($errors) {
+            $codes = array_column($errors, 'error_code');
+            $code  = in_array('booked', $codes, true) ? 409 : (count(array_unique($codes)) === 1 && $codes[0] === 'not_found' ? 404 : 400);
+            agent_fail(count($errors) . ' of ' . count($ids) . ' requests cannot be changed — nothing was changed', $code,
+                       ['errors' => $errors, 'ok_rows' => $rows]);
+        }
+        $toChange = count(array_filter(array_column($rows, 'changed')));
+        if (empty($in['confirm'])) {
+            agent_out(['ok' => true, 'dry_run' => true, 'status' => $status, 'to_change' => $toChange,
+                       'unchanged' => count($rows) - $toChange, 'requests' => $rows,
+                       'message' => 'Dry run — nothing changed. Resend with "confirm": true.']);
+        }
+
+        tl_schema($db);   // no DDL inside the transaction
+        $db->beginTransaction();
+        try {
+            foreach ($rows as $row) {
+                $res = bs_set_request_status($db, $row['request_id'], $status, $reason, $note, (int)$agentUser['id'], $opt);
+                if (!$res['ok']) throw new RuntimeException('Request ' . $row['request_id'] . ': ' . $res['error']);
+            }
+            $db->commit();
+        } catch (Throwable $e) {
+            $db->rollBack();
+            agent_fail('Nothing changed: ' . $e->getMessage(), 409);
+        }
+        agent_out(['ok' => true, 'status' => $status, 'changed' => $toChange,
+                   'unchanged' => count($rows) - $toChange, 'requests' => $rows]);
     }
 
     // ── list_standard_programs ───────────────────────────────────────────────

@@ -170,9 +170,12 @@ try {
 // ── Insert DB record (only after Dropbox succeeded) ───────────────────────────
 try {
     $db->prepare(
-        'INSERT INTO requests (date_received, customer_name, email, whatsapp, source, agent_id, destination, initial_request, status, pax, practice_code, dropbox_url, created_at)
-         VALUES (CURDATE(), ?, ?, ?, ?, ?, ?, ?, "Inquiry", ?, ?, ?, NOW())'
-    )->execute([$customerName, $email ?: null, $whatsapp ?: null, $source, $agentId, $destination ?: null, $initialRequest ?: null, $pax, $folderName, $dropboxWebUrl]);
+        'INSERT INTO requests (date_received, customer_name, email, whatsapp, source, channel, agency_id, agent_id, destination, initial_request, status, pax, practice_code, dropbox_url, created_at)
+         VALUES (CURDATE(), ?, ?, ?, ?, ?, ?, ?, ?, ?, "Inquiry", ?, ?, ?, NOW())'
+    )->execute([$customerName, $email ?: null, $whatsapp ?: null, $source,
+                in_array($channel, ['agency', 'direct', 'sb', 'other'], true) ? $channel : null,
+                ($channel === 'agency' && $agencyId) ? $agencyId : null,
+                $agentId, $destination ?: null, $initialRequest ?: null, $pax, $folderName, $dropboxWebUrl]);
     $requestId = (int)$db->lastInsertId();
 } catch (\Throwable $e) {
     // The Dropbox folder was already created above, but the DB INSERT failed.

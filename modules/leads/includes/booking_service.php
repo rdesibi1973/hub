@@ -10,6 +10,8 @@
  *                                                     (backoffice.php, API confirm_*)
  *   Rollback        : bs_rollback()                   (backoffice.php, API rollback_booking)
  *   Booking email   : bo_booking_email(), bs_send_mail()     (backoffice.php, ajax_booking_email.php, API)
+ *   Request status  : bs_status_check() / bs_set_request_status()
+ *                                                     (request_view.php quick_status, API set_request_status)
  *
  * Requires the leads config.php (db(), DROPBOX_BASE_PATH, …) to be loaded first.
  * Dropbox helpers are loaded lazily, as the pages did before.
@@ -227,10 +229,10 @@ function bs_create_request(PDO $db, array $v, array $opt = []): array {
     // ── INSERT ────────────────────────────────────────────────────────────────
     $db->prepare("
         INSERT INTO requests
-          (practice_code, date_received, customer_name, email, whatsapp, source, agent_id,
+          (practice_code, date_received, customer_name, email, whatsapp, source, channel, agency_id, agent_id,
            destination, period, pax, status, value_usd, commission_pct, commission_usd,
            date_paid, initial_request, dropbox_url, notes)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     ")->execute([
         $folderName,
         $v['date_received'],
@@ -238,6 +240,8 @@ function bs_create_request(PDO $db, array $v, array $opt = []): array {
         $v['email']           ?: null,
         $v['whatsapp']        ?: null,
         $v['source'],
+        $v['channel'],
+        ($v['channel'] === 'agency' && $v['agency_id']) ? (int)$v['agency_id'] : null,
         $v['agent_id']        ?: null,
         $v['destination']     ?: null,
         $v['period']          ?: null,
@@ -1137,4 +1141,82 @@ function bs_send_mail(array $toList, array $ccList, string $subject, string $bod
     return $ok
         ? ['success' => true, 'message' => '']
         : ['success' => false, 'message' => 'mail() returned false — check the BlueHost mail log.'];
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+//  Request status (quick status: request_view.php / requests.php, API set_request_status)
+// ════════════════════════════════════════════════════════════════════════════
+
+/** Reasons a request can be marked Lost (slug => label), stored in requests.lost_reason. */
+function bs_lost_reasons(): array {
+    static $reasons = null;
+    if ($reasons === null) $reasons = require __DIR__ . '/lost_reasons.php';
+    return $reasons;
+}
+
+/**
+ * Check a status change without writing anything.
+ * $opt: restrict_agent_id (int, non-zero = only that agent's requests — restricted Hub staff),
+ *       allowed    (target statuses accepted; default all STATUSES),
+ *       from_booked (targets accepted when the request is Booked now; null = any).
+ * Returns ok, error, error_code (invalid_status|not_allowed|lost_reason|not_found|booked),
+ * old_status, new_status, changed.
+ */
+function bs_status_check(PDO $db, int $id, string $status, string $reason, array $opt = []): array {
+    $res = ['ok' => false, 'error' => null, 'error_code' => null,
+            'old_status' => null, 'new_status' => $status, 'changed' => false];
+    $allowed = isset($opt['allowed']) ? $opt['allowed'] : array_keys(STATUSES);
+    if (!array_key_exists($status, STATUSES)) {
+        return array_merge($res, ['error' => 'Invalid status', 'error_code' => 'invalid_status']);
+    }
+    if (!in_array($status, $allowed, true)) {
+        return array_merge($res, ['error' => 'Status "' . $status . '" cannot be set here', 'error_code' => 'not_allowed']);
+    }
+    if ($status === 'Lost' && !array_key_exists($reason, bs_lost_reasons())) {
+        return array_merge($res, ['error' => 'Please choose a reason.', 'error_code' => 'lost_reason']);
+    }
+    $restrict = (int)($opt['restrict_agent_id'] ?? 0);   // -1 = restricted user without an agent: nothing matches
+    $st = $db->prepare("SELECT status FROM requests WHERE id = ?" . ($restrict !== 0 ? " AND agent_id = ?" : ""));
+    $st->execute($restrict !== 0 ? [$id, $restrict] : [$id]);
+    $old = $st->fetchColumn();
+    if ($old === false) {
+        return array_merge($res, ['error' => 'Request ' . $id . ' not found', 'error_code' => 'not_found']);
+    }
+    $res['old_status'] = (string)$old;
+    if ($old === 'Booked' && isset($opt['from_booked']) && is_array($opt['from_booked'])
+        && $status !== 'Booked' && !in_array($status, $opt['from_booked'], true)) {
+        return array_merge($res, ['error' => 'Request ' . $id . ' is Booked — only ' . implode('/', $opt['from_booked'])
+                                           . ' is allowed; use rollback_booking to reopen it', 'error_code' => 'booked']);
+    }
+    $res['ok']      = true;
+    $res['changed'] = ((string)$old !== $status);
+    return $res;
+}
+
+/**
+ * Set a request's status (same rules as the Hub status menu): reason/note are kept only
+ * for Lost and cleared when leaving Lost; Lost adds a request note; a real change adds a
+ * timeline event. Same $opt and result as bs_status_check(). Run tl_schema() before
+ * calling this inside a transaction (DDL would commit it).
+ */
+function bs_set_request_status(PDO $db, int $id, string $status, string $reason, string $note, int $userId, array $opt = []): array {
+    $chk = bs_status_check($db, $id, $status, $reason, $opt);
+    if (!$chk['ok']) return $chk;
+
+    $reasons   = bs_lost_reasons();
+    $reasonVal = ($status === 'Lost') ? $reason : null;
+    $noteVal   = ($status === 'Lost' && trim($note) !== '') ? trim($note) : null;
+    $db->prepare("UPDATE requests SET status=?, pipeline_column=IF(?='Booked',NULL,pipeline_column), lost_reason=?, lost_note=? WHERE id=?")
+       ->execute([$status, $status, $reasonVal, $noteVal, $id]);
+
+    // Request note so the reason is visible in the request history.
+    if ($status === 'Lost') {
+        $db->prepare("INSERT INTO request_notes (request_id, user_id, note) VALUES (?,?,?)")
+           ->execute([$id, $userId, 'Marked Lost — ' . $reasons[$reason] . ($noteVal !== null ? ': ' . $noteVal : '')]);
+    }
+    if ($chk['changed'] && $chk['old_status'] !== '') {
+        timeline_log($id, 'status_change', $chk['old_status'] . ' → ' . $status,
+                     ['body' => $status === 'Lost' ? $reasons[$reason] . ($noteVal !== null ? ': ' . $noteVal : '') : null]);
+    }
+    return $chk;
 }

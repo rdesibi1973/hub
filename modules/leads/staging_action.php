@@ -199,16 +199,18 @@ if ($action === 'approve') {
 
     $db->prepare("
         INSERT INTO requests
-            (date_received, customer_name, email, whatsapp, source, agent_id,
+            (date_received, customer_name, email, whatsapp, source, channel, agent_id,
              destination, period, pax, status,
              initial_request, notes, practice_code, dropbox_url, created_at)
-        VALUES (?,?,?,?,?,?,?,?,?,'Inquiry',?,?,?,?,NOW())
+        VALUES (?,?,?,?,?,?,?,?,?,?,'Inquiry',?,?,?,?,NOW())
     ")->execute([
         $lead['date_received'],
         $customerName,
         $lead['email']          ?: null,
         $lead['phone']          ?: null,
         $lead['source'],
+        // Website leads are direct; a blog referral or a hand-typed folder name stays unknown.
+        ($suffix === 'Drct' && trim($_POST['folder_name_override'] ?? '') === '') ? 'direct' : null,
         $agentId,
         $dest                   ?: null,
         $lead['period']         ?: null,
