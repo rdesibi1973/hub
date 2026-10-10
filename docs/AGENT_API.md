@@ -214,7 +214,7 @@ name). Reads the booking's Calc (no PhpSpreadsheet needed) and returns:
 
 ### Calc checks (also in Confirm preview, UI + API)
 `error`: more than one pax sheet · a beach night (≥ MIDT) without hotel · formula cells with no saved
-value (Hub would read End = Start). `warn`: H6:I14 not empty · F9 not a formula · flight cost not in the
+value (Hub would read End = Start). `warn`: H6:I14 not empty · F9 empty · flight cost not in the
 rate table / not `=cost*$B$1` · other nights without hotel · guests / country / title / room type missing.
 `confirm_booking` blocks on `error` unless `"force": true`; the BackOffice shows them (red ✖) but never blocks.
 

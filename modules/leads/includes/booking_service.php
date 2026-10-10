@@ -826,7 +826,7 @@ function bs_confirm_checks(array $plan): array {
             'grp_action' => $plan['grp_action'],
             'grp_code'   => $plan['grp_code'],
         ]);
-        // House rules of the Calc (single pax sheet, F9 formula, beach-night hotels, …).
+        // House rules of the Calc (single pax sheet, F9 filled, beach-night hotels, …).
         if ($xlsx && $plan['grp_action'] !== 'ADD') {
             $checks = array_merge($checks, sc_calc_rule_checks($xlsx, [
                 'mid'          => bs_last_midt($plan['new_name'], $plan['pd']['end_date']),

@@ -675,10 +675,9 @@ function sc_calc_rule_checks(string $path, array $ctx = []): array {
     }
     if ($left) $res[] = ['level' => 'warn', 'msg' => 'H6:I14 not cleared (' . implode(', ', $left) . ') — remove rack/sto/single/discount block.'];
 
-    // 3) F9 (Price to customer) = formula of its components.
-    if (!isset($f['F9'])) {
-        $res[] = ['level' => 'warn', 'msg' => 'F9 (Price to customer) is ' . (isset($v['F9']) ? 'a fixed number (' . $v['F9'] . ')' : 'empty')
-                 . ' — write it as a formula of its components, e.g. =1625+255+70.'];
+    // 3) F9 (Price to customer) must be filled — a formula or a fixed number are both fine.
+    if (!isset($f['F9']) && (!isset($v['F9']) || trim((string)$v['F9']) === '')) {
+        $res[] = ['level' => 'warn', 'msg' => 'F9 (Price to customer) is empty.'];
     }
 
     // 4) Hotel on every night (col K); the last day (departure) has none.
