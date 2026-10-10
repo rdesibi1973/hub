@@ -561,9 +561,11 @@ Photos afterwards with `iti_lodge_photos`.
 
 #### `iti_update_lodge` / `iti_update_destination` (POST)
 `lodge_id` / `destination_id`, `fields` `{…}`. Lodge: `website, phone, emergency_phone, email, address,
-description_<lang>, latitude, longitude`. Destination: `name_<lang>, description_<lang>, region, latitude, longitude`.
+description_<lang>, latitude, longitude, destination_id, category` (`budget|mid|luxury|ultra_luxury`), `lodge_type`
+(`lodge|tented_camp|hotel|mobile_camp|house`). Destination: `name_<lang>, description_<lang>, region, latitude, longitude`.
 Returns `changes` `{field: {from, to}}` (only what differs). Dry-run unless `"confirm": true`.
-Name, destination and category of a lodge stay on the Lodges page.
+A lodge's name stays on the Lodges page. Its area (the "Parco Nazionale del Serengeti" under the name in the documents)
+is its `destination_id`: use the park / area, not the airstrip (`… Airstrip` destinations are for flights and transfers).
 
 ## Invoices
 
