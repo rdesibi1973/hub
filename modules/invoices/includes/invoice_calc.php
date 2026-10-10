@@ -167,6 +167,26 @@ function ic_check(array $calc, array $items, string $currency): array {
     return $fail;
 }
 
+/**
+ * The differences ignored at creation that still hold on the current lines (the invoice
+ * may have been edited since, e.g. a discount line added). $log = invoice_excel_checks row.
+ * Re-checks pax/total against the Excel values logged then; other messages are kept as is.
+ */
+function ic_bypass_now(array $log, array $items, string $currency): array {
+    $calc = ['status' => 'ok',
+             'pax'   => $log['excel_pax']   === null ? null : (int)$log['excel_pax'],
+             'total' => $log['excel_total'] === null ? null : (float)$log['excel_total']];
+    $fails = ic_check($calc, array_values($items), $currency);
+    $out = [];
+    foreach (preg_split('/\R/', (string)$log['bypassed']) as $msg) {
+        if (trim($msg) === '') continue;
+        if (stripos($msg, 'Ignore pax') === 0)       { if (isset($fails['pax']))   $out[] = $fails['pax']; }
+        elseif (stripos($msg, 'Ignore total') === 0) { if (isset($fails['total'])) $out[] = $fails['total']; }
+        else $out[] = $msg;
+    }
+    return $out;
+}
+
 /** Create the log table on first use. */
 function ic_ensure_table(PDO $db): void {
     static $done = false;

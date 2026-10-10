@@ -15,6 +15,7 @@
  */
 
 require_once 'config.php';
+require_once 'includes/booking_service.php';   // bo_path_from_url, bo_url_from_path
 header('Content-Type: application/json');
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
@@ -47,7 +48,7 @@ if ($oldFolderName === '' || $newFolderName === '') {
 // Across status renames only the trailing _TAG changes; the rest is stable.
 $db   = db();
 $stmt = $db->prepare(
-    'SELECT id, customer_name, status, dropbox_url, practice_code
+    'SELECT id, customer_name, status, dropbox_url, practice_code, group_folder
      FROM requests WHERE practice_code = ? ORDER BY id DESC LIMIT 1'
 );
 $stmt->execute([$oldFolderName]);
@@ -57,7 +58,7 @@ $row = $stmt->fetch(PDO::FETCH_ASSOC);
 // stored in practice_code that breaks the exact equality above).
 if (!$row) {
     $stmtTrim = $db->prepare(
-        'SELECT id, customer_name, status, dropbox_url, practice_code
+        'SELECT id, customer_name, status, dropbox_url, practice_code, group_folder
          FROM requests WHERE TRIM(practice_code) = ? ORDER BY id DESC LIMIT 1'
     );
     $stmtTrim->execute([$oldFolderName]);
@@ -74,7 +75,7 @@ if (!$row) {
         // Escape LIKE wildcards in the base so '(', ')', '%', '_' are literal.
         $likeBase = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $incomingBase);
         $stmtBase = $db->prepare(
-            "SELECT id, customer_name, status, dropbox_url, practice_code
+            "SELECT id, customer_name, status, dropbox_url, practice_code, group_folder
              FROM requests
              WHERE TRIM(practice_code) = ?
                 OR  TRIM(practice_code) LIKE ? ESCAPE '\\\\'
@@ -123,7 +124,7 @@ if (!$row) {
     $searchName = ($bare !== '' && $bare !== $baseName) ? $bare
                 : ($baseName !== $oldFolderName ? $baseName : $oldFolderName);
     $stmt2 = $db->prepare(
-        'SELECT id, customer_name, status, dropbox_url
+        'SELECT id, customer_name, status, dropbox_url, practice_code, group_folder
          FROM requests WHERE dropbox_url LIKE ? ORDER BY id DESC LIMIT 1'
     );
     $stmt2->execute(['%/' . rawurlencode($searchName) . '%']);
@@ -137,7 +138,7 @@ if (!$row) {
 $matchedViaGroupFolder = false;
 if (!$row) {
     $stmtGrp = $db->prepare(
-        'SELECT id, customer_name, status, dropbox_url
+        'SELECT id, customer_name, status, dropbox_url, practice_code, group_folder
          FROM requests WHERE group_folder = ? ORDER BY id DESC LIMIT 1'
     );
     $stmtGrp->execute([$oldFolderName]);
@@ -205,20 +206,64 @@ foreach ($folderTagMap as $tag => $map) {
     }
 }
 
+// Imported group (practice_code = group_folder): the folder is the group itself.
+// It is found via practice_code, never Fallback 4, but it is still a group rename.
+if (!$matchedViaGroupFolder
+    && trim($row['group_folder'] ?? '') !== ''
+    && trim($row['group_folder']) === trim($row['practice_code'] ?? '')) {
+    $matchedViaGroupFolder = true;
+}
+
 // ── Update ────────────────────────────────────────────────────────────────────
+$updatedCount = 1;
 if ($matchedViaGroupFolder) {
-    // GRP parent folder rename: update group_folder, leave practice_code untouched
-    if ($newDbStatus !== null) {
-        $update = $db->prepare(
-            'UPDATE requests SET group_folder = ?, dropbox_url = ?, status = ?, payment_status = ? WHERE id = ?'
-        );
-        $update->execute([$newFolderName, $newDropboxUrl, $newDbStatus, $newPaymentStatus, (int)$row['id']]);
-    } else {
-        $update = $db->prepare(
-            'UPDATE requests SET group_folder = ?, dropbox_url = ? WHERE id = ?'
-        );
-        $update->execute([$newFolderName, $newDropboxUrl, (int)$row['id']]);
+    // GRP parent folder rename: every request of the group moves with the parent.
+    // Members keep their sub-folder (practice_code) and payment_status (own invoice);
+    // the group tag only sets the booking status, never reviving a cancelled client.
+    // The imported group itself (practice_code = group_folder) takes the new name and,
+    // since the tag is on its own folder, the payment_status too.
+    $oldGroup = trim($row['group_folder']);
+    $members  = $db->prepare(
+        'SELECT id, status, practice_code, dropbox_url FROM requests WHERE group_folder = ?'
+    );
+    $members->execute([$row['group_folder']]);
+    $members = $members->fetchAll(PDO::FETCH_ASSOC);
+
+    // Group folder path from the first stored URL that points inside it
+    // (keeps the directory, e.g. /001_Safari/00_2026).
+    $groupPath = '';
+    foreach ($members as $m) {
+        $p   = bo_path_from_url($m['dropbox_url'] ?? '');
+        $sub = trim($m['practice_code'] ?? '');
+        if ($p !== '' && $sub !== '' && $sub !== $oldGroup && str_ends_with($p, '/' . $sub)) {
+            $p = substr($p, 0, -strlen('/' . $sub));
+        }
+        if ($p !== '' && strcasecmp(basename($p), $oldGroup) === 0) { $groupPath = $p; break; }
     }
+    if ($groupPath === '') $groupPath = '/001_Safari/' . $oldGroup;
+    $newGroupPath = substr($groupPath, 0, (int)strrpos($groupPath, '/')) . '/' . $newFolderName;
+
+    $upd   = $db->prepare(
+        'UPDATE requests SET group_folder = ?, practice_code = ?, dropbox_url = ?, status = ? WHERE id = ?'
+    );
+    $updPs = $db->prepare(
+        'UPDATE requests SET group_folder = ?, practice_code = ?, dropbox_url = ?, status = ?, payment_status = ? WHERE id = ?'
+    );
+    foreach ($members as $m) {
+        $sub    = trim($m['practice_code'] ?? '');
+        $isSelf = $sub === $oldGroup;
+        $code   = $isSelf ? $newFolderName : $m['practice_code'];
+        $url    = bo_url_from_path($isSelf || $sub === '' ? $newGroupPath : $newGroupPath . '/' . $sub);
+        $keep   = ($m['status'] ?? '') === 'Cancelled' && $newDbStatus !== 'Cancelled';
+        $status = ($newDbStatus !== null && !$keep) ? $newDbStatus : $m['status'];
+        if ($isSelf && $newDbStatus !== null) {
+            $updPs->execute([$newFolderName, $code, $url, $status, $newPaymentStatus, (int)$m['id']]);
+        } else {
+            $upd->execute([$newFolderName, $code, $url, $status, (int)$m['id']]);
+        }
+        if ((int)$m['id'] === (int)$row['id']) $newDropboxUrl = $url;
+    }
+    $updatedCount = count($members);
 } else {
     if ($newDbStatus !== null) {
         $update = $db->prepare(
@@ -240,6 +285,7 @@ echo json_encode([
     'old_folder'        => $oldFolderName,
     'new_folder'        => $newFolderName,
     'updated_field'     => $matchedViaGroupFolder ? 'group_folder' : 'practice_code',
+    'updated_count'     => $updatedCount,
     'dropbox_url'       => $newDropboxUrl,
     'new_status'        => $newDbStatus,
     'new_payment_status'=> $newPaymentStatus,

@@ -240,3 +240,49 @@ function memo_link_columns() {
 function memo_link_joins() {
     return " LEFT JOIN requests lr ON lr.id = m.request_id LEFT JOIN invoices li ON li.id = m.invoice_id ";
 }
+
+/**
+ * The Hub user whose board Claude and the morning digest work on: AGENT_MEMO_USER
+ * (username, includes/config.php). [id, username, full_name, email] or null.
+ */
+function memo_owner(PDO $pdo) {
+    if (!defined('AGENT_MEMO_USER')) { return null; }
+    $st = $pdo->prepare("SELECT id, username, full_name, email FROM users WHERE username = ? AND is_active = 1");
+    $st->execute(array((string)AGENT_MEMO_USER));
+    $u = $st->fetch(PDO::FETCH_ASSOC);
+    return $u ? array('id' => (int)$u['id'], 'username' => $u['username'], 'full_name' => $u['full_name'], 'email' => $u['email']) : null;
+}
+
+/**
+ * Memo rows in their public shape (Agent API memo_list, morning digest): links,
+ * invoice balance, plain-text body and pending next steps. $where uses alias m.
+ */
+function memo_rows(PDO $pdo, $where, array $args) {
+    $st = $pdo->prepare("SELECT m.*, " . memo_link_columns() . " FROM memos m" . memo_link_joins() . " WHERE " . $where
+                      . " ORDER BY (m.due_date IS NULL), m.due_date, m.id LIMIT 200");
+    $st->execute($args);
+    $next = $pdo->prepare("SELECT id, title, next_offset_days FROM memos WHERE parent_id = ? AND status = 'pending' AND deleted_at IS NULL ORDER BY id");
+    $out  = array();
+    foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $m) {
+        $next->execute(array((int)$m['id']));
+        $steps = array();
+        foreach ($next->fetchAll(PDO::FETCH_ASSOC) as $n) {
+            $steps[] = array('id' => (int)$n['id'], 'title' => $n['title'], 'days_after' => (int)$n['next_offset_days']);
+        }
+        $out[] = array(
+            'id' => (int)$m['id'], 'title' => $m['title'], 'status' => $m['status'], 'waiting_on' => $m['waiting_on'],
+            'due_date' => $m['due_date'], 'reminder_at' => $m['reminder_at'], 'priority' => $m['priority'],
+            'body' => trim(html_entity_decode(strip_tags(str_replace(array('</p>', '<br>'), "\n", (string)$m['body'])), ENT_QUOTES, 'UTF-8')),
+            'request_id' => $m['request_id'] ? (int)$m['request_id'] : null, 'folder' => $m['req_folder'],
+            'invoice_id' => $m['invoice_id'] ? (int)$m['invoice_id'] : null, 'invoice_number' => $m['inv_number'],
+            'invoice_balance' => $m['inv_balance'] !== null ? (float)$m['inv_balance'] : null,
+            'invoice_currency' => $m['inv_currency'],
+            'afrasia' => $m['inv_issuer'] === 'Savannah Holidays Ltd',
+            'auto_close_on_payment' => $m['auto_close'] === 'payment',
+            'parent_id' => $m['parent_id'] ? (int)$m['parent_id'] : null,
+            'next_steps' => $steps,
+            'source' => $m['source'], 'ext_key' => $m['ext_key'], 'updated_at' => $m['updated_at'],
+        );
+    }
+    return $out;
+}

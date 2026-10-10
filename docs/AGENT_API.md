@@ -31,7 +31,7 @@ without driving the web UI.
 | HTTPS only | Plain HTTP → 403. |
 | Rate limit | 60 calls/min → 429. |
 | Audit | Every call (including failures and dry-runs) → `agent_audit_log` (action, request_id, user, HTTP code, dry_run, payload, result, IP). |
-| Dry-run by default | `confirm_booking`, `send_booking_email`, `rollback_booking`, `rename_folder`, `cancel_invoice_payment`, `update_folder_status`, `import_zoho_invoice`, `create_invoice`, `update_invoice`, `mail_send` and `mail_move` (among others) do nothing unless the body has `"confirm": true`. |
+| Dry-run by default | `update_request`, `confirm_booking`, `send_booking_email`, `rollback_booking`, `rename_folder`, `import_group_folder`, `move_group_folder`, `cancel_invoice_payment`, `update_folder_status`, `import_zoho_invoice`, `create_invoice`, `update_invoice`, `mail_send` and `mail_move` (among others) do nothing unless the body has `"confirm": true`. |
 | No deletes | No delete endpoint (mail included). Undo a confirm with `rollback_booking` (or BackOffice → Rollback). |
 | Mailbox | The key also reads `info@` (`mail_*`): keep `api.txt` as private as the mailbox password. |
 
@@ -39,20 +39,33 @@ without driving the web UI.
 BlueHost's firewall scores requests: the default `curl/…` or `Python-urllib/…` user agent from a cloud IP starts with a
 high score, and then even plain calls (`iti_lodges&q=Mdonya`) can cross the threshold and get HTTP 406, seemingly at
 random (access log, 4 Oct 2026: 9 of ~110 curl calls blocked, 0 of the calls with the agent user agent). Many 406 in a
-row can block the IP for a few minutes. With curl: `-A "Mozilla/5.0 (compatible; SavannahHubAgent/1.0)"`.
+row can block the IP for a few minutes. With curl: `-A "Mozilla/5.0 (compatible; SavannahHubAgent/1.0)"`
+(the examples write it as `-A "$UA"` with `UA="Mozilla/5.0 (compatible; SavannahHubAgent/1.0)"`).
 If a call is still blocked: send JSON with `\uXXXX` escapes (`ensure_ascii`), or wrap the body as
 `{"b64": "<base64 of the UTF-8 JSON>"}` (GET: `&b64=<base64 of a JSON object of the parameters>`), wait a minute, retry once.
 
 Responses: `{"ok": true, …}` or `{"ok": false, "error": "…", …}` with a matching HTTP code
 (400 bad input, 403 auth, 404 not found, 409 duplicate / blocked, 422 partial, 429 rate, 5xx server/Dropbox).
+Hub database down → **503** `{"ok": false, "error": "database unavailable"}` (since 9 Oct 2026; before, an HTML
+text): an outage, not a bad call — wait and retry, don't change the request.
 
 ## Actions
 
 ### `find_requests` (GET)
-`q` (name / folder / email substring), `status`, `agent` (id or name), `year` (received), `limit` ≤ 100.
-At least one filter. Use it as the duplicate check before `create_request`.
-Each row also has `last_activity_at` (latest timeline event, summary or note) and `has_summary` — see
-[Request timeline](#request-timeline).
+Filters (at least one): `q` (name / folder / email substring), `status` (one value or several
+comma-separated, e.g. `Quoted,Hot-Quoted`), `agent` (agent id, agent name, or Hub username such as
+`rdesibi`), `channel` (`agency`|`direct`|`sb`|`other`), `year` (received). `limit` ≤ 100.
+Use it as the duplicate check before `create_request`.
+
+Each row also has `channel`, `agency_id`, `agency_name`, `last_activity_at` (latest timeline event,
+summary or note) and `has_summary` — see [Request timeline](#request-timeline).
+`channel` / `agency_id` are stored since Oct 2026 (migration 067); older rows were filled from the
+folder name only where it is conclusive (`-Drct`, `-SB`, or a known agency short name), so on the
+rest they are `null` and a `channel` filter does not match them.
+
+```bash
+curl -sH "$H" "$U?action=find_requests&status=Quoted,Hot-Quoted&agent=rdesibi&channel=agency"
+```
 
 ### `list_agencies` (GET)
 `q` → `[{id, name, short_name, type}]`.
@@ -69,16 +82,68 @@ Same fields as the New Request form:
 `notify_agent` (default **false**), `dup_override` (default false).
 
 Creates the Dropbox folder `/2026/<Name>(<AgencyShort>-<Agent>)` + subfolders + `CustomerInfo.txt`,
-then the DB row. A likely duplicate → **409** with `dup_candidates`; resend with `"dup_override": true`
+then the DB row (which also stores `channel` and, for agency requests, `agency_id`). A likely duplicate → **409** with `dup_candidates`; resend with `"dup_override": true`
 only if it is really new.
 
+`customer_name` is the client's name only: a name with `(` `)` `[` `]` (e.g. `LucaDeSanctis(LasciatiViaggiare-Daniela)`)
+→ **400** "Write only the client name — the Hub adds (Agency-Agent) itself" (same rule on New Request, Incoming
+approve, Edit Request and the Java `api_create_request.php`). The folder name keeps a mixed-case word as typed:
+`Luca DeSanctis` → `LucaDeSanctis` (all-lower / ALL-CAPS words are capitalised: `mario ROSSI` → `MarioRossi`).
+
 ### `update_request` (POST)
+**Dry-run unless `"confirm": true`** (since 9 Oct 2026; before, it wrote at the first call).
 `request_id` + any of `customer_name, email, whatsapp, source, destination, period, pax, value_usd,
-commission_pct, date_paid, initial_request, notes` (top level or inside `fields`). `commission_usd`
-is recomputed. Status / folder are **not** editable here (use `confirm_booking` / BackOffice).
+commission_pct, date_paid, initial_request, notes, agency_id, channel` (top level or inside `fields`; `""` / `null` clears).
+`commission_usd` is recomputed when `value_usd` or `commission_pct` change. Status / folder are **not**
+editable here (use `set_request_status` below, `confirm_booking` / BackOffice, `rename_folder`).
+
+- `agency_id` must exist (`list_agencies`) and sets `channel` = `agency` unless `channel` is given.
+  `channel` is `agency|direct|sb|other`; `agency` needs an agency (given or already stored); another channel
+  clears the stored agency (`agency_id` + a non-agency channel together → 400).
+- The folder is **not** renamed: when the folder's `(Agency-Agent)` tag does not name the new agency,
+  `warnings[]` gives the suggested folder name — rename it with `rename_folder`.
+- A changed `customer_name` follows the `create_request` name rule (400 on `(` `)` `[` `]`).
+
+Dry run → `{dry_run: true, changes: {field: {from, to}}, ignored, warnings, request}` — only the fields that differ
+(`7890` = `7890.00`). With `confirm` → `{dry_run: false, updated: [fields], changes, ignored, warnings, request}`.
+
+```bash
+curl -sA "$UA" -H "$H" -X POST "$U?action=update_request" -d '{"request_id":3023,"pax":4,"value_usd":15780}'                 # dry run
+curl -sA "$UA" -H "$H" -X POST "$U?action=update_request" -d '{"request_id":3023,"pax":4,"value_usd":15780,"confirm":true}'
+curl -sA "$UA" -H "$H" -X POST "$U?action=update_request" -d '{"request_id":2923,"agency_id":54,"customer_name":"LucaDeSanctis"}'   # dry run
+```
+
+### `set_request_status` (POST)
+**Dry-run unless `"confirm": true`.** Same rules as the status menu in the Hub
+(`bs_set_request_status()` in `includes/booking_service.php`).
+
+- `request_id` **or** `request_ids` (array, max 50)
+- `status`: `Inquiry` | `Quoted` | `Hot-Quoted` | `Lost` | `Cancelled`
+- `lost_reason` — **required for Lost**: `insufficient_budget` | `trip_postponed` | `no_more_replies` |
+  `agent_request` | `other`; `lost_note` optional. Reason / note are kept only on Lost and cleared
+  when a request leaves Lost; Lost also adds a request note.
+
+Rules:
+- `Booked` → **409**: bookings go through `confirm_booking` (folder + DB together).
+- A request that is **Booked now** can only go to `Cancelled` (trip cancelled; the folder is not
+  moved). Any other status → **409** — use `rollback_booking` to reopen it.
+- All or nothing: every id is checked first; if one is unknown (404) or not allowed (409/400),
+  nothing changes and `errors` lists them per id.
+- A real change logs a `status_change` event in the request timeline (author: the API user).
+  Ids already in that status are reported as `changed: false` and left alone.
+
+Dry run → `{dry_run: true, to_change, unchanged, requests: [{request_id, old_status, new_status, changed}]}`;
+with `confirm` → `{changed, unchanged, requests}`.
+
+```bash
+curl -sH "$H" -X POST "$U?action=set_request_status" -d '{"request_ids":[2410,2411],"status":"Lost","lost_reason":"no_more_replies","lost_note":"No reply after 3 follow-ups"}'
+curl -sH "$H" -X POST "$U?action=set_request_status" -d '{"request_ids":[2410,2411],"status":"Lost","lost_reason":"no_more_replies","confirm":true}'
+```
 
 ### `list_standard_programs` (GET)
 Program codes by group (`DumaShort`, `BeachDumaShort`, …) and the Confirm Safari `destinations`.
+A program with a `disabled` reason (template missing in Dropbox) is not copied: `copy_program`
+lists it under `disabled`. The switch-off list is `bs_std_programs_disabled()` in `booking_service.php`.
 
 ### `copy_program` (POST)
 `request_id`, `program` (or `programs: [...]`), optional `prognum` (default: next free number).
@@ -149,7 +214,7 @@ name). Reads the booking's Calc (no PhpSpreadsheet needed) and returns:
 
 ### Calc checks (also in Confirm preview, UI + API)
 `error`: more than one pax sheet · a beach night (≥ MIDT) without hotel · formula cells with no saved
-value (Hub would read End = Start). `warn`: H6:I14 not empty · F9 not a formula · flight cost not in the
+value (Hub would read End = Start). `warn`: H6:I14 not empty · F9 empty · flight cost not in the
 rate table / not `=cost*$B$1` · other nights without hotel · guests / country / title / room type missing.
 `confirm_booking` blocks on `error` unless `"force": true`; the BackOffice shows them (red ✖) but never blocks.
 
@@ -183,19 +248,37 @@ other members.
 Free rename of the booking folder — the same as BackOffice → **Rename…** (shared code:
 `includes/folder_service.php`, `folder_rename()`). For a group the **group parent** (`group_folder`) is
 renamed and every request of the group is updated. No email is sent (unlike Reschedule).
-`request_id`*, `new_name`*, `confirm`.
+`request_id`*, `new_name`*, `current_path`, `rename_files`, `confirm`.
 
-- **Without `"confirm": true` → dry run**, nothing changes. Returns `current`, `new_name`, `is_group`,
+- **`current_path` (re-link)** — the folder's real Dropbox path when it was moved or renamed **outside the
+  Hub** (the stored path no longer exists and its name is not found by search), e.g.
+  `/001_Safari/07_27JUL_Lucadesanctis(lasciativiaggiareDaniela)_START27JUL_END03AUG2027_PROGRESS`. The rename
+  starts from there. It must exist, be a folder, sit under `/2026`, `/2027` or `/001_Safari` (the inquiry root
+  `DROPBOX_BASE_PATH`, the next year, `CK_BASE`), and no other request may point to it (→ 409).
+  `new_name` may equal its basename: pure re-link, no Dropbox rename. Equal to the stored path → ignored.
+  A re-link whose suffix makes the request **Booked** (it was not) also sets `confirmation_date` = today (if empty)
+  and `start_date` from the name — warning "Booked via re-link: no confirm snapshot, Rollback not available".
+  The timeline event is "Folder re-linked" with `relinked from <stored path>`.
+- **`rename_files: true`** — also renames the files inside (recursive, e.g. `old/`) named `NN_<old>…`
+  (`<old>` = the stored name, the folder's current name, or the customer part of either) to
+  `NN_<customer part of new_name>…` — e.g. the `_Calc.xlsx` and Word copied by `copy_program`. The customer part
+  drops the `MM_DDMON_` prefix and `_START…`: `01_LucaDeSanctis(LasciatiViaggiare-Daniela)_MigrazioneEstate_Calc.xlsx`,
+  as the files are named after a Hub confirm. Dry run lists them in `file_renames[{from, to}]`; with confirm →
+  `files_renamed[]`, `files_failed{}` (a failed file never undoes the folder rename).
+- **Without `"confirm": true` → dry run**, nothing changes. Returns `current`, `new_name`, `is_group`, `relink`,
   `status_from_name` `{matched, status, payment_status, current_status, current_payment_status}` (what the
-  new suffix sets: `_DEPOSIT` → Booked/Deposit, `_PAID` → Booked/Paid, `_CANCELLED` → Cancelled …; no
-  status tag → status untouched; a group sets the status only), `dropbox_path_old`, `dropbox_path_new`,
-  `warnings[]` and `calc_dates` `{start, end}` (the `*_Calc.xlsx` itinerary dates, or null).
+  new suffix sets: `_DEPOSIT` → Booked/Deposit, `_PAID` → Booked/Paid, `_PROGRESS` → Booked, `_CANCELLED` →
+  Cancelled …; no status tag → status untouched; a group sets the status only), `dropbox_path_old` (re-link:
+  the stored path), `current_path` (re-link: the real one), `dropbox_path_new`, `warnings[]` and `calc_dates`
+  `{start, end}` (the `*_Calc.xlsx` itinerary dates, or null).
 - **With `"confirm": true`** → renames the Dropbox folder, updates `practice_code` / `group_folder`,
   `dropbox_url`, `status` / `payment_status` (when the suffix matches), the CK tracker, and logs a
   `status_change` timeline event (on every request of a group). Same fields + `renamed: true`.
-- **Errors (nothing changed):** 404 request not found · 400 no folder, empty name, invalid characters
-  (`\ / : * ? " < > |`), identical name · 409 folder not found in Dropbox (stored path, then search), destination folder
-  already exists · 502 Dropbox/DB failure.
+- **Errors (nothing changed):** 404 request not found, `current_path` not in Dropbox · 400 no folder, empty name,
+  invalid characters (`\ / : * ? " < > |`), identical name (without `current_path`), `current_path` outside the
+  allowed roots or a file · 409 folder not found in Dropbox (stored path, then search: the message suggests
+  `current_path` and `candidates[]` lists up to 3 folders in `/001_Safari` found by the customer name),
+  `current_path` already used by another request, destination folder already exists · 502 Dropbox/DB failure.
 - **Warnings (dry run, never blocking):** date tag malformed (`START29OC`), START / MIDT / END not in
   order (e.g. END before START) or spanning > 60 days, `_CK` not last, `MM_DDMON_` prefix ≠ START,
   `_CK` / status tag / START / END dropped from the current name, another request already using the name,
@@ -206,6 +289,76 @@ curl -sA "Mozilla/5.0 (compatible; SavannahHubAgent/1.0)" -H "$H" -X POST "$U?ac
      -d '{"request_id":873,"new_name":"02_10FEB_Rossi(BTG-Roberto)_START10FEB_END16FEB2027_DEPOSIT"}'                  # dry run
 curl -sA "Mozilla/5.0 (compatible; SavannahHubAgent/1.0)" -H "$H" -X POST "$U?action=rename_folder" \
      -d '{"request_id":873,"new_name":"02_10FEB_Rossi(BTG-Roberto)_START10FEB_END16FEB2027_DEPOSIT","confirm":true}'
+# re-link a folder moved outside the Hub (dry run), fixing its name and the files inside
+curl -sA "Mozilla/5.0 (compatible; SavannahHubAgent/1.0)" -H "$H" -X POST "$U?action=rename_folder" \
+     -d '{"request_id":2923,"current_path":"/001_Safari/07_27JUL_Lucadesanctis(lasciativiaggiareDaniela)_START27JUL_END03AUG2027_PROGRESS","new_name":"07_27JUL_LucaDeSanctis(LasciatiViaggiare-Daniela)_START27JUL_END03AUG2027_PROGRESS","rename_files":true}'
+```
+BackOffice → **Rename…**: when the folder is not found, the form reopens with a **Current Dropbox path** field
+(and the candidates); "Folder moved outside the Hub?" opens it directly. Checkbox = `rename_files`.
+
+### Il Diamante set departures — `move_group_folder` + `import_group_folder`
+Confirming a Diamante group (Panorama01, 05, 07, 10, PanoramaDavide …) = two steps: move the provisional
+folder `/itineraries/SafariClassic/it/Agenzia/Diamante/2027-Groups/<MM>_<DDMMM>_PanoramaNN_(Diamante-PS-Roberto)_START…_END…_PROVISIONAL`
+to `/001_Safari/` with `_PROVISIONAL` → `_BALANCE`, then import it as a Hub request (status Booked, payment
+Balance, pax, value) — the same as Hub → **Import Group Folder** (shared code: `includes/group_import_service.php`).
+`create_request` is not used for these groups. One call does both: `move_group_folder` with `import`.
+
+The imported request stores the folder name in both `practice_code` and `group_folder` and
+`dropbox_url` = `/001_Safari/<folder>`; later renames (payment tag, `_CK`) keep the three in step.
+
+#### `import_group_folder` (POST)
+**Dry-run unless `"confirm": true`.**
+- `folder`* — the folder name as it is in `/001_Safari` (name only, no path).
+- Optional overrides (default = read from the name by the Hub parser): `customer_name` (PanoramaNN),
+  `source` (tour operator, `Diamante`), `agent_id` (handler matched to an agent), `destination` (Tanzania),
+  `period`, `start_date` (YYYY-MM-DD), `status` (default **Booked**), `payment_status` (`''`|`Deposit`|`Balance`|
+  `Balance-Cash`|`Paid`; default from the suffix, else **Balance**), `pax`, `value_usd`, `notes`
+  (default "Handler · Agency code · TO").
+- `mode`: `create` (default) | `update` + `target_id` (overwrite an existing request with this folder).
+- `allow_duplicate` (default false).
+
+Checks (all in the dry run):
+- `blocking` `folder_missing` — the folder is not in `/001_Safari` → 404 on confirm.
+- Duplicates (`duplicates[]` `{id, customer_name, status, folder, start_date, period, level, reason}`, ranked):
+  `exact` (same folder already imported) → `blocking` `duplicate_exact`, 409 in `create` mode — use `mode: update`;
+  `high` (same group + dates with another suffix, or same name + start date) → `duplicate_high`, 409 unless
+  `allow_duplicate: true`; `low` (same name) → warning only. In `update` mode the target itself is not a duplicate.
+- Invalid values (status, payment status, date, pax / value not numbers, agent or target not found) → 400 `errors[]`.
+
+Dry run → `{dry_run: true, folder, mode, parsed, values (what will be written), duplicates, blocking[{code, message}], warnings}`.
+Confirm → `{dry_run: false, request_id, mode, request}` and a timeline event **"Group folder imported"**
+(`confirmation`, author the API user; the Hub page logs it too).
+
+```bash
+curl -sA "$UA" -H "$H" -X POST "$U?action=import_group_folder" -d '{"folder":"08_10AUG_Panorama10_(Diamante-PS-Roberto)_START10AUG_END17AUG2027_BALANCE","pax":2,"value_usd":7890}'
+curl -sA "$UA" -H "$H" -X POST "$U?action=import_group_folder" -d '{"folder":"…","pax":2,"value_usd":7890,"confirm":true}'
+curl -sA "$UA" -H "$H" -X POST "$U?action=import_group_folder" -d '{"folder":"…","mode":"update","target_id":3042,"pax":2,"confirm":true}'
+```
+
+#### `move_group_folder` (POST)
+**Dry-run unless `"confirm": true`.**
+- `source`* — the folder name (looked up in `…/Diamante/2027-Groups/`) or its full path under
+  `/itineraries/SafariClassic/it/Agenzia/Diamante/`. Must end with `_PROVISIONAL`.
+- `new_suffix` — `BALANCE` (default) | `DEPOSIT` | `PAID`: `_PROVISIONAL` at the end is replaced by it.
+- `new_name` — the full new name (overrides `new_suffix`; warning if it has no booking tag).
+- `import` — object with the `import_group_folder` fields (without `folder`): after the move, imports the
+  moved folder in the same call.
+
+Rules: destination = `/001_Safari/<new name>`; source missing → 404, destination already there → 409
+(both listed in `blocking` on the dry run). Name checked with the `rename_folder` rules (date tags, prefix =
+START, `_CK` last → `warnings`). Dropbox **move** (not copy + delete), returns the new `dropbox_path`.
+With `import`, the import is checked **before** moving (as `import_preview`; the folder-exists check runs
+after the move): an import that would be refused (400 / 409) means nothing is moved. If the import still fails after the
+move, the move stays done: **422** `{ok: false, moved: true, imported: false, import_error, dropbox_path}` — finish
+with `import_group_folder` on `new_name`.
+
+Dry run → `{dry_run: true, from, to, new_name, warnings, blocking, import_preview?}`.
+Confirm → `{dry_run: false, moved: true, from, to, new_name, dropbox_path, warnings}` + with `import`
+`{imported: true, request_id, mode, request}`.
+
+```bash
+curl -sA "$UA" -H "$H" -X POST "$U?action=move_group_folder" -d '{"source":"09_14SEP_Panorama14_(Diamante-PS-Roberto)_START14SEP_END21SEP2027_PROVISIONAL","import":{"pax":2,"value_usd":7890}}'   # dry run
+curl -sA "$UA" -H "$H" -X POST "$U?action=move_group_folder" -d '{"source":"09_14SEP_Panorama14_…_PROVISIONAL","import":{"pax":2,"value_usd":7890},"confirm":true}'
 ```
 
 ### `iti_programs` (GET)
@@ -352,10 +505,11 @@ Only needed for samples: a personal program's link is on without it (unpublish d
 
 #### `iti_calc_plan` (GET) / `iti_final_from_calc` (POST)
 `request_id`, `sample_id?` (default: the sample whose Calc code matches the file name), `lang?`, `file?`, `sheet?`.
-Plan: `calc` (file, rev, pax), `sample`, `nights[]` (date, label, hotel text → lodge, state, meal, activities,
-from_sample_day, flags), `unmapped` {lodge|activity|route: {norm: text}}, `blocking`, `existing_finals`.
-`iti_final_from_calc` with `"confirm": true` generates the final program (an older final of the request is
-superseded) → `program_id`, `program`. 409 when the Calc cannot be read.
+Plan: `calc` (file, files = every Calc of the folder, rev, pax), `sample`, `nights[]` (date, label, hotel text → lodge, state, meal, activities,
+from_sample_day, flags), `unmapped` {lodge|activity|route: {norm: text}}, `blocking`, `existing_finals` (id, calc_file,
+superseded_by). Several Calc files (e.g. the same safari with other lodges) → pass `file`; each file has its own final.
+`iti_final_from_calc` with `"confirm": true` generates the final program (an older final built from the same Calc
+file is superseded) → `program_id`, `program`. 409 when the Calc cannot be read.
 
 #### `iti_save_alias` (POST)
 `type` (`lodge`|`activity`|`route`), `text` (the Calc text), `lodge_id` (+ `meal_basis` BB|HB|FB|AI) |
@@ -407,9 +561,11 @@ Photos afterwards with `iti_lodge_photos`.
 
 #### `iti_update_lodge` / `iti_update_destination` (POST)
 `lodge_id` / `destination_id`, `fields` `{…}`. Lodge: `website, phone, emergency_phone, email, address,
-description_<lang>, latitude, longitude`. Destination: `name_<lang>, description_<lang>, region, latitude, longitude`.
+description_<lang>, latitude, longitude, destination_id, category` (`budget|mid|luxury|ultra_luxury`), `lodge_type`
+(`lodge|tented_camp|hotel|mobile_camp|house`). Destination: `name_<lang>, description_<lang>, region, latitude, longitude`.
 Returns `changes` `{field: {from, to}}` (only what differs). Dry-run unless `"confirm": true`.
-Name, destination and category of a lodge stay on the Lodges page.
+A lodge's name stays on the Lodges page. Its area (the "Parco Nazionale del Serengeti" under the name in the documents)
+is its `destination_id`: use the park / area, not the airstrip (`… Airstrip` destinations are for flights and transfers).
 
 ## Invoices
 
@@ -451,7 +607,8 @@ Renames the booking's Dropbox folder tag (`_CK` stays last), sets `requests.paym
 parent folder. Without `"confirm": true` → `current` and `new_name` only. Same tag already → `unchanged`.
 
 ### `save_invoice_pdf` (POST)
-Renders the PDF server-side (Dompdf — the same layout as the emailed invoice) and uploads it as
+Renders the PDF server-side (Dompdf) with the same layout as the invoice page's Print / Save as PDF, the
+emailed invoice and the ZIP export — one template, `modules/invoices/includes/invoice_html.php` — and uploads it as
 `Invoice <number>.pdf` (the name *Invoice Check — Dropbox* looks for) into the booking folder
 (GRP client: the client sub-folder). `overwrite` (default false: 409 if the file exists; Dropbox keeps
 the old version when overwritten), `folder_path` (optional full Dropbox path, overrides the folder).
@@ -519,6 +676,16 @@ Memos stay private to that user unless shared in the Hub. Logic: `modules/memo/m
 | `pending` | a next step — hidden until its parent is done, then opened with due = today + `days_after` |
 | `done` / `archived` | closed |
 
+**Morning digest (not an API action).** `modules/memo/cron_digest.php?token=MEMO_CRON_TOKEN`, called by
+cron-job.org Mon–Sat 06:00 EAT (Africa/Nairobi), emails the `AGENT_MEMO_USER` board to `MEMO_DIGEST_TO` (both in
+`includes/config.php`) with subject `[Memo Hub] YYYY-MM-DD – N da sollecitare, M scaduti`: overdue,
+follow-ups due today, next 7 days, in progress, routines, and a last line
+`DIGEST-COUNTS: sollecitare=…; scaduti=…; attesa7=…; incorso=…; leads=…; sh_aperte=…`. Open memos
+without a due date are left out. Once a day (`memo_digest_log`); `&force=1` resends, `&dry=1` shows
+the HTML without sending. The scheduled Cowork recap reads this email from Gmail instead of
+calling the API. Rows come from `memo_rows()` and `memo_routines_status()`, the same code as
+`memo_list` / `routine_status`.
+
 ### `memo_list` (GET)
 `status` (comma list, default `open,doing,waiting`), `q`, `request_id`, `invoice_id`, `ext_key`,
 `follow_up_due=1` (due date today or earlier). → `memos[]` `{id, title, status, waiting_on, due_date,
@@ -535,6 +702,12 @@ payment is recorded on that invoice — by the Hub page or `add_invoice_payment`
 reminder gets an email reminder at 08:00 that day. Created memos are marked 🤖 Claude.
 The reply has a top-level `request_id` when the memo is linked to a request (memos also appear in
 `request_resume`).
+
+**What not to put on the board.** A memo (or a `next_steps` entry) is something **Roberto** has to do or
+follow up. Never create memos for Claude's own work steps — API calls and Hub bookkeeping such as
+"register the payment (`add_invoice_payment`)", "update the invoice PDF (`save_invoice_pdf`)",
+"save in Inv4Agents", "update the Calc / folder": do them in the session, or say in the reply what is
+still to do. A payment memo with `auto_close_on_payment` needs no next steps for recording that payment.
 
 ### `memo_set_status` (POST)
 `id` or `ext_key`, `status` (`open`|`doing`|`waiting`|`done`|`archived`), `note` (appended when done).
@@ -660,7 +833,8 @@ same request + type + title within 60 s is logged once; a logging error never fa
 
 | Trigger (Hub page or API) | Event |
 |---|---|
-| `create_request` / New Request / Import Group Folder | `client_request` "Request received" (first 500 chars of the initial request) |
+| `create_request` / New Request | `client_request` "Request received" (first 500 chars of the initial request) |
+| `import_group_folder` (also via `move_group_folder`) / Import Group Folder | `confirmation` "Group folder imported" (folder, status, pax, value; `refs.dropbox_path`) |
 | `copy_program` / Copy programs | `program_update` "Copied program …" |
 | `fill_calc` with confirm | `calc_update` (+ `refs.calc_file`, `price_total`) |
 | `iti_create_personal`, "Create from sample" on a request, `iti_final_from_calc` / Final program page, `iti_publish`, `iti_document` / `iti_vouchers` saved to Dropbox | `program_update` (+ `refs.program_id`) |

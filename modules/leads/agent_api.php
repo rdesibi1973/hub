@@ -17,9 +17,12 @@
 ob_start();
 require_once __DIR__ . '/../../includes/timezone.php';
 
+// includes/db.php: no connection → {"ok":false,"error":"database unavailable"} + 503, not the HTML text.
+define('DB_FAIL_JSON', true);
 require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/includes/booking_service.php';
 require_once __DIR__ . '/includes/folder_service.php';   // rename_folder (shared with BackOffice "Rename…")
+require_once __DIR__ . '/includes/group_import_service.php';   // import_group_folder / move_group_folder (shared with import_folder.php)
 require_once __DIR__ . '/includes/postpone_lib.php';   // booking_cc_agent_email()
 require_once __DIR__ . '/includes/calc_service.php';   // get_rates, fill_calc
 require_once __DIR__ . '/../iti/includes/iti_texts.php'; // ITI programme translations
@@ -89,7 +92,8 @@ function agent_audit(PDO $db, string $action, $reqId, array $payload, string $re
                               'iti_create_personal', 'iti_update_program', 'iti_update_day', 'iti_publish', 'iti_final_from_calc', 'iti_save_alias',
                               'iti_create_lodge', 'iti_set_days', 'iti_add_day', 'iti_delete_day', 'iti_update_inclusions',
                               'iti_create_flight_route', 'iti_create_activity', 'iti_create_transfer_route', 'iti_save_as_sample',
-                              'create_request', 'add_flight_rates', 'timeline_update', 'summary_set', 'rename_folder'], true) && empty($payload['confirm']);
+                              'create_request', 'add_flight_rates', 'timeline_update', 'summary_set', 'rename_folder',
+                              'set_request_status', 'update_request', 'import_group_folder', 'move_group_folder'], true) && empty($payload['confirm']);
     // Mail: keep who/what in the log, not message bodies or attachment content.
     if (in_array($action, ['mail_get', 'mail_attachment', 'iti_document', 'iti_vouchers'], true) && $code === 200) {
         $res = json_decode($resultJson, true);
@@ -493,8 +497,9 @@ function agent_memo_owner(PDO $db): array {
     require_once __DIR__ . '/../memo/memo_lib.php';
     memo_schema($db);
     if (defined('AGENT_MEMO_USER')) {
-        $st = $db->prepare("SELECT id, username, full_name FROM users WHERE username = ? AND is_active = 1");
-        $st->execute([(string)AGENT_MEMO_USER]);
+        $u = memo_owner($db);
+        if (!$u) agent_fail('Memo owner not found — define AGENT_MEMO_USER (Hub username) in includes/config.php', 500);
+        return ['id' => $u['id'], 'username' => $u['username'], 'full_name' => $u['full_name']];
     } else {
         $st = $db->prepare("SELECT id, username, full_name FROM users
                             WHERE agent_id = ? AND id <> ? AND is_active = 1 ORDER BY id LIMIT 1");
@@ -520,32 +525,9 @@ function agent_memo_find(PDO $db, int $ownerId, array $in): ?array {
     return $m ?: null;
 }
 
-/** Public shape of memo rows (with links and pending next steps). */
+/** Public shape of memo rows (with links and pending next steps) — memo_rows() in memo_lib.php. */
 function agent_memo_rows(PDO $db, string $where, array $args): array {
-    $st = $db->prepare("SELECT m.*, " . memo_link_columns() . " FROM memos m" . memo_link_joins() . " WHERE " . $where
-                     . " ORDER BY (m.due_date IS NULL), m.due_date, m.id LIMIT 200");
-    $st->execute($args);
-    $rows = $st->fetchAll(PDO::FETCH_ASSOC);
-    $out = [];
-    foreach ($rows as $m) {
-        $next = $db->prepare("SELECT id, title, next_offset_days FROM memos WHERE parent_id = ? AND status = 'pending' AND deleted_at IS NULL ORDER BY id");
-        $next->execute([(int)$m['id']]);
-        $out[] = [
-            'id' => (int)$m['id'], 'title' => $m['title'], 'status' => $m['status'], 'waiting_on' => $m['waiting_on'],
-            'due_date' => $m['due_date'], 'reminder_at' => $m['reminder_at'], 'priority' => $m['priority'],
-            'body' => trim(html_entity_decode(strip_tags(str_replace(['</p>', '<br>'], "\n", (string)$m['body'])), ENT_QUOTES, 'UTF-8')),
-            'request_id' => $m['request_id'] ? (int)$m['request_id'] : null, 'folder' => $m['req_folder'],
-            'invoice_id' => $m['invoice_id'] ? (int)$m['invoice_id'] : null, 'invoice_number' => $m['inv_number'],
-            'invoice_balance' => $m['inv_balance'] !== null ? (float)$m['inv_balance'] : null,
-            'afrasia' => $m['inv_issuer'] === 'Savannah Holidays Ltd',
-            'auto_close_on_payment' => $m['auto_close'] === 'payment',
-            'parent_id' => $m['parent_id'] ? (int)$m['parent_id'] : null,
-            'next_steps' => array_map(function ($n) { return ['id' => (int)$n['id'], 'title' => $n['title'], 'days_after' => (int)$n['next_offset_days']]; },
-                                      $next->fetchAll(PDO::FETCH_ASSOC)),
-            'source' => $m['source'], 'ext_key' => $m['ext_key'], 'updated_at' => $m['updated_at'],
-        ];
-    }
-    return $out;
+    return memo_rows($db, $where, $args);
 }
 
 // ── Request timeline (logic in includes/timeline_service.php) ───────────────
@@ -624,18 +606,36 @@ try {
             $like = '%' . $q . '%';
             array_push($args, $like, $like, $like, $like);
         }
-        if (trim((string)($in['status'] ?? '')) !== '') { $where[] = "r.status = ?"; $args[] = trim($in['status']); }
+        // status: one value or several comma-separated ("Quoted,Hot-Quoted")
+        $statuses = array_values(array_filter(array_map('trim', explode(',', (string)($in['status'] ?? ''))), 'strlen'));
+        if ($statuses) {
+            $bad = defined('STATUSES') ? array_values(array_diff($statuses, array_keys(STATUSES))) : [];
+            if ($bad) agent_fail('Invalid status "' . implode('", "', $bad) . '"', 400, ['statuses' => array_keys(STATUSES)]);
+            $where[] = "r.status IN (" . implode(',', array_fill(0, count($statuses), '?')) . ")";
+            $args = array_merge($args, $statuses);
+        }
+        // agent: id, agent name (substring) or Hub username (rdesibi)
         $agent = trim((string)($in['agent'] ?? ''));
         if ($agent !== '') {
             if (ctype_digit($agent)) { $where[] = "r.agent_id = ?"; $args[] = (int)$agent; }
-            else                     { $where[] = "a.name LIKE ?";  $args[] = '%' . $agent . '%'; }
+            else {
+                $where[] = "(a.name LIKE ? OR r.agent_id IN (SELECT u.agent_id FROM users u WHERE u.username = ? AND u.agent_id IS NOT NULL))";
+                $args[] = '%' . $agent . '%'; $args[] = strtolower($agent);
+            }
+        }
+        // channel (migration 067; NULL on old rows whose folder name is not conclusive)
+        $channel = strtolower(trim((string)($in['channel'] ?? '')));
+        if ($channel !== '') {
+            if (!in_array($channel, ['agency', 'direct', 'sb', 'other'], true)) agent_fail('channel must be agency, direct, sb or other');
+            $where[] = "r.channel = ?"; $args[] = $channel;
         }
         if (preg_match('/^\d{4}$/', (string)($in['year'] ?? ''))) {
             $where[] = "YEAR(r.date_received) = ?"; $args[] = (int)$in['year'];
         }
-        if (!$where) agent_fail('Give at least one filter: q, status, agent or year');
+        if (!$where) agent_fail('Give at least one filter: q, status, agent, channel or year');
         $limit = max(1, min(100, (int)($in['limit'] ?? 50)));
-        $st = $db->prepare("SELECT r.*, a.name AS agent_name FROM requests r LEFT JOIN agents a ON a.id = r.agent_id
+        $st = $db->prepare("SELECT r.*, a.name AS agent_name, ag.nome AS agency_name
+                            FROM requests r LEFT JOIN agents a ON a.id = r.agent_id LEFT JOIN agencies ag ON ag.id = r.agency_id
                             WHERE " . implode(' AND ', $where) . " ORDER BY r.id DESC LIMIT " . $limit);
         $st->execute($args);
         $found = $st->fetchAll(PDO::FETCH_ASSOC);
@@ -643,7 +643,12 @@ try {
         $rows  = [];
         foreach ($found as $r) {
             $a = $act[(int)$r['id']] ?? ['last_activity_at' => null, 'has_summary' => false];
-            $rows[] = agent_request_out($r) + ['last_activity_at' => $a['last_activity_at'], 'has_summary' => $a['has_summary']];
+            $rows[] = agent_request_out($r) + [
+                'channel'          => $r['channel'] ?? null,
+                'agency_id'        => !empty($r['agency_id']) ? (int)$r['agency_id'] : null,
+                'agency_name'      => $r['agency_name'] ?? null,
+                'last_activity_at' => $a['last_activity_at'], 'has_summary' => $a['has_summary'],
+            ];
         }
         agent_out(['ok' => true, 'count' => count($rows), 'requests' => $rows]);
     }
@@ -746,42 +751,257 @@ try {
     // ── update_request ───────────────────────────────────────────────────────
     // Plain data fields only. Status / folder changes go through confirm_booking
     // (or the BackOffice), which keep the Dropbox folder and the DB in sync.
+    // agency_id sets channel = agency (unless channel is given); the folder is not renamed
+    // here — a warning suggests the new name for rename_folder.
+    // Dry-run (changes {field: {from, to}}) unless "confirm": true.
     case 'update_request': {
         agent_require_method('POST');
         $r = agent_request($db, $in['request_id'] ?? 0);
         $allowed = ['customer_name','email','whatsapp','source','destination','period','pax',
-                    'value_usd','commission_pct','date_paid','initial_request','notes'];
+                    'value_usd','commission_pct','date_paid','initial_request','notes','agency_id','channel'];
         $fields = isset($in['fields']) && is_array($in['fields']) ? $in['fields'] : $in;
-        $set = []; $args = []; $changed = [];
+        $new = [];
         foreach ($allowed as $f) {
             if (!array_key_exists($f, $fields)) continue;
             $val = $fields[$f];
-            $val = ($val === null || trim((string)$val) === '') ? null : trim((string)$val);
-            $set[] = $f . ' = ?'; $args[] = $val; $changed[] = $f;
+            $new[$f] = ($val === null || trim((string)$val) === '') ? null : trim((string)$val);
         }
-        $ignored = array_values(array_diff(array_keys($fields), array_merge($allowed, ['request_id', 'fields'])));
-        if (!$set) agent_fail('No updatable fields given', 400, ['updatable' => $allowed, 'ignored' => $ignored]);
+        $ignored = array_values(array_diff(array_keys($fields), array_merge($allowed, ['request_id', 'fields', 'confirm'])));
+        if (!$new) agent_fail('No updatable fields given', 400, ['updatable' => $allowed, 'ignored' => $ignored]);
+        if (isset($new['customer_name']) && $new['customer_name'] !== (string)($r['customer_name'] ?? '')
+            && ($ne = bs_customer_name_error($new['customer_name']))) {
+            agent_fail($ne, 400);
+        }
+        // Agency / channel (migration 067): agency_id must exist; channel ≠ agency drops the agency.
+        if (array_key_exists('channel', $new) && $new['channel'] !== null) {
+            $new['channel'] = strtolower($new['channel']);
+            if (!in_array($new['channel'], ['agency', 'direct', 'sb', 'other'], true)) agent_fail('channel must be agency, direct, sb or other');
+        }
+        if (array_key_exists('agency_id', $new) && $new['agency_id'] !== null) {
+            if (!ctype_digit($new['agency_id'])) agent_fail('agency_id must be a number — use list_agencies');
+            $st = $db->prepare("SELECT COUNT(*) FROM agencies WHERE id = ?");
+            $st->execute([(int)$new['agency_id']]);
+            if (!(int)$st->fetchColumn()) agent_fail('agency_id ' . $new['agency_id'] . ' not found — use list_agencies');
+            if (!array_key_exists('channel', $new)) $new['channel'] = 'agency';
+        }
+        if (array_key_exists('channel', $new)) {
+            $agencyAfter = array_key_exists('agency_id', $new) ? $new['agency_id'] : ($r['agency_id'] ?? null);
+            if ($new['channel'] === 'agency' && empty($agencyAfter)) agent_fail('channel agency needs agency_id');
+            if ($new['channel'] !== 'agency' && $new['channel'] !== null && !empty($agencyAfter)) {
+                if (array_key_exists('agency_id', $new)) agent_fail('agency_id is only for channel agency');
+                $new['agency_id'] = null;   // leaving the agency channel
+            }
+        }
         // Keep commission_usd consistent with value × pct.
-        $val = in_array('value_usd', $changed, true) ? $args[array_search('value_usd', $changed)] : $r['value_usd'];
-        $pct = in_array('commission_pct', $changed, true) ? $args[array_search('commission_pct', $changed)] : $r['commission_pct'];
-        if ($val !== null && $pct !== null && (in_array('value_usd', $changed, true) || in_array('commission_pct', $changed, true))) {
-            $set[] = 'commission_usd = ?'; $args[] = round((float)$val * (float)$pct / 100, 2);
+        if (array_key_exists('value_usd', $new) || array_key_exists('commission_pct', $new)) {
+            $val = array_key_exists('value_usd', $new) ? $new['value_usd'] : $r['value_usd'];
+            $pct = array_key_exists('commission_pct', $new) ? $new['commission_pct'] : $r['commission_pct'];
+            if ($val !== null && $pct !== null) $new['commission_usd'] = (string)round((float)$val * (float)$pct / 100, 2);
         }
-        $args[] = (int)$r['id'];
-        $db->prepare("UPDATE requests SET " . implode(', ', $set) . " WHERE id = ?")->execute($args);
-        $r = agent_request($db, $r['id']);
-        agent_out(['ok' => true, 'updated' => $changed, 'ignored' => $ignored, 'request' => agent_request_out($r)]);
+        // Only what differs (7890 = 7890.00).
+        $changes = [];
+        foreach ($new as $f => $to) {
+            $from = $r[$f] ?? null;
+            $same = ($from === null || $to === null) ? ($from === $to || (string)$from === (string)$to)
+                  : (is_numeric($from) && is_numeric($to) ? (float)$from == (float)$to : (string)$from === $to);
+            if (!$same) $changes[$f] = ['from' => $from, 'to' => $to];
+        }
+        $warnings = [];
+        if (isset($changes['agency_id']) && $changes['agency_id']['to'] !== null
+            && ($hint = bs_agency_tag_hint($db, $r, $changes['agency_id']['to']))) {
+            $warnings[] = $hint['message'];
+        }
+        if (empty($in['confirm'])) {
+            agent_out(['ok' => true, 'dry_run' => true, 'changes' => $changes, 'ignored' => $ignored, 'warnings' => $warnings,
+                       'request' => agent_request_out($r),
+                       'message' => $changes ? 'Dry run — nothing saved. Resend with "confirm": true.' : 'Nothing would change.']);
+        }
+        if ($changes) {
+            $set = []; $args = [];
+            foreach ($changes as $f => $c) { $set[] = $f . ' = ?'; $args[] = $c['to']; }
+            $args[] = (int)$r['id'];
+            $db->prepare("UPDATE requests SET " . implode(', ', $set) . " WHERE id = ?")->execute($args);
+            $r = agent_request($db, $r['id']);
+        }
+        agent_out(['ok' => true, 'dry_run' => false, 'updated' => array_keys($changes), 'changes' => $changes,
+                   'ignored' => $ignored, 'warnings' => $warnings, 'request' => agent_request_out($r)]);
+    }
+
+    // ── import_group_folder ──────────────────────────────────────────────────
+    // A confirmed group folder already in /001_Safari → Hub request, same as "Import Group
+    // Folder" (includes/group_import_service.php). Dry-run unless "confirm": true.
+    case 'import_group_folder': {
+        agent_require_method('POST');
+        require_once __DIR__ . '/dropbox_helper.php';
+        try {
+            $p = gi_plan($db, $in, dropbox_get_access_token());
+        } catch (RuntimeException $e) {
+            agent_fail('Dropbox error — nothing was changed: ' . $e->getMessage(), 502);
+        }
+        if ($p['mode'] === 'update' && $p['target_id'] > 0) $agentReqId = $p['target_id'];
+        $out = ['folder' => $p['folder'], 'mode' => $p['mode'], 'target_id' => $p['target_id'] ?: null,
+                'parsed' => $p['parsed'], 'values' => $p['values'], 'duplicates' => $p['duplicates'],
+                'blocking' => $p['blocking'], 'warnings' => $p['warnings']];
+        if ($p['errors']) agent_fail(implode(' ', $p['errors']), 400, ['errors' => $p['errors']] + $out);
+        if (empty($in['confirm'])) {
+            agent_out(array_merge(['ok' => true, 'dry_run' => true], $out, ['message' => $p['blocking']
+                ? 'Dry run — blocked: ' . implode(' ', array_column($p['blocking'], 'message'))
+                : 'Dry run — nothing written. Resend with "confirm": true to import.']));
+        }
+        if ($p['blocking']) {
+            $code = in_array('folder_missing', array_column($p['blocking'], 'code'), true) ? 404 : 409;
+            agent_fail('Not imported: ' . implode(' ', array_column($p['blocking'], 'message')), $code, $out);
+        }
+        $rid = gi_import($db, $p['values'], $p['mode'], $p['target_id']);
+        $agentReqId = $rid;
+        agent_out(['ok' => true, 'dry_run' => false, 'request_id' => $rid, 'mode' => $p['mode'],
+                   'request' => agent_request_out(agent_request($db, $rid)), 'warnings' => $p['warnings']]);
+    }
+
+    // ── move_group_folder ────────────────────────────────────────────────────
+    // Provisional Il Diamante folder (…/Diamante/2027-Groups/…_PROVISIONAL) → /001_Safari with
+    // _PROVISIONAL → _BALANCE (or new_suffix / new_name); optional "import" runs
+    // import_group_folder on the moved folder. Dry-run unless "confirm": true.
+    case 'move_group_folder': {
+        agent_require_method('POST');
+        require_once __DIR__ . '/dropbox_helper.php';
+        if (isset($in['import']) && !is_array($in['import'])) agent_fail('import must be an object with the import_group_folder fields');
+        try {
+            $token = dropbox_get_access_token();
+            $mp    = gi_move_plan($db, $in, $token);
+        } catch (RuntimeException $e) {
+            agent_fail('Dropbox error — nothing was changed: ' . $e->getMessage(), 502);
+        }
+        $out = ['from' => $mp['from'], 'to' => $mp['to'], 'new_name' => $mp['new_name'],
+                'blocking' => $mp['blocking'], 'warnings' => $mp['warnings']];
+        if ($mp['errors']) agent_fail(implode(' ', $mp['errors']), 400, ['errors' => $mp['errors']] + $out);
+
+        // Import checked now on the new name (the folder is not in /001_Safari yet), so a move
+        // is never done when the import would be refused.
+        $imp = null;
+        if (isset($in['import'])) {
+            $imp = gi_plan($db, ['folder' => $mp['new_name']] + $in['import'], null);
+            $out['import_preview'] = ['mode' => $imp['mode'], 'target_id' => $imp['target_id'] ?: null, 'values' => $imp['values'],
+                                      'duplicates' => $imp['duplicates'], 'errors' => $imp['errors'],
+                                      'blocking' => $imp['blocking'], 'warnings' => $imp['warnings']];
+        }
+        $go = !empty($in['confirm']);
+        if (!$go) {
+            $all = array_merge(array_column($mp['blocking'], 'message'), $imp ? array_merge($imp['errors'], array_column($imp['blocking'], 'message')) : []);
+            agent_out(array_merge(['ok' => true, 'dry_run' => true], $out, ['message' => $all
+                ? 'Dry run — blocked: ' . implode(' ', $all)
+                : 'Dry run — nothing moved. Resend with "confirm": true to move' . ($imp ? ' and import' : '') . '.']));
+        }
+        if ($mp['blocking']) {
+            $code = in_array('source_missing', array_column($mp['blocking'], 'code'), true) ? 404 : 409;
+            agent_fail('Not moved: ' . implode(' ', array_column($mp['blocking'], 'message')), $code, $out);
+        }
+        if ($imp && $imp['errors']) agent_fail('Not moved — the import would fail: ' . implode(' ', $imp['errors']), 400, $out);
+        if ($imp && $imp['blocking']) agent_fail('Not moved — the import would be refused: ' . implode(' ', array_column($imp['blocking'], 'message')), 409, $out);
+
+        try {
+            $out['dropbox_path'] = gi_move_folder($token, $mp['from'], $mp['to']);
+        } catch (RuntimeException $e) {
+            agent_fail('Dropbox move failed — nothing was changed: ' . $e->getMessage(), 502, $out);
+        }
+        unset($out['blocking']);
+        $out = ['ok' => true, 'dry_run' => false, 'moved' => true] + $out;
+        if (!$imp) agent_out($out);
+
+        // The move stays done whatever happens to the import.
+        try {
+            $imp = gi_plan($db, ['folder' => $mp['new_name']] + $in['import'], $token);
+            if ($imp['errors'] || $imp['blocking']) {
+                throw new RuntimeException(implode(' ', array_merge($imp['errors'], array_column($imp['blocking'], 'message'))));
+            }
+            $rid = gi_import($db, $imp['values'], $imp['mode'], $imp['target_id']);
+            $agentReqId = $rid;
+            agent_out($out + ['imported' => true, 'request_id' => $rid, 'mode' => $imp['mode'],
+                              'request' => agent_request_out(agent_request($db, $rid))]);
+        } catch (Throwable $e) {
+            agent_out(['ok' => false] + $out + ['imported' => false, 'import_error' => $e->getMessage(),
+                              'error' => 'Folder moved, import failed: ' . $e->getMessage(),
+                              'hint' => 'The folder is moved. Retry with import_group_folder on "' . $mp['new_name'] . '".'], 422);
+        }
+    }
+
+    // ── set_request_status ───────────────────────────────────────────────────
+    // Same rules as the Hub status menu (bs_set_request_status). Booked only via
+    // confirm_booking; a Booked request can only go to Cancelled (folder untouched).
+    // All-or-nothing over up to 50 ids. Dry-run unless "confirm": true.
+    case 'set_request_status': {
+        agent_require_method('POST');
+        $ids = [];
+        if (isset($in['request_ids'])) {
+            if (!is_array($in['request_ids'])) agent_fail('request_ids must be an array of ids');
+            foreach ($in['request_ids'] as $v) { if ((int)$v > 0) $ids[(int)$v] = true; }
+            $ids = array_keys($ids);
+        } elseif ((int)($in['request_id'] ?? 0) > 0) {
+            $ids = [(int)$in['request_id']];
+        }
+        if (!$ids) agent_fail('request_id or request_ids is required');
+        if (count($ids) > 50) agent_fail('At most 50 request_ids per call');
+        if (count($ids) === 1) $agentReqId = $ids[0];
+
+        $status = trim((string)($in['status'] ?? ''));
+        if ($status === 'Booked') agent_fail('Booked is set by confirm_booking (folder + DB together), not here', 409);
+        $settable = ['Inquiry', 'Quoted', 'Hot-Quoted', 'Lost', 'Cancelled'];
+        if (!in_array($status, $settable, true)) agent_fail('status must be one of: ' . implode(', ', $settable), 400, ['statuses' => $settable]);
+        $reason = trim((string)($in['lost_reason'] ?? ''));
+        $note   = trim((string)($in['lost_note']   ?? ''));
+        if ($status === 'Lost' && !array_key_exists($reason, bs_lost_reasons())) {
+            agent_fail('lost_reason is required for Lost', 400, ['lost_reasons' => array_keys(bs_lost_reasons())]);
+        }
+        $opt = ['allowed' => $settable, 'from_booked' => ['Cancelled']];
+
+        // Check every id first: one bad id → nothing changes.
+        $rows = []; $errors = [];
+        foreach ($ids as $rid) {
+            $c = bs_status_check($db, $rid, $status, $reason, $opt);
+            if (!$c['ok']) { $errors[] = ['request_id' => $rid, 'error_code' => $c['error_code'], 'error' => $c['error']]; continue; }
+            $rows[] = ['request_id' => $rid, 'old_status' => $c['old_status'], 'new_status' => $status, 'changed' => $c['changed']];
+        }
+        if ($errors) {
+            $codes = array_column($errors, 'error_code');
+            $code  = in_array('booked', $codes, true) ? 409 : (count(array_unique($codes)) === 1 && $codes[0] === 'not_found' ? 404 : 400);
+            agent_fail(count($errors) . ' of ' . count($ids) . ' requests cannot be changed — nothing was changed', $code,
+                       ['errors' => $errors, 'ok_rows' => $rows]);
+        }
+        $toChange = count(array_filter(array_column($rows, 'changed')));
+        if (empty($in['confirm'])) {
+            agent_out(['ok' => true, 'dry_run' => true, 'status' => $status, 'to_change' => $toChange,
+                       'unchanged' => count($rows) - $toChange, 'requests' => $rows,
+                       'message' => 'Dry run — nothing changed. Resend with "confirm": true.']);
+        }
+
+        tl_schema($db);   // no DDL inside the transaction
+        $db->beginTransaction();
+        try {
+            foreach ($rows as $row) {
+                $res = bs_set_request_status($db, $row['request_id'], $status, $reason, $note, (int)$agentUser['id'], $opt);
+                if (!$res['ok']) throw new RuntimeException('Request ' . $row['request_id'] . ': ' . $res['error']);
+            }
+            $db->commit();
+        } catch (Throwable $e) {
+            $db->rollBack();
+            agent_fail('Nothing changed: ' . $e->getMessage(), 409);
+        }
+        agent_out(['ok' => true, 'status' => $status, 'changed' => $toChange,
+                   'unchanged' => count($rows) - $toChange, 'requests' => $rows]);
     }
 
     // ── list_standard_programs ───────────────────────────────────────────────
     case 'list_standard_programs': {
         $groups = [];
+        $off = bs_std_programs_disabled();
         foreach (bs_std_programs() as $g => $progs) {
             $list = [];
             foreach ($progs as $label => $files) {
                 $dst = [];
                 foreach ($files as $f) $dst[] = $f['dst'];
-                $list[] = ['program' => $label, 'files' => $dst];
+                $row = ['program' => $label, 'files' => $dst];
+                if (isset($off[$label])) $row['disabled'] = $off[$label];
+                $list[] = $row;
             }
             $groups[] = ['group' => $g, 'programs' => $list];
         }
@@ -796,7 +1016,7 @@ try {
                   : (isset($in['program']) ? [(string)$in['program']] : []);
         $res = bs_copy_programs($db, (int)$r['id'], (string)($in['prognum'] ?? ''), $programs);
         if (!$res['ok']) agent_fail($res['msg']);
-        if ($res['unknown'] || $res['missing']) {
+        if ($res['unknown'] || $res['missing'] || $res['disabled']) {
             agent_out(array_merge(['ok' => false, 'error' => 'Some programs were not copied: ' . $res['summary']], $res), 422);
         }
         agent_out($res);
@@ -1340,16 +1560,20 @@ try {
     // ── rename_folder ────────────────────────────────────────────────────────
     // Free rename of the booking folder, same as BackOffice "Rename…" (includes/folder_service.php):
     // Dropbox + Hub (name, URL, status from the suffix) + CK tracker + timeline. No email.
+    // current_path: re-link a folder moved outside the Hub; rename_files: also the NN_<name>… files.
     // Dry-run (paths, status, warnings) unless "confirm": true.
     case 'rename_folder': {
         agent_require_method('POST');
         $r = agent_request($db, $in['request_id'] ?? 0);
-        $v = fs_rename_validate($db, (int)$r['id'], (string)($in['new_name'] ?? ''));
+        $curIn = trim((string)($in['current_path'] ?? ''));
+        $v = fs_rename_validate($db, (int)$r['id'], (string)($in['new_name'] ?? ''), $curIn);
         if (!$v['ok']) agent_fail($v['error'], $v['code']);
-        $go = !empty($in['confirm']);
+        $go        = !empty($in['confirm']);
+        $withFiles = !empty($in['rename_files']);
         require_once __DIR__ . '/dropbox_helper.php';
         try {
-            $pv = fs_rename_preview($db, $v, dropbox_get_access_token(), !$go);   // Calc check on the dry run only
+            // Calc check and file list on the dry run only
+            $pv = fs_rename_preview($db, $v, dropbox_get_access_token(), !$go, $withFiles && !$go);
         } catch (Throwable $e) {
             agent_fail('Dropbox error — nothing was changed: ' . $e->getMessage(), 502);
         }
@@ -1358,24 +1582,36 @@ try {
             'current'          => $v['folder'],
             'new_name'         => $v['new_name'],
             'is_group'         => $v['is_group'],
+            'relink'           => $v['relink'],
             'status_from_name' => ['matched' => $v['set_status'], 'status' => $v['status'],
                                    // a group tag sets the status only: each client keeps its payment_status
                                    'payment_status' => $v['is_group'] ? null : $v['ps'],
                                    'current_status' => $r['status'], 'current_payment_status' => $r['payment_status'] ?? null],
             'dropbox_path_old' => $pv['dropbox_path_old'],
+            'current_path'     => $pv['current_path'],
             'dropbox_path_new' => $pv['dropbox_path_new'],
             'warnings'         => $pv['warnings'],
         ];
+        if ($curIn !== '' && !$v['relink']) $out['warnings'][] = 'current_path equals the stored path — plain rename.';
         if (!$go) $out['calc_dates'] = $pv['calc_dates'];
+        if (!$go && $withFiles) $out['file_renames'] = $pv['file_renames'];
+        if ($pv['candidates']) $out['candidates'] = $pv['candidates'];
         if ($pv['error'] !== null) agent_fail($pv['error'], $pv['code'], $out);
         if (!$go) {
             agent_out(array_merge(['ok' => true, 'dry_run' => true,
-                'message' => 'Dry run — nothing renamed. Resend with "confirm": true to rename the folder.'], $out));
+                'message' => 'Dry run — nothing ' . ($v['relink'] ? 're-linked' : 'renamed') . '. Resend with "confirm": true to '
+                           . ($v['relink'] ? 're-link' : 'rename') . ' the folder.'], $out));
         }
-        $res = folder_rename($db, (int)$r['id'], $v['new_name'], (int)$agentUser['id']);
-        if (!$res['ok']) agent_fail($res['msg'], $res['code'], $out);
-        $out['dropbox_path_old'] = $res['dropbox_path_old'];
+        $res = folder_rename($db, (int)$r['id'], $v['new_name'], (int)$agentUser['id'],
+                             ['current_path' => $curIn, 'rename_files' => $withFiles]);
+        if (!$res['ok']) {
+            if (!empty($res['candidates'])) $out['candidates'] = $res['candidates'];
+            agent_fail($res['msg'], $res['code'], $out);
+        }
         $out['dropbox_path_new'] = $res['dropbox_path_new'];
+        if ($v['relink']) $out['current_path'] = $res['dropbox_path_old'];
+        else              $out['dropbox_path_old'] = $res['dropbox_path_old'];
+        if ($withFiles) { $out['files_renamed'] = $res['files_renamed']; $out['files_failed'] = $res['files_failed']; }
         agent_out(array_merge(['ok' => true, 'dry_run' => false, 'renamed' => true, 'message' => $res['msg']], $out));
     }
 
@@ -2119,7 +2355,7 @@ try {
 
     default:
         agent_fail('Unknown action "' . $agentAction . '"', 400, ['actions' => [
-            'find_requests', 'list_agencies', 'create_request', 'update_request', 'list_standard_programs',
+            'find_requests', 'list_agencies', 'create_request', 'update_request', 'import_group_folder', 'move_group_folder', 'list_standard_programs',
             'copy_program', 'get_rates', 'fill_calc', 'read_calc', 'confirm_preview', 'confirm_booking', 'send_booking_email',
             'rollback_booking', 'iti_programs', 'iti_texts', 'iti_save_texts', 'update_rate', 'replace_flight_rates',
             'iti_lodges', 'iti_lodge', 'iti_destinations', 'iti_destination', 'iti_lodge_photos', 'iti_destination_photo',

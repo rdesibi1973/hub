@@ -54,6 +54,13 @@ unset($lead);
 
 $agents = $db->query("SELECT * FROM agents WHERE active=1 ORDER BY name")->fetchAll();
 
+// Agency list for the searchable picker (same list as request_add.php).
+$agencyJs = array_map(fn($a) => [
+    'id'    => (int)$a['id'],
+    'nome'  => $a['nome'],
+    'short' => $a['short_name'] ?: $a['nome'],
+], $db->query("SELECT id, nome, short_name FROM agencies ORDER BY nome")->fetchAll());
+
 include 'includes/header.php';
 ?>
 <style>
@@ -266,7 +273,7 @@ select:focus,input:focus{outline:none;border-color:#C0211B;box-shadow:0 0 0 2px 
 
     <!-- APPROVE -->
     <div class="action-panel active" id="panel-approve">
-      <form method="POST" action="staging_action.php" target="_blank" onsubmit="afterProcess(this)">
+      <form method="POST" action="staging_action.php" target="_blank" id="approveForm" onsubmit="return onApproveSubmit(this)">
         <input type="hidden" name="action" value="approve">
         <input type="hidden" name="staging_id" id="approveId">
         <!-- Editable customer name -->
@@ -297,20 +304,54 @@ select:focus,input:focus{outline:none;border-color:#C0211B;box-shadow:0 0 0 2px 
             </select>
           </div>
         </div>
-        <!-- Eleonora Ongaro blog-referral flag -->
-        <div style="margin:6px 0 10px;">
+        <!-- Channel (as request_add.php) -->
+        <div style="margin:2px 0 10px;">
+          <label style="font-size:.75rem;font-weight:600;display:block;margin-bottom:4px">Channel *</label>
+          <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:.8rem;">
+            <?php foreach (['direct' => 'Direct', 'agency' => 'Agency', 'sb' => 'SB', 'other' => 'Other'] as $chv => $chl): ?>
+              <label style="display:flex;align-items:center;gap:5px;cursor:pointer;">
+                <input type="radio" name="channel" value="<?= $chv ?>" <?= $chv === 'direct' ? 'checked' : '' ?>
+                       onchange="updateChannel()" style="accent-color:#C0211B;cursor:pointer;"> <?= $chl ?>
+              </label>
+            <?php endforeach; ?>
+          </div>
+        </div>
+        <!-- Agency picker (channel Agency only; mandatory) -->
+        <div id="agencyRow" style="display:none;margin-bottom:10px;">
+          <label style="font-size:.75rem;font-weight:600;display:block;margin-bottom:4px">Agency *</label>
+          <div style="position:relative">
+            <div style="display:flex;gap:6px;align-items:stretch">
+              <input type="text" id="agency_search" autocomplete="off" placeholder="Type to filter agencies…"
+                     oninput="filterAgencies()" onfocus="filterAgencies()" onkeydown="agencyKeydown(event)" style="flex:1">
+              <button type="button" onclick="openAddAgency()" title="Add a new agency"
+                      style="white-space:nowrap;background:#fff;border:1px solid #D1D5DB;border-radius:6px;padding:0 10px;font-size:.78rem;cursor:pointer;">➕ Add</button>
+            </div>
+            <input type="hidden" id="agency_id" name="agency_id" value="" data-short="">
+            <div id="agency_list" role="listbox"
+                 style="position:absolute;z-index:30;left:0;right:0;top:100%;margin-top:2px;max-height:200px;overflow:auto;background:#fff;border:1px solid #D1D5DB;border-radius:6px;box-shadow:0 6px 18px rgba(0,0,0,.12);display:none"></div>
+          </div>
+        </div>
+        <!-- Eleonora Ongaro blog-referral flag (direct clients only) -->
+        <div id="eleonoraRow" style="margin:6px 0 10px;">
           <label style="display:flex;align-items:center;gap:8px;font-size:.78rem;font-weight:600;cursor:pointer;">
             <input type="checkbox" name="eleonora_ongaro" id="eleonoraFlag" value="1"
                    onchange="onEleonoraToggle()" style="width:14px;height:14px;cursor:pointer;">
             📝 Eleonora Ongaro referral — folder as <code>(<span id="eleonoraAgentHint">Agent</span>-EleonoraOngaro)</code>
           </label>
         </div>
-        <!-- Editable folder name -->
+        <!-- Folder name: built from name / channel / agency / agent; editable by hand -->
         <div id="folderPreviewRow" style="margin-bottom:10px;display:none;">
-          <label style="font-size:.75rem;font-weight:600;display:block;margin-bottom:4px">📁 Dropbox Folder Name</label>
-          <input type="text" name="folder_name_override" id="folderNameInput"
+          <label style="font-size:.75rem;font-weight:600;display:flex;align-items:center;gap:8px;margin-bottom:4px">
+            📁 Dropbox Folder Name
+            <span id="folderEditedTag" style="display:none;font-weight:700;color:#92400E;background:#FEF3C7;border-radius:8px;padding:1px 7px;font-size:.68rem">edited by hand</span>
+            <a href="#" id="folderResetLink" onclick="resetFolderName();return false;" style="display:none;font-weight:400;font-size:.72rem;color:#0062B1">↺ rebuild</a>
+          </label>
+          <input type="text" id="folderNameInput"
                  style="font-family:monospace;font-size:.82rem;color:#C0211B;"
-                 oninput="folderUserEdited=true" placeholder="Folder name">
+                 oninput="onFolderInput()" placeholder="Folder name">
+          <!-- sent only when the operator edited the name by hand -->
+          <input type="hidden" name="folder_name_override" id="folderNameOverride" value="">
+          <div id="folderError" style="display:none;margin-top:4px;font-size:.72rem;color:#991B1B"></div>
         </div>
         <!-- Notify agent checkbox -->
         <div style="margin:6px 0 12px;">
@@ -371,36 +412,111 @@ select:focus,input:focus{outline:none;border-color:#C0211B;box-shadow:0 0 0 2px 
   </div>
 </div>
 
+<!-- Add Agency modal (same as request_add.php) -->
+<div id="addAgencyOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1000;align-items:center;justify-content:center">
+  <div style="background:#fff;border-radius:10px;max-width:430px;width:92%;padding:20px;box-shadow:0 12px 40px rgba(0,0,0,.3)">
+    <div style="font-size:1.05rem;font-weight:700;margin-bottom:12px">Add Agency</div>
+    <div id="addAgencyError" style="display:none;background:#FEE2E2;border:1px solid #C0211B;color:#991B1B;border-radius:6px;padding:8px 12px;font-size:.82rem;margin-bottom:10px"></div>
+    <label for="aa_nome" style="font-size:.75rem;font-weight:600;display:block;margin-bottom:4px">Agency name *</label>
+    <input type="text" id="aa_nome" autocomplete="off" placeholder="e.g. Go World Travel" style="margin-bottom:10px">
+    <label for="aa_short" style="font-size:.75rem;font-weight:600;display:block;margin-bottom:4px">Short code (optional)</label>
+    <input type="text" id="aa_short" autocomplete="off" placeholder="auto-generated from name if blank" style="margin-bottom:10px">
+    <div style="font-size:.75rem;font-weight:600;margin-bottom:4px">Type</div>
+    <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:.8rem">
+      <label style="display:flex;align-items:center;gap:5px;cursor:pointer"><input type="radio" name="aa_type" value="savannah" checked> Savannah</label>
+      <label style="display:flex;align-items:center;gap:5px;cursor:pointer"><input type="radio" name="aa_type" value="promoservice"> Promoservice&nbsp;(-PS)</label>
+      <label style="display:flex;align-items:center;gap:5px;cursor:pointer"><input type="radio" name="aa_type" value="lamprati"> Lamprati&nbsp;(-LAM)</label>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
+      <button type="button" class="btn-dismiss" onclick="closeAddAgency()">Cancel</button>
+      <button type="button" class="btn-approve" id="aa_submit" onclick="submitAddAgency()">Create agency</button>
+    </div>
+  </div>
+</div>
+
 <!-- Lead data for JS -->
 <script>
 const LEADS = <?= json_encode(array_column($leads, null, 'id'), JSON_UNESCAPED_UNICODE) ?>;
+window.AGENCIES = <?= json_encode($agencyJs, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
 
-// Folder name helpers (mirror PHP logic in staging_action.php)
+// Folder name preview — mirrors bs_request_folder_name() / bs_camel_case() in
+// includes/booking_service.php, which builds the real name on the server.
 function toCamelCase(name) {
     name = name.trim();
     if (!name.includes(' ') && !name.includes('-')) return name;
     return name.split(/[\s\-]+/)
                .filter(p => p.length > 0)
-               .map(p => p.charAt(0).toUpperCase() + p.slice(1).toLowerCase())
+               .map(p => {   // mixed-case word kept ("DeSanctis"), as bs_camel_case()
+                   const mixed = p !== p.toLowerCase() && p !== p.toUpperCase();
+                   return p.charAt(0).toUpperCase() + (mixed ? p.slice(1) : p.slice(1).toLowerCase());
+               })
                .join('');
 }
-function folderSuffix() {
-    return document.getElementById('eleonoraFlag').checked ? 'EleonoraOngaro' : 'Drct';
+function channelValue() {
+    const r = document.querySelector('#approveForm input[name="channel"]:checked');
+    return r ? r.value : 'direct';
 }
 function buildFolderName(customerName, agentName) {
     const namePart  = toCamelCase(customerName);
     const agentPart = agentName.replace(/\s+/g, '');
-    return namePart + '(' + agentPart + '-' + folderSuffix() + ')';
+    const ch = channelValue();
+    if (ch === 'agency') {
+        const hid = document.getElementById('agency_id');
+        const ag  = hid.value ? (hid.dataset.short || '').replace(/[^\w\-]/g, '') : '?';
+        return namePart + '(' + ag + '-' + agentPart + ')';
+    }
+    if (ch === 'sb')    return namePart + '(' + agentPart + '-SB)';
+    if (ch === 'other') return namePart + '(' + agentPart + ')';
+    const tag = document.getElementById('eleonoraFlag').checked ? 'EleonoraOngaro' : 'Drct';
+    return namePart + '(' + agentPart + '-' + tag + ')';
+}
+// Same rule as bs_folder_name_error(): "Name(Tag)", exactly one "(…)" tag at the end.
+function folderNameError(name) {
+    name = name.trim();
+    if (!name) return 'Folder name is empty.';
+    if (/[\/\\]/.test(name)) return 'Folder name must not contain "/" or "\\".';
+    if (!/^[^()]+\([^()]+\)$/.test(name)) return 'Exactly one "(…)" tag, at the end — e.g. MarioRossi(Roberto-Drct).';
+    return '';
 }
 
 // Toggling the referral flag regenerates the folder name from scratch.
 function onEleonoraToggle() {
-    folderUserEdited = false;
+    setFolderEdited(false);
+    updateFolderPreview();
+}
+
+// Channel change: show the agency picker only for Agency (dropping a selection when
+// leaving it), the referral flag only for Direct; rebuild the folder name.
+function updateChannel() {
+    const ch = channelValue();
+    document.getElementById('agencyRow').style.display = ch === 'agency' ? 'block' : 'none';
+    if (ch !== 'agency') clearAgency();
+    document.getElementById('eleonoraRow').style.display = ch === 'direct' ? 'block' : 'none';
+    if (ch !== 'direct') document.getElementById('eleonoraFlag').checked = false;
+    setFolderEdited(false);
     updateFolderPreview();
 }
 
 let currentLeadName = '';
 let folderUserEdited = false;
+
+function setFolderEdited(on) {
+    folderUserEdited = on;
+    document.getElementById('folderEditedTag').style.display = on ? 'inline' : 'none';
+    document.getElementById('folderResetLink').style.display = on ? 'inline' : 'none';
+    if (!on) document.getElementById('folderError').style.display = 'none';
+}
+function onFolderInput() {
+    setFolderEdited(true);
+    const err = folderNameError(document.getElementById('folderNameInput').value);
+    const box = document.getElementById('folderError');
+    box.textContent = err;
+    box.style.display = err ? 'block' : 'none';
+}
+function resetFolderName() {
+    setFolderEdited(false);
+    updateFolderPreview();
+}
 
 function updateFolderPreview() {
     const sel = document.getElementById('approveAgent');
@@ -420,6 +536,131 @@ function updateFolderPreview() {
 
 function onCustomerNameInput() {
     if (!folderUserEdited) updateFolderPreview();
+}
+
+// Approve: agency mandatory for channel Agency; a hand-edited folder name must be
+// valid and is the only case where folder_name_override is sent (else the server
+// builds the name itself).
+function onApproveSubmit(form) {
+    if (channelValue() === 'agency') {
+        const hidden = document.getElementById('agency_id');
+        const search = document.getElementById('agency_search');
+        if (!hidden.value && search) {   // typed text matching exactly one agency name
+            const typed = search.value.trim().toLowerCase();
+            const m = typed ? window.AGENCIES.find(a => a.nome.toLowerCase() === typed) : null;
+            if (m) selectAgency(m.id);
+        }
+        if (!hidden.value) {
+            alert('Please select an agency (type to filter, or use ➕ Add).');
+            if (search) search.focus();
+            return false;
+        }
+    }
+    const inp = document.getElementById('folderNameInput');
+    const ovr = document.getElementById('folderNameOverride');
+    ovr.value = '';
+    if (folderUserEdited) {
+        const err = folderNameError(inp.value);
+        if (err) { alert('Folder name: ' + err); inp.focus(); return false; }
+        ovr.value = inp.value.trim();
+    }
+    afterProcess(form);
+    return true;
+}
+
+// ── Agency searchable picker (as request_add.php, without the email suggestions) ──
+function agencyEls() {
+  return {
+    search: document.getElementById('agency_search'),
+    hidden: document.getElementById('agency_id'),
+    list:   document.getElementById('agency_list'),
+  };
+}
+function filterAgencies() {
+  const { search, list } = agencyEls();
+  const q = search.value.trim().toLowerCase();
+  // Typing again drops the previous selection until one is picked.
+  const { hidden } = agencyEls();
+  if (hidden.value) {
+    const cur = window.AGENCIES.find(x => x.id === parseInt(hidden.value, 10));
+    if (!cur || cur.nome.toLowerCase() !== q) { hidden.value = ''; hidden.dataset.short = ''; updateFolderPreview(); }
+  }
+  const matches = window.AGENCIES.filter(a =>
+    !q || a.nome.toLowerCase().includes(q) || (a.short || '').toLowerCase().includes(q)
+  ).slice(0, 60);
+  if (!matches.length) {
+    list.innerHTML = '<div style="padding:8px 12px;color:#888;font-size:.8rem">No match — use ➕ Add to create it</div>';
+    list.style.display = 'block';
+    return;
+  }
+  list.innerHTML = matches.map(a =>
+    '<div class="agency-opt" data-id="' + a.id + '" style="padding:6px 12px;cursor:pointer;font-size:.8rem;border-bottom:1px solid #f1f1f1">' +
+      esc(a.nome) + ' <span style="color:#888;font-size:.72rem">' + esc(a.short) + '</span></div>'
+  ).join('');
+  list.style.display = 'block';
+  list.querySelectorAll('.agency-opt').forEach(el => {
+    el.addEventListener('mousedown', function (e) { e.preventDefault(); selectAgency(parseInt(this.dataset.id, 10)); });
+    el.addEventListener('mouseenter', function () { this.style.background = '#F0FDF4'; });
+    el.addEventListener('mouseleave', function () { this.style.background = ''; });
+  });
+}
+function selectAgency(id) {
+  const { search, hidden, list } = agencyEls();
+  const a = window.AGENCIES.find(x => x.id === id);
+  if (!a) return;
+  hidden.value = a.id;
+  hidden.dataset.short = a.short || '';
+  search.value = a.nome;
+  list.style.display = 'none';
+  updateFolderPreview();
+}
+function clearAgency() {
+  const { search, hidden, list } = agencyEls();
+  hidden.value = ''; hidden.dataset.short = '';
+  search.value = '';
+  list.style.display = 'none';
+}
+function agencyKeydown(e) {
+  if (e.key === 'Escape') agencyEls().list.style.display = 'none';
+}
+document.addEventListener('click', function (e) {
+  const { search, list } = agencyEls();
+  if (e.target === search || list.contains(e.target)) return;
+  list.style.display = 'none';
+});
+
+// ── Add Agency modal (ajax_create_agency.php, as request_add.php) ──
+function openAddAgency() {
+  document.getElementById('aa_nome').value  = document.getElementById('agency_search').value.trim();
+  document.getElementById('aa_short').value = '';
+  document.getElementById('addAgencyError').style.display = 'none';
+  document.getElementById('addAgencyOverlay').style.display = 'flex';
+  document.getElementById('aa_nome').focus();
+}
+function closeAddAgency() { document.getElementById('addAgencyOverlay').style.display = 'none'; }
+function submitAddAgency() {
+  const nome   = document.getElementById('aa_nome').value.trim();
+  const short  = document.getElementById('aa_short').value.trim();
+  const type   = (document.querySelector('input[name="aa_type"]:checked') || {}).value || 'savannah';
+  const errBox = document.getElementById('addAgencyError');
+  const btn    = document.getElementById('aa_submit');
+  if (!nome) { errBox.textContent = 'Agency name is required.'; errBox.style.display = 'block'; return; }
+  btn.disabled = true; btn.textContent = 'Saving…';
+  const body = new URLSearchParams({ nome: nome, short_name: short, type: type });
+  fetch('ajax_create_agency.php', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body })
+    .then(r => r.json())
+    .then(j => {
+      // Success, or a duplicate that still hands back the existing id → select it.
+      if (!j || (!j.success && !j.id)) throw new Error((j && j.message) || 'Could not create the agency.');
+      if (!window.AGENCIES.some(a => a.id === j.id)) {
+        window.AGENCIES.push({ id: j.id, nome: j.nome, short: j.short_name });
+        window.AGENCIES.sort((a, b) => a.nome.localeCompare(b.nome));
+      }
+      selectAgency(j.id);
+      closeAddAgency();
+    })
+    .catch(err => { errBox.textContent = err.message; errBox.style.display = 'block'; })
+    .finally(() => { btn.disabled = false; btn.textContent = 'Create agency'; });
 }
 
 // "MARIO ROSSI" / "mario rossi" → "Mario Rossi". Per word: only words typed
@@ -443,13 +684,18 @@ function openDrawer(id) {
 
   // Populate editable name; reset folder state
   currentLeadName = l.customer_name;
-  folderUserEdited = false;
+  setFolderEdited(false);
   document.getElementById('customerNameInput').value = fixNameCase(l.customer_name);
   document.getElementById('approveAgent').value = '';
+  document.querySelector('#approveForm input[name="channel"][value="direct"]').checked = true;
+  clearAgency();
+  document.getElementById('agencyRow').style.display = 'none';
+  document.getElementById('eleonoraRow').style.display = 'block';
   document.getElementById('eleonoraFlag').checked = false;
   document.getElementById('eleonoraAgentHint').textContent = 'Agent';
   document.getElementById('folderPreviewRow').style.display = 'none';
   document.getElementById('folderNameInput').value = '';
+  document.getElementById('folderNameOverride').value = '';
 
   // Pre-select destination if already set
   const ds = document.getElementById('approveDest');

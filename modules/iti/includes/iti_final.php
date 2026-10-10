@@ -68,6 +68,27 @@ function iti_final_suggest_sample(array $samples, string $code, int $days, strin
     return $tie ? 0 : $best;
 }
 
+/**
+ * Title of a final programme: the sample's title without the internal language tag,
+ * in title case, then the customer — "PUMBA SAFARI IN ITALIANO" + "Marco Ciaolo"
+ * → "Pumba Safari – Marco Ciaolo". Empty sample title → ''.
+ */
+function iti_final_title(string $sampleTitle, string $customer): string {
+    $t = trim(preg_replace('/\s+(in\s+(italiano|english|inglese|fran[cç]ais|espa[nñ]ol|deutsch))\s*$/iu', '', $sampleTitle));
+    if ($t === '') return '';
+    if (mb_strtoupper($t, 'UTF-8') === $t) {      // all caps → title case, airport / season codes kept
+        $t = mb_convert_case(mb_strtolower($t, 'UTF-8'), MB_CASE_TITLE, 'UTF-8');
+        $t = preg_replace_callback('/\b(Znz|Jro|Ark|Sto|Dar)\b/u', function ($m) { return strtoupper($m[1]); }, $t);
+        // Small words inside the title stay lower case ("Kiboko Safari e Zanzibar").
+        $t = preg_replace_callback('/(?<=\s)(E|Ed|Da|Di|Del|In|And|Of|The)(?=\s)/u', function ($m) { return strtolower($m[1]); }, $t);
+    }
+    $customer = trim($customer);
+    return mb_substr($customer !== '' ? $t . ' – ' . $customer : $t, 0, 255);
+}
+
+// Two lodges this close count as the same area when aligning the Calc with the sample.
+if (!defined('ITI_FINAL_NEAR_KM')) define('ITI_FINAL_NEAR_KM', 30);
+
 /** Meal flags [breakfast, lunch, dinner, all_inclusive] for a meal basis code. */
 function iti_final_meals(?string $basis): ?array {
     $m = array('BB' => array(1, 0, 0, 0), 'HB' => array(1, 0, 1, 0), 'FB' => array(1, 1, 1, 0), 'AI' => array(1, 1, 1, 1));
@@ -113,7 +134,7 @@ function iti_final_plan(PDO $db, array $calc, int $sampleId): array {
     $lodgeInfo = function ($id) use ($db) {
         static $cache = array();
         if (!isset($cache[$id])) {
-            $st = $db->prepare('SELECT l.id, l.name, l.destination_id, d.name_en AS dest_name FROM iti_lodges l
+            $st = $db->prepare('SELECT l.id, l.name, l.destination_id, l.latitude, l.longitude, d.name_en AS dest_name FROM iti_lodges l
                                  LEFT JOIN iti_destinations d ON d.id = l.destination_id WHERE l.id = ?');
             $st->execute(array($id));
             $cache[$id] = $st->fetch(PDO::FETCH_ASSOC) ?: null;
@@ -184,29 +205,38 @@ function iti_final_plan(PDO $db, array $calc, int $sampleId): array {
     }
 
     // Align with the sample's days on the lodge sequence. Same lodge = best match;
-    // same destination with another lodge (Kifaru in the sample, Orangi in the Calc)
-    // still keeps the sample day's text, flagged for review.
+    // same destination, or another lodge within ITI_FINAL_NEAR_KM (The Manor at
+    // Ngorongoro ~ Marera in Karatu: two destinations, one area), still keeps the
+    // sample day's text, flagged for review.
     $sampleDays = array();
     if ($sampleId) {
-        $st = $db->prepare('SELECT d.id, d.day_number, d.end_lodge_id, l.name AS lodge_name, l.destination_id
+        $st = $db->prepare('SELECT d.id, d.day_number, d.end_lodge_id, l.name AS lodge_name, l.destination_id, l.latitude, l.longitude
                               FROM iti_program_days d LEFT JOIN iti_lodges l ON l.id = d.end_lodge_id
                              WHERE d.program_id = ? ORDER BY d.day_number');
         $st->execute(array($sampleId));
         $sampleDays = $st->fetchAll(PDO::FETCH_ASSOC);
+        $geo = function ($row) {   // [lat, lng] of a lodge row, null when unknown (0 / 0 = not set)
+            $lat = (float)($row['latitude'] ?? 0); $lng = (float)($row['longitude'] ?? 0);
+            return (abs($lat) > 0.0001 || abs($lng) > 0.0001) ? array($lat, $lng) : null;
+        };
         $ka = array(); $kb = array();
         foreach ($days as $i => $d) {
-            $ka[] = array('l' => $d['lodge_id'], 'd' => $d['dest_id'], 'end' => $d['last'] && $d['hotel_text'] === '');
+            $li = $d['lodge_id'] ? $lodgeInfo($d['lodge_id']) : null;
+            $ka[] = array('l' => $d['lodge_id'], 'd' => $d['dest_id'], 'end' => $d['last'] && $d['hotel_text'] === '',
+                          'geo' => $li ? $geo($li) : null);
         }
         $m = count($sampleDays);
         foreach ($sampleDays as $j => $s) {
             $kb[] = array('l' => $s['end_lodge_id'] ? (int)$s['end_lodge_id'] : null,
                           'd' => $s['destination_id'] ? (int)$s['destination_id'] : null,
-                          'end' => !$s['end_lodge_id'] && $j === $m - 1);
+                          'end' => !$s['end_lodge_id'] && $j === $m - 1,
+                          'geo' => $geo($s));
         }
         $score = function ($x, $y) {
             if ($x['end'] && $y['end']) return 2;
             if ($x['l'] && $x['l'] === $y['l']) return 2;
             if ($x['d'] && $x['d'] === $y['d']) return 1;
+            if ($x['geo'] && $y['geo'] && iti_haversine($x['geo'][0], $x['geo'][1], $y['geo'][0], $y['geo'][1]) <= ITI_FINAL_NEAR_KM) return 1;
             return 0;
         };
         foreach (iti_final_align($ka, $kb, $score) as $i => $j) {
@@ -226,7 +256,9 @@ function iti_final_plan(PDO $db, array $calc, int $sampleId): array {
     foreach ($days as $i => $d) {
         if ($sampleId && $d['sample_index'] === null) {
             $days[$i]['flags'][] = 'Not in the sample: added from the Calc (text to review).';
-            if ($d['route'] && $d['route']['state'] === 'unmapped') {
+            // Routes only once every hotel is mapped: until then the alignment with the
+            // sample is not known and most days only look new.
+            if ($d['route'] && $d['route']['state'] === 'unmapped' && !$unmapped['lodge']) {
                 $unmapped['route'][iti_alias_norm($d['route']['text'])] = $d['route']['text'];
             }
         }
@@ -237,6 +269,7 @@ function iti_final_plan(PDO $db, array $calc, int $sampleId): array {
     foreach ($unmapped['route'] as $t) $blocking[] = 'Route "' . $t . '" (a day not in the sample) has no route alias.';
 
     $flags = array();
+    if ($unmapped['lodge'] && $sampleId) $flags[] = 'Map the hotels first: which days match the sample (and which routes are needed) depends on them.';
     if (!empty($calc['guests_tba'])) $flags[] = 'Guests not known yet (TBA) — the program will say "to be defined".';
     if ($sampleId && count($sampleDays) !== count($days)) {
         $flags[] = 'The sample has ' . count($sampleDays) . ' days, the Calc ' . count($days) . ' — days are added / removed to match the Calc.';
@@ -260,8 +293,17 @@ function iti_final_generate(PDO $db, int $requestId, array $calc, int $sampleId,
     if (!$sample || $sample['program_type'] !== 'sample') throw new RuntimeException('Sample #' . $sampleId . ' not found.');
 
     $pax = $calc['pax'];
-    $newId = iti_duplicate_program($sampleId, 'personal', (string)($who['username'] ?? 'system'), array(
-        'title_en'         => $sample['title_en'],
+    // "Pumba Safari – Marco Ciaolo" in every language the sample has a title for.
+    $st = $db->prepare('SELECT customer_name FROM requests WHERE id = ?');
+    $st->execute(array($requestId));
+    $customer = (string)$st->fetchColumn();
+    $titles = array();
+    foreach (ITI_LANGUAGES as $l) {
+        if (!array_key_exists('title_' . $l, $sample)) continue;
+        $titles['title_' . $l] = (string)$sample['title_' . $l] !== '' ? iti_final_title((string)$sample['title_' . $l], $customer) : '';
+    }
+    if (empty($titles['title_en'])) $titles['title_en'] = iti_final_title((string)$sample['title_en'], $customer) ?: (string)$sample['title_en'];
+    $newId = iti_duplicate_program($sampleId, 'personal', (string)($who['username'] ?? 'system'), $titles + array(
         'lead_request_id'  => $requestId,
         'ref_number'       => iti_lead_ref_number($requestId, (string)($calc['calc_path'] ?? '')),
         'stage'            => 'final',
@@ -414,9 +456,11 @@ function iti_final_generate(PDO $db, int $requestId, array $calc, int $sampleId,
                                $g['dob'], $g['country'] !== '' ? mb_substr($g['country'], 0, 80) : null));
         }
 
-        // One active final per request: older ones are kept, marked superseded.
-        $st = $db->prepare("SELECT id FROM iti_programs WHERE lead_request_id = ? AND stage = 'final' AND superseded_by IS NULL AND id <> ?");
-        $st->execute(array($requestId, $newId));
+        // One active final per Calc file of the request (a request can have two Calc
+        // files, e.g. the same safari with other lodges): older ones are kept, marked superseded.
+        $st = $db->prepare("SELECT id FROM iti_programs WHERE lead_request_id = ? AND stage = 'final' AND superseded_by IS NULL AND id <> ?
+                              AND source_calc_path <=> ?");
+        $st->execute(array($requestId, $newId, $calc['calc_path'] ?? null));
         $old = array_map('intval', $st->fetchAll(PDO::FETCH_COLUMN));
         if ($old) {
             $db->prepare("UPDATE iti_programs SET superseded_by = ?, superseded_at = ? WHERE id IN (" . implode(',', $old) . ")")
@@ -449,7 +493,7 @@ function iti_final_generate(PDO $db, int $requestId, array $calc, int $sampleId,
 /** Final programmes of a request, newest first (active = not superseded). */
 function iti_final_list(PDO $db, int $requestId): array {
     iti_ensure_final_schema();
-    $st = $db->prepare("SELECT id, title_en, title_it, start_date, generated_at, source_calc_rev, superseded_by, superseded_at, status
+    $st = $db->prepare("SELECT id, title_en, title_it, start_date, generated_at, source_calc_path, source_calc_rev, superseded_by, superseded_at, status
                           FROM iti_programs WHERE lead_request_id = ? AND stage = 'final' ORDER BY id DESC");
     $st->execute(array($requestId));
     return $st->fetchAll(PDO::FETCH_ASSOC);

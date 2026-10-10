@@ -10,6 +10,8 @@
  *                                                     (backoffice.php, API confirm_*)
  *   Rollback        : bs_rollback()                   (backoffice.php, API rollback_booking)
  *   Booking email   : bo_booking_email(), bs_send_mail()     (backoffice.php, ajax_booking_email.php, API)
+ *   Request status  : bs_status_check() / bs_set_request_status()
+ *                                                     (request_view.php quick_status, API set_request_status)
  *
  * Requires the leads config.php (db(), DROPBOX_BASE_PATH, …) to be loaded first.
  * Dropbox helpers are loaded lazily, as the pages did before.
@@ -66,6 +68,8 @@ function req_folder_path(array $r): string {
         }
     }
     if (!empty($r['group_folder']) && $leaf !== '') {
+        // Imported group (Import Group Folder): group_folder = practice_code = one folder.
+        if (trim($r['group_folder']) === $leaf) return '/001_Safari/' . $leaf;
         return '/001_Safari/' . $r['group_folder'] . '/' . $leaf;
     }
     return '';
@@ -75,15 +79,41 @@ function req_folder_path(array $r): string {
 //  Create request
 // ════════════════════════════════════════════════════════════════════════════
 
-/** "patrizia fiorini" → "PatriziaFiorini"; compact CamelCase is kept as-is. */
+/**
+ * "patrizia fiorini" → "PatriziaFiorini", "ROSSI mario" → "RossiMario"; compact CamelCase is
+ * kept as-is, and so is a mixed-case word ("Luca DeSanctis" → "LucaDeSanctis", not "Desanctis").
+ * Keep in step with toCamelCase() in request_add.php and staging.php.
+ */
 function bs_camel_case(string $name): string {
     $name = trim($name);
     if (strpos($name, ' ') === false && strpos($name, '-') === false) return $name;
-    return implode('', array_map('ucfirst', array_map('mb_strtolower', preg_split('/[\s\-]+/', $name))));
+    $out = '';
+    foreach (preg_split('/[\s\-]+/', $name, -1, PREG_SPLIT_NO_EMPTY) as $w) {
+        $first = mb_strtoupper(mb_substr($w, 0, 1));
+        $rest  = mb_substr($w, 1);
+        $mixed = $w !== mb_strtolower($w) && $w !== mb_strtoupper($w);
+        $out  .= $first . ($mixed ? $rest : mb_strtolower($rest));
+    }
+    return $out;
 }
 
-/** Folder name for a new request, e.g. "PatriziaFiorini(TVT-PS-Roberto)". */
-function bs_request_folder_name(PDO $db, string $customerName, string $channel, $agencyId, $agentId): string {
+/**
+ * Customer name guard: the client's name only — no "(Agency-Agent)" tag, which the Hub
+ * adds to the folder name itself. Returns the error message, or null when the name is fine.
+ */
+function bs_customer_name_error(string $name): ?string {
+    if (preg_match('/[()\[\]]/', $name)) {
+        return 'Write only the client name — the Hub adds (Agency-Agent) itself.';
+    }
+    return null;
+}
+
+/**
+ * Folder name for a new request, e.g. "PatriziaFiorini(TVT-PS-Roberto)".
+ * $directTag replaces "Drct" for a direct client, e.g. "EleonoraOngaro" (blog referral).
+ */
+function bs_request_folder_name(PDO $db, string $customerName, string $channel, $agencyId, $agentId,
+                                string $directTag = 'Drct'): string {
     $agStmt = $db->prepare("SELECT name FROM agents WHERE id = ? LIMIT 1");
     $agStmt->execute([$agentId]);
     $agRow     = $agStmt->fetch(PDO::FETCH_ASSOC);
@@ -105,9 +135,55 @@ function bs_request_folder_name(PDO $db, string $customerName, string $channel, 
         case 'agency': $suffix = "({$agencyNome}-{$agentName})"; break;
         case 'sb':     $suffix = "({$agentName}-SB)";            break;
         case 'other':  $suffix = "({$agentName})";               break;
-        default:       $suffix = "({$agentName}-Drct)";          break;
+        default:       $suffix = "({$agentName}-{$directTag})";  break;
     }
     return $namePart . $suffix;
+}
+
+/**
+ * Check a hand-edited request folder name: "Name(Tag)", exactly one "(…)" tag at the
+ * end, no path separators. Returns '' when valid, else the error message.
+ */
+function bs_folder_name_error(string $name): string {
+    $name = trim($name);
+    if ($name === '') return 'Folder name is empty.';
+    if (preg_match('#[/\\\\]#', $name)) return 'Folder name must not contain "/" or "\\".';
+    if (!preg_match('/^[^()]+\([^()]+\)$/u', $name)) {
+        return 'Folder name must be Name(Tag) with exactly one "(…)" tag at the end, e.g. MarioRossi(Roberto-Drct).';
+    }
+    return '';
+}
+
+/**
+ * After an agency change: does the folder's (Agency-Agent) tag still name that agency?
+ * $r = request row (practice_code, group_folder, agent_id). Checks the last (…) group of
+ * the folder (group: the parent). Returns null when it matches (or nothing to compare),
+ * else ['message' => …, 'suggested_name' => folder name with the tag rebuilt].
+ * The folder itself is not renamed here: that is rename_folder / BackOffice "Rename…".
+ */
+function bs_agency_tag_hint(PDO $db, array $r, $agencyId): ?array {
+    $folder = trim((string)($r['group_folder'] ?? '')) ?: trim((string)($r['practice_code'] ?? ''));
+    if ($folder === '' || !(int)$agencyId) return null;
+    $st = $db->prepare("SELECT nome, short_name FROM agencies WHERE id = ?");
+    $st->execute([(int)$agencyId]);
+    $ag = $st->fetch(PDO::FETCH_ASSOC);
+    if (!$ag) return null;
+    $short = preg_replace('/[^\w\-]/', '', $ag['short_name'] ?: $ag['nome']);
+    if ($short === '' || !preg_match_all('/\(([^()]*)\)/', $folder, $m, PREG_OFFSET_CAPTURE)) return null;
+
+    $last = count($m[0]) - 1;
+    $tag  = $m[1][$last][0];
+    if (stripos($tag, $short . '-') === 0) return null;   // "TVT-PS-Roberto" names agency "TVT"
+
+    $st = $db->prepare("SELECT name FROM agents WHERE id = ?");
+    $st->execute([(int)($r['agent_id'] ?? 0)]);
+    $agent = str_replace(' ', '', (string)($st->fetchColumn() ?: ''));
+    if ($agent === '') { $p = strrpos($tag, '-'); $agent = $p === false ? $tag : substr($tag, $p + 1); }
+
+    $suggested = substr_replace($folder, '(' . $short . '-' . $agent . ')', $m[0][$last][1], strlen($m[0][$last][0]));
+    return ['message' => 'The folder tag (' . $tag . ') does not name agency ' . $short . '. Suggested folder name: '
+                       . $suggested . ' — rename it with rename_folder / BackOffice "Rename…".',
+            'suggested_name' => $suggested];
 }
 
 /**
@@ -118,7 +194,10 @@ function bs_request_folder_name(PDO $db, string $customerName, string $channel, 
  *          agent_id, destination, period, pax, status, value_usd, commission_pct,
  *          commission_usd, date_paid, initial_request, notes  (strings, '' = empty)
  * $opt:    dropbox_skip (bool), dup_override (bool), notify_agent (bool),
- *          creator_user_id (int)
+ *          creator_user_id (int), dry_run (bool),
+ *          direct_tag (string, replaces "Drct" for channel direct — Incoming blog referral),
+ *          folder_name (string, explicit folder name; checked with bs_folder_name_error()),
+ *          initial_request_optional (bool — Incoming leads may arrive without text)
  *
  * Returns ['ok'=>bool, 'errors'=>[], 'error_code'=>''|'validation'|'duplicate'|'folder_exists'|'dropbox',
  *          'dup_candidates'=>[], 'request_id', 'folder_name', 'dropbox_path', 'notify'=>['sent','error']].
@@ -145,10 +224,17 @@ function bs_create_request(PDO $db, array $v, array $opt = []): array {
     // ── Validate ──────────────────────────────────────────────────────────────
     $errors = [];
     if (!$v['customer_name'])   $errors[] = 'Customer name is required.';
+    elseif ($ne = bs_customer_name_error($v['customer_name'])) $errors[] = $ne;
     if (!$v['date_received'])   $errors[] = 'Date received is required.';
-    if (!$dropboxSkip && !$v['initial_request']) $errors[] = 'Initial Request is required.';
+    if (!$dropboxSkip && !$v['initial_request'] && empty($opt['initial_request_optional'])) {
+        $errors[] = 'Initial Request is required.';
+    }
     if (!$v['agent_id'])        $errors[] = 'Please select an agent.';
     if ($v['channel'] === 'agency' && !$v['agency_id']) $errors[] = 'Please select an agency.';
+    $directTag = trim((string)($opt['direct_tag'] ?? '')) ?: 'Drct';
+    if (!preg_match('/^[A-Za-z0-9]+$/', $directTag)) $errors[] = 'Invalid folder tag.';
+    $folderOverride = trim((string)($opt['folder_name'] ?? ''));
+    if ($folderOverride !== '' && ($fe = bs_folder_name_error($folderOverride)) !== '') $errors[] = $fe;
     if ($errors) { $out['errors'] = $errors; $out['error_code'] = 'validation'; return $out; }
 
     // ── Duplicate check BEFORE inserting (same checks as Incoming) ────────────
@@ -171,7 +257,8 @@ function bs_create_request(PDO $db, array $v, array $opt = []): array {
     }
 
     // ── Folder name ───────────────────────────────────────────────────────────
-    $folderName    = bs_request_folder_name($db, $v['customer_name'], $v['channel'], $v['agency_id'], $v['agent_id']);
+    $folderName    = $folderOverride !== '' ? $folderOverride
+                   : bs_request_folder_name($db, $v['customer_name'], $v['channel'], $v['agency_id'], $v['agent_id'], $directTag);
     $dropboxPath   = DROPBOX_BASE_PATH . '/' . $folderName;
     $dropboxWebUrl = 'https://www.dropbox.com/home' . $dropboxPath;
     $out['folder_name']  = $folderName;
@@ -227,10 +314,10 @@ function bs_create_request(PDO $db, array $v, array $opt = []): array {
     // ── INSERT ────────────────────────────────────────────────────────────────
     $db->prepare("
         INSERT INTO requests
-          (practice_code, date_received, customer_name, email, whatsapp, source, agent_id,
+          (practice_code, date_received, customer_name, email, whatsapp, source, channel, agency_id, agent_id,
            destination, period, pax, status, value_usd, commission_pct, commission_usd,
            date_paid, initial_request, dropbox_url, notes)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     ")->execute([
         $folderName,
         $v['date_received'],
@@ -238,6 +325,8 @@ function bs_create_request(PDO $db, array $v, array $opt = []): array {
         $v['email']           ?: null,
         $v['whatsapp']        ?: null,
         $v['source'],
+        $v['channel'],
+        ($v['channel'] === 'agency' && $v['agency_id']) ? (int)$v['agency_id'] : null,
         $v['agent_id']        ?: null,
         $v['destination']     ?: null,
         $v['period']          ?: null,
@@ -278,6 +367,22 @@ function bs_std_programs(): array {
     static $groups = null;
     if ($groups === null) $groups = require __DIR__ . '/std_programs.php';
     return $groups;
+}
+
+/**
+ * Programs temporarily switched off: label => reason. Their checkbox is greyed out and
+ * copy refuses them; the std_programs.php entry stays so already-copied files are still
+ * recognised. Remove the line to re-enable once the template is back in Dropbox.
+ */
+function bs_std_programs_disabled(): array {
+    return [
+        'Chui'            => 'Template ChuiSafari_Calc.xlsx missing (not in it/ nor Agenzia/2026-27)',
+        'Baobab'          => 'Template BaobabDeluxe2025_Calc.xlsx missing (not in it/ nor Agenzia/2026-27)',
+        'Lux Duma'        => 'Template LUXDuma_Calc.xlsx missing (not in it/ nor Agenzia/2026-27)',
+        'Lux Pumba'       => 'Template LUXPumba_Calc.xlsx missing (not in it/ nor Agenzia/2026-27)',
+        'Duma+Pemba'      => 'Template Beach/DumaPemba_Calc.xlsx missing',
+        'Zanzibar Safari' => 'Template Beach/SavannahExplorers_ZanzibarSafari.docx missing',
+    ];
 }
 
 /** Next free ProgNumber in a Dropbox folder: max existing NN_ prefix + 1, 2 digits. */
@@ -335,7 +440,7 @@ function bs_copied_programs(array $files, string $folderName): array {
 /**
  * Copy standard program templates into a request's folder, renamed
  * {ProgNumber}_{FolderName}_{dst} (bs_program_file_name). $prognum '' = next free number.
- * Returns ['ok','msg','prognum','summary','copied','skipped','missing','unknown'].
+ * Returns ['ok','msg','prognum','summary','copied','skipped','missing','unknown','disabled'].
  */
 function bs_copy_programs(PDO $db, int $reqId, string $prognum, array $programs): array {
     $prognum = trim($prognum);
@@ -372,9 +477,11 @@ function bs_copy_programs(PDO $db, int $reqId, string $prognum, array $programs)
     $token = dropbox_get_access_token();
     if ($prognum === '') $prognum = bs_next_prognum($token, $destDir);
 
-    $copied = []; $skipped = []; $missing = []; $unknown = [];
+    $disabledMap = bs_std_programs_disabled();
+    $copied = []; $skipped = []; $missing = []; $unknown = []; $disabled = [];
     foreach ($programs as $label) {
         if (!isset($byLabel[$label])) { $unknown[] = $label; continue; }
+        if (isset($disabledMap[$label])) { $disabled[] = $label . ' — ' . $disabledMap[$label]; continue; }
         foreach ($byLabel[$label] as $f) {
             $src  = str_replace('{YEAR}', $year, $f['src']);
             $base = bs_program_file_name($prognum, $folderName, $f['dst']);
@@ -390,8 +497,9 @@ function bs_copy_programs(PDO $db, int $reqId, string $prognum, array $programs)
     if ($skipped) $parts[] = count($skipped) . ' skipped (already there)';
     if ($missing) $parts[] = count($missing) . ' template(s) missing';
     if ($unknown) $parts[] = count($unknown) . ' unknown';
+    if ($disabled) $parts[] = count($disabled) . ' disabled';
     if ($copied) {
-        $done = array_values(array_intersect($programs, array_keys($byLabel)));
+        $done = array_values(array_diff(array_intersect($programs, array_keys($byLabel)), array_keys($disabledMap)));
         timeline_log($reqId, 'program_update', 'Copied program ' . implode(', ', $done),
                      ['body' => implode("\n", $copied), 'refs' => ['dropbox_path' => $destDir]]);
     }
@@ -404,6 +512,7 @@ function bs_copy_programs(PDO $db, int $reqId, string $prognum, array $programs)
         'skipped'  => $skipped,
         'missing'  => $missing,
         'unknown'  => $unknown,
+        'disabled' => $disabled,
     ];
 }
 
@@ -717,7 +826,7 @@ function bs_confirm_checks(array $plan): array {
             'grp_action' => $plan['grp_action'],
             'grp_code'   => $plan['grp_code'],
         ]);
-        // House rules of the Calc (single pax sheet, F9 formula, beach-night hotels, …).
+        // House rules of the Calc (single pax sheet, F9 filled, beach-night hotels, …).
         if ($xlsx && $plan['grp_action'] !== 'ADD') {
             $checks = array_merge($checks, sc_calc_rule_checks($xlsx, [
                 'mid'          => bs_last_midt($plan['new_name'], $plan['pd']['end_date']),
@@ -1137,4 +1246,82 @@ function bs_send_mail(array $toList, array $ccList, string $subject, string $bod
     return $ok
         ? ['success' => true, 'message' => '']
         : ['success' => false, 'message' => 'mail() returned false — check the BlueHost mail log.'];
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+//  Request status (quick status: request_view.php / requests.php, API set_request_status)
+// ════════════════════════════════════════════════════════════════════════════
+
+/** Reasons a request can be marked Lost (slug => label), stored in requests.lost_reason. */
+function bs_lost_reasons(): array {
+    static $reasons = null;
+    if ($reasons === null) $reasons = require __DIR__ . '/lost_reasons.php';
+    return $reasons;
+}
+
+/**
+ * Check a status change without writing anything.
+ * $opt: restrict_agent_id (int, non-zero = only that agent's requests — restricted Hub staff),
+ *       allowed    (target statuses accepted; default all STATUSES),
+ *       from_booked (targets accepted when the request is Booked now; null = any).
+ * Returns ok, error, error_code (invalid_status|not_allowed|lost_reason|not_found|booked),
+ * old_status, new_status, changed.
+ */
+function bs_status_check(PDO $db, int $id, string $status, string $reason, array $opt = []): array {
+    $res = ['ok' => false, 'error' => null, 'error_code' => null,
+            'old_status' => null, 'new_status' => $status, 'changed' => false];
+    $allowed = isset($opt['allowed']) ? $opt['allowed'] : array_keys(STATUSES);
+    if (!array_key_exists($status, STATUSES)) {
+        return array_merge($res, ['error' => 'Invalid status', 'error_code' => 'invalid_status']);
+    }
+    if (!in_array($status, $allowed, true)) {
+        return array_merge($res, ['error' => 'Status "' . $status . '" cannot be set here', 'error_code' => 'not_allowed']);
+    }
+    if ($status === 'Lost' && !array_key_exists($reason, bs_lost_reasons())) {
+        return array_merge($res, ['error' => 'Please choose a reason.', 'error_code' => 'lost_reason']);
+    }
+    $restrict = (int)($opt['restrict_agent_id'] ?? 0);   // -1 = restricted user without an agent: nothing matches
+    $st = $db->prepare("SELECT status FROM requests WHERE id = ?" . ($restrict !== 0 ? " AND agent_id = ?" : ""));
+    $st->execute($restrict !== 0 ? [$id, $restrict] : [$id]);
+    $old = $st->fetchColumn();
+    if ($old === false) {
+        return array_merge($res, ['error' => 'Request ' . $id . ' not found', 'error_code' => 'not_found']);
+    }
+    $res['old_status'] = (string)$old;
+    if ($old === 'Booked' && isset($opt['from_booked']) && is_array($opt['from_booked'])
+        && $status !== 'Booked' && !in_array($status, $opt['from_booked'], true)) {
+        return array_merge($res, ['error' => 'Request ' . $id . ' is Booked — only ' . implode('/', $opt['from_booked'])
+                                           . ' is allowed; use rollback_booking to reopen it', 'error_code' => 'booked']);
+    }
+    $res['ok']      = true;
+    $res['changed'] = ((string)$old !== $status);
+    return $res;
+}
+
+/**
+ * Set a request's status (same rules as the Hub status menu): reason/note are kept only
+ * for Lost and cleared when leaving Lost; Lost adds a request note; a real change adds a
+ * timeline event. Same $opt and result as bs_status_check(). Run tl_schema() before
+ * calling this inside a transaction (DDL would commit it).
+ */
+function bs_set_request_status(PDO $db, int $id, string $status, string $reason, string $note, int $userId, array $opt = []): array {
+    $chk = bs_status_check($db, $id, $status, $reason, $opt);
+    if (!$chk['ok']) return $chk;
+
+    $reasons   = bs_lost_reasons();
+    $reasonVal = ($status === 'Lost') ? $reason : null;
+    $noteVal   = ($status === 'Lost' && trim($note) !== '') ? trim($note) : null;
+    $db->prepare("UPDATE requests SET status=?, pipeline_column=IF(?='Booked',NULL,pipeline_column), lost_reason=?, lost_note=? WHERE id=?")
+       ->execute([$status, $status, $reasonVal, $noteVal, $id]);
+
+    // Request note so the reason is visible in the request history.
+    if ($status === 'Lost') {
+        $db->prepare("INSERT INTO request_notes (request_id, user_id, note) VALUES (?,?,?)")
+           ->execute([$id, $userId, 'Marked Lost — ' . $reasons[$reason] . ($noteVal !== null ? ': ' . $noteVal : '')]);
+    }
+    if ($chk['changed'] && $chk['old_status'] !== '') {
+        timeline_log($id, 'status_change', $chk['old_status'] . ' → ' . $status,
+                     ['body' => $status === 'Lost' ? $reasons[$reason] . ($noteVal !== null ? ': ' . $noteVal : '') : null]);
+    }
+    return $chk;
 }

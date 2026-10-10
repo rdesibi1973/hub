@@ -16,5 +16,11 @@ try {
     hub_db_timezone($pdo);
 } catch (PDOException $e) {
     error_log('DB connection failed: ' . $e->getMessage());
+    if (defined('DB_FAIL_JSON')) {   // JSON callers (Agent API): tell an outage from a bad call
+        while (ob_get_level()) ob_end_clean();
+        http_response_code(503);
+        header('Content-Type: application/json; charset=utf-8');
+        die('{"ok":false,"error":"database unavailable"}');
+    }
     die('Database connection failed. Please contact your administrator.');
 }

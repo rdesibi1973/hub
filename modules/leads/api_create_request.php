@@ -3,6 +3,7 @@
 require_once 'config.php';
 require_once 'dropbox_helper.php';
 require_once 'notifications.php';
+require_once 'includes/booking_service.php';   // bs_camel_case, bs_customer_name_error
 header('Content-Type: application/json');
 
 if (($_SERVER['HTTP_X_API_KEY'] ?? '') !== API_KEY) {
@@ -31,6 +32,9 @@ if (!$userId || !$agentId || $customerName === '' || $channel === '') {
 }
 if ($channel === 'agency' && !$agencyId) {
     http_response_code(400); echo json_encode(['success'=>false,'message'=>'agency_id required for channel=agency']); exit;
+}
+if ($nameErr = bs_customer_name_error($customerName)) {
+    http_response_code(400); echo json_encode(['success'=>false,'message'=>$nameErr]); exit;
 }
 
 $db = db();
@@ -80,13 +84,7 @@ if ($channel === 'agency' && $agencyId) {
 }
 
 // Build folder name
-function toCamelCase(string $name): string {
-    $name = trim($name);
-    // Already compact CamelCase (no spaces) — keep as-is
-    if (strpos($name, ' ') === false && strpos($name, '-') === false) return $name;
-    return implode('', array_map('ucfirst', array_map('mb_strtolower', preg_split('/[\s\-]+/', $name))));
-}
-$namePart = toCamelCase($customerName);
+$namePart = bs_camel_case($customerName);
 switch ($channel) {
     case 'agency': $suffix = "({$agencyNome}-{$agentName})"; break;
     case 'direct': $suffix = "({$agentName}-Drct)";          break;
@@ -170,9 +168,12 @@ try {
 // ── Insert DB record (only after Dropbox succeeded) ───────────────────────────
 try {
     $db->prepare(
-        'INSERT INTO requests (date_received, customer_name, email, whatsapp, source, agent_id, destination, initial_request, status, pax, practice_code, dropbox_url, created_at)
-         VALUES (CURDATE(), ?, ?, ?, ?, ?, ?, ?, "Inquiry", ?, ?, ?, NOW())'
-    )->execute([$customerName, $email ?: null, $whatsapp ?: null, $source, $agentId, $destination ?: null, $initialRequest ?: null, $pax, $folderName, $dropboxWebUrl]);
+        'INSERT INTO requests (date_received, customer_name, email, whatsapp, source, channel, agency_id, agent_id, destination, initial_request, status, pax, practice_code, dropbox_url, created_at)
+         VALUES (CURDATE(), ?, ?, ?, ?, ?, ?, ?, ?, ?, "Inquiry", ?, ?, ?, NOW())'
+    )->execute([$customerName, $email ?: null, $whatsapp ?: null, $source,
+                in_array($channel, ['agency', 'direct', 'sb', 'other'], true) ? $channel : null,
+                ($channel === 'agency' && $agencyId) ? $agencyId : null,
+                $agentId, $destination ?: null, $initialRequest ?: null, $pax, $folderName, $dropboxWebUrl]);
     $requestId = (int)$db->lastInsertId();
 } catch (\Throwable $e) {
     // The Dropbox folder was already created above, but the DB INSERT failed.

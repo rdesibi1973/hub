@@ -1,6 +1,7 @@
 <?php
 require_once 'config.php';
 require_once 'notifications.php';
+require_once 'includes/booking_service.php';   // bs_customer_name_error, bs_agency_tag_hint
 $pageTitle = 'Edit Request';
 $db = db();
 
@@ -39,8 +40,10 @@ $errors = [];
 
 // Fields editable by admin/manager (full set)
 $fullFields = ['practice_code','group_folder','date_received','customer_name','email','whatsapp','source','agent_id',
+               'channel','agency_id',
                'destination','period','pax','status','payment_status','value_usd','commission_pct','commission_usd',
                'date_paid','start_date','initial_request','dropbox_url','notes'];
+$agencies = $isRestricted ? [] : $db->query("SELECT id, nome, short_name FROM agencies ORDER BY nome")->fetchAll();
 
 // Fields editable by staff (restricted set — no financials, no agent reassignment)
 $staffFields = ['customer_name','email','whatsapp','source','destination','period','pax',
@@ -69,7 +72,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if (!$v['customer_name']) $errors[] = 'Customer name is required.';
+    elseif ($v['customer_name'] !== (string)($req['customer_name'] ?? '')
+            && ($ne = bs_customer_name_error($v['customer_name']))) $errors[] = $ne;
     if (!$isRestricted && !$v['date_received']) $errors[] = 'Date received is required.';
+
+    // ── Channel / agency (admin/manager): an agency only on the Agency channel ──
+    $agencyHint = null;
+    if (!$isRestricted) {
+        if (!in_array($v['channel'], ['', 'agency', 'direct', 'sb', 'other'], true)) $v['channel'] = (string)($req['channel'] ?? '');
+        if ($v['agency_id'] !== '' && !in_array((int)$v['agency_id'], array_map('intval', array_column($agencies, 'id')), true)) {
+            $errors[] = 'Unknown agency.';
+        }
+        if ($v['agency_id'] !== '' && $v['channel'] === '') $v['channel'] = 'agency';
+        if ($v['channel'] === 'agency' && $v['agency_id'] === '') $errors[] = 'Please select an agency (channel Agency).';
+        if ($v['channel'] !== 'agency') $v['agency_id'] = '';
+        if (!$errors && $v['agency_id'] !== '' && (string)$v['agency_id'] !== (string)($req['agency_id'] ?? '')) {
+            $agencyHint = bs_agency_tag_hint($db, ['practice_code' => $v['practice_code'], 'group_folder' => $v['group_folder'],
+                                                   'agent_id' => $v['agent_id']], $v['agency_id']);
+        }
+    }
 
     // ── Folder names must never contain spaces (naming convention) ──
     if (strpos($v['practice_code'] ?? '', ' ') !== false) {
@@ -287,6 +308,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $db->prepare("
                 UPDATE requests SET
                   practice_code=?, group_folder=?, date_received=?, customer_name=?, email=?, whatsapp=?, source=?, agent_id=?,
+                  channel=?, agency_id=?,
                   destination=?, period=?, pax=?, status=?, payment_status=?, value_usd=?, commission_pct=?, commission_usd=?,
                   date_paid=?, start_date=?, initial_request=?, dropbox_url=?, notes=?,
                   pipeline_column=IF(?='Booked',NULL,pipeline_column)
@@ -300,6 +322,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $v['whatsapp']        ?: null,
                 $v['source'],
                 $v['agent_id']        ?: null,
+                $v['channel']         ?: null,
+                $v['agency_id']       !== '' ? (int)$v['agency_id'] : null,
                 $v['destination']     ?: null,
                 $v['period']          ?: null,
                 $v['pax']             ?: null,
@@ -335,6 +359,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (!empty($reassignFlash)) $flashParts[] = $reassignFlash;
         flash(implode(' ', $flashParts));
         if (!empty($reassignError)) flash('⚠ ' . htmlspecialchars($reassignError), 'error');
+        if (!empty($agencyHint)) flash('⚠ ' . htmlspecialchars($agencyHint['message']), 'error');
         header("Location: request_view.php?id=" . $id);
         exit;
     }
@@ -407,6 +432,26 @@ include 'includes/header.php';
             <option value="<?= $ag['id'] ?>" <?= (string)$v['agent_id']===(string)$ag['id']?'selected':'' ?>><?= h($ag['name']) ?><?= empty($ag['active']) ? ' (inactive)' : '' ?></option>
           <?php endforeach; ?>
         </select>
+      </div>
+
+      <div class="form-group">
+        <label>Channel</label>
+        <select name="channel" id="channel_select" onchange="toggleAgency()">
+          <?php foreach (['' => '— Unknown —', 'agency' => 'Agency', 'direct' => 'Direct', 'sb' => 'SB', 'other' => 'Other'] as $cv => $cl): ?>
+            <option value="<?= h($cv) ?>" <?= (string)($v['channel'] ?? '')===$cv?'selected':'' ?>><?= h($cl) ?></option>
+          <?php endforeach; ?>
+        </select>
+      </div>
+
+      <div class="form-group" id="agency_group" style="<?= ($v['channel'] ?? '')==='agency'?'':'display:none' ?>">
+        <label>Agency *</label>
+        <select name="agency_id" id="agency_select">
+          <option value="">— Select —</option>
+          <?php foreach ($agencies as $agc): ?>
+            <option value="<?= (int)$agc['id'] ?>" <?= (string)($v['agency_id'] ?? '')===(string)$agc['id']?'selected':'' ?>><?= h($agc['nome']) ?><?= $agc['short_name'] && $agc['short_name'] !== $agc['nome'] ? ' (' . h($agc['short_name']) . ')' : '' ?></option>
+          <?php endforeach; ?>
+        </select>
+        <div style="font-size:.7rem;color:var(--grey-mid);margin-top:3px">Changing the agency does not rename the folder — use BackOffice “Rename…”.</div>
       </div>
       <?php endif; ?>
 
@@ -602,6 +647,14 @@ function togglePaymentStatus() {
 }
 
 <?php if (!$isRestricted): ?>
+// Agency picker only on the Agency channel (the server drops it otherwise).
+function toggleAgency() {
+  const agency = document.getElementById('channel_select').value === 'agency';
+  document.getElementById('agency_group').style.display = agency ? '' : 'none';
+  document.getElementById('agency_select').required = agency;
+}
+toggleAgency();
+
 function calcComm() {
   const pctEl   = document.getElementById('commission_pct');
   const display = document.getElementById('comm_display');

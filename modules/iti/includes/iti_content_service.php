@@ -242,20 +242,30 @@ function iti_table_columns_cs(PDO $db, string $table): array {
 
 /**
  * Change texts / contacts / coordinates of a lodge or destination. $fields: any of
- * iti_cs_editable($kind) + latitude, longitude ("" or null clears). Returns the diff;
+ * iti_cs_editable($kind) + latitude, longitude ("" or null clears); a lodge also
+ * destination_id, category, lodge_type (the name stays on the Lodges page). Returns the diff;
  * with $go it is written.
  */
 function iti_cs_update(PDO $db, string $kind, int $id, array $fields, bool $go): array {
     $isLodge = $kind === 'lodge';
     $row = $isLodge ? iti_cs_lodge_row($db, $id) : iti_cs_destination_row($db, $id);
     if (!$row) throw new InvalidArgumentException(($isLodge ? 'Lodge ' : 'Destination ') . $id . ' not found');
-    $allowed = array_merge(iti_cs_editable($kind), ['latitude', 'longitude']);
+    $allowed = array_merge(iti_cs_editable($kind), ['latitude', 'longitude'], $isLodge ? ['destination_id', 'category', 'lodge_type'] : []);
     $unknown = array_values(array_diff(array_keys($fields), $allowed));
     if ($unknown) throw new InvalidArgumentException('Not editable here: ' . implode(', ', $unknown) . ' — allowed: ' . implode(', ', $allowed));
 
     $changes = [];
     foreach ($fields as $k => $v) {
-        if ($k === 'latitude' || $k === 'longitude') {
+        if ($k === 'destination_id') {
+            $v = (int)$v;
+            if (!$v || !iti_cs_destination_row($db, $v)) throw new InvalidArgumentException('destination_id ' . $v . ' not found');
+            $cur = (int)$row[$k];
+        } elseif ($k === 'category' || $k === 'lodge_type') {
+            $v = trim((string)$v);
+            $ok = $k === 'category' ? ['budget', 'mid', 'luxury', 'ultra_luxury'] : ['lodge', 'tented_camp', 'hotel', 'mobile_camp', 'house'];
+            if (!in_array($v, $ok, true)) throw new InvalidArgumentException($k . ': ' . implode('|', $ok));
+            $cur = (string)($row[$k] ?? '');
+        } elseif ($k === 'latitude' || $k === 'longitude') {
             if ($v === '' || $v === null) $v = null;
             elseif (!is_numeric($v) || abs((float)$v) > ($k === 'latitude' ? 90 : 180)) throw new InvalidArgumentException($k . ': not a valid coordinate');
             else $v = round((float)$v, 6);

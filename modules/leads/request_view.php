@@ -233,51 +233,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
 // Reasons a request can be marked Lost (slug => label). Used by the status
 // handler below, the "Lost" modal in the view and the inline status in requests.php.
-$LOST_REASONS = require __DIR__ . '/includes/lost_reasons.php';
+$LOST_REASONS = bs_lost_reasons();
 
-// ── Inline status update ────────────────────────────────────────────────────
+// ── Inline status update — logic in bs_set_request_status() (booking_service.php) ──
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['quick_status'])) {
-    $newStatus    = trim($_POST['quick_status']);
-    $isXhr        = ($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '') === 'XMLHttpRequest';
-    $staffAgentId = isLeadsRestricted() ? getStaffAgentId() : 0;
-    $lostReason   = trim($_POST['lost_reason'] ?? '');
-    $lostNote     = trim($_POST['lost_note']   ?? '');
-
-    if (!array_key_exists($newStatus, STATUSES)) {
+    $newStatus = trim($_POST['quick_status']);
+    $isXhr     = ($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '') === 'XMLHttpRequest';
+    $res = bs_set_request_status($db, $id, $newStatus, trim($_POST['lost_reason'] ?? ''), trim($_POST['lost_note'] ?? ''),
+                                 (int)($cu['id'] ?? 0), ['restrict_agent_id' => isLeadsRestricted() ? ((int)getStaffAgentId() ?: -1) : 0]);
+    if (!$res['ok']) {
         if ($isXhr) { header('Content-Type: application/json');
-                      echo json_encode(['ok'=>false,'message'=>'Invalid status']); exit; }
-        flash('Invalid status.', 'error');
-    } elseif ($newStatus === 'Lost' && !array_key_exists($lostReason, $LOST_REASONS)) {
-        // A reason is mandatory when marking a request Lost.
-        if ($isXhr) { header('Content-Type: application/json');
-                      echo json_encode(['ok'=>false,'message'=>'Please choose a reason.']); exit; }
-        flash('Please choose a reason for marking this request as Lost.', 'error');
+                      echo json_encode(['ok'=>false,'message'=>$res['error']]); exit; }
+        flash($res['error_code'] === 'lost_reason' ? 'Please choose a reason for marking this request as Lost.' : $res['error'], 'error');
     } else {
-        // Reason/note are stored only for Lost; cleared when leaving Lost.
-        $reasonVal = ($newStatus === 'Lost') ? $lostReason : null;
-        $noteVal   = ($newStatus === 'Lost' && $lostNote !== '') ? $lostNote : null;
-        $oldSt = $db->prepare("SELECT status FROM requests WHERE id=?");
-        $oldSt->execute([$id]);
-        $oldStatus = (string)$oldSt->fetchColumn();
-
-        if (isLeadsRestricted()) {
-            $db->prepare("UPDATE requests SET status=?, pipeline_column=IF(?='Booked',NULL,pipeline_column), lost_reason=?, lost_note=? WHERE id=? AND agent_id=?")
-               ->execute([$newStatus, $newStatus, $reasonVal, $noteVal, $id, $staffAgentId]);
-        } else {
-            $db->prepare("UPDATE requests SET status=?, pipeline_column=IF(?='Booked',NULL,pipeline_column), lost_reason=?, lost_note=? WHERE id=?")
-               ->execute([$newStatus, $newStatus, $reasonVal, $noteVal, $id]);
-        }
-        // Log a timeline note so the reason is visible in the request history.
-        if ($newStatus === 'Lost') {
-            $noteText = 'Marked Lost — ' . $LOST_REASONS[$lostReason]
-                      . ($noteVal !== null ? ': ' . $noteVal : '');
-            $db->prepare("INSERT INTO request_notes (request_id, user_id, note) VALUES (?,?,?)")
-               ->execute([$id, (int)($cu['id'] ?? 0), $noteText]);
-        }
-        if ($oldStatus !== '' && $oldStatus !== $newStatus) {
-            timeline_log($id, 'status_change', $oldStatus . ' → ' . $newStatus,
-                         ['body' => $newStatus === 'Lost' ? $LOST_REASONS[$lostReason] . ($noteVal !== null ? ': ' . $noteVal : '') : null]);
-        }
         if ($isXhr) { header('Content-Type: application/json');
                       echo json_encode(['ok'=>true]); exit; }
         flash('Status updated to ' . $newStatus . '.');
@@ -587,7 +555,12 @@ include 'includes/header.php';
 <div class="table-wrap" style="max-width:860px;margin-bottom:20px">
   <div class="detail-grid">
 
-    <?php if (!empty($r['group_folder'])): ?>
+    <?php
+    // Imported group folders (import_folder.php / API import_group_folder) store the same
+    // name in group_folder and practice_code: one folder, not a parent + sub-folder.
+    $selfGrp = !empty($r['group_folder']) && trim($r['group_folder']) === trim($r['practice_code'] ?? '');
+    ?>
+    <?php if (!empty($r['group_folder']) && !$selfGrp): ?>
     <div class="detail-label">GRP Folder</div>
     <div class="detail-value" style="font-size:.82rem;">
       <?= h($r['group_folder']) ?>
@@ -596,7 +569,7 @@ include 'includes/header.php';
 
     <div class="detail-label">Dropbox Folder</div>
     <div class="detail-value">
-      <?php if (!empty($r['group_folder']) && $r['practice_code']): ?>
+      <?php if (!empty($r['group_folder']) && $r['practice_code'] && !$selfGrp): ?>
         <span style="color:var(--grey-mid);font-size:.78rem;"><?= h($r['group_folder']) ?>/</span><?= h($r['practice_code']) ?>
       <?php else: ?>
         <?= $r['practice_code'] ? h($r['practice_code']) : '<span class="text-muted">—</span>' ?>
@@ -850,7 +823,10 @@ include 'includes/header.php';
         })();
         </script>
       <?php else: ?>
-        <span class="text-muted"><?= $ckOther ? '— no CK outside Tanzania' : '— folder not in 001_Safari (the check runs on confirmed bookings)' ?></span>
+        <span class="text-muted"><?= $ckOther ? '— no CK outside Tanzania'
+            : (preg_match('#^/001_Safari/[^/]+#i', $dbxPath)
+               ? '— not in the CK tracker yet (a folder moved to 001_Safari is picked up by the next scan)'
+               : '— folder not in 001_Safari (the check runs on confirmed bookings)') ?></span>
       <?php endif; ?>
     </div>
 
@@ -889,7 +865,7 @@ include 'includes/header.php';
 
 <!-- STANDARD PROGRAMS (Copy Programs) -->
 <?php if (!isLeadsRestricted() && $dbxPath): ?>
-<?php $stdPrograms = require 'includes/std_programs.php'; ?>
+<?php $stdPrograms = bs_std_programs(); $stdDisabled = bs_std_programs_disabled(); ?>
 <div class="section-label">Standard Programs</div>
 <div class="table-wrap" style="max-width:1100px;margin-bottom:20px">
   <div style="padding:18px 22px">
@@ -902,9 +878,15 @@ include 'includes/header.php';
       <div style="min-width:170px">
         <div style="font-weight:700;font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;color:var(--grey-mid);margin-bottom:8px"><?= h($groupName) ?></div>
         <?php foreach ($progs as $label => $files): ?>
+        <?php if (isset($stdDisabled[$label])): ?>
+        <label style="display:block;font-size:.8rem;margin-bottom:5px;color:var(--grey-mid);opacity:.55;cursor:not-allowed" title="Disabled: <?= h($stdDisabled[$label]) ?>">
+          <input type="checkbox" disabled style="vertical-align:middle;margin-right:5px"><?= h($label) ?>
+        </label>
+        <?php else: ?>
         <label style="display:block;font-size:.8rem;margin-bottom:5px;cursor:pointer">
           <input type="checkbox" class="cp-prog" value="<?= h($label) ?>" style="vertical-align:middle;margin-right:5px"><?= h($label) ?>
         </label>
+        <?php endif; ?>
         <?php endforeach; ?>
       </div>
       <?php endforeach; ?>
@@ -963,6 +945,7 @@ function copyPrograms() {
       html += list('Skipped (already there)', d.skipped, '#92400e');
       html += list('Templates missing', d.missing, '#C0211B');
       html += list('Unknown', d.unknown, '#C0211B');
+      html += list('Disabled', d.disabled, '#C0211B');
       result.innerHTML = html;
       result.style.display = html ? 'block' : 'none';
       loadNextProg();   // advance ProgNumber for the next program

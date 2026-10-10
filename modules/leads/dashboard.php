@@ -5,49 +5,77 @@ requireLogin();
 if (isLeadsRestricted()) { header('Location: requests.php'); exit; }
 $pageTitle = 'Dashboard';
 
-// ── Period resolution ────────────────────────────────────────────
-$year   = (int)($_GET['year']   ?? date('Y'));
-$period = $_GET['period'] ?? date('m');       // 'year' | '01'..'12'  — default: current month
-$mode   = $_GET['mode']   ?? 'period';        // 'period' | 'ytd'
+date_default_timezone_set('Africa/Dar_es_Salaam');   // "today" / YTD must follow Arusha, not the US server
 
-$months = ['01'=>'January','02'=>'February','03'=>'March','04'=>'April',
-           '05'=>'May','06'=>'June','07'=>'July','08'=>'August',
-           '09'=>'September','10'=>'October','11'=>'November','12'=>'December'];
+// ── Period resolution: one date range, default YTD ───────────────
+// ?from=YYYY-MM-DD&to=YYYY-MM-DD. Presets (YTD, full year, single months) just fill the range.
+$today = date('Y-m-d');
+$curY  = (int)date('Y');
+$isYmd = function ($s) {
+    if (!is_string($s) || !preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $s, $m)) return false;
+    return checkdate((int)$m[2], (int)$m[3], (int)$m[1]);
+};
+$start = $_GET['from'] ?? '';
+$end   = $_GET['to']   ?? '';
+if (!$isYmd($start) || !$isYmd($end)) { $start = "$curY-01-01"; $end = $today; }
+if ($start > $end) [$start, $end] = [$end, $start];
 
-if ($period === 'year') {
-    $start       = "$year-01-01";
-    $end         = "$year-12-31";
-    $periodLabel = "Full Year $year";
-    $showToggle  = false;
-    $mode        = 'period';
-} else {
-    $m = str_pad((int)$period, 2, '0', STR_PAD_LEFT);
-    $showToggle  = true;
-    if ($mode === 'ytd') {
-        $start       = "$year-01-01";
-        $end         = date('Y-m-t', strtotime("$year-$m-01"));
-        $periodLabel = "Jan – " . date('M Y', strtotime("$year-$m-01")) . " (YTD)";
-    } else {
-        $start       = "$year-$m-01";
-        $end         = date('Y-m-t', strtotime("$year-$m-01"));
-        $periodLabel = date('F Y', strtotime("$year-$m-01"));
+// Presets: [label, from, to]
+$presets = [
+    'ytd'      => ["YTD $curY",              "$curY-01-01", $today],
+    'ytd_prev' => ['YTD ' . ($curY - 1),     ($curY - 1) . '-01-01', ($curY - 1) . substr($today, 4)],
+    'year_prev'=> ['Full Year ' . ($curY - 1), ($curY - 1) . '-01-01', ($curY - 1) . '-12-31'],
+];
+if ($presets['ytd_prev'][2] === ($curY - 1) . '-02-29' && !checkdate(2, 29, $curY - 1)) $presets['ytd_prev'][2] = ($curY - 1) . '-02-28';
+$activePreset = null;
+foreach ($presets as $k => $p) if ($p[1] === $start && $p[2] === $end) { $activePreset = $k; break; }
+
+// Month quick-picks: this year up to the current month, then all of last year (newest first)
+$monthOpts = [];
+foreach ([$curY, $curY - 1] as $y) {
+    $lastM = $y === $curY ? (int)date('n') : 12;
+    for ($mm = $lastM; $mm >= 1; $mm--) {
+        $f = sprintf('%04d-%02d-01', $y, $mm);
+        $monthOpts[$y][] = [date('F Y', strtotime($f)), $f, date('Y-m-t', strtotime($f))];
     }
+}
+$isFullMonth = substr($start, 8) === '01' && $end === date('Y-m-t', strtotime($start));
+
+// Human label for the range
+$fmt = fn($d, $withYear = true) => date($withYear ? 'j M Y' : 'j M', strtotime($d));
+if ($activePreset === 'ytd') {
+    $periodLabel = "YTD $curY (1 Jan – " . $fmt($end, false) . ')';
+} elseif ($isFullMonth) {
+    $periodLabel = date('F Y', strtotime($start));
+} elseif (substr($start, 5) === '01-01' && substr($end, 5) === '12-31' && substr($start, 0, 4) === substr($end, 0, 4)) {
+    $periodLabel = 'Full Year ' . substr($start, 0, 4);
+} elseif ($activePreset === 'ytd_prev') {
+    $periodLabel = 'YTD ' . ($curY - 1) . ' (1 Jan – ' . $fmt($end, false) . ')';
+} else {
+    $periodLabel = $fmt($start, substr($start, 0, 4) !== substr($end, 0, 4)) . ' – ' . $fmt($end);
 }
 
 $db = db();
 
 // ── Stats ────────────────────────────────────────────────────────
+// received → date_received; booked/value → confirmation_date (closed in the period,
+// whenever received) — same split as reports.php
 $total = $db->prepare("SELECT COUNT(*) FROM requests WHERE date_received BETWEEN ? AND ?");
 $total->execute([$start, $end]);
 $totalCount = (int)$total->fetchColumn();
 
-$booked = $db->prepare("SELECT COUNT(*) FROM requests WHERE status='Booked' AND date_received BETWEEN ? AND ? AND (practice_code NOT LIKE '%-STAFF%' OR practice_code IS NULL)");
+$booked = $db->prepare("SELECT COUNT(*) FROM requests WHERE status='Booked' AND confirmation_date BETWEEN ? AND ? AND (practice_code NOT LIKE '%-STAFF%' OR practice_code IS NULL)");
 $booked->execute([$start, $end]);
 $bookedCount = (int)$booked->fetchColumn();
 
-$salesRate = $totalCount > 0 ? round($bookedCount / $totalCount * 100, 1) : 0;
+// Sales rate = booked in the period (confirmation_date, whenever received) /
+// received in the period. STAFF excluded from both, as in reports.php.
+$recvNoStaff = $db->prepare("SELECT COUNT(*) FROM requests WHERE date_received BETWEEN ? AND ? AND (practice_code NOT LIKE '%-STAFF%' OR practice_code IS NULL)");
+$recvNoStaff->execute([$start, $end]);
+$convRecv  = (int)$recvNoStaff->fetchColumn();
+$salesRate = $convRecv > 0 ? round($bookedCount / $convRecv * 100, 1) : 0;
 
-$value = $db->prepare("SELECT COALESCE(SUM(value_usd),0) FROM requests WHERE status='Booked' AND date_received BETWEEN ? AND ? AND (practice_code NOT LIKE '%-STAFF%' OR practice_code IS NULL)");
+$value = $db->prepare("SELECT COALESCE(SUM(value_usd),0) FROM requests WHERE status='Booked' AND confirmation_date BETWEEN ? AND ? AND (practice_code NOT LIKE '%-STAFF%' OR practice_code IS NULL)");
 $value->execute([$start, $end]);
 $totalValue = (float)$value->fetchColumn();
 
@@ -60,23 +88,30 @@ $lost->execute([$start, $end]);
 $lostCount = (int)$lost->fetchColumn();
 
 // ── Per-agent breakdown — sorted by total requests received ──────
+// total/comm by date_received, booked by confirmation_date (may exceed total)
 $byAgent = $db->prepare("
-    SELECT a.name,
-           COUNT(r.id)                          AS total,
-           SUM(r.status='Booked' AND (r.practice_code NOT LIKE '%-STAFF%' OR r.practice_code IS NULL)) AS booked,
-           COALESCE(SUM(r.commission_usd),0)    AS comm
-    FROM agents a
-    LEFT JOIN requests r ON r.agent_id = a.id
-          AND r.date_received BETWEEN ? AND ?
-    WHERE a.active = 1
-    GROUP BY a.id, a.name
-    HAVING total > 0
+    SELECT * FROM (
+        SELECT a.name,
+               (SELECT COUNT(*) FROM requests r
+                 WHERE r.agent_id = a.id AND r.date_received BETWEEN ? AND ?) AS total,
+               (SELECT COUNT(*) FROM requests r
+                 WHERE r.agent_id = a.id AND r.status = 'Booked'
+                   AND r.confirmation_date BETWEEN ? AND ?
+                   AND (r.practice_code NOT LIKE '%-STAFF%' OR r.practice_code IS NULL)) AS booked,
+               (SELECT COALESCE(SUM(r.commission_usd),0) FROM requests r
+                 WHERE r.agent_id = a.id AND r.date_received BETWEEN ? AND ?) AS comm
+        FROM agents a
+        WHERE a.active = 1
+    ) t
+    WHERE total > 0 OR booked > 0
     ORDER BY total DESC, booked DESC
 ");
-$byAgent->execute([$start, $end]);
+$byAgent->execute([$start, $end, $start, $end, $start, $end]);
 $agentRows = $byAgent->fetchAll();
 
-$maxTotal = $agentRows ? max(1, ...array_column($agentRows, 'total')) : 1;
+$maxTotal = $agentRows
+    ? max(1, ...array_map(fn($r) => max((int)$r['total'], (int)$r['booked']), $agentRows))
+    : 1;
 
 // ── Recent requests (last 10) ────────────────────────────────────
 $recent = $db->query("
@@ -88,10 +123,8 @@ $recent = $db->query("
 ")->fetchAll();
 
 // ── URL helper ───────────────────────────────────────────────────
-function dashUrl($overrides = []) {
-    global $year, $period, $mode;
-    $params = array_merge(['year'=>$year,'period'=>$period,'mode'=>$mode], $overrides);
-    return '?' . http_build_query($params);
+function rangeUrl($from, $to) {
+    return '?' . http_build_query(['from' => $from, 'to' => $to]);
 }
 
 include 'includes/header.php';
@@ -106,12 +139,14 @@ include 'includes/header.php';
   font-size: .7rem; font-weight: 700; text-transform: uppercase;
   letter-spacing: .1em; color: var(--grey-mid);
 }
-.dash-filter-bar select {
+.dash-filter-bar select, .dash-filter-bar input[type=date] {
   font-family: 'Open Sans', sans-serif; font-size: .85rem; font-weight: 600;
   padding: 7px 12px; border: 1.5px solid var(--grey-lt); border-radius: 7px;
   background: var(--white); color: var(--black); cursor: pointer; transition: border-color .15s;
 }
-.dash-filter-bar select:focus { outline: none; border-color: var(--red); }
+.dash-filter-bar select:focus, .dash-filter-bar input[type=date]:focus { outline: none; border-color: var(--red); }
+.dash-filter-bar input[type=date] { cursor: text; padding: 6px 10px; }
+.dash-range-form { display: flex; align-items: center; gap: 8px; margin: 0; }
 .period-toggle { display: flex; background: var(--grey-lt); border-radius: 7px; overflow: hidden; }
 .period-toggle a {
   font-size: .72rem; font-weight: 700; text-transform: uppercase;
@@ -137,47 +172,42 @@ include 'includes/header.php';
   <a href="request_add.php" class="btn btn-red">+ New Request</a>
 </div>
 
-<!-- PERIOD FILTER BAR -->
+<!-- PERIOD FILTER BAR — one date range; presets and months just fill it -->
 <div class="dash-filter-bar">
-  <label>Year</label>
-  <select onchange="applyParam('year',this.value)">
-    <?php foreach ([(int)date('Y')-1, (int)date('Y'), (int)date('Y')+1] as $y): ?>
-      <option value="<?= $y ?>" <?= $y == $year ? 'selected' : '' ?>><?= $y ?></option>
-    <?php endforeach; ?>
-  </select>
-
-  <div class="dash-filter-sep"></div>
-
-  <label>Period</label>
-  <select onchange="applyPeriod(this.value)">
-    <option value="year" <?= $period==='year' ? 'selected' : '' ?>>Full Year</option>
-    <?php foreach ($months as $num => $name): ?>
-      <option value="<?= $num ?>" <?= $period===$num ? 'selected' : '' ?>><?= $name ?></option>
-    <?php endforeach; ?>
-  </select>
-
-  <?php if ($showToggle): ?>
-  <div class="dash-filter-sep"></div>
-  <label>View</label>
   <div class="period-toggle">
-    <a href="<?= dashUrl(['mode'=>'period']) ?>" class="<?= $mode==='period' ? 'active' : '' ?>">This month</a>
-    <a href="<?= dashUrl(['mode'=>'ytd'])   ?>" class="<?= $mode==='ytd'    ? 'active' : '' ?>">YTD</a>
+    <?php foreach ($presets as $k => $p): ?>
+      <a href="<?= rangeUrl($p[1], $p[2]) ?>" class="<?= $activePreset === $k ? 'active' : '' ?>"><?= h($p[0]) ?></a>
+    <?php endforeach; ?>
   </div>
-  <?php endif; ?>
+
+  <div class="dash-filter-sep"></div>
+
+  <label>Month</label>
+  <select autocomplete="off" onchange="if (this.value) location.href = this.value">
+    <option value="">—</option>
+    <?php foreach ($monthOpts as $y => $opts): ?>
+      <optgroup label="<?= $y ?>">
+        <?php foreach ($opts as $o): ?>
+          <option value="<?= h(rangeUrl($o[1], $o[2])) ?>" <?= $o[1] === $start && $o[2] === $end ? 'selected' : '' ?>><?= h($o[0]) ?></option>
+        <?php endforeach; ?>
+      </optgroup>
+    <?php endforeach; ?>
+  </select>
+
+  <div class="dash-filter-sep"></div>
+
+  <form method="get" class="dash-range-form">
+    <label for="dash-from">From</label>
+    <input type="date" id="dash-from" name="from" value="<?= h($start) ?>" autocomplete="off" required>
+    <label for="dash-to">To</label>
+    <input type="date" id="dash-to" name="to" value="<?= h($end) ?>" autocomplete="off" required>
+    <button type="submit" class="btn btn-outline btn-sm">Apply</button>
+  </form>
 </div>
 
 <script>
-function applyParam(key, val) {
-  var u = new URL(location.href);
-  u.searchParams.set(key, val);
-  location.href = u.toString();
-}
-function applyPeriod(val) {
-  var u = new URL(location.href);
-  u.searchParams.set('period', val);
-  if (val === 'year') u.searchParams.set('mode', 'period');
-  location.href = u.toString();
-}
+// Back/forward cache can restore stale filter values: reload to resync with the URL
+window.addEventListener('pageshow', function (e) { if (e.persisted) location.reload(); });
 </script>
 
 <!-- STAT CARDS -->
@@ -195,7 +225,7 @@ function applyPeriod(val) {
   <div class="stat-card amber">
     <div class="stat-label">Sales Rate</div>
     <div class="stat-value"><?= $salesRate ?>%</div>
-    <div class="stat-sub">booked / received</div>
+    <div class="stat-sub"><?= $bookedCount ?> booked / <?= $convRecv ?> received</div>
   </div>
   <div class="stat-card green">
     <div class="stat-label">Value Sold</div>
@@ -222,7 +252,7 @@ function applyPeriod(val) {
     <?php if ($agentRows): ?>
       <?php foreach ($agentRows as $row):
         $totalPct  = round($row['total'] / $maxTotal * 100);
-        $bookedPct = $row['total'] > 0 ? round($row['booked'] / $maxTotal * 100) : 0;
+        $bookedPct = round($row['booked'] / $maxTotal * 100);
       ?>
       <div class="breakdown-row">
         <span class="breakdown-agent"><?= h($row['name']) ?></span>

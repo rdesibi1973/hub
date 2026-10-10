@@ -420,14 +420,15 @@ function iti_ps_calc_plan(PDO $db, int $rid, array $in): array {
                      'activities' => array_map(function ($a) { return $a['text'] . ' [' . $a['state'] . ']'; }, $d['acts'] ?? []),
                      'from_sample_day' => $d['sample_index'] !== null ? $d['sample_index'] + 1 : null, 'flags' => $d['flags'] ?? []];
     }
-    return ['calc' => ['file' => $calc['file'], 'rev' => $calc['calc_rev'] ?? null, 'pax' => $calc['pax'] ?? null],
+    return ['calc' => ['file' => $calc['file'], 'files' => $calc['candidates'] ?? [], 'rev' => $calc['calc_rev'] ?? null, 'pax' => $calc['pax'] ?? null],
             'code' => $code, 'sample' => $sample ? ['id' => (int)$sample['id'], 'title' => iti_doc_pick($sample, 'title', $lang)] : null,
             'nights' => $nights, 'unmapped' => $plan['unmapped'], 'blocking' => $plan['blocking'], 'flags' => $plan['flags'],
-            'existing_finals' => array_map(function ($f) { return ['id' => (int)$f['id'], 'superseded_by' => $f['superseded_by'] ? (int)$f['superseded_by'] : null]; }, iti_final_list($db, $rid)),
+            'existing_finals' => array_map(function ($f) { return ['id' => (int)$f['id'], 'calc_file' => $f['source_calc_path'] ? basename($f['source_calc_path']) : null,
+                                                                   'superseded_by' => $f['superseded_by'] ? (int)$f['superseded_by'] : null]; }, iti_final_list($db, $rid)),
             '_calc' => $calc, '_sample_id' => $sample ? (int)$sample['id'] : 0, '_lang' => $lang];
 }
 
-/** Generate the final programme (replaces an older final of the same request). */
+/** Generate the final programme (replaces an older final built from the same Calc file). */
 function iti_ps_calc_generate(PDO $db, int $rid, array $plan, array $who): array {
     if (!$plan['_sample_id']) throw new InvalidArgumentException('No sample for Calc code "' . $plan['code'] . '" — pass sample_id');
     if ($plan['blocking']) throw new InvalidArgumentException('Map these Calc texts first (iti_save_alias): ' . implode(' ', $plan['blocking']));

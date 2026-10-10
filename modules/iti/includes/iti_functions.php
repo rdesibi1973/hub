@@ -1218,18 +1218,25 @@ function iti_alias_parts(string $s): array {
     return $out;
 }
 
-// A Calc hotel text often ends with its meal basis: "Orangi River Luxury (FB)",
-// "Arusha Explorers in HB", "Kifaru - full board". Returns [base text, meal code|null];
-// the meal is null (and the text unchanged) when there is no such suffix.
+// A Calc hotel text often carries its meal basis and cost notes after the name:
+// "Orangi River Luxury (FB)", "Arusha Explorers in HB", "Kifaru - full board",
+// "Tarangire Treetops FB (+WMA 59)", "Arusha Coffee Lodge Plantation Room BB + dinner 43".
+// Returns [hotel text without them, meal code|null]. "BB + dinner" = HB, "HB + lunch" = FB.
+// Without a meal, trailing cost notes ("(+levy 1%)", "+ dinner 43") are still dropped.
 function iti_alias_split_meal(string $text): array {
     $words = array('bed ?(?:&|and) ?breakfast' => 'BB', 'half ?board' => 'HB', 'full ?board' => 'FB', 'all ?inclusive' => 'AI');
-    $re = '/^(.*?)[\s,\-–\/]*(?:\(\s*|\bin\s+)?\b(BB|HB|FB|AI|' . implode('|', array_keys($words)) . ')\b\s*\)?\s*$/iu';
-    if (!preg_match($re, $text, $m) || trim($m[1]) === '') return array($text, null);
-    $meal = strtoupper($m[2]);
-    if (!isset(ITI_MEAL_BASIS[$meal])) {
-        foreach ($words as $w => $code) { if (preg_match('/^' . $w . '$/i', $m[2])) { $meal = $code; break; } }
+    $re = '/^(.*?)[\s,\-–\/]*(?:\(\s*|\bin\s+)?\b(BB|HB|FB|AI|' . implode('|', array_keys($words)) . ')\b(.*)$/iu';
+    if (preg_match($re, $text, $m) && trim($m[1], " ,-–/(\t") !== '') {
+        $meal = strtoupper($m[2]);
+        if (!isset(ITI_MEAL_BASIS[$meal])) {
+            foreach ($words as $w => $code) { if (preg_match('/^' . $w . '$/i', $m[2])) { $meal = $code; break; } }
+        }
+        if ($meal === 'BB' && preg_match('/^\s*\)?\s*\+\s*(dinner|cena|d)\b/i', $m[3])) $meal = 'HB';
+        elseif ($meal === 'HB' && preg_match('/^\s*\)?\s*\+\s*(lunch|pranzo|l)\b/i', $m[3])) $meal = 'FB';
+        return array(trim($m[1], " ,-–/(\t"), isset(ITI_MEAL_BASIS[$meal]) ? $meal : null);
     }
-    return array(trim($m[1]), isset(ITI_MEAL_BASIS[$meal]) ? $meal : null);
+    $base = trim(preg_replace('/(\s*\([^)]*[\d+][^)]*\)|\s+\+.*)+\s*$/u', '', $text));
+    return array($base !== '' ? $base : $text, null);
 }
 
 /**

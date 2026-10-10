@@ -20,6 +20,78 @@ Running log of notable changes and current build state. Module-level "active / p
 
 ---
 
+## 2026-10-09 — Incoming approve: channel + agency, shared folder name
+- Bug: approving an Incoming lead never stored `agency_id` and stored `channel` only when the folder
+  field was empty — but the form always pre-filled it, so almost every approval got `channel = NULL`.
+  Agency leads got their "(Agency-Agent)" tag only by hand-typing it into the folder name (#2923).
+- `staging.php` approve form: Channel (Direct / Agency / SB / Other, default Direct) and, for Agency, the
+  searchable agency picker with ➕ Add (as `request_add.php`; agency mandatory). The folder preview follows
+  channel / agency / agent; a hand-edited name is marked "edited by hand" (↺ rebuild) and is the only case
+  where `folder_name_override` is sent. Eleonora Ongaro referral flag only for Direct (still "(Agent-EleonoraOngaro)",
+  channel direct).
+- `staging_action.php` approve now goes through `bs_create_request()` (own Dropbox / INSERT / notify code
+  removed): stores `channel` + `agency_id`, folder built by `bs_request_folder_name()`, logs the
+  "Request received" timeline event, CustomerInfo.txt gets the CUSTOMER block like New Request. The service's
+  duplicate check is skipped (the operator reviewed the drawer flags; the lead would match itself in `lead_staging`).
+- `booking_service.php`: `bs_request_folder_name()` takes an optional direct tag (default "Drct");
+  new `bs_folder_name_error()` (Name(Tag), exactly one "(…)" tag at the end, no "/" or "\");
+  `bs_create_request()` options `direct_tag`, `folder_name` (validated), `initial_request_optional`.
+- `tools/backfill_request_channel.php`: reads the LAST "(…)" tag (broken double-tag names); direct also for
+  `(RobertoCapri)`, any `EleonoraOngaro` tag and `(Nuru-Trekk|Trek|Tekk)`; `--list` prints each row filled.
+  Then also `(Roberto-Trek)` direct; agent-first tags `(Sultan-Yeadimtravel)`, one-token `(SouriTrip)` /
+  `(GoWorld_Alex)` read as agencies; aliases AVIT, Adriana, Avventure, Areatour, SouriTip, FedericaKailas.
+  Run on the server 9 Oct: 118 requests filled in three runs (87 direct, 31 agency), 534 still NULL (mostly one-word
+  `Client(Agent)` folders, agency spellings with no agency record, no folder). NULL-id lists kept in
+  `~/channel_null_ids_20261009*.txt`.
+
+## 2026-10-09 — Re-link a folder moved outside the Hub; agency edit; customer-name guard
+- `rename_folder` / BackOffice "Rename…": new `current_path` (re-link a folder moved or renamed outside the
+  Hub, e.g. #2923) and `rename_files` (also the `NN_<old name>…` Calc / Word files). Shared code in
+  `folder_service.php` (`fs_rename_validate`, `fs_relink_resolve`, `fs_file_renames`, `fs_allowed_roots`).
+  A re-link to Booked sets `confirmation_date` / `start_date` (no Rollback: no confirm snapshot). "Folder not
+  found" suggests `current_path` with up to 3 candidates; the BackOffice form reopens with the path field.
+- `update_request`: `agency_id` / `channel` (folder not renamed; warning with the suggested name,
+  `bs_agency_tag_hint()`). Edit Request: Channel + Agency fields (admin/manager).
+- Customer name guard (`bs_customer_name_error()`): no `( ) [ ]` in the name — New Request (inline),
+  `create_request`, Incoming approve, Edit Request, Java `api_create_request.php`. Incoming approve also
+  refuses a typed folder name with more than one `(…)` tag.
+- `bs_camel_case()` keeps mixed-case words (`Luca DeSanctis` → `LucaDeSanctis`, was `Lucadesanctis`); Incoming
+  approve and `api_create_request.php` now use it instead of their own copies.
+
+## 2026-10-09 — Invoice PDF: one layout for the page and Dompdf
+- `modules/invoices/includes/invoice_html.php` is now the only invoice / credit note layout (tables + class
+  CSS, no flex / grid): `invoice_pdf.php` and `cn_pdf.php` (Print / Save as PDF) and Dompdf
+  (`inv_pdf()` → API `save_invoice_pdf`, `api_send_invoice_email.php`, `invoices_zip.php`) render the same body.
+- Dompdf PDFs now look like the printed page: logo + "Invoice", BALANCE DUE, issuer block, BILL TO, dates
+  (Terms / Due Date only when set — no more "Due Date: —", no Currency row), ITEM & DESCRIPTION, Sub Total /
+  Total / Payment Made / Balance Due, NOTES and TERMS & CONDITIONS side by side; SH: AfrAsia bank details per currency.
+- The design follows Chrome's print (background graphics off): no dark table header or grey Balance Due fill,
+  on screen too. SH bank-details block more compact (an SH invoice with 2 lines fits one A4 page) and never split.
+- Dompdf uses Open Sans like the page: static TTF in `modules/invoices/assets/fonts/` (300 / 400 / 600 / 700,
+  OFL), options from `inv_doc_dompdf_options()` (font folder in chroot, metrics cached in `sys_get_temp_dir()`).
+  Checked against the Chrome print of SE-2026-0177: same column positions and line positions within 1–2 pt.
+- `invoice_pdf.php` / `cn_pdf.php` now require login + invoices permission (`requireInvoiceAccess()`); before,
+  any invoice or credit note could be opened by id without logging in. File name unchanged.
+
+## 2026-10-09 — Agent API: Il Diamante group folders; update_request dry-run
+- New `includes/group_import_service.php` (`gi_parse`, `gi_duplicates`, `gi_validate`, `gi_import`, plus
+  `gi_plan` / `gi_move_plan` for the API): the logic of Import Group Folder, moved out of `import_folder.php`
+  and `api_import_folder_parse.php` (same behaviour; pax / value now checked as numbers). An import now logs
+  a "Group folder imported" timeline event.
+- API `import_group_folder` (folder in `/001_Safari` → request, Booked / Balance; duplicate rules exact → 409,
+  high → 409 unless `allow_duplicate`) and `move_group_folder` (`…/Diamante/2027-Groups/…_PROVISIONAL` →
+  `/001_Safari/…_BALANCE|_DEPOSIT|_PAID`, optional `import` in the same call). Both dry-run unless `"confirm": true`.
+- **Breaking for callers:** API `update_request` is now **dry-run unless `"confirm": true`** and returns
+  `changes {field: {from, to}}` (on 7 Oct it changed pax / value of #3023 at the first call).
+- API: Hub DB down → `{"ok":false,"error":"database unavailable"}` HTTP 503 instead of an HTML text
+  (`includes/db.php`, flag `DB_FAIL_JSON`).
+- Request view, imported groups (`group_folder` = `practice_code`, e.g. #3055, #3064): Dropbox folder no longer
+  shown as `<folder>/<folder>`; CK box says "not in the CK tracker yet" instead of "not in 001_Safari" when the
+  folder is in 001_Safari but not scanned yet. `req_folder_path()` fallback no longer doubles the name.
+- Fix: renaming an imported group (Rename… / `rename_folder`, group payment tag in `grp_status.php`, `_CK`
+  sync in `ck_lib.php`) wrote `dropbox_url = …/<new>/<old>` and left `practice_code` on the old name;
+  now both follow the new name.
+
 ## 2026-10 — ITI ref number and file names = the copy_program Word
 - Rule: a client programme's `ref_number` and every programme file saved in the booking folder are named
   like the Word `copy_program` copied there (`01_Name(Agency-Agent)_PumbaSafari`). Shared naming:

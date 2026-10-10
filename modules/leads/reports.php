@@ -70,6 +70,7 @@ $dest_list = $dest_rows ?: [];
 // ── Helper: summary from LIVE table (requests) ───────────────────
 // total/by_dest  → date_received  (volume of incoming requests)
 // confirmed/sales/pax/commission → confirmation_date (closed deals)
+// rate → confirmed in the period / received in the period (when received does not matter)
 function buildSummary(PDO $db, string $from, string $to, array $agents, array $dest_list): array {
     $rows = [];
     $totals = ['agent' => 'TOTAL', 'total' => 0, 'confirmed' => 0, 'rate' => 0, 'by_dest' => [],
@@ -1003,7 +1004,8 @@ include 'includes/header.php';
           <?php endif; ?>
         </td>
         <td class="text-right">
-          <?php $rate_color = $r['rate'] >= 10 ? 'var(--green)' : ($r['rate'] >= 5 ? 'var(--amber)' : 'var(--grey-mid)'); ?>
+          <?php // booked in period / received: company average ~20% (Oct 2025–Sep 2026)
+                $rate_color = $r['rate'] >= 20 ? 'var(--green)' : ($r['rate'] >= 10 ? 'var(--amber)' : 'var(--grey-mid)'); ?>
           <span style="font-weight:700;color:<?= $rate_color ?>"><?= $r['rate'] ?>%</span>
         </td>
         <?php if (!$is_history): ?>

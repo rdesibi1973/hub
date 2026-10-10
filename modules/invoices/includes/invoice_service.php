@@ -653,10 +653,7 @@ function inv_pdf(array $inv, array $items, array $activePayments): string {
     if (!class_exists('\Dompdf\Dompdf')) throw new RuntimeException('PDF library not installed. Run: composer install');
     require_once __DIR__ . '/invoice_html.php';
 
-    $options = new \Dompdf\Options();
-    $options->set('isHtml5ParserEnabled', true);
-    $options->set('isRemoteEnabled', false);   // no external resources
-    $dompdf = new \Dompdf\Dompdf($options);
+    $dompdf = new \Dompdf\Dompdf(inv_doc_dompdf_options());   // no external resources; Open Sans from assets/fonts
     $dompdf->loadHtml(buildInvoiceHtml($inv, $items, $activePayments));
     $dompdf->setPaper('A4', 'portrait');
     $dompdf->render();

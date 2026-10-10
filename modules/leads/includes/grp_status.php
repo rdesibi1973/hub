@@ -85,12 +85,13 @@ function grp_sync_parent_tag(PDO $db, string $token, string $groupFolder): array
     $newPath   = $parentDir . '/' . $newName;
     dropbox_move_folder($token, $curPath, $newPath);   // the clients' sub-folders move with it
 
-    $upd = $db->prepare("UPDATE requests SET group_folder = ?, dropbox_url = ? WHERE id = ?");
+    $upd = $db->prepare("UPDATE requests SET group_folder = ?, practice_code = ?, dropbox_url = ? WHERE id = ?");
     foreach ($members as $m) {
-        $sub = trim($m['practice_code'] ?? '');
-        $path = $sub !== '' ? $newPath . '/' . $sub : $newPath;
+        $sub  = trim($m['practice_code'] ?? '');
+        $self = $sub === $groupFolder;   // imported group: practice_code = group_folder = the folder itself
+        $path = $sub !== '' && !$self ? $newPath . '/' . $sub : $newPath;
         $url  = 'https://www.dropbox.com/home/' . implode('/', array_map('rawurlencode', explode('/', ltrim($path, '/'))));
-        $upd->execute([$newName, $url, (int)$m['id']]);
+        $upd->execute([$newName, $self ? $newName : $m['practice_code'], $url, (int)$m['id']]);
     }
     return ['ok' => true, 'changed' => true, 'new_name' => $newName,
             'msg' => 'Group folder renamed to …_' . $want . ' (' . count($members) . ' booking(s)).'];

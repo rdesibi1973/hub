@@ -317,6 +317,7 @@ function calc_read_request(PDO $db, int $requestId, string $file = '', string $s
         'request_id' => (int)$r['id'],
         'folder'     => $dir,
         'file'       => $pick['file'],
+        'candidates' => $pick['candidates'],   // every *_Calc.xlsx of the folder
         'calc_path'  => $path,
         'calc_rev'   => $dl['rev'],
     ], $data);
