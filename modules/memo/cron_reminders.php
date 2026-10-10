@@ -5,7 +5,7 @@
 //
 // Token is NOT hardcoded here: define MEMO_CRON_TOKEN in includes/config.php (outside the repo).
 
-date_default_timezone_set('Africa/Dar_es_Salaam');
+require_once __DIR__ . '/../../includes/timezone.php';
 
 require_once __DIR__ . '/../../includes/config.php';  // must define MEMO_CRON_TOKEN
 require_once __DIR__ . '/../../includes/db.php';       // provides $pdo

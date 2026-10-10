@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__ . '/config.php';
+require_once __DIR__ . '/timezone.php';
 
 try {
     $pdo = new PDO(
@@ -12,6 +13,7 @@ try {
             PDO::ATTR_EMULATE_PREPARES   => false,
         ]
     );
+    hub_db_timezone($pdo);
 } catch (PDOException $e) {
     error_log('DB connection failed: ' . $e->getMessage());
     die('Database connection failed. Please contact your administrator.');

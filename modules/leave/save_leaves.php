@@ -47,6 +47,7 @@ try {
             PDO::ATTR_EMULATE_PREPARES   => false,
         ]
     );
+    hub_db_timezone($leavePdo);
 
     // Create tables if they don't exist yet
     $leavePdo->exec("CREATE TABLE IF NOT EXISTS leave_employees (

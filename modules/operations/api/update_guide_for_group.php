@@ -1,7 +1,7 @@
 <?php
 // Update driver/guide for all movements sharing the same client_name and old driver value.
 ob_start();
-date_default_timezone_set('Africa/Dar_es_Salaam');
+require_once __DIR__ . '/../../../includes/timezone.php';
 require_once __DIR__ . '/../../../includes/auth.php';
 require_once __DIR__ . '/../../../includes/db.php';
 start_session();

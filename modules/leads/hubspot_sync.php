@@ -20,6 +20,8 @@ if (!defined('DB_HOST'))       define('DB_HOST',       'localhost');
 if (!defined('DB_NAME'))       define('DB_NAME',       'savannp5_savannah_leads');
 if (!defined('DB_USER'))       define('DB_USER',       'savannp5_rdesibi');
 if (!defined('DB_PASS'))       define('DB_PASS',       'Savannah2026');
+require_once __DIR__ . '/../../includes/timezone.php';   // Tanzania time (date(), hs_db() session)
+
 // ── HubSpot token ────────────────────────────────────────────────────────────
 // When running as web request, config.php is loaded first by the caller.
 // When running as CLI (cron), load config.php directly from this file.
@@ -53,6 +55,7 @@ function hs_db(): PDO {
         DB_USER, DB_PASS,
         [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC]
     );
+    hub_db_timezone($db);
     return $db;
 }
 

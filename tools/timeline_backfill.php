@@ -16,7 +16,7 @@
  * CLI only (run over SSH on the server).
  */
 if (PHP_SAPI !== 'cli') { http_response_code(404); exit; }
-date_default_timezone_set('Africa/Dar_es_Salaam');
+require_once __DIR__ . '/../includes/timezone.php';
 
 require_once __DIR__ . '/../includes/config.php';
 require_once __DIR__ . '/../includes/db.php';

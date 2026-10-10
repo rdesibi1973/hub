@@ -32,7 +32,11 @@ outdated — this file wins where they disagree (PHP version, local lint).
   (`modules/memo/` and `grp_status.php` are kept PHP-7 style).
 - **MySQL, not MariaDB**: no `ADD COLUMN IF NOT EXISTS`. For new columns either a migration or a
   lazy schema function (check `INFORMATION_SCHEMA` once, then `ALTER` in try/catch — see `memo_schema()`).
-- Timezone: every entry point sets `Africa/Dar_es_Salaam` (server is US).
+- Timezone: server is US; the Hub runs on EAT via `includes/timezone.php` (PHP `Africa/Dar_es_Salaam`
+  + `hub_db_timezone($pdo)` → MySQL session `+03:00`, so `NOW()` matches `date()`). It is loaded by
+  `session_boot.php`/`auth.php`, `db.php`, `iti_functions.php` and, on the server, the off-repo
+  `modules/leads/config.php` (top `require_once` + `hub_db_timezone()` in its `db()`). A new PDO
+  connection must call `hub_db_timezone()`. DATETIME rows written before Oct 2026 by non-API pages are US time.
 - AJAX/JSON handlers: `ob_start()` first so warnings don't break JSON.
 - Server-only, never in git: `includes/config.php`, `modules/leads/config.php`, `api.txt` (agent key).
   Constants there: `AGENT_API_KEY`, `AGENT_API_USER`, `AGENT_MEMO_USER`, `MEMO_CRON_TOKEN`,

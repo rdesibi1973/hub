@@ -15,6 +15,7 @@ try {
         DB_USER, DB_PASS,
         [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC]
     );
+    hub_db_timezone($pdo);
 
     // Check tables exist
     $tables = $pdo->query("SHOW TABLES LIKE 'leave_employees'")->fetchAll();

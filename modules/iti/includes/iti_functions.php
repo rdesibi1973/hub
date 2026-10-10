@@ -10,6 +10,8 @@ if (!defined('DB_HOST')) {
     require_once $_iti_config;
 }
 
+require_once dirname(__FILE__, 4) . '/includes/timezone.php';
+
 static $_iti_pdo = null;
 
 require_once __DIR__ . '/iti_texts.php';   // translatable texts, day transfers (iti_transfers_replace)
@@ -29,6 +31,7 @@ function db(): PDO {
                     PDO::ATTR_EMULATE_PREPARES   => false,
                 ]
             );
+            hub_db_timezone($_iti_pdo);
         } catch (PDOException $ex) {
             http_response_code(500);
             die('DB connection failed: ' . $ex->getMessage());

@@ -15,7 +15,7 @@
  * ../invoices/includes/invoice_service.php), shared with the Hub pages.
  */
 ob_start();
-date_default_timezone_set('Africa/Dar_es_Salaam');
+require_once __DIR__ . '/../../includes/timezone.php';
 
 require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/includes/booking_service.php';
@@ -131,6 +131,7 @@ if ($expected === '') agent_fail('AGENT_API_KEY not configured', 500);
 if ($given === '' || !hash_equals($expected, $given)) agent_fail('Forbidden', 403);
 
 $db = db();
+hub_db_timezone($db);   // NOW() in the shared services = EAT, like date()
 agent_ensure_schema($db);
 
 // Rate limit: calls in the last 60 s (every call is audited, so the log is the counter).

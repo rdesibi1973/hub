@@ -21,10 +21,10 @@ require_once 'config.php';
 $db = db();
 
 // ── Timezone: align NOW() and entered times to Dar es Salaam (EAT) ──────────
-// BlueHost server clock is in US time (~7h behind), so NOW() must be forced to
+// BlueHost server clock is in US time (9-10h behind), so NOW() must be forced to
 // the same zone in which to-do times are entered, otherwise reminders fire late.
-date_default_timezone_set('Africa/Dar_es_Salaam');
-$db->exec("SET time_zone = '+03:00'");
+require_once __DIR__ . '/../../includes/timezone.php';
+hub_db_timezone($db);
 
 // ── Find all due, unsent, not-done to-dos that have an email address ───────
 $stmt = $db->prepare("

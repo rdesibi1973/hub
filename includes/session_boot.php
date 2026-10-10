@@ -14,6 +14,8 @@
  * fixes this.
  */
 
+require_once __DIR__ . '/timezone.php';   // Tanzania time for every page that boots a session
+
 if (!function_exists('hub_session_boot')) {
     function hub_session_boot(): void {
         if (session_status() !== PHP_SESSION_NONE) {
