@@ -162,6 +162,11 @@ include 'includes/header.php';
 }
 .bbar-total { position: absolute; left:0; top:0; bottom:0; background: #d8e8d8; border-radius:3px; }
 .bbar-booked { position: absolute; left:0; top:0; bottom:0; background: var(--green); border-radius:3px; }
+.sales-rate {
+  display: inline-block; margin-left: 6px; padding: 1px 6px; border-radius: 9px;
+  font-size: .68rem; font-weight: 700; color: var(--green); background: #e6efe6;
+  vertical-align: 1px;
+}
 </style>
 
 <div class="page-header">
@@ -247,15 +252,17 @@ window.addEventListener('pageshow', function (e) { if (e.persisted) location.rel
   <div class="breakdown-card">
     <h3>By Agent — <?= h($periodLabel) ?></h3>
     <div style="font-size:.63rem;color:var(--grey-mid);margin-bottom:10px;text-transform:uppercase;letter-spacing:.07em;">
-      Ordered by requests &nbsp;·&nbsp; <span style="color:var(--green);">■</span> booked &nbsp;/ total
+      Ordered by requests &nbsp;·&nbsp; <span style="color:var(--green);">■</span> booked &nbsp;/ total &nbsp;·&nbsp; % = sales rate
     </div>
     <?php if ($agentRows): ?>
       <?php foreach ($agentRows as $row):
         $totalPct  = round($row['total'] / $maxTotal * 100);
         $bookedPct = round($row['booked'] / $maxTotal * 100);
+        $salesRate = $row['total'] > 0 ? round($row['booked'] / $row['total'] * 100) : 0;
       ?>
       <div class="breakdown-row">
-        <span class="breakdown-agent"><?= h($row['name']) ?></span>
+        <span class="breakdown-agent"><?= h($row['name']) ?>
+          <span class="sales-rate" title="Sales rate: booked / total requests"><?= $salesRate ?>%</span></span>
         <div class="bbar-wrap">
           <div class="bbar-total"  style="width:<?= $totalPct  ?>%"></div>
           <div class="bbar-booked" style="width:<?= $bookedPct ?>%"></div>
