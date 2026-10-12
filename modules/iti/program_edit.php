@@ -851,7 +851,7 @@ include __DIR__ . '/../../includes/layout_header.php';
     <div class="form-grid">
       <div class="form-group">
         <label>Ref. Number</label>
-        <input type="text" name="ref_number" maxlength="60"
+        <input type="text" name="ref_number" maxlength="120"
                placeholder="e.g. 01_Name(Agency-Agent)_PumbaSafari"
                title="Name of the programme Word in the booking folder (no extension) — also the file name of the Word / PDF saved there"
                value="<?= h($program['ref_number'] ?? '') ?>">

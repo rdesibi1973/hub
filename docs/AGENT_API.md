@@ -392,7 +392,7 @@ Typical flows:
 put in the request folder — same progressive number and prefix as its Calc:
 Calc `01_MarcoCiaolo(OceanoPoint-Roberto)_Pumba_Calc.xlsx`, Word `01_MarcoCiaolo(OceanoPoint-Roberto)_PumbaSafari.docx`
 → `ref_number` = `01_MarcoCiaolo(OceanoPoint-Roberto)_PumbaSafari`, and every programme file the API saves in the booking
-folder is `<ref_number>.docx` / `<ref_number>.pdf` / `<ref_number>_Guida.pdf`. `ref_number`: max 60 characters (the column),
+folder is `<ref_number>.docx` / `<ref_number>.pdf` / `<ref_number>_Guida.pdf`. `ref_number`: max 120 characters (the column; was 60 until Oct 2026),
 no `\ / : * ? " < > |`. `iti_create_personal` sets it from the folder; `iti_update_program` changes it.
 
 #### `iti_samples` (GET)
@@ -510,6 +510,8 @@ from_sample_day, flags), `unmapped` {lodge|activity|route: {norm: text}}, `block
 superseded_by). Several Calc files (e.g. the same safari with other lodges) → pass `file`; each file has its own final.
 `iti_final_from_calc` with `"confirm": true` generates the final program (an older final built from the same Calc
 file is superseded) → `program_id`, `program`. 409 when the Calc cannot be read.
+The new final's `ref_number` (`iti_final_ref_number()`): the ref of the final it replaces (kept when it was set by hand), else
+the programme Word copied next to that Calc, else the Calc's name without `_Calc` (`01_Name(Agency-Agent)_Code`).
 
 #### `iti_save_alias` (POST)
 `type` (`lodge`|`activity`|`route`), `text` (the Calc text), `lodge_id` (+ `meal_basis` BB|HB|FB|AI) |

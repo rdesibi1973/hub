@@ -576,6 +576,34 @@ function iti_final_plan(PDO $db, array $calc, int $sampleId): array {
 }
 
 /**
+ * ref_number (= the programme files' name) of a final programme, as docs/AGENT_API.md asks:
+ * the name of the programme Word with the Calc's NN_ ("01_LucaDeSanctis(LasciatiViaggiare-
+ * Daniela)_SafariGrandeMigrazioneEstate"). In order: the ref of the final it replaces (same
+ * Calc, unless it is the old folder-based form "01_07_27JUL_…"); the Word copy_program put
+ * next to that Calc (iti_ps_ref_from_request); the Calc's own name without "_Calc"; the
+ * folder-based iti_lead_ref_number().
+ */
+function iti_final_ref_number(PDO $db, int $requestId, array $calc) {
+    $file = basename((string)($calc['calc_path'] ?? ($calc['file'] ?? '')));
+    $st = $db->prepare("SELECT ref_number, source_calc_path FROM iti_programs WHERE lead_request_id = ? AND stage = 'final'
+                         AND superseded_by IS NULL AND ref_number IS NOT NULL AND ref_number <> '' ORDER BY id DESC");
+    $st->execute(array($requestId));
+    foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $p) {
+        if (basename((string)$p['source_calc_path']) === $file && !preg_match('/^\d{1,3}_\d{2}_\d{2}[A-Z]{3}_/', $p['ref_number'])) {
+            return $p['ref_number'];
+        }
+    }
+    try {
+        require_once __DIR__ . '/iti_program_service.php';
+        return iti_ps_ref_from_request($db, $requestId, $file)['ref_number'];
+    } catch (Throwable $e) { /* no Word copied next to this Calc: from the Calc's name */ }
+    if (preg_match('/^(\d{1,3}_.+)_calc\.xlsx$/i', $file, $m) && !preg_match('#[\\\\/:*?"<>|]#', $m[1])) {
+        return mb_substr($m[1], 0, 120);
+    }
+    return iti_lead_ref_number($requestId, $file);
+}
+
+/**
  * Build the final programme. $calc must come from calc_read_request() (calc_path,
  * calc_rev). Throws RuntimeException when the plan still has blocking items.
  * $who = ['id' => users.id, 'username' => ...]. Returns ['program_id', 'superseded' => int[], 'plan'].
@@ -602,7 +630,7 @@ function iti_final_generate(PDO $db, int $requestId, array $calc, int $sampleId,
     if (empty($titles['title_en'])) $titles['title_en'] = iti_final_title((string)$sample['title_en'], $customer) ?: (string)$sample['title_en'];
     $newId = iti_duplicate_program($sampleId, 'personal', (string)($who['username'] ?? 'system'), $titles + array(
         'lead_request_id'  => $requestId,
-        'ref_number'       => iti_lead_ref_number($requestId, (string)($calc['calc_path'] ?? '')),
+        'ref_number'       => iti_final_ref_number($db, $requestId, $calc),
         'stage'            => 'final',
         'start_date'       => $calc['start_date'],
         'duration_days'    => count($calc['days']),

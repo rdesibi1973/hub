@@ -1016,7 +1016,7 @@ function iti_lead_ref_number(int $lead_id, string $file = '') {
         }
     }
     if ($num === '') $num = '01';
-    return mb_substr(str_pad($num, 2, '0', STR_PAD_LEFT) . '_' . $practice, 0, 50);   // same cap as sto_import
+    return mb_substr(str_pad($num, 2, '0', STR_PAD_LEFT) . '_' . $practice, 0, 120);   // the column
 }
 
 // ── FINAL PROGRAMME (confirmed booking) — data model ─────────────────────────
@@ -1072,6 +1072,12 @@ function iti_ensure_doc_columns(): void {
         }
         // Migration camps: the same camp in the other season's area (Ndutu ↔ north), see iti_final_season_lodge().
         if (iti_add_column('iti_lodges', 'season_twin_id', 'INT NULL DEFAULT NULL')) iti_seed_season_twins();
+        // ref_number = the programme Word's name ("01_LucaDeSanctis(LasciatiViaggiare-Daniela)_SafariGrandeMigrazioneEstate",
+        // 72 characters): 60 was too short.
+        $c = db()->query("SHOW COLUMNS FROM iti_programs LIKE 'ref_number'")->fetch(PDO::FETCH_ASSOC);
+        if ($c && preg_match('/varchar\((\d+)\)/i', (string)$c['Type'], $m) && (int)$m[1] < 120) {
+            db()->exec('ALTER TABLE iti_programs MODIFY ref_number VARCHAR(120) NULL DEFAULT NULL');
+        }
     } catch (PDOException $e) {
         error_log('iti_ensure_doc_columns: ' . $e->getMessage());
     }

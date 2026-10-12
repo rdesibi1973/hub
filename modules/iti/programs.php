@@ -167,7 +167,7 @@ include __DIR__ . '/../../includes/layout_header.php';
 
   <div class="form-group">
     <label>Ref. Number</label>
-    <input type="text" name="ref_number" maxlength="60"
+    <input type="text" name="ref_number" maxlength="120"
            placeholder="e.g. SE-2025-001">
     <span class="form-hint">Optional. Can also be set later in the editor.</span>
   </div>
