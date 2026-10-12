@@ -204,7 +204,14 @@ function ops_request_dirs(array $r): array {
     $dirs = ['/' . $rel];
     $segs = explode('/', $rel);
     if (count($segs) > 2 && folder_is_booking_leaf($segs[count($segs) - 2])) $dirs[] = '/' . implode('/', array_slice($segs, 0, -1));
-    return $dirs;
+    // GRP: dropbox_url can keep the parent's old name after a status rename; group_folder is kept current.
+    $gf = trim((string)($r['group_folder'] ?? ''));
+    $pc = trim((string)($r['practice_code'] ?? ''));
+    if ($gf !== '') {
+        if ($pc !== '' && $pc !== $gf) $dirs[] = CK_BASE . '/' . $gf . '/' . $pc;
+        $dirs[] = CK_BASE . '/' . $gf;
+    }
+    return array_values(array_unique($dirs));
 }
 
 /**
@@ -242,7 +249,7 @@ function ops_calc(PDO $db, array $r, bool $force = false): array {
         $calc = cp_pick_calc(cp_retry(fn() => cp_list_files($token, $d)));
         if ($calc) { $dir = $d; break; }
     }
-    if (!$calc) return $save(['status' => 'nocalc', 'msg' => 'No *_Calc.xlsx in ' . $dirs[0]], null, null);
+    if (!$calc) return $save(['status' => 'nocalc', 'msg' => 'No *_Calc.xlsx in ' . implode(' or ', $dirs)], null, null);
     $file = $dir . '/' . $calc['name'];
     if ($cached && $cache['file_path'] === $file && $cache['file_rev'] === $calc['rev']) {
         $db->prepare("UPDATE ops_calc_cache SET checked_at = ? WHERE request_id = ?")->execute([date('Y-m-d H:i:s'), $id]);
@@ -291,20 +298,28 @@ function ops_request_out(array $r): array {
             'pax' => $r['pax'] !== null ? (int)$r['pax'] : null, 'start_date' => $r['start_date'], 'end_date' => $r['end_date']];
 }
 
+/** "GRP2710" code in a folder / group name, or ''. */
+function ops_grp_code(string $s): string {
+    return preg_match('/GRP\d{4}/i', $s, $m) ? strtoupper($m[0]) : '';
+}
+
 /**
- * The booking among $reqs that $text names (customer tokens, as Payments matches a Calc),
- * closest to $date by $field (start_date|end_date) within $maxDays. Null when none.
+ * The booking among $reqs that $text names, closest to $date by $field (start_date|end_date)
+ * within $maxDays. Names: the customer tokens as Payments matches a Calc (2 tokens, or 1 on the
+ * same day ± 1), or the same GRP code. Null when none.
  */
 function ops_match_request(array $reqs, string $text, ?string $date, string $field, int $maxDays = 7): ?array {
     require_once __DIR__ . '/../../leads/includes/calc_payments.php';   // cp_name_tokens / cp_name_score
+    $code = ops_grp_code($text);
     $best = null; $bestKey = null;
     foreach ($reqs as $r) {
-        $tok = cp_name_tokens((string)$r['customer_name']);
-        if (!$tok) continue;
-        $score = cp_name_score($tok, $text);
-        if ($score < min(2, count($tok))) continue;
         $dd = ($date && $r[$field]) ? abs((int)round((strtotime($date) - strtotime($r[$field])) / 86400)) : 0;
         if ($dd > $maxDays) continue;
+        $tok = cp_name_tokens((string)$r['customer_name']);
+        $score = $tok ? cp_name_score($tok, $text) : 0;
+        $grp = $code !== '' && $code === ops_grp_code($r['folder'] . ' ' . $r['customer_name']);
+        if (!$grp && !($tok && ($score >= min(2, count($tok)) || ($score >= 1 && $dd <= 1)))) continue;
+        if ($grp) $score = max($score, 1);
         $key = [$dd, -$score];
         if ($bestKey === null || $key < $bestKey) { $best = $r; $bestKey = $key; }
     }
@@ -402,6 +417,14 @@ function ops_movements_report(PDO $db, string $from, string $to, bool $withCalc 
             $text = ($c && $c['status'] === 'ok') ? (string)$c[$type] : '';
             $row['calc_value'] = $text !== '' ? mb_substr($text, 0, 400) : null;
             $facts = ops_flight_facts($text);
+            // A bush-flight leg (Auric, Coastal …) or a move mid-trip is not in the Calc ARRIVAL /
+            // DEPARTURE text (international flights): nothing to compare.
+            $offEnds = $expected !== null && abs((strtotime($m['move_date']) - strtotime($expected)) / 86400) > 1;
+            if (ops_is_domestic_flight((string)$m['flight']) || $offEnds) {
+                $row['leg'] = $offEnds ? 'mid_trip' : 'domestic';
+                $facts = ['flights' => [], 'times' => [], 'dates' => [], 'tba' => false];
+                $expected = null;
+            }
             // Date: the Calc flight date (±1 day: overnight flights), else the folder START / END (±1).
             $dateOk = $facts['dates']
                 ? (bool)array_intersect([ops_ddmmm($m['move_date']), ops_ddmmm($m['move_date'], -1), ops_ddmmm($m['move_date'], 1)], $facts['dates'])
@@ -504,10 +527,10 @@ function ops_lunch_boxes_report(PDO $db, string $from, string $to, bool $withCal
                 $d = $days[$i]['date'];
                 if (!$d || $d < $from || $d > $to) continue;
                 $prev = $days[$i - 1];
-                if (!ops_is_safari_day($days[$i]) || !ops_has_word($prev['label'] . ' ' . $prev['hotel'], OPS_ARUSHA_WORDS)) continue;
+                if (!ops_is_safari_day($days[$i]) || !ops_has_word(ops_overnight($prev), OPS_ARUSHA_WORDS)) continue;
                 if (!isset($byReqDate[$r['id'] . '|' . $d])) {
                     $missing[] = ['date' => $d] + ops_request_out($r) + [
-                        'lodge' => trim($prev['hotel']) !== '' ? $prev['hotel'] : $prev['label'],
+                        'lodge' => ops_overnight($prev),
                         'safari_day' => trim($days[$i]['label']), 'extra_details' => $c['extra_details'] ?: null,
                     ];
                 }
@@ -527,12 +550,19 @@ function ops_is_safari_day(array $day): bool {
     return trim((string)$day['park_fees']) !== '' && !ops_has_word($day['park_fees'], OPS_TREK_WORDS);
 }
 
-/** Overnight before $date in a Calc (hotel, else label), or null. */
+/** Where a Calc day ends: the hotel, else the last place of the day text ("JRO-Arusha-Karatu" → Karatu). */
+function ops_overnight(array $day): string {
+    if (trim((string)$day['hotel']) !== '') return trim($day['hotel']);
+    $parts = array_values(array_filter(array_map('trim', explode('-', (string)$day['label'])), 'strlen'));
+    return $parts ? (string)end($parts) : '';
+}
+
+/** Overnight before $date in a Calc, or null. */
 function ops_night_before(?array $c, string $date): ?string {
     if (!$c || $c['status'] !== 'ok' || $date === '') return null;
     $prev = date('Y-m-d', strtotime($date . ' -1 day'));
     foreach ($c['days'] as $d) {
-        if ($d['date'] === $prev) return trim($d['hotel']) !== '' ? $d['hotel'] : ($d['label'] ?: null);
+        if ($d['date'] === $prev) return ops_overnight($d) ?: null;
     }
     return null;
 }
@@ -581,8 +611,12 @@ function ops_medivac_report(PDO $db, string $from, string $to, bool $withCalc = 
 
     $rows = []; $covered = [];
     foreach ($groups as $g) {
-        $req = ops_match_request($reqs, $g['group_name'] . ' ' . $g['source_file'], $g['coverage_start'], 'start_date', 3);
+        $gText = $g['group_name'] . ' ' . $g['source_file'];
+        $req = ops_match_request($reqs, $gText, $g['coverage_start'], 'start_date', 3);
         if ($req) $covered[(int)$req['id']] = true;
+        if (($code = ops_grp_code($gText)) !== '') {      // one list for the whole group
+            foreach ($reqs as $x) if (ops_grp_code($x['folder'] . ' ' . $x['customer_name']) === $code) $covered[(int)$x['id']] = true;
+        }
         $guests = array_map(fn($t) => ['name' => $t['full_name'], 'title' => $t['title'], 'nationality' => $t['country']], $g['travelers']);
         $rows[] = ['group_ref' => $g['group_ref'], 'group_name' => $g['group_name'], 'tour_agent' => $g['tour_agent'],
                    'request_id' => $req ? (int)$req['id'] : null, 'folder' => $req['folder'] ?? null,
@@ -613,6 +647,11 @@ function ops_medivac_report(PDO $db, string $from, string $to, bool $withCalc = 
     return ['from' => $from, 'to' => $to,
             'counts' => ['registered' => count($rows), 'missing' => count($missing), 'excluded' => count($excluded)],
             'rows' => $rows, 'missing' => $missing, 'excluded' => $excluded];
+}
+
+/** Operations flight text of a domestic carrier ("Auric air", "Coastal", "FL 123" …). */
+function ops_is_domestic_flight(string $f): bool {
+    return (bool)preg_match('/auric|coastal|precision|flight ?link|as ?salaam|assalaam|safari ?air|regional|unity|zanair|tropical|\bPW\s?\d|\bQZ\s?\d/i', $f);
 }
 
 /** A file name that looks like a flight ticket. */
