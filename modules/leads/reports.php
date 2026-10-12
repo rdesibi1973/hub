@@ -441,8 +441,28 @@ if ($report_type === 'team') {
         $by = [];
         foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $r) $by[(int)$r['agent_id']] = $r;
 
+        // Recent load (always relative to today, not to the selected year):
+        // requests received today, today+yesterday, last 7 days incl. today.
+        $d0 = date('Y-m-d');
+        $d1 = date('Y-m-d', strtotime('-1 day'));
+        $d6 = date('Y-m-d', strtotime('-6 days'));
+        $q = $db->prepare("
+            SELECT agent_id,
+                   SUM(date_received >= ?) AS r_today,
+                   SUM(date_received >= ?) AS r_2d,
+                   COUNT(*)                AS r_7d
+            FROM requests
+            WHERE date_received >= ? AND date_received <= ? AND $notStaff
+            GROUP BY agent_id
+        ");
+        $q->execute([$d0, $d1, $d6, $d0]);
+        foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $aid = (int)$r['agent_id'];
+            $by[$aid] = ($by[$aid] ?? []) + $r;
+        }
+
         $rows = [];
-        $tot  = ['assigned'=>0,'booked'=>0,'open'=>0,'lost'=>0,'hot'=>0,'sales'=>0.0];
+        $tot  = ['assigned'=>0,'booked'=>0,'open'=>0,'lost'=>0,'hot'=>0,'sales'=>0.0,'r_today'=>0,'r_2d'=>0,'r_7d'=>0];
         $push = function(int $aid, string $name, $d) use (&$rows, &$tot) {
             $row = [
                 'aid'=>$aid, 'name'=>$name,
@@ -452,9 +472,12 @@ if ($report_type === 'team') {
                 'lost'    =>(int)($d['lost']??0),
                 'hot'     =>(int)($d['hot_cnt']??0),
                 'sales'   =>(float)($d['sales']??0),
+                'r_today' =>(int)($d['r_today']??0),
+                'r_2d'    =>(int)($d['r_2d']??0),
+                'r_7d'    =>(int)($d['r_7d']??0),
             ];
             $rows[] = $row;
-            foreach (['assigned','booked','open','lost','hot','sales'] as $k) $tot[$k] += $row[$k];
+            foreach (['assigned','booked','open','lost','hot','sales','r_today','r_2d','r_7d'] as $k) $tot[$k] += $row[$k];
         };
         foreach ($all_agents as $ag) $push((int)$ag['id'], $ag['name'], $by[(int)$ag['id']] ?? []);
         if (!empty($by[0])) $push(0, '— Unassigned —', $by[0]);   // requests with no agent
@@ -707,6 +730,9 @@ include 'includes/header.php';
       <thead>
         <tr>
           <th style="text-align:left">Agent</th>
+          <th class="recent-col" title="Requests received today">Today</th>
+          <th class="recent-col" title="Requests received today + yesterday">2 days</th>
+          <th class="recent-col" title="Requests received in the last 7 days, today included">7 days</th>
           <th>Assigned</th><th>Booked</th><th>Rate</th>
           <th>Open</th><th>🔥 Hot</th><th>Lost</th><th>Sales</th>
         </tr>
@@ -721,6 +747,9 @@ include 'includes/header.php';
               <span style="color:var(--grey-mid)"><?= h($r['name']) ?></span>
             <?php endif; ?>
           </td>
+          <td class="recent-col"><?= $r['r_today'] ?: '—' ?></td>
+          <td class="recent-col"><?= $r['r_2d'] ?: '—' ?></td>
+          <td class="recent-col"><?= $r['r_7d'] ?: '—' ?></td>
           <td><?= $r['assigned'] ?></td>
           <td><?= $r['booked'] ?: '—' ?></td>
           <td style="font-weight:700"><?= $rate($r['booked'],$r['assigned']) ?>%</td>
@@ -734,6 +763,9 @@ include 'includes/header.php';
       <tfoot>
         <tr style="font-weight:700;border-top:2px solid var(--grey-lt)">
           <td style="text-align:left">TOTAL</td>
+          <td class="recent-col"><?= $T['r_today'] ?></td>
+          <td class="recent-col"><?= $T['r_2d'] ?></td>
+          <td class="recent-col"><?= $T['r_7d'] ?></td>
           <td><?= $T['assigned'] ?></td>
           <td><?= $T['booked'] ?></td>
           <td><?= $rate($T['booked'],$T['assigned']) ?>%</td>
@@ -747,8 +779,11 @@ include 'includes/header.php';
   </div>
   <p style="font-size:.72rem;color:var(--grey-mid);margin-top:8px">
     Cohort view for <?= $year ?>: <strong>Rate = Booked ÷ Assigned</strong> over requests assigned this year
-    (a lead assigned this year that is now Booked counts, whenever it closed). Click an agent for the weekly breakdown.
+    (a lead assigned this year that is now Booked counts, whenever it closed). Click an agent for the weekly breakdown.<br>
+    <strong>Today / 2 days / 7 days</strong> = requests received in that window counting back from today
+    (<?= date('d M') ?>), whatever year is selected.
   </p>
+  <style>.recent-col{background:#f3f7fb}</style>
 
 <?php elseif ($team_agent !== null): // ---- DRILL-DOWN: single agent ---- ?>
   <?php $k = $team_agent['kpi']; ?>
