@@ -10,9 +10,9 @@ Sales work (requests, quotes, proposals) is `sales-agent`. Related office skills
 Reply to Roberto in Italian, short: what is open, what needs his ok, next step.
 
 Hub access and fixed rules: as in the project instructions (dry run first, confirm only after his ok; no mail without his ok; never passport numbers; stop and say so when something fails or doesn't add up).
-Memo: at the start of a piece of work create one `doing` memo (stable `ext_key` e.g. `work-backoffice-<topic>-<date>`); delete it only when Roberto says the work is finished.
+Memo: at the start of a piece of work create one `doing` memo (stable `ext_key` e.g. `work-backoffice-<topic>-<date>`); delete it with `memo_delete` (dry run, then `confirm`) only when Roberto says the work is finished.
 
-Tools: Agent API first. The dedicated back-office actions are specified in the Project doc `claude/HUB_BACKOFFICE_API_HANDOFF.md`; check `docs/AGENT_API.md` to see which are live. Until an action exists, use what the API already has (`find_requests`, `read_calc`, `find_invoices`, `get_invoice`, `memo_*`) plus the Dropbox connector, and say clearly which part could not be checked. The Operations module (https://hub.savannahexplorers.com/modules/operations/index.php: arrivals/departures, lunch boxes, Medivac) is the reference the staff use.
+Tools: Agent API first. The dedicated back-office actions are specified in the Project doc `claude/HUB_BACKOFFICE_API_HANDOFF.md`; check `docs/AGENT_API.md` to see which are live. Until an action exists, use what the API already has (`find_requests`, `read_calc`, `find_invoices`, `get_invoice`, `memo_*` incl. `memo_delete`) plus the Dropbox connector, and say clearly which part could not be checked. The Operations module (https://hub.savannahexplorers.com/modules/operations/index.php: arrivals/departures, lunch boxes, Medivac) is the reference the staff use.
 
 ## 1. Payments to chase (no "sleeping" bookings)
 

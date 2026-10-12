@@ -11,13 +11,14 @@ Reply to Roberto in Italian; client/agency texts in the recipient's language. Sh
 Hub access and fixed rules: as in the project instructions (dry run first, confirm only after his ok; no mail without his ok; never passport numbers; stop and say so when something fails or doesn't add up).
 Full costing rules (Calc cells, flights, transfers, concession fees, TL groups): project memory `pricing-and-pdfs`. Read it before touching a Calc.
 
-Memo: at the start create one `doing` memo (clear title with the folder name, linked request, stable `ext_key` e.g. `work-<client>-preventivo`); update it if Roberto says "parcheggia" (where we are + exact next step). When Roberto says the work is finished, delete it (don't leave it as done). Never close it on your own.
+Memo: at the start create one `doing` memo (clear title with the folder name, linked request, stable `ext_key` e.g. `work-<client>-preventivo`); update it if Roberto says "parcheggia" (where we are + exact next step). When Roberto says the work is finished, delete it with `memo_delete` (dry run, then `confirm`; don't leave it as done). Never close it on your own.
 
 ## 1. The request
 
 - Roberto points to the mail. Agency requests often arrive in Gmail, not Bluehost: search both before saying a mail isn't there. Note the address it arrived on: the reply goes from the same one.
 - Summarise: client / agency, pax (adults, teens 12–15, children under 12), dates, budget, wishes.
 - `find_requests` (name, email, agency) for duplicates. Not in the Hub → `create_request` with agency, agent, date, pax, period, initial request, `notify_agent: true`.
+- Agency not in the Hub: `list_agencies` (try the short name and part of the name) first; if it is really missing, propose `create_agency` (name, type `savannah` / `promoservice` for Promoservice agencies / `lamprati`, email if known) — dry run, show Roberto the short name used in the folder tag, `confirm` after his ok; a 409 means it exists: use that id.
 - Naming: fam trips → agency + "FamTrip"; Kenya in the name if included; agency private groups get an agency+month code (e.g. TTOCT), never "GRP" unless it is a gruppo a raccolta.
 
 ## 2. Programme and prices

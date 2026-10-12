@@ -10,7 +10,7 @@ Reply to Roberto in Italian, short: what you prepared, what needs his ok, next s
 
 Hub access and fixed rules: as in the project instructions (dry run first, confirm only after his ok; no mail without his ok; never passport numbers; stop and say so when something fails or doesn't add up).
 
-Memo: at the start create one `doing` memo (clear title, linked request/invoice, stable `ext_key` e.g. `work-<client>-fattura`); update it if Roberto says "parcheggia". When Roberto says the work is finished, delete it (don't leave it as done). Never close it on your own.
+Memo: at the start create one `doing` memo (clear title, linked request/invoice, stable `ext_key` e.g. `work-<client>-fattura`); update it if Roberto says "parcheggia". When Roberto says the work is finished, delete it with `memo_delete` (dry run, then `confirm`; don't leave it as done). Never close it on your own.
 
 Reference list for all payments (SE and SH): https://hub.savannahexplorers.com/modules/leads/payments.php
 
@@ -26,6 +26,7 @@ Reference list for all payments (SE and SH): https://hub.savannahexplorers.com/m
 - Promoturismo = Alhambra Viaggi → invoice to ALHAMBRA VIAGGI.
 - Promoservice (Paolo Maresi) is a representative, not invoiced: bill the actual agency.
 - Agencies: pass `agency_id`. Direct clients: bill the client.
+- Agency not in the Hub: `list_agencies` (try the short name and part of the name) first; if it is really missing, propose `create_agency` (name, type `savannah` / `promoservice` for Promoservice agencies / `lamprati`, email if known) — dry run, show Roberto the short name used in the folder tag, `confirm` after his ok; a 409 means it exists: use that id.
 - Some `SE-…` numbers are really Savannah Holidays invoices (switched after creation; the number can't change): don't "fix" them.
 - Old Zoho invoices are `INV-…` (`import_zoho_invoice`).
 - If issuer or bill-to is unclear, ask before preparing.
