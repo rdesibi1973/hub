@@ -181,7 +181,7 @@ include __DIR__ . '/../../includes/layout_header.php';
   <div style="font-size:.85rem;line-height:1.7;">
     <strong><?= h($calc['file']) ?></strong> · sheet <?= h($calc['sheet']) ?><br>
     <?= $fmtD($calc['start_date']) ?> → <?= $fmtD($calc['end_date']) ?> · <?= (int)$calc['nights'] ?> nights ·
-    <?= (int)$calc['pax']['adults'] ?> adults<?= $calc['pax']['teen'] ? ', ' . (int)$calc['pax']['teen'] . ' teen' : '' ?><?= $calc['pax']['child'] ? ', ' . (int)$calc['pax']['child'] . ' children' : '' ?>
+    <?= (int)$calc['pax']['adults'] ?> adults<?= $calc['pax']['teen'] ? ', ' . (int)$calc['pax']['teen'] . ' teen' : '' ?><?= $calc['pax']['child'] ? ', ' . (int)$calc['pax']['child'] . ' child' . ($calc['pax']['child'] > 1 ? 'ren' : '') : '' ?>
     · room: <?= h($calc['room_config'] ?: '—') ?><br>
     <?php $gKnown = array_filter($calc['guests'], function ($g) { return empty($g['tba']); });
           $gTba   = count($calc['guests']) - count($gKnown); ?>
