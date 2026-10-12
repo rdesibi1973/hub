@@ -133,6 +133,14 @@ function calc_read_file(string $path, string $wantSheet = ''): array {
     $priceTotal    = $priceNext('Tot price');
     $sto = calc_rd_find($v, 'sto');       // 'sto' label, amount on its left (cleared once confirmed)
     $priceSto = ($sto && $sto[0] > 'A') ? calc_rd_num($v, calc_rd_col_shift($sto[0], -1), $sto[1]) : null;
+    // Per-person price to customer of a teenager / child: "Teenager price" / "Child price" (I7 / I8),
+    // amount on the left (H7 = F9 − teenager discount, H8 = F9 − child discount).
+    $priceLeft = function (string $label) use ($v) {
+        $at = calc_rd_find($v, $label);
+        return ($at && $at[0] > 'A') ? calc_rd_num($v, calc_rd_col_shift($at[0], -1), $at[1]) : null;
+    };
+    $priceTeen  = $priceLeft('Teenager price');
+    $priceChild = $priceLeft('Child price');
 
     // ── Day table ─────────────────────────────────────────────────────────────
     $hdr = 16;
@@ -281,6 +289,8 @@ function calc_read_file(string $path, string $wantSheet = ''): array {
         'price_to_customer' => $priceCustomer,
         'price_total'       => $priceTotal,
         'price_sto'         => $priceSto,
+        'price_teen'        => $priceTeen,
+        'price_child'       => $priceChild,
         'warnings'          => $warnings,
     ];
 }

@@ -282,6 +282,40 @@ function iti_final_same_kind(array $a, array $b): bool {
     return (bool)array_intersect_key($words($a), $words($b));
 }
 
+/**
+ * Price table of a final programme from the Calc — the price to the customer: per person
+ * for each pax type the Calc has (adult F9, teenager "Teenager price", child "Child price"),
+ * then the total (F10, bold). [] when the Calc has no price to customer.
+ * Rows [{label, price, currency, bold?}] as iti_doc_data() reads price_table_json.
+ */
+function iti_final_price_table(array $calc, string $lang): array {
+    $L = array(
+        'it' => array('Adulto', 'Ragazzo (12–15 anni)', 'Bambino (sotto i 12 anni)', 'Totale pratica', array('adulto', 'adulti'), array('ragazzo', 'ragazzi'), array('bambino', 'bambini')),
+        'en' => array('Adult', 'Teenager (12–15)', 'Child (under 12)', 'Total booking', array('adult', 'adults'), array('teenager', 'teenagers'), array('child', 'children')),
+        'fr' => array('Adulte', 'Adolescent (12–15 ans)', 'Enfant (moins de 12 ans)', 'Prix total', array('adulte', 'adultes'), array('adolescent', 'adolescents'), array('enfant', 'enfants')),
+        'es' => array('Adulto', 'Adolescente (12–15 años)', 'Niño (menor de 12 años)', 'Precio total', array('adulto', 'adultos'), array('adolescente', 'adolescentes'), array('niño', 'niños')),
+        'de' => array('Erwachsener', 'Jugendlicher (12–15 J.)', 'Kind (unter 12 J.)', 'Gesamtpreis', array('Erwachsener', 'Erwachsene'), array('Jugendlicher', 'Jugendliche'), array('Kind', 'Kinder')),
+    );
+    $t = $L[$lang] ?? $L['en'];
+    $adult = $calc['price_to_customer'] ?? null;
+    if ($adult === null || $adult <= 0) return array();
+    $pax = $calc['pax'] ?? array();
+    $rows = array(); $who = array();
+    $add = function ($n, $label, $price, $forms) use (&$rows, &$who) {
+        if ($n <= 0 || $price === null || $price <= 0) return;
+        $rows[] = array('label' => $label, 'price' => round((float)$price), 'currency' => 'USD');
+        $who[]  = $n . ' ' . $forms[$n > 1 ? 1 : 0];
+    };
+    $add((int)($pax['adults'] ?? 0), $t[0], $adult, $t[4]);
+    $add((int)($pax['teen'] ?? 0), $t[1], $calc['price_teen'] ?? null, $t[5]);
+    $add((int)($pax['child'] ?? 0), $t[2], $calc['price_child'] ?? null, $t[6]);
+    if (!empty($calc['price_total']) && $calc['price_total'] > 0) {
+        $rows[] = array('label' => $t[3] . ($who ? ' (' . implode(', ', $who) . ')' : ''), 'price' => round((float)$calc['price_total']),
+                        'currency' => 'USD', 'bold' => true);
+    }
+    return $rows;
+}
+
 /** Text of an added day spent in the same lodge as the night before: a game drive day, or a free day at the beach. */
 function iti_final_stay_text(string $lang, bool $beach): string {
     $t = $beach
@@ -636,6 +670,7 @@ function iti_final_generate(PDO $db, int $requestId, array $calc, int $sampleId,
     $newId = iti_duplicate_program($sampleId, 'personal', (string)($who['username'] ?? 'system'), $titles + array(
         'lead_request_id'  => $requestId,
         'ref_number'       => iti_final_ref_number($db, $requestId, $calc),
+        'price_table_json' => ($pt = iti_final_price_table($calc, $lang)) ? json_encode($pt, JSON_UNESCAPED_UNICODE) : null,
         'stage'            => 'final',
         'start_date'       => $calc['start_date'],
         'duration_days'    => count($calc['days']),

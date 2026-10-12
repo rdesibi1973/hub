@@ -535,6 +535,9 @@ from Excel Calc"):
   Camp in January, with a "Season rule" flag; otherwise the night is flagged "closed in <month>". The lodge suggestion for an unmapped hotel text follows the same rule.
 - **Activities:** a Calc activity of the same kind as one already on the sample day (a common word of 6+ letters, e.g.
   "camminata"; game drives excluded) replaces it instead of being added next to it.
+- **Prices:** the price table is the price to the customer from the Calc, per person for each pax type of the Calc —
+  adult (F9 "Price to customer"), teenager ("Teenager price", H7), child ("Child price", H8) — then the total (F10
+  "Tot price", bold: "Totale pratica (2 adulti, 1 ragazzo, 1 bambino)"), labels in the program language.
 - **Added days** (not in the sample): another night in the same lodge gets no transfer and "Full day game drive" (beach:
   free day). Guest rows "TBA" / "waiting" / "?" are not saved as names. The title drops the sample's season / rate tags
   ("Lug-Set", "Inverno STO Dic2026-Mar2027") and ends with the first named guest of the Calc.
