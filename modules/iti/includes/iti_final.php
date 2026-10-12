@@ -246,6 +246,29 @@ function iti_final_title(string $sampleTitle, string $customer): string {
     return mb_substr($customer !== '' ? $t . ' – ' . $customer : $t, 0, 255);
 }
 
+/** Text of an added day spent in the same lodge as the night before: a game drive day, or a free day at the beach. */
+function iti_final_stay_text(string $lang, bool $beach): string {
+    $t = $beach
+        ? array('it' => 'Giornata libera per relax al mare e attività facoltative.', 'en' => 'Free day to relax on the beach, with optional activities.',
+                'fr' => 'Journée libre pour se détendre à la plage, avec activités facultatives.', 'es' => 'Día libre para relajarse en la playa, con actividades opcionales.',
+                'de' => 'Freier Tag zum Entspannen am Strand, mit optionalen Aktivitäten.')
+        : array('it' => 'Intera giornata di fotosafari.', 'en' => 'Full day game drive.', 'fr' => 'Journée complète de safari photo.',
+                'es' => 'Día completo de safari fotográfico.', 'de' => 'Ganztägige Pirschfahrt.');
+    return $t[$lang] ?? $t['en'];
+}
+
+/**
+ * Client name for the program title: the first guest of the Calc with a name
+ * ("Luca De Sanctis"), else the Hub customer name with its words split
+ * ("LucaDeSanctis" → "Luca De Sanctis").
+ */
+function iti_final_customer_name(array $calc, string $customer): string {
+    foreach ($calc['guests'] ?? array() as $g) {
+        if (empty($g['tba']) && trim((string)$g['name']) !== '') return trim((string)$g['name']);
+    }
+    return trim(preg_replace('/(?<=\p{Ll})(?=\p{Lu})/u', ' ', $customer));
+}
+
 // Two lodges this close count as the same area when aligning the Calc with the sample.
 if (!defined('ITI_FINAL_NEAR_KM')) define('ITI_FINAL_NEAR_KM', 30);
 
@@ -534,7 +557,7 @@ function iti_final_generate(PDO $db, int $requestId, array $calc, int $sampleId,
     // "Pumba Safari – Marco Ciaolo" in every language the sample has a title for.
     $st = $db->prepare('SELECT customer_name FROM requests WHERE id = ?');
     $st->execute(array($requestId));
-    $customer = (string)$st->fetchColumn();
+    $customer = iti_final_customer_name($calc, (string)$st->fetchColumn());
     $titles = array();
     foreach (ITI_LANGUAGES as $l) {
         if (!array_key_exists('title_' . $l, $sample)) continue;
@@ -585,6 +608,12 @@ function iti_final_generate(PDO $db, int $requestId, array $calc, int $sampleId,
             $st->execute(array($destId));
             return trim((string)$st->fetchColumn());
         };
+        $isBeach = function ($destId) use ($db) {
+            if (!$destId) return false;
+            $st = $db->prepare('SELECT is_beach_stay FROM iti_destinations WHERE id = ?');
+            $st->execute(array($destId));
+            return (bool)$st->fetchColumn();
+        };
         $routeName = function ($trId) use ($db) {
             $st = $db->prepare('SELECT fd.name_en AS f, td.name_en AS t, tr.duration_min, tr.distance_km FROM iti_transfer_routes tr
                                   JOIN iti_destinations fd ON fd.id = tr.from_destination
@@ -628,22 +657,25 @@ function iti_final_generate(PDO $db, int $requestId, array $calc, int $sampleId,
                 $vals['meal_all_inclusive'] = $meals[3];
             }
             if ($isNew) {
+                // Another night in the same lodge: no transfer, a full day there (the destination
+                // text is already shown in the day's destination block).
+                $stay = $d['lodge_id'] && $d['lodge_id'] === $prevLodge;
                 if ($d['dest_id']) $vals['destination_id'] = $d['dest_id'];
                 foreach (ITI_LANGUAGES as $l) { $vals['day_title_' . $l] = ''; $vals['narrative_' . $l] = ''; }
                 $vals['day_title_' . $lang] = mb_substr($d['label'], 0, 200);
-                $vals['narrative_' . $lang] = $destDesc($d['dest_id']);
+                $vals['narrative_' . $lang] = $stay ? iti_final_stay_text($lang, $isBeach($d['dest_id'])) : $destDesc($d['dest_id']);
                 $vals['program_id'] = $newId;
                 $vals = array_intersect_key($vals, array_flip($dayCols));
                 $db->prepare('INSERT INTO iti_program_days (`' . implode('`,`', array_keys($vals)) . '`) VALUES ('
                              . implode(',', array_fill(0, count($vals), '?')) . ')')->execute(array_values($vals));
                 $dayId = (int)$db->lastInsertId();
-                // Transfer / flight of an added day, from its route alias.
-                if ($d['route'] && $d['route']['transfer_route_id'] && ($r = $routeName($d['route']['transfer_route_id']))) {
+                // Transfer / flight of an added day, from its route alias (none on a stay day).
+                if (!$stay && $d['route'] && $d['route']['transfer_route_id'] && ($r = $routeName($d['route']['transfer_route_id']))) {
                     $notes = iti_build_transfer_notes($r['f'], $r['t'], (int)$r['duration_min'], $r['distance_km'] !== null ? (int)$r['distance_km'] : 0);
                     $tr = array('description' => $notes[$lang] ?? $notes['en'], 'tr' => $notes);   // all languages at once
                     iti_transfers_replace($db, $dayId, array($tr));
                 }
-                if ($d['route'] && $d['route']['flight_route_id']) {
+                if (!$stay && $d['route'] && $d['route']['flight_route_id']) {
                     $db->prepare('INSERT INTO iti_day_flights (program_day_id, flight_route_id, sort_order) VALUES (?,?,1)')
                        ->execute(array($dayId, $d['route']['flight_route_id']));
                 }
