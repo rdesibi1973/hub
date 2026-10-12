@@ -364,12 +364,14 @@ function ops_match_request(array $reqs, string $text, ?string $date, string $fie
     foreach ($reqs as $r) {
         $dd = ($date && $r[$field]) ? abs((int)round((strtotime($date) - strtotime($r[$field])) / 86400)) : 0;
         if ($dd > $maxDays) continue;
-        $tok = cp_name_tokens((string)$r['customer_name']);
+        // "FabioZanelli_GRP1610": the GRP code is not a name.
+        $tok = cp_name_tokens((string)preg_replace('/_?GRP\d+/i', '', (string)$r['customer_name']));
         $score = $tok ? cp_name_score($tok, $text) : 0;
         $grp = $code !== '' && $code === ops_grp_code($r['folder'] . ' ' . $r['customer_name']);
-        if (!$grp && !($tok && ($score >= min(2, count($tok)) || ($score >= 1 && $dd <= 1)))) continue;
-        if ($grp) $score = max($score, 1);
-        $key = [$dd, -$score];
+        $strong = $grp || ($tok && $score >= min(2, count($tok)));
+        if (!$strong && !($score >= 1 && $dd <= 1)) continue;
+        // A full name (or the GRP code) wins over one name on a closer date.
+        $key = [$strong ? 0 : 1, $dd, -$score];
         if ($bestKey === null || $key < $bestKey) { $best = $r; $bestKey = $key; }
     }
     return $best;
@@ -551,6 +553,10 @@ function ops_lunch_boxes_report(PDO $db, string $from, string $to, bool $withCal
             $lodge = ops_night_before($c, (string)$x['safari_date']);
         }
         if ($req) $byReqDate[$req['id'] . '|' . $x['safari_date']] = true;
+        // A group's lunch box ("Fabio Zanelli GRP1610") covers every member of the group.
+        if (($code = ops_grp_code($x['client_name'] . ' ' . $x['folder_name'] . ' ' . $x['source_file'])) !== '') {
+            foreach ($reqs as $m) if (ops_grp_code($m['folder'] . ' ' . $m['customer_name']) === $code) $byReqDate[$m['id'] . '|' . $x['safari_date']] = true;
+        }
         $rows[] = [
             'id' => (int)$x['id'], 'date' => $x['safari_date'], 'client' => $x['client_name'],
             'request_id' => $req ? (int)$req['id'] : null, 'folder' => $req['folder'] ?? null,
@@ -737,7 +743,10 @@ function ops_flight_tickets_report(PDO $db, string $from, string $to): array {
         $files = [];
         try {
             $token = $token ?? cp_retry(fn() => dropbox_get_access_token());
-            foreach (ops_request_dirs($r) as $dir) {
+            // Where the Calc was found (a GRP member's current folder) and its group folder, else the record's paths.
+            $tdirs = !empty($c['dir']) ? [$c['dir']] : ops_request_dirs($r);
+            if (!empty($c['dir']) && substr_count(trim($c['dir'], '/'), '/') >= 2) $tdirs[] = dirname($c['dir']);
+            foreach (array_unique($tdirs) as $dir) {
                 foreach (cp_retry(fn() => cp_list_files($token, $dir)) as $f) {
                     if (ops_is_ticket_file($f['name'])) $files[] = $f['name'];
                 }
