@@ -147,13 +147,51 @@ function iti_final_geo($row) {
     return (abs($lat) > 0.0001 || abs($lng) > 0.0001) ? array($lat, $lng) : null;
 }
 
-/** A sample's days in order: id, day_number, end_lodge_id, lodge_name, destination_id, latitude, longitude. */
+/**
+ * A sample's days in order: id, day_number, end_lodge_id, lodge_name, destination_id,
+ * latitude, longitude, lodge_text. Samples imported from WeTu often have the lodge
+ * only as text ("Mara Pure Migration (Jul - Oct)"): it is read through the lodge
+ * aliases, else the closest lodge name, so the day still matches the Calc;
+ * 'lodge_text' keeps that text (null when the lodge is linked).
+ */
 function iti_final_sample_days(PDO $db, int $sampleId): array {
-    $st = $db->prepare('SELECT d.id, d.day_number, d.end_lodge_id, l.name AS lodge_name, l.destination_id, l.latitude, l.longitude
+    $st = $db->prepare('SELECT d.id, d.day_number, d.end_lodge_id, d.end_lodge_custom, l.name AS lodge_name, l.destination_id, l.latitude, l.longitude
                           FROM iti_program_days d LEFT JOIN iti_lodges l ON l.id = d.end_lodge_id
                          WHERE d.program_id = ? ORDER BY d.day_number');
     $st->execute(array($sampleId));
-    return $st->fetchAll(PDO::FETCH_ASSOC);
+    $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+    foreach ($rows as $k => $r) {
+        $rows[$k]['lodge_text'] = null;
+        $txt = trim((string)$r['end_lodge_custom']);
+        if ($r['end_lodge_id'] || $txt === '') continue;
+        $id = iti_final_lodge_from_text($txt);
+        if ($id && ($li = iti_final_lodge_info($db, $id))) {
+            $rows[$k]['end_lodge_id'] = $id;
+            $rows[$k]['lodge_name'] = $li['name'];
+            $rows[$k]['destination_id'] = $li['destination_id'];
+            $rows[$k]['latitude'] = $li['latitude'];
+            $rows[$k]['longitude'] = $li['longitude'];
+            $rows[$k]['lodge_text'] = $txt;
+        }
+    }
+    return $rows;
+}
+
+/** Lodge id for a free lodge text of a sample: its alias, else the closest name (without "(…)"), else 0. */
+function iti_final_lodge_from_text(string $txt): int {
+    static $names = null, $cache = array();
+    if (isset($cache[$txt])) return $cache[$txt];
+    list($base) = iti_alias_split_meal($txt);
+    foreach (array($txt, $base) as $t) {
+        $a = iti_alias_lookup('lodge', $t);
+        if ($a && $a['lodge_id']) return $cache[$txt] = (int)$a['lodge_id'];
+    }
+    if ($names === null) {
+        $names = array();
+        foreach (iti_get_lodges() as $l) $names[(int)$l['id']] = $l['name'];
+    }
+    $id = iti_alias_suggest(trim(preg_replace('/\([^)]*\)/', ' ', $base)), $names);
+    return $cache[$txt] = $id ? (int)$id : 0;
 }
 
 /**
@@ -463,6 +501,12 @@ function iti_final_plan(PDO $db, array $calc, int $sampleId): array {
     foreach ($unmapped['route'] as $t) $blocking[] = 'Route "' . $t . '" (a day not in the sample) has no route alias.';
 
     $flags = array();
+    foreach ($sampleDays as $s) {
+        if ($s['lodge_text'] !== null) {
+            $flags[] = 'Sample day ' . (int)$s['day_number'] . ' has the lodge only as text “' . $s['lodge_text'] . '” — read as '
+                     . $s['lodge_name'] . '. Link the lodge in the sample to make it certain.';
+        }
+    }
     if ($unmapped['lodge'] && $sampleId) $flags[] = 'Map the hotels first: which days match the sample (and which routes are needed) depends on them.';
     if (!empty($calc['guests_tba'])) $flags[] = 'Some guest names are not known yet (TBA / waiting) — only the known names go into the program; add the others later.';
     if ($sampleId && count($sampleDays) !== count($days)) {
