@@ -22,6 +22,7 @@ require_once __DIR__ . '/../../includes/timezone.php';
 define('DB_FAIL_JSON', true);
 require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/includes/booking_service.php';
+require_once __DIR__ . '/includes/agency_service.php';   // create_agency (shared with Agencies → Add)
 require_once __DIR__ . '/includes/folder_service.php';   // rename_folder (shared with BackOffice "Rename…")
 require_once __DIR__ . '/includes/group_import_service.php';   // import_group_folder / move_group_folder (shared with import_folder.php)
 require_once __DIR__ . '/includes/postpone_lib.php';   // booking_cc_agent_email()
@@ -94,7 +95,7 @@ function agent_audit(PDO $db, string $action, $reqId, array $payload, string $re
                               'iti_create_lodge', 'iti_set_days', 'iti_add_day', 'iti_delete_day', 'iti_update_inclusions',
                               'iti_create_flight_route', 'iti_create_activity', 'iti_create_transfer_route', 'iti_save_as_sample',
                               'create_request', 'add_flight_rates', 'timeline_update', 'summary_set', 'rename_folder',
-                              'set_request_status', 'update_request', 'import_group_folder', 'move_group_folder', 'ck_request_check', 'memo_delete'], true) && empty($payload['confirm']);
+                              'set_request_status', 'update_request', 'import_group_folder', 'move_group_folder', 'ck_request_check', 'memo_delete', 'create_agency'], true) && empty($payload['confirm']);
     // Mail: keep who/what in the log, not message bodies or attachment content.
     if (in_array($action, ['mail_get', 'mail_attachment', 'iti_document', 'iti_vouchers'], true) && $code === 200) {
         $res = json_decode($resultJson, true);
@@ -678,6 +679,33 @@ try {
             $out[] = ['id' => (int)$a['id'], 'name' => $a['nome'], 'short_name' => $a['short_name'], 'type' => $a['type']];
         }
         agent_out(['ok' => true, 'agencies' => $out]);
+    }
+
+    // ── create_agency ────────────────────────────────────────────────────────
+    // Same as Agencies → Add (agency_create() in includes/agency_service.php).
+    // Dry-run unless "confirm": true; an existing name / short name → 409.
+    case 'create_agency': {
+        agent_require_method('POST');
+        $f = ['nome' => $in['name'] ?? $in['nome'] ?? '', 'short_name' => $in['short_name'] ?? '',
+              'type' => $in['type'] ?? 'savannah', 'address' => $in['address'] ?? '', 'email' => $in['email'] ?? ''];
+        if (!array_key_exists(trim((string)$f['type']), agency_types())) {
+            agent_fail('type must be one of: ' . implode(', ', array_keys(agency_types())));
+        }
+        $res = agency_create($db, $f, empty($in['confirm']));
+        if (!$res['ok']) {
+            $dups = [];
+            foreach ($res['duplicates'] as $d) $dups[] = ['id' => $d['id'], 'name' => $d['nome'], 'short_name' => $d['short_name'], 'type' => $d['type']];
+            agent_fail($res['error'], ['duplicate' => 409, 'db' => 500][$res['error_code']] ?? 400,
+                       ['error_code' => $res['error_code'], 'existing' => $dups]);
+        }
+        $a   = $res['agency'];
+        $out = ['id' => $a['id'] ?? null, 'name' => $a['nome'], 'short_name' => $a['short_name'], 'type' => $a['type'],
+                'address' => $a['address'], 'email' => $a['email']];
+        if (empty($in['confirm'])) {
+            agent_out(['ok' => true, 'dry_run' => true, 'agency' => $out,
+                       'message' => 'Dry run — nothing created. Folder tag will be (' . $a['short_name'] . '-<Agent>). Resend with "confirm": true.']);
+        }
+        agent_out(['ok' => true, 'created' => true, 'agency' => $out]);
     }
 
     // ── create_request ───────────────────────────────────────────────────────
@@ -2548,7 +2576,7 @@ try {
 
     default:
         agent_fail('Unknown action "' . $agentAction . '"', 400, ['actions' => [
-            'find_requests', 'list_agencies', 'create_request', 'update_request', 'import_group_folder', 'move_group_folder', 'list_standard_programs',
+            'find_requests', 'list_agencies', 'create_agency', 'create_request', 'update_request', 'import_group_folder', 'move_group_folder', 'list_standard_programs',
             'copy_program', 'get_rates', 'fill_calc', 'read_calc', 'confirm_preview', 'confirm_booking', 'send_booking_email',
             'rollback_booking', 'iti_programs', 'iti_texts', 'iti_save_texts', 'update_rate', 'replace_flight_rates',
             'iti_lodges', 'iti_lodge', 'iti_destinations', 'iti_destination', 'iti_lodge_photos', 'iti_destination_photo',

@@ -31,7 +31,7 @@ without driving the web UI.
 | HTTPS only | Plain HTTP → 403. |
 | Rate limit | 60 calls/min → 429. |
 | Audit | Every call (including failures and dry-runs) → `agent_audit_log` (action, request_id, user, HTTP code, dry_run, payload, result, IP). |
-| Dry-run by default | `update_request`, `confirm_booking`, `send_booking_email`, `rollback_booking`, `rename_folder`, `import_group_folder`, `move_group_folder`, `set_request_status`, `cancel_invoice_payment`, `update_folder_status`, `import_zoho_invoice`, `create_invoice`, `update_invoice`, `memo_delete`, `mail_send`, `mail_move` and `ck_request_check` (among others) do nothing unless the body has `"confirm": true`. |
+| Dry-run by default | `update_request`, `confirm_booking`, `send_booking_email`, `rollback_booking`, `rename_folder`, `import_group_folder`, `move_group_folder`, `set_request_status`, `cancel_invoice_payment`, `update_folder_status`, `import_zoho_invoice`, `create_invoice`, `update_invoice`, `memo_delete`, `create_agency`, `mail_send`, `mail_move` and `ck_request_check` (among others) do nothing unless the body has `"confirm": true`. |
 | No deletes | No delete endpoint (mail included), except `memo_delete`, which is soft (`deleted_at`, the row stays). Undo a confirm with `rollback_booking` (or BackOffice → Rollback). |
 | Mailbox | The key also reads `info@` (`mail_*`): keep `api.txt` as private as the mailbox password. |
 
@@ -70,6 +70,22 @@ curl -sH "$H" "$U?action=find_requests&status=Quoted,Hot-Quoted&agent=rdesibi&ch
 
 ### `list_agencies` (GET)
 `q` → `[{id, name, short_name, type}]`.
+
+### `create_agency` (POST)
+Adds an agency, same as Agencies → Add in the Hub (`agency_create()` in `includes/agency_service.php`, also used by
+the ➕ Add Agency button and the Java BackOffice). **Dry-run unless `"confirm": true`.**
+`name`*, `short_name` (default: the name in CamelCase, "eko spostamenti" → `EkoSpostamenti`), `type`
+(`savannah` default | `promoservice` → short name ends `-PS` | `lamprati` → `-LAM`), `address`, `email`.
+The short name is the agency part of folder tags `(Short-Agent)`: no spaces, brackets or `/ \ : * ? " < > |` (400).
+An agency whose name or short name already exists, ignoring case, spaces and punctuation
+(`EKO-spostamenti` = `Eko Spostamenti`), → **409** with `existing[]` — use that id. Run `list_agencies` first.
+→ `{dry_run: true, agency: {name, short_name, type, address, email}}`; with `confirm` → `{created: true, agency: {id, …}}`.
+Then `create_request` / `update_request` with `agency_id`.
+
+```bash
+curl -sA "$UA" -H "$H" -X POST "$U?action=create_agency" -d '{"name":"Viaggi del Mappamondo","email":"info@example.it"}'                  # dry run
+curl -sA "$UA" -H "$H" -X POST "$U?action=create_agency" -d '{"name":"Viaggi del Mappamondo","email":"info@example.it","confirm":true}'
+```
 
 ### `create_request` (POST)
 **Dry-run unless `"confirm": true`** (since Oct 2026): the dry run checks the fields and the duplicates and returns

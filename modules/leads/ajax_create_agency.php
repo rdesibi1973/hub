@@ -9,8 +9,10 @@
  *
  * POST (form-urlencoded): nome, short_name (optional), type (savannah|promoservice|lamprati)
  * Returns JSON: { success, id, nome, short_name }  (on duplicate: success=false + the existing id)
+ * Logic: agency_create() in includes/agency_service.php.
  */
 require_once 'config.php';
+require_once __DIR__ . '/includes/agency_service.php';
 header('Content-Type: application/json');
 requireLogin();
 
@@ -20,59 +22,23 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     exit;
 }
 
-$nome  = trim($_POST['nome']       ?? '');
-$short = trim($_POST['short_name'] ?? '');
-$type  = $_POST['type']            ?? 'savannah';
-
-if ($nome === '') {
-    http_response_code(400);
-    echo json_encode(['success' => false, 'message' => 'Agency name is required.']);
-    exit;
-}
-if (!in_array($type, ['savannah', 'promoservice', 'lamprati'], true)) {
-    $type = 'savannah';
-}
-
-// Short code: auto-generate from the name when blank, then apply the type suffix
-// (stripping any existing one first so we never double it).
-if ($short === '') {
-    $short = preg_replace_callback('/(?:^|\s+|-)(\S)/', fn($m) => strtoupper($m[1]), strtolower($nome));
-    $short = preg_replace('/[\s-]+/', '', $short);
-}
-$short = preg_replace('/-PS$|-LAM$/', '', $short);
-if     ($type === 'promoservice') $short .= '-PS';
-elseif ($type === 'lamprati')     $short .= '-LAM';
-
-try {
-    $db = db();
-
-    // Duplicate name → hand back the existing row so the caller can select it.
-    $chk = $db->prepare('SELECT id, nome, short_name FROM agencies WHERE LOWER(nome) = LOWER(?) LIMIT 1');
-    $chk->execute([$nome]);
-    if ($row = $chk->fetch(PDO::FETCH_ASSOC)) {
-        http_response_code(409);
-        echo json_encode([
-            'success'    => false,
-            'message'    => 'Agency "' . $nome . '" already exists — selected it.',
-            'id'         => (int)$row['id'],
-            'nome'       => $row['nome'],
-            'short_name' => $row['short_name'] ?: $row['nome'],
-        ]);
-        exit;
-    }
-
-    $db->prepare('INSERT INTO agencies (nome, short_name, type, attiva) VALUES (?, ?, ?, 1)')
-       ->execute([$nome, $short, $type]);
-    $newId = (int)$db->lastInsertId();
-
+$res = agency_create(db(), ['nome' => $_POST['nome'] ?? '', 'short_name' => $_POST['short_name'] ?? '',
+                            'type' => $_POST['type'] ?? 'savannah']);
+if ($res['ok']) {
+    echo json_encode(['success' => true, 'id' => $res['agency']['id'],
+                      'nome' => $res['agency']['nome'], 'short_name' => $res['agency']['short_name']]);
+} elseif ($res['error_code'] === 'duplicate') {
+    // Duplicate → hand back the existing row so the caller can select it.
+    $row = $res['duplicates'][0];
+    http_response_code(409);
     echo json_encode([
-        'success'    => true,
-        'id'         => $newId,
-        'nome'       => $nome,
-        'short_name' => $short,
+        'success'    => false,
+        'message'    => 'Agency "' . $row['nome'] . '" already exists — selected it.',
+        'id'         => $row['id'],
+        'nome'       => $row['nome'],
+        'short_name' => $row['short_name'] ?: $row['nome'],
     ]);
-
-} catch (PDOException $e) {
-    http_response_code(500);
-    echo json_encode(['success' => false, 'message' => 'Database error while adding the agency.']);
+} else {
+    http_response_code($res['error_code'] === 'db' ? 500 : 400);
+    echo json_encode(['success' => false, 'message' => $res['error']]);
 }

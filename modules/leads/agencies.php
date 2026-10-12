@@ -1,5 +1,6 @@
 <?php
 require_once 'config.php';
+require_once __DIR__ . '/includes/agency_service.php';
 $pageTitle = 'Agencies';
 $db = db();
 requireLogin();
@@ -18,43 +19,13 @@ function wa_number($phone) {
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? '';
 
-    // ADD
+    // ADD — agency_create() in includes/agency_service.php
     if ($action === 'add') {
-        $nome  = trim($_POST['nome']       ?? '');
-        $short = trim($_POST['short_name'] ?? '');
-        $type  = $_POST['type']            ?? 'savannah'; 
-        $attiva = 1;
-
-        if ($nome === '') {
-            $errors[] = 'Agency name is required.';
-        } else {
-            // 1. Se lo short è vuoto, lo generiamo dal nome[cite: 2]
-            if ($short === '') {
-                $short = preg_replace_callback(
-                    '/(?:^|\s+|-)(\S)/',
-                    fn($m) => strtoupper($m[1]),
-                    strtolower($nome)
-                );
-                $short = preg_replace('/[\s-]+/', '', $short);
-            }
-
-            // 2. Applichiamo il suffisso scelto dal radio button[cite: 2]
-            if ($type === 'promoservice') {
-                $short .= '-PS';
-            } elseif ($type === 'lamprati') {
-                $short .= '-LAM';
-            }
-
-            try {
-                $address = trim($_POST['address'] ?? '');
-                $email   = trim($_POST['email'] ?? '');
-                $db->prepare('INSERT INTO agencies (nome, short_name, type, attiva, address, email) VALUES (?, ?, ?, ?, ?, ?)')
-                   ->execute([$nome, $short, $type, $attiva, $address ?: null, $email ?: null]);
-                $success = "Agency \"$nome\" added.";
-            } catch (PDOException $e) {
-                $errors[] = 'Duplicate name or database error.';
-            }
-        }
+        $res = agency_create($db, ['nome' => $_POST['nome'] ?? '', 'short_name' => $_POST['short_name'] ?? '',
+                                   'type' => $_POST['type'] ?? 'savannah', 'address' => $_POST['address'] ?? '',
+                                   'email' => $_POST['email'] ?? '']);
+        if ($res['ok']) $success = 'Agency "' . $res['agency']['nome'] . '" added.';
+        else            $errors[] = $res['error'];
     }
 
     // EDIT
