@@ -41,6 +41,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit) {
     foreach (ITI_LANGS as $lang) {
         $fields["description_{$lang}"] = trim($_POST["description_{$lang}"] ?? '');
     }
+    // Migration camp open months ("12,1,2,3"); none ticked = by area.
+    $seasonMonths = array_values(array_unique(array_filter(array_map('intval', (array)($_POST['season_months'] ?? [])),
+                                                            fn($m) => $m >= 1 && $m <= 12)));
+    $seasonMonths = $seasonMonths ? implode(',', $seasonMonths) : null;
 
     if ($fields['name'] === '' || !$fields['destination_id']) {
         iti_flash_set('error', 'Name and Destination are required.');
@@ -74,7 +78,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit) {
             $fields['website'], $fields['latitude'], $fields['longitude'],
             $fields['phone'], $fields['email'], $fields['address'], $fields['emergency_phone'], $fields['is_active'], $fields['photos'],
         ]);
-        iti_set_season_twin((int)$db->lastInsertId(), (int)($_POST['season_twin_id'] ?? 0));
+        $newLodge = (int)$db->lastInsertId();
+        iti_set_season_twin($newLodge, (int)($_POST['season_twin_id'] ?? 0));
+        $db->prepare('UPDATE iti_lodges SET season_months = ? WHERE id = ?')->execute([$seasonMonths, $newLodge]);
         iti_flash_set($photo_errors ? 'error' : 'success', '"' . $fields['name'] . '" created.' . ($photo_errors ? ' Photos: ' . implode(' ', $photo_errors) : ''));
         iti_redirect('lodges.php');
 
@@ -92,6 +98,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit) {
             $fields['phone'], $fields['email'], $fields['address'], $fields['emergency_phone'], $fields['is_active'], $fields['photos'], $id,
         ]);
         iti_set_season_twin($id, (int)($_POST['season_twin_id'] ?? 0));
+        $db->prepare('UPDATE iti_lodges SET season_months = ? WHERE id = ?')->execute([$seasonMonths, $id]);
         if ($photo_errors) {
             iti_flash_set('error', 'Lodge saved, but some photos were not: ' . implode(' ', $photo_errors));
             iti_redirect("lodges.php?action=edit&id={$id}");
@@ -200,6 +207,16 @@ include __DIR__ . '/../../includes/layout_header.php';
         <?= iti_options($twinOpts, ($row['season_twin_id'] ?? null) ?: null, '— none (not a migration camp, or one camp that moves itself) —') ?>
       </select>
       <div style="font-size:.75rem;color:var(--grey-mid);margin-top:3px;">The program from Calc picks the camp of the right area from the night's date. Set it on one camp, the other is updated too. Migration camps are of type Mobile Camp.</div>
+    </div>
+    <div class="form-group full">
+      <label>Open months <span style="font-weight:400;text-transform:none;color:var(--grey-mid)">migration camps — none ticked = by area: north Jun–Oct, Ndutu Dec–Mar, a camp that moves itself all but Apr, May, Nov</span></label>
+      <?php $openM = array_map('intval', array_filter(explode(',', (string)($row['season_months'] ?? '')))); ?>
+      <div style="display:flex;flex-wrap:wrap;gap:4px 14px;">
+        <?php foreach ([1=>'Jan',2=>'Feb',3=>'Mar',4=>'Apr',5=>'May',6=>'Jun',7=>'Jul',8=>'Aug',9=>'Sep',10=>'Oct',11=>'Nov',12=>'Dec'] as $mn => $ml): ?>
+          <label style="margin:0;text-transform:none;font-size:.85rem;font-weight:400;cursor:pointer;">
+            <input type="checkbox" name="season_months[]" value="<?= $mn ?>" <?= in_array($mn, $openM, true) ? 'checked' : '' ?>> <?= $ml ?></label>
+        <?php endforeach; ?>
+      </div>
     </div>
   </div>
 
@@ -370,6 +387,9 @@ include __DIR__ . '/../../includes/layout_header.php';
         <td style="font-size:.82rem;color:var(--grey-dk);"><?= ITI_LODGE_TYPES[$l['lodge_type']] ?? h($l['lodge_type']) ?>
           <?php if (!empty($l['season_twin_id']) && isset($lodgeNames[$l['season_twin_id']])): ?>
             <div style="font-size:.7rem;color:var(--grey-mid);" title="Same camp in the other season">⇄ <?= h($lodgeNames[$l['season_twin_id']]) ?></div>
+          <?php endif; ?>
+          <?php if (!empty($l['season_months'])): ?>
+            <div style="font-size:.7rem;color:var(--grey-mid);" title="Open months">open: <?= h(implode(' ', array_map(fn($m) => date('M', mktime(0, 0, 0, (int)$m, 1)), explode(',', $l['season_months'])))) ?></div>
           <?php endif; ?></td>
         <td><span class="badge <?= $l['is_active']?'status-booked':'status-cancelled' ?>"><?= $l['is_active']?'Active':'Inactive' ?></span></td>
         <td>

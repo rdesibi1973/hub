@@ -317,26 +317,18 @@ function iti_final_meals(?string $basis): ?array {
 /*
  * Migration camps follow the herds: in the north (Mara River / Kogatende) from June
  * to October, at Ndutu from December to March; in April, May and November they are
- * closed while they move. A Calc text like "Pure Migration" or "Bush Camp" is mapped
- * once to one of the camps; the night's month then picks the camp of the right area.
+ * closed while they move — by default; a camp's own open months (iti_lodges.season_months,
+ * set on the lodge page) win: Untamed also opens in the central Serengeti (Apr–Jun, Nov).
+ * A Calc text like "Pure Migration" or "Bush Camp" is mapped once to one of the camps;
+ * the night's month then picks the camp that is open: the camp itself, else its twin.
  * Camps = active lodges of type Mobile Camp, or with a season twin (iti_lodges.
  * season_twin_id, set on the lodge page: the same camp in the other area, e.g.
- * Tanzania Bush Camps Ndutu Mobile ↔ Mara River). Area: "Ndutu" in the name or
- * destination → south; Mara / Kogatende / North → north; else the opposite of the
- * twin's. A camp without a twin moves itself (Ubuntu, Untamed): kept, only warned
- * when closed.
+ * Tanzania Bush Camps Ndutu Mobile ↔ Mara River). Area (for the default months):
+ * "Ndutu" in the name or destination → south; Mara / Kogatende / North → north; else
+ * the opposite of the twin's; else none (one camp that moves itself: Ubuntu, Untamed).
  * Without a twin set, two mobile camps whose names match without the area words
  * are twins ("Ndutu Pure Migration Camp" ~ "Mara Pure Migration Camp").
  */
-
-/** 'north' (Jun–Oct), 'south' (Dec–Mar) or null (Apr, May, Nov: camps closed) for a Y-m-d date. */
-function iti_final_migration_area(?string $ymd): ?string {
-    if (!$ymd) return null;
-    $m = (int)date('n', strtotime($ymd));
-    if ($m >= 6 && $m <= 10) return 'north';
-    if ($m === 12 || $m <= 3) return 'south';
-    return null;
-}
 
 /** Migration camps: lodge id => ['name', 'area' => 'north'|'south'|'', 'twin' => lodge id or 0]. */
 function iti_final_migration_camps(): array {
@@ -374,48 +366,61 @@ function iti_final_migration_camps(): array {
             $ta = $areaOf($lodges[$twinOf[$id]]);
             $area = $ta === 'south' ? 'north' : ($ta === 'north' ? 'south' : '');
         }
-        $camps[$id] = array('name' => $l['name'], 'area' => $area, 'twin' => $twinOf[$id] ?? 0);
+        $camps[$id] = array('name' => $l['name'], 'area' => $area, 'twin' => $twinOf[$id] ?? 0,
+                            'months' => iti_final_open_months($l['season_months'] ?? null, $area));
     }
     return $camps;
 }
 
 /**
+ * Months a migration camp is open: iti_lodges.season_months ("12,1,2,3", set on the lodge
+ * page — e.g. Untamed, which also opens in the central Serengeti April–June and November:
+ * all year), else by area: north Jun–Oct, Ndutu Dec–Mar, a camp that moves itself all but
+ * April, May and November.
+ */
+function iti_final_open_months($stored, string $area): array {
+    $m = array_values(array_unique(array_filter(array_map('intval', explode(',', (string)$stored)),
+                                                function ($x) { return $x >= 1 && $x <= 12; })));
+    if ($m) return $m;
+    if ($area === 'north') return array(6, 7, 8, 9, 10);
+    if ($area === 'south') return array(12, 1, 2, 3);
+    return array(1, 2, 3, 6, 7, 8, 9, 10, 12);
+}
+
+/**
  * The lodge to use for a night given the season: ['id' => lodge id, 'note' => ?string].
- * A migration camp of the wrong area is swapped for the same camp in the right one;
- * 'note' explains the swap, or warns when the camp is closed / has no twin.
+ * A migration camp closed that month is swapped for its season twin when the twin is
+ * open; 'note' explains the swap, or warns when the camp is closed.
  */
 function iti_final_season_lodge(int $lodgeId, ?string $ymd): array {
     $camps = iti_final_migration_camps();
     if (!isset($camps[$lodgeId]) || !$ymd) return array('id' => $lodgeId, 'note' => null);
-    $c     = $camps[$lodgeId];
+    $c = $camps[$lodgeId];
+    $m = (int)date('n', strtotime($ymd));
     $month = date('F', strtotime($ymd));
-    $want  = iti_final_migration_area($ymd);
-    $where = array('north' => 'in the north (Mara / Kogatende)', 'south' => 'at Ndutu');
-    if ($want === null) {
-        return array('id' => $lodgeId, 'note' => $c['name'] . ': migration camps are closed in ' . $month
-                     . ' (moving between Ndutu and the north) — check the lodge.');
+    if (in_array($m, $c['months'], true)) return array('id' => $lodgeId, 'note' => null);
+    $t = $c['twin'] && isset($camps[$c['twin']]) ? $camps[$c['twin']] : null;
+    if ($t && in_array($m, $t['months'], true)) {
+        return array('id' => $c['twin'], 'note' => 'Season rule: in ' . $month . ' ' . $c['name'] . ' is closed → '
+                     . $t['name'] . ' (the Calc text is mapped to ' . $c['name'] . ').');
     }
-    // No twin (Ubuntu, Untamed: one camp that moves itself) or already the right area: kept.
-    if (!$c['twin'] || $c['area'] === '' || $want === $c['area']) return array('id' => $lodgeId, 'note' => null);
-    if (isset($camps[$c['twin']]) && $camps[$c['twin']]['area'] === $want) {
-        return array('id' => $c['twin'], 'note' => 'Season rule: in ' . $month . ' the migration camps are ' . $where[$want]
-                     . ' → ' . $camps[$c['twin']]['name'] . ' (the Calc text is mapped to ' . $c['name'] . ').');
-    }
-    return array('id' => $lodgeId, 'note' => $c['name'] . ': in ' . $month . ' the migration camps are ' . $where[$want]
-                 . ', but its season twin is not there — check the two camps in ITI → Lodges.');
+    return array('id' => $lodgeId, 'note' => $c['name'] . ' is closed in ' . $month
+                 . ($t ? ', and so is its season twin ' . $t['name'] : '') . ' — check the lodge (open months: ITI → Lodges).');
 }
 
 /**
  * Lodge to preselect when mapping a Calc hotel text: iti_alias_suggest() over the
- * lodges, leaving out the migration camps of the wrong area for the night's date
- * ("Pure Migration" in July → Mara Pure Migration Camp, not the Ndutu one).
+ * lodges, leaving out the migration camps closed in the night's month whose twin is
+ * open ("Pure Migration" in July → Mara Pure Migration Camp, not the Ndutu one).
  * $names = [lodge id => name]. Returns the id or null.
  */
 function iti_final_suggest_lodge(string $text, array $names, ?string $ymd) {
-    $want = iti_final_migration_area($ymd);
-    if ($want !== null) {
-        foreach (iti_final_migration_camps() as $id => $c) {
-            if ($c['twin'] && $c['area'] !== '' && $c['area'] !== $want) unset($names[$id]);
+    if ($ymd) {
+        $m = (int)date('n', strtotime($ymd));
+        $camps = iti_final_migration_camps();
+        foreach ($camps as $id => $c) {
+            if (!in_array($m, $c['months'], true) && $c['twin'] && isset($camps[$c['twin']])
+                && in_array($m, $camps[$c['twin']]['months'], true)) unset($names[$id]);
         }
     }
     return iti_alias_suggest($text, $names);

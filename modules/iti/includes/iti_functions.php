@@ -1072,6 +1072,8 @@ function iti_ensure_doc_columns(): void {
         }
         // Migration camps: the same camp in the other season's area (Ndutu ↔ north), see iti_final_season_lodge().
         if (iti_add_column('iti_lodges', 'season_twin_id', 'INT NULL DEFAULT NULL')) iti_seed_season_twins();
+        // Open months of a migration camp, "12,1,2,3" (NULL = by area, see iti_final_open_months()).
+        iti_add_column('iti_lodges', 'season_months', 'VARCHAR(40) NULL DEFAULT NULL');
         // ref_number = the programme Word's name ("01_LucaDeSanctis(LasciatiViaggiare-Daniela)_SafariGrandeMigrazioneEstate",
         // 72 characters): 60 was too short.
         $c = db()->query("SHOW COLUMNS FROM iti_programs LIKE 'ref_number'")->fetch(PDO::FETCH_ASSOC);

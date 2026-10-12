@@ -31,7 +31,7 @@ without driving the web UI.
 | HTTPS only | Plain HTTP → 403. |
 | Rate limit | 60 calls/min → 429. |
 | Audit | Every call (including failures and dry-runs) → `agent_audit_log` (action, request_id, user, HTTP code, dry_run, payload, result, IP). |
-| Dry-run by default | `update_request`, `confirm_booking`, `send_booking_email`, `rollback_booking`, `rename_folder`, `import_group_folder`, `move_group_folder`, `cancel_invoice_payment`, `update_folder_status`, `import_zoho_invoice`, `create_invoice`, `update_invoice`, `mail_send` and `mail_move` (among others) do nothing unless the body has `"confirm": true`. |
+| Dry-run by default | `update_request`, `confirm_booking`, `send_booking_email`, `rollback_booking`, `rename_folder`, `import_group_folder`, `move_group_folder`, `set_request_status`, `cancel_invoice_payment`, `update_folder_status`, `import_zoho_invoice`, `create_invoice`, `update_invoice`, `mail_send` and `mail_move` (among others) do nothing unless the body has `"confirm": true`. |
 | No deletes | No delete endpoint (mail included). Undo a confirm with `rollback_booking` (or BackOffice → Rollback). |
 | Mailbox | The key also reads `info@` (`mail_*`): keep `api.txt` as private as the mailbox password. |
 
@@ -54,7 +54,8 @@ text): an outage, not a bad call — wait and retry, don't change the request.
 ### `find_requests` (GET)
 Filters (at least one): `q` (name / folder / email substring), `status` (one value or several
 comma-separated, e.g. `Quoted,Hot-Quoted`), `agent` (agent id, agent name, or Hub username such as
-`rdesibi`), `channel` (`agency`|`direct`|`sb`|`other`), `year` (received). `limit` ≤ 100.
+`rdesibi`; two agents are called Roberto: 14 = Roberto De Sibi, the other is Roberto Capri — prefer the id
+or the username), `channel` (`agency`|`direct`|`sb`|`other`), `year` (received). `limit` ≤ 100.
 Use it as the duplicate check before `create_request`.
 
 Each row also has `channel`, `agency_id`, `agency_name`, `last_activity_at` (latest timeline event,
@@ -120,24 +121,29 @@ curl -sA "$UA" -H "$H" -X POST "$U?action=update_request" -d '{"request_id":2923
 - `request_id` **or** `request_ids` (array, max 50)
 - `status`: `Inquiry` | `Quoted` | `Hot-Quoted` | `Lost` | `Cancelled`
 - `lost_reason` — **required for Lost**: `insufficient_budget` | `trip_postponed` | `no_more_replies` |
-  `agent_request` | `other`; `lost_note` optional. Reason / note are kept only on Lost and cleared
-  when a request leaves Lost; Lost also adds a request note.
+  `agent_request` | `other` (same list as the "Mark as Lost" modal: `includes/lost_reasons.php`);
+  `lost_note` optional. Lost writes `lost_reason` / `lost_note` and adds a request note
+  "Marked Lost — <reason>: <note>".
 
 Rules:
 - `Booked` → **409**: bookings go through `confirm_booking` (folder + DB together).
-- A request that is **Booked now** can only go to `Cancelled` (trip cancelled; the folder is not
-  moved). Any other status → **409** — use `rollback_booking` to reopen it.
-- All or nothing: every id is checked first; if one is unknown (404) or not allowed (409/400),
-  nothing changes and `errors` lists them per id.
-- A real change logs a `status_change` event in the request timeline (author: the API user).
-  Ids already in that status are reported as `changed: false` and left alone.
+- A request that is **Booked now** is not changed here (any status) → **409**: use `rollback_booking` / BackOffice.
+- **Reopen** (Lost → `Inquiry` / `Quoted` / `Hot-Quoted`): as in the Hub status menu, `lost_reason` and `lost_note`
+  are **cleared**; the "Marked Lost" request note and the `status_change` timeline event stay as history.
+- A real change logs a `status_change` event in the request timeline (author: `claude_agent`).
+  A request already in that status is left alone and reported `unchanged: true`.
+- Each request is handled on its own (a failure does not stop the others). All ok → 200; some failed → **422**;
+  a single id that fails → its own code (404 not found, 409 Booked, 400 bad input).
 
-Dry run → `{dry_run: true, to_change, unchanged, requests: [{request_id, old_status, new_status, changed}]}`;
-with `confirm` → `{changed, unchanged, requests}`.
+Response: `{ok, dry_run, status, to_change|changed, unchanged, failed, results, reopen_rule}`; each result is
+`{id, ok, customer_name, folder, current_status, new_status, lost_reason}` plus `unchanged: true`, or
+`error_code` + `error`, or `effects` (dry run) / `done` (confirm) — the list of writes — and, on a reopen,
+`reopen: "Lost → Quoted"`, `lost_reason_removed`, `lost_note_removed`.
 
 ```bash
-curl -sH "$H" -X POST "$U?action=set_request_status" -d '{"request_ids":[2410,2411],"status":"Lost","lost_reason":"no_more_replies","lost_note":"No reply after 3 follow-ups"}'
-curl -sH "$H" -X POST "$U?action=set_request_status" -d '{"request_ids":[2410,2411],"status":"Lost","lost_reason":"no_more_replies","confirm":true}'
+curl -sA "$UA" -H "$H" -X POST "$U?action=set_request_status" -d '{"request_ids":[2410,2411],"status":"Lost","lost_reason":"no_more_replies","lost_note":"No reply after 3 follow-ups"}'
+curl -sA "$UA" -H "$H" -X POST "$U?action=set_request_status" -d '{"request_ids":[2410,2411],"status":"Lost","lost_reason":"no_more_replies","confirm":true}'
+curl -sA "$UA" -H "$H" -X POST "$U?action=set_request_status" -d '{"request_id":2451,"status":"Quoted"}'   # reopen, dry run
 ```
 
 ### `list_standard_programs` (GET)
@@ -522,10 +528,11 @@ from Excel Calc"):
 - **Sample lodges kept only as text** ("Mara Pure Migration (Jul - Oct)") are read through the lodge aliases, else the closest
   lodge name, so the day still matches; the plan flags them ("link the lodge in the sample").
 - **Migration camps, season rule:** a camp is a lodge of type `mobile_camp` or one with a season twin (`season_twin_id`, see
-  Lodges). North (Mara / Kogatende) June–October, Ndutu December–March, closed April, May, November. Each night's date
-  picks the twin of the right area: "Pure Migration" mapped once → Mara Pure Migration Camp in July, Ndutu Pure
-  Migration Camp in January; the night carries a "Season rule" flag. A camp without a twin moves itself (Ubuntu,
-  Untamed): kept, flagged only in the closed months. The lodge suggestion for an unmapped hotel text follows the same rule.
+  Lodges). Open months: the camp's own (`season_months`, ticked on the lodge page — e.g. Untamed, which also opens in the
+  central Serengeti April–June and November: all year), else by area: north (Mara / Kogatende) June–October, Ndutu
+  December–March, a camp that moves itself all but April, May, November. A night in a month the camp is closed goes to
+  its twin when the twin is open: "Pure Migration" mapped once → Mara Pure Migration Camp in July, Ndutu Pure Migration
+  Camp in January, with a "Season rule" flag; otherwise the night is flagged "closed in <month>". The lodge suggestion for an unmapped hotel text follows the same rule.
 - **Activities:** a Calc activity of the same kind as one already on the sample day (a common word of 6+ letters, e.g.
   "camminata"; game drives excluded) replaces it instead of being added next to it.
 - **Added days** (not in the sample): another night in the same lodge gets no transfer and "Full day game drive" (beach:
@@ -590,7 +597,8 @@ description_<lang>, latitude, longitude, destination_id, category` (`budget|mid|
 Returns `changes` `{field: {from, to}}` (only what differs). Dry-run unless `"confirm": true`.
 A lodge's name stays on the Lodges page — and so does its **season twin** (`season_twin_id`, "Same camp in the other
 season": a migration camp's counterpart in the other area, e.g. Tanzania Bush Camps Ndutu Mobile Camp ↔ Mara River
-Camp; set on one camp, both are updated; shown as "⇄ …" in the Lodges list). Not editable through the API; see the season
+Camp; set on one camp, both are updated; shown as "⇄ …" in the Lodges list) and its **open months** (`season_months`).
+Not editable through the API; see the season
 rule under `iti_final_from_calc`. Its area (the "Parco Nazionale del Serengeti" under the name in the documents)
 is its `destination_id`: use the park / area, not the airstrip (`… Airstrip` destinations are for flights and transfers).
 
