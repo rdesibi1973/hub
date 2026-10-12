@@ -462,6 +462,9 @@ Every key optional: `day_title_<lang>`, `narrative_<lang>`, `end_lodge_id` | `en
 - `transfers`: `["Dar airport – Serena Hotel, about 40 min", …]` (text shown on the day, program language) or
   `[{description, text_<lang>?: "<translation>"}]`; a transfer whose text is unchanged keeps its translations;
 - `activities`: `[{activity_id} | {activity: "<name>"} | {custom: "<text>", text_<lang>?: "<translation>"}]` (see `iti_activities`; a catalogue activity shows its own name);
+  a free-text activity (`custom`, stored as `activity_custom` + `custom_note_<lang>`, e.g. "Fotosafari" / "Game drive" in
+  samples imported from WeTu) shows its `text_<lang>`, else the custom text. The Hub editor lists these too and keeps their
+  translations when a day is saved (before Oct 2026 it did not show them, and saving the day deleted them);
 - `flights`: `[{flight_route_id | custom, airline?, flight_no?: "UI 403", dep?: "07:40", arr?: "10:05", note_<lang>?}]` (see `iti_flight_routes`).
   `flight_no` and the times go on the flight voucher and on the transfer to / from the airport that day.
 `iti_program` returns `structure[]`: the stored days in this same shape (with ids), to edit and send back.
@@ -510,6 +513,25 @@ from_sample_day, flags), `unmapped` {lodge|activity|route: {norm: text}}, `block
 superseded_by). Several Calc files (e.g. the same safari with other lodges) → pass `file`; each file has its own final.
 `iti_final_from_calc` with `"confirm": true` generates the final program (an older final built from the same Calc
 file is superseded) → `program_id`, `program`. 409 when the Calc cannot be read.
+How the plan and the final are built (`modules/iti/includes/iti_final.php`, same on the Hub page "Create Itinerary Program
+from Excel Calc"):
+- **Sample proposal** (no sample tagged with the Calc code yet): each sample is scored on its itinerary (Calc nights aligned
+  with the sample's days: same lodge, same destination or a lodge within 30 km), the code words in the title
+  ("MigrazioneEstate" → migrazione), the season in the title ("LUG-SET" fits a July start, "DIC-MAR" does not), days and
+  language. The Hub shows the reason next to the ★.
+- **Sample lodges kept only as text** ("Mara Pure Migration (Jul - Oct)") are read through the lodge aliases, else the closest
+  lodge name, so the day still matches; the plan flags them ("link the lodge in the sample").
+- **Migration camps, season rule:** a camp is a lodge of type `mobile_camp` or one with a season twin (`season_twin_id`, see
+  Lodges). North (Mara / Kogatende) June–October, Ndutu December–March, closed April, May, November. Each night's date
+  picks the twin of the right area: "Pure Migration" mapped once → Mara Pure Migration Camp in July, Ndutu Pure
+  Migration Camp in January; the night carries a "Season rule" flag. A camp without a twin moves itself (Ubuntu,
+  Untamed): kept, flagged only in the closed months. The lodge suggestion for an unmapped hotel text follows the same rule.
+- **Activities:** a Calc activity of the same kind as one already on the sample day (a common word of 6+ letters, e.g.
+  "camminata"; game drives excluded) replaces it instead of being added next to it.
+- **Added days** (not in the sample): another night in the same lodge gets no transfer and "Full day game drive" (beach:
+  free day). Guest rows "TBA" / "waiting" / "?" are not saved as names. The title drops the sample's season / rate tags
+  ("Lug-Set", "Inverno STO Dic2026-Mar2027") and ends with the first named guest of the Calc.
+
 The new final's `ref_number` (`iti_final_ref_number()`): the ref of the final it replaces (kept when it was set by hand), else
 the programme Word copied next to that Calc, else the Calc's name without `_Calc` (`01_Name(Agency-Agent)_Code`).
 
@@ -566,7 +588,10 @@ Photos afterwards with `iti_lodge_photos`.
 description_<lang>, latitude, longitude, destination_id, category` (`budget|mid|luxury|ultra_luxury`), `lodge_type`
 (`lodge|tented_camp|hotel|mobile_camp|house`). Destination: `name_<lang>, description_<lang>, region, latitude, longitude`.
 Returns `changes` `{field: {from, to}}` (only what differs). Dry-run unless `"confirm": true`.
-A lodge's name stays on the Lodges page. Its area (the "Parco Nazionale del Serengeti" under the name in the documents)
+A lodge's name stays on the Lodges page — and so does its **season twin** (`season_twin_id`, "Same camp in the other
+season": a migration camp's counterpart in the other area, e.g. Tanzania Bush Camps Ndutu Mobile Camp ↔ Mara River
+Camp; set on one camp, both are updated; shown as "⇄ …" in the Lodges list). Not editable through the API; see the season
+rule under `iti_final_from_calc`. Its area (the "Parco Nazionale del Serengeti" under the name in the documents)
 is its `destination_id`: use the park / area, not the airstrip (`… Airstrip` destinations are for flights and transfers).
 
 ## Invoices
