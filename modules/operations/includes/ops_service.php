@@ -446,7 +446,10 @@ function ops_movements_report(PDO $db, string $from, string $to, bool $withCalc 
     foreach ($movs as $m) {
         $type  = strtolower($m['movement_type']);
         $field = $type === 'arrival' ? 'start_date' : 'end_date';
-        $req   = ops_match_request($reqs, $m['client_name'] . ' ' . $m['dropbox_folder'], $m['move_date'], $field);
+        // The client name first; the source Calc file only when the name alone matches nothing
+        // (a row saved from a group Calc can carry another client's file name).
+        $req   = ops_match_request($reqs, (string)$m['client_name'], $m['move_date'], $field)
+              ?? ops_match_request($reqs, $m['client_name'] . ' ' . $m['dropbox_folder'], $m['move_date'], $field);
         $time  = $m['move_time'] ? substr($m['move_time'], 0, 5) : '';
         $row = [
             'date' => $m['move_date'], 'type' => $type, 'movement_id' => (int)$m['id'],
