@@ -20,7 +20,7 @@ require_once __DIR__ . '/../../leads/includes/ck_lib.php';   // ck_is_other_dest
 
 const OPS_NIGHT_CUTOFF   = '06:00:00';
 const OPS_CALC_RECHECK   = 600;     // seconds before a cached Calc is compared with Dropbox again
-const OPS_CALC_VERSION   = 2;       // bump when ops_calc() reads differently: cached results are read again
+const OPS_CALC_VERSION   = 3;       // bump when ops_calc() reads differently: cached results are read again
 const OPS_WARN_DAYS      = 7;       // flight / time missing this close to the date → warning
 const OPS_TBA_RE         = '/\b(TBA|TBC|TBD)\b|to be (advised|confirmed)|da definire/i';
 /** Overnight in Arusha (Calc OVERNIGHT / HOTEL text). */
