@@ -442,17 +442,21 @@ if ($report_type === 'team') {
         foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $r) $by[(int)$r['agent_id']] = $r;
 
         // Recent load (always relative to today, not to the selected year):
-        // requests received today, today+yesterday, last 7 days incl. today.
+        // requests ASSIGNED to the current agent today, today+yesterday, last 7 days incl. today.
+        // Assignment date = requests.assigned_at; older rows fall back to date_received.
+        require_once __DIR__ . '/includes/assignment_service.php';
+        assign_schema($db);
+        $ad = assign_date_sql();
         $d0 = date('Y-m-d');
         $d1 = date('Y-m-d', strtotime('-1 day'));
         $d6 = date('Y-m-d', strtotime('-6 days'));
         $q = $db->prepare("
             SELECT agent_id,
-                   SUM(date_received >= ?) AS r_today,
-                   SUM(date_received >= ?) AS r_2d,
-                   COUNT(*)                AS r_7d
+                   SUM($ad >= ?) AS r_today,
+                   SUM($ad >= ?) AS r_2d,
+                   COUNT(*)      AS r_7d
             FROM requests
-            WHERE date_received >= ? AND date_received <= ? AND $notStaff
+            WHERE $ad >= ? AND $ad <= ? AND $notStaff
             GROUP BY agent_id
         ");
         $q->execute([$d0, $d1, $d6, $d0]);
@@ -730,9 +734,9 @@ include 'includes/header.php';
       <thead>
         <tr>
           <th style="text-align:left">Agent</th>
-          <th class="recent-col" title="Requests received today">Today</th>
-          <th class="recent-col" title="Requests received today + yesterday">2 days</th>
-          <th class="recent-col" title="Requests received in the last 7 days, today included">7 days</th>
+          <th class="recent-col" title="Requests assigned today">Today</th>
+          <th class="recent-col" title="Requests assigned today + yesterday">2 days</th>
+          <th class="recent-col" title="Requests assigned in the last 7 days, today included">7 days</th>
           <th>Assigned</th><th>Booked</th><th>Rate</th>
           <th>Open</th><th>🔥 Hot</th><th>Lost</th><th>Sales</th>
         </tr>
@@ -780,8 +784,9 @@ include 'includes/header.php';
   <p style="font-size:.72rem;color:var(--grey-mid);margin-top:8px">
     Cohort view for <?= $year ?>: <strong>Rate = Booked ÷ Assigned</strong> over requests assigned this year
     (a lead assigned this year that is now Booked counts, whenever it closed). Click an agent for the weekly breakdown.<br>
-    <strong>Today / 2 days / 7 days</strong> = requests received in that window counting back from today
-    (<?= date('d M') ?>), whatever year is selected.
+    <strong>Today / 2 days / 7 days</strong> = requests assigned to the agent in that window, counting back from today
+    (<?= date('d M') ?>), whatever year is selected. A reassigned request counts for the new agent;
+    requests assigned before 12 Oct 2026 use their date received.
   </p>
   <style>.recent-col{background:#f3f7fb}</style>
 

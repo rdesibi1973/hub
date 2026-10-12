@@ -175,6 +175,7 @@ try {
                 ($channel === 'agency' && $agencyId) ? $agencyId : null,
                 $agentId, $destination ?: null, $initialRequest ?: null, $pax, $folderName, $dropboxWebUrl]);
     $requestId = (int)$db->lastInsertId();
+    assign_touch($db, $requestId);
 } catch (\Throwable $e) {
     // The Dropbox folder was already created above, but the DB INSERT failed.
     // This is exactly the "orphan folder" scenario (folder on Dropbox, no

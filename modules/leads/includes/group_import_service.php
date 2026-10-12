@@ -17,6 +17,7 @@
 
 require_once __DIR__ . '/folder_parser.php';
 require_once __DIR__ . '/timeline_service.php';
+require_once __DIR__ . '/assignment_service.php';  // assign_touch(): requests.assigned_at
 require_once __DIR__ . '/folder_service.php';   // fs_name_warnings, bo_status_from_name, FS_BAD_CHARS_RE
 
 /** Provisional Il Diamante set departures; a bare folder name is looked up in GI_DIAMANTE_DIR. */
@@ -213,6 +214,7 @@ function gi_import(PDO $db, array $v, string $mode, int $targetId = 0): int {
         ]);
         $reqId = (int)$db->lastInsertId();
     }
+    assign_touch($db, $reqId);
 
     $bits = array_filter([$status . ($paymentStatus !== '' ? ' / ' . $paymentStatus : ''),
                           $paxVal !== null ? $paxVal . ' pax' : '',

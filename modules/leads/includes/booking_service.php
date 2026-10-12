@@ -22,6 +22,7 @@
 require_once __DIR__ . '/folder_parser.php';
 require_once __DIR__ . '/safari_check.php';
 require_once __DIR__ . '/timeline_service.php';   // timeline_log(): system events of the request history
+require_once __DIR__ . '/assignment_service.php'; // assign_touch(): requests.assigned_at
 
 // ════════════════════════════════════════════════════════════════════════════
 //  Paths / URLs
@@ -341,6 +342,7 @@ function bs_create_request(PDO $db, array $v, array $opt = []): array {
         $v['notes']           ?: null,
     ]);
     $out['request_id'] = (int)$db->lastInsertId();
+    assign_touch($db, $out['request_id']);
     $out['ok'] = true;
     timeline_log($out['request_id'], 'client_request', $dropboxSkip ? 'Request imported from folder' : 'Request received',
                  ['body' => tl_cut($v['initial_request'], 500), 'refs' => ['dropbox_path' => $dropboxPath ?? null]]);

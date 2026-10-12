@@ -19,6 +19,7 @@ require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/dropbox_helper.php';
 if (!defined('HS_INCLUDED')) define('HS_INCLUDED', true);
 require_once __DIR__ . '/hubspot_sync.php';
+require_once __DIR__ . '/includes/assignment_service.php';
 
 // ── What we are recovering ───────────────────────────────────────────────────
 $EMAIL       = 'polloni.marco@hotmail.com';
@@ -145,6 +146,7 @@ if ($existingId) {
         $pax, $FOLDER_NAME, $dropboxWebUrl,
     ]);
     $newId = (int)$db->lastInsertId();
+    assign_touch($db, $newId);
     echo "Hub record created: #$newId\n";
 }
 

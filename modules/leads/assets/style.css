@@ -197,6 +197,11 @@ main {
   vertical-align: middle;
 }
 .table-wrap tbody tr:last-child td { border-bottom: none; }
+.table-wrap tfoot td {
+  padding: 13px 16px;
+  font-size: .83rem;
+  vertical-align: middle;
+}
 .table-wrap tbody tr:hover { background: #fafaf9; }
 
 /* ── STATUS BADGES ── */

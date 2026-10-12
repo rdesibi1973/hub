@@ -341,6 +341,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $id,
             ]);
 
+            assign_touch($db, (int)$id);   // records assigned_at if agent_id changed
+
             // ── Notify the newly assigned agent when the request is reassigned ──
             $oldAgentId = (int)($req['agent_id'] ?? 0);
             $newAgentId = (int)($v['agent_id'] ?: 0);
