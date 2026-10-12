@@ -88,7 +88,7 @@ function sc_xlsx_sheet(string $path, ?string $sheetName = null): array {
         }
         $pick = null;
         if ($sheetName !== null && isset($nameToRid[$sheetName])) $pick = $nameToRid[$sheetName];
-        elseif ($sheetName === null && $nameToRid)                $pick = reset($nameToRid);
+        elseif ($sheetName === null && $nameToRid)                $pick = $nameToRid[sc_default_sheet(array_keys($nameToRid))];
         if ($pick && isset($ridToTarget[$pick])) {
             $tgt = ltrim($ridToTarget[$pick], '/');
             $target = (strpos($tgt, 'xl/') === 0) ? $tgt : 'xl/' . $tgt;
@@ -153,6 +153,19 @@ function sc_xlsx_sheets(string $path): array {
         }
     }
     return $names;
+}
+
+/**
+ * The sheet read when no name is given: with several pax sheets (old quotes kept
+ * next to the confirmed one) the only one marked "CONF", else the first sheet.
+ * Same rule as calc_read_file(), so every reader sees the confirmed dates.
+ */
+function sc_default_sheet(array $sheetNames): string {
+    $conf = [];
+    foreach ($sheetNames as $n) {
+        if (stripos($n, 'PAX') !== false && stripos($n, 'CONF') !== false) $conf[] = $n;
+    }
+    return count($conf) === 1 ? $conf[0] : (string)reset($sheetNames);
 }
 
 /** True if any worksheet name contains "RECAP" — the mark of a GROUP (GRP) calc. */

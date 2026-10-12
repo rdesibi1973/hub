@@ -85,11 +85,12 @@ if ($multiCalc) {   // the file picker replaces the reader's "several Calc files
 }
 $calcChanged = $active && $calc && $active['source_calc_rev'] && $active['source_calc_rev'] !== $calc['calc_rev'];
 
-$samples = []; $suggestedSample = 0;
+$samples = []; $suggestedSample = 0; $suggestedWhy = '';
 if ($calc && !$sample) {
     $samples = $db->query("SELECT id, title_en, title_it, display_language, duration_days, hub_program_code FROM iti_programs
                             WHERE program_type = 'sample' AND status <> 'cancelled' ORDER BY title_en")->fetchAll();
-    $suggestedSample = iti_final_suggest_sample($samples, $code, count($calc['days']), $lang);
+    $sug = iti_final_suggest_sample($db, $samples, $code, $calc, $plan['days'], $lang);
+    $suggestedSample = $sug['id']; $suggestedWhy = $sug['why'];
 }
 // Pickers for inline mapping (only when something is unmapped).
 $opt = ['lodge' => [], 'activity' => [], 'transfer' => [], 'flight' => []];
@@ -182,7 +183,10 @@ include __DIR__ . '/../../includes/layout_header.php';
     <?= $fmtD($calc['start_date']) ?> → <?= $fmtD($calc['end_date']) ?> · <?= (int)$calc['nights'] ?> nights ·
     <?= (int)$calc['pax']['adults'] ?> adults<?= $calc['pax']['teen'] ? ', ' . (int)$calc['pax']['teen'] . ' teen' : '' ?><?= $calc['pax']['child'] ? ', ' . (int)$calc['pax']['child'] . ' children' : '' ?>
     · room: <?= h($calc['room_config'] ?: '—') ?><br>
-    Guests: <?= $calc['guests_tba'] ? '<em>TBA</em>' : h(implode(', ', array_map(function ($g) { return trim($g['title'] . ' ' . $g['name']); }, $calc['guests']))) ?><br>
+    <?php $gKnown = array_filter($calc['guests'], function ($g) { return empty($g['tba']); });
+          $gTba   = count($calc['guests']) - count($gKnown); ?>
+    Guests: <?= h(implode(', ', array_map(function ($g) { return trim($g['title'] . ' ' . $g['name']); }, $gKnown))) ?>
+    <?= $gTba || !$calc['guests'] ? '<em>' . ($gKnown ? '+ ' : '') . ($gTba ?: '') . ' TBA</em>' : '' ?><br>
     Arrival: <?= h($calc['arrival'] ?: '—') ?> · Departure: <?= h($calc['departure'] ?: '—') ?>
     <?php foreach ($calc['warnings'] as $w): ?><div style="color:#8a6d00;">⚠ <?= h($w) ?></div><?php endforeach; ?>
   </div>
@@ -206,7 +210,7 @@ include __DIR__ . '/../../includes/layout_header.php';
         <?php endforeach; ?>
       </select>
       <button type="submit" class="btn btn-red btn-sm">Use this sample</button>
-      <?php if ($suggestedSample): ?><span style="font-size:.78rem;color:var(--grey-mid);">★ proposed: title contains “<?= h($code) ?>”<?= count($calc['days']) ? ', ' . count($calc['days']) . ' days like the Calc' : '' ?> — check it</span><?php endif; ?>
+      <?php if ($suggestedSample): ?><span style="font-size:.78rem;color:var(--grey-mid);">★ proposed: <?= h($suggestedWhy) ?> — check it</span><?php endif; ?>
     </form>
   <?php endif; ?>
 </div>
@@ -224,7 +228,7 @@ include __DIR__ . '/../../includes/layout_header.php';
       <span style="min-width:90px;font-size:.75rem;color:var(--grey-mid);"><?= $lbl ?></span>
       <code style="min-width:220px;"><?= h($text) ?></code>
       <?php if ($type === 'lodge'): ?>
-        <select name="lodge_id" style="max-width:340px;"><?= iti_options($opt['lodge'], iti_alias_suggest($text, $optName['lodge']), '— nothing (own arrangement / not a lodge) —') ?></select>
+        <select name="lodge_id" style="max-width:340px;"><?= iti_options($opt['lodge'], iti_final_suggest_lodge($text, $optName['lodge'], $plan['hints']['lodge_date'][$text] ?? null), '— nothing (own arrangement / not a lodge) —') ?></select>
         <select name="meal_basis"><?= iti_options(ITI_MEAL_BASIS, $plan['hints']['lodge_meal'][$text] ?? null, '— meal: lodge default —') ?></select>
       <?php elseif ($type === 'activity'): ?>
         <select name="activity_id" style="max-width:380px;"><?= iti_options($opt['activity'], iti_alias_suggest($text, $opt['activity']), '— nothing (not an activity) —') ?></select>

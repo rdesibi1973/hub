@@ -241,7 +241,8 @@ function calc_read_file(string $path, string $wantSheet = ''): array {
             if ($name === '') { if (++$blank >= 2) break; continue; }
             if (stripos($name, 'DETAILS') !== false) break;       // reached ARRIVAL DETAILS
             $blank = 0;
-            $isTba = strcasecmp($name, 'TBA') === 0;
+            // Placeholder rows ("TBA", "waiting", "tbc", "?", "guest 2") = name not known yet.
+            $isTba = (bool)preg_match('/^(tba|tbc|tbd|n\/?a|waiting|wait|pending|unknown|da definire|\?+|-+|(guest|pax|name)\s*\d*)\.?$/i', trim($name));
             $tba = $tba || $isTba;
             $dobRaw = $gcol['dob'] ? calc_rd_text($v, $gcol['dob'], $r) : '';
             $guests[] = [

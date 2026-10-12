@@ -41,31 +41,153 @@ function iti_final_find_sample(PDO $db, string $code, string $lang) {
 }
 
 /**
- * The sample to propose for a Calc code when none is tagged yet: the title must
- * contain the code ("Pumba" → "PUMBA SAFARI IN ITALIANO"); then the same number of
- * days as the Calc, the title starting with the code, the display language and not
- * being tagged with another code count. Returns the sample id, or 0 (none / a tie).
- * $samples = rows with id, title_en, title_it, duration_days, display_language, hub_program_code.
+ * Months a sample title names: "LUG-SET" → [7,8,9], "DIC2026-MAR2027" → [12,1,2,3],
+ * "ESTATE" → [6..9], "INVERNO" → [12,1,2,3]. Italian and English. [] = no season.
  */
-function iti_final_suggest_sample(array $samples, string $code, int $days, string $lang): int {
-    $k = function ($s) { return preg_replace('/[^a-z0-9]+/', '', strtolower((string)$s)); };
-    $c = $k($code);
-    if ($c === '') return 0;
-    $best = 0; $bestScore = 0; $tie = false;
-    foreach ($samples as $s) {
-        $score = 0;
-        foreach (array($s['title_it'], $s['title_en']) as $t) {
-            $t = $k($t);
-            if ($t !== '' && strpos($t, $c) !== false) { $score = max($score, strpos($t, $c) === 0 ? 3 : 2); }
-        }
-        if (!$score) continue;
-        if ((int)$s['duration_days'] === $days) $score += 4;
-        if ($s['display_language'] === $lang) $score += 1;
-        if (!empty($s['hub_program_code']) && $s['hub_program_code'] !== $code) $score -= 2;
-        if ($score > $bestScore) { $best = (int)$s['id']; $bestScore = $score; $tie = false; }
-        elseif ($score === $bestScore) $tie = true;
+function iti_final_title_months(string $title): array {
+    $mon = array('gen' => 1, 'jan' => 1, 'feb' => 2, 'mar' => 3, 'apr' => 4, 'mag' => 5, 'may' => 5, 'giu' => 6, 'jun' => 6,
+                 'lug' => 7, 'jul' => 7, 'ago' => 8, 'aug' => 8, 'set' => 9, 'sep' => 9, 'ott' => 10, 'oct' => 10,
+                 'nov' => 11, 'dic' => 12, 'dec' => 12);
+    $t = strtolower($title);
+    $alt = implode('|', array_keys($mon));
+    if (preg_match('/\b(' . $alt . ')[a-z]*\s*\d{0,4}\s*(?:-|–|\/)\s*(' . $alt . ')[a-z]*/', $t, $m)) {
+        $out = array();
+        for ($i = $mon[$m[1]], $k = 0; $k < 12; $i = $i % 12 + 1, $k++) { $out[] = $i; if ($i === $mon[$m[2]]) break; }
+        return $out;
     }
-    return $tie ? 0 : $best;
+    if (preg_match('/\b(estate|summer)\b/', $t)) return array(6, 7, 8, 9);
+    if (preg_match('/\b(inverno|winter)\b/', $t)) return array(12, 1, 2, 3);
+    return array();
+}
+
+/**
+ * The sample to propose when none is tagged with the Calc code yet. Scores each
+ * sample on:
+ *  - its itinerary: the Calc nights aligned with the sample's days (same lodge,
+ *    same destination or a lodge within ITI_FINAL_NEAR_KM — as iti_final_plan()),
+ *    as a share of the longer of the two (0–10 points);
+ *  - its name: the whole code in the title (+3), else each code word in it
+ *    ("MigrazioneEstate" → migrazione, estate; +1.5 each);
+ *  - the season: the Calc start month inside the months of the title (+2, outside −3);
+ *  - the same number of days (+1, one off +0.5), the language (+0.5), already
+ *    tagged with another code (−1).
+ * $samples = rows with id, title_en, title_it, duration_days, display_language, hub_program_code;
+ * $planDays = iti_final_plan($db, $calc, 0)['days'].
+ * Returns ['id' => sample id or 0 (nothing close / a tie), 'why' => string].
+ */
+function iti_final_suggest_sample(PDO $db, array $samples, string $code, array $calc, array $planDays, string $lang): array {
+    $norm  = function ($s) { return preg_replace('/[^a-z0-9]+/', '', strtolower((string)$s)); };
+    $c     = $norm($code);
+    $words = array();   // "MigrazioneEstate" / "Grande_Migrazione" → migrazione, estate, grande
+    foreach (preg_split('/[^a-z0-9]+/', strtolower(preg_replace('/(?<=[a-z])(?=[A-Z])/', ' ', $code))) as $w) {
+        if (strlen($w) >= 4) $words[] = $w;
+    }
+    $startMonth = !empty($calc['start_date']) ? (int)date('n', strtotime($calc['start_date'])) : 0;
+    $nDays = count($calc['days']);
+    $mapped = 0;
+    foreach ($planDays as $d) if ($d['lodge_id']) $mapped++;
+
+    $rank = array();
+    foreach ($samples as $s) {
+        $why = array(); $score = 0.0;
+        // Itinerary.
+        if ($mapped) {
+            $m = iti_final_match_sample($db, $planDays, iti_final_sample_days($db, (int)$s['id']));
+            $fit = $m['max'] ? $m['score'] / $m['max'] : 0;
+            $score += 10 * $fit;
+            if ($fit >= 0.3) $why[] = 'itinerary ' . round(100 * $fit) . '% alike';
+        }
+        // Name.
+        $title = $s['title_it'] . ' ' . $s['title_en'];
+        $tn = $norm($title);
+        if ($c !== '' && strpos($tn, $c) !== false) { $score += 3; $why[] = 'title contains “' . $code . '”'; }
+        else {
+            $hit = array();
+            foreach ($words as $w) { if (strpos($tn, substr($w, 0, max(5, strlen($w) - 2))) !== false) $hit[] = $w; }
+            if ($hit) { $score += 1.5 * count($hit); $why[] = 'title has “' . implode('”, “', $hit) . '”'; }
+        }
+        // Season.
+        $months = iti_final_title_months($title);
+        if ($months && $startMonth) {
+            if (in_array($startMonth, $months, true)) { $score += 2; $why[] = 'season fits'; }
+            else $score -= 3;
+        }
+        $dd = abs((int)$s['duration_days'] - $nDays);
+        if ($dd === 0) { $score += 1; $why[] = $nDays . ' days like the Calc'; }
+        elseif ($dd === 1) $score += 0.5;
+        if ($s['display_language'] === $lang) $score += 0.5;
+        if (!empty($s['hub_program_code']) && $s['hub_program_code'] !== $code) $score -= 1;
+        $rank[(int)$s['id']] = array($score, $why);
+    }
+    uasort($rank, function ($a, $b) { return $b[0] <=> $a[0]; });
+    $ids = array_keys($rank);
+    if (!$ids) return array('id' => 0, 'why' => '');
+    $best = $rank[$ids[0]];
+    $second = isset($ids[1]) ? $rank[$ids[1]][0] : -INF;
+    // Something real must match (≥ 4 points: e.g. half the itinerary, or the code), and clearly ahead.
+    if ($best[0] < 4 || $best[0] - $second < 0.5) return array('id' => 0, 'why' => '');
+    return array('id' => $ids[0], 'why' => implode(', ', $best[1]));
+}
+
+/** A lodge with its destination and coordinates (cached), or null. */
+function iti_final_lodge_info(PDO $db, int $id) {
+    static $cache = array();
+    if (!isset($cache[$id])) {
+        $st = $db->prepare('SELECT l.id, l.name, l.destination_id, l.latitude, l.longitude, d.name_en AS dest_name FROM iti_lodges l
+                             LEFT JOIN iti_destinations d ON d.id = l.destination_id WHERE l.id = ?');
+        $st->execute(array($id));
+        $cache[$id] = $st->fetch(PDO::FETCH_ASSOC) ?: null;
+    }
+    return $cache[$id];
+}
+
+/** [lat, lng] of a lodge row, null when unknown (0 / 0 = not set). */
+function iti_final_geo($row) {
+    $lat = (float)($row['latitude'] ?? 0); $lng = (float)($row['longitude'] ?? 0);
+    return (abs($lat) > 0.0001 || abs($lng) > 0.0001) ? array($lat, $lng) : null;
+}
+
+/** A sample's days in order: id, day_number, end_lodge_id, lodge_name, destination_id, latitude, longitude. */
+function iti_final_sample_days(PDO $db, int $sampleId): array {
+    $st = $db->prepare('SELECT d.id, d.day_number, d.end_lodge_id, l.name AS lodge_name, l.destination_id, l.latitude, l.longitude
+                          FROM iti_program_days d LEFT JOIN iti_lodges l ON l.id = d.end_lodge_id
+                         WHERE d.program_id = ? ORDER BY d.day_number');
+    $st->execute(array($sampleId));
+    return $st->fetchAll(PDO::FETCH_ASSOC);
+}
+
+/**
+ * Align the plan's nights with a sample's days on the lodge sequence. Same lodge
+ * = 2; same destination, or another lodge within ITI_FINAL_NEAR_KM (The Manor at
+ * Ngorongoro ~ Marera in Karatu: two destinations, one area) = 1; the departure
+ * day with the sample's last day = 2.
+ * Returns ['map' => [planIndex => sampleIndex], 'score' => matched points, 'max' => 2 × the longer list].
+ */
+function iti_final_match_sample(PDO $db, array $planDays, array $sampleDays): array {
+    $ka = array(); $kb = array();
+    foreach ($planDays as $d) {
+        $li = $d['lodge_id'] ? iti_final_lodge_info($db, (int)$d['lodge_id']) : null;
+        $ka[] = array('l' => $d['lodge_id'], 'd' => $d['dest_id'], 'end' => $d['last'] && $d['hotel_text'] === '',
+                      'geo' => $li ? iti_final_geo($li) : null);
+    }
+    $m = count($sampleDays);
+    foreach ($sampleDays as $j => $s) {
+        $kb[] = array('l' => $s['end_lodge_id'] ? (int)$s['end_lodge_id'] : null,
+                      'd' => $s['destination_id'] ? (int)$s['destination_id'] : null,
+                      'end' => !$s['end_lodge_id'] && $j === $m - 1,
+                      'geo' => iti_final_geo($s));
+    }
+    $score = function ($x, $y) {
+        if ($x['end'] && $y['end']) return 2;
+        if ($x['l'] && $x['l'] === $y['l']) return 2;
+        if ($x['d'] && $x['d'] === $y['d']) return 1;
+        if ($x['geo'] && $y['geo'] && iti_haversine($x['geo'][0], $x['geo'][1], $y['geo'][0], $y['geo'][1]) <= ITI_FINAL_NEAR_KM) return 1;
+        return 0;
+    };
+    $map = iti_final_align($ka, $kb, $score);
+    $total = 0;
+    foreach ($map as $i => $j) $total += $score($ka[$i], $kb[$j]);
+    return array('map' => $map, 'score' => $total, 'max' => 2 * max(count($ka), count($kb)));
 }
 
 /**
@@ -93,6 +215,86 @@ if (!defined('ITI_FINAL_NEAR_KM')) define('ITI_FINAL_NEAR_KM', 30);
 function iti_final_meals(?string $basis): ?array {
     $m = array('BB' => array(1, 0, 0, 0), 'HB' => array(1, 0, 1, 0), 'FB' => array(1, 1, 1, 0), 'AI' => array(1, 1, 1, 1));
     return ($basis !== null && isset($m[$basis])) ? $m[$basis] : null;
+}
+
+/*
+ * Migration camps follow the herds: in the north (Mara River / Kogatende) from June
+ * to October, at Ndutu from December to March; in April, May and November they are
+ * closed while they move. A Calc text like "Pure Migration" is mapped once to one
+ * of the camps; the night's month then picks the camp of the right area.
+ * Camps = active lodges with "migration" in the name. Area from the name or the
+ * destination: Ndutu → south; Mara / Kogatende / North → north (no area = a camp
+ * that does not move, left alone). Two camps are the same camp when their names
+ * match without the area words ("Ndutu Pure Migration Camp" ~ "Mara Pure Migration Camp").
+ */
+
+/** 'north' (Jun–Oct), 'south' (Dec–Mar) or null (Apr, May, Nov: camps closed) for a Y-m-d date. */
+function iti_final_migration_area(?string $ymd): ?string {
+    if (!$ymd) return null;
+    $m = (int)date('n', strtotime($ymd));
+    if ($m >= 6 && $m <= 10) return 'north';
+    if ($m === 12 || $m <= 3) return 'south';
+    return null;
+}
+
+/** Migration camps: lodge id => ['name', 'area' => 'north'|'south'|'', 'key']. */
+function iti_final_migration_camps(): array {
+    static $camps = null;
+    if ($camps !== null) return $camps;
+    $camps = array();
+    foreach (iti_get_lodges() as $l) {
+        if (stripos($l['name'], 'migration') === false) continue;
+        $txt  = strtolower($l['name'] . ' ' . $l['dest_name_en']);
+        $area = strpos($txt, 'ndutu') !== false ? 'south'
+              : (preg_match('/\b(mara|kogatende|north(ern)?)\b/', $txt) ? 'north' : '');
+        $key  = preg_replace('/\b(ndutu|mara|kogatende|north(ern)?|south(ern)?|serengeti)\b/', ' ', strtolower($l['name']));
+        $camps[(int)$l['id']] = array('name' => $l['name'], 'area' => $area,
+                                      'key' => trim(preg_replace('/[^a-z0-9]+/', ' ', $key)));
+    }
+    return $camps;
+}
+
+/**
+ * The lodge to use for a night given the season: ['id' => lodge id, 'note' => ?string].
+ * A migration camp of the wrong area is swapped for the same camp in the right one;
+ * 'note' explains the swap, or warns when the camp is closed / has no twin.
+ */
+function iti_final_season_lodge(int $lodgeId, ?string $ymd): array {
+    $camps = iti_final_migration_camps();
+    if (!isset($camps[$lodgeId]) || $camps[$lodgeId]['area'] === '' || !$ymd) return array('id' => $lodgeId, 'note' => null);
+    $c     = $camps[$lodgeId];
+    $month = date('F', strtotime($ymd));
+    $want  = iti_final_migration_area($ymd);
+    $where = array('north' => 'in the north (Mara / Kogatende)', 'south' => 'at Ndutu');
+    if ($want === null) {
+        return array('id' => $lodgeId, 'note' => $c['name'] . ': migration camps are closed in ' . $month
+                     . ' (moving between Ndutu and the north) — check the lodge.');
+    }
+    if ($want === $c['area']) return array('id' => $lodgeId, 'note' => null);
+    foreach ($camps as $id => $o) {
+        if ($o['area'] === $want && $o['key'] === $c['key']) {
+            return array('id' => $id, 'note' => 'Season rule: in ' . $month . ' the migration camps are ' . $where[$want]
+                         . ' → ' . $o['name'] . ' (the Calc text is mapped to ' . $c['name'] . ').');
+        }
+    }
+    return array('id' => $lodgeId, 'note' => $c['name'] . ': in ' . $month . ' the migration camps are ' . $where[$want]
+                 . ', and ITI Lodges has no twin of this camp there — check the lodge.');
+}
+
+/**
+ * Lodge to preselect when mapping a Calc hotel text: iti_alias_suggest() over the
+ * lodges, leaving out the migration camps of the wrong area for the night's date
+ * ("Pure Migration" in July → Mara Pure Migration Camp, not the Ndutu one).
+ * $names = [lodge id => name]. Returns the id or null.
+ */
+function iti_final_suggest_lodge(string $text, array $names, ?string $ymd) {
+    $want = iti_final_migration_area($ymd);
+    if ($want !== null) {
+        foreach (iti_final_migration_camps() as $id => $c) {
+            if ($c['area'] !== '' && $c['area'] !== $want) unset($names[$id]);
+        }
+    }
+    return iti_alias_suggest($text, $names);
 }
 
 /**
@@ -129,18 +331,9 @@ function iti_final_align(array $a, array $b, ?callable $score = null): array {
 function iti_final_plan(PDO $db, array $calc, int $sampleId): array {
     iti_ensure_final_schema();
     $days = array(); $unmapped = array('lodge' => array(), 'activity' => array(), 'route' => array());
-    $hints = array('lodge_meal' => array());   // unmapped hotel text => meal from its suffix
+    $hints = array('lodge_meal' => array(), 'lodge_date' => array());   // unmapped hotel text => meal from its suffix / first night
     $n = count($calc['days']);
-    $lodgeInfo = function ($id) use ($db) {
-        static $cache = array();
-        if (!isset($cache[$id])) {
-            $st = $db->prepare('SELECT l.id, l.name, l.destination_id, l.latitude, l.longitude, d.name_en AS dest_name FROM iti_lodges l
-                                 LEFT JOIN iti_destinations d ON d.id = l.destination_id WHERE l.id = ?');
-            $st->execute(array($id));
-            $cache[$id] = $st->fetch(PDO::FETCH_ASSOC) ?: null;
-        }
-        return $cache[$id];
-    };
+    $lodgeInfo = function ($id) use ($db) { return iti_final_lodge_info($db, (int)$id); };
 
     foreach ($calc['days'] as $i => $cd) {
         $last = ($i === $n - 1);
@@ -161,11 +354,14 @@ function iti_final_plan(PDO $db, array $calc, int $sampleId): array {
                 $d['lodge_state'] = 'unmapped';
                 $unmapped['lodge'][iti_alias_norm($base)] = $base;
                 if ($mealSfx) $hints['lodge_meal'][$base] = $mealSfx;
+                if (!isset($hints['lodge_date'][$base])) $hints['lodge_date'][$base] = $cd['date'];   // first night: season of the suggestion
             } elseif (!$a['lodge_id']) {
                 $d['lodge_state'] = 'nothing';
                 $d['lodge_custom'] = $cd['hotel_text'];        // e.g. "Riu Palace Nungwi - own arrangement"
             } else {
-                $li = $lodgeInfo((int)$a['lodge_id']);
+                $sea = iti_final_season_lodge((int)$a['lodge_id'], $cd['date']);   // migration camps: north / Ndutu by month
+                if ($sea['note']) $d['flags'][] = $sea['note'];
+                $li = $lodgeInfo($sea['id']);
                 $d['lodge_state'] = $li ? 'ok' : 'unmapped';
                 if ($li) {
                     $d['lodge_id'] = (int)$li['id']; $d['lodge_name'] = $li['name'];
@@ -204,42 +400,13 @@ function iti_final_plan(PDO $db, array $calc, int $sampleId): array {
         $days[] = $d;
     }
 
-    // Align with the sample's days on the lodge sequence. Same lodge = best match;
-    // same destination, or another lodge within ITI_FINAL_NEAR_KM (The Manor at
-    // Ngorongoro ~ Marera in Karatu: two destinations, one area), still keeps the
+    // Align with the sample's days on the lodge sequence (iti_final_match_sample()).
+    // Same lodge = best match; same destination or a nearby lodge still keeps the
     // sample day's text, flagged for review.
     $sampleDays = array();
     if ($sampleId) {
-        $st = $db->prepare('SELECT d.id, d.day_number, d.end_lodge_id, l.name AS lodge_name, l.destination_id, l.latitude, l.longitude
-                              FROM iti_program_days d LEFT JOIN iti_lodges l ON l.id = d.end_lodge_id
-                             WHERE d.program_id = ? ORDER BY d.day_number');
-        $st->execute(array($sampleId));
-        $sampleDays = $st->fetchAll(PDO::FETCH_ASSOC);
-        $geo = function ($row) {   // [lat, lng] of a lodge row, null when unknown (0 / 0 = not set)
-            $lat = (float)($row['latitude'] ?? 0); $lng = (float)($row['longitude'] ?? 0);
-            return (abs($lat) > 0.0001 || abs($lng) > 0.0001) ? array($lat, $lng) : null;
-        };
-        $ka = array(); $kb = array();
-        foreach ($days as $i => $d) {
-            $li = $d['lodge_id'] ? $lodgeInfo($d['lodge_id']) : null;
-            $ka[] = array('l' => $d['lodge_id'], 'd' => $d['dest_id'], 'end' => $d['last'] && $d['hotel_text'] === '',
-                          'geo' => $li ? $geo($li) : null);
-        }
-        $m = count($sampleDays);
-        foreach ($sampleDays as $j => $s) {
-            $kb[] = array('l' => $s['end_lodge_id'] ? (int)$s['end_lodge_id'] : null,
-                          'd' => $s['destination_id'] ? (int)$s['destination_id'] : null,
-                          'end' => !$s['end_lodge_id'] && $j === $m - 1,
-                          'geo' => $geo($s));
-        }
-        $score = function ($x, $y) {
-            if ($x['end'] && $y['end']) return 2;
-            if ($x['l'] && $x['l'] === $y['l']) return 2;
-            if ($x['d'] && $x['d'] === $y['d']) return 1;
-            if ($x['geo'] && $y['geo'] && iti_haversine($x['geo'][0], $x['geo'][1], $y['geo'][0], $y['geo'][1]) <= ITI_FINAL_NEAR_KM) return 1;
-            return 0;
-        };
-        foreach (iti_final_align($ka, $kb, $score) as $i => $j) {
+        $sampleDays = iti_final_sample_days($db, $sampleId);
+        foreach (iti_final_match_sample($db, $days, $sampleDays)['map'] as $i => $j) {
             $days[$i]['sample_index'] = $j;
             $s = $sampleDays[$j];
             if ($days[$i]['lodge_id'] && $s['end_lodge_id'] && (int)$s['end_lodge_id'] !== $days[$i]['lodge_id']) {
@@ -270,7 +437,7 @@ function iti_final_plan(PDO $db, array $calc, int $sampleId): array {
 
     $flags = array();
     if ($unmapped['lodge'] && $sampleId) $flags[] = 'Map the hotels first: which days match the sample (and which routes are needed) depends on them.';
-    if (!empty($calc['guests_tba'])) $flags[] = 'Guests not known yet (TBA) — the program will say "to be defined".';
+    if (!empty($calc['guests_tba'])) $flags[] = 'Some guest names are not known yet (TBA / waiting) — only the known names go into the program; add the others later.';
     if ($sampleId && count($sampleDays) !== count($days)) {
         $flags[] = 'The sample has ' . count($sampleDays) . ' days, the Calc ' . count($days) . ' — days are added / removed to match the Calc.';
     }
@@ -451,6 +618,7 @@ function iti_final_generate(PDO $db, int $requestId, array $calc, int $sampleId,
                            (int)$pax['child'], $calc['arrival'] ?: null, $calc['departure'] ?: null, $calc['extra_details'] ?: null));
         $gi = 0;
         foreach ($calc['guests'] as $g) {
+            if (!empty($g['tba'])) continue;      // "TBA" / "waiting" rows: name not known yet
             $db->prepare('INSERT INTO iti_program_guests (program_id, sort_order, full_name, title, dob, country) VALUES (?,?,?,?,?,?)')
                ->execute(array($newId, ++$gi, mb_substr($g['name'], 0, 160), $g['title'] !== '' ? mb_substr($g['title'], 0, 10) : null,
                                $g['dob'], $g['country'] !== '' ? mb_substr($g['country'], 0, 80) : null));
