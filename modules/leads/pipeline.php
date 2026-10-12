@@ -1,6 +1,7 @@
 <?php
 require_once 'config.php';
 require_once 'includes/folder_parser.php';   // parse_folder_dates(): start of a Booked trip from its folder
+require_once 'includes/timeline_service.php'; // timeline_log(): status_change when a drop changes the status
 requireLogin();
 
 $isStaff      = isLeadsRestricted();
@@ -45,11 +46,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'
         $sql .= " AND agent_id=?";
         $args[] = $staffAgentId;
     }
-    $db->prepare($sql)->execute($args);
-    // Report the status actually stored (a closed status is left unchanged).
     $st = $db->prepare("SELECT status FROM requests WHERE id=?");
     $st->execute([$id]);
-    echo json_encode(['ok'=>true, 'status'=>$newStatus !== null ? $st->fetchColumn() : null]); exit;
+    $oldStatus = (string)$st->fetchColumn();
+    $db->prepare($sql)->execute($args);
+    // Report the status actually stored (a closed status is left unchanged).
+    $st->execute([$id]);
+    $stored = (string)$st->fetchColumn();
+    // Same timeline event as the status menu (bs_set_request_status).
+    if ($oldStatus !== '' && $stored !== $oldStatus) {
+        timeline_log($id, 'status_change', $oldStatus . ' → ' . $stored);
+    }
+    echo json_encode(['ok'=>true, 'status'=>$newStatus !== null ? $stored : null]); exit;
 }
 
 // ── Filters ────────────────────────────────────────────────────────────────
