@@ -29,10 +29,10 @@ try {
     $ins = $pdo->prepare(
         "INSERT INTO medivac_travelers_archive
          (id, group_ref, group_name, tour_agent, coverage_start, coverage_end,
-          full_name, title, dob, passport_number, country,
+          full_name, title, dob, country,
           insurance_name, policy_number, source_file, notes, created_by, created_at, updated_at, archived_at)
          SELECT id, group_ref, group_name, tour_agent, coverage_start, coverage_end,
-                full_name, title, dob, passport_number, country,
+                full_name, title, dob, country,
                 insurance_name, policy_number, source_file, notes, created_by, created_at, updated_at, NOW()
          FROM medivac_travelers
          WHERE $where

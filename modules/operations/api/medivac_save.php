@@ -71,9 +71,9 @@ $groupRef = uniqid('mv_', true);
 $stmt = $pdo->prepare(
     'INSERT INTO medivac_travelers
      (group_ref, group_name, tour_agent, coverage_start, coverage_end,
-      full_name, title, dob, passport_number, country,
+      full_name, title, dob, country,
       insurance_name, policy_number, source_file, created_by)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)'
 );
 
 // Build set of dup name+dob to skip
@@ -99,14 +99,13 @@ try {
         }
 
         $title    = in_array($t['title'] ?? '', ['MR','MRS','MS','']) ? ($t['title'] ?? '') : '';
-        $passport = trim($t['passport_number'] ?? '');
-        $country  = trim($t['country']  ?? '');
+        $country  = trim($t['country']  ?? '');   // no passport numbers: the Hub never stores them
 
         $stmt->execute([
             $groupRef, $groupName, $tourAgent ?: null,
             $startSql, $endSql,
             $name, $title, $dob ?: null,
-            $passport ?: null, $country ?: null,
+            $country ?: null,
             null, null,   // insurance_name, policy_number — filled later
             $sourceFile ?: null, $userId
         ]);

@@ -164,11 +164,10 @@ $extra_css = '
         <table class="preview-table" id="preview-table">
           <thead>
             <tr>
-              <th style="width:26%">Full Name</th>
-              <th style="width:8%">Title</th>
-              <th style="width:13%">Date of Birth</th>
-              <th style="width:16%">Passport #</th>
-              <th style="width:14%">Country / Nationality</th>
+              <th style="width:34%">Full Name</th>
+              <th style="width:10%">Title</th>
+              <th style="width:16%">Date of Birth</th>
+              <th style="width:20%">Country / Nationality</th>
               <th style="width:7%"></th>
             </tr>
           </thead>
@@ -289,13 +288,9 @@ $extra_css = '
         <input type="date" class="form-control" id="edit-dob">
       </div>
       <div class="form-group" style="margin-bottom:0;">
-        <label class="form-label">Passport #</label>
-        <input type="text" class="form-control" id="edit-passport">
+        <label class="form-label">Country / Nationality</label>
+        <input type="text" class="form-control" id="edit-country">
       </div>
-    </div>
-    <div class="form-group" style="margin-bottom:20px;">
-      <label class="form-label">Country / Nationality</label>
-      <input type="text" class="form-control" id="edit-country">
     </div>
     <div class="form-row" style="margin-bottom:20px;">
       <div class="form-group" style="margin-bottom:0;">
@@ -372,7 +367,8 @@ function handleFile(file) {
 
 // Scan every sheet and choose the one whose traveler block is the most complete.
 // Calc files often carry several near-duplicate sheets (e.g. two "CONF" tabs) where
-// only one has passport / DOB filled in — pick that one rather than the first by name.
+// only one has DOB / nationality filled in — pick that one rather than the first by name.
+// Passport numbers (Calc column E) are never read: the Hub does not store them.
 function pickBestSheet(wb) {
     document.getElementById('sheet-error').style.display = 'none';
 
@@ -391,7 +387,7 @@ function pickBestSheet(wb) {
 }
 
 // Pick the best sheet from a candidate list. When a group holds several tabs, prefer the
-// most complete (filled passport/DOB/country), then the longest traveler list.
+// most complete (filled DOB/country), then the longest traveler list.
 function bestOf(wb, names) {
     let best = null;
     names.forEach(name => {
@@ -400,7 +396,7 @@ function bestOf(wb, names) {
         const travelers = extractTravelers(rows, true); // silent — no toast while scanning
         if (!travelers.length) return;
         const filled = travelers.reduce((s, t) =>
-            s + (t.dob ? 1 : 0) + (t.passport_number ? 1 : 0) + (t.country ? 1 : 0), 0);
+            s + (t.dob ? 1 : 0) + (t.country ? 1 : 0), 0);
         const score  = filled * 100 + travelers.length * 10;
         if (!best || score > best.score) best = {name, sheet, rows, travelers, score};
     });
@@ -441,7 +437,6 @@ function extractTravelers(rows, silent) {
             full_name:       name.toUpperCase(),
             title:           normTitle(String(row[1] || "").trim()),
             dob:             parseFlexDate(row[2]),
-            passport_number: String(row[4] || "").trim(),
             country:         String(row[5] || "").trim().toUpperCase(),
         });
     }
@@ -596,7 +591,6 @@ function appendRow(t) {
         </select>
       </td>
       <td><input class="pt-input" type="date" value="${esc(t.dob || "")}"></td>
-      <td><input class="pt-input" type="text" value="${esc(t.passport_number || "")}" placeholder="Passport #"></td>
       <td><input class="pt-input" type="text" value="${esc(t.country || "")}" placeholder="Country"></td>
       <td><button class="btn-del-row" title="Remove row" onclick="removeRow(this)">✕</button></td>
     `;
@@ -604,7 +598,7 @@ function appendRow(t) {
 }
 
 function addBlankRow() {
-    appendRow({full_name:"", title:"", dob:"", passport_number:"", country:""});
+    appendRow({full_name:"", title:"", dob:"", country:""});
     updateCount();
 }
 
@@ -635,8 +629,7 @@ function collectTravelers() {
             full_name:       name,
             title:           inputs[1].value,
             dob:             inputs[2].value || null,
-            passport_number: inputs[3].value.trim(),
-            country:         inputs[4].value.trim(),
+            country:         inputs[3].value.trim(),
         });
     });
     return list;
@@ -758,7 +751,6 @@ function renderGroups(groups, isArchive) {
               <td class="td-name">${esc(t.full_name)}</td>
               <td>${esc(t.title)}</td>
               <td>${fmtDisplay(t.dob)}</td>
-              <td>${esc(t.passport_number || '—')}</td>
               <td>${esc(t.country || '—')}</td>
               <td style="white-space:nowrap;">
                 ${isArchive ? '' : `<button class="btn btn-secondary btn-sm" onclick='openEditModal(${JSON.stringify(t)})'>✏️</button>`}
@@ -783,7 +775,7 @@ function renderGroups(groups, isArchive) {
           <div class="group-card-body">
             <table>
               <thead><tr>
-                <th>Name</th><th>Title</th><th>DOB</th><th>Passport #</th><th>Country</th><th></th>
+                <th>Name</th><th>Title</th><th>DOB</th><th>Country</th><th></th>
               </tr></thead>
               <tbody>${travelerRows}</tbody>
             </table>
@@ -904,7 +896,6 @@ function openEditModal(t) {
     document.getElementById('edit-name').value     = t.full_name    || '';
     document.getElementById('edit-title').value    = t.title        || '';
     document.getElementById('edit-dob').value      = t.dob          || '';
-    document.getElementById('edit-passport').value = t.passport_number || '';
     document.getElementById('edit-country').value  = t.country      || '';
     document.getElementById('edit-insurance').value = t.insurance_name || '';
     document.getElementById('edit-policy').value   = t.policy_number  || '';
@@ -922,7 +913,6 @@ async function saveEditModal() {
         full_name:       document.getElementById('edit-name').value.trim(),
         title:           document.getElementById('edit-title').value,
         dob:             document.getElementById('edit-dob').value || null,
-        passport_number: document.getElementById('edit-passport').value.trim(),
         country:         document.getElementById('edit-country').value.trim(),
         insurance_name:  document.getElementById('edit-insurance').value.trim(),
         policy_number:   document.getElementById('edit-policy').value.trim(),
@@ -944,8 +934,7 @@ async function saveEditModal() {
                 cells[0].textContent = payload.full_name;
                 cells[1].textContent = payload.title;
                 cells[2].textContent = fmtDisplay(payload.dob);
-                cells[3].textContent = payload.passport_number || '—';
-                cells[4].textContent = payload.country || '—';
+                cells[3].textContent = payload.country || '—';
             }
             closeEditModal();
             showToast('Traveler updated.', 'success');

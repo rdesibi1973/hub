@@ -14,7 +14,9 @@ if (!$from || !$to ||
 
 // ── Fetch data ────────────────────────────────────────────────────────────────
 $stmt = $pdo->prepare(
-    'SELECT * FROM medivac_travelers
+    'SELECT full_name, dob, country, tour_agent, coverage_start, coverage_end,
+            group_name, insurance_name, policy_number
+     FROM medivac_travelers
      WHERE coverage_start >= ? AND coverage_start <= ?
      ORDER BY coverage_start ASC, group_name ASC, full_name ASC'
 );
@@ -85,7 +87,7 @@ foreach ($rows as $r) {
         cS($r['full_name']       ?? '', $st),
         cS(fmtDate($r['dob']),          $st),
         cS($r['country']         ?? '', $st),
-        cS('', $st),
+        cS('', $st),   // Passport # — column kept for the Arusha Medivac layout, always empty
         cS($r['tour_agent']      ?? '', $st),
         cS(fmtDate($r['coverage_start']), $st),
         cS(fmtDate($r['coverage_end']),   $st),

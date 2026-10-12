@@ -11,8 +11,8 @@
  *   ops_calc()               a booking's Calc (cached on its Dropbox rev)
  *   ops_*_report()           the cross-checks for the Agent API
  *
- * Passport numbers: ops_medivac_groups() returns them only for the Medivac page
- * ($withPassport); the reports never select them and the Calc reader skips them.
+ * Passport numbers: never stored or returned (Medivac dropped the column, migration 068);
+ * the Calc reader skips them.
  * Callers pass the PDO. The Calc / Dropbox helpers are loaded only when used.
  */
 require_once __DIR__ . '/../../leads/includes/folder_parser.php';
@@ -106,12 +106,12 @@ function ops_lunch_box_rows(PDO $pdo, ?string $from, ?string $to, string $search
 
 /**
  * Medivac lists grouped by import batch (group_ref), by coverage start (bounds optional).
- * Passport numbers only with $withPassport (the Medivac page) — never for the API.
+ * Same data for the Medivac page and the Agent API.
  */
-function ops_medivac_groups(PDO $pdo, ?string $from, ?string $to, string $search = '', bool $archive = false, bool $withPassport = false): array {
+function ops_medivac_groups(PDO $pdo, ?string $from, ?string $to, string $search = '', bool $archive = false): array {
     $table = $archive ? 'medivac_travelers_archive' : 'medivac_travelers';
     $cols  = 'id, group_ref, group_name, tour_agent, coverage_start, coverage_end, source_file, created_at,
-              full_name, title, dob, country, insurance_name, policy_number' . ($withPassport ? ', passport_number' : '');
+              full_name, title, dob, country, insurance_name, policy_number';
     $where = []; $params = [];
     if ($from && preg_match('/^\d{4}-\d{2}-\d{2}$/', $from)) { $where[] = 'coverage_start >= ?'; $params[] = $from; }
     if ($to && preg_match('/^\d{4}-\d{2}-\d{2}$/', $to))     { $where[] = 'coverage_start <= ?'; $params[] = $to; }
@@ -134,10 +134,9 @@ function ops_medivac_groups(PDO $pdo, ?string $from, ?string $to, string $search
                 'source_file' => $r['source_file'], 'created_at' => $r['created_at'], 'travelers' => [],
             ];
         }
-        $t = ['id' => $r['id'], 'full_name' => $r['full_name'], 'title' => $r['title'], 'dob' => $r['dob']];
-        if ($withPassport) $t['passport_number'] = $r['passport_number'];
-        $groups[$ref]['travelers'][] = $t + ['country' => $r['country'], 'insurance_name' => $r['insurance_name'],
-                                             'policy_number' => $r['policy_number']];
+        $groups[$ref]['travelers'][] = ['id' => $r['id'], 'full_name' => $r['full_name'], 'title' => $r['title'],
+                                        'dob' => $r['dob'], 'country' => $r['country'],
+                                        'insurance_name' => $r['insurance_name'], 'policy_number' => $r['policy_number']];
     }
     return array_values($groups);
 }

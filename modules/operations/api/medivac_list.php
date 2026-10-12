@@ -6,8 +6,8 @@ require_permission('operations');
 
 header('Content-Type: application/json');
 
-// Grouped by group_ref. The Medivac page shows the passport column (the Agent API never gets it).
+// Grouped by group_ref. No passport numbers (the Hub never stores them).
 $groups = ops_medivac_groups($pdo, $_GET['from'] ?? null, $_GET['to'] ?? null,
-                             trim($_GET['q'] ?? ''), !empty($_GET['archive']), true);
+                             trim($_GET['q'] ?? ''), !empty($_GET['archive']));
 
 echo json_encode(['ok' => true, 'groups' => $groups]);
