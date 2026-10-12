@@ -32,7 +32,7 @@ function iti_final_code_from_calc(string $file): string {
 /** The sample tagged with this Calc code (prefer the display language), or null. */
 function iti_final_find_sample(PDO $db, string $code, string $lang) {
     if ($code === '') return null;
-    $st = $db->prepare("SELECT id, title_en, title_it, display_language, duration_days FROM iti_programs
+    $st = $db->prepare("SELECT id, program_type, title_en, title_it, display_language, duration_days FROM iti_programs
                          WHERE program_type = 'sample' AND status <> 'cancelled' AND hub_program_code = ?
                          ORDER BY (display_language = ?) DESC, id DESC LIMIT 1");
     $st->execute(array($code, $lang));
