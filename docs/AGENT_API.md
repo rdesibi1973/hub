@@ -215,7 +215,10 @@ name). Reads the booking's Calc (no PhpSpreadsheet needed) and returns:
 - Day dates = the hard-typed date (A17, or a date typed later after a gap) + row offset; a formula's
   saved value is only compared (warning if different).
 - Several pax sheets: the one whose name contains **CONF** is read (warning); none or several
-  marked → 422 "not finalised". Group calcs (RECAP) → 422.
+  marked → 422 "not finalised".
+- Group calcs (RECAP sheet): pass `sheet` = the client's own sheet (`"1PAX Cacioli"`: that client's days,
+  guests and flights) or `"RECAP"` (the whole group: every client's guests and flights). Without `sheet` → 422
+  listing the client sheets.
 - `flight_cost` is the saved FLIGHTS amount of that day (e.g. `=215*$B$1` → 430 for 2 pax).
 
 ### Calc checks (also in Confirm preview, UI + API)
@@ -878,6 +881,9 @@ except `ck_request_check`. "Booked" = request status Booked / Paid / Balance / D
 Dates come from the folder name (`_START…` / `_END…`). The `ops_*` and `flight_tickets` actions read each
 booking's Calc from Dropbox; it is cached (`ops_calc_cache`) and downloaded again only when the file changes,
 so the first call over a period can take a minute. `calc=0` skips the Calc (no cross-check). Max 62 days per call.
+Group bookings (GRP, Calc with a RECAP sheet in the group folder): each member is read from its own client
+sheet, matched by name ("1PAX Cacioli" ~ AnnamariaCaciolli); with one client sheet that one; with no match the
+RECAP sheet (whole group) and a warning in the Calc `warnings`.
 Passport numbers are never read or returned.
 
 ### `payments_due` (GET)
@@ -931,7 +937,7 @@ Lunch boxes (current + history tables) by safari date. `from`, `to` (default tod
 Calc), diet_notes (EXTRA DETAILS), notes, folder_name, source}` (the lunch box table has no departure time);
 `missing[]` `{date, request_id, folder, customer, pax, start_date, end_date, lodge, safari_day, extra_details}`:
 a safari day (park fees / safari park) after a night in Arusha in the Calc with no lunch box for that date;
-`calc_unreadable[]` (group Calc with RECAP, several pax sheets, no Calc …: check by hand).
+`calc_unreadable[]` (several pax sheets and none CONF, no Calc …: check by hand).
 
 ### `ops_medivac` (GET)
 Medivac registrations by coverage start (current + archive), and the Tanzania safaris starting in the

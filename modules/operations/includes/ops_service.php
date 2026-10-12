@@ -20,6 +20,7 @@ require_once __DIR__ . '/../../leads/includes/ck_lib.php';   // ck_is_other_dest
 
 const OPS_NIGHT_CUTOFF   = '06:00:00';
 const OPS_CALC_RECHECK   = 600;     // seconds before a cached Calc is compared with Dropbox again
+const OPS_CALC_VERSION   = 2;       // bump when ops_calc() reads differently: cached results are read again
 const OPS_WARN_DAYS      = 7;       // flight / time missing this close to the date → warning
 const OPS_TBA_RE         = '/\b(TBA|TBC|TBD)\b|to be (advised|confirmed)|da definire/i';
 /** Overnight in Arusha (Calc OVERNIGHT / HOTEL text). */
@@ -217,7 +218,8 @@ function ops_request_dirs(array $r): array {
 /**
  * A booking's Calc, reduced to what Operations needs, cached in ops_calc_cache and
  * read again only when the file's Dropbox revision changed (checked every OPS_CALC_RECHECK s).
- * → ['status' => ok|nofolder|nocalc|unreadable, 'msg'?, 'file'?, 'dir'?, 'start_date', 'end_date', 'pax',
+ * Group calc (RECAP): the client's own sheet (ops_group_sheet), else RECAP = the whole group (warning).
+ * → ['status' => ok|nofolder|nocalc|unreadable, 'msg'?, 'file'?, 'dir'?, 'sheet', 'group', 'start_date', 'end_date', 'pax',
  *    'arrival', 'departure', 'extra_details', 'days' [{date, label, hotel, flight_cost, park_fees}],
  *    'guests' [{name, title, country, tba}], 'guests_tba', 'warnings']
  * No passport numbers (calc_reader.php never reads them). Dropbox errors throw RuntimeException.
@@ -233,9 +235,11 @@ function ops_calc(PDO $db, array $r, bool $force = false): array {
     $st->execute([$id]);
     $cache  = $st->fetch(PDO::FETCH_ASSOC) ?: null;
     $cached = $cache ? json_decode((string)$cache['result_json'], true) : null;
+    if ($cached && ($cached['v'] ?? 1) !== OPS_CALC_VERSION) $cached = null;   // read with older rules
     if (!$force && $cached && strtotime($cache['checked_at']) > time() - OPS_CALC_RECHECK) return $cached;
 
     $save = function (array $res, ?string $file, ?string $rev) use ($db, $id): array {
+        $res['v'] = OPS_CALC_VERSION;
         $db->prepare("REPLACE INTO ops_calc_cache (request_id, file_path, file_rev, result_json, checked_at) VALUES (?, ?, ?, ?, ?)")
            ->execute([$id, $file, $rev, json_encode($res, JSON_UNESCAPED_UNICODE), date('Y-m-d H:i:s')]);
         return $res;
@@ -260,8 +264,12 @@ function ops_calc(PDO $db, array $r, bool $force = false): array {
     if ($bytes === null || $bytes === '') return $save(['status' => 'nocalc', 'msg' => 'Could not download ' . $file], null, null);
     $tmp = tempnam(sys_get_temp_dir(), 'opscalc_');
     file_put_contents($tmp, $bytes);
+    $group = null;
     try {
-        $c = calc_read_file($tmp);
+        $sheets = sc_xlsx_sheets($tmp);
+        if (sc_has_recap($sheets)) $group = ops_group_sheet($sheets, $r);
+        $c = calc_read_file($tmp, $group['sheet'] ?? '');
+        if ($group && $group['warning'] !== '') array_unshift($c['warnings'], $group['warning']);
     } catch (InvalidArgumentException $e) {
         return $save(['status' => 'unreadable', 'msg' => $e->getMessage(), 'file' => $calc['name'], 'dir' => $dir], $file, $calc['rev']);
     } finally {
@@ -276,11 +284,36 @@ function ops_calc(PDO $db, array $r, bool $force = false): array {
     foreach ($c['guests'] as $g) $guests[] = ['name' => $g['name'], 'title' => $g['title'], 'country' => $g['country'], 'tba' => $g['tba']];
     return $save([
         'status' => 'ok', 'file' => $calc['name'], 'dir' => $dir, 'sheet' => $c['sheet'],
+        'group' => $group ? ($group['whole'] ? 'whole_group' : 'client_sheet') : null,
         'start_date' => $c['start_date'], 'end_date' => $c['end_date'], 'pax' => $c['pax'],
         'arrival' => $c['arrival'], 'departure' => $c['departure'], 'extra_details' => $c['extra_details'],
         'days' => $days, 'guests' => $guests, 'guests_tba' => $c['guests_tba'],
         'warnings' => array_slice($c['warnings'], 0, 5),
     ], $file, $calc['rev']);
+}
+
+/**
+ * The sheet of a group calc for this booking: the client sheet whose name matches the customer
+ * ("1PAX Cacioli" ~ AnnamariaCaciolli, as Payments matches a RECAP row), the only client sheet,
+ * else RECAP (the whole group: every client's guests and flights) with a warning.
+ * → ['sheet' => name, 'whole' => bool, 'warning' => '']
+ */
+function ops_group_sheet(array $sheets, array $r): array {
+    $clients = calc_group_client_sheets($sheets);
+    $recap = '';
+    foreach ($sheets as $s) if (stripos($s, 'recap') !== false) { $recap = $s; break; }
+    $tok = cp_name_tokens(preg_replace('/_?GRP\d+/i', '', (string)$r['customer_name']));
+    $best = []; $max = 0;
+    foreach ($clients as $s) {
+        $score = $tok ? cp_name_score($tok, $s) : 0;
+        if ($score > $max) { $max = $score; $best = [$s]; }
+        elseif ($score === $max && $score > 0) $best[] = $s;
+    }
+    if (count($best) === 1) return ['sheet' => $best[0], 'whole' => false, 'warning' => ''];
+    if (count($clients) === 1) return ['sheet' => $clients[0], 'whole' => false, 'warning' => ''];
+    return ['sheet' => $recap, 'whole' => true,
+            'warning' => 'Group calc: no client sheet named like "' . $r['customer_name'] . '" (' . implode(', ', array_map('trim', $clients))
+                       . ') — read RECAP, the whole group.'];
 }
 
 /** ops_calc() that never throws: a Dropbox error becomes status "error". */

@@ -78,9 +78,18 @@ function calc_rd_col_shift(string $col, int $n): string {
     return chr(ord($col) + $n);
 }
 
+/** The client sheets of a group calc (every sheet but RECAP). */
+function calc_group_client_sheets(array $sheets): array {
+    $out = [];
+    foreach ($sheets as $s) { if (stripos($s, 'recap') === false) $out[] = $s; }
+    return $out;
+}
+
 /**
  * Read a local Calc. Throws InvalidArgumentException when the booking is not
- * finalised (several PAX sheets) or is a group calc (RECAP).
+ * finalised (several PAX sheets), or is a group calc (RECAP) and no sheet is given.
+ * A group calc is read one sheet at a time: a client's own sheet ("2PAX Fabio Zanelli":
+ * that client's days, guests, flights) or "RECAP" (the whole group).
  * @return array{sheet:string, pax:array, pax_text:string, room_config:string, extra_details:string,
  *   start_date:?string, end_date:?string, nights:int, days:array, guests:array, guests_tba:bool,
  *   arrival:string, departure:string, price_to_customer:?float, price_total:?float, price_sto:?float,
@@ -89,8 +98,9 @@ function calc_rd_col_shift(string $col, int $n): string {
 function calc_read_file(string $path, string $wantSheet = ''): array {
     $sheets = sc_xlsx_sheets($path);
     if (!$sheets) throw new InvalidArgumentException('Not a readable .xlsx file.');
-    if (sc_has_recap($sheets)) {
-        throw new InvalidArgumentException('Group calc (RECAP sheet) — read each client\'s own Calc instead.');
+    if (sc_has_recap($sheets) && trim($wantSheet) === '') {
+        throw new InvalidArgumentException('Group calc (RECAP sheet) — pass "sheet": the client\'s own sheet ('
+            . implode(', ', array_map('trim', calc_group_client_sheets($sheets))) . ') or RECAP for the whole group.');
     }
     $warnings = [];
     $pax = [];
