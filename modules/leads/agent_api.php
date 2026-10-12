@@ -2386,7 +2386,7 @@ try {
             'save_invoice_pdf', 'import_zoho_invoice', 'create_invoice', 'update_invoice', 'memo_list', 'memo_save', 'memo_set_status',
             'routine_status', 'routine_done',
             'mail_folders', 'mail_list', 'mail_get', 'mail_attachment', 'mail_flag', 'mail_move', 'mail_draft', 'mail_send',
-            'timeline_list', 'timeline_add', 'timeline_update', 'summary_set', 'request_resume',
+            'timeline_list', 'timeline_add', 'timeline_update', 'summary_set', 'request_resume', 'set_request_status',
         ]]);
     }
 } catch (Throwable $e) {
