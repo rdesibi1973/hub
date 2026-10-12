@@ -788,7 +788,10 @@ include 'includes/header.php';
     (<?= date('d M') ?>), whatever year is selected. A reassigned request counts for the new agent;
     requests assigned before 12 Oct 2026 use their date received.
   </p>
-  <style>.recent-col{background:#f3f7fb}</style>
+  <style>
+    .recent-col{background:#f3f7fb}
+    .table-wrap tfoot td{padding:13px 16px;font-size:.83rem;vertical-align:middle}
+  </style>
 
 <?php elseif ($team_agent !== null): // ---- DRILL-DOWN: single agent ---- ?>
   <?php $k = $team_agent['kpi']; ?>

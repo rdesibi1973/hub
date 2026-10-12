@@ -10,7 +10,7 @@ $currentUser = current_user();
 <title><?= h($pageTitle ?? 'Lead Tracker') ?> — Savannah Explorers</title>
 <link rel="icon" type="image/png" href="https://www.savannahexplorers.net/img/logo-savannah-explorers.png">
 <link href="https://fonts.googleapis.com/css2?family=Merriweather:wght@400;700&family=Open+Sans:wght@300;400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="assets/style.css">
+<link rel="stylesheet" href="assets/style.css?v=<?= @filemtime(__DIR__ . '/assets/style.css') ?>">
 <style>
 /* ── MAIN HEADER — identical to Savannah Explorers Hub ── */
 header {
