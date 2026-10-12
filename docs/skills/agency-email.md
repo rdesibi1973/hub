@@ -21,8 +21,10 @@ Fixed rules as in the project instructions: never send without his explicit ok o
 - ALWAYS a draft as an `.eml` file in `C:\Dropbox\Exchange\Draft-mail` (Dropbox `/Exchange/Draft-mail/`), named `YYYY-MM-DD_<folder name>_<topic>.eml`; when the mail is about a request/booking, save a copy in that folder's `mails` subfolder too. No Hub `mail_draft`, no Gmail-connector drafts (12 Oct 2026).
 - The .eml must be HTML: multipart text + html, header `X-Unsent: 1`, UTF-8; default font, no width limit (remove the `max-width` from the signature div).
 - Replies: `From` = the address the mail arrived on (info@savannahexplorers.com or savannah.explorers@gmail.com); `To` = the sender; subject "Re: …"; `In-Reply-To` and `References` = the original Message-ID (from `mail_get` or the Gmail connector) so it threads.
+- Replies quote the original mail below the signature, as a normal reply does: a line "Il <gg/mm/aaaa hh:mm>, <mittente> ha scritto:" (English "On <date>, <sender> wrote:"), then the original body as received (`mail_get` `body`, with the earlier thread it contains), in a `<blockquote type="cite">` in the html part and with "> " lines in the text part; strip empty lines at the start (12 Oct 2026).
 - New mails (no thread) and mails to staff: `From` Gmail (savannah.explorers@gmail.com).
 - Signature at the bottom matching the address: `InfoSavannahExplorers.html` (info@) or `OfficeGmail.html` (Gmail), in `C:\Dropbox\001_Safari\99_office\`. The signature already holds "Rimango a disposizione…", "Buona giornata", "Roberto": don't repeat them in the body.
+- The signature images (Roberto's photo, Tripadvisor badge) are links to savannahexplorers.com: Thunderbird hides remote images when a draft is opened from file, recipients see them. Don't embed or change them.
 - Take the signature's raw HTML from his PC (`device_stage_files` or the device shell) and paste it as is into the html part. Never rebuild it from the Dropbox connector `fetch` text: that is extracted plain text and loses the formatting (12 Oct 2026).
 - Attachments only when Roberto asks.
 - Write the file to his PC (device shell or `device_commit_files`); if the PC is not reachable, stop and tell him.
@@ -47,7 +49,7 @@ Every mail about a request/booking carries the Dropbox folder name: `Re: <origin
 - Costs outside the quote: NIC mandatory insurance for Tanzania USD 44 pp (NIC, not a Zanzibar insurance); Zanzibar infrastructure tax USD 5 pppn paid at the hotel.
 - International flights only if asked: "Possiamo prenotare anche i voli internazionali dall'Italia, spesso abbiamo buone tariffe Tour Operator. Per opzionare senza impegno i voli internazionali abbiamo bisogno di: cognomi / nomi esattamente come sono scritti sul passaporto e le date di nascita; aeroporto di partenza; date con eventuale flessibilità".
 - A payment is "received" only when the money has arrived; a transfer announced is "in arrivo".
-- Kenya trips: the client-facing emergency contact is always Savannah's office; don't mention the Kenya partner or its Medivac.
+- Kenya trips: never mention the Kenya partner to agencies or clients (not for availability, quotes, lodges or emergencies) — they see Savannah as handling everything. Write "we will check availability", not "with our partner in Kenya". The client-facing emergency contact is always Savannah's office; don't mention the partner's Medivac (12 Oct 2026).
 - Standalone excursions for clients who didn't book the package: politely declined (easy to arrange locally).
 - Lodge-only (Orangi Collection) enquiries: no Savannah road transfers between Serengeti/Ngorongoro lodges; transfers by bush flight, arranged on their side.
 
