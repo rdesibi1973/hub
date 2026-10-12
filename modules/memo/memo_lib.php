@@ -170,6 +170,17 @@ function memo_close(PDO $pdo, $id, $note = '') {
 }
 
 /**
+ * Delete one of $userId's memos (soft: deleted_at is set, the row stays). Used by the
+ * Memo Board and the Agent API (memo_delete). Returns true if a memo was deleted.
+ */
+function memo_delete(PDO $pdo, $id, $userId) {
+    $now = date('Y-m-d H:i:s');
+    $st  = $pdo->prepare("UPDATE memos SET deleted_at = ?, updated_at = ? WHERE id = ? AND user_id = ? AND deleted_at IS NULL");
+    $st->execute(array($now, $now, (int)$id, (int)$userId));
+    return $st->rowCount() > 0;
+}
+
+/**
  * A payment was recorded on an invoice: close the memos waiting for it
  * (auto_close = 'payment') and open their next steps.
  * Returns [{id, title, opened_next: [ids]}].

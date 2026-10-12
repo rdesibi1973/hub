@@ -1,6 +1,6 @@
 ---
 name: agency-email
-description: Draft any Savannah email to agencies, direct clients or staff (replies, updates, complaints, payment notes) in Roberto's style, as a mail_draft from the right address.
+description: Draft any Savannah email to agencies, direct clients or staff (replies, updates, complaints, payment notes) in Roberto's style, as an .eml draft in Exchange/Draft-mail from the right address.
 ---
 
 # Agency / client / staff email
@@ -18,12 +18,14 @@ Fixed rules as in the project instructions: never send without his explicit ok o
 
 ## 2. Where the draft goes
 
-- ALWAYS a draft with the Hub `mail_draft` action — no Gmail-connector drafts, no .eml files.
-- Replies: from the same address the mail arrived on (info@savannahexplorers.com or savannah.explorers@gmail.com), in the original thread ("Re: …").
-- New mails (no thread) and mails to staff: from Gmail (savannah.explorers@gmail.com).
-- Signature at the bottom matching the address: `InfoSavannahExplorers.html` (info@) or `OfficeGmail.html` (Gmail), in `C:\Dropbox\001_Safari\99_office\`.
-- Attachments (`attachments[]`) only when Roberto asks.
-- If `mail_draft` cannot use the needed address, stop and tell him.
+- ALWAYS a draft as an `.eml` file in `C:\Dropbox\Exchange\Draft-mail` (Dropbox `/Exchange/Draft-mail/`), named `YYYY-MM-DD_<folder name>_<topic>.eml`; when the mail is about a request/booking, save a copy in that folder's `mails` subfolder too. No Hub `mail_draft`, no Gmail-connector drafts (12 Oct 2026).
+- The .eml must be HTML: multipart text + html, header `X-Unsent: 1`, UTF-8; default font, no width limit (remove the `max-width` from the signature div).
+- Replies: `From` = the address the mail arrived on (info@savannahexplorers.com or savannah.explorers@gmail.com); `To` = the sender; subject "Re: …"; `In-Reply-To` and `References` = the original Message-ID (from `mail_get` or the Gmail connector) so it threads.
+- New mails (no thread) and mails to staff: `From` Gmail (savannah.explorers@gmail.com).
+- Signature at the bottom matching the address: `InfoSavannahExplorers.html` (info@) or `OfficeGmail.html` (Gmail), in `C:\Dropbox\001_Safari\99_office\`. The signature already holds "Rimango a disposizione…", "Buona giornata", "Roberto": don't repeat them in the body.
+- Take the signature's raw HTML from his PC (`device_stage_files` or the device shell) and paste it as is into the html part. Never rebuild it from the Dropbox connector `fetch` text: that is extracted plain text and loses the formatting (12 Oct 2026).
+- Attachments only when Roberto asks.
+- Write the file to his PC (device shell or `device_commit_files`); if the PC is not reachable, stop and tell him.
 
 ## 3. Subject
 
@@ -62,4 +64,4 @@ English, short, factual: folder name in the subject, what to do, by when. Bookin
 
 ## 8. Report to Roberto (Italian)
 
-Show from / to / cc, subject, full text, attachments, then: "Bozza salvata in mail_draft da <indirizzo>. Serve da te: ok sul testo e sui destinatari."
+Show from / to / cc, subject, full text, attachments, then: "Bozza salvata in Exchange/Draft-mail/<file>.eml (da <indirizzo>). Serve da te: ok sul testo e sui destinatari."

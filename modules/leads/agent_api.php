@@ -94,7 +94,7 @@ function agent_audit(PDO $db, string $action, $reqId, array $payload, string $re
                               'iti_create_lodge', 'iti_set_days', 'iti_add_day', 'iti_delete_day', 'iti_update_inclusions',
                               'iti_create_flight_route', 'iti_create_activity', 'iti_create_transfer_route', 'iti_save_as_sample',
                               'create_request', 'add_flight_rates', 'timeline_update', 'summary_set', 'rename_folder',
-                              'set_request_status', 'update_request', 'import_group_folder', 'move_group_folder', 'ck_request_check'], true) && empty($payload['confirm']);
+                              'set_request_status', 'update_request', 'import_group_folder', 'move_group_folder', 'ck_request_check', 'memo_delete'], true) && empty($payload['confirm']);
     // Mail: keep who/what in the log, not message bodies or attachment content.
     if (in_array($action, ['mail_get', 'mail_attachment', 'iti_document', 'iti_vouchers'], true) && $code === 200) {
         $res = json_decode($resultJson, true);
@@ -1968,6 +1968,41 @@ try {
                    'opened_next' => $opened ? agent_memo_rows($db, "m.id IN (" . implode(',', array_map('intval', $opened)) . ")", []) : []]);
     }
 
+    // ── memo_delete ──────────────────────────────────────────────────────────
+    // Same as the bin on the Memo Board (memo_delete(): soft, deleted_at). id, ext_key
+    // or ids[] (max 50); one unknown id → nothing deleted. Dry-run unless "confirm": true.
+    case 'memo_delete': {
+        agent_require_method('POST');
+        $owner = agent_memo_owner($db);
+        $keys  = [];
+        if (isset($in['ids'])) {
+            if (!is_array($in['ids'])) agent_fail('ids must be an array of memo ids');
+            foreach ($in['ids'] as $v) { if ((int)$v > 0) $keys[(int)$v] = ['id' => (int)$v]; }
+            $keys = array_values($keys);
+        } elseif ((int)($in['id'] ?? 0) > 0 || trim((string)($in['ext_key'] ?? '')) !== '') {
+            $keys = [$in];
+        }
+        if (!$keys) agent_fail('id, ext_key or ids is required');
+        if (count($keys) > 50) agent_fail('At most 50 ids per call');
+        $found = []; $missing = [];
+        foreach ($keys as $k) {
+            $m = agent_memo_find($db, $owner['id'], $k);
+            if ($m) $found[(int)$m['id']] = true;
+            else    $missing[] = isset($k['id']) && (int)$k['id'] > 0 ? (int)$k['id'] : trim((string)($k['ext_key'] ?? ''));
+        }
+        if ($missing) agent_fail('Memo not found on ' . $owner['full_name'] . "'s board: " . implode(', ', $missing) . ' — nothing deleted', 404,
+                                 ['not_found' => $missing]);
+        $ids  = array_keys($found);
+        $rows = agent_memo_rows($db, "m.id IN (" . implode(',', $ids) . ")", []);
+        if (empty($in['confirm'])) {
+            agent_out(['ok' => true, 'dry_run' => true, 'to_delete' => count($ids), 'memos' => $rows,
+                       'message' => 'Dry run — nothing deleted. Resend with "confirm": true.']);
+        }
+        $deleted = [];
+        foreach ($ids as $mid) { if (memo_delete($db, $mid, $owner['id'])) $deleted[] = $mid; }
+        agent_out(['ok' => true, 'deleted' => $deleted, 'memos' => $rows]);
+    }
+
     // ── routine_status / routine_done ────────────────────────────────────────
     // The owner's recurring checks (Memo Board top strip): due / count / last done.
     case 'routine_status': {
@@ -2523,7 +2558,7 @@ try {
             'iti_flight_routes', 'iti_create_flight_route', 'iti_activities', 'iti_create_activity',
             'iti_transfer_routes', 'iti_create_transfer_route', 'add_flight_rates',
             'find_invoices', 'get_invoice', 'add_invoice_payment', 'cancel_invoice_payment', 'update_folder_status',
-            'save_invoice_pdf', 'import_zoho_invoice', 'create_invoice', 'update_invoice', 'memo_list', 'memo_save', 'memo_set_status',
+            'save_invoice_pdf', 'import_zoho_invoice', 'create_invoice', 'update_invoice', 'memo_list', 'memo_save', 'memo_set_status', 'memo_delete',
             'routine_status', 'routine_done',
             'mail_folders', 'mail_list', 'mail_get', 'mail_attachment', 'mail_flag', 'mail_move', 'mail_draft', 'mail_send',
             'timeline_list', 'timeline_add', 'timeline_update', 'summary_set', 'request_resume', 'set_request_status',

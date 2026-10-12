@@ -67,7 +67,7 @@ Preventivo <cartella>
 Programma: <nome> (sample #id, perché)
 Prezzo: <NNNN> usd per persona base N pax (Calc <file>) – margine <...>
 File: <ref_number>.docx/.pdf salvato
-Mail: bozza mail_draft da <indirizzo> – Re: <oggetto>
+Mail: bozza Exchange/Draft-mail/<file>.eml da <indirizzo> – Re: <oggetto>
 Memo: <titolo> (doing)
 Serve da te: ok su prezzo e testo
 ```

@@ -31,8 +31,8 @@ without driving the web UI.
 | HTTPS only | Plain HTTP → 403. |
 | Rate limit | 60 calls/min → 429. |
 | Audit | Every call (including failures and dry-runs) → `agent_audit_log` (action, request_id, user, HTTP code, dry_run, payload, result, IP). |
-| Dry-run by default | `update_request`, `confirm_booking`, `send_booking_email`, `rollback_booking`, `rename_folder`, `import_group_folder`, `move_group_folder`, `set_request_status`, `cancel_invoice_payment`, `update_folder_status`, `import_zoho_invoice`, `create_invoice`, `update_invoice`, `mail_send`, `mail_move` and `ck_request_check` (among others) do nothing unless the body has `"confirm": true`. |
-| No deletes | No delete endpoint (mail included). Undo a confirm with `rollback_booking` (or BackOffice → Rollback). |
+| Dry-run by default | `update_request`, `confirm_booking`, `send_booking_email`, `rollback_booking`, `rename_folder`, `import_group_folder`, `move_group_folder`, `set_request_status`, `cancel_invoice_payment`, `update_folder_status`, `import_zoho_invoice`, `create_invoice`, `update_invoice`, `memo_delete`, `mail_send`, `mail_move` and `ck_request_check` (among others) do nothing unless the body has `"confirm": true`. |
+| No deletes | No delete endpoint (mail included), except `memo_delete`, which is soft (`deleted_at`, the row stays). Undo a confirm with `rollback_booking` (or BackOffice → Rollback). |
 | Mailbox | The key also reads `info@` (`mail_*`): keep `api.txt` as private as the mailbox password. |
 
 **Server firewall (Mod_Security) — always send `User-Agent: Mozilla/5.0 (compatible; SavannahHubAgent/1.0)`.**
@@ -753,6 +753,19 @@ still to do. A payment memo with `auto_close_on_payment` needs no next steps for
 ### `memo_set_status` (POST)
 `id` or `ext_key`, `status` (`open`|`doing`|`waiting`|`done`|`archived`), `note` (appended when done).
 `done` opens the next steps → `opened_next[]`.
+
+### `memo_delete` (POST)
+Deletes memos from the owner's board, like the bin on the Memo Board (same code, `memo_delete()` in
+`memo_lib.php`): soft — `deleted_at` is set, the row stays in the DB (no restore through the API).
+`id` or `ext_key`, or `ids` (array, max 50). **Dry-run unless `"confirm": true`** → `{dry_run, to_delete, memos[]}`;
+with `confirm` → `{deleted: [ids], memos[]}`. One unknown id (or a memo on another user's board) → 404, nothing
+deleted. Pending next steps of a deleted memo are left as they are (as on the board); they never open.
+To close a finished task use `memo_set_status` `done` — delete only memos that are wrong, duplicated or no longer wanted.
+
+```bash
+curl -sA "$UA" -H "$H" -X POST "$U?action=memo_delete" -d '{"ids":[812,813]}'                  # dry run
+curl -sA "$UA" -H "$H" -X POST "$U?action=memo_delete" -d '{"ids":[812,813],"confirm":true}'
+```
 
 `add_invoice_payment` returns `memos_closed[]` (memos closed automatically by that payment).
 

@@ -298,8 +298,7 @@ if ($action === 'reorder') {
 // ---------- delete (owner only) ----------
 if ($action === 'delete') {
     $id = isset($_POST['id']) ? intval($_POST['id']) : 0;
-    $stmt = $pdo->prepare("UPDATE memos SET deleted_at=?, updated_at=? WHERE id=? AND user_id=?");
-    $stmt->execute(array($now, $now, $id, $uid));
+    memo_delete($pdo, $id, $uid);
     out(true, array());
 }
 
