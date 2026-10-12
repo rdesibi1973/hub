@@ -253,6 +253,22 @@ function ops_calc(PDO $db, array $r, bool $force = false): array {
         $calc = cp_pick_calc(cp_retry(fn() => cp_list_files($token, $d)));
         if ($calc) { $dir = $d; break; }
     }
+    // GRP whose Hub record keeps an old group folder name: the current one, found by its GRP code
+    // among the /001_Safari folders the CK scan keeps up to date.
+    $code = ops_grp_code((string)($r['group_folder'] ?? '') . ' ' . (string)($r['practice_code'] ?? ''));
+    if (!$calc && $code !== '') {
+        $st = $db->prepare("SELECT folder_name FROM ck_folders WHERE gone = 0 AND folder_name LIKE ?");
+        $st->execute(['%' . $code . '%']);
+        $live = $st->fetchAll(PDO::FETCH_COLUMN);
+        if (count($live) === 1) {
+            $leaf = basename((string)($r['practice_code'] ?? ''));
+            foreach (array_filter([$leaf !== '' && $leaf !== $live[0] ? CK_BASE . '/' . $live[0] . '/' . $leaf : '', CK_BASE . '/' . $live[0]]) as $d) {
+                $dirs[] = $d;
+                $calc = cp_pick_calc(cp_retry(fn() => cp_list_files($token, $d)));
+                if ($calc) { $dir = $d; break; }
+            }
+        }
+    }
     if (!$calc) return $save(['status' => 'nocalc', 'msg' => 'No *_Calc.xlsx in ' . implode(' or ', $dirs)], null, null);
     $file = $dir . '/' . $calc['name'];
     if ($cached && $cache['file_path'] === $file && $cache['file_rev'] === $calc['rev']) {
