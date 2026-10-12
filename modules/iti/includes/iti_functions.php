@@ -1710,19 +1710,30 @@ function iti_get_program_days(int $program_id): array {
     return iti_get_days($program_id);
 }
 
+// The day's activities: master activities and free-text ones (activity_custom, e.g. imported
+// from WeTu), whose name_<lang> is their custom_note_<lang> translation or the text itself —
+// left out, the edit page would not show them and saving the day would delete them.
 function iti_get_day_activities(int $program_day_id): array {
     $st = db()->prepare(
         'SELECT da.*, a.name_en, a.name_it, a.name_fr, a.name_es, a.name_de,
                 a.activity_type, a.duration_hours,
                 d.name_en AS dest_name_en
            FROM iti_day_activities da
-           JOIN iti_activities a ON a.id = da.activity_id
+           LEFT JOIN iti_activities a ON a.id = da.activity_id
            LEFT JOIN iti_destinations d ON d.id = a.destination_id
-          WHERE da.program_day_id = ?
+          WHERE da.program_day_id = ? AND (a.id IS NOT NULL OR COALESCE(da.activity_custom, \'\') <> \'\')
           ORDER BY da.sort_order'
     );
     $st->execute([$program_day_id]);
-    return $st->fetchAll();
+    $rows = $st->fetchAll();
+    foreach ($rows as &$r) {
+        if (!empty($r['activity_id'])) continue;
+        foreach (ITI_LANGUAGES as $l) {
+            $r['name_' . $l] = trim((string)($r['custom_note_' . $l] ?? '')) ?: (string)$r['activity_custom'];
+        }
+    }
+    unset($r);
+    return $rows;
 }
 
 function iti_get_day_flights(int $program_day_id): array {

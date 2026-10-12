@@ -235,6 +235,7 @@ function iti_final_match_sample(PDO $db, array $planDays, array $sampleDays): ar
  */
 function iti_final_title(string $sampleTitle, string $customer): string {
     $t = trim(preg_replace('/\s+(in\s+(italiano|english|inglese|fran[cç]ais|espa[nñ]ol|deutsch))\s*$/iu', '', $sampleTitle));
+    $t = iti_final_strip_season($t);
     if ($t === '') return '';
     if (mb_strtoupper($t, 'UTF-8') === $t) {      // all caps → title case, airport / season codes kept
         $t = mb_convert_case(mb_strtolower($t, 'UTF-8'), MB_CASE_TITLE, 'UTF-8');
@@ -244,6 +245,41 @@ function iti_final_title(string $sampleTitle, string $customer): string {
     }
     $customer = trim($customer);
     return mb_substr($customer !== '' ? $t . ' – ' . $customer : $t, 0, 255);
+}
+
+/**
+ * A sample title without its season / rate tags, which are for the team, not the
+ * client: "SAFARI GRANDE MIGRAZIONE LUG-SET" → "SAFARI GRANDE MIGRAZIONE",
+ * "… INVERNO STO DIC2026-MAR2027", "GREAT MIGRATION SAFARI – WINTER, DEC 2026–MAR 2027"
+ * → the name only. Month ranges, season words, "STO" and years go.
+ */
+function iti_final_strip_season(string $title): string {
+    $mon = '(?:gen|jan|feb|f[eé]v|mar|apr|avr|abr|mag|may|mai|giu|jun|juin|lug|jul|juil|ago|aug|ao[uû]|set|sep|ott|oct|okt|nov|dic|dec|d[eé]c|dez)\p{L}*';
+    $t = preg_replace('/\b' . $mon . '\.?\s*(?:\d{4})?\s*(?:-|–|\/)\s*' . $mon . '\.?\s*(?:\d{4})?/iu', ' ', $title);
+    $t = preg_replace('/\b(?:inverno|estate|winter|summer|hiver|[eé]t[eé]|invierno|verano|sommer|sto)\b/iu', ' ', $t);
+    $t = preg_replace('/\b\d{4}(?:\s*[-–\/]\s*\d{2,4})?\b/u', ' ', $t);
+    $t = preg_replace('/\s*[,–\-:\/]+\s*(?=[,–\-:\/]|$)/u', '', trim(preg_replace('/\s+/u', ' ', $t)));
+    return trim($t, " \t,–-:/");
+}
+
+/**
+ * Two activity names of the same kind: a common word of 6+ letters ("camminata"),
+ * generic words aside — game drives are not merged (a night drive is added to the
+ * day's game drive, not swapped for it). $a, $b = lists of names (any language).
+ */
+function iti_final_same_kind(array $a, array $b): bool {
+    static $generic = array('activity', 'attivita', 'attività', 'lodge', 'safari', 'fotosafari', 'national', 'nazionale',
+                            'giornata', 'intera', 'notturno', 'notturna');
+    $words = function (array $names) use ($generic) {
+        $w = array();
+        foreach ($names as $n) {
+            foreach (preg_split('/[^\p{L}]+/u', mb_strtolower((string)$n)) as $x) {
+                if (mb_strlen($x) >= 6 && !in_array($x, $generic, true)) $w[$x] = true;
+            }
+        }
+        return $w;
+    };
+    return (bool)array_intersect_key($words($a), $words($b));
 }
 
 /** Text of an added day spent in the same lodge as the night before: a game drive day, or a free day at the beach. */
@@ -685,7 +721,10 @@ function iti_final_generate(PDO $db, int $requestId, array $calc, int $sampleId,
             }
 
             // Calc activities not already on the day (same activity, or its name in a custom text).
-            $st = $db->prepare('SELECT activity_id, activity_custom FROM iti_day_activities WHERE program_day_id = ?');
+            // A sample activity of the same kind (a common word of 6+ letters: "Camminata
+            // naturalistica" ~ "Camminata nei dintorni del lodge") is replaced by the Calc one.
+            $st = $db->prepare('SELECT a.id, a.activity_id, a.activity_custom, m.name_en, m.name_it FROM iti_day_activities a
+                                  LEFT JOIN iti_activities m ON m.id = a.activity_id WHERE a.program_day_id = ?');
             $st->execute(array($dayId));
             $have = $st->fetchAll(PDO::FETCH_ASSOC);
             $sort = count($have);
@@ -695,16 +734,26 @@ function iti_final_generate(PDO $db, int $requestId, array $calc, int $sampleId,
                 $an->execute(array($a['activity_id']));
                 $names = array_filter(array_map('mb_strtolower', array_values($an->fetch(PDO::FETCH_ASSOC) ?: array())));
                 $names[] = $a['text'];
-                $dup = false;
-                foreach ($have as $h) {
+                $dup = false; $same = null;
+                foreach ($have as $k => $h) {
                     if ((int)$h['activity_id'] === $a['activity_id']) { $dup = true; break; }
                     $txt = mb_strtolower((string)$h['activity_custom']);
                     foreach ($names as $nm) { if ($nm !== '' && $txt !== '' && strpos($txt, $nm) !== false) { $dup = true; break 2; } }
+                    if ($same === null && !empty($h['id'])
+                        && iti_final_same_kind($names, array($h['activity_custom'], $h['name_en'], $h['name_it']))) $same = $k;
                 }
                 if ($dup) continue;
+                if ($same !== null) {   // the sample's texts of the old activity go too
+                    $clear = '';
+                    foreach (iti_table_columns('iti_day_activities') as $c) if (strpos($c, 'custom_note_') === 0) $clear .= ', `' . $c . '` = NULL';
+                    $db->prepare('UPDATE iti_day_activities SET activity_id = ?, activity_custom = NULL' . $clear . ' WHERE id = ?')
+                       ->execute(array($a['activity_id'], (int)$have[$same]['id']));
+                    $have[$same] = array('id' => null, 'activity_id' => $a['activity_id'], 'activity_custom' => null, 'name_en' => null, 'name_it' => null);
+                    continue;
+                }
                 $db->prepare('INSERT INTO iti_day_activities (program_day_id, activity_id, sort_order) VALUES (?,?,?)')
                    ->execute(array($dayId, $a['activity_id'], ++$sort));
-                $have[] = array('activity_id' => $a['activity_id'], 'activity_custom' => null);
+                $have[] = array('id' => null, 'activity_id' => $a['activity_id'], 'activity_custom' => null, 'name_en' => null, 'name_it' => null);
             }
 
             $prevLodge = $d['lodge_id'];

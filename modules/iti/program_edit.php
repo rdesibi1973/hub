@@ -221,6 +221,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 iti_transfers_replace($db, $day_id, array_values((array)($_POST['transfer_desc'] ?? [])));
 
                 // ── Activities: delete all then re-insert from array ──
+                // The form has no field for the per-language texts (custom_note_it…): keep them,
+                // matching each saved row to an old one with the same activity / custom text.
+                $act_noteCols = array_values(array_filter(iti_table_columns('iti_day_activities'), function ($c) { return strpos($c, 'custom_note_') === 0; }));
+                $act_old = [];
+                if ($act_noteCols) {
+                    $q = $db->prepare('SELECT * FROM iti_day_activities WHERE program_day_id=? ORDER BY sort_order, id');
+                    $q->execute([$day_id]);
+                    $act_old = $q->fetchAll(PDO::FETCH_ASSOC);
+                }
                 $db->prepare('DELETE FROM iti_day_activities WHERE program_day_id=?')->execute([$day_id]);
                 $act_ids     = $_POST['activity_id']     ?? [];
                 $act_customs = $_POST['activity_custom'] ?? [];
@@ -228,7 +237,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $aid  = (int)$aid;
                     $cust = trim($act_customs[$i] ?? '');
                     if (!$aid && $cust === '') continue;
-                    $db->prepare('INSERT INTO iti_day_activities (program_day_id,activity_id,activity_custom,sort_order) VALUES (?,?,?,?)')->execute([$day_id, $aid ?: null, $cust ?: null, $i+1]);
+                    $notes = [];
+                    foreach ($act_old as $k => $o) {
+                        if ((int)$o['activity_id'] === $aid && ($aid || trim((string)$o['activity_custom']) === $cust)) {
+                            foreach ($act_noteCols as $c) if ((string)$o[$c] !== '') $notes[$c] = $o[$c];
+                            unset($act_old[$k]);
+                            break;
+                        }
+                    }
+                    $cols = array_merge(['program_day_id','activity_id','activity_custom','sort_order'], array_keys($notes));
+                    $db->prepare('INSERT INTO iti_day_activities (' . implode(',', $cols) . ') VALUES (' . implode(',', array_fill(0, count($cols), '?')) . ')')
+                       ->execute(array_merge([$day_id, $aid ?: null, $cust ?: null, $i+1], array_values($notes)));
                 }
 
                 // ── Flights: delete all then re-insert from array ──
