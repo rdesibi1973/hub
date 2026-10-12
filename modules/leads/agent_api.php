@@ -927,8 +927,8 @@ try {
 
     // ── set_request_status ───────────────────────────────────────────────────
     // Same rules as the Hub status menu (bs_set_request_status). Booked only via
-    // confirm_booking; a Booked request can only go to Cancelled (folder untouched).
-    // All-or-nothing over up to 50 ids. Dry-run unless "confirm": true.
+    // confirm_booking; a Booked request is not changed here (rollback_booking / BackOffice).
+    // Up to 50 ids, one result each; 422 if some fail. Dry-run unless "confirm": true.
     case 'set_request_status': {
         agent_require_method('POST');
         $ids = [];
@@ -952,42 +952,60 @@ try {
         if ($status === 'Lost' && !array_key_exists($reason, bs_lost_reasons())) {
             agent_fail('lost_reason is required for Lost', 400, ['lost_reasons' => array_keys(bs_lost_reasons())]);
         }
-        $opt = ['allowed' => $settable, 'from_booked' => ['Cancelled']];
+        $opt     = ['allowed' => $settable, 'from_booked' => []];
+        $dry     = empty($in['confirm']);
+        $codeMap = ['not_found' => 404, 'booked' => 409];
 
-        // Check every id first: one bad id → nothing changes.
-        $rows = []; $errors = [];
+        $ph = implode(',', array_fill(0, count($ids), '?'));
+        $st = $db->prepare("SELECT id, customer_name, practice_code, status, lost_reason, lost_note FROM requests WHERE id IN ($ph)");
+        $st->execute($ids);
+        $info = [];
+        foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) $info[(int)$r['id']] = $r;
+
+        if (!$dry) tl_schema($db);   // no DDL inside the transactions below
+        // Each request on its own: a failure doesn't stop the others.
+        $results = []; $failCodes = [];
         foreach ($ids as $rid) {
+            $r   = $info[$rid] ?? [];
+            $row = ['id' => $rid, 'ok' => false, 'customer_name' => $r['customer_name'] ?? null,
+                    'folder' => $r['practice_code'] ?? null, 'current_status' => $r['status'] ?? null,
+                    'new_status' => $status, 'lost_reason' => $status === 'Lost' ? $reason : null];
             $c = bs_status_check($db, $rid, $status, $reason, $opt);
-            if (!$c['ok']) { $errors[] = ['request_id' => $rid, 'error_code' => $c['error_code'], 'error' => $c['error']]; continue; }
-            $rows[] = ['request_id' => $rid, 'old_status' => $c['old_status'], 'new_status' => $status, 'changed' => $c['changed']];
-        }
-        if ($errors) {
-            $codes = array_column($errors, 'error_code');
-            $code  = in_array('booked', $codes, true) ? 409 : (count(array_unique($codes)) === 1 && $codes[0] === 'not_found' ? 404 : 400);
-            agent_fail(count($errors) . ' of ' . count($ids) . ' requests cannot be changed — nothing was changed', $code,
-                       ['errors' => $errors, 'ok_rows' => $rows]);
-        }
-        $toChange = count(array_filter(array_column($rows, 'changed')));
-        if (empty($in['confirm'])) {
-            agent_out(['ok' => true, 'dry_run' => true, 'status' => $status, 'to_change' => $toChange,
-                       'unchanged' => count($rows) - $toChange, 'requests' => $rows,
-                       'message' => 'Dry run — nothing changed. Resend with "confirm": true.']);
+            if ($c['ok'] && !$dry && $c['changed']) {
+                $db->beginTransaction();
+                try {
+                    $c = bs_set_request_status($db, $rid, $status, $reason, $note, (int)$agentUser['id'], $opt);
+                    $c['ok'] ? $db->commit() : $db->rollBack();
+                } catch (Throwable $e) {
+                    $db->rollBack();
+                    $c = ['ok' => false, 'error' => $e->getMessage(), 'error_code' => 'db'];
+                }
+            }
+            if (!$c['ok']) {
+                $results[]   = $row + ['error_code' => $c['error_code'], 'error' => $c['error']];
+                $failCodes[] = $codeMap[$c['error_code']] ?? 422;
+                continue;
+            }
+            $row['ok'] = true;
+            if (!$c['changed']) { $results[] = $row + ['unchanged' => true]; continue; }
+            $fx = bs_status_effects($r, $status, $reason, $note);
+            if ($fx['reopen'] !== null) {
+                $row['reopen']              = $fx['reopen'];
+                $row['lost_reason_removed'] = $fx['lost_reason_removed'];
+                $row['lost_note_removed']   = $fx['lost_note_removed'];
+            }
+            $results[] = $row + [$dry ? 'effects' : 'done' => $fx['effects']];
         }
 
-        tl_schema($db);   // no DDL inside the transaction
-        $db->beginTransaction();
-        try {
-            foreach ($rows as $row) {
-                $res = bs_set_request_status($db, $row['request_id'], $status, $reason, $note, (int)$agentUser['id'], $opt);
-                if (!$res['ok']) throw new RuntimeException('Request ' . $row['request_id'] . ': ' . $res['error']);
-            }
-            $db->commit();
-        } catch (Throwable $e) {
-            $db->rollBack();
-            agent_fail('Nothing changed: ' . $e->getMessage(), 409);
-        }
-        agent_out(['ok' => true, 'status' => $status, 'changed' => $toChange,
-                   'unchanged' => count($rows) - $toChange, 'requests' => $rows]);
+        $nFail    = count($failCodes);
+        $nSame    = count(array_filter($results, fn($x) => !empty($x['unchanged'])));
+        $nChange  = count($results) - $nFail - $nSame;
+        $httpCode = !$nFail ? 200 : (count($ids) === 1 ? $failCodes[0] : 422);
+        agent_out(['ok' => !$nFail, 'dry_run' => $dry, 'status' => $status,
+                   $dry ? 'to_change' : 'changed' => $nChange, 'unchanged' => $nSame, 'failed' => $nFail,
+                   'results' => $results,
+                   'reopen_rule' => 'Leaving Lost clears lost_reason and lost_note (as the Hub status menu); the "Marked Lost" request note and the status_change timeline event stay as history.']
+                  + ($dry ? ['message' => 'Dry run — nothing changed. Resend with "confirm": true.'] : []), $httpCode);
     }
 
     // ── list_standard_programs ───────────────────────────────────────────────

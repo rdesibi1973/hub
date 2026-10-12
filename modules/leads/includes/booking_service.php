@@ -10,7 +10,7 @@
  *                                                     (backoffice.php, API confirm_*)
  *   Rollback        : bs_rollback()                   (backoffice.php, API rollback_booking)
  *   Booking email   : bo_booking_email(), bs_send_mail()     (backoffice.php, ajax_booking_email.php, API)
- *   Request status  : bs_status_check() / bs_set_request_status()
+ *   Request status  : bs_status_check() / bs_status_effects() / bs_set_request_status()
  *                                                     (request_view.php quick_status, API set_request_status)
  *
  * Requires the leads config.php (db(), DROPBOX_BASE_PATH, …) to be loaded first.
@@ -1292,12 +1292,39 @@ function bs_status_check(PDO $db, int $id, string $status, string $reason, array
     $res['old_status'] = (string)$old;
     if ($old === 'Booked' && isset($opt['from_booked']) && is_array($opt['from_booked'])
         && $status !== 'Booked' && !in_array($status, $opt['from_booked'], true)) {
-        return array_merge($res, ['error' => 'Request ' . $id . ' is Booked — only ' . implode('/', $opt['from_booked'])
-                                           . ' is allowed; use rollback_booking to reopen it', 'error_code' => 'booked']);
+        return array_merge($res, ['error' => 'Request ' . $id . ' is Booked — '
+                                           . ($opt['from_booked'] ? 'only ' . implode('/', $opt['from_booked']) . ' is allowed; ' : '')
+                                           . 'use rollback_booking / BackOffice to change it', 'error_code' => 'booked']);
     }
     $res['ok']      = true;
     $res['changed'] = ((string)$old !== $status);
     return $res;
+}
+
+/**
+ * What bs_set_request_status() will write, for a dry run. $row = requests row (status,
+ * lost_reason, lost_note). Keep in step with bs_set_request_status(). Returns
+ * reopen ("Lost → Quoted" or null), lost_reason_removed / lost_note_removed, effects[].
+ */
+function bs_status_effects(array $row, string $status, string $reason, string $note): array {
+    $reasons = bs_lost_reasons();
+    $old     = (string)($row['status'] ?? '');
+    $note    = trim($note);
+    $out = ['reopen' => null, 'lost_reason_removed' => null, 'lost_note_removed' => null, 'effects' => []];
+    if ($old === $status) return $out;
+    $out['effects'][] = 'requests.status: ' . ($old !== '' ? $old : '(empty)') . ' → ' . $status;
+    if ($status === 'Lost') {
+        $label = $reasons[$reason] ?? $reason;
+        $out['effects'][] = 'requests.lost_reason = ' . $reason . ($note !== '' ? ', lost_note = "' . $note . '"' : ', lost_note empty');
+        $out['effects'][] = 'request note: "Marked Lost — ' . $label . ($note !== '' ? ': ' . $note : '') . '"';
+    } elseif ($old === 'Lost') {
+        $out['reopen']              = 'Lost → ' . $status;
+        $out['lost_reason_removed'] = ($row['lost_reason'] ?? '') !== '' ? $row['lost_reason'] : null;
+        $out['lost_note_removed']   = ($row['lost_note'] ?? '') !== '' ? $row['lost_note'] : null;
+        $out['effects'][] = 'requests.lost_reason / lost_note cleared (the "Marked Lost" request note and the timeline event stay as history)';
+    }
+    if ($old !== '') $out['effects'][] = 'timeline event status_change "' . $old . ' → ' . $status . '"';
+    return $out;
 }
 
 /**
