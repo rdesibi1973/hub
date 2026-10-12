@@ -31,7 +31,7 @@ without driving the web UI.
 | HTTPS only | Plain HTTP → 403. |
 | Rate limit | 60 calls/min → 429. |
 | Audit | Every call (including failures and dry-runs) → `agent_audit_log` (action, request_id, user, HTTP code, dry_run, payload, result, IP). |
-| Dry-run by default | `update_request`, `confirm_booking`, `send_booking_email`, `rollback_booking`, `rename_folder`, `import_group_folder`, `move_group_folder`, `set_request_status`, `cancel_invoice_payment`, `update_folder_status`, `import_zoho_invoice`, `create_invoice`, `update_invoice`, `mail_send` and `mail_move` (among others) do nothing unless the body has `"confirm": true`. |
+| Dry-run by default | `update_request`, `confirm_booking`, `send_booking_email`, `rollback_booking`, `rename_folder`, `import_group_folder`, `move_group_folder`, `set_request_status`, `cancel_invoice_payment`, `update_folder_status`, `import_zoho_invoice`, `create_invoice`, `update_invoice`, `mail_send`, `mail_move` and `ck_request_check` (among others) do nothing unless the body has `"confirm": true`. |
 | No deletes | No delete endpoint (mail included). Undo a confirm with `rollback_booking` (or BackOffice → Rollback). |
 | Mailbox | The key also reads `info@` (`mail_*`): keep `api.txt` as private as the mailbox password. |
 
@@ -775,11 +775,19 @@ curl -sH "$H" -X POST "$U?action=memo_save" -d '{"title":"Balance Etnia – Ross
 curl -sH "$H" "$U?action=memo_list&follow_up_due=1"
 ```
 
-## Mailbox info@ (IMAP)
+## Mailboxes info@ and Gmail (IMAP)
 
 Lets Claude read and answer `info@savannahexplorers.com` without logging in to the BlueHost
-webmail. Logic: root `includes/mailbox_service.php` (PHP imap extension, on BlueHost). The mailbox
-is on the same server, so IMAP goes to `localhost`.
+webmail, and draft / send from Gmail (`savannah.explorers@gmail.com`). Logic: root
+`includes/mailbox_service.php` (PHP imap extension, on BlueHost).
+
+**Which mailbox** — every `mail_*` action takes `mailbox` = `info` (default) | `gmail`; `mail_draft` /
+`mail_send` take it as `from` (same values). Roberto's rule: a **reply** goes from the mailbox the mail
+arrived on; **new mails and staff mails** go from Gmail.
+- `info` — BlueHost, IMAP on `localhost`; `mail_send` uses the server mail() and keeps a copy in `INBOX.Sent`.
+- `gmail` — IMAP `imap.gmail.com:993`, `mail_send` via SMTP `smtp.gmail.com:587` (STARTTLS); Gmail files the
+  Sent copy itself. Drafts go to the Gmail Drafts folder, found by its `\Drafts` flag (the name is in the
+  account language, e.g. `[Gmail]/Bozze`); `GMAIL_DRAFTS` overrides it.
 
 **Setup (server, once)** — in the server-only root `includes/config.php`:
 ```php
@@ -788,13 +796,20 @@ define('MAILBOX_PASS', '<mailbox password>');
 // optional: define('MAILBOX_IMAP', '{localhost:993/imap/ssl/novalidate-cert}');
 // optional: define('MAILBOX_NAME', 'Savannah Explorers');   // From name
 // optional: define('MAILBOX_SENT', 'INBOX.Sent'); define('MAILBOX_DRAFTS', 'INBOX.Drafts');
-```
-Without them every `mail_*` action answers 503. If the mailbox password is changed in cPanel,
-update `MAILBOX_PASS` too (calls then fail with "IMAP login failed").
 
-Messages are addressed by `folder` (default `INBOX`; BlueHost names: `INBOX.Sent`, `INBOX.Archive`, …)
-+ `uid`. Reading never marks a message as seen unless `mark_seen: true`. There is no delete.
-The audit log keeps who/subject for `mail_get` / `mail_attachment`, not bodies or files.
+// Gmail: Google account → Security → 2-Step Verification on → App passwords → "Hub"
+define('GMAIL_USER', 'savannah.explorers@gmail.com');
+define('GMAIL_APP_PASSWORD', '<16-character app password>');
+// optional: define('GMAIL_NAME', 'Savannah Explorers'); define('GMAIL_DRAFTS', '[Gmail]/Bozze');
+```
+Without them the `mail_*` actions for that mailbox answer 503. If the mailbox password is changed in cPanel,
+update `MAILBOX_PASS` too (calls then fail with "IMAP login failed"); a revoked Gmail app password fails the same way.
+Passwords are never written to the audit log (only the request body is logged, and it never carries them).
+
+Messages are addressed by `folder` (default `INBOX`; BlueHost names: `INBOX.Sent`, `INBOX.Archive`, …;
+Gmail: `INBOX`, `[Gmail]/All Mail`, labels) + `uid`. Reading never marks a message as seen unless
+`mark_seen: true`. There is no delete. The audit log keeps who/subject for `mail_get` / `mail_attachment`,
+not bodies or files.
 
 ### `mail_folders` (GET)
 → `folders[]` `{name, messages, unseen}`.
@@ -825,14 +840,22 @@ instead → `saved_to`; `save_as` renames it; an existing file is kept unless `o
 `uid` or `uids[]`, `folder`, `to_folder`* (must exist). Dry-run unless `"confirm": true`.
 
 ### `mail_draft` (POST) / `mail_send` (POST)
-From `info@`. `to`, `cc`, `bcc` (string or list), `subject`, `body` (plain text) or `body_html`,
-`attachments[]` `{name, content_base64}` (≤ 10 MB each). For a reply give `reply_to_uid` (+ `reply_folder`):
-`to` defaults to the sender (Reply-To), `subject` to "Re: …", and the reply is threaded (In-Reply-To / References).
-- `mail_draft` saves it in **Drafts** — nothing is sent; Roberto sends it from webmail / phone.
+`from` = `info` (default) | `gmail`. `to`, `cc`, `bcc` (string or list), `subject`, `body` (plain text) or
+`body_html` (a plain-text part is added from it), `attachments[]` `{name, content_base64}` (≤ 10 MB each).
+The signature is part of the body (Cowork adds OfficeGmail.html); nothing is appended.
+Replies, threaded with In-Reply-To / References:
+- `reply_to_uid` (+ `reply_folder`) — a message of the same mailbox: `to` defaults to the sender (Reply-To),
+  `subject` to "Re: …".
+- `in_reply_to` (Message-ID, `<…@…>`) + `references` (its References header, string or list) + `subject`
+  — a message read with another tool (the Gmail connector). Gmail threads the draft under the original when
+  the subject matches ("Re: <original subject>").
+
+- `mail_draft` saves it in **Drafts** — nothing is sent; Roberto sends it from webmail / Gmail / phone.
 - `mail_send` is a dry-run (→ `email` preview) unless `"confirm": true`; then it sends, keeps a copy in
-  **Sent** and marks the original as answered.
+  **Sent** (Gmail: automatically) and marks the original as answered (`reply_to_uid`).
+- → `email {from, mailbox, to, cc, bcc, subject, in_reply_to, references, body, attachments}`.
 - Optional `request_id`: a confirmed `mail_send` is logged in that request's timeline (`mail_sent`,
-  → `timeline_event_id`). Drafts are not logged.
+  `refs.mail_box` `bluehost` | `gmail`, → `timeline_event_id`). Drafts are not logged.
 
 ```bash
 curl -sH "$H" "$U?action=mail_list&unseen=1&limit=20"
@@ -840,6 +863,103 @@ curl -sH "$H" "$U?action=mail_get&uid=48213"
 curl -sH "$H" "$U?action=mail_attachment&uid=48213&part=2&request_id=2958"        # → booking folder
 curl -sH "$H" -X POST "$U?action=mail_draft" -d '{"reply_to_uid":48213,"body":"Dear Anna,\nthank you …"}'
 curl -sH "$H" -X POST "$U?action=mail_flag"  -d '{"uids":[48213,48214],"seen":true}'
+curl -sH "$H" "$U?action=mail_folders&mailbox=gmail"
+# Gmail draft in an existing thread (Message-ID / References from the Gmail connector)
+curl -sH "$H" -X POST "$U?action=mail_draft" -d '{"from":"gmail","to":"agent@agency.it","subject":"Re: Rossi 12 Oct","in_reply_to":"<CAF12ab@mail.gmail.com>","references":"<CAE99@mail.gmail.com> <CAF12ab@mail.gmail.com>","body_html":"<p>Dear Anna, …</p>"}'
+curl -sH "$H" -X POST "$U?action=mail_send"  -d '{"from":"gmail","to":"staff@savannahexplorers.com","subject":"Lunch boxes 14 Oct","body":"…"}'   # dry-run
+```
+
+## Back office (read-only)
+
+The data of the Hub back-office pages, for the Cowork "back-office" skill (`docs/skills/back-office.md`).
+Same queries as the pages (shared services: `modules/leads/includes/payments_service.php`,
+`modules/leads/includes/ck_lib.php`, `modules/operations/includes/ops_service.php`). All GET and read-only
+except `ck_request_check`. "Booked" = request status Booked / Paid / Balance / Deposit, not cancelled.
+Dates come from the folder name (`_START…` / `_END…`). The `ops_*` and `flight_tickets` actions read each
+booking's Calc from Dropbox; it is cached (`ops_calc_cache`) and downloaded again only when the file changes,
+so the first call over a period can take a minute. `calc=0` skips the Calc (no cross-check). Max 62 days per call.
+Passport numbers are never read or returned.
+
+### `payments_due` (GET)
+The Payments page list (bookings at `_DEPOSIT` / `_BALANCE` / `_BALANCE-CASH`) with invoices, payments and due dates.
+`days` (default 14: next due date within N days, overdue included), `overdue=1` (only overdue),
+`stage` (`Deposit` | `Balance` | `Balance-Cash`), `issuer` (`SE` | `SH`; bookings without invoice drop out).
+Due-date rule (the page stores none): deposit 30% at `confirmation_date`; balance 60 days before START for
+direct clients, 45 for agencies (`channel` agency, else a folder tag without `Drct`); Il Diamante: no deposit,
+balance 30 days before arrival. The next due is the deposit while the folder is `_DEPOSIT` and the invoice
+payments don't cover 30%, else the balance.
+→ `counts`, `rows[]` `{request_id, folder, client_folder, customer, agency, agent, client_type, start_date, stage,
+confirmation_date, days_since_confirmation, invoice_number, invoice_ids[], issuer, currency, total, paid, balance,
+deposit_due, deposit_due_date, balance_due_date, invoice_due_date, next_due (deposit|balance), next_due_date,
+days_to_due, overdue_days, last_payment_date, last_contact (latest mail_sent in the timeline / Payments notes),
+memo_id (open payment memo on the invoice), notes[]}`, sorted by `next_due_date`;
+`sleeping[]` (confirmed > 7 days ago with **no invoice** — `reason: no_invoice` — or still `Deposit` with no
+payment and no invoice activity for 7 days — `deposit_no_payment`); `no_due_date[]` (no confirmation date /
+no START in the folder).
+
+### `ck_status` (GET)
+The CK tracker: every booking folder at the top of `/001_Safari` (a private safari or a whole GRP). Runs the
+same Dropbox scan as the page first (`scan=0` skips it; a failed scan → `scan_warning`, last known state).
+Tanzania only; trips already started are left out unless `past=1` or `q`.
+`has_ck=0|1`, `start_before` (YYYY-MM-DD), `q` (folder / customer / agent words).
+→ `rows[]` `{ck_folder_id, request_id, request_ids[], folder, agent, start_date, days_to_arrival, band
+(red < 60 days · amber 60–90 · grey > 90), stage, ck_due (booking done, no _CK), waiting_days, has_ck, ck_at,
+ck_by, check_requested_at, last_checked_at, overall (green|yellow|red|grey|error), n_red, n_yellow,
+reds[] / yellows[] ("Section — Title" of the open points; confirmed ones left out), check_error, report_url,
+last_note}`. To set `_CK` use `rename_folder` (it keeps `_CK` last).
+
+### `ck_request_check` (POST)
+`request_id` or `ck_folder_id`. Queues a SafariCheck run (`check_requested_at`) and starts the runner, as
+"Run check" on the CK tracker (result in ~2 minutes, else in the nightly run). Dry-run (→ `would_check`)
+unless `"confirm": true`.
+
+### `ops_movements` (GET)
+Arrivals and departures saved in Operations (real dates, not the 06:00 night shift of the daily view), cross-checked
+with the bookings. `from`, `to` (default today → +14 days), `calc=0`.
+→ `counts`, `rows[]` `{date, type (arrival|departure), movement_id, request_id, folder, customer, pax, flight,
+time, from_to, transfer (driver), hotel, notes, source (calc = saved from the Calc extractor | manual),
+calc_value (Calc ARRIVAL / DEPARTURE DETAILS text), match, diffs[] {field (date|flight|time), ops, calc}}`:
+- `ok` — matched to a booking (customer name, date ± 7 days) and consistent with the Calc;
+- `diff` — date (beyond ± 1 day), flight or time not in the Calc text;
+- `missing_in_ops` — a booking starting / ending in the period with no arrival / departure row;
+- `manual_only` — an Operations row with no booking (or a name the match did not recognise).
+`warnings[]`: within 7 days, flight / time empty or TBA, or a booking with no Operations row.
+
+### `ops_lunch_boxes` (GET)
+Lunch boxes (current + history tables) by safari date. `from`, `to` (default today → +14), `calc=0`.
+→ `rows[]` `{id, date, client, request_id, folder, pax, jeeps, guide, box_type, lodge (overnight before, from the
+Calc), diet_notes (EXTRA DETAILS), notes, folder_name, source}` (the lunch box table has no departure time);
+`missing[]` `{date, request_id, folder, customer, pax, start_date, end_date, lodge, safari_day, extra_details}`:
+a safari day (park fees / safari park) after a night in Arusha in the Calc with no lunch box for that date;
+`calc_unreadable[]` (group Calc with RECAP, several pax sheets, no Calc …: check by hand).
+
+### `ops_medivac` (GET)
+Medivac registrations by coverage start (current + archive), and the Tanzania safaris starting in the
+period that are not registered. `from`, `to` (default today → +30), `calc=0`.
+Rule: Tanzania safaris only; trekking + safari included; trekking only, Only Zanzibar, Staff and other
+countries excluded (→ `excluded[]` with `reason`).
+→ `rows[]` `{group_ref, group_name, tour_agent, request_id, folder, start_date, end_date, guests[] {name, title,
+nationality}, warnings[], source}`; `missing[]` `{request_id, folder, customer, pax, start_date, end_date, reason,
+guests[] (from the Calc), warnings[]}`. Warnings: TBA names, missing nationality, Calc not readable.
+Never passport numbers (the Medivac page keeps its own passport column; the API does not select it).
+
+### `flight_tickets` (GET)
+Bookings starting in `from`–`to` (default today → +30) with a domestic flight booked by Savannah (Calc
+FLIGHT cost > 0), and the ticket files in the booking folder (top-level names with ticket / e-ticket / PNR /
+boarding / airline names, or anything in `flights/`; a GRP member's group folder too).
+→ `counts`, `rows[]` `{request_id, folder, customer, pax, start_date, end_date, flights[] {date, route (Calc day
+text), cost}, ticket_files[], status (ok | missing | unknown = Calc not readable, + msg)}`.
+Not yet: `sent` (a mail with the ticket in the request timeline), `vouchers_status`.
+
+```bash
+curl -sH "$H" "$U?action=payments_due&days=21"
+curl -sH "$H" "$U?action=payments_due&overdue=1&issuer=SH"
+curl -sH "$H" "$U?action=ck_status&has_ck=0&start_before=2027-01-15"
+curl -sH "$H" -X POST "$U?action=ck_request_check" -d '{"request_id":2958}'                 # dry-run
+curl -sH "$H" "$U?action=ops_movements&from=2026-10-14&to=2026-10-28"
+curl -sH "$H" "$U?action=ops_lunch_boxes"
+curl -sH "$H" "$U?action=ops_medivac&from=2026-10-12&to=2026-11-12"
+curl -sH "$H" "$U?action=flight_tickets"
 ```
 
 ## Request timeline

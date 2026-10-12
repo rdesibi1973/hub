@@ -1,14 +1,21 @@
 <?php
 /**
- * mailbox_service.php — read / draft / send for the BlueHost mailbox
- * (info@savannahexplorers.com) over IMAP, so Claude (Agent API mail_* actions)
- * doesn't have to log in to webmail. Needs the PHP imap extension (on BlueHost).
+ * mailbox_service.php — read / draft / send over IMAP for two mailboxes, so Claude
+ * (Agent API mail_* actions) doesn't have to log in to webmail. Needs the PHP imap
+ * extension (on BlueHost).
+ *   'info'  (default) the BlueHost mailbox info@savannahexplorers.com — sends with mail()
+ *   'gmail' savannah.explorers@gmail.com — IMAP imap.gmail.com, sends via SMTP
+ *           smtp.gmail.com:587 (Gmail keeps the Sent copy itself)
+ * mbx_use('gmail') switches every function below to that mailbox.
  *
- * Server-only constants in the root includes/config.php:
+ * Server-only constants in the root includes/config.php (never logged):
  *   MAILBOX_USER   'info@savannahexplorers.com'
  *   MAILBOX_PASS   the mailbox password
  *   MAILBOX_IMAP   optional, default '{localhost:993/imap/ssl/novalidate-cert}'
  *   MAILBOX_NAME   optional From name, default 'Savannah Explorers'
+ *   GMAIL_USER, GMAIL_APP_PASSWORD   Gmail address + app password (Google account → App passwords)
+ *   GMAIL_NAME     optional From name, default 'Savannah Explorers'
+ *   GMAIL_DRAFTS   optional Drafts folder (else found by its \Drafts flag: "[Gmail]/Bozze" …)
  *
  * Messages are addressed by IMAP UID + folder (UIDs are stable within a folder).
  * Reading never marks a message as seen unless asked. Nothing here deletes mail.
@@ -18,21 +25,52 @@ const MBX_MAX_LIST       = 100;
 const MBX_MAX_BODY_CHARS = 100000;
 const MBX_MAX_ATTACHMENT = 10 * 1024 * 1024;
 
+const MBX_BOXES = ['info', 'gmail'];
+
+/** Switch the mailbox the functions below work on ('info' | 'gmail'). */
+function mbx_use(string $box): void {
+    if (!in_array($box, MBX_BOXES, true)) throw new InvalidArgumentException('Unknown mailbox "' . $box . '" — use info or gmail');
+    $GLOBALS['MBX_BOX'] = $box;
+}
+
+/** The current mailbox ('info' by default). */
+function mbx_box(): string {
+    return $GLOBALS['MBX_BOX'] ?? 'info';
+}
+
+/** Login, server and From of the current mailbox: [user, pass, imap, name, smtp]. */
+function mbx_account(): array {
+    $c = function (string $n, string $def = ''): string { return defined($n) ? (string)constant($n) : $def; };
+    if (mbx_box() === 'gmail') {
+        return ['user' => $c('GMAIL_USER'), 'pass' => $c('GMAIL_APP_PASSWORD'), 'imap' => '{imap.gmail.com:993/imap/ssl}',
+                'name' => $c('GMAIL_NAME', 'Savannah Explorers'), 'smtp' => ['host' => 'smtp.gmail.com', 'port' => 587]];
+    }
+    return ['user' => $c('MAILBOX_USER'), 'pass' => $c('MAILBOX_PASS'),
+            'imap' => $c('MAILBOX_IMAP', '{localhost:993/imap/ssl/novalidate-cert}'),
+            'name' => $c('MAILBOX_NAME', 'Savannah Explorers'), 'smtp' => null];
+}
+
+/** Constants to define for the current mailbox (error messages). */
+function mbx_config_hint(): string {
+    return mbx_box() === 'gmail' ? 'GMAIL_USER / GMAIL_APP_PASSWORD' : 'MAILBOX_USER / MAILBOX_PASS';
+}
+
 function mbx_configured(): bool {
-    return function_exists('imap_open') && defined('MAILBOX_USER') && defined('MAILBOX_PASS')
-        && (string)MAILBOX_USER !== '' && (string)MAILBOX_PASS !== '';
+    $a = mbx_account();
+    return function_exists('imap_open') && $a['user'] !== '' && $a['pass'] !== '';
 }
 
 /** '{host:port/flags}' part of every mailbox name. */
 function mbx_server(): string {
-    return defined('MAILBOX_IMAP') ? (string)MAILBOX_IMAP : '{localhost:993/imap/ssl/novalidate-cert}';
+    return mbx_account()['imap'];
 }
 
 /** Open the mailbox on $folder (default INBOX). Throws RuntimeException. */
 function mbx_open(string $folder = 'INBOX') {
     if (!function_exists('imap_open')) throw new RuntimeException('PHP imap extension not available');
-    if (!mbx_configured()) throw new RuntimeException('Mailbox not configured — define MAILBOX_USER / MAILBOX_PASS in includes/config.php');
-    $c = @imap_open(mbx_server() . mbx_folder_encode($folder), (string)MAILBOX_USER, (string)MAILBOX_PASS, 0, 1);
+    if (!mbx_configured()) throw new RuntimeException('Mailbox not configured — define ' . mbx_config_hint() . ' in includes/config.php');
+    $a = mbx_account();
+    $c = @imap_open(mbx_server() . mbx_folder_encode($folder), $a['user'], $a['pass'], 0, 1);
     if (!$c) {
         $err = imap_last_error() ?: 'unknown error';
         imap_errors();
@@ -97,17 +135,66 @@ function mbx_folders(): array {
  * if defined, else the first existing of the usual names.
  */
 function mbx_special_folder($c, string $role): string {
-    $const = 'MAILBOX_' . strtoupper($role);
+    $const = (mbx_box() === 'gmail' ? 'GMAIL_' : 'MAILBOX_') . strtoupper($role);
     if (defined($const)) return (string)constant($const);
+    if (mbx_box() === 'gmail') {
+        // Gmail names its folders in the account language ("[Gmail]/Bozze"): find them by flag.
+        $byFlag = mbx_special_use();
+        if (isset($byFlag[$role])) return $byFlag[$role];
+    }
     $names = [
-        'sent'   => ['INBOX.Sent', 'Sent', 'INBOX.Sent Messages', 'Sent Messages', 'INBOX.Sent Items'],
-        'drafts' => ['INBOX.Drafts', 'Drafts'],
-        'trash'  => ['INBOX.Trash', 'Trash'],
+        'sent'   => ['INBOX.Sent', 'Sent', 'INBOX.Sent Messages', 'Sent Messages', 'INBOX.Sent Items', '[Gmail]/Sent Mail', '[Google Mail]/Sent Mail'],
+        'drafts' => ['INBOX.Drafts', 'Drafts', '[Gmail]/Drafts', '[Google Mail]/Drafts', '[Gmail]/Bozze', '[Gmail]/Brouillons', '[Gmail]/Entwürfe', '[Gmail]/Borradores'],
+        'trash'  => ['INBOX.Trash', 'Trash', '[Gmail]/Trash', '[Gmail]/Cestino'],
     ][$role] ?? [];
     $have = [];
     foreach ((array)imap_list($c, mbx_server(), '*') as $full) $have[] = mbx_folder_decode(substr($full, strlen(mbx_server())));
     foreach ($names as $n) if (in_array($n, $have, true)) return $n;
     throw new RuntimeException('No ' . $role . ' folder found — define ' . $const . ' in includes/config.php');
+}
+
+/**
+ * RFC 6154 special-use folders of the current mailbox: ['drafts' => name, 'sent' => …, 'trash' => …].
+ * The imap extension (c-client) doesn't report these flags, so this asks the server with a
+ * plain IMAP LIST over TLS. [] when the server can't be asked.
+ */
+function mbx_special_use(): array {
+    static $cache = [];
+    $box = mbx_box();
+    if (isset($cache[$box])) return $cache[$box];
+    $a = mbx_account();
+    if (!preg_match('#^\{([^:}/]+):(\d+)#', $a['imap'], $m)) return $cache[$box] = [];
+    $fp = @stream_socket_client('ssl://' . $m[1] . ':' . $m[2], $errno, $errstr, 15);
+    if (!$fp) return $cache[$box] = [];
+    stream_set_timeout($fp, 15);
+    $q = function (string $s): string { return '"' . str_replace(['\\', '"'], ['\\\\', '\\"'], $s) . '"'; };
+    $cmd = function (string $tag, string $line) use ($fp): array {
+        fwrite($fp, $tag . ' ' . $line . "\r\n");
+        $lines = [];
+        while (($l = fgets($fp)) !== false) {
+            $lines[] = rtrim($l, "\r\n");
+            if (strpos($l, $tag . ' ') === 0) break;
+        }
+        return $lines;
+    };
+    $out = [];
+    try {
+        fgets($fp);                                                   // greeting
+        $login = $cmd('a1', 'LOGIN ' . $q($a['user']) . ' ' . $q($a['pass']));
+        if (stripos((string)end($login), 'a1 OK') !== 0) return $cache[$box] = [];
+        foreach ($cmd('a2', 'LIST "" "*"') as $l) {
+            if (!preg_match('/^\* LIST \(([^)]*)\) \S+ (.+)$/i', $l, $x)) continue;
+            $name = trim($x[2]);
+            if ($name !== '' && $name[0] === '"') $name = stripcslashes(substr($name, 1, -1));
+            foreach (['drafts' => '\Drafts', 'sent' => '\Sent', 'trash' => '\Trash'] as $role => $flag) {
+                if (stripos($x[1], $flag) !== false) $out[$role] = mbx_folder_decode($name);
+            }
+        }
+        $cmd('a3', 'LOGOUT');
+    } finally {
+        fclose($fp);
+    }
+    return $cache[$box] = $out;
 }
 
 /** 'YYYY-MM-DD' → IMAP search date '3-Oct-2026'. */
@@ -348,16 +435,18 @@ function mbx_move(string $folder, array $uids, string $to): void {
 }
 
 /**
- * Build an outgoing message from info@.
+ * Build an outgoing message from the current mailbox (info@ or Gmail).
  * $in: to, cc, bcc (string or array), subject, body (plain text) or body_html,
  *      reply_to_uid + reply_folder (threads the reply: Re: subject, In-Reply-To, To = sender),
+ *      or in_reply_to (+ references): the Message-ID of a message read elsewhere (Gmail connector),
  *      attachments [{name, content_base64}].
  * → ['mailer' => PHPMailer (preSend done), 'summary' => [...], 'reply' => ['folder','uid']|null]
  */
 function mbx_compose(array $in) {
     require_once __DIR__ . '/../modules/leads/includes/phpmailer/Exception.php';
     require_once __DIR__ . '/../modules/leads/includes/phpmailer/PHPMailer.php';
-    if (!mbx_configured()) throw new RuntimeException('Mailbox not configured — define MAILBOX_USER / MAILBOX_PASS in includes/config.php');
+    if (!mbx_configured()) throw new RuntimeException('Mailbox not configured — define ' . mbx_config_hint() . ' in includes/config.php');
+    $acc = mbx_account();
 
     $emails = function ($v): array {
         $list = is_array($v) ? $v : preg_split('/[,;]+/', (string)$v);
@@ -389,6 +478,15 @@ function mbx_compose(array $in) {
         if ($subject === '') $subject = preg_match('/^\s*re:/i', $orig['subject']) ? $orig['subject'] : 'Re: ' . $orig['subject'];
         $inReplyTo  = $orig['message_id'];
         $references = trim($orig['references'] . ' ' . $orig['message_id']);
+    } elseif (trim((string)($in['in_reply_to'] ?? '')) !== '') {
+        // Thread on a message read with another tool: its Message-ID "<…@…>" (+ its References).
+        $inReplyTo = trim((string)$in['in_reply_to']);
+        if ($inReplyTo[0] !== '<') $inReplyTo = '<' . $inReplyTo . '>';
+        if (!preg_match('/^<[^<>\s]+@[^<>\s]+>$/', $inReplyTo)) throw new InvalidArgumentException('in_reply_to must be a Message-ID like <abc@mail.gmail.com>');
+        $refs = is_array($in['references'] ?? null) ? implode(' ', $in['references']) : (string)($in['references'] ?? '');
+        $refs = trim((string)preg_replace('/\s+/', ' ', $refs));
+        if (!preg_match('/^(<[^<>\s]+>\s?)*$/', $refs)) throw new InvalidArgumentException('references must be Message-IDs like "<a@b> <c@d>"');
+        $references = $refs === '' ? $inReplyTo : (strpos($refs, $inReplyTo) === false ? $refs . ' ' . $inReplyTo : $refs);
     }
     if (!$to) throw new InvalidArgumentException('to is required (or reply_to_uid)');
     if ($subject === '') throw new InvalidArgumentException('subject is required');
@@ -397,10 +495,22 @@ function mbx_compose(array $in) {
     if (trim($text) === '' && trim($html) === '') throw new InvalidArgumentException('body (or body_html) is required');
 
     $m = new PHPMailer\PHPMailer\PHPMailer(true);
-    $m->isMail();
+    if ($acc['smtp']) {
+        require_once __DIR__ . '/../modules/leads/includes/phpmailer/SMTP.php';
+        $m->isSMTP();
+        $m->Host       = $acc['smtp']['host'];
+        $m->Port       = $acc['smtp']['port'];
+        $m->SMTPSecure = PHPMailer\PHPMailer\PHPMailer::ENCRYPTION_STARTTLS;
+        $m->SMTPAuth   = true;
+        $m->Username   = $acc['user'];
+        $m->Password   = $acc['pass'];
+        $m->Timeout    = 30;
+    } else {
+        $m->isMail();
+    }
     $m->CharSet = 'UTF-8';
-    $m->setFrom((string)MAILBOX_USER, defined('MAILBOX_NAME') ? (string)MAILBOX_NAME : 'Savannah Explorers');
-    $m->Sender = (string)MAILBOX_USER;
+    $m->setFrom($acc['user'], $acc['name']);
+    $m->Sender = $acc['user'];
     foreach ($to as $a)  $m->addAddress($a);
     foreach ($cc as $a)  $m->addCC($a);
     foreach ($bcc as $a) $m->addBCC($a);
@@ -431,8 +541,8 @@ function mbx_compose(array $in) {
     return [
         'mailer'  => $m,
         'reply'   => $reply,
-        'summary' => ['from' => (string)MAILBOX_USER, 'to' => $to, 'cc' => $cc, 'bcc' => $bcc, 'subject' => $subject,
-                      'in_reply_to' => $inReplyTo ?: null, 'body' => trim($text) !== '' ? $text : mbx_html_to_text($html),
+        'summary' => ['from' => $acc['user'], 'mailbox' => mbx_box(), 'to' => $to, 'cc' => $cc, 'bcc' => $bcc, 'subject' => $subject,
+                      'in_reply_to' => $inReplyTo ?: null, 'references' => $references ?: null, 'body' => trim($text) !== '' ? $text : mbx_html_to_text($html),
                       'attachments' => $attNames],
     ];
 }
@@ -459,6 +569,7 @@ function mbx_save_draft(array $composed): string {
 
 /**
  * Send a composed message, keep a copy in Sent and mark the original \Answered.
+ * Gmail (SMTP) files the Sent copy itself, so nothing is appended there.
  * → ['sent_folder' => string|null, 'warning' => string|null]
  */
 function mbx_send(array $composed): array {
@@ -467,7 +578,7 @@ function mbx_send(array $composed): array {
     $warn = null;
     $sent = null;
     try {
-        $sent = mbx_append('sent', $m->getSentMIMEMessage(), '\\Seen');
+        $sent = mbx_box() === 'gmail' ? '(Gmail Sent)' : mbx_append('sent', $m->getSentMIMEMessage(), '\\Seen');
         if ($composed['reply']) {
             $c = mbx_open($composed['reply']['folder']);
             try { imap_setflag_full($c, (string)$composed['reply']['uid'], '\\Answered', ST_UID); } finally { mbx_close($c); }

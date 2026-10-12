@@ -12,7 +12,8 @@
  * dry-runs unless the body carries "confirm": true.
  *
  * All logic lives in includes/booking_service.php (invoices:
- * ../invoices/includes/invoice_service.php), shared with the Hub pages.
+ * ../invoices/includes/invoice_service.php; back office: includes/payments_service.php,
+ * includes/ck_lib.php, ../operations/includes/ops_service.php), shared with the Hub pages.
  */
 ob_start();
 require_once __DIR__ . '/../../includes/timezone.php';
@@ -93,7 +94,7 @@ function agent_audit(PDO $db, string $action, $reqId, array $payload, string $re
                               'iti_create_lodge', 'iti_set_days', 'iti_add_day', 'iti_delete_day', 'iti_update_inclusions',
                               'iti_create_flight_route', 'iti_create_activity', 'iti_create_transfer_route', 'iti_save_as_sample',
                               'create_request', 'add_flight_rates', 'timeline_update', 'summary_set', 'rename_folder',
-                              'set_request_status', 'update_request', 'import_group_folder', 'move_group_folder'], true) && empty($payload['confirm']);
+                              'set_request_status', 'update_request', 'import_group_folder', 'move_group_folder', 'ck_request_check'], true) && empty($payload['confirm']);
     // Mail: keep who/what in the log, not message bodies or attachment content.
     if (in_array($action, ['mail_get', 'mail_attachment', 'iti_document', 'iti_vouchers'], true) && $code === 200) {
         $res = json_decode($resultJson, true);
@@ -466,15 +467,26 @@ function agent_request_dropbox_dir(string $token, array $r): string {
     return $dir;
 }
 
-// ── Mailbox info@ (logic in includes/mailbox_service.php) ───────────────────
-/** Loaded only by the mail actions; fails 503 when the mailbox isn't configured. */
-function agent_mail_lib(): void {
+// ── Mailboxes info@ / Gmail (logic in includes/mailbox_service.php) ─────────
+/**
+ * Loaded only by the mail actions: picks the mailbox ($in[$key]: info (default) | gmail)
+ * and fails 503 when it isn't configured.
+ */
+function agent_mail_lib(array $in = [], string $key = 'mailbox'): void {
     require_once __DIR__ . '/../../includes/mailbox_service.php';
+    $box = strtolower(trim((string)($in[$key] ?? ''))) ?: 'info';
+    if (!in_array($box, MBX_BOXES, true)) agent_fail($key . ' must be info or gmail');
+    mbx_use($box);
     if (!mbx_configured()) {
         agent_fail(function_exists('imap_open')
-            ? 'Mailbox not configured — define MAILBOX_USER / MAILBOX_PASS in includes/config.php (see docs/AGENT_API.md)'
+            ? 'Mailbox ' . $box . ' not configured — define ' . mbx_config_hint() . ' in includes/config.php (see docs/AGENT_API.md)'
             : 'PHP imap extension not available on this server', 503);
     }
+}
+
+/** Timeline ref of the current mailbox. */
+function agent_mail_box_ref(): string {
+    return mbx_box() === 'gmail' ? 'gmail' : 'bluehost';
 }
 
 /** UIDs from "uid" or "uids" (number, list or "1,2,3"), or fail. */
@@ -2142,16 +2154,16 @@ try {
                    'hint' => 'The PDF in Dropbox is not updated: run save_invoice_pdf with "overwrite": true if it was saved before.']);
     }
 
-    // ── Mailbox info@ ────────────────────────────────────────────────────────
-    // IMAP on the BlueHost mailbox, so Claude doesn't log in to webmail.
-    // Reading never marks as seen unless "mark_seen": true. No delete action.
+    // ── Mailboxes info@ / Gmail ──────────────────────────────────────────────
+    // IMAP on the BlueHost mailbox (default) or Gmail ("mailbox": "gmail"), so Claude
+    // doesn't log in to webmail. Reading never marks as seen unless "mark_seen": true. No delete action.
     case 'mail_folders': {
-        agent_mail_lib();
-        agent_out(['ok' => true, 'mailbox' => (string)MAILBOX_USER, 'folders' => mbx_folders()]);
+        agent_mail_lib($in);
+        agent_out(['ok' => true, 'mailbox' => mbx_account()['user'], 'folders' => mbx_folders()]);
     }
 
     case 'mail_list': {
-        agent_mail_lib();
+        agent_mail_lib($in);
         foreach (['since', 'before'] as $k) if (!empty($in[$k])) $in[$k] = agent_iso_date($in[$k], $k);
         $flt = [
             'unseen'  => !empty($in['unseen']) && $in['unseen'] !== '0',
@@ -2164,7 +2176,7 @@ try {
     }
 
     case 'mail_get': {
-        agent_mail_lib();
+        agent_mail_lib($in);
         $uid = (int)($in['uid'] ?? 0);
         if ($uid <= 0) agent_fail('uid is required');
         $folder = (string)($in['folder'] ?? 'INBOX');
@@ -2177,7 +2189,7 @@ try {
             $r = agent_request($db, $in['request_id']);
             $logged = agent_tl_log_mail($db, (int)$r['id'], 'mail_received', $msg['subject'] ?? '', $msg['message_id'] ?? '',
                 'From: ' . agent_tl_addr($msg['from'] ?? []) . "\n" . 'Date: ' . ($msg['date'] ?? '') . "\n\n" . tl_cut((string)($msg['body'] ?? ''), 1500),
-                ['mail_box' => 'bluehost', 'mail_folder' => $folder, 'mail_uid' => $uid]);
+                ['mail_box' => agent_mail_box_ref(), 'mail_folder' => $folder, 'mail_uid' => $uid]);
         }
         agent_out(['ok' => true, 'message' => $msg] + ($logged !== null ? ['timeline_event_id' => $logged] : []));
     }
@@ -2185,7 +2197,7 @@ try {
     // Returns the file as base64, or with request_id / folder_path saves it to
     // Dropbox (booking folder) instead. Existing file kept unless "overwrite": true.
     case 'mail_attachment': {
-        agent_mail_lib();
+        agent_mail_lib($in);
         $uid  = (int)($in['uid'] ?? 0);
         $part = trim((string)($in['part'] ?? ''));
         if ($uid <= 0 || !preg_match('/^\d+(\.\d+)*$/', $part)) agent_fail('uid and part (from mail_get attachments) are required');
@@ -2230,7 +2242,7 @@ try {
 
     case 'mail_flag': {
         agent_require_method('POST');
-        agent_mail_lib();
+        agent_mail_lib($in);
         $uids = agent_mail_uids($in);
         $seen = array_key_exists('seen', $in) ? (bool)$in['seen'] : null;
         $flag = array_key_exists('flagged', $in) ? (bool)$in['flagged'] : null;
@@ -2243,7 +2255,7 @@ try {
     // Move to another existing folder (e.g. INBOX.Archive). Dry-run unless "confirm": true.
     case 'mail_move': {
         agent_require_method('POST');
-        agent_mail_lib();
+        agent_mail_lib($in);
         $uids = agent_mail_uids($in);
         $folder = (string)($in['folder'] ?? 'INBOX');
         $to = trim((string)($in['to_folder'] ?? ''));
@@ -2261,12 +2273,13 @@ try {
         agent_out(['ok' => true, 'dry_run' => false, 'moved' => ['from' => $folder, 'to' => $to, 'uids' => $uids]]);
     }
 
-    // Save a message in Drafts: Roberto reviews and sends it from webmail / phone.
+    // Save a message in Drafts: Roberto reviews and sends it from webmail / Gmail / phone.
     case 'mail_draft':
-    // Send from info@ (copy in Sent, original marked answered). Dry-run unless "confirm": true.
+    // Send (copy in Sent, original marked answered). Dry-run unless "confirm": true.
+    // "from": info (default, info@ — replies to mail that came there) | gmail (new mails, staff mails).
     case 'mail_send': {
         agent_require_method('POST');
-        agent_mail_lib();
+        agent_mail_lib($in, isset($in['from']) ? 'from' : 'mailbox');
         try {
             $composed = mbx_compose($in);
         } catch (InvalidArgumentException $e) {
@@ -2289,7 +2302,7 @@ try {
             $logged = agent_tl_log_mail($db, (int)$mailReq['id'], 'mail_sent', (string)$email['subject'], '',
                 'To: ' . agent_tl_addr($email['to'] ?? []) . (!empty($email['cc']) ? "\nCc: " . agent_tl_addr($email['cc']) : '') . "\n\n"
                 . tl_cut((string)$email['body'], 1500),
-                ['mail_box' => 'bluehost', 'in_reply_to' => $email['in_reply_to'] ?? null]);
+                ['mail_box' => agent_mail_box_ref(), 'in_reply_to' => $email['in_reply_to'] ?? null]);
         }
         agent_out(['ok' => true, 'dry_run' => false, 'message' => 'Sent', 'sent_folder' => $res['sent_folder'],
                    'warning' => $res['warning'], 'email' => $email] + ($logged !== null ? ['timeline_event_id' => $logged] : []));
@@ -2371,6 +2384,133 @@ try {
         agent_out(['ok' => true] + tl_resume($db, $r));
     }
 
+    // ── Back office (read-only): logic in includes/payments_service.php, includes/ck_lib.php,
+    //    ../operations/includes/ops_service.php — the same data as the Hub pages.
+    case 'payments_due': {
+        require_once __DIR__ . '/includes/payments_service.php';
+        $stage = trim((string)($in['stage'] ?? ''));
+        if ($stage !== '' && !in_array($stage, PAY_UNPAID_STATUSES, true)) agent_fail('stage must be one of: ' . implode(', ', PAY_UNPAID_STATUSES));
+        $issuer = strtoupper(trim((string)($in['issuer'] ?? '')));
+        if ($issuer !== '' && !in_array($issuer, ['SE', 'SH'], true)) agent_fail('issuer must be SE or SH');
+        $res = pay_due_report($db, ['days' => isset($in['days']) && $in['days'] !== '' ? (int)$in['days'] : 14,
+                                    'overdue' => !empty($in['overdue']) && $in['overdue'] !== '0',
+                                    'stage' => $stage, 'issuer' => $issuer]);
+        agent_out(['ok' => true] + $res);
+    }
+
+    case 'ck_status': {
+        require_once __DIR__ . '/dropbox_helper.php';
+        require_once __DIR__ . '/includes/ck_lib.php';
+        $scanError = null;
+        if (!isset($in['scan']) || !empty($in['scan'])) {   // as the CK tracker page: record Dropbox changes first
+            try { ck_scan($db, dropbox_get_access_token()); }
+            catch (Throwable $e) { $scanError = 'Dropbox scan failed — last known state: ' . $e->getMessage(); }
+        }
+        $before = trim((string)($in['start_before'] ?? '')) !== '' ? agent_iso_date($in['start_before'], 'start_before') : null;
+        $hasCk  = isset($in['has_ck']) && $in['has_ck'] !== '' ? !empty($in['has_ck']) && $in['has_ck'] !== '0' : null;
+        $q      = trim((string)($in['q'] ?? ''));
+        $past   = !empty($in['past']) && $in['past'] !== '0';
+        $list = [];
+        foreach (ck_tracker_rows($db) as $r) {
+            if ($r['other']) continue;                                                   // no CK outside Tanzania
+            if ($q === '' && !$past && $r['to_arrival'] !== null && $r['to_arrival'] < 0) continue;
+            if ($hasCk !== null && (bool)(int)$r['has_ck'] !== $hasCk) continue;
+            if ($before !== null && (!$r['start_date'] || $r['start_date'] >= $before)) continue;
+            if ($q !== '') {
+                $hay = [$r['folder_name'], $r['agent']];
+                foreach ($r['reqs'] as $x) { $hay[] = $x['customer_name']; $hay[] = $x['practice_code']; $hay[] = $x['group_folder']; }
+                $hit = true;
+                foreach (preg_split('/\s+/', $q) as $w) if (mb_stripos(implode(' | ', array_map('strval', $hay)), $w) === false) $hit = false;
+                if (!$hit) continue;
+            }
+            $list[] = $r;
+        }
+        usort($list, fn($a, $b) => [$a['start_date'] ?? '9999-12-31', $a['folder_name']] <=> [$b['start_date'] ?? '9999-12-31', $b['folder_name']]);
+        $points = ck_check_points($db, array_column($list, 'last_check_id'));
+        $base = defined('BASE_URL') ? rtrim((string)BASE_URL, '/') : '';
+        if (!preg_match('#^https?://#', $base)) $base = 'https://' . ($_SERVER['HTTP_HOST'] ?? '') . $base;
+        $rows = [];
+        foreach ($list as $r) {
+            $cid = (int)$r['last_check_id'];
+            $rows[] = [
+                'ck_folder_id'    => (int)$r['id'],
+                'request_id'      => $r['reqs'] ? (int)$r['reqs'][0]['id'] : null,
+                'request_ids'     => array_map(fn($x) => (int)$x['id'], $r['reqs']),
+                'folder'          => $r['folder_name'],
+                'agent'           => $r['agent'] ?: null,
+                'start_date'      => $r['start_date'],
+                'days_to_arrival' => $r['to_arrival'],
+                'band'            => $r['band'],
+                'stage'           => $r['stage'],
+                'ck_due'          => $r['missing'],
+                'waiting_days'    => $r['waiting'],
+                'has_ck'          => (bool)(int)$r['has_ck'],
+                'ck_at'           => $r['ck_at'],
+                'ck_by'           => $r['ck_by_name'],
+                'check_requested_at' => $r['check_requested_at'],
+                'last_checked_at' => $r['last_checked_at'] ?? $r['chk_at'],
+                'overall'         => $r['chk_overall'],
+                'n_red'           => $r['chk_overall'] !== null ? (int)$r['chk_red'] : null,
+                'n_yellow'        => $r['chk_overall'] !== null ? (int)$r['chk_yellow'] : null,
+                'reds'            => $points[$cid]['reds'] ?? [],
+                'yellows'         => $points[$cid]['yellows'] ?? [],
+                'check_error'     => $r['chk_error'] ?: null,
+                'report_url'      => $cid ? $base . '/modules/leads/ck_report.php?id=' . $cid : null,
+                'last_note'       => $r['last_note'] !== '' ? $r['last_note'] : null,
+            ];
+        }
+        agent_out(['ok' => true, 'count' => count($rows), 'scan_warning' => $scanError, 'rows' => $rows,
+                   'hint' => 'Add _CK with rename_folder (it keeps _CK last); re-run a check with ck_request_check.']);
+    }
+
+    // Queue a SafariCheck run (ck_folders.check_requested_at) and start the runner, as "Run check"
+    // on the CK tracker. Dry-run unless "confirm": true.
+    case 'ck_request_check': {
+        agent_require_method('POST');
+        require_once __DIR__ . '/dropbox_helper.php';
+        require_once __DIR__ . '/includes/ck_lib.php';
+        $fid = (int)($in['ck_folder_id'] ?? 0);
+        $match = null;
+        foreach (ck_tracker_rows($db) as $r) {
+            if ($fid > 0 ? (int)$r['id'] === $fid
+                         : in_array((int)($in['request_id'] ?? 0), array_map(fn($x) => (int)$x['id'], $r['reqs']), true)) { $match = $r; break; }
+        }
+        if ((int)($in['request_id'] ?? 0) > 0) agent_request($db, $in['request_id']);   // 404 + audit link
+        if ($fid <= 0 && (int)($in['request_id'] ?? 0) <= 0) agent_fail('request_id or ck_folder_id is required');
+        if (!$match) agent_fail('No CK folder in /001_Safari for this ' . ($fid > 0 ? 'ck_folder_id' : 'request') . ' (see ck_status)', 404);
+        if ($match['other']) agent_fail('No CK outside Tanzania — ' . $match['folder_name'], 409);
+        $info = ['ck_folder_id' => (int)$match['id'], 'folder' => $match['folder_name'], 'stage' => $match['stage'],
+                 'check_requested_at' => $match['check_requested_at'], 'last_check_id' => $match['last_check_id'] ? (int)$match['last_check_id'] : null];
+        if (empty($in['confirm'])) {
+            agent_out(['ok' => true, 'dry_run' => true, 'would_check' => $info,
+                       'message' => 'Dry run — nothing queued. Resend with "confirm": true to run the SafariCheck (about 2 minutes; nightly if GitHub is not reachable).']);
+        }
+        $res = ck_request_check($db, [(int)$match['id']], 'manual');
+        agent_out(['ok' => true, 'dry_run' => false, 'check' => $info, 'runner' => $res,
+                   'hint' => 'The result shows in ck_status (last_checked_at / overall) when the run is done.']);
+    }
+
+    case 'ops_movements':
+    case 'ops_lunch_boxes':
+    case 'ops_medivac':
+    case 'flight_tickets': {
+        require_once __DIR__ . '/../operations/includes/ops_service.php';
+        $span = ['ops_movements' => 14, 'ops_lunch_boxes' => 14, 'ops_medivac' => 30, 'flight_tickets' => 30][$agentAction];
+        $from = trim((string)($in['from'] ?? '')) !== '' ? agent_iso_date($in['from'], 'from') : date('Y-m-d');
+        $to   = trim((string)($in['to'] ?? '')) !== '' ? agent_iso_date($in['to'], 'to') : date('Y-m-d', strtotime($from . ' +' . $span . ' days'));
+        if ($to < $from) agent_fail('to is before from');
+        if ((strtotime($to) - strtotime($from)) / 86400 > 62) agent_fail('At most 62 days per call (each booking\'s Calc is read)');
+        $withCalc = !isset($in['calc']) || !empty($in['calc']) && $in['calc'] !== '0';
+        @set_time_limit(300);   // Calc reads: one Dropbox listing (+ download when the Calc changed) per booking
+        switch ($agentAction) {
+            case 'ops_movements':   $res = ops_movements_report($db, $from, $to, $withCalc); break;
+            case 'ops_lunch_boxes': $res = ops_lunch_boxes_report($db, $from, $to, $withCalc); break;
+            case 'ops_medivac':     $res = ops_medivac_report($db, $from, $to, $withCalc); break;
+            default:                $res = ops_flight_tickets_report($db, $from, $to);
+        }
+        agent_out(['ok' => true] + $res);
+    }
+
     default:
         agent_fail('Unknown action "' . $agentAction . '"', 400, ['actions' => [
             'find_requests', 'list_agencies', 'create_request', 'update_request', 'import_group_folder', 'move_group_folder', 'list_standard_programs',
@@ -2387,6 +2527,7 @@ try {
             'routine_status', 'routine_done',
             'mail_folders', 'mail_list', 'mail_get', 'mail_attachment', 'mail_flag', 'mail_move', 'mail_draft', 'mail_send',
             'timeline_list', 'timeline_add', 'timeline_update', 'summary_set', 'request_resume', 'set_request_status',
+            'payments_due', 'ck_status', 'ck_request_check', 'ops_movements', 'ops_lunch_boxes', 'ops_medivac', 'flight_tickets',
         ]]);
     }
 } catch (Throwable $e) {

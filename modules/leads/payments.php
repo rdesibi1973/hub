@@ -2,6 +2,7 @@
 ob_start(); // capture any warnings/notices from includes
 require_once 'config.php';
 require_once 'includes/folder_parser.php';
+require_once 'includes/payments_service.php';   // pay_unsettled_rows() — shared with the Agent API (payments_due)
 require_once 'includes/mail_helper.php';
 requireLogin();
 
@@ -12,9 +13,6 @@ $me          = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
 $my_agent_id = (int)($me['agent_id'] ?? 0);
 // Rename / BackOffice links: BackOffice is admin + manager only.
 $canManage = in_array($cu['role_name'] ?? '', ['admin', 'manager'], true);
-
-// Payment statuses that count as "not yet settled".
-const UNPAID_STATUSES = ['Deposit', 'Balance', 'Balance-Cash'];
 
 // ── AJAX handlers ─────────────────────────────────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
@@ -177,61 +175,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 // ── Data ──────────────────────────────────────────────────────────────────────
 $agents = db()->query("SELECT id, name FROM agents WHERE active=1 ORDER BY name")->fetchAll(PDO::FETCH_ASSOC);
 
-$rows = db()->query(
-    "SELECT r.id, r.customer_name, r.destination, r.pax,
-            -- Bookings imported from a Dropbox folder have no email: fall back to
-            -- the latest email on another request for the same client.
-            COALESCE(NULLIF(TRIM(r.email), ''),
-                     (SELECT r2.email FROM requests r2
-                       WHERE r2.customer_name = r.customer_name
-                         AND r2.email IS NOT NULL AND TRIM(r2.email) <> ''
-                       ORDER BY r2.id DESC LIMIT 1)) AS email,
-            r.group_folder, r.practice_code, r.period, r.status, r.agent_id,
-            r.source, r.payment_status, r.date_received, r.confirmation_date, r.dropbox_url,
-            a.name AS agent_name,
-            (SELECT u.email FROM users u
-               WHERE u.agent_id = r.agent_id ORDER BY u.id LIMIT 1) AS agent_email,
-            -- Notes = manual notes + logged sent emails (same set as the notes popup).
-            (SELECT COUNT(*) FROM request_notes rn
-               WHERE rn.request_id = r.id
-                 AND (rn.note_type <> 'manual' OR (rn.body IS NOT NULL AND TRIM(rn.body) <> ''))) AS note_count,
-            -- \"type|text\": the body for a manual note, the subject for a sent email.
-            (SELECT CONCAT(rn2.note_type, '|', COALESCE(IF(rn2.note_type = 'manual', rn2.body, rn2.subject), ''))
-               FROM request_notes rn2
-               WHERE rn2.request_id = r.id
-                 AND (rn2.note_type <> 'manual' OR (rn2.body IS NOT NULL AND TRIM(rn2.body) <> ''))
-               ORDER BY rn2.created_at DESC, rn2.id DESC LIMIT 1) AS last_note_raw,
-            (SELECT u3.full_name FROM request_notes rn3
-               LEFT JOIN users u3 ON u3.id = rn3.created_by
-               WHERE rn3.request_id = r.id
-                 AND (rn3.note_type <> 'manual' OR (rn3.body IS NOT NULL AND TRIM(rn3.body) <> ''))
-               ORDER BY rn3.created_at DESC, rn3.id DESC LIMIT 1) AS last_note_by
-     FROM requests r
-     LEFT JOIN agents a ON a.id = r.agent_id
-     WHERE r.status IN ('Booked','Paid','Balance','Deposit')
-       AND (r.payment_status IS NULL OR r.payment_status != 'Cancelled')
-     ORDER BY r.id DESC"
-)->fetchAll(PDO::FETCH_ASSOC);
+// Confirmed requests still to be paid (includes/payments_service.php).
+$rows = pay_unsettled_rows(db());
 
 $today_ts   = mktime(0, 0, 0);
 $window_end = strtotime('+12 months', $today_ts);
-
-foreach ($rows as &$row) {
-    [$nType, $nText] = array_pad(explode('|', (string)($row['last_note_raw'] ?? ''), 2), 2, '');
-    $row['last_note'] = $nType === 'email_sent' ? '📧 ' . $nText : $nText;
-    $d = parse_folder_dates(get_date_folder($row));
-    $row['start_date'] = $d['start_date'];
-    $row['end_date']   = $d['end_date'];
-    $row['start_ts']   = $d['start_ts'];
-    // Per-request payment status is authoritative. When it is NULL, fall back to
-    // the folder tag (display only): for a private safari that's its own folder,
-    // and for a GRP it's the main group folder (folder_payment_status → group_folder).
-    $row['_ps_derived'] = $row['payment_status'] ?: folder_payment_status($row);
-}
-unset($row);
-
-// Keep only NOT-yet-settled pratiche (per-request status).
-$rows = array_values(array_filter($rows, fn($r) => in_array($r['_ps_derived'], UNPAID_STATUSES, true)));
 
 // ── Filters (server-side GET, consistent with requests.php) ───────────────────
 // Fresh visit (no filter params) pre-selects the current user's own agent and

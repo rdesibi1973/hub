@@ -331,6 +331,102 @@ function ck_record_rename(PDO $db, string $oldName, string $newName, ?int $userI
     }
 }
 
+/**
+ * Every tracked folder still in /001_Safari with its last check, notes, requests
+ * and computed fields (agent, is_grp, other, to_arrival, band, in_stage, waiting,
+ * missing). The CK tracker page and the Agent API (ck_status) filter this list.
+ * Needs dropbox_helper.php (dropbox_folder_stem).
+ */
+function ck_tracker_rows(PDO $db): array {
+    ck_ensure_schema($db);
+    $folders = $db->query("SELECT f.*, u.full_name AS ck_by_name,
+                                  c.overall AS chk_overall, c.n_red AS chk_red, c.n_yellow AS chk_yellow,
+                                  c.created_at AS chk_at, c.error AS chk_error,
+                                  (SELECT COUNT(*) FROM ck_notes n WHERE n.ck_folder_id = f.id) AS note_count,
+                                  -- \"type|text\": the body for a note, the subject for a sent email.
+                                  (SELECT CONCAT(n2.note_type, '|', COALESCE(IF(n2.note_type = 'manual', n2.body, n2.subject), ''))
+                                     FROM ck_notes n2 WHERE n2.ck_folder_id = f.id
+                                     ORDER BY n2.created_at DESC, n2.id DESC LIMIT 1) AS last_note_raw,
+                                  (SELECT u3.full_name FROM ck_notes n3 LEFT JOIN users u3 ON u3.id = n3.created_by
+                                     WHERE n3.ck_folder_id = f.id
+                                     ORDER BY n3.created_at DESC, n3.id DESC LIMIT 1) AS last_note_by
+                           FROM ck_folders f
+                           LEFT JOIN users u ON u.id = f.ck_by
+                           LEFT JOIN ck_checks c ON c.id = f.last_check_id
+                           WHERE f.gone = 0")->fetchAll(PDO::FETCH_ASSOC);
+
+    // Requests per folder: a private safari by practice_code, a GRP by group_folder.
+    $byPc = []; $byGrp = [];
+    $rq = $db->query("SELECT r.id, r.customer_name, r.practice_code, r.group_folder, r.pax, a.name AS agent_name
+                      FROM requests r LEFT JOIN agents a ON a.id = r.agent_id
+                      WHERE (r.group_folder IS NOT NULL AND r.group_folder <> '')
+                         OR r.dropbox_url LIKE '%001_Safari%'");
+    foreach ($rq->fetchAll(PDO::FETCH_ASSOC) as $r) {
+        if (trim($r['group_folder'] ?? '') !== '') $byGrp[mb_strtolower(trim($r['group_folder']))][] = $r;
+        elseif (trim($r['practice_code'] ?? '') !== '') $byPc[mb_strtolower(trim($r['practice_code']))][] = $r;
+    }
+    $byStem = [];
+    foreach ($byPc as $k => $list) $byStem[dropbox_folder_stem($k)] = array_merge($byStem[dropbox_folder_stem($k)] ?? [], $list);
+
+    $today = new DateTimeImmutable(ck_now('Y-m-d'));
+    $daysFrom = function (?string $dt) use ($today): ?int {
+        if (!$dt) return null;
+        return (int)$today->diff(new DateTimeImmutable(substr($dt, 0, 10)))->format('%r%a');
+    };
+
+    $rows = [];
+    foreach ($folders as $f) {
+        $key  = mb_strtolower($f['folder_name']);
+        $reqs = $byGrp[$key] ?? $byPc[$key] ?? $byStem[dropbox_folder_stem($f['folder_name'])] ?? [];
+        // Sales person: the request's agent when all matched requests agree, else the folder's (…) tag.
+        $reqAgents = array_values(array_unique(array_filter(array_map(fn($q) => (string)($q['agent_name'] ?? ''), $reqs))));
+        $agent = count($reqAgents) === 1 ? $reqAgents[0] : ck_agent_from_name($f['folder_name']);
+
+        $toArrival = $daysFrom($f['start_date']);           // + = days ahead, − = already started
+        $band = null;
+        if ($toArrival !== null && $toArrival >= 0) $band = $toArrival < 60 ? 'red' : ($toArrival <= 90 ? 'amber' : 'grey');
+
+        [$nType, $nText] = array_pad(explode('|', (string)($f['last_note_raw'] ?? ''), 2), 2, '');
+        $rows[] = $f + [
+            'last_note'  => $nType === 'email_sent' ? '📧 ' . $nText : $nText,
+            'reqs'       => $reqs,
+            'agent'      => $agent,
+            'is_grp'     => stripos($f['folder_name'], 'GRP') !== false || isset($byGrp[$key]),
+            'other'      => ck_is_other_destination($f['folder_name']),
+            'to_arrival' => $toArrival,
+            'band'       => $band,
+            'in_stage'   => $f['stage_since'] ? -$daysFrom($f['stage_since']) : null,
+            'waiting'    => $f['booking_done_at'] ? -$daysFrom($f['booking_done_at']) : null,
+            'missing'    => in_array($f['stage'], CK_DONE_STAGES, true) && !(int)$f['has_ck'],
+        ];
+    }
+    return $rows;
+}
+
+/**
+ * Open red / yellow points of stored checks: [check_id => ['reds' => [...], 'yellows' => [...]]].
+ * Short labels "Section — Title"; points ticked "Correct / confirmed" are left out.
+ */
+function ck_check_points(PDO $db, array $checkIds): array {
+    $checkIds = array_values(array_filter(array_map('intval', $checkIds)));
+    if (!$checkIds) return [];
+    $in = implode(',', array_fill(0, count($checkIds), '?'));
+    $st = $db->prepare("SELECT id, checks_json FROM ck_checks WHERE id IN ($in)");
+    $st->execute($checkIds);
+    $out = [];
+    foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $c) {
+        $p = ['reds' => [], 'yellows' => []];
+        foreach (json_decode((string)$c['checks_json'], true) ?: [] as $k) {
+            if (!empty($k['confirmed'])) continue;
+            $label = trim(($k['section'] ?? '') . ' — ' . ($k['title'] ?? ''), ' —');
+            if (($k['status'] ?? '') === 'red')    $p['reds'][]    = $label;
+            if (($k['status'] ?? '') === 'yellow') $p['yellows'][] = $label;
+        }
+        $out[(int)$c['id']] = $p;
+    }
+    return $out;
+}
+
 /** Dropbox web URL from an API path (same shape as backoffice.php). */
 function ck_url_from_path(string $path): string {
     return 'https://www.dropbox.com/home/' . implode('/', array_map('rawurlencode', explode('/', ltrim($path, '/'))));
