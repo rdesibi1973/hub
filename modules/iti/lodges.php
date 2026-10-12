@@ -74,6 +74,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit) {
             $fields['website'], $fields['latitude'], $fields['longitude'],
             $fields['phone'], $fields['email'], $fields['address'], $fields['emergency_phone'], $fields['is_active'], $fields['photos'],
         ]);
+        iti_set_season_twin((int)$db->lastInsertId(), (int)($_POST['season_twin_id'] ?? 0));
         iti_flash_set($photo_errors ? 'error' : 'success', '"' . $fields['name'] . '" created.' . ($photo_errors ? ' Photos: ' . implode(' ', $photo_errors) : ''));
         iti_redirect('lodges.php');
 
@@ -90,6 +91,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit) {
             $fields['website'], $fields['latitude'], $fields['longitude'],
             $fields['phone'], $fields['email'], $fields['address'], $fields['emergency_phone'], $fields['is_active'], $fields['photos'], $id,
         ]);
+        iti_set_season_twin($id, (int)($_POST['season_twin_id'] ?? 0));
         if ($photo_errors) {
             iti_flash_set('error', 'Lodge saved, but some photos were not: ' . implode(' ', $photo_errors));
             iti_redirect("lodges.php?action=edit&id={$id}");
@@ -137,6 +139,7 @@ $stmt = $db->prepare(
 );
 $stmt->execute($params);
 $lodges = $stmt->fetchAll();
+$lodgeNames = $db->query('SELECT id, name FROM iti_lodges')->fetchAll(PDO::FETCH_KEY_PAIR);   // season twins in the list
 
 $destinations_map = iti_destinations_map();
 
@@ -188,6 +191,15 @@ include __DIR__ . '/../../includes/layout_header.php';
     <div class="form-group">
       <label>Website</label>
       <input type="url" name="website" placeholder="https://…" value="<?= h($row['website'] ?? '') ?>">
+    </div>
+    <div class="form-group full">
+      <label>Same camp in the other season <span style="font-weight:400;text-transform:none;color:var(--grey-mid)">migration camps: Ndutu (Dec–Mar) ↔ north Mara / Kogatende (Jun–Oct)</span></label>
+      <select name="season_twin_id" style="max-width:520px;">
+        <?php $twinOpts = [];
+              foreach (iti_get_lodges() as $tl) { if ((int)$tl['id'] !== $id) $twinOpts[$tl['id']] = $tl['name'] . ' — ' . $tl['dest_name_en']; } ?>
+        <?= iti_options($twinOpts, ($row['season_twin_id'] ?? null) ?: null, '— none (not a migration camp, or one camp that moves itself) —') ?>
+      </select>
+      <div style="font-size:.75rem;color:var(--grey-mid);margin-top:3px;">The program from Calc picks the camp of the right area from the night's date. Set it on one camp, the other is updated too. Migration camps are of type Mobile Camp.</div>
     </div>
   </div>
 
@@ -355,7 +367,10 @@ include __DIR__ . '/../../includes/layout_header.php';
           <?php if ($l['region']): ?><div style="font-size:.7rem;color:var(--grey-mid);"><?= h($l['region']) ?></div><?php endif; ?>
         </td>
         <td><span class="badge <?= match($l['category']){ 'budget'=>'status-inquiry','mid'=>'status-quoted','luxury'=>'status-hot','ultra_luxury'=>'status-booked',default=>'' } ?>"><?= ITI_LODGE_CATEGORIES[$l['category']] ?? h($l['category']) ?></span></td>
-        <td style="font-size:.82rem;color:var(--grey-dk);"><?= ITI_LODGE_TYPES[$l['lodge_type']] ?? h($l['lodge_type']) ?></td>
+        <td style="font-size:.82rem;color:var(--grey-dk);"><?= ITI_LODGE_TYPES[$l['lodge_type']] ?? h($l['lodge_type']) ?>
+          <?php if (!empty($l['season_twin_id']) && isset($lodgeNames[$l['season_twin_id']])): ?>
+            <div style="font-size:.7rem;color:var(--grey-mid);" title="Same camp in the other season">⇄ <?= h($lodgeNames[$l['season_twin_id']]) ?></div>
+          <?php endif; ?></td>
         <td><span class="badge <?= $l['is_active']?'status-booked':'status-cancelled' ?>"><?= $l['is_active']?'Active':'Inactive' ?></span></td>
         <td>
           <?php if ($can_edit): ?>

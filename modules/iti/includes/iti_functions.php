@@ -1070,8 +1070,49 @@ function iti_ensure_doc_columns(): void {
                          WHERE CONCAT_WS(' ', name_en, region, code) REGEXP 'zanzibar|pemba|mafia|pangani'
                            AND name_en NOT LIKE '%stone town%' AND name_en NOT LIKE '%airport%' AND COALESCE(region, '') <> 'Airports'");
         }
+        // Migration camps: the same camp in the other season's area (Ndutu ↔ north), see iti_final_season_lodge().
+        if (iti_add_column('iti_lodges', 'season_twin_id', 'INT NULL DEFAULT NULL')) iti_seed_season_twins();
     } catch (PDOException $e) {
         error_log('iti_ensure_doc_columns: ' . $e->getMessage());
+    }
+}
+
+/**
+ * First run of season_twin_id: pair the mobile camps whose names match without the
+ * area words (Ndutu / Mara Pure Migration Camp, Ndutu / Serengeti Wildlands Camp),
+ * plus Tanzania Bush Camps' Ndutu Mobile Camp ↔ Mara River Camp. Later pairs are
+ * set on the lodge page.
+ */
+function iti_seed_season_twins(): void {
+    $db = db();
+    $rows = $db->query("SELECT id, name, lodge_type FROM iti_lodges WHERE is_active = 1")->fetchAll(PDO::FETCH_ASSOC);
+    $key = function ($n) {
+        $n = preg_replace('/\b(ndutu|mara|kogatende|north(ern)?|south(ern)?|serengeti)\b/', ' ', strtolower($n));
+        return trim(preg_replace('/[^a-z0-9]+/', ' ', $n));
+    };
+    $pairs = array(); $byKey = array();
+    foreach ($rows as $r) if ($r['lodge_type'] === 'mobile_camp') $byKey[$key($r['name'])][] = (int)$r['id'];
+    foreach ($byKey as $ids) if (count($ids) === 2) $pairs[] = $ids;
+    $find = function ($re) use ($rows) { foreach ($rows as $r) if (preg_match($re, $r['name'])) return (int)$r['id']; return 0; };
+    $a = $find('/bush camps.*ndutu mobile/i'); $b = $find('/bush camps.*mara river/i');
+    if ($a && $b) $pairs[] = array($a, $b);
+    $st = $db->prepare('UPDATE iti_lodges SET season_twin_id = ? WHERE id = ?');
+    foreach ($pairs as $p) { $st->execute(array($p[1], $p[0])); $st->execute(array($p[0], $p[1])); }
+}
+
+/**
+ * Set (or clear with 0) the season twin of a lodge, on both sides; the old twins
+ * of either lodge are unlinked.
+ */
+function iti_set_season_twin(int $lodgeId, int $twinId): void {
+    $db = db();
+    if ($twinId === $lodgeId) $twinId = 0;
+    $db->prepare('UPDATE iti_lodges SET season_twin_id = NULL WHERE season_twin_id IN (?, ?) OR id IN (?, ?)')
+       ->execute(array($lodgeId, $twinId ?: $lodgeId, $lodgeId, $twinId ?: $lodgeId));
+    if ($twinId) {
+        $st = $db->prepare('UPDATE iti_lodges SET season_twin_id = ? WHERE id = ?');
+        $st->execute(array($twinId, $lodgeId));
+        $st->execute(array($lodgeId, $twinId));
     }
 }
 

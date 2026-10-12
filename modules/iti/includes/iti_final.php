@@ -220,12 +220,16 @@ function iti_final_meals(?string $basis): ?array {
 /*
  * Migration camps follow the herds: in the north (Mara River / Kogatende) from June
  * to October, at Ndutu from December to March; in April, May and November they are
- * closed while they move. A Calc text like "Pure Migration" is mapped once to one
- * of the camps; the night's month then picks the camp of the right area.
- * Camps = active lodges with "migration" in the name. Area from the name or the
- * destination: Ndutu → south; Mara / Kogatende / North → north (no area = a camp
- * that does not move, left alone). Two camps are the same camp when their names
- * match without the area words ("Ndutu Pure Migration Camp" ~ "Mara Pure Migration Camp").
+ * closed while they move. A Calc text like "Pure Migration" or "Bush Camp" is mapped
+ * once to one of the camps; the night's month then picks the camp of the right area.
+ * Camps = active lodges of type Mobile Camp, or with a season twin (iti_lodges.
+ * season_twin_id, set on the lodge page: the same camp in the other area, e.g.
+ * Tanzania Bush Camps Ndutu Mobile ↔ Mara River). Area: "Ndutu" in the name or
+ * destination → south; Mara / Kogatende / North → north; else the opposite of the
+ * twin's. A camp without a twin moves itself (Ubuntu, Untamed): kept, only warned
+ * when closed.
+ * Without a twin set, two mobile camps whose names match without the area words
+ * are twins ("Ndutu Pure Migration Camp" ~ "Mara Pure Migration Camp").
  */
 
 /** 'north' (Jun–Oct), 'south' (Dec–Mar) or null (Apr, May, Nov: camps closed) for a Y-m-d date. */
@@ -237,19 +241,43 @@ function iti_final_migration_area(?string $ymd): ?string {
     return null;
 }
 
-/** Migration camps: lodge id => ['name', 'area' => 'north'|'south'|'', 'key']. */
+/** Migration camps: lodge id => ['name', 'area' => 'north'|'south'|'', 'twin' => lodge id or 0]. */
 function iti_final_migration_camps(): array {
     static $camps = null;
     if ($camps !== null) return $camps;
+    iti_ensure_doc_columns();   // season_twin_id
+    $lodges = array();
+    foreach (iti_get_lodges() as $l) $lodges[(int)$l['id']] = $l;
+    $twinOf = array();
+    foreach ($lodges as $id => $l) {
+        $t = (int)($l['season_twin_id'] ?? 0);
+        if ($t && isset($lodges[$t])) { $twinOf[$id] = $t; $twinOf[$t] = $id; }
+    }
+    $areaOf = function ($l) {
+        $txt = strtolower($l['name'] . ' ' . $l['dest_name_en']);
+        if (strpos($txt, 'ndutu') !== false) return 'south';
+        return preg_match('/\b(mara|kogatende|north(ern)?)\b/', strtolower($l['name'])) ? 'north' : '';
+    };
+    $key = function ($n) {
+        $n = preg_replace('/\b(ndutu|mara|kogatende|north(ern)?|south(ern)?|serengeti)\b/', ' ', strtolower($n));
+        return trim(preg_replace('/[^a-z0-9]+/', ' ', $n));
+    };
+    // Mobile camps without a twin set: pair them by name.
+    $byKey = array();
+    foreach ($lodges as $id => $l) {
+        if ($l['lodge_type'] === 'mobile_camp' && !isset($twinOf[$id])) $byKey[$key($l['name'])][] = $id;
+    }
+    foreach ($byKey as $ids) if (count($ids) === 2) { $twinOf[$ids[0]] = $ids[1]; $twinOf[$ids[1]] = $ids[0]; }
+
     $camps = array();
-    foreach (iti_get_lodges() as $l) {
-        if (stripos($l['name'], 'migration') === false) continue;
-        $txt  = strtolower($l['name'] . ' ' . $l['dest_name_en']);
-        $area = strpos($txt, 'ndutu') !== false ? 'south'
-              : (preg_match('/\b(mara|kogatende|north(ern)?)\b/', $txt) ? 'north' : '');
-        $key  = preg_replace('/\b(ndutu|mara|kogatende|north(ern)?|south(ern)?|serengeti)\b/', ' ', strtolower($l['name']));
-        $camps[(int)$l['id']] = array('name' => $l['name'], 'area' => $area,
-                                      'key' => trim(preg_replace('/[^a-z0-9]+/', ' ', $key)));
+    foreach ($lodges as $id => $l) {
+        if ($l['lodge_type'] !== 'mobile_camp' && !isset($twinOf[$id])) continue;
+        $area = $areaOf($l);
+        if ($area === '' && isset($twinOf[$id])) {
+            $ta = $areaOf($lodges[$twinOf[$id]]);
+            $area = $ta === 'south' ? 'north' : ($ta === 'north' ? 'south' : '');
+        }
+        $camps[$id] = array('name' => $l['name'], 'area' => $area, 'twin' => $twinOf[$id] ?? 0);
     }
     return $camps;
 }
@@ -261,7 +289,7 @@ function iti_final_migration_camps(): array {
  */
 function iti_final_season_lodge(int $lodgeId, ?string $ymd): array {
     $camps = iti_final_migration_camps();
-    if (!isset($camps[$lodgeId]) || $camps[$lodgeId]['area'] === '' || !$ymd) return array('id' => $lodgeId, 'note' => null);
+    if (!isset($camps[$lodgeId]) || !$ymd) return array('id' => $lodgeId, 'note' => null);
     $c     = $camps[$lodgeId];
     $month = date('F', strtotime($ymd));
     $want  = iti_final_migration_area($ymd);
@@ -270,15 +298,14 @@ function iti_final_season_lodge(int $lodgeId, ?string $ymd): array {
         return array('id' => $lodgeId, 'note' => $c['name'] . ': migration camps are closed in ' . $month
                      . ' (moving between Ndutu and the north) — check the lodge.');
     }
-    if ($want === $c['area']) return array('id' => $lodgeId, 'note' => null);
-    foreach ($camps as $id => $o) {
-        if ($o['area'] === $want && $o['key'] === $c['key']) {
-            return array('id' => $id, 'note' => 'Season rule: in ' . $month . ' the migration camps are ' . $where[$want]
-                         . ' → ' . $o['name'] . ' (the Calc text is mapped to ' . $c['name'] . ').');
-        }
+    // No twin (Ubuntu, Untamed: one camp that moves itself) or already the right area: kept.
+    if (!$c['twin'] || $c['area'] === '' || $want === $c['area']) return array('id' => $lodgeId, 'note' => null);
+    if (isset($camps[$c['twin']]) && $camps[$c['twin']]['area'] === $want) {
+        return array('id' => $c['twin'], 'note' => 'Season rule: in ' . $month . ' the migration camps are ' . $where[$want]
+                     . ' → ' . $camps[$c['twin']]['name'] . ' (the Calc text is mapped to ' . $c['name'] . ').');
     }
     return array('id' => $lodgeId, 'note' => $c['name'] . ': in ' . $month . ' the migration camps are ' . $where[$want]
-                 . ', and ITI Lodges has no twin of this camp there — check the lodge.');
+                 . ', but its season twin is not there — check the two camps in ITI → Lodges.');
 }
 
 /**
@@ -291,7 +318,7 @@ function iti_final_suggest_lodge(string $text, array $names, ?string $ymd) {
     $want = iti_final_migration_area($ymd);
     if ($want !== null) {
         foreach (iti_final_migration_camps() as $id => $c) {
-            if ($c['area'] !== '' && $c['area'] !== $want) unset($names[$id]);
+            if ($c['twin'] && $c['area'] !== '' && $c['area'] !== $want) unset($names[$id]);
         }
     }
     return iti_alias_suggest($text, $names);
