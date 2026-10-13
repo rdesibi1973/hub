@@ -45,6 +45,8 @@ From each document note: supplier / property, kind (invoice, pro-forma, service 
 | Transfer | date, pick-up / drop-off, the flight it meets (vs `arrival` / `departure` and the flight invoices); a reply like "noted" / "confirmed" counts as confirmation |
 | Activity | a supplier booking (balloon, Mto wa Mbu walk, Materuni…): a document with the date and pax. Activities of our own lodges (`own: true`: "Natural Walk" = Marera Walking and Iraqw families; bush dinner at Orangi, also when the text is just "Bush dinner" on an Orangi night) → "in-house", no evidence needed, but note it if the SV doesn't mention it |
 
+GRP folders (group departures): a group block with more rooms or flight seats than the pax of the folder is normal (they are held for other participants, e.g. 3 doubles for a couple, or a return leg nobody of this folder flies). Rule: unsold rooms / seats are released 60 days before arrival. Before that date write only an info note ("group block: N rooms / seats over the folder's pax, release date <arrival - 60 days>") and do not count it as CHECK; from 60 days before arrival mark it CHECK with "release unsold rooms / seats".
+
 Amount: if a document's total differs from `calc_invoice` or the flight cost, note the difference (info, not an error: taxes, levies, extras).
 
 Status of each service:

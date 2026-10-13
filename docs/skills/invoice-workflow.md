@@ -26,6 +26,7 @@ Reference list for all payments (SE and SH): https://hub.savannahexplorers.com/m
 - Promoturismo = Alhambra Viaggi → invoice to ALHAMBRA VIAGGI.
 - Promoservice (Paolo Maresi) is a representative, not invoiced: bill the actual agency.
 - Agencies: pass `agency_id`. Direct clients: bill the client.
+- Agency without an address in the Hub (`list_agencies` shows `address`): look for it in the agency's mails (signature, often an image) and save it with `update_agency` (dry run, then confirm) before creating the invoice, so the bill-to has the address (13 Oct 2026).
 - Agency not in the Hub: `list_agencies` (try the short name and part of the name) first; if it is really missing, propose `create_agency` (name, type `savannah` / `promoservice` for Promoservice agencies / `lamprati`, email if known) — dry run, show Roberto the short name used in the folder tag, `confirm` after his ok; a 409 means it exists: use that id.
 - Some `SE-…` numbers are really Savannah Holidays invoices (switched after creation; the number can't change): don't "fix" them.
 - Old Zoho invoices are `INV-…` (`import_zoho_invoice`).
@@ -39,7 +40,18 @@ Reference list for all payments (SE and SH): https://hub.savannahexplorers.com/m
 4. `calc_check` fails → report the exact difference vs the Calc. Never `ignore_checks`, `allow_duplicate` or `allow_overpaid` unless he says so.
 5. After his ok → confirm.
 6. Offer `save_invoice_pdf` (practice folder; `overwrite: true` only if a PDF already existed and he agrees).
+   After a new booking's deposit invoice don't touch the folder status: the booking team sets `_DEPOSIT` when the bookings are done (13 Oct 2026).
 7. SH invoices only: propose the payment memo — `waiting`, linked to the invoice, `auto_close_on_payment`, `ext_key` `pay-<invoice number>`, `waiting_on` = client/agency, `due_date` = when to chase, supplier to pay afterwards in `next_steps`. SE invoices: no payment memo.
+
+## Bank details for payment requests
+
+Savannah Explorers Ltd (SE invoices, USD):
+- Beneficiary: Savannah Explorers Ltd, Engosheraton, P.O. Box 16726, Arusha - Tanzania
+- Bank: Exim Bank (T) Ltd, P.O. Box 1431, 9 Samora Avenue, Dar es Salaam - Tanzania
+- Account Number: 0030024670 (USD)
+- Swift: EXTNTZTZ
+
+Savannah Holidays Ltd (SH invoices): AfrAsia account — details from Roberto (not recorded here yet).
 
 ## 4. Change an invoice
 
