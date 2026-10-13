@@ -351,6 +351,33 @@ function agent_user_for_agent(PDO $db, $agentId): array {
     return $u ? ['id' => (int)$u['id'], 'full_name' => (string)$u['full_name']] : ['id' => 0, 'full_name' => ''];
 }
 
+/**
+ * Booking-team email of a request: template (bo_booking_email) + the API edits
+ * (bs_booking_email_edit keys + sender_name). $action = confirm GRP action
+ * (NONE|CREATE|ADD), $folder / $group = practice_code / group_folder after confirm.
+ * Signed as the request's agent (name, signature, Reply-To).
+ */
+function agent_booking_email(PDO $db, array $r, string $action, string $folder, string $group, array $edit): array {
+    $grpMain = '';
+    if     ($action === 'ADD')    { $grpMain = $group; }
+    elseif ($action === 'CREATE') { $folder  = $group !== '' ? $group : $folder; }
+    $sender     = agent_user_for_agent($db, $r['agent_id'] ?? null);
+    $senderName = trim((string)($edit['sender_name'] ?? '')) ?: ($sender['full_name'] ?: (string)($r['agent_name'] ?? ''));
+    $mail = bo_booking_email($folder, booking_cc_agent_email($db, $r['agent_id'] ?? null), $grpMain, $senderName);
+    return bs_booking_email_edit($mail, $edit) + ['sender_user_id' => $sender['id']];
+}
+
+/** Send a booking email built by agent_booking_email(); logged in the request timeline. */
+function agent_booking_email_send(int $reqId, array $email): array {
+    $res = bs_send_mail($email['to'], $email['cc'], $email['subject'], $email['body'], $email['sender_user_id']);
+    if ($res['success']) {
+        timeline_log($reqId, 'mail_sent', 'Booking email: ' . $email['subject'],
+                     ['body' => 'To: ' . implode(', ', $email['to']) . ($email['cc'] ? "\nCc: " . implode(', ', $email['cc']) : ''),
+                      'refs' => ['mail_box' => 'hub']]);
+    }
+    return $res;
+}
+
 // ── Invoices (logic in modules/invoices/includes/invoice_service.php) ────────
 /** Loaded only by the invoice actions. */
 function agent_invoice_lib(): void {
@@ -1109,12 +1136,23 @@ try {
             'checks'       => $checks,
             'blocking'     => $blocking,
         ];
+        // Booking-team email as it will be after the confirm, with the edits in "email"
+        // (same keys as send_booking_email); "email": {"send": true} sends it on confirm.
+        $mailEdit = is_array($in['email'] ?? null) ? $in['email'] : [];
+        $mailSend = !empty($mailEdit['send']);
+        if ($plan['grp_action'] === 'ADD')        { $pFolder = $plan['member_name']; $pGroup = $plan['grp_main']; }
+        elseif ($plan['grp_action'] === 'CREATE') { $pFolder = $plan['sub_name'];    $pGroup = (string)$plan['new_name']; }
+        else                                      { $pFolder = $plan['new_name'];    $pGroup = ''; }
+        $preview['email']      = agent_booking_email($db, $r, $plan['grp_action'], (string)$pFolder, (string)$pGroup, $mailEdit);
+        $preview['email_send'] = $mailSend;
         if ($agentAction === 'confirm_preview') agent_out(array_merge(['ok' => true], $preview));
 
         // confirm_booking
+        if ($mailSend && !$preview['email']['to']) agent_fail('Booking email: no valid To addresses', 400, $preview);
         if (empty($in['confirm'])) {
             agent_out(array_merge(['ok' => true, 'dry_run' => true,
-                'message' => 'Dry run — nothing moved. Resend with "confirm": true to confirm.'], $preview));
+                'message' => 'Dry run — nothing moved' . ($mailSend ? ', no email sent' : '') . '. Resend with "confirm": true to confirm'
+                           . ($mailSend ? ' and send the booking email.' : '.')], $preview));
         }
         $force = !empty($in['force']);
         if ($blocking && !$force) {
@@ -1122,9 +1160,21 @@ try {
         }
         $res = bs_confirm_commit($db, $plan, $force);
         if (!$res['ok']) agent_fail($res['msg'], 409, $preview);
-        agent_out(['ok' => true, 'dry_run' => false, 'message' => $res['msg'], 'folder' => $res['folder'],
-                   'group_folder' => $res['group_folder'], 'dropbox_path' => $res['dropbox_path'],
-                   'status' => 'Booked', 'checks' => $checks]);
+        $out = ['ok' => true, 'dry_run' => false, 'message' => $res['msg'], 'folder' => $res['folder'],
+                'group_folder' => $res['group_folder'], 'dropbox_path' => $res['dropbox_path'],
+                'status' => 'Booked', 'checks' => $checks];
+        if ($mailSend) {
+            // Rebuilt from the confirmed folder names; a mail failure does not undo the confirm.
+            $email = agent_booking_email($db, $r, $plan['grp_action'], (string)$res['folder'], (string)$res['group_folder'], $mailEdit);
+            $sent  = agent_booking_email_send((int)$r['id'], $email);
+            $out['email'] = $email;
+            $out['email_sent'] = $sent['success'];
+            if (!$sent['success']) {
+                $out['email_error'] = $sent['message'];
+                $out['message'] .= ' Booking email NOT sent — retry with send_booking_email.';
+            }
+        }
+        agent_out($out);
     }
 
     // ── send_booking_email ───────────────────────────────────────────────────
@@ -1134,42 +1184,17 @@ try {
         if (($r['status'] ?? '') !== 'Booked') agent_fail('Request is not Booked — confirm it first', 409);
 
         // Which template variant: from the confirm snapshot (ADD → group variant).
-        $pre  = json_decode((string)($r['pre_confirm_json'] ?? ''), true);
-        $mact = strtoupper((string)(is_array($pre) ? ($pre['action'] ?? 'NONE') : 'NONE'));
-        $folder  = trim($r['practice_code'] ?? '');
-        $grpMain = '';
-        if     ($mact === 'ADD')    { $grpMain = trim($r['group_folder'] ?? ''); }
-        elseif ($mact === 'CREATE') { $folder  = trim($r['group_folder'] ?? '') ?: $folder; }
-
-        // Signed as the request's agent (their name, signature and Reply-To).
-        $sender = agent_user_for_agent($db, $r['agent_id'] ?? null);
-        $senderName = trim((string)($in['sender_name'] ?? '')) ?: ($sender['full_name'] ?: (string)($r['agent_name'] ?? ''));
-
-        $mail = bo_booking_email($folder, booking_cc_agent_email($db, $r['agent_id'] ?? null), $grpMain, $senderName);
-
-        $to = isset($in['to']) ? bs_parse_emails($in['to']) : bs_parse_emails($mail['to']);
-        $cc = isset($in['cc']) ? bs_parse_emails($in['cc']) : bs_parse_emails($mail['cc']);
-        if (!empty($in['cc_remove'])) {
-            $rm = array_map('strtolower', bs_parse_emails($in['cc_remove']));
-            $cc = array_values(array_filter($cc, function ($a) use ($rm) { return !in_array(strtolower($a), $rm, true); }));
-        }
-        $subject = trim((string)($in['subject'] ?? '')) ?: $mail['subject'];
-        $body    = $mail['body'];
-        $extra   = trim((string)($in['body_extra'] ?? ''));
-        if ($extra !== '') {
-            $pos  = strrpos($body, "\nThanks\n");
-            $body = $pos !== false ? substr($body, 0, $pos) . "\n" . $extra . "\n" . substr($body, $pos) : $body . "\n\n" . $extra;
-        }
-        $email = ['to' => $to, 'cc' => $cc, 'subject' => $subject, 'body' => $body, 'sender_user_id' => $sender['id']];
+        $pre   = json_decode((string)($r['pre_confirm_json'] ?? ''), true);
+        $mact  = strtoupper((string)(is_array($pre) ? ($pre['action'] ?? 'NONE') : 'NONE'));
+        $email = agent_booking_email($db, $r, $mact, trim($r['practice_code'] ?? ''), trim($r['group_folder'] ?? ''), $in);
+        if (!$email['to']) agent_fail('No valid To addresses', 400, ['email' => $email]);
 
         if (empty($in['confirm'])) {
             agent_out(['ok' => true, 'dry_run' => true,
                        'message' => 'Dry run — not sent. Resend with "confirm": true to send.', 'email' => $email]);
         }
-        $res = bs_send_mail($to, $cc, $subject, $body, $sender['id']);
+        $res = agent_booking_email_send((int)$r['id'], $email);
         if (!$res['success']) agent_fail($res['message'], 502, ['email' => $email]);
-        timeline_log((int)$r['id'], 'mail_sent', 'Booking email: ' . $subject,
-                     ['body' => 'To: ' . implode(', ', $to) . ($cc ? "\nCc: " . implode(', ', $cc) : ''), 'refs' => ['mail_box' => 'hub']]);
         agent_out(['ok' => true, 'dry_run' => false, 'message' => 'Sent', 'email' => $email]);
     }
 

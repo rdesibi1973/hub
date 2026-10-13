@@ -256,11 +256,27 @@ unless `"force": true`. Moves the folder to `001_Safari`, renames it
 `MM_DDMON_<folder>_STARTddMON[_MIDTddMON]_ENDddMONyyyy_PROGRESS`, status → Booked,
 snapshot stored for Rollback.
 
+**Booking email at confirm time.** `confirm_preview` and the `confirm_booking` dry run also return
+`email` (`to[]`, `cc[]`, `subject`, `body`, `sender_user_id`): the booking-team email as it will be
+with the new folder name. Optional `email` object in the body = the edits (same keys as
+`send_booking_email` below) + `"send": true` → after a successful confirm the edited email is sent
+in the same call (response: `email`, `email_sent`, `email_error` if it failed — the confirm stays
+done; retry with `send_booking_email`). Without `send` nothing is mailed. A `send` with no valid To → 400.
+```json
+{"request_id":2958,"start":"2027-01-19","end":"2027-01-28","confirm":true,
+ "email":{"send":true,"cc_remove":["savannah.explorers@gmail.com"],"no_invoice":true,
+          "body_extra":"Provisional bookings until 30 Oct for 15 double/twin; room list to follow."}}
+```
+
 ### `send_booking_email` (POST)
-`request_id` (must be Booked), optional `to[]`, `cc[]` (replace the template lists),
-`cc_remove[]` (drop addresses from the template CC), `subject`, `body_extra` (inserted before
-"Thanks"), `sender_name`. Without `"confirm": true` → returns the email that *would* be sent.
-Signed with the request agent's name, signature and Reply-To.
+`request_id` (must be Booked). Edits of the template, all optional:
+`to[]` / `cc[]` (replace the template lists), `to_add[]` / `cc_add[]`, `to_remove[]` / `cc_remove[]`,
+`subject`, `body` (replaces the whole template text; signature and Reply-To are still added),
+`body_extra` (inserted before "Thanks"), `no_invoice` (true → drops the "Esther - prepare the not
+paid invoice" line, e.g. group options invoiced when the group closes), `sender_name`.
+Without `"confirm": true` → returns the email that *would* be sent. No valid To → 400.
+Signed with the request agent's name, signature and Reply-To. Shared logic:
+`bs_booking_email_edit()` (booking_service.php).
 
 ### `rollback_booking` (POST)
 `request_id`. Undoes a Hub confirmation exactly like BackOffice → Rollback…: moves the folder

@@ -26,13 +26,15 @@ Memo: at the start create one `doing` memo (clear title, linked request, stable 
 - rooms exactly as requested (man+woman couple = 1 DBL; families of 4 in quadruple at Orangi Collection lodges);
 - guests from row 43: "First Last", MR/MRS, country (Italian names + Italian agency → ITALY); arrival A51, departure A56;
 - cached formula values present (otherwise the Hub reads End date = Start date).
+- rooms: the Hub reads the value in the row BELOW the "ROOMS TYPE" header (A37 header, A38 value) — keep the header, write the rooms under it.
+- **Groups (gruppi a raccolta / agency group departures):** guests stay TBA — the agency sends the room list with names only if and when the group confirms. Rooms = the block requested (e.g. "15 double/twin"); some rooms may be released and singles added when the group closes. Keep the H6:I14 block (single supplement, teen/child discounts) until the group confirms: supplements and discounts are applied then. Don't flag these as missing. In `send_booking_email` add a `body_extra` asking for provisional bookings until the option date Roberto gives, for the room block, with room list and singles to follow (13 Oct 2026).
 Anything missing: list it and ask, don't fix silently. Calc not open in Excel on his PC; after a local edit wait for Dropbox sync before any Hub action.
 
 ## 3. Confirm
 
-1. `confirm_preview` with start, mid / mid2 (or NA), end, destination, grp (NONE unless a real gruppo a raccolta). Show the new folder name and every check/warning. Kenya in the folder name if the trip includes Kenya; fam trips = agency + "FamTrip".
-2. After ok → `confirm_booking` with confirm → folder to `/001_Safari/`, status Booked.
-3. `send_booking_email` dry run → show To / Cc / body (template To: accountant@, glady@, operations@, nuru@; Cc configurable — ask whether to keep info@). Send only after his ok on text and recipients.
+1. `confirm_preview` with start, mid / mid2 (or NA), end, destination, grp (NONE unless a real gruppo a raccolta). Show the new folder name, every check/warning AND the booking email it returns (`email`: To / Cc / subject / body; template To: accountant@, glady@, operations@, nuru@; Cc configurable — ask whether to keep info@). Kenya in the folder name if the trip includes Kenya; fam trips = agency + "FamTrip".
+2. Changes to the email go in an `email` object (`to_add`/`to_remove`/`cc_add`/`cc_remove`, `to`/`cc` to replace, `subject`, `body` for a full rewrite, `body_extra`, `no_invoice`): rerun the preview with it and show the result until Roberto is happy.
+3. After his ok on folder AND email → `confirm_booking` with `confirm: true` and the same `email` + `"send": true`: folder to `/001_Safari/`, status Booked, email sent in one call. Check `email_sent`; if false, say so and retry with `send_booking_email` (same edits). If he wants to confirm now and mail later, omit `send` and use `send_booking_email` afterwards.
 
 ## 4. Invoice
 
