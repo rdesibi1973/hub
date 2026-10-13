@@ -30,6 +30,12 @@ Running log of notable changes and current build state. Module-level "active / p
 - safariagent (`iti_program.py`, `run.py`, `ci_check.py`): the ITI programme is checked when the folder
   has no programme `.docx` or the `.docx` is its ITI export; a Wetu Word still wins. The report notes the
   source; programme changes change the fingerprint (nightly re-check).
+- Which programme is the booking's (same day, second step): only active finals generated from a Calc in
+  `/001_Safari/` (a final generated while the request was still in `/2026/` does not count) and programmes
+  marked Confirmed in ITI; `?action=iti` returns them as `programs` (`chosen_by` final / confirmed) and the
+  others as `skipped` with the reason. The runner takes the final from the Calc it checks (file name; the
+  folder is not compared, it is renamed as tags change), else the one Confirmed programme (several = red),
+  else a final from another Calc (yellow); with none, "Word file not found" lists the skipped ones.
 
 ## 2026-10-09 — Incoming approve: channel + agency, shared folder name
 - Bug: approving an Incoming lead never stored `agency_id` and stored `channel` only when the folder

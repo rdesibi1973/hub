@@ -4,10 +4,17 @@
  * reads from a Wetu Word (safariagent core_model.WordData), for the CK runner:
  * modules/leads/ck_agent_api.php ?action=iti.
  *
- * Which programme: the personal programmes linked to the folder's Hub requests
- * (iti_programs.lead_request_id), not cancelled, with a start date; per request the
- * active final ones (built from the Calc, not superseded), else the newest personal one.
- * GRP folder: one per client request, with that client's sub-folder (requests.practice_code).
+ * Which programmes count as the booking's: the personal programmes linked to the folder's
+ * Hub requests (iti_programs.lead_request_id), not cancelled, not superseded, with a start
+ * date, that are either
+ *   - 'final': an active final programme generated from a Calc in 001_Safari, i.e. after the
+ *     booking was confirmed (source_calc_path contains /001_Safari/; the folder itself is
+ *     not compared, it is renamed as its tags change — the runner compares the Calc file
+ *     name), or
+ *   - 'confirmed': marked Confirmed by hand in ITI (programmes not built from the Calc).
+ * The others are returned as 'skipped' with the reason, for the report. The runner picks
+ * among them by the Calc it checks (safariagent iti_program.choose()).
+ * GRP folder: per client request, with that client's sub-folder (requests.practice_code).
  *
  * Night of day N = its end lodge (the last day has no night). Meal basis of the night
  * from the day's flags: dinner + lunch = FB, dinner = HB, breakfast next morning = BB,
@@ -15,7 +22,10 @@
  */
 require_once __DIR__ . '/iti_functions.php';
 
-/** Programmes of a 001_Safari folder for SafariCheck, newest first. */
+// Confirmed bookings' Dropbox folder (CK_BASE in ck_lib.php), as it appears in source_calc_path.
+const CK_ITI_BOOKING_DIR = '/001_Safari/';
+
+/** ['programs' => usable programmes, newest first, 'skipped' => [{id, …, reason}]] of a 001_Safari folder. */
 function iti_ck_programs(PDO $db, string $folder): array {
     iti_ensure_final_schema();
     $st = $db->prepare("SELECT id, practice_code, group_folder FROM requests
@@ -26,27 +36,35 @@ function iti_ck_programs(PDO $db, string $folder): array {
         $sub = trim((string)$r['practice_code']);
         $reqs[(int)$r['id']] = (string)$r['group_folder'] !== '' && $sub !== $folder ? $sub : '';
     }
-    if (!$reqs) return [];
+    $out = ['programs' => [], 'skipped' => []];
+    if (!$reqs) return $out;
 
     $in = implode(',', array_fill(0, count($reqs), '?'));
     $st = $db->prepare("SELECT * FROM iti_programs WHERE lead_request_id IN ($in)
                           AND program_type = 'personal' AND status <> 'cancelled' ORDER BY id DESC");
     $st->execute(array_keys($reqs));
-    $finals = []; $other = [];
     foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $p) {
-        if (empty($p['start_date']) || !preg_match('/^\d{4}-\d{2}-\d{2}$/', (string)$p['start_date'])) continue;
-        $rid = (int)$p['lead_request_id'];
-        if (($p['stage'] ?? '') === 'final') {
-            if (empty($p['superseded_by'])) $finals[$rid][] = $p;
-        } elseif (!isset($other[$rid])) {
-            $other[$rid] = $p;
+        if (!empty($p['superseded_by'])) continue;        // an older version of a final programme
+        $rid   = (int)$p['lead_request_id'];
+        $final = ($p['stage'] ?? '') === 'final';
+        $calc  = (string)($p['source_calc_path'] ?? '');
+        $fromBooking = $final && stripos($calc, CK_ITI_BOOKING_DIR) !== false;
+        $confirmed   = ($p['status'] ?? '') === 'confirmed';
+        $reason = null;
+        if (empty($p['start_date']) || !preg_match('/^\d{4}-\d{2}-\d{2}$/', (string)$p['start_date'])) {
+            $reason = 'no start date';
+        } elseif (!$fromBooking && !$confirmed) {
+            $reason = $final ? 'final program generated before the booking was confirmed (Calc ' . $calc . '), not marked Confirmed'
+                             : 'proposal, not marked Confirmed';
         }
-    }
-    $out = [];
-    foreach ($reqs as $rid => $sub) {
-        foreach ($finals[$rid] ?? (isset($other[$rid]) ? [$other[$rid]] : []) as $p) {
-            $out[] = iti_ck_program_data($db, $p, $rid, $sub);
+        if ($reason !== null) {
+            $out['skipped'][] = ['id' => (int)$p['id'], 'request_id' => $rid, 'client_folder' => $reqs[$rid],
+                                 'title' => iti_ck_pick($p, 'title_', (string)($p['display_language'] ?? 'it')),
+                                 'stage' => $p['stage'] ?? 'proposal', 'status' => $p['status'] ?? '', 'reason' => $reason,
+                                 'link' => ITI_MODULE_URL . '/program_edit.php?id=' . (int)$p['id']];
+            continue;
         }
+        $out['programs'][] = iti_ck_program_data($db, $p, $rid, $reqs[$rid]) + ['chosen_by' => $fromBooking ? 'final' : 'confirmed'];
     }
     return $out;
 }
