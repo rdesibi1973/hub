@@ -20,8 +20,14 @@ require_once __DIR__ . '/calc_reader.php';
 /** Hotel texts of The Orangi Collection lodges: booked in ResRequest, evidence = the "SV" file. */
 const BC_OWN_LODGES = '/\b(orangi|marera|kifaru|arusha explorers?)\b/i';
 
-/** ACTIVITY DESC items handled in-house, not booked with a supplier. */
-const BC_INTERNAL = '/^(emergency|medi ?vac|amref|lunch ?box|hot lunch|picnic|gates?\b|paid\b|ok$|-+$)/i';
+/**
+ * ACTIVITY DESC items handled in-house, not booked with a supplier: Maasai visits are
+ * arranged by the safari guide, Olduvai is paid with the Ngorongoro permit.
+ */
+const BC_INTERNAL = '/^(emergency|medi ?vac|amref|lunch ?box|hot lunch|picnic|gates?\b|paid\b|maa?sai|olduvai|oldupai|(cathedral )?church visit|(short )?city tour|ok$|-+$)/i';
+
+/** Activities run by our own lodges ("Natural Walk" = Marera Walking and Iraqw families): no supplier booking. */
+const BC_OWN_ACTIVITY = '/\b(orangi|marera|kifaru|arusha explorers?)\b|natural walk/i';
 
 /** Hotel text that is not a stay (e.g. the departure day's note). */
 const BC_NOT_STAY = '/^(transfer|day ?room|n\/?a|-+)\b/i';
@@ -78,8 +84,11 @@ function bc_services(array $calc): array {
         foreach (preg_split('/\s*\+\s*/', $d['activity_desc']) as $item) {
             $item = trim($item);
             if ($item === '' || preg_match(BC_INTERNAL, $item)) continue;
-            $out[] = ['type' => preg_match('/transfer/i', $item) ? 'transfer' : 'activity', 'date' => $d['date'],
-                      'text' => $item, 'route' => $d['label'], 'rows' => [$d['row']]];
+            $isTransfer = (bool)preg_match('/transfer/i', $item);
+            $svc = ['type' => $isTransfer ? 'transfer' : 'activity', 'date' => $d['date'],
+                    'text' => $item, 'route' => $d['label'], 'rows' => [$d['row']]];
+            if (!$isTransfer) $svc['own'] = (bool)preg_match(BC_OWN_ACTIVITY, $item);
+            $out[] = $svc;
         }
     }
     $close();

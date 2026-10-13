@@ -17,7 +17,7 @@ This is a CHECK: never edit the Calc, never move, rename or delete files, never 
 `find_requests` → `request_id`, then `booking_check` (GET). It returns:
 - `local_folder` (`C:\Dropbox\001_Safari\…`): read the files there, write the report there;
 - `calc`: file, sheet, pax `{adults, teen, child}`, `room_config`, `arrival`, `departure`, guests, warnings;
-- `services[]` in date order: `accommodation` (consecutive nights in one hotel: `check_in`, `check_out`, `nights`, `own`, `calc_invoice[]`, `calc_checked[]`), `flight` (`date`, `route`, `cost`), `transfer` / `activity` (`date`, `text`, `route`). In-house items (emergency, medivac, lunch boxes, hot lunch) are already left out;
+- `services[]` in date order: `accommodation` (consecutive nights in one hotel: `check_in`, `check_out`, `nights`, `own`, `calc_invoice[]`, `calc_checked[]`), `flight` (`date`, `route`, `cost`), `transfer` / `activity` (`date`, `text`, `route`). In-house items (emergency, medivac, lunch boxes, hot lunch, Maasai visits — arranged by the safari guide —, Olduvai — paid with the Ngorongoro permit, church visit / city tour on Mafia) are already left out; activities have `own` (run by our lodges);
 - `evidence[]`: every file in `invoices/` and `bookings/` (`scope` `group` = the GRP folder's), `old` = inside an `old…` sub-folder.
 
 422 "several pax sheets, none marked CONF": look at the sheet names. Two real parts of one trip (e.g. `16PAX` + `2PAX ZNZ`) → call once per `sheet` and check both; old quotes left next to the confirmed one → say so and stop (the Calc must be cleaned first). No Calc → say so and stop.
@@ -43,7 +43,7 @@ From each document note: supplier / property, kind (invoice, pro-forma, service 
 | Stay | check-in / check-out (nights), pax adults + children, rooms vs `room_config`, meal plan when the Calc states it (HB/FB), status confirmed |
 | Flight | date, route (all legs), pax, status; times consistent with `calc.arrival` / `departure` for the first / last leg |
 | Transfer | date, pick-up / drop-off, the flight it meets (vs `arrival` / `departure` and the flight invoices); a reply like "noted" / "confirmed" counts as confirmation |
-| Activity | a supplier booking (balloon, Mto wa Mbu walk, Materuni…): a document with the date and pax. Activities at our own lodges (bush dinner at Orangi, Marera walking) → "in-house", no evidence needed, but note it if the SV doesn't mention it |
+| Activity | a supplier booking (balloon, Mto wa Mbu walk, Materuni…): a document with the date and pax. Activities of our own lodges (`own: true`: "Natural Walk" = Marera Walking and Iraqw families; bush dinner at Orangi, also when the text is just "Bush dinner" on an Orangi night) → "in-house", no evidence needed, but note it if the SV doesn't mention it |
 
 Amount: if a document's total differs from `calc_invoice` or the flight cost, note the difference (info, not an error: taxes, levies, extras).
 

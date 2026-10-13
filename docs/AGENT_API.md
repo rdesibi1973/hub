@@ -247,7 +247,8 @@ Read-only, for the Cowork skill `booking-check` (verify a booked safari). `reque
   `accommodation` `{name, check_in, check_out, nights, own, calc_invoice[], calc_checked[], rows[]}`
   (consecutive nights in the same hotel; `own` = The Orangi Collection → booked in ResRequest, evidence
   is the "SV" file), `flight` `{date, route, cost, rows}`, `transfer` / `activity` `{date, text, route, rows}`
-  (one per ACTIVITY DESC item; in-house items — emergency, medivac, lunch boxes, hot lunch — skipped);
+  (one per ACTIVITY DESC item; in-house items — emergency, medivac, lunch boxes, hot lunch, Maasai visits, Olduvai,
+  church visit / city tour — skipped; `activity.own` = run by our lodges, e.g. "Natural Walk" at Marera);
 - `evidence[]` `{scope own|group, path, name, ext, size, old}`: every file in `invoices/` and `bookings/`
   (any format; `old` = inside an "old…" sub-folder);
 - `summary`: services per type, `evidence_files`, `stays_without_invoice_or_checked`.
