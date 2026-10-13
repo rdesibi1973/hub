@@ -669,7 +669,7 @@ function bs_confirm_plan(PDO $db, int $reqId, array $in): array {
 
     $plan = ['found' => false, 'error' => '', 'request_id' => $reqId, 'r' => null, 'old_folder' => '',
              'grp_action' => $grpAction, 'grp_code' => $grpCode, 'grp_main' => $grpMain,
-             'dest_value' => $destValue, 'errs' => [], 'new_name' => null, 'sub_name' => null,
+             'dest_value' => $destValue, 'dest_suffix' => $destSuffix, 'errs' => [], 'new_name' => null, 'sub_name' => null,
              'member_name' => null, 'pd' => ['start_date' => null, 'end_date' => null],
              'token' => null, 'cur_path' => null, 'dbx_err' => '', 'grps' => [],
              'block' => false, 'can_override' => false, 'block_msg' => '', 'fields' => []];
@@ -812,6 +812,31 @@ function bs_known_flight_costs(): ?array {
 }
 
 /**
+ * ITI lodges with the name and country of their destination, for the destination
+ * check: ['alias' => [Calc text => [dest, country]], 'name' => [lodge name => [dest, country]]],
+ * keys normalized with sc_place_norm(). Empty when the ITI tables are unavailable.
+ */
+function bs_lodge_countries(): array {
+    $out = ['alias' => [], 'name' => []];
+    try {
+        $sql = "SELECT %s AS k, d.name_en AS dest, d.country FROM %s
+                  JOIN iti_destinations d ON d.id = l.destination_id
+                 WHERE l.is_active = 1 AND d.country IS NOT NULL AND d.country <> ''";
+        $q = [
+            'alias' => sprintf($sql, 'a.alias', 'iti_lodge_aliases a JOIN iti_lodges l ON l.id = a.lodge_id'),
+            'name'  => sprintf($sql, 'l.name',  'iti_lodges l'),
+        ];
+        foreach ($q as $kind => $s) {
+            foreach (db()->query($s)->fetchAll(PDO::FETCH_ASSOC) as $r) {
+                $k = sc_place_norm((string)$r['k']);
+                if ($k !== '') $out[$kind][$k] = [(string)$r['dest'], ucwords(strtolower(trim($r['country'])))];
+            }
+        }
+    } catch (Throwable $e) { return ['alias' => [], 'name' => []]; }
+    return $out;
+}
+
+/**
  * Advisory pre-flight checks for a format-valid plan: Excel QC (dates, flights),
  * Dropbox reachability and GRP existence. Each: ['level'=>ok|warn|info|…,'msg'].
  */
@@ -834,6 +859,11 @@ function bs_confirm_checks(array $plan): array {
                 'mid'          => bs_last_midt($plan['new_name'], $plan['pd']['end_date']),
                 'flight_costs' => bs_known_flight_costs(),
             ]));
+        }
+        // Places in the Calc vs the destination chosen (an ADD keeps the group's name).
+        if ($xlsx && $plan['grp_action'] !== 'ADD') {
+            $checks = array_merge($checks, sc_destination_check(sc_calc_place_texts($xlsx),
+                $plan['dest_suffix'], $plan['dest_value'], bs_lodge_countries()));
         }
         if ($xlsx) @unlink($xlsx);
     } catch (Throwable $e) {

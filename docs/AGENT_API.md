@@ -248,7 +248,12 @@ rate table / not `=cost*$B$1` · other nights without hotel · guests / country 
 `grp_code` (DDMM), `grp_main`.
 Dates: ISO `2027-01-19` or Hub format (`19JAN`; `end` = `28JAN2027`). `dest`: a label from
 `list_standard_programs.destinations`, or its suffix (`ZNZ`, `TREK`, `KENYA`…); empty = Tanzania safari.
-Returns `new_name`, `checks` (Excel dates vs folder dates, flights, GRP) and `blocking`.
+Returns `new_name`, `checks` (Excel dates vs folder dates, flights, GRP, destination) and `blocking`.
+**Destination check** (`warn`, not blocking): the places in the Calc day rows (place names, and
+ITI lodges through their destination's country) must fit `dest` — e.g. Masai Mara with a Tanzania
+safari, Serengeti with `KENYA`, mainland places with `ZNZ`, no route/hut with `TREK`, only Zanzibar
+places with a Tanzania safari. Nairobi / Dar / Kigali / Entebbe / JNB on the first or last day = transit.
+If you get this warning, ask the seller which destination is right before you confirm.
 
 ### `confirm_booking` (POST)
 Same input + `"confirm": true`. Without it → dry-run (= preview). With blocking issues → 409

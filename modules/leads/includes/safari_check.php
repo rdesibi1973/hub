@@ -746,3 +746,162 @@ function sc_calc_rule_checks(string $path, array $ctx = []): array {
     if (!$res) $res[] = ['level' => 'ok', 'msg' => 'Calc house rules: all OK.'];
     return $res;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Destination check: the places in the Calc vs the destination chosen at confirm
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Place names → [country, zone]. Zone: 'tz' = Tanzania mainland safari, 'znz' =
+ * Zanzibar / Pemba, 'trek' = Kilimanjaro / Meru routes and huts, null = other.
+ * Only unambiguous names: no bare "Kilimanjaro" (Amboseli lodges use it), no bare
+ * "Mara" (Serengeti's Mara River camps) and no bare "Meru" (Meru NP is in Kenya).
+ */
+const SC_PLACES = [
+    'serengeti|ngorongoro|tarangire|manyara|arusha|karatu|ndutu|natron|ruaha|selous|nyerere|mikumi|katavi|mahale|gombe|moshi|eyasi|mto wa mbu|kogatende|seronera|olduvai|oldupai|rhotia|usa river|saadani' => ['Tanzania', 'tz'],
+    'dar es salaam|mafia' => ['Tanzania', null],
+    'zanzibar|znz|stone town|nungwi|kendwa|paje|matemwe|kiwengwa|michamvi|jambiani|bwejuu|pongwe|uroa|kizimkazi|mnemba|pemba' => ['Tanzania', 'znz'],
+    'machame|marangu|lemosho|rongai|umbwe|shira|barafu|kibo hut|horombo|mandara|uhuru peak|kilimanjaro (?:trek|climb)|mount meru|mt\.? meru|miriakamba|saddle hut' => ['Tanzania', 'trek'],
+    'masai mara|maasai mara|amboseli|tsavo|nairobi|samburu|naivasha|nakuru|diani|mombasa|watamu|malindi|lamu|ol pejeta|laikipia|lewa|meru national park|aberdare|kilifi|ukunda' => ['Kenya', null],
+    'bwindi|kibale|murchison|queen elizabeth|entebbe|kampala|jinja|kidepo|lake mburo|ishasha' => ['Uganda', null],
+    'volcanoes national park|kigali|akagera|nyungwe|musanze|ruhengeri' => ['Rwanda', null],
+    'etosha|sossusvlei|sesriem|windhoek|swakopmund|damaraland|skeleton coast' => ['Namibia', null],
+    'kruger|knp|kmia|cape town|cpt|sabi sands?|johannesburg|jnb|stellenbosch|franschhoek|garden route' => ['South Africa', null],
+    'okavango|chobe|maun|kasane|moremi|makgadikgadi|savuti' => ['Botswana', null],
+    'nosy be|antananarivo|andasibe|isalo|morondava' => ['Madagascar', null],
+    'victoria falls|hwange' => ['Zimbabwe', null],
+    'livingstone|south luangwa|lower zambezi' => ['Zambia', null],
+];
+
+/** International gateways: on the first / last day only they are a transit, not a destination. */
+const SC_GATEWAYS = ['Nairobi', 'Dar Es Salaam', 'Kigali', 'Entebbe', 'Johannesburg', 'Jnb'];
+
+/** Lower-case, punctuation → space, spaces collapsed. */
+function sc_place_norm(string $s): string {
+    $s = preg_replace('/[^\p{L}\p{N}\']+/u', ' ', mb_strtolower($s, 'UTF-8'));
+    return trim(preg_replace('/\s+/', ' ', $s));
+}
+
+/** Gazetteer hits in a text: [[place, country, zone], …]. */
+function sc_place_hits(string $text): array {
+    $out = [];
+    $t = sc_place_norm($text);
+    if ($t === '') return $out;
+    foreach (SC_PLACES as $re => $cz) {
+        if (preg_match_all('/\b(?:' . $re . ')\b/u', $t, $m)) {
+            foreach (array_unique($m[0]) as $p) $out[] = [ucwords($p), $cz[0], $cz[1]];
+        }
+    }
+    return $out;
+}
+
+/**
+ * Text cells of the itinerary day rows (PARK/OVERNIGHT, hotel, activities, fees…),
+ * columns B–T; numbers skipped. Each: ['text' => string, 'date' => ?Y-m-d].
+ */
+function sc_calc_place_texts(string $path): array {
+    $full = sc_xlsx_sheet($path);
+    $v = $full['v'];
+    $out = [];
+    foreach (sc_calc_day_rows($v, $full['f']) as $d) {
+        foreach (range('B', 'T') as $col) {
+            $t = trim(sc_cell($v, $col, $d['row']));
+            if ($t === '' || is_numeric($t)) continue;
+            $out[] = ['text' => $t, 'date' => $d['date']];
+        }
+    }
+    return $out;
+}
+
+/**
+ * Compare the places of the Calc with the destination chosen at confirm.
+ * $texts  = sc_calc_place_texts();
+ * $suffix = folder suffix of the destination ('' Tanzania, '-TREK', '-ZNZ', '-TZ-KENYA', '-KENYA', …);
+ * $country = requests.destination value ('Tanzania', 'Kenya', …);
+ * $lodges = ['alias' => [norm text => [dest, country]], 'name' => [norm lodge name => [dest, country]]]
+ *           from the ITI lodge tables (lodges whose text has no place name, e.g. "Kifaru").
+ * Returns check rows (warn / ok); [] when no known place is found.
+ */
+function sc_destination_check(array $texts, string $suffix, string $country, array $lodges = []): array {
+    $suffix = strtoupper($suffix);
+    if ($country === '' || $suffix === '-STAFF') return [];
+    $aliases = $lodges['alias'] ?? [];
+    $names   = $lodges['name']  ?? [];
+
+    // Evidence: country => zone => [place label => first date].
+    $ev = [];
+    $dates = array_filter(array_column($texts, 'date'));
+    $edge  = $dates ? [min($dates), max($dates)] : [];
+    $add = function ($c, $z, $label, $date) use (&$ev, $edge) {
+        if (in_array($label, SC_GATEWAYS, true) && in_array($date, $edge, true)) return;   // arrival / departure via
+        $z = $z === null ? '-' : $z;
+        if (!isset($ev[$c][$z][$label])) $ev[$c][$z][$label] = $date;
+    };
+    foreach ($texts as $tx) {
+        $hits = sc_place_hits($tx['text']);
+        foreach ($hits as $h) $add($h[1], $h[2], $h[0], $tx['date']);
+        if ($hits || (!$aliases && !$names)) continue;
+        // No place name: an ITI lodge (alias, or its name inside the text).
+        $n    = sc_place_norm($tx['text']);
+        $base = sc_place_norm(preg_replace('/\(.*$|\b(?:in\s+)?(?:bb|hb|fb|ai)\b.*$/i', '', $tx['text']));
+        $lodge = $aliases[$n] ?? ($aliases[$base] ?? null);
+        if ($lodge === null) {
+            $found = [];
+            foreach ($names as $ln => $info) {
+                if (strlen($ln) >= 6 && strpos(' ' . $n . ' ', ' ' . $ln . ' ') !== false) $found[$ln] = $info;
+                elseif (strlen($base) >= 6 && strpos(' ' . $ln . ' ', ' ' . $base . ' ') !== false) $found[$ln] = $info;
+            }
+            if (count($found) === 1) $lodge = reset($found);
+        }
+        if ($lodge === null) continue;
+        $dh = sc_place_hits($lodge[0]);   // zone from the lodge's destination name
+        $add($lodge[1], $dh ? $dh[0][2] : null, trim($tx['text']), $tx['date']);
+    }
+    if (!$ev) return [];
+
+    $list = function (array $zones) {
+        $items = [];
+        foreach ($zones as $places) {
+            foreach ($places as $p => $d) $items[$p] = $d;
+        }
+        asort($items);
+        $out = [];
+        foreach (array_slice($items, 0, 4, true) as $p => $d) $out[] = $p . ($d ? ' (' . date('d M', strtotime($d)) . ')' : '');
+        return implode(', ', $out) . (count($items) > 4 ? ' +' . (count($items) - 4) . ' more' : '');
+    };
+    $allowed = $suffix === '-TZ-KENYA' ? ['Tanzania', 'Kenya'] : [$country];
+    $labels  = ['-TZ-KENYA' => 'Kenya-Tanzania', '-TREK' => 'Trekking Kilimanjaro / Meru', '-ZNZ' => 'Only Zanzibar'];
+    $label   = $labels[$suffix] ?? $country;
+    $res = [];
+
+    foreach ($ev as $c => $zones) {
+        if (!in_array($c, $allowed, true)) {
+            $res[] = ['level' => 'warn', 'msg' => 'Destination is ' . $label . ' but the Calc has places in ' . $c . ': '
+                     . $list($zones) . ' — check the destination.'];
+        }
+    }
+    foreach ($allowed as $c) {
+        if (count($allowed) > 1 && !isset($ev[$c])) {
+            $res[] = ['level' => 'warn', 'msg' => 'Destination is ' . $label . ' but the Calc has no place in ' . $c . ' — check the destination.'];
+        }
+    }
+    $tz = $ev['Tanzania'] ?? [];
+    if ($suffix === '-ZNZ' && $tz) {
+        $main = array_intersect_key($tz, ['tz' => 1, 'trek' => 1]);
+        if ($main)            $res[] = ['level' => 'warn', 'msg' => 'Destination is Only Zanzibar but the Calc has mainland places: ' . $list($main) . ' — should it be Safari / Safari & Beach?'];
+        if (!isset($tz['znz'])) $res[] = ['level' => 'warn', 'msg' => 'Destination is Only Zanzibar but the Calc has no Zanzibar place — check the destination.'];
+    }
+    if ($suffix === '-TREK' && $tz && !isset($tz['trek'])) {
+        $res[] = ['level' => 'warn', 'msg' => 'Destination is Trekking Kilimanjaro / Meru but the Calc has no trekking route or hut — check the destination.'];
+    }
+    if ($suffix === '' && $country === 'Tanzania' && isset($tz['znz']) && !isset($tz['tz']) && !isset($tz['trek'])) {
+        $res[] = ['level' => 'warn', 'msg' => 'The Calc has only Zanzibar places (' . $list(['znz' => $tz['znz']]) . ') — should the destination be Only Zanzibar?'];
+    }
+
+    if (!$res) {
+        $all = [];
+        foreach ($ev as $zones) { foreach ($zones as $places) $all[] = $places; }
+        $res[] = ['level' => 'ok', 'msg' => 'Destination ' . $label . ' fits the Calc places: ' . $list($all) . '.'];
+    }
+    return $res;
+}
