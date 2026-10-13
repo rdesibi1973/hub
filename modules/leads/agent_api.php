@@ -1370,6 +1370,23 @@ try {
         agent_out(array_merge(['ok' => true], $res));
     }
 
+    // ── booking_check ────────────────────────────────────────────────────────
+    // Read-only: what had to be booked (Calc → services) and the evidence saved
+    // in invoices/ + bookings/. The Cowork skill booking-check matches them.
+    case 'booking_check': {
+        $r = agent_request($db, $in['request_id'] ?? 0);
+        require_once __DIR__ . '/dropbox_helper.php';
+        require_once __DIR__ . '/includes/booking_check.php';
+        try {
+            $res = bc_request($db, (int)$r['id'], (string)($in['file'] ?? ''), (string)($in['sheet'] ?? ''));
+        } catch (InvalidArgumentException $e) {
+            agent_fail($e->getMessage(), 422);
+        } catch (RuntimeException $e) {
+            agent_fail($e->getMessage(), 502);
+        }
+        agent_out(array_merge(['ok' => true], $res));
+    }
+
     // ── ITI programmes: list / texts to translate / save translations ────────
     case 'iti_programs': {
         $q = trim((string)($in['q'] ?? ''));
@@ -2602,7 +2619,7 @@ try {
     default:
         agent_fail('Unknown action "' . $agentAction . '"', 400, ['actions' => [
             'find_requests', 'list_agencies', 'create_agency', 'create_request', 'update_request', 'import_group_folder', 'move_group_folder', 'list_standard_programs',
-            'copy_program', 'get_rates', 'fill_calc', 'read_calc', 'confirm_preview', 'confirm_booking', 'send_booking_email',
+            'copy_program', 'get_rates', 'fill_calc', 'read_calc', 'booking_check', 'confirm_preview', 'confirm_booking', 'send_booking_email',
             'rollback_booking', 'iti_programs', 'iti_texts', 'iti_save_texts', 'update_rate', 'replace_flight_rates',
             'iti_lodges', 'iti_lodge', 'iti_destinations', 'iti_destination', 'iti_lodge_photos', 'iti_destination_photo',
             'iti_update_lodge', 'iti_update_destination', 'iti_create_lodge', 'iti_samples', 'iti_program', 'iti_document', 'iti_vouchers', 'iti_create_personal', 'iti_update_program',

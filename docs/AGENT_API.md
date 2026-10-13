@@ -237,6 +237,23 @@ name). Reads the booking's Calc (no PhpSpreadsheet needed) and returns:
   listing the client sheets.
 - `flight_cost` is the saved FLIGHTS amount of that day (e.g. `=215*$B$1` → 430 for 2 pax).
 
+### `booking_check` (GET)
+Read-only, for the Cowork skill `booking-check` (verify a booked safari). `request_id`, optional
+`file`, `sheet` (as `read_calc`; a group calc is read on `RECAP` by default). Returns:
+- `folder`, `group_folder` (GRP member: the group folder, its evidence is listed too), `local_folder`
+  (`C:\Dropbox\…`, where Cowork reads the files and writes `booking-check.html`), `customer`, `status`, `payment`;
+- `calc`: as `read_calc` without `days` (file, sheet, pax, room_config, arrival/departure, guests, warnings);
+- `services[]` in date order:
+  `accommodation` `{name, check_in, check_out, nights, own, calc_invoice[], calc_checked[], rows[]}`
+  (consecutive nights in the same hotel; `own` = The Orangi Collection → booked in ResRequest, evidence
+  is the "SV" file), `flight` `{date, route, cost, rows}`, `transfer` / `activity` `{date, text, route, rows}`
+  (one per ACTIVITY DESC item; in-house items — emergency, medivac, lunch boxes, hot lunch — skipped);
+- `evidence[]` `{scope own|group, path, name, ext, size, old}`: every file in `invoices/` and `bookings/`
+  (any format; `old` = inside an "old…" sub-folder);
+- `summary`: services per type, `evidence_files`, `stays_without_invoice_or_checked`.
+The INVOICE amount sits on the first row of a block, and one invoice may cover several services
+("ARUSHA, MARERA & KIFARU - SV", one transfer mail for all transfers): match by content, not by name.
+
 ### Calc checks (also in Confirm preview, UI + API)
 `error`: more than one pax sheet · a beach night (≥ MIDT) without hotel · formula cells with no saved
 value (Hub would read End = Start). `warn`: H6:I14 not empty · F9 empty · flight cost not in the
