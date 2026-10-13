@@ -49,6 +49,8 @@ GRP folders (group departures): a group block with more rooms or flight seats th
 
 Amount: if a document's total differs from `calc_invoice` or the flight cost, note the difference (info, not an error: taxes, levies, extras).
 
+Domestic flight tickets are saved in `flights/` and are often issued only a few weeks or days before arrival. A flight correctly booked (confirmed invoice / pro-forma, right date, route and pax) with no ticket yet is NOT an error: info "ticket not issued yet — checked by the weekly ticket round (back-office §6)". If the ticket is there, check names, date, flight and times against the Calc.
+
 Status of each service:
 - **OK**: evidence found and everything matches.
 - **CHECK**: evidence found but something differs or is unclear (pax, dates, room, provisional, amount).

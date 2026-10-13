@@ -1,6 +1,6 @@
 ---
 name: daily-check
-description: Savannah Explorers daily round ("fai il giro"): routine_status, incoming leads to assign, open SH/AfrAsia balances and their memos, then routine_done. Mail is read by Roberto, not here.
+description: Savannah Explorers daily round ("fai il giro"): routine_status, incoming leads to assign, open SH/AfrAsia balances and their memos, weekly domestic flight tickets check, then routine_done. Mail is read by Roberto, not here.
 ---
 
 # Daily check ("il giro")
@@ -37,6 +37,10 @@ List open balances:
 
 SH payment memos: every open SH invoice must have a `waiting` memo linked to it with `auto_close_on_payment` and `ext_key` `pay-<invoice number>`. If one is missing, propose it (`waiting_on` = client/agency, `due_date` = when to chase, supplier to pay afterwards in `next_steps`). Never payment memos for SE invoices.
 
+## 3b. Domestic flight tickets (once a week)
+
+On Monday, or the first round of the week: `flight_tickets` with `from` = today, `to` = today + 14 days, as in `back-office` §6. Report the bookings with `missing` (who booked it) and the tickets present but not yet sent. Other days skip this section.
+
 ## 4. Report (Italian, plain text, no emoji)
 
 ```
@@ -48,6 +52,9 @@ Leads da assegnare: <N>
 Saldi aperti SH: <N> (<totale>)
 - <SH-…> <cliente/agenzia> <saldo> scad. <data> [memo: ok / manca]
 In scadenza / scaduti (altre pratiche): ...
+
+Biglietti voli interni (solo il lunedì, prossime 2 settimane): mancanti <N>, da inviare <M>
+- <cartella> – <volo> <data> – manca il biglietto (prenotato da <Glady/Lydia>)
 
 Cosa serve da te: ...
 ```

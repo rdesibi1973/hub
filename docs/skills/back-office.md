@@ -56,10 +56,14 @@ Anderson and Harrison handle arrivals and departures: the report is for them too
 - Check every guest has a name and nationality; "TBA" names → flag. Never passport numbers.
 - Sending to Medivac (Joleen) only after Roberto's ok.
 
-## 6. Domestic flight tickets
+## 6. Domestic flight tickets (weekly)
 
-- For upcoming safaris with a domestic flight booked by Savannah (Auric Air etc., Calc col C): check the ticket (PDF / e-ticket) is in the booking folder.
-- Missing ticket → flag (who booked it, Glady / Lydia). Ticket present but not yet sent → propose the mail to the client/agency with the ticket attached (draft per `agency-email`).
+Once a week (Monday, or the first round of the week — see `daily-check`): `flight_tickets` with `from` = today, `to` = today + 14 days. It lists the confirmed bookings starting in the window with a domestic flight booked / bought by Savannah (Calc FLIGHT cost > 0 = flight included in the programme) and the ticket files in the folder.
+- Tickets are always saved in the booking's `flights/` sub-folder.
+- `ok` → ticket present: check names, date and flight against the Calc; if not yet sent, propose the mail to the agency / client with the ticket attached (draft per `agency-email`).
+- `missing` → flag it (who booked it, Glady / Lydia) and propose asking the airline for the ticket.
+- `unknown` → Calc not readable: check by hand.
+- Before the 2-week window a missing ticket is not a problem (tickets come late); `booking-check` only notes it as info.
 - Names on tickets have no spaces in compound names (e.g. DICESARE): not a discrepancy.
 
 ## 7. Vouchers, rooming lists, ResRequest
