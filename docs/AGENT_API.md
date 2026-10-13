@@ -31,7 +31,7 @@ without driving the web UI.
 | HTTPS only | Plain HTTP → 403. |
 | Rate limit | 60 calls/min → 429. |
 | Audit | Every call (including failures and dry-runs) → `agent_audit_log` (action, request_id, user, HTTP code, dry_run, payload, result, IP). |
-| Dry-run by default | `update_request`, `confirm_booking`, `send_booking_email`, `rollback_booking`, `rename_folder`, `import_group_folder`, `move_group_folder`, `set_request_status`, `cancel_invoice_payment`, `update_folder_status`, `import_zoho_invoice`, `create_invoice`, `update_invoice`, `memo_delete`, `create_agency`, `mail_send`, `mail_move` and `ck_request_check` (among others) do nothing unless the body has `"confirm": true`. |
+| Dry-run by default | `update_request`, `confirm_booking`, `send_booking_email`, `rollback_booking`, `rename_folder`, `import_group_folder`, `move_group_folder`, `set_request_status`, `cancel_invoice_payment`, `update_folder_status`, `import_zoho_invoice`, `create_invoice`, `update_invoice`, `memo_delete`, `create_agency`, `update_agency`, `mail_send`, `mail_move` and `ck_request_check` (among others) do nothing unless the body has `"confirm": true`. |
 | No deletes | No delete endpoint (mail included), except `memo_delete`, which is soft (`deleted_at`, the row stays). Undo a confirm with `rollback_booking` (or BackOffice → Rollback). |
 | Mailbox | The key also reads `info@` (`mail_*`): keep `api.txt` as private as the mailbox password. |
 
@@ -69,7 +69,7 @@ curl -sH "$H" "$U?action=find_requests&status=Quoted,Hot-Quoted&agent=rdesibi&ch
 ```
 
 ### `list_agencies` (GET)
-`q` → `[{id, name, short_name, type}]`.
+`q` → `[{id, name, short_name, type, active, address, email}]` (inactive agencies included).
 
 ### `create_agency` (POST)
 Adds an agency, same as Agencies → Add in the Hub (`agency_create()` in `includes/agency_service.php`, also used by
@@ -85,6 +85,22 @@ Then `create_request` / `update_request` with `agency_id`.
 ```bash
 curl -sA "$UA" -H "$H" -X POST "$U?action=create_agency" -d '{"name":"Viaggi del Mappamondo","email":"info@example.it"}'                  # dry run
 curl -sA "$UA" -H "$H" -X POST "$U?action=create_agency" -d '{"name":"Viaggi del Mappamondo","email":"info@example.it","confirm":true}'
+```
+
+### `update_agency` (POST)
+Edits an agency, same as Agencies → Edit in the Hub (`agency_update()` in `includes/agency_service.php`).
+**Dry-run unless `"confirm": true`.** `agency_id`* plus any of `name`, `short_name`, `type`, `active` (bool),
+`address`, `email` (top level or inside `fields`); only the fields given change, `""` / `null` clears address / email.
+`short_name` `""` → CamelCase of the name; a new `type` re-applies the `-PS` / `-LAM` suffix to the short name.
+Same checks as `create_agency` (email, short-name characters, **409** + `existing[]` when the new name / short name
+belongs to another agency); unknown id → 404.
+→ `{dry_run: true, agency: {…after}, changes: {field: {from, to}}, warning}`; with `confirm` → `{updated: true, …}`;
+nothing different → `{unchanged: true}`. Changing the short name does **not** rename Dropbox folders: old folders keep the
+old `(Short-Agent)` tag (`warning`).
+
+```bash
+curl -sA "$UA" -H "$H" -X POST "$U?action=update_agency" -d '{"agency_id":164,"address":"Via Roma 1, 00100 Roma"}'                 # dry run
+curl -sA "$UA" -H "$H" -X POST "$U?action=update_agency" -d '{"agency_id":164,"address":"Via Roma 1, 00100 Roma","confirm":true}'
 ```
 
 ### `create_request` (POST)

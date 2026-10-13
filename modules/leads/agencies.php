@@ -28,29 +28,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         else            $errors[] = $res['error'];
     }
 
-    // EDIT
+    // EDIT — agency_update() in includes/agency_service.php
     if ($action === 'edit') {
-        $id    = (int)$_POST['id'];
-        $nome  = trim($_POST['nome']       ?? '');
-        $short = trim($_POST['short_name'] ?? '');
-        $type  = $_POST['type']            ?? 'savannah';
-        $attiva = isset($_POST['attiva']) ? 1 : 0;
-        if ($nome === '') {
-            $errors[] = 'Agency name is required.';
-        } else {
-            // Strip any existing suffix before re-applying
-            $short = preg_replace('/-PS$|-LAM$/', '', $short);
-            if ($type === 'promoservice') {
-                $short .= '-PS';
-            } elseif ($type === 'lamprati') {
-                $short .= '-LAM';
-            }
-            $address = trim($_POST['address'] ?? '');
-            $email   = trim($_POST['email'] ?? '');
-            $db->prepare('UPDATE agencies SET nome=?, short_name=?, type=?, attiva=?, address=?, email=? WHERE id=?')
-               ->execute([$nome, $short ?: null, $type, $attiva, $address ?: null, $email ?: null, $id]);
-            $success = "Agency updated.";
-        }
+        $res = agency_update($db, (int)$_POST['id'], ['nome' => $_POST['nome'] ?? '', 'short_name' => $_POST['short_name'] ?? '',
+                                                      'type' => $_POST['type'] ?? 'savannah', 'attiva' => isset($_POST['attiva']) ? 1 : 0,
+                                                      'address' => $_POST['address'] ?? '', 'email' => $_POST['email'] ?? '']);
+        if ($res['ok']) $success = 'Agency updated.';
+        else            $errors[] = $res['error'];
     }
 
     // DELETE[cite: 2]

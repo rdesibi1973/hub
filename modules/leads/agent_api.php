@@ -95,7 +95,7 @@ function agent_audit(PDO $db, string $action, $reqId, array $payload, string $re
                               'iti_create_lodge', 'iti_set_days', 'iti_add_day', 'iti_delete_day', 'iti_update_inclusions',
                               'iti_create_flight_route', 'iti_create_activity', 'iti_create_transfer_route', 'iti_save_as_sample',
                               'create_request', 'add_flight_rates', 'timeline_update', 'summary_set', 'rename_folder',
-                              'set_request_status', 'update_request', 'import_group_folder', 'move_group_folder', 'ck_request_check', 'memo_delete', 'create_agency'], true) && empty($payload['confirm']);
+                              'set_request_status', 'update_request', 'import_group_folder', 'move_group_folder', 'ck_request_check', 'memo_delete', 'create_agency', 'update_agency'], true) && empty($payload['confirm']);
     // Mail: keep who/what in the log, not message bodies or attachment content.
     if (in_array($action, ['mail_get', 'mail_attachment', 'iti_document', 'iti_vouchers'], true) && $code === 200) {
         $res = json_decode($resultJson, true);
@@ -698,12 +698,13 @@ try {
         $q = trim((string)($in['q'] ?? ''));
         if ($q === '') agent_fail('q is required');
         $like = '%' . $q . '%';
-        $st = $db->prepare("SELECT id, nome, short_name, type FROM agencies
+        $st = $db->prepare("SELECT id, nome, short_name, type, attiva, address, email FROM agencies
                             WHERE nome LIKE ? OR short_name LIKE ? ORDER BY nome LIMIT 50");
         $st->execute([$like, $like]);
         $out = [];
         foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $a) {
-            $out[] = ['id' => (int)$a['id'], 'name' => $a['nome'], 'short_name' => $a['short_name'], 'type' => $a['type']];
+            $out[] = ['id' => (int)$a['id'], 'name' => $a['nome'], 'short_name' => $a['short_name'], 'type' => $a['type'],
+                      'active' => (bool)$a['attiva'], 'address' => $a['address'], 'email' => $a['email']];
         }
         agent_out(['ok' => true, 'agencies' => $out]);
     }
@@ -733,6 +734,48 @@ try {
                        'message' => 'Dry run — nothing created. Folder tag will be (' . $a['short_name'] . '-<Agent>). Resend with "confirm": true.']);
         }
         agent_out(['ok' => true, 'created' => true, 'agency' => $out]);
+    }
+
+    // ── update_agency ────────────────────────────────────────────────────────
+    // Same as Agencies → Edit (agency_update() in includes/agency_service.php): only the
+    // fields given change. Dry-run unless "confirm": true.
+    case 'update_agency': {
+        agent_require_method('POST');
+        $id = (int)($in['agency_id'] ?? $in['id'] ?? 0);
+        if ($id <= 0) agent_fail('agency_id is required — use list_agencies');
+        $src = isset($in['fields']) && is_array($in['fields']) ? $in['fields'] + $in : $in;
+        $f = [];
+        foreach (['name' => 'nome', 'nome' => 'nome', 'short_name' => 'short_name', 'type' => 'type',
+                  'active' => 'attiva', 'address' => 'address', 'email' => 'email'] as $k => $col) {
+            if (array_key_exists($k, $src)) $f[$col] = $src[$k];
+        }
+        if (!$f) agent_fail('Nothing to change — give name, short_name, type, active, address and/or email');
+        if (array_key_exists('attiva', $f) && !is_bool($f['attiva']) && !in_array($f['attiva'], [0, 1, '0', '1'], true)) {
+            agent_fail('active must be true or false');
+        }
+        $res = agency_update($db, $id, $f, empty($in['confirm']));
+        if (!$res['ok']) {
+            $dups = [];
+            foreach ($res['duplicates'] as $d) $dups[] = ['id' => $d['id'], 'name' => $d['nome'], 'short_name' => $d['short_name'], 'type' => $d['type']];
+            agent_fail($res['error'], ['not_found' => 404, 'duplicate' => 409, 'db' => 500][$res['error_code']] ?? 400,
+                       ['error_code' => $res['error_code'], 'existing' => $dups]);
+        }
+        $a   = $res['agency'];
+        $out = ['id' => $a['id'], 'name' => $a['nome'], 'short_name' => $a['short_name'], 'type' => $a['type'],
+                'active' => (bool)$a['attiva'], 'address' => $a['address'], 'email' => $a['email']];
+        $changes = [];
+        foreach ($res['changes'] as $k => $c) {
+            $changes[['nome' => 'name', 'attiva' => 'active'][$k] ?? $k] = $k === 'attiva'
+                ? ['from' => (bool)$c['from'], 'to' => (bool)$c['to']] : $c;
+        }
+        $warn = isset($changes['short_name'])
+            ? 'Short name changes: existing Dropbox folders keep the old tag (' . $changes['short_name']['from'] . '-…) and are not renamed.' : null;
+        if (!$changes) agent_out(['ok' => true, 'unchanged' => true, 'agency' => $out]);
+        if (empty($in['confirm'])) {
+            agent_out(['ok' => true, 'dry_run' => true, 'agency' => $out, 'changes' => $changes, 'warning' => $warn,
+                       'message' => 'Dry run — nothing saved. Resend with "confirm": true.']);
+        }
+        agent_out(['ok' => true, 'updated' => true, 'agency' => $out, 'changes' => $changes, 'warning' => $warn]);
     }
 
     // ── create_request ───────────────────────────────────────────────────────
@@ -2618,7 +2661,7 @@ try {
 
     default:
         agent_fail('Unknown action "' . $agentAction . '"', 400, ['actions' => [
-            'find_requests', 'list_agencies', 'create_agency', 'create_request', 'update_request', 'import_group_folder', 'move_group_folder', 'list_standard_programs',
+            'find_requests', 'list_agencies', 'create_agency', 'update_agency', 'create_request', 'update_request', 'import_group_folder', 'move_group_folder', 'list_standard_programs',
             'copy_program', 'get_rates', 'fill_calc', 'read_calc', 'booking_check', 'confirm_preview', 'confirm_booking', 'send_booking_email',
             'rollback_booking', 'iti_programs', 'iti_texts', 'iti_save_texts', 'update_rate', 'replace_flight_rates',
             'iti_lodges', 'iti_lodge', 'iti_destinations', 'iti_destination', 'iti_lodge_photos', 'iti_destination_photo',

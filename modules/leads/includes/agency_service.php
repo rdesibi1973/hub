@@ -1,9 +1,10 @@
 <?php
 /**
- * agency_service.php — creating an agency (agencies table).
+ * agency_service.php — creating and editing an agency (agencies table).
  *
- * Shared by agencies.php (Add), ajax_create_agency.php (➕ Add Agency on request_add /
+ * agency_create(): agencies.php (Add), ajax_create_agency.php (➕ Add Agency on request_add /
  * staging), api_create_agency.php (Java BackOffice) and the Agent API (create_agency).
+ * agency_update(): agencies.php (Edit) and the Agent API (update_agency).
  */
 
 /** Agency types (radio on the Agencies page) => short_name suffix. */
@@ -87,6 +88,69 @@ function agency_create(PDO $db, array $f, bool $dryRun = false): array {
         return array_merge($res, ['error' => 'Database error while adding the agency.', 'error_code' => 'db']);
     }
     $res['agency'] = ['id' => (int)$db->lastInsertId()] + $res['agency'];
+    $res['ok'] = true;
+    return $res;
+}
+
+/**
+ * Check (and, unless $dryRun, save) changes to agency $id. Only the keys present in $f change:
+ * nome, short_name ("" → CamelCase of the name), type (re-applies the -PS / -LAM suffix), attiva (0|1),
+ * address, email ("" / null clears address and email).
+ * Returns ok, error, error_code (not_found|name|type|email|short_name|duplicate|db), agency (after),
+ * changes {field: {from, to}}, duplicates[] (on error_code duplicate).
+ */
+function agency_update(PDO $db, int $id, array $f, bool $dryRun = false): array {
+    $res = ['ok' => false, 'error' => null, 'error_code' => null, 'changes' => [], 'duplicates' => []];
+    $st = $db->prepare('SELECT id, nome, short_name, type, attiva, address, email FROM agencies WHERE id = ?');
+    $st->execute([$id]);
+    $cur = $st->fetch(PDO::FETCH_ASSOC);
+    if (!$cur) return array_merge($res, ['error' => 'Agency ' . $id . ' not found.', 'error_code' => 'not_found']);
+
+    $new = $cur;
+    if (array_key_exists('nome', $f)) $new['nome'] = trim((string)$f['nome']);
+    if ($new['nome'] === '') return array_merge($res, ['error' => 'Agency name is required.', 'error_code' => 'name']);
+    if (array_key_exists('type', $f)) {
+        $new['type'] = trim((string)$f['type']);
+        if (!array_key_exists($new['type'], agency_types())) {
+            return array_merge($res, ['error' => 'type must be one of: ' . implode(', ', array_keys(agency_types())) . '.', 'error_code' => 'type']);
+        }
+    }
+    if (array_key_exists('attiva', $f)) $new['attiva'] = $f['attiva'] ? 1 : 0;
+    foreach (['address', 'email'] as $k) {
+        if (array_key_exists($k, $f)) $new[$k] = trim((string)$f[$k]) !== '' ? trim((string)$f[$k]) : null;
+    }
+    if ($new['email'] !== null && $new['email'] !== $cur['email'] && !filter_var($new['email'], FILTER_VALIDATE_EMAIL)) {
+        return array_merge($res, ['error' => 'Invalid email "' . $new['email'] . '".', 'error_code' => 'email']);
+    }
+    if (array_key_exists('short_name', $f) || $new['type'] !== $cur['type']) {
+        $short = array_key_exists('short_name', $f) ? (string)$f['short_name'] : (string)$cur['short_name'];
+        $new['short_name'] = agency_short_name($new['nome'], $short, $new['type']);
+        if (preg_match('#[\s()\[\]/\\\\:*?"<>|]#', $new['short_name'])) {
+            return array_merge($res, ['error' => 'Invalid short name "' . $new['short_name'] . '" (no spaces, brackets or / \ : * ? " < > |).',
+                                      'error_code' => 'short_name']);
+        }
+    }
+
+    foreach (['nome', 'short_name', 'type', 'attiva', 'address', 'email'] as $k) {
+        if ((string)$new[$k] !== (string)$cur[$k]) $res['changes'][$k] = ['from' => $cur[$k], 'to' => $new[$k]];
+    }
+    $res['agency'] = ['id' => $id, 'nome' => $new['nome'], 'short_name' => $new['short_name'], 'type' => $new['type'],
+                      'attiva' => (int)$new['attiva'], 'address' => $new['address'], 'email' => $new['email']];
+    if (isset($res['changes']['nome']) || isset($res['changes']['short_name'])) {
+        $dup = array_values(array_filter(agency_duplicates($db, $new['nome'], (string)$new['short_name']),
+                                         function ($d) use ($id) { return $d['id'] !== $id; }));
+        if ($dup) {
+            return array_merge($res, ['error' => 'Agency "' . $dup[0]['nome'] . '" already exists.', 'error_code' => 'duplicate', 'duplicates' => $dup]);
+        }
+    }
+    if ($dryRun || !$res['changes']) return array_merge($res, ['ok' => true]);
+    try {
+        $db->prepare('UPDATE agencies SET nome=?, short_name=?, type=?, attiva=?, address=?, email=? WHERE id=?')
+           ->execute([$new['nome'], $new['short_name'], $new['type'], $new['attiva'], $new['address'], $new['email'], $id]);
+    } catch (PDOException $e) {
+        error_log('agency_update: ' . $e->getMessage());
+        return array_merge($res, ['error' => 'Database error while saving the agency.', 'error_code' => 'db']);
+    }
     $res['ok'] = true;
     return $res;
 }
