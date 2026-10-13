@@ -31,7 +31,7 @@ without driving the web UI.
 | HTTPS only | Plain HTTP → 403. |
 | Rate limit | 60 calls/min → 429. |
 | Audit | Every call (including failures and dry-runs) → `agent_audit_log` (action, request_id, user, HTTP code, dry_run, payload, result, IP). |
-| Dry-run by default | `update_request`, `confirm_booking`, `send_booking_email`, `rollback_booking`, `rename_folder`, `import_group_folder`, `move_group_folder`, `set_request_status`, `cancel_invoice_payment`, `update_folder_status`, `import_zoho_invoice`, `create_invoice`, `update_invoice`, `memo_delete`, `create_agency`, `update_agency`, `mail_send`, `mail_move` and `ck_request_check` (among others) do nothing unless the body has `"confirm": true`. |
+| Dry-run by default | `update_request`, `confirm_booking`, `send_booking_email`, `rollback_booking`, `rename_folder`, `import_group_folder`, `move_group_folder`, `set_request_status`, `cancel_invoice_payment`, `update_folder_status`, `import_zoho_invoice`, `create_invoice`, `update_invoice`, `memo_delete`, `create_agency`, `update_agency`, `save_agency_contact`, `delete_agency_contact`, `mail_send`, `mail_move` and `ck_request_check` (among others) do nothing unless the body has `"confirm": true`. |
 | No deletes | No delete endpoint (mail included), except `memo_delete`, which is soft (`deleted_at`, the row stays). Undo a confirm with `rollback_booking` (or BackOffice → Rollback). |
 | Mailbox | The key also reads `info@` (`mail_*`): keep `api.txt` as private as the mailbox password. |
 
@@ -69,7 +69,8 @@ curl -sH "$H" "$U?action=find_requests&status=Quoted,Hot-Quoted&agent=rdesibi&ch
 ```
 
 ### `list_agencies` (GET)
-`q` → `[{id, name, short_name, type, active, address, email}]` (inactive agencies included).
+`q` → `[{id, name, short_name, type, active, address, email, contacts[]}]` (inactive agencies included);
+`contacts[]` = `{id, agency_id, name, role, email, phone, primary, notes}`, primary first.
 
 ### `create_agency` (POST)
 Adds an agency, same as Agencies → Add in the Hub (`agency_create()` in `includes/agency_service.php`, also used by
@@ -101,6 +102,24 @@ old `(Short-Agent)` tag (`warning`).
 ```bash
 curl -sA "$UA" -H "$H" -X POST "$U?action=update_agency" -d '{"agency_id":164,"address":"Via Roma 1, 00100 Roma"}'                 # dry run
 curl -sA "$UA" -H "$H" -X POST "$U?action=update_agency" -d '{"agency_id":164,"address":"Via Roma 1, 00100 Roma","confirm":true}'
+```
+
+### `save_agency_contact` (POST)
+Adds or edits a contact of an agency, same as the contacts on the Agencies page (`agency_contact_save()` in
+`includes/agency_service.php`). **Dry-run unless `"confirm": true`.** `agency_id`*, `contact_id` (edit; omit to add),
+`name` (* when adding), `role`, `email`, `phone`, `notes`, `primary` (bool) — top level or inside `fields`. On an edit
+only the fields given change; `""` / `null` clears (not the name). `primary: true` makes the agency's other contacts
+non-primary. Adding a contact whose email, or name (ignoring case and punctuation), is already a contact of the agency
+→ **409** with `existing[]` — edit that one instead. Invalid email → 400; unknown agency / contact → 404.
+→ `{dry_run: true, contact, changes: {field: {from, to}}}`; with `confirm` → `{created: true | updated: true, contact: {id, …}}`;
+nothing different → `{unchanged: true}`. Existing contacts and their ids: `contacts[]` in `list_agencies`.
+
+### `delete_agency_contact` (POST)
+`contact_id`* → `{dry_run: true, contact}`; with `"confirm": true` → `{deleted: true, contact}`.
+
+```bash
+curl -sA "$UA" -H "$H" -X POST "$U?action=save_agency_contact" -d '{"agency_id":164,"name":"Anna Rossi","role":"Booking","email":"anna@example.it","phone":"+39 02 1234567","primary":true}'   # dry run
+curl -sA "$UA" -H "$H" -X POST "$U?action=save_agency_contact" -d '{"agency_id":164,"contact_id":31,"phone":"+39 333 1234567","confirm":true}'
 ```
 
 ### `create_request` (POST)

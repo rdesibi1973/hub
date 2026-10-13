@@ -85,6 +85,12 @@ function agent_ensure_schema(PDO $db): void {
     $done = true;
 }
 
+/** An agency_contacts row as the API returns it. */
+function agent_agency_contact(array $c): array {
+    return ['id' => (int)$c['id'], 'agency_id' => (int)$c['agency_id'], 'name' => $c['name'], 'role' => $c['role'],
+            'email' => $c['email'], 'phone' => $c['phone'], 'primary' => (bool)$c['is_primary'], 'notes' => $c['notes']];
+}
+
 function agent_audit(PDO $db, string $action, $reqId, array $payload, string $resultJson, int $code): void {
     global $agentUser;
     agent_ensure_schema($db);
@@ -95,7 +101,7 @@ function agent_audit(PDO $db, string $action, $reqId, array $payload, string $re
                               'iti_create_lodge', 'iti_set_days', 'iti_add_day', 'iti_delete_day', 'iti_update_inclusions',
                               'iti_create_flight_route', 'iti_create_activity', 'iti_create_transfer_route', 'iti_save_as_sample',
                               'create_request', 'add_flight_rates', 'timeline_update', 'summary_set', 'rename_folder',
-                              'set_request_status', 'update_request', 'import_group_folder', 'move_group_folder', 'ck_request_check', 'memo_delete', 'create_agency', 'update_agency'], true) && empty($payload['confirm']);
+                              'set_request_status', 'update_request', 'import_group_folder', 'move_group_folder', 'ck_request_check', 'memo_delete', 'create_agency', 'update_agency', 'save_agency_contact', 'delete_agency_contact'], true) && empty($payload['confirm']);
     // Mail: keep who/what in the log, not message bodies or attachment content.
     if (in_array($action, ['mail_get', 'mail_attachment', 'iti_document', 'iti_vouchers'], true) && $code === 200) {
         $res = json_decode($resultJson, true);
@@ -701,10 +707,13 @@ try {
         $st = $db->prepare("SELECT id, nome, short_name, type, attiva, address, email FROM agencies
                             WHERE nome LIKE ? OR short_name LIKE ? ORDER BY nome LIMIT 50");
         $st->execute([$like, $like]);
+        $rows     = $st->fetchAll(PDO::FETCH_ASSOC);
+        $contacts = agency_contacts($db, array_column($rows, 'id'));
         $out = [];
-        foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $a) {
+        foreach ($rows as $a) {
             $out[] = ['id' => (int)$a['id'], 'name' => $a['nome'], 'short_name' => $a['short_name'], 'type' => $a['type'],
-                      'active' => (bool)$a['attiva'], 'address' => $a['address'], 'email' => $a['email']];
+                      'active' => (bool)$a['attiva'], 'address' => $a['address'], 'email' => $a['email'],
+                      'contacts' => array_map('agent_agency_contact', $contacts[(int)$a['id']] ?? [])];
         }
         agent_out(['ok' => true, 'agencies' => $out]);
     }
@@ -776,6 +785,60 @@ try {
                        'message' => 'Dry run — nothing saved. Resend with "confirm": true.']);
         }
         agent_out(['ok' => true, 'updated' => true, 'agency' => $out, 'changes' => $changes, 'warning' => $warn]);
+    }
+
+    // ── save_agency_contact ──────────────────────────────────────────────────
+    // Adds (no contact_id) or edits a contact of an agency, same as the contacts on the
+    // Agencies page (agency_contact_save()). Dry-run unless "confirm": true.
+    case 'save_agency_contact': {
+        agent_require_method('POST');
+        $agencyId  = (int)($in['agency_id'] ?? 0);
+        $contactId = (int)($in['contact_id'] ?? 0);
+        if ($agencyId <= 0) agent_fail('agency_id is required — use list_agencies');
+        $src = isset($in['fields']) && is_array($in['fields']) ? $in['fields'] + $in : $in;
+        $f = [];
+        foreach (['name' => 'name', 'role' => 'role', 'email' => 'email', 'phone' => 'phone', 'notes' => 'notes', 'primary' => 'is_primary'] as $k => $col) {
+            if (array_key_exists($k, $src)) $f[$col] = $src[$k];
+        }
+        if ($contactId && !$f) agent_fail('Nothing to change — give name, role, email, phone, notes and/or primary');
+        if (array_key_exists('is_primary', $f) && !is_bool($f['is_primary']) && !in_array($f['is_primary'], [0, 1, '0', '1'], true)) {
+            agent_fail('primary must be true or false');
+        }
+        $res = agency_contact_save($db, $agencyId, $contactId, $f, empty($in['confirm']));
+        if (!$res['ok']) {
+            agent_fail($res['error'], ['not_found' => 404, 'duplicate' => 409, 'db' => 500][$res['error_code']] ?? 400,
+                       ['error_code' => $res['error_code'], 'existing' => array_map('agent_agency_contact', $res['duplicates'])]);
+        }
+        $c   = $res['contact'];
+        $out = agent_agency_contact($c);
+        if ($c['id'] === null) $out['id'] = null;   // dry run of a new contact
+        $changes = [];
+        foreach ($res['changes'] as $k => $ch) {
+            $changes[$k === 'is_primary' ? 'primary' : $k] = $k === 'is_primary'
+                ? ['from' => $ch['from'] === null ? null : (bool)$ch['from'], 'to' => (bool)$ch['to']] : $ch;
+        }
+        $verb = $contactId ? 'updated' : 'created';
+        if ($contactId && !$changes) agent_out(['ok' => true, 'unchanged' => true, 'contact' => $out]);
+        if (empty($in['confirm'])) {
+            agent_out(['ok' => true, 'dry_run' => true, 'contact' => $out, 'changes' => $changes,
+                       'message' => 'Dry run — nothing saved. Resend with "confirm": true.']);
+        }
+        agent_out(['ok' => true, $verb => true, 'contact' => $out, 'changes' => $changes]);
+    }
+
+    // ── delete_agency_contact ────────────────────────────────────────────────
+    case 'delete_agency_contact': {
+        agent_require_method('POST');
+        $contactId = (int)($in['contact_id'] ?? 0);
+        if ($contactId <= 0) agent_fail('contact_id is required — see contacts[] in list_agencies');
+        $res = agency_contact_delete($db, $contactId, empty($in['confirm']));
+        if (!$res['ok']) agent_fail($res['error'], ['not_found' => 404, 'db' => 500][$res['error_code']] ?? 400, ['error_code' => $res['error_code']]);
+        $out = agent_agency_contact($res['contact']);
+        if (empty($in['confirm'])) {
+            agent_out(['ok' => true, 'dry_run' => true, 'contact' => $out,
+                       'message' => 'Dry run — nothing deleted. Resend with "confirm": true.']);
+        }
+        agent_out(['ok' => true, 'deleted' => true, 'contact' => $out]);
     }
 
     // ── create_request ───────────────────────────────────────────────────────
@@ -2661,7 +2724,7 @@ try {
 
     default:
         agent_fail('Unknown action "' . $agentAction . '"', 400, ['actions' => [
-            'find_requests', 'list_agencies', 'create_agency', 'update_agency', 'create_request', 'update_request', 'import_group_folder', 'move_group_folder', 'list_standard_programs',
+            'find_requests', 'list_agencies', 'create_agency', 'update_agency', 'save_agency_contact', 'delete_agency_contact', 'create_request', 'update_request', 'import_group_folder', 'move_group_folder', 'list_standard_programs',
             'copy_program', 'get_rates', 'fill_calc', 'read_calc', 'booking_check', 'confirm_preview', 'confirm_booking', 'send_booking_email',
             'rollback_booking', 'iti_programs', 'iti_texts', 'iti_save_texts', 'update_rate', 'replace_flight_rates',
             'iti_lodges', 'iti_lodge', 'iti_destinations', 'iti_destination', 'iti_lodge_photos', 'iti_destination_photo',

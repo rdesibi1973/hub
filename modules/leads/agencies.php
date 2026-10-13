@@ -45,41 +45,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $success = "Agency deleted.";
     }
 
-    // CONTACT ADD / EDIT
+    // CONTACT ADD / EDIT — agency_contact_save() in includes/agency_service.php
     if ($action === 'contact_add' || $action === 'contact_edit') {
-        $agencyId = (int)($_POST['agency_id'] ?? 0);
-        $cname    = trim($_POST['c_name']  ?? '');
-        $crole    = trim($_POST['c_role']  ?? '');
-        $cemail   = trim($_POST['c_email'] ?? '');
-        $cphone   = trim($_POST['c_phone'] ?? '');
-        $cnotes   = trim($_POST['c_notes'] ?? '');
-        $cprimary = isset($_POST['c_primary']) ? 1 : 0;
-
-        if (!$agencyId || $cname === '') {
-            $errors[] = 'Contact name is required.';
-        } else {
-            // Only one primary contact per agency.
-            if ($cprimary) {
-                $db->prepare('UPDATE agency_contacts SET is_primary=0 WHERE agency_id=?')->execute([$agencyId]);
-            }
-            if ($action === 'contact_add') {
-                $db->prepare('INSERT INTO agency_contacts (agency_id, name, role, email, phone, is_primary, notes) VALUES (?, ?, ?, ?, ?, ?, ?)')
-                   ->execute([$agencyId, $cname, $crole ?: null, $cemail ?: null, $cphone ?: null, $cprimary, $cnotes ?: null]);
-                $success = "Contact added.";
-            } else {
-                $cid = (int)($_POST['contact_id'] ?? 0);
-                $db->prepare('UPDATE agency_contacts SET name=?, role=?, email=?, phone=?, is_primary=?, notes=? WHERE id=? AND agency_id=?')
-                   ->execute([$cname, $crole ?: null, $cemail ?: null, $cphone ?: null, $cprimary, $cnotes ?: null, $cid, $agencyId]);
-                $success = "Contact updated.";
-            }
-        }
+        $res = agency_contact_save($db, (int)($_POST['agency_id'] ?? 0),
+                                   $action === 'contact_edit' ? (int)($_POST['contact_id'] ?? 0) : 0,
+                                   ['name' => $_POST['c_name'] ?? '', 'role' => $_POST['c_role'] ?? '', 'email' => $_POST['c_email'] ?? '',
+                                    'phone' => $_POST['c_phone'] ?? '', 'notes' => $_POST['c_notes'] ?? '',
+                                    'is_primary' => isset($_POST['c_primary']) ? 1 : 0]);
+        if ($res['ok']) $success = $action === 'contact_add' ? 'Contact added.' : 'Contact updated.';
+        else            $errors[] = $res['error'];
     }
 
     // CONTACT DELETE
     if ($action === 'contact_delete') {
-        $cid = (int)($_POST['contact_id'] ?? 0);
-        $db->prepare('DELETE FROM agency_contacts WHERE id=?')->execute([$cid]);
-        $success = "Contact deleted.";
+        $res = agency_contact_delete($db, (int)($_POST['contact_id'] ?? 0));
+        if ($res['ok']) $success = 'Contact deleted.';
+        else            $errors[] = $res['error'];
     }
 
     if (!$errors) {
