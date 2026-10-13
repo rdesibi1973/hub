@@ -20,6 +20,17 @@ Running log of notable changes and current build state. Module-level "active / p
 
 ---
 
+## 2026-10-13 — CK tracker: SafariCheck reads programmes built in ITI
+- SafariCheck (cloud runner) only read a Wetu Word: a booking whose programme was made in ITI got
+  "Word file not found", and an ITI Word export (no Wetu tables) would give false reds.
+- `ck_agent_api.php ?action=iti`: the ITI programme of the folder's requests — the active final one(s),
+  else the newest personal one, with a start date; GRP: per client sub-folder — as SafariCheck data
+  (stays night by night with meal basis from the day flags, room type, pax, adult/teen USD price from
+  the price table, internal flights, exclusions). Shared logic: `modules/iti/includes/iti_ck_export.php`.
+- safariagent (`iti_program.py`, `run.py`, `ci_check.py`): the ITI programme is checked when the folder
+  has no programme `.docx` or the `.docx` is its ITI export; a Wetu Word still wins. The report notes the
+  source; programme changes change the fingerprint (nightly re-check).
+
 ## 2026-10-09 — Incoming approve: channel + agency, shared folder name
 - Bug: approving an Incoming lead never stored `agency_id` and stored `channel` only when the folder
   field was empty — but the form always pre-filled it, so almost every approval got `channel = NULL`.

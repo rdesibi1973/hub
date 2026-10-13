@@ -10,6 +10,7 @@
 //   GET  ?action=queue[&ids=1,2]   folders to check
 //   GET  ?action=list&id=N         recursive file listing of the folder
 //   GET  ?action=file&id=N&path=P  one allowed file (binary)
+//   GET  ?action=iti&id=N          ITI programmes of the folder's requests (iti_ck_export.php)
 //   POST ?action=result            JSON result of one folder
 
 require_once __DIR__ . '/config.php';
@@ -101,6 +102,18 @@ try {
         header('Content-Length: ' . strlen($data));
         echo $data;
         exit;
+    }
+
+    // ── ITI programmes linked to the folder's requests (read instead of a Wetu Word) ──
+    if ($action === 'iti') {
+        $f = ck_api_folder($db, (int)($_GET['id'] ?? 0));
+        require_once __DIR__ . '/../iti/includes/iti_ck_export.php';
+        $out = [];
+        foreach (iti_ck_programs($db, $f['folder_name']) as $p) {
+            $p['hash'] = sha1(json_encode($p, JSON_UNESCAPED_UNICODE));   // in the runner's fingerprint
+            $out[] = $p;
+        }
+        ck_api_out(['ok' => true, 'programs' => $out]);
     }
 
     // ── Result ───────────────────────────────────────────────────────────────
