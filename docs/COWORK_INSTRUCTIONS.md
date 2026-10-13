@@ -51,7 +51,9 @@ Rispondimi in italiano. Mail e documenti per clienti / agenzie nella lingua del 
 3. Conferma → `confirm_preview`, poi `confirm_booking` (cartella in `/001_Safari`, stato Booked) → `send_booking_email`.
    Poi programma finale dal Calc (sotto).
 4. Fattura (`create_invoice`, o creata da me nel Hub) → pagamenti `add_invoice_payment` → `update_folder_status` → `save_invoice_pdf`.
-5. Prima della partenza: CK (documenti, voli, voucher).
+5. Prenotazioni fatte dal booking team → "verifica le prenotazioni di X": skill `booking-check` (`booking_check` +
+   documenti in `invoices/` / `bookings/` → `booking-check.html` nella cartella della pratica).
+6. Prima della partenza: CK (documenti, voli, voucher).
 
 Cartelle Dropbox: richieste in `/2026/<Nome>(<Agenzia>-<Agente>)`, pratiche confermate in `/001_Safari/`
 con le date e lo stato pagamento nel nome (`_DEPOSIT`, `_BALANCE`, `_PAID`, `_CK` in fondo).

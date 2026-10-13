@@ -24,7 +24,7 @@ This is a CHECK: never edit the Calc, never move, rename or delete files, never 
 
 ## 2. Read every evidence file
 
-Open each file in `local_folder` (and the group folder for `scope: group`): PDF, Word, Excel, `.eml` / `.msg` (body + quoted thread), images. File names are unpredictable: identify a document by its content, never by its name. Files with `old: true`: don't use them, list them as ignored.
+Here the PC is needed, not the Dropbox connector (it can't read Excel / Word reliably nor write the report): ask access to `C:\Dropbox` once at the start of the session, never to sub-folders. Open each file in `local_folder` (and the group folder for `scope: group`): PDF, Word, Excel, `.eml` / `.msg` (body + quoted thread), images. File names are unpredictable: identify a document by its content, never by its name. Files with `old: true`: don't use them, list them as ignored.
 
 From each document note: supplier / property, kind (invoice, pro-forma, service voucher "SV", reservation summary, confirmation mail), status (Confirmed / Provisional / Cancelled / just "noted"), service dates (arrive / depart, flight or transfer date), nights, rooms and room type, meal plan, pax (adults / children), guest or booking name, amount and currency, reference number.
 
