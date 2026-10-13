@@ -139,7 +139,7 @@ function iti_mag_word_build(array $D): array {
     $s->addText($D['title'], 'mwH1', ['spaceAfter' => 80]);
     if ($D['subtitle'] !== '') $s->addText($D['subtitle'], ['name' => 'Calibri', 'size' => 13, 'color' => $INK], ['spaceAfter' => 100]);
     if ($routeNames && $D['subtitle'] === '') $s->addText(implode(' · ', $routeNames), 'mwRoute', ['spaceAfter' => 100]);
-    $facts = array_filter([$dateRange, $D['duration'], $M['private'], $paxLabel]);
+    $facts = array_filter([$dateRange, $D['duration'], $T['safari_pill'], $paxLabel]);
     $pub = isset($D['public_url']) ? (string)$D['public_url'] : '';   // digital itinerary (personal programme), set by iti_export_file()
     $s->addText(implode('   ·   ', $facts), ['name' => 'Calibri', 'size' => 10, 'bold' => true, 'color' => $RED], ['spaceAfter' => $pub !== '' ? 60 : 240]);
     if ($pub !== '') {

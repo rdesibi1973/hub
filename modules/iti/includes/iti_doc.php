@@ -10,10 +10,37 @@
 require_once __DIR__ . '/iti_photos.php';
 require_once __DIR__ . '/iti_terms.php';   // T&C per channel (direct / agency), placeholder texts
 
+/**
+ * Cover kicker + facts pill of a programme document by safari type (iti_programs.safari_type):
+ * private safari or group departure (shared jeep). The only place these strings live, so the
+ * web page, PDF and Word stay in step. Returns ['kicker', 'safari_pill'].
+ */
+function iti_safari_labels(string $type, string $lang): array {
+    $L = [
+        'private' => [
+            'it' => ['Safari privato in Tanzania', 'Safari privato con guida'],
+            'en' => ['Private safari in Tanzania', 'Private guided safari'],
+            'fr' => ['Safari privé en Tanzanie', 'Safari privé avec guide'],
+            'es' => ['Safari privado en Tanzania', 'Safari privado con guía'],
+            'de' => ['Private Safari in Tansania', 'Private Safari mit Guide'],
+        ],
+        'group' => [
+            'it' => ['Safari di gruppo in Tanzania', 'Safari di gruppo con guida'],
+            'en' => ['Group safari in Tanzania', 'Guided group safari'],
+            'fr' => ['Safari en groupe en Tanzanie', 'Safari en groupe avec guide'],
+            'es' => ['Safari en grupo en Tanzania', 'Safari en grupo con guía'],
+            'de' => ['Gruppensafari in Tansania', 'Gruppensafari mit Guide'],
+        ],
+    ];
+    $t = $L[$type] ?? $L['private'];
+    $v = $t[$lang] ?? $t['en'];
+    return ['kicker' => $v[0], 'safari_pill' => $v[1]];
+}
+
 /** UI strings per language. */
 function iti_doc_labels(string $lang): array {
     $L = [
-        'it' => ['kicker' => 'Safari privato in Tanzania', 'days' => 'giorni', 'day1' => 'giorno', 'nights' => 'notti', 'night1' => 'notte',
+        'it' => ['days' => 'giorni', 'day1' => 'giorno', 'nights' => 'notti', 'night1' => 'notte',
                  'brief' => 'Il safari in breve', 'day' => 'Giorno', 'route' => 'Percorso', 'overnight' => 'Pernottamento', 'board' => 'Trattamento',
                  'prices' => 'Quote per persona', 'group' => 'Gruppo', 'pp' => 'Per persona', 'pax' => 'partecipanti',
                  'incl' => 'La quota comprende', 'excl' => 'La quota non comprende', 'program' => 'Programma giorno per giorno',
@@ -21,7 +48,7 @@ function iti_doc_labels(string $lang): array {
                  'ref' => 'Riferimento', 'phone' => 'Telefono', 'email' => 'E-mail', 'office' => 'ufficio', 'emergency' => 'Emergenze',
                  'terms' => 'Termini e condizioni', 'activities' => 'Attività', 'end' => 'Fine dei nostri servizi',
                  'B' => 'colazione', 'L' => 'pranzo', 'D' => 'cena', 'FB' => 'pensione completa', 'HB' => 'mezza pensione', 'AI' => 'all inclusive', 'none' => '—'],
-        'en' => ['kicker' => 'Private safari in Tanzania', 'days' => 'days', 'day1' => 'day', 'nights' => 'nights', 'night1' => 'night',
+        'en' => ['days' => 'days', 'day1' => 'day', 'nights' => 'nights', 'night1' => 'night',
                  'brief' => 'Safari at a glance', 'day' => 'Day', 'route' => 'Route', 'overnight' => 'Overnight', 'board' => 'Meal plan',
                  'prices' => 'Rates per person', 'group' => 'Group', 'pp' => 'Per person', 'pax' => 'people',
                  'incl' => 'Included', 'excl' => 'Not included', 'program' => 'Day-by-day itinerary',
@@ -29,7 +56,7 @@ function iti_doc_labels(string $lang): array {
                  'ref' => 'Contact', 'phone' => 'Phone', 'email' => 'E-mail', 'office' => 'office', 'emergency' => 'Emergencies',
                  'terms' => 'Terms and conditions', 'activities' => 'Activities', 'end' => 'End of our services',
                  'B' => 'breakfast', 'L' => 'lunch', 'D' => 'dinner', 'FB' => 'full board', 'HB' => 'half board', 'AI' => 'all inclusive', 'none' => '—'],
-        'fr' => ['kicker' => 'Safari privé en Tanzanie', 'days' => 'jours', 'day1' => 'jour', 'nights' => 'nuits', 'night1' => 'nuit',
+        'fr' => ['days' => 'jours', 'day1' => 'jour', 'nights' => 'nuits', 'night1' => 'nuit',
                  'brief' => 'Le safari en bref', 'day' => 'Jour', 'route' => 'Itinéraire', 'overnight' => 'Hébergement', 'board' => 'Formule',
                  'prices' => 'Tarifs par personne', 'group' => 'Groupe', 'pp' => 'Par personne', 'pax' => 'participants',
                  'incl' => 'Le prix comprend', 'excl' => 'Le prix ne comprend pas', 'program' => 'Programme jour par jour',
@@ -37,7 +64,7 @@ function iti_doc_labels(string $lang): array {
                  'ref' => 'Contact', 'phone' => 'Téléphone', 'email' => 'E-mail', 'office' => 'bureau', 'emergency' => 'Urgences',
                  'terms' => 'Conditions générales', 'activities' => 'Activités', 'end' => 'Fin de nos services',
                  'B' => 'petit-déjeuner', 'L' => 'déjeuner', 'D' => 'dîner', 'FB' => 'pension complète', 'HB' => 'demi-pension', 'AI' => 'tout compris', 'none' => '—'],
-        'es' => ['kicker' => 'Safari privado en Tanzania', 'days' => 'días', 'day1' => 'día', 'nights' => 'noches', 'night1' => 'noche',
+        'es' => ['days' => 'días', 'day1' => 'día', 'nights' => 'noches', 'night1' => 'noche',
                  'brief' => 'El safari en breve', 'day' => 'Día', 'route' => 'Recorrido', 'overnight' => 'Alojamiento', 'board' => 'Régimen',
                  'prices' => 'Precios por persona', 'group' => 'Grupo', 'pp' => 'Por persona', 'pax' => 'participantes',
                  'incl' => 'El precio incluye', 'excl' => 'El precio no incluye', 'program' => 'Programa día a día',
@@ -45,7 +72,7 @@ function iti_doc_labels(string $lang): array {
                  'ref' => 'Contacto', 'phone' => 'Teléfono', 'email' => 'E-mail', 'office' => 'oficina', 'emergency' => 'Emergencias',
                  'terms' => 'Términos y condiciones', 'activities' => 'Actividades', 'end' => 'Fin de nuestros servicios',
                  'B' => 'desayuno', 'L' => 'almuerzo', 'D' => 'cena', 'FB' => 'pensión completa', 'HB' => 'media pensión', 'AI' => 'todo incluido', 'none' => '—'],
-        'de' => ['kicker' => 'Private Safari in Tansania', 'days' => 'Tage', 'day1' => 'Tag', 'nights' => 'Nächte', 'night1' => 'Nacht',
+        'de' => ['days' => 'Tage', 'day1' => 'Tag', 'nights' => 'Nächte', 'night1' => 'Nacht',
                  'brief' => 'Die Safari auf einen Blick', 'day' => 'Tag', 'route' => 'Route', 'overnight' => 'Übernachtung', 'board' => 'Verpflegung',
                  'prices' => 'Preise pro Person', 'group' => 'Gruppe', 'pp' => 'Pro Person', 'pax' => 'Teilnehmer',
                  'incl' => 'Im Preis enthalten', 'excl' => 'Nicht im Preis enthalten', 'program' => 'Reiseverlauf Tag für Tag',
@@ -169,7 +196,7 @@ function iti_doc_data(int $id, string $lang): ?array {
     iti_ensure_doc_columns();   // room_type, pax_teens, is_beach_stay (also from the public page)
     $p = iti_get_program($id);
     if (!$p) return null;
-    $T = iti_doc_labels($lang);
+    $T = iti_doc_labels($lang) + iti_safari_labels(iti_safari_type($p), $lang);
 
     $days = iti_get_days($id);
     $lodgeIds = []; $destIds = [];
@@ -322,6 +349,7 @@ function iti_doc_data(int $id, string $lang): ?array {
         'lang'     => $lang,
         'T'        => $T,
         'program'  => $p,
+        'safari_type' => iti_safari_type($p),
         'title'    => iti_doc_pick($p, 'title', $lang),
         'subtitle' => iti_doc_pick($p, 'subtitle', $lang),
         'intro'    => iti_doc_pick($p, 'intro', $lang),

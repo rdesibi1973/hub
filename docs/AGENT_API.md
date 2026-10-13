@@ -534,7 +534,7 @@ curl -sH "$H" "$U?action=iti_document&program_id=412&format=guide&save=1"       
 #### `iti_create_personal` (POST)
 `sample_id`, `lead_request_id?` (Hub request), `calc_file?`, `fields?` — any of `ref_number`, `title_<lang>`, `subtitle_<lang>`, `intro_<lang>`,
 `start_date` (YYYY-MM-DD: dates appear on the cover and on each day), `pax_adults`, `pax_teens` (under 16), `pax_children` (under 12),
-`display_language`, `display_currency`, `price_table_json` (`[{label, price, currency, bold?}]`; `bold: true` prints the row in bold — a row starting "Totale pratica" / "Total booking" is bold unless `bold: false`), `price_notes_<lang>`.
+`display_language`, `display_currency`, `safari_type` (`private` | `group`), `price_table_json` (`[{label, price, currency, bold?}]`; `bold: true` prints the row in bold — a row starting "Totale pratica" / "Total booking" is bold unless `bold: false`), `price_notes_<lang>`.
 Copies the sample (days, activities, prices, inclusions) as a draft proposal, with the T&C of the request's client type
 (`fields.terms_variant` = `direct` | `agency` forces one). Dry-run unless `"confirm": true` (→ plan with `terms_variant`,
 `ref_number` and `ref_source`); confirmed → `program_id`, `links`, `terms` and the full `program`.
@@ -542,6 +542,11 @@ Copies the sample (days, activities, prices, inclusions) as a draft proposal, wi
 Word `copy_program` put in the request folder (`NN_<folder>_<Prog>Safari.docx`) when there is exactly one; `calc_file`
 (e.g. `01_…_Pumba_Calc.xlsx`) picks the Word of that Calc (same `NN_` and programme). None or several → **409**, nothing
 created, with `word_candidates`, `calc_files`, `folder` and `hint`: resend with `fields.ref_number` or `calc_file` — never guess.
+**safari_type:** `private` ("Safari privato in Tanzania" / "Safari privato con guida" on the cover and facts line of web,
+PDF and Word) or `group` ("Safari di gruppo in Tanzania" / "Safari di gruppo con guida"; 5 languages). `fields.safari_type` wins;
+otherwise `group` when the sample is a group safari or `GRP` is in the ref_number, the Calc file or the request folder
+(`_DumaGRP`, `_GRP0301`, `GRP1508Simba`), else `private`. Same rule for `iti_final_from_calc` and the Hub's copy buttons;
+the plan shows it. `iti_program` returns `safari_type`; change it with `iti_update_program`.
 
 #### `iti_update_program` (POST)
 `program_id`, `fields` (same list — `ref_number` included, see the rule above — plus `terms_variant` = `direct` | `agency` | `auto` (from the linked request)) → `changes`

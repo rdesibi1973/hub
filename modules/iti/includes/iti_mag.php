@@ -18,7 +18,7 @@ function iti_mag_labels(string $lang): array {
                  'days_nav' => 'Giorni', 'prices_nav' => 'Quote', 'info_nav' => 'Info', 'see_day' => 'vedi giorno',
                  'website' => 'Sito web', 'start' => 'Arrivo', 'end' => 'Partenza', 'km' => 'km in linea d\'aria',
                  'destinations' => 'Destinazioni', 'lodges' => 'Sistemazioni', 'online' => 'Itinerario digitale', 'online_btn' => 'Apri l’itinerario digitale',
-                 'about_dest' => 'La destinazione', 'pdf' => 'Scarica PDF', 'private' => 'Safari privato con guida',
+                 'about_dest' => 'La destinazione', 'pdf' => 'Scarica PDF',
                  'adult' => 'adulto', 'adults' => 'adulti', 'child' => 'bambino', 'children' => 'bambini', 'dates' => 'Date',
                  'teen' => 'ragazzo', 'teens' => 'ragazzi', 'teen_age' => '(minori di 16 anni)', 'child_age' => '(minori di 12 anni)',
                  'months' => ['gennaio', 'febbraio', 'marzo', 'aprile', 'maggio', 'giugno', 'luglio', 'agosto', 'settembre', 'ottobre', 'novembre', 'dicembre'],
@@ -27,7 +27,7 @@ function iti_mag_labels(string $lang): array {
                  'days_nav' => 'Days', 'prices_nav' => 'Rates', 'info_nav' => 'Info', 'see_day' => 'see day',
                  'website' => 'Website', 'start' => 'Arrival', 'end' => 'Departure', 'km' => 'km as the crow flies',
                  'destinations' => 'Destinations', 'lodges' => 'Accommodation', 'online' => 'Digital itinerary', 'online_btn' => 'Open the digital itinerary',
-                 'about_dest' => 'The destination', 'pdf' => 'Download PDF', 'private' => 'Private guided safari',
+                 'about_dest' => 'The destination', 'pdf' => 'Download PDF',
                  'adult' => 'adult', 'adults' => 'adults', 'child' => 'child', 'children' => 'children', 'dates' => 'Dates',
                  'teen' => 'teenager', 'teens' => 'teenagers', 'teen_age' => '(under 16)', 'child_age' => '(under 12)',
                  'months' => ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'],
@@ -36,7 +36,7 @@ function iti_mag_labels(string $lang): array {
                  'days_nav' => 'Jours', 'prices_nav' => 'Tarifs', 'info_nav' => 'Infos', 'see_day' => 'voir jour',
                  'website' => 'Site web', 'start' => 'Arrivée', 'end' => 'Départ', 'km' => 'km à vol d\'oiseau',
                  'destinations' => 'Destinations', 'lodges' => 'Hébergements', 'online' => 'Itinéraire numérique', 'online_btn' => 'Ouvrir l’itinéraire numérique',
-                 'about_dest' => 'La destination', 'pdf' => 'Télécharger le PDF', 'private' => 'Safari privé avec guide',
+                 'about_dest' => 'La destination', 'pdf' => 'Télécharger le PDF',
                  'adult' => 'adulte', 'adults' => 'adultes', 'child' => 'enfant', 'children' => 'enfants', 'dates' => 'Dates',
                  'teen' => 'adolescent', 'teens' => 'adolescents', 'teen_age' => '(moins de 16 ans)', 'child_age' => '(moins de 12 ans)',
                  'months' => ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'],
@@ -45,7 +45,7 @@ function iti_mag_labels(string $lang): array {
                  'days_nav' => 'Días', 'prices_nav' => 'Precios', 'info_nav' => 'Info', 'see_day' => 'ver día',
                  'website' => 'Sitio web', 'start' => 'Llegada', 'end' => 'Salida', 'km' => 'km en línea recta',
                  'destinations' => 'Destinos', 'lodges' => 'Alojamientos', 'online' => 'Itinerario digital', 'online_btn' => 'Abrir el itinerario digital',
-                 'about_dest' => 'El destino', 'pdf' => 'Descargar PDF', 'private' => 'Safari privado con guía',
+                 'about_dest' => 'El destino', 'pdf' => 'Descargar PDF',
                  'adult' => 'adulto', 'adults' => 'adultos', 'child' => 'niño', 'children' => 'niños', 'dates' => 'Fechas',
                  'teen' => 'adolescente', 'teens' => 'adolescentes', 'teen_age' => '(menos de 16 años)', 'child_age' => '(menos de 12 años)',
                  'months' => ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'],
@@ -54,7 +54,7 @@ function iti_mag_labels(string $lang): array {
                  'days_nav' => 'Tage', 'prices_nav' => 'Preise', 'info_nav' => 'Infos', 'see_day' => 'siehe Tag',
                  'website' => 'Webseite', 'start' => 'Ankunft', 'end' => 'Abreise', 'km' => 'km Luftlinie',
                  'destinations' => 'Reiseziele', 'lodges' => 'Unterkünfte', 'online' => 'Digitale Reiseroute', 'online_btn' => 'Digitale Reiseroute öffnen',
-                 'about_dest' => 'Das Reiseziel', 'pdf' => 'PDF herunterladen', 'private' => 'Private Safari mit Guide',
+                 'about_dest' => 'Das Reiseziel', 'pdf' => 'PDF herunterladen',
                  'adult' => 'Erwachsener', 'adults' => 'Erwachsene', 'child' => 'Kind', 'children' => 'Kinder', 'dates' => 'Reisedaten',
                  'teen' => 'Jugendlicher', 'teens' => 'Jugendliche', 'teen_age' => '(unter 16)', 'child_age' => '(unter 12)',
                  'months' => ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'],
@@ -416,7 +416,7 @@ function iti_mag_render(array $D, string $publicUrl = '', bool $printBtn = true)
       <div class="mag-pills">
         <?php if ($dateRange !== ''): ?><span class="mag-pill"><?= h($dateRange) ?></span><?php endif; ?>
         <span class="mag-pill"><?= h($D['duration']) ?></span>
-        <span class="mag-pill"><?= h($M['private']) ?></span>
+        <span class="mag-pill"><?= h($T['safari_pill']) ?></span>
         <?php if ($paxLabel !== ''): ?><span class="mag-pill"><?= h($paxLabel) ?></span><?php endif; ?>
       </div>
     </div>

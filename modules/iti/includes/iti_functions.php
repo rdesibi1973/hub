@@ -922,7 +922,12 @@ function iti_duplicate_program(int $src_id, string $dest_type, string $created_b
         'public_token'      => null,
         'published_at'      => null,
     ), $set);
+    // Client programme from a sample: private / group from the sample and the GRP tags (a given value wins).
+    if ($dest_type === 'personal' && $src['program_type'] === 'sample' && !array_key_exists('safari_type', $set)) {
+        $hdr['safari_type'] = iti_safari_type_auto($db, $hdr, $src);
+    }
 
+    iti_ensure_doc_columns();   // safari_type: DDL, before the transaction
     $db->beginTransaction();
     try {
         // Header: same technique as the child tables, keyed on the row's own id.
@@ -1074,6 +1079,8 @@ function iti_ensure_doc_columns(): void {
         if (iti_add_column('iti_lodges', 'season_twin_id', 'INT NULL DEFAULT NULL')) iti_seed_season_twins();
         // Open months of a migration camp, "12,1,2,3" (NULL = by area, see iti_final_open_months()).
         iti_add_column('iti_lodges', 'season_months', 'VARCHAR(40) NULL DEFAULT NULL');
+        // Private safari or group departure: cover kicker + facts pill of the documents (iti_safari_labels()).
+        if (iti_add_column('iti_programs', 'safari_type', "VARCHAR(10) NOT NULL DEFAULT 'private'")) iti_seed_safari_types();
         // ref_number = the programme Word's name ("01_LucaDeSanctis(LasciatiViaggiare-Daniela)_SafariGrandeMigrazioneEstate",
         // 72 characters): 60 was too short.
         $c = db()->query("SHOW COLUMNS FROM iti_programs LIKE 'ref_number'")->fetch(PDO::FETCH_ASSOC);
@@ -1082,6 +1089,52 @@ function iti_ensure_doc_columns(): void {
         }
     } catch (PDOException $e) {
         error_log('iti_ensure_doc_columns: ' . $e->getMessage());
+    }
+}
+
+const ITI_SAFARI_TYPES = array('private', 'group');
+
+/** Safari type of a programme row: 'group' or 'private' (default, also when the column is missing). */
+function iti_safari_type(array $p): string {
+    return ($p['safari_type'] ?? '') === 'group' ? 'group' : 'private';
+}
+
+/**
+ * Safari type for a new personal programme when none is given: group when its sample is a
+ * group safari, or "GRP" is in the ref. number, the Calc file or the linked request's folder
+ * (_DumaGRP, _GRP0301, GRP1508Simba); otherwise private.
+ */
+function iti_safari_type_auto(PDO $db, array $p, ?array $sample = null): string {
+    if ($sample && iti_safari_type($sample) === 'group') return 'group';
+    $hay = (string)($p['ref_number'] ?? '') . ' ' . basename((string)($p['source_calc_path'] ?? ''));
+    if (!empty($p['lead_request_id'])) {
+        $st = $db->prepare('SELECT practice_code FROM requests WHERE id = ?');
+        $st->execute(array((int)$p['lead_request_id']));
+        $hay .= ' ' . (string)$st->fetchColumn();
+    }
+    return strpos($hay, 'GRP') !== false ? 'group' : 'private';
+}
+
+/**
+ * First run of safari_type: group for the group samples (code with GRP, and Nyumbu) and for every
+ * programme with GRP in its ref. number, Calc file or linked request folder, or copied from a group
+ * sample. Each step on its own: a column missing on an old table only skips that step.
+ */
+function iti_seed_safari_types(): void {
+    $db = db();
+    $steps = array(
+        "UPDATE iti_programs SET safari_type = 'group' WHERE program_type = 'sample'
+            AND (BINARY COALESCE(hub_program_code, '') LIKE '%GRP%' OR CONCAT_WS(' ', hub_program_code, title_it, title_en) LIKE '%Nyumbu%')",
+        "UPDATE iti_programs SET safari_type = 'group' WHERE BINARY COALESCE(ref_number, '') LIKE '%GRP%'",
+        "UPDATE iti_programs SET safari_type = 'group' WHERE BINARY COALESCE(source_calc_path, '') LIKE '%GRP%'",
+        "UPDATE iti_programs p JOIN requests r ON r.id = p.lead_request_id SET p.safari_type = 'group'
+            WHERE BINARY COALESCE(r.practice_code, '') LIKE '%GRP%'",
+        "UPDATE iti_programs p JOIN iti_programs s ON s.id = p.sample_program_id SET p.safari_type = 'group'
+            WHERE p.program_type = 'personal' AND s.safari_type = 'group'",
+    );
+    foreach ($steps as $sql) {
+        try { $db->exec($sql); }
+        catch (PDOException $e) { error_log('iti_seed_safari_types: ' . $e->getMessage()); }
     }
 }
 

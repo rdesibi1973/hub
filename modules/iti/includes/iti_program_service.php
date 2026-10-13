@@ -135,6 +135,7 @@ function iti_ps_program_out(PDO $db, int $id, string $lang = ''): array {
     return [
         'id' => (int)$p['id'], 'type' => $p['program_type'], 'stage' => $p['stage'] ?? null, 'status' => $p['status'],
         'ref_number' => isset($p['ref_number']) && $p['ref_number'] !== '' ? $p['ref_number'] : null,
+        'safari_type' => $D['safari_type'],
         'sample_id' => $p['sample_program_id'] ? (int)$p['sample_program_id'] : null,
         'lead_request_id' => isset($p['lead_request_id']) && $p['lead_request_id'] ? (int)$p['lead_request_id'] : null,
         'title' => $D['title'], 'subtitle' => $D['subtitle'], 'intro' => $D['intro'], 'language' => $lang,
@@ -181,7 +182,7 @@ function iti_ps_schema(): void {
 /** Header fields an agent may set, limited to the columns the live table really has. */
 function iti_ps_header_fields(): array {
     iti_ps_schema();
-    $f = ['ref_number', 'display_language', 'display_currency', 'start_date', 'pax_adults', 'pax_teens', 'pax_children', 'price_table_json', 'price_notes'];
+    $f = ['ref_number', 'safari_type', 'display_language', 'display_currency', 'start_date', 'pax_adults', 'pax_teens', 'pax_children', 'price_table_json', 'price_notes'];
     foreach (ITI_PS_LANGS as $l) foreach (['title', 'subtitle', 'intro', 'price_notes'] as $k) $f[] = $k . '_' . $l;
     return array_values(array_intersect($f, iti_table_columns('iti_programs')));
 }
@@ -196,6 +197,7 @@ function iti_ps_header_values(array $fields): array {
     foreach ($fields as $k => $v) {
         if ($k === 'display_language' && !in_array($v, ITI_PS_LANGS, true)) throw new InvalidArgumentException('display_language: en|it|fr|es|de');
         if ($k === 'display_currency' && !in_array($v, ['USD', 'EUR'], true)) throw new InvalidArgumentException('display_currency: USD|EUR');
+        if ($k === 'safari_type' && !in_array($v, ITI_SAFARI_TYPES, true)) throw new InvalidArgumentException('safari_type: private | group');
         if ($k === 'start_date') {
             if ($v !== null && $v !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', (string)$v)) throw new InvalidArgumentException('start_date: YYYY-MM-DD');
             $v = $v === '' ? null : $v;
@@ -225,7 +227,7 @@ function iti_ps_personal(int $id): array {
 /**
  * Proposal for a client: a copy of a sample, or a blank programme (no sample_id) for trips with
  * no matching sample. $in: sample_id?, lead_request_id?, calc_file?, fields? {ref_number, title_<lang>, subtitle_<lang>,
- * intro_<lang>, start_date, pax_adults, pax_teens (under 16), pax_children (under 12), display_language, display_currency,
+ * intro_<lang>, safari_type (private | group; default from the sample / GRP tags), start_date, pax_adults, pax_teens (under 16), pax_children (under 12), display_language, display_currency,
  * price_table_json, price_notes_<lang>}, days? [day items, see iti_program_build.php] (replace
  * the sample's days). Blank programme: title_<display_language> and days[] are required.
  */
@@ -270,10 +272,13 @@ function iti_ps_create_personal(PDO $db, array $in, string $who, bool $go): arra
         if (trim((string)($set['title_' . $lang] ?? '')) === '') throw new InvalidArgumentException('Blank program: fields.title_' . $lang . ' is required');
         if (!$items) throw new InvalidArgumentException('Blank program: days[] is required');
         foreach (ITI_PS_LANGS as $l) if (!isset($set['title_' . $l]) || $set['title_' . $l] === '') $set['title_' . $l] = $set['title_' . $lang];   // NOT NULL columns
+        if (!isset($set['safari_type'])) $set['safari_type'] = iti_safari_type_auto($db, $set);   // GRP in ref / request folder → group
         $plan = ['sample' => null, 'set' => $set];
     }
     if ($days !== null) $plan['days'] = count($items);
     $plan['ref_number'] = $ref['ref_number'];
+    // private | group: given, else from the sample and the GRP tags (iti_duplicate_program() applies the same rule).
+    $plan['safari_type'] = $set['safari_type'] ?? iti_safari_type_auto($db, $set, $s);
     $plan['ref_source'] = $ref['source'] !== null ? $ref['source'] . (isset($ref['file']) ? ': ' . $ref['file'] : '') : null;
     // T&C of the linked request's channel: direct client (Drct) 60 days, agency 45 days.
     $plan['terms_variant'] = $tv !== 'auto' ? $tv : (isset($set['lead_request_id']) ? iti_terms_variant_for_request($db, $set['lead_request_id']) : null);

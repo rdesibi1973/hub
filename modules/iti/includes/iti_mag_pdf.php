@@ -128,7 +128,7 @@ td{vertical-align:top}
 <h1><?= h($D['title']) ?></h1>
 <?php if ($D['subtitle'] !== ''): ?><p style="font-size:12pt"><?= h($D['subtitle']) ?></p>
 <?php elseif ($routeNames): ?><p class="serif" style="font-size:12pt;font-style:italic"><?= h(implode(' · ', $routeNames)) ?></p><?php endif; ?>
-<p class="facts"><?= h(implode('   ·   ', array_filter([$dateRange, $D['duration'], $M['private'], $paxLabel]))) ?></p>
+<p class="facts"><?= h(implode('   ·   ', array_filter([$dateRange, $D['duration'], $T['safari_pill'], $paxLabel]))) ?></p>
 <?php if ($pub !== ''): ?><p style="margin:-4px 0 14px"><a href="<?= h($pub) ?>" style="display:inline-block;background:#B3241C;color:#fff;text-decoration:none;font-weight:bold;font-size:9pt;padding:4pt 11pt"><?= h($M['online_btn']) ?> →</a></p><?php endif; ?>
 <?php if (($c = iti_mag_cover($D)) !== '') echo iti_mp_img($c, 1400, $tmp, 'width:100%'); ?>
 

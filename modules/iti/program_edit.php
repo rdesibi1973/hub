@@ -72,6 +72,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (isset($_POST['pax_teens'])) {   // column from iti_ps_schema()
             $db->prepare('UPDATE iti_programs SET pax_teens=? WHERE id=?')->execute([max(0, (int)$_POST['pax_teens']), $id]);
         }
+        if (isset($_POST['safari_type']) && in_array($_POST['safari_type'], ITI_SAFARI_TYPES, true)) {   // cover + facts of the documents
+            $db->prepare('UPDATE iti_programs SET safari_type=? WHERE id=?')->execute([$_POST['safari_type'], $id]);
+        }
         // Hub leads request link (personal programs)
         if (isset($_POST['lead_request_id'])) {
             iti_ensure_lead_link();
@@ -889,6 +892,16 @@ include __DIR__ . '/../../includes/layout_header.php';
           <option value="EUR" <?= $program['display_currency']==='EUR'?'selected':'' ?>>EUR — €</option>
         </select>
       </div>
+      <?php if (array_key_exists('safari_type', $program)): ?>
+      <div class="form-group">
+        <label>Safari Type</label>
+        <select name="safari_type">
+          <option value="private" <?= iti_safari_type($program)==='private'?'selected':'' ?>>Private safari</option>
+          <option value="group" <?= iti_safari_type($program)==='group'?'selected':'' ?>>Group safari (shared jeep)</option>
+        </select>
+        <span class="form-hint">Cover and facts line of the programme: "Safari privato…" or "Safari di gruppo…"</span>
+      </div>
+      <?php endif; ?>
       <div class="form-group">
         <label>Terms &amp; Conditions</label>
         <select name="terms_id" <?= $terms_override ? 'disabled' : '' ?>>
