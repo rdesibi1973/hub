@@ -21,10 +21,11 @@ require_once __DIR__ . '/calc_reader.php';
 const BC_OWN_LODGES = '/\b(orangi|marera|kifaru|arusha explorers?)\b/i';
 
 /**
- * ACTIVITY DESC items handled in-house, not booked with a supplier: Maasai visits are
- * arranged by the safari guide, Olduvai is paid with the Ngorongoro permit.
+ * ACTIVITY DESC items handled in-house, not booked with a supplier: Maasai visits, Napuro
+ * waterfalls and Lake Eyasi activities are arranged by the safari guide, Olduvai is paid
+ * with the Ngorongoro permit.
  */
-const BC_INTERNAL = '/^(emergency|medi ?vac|amref|lunch ?box|hot lunch|picnic|gates?\b|paid\b|maa?sai|olduvai|oldupai|(cathedral )?church visit|(short )?city tour|ok$|-+$)/i';
+const BC_INTERNAL = '/^(emergency|medi ?vac|amref|lunch ?box|hot lunch|picnic|gates?\b|paid\b|maa?sai|olduvai|oldupai|napuro|(lake )?eyasi|(cathedral )?church visit|(short )?city tour|ok$|-+$)/i';
 
 /** Activities run by our own lodges ("Natural Walk" = Marera Walking and Iraqw families): no supplier booking. */
 const BC_OWN_ACTIVITY = '/\b(orangi|marera|kifaru|arusha explorers?)\b|natural walk/i';
