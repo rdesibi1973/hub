@@ -1181,6 +1181,43 @@ function bs_parse_emails($list): array {
 }
 
 /**
+ * Apply edits to a booking email (bo_booking_email() output). $edit keys, all optional:
+ * to / cc (replace the template list), to_add / cc_add, to_remove / cc_remove, subject,
+ * body (replaces the whole text), body_extra (inserted before "Thanks"),
+ * no_invoice (drops the "Esther - prepare the not paid invoice" line, e.g. group options).
+ * Returns ['to'=>[], 'cc'=>[], 'subject'=>string, 'body'=>string].
+ */
+function bs_booking_email_edit(array $mail, array $edit): array {
+    $out = [];
+    foreach (['to', 'cc'] as $k) {
+        $list = isset($edit[$k]) ? bs_parse_emails($edit[$k]) : bs_parse_emails($mail[$k]);
+        $low  = array_map('strtolower', $list);
+        foreach (!empty($edit[$k . '_add']) ? bs_parse_emails($edit[$k . '_add']) : [] as $a) {
+            if (!in_array(strtolower($a), $low, true)) { $list[] = $a; $low[] = strtolower($a); }
+        }
+        if (!empty($edit[$k . '_remove'])) {
+            $rm   = array_map('strtolower', bs_parse_emails($edit[$k . '_remove']));
+            $list = array_values(array_filter($list, function ($a) use ($rm) { return !in_array(strtolower($a), $rm, true); }));
+        }
+        $out[$k] = $list;
+    }
+    $out['subject'] = trim((string)($edit['subject'] ?? '')) ?: $mail['subject'];
+
+    $bodyIn = trim(str_replace("\r\n", "\n", (string)($edit['body'] ?? '')));
+    $body   = $bodyIn !== '' ? $bodyIn : $mail['body'];
+    if (!empty($edit['no_invoice'])) {
+        $body = preg_replace('/^Esther - prepare the not paid invoice\n/m', '', $body);
+    }
+    $extra = trim(str_replace("\r\n", "\n", (string)($edit['body_extra'] ?? '')));
+    if ($extra !== '') {
+        $pos  = strrpos($body, "\nThanks\n");
+        $body = $pos !== false ? substr($body, 0, $pos) . "\n" . $extra . "\n" . substr($body, $pos) : rtrim($body) . "\n\n" . $extra;
+    }
+    $out['body'] = preg_replace("/\n{3,}/", "\n\n", $body);
+    return $out;
+}
+
+/**
  * Send a plain booking-team email from noreply@, with Reply-To + HTML signature of
  * $userId (when set). Returns ['success'=>bool, 'message'=>string].
  */
