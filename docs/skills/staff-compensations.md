@@ -26,7 +26,7 @@ Memo: at the start create one `doing` memo (stable `ext_key` e.g. `work-commissi
 - Cancellation: if the safari is later cancelled, the commission is recalculated on what the client actually paid (deposit / penalty kept). The difference already paid to the seller is deducted from their next commissions — show it in the report as a negative line on the original booking.
 - Markup: the one actually used for the price in the booking's Calc (`read_calc` doesn't return it: open the Calc; D1 = Markup %, D2 = Markup TO %; the effective markup is the one that gives F9 "Price to customer").
 - Minimum markup for any commission: 12%. Below 12% → no commission.
-- Agency bookings follow the same rules as direct clients, unless Roberto decides otherwise (e.g. Yeadim Travel: no commission, Oct 2026).
+- Agency bookings: Italian agencies follow the same rules as direct clients. Foreign agencies (non-Italian, e.g. Yeadim Travel, Ways of Africa): no commission.
 - Seller = the agent in the folder name, e.g. `Name(Anderson-Drct)`, `Name(Agency-Anderson)`.
 - Roberto may make exceptions: when a booking doesn't fit, or Saruni's figure differs from the rule, don't treat it as an error — list it and ask him.
 

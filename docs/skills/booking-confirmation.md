@@ -32,9 +32,10 @@ Anything missing: list it and ask, don't fix silently. Calc not open in Excel on
 
 ## 3. Confirm
 
-1. `confirm_preview` with start, mid / mid2 (or NA), end, destination, grp (NONE unless a real gruppo a raccolta). Show the new folder name, every check/warning AND the booking email it returns (`email`: To / Cc / subject / body; template To: accountant@, glady@, operations@, nuru@; Cc configurable — ask whether to keep info@). Kenya in the folder name if the trip includes Kenya; fam trips = agency + "FamTrip".
+1. `confirm_preview` with start, mid / mid2 (or NA), end, destination, grp (NONE unless a real gruppo a raccolta). Show the new folder name, every check/warning AND the booking email it returns (`email`: To / Cc / subject / body; template To: accountant@, glady@, operations@, nuru@; Cc configurable — ask whether to keep info@). Kenya in the folder name if the trip includes Kenya; fam trips = agency + "FamTrip". Destination: leave it empty (Tanzania) for a safari, also with a Zanzibar/beach extension; `ZNZ` (or another suffix) only when the whole trip is in that destination, because it ends up in the folder name (13 Oct 2026).
 2. Changes to the email go in an `email` object (`to_add`/`to_remove`/`cc_add`/`cc_remove`, `to`/`cc` to replace, `subject`, `body` for a full rewrite, `body_extra`, `no_invoice`): rerun the preview with it and show the result until Roberto is happy.
 3. After his ok on folder AND email → `confirm_booking` with `confirm: true` and the same `email` + `"send": true`: folder to `/001_Safari/`, status Booked, email sent in one call. Check `email_sent`; if false, say so and retry with `send_booking_email` (same edits). If he wants to confirm now and mail later, omit `send` and use `send_booking_email` afterwards.
+4. After the confirm, move the Calcs that were not confirmed (the other `NN_…_Calc.xlsx` versions) into the booking folder's `old/` subfolder: only the confirmed Calc stays at the top (13 Oct 2026).
 
 ## 4. Invoice
 
