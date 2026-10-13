@@ -376,12 +376,90 @@ if ($report_type === 'travel' && !$is_history) {
 // of the requests ASSIGNED this year, how many are now Booked (regardless of when).
 $team_overview = null;   // per-agent rows (agent_filter = 0)
 $team_agent    = null;   // single-agent drill-down (agent_filter > 0)
-$OPEN_STATUSES = ['Inquiry','Quoted','Hot','Hot-Quoted'];
+// Pipeline stage of an open request — same rule as pipeline.php: Hot / Hot-Quoted, or a Quoted one
+// moved to the HOT column by hand, is Hot. Booked = Confirmed. Closed (Lost, Cancelled…) → null.
+function team_stage(array $r): ?string {
+    $st = (string)$r['status'];
+    if ($st === 'Booked')  return 'confirmed';
+    if ($st === 'Inquiry') return 'inquiry';
+    if ($st === 'Quoted')  return ($r['pipeline_column'] ?? '') === 'hot' ? 'hot' : 'quoted';
+    if ($st === 'Hot' || $st === 'Hot-Quoted') return 'hot';
+    return null;
+}
+// Click on a number in the Sales Team tables → list of the requests behind it.
+// list = bucket, who = agent id (0 = all agents, -1 = unassigned).
+const TEAM_LISTS = [
+    'assigned'  => 'Assigned',
+    'inquiry'   => 'Inquiry',
+    'quoted'    => 'Quoted',
+    'hot'       => '🔥 Hot',
+    'confirmed' => '✅ Confirmed',
+    'lost'      => 'Lost',
+    'today'     => 'Assigned today',
+    '2d'        => 'Assigned today + yesterday',
+    '7d'        => 'Assigned in the last 7 days',
+];
+$team_list_key = (string)($_GET['list'] ?? '');
+if (!isset(TEAM_LISTS[$team_list_key])) $team_list_key = '';
+$team_who = $isRestricted ? $myAgentId : (int)($_GET['who'] ?? 0);
+$team_list = null;   // rows for the clicked number
+
+/** Link from a Sales Team number to its request list; 0 stays a plain dash. */
+function team_num($n, string $list, int $who, int $year, ?string $txt = null): string {
+    if (!$n) return '—';
+    $txt = $txt ?? (string)$n;
+    $url = '?' . http_build_query(['rtype'=>'team','year'=>$year,'agent'=>$who > 0 ? $who : 0,'list'=>$list,'who'=>$who]);
+    return '<a href="' . h($url) . '" class="team-num">' . h($txt) . '</a>';
+}
+
 if ($report_type === 'team') {
     $ty       = $year;
     $notStaff = "(practice_code NOT LIKE '%-STAFF%' OR practice_code IS NULL)";
 
-    if ($agent_filter > 0) {
+    if ($team_list_key !== '') {
+        require_once __DIR__ . '/includes/assignment_service.php';
+        assign_schema($db);
+        $ad     = assign_date_sql('r');
+        $where  = ["(r.practice_code NOT LIKE '%-STAFF%' OR r.practice_code IS NULL)"];
+        $params = [];
+        if ($team_who > 0)       { $where[] = 'r.agent_id = ?'; $params[] = $team_who; }
+        elseif ($team_who === -1) $where[] = '(r.agent_id IS NULL OR r.agent_id = 0)';
+        $recent = ['today' => 0, '2d' => 1, '7d' => 6];
+        if (isset($recent[$team_list_key])) {
+            // Same window as the Today / 2 days / 7 days columns: relative to today, any year.
+            $where[]  = "$ad >= ? AND $ad <= ?";
+            $params[] = date('Y-m-d', strtotime('-' . $recent[$team_list_key] . ' days'));
+            $params[] = date('Y-m-d');
+        } else {
+            $where[]  = 'YEAR(r.date_received) = ?';
+            $params[] = $ty;
+            $where[]  = [
+                'assigned'  => '1=1',
+                'inquiry'   => "r.status='Inquiry'",
+                'quoted'    => "r.status='Quoted' AND COALESCE(r.pipeline_column,'')<>'hot'",
+                'hot'       => "(r.status IN ('Hot','Hot-Quoted') OR (r.status='Quoted' AND r.pipeline_column='hot'))",
+                'confirmed' => "r.status='Booked'",
+                'lost'      => "r.status='Lost'",
+            ][$team_list_key];
+        }
+        $q = $db->prepare("
+            SELECT r.id, r.customer_name, r.destination, r.value_usd, r.pax, r.date_received,
+                   r.status, r.pipeline_column, $ad AS assigned_on, a.name AS agent_name
+            FROM requests r
+            LEFT JOIN agents a ON a.id = r.agent_id
+            WHERE " . implode(' AND ', $where) . "
+            ORDER BY r.date_received DESC, r.id DESC
+        ");
+        $q->execute($params);
+        $team_list = $q->fetchAll(PDO::FETCH_ASSOC);
+
+        $wname = 'All agents';
+        if ($team_who === -1) $wname = 'Unassigned';
+        foreach ($all_agents as $ag) if ((int)$ag['id'] === $team_who) $wname = $ag['name'];
+        $title_str = $wname . ' — ' . TEAM_LISTS[$team_list_key]
+                   . (isset($recent[$team_list_key]) ? '' : " ($ty)");
+
+    } elseif ($agent_filter > 0) {
         // Drill-down: one query with every request assigned to this agent this year.
         $q = $db->prepare("
             SELECT id, customer_name, destination, value_usd, pax,
@@ -393,27 +471,24 @@ if ($report_type === 'team') {
         $q->execute([$agent_filter, $ty]);
         $reqs = $q->fetchAll(PDO::FETCH_ASSOC);
 
-        $kpi   = ['assigned'=>0,'booked'=>0,'open'=>0,'lost'=>0,'hot'=>0,'sales'=>0.0];
+        $kpi   = ['assigned'=>0,'inquiry'=>0,'quoted'=>0,'hot'=>0,'booked'=>0,'lost'=>0,'sales'=>0.0];
         $weeks = [];   // isoWeek => aggregate + request list
         foreach ($reqs as $r) {
             $kpi['assigned']++;
-            $isBooked = ($r['status'] === 'Booked');
-            $isLost   = ($r['status'] === 'Lost');
-            $isOpen   = in_array($r['status'], $OPEN_STATUSES, true);
-            $isHot    = ($r['pipeline_column'] === 'hot');
-            if ($isBooked) { $kpi['booked']++; $kpi['sales'] += (float)$r['value_usd']; }
-            if ($isLost)   $kpi['lost']++;
-            if ($isOpen)   $kpi['open']++;
-            if ($isHot)    $kpi['hot']++;
+            $stage  = team_stage($r);
+            $isLost = ($r['status'] === 'Lost');
+            if ($stage === 'confirmed') { $kpi['booked']++; $kpi['sales'] += (float)$r['value_usd']; }
+            elseif ($stage !== null)    $kpi[$stage]++;
+            if ($isLost) $kpi['lost']++;
 
             $wk = (int)date('W', strtotime($r['date_received']));
             if (!isset($weeks[$wk])) {
-                $weeks[$wk] = ['wk'=>$wk,'assigned'=>0,'booked'=>0,'open'=>0,'lost'=>0,'reqs'=>[]];
+                $weeks[$wk] = ['wk'=>$wk,'assigned'=>0,'inquiry'=>0,'quoted'=>0,'hot'=>0,'booked'=>0,'lost'=>0,'reqs'=>[]];
             }
             $weeks[$wk]['assigned']++;
-            if ($isBooked) $weeks[$wk]['booked']++;
-            if ($isLost)   $weeks[$wk]['lost']++;
-            if ($isOpen)   $weeks[$wk]['open']++;
+            if ($stage === 'confirmed') $weeks[$wk]['booked']++;
+            elseif ($stage !== null)    $weeks[$wk][$stage]++;
+            if ($isLost) $weeks[$wk]['lost']++;
             $weeks[$wk]['reqs'][] = $r;
         }
         krsort($weeks);   // most recent week first
@@ -429,9 +504,10 @@ if ($report_type === 'team') {
             SELECT agent_id,
                    COUNT(*)                                            AS assigned,
                    SUM(status='Booked')                                AS booked,
-                   SUM(status IN ('Inquiry','Quoted','Hot','Hot-Quoted')) AS open_cnt,
+                   SUM(status='Inquiry')                               AS inquiry_cnt,
+                   SUM(status='Quoted' AND COALESCE(pipeline_column,'')<>'hot') AS quoted_cnt,
+                   SUM(status IN ('Hot','Hot-Quoted') OR (status='Quoted' AND pipeline_column='hot')) AS hot_cnt,
                    SUM(status='Lost')                                  AS lost,
-                   SUM(pipeline_column='hot')                          AS hot_cnt,
                    SUM(CASE WHEN status='Booked' THEN value_usd ELSE 0 END) AS sales
             FROM requests
             WHERE YEAR(date_received) = ? AND $notStaff
@@ -466,22 +542,23 @@ if ($report_type === 'team') {
         }
 
         $rows = [];
-        $tot  = ['assigned'=>0,'booked'=>0,'open'=>0,'lost'=>0,'hot'=>0,'sales'=>0.0,'r_today'=>0,'r_2d'=>0,'r_7d'=>0];
+        $tot  = ['assigned'=>0,'inquiry'=>0,'quoted'=>0,'hot'=>0,'booked'=>0,'lost'=>0,'sales'=>0.0,'r_today'=>0,'r_2d'=>0,'r_7d'=>0];
         $push = function(int $aid, string $name, $d) use (&$rows, &$tot) {
             $row = [
                 'aid'=>$aid, 'name'=>$name,
                 'assigned'=>(int)($d['assigned']??0),
-                'booked'  =>(int)($d['booked']??0),
-                'open'    =>(int)($d['open_cnt']??0),
-                'lost'    =>(int)($d['lost']??0),
+                'inquiry' =>(int)($d['inquiry_cnt']??0),
+                'quoted'  =>(int)($d['quoted_cnt']??0),
                 'hot'     =>(int)($d['hot_cnt']??0),
+                'booked'  =>(int)($d['booked']??0),
+                'lost'    =>(int)($d['lost']??0),
                 'sales'   =>(float)($d['sales']??0),
                 'r_today' =>(int)($d['r_today']??0),
                 'r_2d'    =>(int)($d['r_2d']??0),
                 'r_7d'    =>(int)($d['r_7d']??0),
             ];
             $rows[] = $row;
-            foreach (['assigned','booked','open','lost','hot','sales','r_today','r_2d','r_7d'] as $k) $tot[$k] += $row[$k];
+            foreach (['assigned','inquiry','quoted','hot','booked','lost','sales','r_today','r_2d','r_7d'] as $k) $tot[$k] += $row[$k];
         };
         foreach ($all_agents as $ag) $push((int)$ag['id'], $ag['name'], $by[(int)$ag['id']] ?? []);
         if (!empty($by[0])) $push(0, '— Unassigned —', $by[0]);   // requests with no agent
@@ -726,8 +803,54 @@ include 'includes/header.php';
   $rate = fn($num,$den) => $den>0 ? round($num*100/$den) : 0;
   $pill = fn($st) => '<span class="badge '.(STATUSES[$st] ?? '').'">'.h($st).'</span>';
 ?>
+<style>
+  .recent-col{background:#f3f7fb}
+  .pipe-col{background:#fbf8f1}
+  .table-wrap tfoot td{padding:13px 16px;font-size:.83rem;vertical-align:middle}
+  a.team-num{color:inherit;text-decoration:none;border-bottom:1px dotted var(--grey-mid)}
+  a.team-num:hover{color:var(--red);border-bottom-color:var(--red)}
+</style>
 
-<?php if ($team_overview !== null): // ---- OVERVIEW: all agents ---- ?>
+<?php if ($team_list !== null): // ---- LIST: requests behind a clicked number ---- ?>
+  <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px;flex-wrap:wrap">
+    <a href="?rtype=team&year=<?= $year ?>&agent=<?= $isRestricted ? $myAgentId : 0 ?>" class="btn btn-outline btn-sm">← Sales Team</a>
+    <?php if ($team_who > 0 && !$isRestricted): ?>
+      <a href="?rtype=team&year=<?= $year ?>&agent=<?= $team_who ?>" class="btn btn-outline btn-sm">Agent detail</a>
+    <?php endif; ?>
+    <strong style="font-size:.9rem"><?= h($title_str) ?></strong>
+    <span style="color:var(--grey-mid);font-size:.82rem">(<?= count($team_list) ?>)</span>
+  </div>
+  <?php $showAgent = $team_who === 0; $isRecent = in_array($team_list_key, ['today','2d','7d'], true); ?>
+  <div class="table-wrap">
+    <table>
+      <thead><tr>
+        <th style="text-align:left">Received</th>
+        <?php if ($isRecent): ?><th style="text-align:left">Assigned</th><?php endif; ?>
+        <th style="text-align:left">Customer</th>
+        <?php if ($showAgent): ?><th style="text-align:left">Agent</th><?php endif; ?>
+        <th style="text-align:left">Destination</th><th>Pax</th><th style="text-align:left">Status</th><th>Value</th>
+      </tr></thead>
+      <tbody>
+      <?php if (!$team_list): ?>
+        <tr><td colspan="8" style="color:var(--grey-mid)">No requests.</td></tr>
+      <?php endif; ?>
+      <?php foreach ($team_list as $r): ?>
+        <tr>
+          <td style="text-align:left;color:var(--grey-mid);white-space:nowrap"><?= date('d M', strtotime($r['date_received'])) ?></td>
+          <?php if ($isRecent): ?><td style="text-align:left;color:var(--grey-mid);white-space:nowrap"><?= date('d M', strtotime($r['assigned_on'])) ?></td><?php endif; ?>
+          <td style="text-align:left"><a href="request_view.php?id=<?= $r['id'] ?>" target="_blank" rel="noopener" style="font-weight:600;color:var(--grey-dk);text-decoration:none"><?= h($r['customer_name']) ?></a></td>
+          <?php if ($showAgent): ?><td style="text-align:left"><?= h($r['agent_name'] ?: '—') ?></td><?php endif; ?>
+          <td style="text-align:left"><?= h($r['destination'] ?: '—') ?></td>
+          <td><?= $r['pax'] ?: '—' ?></td>
+          <td style="text-align:left"><?= $pill($r['status']) ?><?php if (team_stage($r) === 'hot' && $r['status'] === 'Quoted'): ?> <span class="badge status-hot-quoted">🔥</span><?php endif; ?></td>
+          <td><?= $r['value_usd']>0 ? '$'.number_format($r['value_usd'],0):'—' ?></td>
+        </tr>
+      <?php endforeach; ?>
+      </tbody>
+    </table>
+  </div>
+
+<?php elseif ($team_overview !== null): // ---- OVERVIEW: all agents ---- ?>
   <?php $T = $team_overview['totals']; ?>
   <div class="table-wrap">
     <table>
@@ -737,12 +860,13 @@ include 'includes/header.php';
           <th class="recent-col" title="Requests assigned today">Today</th>
           <th class="recent-col" title="Requests assigned today + yesterday">2 days</th>
           <th class="recent-col" title="Requests assigned in the last 7 days, today included">7 days</th>
-          <th>Assigned</th><th>Booked</th><th>Rate</th>
-          <th>Open</th><th>🔥 Hot</th><th>Lost</th><th>Sales</th>
+          <th>Assigned</th>
+          <th class="pipe-col">Inquiry</th><th class="pipe-col">Quoted</th><th class="pipe-col">🔥 Hot</th><th class="pipe-col">✅ Confirmed</th>
+          <th>Rate</th><th>Lost</th><th>Sales</th>
         </tr>
       </thead>
       <tbody>
-      <?php foreach ($team_overview['rows'] as $r): ?>
+      <?php foreach ($team_overview['rows'] as $r): $w = $r['aid'] > 0 ? $r['aid'] : -1; ?>
         <tr>
           <td style="text-align:left">
             <?php if ($r['aid']>0): ?>
@@ -751,32 +875,34 @@ include 'includes/header.php';
               <span style="color:var(--grey-mid)"><?= h($r['name']) ?></span>
             <?php endif; ?>
           </td>
-          <td class="recent-col"><?= $r['r_today'] ?: '—' ?></td>
-          <td class="recent-col"><?= $r['r_2d'] ?: '—' ?></td>
-          <td class="recent-col"><?= $r['r_7d'] ?: '—' ?></td>
-          <td><?= $r['assigned'] ?></td>
-          <td><?= $r['booked'] ?: '—' ?></td>
+          <td class="recent-col"><?= team_num($r['r_today'], 'today', $w, $year) ?></td>
+          <td class="recent-col"><?= team_num($r['r_2d'], '2d', $w, $year) ?></td>
+          <td class="recent-col"><?= team_num($r['r_7d'], '7d', $w, $year) ?></td>
+          <td><?= team_num($r['assigned'], 'assigned', $w, $year) ?></td>
+          <td class="pipe-col"><?= team_num($r['inquiry'], 'inquiry', $w, $year) ?></td>
+          <td class="pipe-col"><?= team_num($r['quoted'], 'quoted', $w, $year) ?></td>
+          <td class="pipe-col"><?= team_num($r['hot'], 'hot', $w, $year) ?></td>
+          <td class="pipe-col"><?= team_num($r['booked'], 'confirmed', $w, $year) ?></td>
           <td style="font-weight:700"><?= $rate($r['booked'],$r['assigned']) ?>%</td>
-          <td><?= $r['open'] ?: '—' ?></td>
-          <td><?= $r['hot'] ?: '—' ?></td>
-          <td><?= $r['lost'] ?: '—' ?></td>
-          <td><?= $r['sales']>0 ? '$'.number_format($r['sales'],0) : '—' ?></td>
+          <td><?= team_num($r['lost'], 'lost', $w, $year) ?></td>
+          <td><?= team_num($r['sales'] > 0, 'confirmed', $w, $year, '$'.number_format($r['sales'],0)) ?></td>
         </tr>
       <?php endforeach; ?>
       </tbody>
       <tfoot>
         <tr style="font-weight:700;border-top:2px solid var(--grey-lt)">
           <td style="text-align:left">TOTAL</td>
-          <td class="recent-col"><?= $T['r_today'] ?></td>
-          <td class="recent-col"><?= $T['r_2d'] ?></td>
-          <td class="recent-col"><?= $T['r_7d'] ?></td>
-          <td><?= $T['assigned'] ?></td>
-          <td><?= $T['booked'] ?></td>
+          <td class="recent-col"><?= team_num($T['r_today'], 'today', 0, $year) ?></td>
+          <td class="recent-col"><?= team_num($T['r_2d'], '2d', 0, $year) ?></td>
+          <td class="recent-col"><?= team_num($T['r_7d'], '7d', 0, $year) ?></td>
+          <td><?= team_num($T['assigned'], 'assigned', 0, $year) ?></td>
+          <td class="pipe-col"><?= team_num($T['inquiry'], 'inquiry', 0, $year) ?></td>
+          <td class="pipe-col"><?= team_num($T['quoted'], 'quoted', 0, $year) ?></td>
+          <td class="pipe-col"><?= team_num($T['hot'], 'hot', 0, $year) ?></td>
+          <td class="pipe-col"><?= team_num($T['booked'], 'confirmed', 0, $year) ?></td>
           <td><?= $rate($T['booked'],$T['assigned']) ?>%</td>
-          <td><?= $T['open'] ?></td>
-          <td><?= $T['hot'] ?></td>
-          <td><?= $T['lost'] ?></td>
-          <td>$<?= number_format($T['sales'],0) ?></td>
+          <td><?= team_num($T['lost'], 'lost', 0, $year) ?></td>
+          <td><?= team_num($T['sales'] > 0, 'confirmed', 0, $year, '$'.number_format($T['sales'],0)) ?></td>
         </tr>
       </tfoot>
     </table>
@@ -786,30 +912,35 @@ include 'includes/header.php';
     (a lead assigned this year that is now Booked counts, whenever it closed). Click an agent for the weekly breakdown.<br>
     <strong>Today / 2 days / 7 days</strong> = requests assigned to the agent in that window, counting back from today
     (<?= date('d M') ?>), whatever year is selected. A reassigned request counts for the new agent;
-    requests assigned before 12 Oct 2026 use their date received.
+    requests assigned before 12 Oct 2026 use their date received.<br>
+    <strong>Inquiry / Quoted / Hot / Confirmed</strong> = where those requests are now, as on the Pipeline
+    (Hot = Hot, Hot-Quoted, or Quoted moved to HOT; Confirmed = Booked). Click a number to see the requests.
   </p>
-  <style>
-    .recent-col{background:#f3f7fb}
-    .table-wrap tfoot td{padding:13px 16px;font-size:.83rem;vertical-align:middle}
-  </style>
 
 <?php elseif ($team_agent !== null): // ---- DRILL-DOWN: single agent ---- ?>
   <?php $k = $team_agent['kpi']; ?>
   <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:20px">
     <?php
+      // [label, value shown, colour, list key or '' when not clickable, count]
       $cards = [
-        ['Assigned',      $k['assigned'],                              'var(--blue)'],
-        ['Booked',        $k['booked'],                                'var(--green)'],
-        ['Rate',          $rate($k['booked'],$k['assigned']).'%',      'var(--amber)'],
-        ['Open',          $k['open'],                                  'var(--grey-dk)'],
-        ['🔥 Hot-Quoted', $k['hot'],                                   '#C45000'],
-        ['Sales',         '$'.number_format($k['sales'],0),            'var(--green)'],
+        ['Assigned',     $k['assigned'],                         'var(--blue)',    'assigned',  $k['assigned']],
+        ['Inquiry',      $k['inquiry'],                          'var(--grey-dk)', 'inquiry',   $k['inquiry']],
+        ['Quoted',       $k['quoted'],                           'var(--amber)',   'quoted',    $k['quoted']],
+        ['🔥 Hot',       $k['hot'],                              '#C45000',        'hot',       $k['hot']],
+        ['✅ Confirmed', $k['booked'],                           'var(--green)',   'confirmed', $k['booked']],
+        ['Rate',         $rate($k['booked'],$k['assigned']).'%', 'var(--amber)',   '',          0],
+        ['Lost',         $k['lost'],                             'var(--grey-mid)','lost',      $k['lost']],
+        ['Sales',        '$'.number_format($k['sales'],0),       'var(--green)',   'confirmed', $k['booked']],
       ];
-      foreach ($cards as $c): ?>
-      <div style="flex:1;min-width:120px;background:var(--white);border-radius:10px;box-shadow:0 1px 6px rgba(0,0,0,.06);border-top:3px solid <?= $c[2] ?>;padding:14px 16px">
+      foreach ($cards as $c):
+        $href = ($c[3] !== '' && $c[4] > 0)
+              ? '?' . http_build_query(['rtype'=>'team','year'=>$year,'agent'=>$agent_filter,'list'=>$c[3],'who'=>$agent_filter])
+              : '';
+      ?>
+      <<?= $href ? 'a href="'.h($href).'"' : 'div' ?> style="flex:1;min-width:110px;background:var(--white);border-radius:10px;box-shadow:0 1px 6px rgba(0,0,0,.06);border-top:3px solid <?= $c[2] ?>;padding:14px 16px;text-decoration:none;color:inherit">
         <div style="font-size:.66rem;font-weight:700;letter-spacing:.06em;color:var(--grey-mid);text-transform:uppercase"><?= $c[0] ?></div>
         <div style="font-size:1.5rem;font-weight:800;color:var(--grey-dk);margin-top:4px"><?= $c[1] ?></div>
-      </div>
+      </<?= $href ? 'a' : 'div' ?>>
     <?php endforeach; ?>
   </div>
 
@@ -822,7 +953,7 @@ include 'includes/header.php';
       <thead>
         <tr>
           <th style="text-align:left">Week</th>
-          <th>Assigned</th><th>🟢 Booked</th><th>🟡 Open</th><th>⚪ Lost</th><th>Rate</th><th></th>
+          <th>Assigned</th><th>Inquiry</th><th>Quoted</th><th>🔥 Hot</th><th>✅ Confirmed</th><th>⚪ Lost</th><th>Rate</th><th></th>
         </tr>
       </thead>
       <tbody>
@@ -834,21 +965,23 @@ include 'includes/header.php';
         <tr class="wk-row" onclick="toggleWk(<?= $wk ?>)" style="cursor:pointer">
           <td style="text-align:left;font-weight:700">W<?= $wk ?> <span style="font-weight:400;color:var(--grey-mid)">· <?= $mon ?>–<?= $sun ?></span></td>
           <td><?= $w['assigned'] ?></td>
+          <td><?= $w['inquiry'] ?: '—' ?></td>
+          <td><?= $w['quoted'] ?: '—' ?></td>
+          <td><?= $w['hot'] ?: '—' ?></td>
           <td><?= $w['booked'] ?: '—' ?></td>
-          <td><?= $w['open'] ?: '—' ?></td>
           <td><?= $w['lost'] ?: '—' ?></td>
           <td style="font-weight:700"><?= $rate($w['booked'],$w['assigned']) ?>%</td>
           <td style="color:var(--grey-mid)">▸</td>
         </tr>
         <tr class="wk-detail" id="wk-<?= $wk ?>" hidden>
-          <td colspan="7" style="background:#FAFAFA;padding:6px 12px">
+          <td colspan="9" style="background:#FAFAFA;padding:6px 12px">
             <?php foreach ($w['reqs'] as $r): ?>
               <div style="display:flex;align-items:center;gap:10px;padding:5px 4px;border-bottom:1px solid var(--grey-lt);font-size:.8rem">
                 <span style="color:var(--grey-mid);white-space:nowrap;width:52px"><?= date('d M', strtotime($r['date_received'])) ?></span>
                 <a href="request_view.php?id=<?= $r['id'] ?>" target="_blank" rel="noopener" style="font-weight:600;color:var(--grey-dk);flex:1;min-width:120px;text-decoration:none"><?= h($r['customer_name']) ?></a>
                 <span style="color:var(--grey-mid);flex:1;min-width:80px"><?= h($r['destination'] ?: '—') ?></span>
                 <?= $pill($r['status']) ?>
-                <?php if ($r['pipeline_column']==='hot'): ?><span class="badge status-hot-quoted">🔥 HOT</span><?php endif; ?>
+                <?php if (team_stage($r) === 'hot' && $r['status'] === 'Quoted'): ?><span class="badge status-hot-quoted">🔥 HOT</span><?php endif; ?>
                 <span style="width:80px;text-align:right;color:var(--grey-dk)"><?= $r['value_usd']>0 ? '$'.number_format($r['value_usd'],0):'' ?></span>
               </div>
             <?php endforeach; ?>
@@ -871,7 +1004,7 @@ include 'includes/header.php';
           <td style="text-align:left"><a href="request_view.php?id=<?= $r['id'] ?>" target="_blank" rel="noopener" style="font-weight:600;color:var(--grey-dk);text-decoration:none"><?= h($r['customer_name']) ?></a></td>
           <td style="text-align:left"><?= h($r['destination'] ?: '—') ?></td>
           <td><?= $r['pax'] ?: '—' ?></td>
-          <td style="text-align:left"><?= $pill($r['status']) ?><?php if ($r['pipeline_column']==='hot'): ?> <span class="badge status-hot-quoted">🔥</span><?php endif; ?></td>
+          <td style="text-align:left"><?= $pill($r['status']) ?><?php if (team_stage($r) === 'hot' && $r['status'] === 'Quoted'): ?> <span class="badge status-hot-quoted">🔥</span><?php endif; ?></td>
           <td><?= $r['value_usd']>0 ? '$'.number_format($r['value_usd'],0):'—' ?></td>
         </tr>
       <?php endforeach; ?>
