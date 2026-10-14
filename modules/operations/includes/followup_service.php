@@ -835,16 +835,27 @@ function followup_upsert(PDO $db, array $rows, array $scanned, bool $confirm, st
             if (!isset($byReq[$r]) || substr_count($u['dir'], '/') > substr_count($units[$byReq[$r]]['dir'], '/')) $byReq[$r] = $k;
         }
     }
-    $find = function ($ref) use ($byFolder, $byReq) {
+    $find = function ($ref) use ($byFolder, $byReq, $units) {
         if (is_int($ref) || ctype_digit((string)$ref)) return $byReq[(int)$ref] ?? null;
-        $s = dropbox_folder_stem_safe(preg_replace('#^/?001_Safari/#i', '', trim((string)$ref, '/')));
-        $hit = $byFolder[$s] ?? $byFolder[dropbox_folder_stem_safe(basename($s))] ?? [];
-        return count(array_unique($hit)) === 1 ? $hit[0] : null;
+        $rel = preg_replace('#^/?001_Safari/#i', '', trim((string)$ref, '/'));
+        $s = dropbox_folder_stem_safe($rel);
+        $hit = array_values(array_unique($byFolder[$s] ?? $byFolder[dropbox_folder_stem_safe(basename($rel))] ?? []));
+        if (count($hit) <= 1) return $hit[0] ?? null;
+        // Same stem twice: a Hub record still points to the folder's old name (status tag) — "GRP_DEPOSIT" next to the
+        // group's current "GRP_BALANCE", or a member link built on it. The top-level folder wins, then the exact name.
+        usort($hit, fn($a, $b) => [substr_count($units[$a]['folder'], '/'), strcasecmp(basename($units[$a]['folder']), basename($rel)) !== 0]
+                               <=> [substr_count($units[$b]['folder'], '/'), strcasecmp(basename($units[$b]['folder']), basename($rel)) !== 0]);
+        return $hit[0];
     };
     $docs = []; $unmatched = []; $cached = 0;
     foreach ($rows as $i => $r) {
         $ref = $r['request_id'] ?? $r['folder'] ?? null;
         $k = $ref !== null ? $find($ref) : null;
+        // The folder as it is now on disk (the Hub record may keep an old status tag): the 📂 link must open it.
+        if ($k !== null && !empty($r['folder'])) {
+            $units[$k]['folder'] = trim(preg_replace('#^/?001_Safari/#i', '', (string)$r['folder']), '/');
+            $units[$k]['dir'] = CK_BASE . '/' . $units[$k]['folder'];
+        }
         // Every document sent is kept for the group check (a collective GRP may have no confirmed request yet).
         if ($confirm && followup_cache_sent_doc($db, $r, $k !== null ? $units[$k]['dir'] : null)) $cached++;
         if ($k === null) {

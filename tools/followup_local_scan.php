@@ -12,7 +12,7 @@
  *
  * Options: --root=C:\Dropbox\001_Safari  --pdftotext=C:\Utility\Git\mingw64\bin\pdftotext.exe
  *          --key-file=<path of api.txt>  (or env HUB_AGENT_KEY)  --url=https://hub.savannahexplorers.com/api/agent/index.php
- *          --today=YYYY-MM-DD (tests)  --no-send (classify only)
+ *          --today=YYYY-MM-DD (tests)  --no-send (classify only)  --cainfo=<CA bundle> (default: Git's, the office PHP has none)
  * Needs PHP with curl + openssl (the .bat loads them). Passport files are never opened (only invoices\).
  */
 date_default_timezone_set('Africa/Dar_es_Salaam');
@@ -21,7 +21,8 @@ require_once __DIR__ . '/../modules/operations/includes/followup_classify.php';
 
 $opt = ['root' => 'C:\\Dropbox\\001_Safari', 'pdftotext' => 'C:\\Utility\\Git\\mingw64\\bin\\pdftotext.exe',
         'key-file' => __DIR__ . '/../api.txt', 'url' => 'https://hub.savannahexplorers.com/api/agent/index.php',
-        'today' => date('Y-m-d'), 'folder' => '', 'json' => '', 'confirm' => false, 'no-send' => false];
+        'today' => date('Y-m-d'), 'folder' => '', 'json' => '', 'confirm' => false, 'no-send' => false,
+        'cainfo' => 'C:\\Utility\\Git\\mingw64\\etc\\ssl\\certs\\ca-bundle.crt'];
 foreach (array_slice($argv, 1) as $a) {
     if (!preg_match('/^--([a-z\-]+)(?:=(.*))?$/', $a, $m) || !array_key_exists($m[1], $opt)) { fwrite(STDERR, "Unknown option $a\n"); exit(2); }
     $opt[$m[1]] = isset($m[2]) ? $m[2] : true;
@@ -58,6 +59,22 @@ if ($opt['folder'] !== '') $folders = array_filter($folders, fn($k) => stripos($
 ksort($folders);
 echo count($folders) . " booking folder(s) with trips not ended\n";
 
+/**
+ * POST to the Agent API → [http code, body, curl error]. The office PHP has no CA list of its own: Git's
+ * bundle (--cainfo) verifies the Hub certificate. User agent as in docs/AGENT_API.md (Mod_Security).
+ */
+function hub_post(array $opt, string $action, string $body, string $key): array {
+    $ch = curl_init($opt['url'] . '?action=' . $action);
+    curl_setopt_array($ch, [CURLOPT_POST => true, CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 300, CURLOPT_POSTFIELDS => $body,
+                            CURLOPT_HTTPHEADER => ['Content-Type: application/json', 'X-Agent-Key: ' . $key],
+                            CURLOPT_USERAGENT => 'Mozilla/5.0 (compatible; SavannahHubAgent/1.0)']);
+    if ($opt['cainfo'] !== '' && is_file($opt['cainfo'])) curl_setopt($ch, CURLOPT_CAINFO, $opt['cainfo']);
+    $res = curl_exec($ch);
+    $out = [(int)curl_getinfo($ch, CURLINFO_HTTP_CODE), $res === false ? '' : (string)$res, curl_errno($ch) ? curl_error($ch) : ''];
+    curl_close($ch);
+    return $out;
+}
+
 /** Same rule as followup_group_kind() in followup_service.php (not loaded here: it needs the DB). */
 function followup_group_kind_local(string $name): bool {
     return (bool)(preg_match('/GRP\d{4}|\(Diamante|Panorama/i', $name)
@@ -82,7 +99,7 @@ foreach ($folders as $rel => $trip) {
         @unlink($pdf);
         if ($rc !== 0 && !is_file($tmp)) { $ok = false; echo "  ! not read: $rel/invoices/$f\n"; continue; }
         $c = followup_classify(is_file($tmp) ? (string)file_get_contents($tmp) : '', $f, $trip, $today);
-        $groupDoc = $isGroup && (!empty($c['block_text']) || !empty($c['flight_pax']) || !empty($c['flight_znz']) || !empty($c['names_tba']));
+        $groupDoc = $isGroup;   // group folders: every PDF is sent, so the group check knows all its documents were read
         if ($c['issue']) {
             $count[$c['issue'] === 'unreadable' ? 'unreadable' : 'issues']++;
         } elseif ($c['status'] === 'confirmed') {
@@ -130,15 +147,12 @@ if ($cur['rows'] || $cur['scanned']) $batches[] = $cur;
 $total = ['added' => 0, 'updated' => 0, 'closed' => 0, 'reopened' => 0, 'unmatched' => 0];
 foreach ($batches as $i => $b) {
     $body = json_encode(['b64' => base64_encode(json_encode($b + ['confirm' => (bool)$opt['confirm'], 'source' => 'local'], JSON_UNESCAPED_UNICODE))]);
-    $ch = curl_init($opt['url'] . '?action=followup_upsert');
-    curl_setopt_array($ch, [CURLOPT_POST => true, CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 300, CURLOPT_POSTFIELDS => $body,
-                            CURLOPT_HTTPHEADER => ['Content-Type: application/json', 'X-Agent-Key: ' . $key],
-                            CURLOPT_USERAGENT => 'SavannahHub-followup-local/1.0']);
-    $res = curl_exec($ch);
-    $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    curl_close($ch);
+    [$code, $res, $err] = hub_post($opt, 'followup_upsert', $body, $key);
     $j = json_decode((string)$res, true);
-    if ($code !== 200 || empty($j['ok'])) { fwrite(STDERR, "Batch " . ($i + 1) . " failed (HTTP $code): " . substr((string)$res, 0, 400) . "\n"); exit(1); }
+    if ($code !== 200 || empty($j['ok'])) {
+        fwrite(STDERR, "Batch " . ($i + 1) . " failed (HTTP $code" . ($err !== '' ? ", $err" : '') . "): " . substr((string)$res, 0, 400) . "\n");
+        exit(1);
+    }
     foreach (['added', 'updated', 'closed', 'reopened'] as $k) $total[$k] += count($j[$k] ?? []);
     $total['unmatched'] += count($j['unmatched'] ?? []);
     foreach ($j['closed'] ?? [] as $c) echo "  closed ({$c['reason']}): " . ($c['folder'] ?? '') . ' ' . ($c['ref'] ?? '') . "\n";
@@ -146,13 +160,9 @@ foreach ($batches as $i => $b) {
     foreach ($j['unmatched'] ?? [] as $u) echo "  not matched: " . ($u['folder'] ?? $u['row']) . ' — ' . $u['error'] . "\n";
 }
 // ── Group check (arrivals in the next 60 days), with the documents just sent ──
-$ch = curl_init($opt['url'] . '?action=followup_scan');
-curl_setopt_array($ch, [CURLOPT_POST => true, CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 300,
-                        CURLOPT_POSTFIELDS => json_encode(['b64' => base64_encode(json_encode(['type' => 'group', 'confirm' => (bool)$opt['confirm']]))]),
-                        CURLOPT_HTTPHEADER => ['Content-Type: application/json', 'X-Agent-Key: ' . $key],
-                        CURLOPT_USERAGENT => 'SavannahHub-followup-local/1.0']);
-$g = json_decode((string)curl_exec($ch), true);
-curl_close($ch);
+[$code, $res, $err] = hub_post($opt, 'followup_scan', json_encode(['b64' => base64_encode(json_encode(['type' => 'group', 'confirm' => (bool)$opt['confirm']]))]), $key);
+$g = json_decode((string)$res, true);
+if (!$g && $err !== '') $g = ['error' => $err];
 if (!empty($g['group'])) {
     printf("Groups arriving within 60 days: %d checked, %d new, %d updated, %d closed\n", count($g['group']['groups'] ?? []),
            count($g['group']['added'] ?? []), count($g['group']['updated'] ?? []), count($g['group']['closed'] ?? []));
