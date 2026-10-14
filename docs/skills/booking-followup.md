@@ -58,7 +58,10 @@ Proposta: <a chi scrivere / cosa sollecitare>
 
 ## 3. Chase
 
-- Internal (Glady / Lydia): one mail with the lines to take in charge or close, grouped by owner — English, as an `.eml` draft per `agency-email` (from info@, `C:\Dropbox\Exchange\Draft-mail`).
+- Internal (Glady + Lydia): one mail to operations@savannahexplorers.com (never Glady only), from Gmail, English, as an
+  `.eml` draft per `agency-email` (`C:\Dropbox\Exchange\Draft-mail`): this week's urgencies first (tickets, provisional
+  expiring, groups), then the expired ones by who booked them. Use the folder names as on disk (the Hub customer name can differ).
+  Leave out what Roberto already knows is fine (e.g. FamTrip Promoservice: the 2 ZNZ pax have their tickets).
 - Supplier (provisional expired close to the service, on-request flights, rooms to release for a group): only if Roberto asks — one draft per supplier with the references (WB…, booking ID) and the dates; the booking team normally does it.
 - Never change staff fields for them. If Roberto asks to reassign, mark not relevant or add a note: `followup_update` (dry run → his ok → `"confirm": true`).
 
