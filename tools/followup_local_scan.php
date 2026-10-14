@@ -58,11 +58,18 @@ if ($opt['folder'] !== '') $folders = array_filter($folders, fn($k) => stripos($
 ksort($folders);
 echo count($folders) . " booking folder(s) with trips not ended\n";
 
+/** Same rule as followup_group_kind() in followup_service.php (not loaded here: it needs the DB). */
+function followup_group_kind_local(string $name): bool {
+    return (bool)(preg_match('/GRP\d{4}|\(Diamante|Panorama/i', $name)
+                  || preg_match('/[_-]PROVISIONAL$/i', preg_replace('/(?:[_-]+CK)+$/i', '', trim($name))));
+}
+
 // ── Read and classify ──
 $rows = []; $scanned = []; $count = ['docs' => 0, 'issues' => 0, 'confirmed' => 0, 'unknown' => 0, 'unreadable' => 0];
 $tmp = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'fu_scan_' . getmypid() . '.txt';
 foreach ($folders as $rel => $trip) {
     $dir = "$root/$rel/invoices";
+    $isGroup = followup_group_kind_local(explode('/', preg_replace('#^00_20\d\d/#', '', $rel))[0]);   // the top booking folder
     $ok = true;
     foreach (is_dir($dir) ? scandir($dir) : [] as $f) {
         if (!is_file("$dir/$f") || followup_skip_file($f)) continue;
@@ -75,17 +82,20 @@ foreach ($folders as $rel => $trip) {
         @unlink($pdf);
         if ($rc !== 0 && !is_file($tmp)) { $ok = false; echo "  ! not read: $rel/invoices/$f\n"; continue; }
         $c = followup_classify(is_file($tmp) ? (string)file_get_contents($tmp) : '', $f, $trip, $today);
+        $groupDoc = $isGroup && (!empty($c['block_text']) || !empty($c['flight_pax']) || !empty($c['flight_znz']) || !empty($c['names_tba']));
         if ($c['issue']) {
             $count[$c['issue'] === 'unreadable' ? 'unreadable' : 'issues']++;
         } elseif ($c['status'] === 'confirmed') {
             $count['confirmed']++;
         } else {
             $count['unknown']++;
-            continue;                                       // no status printed: nothing to say about it
+            if (!$groupDoc) continue;                       // no status printed: nothing to say (groups: blocks / seats still count)
         }
         $rows[] = ['folder' => $rel, 'source_file' => 'invoices/' . $f, 'supplier' => $c['supplier'], 'supplier_ref' => $c['supplier_ref'],
                    'service_date' => $c['service_date'], 'issue' => $c['issue'], 'status' => $c['status'],
-                   'doc_status_text' => $c['doc_status_text'], 'expiry_date' => $c['expiry_date'], 'booked_by' => $c['booked_by']];
+                   'doc_status_text' => $c['doc_status_text'], 'expiry_date' => $c['expiry_date'], 'booked_by' => $c['booked_by'],
+                   'block_text' => $c['block_text'] ?? null, 'names_tba' => $c['names_tba'] ?? false, 'flight_pax' => $c['flight_pax'] ?? null,
+                   'flight_znz' => $c['flight_znz'] ?? false, 'flight_text' => $c['flight_text'] ?? null, 'ticket_limit' => $c['ticket_limit'] ?? null];
     }
     if ($ok) $scanned[] = $rel;
 }
@@ -134,6 +144,21 @@ foreach ($batches as $i => $b) {
     foreach ($j['closed'] ?? [] as $c) echo "  closed ({$c['reason']}): " . ($c['folder'] ?? '') . ' ' . ($c['ref'] ?? '') . "\n";
     foreach ($j['reopened'] ?? [] as $c) echo "  re-opened: " . ($c['folder'] ?? '') . ' ' . ($c['ref'] ?? '') . "\n";
     foreach ($j['unmatched'] ?? [] as $u) echo "  not matched: " . ($u['folder'] ?? $u['row']) . ' — ' . $u['error'] . "\n";
+}
+// ── Group check (arrivals in the next 60 days), with the documents just sent ──
+$ch = curl_init($opt['url'] . '?action=followup_scan');
+curl_setopt_array($ch, [CURLOPT_POST => true, CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 300,
+                        CURLOPT_POSTFIELDS => json_encode(['b64' => base64_encode(json_encode(['type' => 'group', 'confirm' => (bool)$opt['confirm']]))]),
+                        CURLOPT_HTTPHEADER => ['Content-Type: application/json', 'X-Agent-Key: ' . $key],
+                        CURLOPT_USERAGENT => 'SavannahHub-followup-local/1.0']);
+$g = json_decode((string)curl_exec($ch), true);
+curl_close($ch);
+if (!empty($g['group'])) {
+    printf("Groups arriving within 60 days: %d checked, %d new, %d updated, %d closed\n", count($g['group']['groups'] ?? []),
+           count($g['group']['added'] ?? []), count($g['group']['updated'] ?? []), count($g['group']['closed'] ?? []));
+    foreach ($g['group']['added'] ?? [] as $a) echo '  + ' . ($a['folder'] ?? '') . ' — ' . ($a['status'] ?? '') . "\n";
+} else {
+    echo 'Group check not run: ' . substr((string)json_encode($g), 0, 300) . "\n";
 }
 printf("%s: %d new, %d updated, %d closed, %d re-opened, %d row(s) not matched to a booking\n",
        $opt['confirm'] ? 'Saved' : 'Dry run (add --confirm to save)', $total['added'], $total['updated'], $total['closed'], $total['reopened'], $total['unmatched']);

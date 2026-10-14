@@ -1086,6 +1086,17 @@ logic `modules/operations/includes/followup_service.php`, documents read by `fol
   `unreadable` (no text in the PDF). Payment files (swift, receipt, bank …) are skipped.
 - `type: ticket` — domestic flights in the next 14 days of bookings with no ticket file (the `flight_tickets` logic):
   `ticket_missing`; a Calc that cannot be read → `unreadable` with the reason.
+- `type: group` — group folders at the top of `/001_Safari` arriving within **60 days**: every `GRPnnnn` folder,
+  Il Diamante set departures (`(Diamante…)` / `Panorama…`) and private agency groups tagged `_PROVISIONAL`.
+  `group_to_finalize`: what the check could collect for the booking team, which checks and finalises (release /
+  confirm services, room list, arrival / departure flights): client sub-folders (GRP: one per confirmed client), the Excel
+  (`*_Calc.xlsx`, else the Panorama workbook: RECAP + client sheets, pax and rooms), supplier blocks ("block 3 double rooms
+  (6 adults)"), documents still provisional, names TBA. `group_znz_flight` (when a flight to Zanzibar is booked or a client has
+  ARK-ZNZ in the Calc): seats on the flight invoices vs pax with the flight in their Calc sheet → "seats match", "N seat(s) to
+  release", "N pax without a seat"; `expiry_date` = ticketing time limit. The full data is in `details`. A group line
+  closed by staff is **not** re-opened by the next check; a group folder no longer found closes as `auto_not_found`.
+  PDF facts come from the server reader or from the office PC scan (`followup_upsert` keeps every document sent, also for
+  group folders without a confirmed request); the Excel is read on the server.
 - One line per `dedupe_key`: request + supplier reference (WB…, booking ID), else request + supplier + service date;
   tickets request + flight date + route. GRP: documents in the group folder belong to the group's first request (a
   member's `request_id` filter shows them too).
@@ -1103,7 +1114,7 @@ logic `modules/operations/includes/followup_service.php`, documents read by `fol
   `FOLLOWUP_PDFTOTEXT` (`includes/config.php`).
 
 #### `followup_list` (GET)
-`type` (`supplier` | `ticket`), `status` (`open` default | `closed` | `all`), `owner` (username | user id | `none`),
+`type` (`supplier` | `ticket` | `group`), `status` (`open` default | `closed` | `all`), `owner` (username | user id | `none`),
 `priority` (`1-URGENT` | `2-HIGH` | `3-NORMAL`, or `1`/`2`/`3`), `request_id`, `q` (client / folder / supplier / ref / notes).
 → `count`, `last_check_at` `{supplier, ticket}`, `last_checks`, `rows[]` `{id, type, request_id, customer, folder, folder_url,
 file_url, start_date, end_date, service_date, days_left, supplier, supplier_ref, service, source_file, issue, issue_label,
@@ -1112,7 +1123,7 @@ first_seen_at, last_seen_at, closed_at, closed_by, close_reason, events_count}` 
 priority, service date.
 
 #### `followup_scan` (POST)
-Runs the check. **Dry run unless `"confirm": true`** (the dry run returns what would change). `type` `supplier` | `ticket` |
+Runs the check. **Dry run unless `"confirm": true`** (the dry run returns what would change). `type` `supplier` | `ticket` | `group` |
 `all` (default), `request_id` (one booking). → `supplier` / `ticket` summaries `{added[], updated[], closed[] (+ reason),
 reopened[], unreadable[], unchanged}`; supplier also `units`, `units_complete`, `reader`, `partial` (time budget used up —
 run again, each PDF is read once per Dropbox revision), `errors[]`.
@@ -1134,11 +1145,12 @@ booked_by?}` (max 2000), `scanned[]` = folders whose `invoices/` were read compl
 curl -sA "$UA" -H "$H" "$U?action=followup_list&owner=none&priority=1"
 curl -sA "$UA" -H "$H" "$U?action=followup_list&request_id=2958&status=all"
 curl -sA "$UA" -H "$H" -X POST "$U?action=followup_scan" -d '{"type":"ticket"}'                                   # dry run
+curl -sA "$UA" -H "$H" -X POST "$U?action=followup_scan" -d '{"type":"group"}'                                    # dry run: groups arriving within 60 days
 curl -sA "$UA" -H "$H" -X POST "$U?action=followup_scan" -d '{"type":"all","confirm":true}'
 curl -sA "$UA" -H "$H" -X POST "$U?action=followup_update" -d '{"id":12,"staff_status":"problem","notes":"Lodge full on 1 Jan, alternatives asked"}'   # dry run
 curl -sA "$UA" -H "$H" -X POST "$U?action=followup_upsert" -d '{"rows":[{"folder":"12_30DEC_ElenaManfroni(UnEmozionePerSempre-PS-Roberto)_START30DEC_MIDT04JAN_END08JAN2027_BALANCE","source_file":"invoices/Lion'"'"'s paw-INV.pdf","supplier":"Lion'"'"'s Paw","supplier_ref":"WB41803","service_date":"2027-01-01","issue":"provisional_expired","doc_status_text":"Provisional (expires 28 Sep 2026)","expiry_date":"2026-09-28","booked_by":"Lydia"}],"scanned":[]}'   # dry run
 ```
-Cron (cron-job.org): `modules/operations/followup_cron.php?token=…&type=ticket` daily 05:30, `&type=supplier` Monday 05:30
+Cron (cron-job.org): `modules/operations/followup_cron.php?token=…&type=ticket` daily 05:30, `&type=group` daily 05:40, `&type=supplier` Monday 05:30
 (token `FOLLOWUP_CRON_TOKEN`, else `MEMO_CRON_TOKEN`; `&dry=1` = summary only). The memo digest (06:00) lists new lines,
 problems, lines not taken in charge for > 2 days, provisional expiring ≤ 7 days and tickets missing ≤ 7 days.
 

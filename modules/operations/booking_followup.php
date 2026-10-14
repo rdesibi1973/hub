@@ -25,7 +25,7 @@ $extra_css = '
 .fu-run select{padding:7px 12px;border:1.5px solid var(--grey-lt);border-radius:20px;font-family:inherit;font-size:.8rem;background:var(--white)}
 .fu-msg{display:none;margin:0 0 16px;padding:12px 16px;border-radius:8px;font-size:.82rem;line-height:1.5;background:var(--navy-lt);color:#123a5c}
 .fu-msg.err{background:var(--red-lt);color:var(--red-dk)}
-.fu-stats{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:12px;margin-bottom:18px}
+.fu-stats{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:12px;margin-bottom:18px}
 .stat-card{background:var(--white);border-radius:10px;box-shadow:0 1px 8px rgba(0,0,0,.08);padding:14px 16px;border-top:3px solid var(--grey-lt);cursor:pointer}
 .stat-card .v{font-family:Merriweather,serif;font-size:1.5rem;font-weight:700;color:var(--black);font-variant-numeric:tabular-nums}
 .stat-card .l{font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--grey-mid);margin-top:2px}
@@ -60,8 +60,10 @@ table.fu-table tr.hist td{background:var(--off-white);font-size:.74rem}
 .fu-empty{padding:28px;text-align:center;color:var(--grey-mid);font-size:.85rem}
 .fu-ev{list-style:none;margin:0;padding:0}
 .fu-ev li{padding:2px 0;color:var(--grey-dk)}
+.fu-det{margin:0 0 8px;padding:0 0 8px;border-bottom:1px solid var(--grey-lt);list-style:none}
+.fu-det li{padding:1px 0;color:var(--grey-dk)} .fu-det b{color:var(--black);font-weight:600;margin-right:6px}
 .fu-ev .w{color:var(--grey-mid);margin-right:8px;font-variant-numeric:tabular-nums}
-@media(max-width:1100px){.fu-stats{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:1200px){.fu-stats{grid-template-columns:repeat(4,minmax(0,1fr))}}
 @media(max-width:600px){.fu-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.fu-run{margin-left:0}}
 ';
 $extra_js = '<script>window.FU_DATA = ' . json_encode($fuData, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP) . ';</script>'
@@ -78,6 +80,7 @@ include __DIR__ . '/../../includes/layout_header.php';
     <div class="fu-run">
       <select id="fu-run-type" aria-label="What to check">
         <option value="ticket">Tickets (next 14 days)</option>
+        <option value="group">Groups (arrival ≤ 60 days)</option>
         <option value="supplier">Supplier documents</option>
         <option value="all">Both</option>
       </select>

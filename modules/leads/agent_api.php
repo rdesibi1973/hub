@@ -2728,7 +2728,7 @@ try {
         require_once __DIR__ . '/../operations/includes/followup_service.php';
         $status = (string)($in['status'] ?? 'open');
         if (!in_array($status, ['open', 'closed', 'all'], true)) agent_fail('status must be open, closed or all');
-        if (!empty($in['type']) && !in_array($in['type'], ['supplier', 'ticket'], true)) agent_fail('type must be supplier or ticket');
+        if (!empty($in['type']) && !in_array($in['type'], ['supplier', 'ticket', 'group'], true)) agent_fail('type must be supplier, ticket or group');
         if ((int)($in['request_id'] ?? 0) > 0) $agentReqId = agent_request($db, $in['request_id'])['id'];
         $rows = followup_rows($db, ['status' => $status, 'type' => $in['type'] ?? null, 'owner' => $in['owner'] ?? '',
                                     'priority' => $in['priority'] ?? null, 'request_id' => $in['request_id'] ?? null, 'q' => $in['q'] ?? null]);
@@ -2741,7 +2741,7 @@ try {
         agent_require_method('POST');
         require_once __DIR__ . '/../operations/includes/followup_service.php';
         $type = (string)($in['type'] ?? 'all');
-        if (!in_array($type, ['supplier', 'ticket', 'all'], true)) agent_fail('type must be supplier, ticket or all');
+        if (!in_array($type, ['supplier', 'ticket', 'group', 'all'], true)) agent_fail('type must be supplier, ticket, group or all');
         $rid = (int)($in['request_id'] ?? 0);
         if ($rid > 0) $agentReqId = agent_request($db, $rid)['id'];
         $res = followup_scan($db, ['type' => $type, 'request_id' => $rid ?: null, 'confirm' => !empty($in['confirm']),

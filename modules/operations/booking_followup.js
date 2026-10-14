@@ -5,12 +5,14 @@
   var D = window.FU_DATA;
   var API = 'api/followup.php';
   var ISSUE = {provisional: 'Provisional', provisional_expired: 'Provisional expired', on_request: 'On request',
-               orangi_rooms_provisional: 'Rooms still provisional', ticket_missing: 'Ticket missing', unreadable: 'Unreadable'};
+               orangi_rooms_provisional: 'Rooms still provisional', ticket_missing: 'Ticket missing', unreadable: 'Unreadable',
+               group_to_finalize: 'Group to finalize', group_znz_flight: 'Group ARK-ZNZ flight'};
   var STATUS = {open: 'Open', in_progress: 'In progress', problem: 'Problem', resolved: 'Resolved', not_relevant: 'Not relevant'};
   var TABS = [
     {key: 'open', label: 'All open'},
     {key: 'provisional', label: 'Provisional'},
     {key: 'tickets', label: 'Tickets'},
+    {key: 'groups', label: 'Groups'},
     {key: 'problem', label: 'Problem'},
     {key: 'closed', label: 'Closed'}
   ];
@@ -43,6 +45,7 @@
     if (r.closed_at) return false;
     if (tab === 'provisional') return r.type === 'supplier';
     if (tab === 'tickets') return r.type === 'ticket';
+    if (tab === 'groups') return r.type === 'group';
     if (tab === 'problem') return r.staff_status === 'problem';
     return true;
   }
@@ -76,7 +79,7 @@
   // ── Header, stats, tabs, filter options ─────────────────────────────────
   function renderRuns() {
     var parts = [];
-    [['ticket', 'Tickets'], ['supplier', 'Supplier documents']].forEach(function (t) {
+    [['ticket', 'Tickets'], ['group', 'Groups'], ['supplier', 'Supplier documents']].forEach(function (t) {
       var r = D.runs[t[0]];
       parts.push(t[1] + ': ' + (r ? 'last check ' + dmyhm(r.at) + ' — ' + esc(r.by) + (r.partial ? ' (partial)' : '') : 'not checked yet'));
     });
@@ -90,6 +93,7 @@
       ['problem', 'Problem', 'red', function () { setTab('problem'); }],
       ['expiring', 'Expiring ≤ 7 days', 'amber', function () { setTab('provisional'); }],
       ['tickets', 'Tickets missing', 'navy', function () { setTab('tickets'); }],
+      ['groups', 'Groups to finalize', 'navy', function () { setTab('groups'); }],
       ['closed7', 'Closed last 7 days', 'green', function () { setTab('closed'); }]
     ];
     var box = $('fu-stats');
@@ -184,7 +188,7 @@
       '<span style="white-space:nowrap">' + dmy(svc) + '</span><span class="fu-days' + (r.days_left !== null && r.days_left <= 7 ? ' fu-late' : '') + '">' + days(r.days_left) + '</span>',
       '<span class="fu-client">' + esc(r.customer || r.folder_name) + '</span>' +
         (r.folder_url ? '<a class="fu-folder" href="' + esc(r.folder_url) + '" target="_blank" rel="noopener" title="' + esc(r.folder) + '">📁 ' + esc(r.folder_name) + '</a>' : ''),
-      esc(r.type === 'ticket' ? (r.service || r.supplier || '') : (r.supplier || '')),
+      esc(r.type === 'ticket' ? (r.service || r.supplier || '') : (r.supplier || '')) + (r.type === 'group' && r.service ? '<span class="fu-days">' + esc(r.service) + '</span>' : ''),
       esc(r.supplier_ref || ''),
       '<span class="badge badge-issue' + issueCls + '">' + esc(ISSUE[r.issue] || r.issue) + '</span>',
       esc(r.doc_status_text || '') + (r.booked_by ? '<span class="fu-days">booked by ' + esc(r.booked_by) + '</span>' : ''),
@@ -205,7 +209,9 @@
   function renderTable() {
     var t = $('fu-table');
     var list = sortRows(all().filter(function (r) { return inTab(r, state.tab) && passes(r); }));
-    var head =['Priority', 'Service', 'Client / folder', state.tab === 'tickets' ? 'Flight' : 'Supplier', 'Ref', 'Issue', 'Document status',
+    var head = ['Priority', state.tab === 'groups' ? 'Arrival' : 'Service', 'Client / folder',
+                state.tab === 'tickets' ? 'Flight' : state.tab === 'groups' ? 'Group' : 'Supplier',
+                'Ref', 'Issue', state.tab === 'groups' ? 'What we found' : 'Document status',
                 'Expiry', 'File', 'Owner', 'Contacted', 'Status', 'Notes', state.tab === 'closed' ? 'Closed' : 'Last check', ''];
     t.innerHTML = '<thead><tr>' + head.map(function (h) { return '<th>' + h + '</th>'; }).join('') + '</tr></thead>';
     var body = document.createElement('tbody');
@@ -215,11 +221,26 @@
     }
     list.forEach(function (r) {
       body.appendChild(row(r));
-      if (state.open[r.id]) body.appendChild(histRow(r.id, state.open[r.id], head.length));
+      if (state.open[r.id]) body.appendChild(histRow(r, state.open[r.id], head.length));
     });
     t.appendChild(body);
   }
-  function histRow(id, events, span) {
+  /** Group lines: what the check collected (Excel, client folders, blocks, flights), above the history. */
+  function detailsList(r) {
+    var d = r.details;
+    if (!d) return '';
+    var rows = [];
+    var add = function (label, list) { (list || []).forEach(function (x) { rows.push('<li><b>' + esc(label) + '</b>' + esc(x) + '</li>'); }); };
+    if (d.calc) rows.push('<li><b>Excel</b>' + esc(d.calc.file) + (d.calc.pax_total !== null ? ' — ' + d.calc.pax_total + ' pax' : '') + '</li>');
+    add('Sheet', d.sold); add('Client folder', d.client_folders); add('Block', d.blocks); add('Provisional', d.provisional);
+    add('Flight', d.flights); add('Flying ARK-ZNZ', d.clients_flying);
+    if (d.calc && d.calc.warnings) add('Excel', d.calc.warnings);
+    if (d.names_tba) rows.push('<li><b>Names</b>still TBA</li>');
+    if (d.documents_not_read) rows.push('<li><b>PDF</b>' + d.documents_not_read + ' not read yet (run the office PC scan)</li>');
+    return rows.length ? '<ul class="fu-det">' + rows.join('') + '</ul>' : '';
+  }
+  function histRow(r, events, span) {
+    var id = r.id;
     var tr = document.createElement('tr');
     tr.className = 'hist';
     tr.dataset.hist = id;
@@ -228,7 +249,7 @@
                : esc(e.field.replace('_', ' ')) + ': ' + esc(e.old || '—') + ' → ' + esc(e.new || '—');
       return '<li><span class="w">' + dmyhm(e.at) + ' · ' + esc(e.by) + '</span>' + what + '</li>';
     }).join('');
-    tr.innerHTML = '<td colspan="' + span + '"><ul class="fu-ev">' + items + '</ul></td>';
+    tr.innerHTML = '<td colspan="' + span + '">' + detailsList(r) + '<ul class="fu-ev">' + items + '</ul></td>';
     return tr;
   }
   function render() { renderRuns(); renderStats(); renderTabs(); renderTable(); }
@@ -330,7 +351,7 @@
     var type = $('fu-run-type').value, msg = $('fu-msg');
     runBtn.disabled = true;
     msg.className = 'fu-msg'; msg.style.display = 'block';
-    msg.textContent = '⏳ Checking ' + (type === 'ticket' ? 'tickets' : type === 'supplier' ? 'supplier documents' : 'tickets and supplier documents') +
+    msg.textContent = '⏳ Checking ' + (type === 'ticket' ? 'tickets' : type === 'supplier' ? 'supplier documents' : type === 'group' ? 'groups arriving within 60 days' : 'tickets, groups and supplier documents') +
                       '… (supplier documents: up to a few minutes)';
     post('scan', {type: type}).then(function (d) {
       runBtn.disabled = false;
@@ -339,7 +360,7 @@
       var lines = [];
       Object.keys(d.summary).forEach(function (t) {
         var s = d.summary[t];
-        lines.push('<strong>' + (t === 'ticket' ? 'Tickets' : 'Supplier documents') + ':</strong> ' + s.added + ' new, ' + s.updated + ' updated, ' +
+        lines.push('<strong>' + (t === 'ticket' ? 'Tickets' : t === 'group' ? 'Groups' : 'Supplier documents') + ':</strong> ' + s.added + ' new, ' + s.updated + ' updated, ' +
                    s.closed + ' closed, ' + s.reopened + ' re-opened, ' + s.unreadable + ' unreadable' +
                    (s.units !== undefined ? ' · ' + s.units_complete + '/' + s.units + ' folders read' : '') +
                    (s.warning ? '<br>⚠ ' + esc(s.warning) : '') + (s.hint ? '<br>' + esc(s.hint) : '') +

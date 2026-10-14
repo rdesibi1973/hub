@@ -57,7 +57,7 @@ function followup_all_dates(string $text): array {
 /** Supplier name from the file name: "LION'S PAW - INV.pdf" → "Lion's Paw", "The Orangi Collection  - sv 1.pdf" → "The Orangi Collection". */
 function followup_supplier_from_file(string $name): string {
     $s = preg_replace('/\.[a-z0-9]{2,4}$/i', '', basename($name));
-    $s = preg_replace('/\((?:\d+|copy)\)|\bcopy\b|[_]+/i', ' ', $s);
+    $s = preg_replace('/\((?:\d+|copy)\)|\bcopy\b|[_]+|\bWB\s?\d{3,7}\b|\b\d{1,2}\s*pax\b/i', ' ', $s);   // the reference / pax count are not the supplier
     $s = preg_replace('/(?:[\s\-–]+|\b)(?:inv(?:oice)?s?|s\.?v\.?|vouchers?|proforma|pro-forma|confirmations?|conf|booking|reservation|res)\b\.?(?:[\s\-–]*\d+)?/i', ' ', $s);
     $s = trim(preg_replace('/\s+/', ' ', $s), " -–.,");
     if ($s === '') $s = preg_replace('/\.[a-z0-9]{2,4}$/i', '', basename($name));
@@ -77,7 +77,7 @@ function followup_norm(string $s): string {
 function followup_is_policy_line(string $l): bool {
     return (bool)preg_match('/polic|strictly|release|held|subject to|are valid|is valid|bookings? (?:are|will|is)|provisional bookings|'
                           . 'provisional =|cancellation|expiry period|prior to|discretion|not applicable|change to provisional|'
-                          . 'automatically|without (?:prior )?notice|notify you|terms|"provisional"|tentative|temporary|awaiting|definition|means/i', $l);
+                          . 'automatically|without (?:prior )?notice|notify you|terms|"provisional"|tentative|temporary|awaiting|definition|means|is applicable|per booking/i', $l);
 }
 
 /**
@@ -97,6 +97,49 @@ function followup_status_after_label(string $flat): ?string {
         }
     }
     return null;
+}
+
+/**
+ * What a group check needs from a document (collective GRP, Il Diamante SIC, private groups):
+ *   block_text   "block 3 double rooms (6 adults)" / "8 rooms provisional" (voucher notes)
+ *   names_tba    guest names still TBA
+ *   flight_pax   seats on a flight invoice ("Travellers: (Count:Adult: 4)", "4XAdult", "… 4pax")
+ *   flight_znz   the flight goes to / from Zanzibar
+ *   flight_text  first flight row ("AL401 ARUSHA 14:30 ZANZIBAR 15:30"), ticket_limit (ticketing time limit)
+ */
+function followup_group_facts(array &$out, string $flat, string $one, bool $isFlight, string $file): void {
+    $out['block_text'] = null; $out['names_tba'] = false;
+    $out['flight_pax'] = null; $out['flight_znz'] = false; $out['flight_text'] = null; $out['ticket_limit'] = null;
+    // "block 3 double rooms" anywhere; "2 Double rooms + 1 Single room" only in the notes (tables say "Room Charge", addresses "Block B").
+    $notes = preg_match('/\b(?:Reservation Notes|Guest Information|Remarks|Special (?:Service )?Requests?)\b(.*?)(?:TERMS\s*&\s*CONDITIONS|Accommodation Rates|Provisional (?:Booking )?Policy|$)/is', $flat, $nm) ? $nm[1] : '';
+    // The clause starts at a word: (?<!\S) keeps "5 adults + 1 Teenager…" whole instead of "eenager…".
+    if (preg_match('/(?<![^\s\-–:(])[^\n.*]{0,60}?\bblock(?:ed)?\s+(?:of\s+)?\d+\s*[^\n]{0,70}/i', $flat, $m) && !followup_is_policy_line($m[0])) {
+        $out['block_text'] = trim(preg_replace('/\s+/', ' ', $m[0]));
+    } elseif ($notes !== '' && preg_match('/(?:^|(?<=\n))[^\n]*?\b\d+\s+(?:double|twin|single|triple|dbl|twn|sgl|tpl)?\s*rooms?\b[^\n]{0,60}/i', $notes, $m)
+              && !followup_is_policy_line($m[0])) {
+        $out['block_text'] = trim(preg_replace('/\s+/', ' ', $m[0]));
+        if (strlen($out['block_text']) > 160) $out['block_text'] = '…' . substr($out['block_text'], -157);
+    }
+    $out['names_tba'] = (bool)preg_match('/\bnames?\s+(?:are\s+)?(?:TBA|TBC|to be (?:advised|confirmed))|\b(?:TBA|TBC)\b[^\n]{0,15}\bnames?\b/i', $one);
+    $airline = '/auric|coastal|precision|flight ?link|salaam|regional air|air tanzania|zanair|tropical air|safari ?air|unity air|aerocrs/i';
+    if ($isFlight || preg_match($airline, $file . ' ' . substr($one, 0, 600))) {
+        $pax = 0;
+        if (preg_match('/Count:\s*([^)]*)\)/i', $one, $m) && preg_match_all('/(?:Adult|Child|Infant|Teen)\w*\s*:\s*(\d+)/i', $m[1], $c)) {
+            $pax = array_sum(array_map('intval', $c[1]));
+        } elseif (preg_match_all('/\b(\d{1,2})\s*X\s*(?:Adult|Child|Teen)/i', $one, $c)) {
+            $pax = max(array_map('intval', $c[1]));
+        } elseif (preg_match('/\b(\d{1,2})\s*pax\b/i', $file . ' ' . $one, $m)) {
+            $pax = (int)$m[1];
+        }
+        $out['flight_pax'] = $pax ?: null;
+        $rows = preg_match_all('/\b[A-Z]{2}\s?\d{2,4}\b[^\n]{0,30}\b\d{1,2}:\d{2}\b[^\n]{0,40}/', $flat, $m) ? array_map(fn($x) => trim(preg_replace('/\s+/', ' ', $x)), $m[0]) : [];
+        // Towards Zanzibar only (ARK-ZNZ, Seronera-ZNZ): "UI624 Arusha 13:45 Zanzibar 15:00", not the "YS105 ZANZIBAR 11:00 ARUSHA" return.
+        $znz = array_values(array_filter($rows, fn($x) => preg_match('/zanzibar|\bZNZ\b/i', $x)
+                                                        && !preg_match('/^[A-Z]{2}\s?\d{2,4}\s+(?:zanzibar|ZNZ)\b/i', $x)));
+        $out['flight_znz'] = (bool)$znz;
+        $out['flight_text'] = $znz[0] ?? $rows[0] ?? null;
+        if (preg_match('/Ticketing Time Limit\s*:?\s*(' . FU_DATE_RE . ')/i', $one, $m)) $out['ticket_limit'] = followup_parse_date($m[1]);
+    }
 }
 
 /**
@@ -232,6 +275,8 @@ function followup_classify(string $text, string $file, array $trip = [], ?string
             }
         }
     }
+
+    followup_group_facts($out, $flat, $one, $isFlight, $file);
 
     $out['status'] = $status ?? 'unknown';
     if ($status === 'provisional') {

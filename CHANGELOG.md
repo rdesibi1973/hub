@@ -20,6 +20,18 @@ Running log of notable changes and current build state. Module-level "active / p
 
 ---
 
+## 2026-10-14 — Booking follow-up: groups 60 days before arrival (+ ARK-ZNZ seats)
+- New line type `group` (tab Groups, card "Groups to finalize", Run check "Groups"): every GRP folder, Il Diamante set
+  departures and private groups tagged `_PROVISIONAL` arriving within 60 days. `group_to_finalize` collects client
+  sub-folders, the Excel (RECAP + client sheets, or the Panorama workbook: pax, rooms), supplier blocks ("block 3 double
+  rooms (6 adults)"), documents still provisional and names TBA, for the booking team to release / confirm and finalise.
+  `group_znz_flight`: seats on the Zanzibar flight invoices ("Count: Adult: 4", "2XAdult") vs pax with ARK-ZNZ in their
+  Calc sheet, ticketing time limit as expiry. A group closed by staff is not re-opened by the check.
+- Classifier: block / rooms notes, names TBA, flight seats and direction (towards Zanzibar only), ticketing time limit;
+  tested on the group folders of Oct 2026 – Aug 2027 (GRP2710: 4 seats = Ferri 2 + Pizi 2; Savannah collective GRPs:
+  0 client folders vs the Orangi block). `followup_upsert` keeps every document sent (also groups without a confirmed
+  request); the office PC scan runs the group check after sending. Cron `&type=group` daily. Migration 070 (or on first use).
+
 ## 2026-10-14 — Booking follow-up: provisional bookings + missing domestic tickets
 - The 9 Oct Excel of supplier bookings still provisional went back and forth by mail untouched. Now one page,
   Operations → 📌 Booking follow-up (`modules/operations/booking_followup.php`, also on the Hub home, the Lead Tracker

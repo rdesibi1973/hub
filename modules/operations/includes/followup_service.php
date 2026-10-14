@@ -24,18 +24,20 @@
 require_once __DIR__ . '/ops_service.php';
 require_once __DIR__ . '/followup_classify.php';
 
-const FU_CLASSIFY_VERSION = 1;          // bump when followup_classify() reads differently: cached documents are read again
+const FU_CLASSIFY_VERSION = 2;          // bump when followup_classify() reads differently: cached documents are read again
 const FU_TICKET_DAYS      = 14;         // ticket scan: flights in the next N days
 const FU_SCAN_BUDGET      = 240;        // seconds a supplier scan may spend downloading PDFs (the rest: next run)
-const FU_ISSUES  = ['provisional', 'provisional_expired', 'on_request', 'orangi_rooms_provisional', 'ticket_missing', 'unreadable'];
+const FU_GROUP_DAYS       = 60;         // group check: arrivals in the next N days
+const FU_ISSUES  = ['provisional', 'provisional_expired', 'on_request', 'orangi_rooms_provisional', 'ticket_missing', 'unreadable',
+                    'group_to_finalize', 'group_znz_flight'];
 const FU_STATUSES = ['open', 'in_progress', 'problem', 'resolved', 'not_relevant'];
 const FU_REASONS = ['auto_confirmed', 'auto_ticket_saved', 'auto_trip_ended', 'auto_not_found', 'manual'];
 /** Worst first: the issue a line shows when several documents carry the same reference. */
 const FU_ISSUE_RANK = ['provisional_expired' => 0, 'provisional' => 1, 'on_request' => 2, 'orangi_rooms_provisional' => 3,
-                       'ticket_missing' => 4, 'unreadable' => 5];
+                       'ticket_missing' => 4, 'unreadable' => 5, 'group_to_finalize' => 6, 'group_znz_flight' => 7];
 const FU_ISSUE_LABELS = ['provisional' => 'Provisional', 'provisional_expired' => 'Provisional expired', 'on_request' => 'On request',
                          'orangi_rooms_provisional' => 'Rooms still provisional', 'ticket_missing' => 'Ticket missing',
-                         'unreadable' => 'Unreadable'];
+                         'unreadable' => 'Unreadable', 'group_to_finalize' => 'Group to finalize', 'group_znz_flight' => 'Group ZNZ flight'];
 const FU_STATUS_LABELS = ['open' => 'Open', 'in_progress' => 'In progress', 'problem' => 'Problem', 'resolved' => 'Resolved',
                           'not_relevant' => 'Not relevant'];
 const FU_REASON_LABELS = ['auto_confirmed' => 'confirmed document saved', 'auto_ticket_saved' => 'ticket saved',
@@ -51,7 +53,7 @@ function followup_schema(PDO $db): void {
     $issues = "'" . implode("','", FU_ISSUES) . "'";
     $db->exec("CREATE TABLE IF NOT EXISTS booking_followups (
         id              INT AUTO_INCREMENT PRIMARY KEY,
-        type            ENUM('supplier','ticket') NOT NULL,
+        type            ENUM('supplier','ticket','group') NOT NULL,
         dedupe_key      VARCHAR(190) NOT NULL,
         request_id      INT NULL,
         folder          VARCHAR(255) NULL,
@@ -76,11 +78,13 @@ function followup_schema(PDO $db): void {
         closed_by       VARCHAR(20) NULL,
         close_reason    ENUM('auto_confirmed','auto_ticket_saved','auto_trip_ended','auto_not_found','manual') NULL,
         scan_source     VARCHAR(10) NULL,
+        details         TEXT NULL,
         UNIQUE KEY uq_followup_key (dedupe_key),
         KEY idx_followup_request (request_id),
         KEY idx_followup_closed (closed_at),
         KEY idx_followup_owner (owner_user_id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    followup_schema_upgrade($db, $issues);
     $db->exec("CREATE TABLE IF NOT EXISTS booking_followup_events (
         id          INT AUTO_INCREMENT PRIMARY KEY,
         followup_id INT NOT NULL,
@@ -110,6 +114,25 @@ function followup_schema(PDO $db): void {
         KEY idx_followup_run_at (at)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
     $done = true;
+}
+
+/**
+ * Tables created by migration 069 / the first version: add the group type and `details`
+ * (migration 070 does the same). Checked once in INFORMATION_SCHEMA; each ALTER may fail harmlessly.
+ */
+function followup_schema_upgrade(PDO $db, string $issues): void {
+    try {
+        $st = $db->query("SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+                          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'booking_followups' AND COLUMN_NAME = 'details'");
+        if ((int)$st->fetchColumn() > 0) return;
+    } catch (Throwable $e) {
+        return;   // no INFORMATION_SCHEMA (tests)
+    }
+    foreach (["ALTER TABLE booking_followups MODIFY type ENUM('supplier','ticket','group') NOT NULL",
+              "ALTER TABLE booking_followups MODIFY issue ENUM($issues) NOT NULL",
+              "ALTER TABLE booking_followups ADD COLUMN details TEXT NULL"] as $sql) {
+        try { $db->exec($sql); } catch (Throwable $e) { error_log('followup_schema_upgrade: ' . $e->getMessage()); }
+    }
 }
 
 // ── Who may do what ──────────────────────────────────────────────────────────
@@ -344,6 +367,237 @@ function followup_ticket_candidates(PDO $db, string $today, ?int $requestId = nu
     return ['lines' => $lines, 'ok' => $ok, 'checked' => $checked, 'to' => $to];
 }
 
+// ── Groups (60 days before arrival) ──────────────────────────────────────────
+
+/** 'grp' (any GRPnnnn folder), 'sic' (Il Diamante / Panorama set departures), 'private' (agency group tagged _PROVISIONAL), or null. */
+function followup_group_kind(string $name): ?string {
+    if (preg_match('/GRP\d{4}/i', $name)) return 'grp';
+    if (preg_match('/\(Diamante|Panorama/i', $name)) return 'sic';
+    if (preg_match('/[_-]PROVISIONAL$/i', preg_replace('/(?:[_-]+CK)+$/i', '', trim($name)))) return 'private';
+    return null;
+}
+
+const FU_GROUP_LABELS = ['grp' => 'GRP', 'sic' => 'Il Diamante SIC', 'private' => 'Private group'];
+
+/**
+ * What a group's Calc says: RECAP total + one entry per client sheet (pax, rooms, ARK-ZNZ flight), or
+ * the only sheet (Diamante / private groups / a collective GRP still on its price sheet).
+ * Passport numbers are never read (calc_reader.php).
+ */
+function followup_group_calc(string $token, string $dir, array $calc): array {
+    require_once __DIR__ . '/../../leads/includes/calc_reader.php';
+    $out = ['file' => $calc['name'], 'recap' => false, 'pax_total' => null, 'rooms' => '', 'clients' => [], 'warnings' => []];
+    $bytes = cp_retry(fn() => dropbox_download_text($token, $dir . '/' . $calc['name']));
+    if ($bytes === null || $bytes === '') { $out['warnings'][] = 'Calc not downloaded'; return $out; }
+    $tmp = tempnam(sys_get_temp_dir(), 'fugrp_');
+    file_put_contents($tmp, $bytes);
+    try {
+        return followup_group_calc_file($tmp, $calc['name']);
+    } finally {
+        @unlink($tmp);
+    }
+}
+
+/** followup_group_calc() on a local .xlsx (also used by the tests). */
+function followup_group_calc_file(string $path, string $name): array {
+    require_once __DIR__ . '/../../leads/includes/calc_reader.php';
+    $out = ['file' => $name, 'recap' => false, 'pax_total' => null, 'rooms' => '', 'clients' => [], 'warnings' => []];
+    $sum = fn(array $p) => (int)($p['adults'] ?? 0) + (int)($p['teen'] ?? 0) + (int)($p['child'] ?? 0);
+    $znz = function (array $c) {
+        foreach ($c['days'] as $d) {
+            // Towards Zanzibar: the day ends there ("Karatu-Arusha-ZNZ"), not "ZNZ-Arusha".
+            $parts = array_values(array_filter(array_map('trim', preg_split('/[-–>\/]+/u', (string)$d['label'])), 'strlen'));
+            if ((float)$d['flight_cost'] > 0 && $parts && preg_match('/zanzibar|\bZNZ\b/i', end($parts))) return ['date' => $d['date'], 'route' => trim($d['label'])];
+        }
+        return null;
+    };
+    $sheets = sc_xlsx_sheets($path);
+    $read = function (string $sheet) use ($path, $sum, $znz, &$out) {
+        try {
+            $c = calc_read_file($path, $sheet);
+        } catch (Throwable $e) {
+            $out['warnings'][] = ($sheet ?: 'Calc') . ': ' . $e->getMessage();
+            return null;
+        }
+        $f = $znz($c);
+        return ['sheet' => trim($sheet ?: $c['sheet']), 'pax' => $sum($c['pax']), 'rooms' => trim(preg_replace('/\s+/', ' ', (string)$c['room_config'])),
+                'znz' => $f, 'guests_tba' => (bool)$c['guests_tba']];
+    };
+    if (sc_has_recap($sheets)) {
+        $out['recap'] = true;
+        foreach ($sheets as $s) {
+            if (stripos($s, 'recap') !== false) { if ($r = $read($s)) { $out['pax_total'] = $r['pax']; $out['rooms'] = $r['rooms']; } }
+        }
+        foreach (calc_group_client_sheets($sheets) as $s) if ($r = $read($s)) $out['clients'][] = $r;
+    } elseif (count($sheets) === 1 && ($r = $read($sheets[0]))) {
+        $out['pax_total'] = $r['pax']; $out['rooms'] = $r['rooms']; $out['clients'][] = $r;
+    } else {
+        $out['warnings'][] = count($sheets) . ' sheets and no RECAP: ' . implode(', ', array_slice($sheets, 0, 6));
+    }
+    return $out;
+}
+
+/** Classified documents of a group folder's invoices/: server reading if possible, else what the office PC sent. */
+function followup_group_docs(PDO $db, string $token, string $dir, bool $canRead, float $deadline, string $today, array $trip): array {
+    $files = cp_retry(fn() => cp_list_files($token, $dir . '/invoices'));
+    $get = $db->prepare("SELECT rev, result_json FROM booking_followup_docs WHERE path_hash = ?");
+    $docs = [];
+    foreach ($files as $f) {
+        if (followup_skip_file($f['name'])) continue;
+        $path = $dir . '/invoices/' . $f['name'];
+        $get->execute([sha1(strtolower($path))]);
+        $c = $get->fetch(PDO::FETCH_ASSOC);
+        $res = $c ? json_decode((string)$c['result_json'], true) : null;
+        $fresh = $res && ($res['v'] ?? 0) === FU_CLASSIFY_VERSION && ($c['rev'] === $f['rev'] || ($c['rev'] === 'local' && !$canRead));
+        if (!$fresh && $canRead && microtime(true) < $deadline) {
+            $bytes = cp_retry(fn() => dropbox_download_text($token, $path));
+            if ($bytes !== null) {
+                $res = followup_classify(followup_pdf_text($bytes), $f['name'], $trip, $today) + ['v' => FU_CLASSIFY_VERSION];
+                $db->prepare("REPLACE INTO booking_followup_docs (path_hash, path, rev, request_id, result_json, read_at) VALUES (?,?,?,?,?,?)")
+                   ->execute([sha1(strtolower($path)), $path, $f['rev'], null, json_encode($res, JSON_UNESCAPED_UNICODE), date('Y-m-d H:i:s')]);
+                $fresh = true;
+            }
+        }
+        $docs[] = ($res ?: ['status' => 'unknown']) + ['file' => $f['name'], 'read' => (bool)$res];
+    }
+    return $docs;
+}
+
+/**
+ * The two group lines for one folder: "group to finalize" (what the Calc, the client sub-folders and the
+ * supplier documents say) and, when a Zanzibar flight is involved, seats booked vs clients flying with us.
+ * The booking team checks and finalises (release / confirm services, room list, arrival / departure flights).
+ */
+function followup_group_lines(string $name, string $kind, array $trip, ?array $calc, array $members, array $docs, ?array $req): array {
+    $base = ['type' => 'group', 'request_id' => $req ? (int)$req['id'] : null, 'folder' => $name,
+             'start_date' => $trip['start_date'], 'end_date' => $trip['end_date'], 'service_date' => $trip['start_date'],
+             'supplier' => FU_GROUP_LABELS[$kind], 'supplier_ref' => ops_grp_code($name) ?: null, 'booked_by' => null];
+    $key = 'G|' . dropbox_folder_core_safe($name) . '|' . $trip['start_date'];
+    $lines = [];
+    $unread = count(array_filter($docs, fn($d) => !$d['read']));
+
+    // Sold. GRP: one sub-folder per confirmed client (the Calc sheets of a collective GRP with no client yet are
+    // price sheets). Il Diamante / private groups: the Excel.
+    $sold = []; $calcTxt = '';
+    if ($calc) {
+        $pax = array_sum(array_column($calc['clients'], 'pax'));
+        if ($calc['recap']) $calcTxt = ($calc['pax_total'] ?? $pax) . ' pax in RECAP, ' . count($calc['clients']) . ' sheet(s)';
+        elseif ($calc['clients']) $calcTxt = $pax . ' pax' . ($calc['rooms'] !== '' ? ', ' . (strlen($calc['rooms']) > 90 ? substr($calc['rooms'], 0, 88) . '…' : $calc['rooms']) : '');
+        foreach ($calc['clients'] as $c) $sold[] = $c['sheet'] . ': ' . $c['pax'] . ' pax' . ($c['rooms'] !== '' ? ', ' . $c['rooms'] : '');
+    }
+    if ($kind === 'grp') $soldTxt = count($members) . ' client folder(s)' . ($calcTxt !== '' ? ' · Calc: ' . $calcTxt : ' · no Calc');
+    else $soldTxt = $calcTxt !== '' ? $calcTxt : 'no Excel found';
+
+    // Blocked / to release: supplier documents.
+    $blocks = []; $open = []; $tba = false; $exp = null;
+    foreach ($docs as $d) {
+        if (!empty($d['block_text'])) $blocks[] = ($d['supplier'] ?? $d['file']) . (!empty($d['supplier_ref']) ? ' ' . $d['supplier_ref'] : '') . ': ' . $d['block_text'];
+        if (in_array($d['status'] ?? '', ['provisional', 'on_request'], true) || ($d['issue'] ?? null) === 'orangi_rooms_provisional') {
+            $open[] = ($d['supplier'] ?? $d['file']) . (!empty($d['supplier_ref']) ? ' ' . $d['supplier_ref'] : '') . ' — ' . ($d['doc_status_text'] ?? $d['status']);
+            if (!empty($d['expiry_date']) && ($exp === null || $d['expiry_date'] < $exp)) $exp = $d['expiry_date'];
+        }
+        if (!empty($d['names_tba'])) $tba = true;
+    }
+    if ($calc) foreach ($calc['clients'] as $c) if ($c['guests_tba']) $tba = true;
+
+    $summary = 'Sold: ' . $soldTxt
+             . ($blocks ? ' · Blocked: ' . $blocks[0] . (count($blocks) > 1 ? ' (+' . (count($blocks) - 1) . ')' : '') : '')
+             . ($open ? ' · ' . count($open) . ' supplier doc(s) provisional / on request' : '')
+             . ($tba ? ' · names TBA' : '') . ($unread ? ' · ' . $unread . ' PDF(s) not read yet' : '');
+    $details = ['kind' => $kind, 'calc' => $calc ? ['file' => $calc['file'], 'recap' => $calc['recap'], 'pax_total' => $calc['pax_total'],
+                                                    'rooms' => $calc['rooms'], 'warnings' => $calc['warnings']] : null,
+                'sold' => $sold, 'client_folders' => $members, 'blocks' => $blocks, 'provisional' => $open, 'names_tba' => $tba,
+                'documents' => count($docs), 'documents_not_read' => $unread];
+    $k = followup_key_fit($key . '|finalize');
+    $lines[$k] = $base + ['dedupe_key' => $k, 'service' => 'Group to finalize',
+        'source_file' => $calc ? $calc['file'] : null, 'issue' => 'group_to_finalize', 'doc_status_text' => substr($summary, 0, 255),
+        'expiry_date' => $exp, 'details' => json_encode($details, JSON_UNESCAPED_UNICODE)];
+
+    // Zanzibar flight: seats on the flight invoices vs clients with ARK-ZNZ in their Calc sheet.
+    $seats = 0; $flights = []; $limit = null; $flightFile = null;
+    foreach ($docs as $d) {
+        if (empty($d['flight_znz'])) continue;
+        $seats += (int)($d['flight_pax'] ?? 0);
+        $flights[] = ($d['supplier'] ?? $d['file']) . ': ' . ($d['flight_pax'] ?? '?') . ' seat(s) — ' . ($d['flight_text'] ?? '') . (!empty($d['status']) && $d['status'] !== 'unknown' ? ' (' . $d['status'] . ')' : '');
+        if (!empty($d['ticket_limit']) && ($limit === null || $d['ticket_limit'] < $limit)) $limit = $d['ticket_limit'];
+        $flightFile = $flightFile ?? $d['file'];
+    }
+    $flying = []; $flyPax = 0;
+    if ($calc) foreach ($calc['clients'] as $c) if ($c['znz']) { $flying[] = $c['sheet'] . ' ' . $c['pax'] . ' pax (' . $c['znz']['route'] . ')'; $flyPax += $c['pax']; }
+    if ($flights || $flying) {
+        $diff = $seats - $flyPax;
+        $verdict = !$flights ? 'no ZNZ flight invoice in invoices/' : ($diff === 0 ? 'seats match' : ($diff > 0 ? $diff . ' seat(s) to release' : abs($diff) . ' pax without a seat'));
+        $txt = 'Seats ' . $seats . ' · clients with ARK-ZNZ in the Calc: ' . $flyPax . ' pax → ' . $verdict;
+        $k = followup_key_fit($key . '|znz');
+        $lines[$k] = $base + ['dedupe_key' => $k, 'service' => 'ARK-ZNZ flight',
+            'source_file' => $flightFile ? 'invoices/' . $flightFile : null, 'issue' => 'group_znz_flight',
+            'doc_status_text' => substr($txt, 0, 255), 'expiry_date' => $limit,
+            'details' => json_encode(['flights' => $flights, 'clients_flying' => $flying, 'seats' => $seats, 'pax_flying' => $flyPax,
+                                      'ticketing_limit' => $limit], JSON_UNESCAPED_UNICODE)];
+    }
+    return $lines;
+}
+
+/** The group's Excel: the *_Calc.xlsx, else (Il Diamante "Panorama01_Diamante_05JAN.xlsx") another workbook of the folder. */
+function followup_group_pick_excel(array $files): ?array {
+    if ($c = cp_pick_calc($files)) return $c;
+    $x = array_values(array_filter($files, fn($f) => preg_match('/\.xlsx$/i', $f['name']) && strpos($f['name'], '~$') !== 0
+                                                     && stripos($f['name'], 'conflicted copy') === false));
+    usort($x, fn($a, $b) => (stripos($b['name'], 'panorama') !== false) <=> (stripos($a['name'], 'panorama') !== false));
+    return $x[0] ?? null;
+}
+
+/** dropbox_folder_core() without loading the Dropbox helper first. */
+function dropbox_folder_core_safe(string $name): string {
+    require_once __DIR__ . '/../../leads/dropbox_helper.php';
+    return dropbox_folder_core($name);
+}
+
+/**
+ * Group lines for every group folder at the top of /001_Safari arriving in the next 60 days.
+ * → ['lines', 'groups' => [folder names], 'errors' => [], 'complete' => bool]
+ */
+function followup_group_candidates(PDO $db, string $today, string $token, bool $canRead, float $deadline, ?int $requestId = null): array {
+    $to = date('Y-m-d', strtotime($today . ' +' . FU_GROUP_DAYS . ' days'));
+    $folders = [];
+    foreach (cp_retry(fn() => dropbox_list_folder_entries($token, CK_BASE)) as $e) {
+        $kind = followup_group_kind($e['name']);
+        if (!$kind) continue;
+        $d = parse_folder_dates($e['name']);
+        if (!$d['start_date'] || $d['start_date'] < $today || $d['start_date'] > $to) continue;
+        $folders[$e['name']] = ['kind' => $kind, 'trip' => $d];
+    }
+    // Hub requests of each folder (the first one owns the lines; a collective GRP may have none yet).
+    $reqs = [];
+    if ($folders) {
+        foreach ($db->query("SELECT id, customer_name, practice_code, group_folder, dropbox_url FROM requests
+                             WHERE (payment_status IS NULL OR payment_status <> 'Cancelled')")->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $rel = folder_rel_path($r);
+            if (!preg_match('#^001_Safari/(?:00_20\d\d/)?([^/]+)#i', $rel, $m)) continue;
+            $reqs[dropbox_folder_stem_safe($m[1])][] = $r;
+        }
+    }
+    $lines = []; $errors = []; $names = [];
+    foreach ($folders as $name => $g) {
+        $owner = null;
+        foreach ($reqs[dropbox_folder_stem_safe($name)] ?? [] as $r) if (!$owner || (int)$r['id'] < (int)$owner['id']) $owner = $r;
+        if ($requestId && (!$owner || !in_array($requestId, array_map(fn($r) => (int)$r['id'], $reqs[dropbox_folder_stem_safe($name)] ?? []), true))) continue;
+        $dir = CK_BASE . '/' . $name;
+        try {
+            $calcFile = followup_group_pick_excel(cp_retry(fn() => cp_list_files($token, $dir)));
+            $calc = $calcFile ? followup_group_calc($token, $dir, $calcFile) : null;
+            $members = [];
+            foreach (cp_retry(fn() => dropbox_list_folder_entries($token, $dir)) as $sub) if (folder_is_booking_leaf($sub['name'])) $members[] = $sub['name'];
+            $docs = followup_group_docs($db, $token, $dir, $canRead, $deadline, $today, $g['trip']);
+            $lines += followup_group_lines($name, $g['kind'], $g['trip'], $calc, $members, $docs, $owner);
+            $names[] = $name;
+        } catch (Throwable $e) {
+            $errors[] = ['folder' => $name, 'error' => $e->getMessage()];
+        }
+    }
+    return ['lines' => $lines, 'groups' => $names, 'errors' => $errors, 'complete' => !$errors && !$requestId];
+}
+
 // ── Apply: insert / update / close / re-open ─────────────────────────────────
 
 /** Event row (user NULL = the check). */
@@ -379,7 +633,7 @@ function followup_apply(PDO $db, string $type, array $cand, array $scope, bool $
     $have = [];
     foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) $have[$r['dedupe_key']] = $r;
     $docFields = ['request_id', 'folder', 'start_date', 'end_date', 'service_date', 'supplier', 'supplier_ref', 'service',
-                  'source_file', 'issue', 'doc_status_text', 'expiry_date', 'booked_by'];
+                  'source_file', 'issue', 'doc_status_text', 'expiry_date', 'booked_by', 'details'];
     $logged = ['issue', 'doc_status_text', 'expiry_date', 'source_file', 'service_date'];
 
     foreach ($cand as $key => $l) {
@@ -402,8 +656,10 @@ function followup_apply(PDO $db, string $type, array $cand, array $scope, bool $
             $nv = $l[$f] ?? null; $ov = $old[$f];
             if ((string)$nv !== (string)$ov && !($nv === null && $f !== 'issue' && $ov !== null && in_array($f, ['booked_by', 'supplier_ref'], true))) $diff[$f] = [$ov, $nv];
         }
-        $reopen = $old['closed_at'] !== null && $old['staff_status'] !== 'not_relevant' && $old['close_reason'] !== 'auto_trip_ended';
-        if ($old['closed_at'] !== null && !$reopen) {                      // closed as not relevant: stays closed
+        // Not re-opened: not relevant (admin), trip ended, and a group the booking team closed (they finalise it).
+        $reopen = $old['closed_at'] !== null && $old['staff_status'] !== 'not_relevant' && $old['close_reason'] !== 'auto_trip_ended'
+               && !($type === 'group' && $old['close_reason'] === 'manual');
+        if ($old['closed_at'] !== null && !$reopen) {                      // stays closed
             if ($confirm) $db->prepare("UPDATE booking_followups SET last_seen_at = ? WHERE id = ?")->execute([$now, $id]);
             $sum['unchanged']++;
             continue;
@@ -419,7 +675,8 @@ function followup_apply(PDO $db, string $type, array $cand, array $scope, bool $
             $db->prepare("UPDATE booking_followups SET " . implode(', ', $set) . " WHERE id = ?")->execute($args);
             foreach ($diff as $f => $v) if (in_array($f, $logged, true)) followup_event($db, $id, null, $f, $v[0], $v[1]);
             if ($reopen) {
-                $what = $type === 'ticket' ? 'ticket still missing' : 'still ' . strtolower(FU_ISSUE_LABELS[$l['issue']]) . ($l['source_file'] ? ' in ' . $l['source_file'] : '');
+                $what = $type === 'ticket' ? 'ticket still missing' : ($type === 'group' ? 'group still to finalize'
+                      : 'still ' . strtolower(FU_ISSUE_LABELS[$l['issue']]) . ($l['source_file'] ? ' in ' . $l['source_file'] : ''));
                 followup_event($db, $id, null, 'reopened', ($old['close_reason'] ?? '') . ($old['staff_status'] === 'resolved' ? ' / resolved' : ''), $what);
                 if ($old['staff_status'] === 'resolved') followup_event($db, $id, null, 'staff_status', 'resolved', 'open');
             }
@@ -438,6 +695,7 @@ function followup_apply(PDO $db, string $type, array $cand, array $scope, bool $
         if (($old['end_date'] ?: $old['start_date']) && ($old['end_date'] ?: $old['start_date']) < $today) $reason = 'auto_trip_ended';
         elseif ($type === 'supplier' && isset($scope['confirmed'][$key])) $reason = 'auto_confirmed';
         elseif ($type === 'ticket' && isset($scope['ok'][$rid])) $reason = 'auto_ticket_saved';
+        elseif ($type === 'group' && !empty($scope['complete_type'])) $reason = 'auto_not_found';   // folder renamed / cancelled / moved
         elseif (isset($done[$rid]) && ($type === 'supplier'
                 || $old['service_date'] >= $today && $old['service_date'] <= ($scope['to'] ?? '9999-12-31'))) $reason = 'auto_not_found';
         if (!$reason) continue;
@@ -483,18 +741,19 @@ function followup_scan(PDO $db, array $o = []): array {
     require_once __DIR__ . '/../../leads/dropbox_helper.php';
     require_once __DIR__ . '/../../leads/includes/calc_payments.php';
     followup_schema($db);
-    $type    = in_array($o['type'] ?? 'all', ['supplier', 'ticket', 'all'], true) ? ($o['type'] ?? 'all') : 'all';
+    $type    = in_array($o['type'] ?? 'all', ['supplier', 'ticket', 'group', 'all'], true) ? ($o['type'] ?? 'all') : 'all';
     $rid     = !empty($o['request_id']) ? (int)$o['request_id'] : null;
     $confirm = !empty($o['confirm']);
     $source  = (string)($o['source'] ?? 'api');
     $today   = (string)($o['today'] ?? date('Y-m-d'));
     $out = ['dry_run' => !$confirm, 'today' => $today];
     @set_time_limit(600);
+    $token = null;
 
-    if ($type !== 'ticket') {
-        $reader = followup_pdf_reader();
+    $reader = followup_pdf_reader();
+    if ($type === 'supplier' || $type === 'all') {
         $units = followup_units($db, $rid, $today);
-        $token = cp_retry(fn() => dropbox_get_access_token());
+        $token = $token ?? cp_retry(fn() => dropbox_get_access_token());
         $deadline = microtime(true) + (float)($o['budget'] ?? FU_SCAN_BUDGET);
         $cand = []; $confirmed = []; $doneReq = []; $partialReq = []; $errors = []; $complete = 0;
         foreach ($units as $u) {
@@ -524,7 +783,17 @@ function followup_scan(PDO $db, array $o = []): array {
                          + ($partial && $reader !== null ? ['hint' => 'Time budget used up — run the check again to read the remaining documents (each PDF is read once).'] : []);
         if ($confirm) followup_log_run($db, 'supplier', $source, $o['user_id'] ?? null, followup_counts($out['supplier']), $partial);
     }
-    if ($type !== 'supplier') {
+    if ($type === 'group' || $type === 'all') {
+        $token = $token ?? cp_retry(fn() => dropbox_get_access_token());
+        $g = followup_group_candidates($db, $today, $token, $reader !== null, microtime(true) + (float)($o['budget'] ?? FU_SCAN_BUDGET), $rid);
+        $owners = array_values(array_unique(array_filter(array_map(fn($l) => $l['request_id'], $g['lines']))));
+        $sum = followup_apply($db, 'group', $g['lines'], ['complete_type' => $g['complete'], 'only' => $rid ? ($owners ?: [0]) : null],
+                              $confirm, 'server', $today);
+        $out['group'] = $sum + ['groups' => $g['groups'], 'window' => [$today, date('Y-m-d', strtotime($today . ' +' . FU_GROUP_DAYS . ' days'))],
+                                'errors' => $g['errors']];
+        if ($confirm) followup_log_run($db, 'group', $source, $o['user_id'] ?? null, followup_counts($out['group']), !$g['complete'] && !$rid);
+    }
+    if ($type === 'ticket' || $type === 'all') {
         $t = followup_ticket_candidates($db, $today, $rid);
         $sum = followup_apply($db, 'ticket', $t['lines'], ['requests' => array_keys($t['checked']), 'ok' => $t['ok'], 'to' => $t['to'], 'only' => $rid ? [$rid] : null],
                               $confirm, 'server', $today);
@@ -539,6 +808,7 @@ function followup_counts(array $s): array {
     $c = [];
     foreach (['added', 'updated', 'closed', 'reopened', 'unreadable'] as $k) $c[$k] = count($s[$k] ?? []);
     foreach (['units', 'units_complete', 'reader', 'partial'] as $k) if (isset($s[$k])) $c[$k] = $s[$k];
+    if (isset($s['groups'])) $c['groups'] = count($s['groups']);
     return $c;
 }
 
@@ -553,6 +823,7 @@ function followup_counts(array $s): array {
  */
 function followup_upsert(PDO $db, array $rows, array $scanned, bool $confirm, string $source = 'agent', ?string $today = null): array {
     $today = $today ?? date('Y-m-d');
+    followup_schema($db);
     $units = followup_units($db, null, $today);
     $byFolder = []; $byReq = [];
     foreach ($units as $k => $u) {
@@ -569,12 +840,19 @@ function followup_upsert(PDO $db, array $rows, array $scanned, bool $confirm, st
         $hit = $byFolder[$s] ?? $byFolder[dropbox_folder_stem_safe(basename($s))] ?? [];
         return count(array_unique($hit)) === 1 ? $hit[0] : null;
     };
-    $docs = []; $unmatched = [];
+    $docs = []; $unmatched = []; $cached = 0;
     foreach ($rows as $i => $r) {
         $ref = $r['request_id'] ?? $r['folder'] ?? null;
         $k = $ref !== null ? $find($ref) : null;
-        if ($k === null) { $unmatched[] = ['row' => $i, 'folder' => $r['folder'] ?? null, 'request_id' => $r['request_id'] ?? null,
-                                           'error' => 'no open confirmed booking with this folder / request']; continue; }
+        // Every document sent is kept for the group check (a collective GRP may have no confirmed request yet).
+        if ($confirm && followup_cache_sent_doc($db, $r, $k !== null ? $units[$k]['dir'] : null)) $cached++;
+        if ($k === null) {
+            $grp = followup_group_kind(basename((string)($r['folder'] ?? '')));
+            $unmatched[] = ['row' => $i, 'folder' => $r['folder'] ?? null, 'request_id' => $r['request_id'] ?? null,
+                            'error' => $grp ? 'group folder without a confirmed booking — kept for the group check only'
+                                            : 'no open confirmed booking with this folder / request'];
+            continue;
+        }
         $issue = $r['issue'] ?? null;
         if ($issue !== null && $issue !== '' && !in_array($issue, FU_ISSUES, true) || $issue === 'ticket_missing') {
             $unmatched[] = ['row' => $i, 'error' => 'issue must be one of ' . implode(', ', array_diff(FU_ISSUES, ['ticket_missing'])) . ' (or status confirmed)'];
@@ -604,7 +882,27 @@ function followup_upsert(PDO $db, array $rows, array $scanned, bool $confirm, st
     // Only the requests sent are in scope: other bookings' lines are left alone.
     $sum = followup_apply_subset($db, $cand, ['requests' => $doneReq, 'confirmed' => $confirmed],
                                  array_unique(array_map(fn($k) => (int)$units[$k]['request']['id'], array_keys($docs))), $confirm, $source, $today);
-    return $sum + ['matched' => count($rows) - count($unmatched), 'unmatched' => $unmatched, 'folders' => count($docs)];
+    return $sum + ['matched' => count($rows) - count($unmatched), 'unmatched' => $unmatched, 'folders' => count($docs), 'documents_kept' => $cached];
+}
+
+/** A document read elsewhere, stored like a server reading (rev 'local') so the group check can use it. */
+function followup_cache_sent_doc(PDO $db, array $r, ?string $unitDir): bool {
+    $file = trim((string)($r['source_file'] ?? ''));
+    if ($file === '') return false;
+    if (stripos($file, 'invoices/') !== 0) $file = 'invoices/' . ltrim($file, '/');
+    $dir = !empty($r['folder']) ? CK_BASE . '/' . trim(preg_replace('#^/?001_Safari/#i', '', (string)$r['folder']), '/') : $unitDir;
+    if (!$dir) return false;
+    $issue = $r['issue'] ?? null;
+    $doc = ['status' => $issue ? ($issue === 'on_request' ? 'on_request' : ($issue === 'orangi_rooms_provisional' ? 'confirmed' : 'provisional'))
+                               : strtolower((string)($r['status'] ?? 'unknown')),
+            'issue' => $issue ?: null, 'supplier' => $r['supplier'] ?? followup_supplier_from_file($file), 'supplier_ref' => $r['supplier_ref'] ?? null,
+            'service_date' => $r['service_date'] ?? null, 'doc_status_text' => $r['doc_status_text'] ?? null, 'expiry_date' => $r['expiry_date'] ?? null,
+            'booked_by' => $r['booked_by'] ?? null, 'v' => FU_CLASSIFY_VERSION];
+    foreach (['block_text', 'names_tba', 'flight_pax', 'flight_znz', 'flight_text', 'ticket_limit'] as $f) $doc[$f] = $r[$f] ?? null;
+    $path = $dir . '/' . $file;
+    $db->prepare("REPLACE INTO booking_followup_docs (path_hash, path, rev, request_id, result_json, read_at) VALUES (?,?,?,?,?,?)")
+       ->execute([sha1(strtolower($path)), $path, 'local', null, json_encode($doc, JSON_UNESCAPED_UNICODE), date('Y-m-d H:i:s')]);
+    return true;
 }
 
 /** followup_apply() limited to some requests (an upsert does not see the other bookings). */
@@ -656,7 +954,7 @@ function followup_rows(PDO $db, array $f = [], ?string $today = null): array {
     $status = $f['status'] ?? 'open';
     if ($status === 'open') $w[] = 'b.closed_at IS NULL';
     elseif ($status === 'closed') $w[] = 'b.closed_at IS NOT NULL';
-    if (!empty($f['type']) && in_array($f['type'], ['supplier', 'ticket'], true)) { $w[] = 'b.type = ?'; $a[] = $f['type']; }
+    if (!empty($f['type']) && in_array($f['type'], ['supplier', 'ticket', 'group'], true)) { $w[] = 'b.type = ?'; $a[] = $f['type']; }
     if (!empty($f['ids'])) { $ids = array_map('intval', (array)$f['ids']); $w[] = 'b.id IN (' . implode(',', $ids ?: [0]) . ')'; }
     if (isset($f['owner']) && $f['owner'] !== '') {
         if ($f['owner'] === 'none') $w[] = 'b.owner_user_id IS NULL';
@@ -704,7 +1002,8 @@ function followup_out(array $r, string $today): array {
         'id' => (int)$r['id'], 'type' => $r['type'], 'request_id' => $r['request_id'] !== null ? (int)$r['request_id'] : null,
         'customer' => $r['customer_name'] ?? null, 'folder' => $r['folder'], 'folder_name' => basename((string)$r['folder']),
         'folder_url' => $r['folder'] ? followup_dropbox_url($dir) : null,
-        'file_url' => $r['source_file'] ? followup_dropbox_url($dir . '/' . dirname($r['source_file']), basename($r['source_file'])) : null,
+        'file_url' => $r['source_file'] ? followup_dropbox_url($dir . (dirname($r['source_file']) !== '.' ? '/' . dirname($r['source_file']) : ''),
+                                                                basename($r['source_file'])) : null,
         'start_date' => $r['start_date'], 'end_date' => $r['end_date'], 'service_date' => $r['service_date'],
         'days_left' => $svc ? (int)round((strtotime($svc) - strtotime($today)) / 86400) : null,
         'supplier' => $r['supplier'], 'supplier_ref' => $r['supplier_ref'], 'service' => $r['service'],
@@ -720,6 +1019,7 @@ function followup_out(array $r, string $today): array {
         'closed_at' => $r['closed_at'], 'closed_by' => $r['closed_by'] === 'system' ? 'system' : (($r['closed_by_name'] ?? null) ?: $r['closed_by']),
         'close_reason' => $r['close_reason'], 'close_reason_label' => $r['close_reason'] ? FU_REASON_LABELS[$r['close_reason']] : null,
         'events_count' => (int)($r['events_count'] ?? 0), 'source' => $r['scan_source'],
+        'details' => !empty($r['details']) ? json_decode((string)$r['details'], true) : null,
     ];
 }
 
@@ -748,13 +1048,14 @@ function followup_events(PDO $db, int $id): array {
 
 /** Stat cards of the page. */
 function followup_stats(array $open, array $closedRecent): array {
-    $s = ['untaken' => 0, 'urgent' => 0, 'problem' => 0, 'expiring' => 0, 'tickets' => 0, 'closed7' => count($closedRecent)];
+    $s = ['untaken' => 0, 'urgent' => 0, 'problem' => 0, 'expiring' => 0, 'tickets' => 0, 'groups' => 0, 'closed7' => count($closedRecent)];
     foreach ($open as $r) {
         if ($r['owner_user_id'] === null) $s['untaken']++;
         if ($r['priority'] === '1-URGENT') $s['urgent']++;
         if ($r['staff_status'] === 'problem') $s['problem']++;
         if ($r['expiry_date'] && !$r['expired'] && (strtotime($r['expiry_date']) - time()) / 86400 <= 7) $s['expiring']++;
         if ($r['issue'] === 'ticket_missing') $s['tickets']++;
+        if ($r['issue'] === 'group_to_finalize') $s['groups']++;
     }
     return $s;
 }

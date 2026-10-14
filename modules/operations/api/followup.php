@@ -49,7 +49,7 @@ try {
         $res = followup_scan($db, ['type' => $in['type'] ?? 'all', 'confirm' => true, 'source' => 'page', 'user_id' => (int)$user['id'],
                                    'budget' => 150]);   // stay inside the browser / PHP time limit; the next run reads the rest
         $out = ['ok' => true, 'summary' => []];
-        foreach (['supplier', 'ticket'] as $t) {
+        foreach (['supplier', 'ticket', 'group'] as $t) {
             if (!isset($res[$t])) continue;
             $out['summary'][$t] = followup_counts($res[$t])
                 + array_intersect_key($res[$t], array_flip(['warning', 'hint', 'errors', 'window']))
