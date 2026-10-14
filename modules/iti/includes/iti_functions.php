@@ -1566,6 +1566,13 @@ function iti_get_activities(int $destination_id = null): array {
     return $st->fetchAll();
 }
 
+/** One activity by id (active or not: activities.php edits deactivated ones too). */
+function iti_get_activity(int $id): array|false {
+    $st = db()->prepare('SELECT * FROM iti_activities WHERE id = ?');
+    $st->execute([$id]);
+    return $st->fetch();
+}
+
 // ── STANDARD INCLUSIONS ───────────────────────────────────────────────────────
 function iti_get_standard_inclusions(string $type = null): array {
     if ($type) {

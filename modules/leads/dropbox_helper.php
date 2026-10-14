@@ -170,8 +170,20 @@ function dropbox_move_folder(string $token, string $from_path, string $to_path):
 
     $data = json_decode($body, true) ?? [];
     if ($code !== 200) {
-        $errSummary = $data['error_summary'] ?? $body;
-        throw new RuntimeException("Dropbox move_v2 failed (HTTP $code): $errSummary");
+        $errSummary = (string)($data['error_summary'] ?? $body);
+        // Plain words for the common refusals (the raw Dropbox code stays at the end).
+        $toDir = rtrim(substr($to_path, 0, (int)strrpos($to_path, '/')), '/') ?: '/';
+        if (stripos($errSummary, 'to/conflict') === 0) {
+            $why = 'Dropbox refused the move: "' . basename($to_path) . '" already exists in ' . $toDir
+                 . ' (a folder with that name is already there — check Dropbox for a duplicate, merge or rename it, then retry).';
+        } elseif (stripos($errSummary, 'from_lookup/not_found') === 0) {
+            $why = 'Dropbox refused the move: the folder is no longer at ' . $from_path . ' (moved or renamed outside the Hub — use Rename… with its current path).';
+        } elseif (stripos($errSummary, 'to/no_write_permission') === 0 || stripos($errSummary, 'from_lookup/restricted') === 0) {
+            $why = 'Dropbox refused the move: no permission on ' . $toDir . '.';
+        } else {
+            $why = 'Dropbox move failed';
+        }
+        throw new RuntimeException("$why [move_v2 HTTP $code: $errSummary]");
     }
     return $data;
 }
