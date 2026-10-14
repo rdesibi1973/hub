@@ -53,12 +53,6 @@ include __DIR__ . '/includes/layout_header.php';
       <span class="pc-arrow">↗</span>
     </a>
 
-    <a class="primary-card" href="<?= BASE_URL ?>/modules/operations/booking_followup.php">
-      <div class="pc-icon">📌</div>
-      <div class="pc-text"><h3>Booking follow-up</h3><p>Provisional bookings &amp; missing tickets</p></div>
-      <span class="pc-arrow">↗</span>
-    </a>
-
     <a class="primary-card" href="<?= BASE_URL ?>/modules/memo/index.php">
       <div class="pc-icon">📝</div>
       <div class="pc-text"><h3>Memo Board</h3><p>Personal memos &amp; reminders</p></div>
