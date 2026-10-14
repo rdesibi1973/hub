@@ -101,7 +101,8 @@ function agent_audit(PDO $db, string $action, $reqId, array $payload, string $re
                               'iti_create_lodge', 'iti_set_days', 'iti_add_day', 'iti_delete_day', 'iti_update_inclusions',
                               'iti_create_flight_route', 'iti_create_activity', 'iti_create_transfer_route', 'iti_save_as_sample',
                               'create_request', 'add_flight_rates', 'timeline_update', 'summary_set', 'rename_folder',
-                              'set_request_status', 'update_request', 'import_group_folder', 'move_group_folder', 'ck_request_check', 'memo_delete', 'create_agency', 'update_agency', 'save_agency_contact', 'delete_agency_contact'], true) && empty($payload['confirm']);
+                              'set_request_status', 'update_request', 'import_group_folder', 'move_group_folder', 'ck_request_check', 'memo_delete', 'create_agency', 'update_agency', 'save_agency_contact', 'delete_agency_contact',
+                              'followup_scan', 'followup_update', 'followup_upsert'], true) && empty($payload['confirm']);
     // Mail: keep who/what in the log, not message bodies or attachment content.
     if (in_array($action, ['mail_get', 'mail_attachment', 'iti_document', 'iti_vouchers'], true) && $code === 200) {
         $res = json_decode($resultJson, true);
@@ -2722,6 +2723,63 @@ try {
         agent_out(['ok' => true] + $res);
     }
 
+    // ── Booking follow-up (modules/operations/includes/followup_service.php, page booking_followup.php) ──
+    case 'followup_list': {
+        require_once __DIR__ . '/../operations/includes/followup_service.php';
+        $status = (string)($in['status'] ?? 'open');
+        if (!in_array($status, ['open', 'closed', 'all'], true)) agent_fail('status must be open, closed or all');
+        if (!empty($in['type']) && !in_array($in['type'], ['supplier', 'ticket'], true)) agent_fail('type must be supplier or ticket');
+        if ((int)($in['request_id'] ?? 0) > 0) $agentReqId = agent_request($db, $in['request_id'])['id'];
+        $rows = followup_rows($db, ['status' => $status, 'type' => $in['type'] ?? null, 'owner' => $in['owner'] ?? '',
+                                    'priority' => $in['priority'] ?? null, 'request_id' => $in['request_id'] ?? null, 'q' => $in['q'] ?? null]);
+        $runs = followup_last_runs($db);
+        agent_out(['ok' => true, 'count' => count($rows), 'last_check_at' => ['supplier' => $runs['supplier']['at'] ?? null, 'ticket' => $runs['ticket']['at'] ?? null],
+                   'last_checks' => $runs, 'rows' => $rows]);
+    }
+
+    case 'followup_scan': {
+        agent_require_method('POST');
+        require_once __DIR__ . '/../operations/includes/followup_service.php';
+        $type = (string)($in['type'] ?? 'all');
+        if (!in_array($type, ['supplier', 'ticket', 'all'], true)) agent_fail('type must be supplier, ticket or all');
+        $rid = (int)($in['request_id'] ?? 0);
+        if ($rid > 0) $agentReqId = agent_request($db, $rid)['id'];
+        $res = followup_scan($db, ['type' => $type, 'request_id' => $rid ?: null, 'confirm' => !empty($in['confirm']),
+                                   'source' => 'api', 'user_id' => (int)$agentUser['id']]);
+        agent_out(['ok' => true] + $res + (empty($in['confirm'])
+            ? ['message' => 'Dry run — nothing written. Resend with "confirm": true to save the lines (staff fields are never touched).'] : []));
+    }
+
+    case 'followup_update': {
+        agent_require_method('POST');
+        require_once __DIR__ . '/../operations/includes/followup_service.php';
+        $ch = array_intersect_key($in, array_flip(['owner', 'contacted_at', 'staff_status', 'notes']));
+        if (!$ch) agent_fail('Nothing to change — send owner, contacted_at, staff_status and / or notes');
+        // The key acts as AGENT_API_USER with the follow-up admin rights (reassign, not_relevant); dry run + audit log.
+        $res = followup_update($db, (int)($in['id'] ?? 0), $ch, ['id' => (int)$agentUser['id'], 'role_name' => $agentUser['role_name'],
+                                                                'permissions' => [FU_EDIT_PERMISSION], 'followup_admin' => true],
+                               !empty($in['confirm']));
+        if (!$res['ok']) agent_fail($res['error'], $res['code'] ?? 400);
+        $agentReqId = $res['row']['request_id'] ?? null;
+        agent_out($res + (empty($in['confirm']) ? ['message' => 'Dry run — resend with "confirm": true to save.'] : []));
+    }
+
+    case 'followup_upsert': {
+        agent_require_method('POST');
+        require_once __DIR__ . '/../operations/includes/followup_service.php';
+        $rows = $in['rows'] ?? [];
+        $scanned = $in['scanned'] ?? [];
+        if (!is_array($rows) || !is_array($scanned)) agent_fail('rows and scanned must be arrays');
+        if (!$rows && !$scanned) agent_fail('rows[] (supplier documents) and / or scanned[] (folders read completely) required');
+        if (count($rows) > 2000) agent_fail('At most 2000 rows per call');
+        $source = in_array($in['source'] ?? '', ['local', 'agent'], true) ? $in['source'] : 'agent';
+        @set_time_limit(300);
+        $res = followup_upsert($db, $rows, $scanned, !empty($in['confirm']), $source);
+        if (!empty($in['confirm'])) followup_log_run($db, 'supplier', $source === 'local' ? 'local' : 'api', (int)$agentUser['id'], followup_counts($res), false);
+        agent_out(['ok' => true, 'dry_run' => empty($in['confirm'])] + $res
+                  + (empty($in['confirm']) ? ['message' => 'Dry run — nothing written. Resend with "confirm": true.'] : []));
+    }
+
     default:
         agent_fail('Unknown action "' . $agentAction . '"', 400, ['actions' => [
             'find_requests', 'list_agencies', 'create_agency', 'update_agency', 'save_agency_contact', 'delete_agency_contact', 'create_request', 'update_request', 'import_group_folder', 'move_group_folder', 'list_standard_programs',
@@ -2739,6 +2797,7 @@ try {
             'mail_folders', 'mail_list', 'mail_get', 'mail_attachment', 'mail_flag', 'mail_move', 'mail_draft', 'mail_send',
             'timeline_list', 'timeline_add', 'timeline_update', 'summary_set', 'request_resume', 'set_request_status',
             'payments_due', 'ck_status', 'ck_request_check', 'ops_movements', 'ops_lunch_boxes', 'ops_medivac', 'flight_tickets',
+            'followup_list', 'followup_scan', 'followup_update', 'followup_upsert',
         ]]);
     }
 } catch (Throwable $e) {

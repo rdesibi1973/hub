@@ -42,7 +42,7 @@ Notes:
 
 All live secrets sit in server-only config that is **git-ignored** (see `.gitignore`):
 
-- `includes/config.php` (root) — excluded from repo. Holds e.g. `API_IMPORT_KEY` (checked via the `X-Hub-Token` header), `AGENT_API_KEY` / `AGENT_API_USER` (Agent API, header `X-Agent-Key`), `AGENT_MEMO_USER` (whose Memo Board Claude writes to), `MEMO_CRON_TOKEN` (memo reminder cron).
+- `includes/config.php` (root) — excluded from repo. Holds e.g. `API_IMPORT_KEY` (checked via the `X-Hub-Token` header), `AGENT_API_KEY` / `AGENT_API_USER` (Agent API, header `X-Agent-Key`), `AGENT_MEMO_USER` (whose Memo Board Claude writes to), `MEMO_CRON_TOKEN` (memo reminder cron), optional `FOLLOWUP_CRON_TOKEN` (Booking follow-up cron, else `MEMO_CRON_TOKEN`) and `FOLLOWUP_PDFTOTEXT` (path of a pdftotext binary, if one is installed for the supplier scan).
 - `api.txt` (repo root on Roberto's PC, git-ignored) — local copy of the Agent API key for Claude sessions.
 - `modules/leads/config.php` — excluded from repo. Holds live DB, Dropbox and HubSpot credentials, plus `API_KEY` (checked via the `X-Api-Key` header) and any external keys (e.g. `ANTHROPIC_API_KEY` used by `modules/iti/iti_fix_destinations.php`).
 
@@ -55,5 +55,8 @@ To edit a secret: change it **on the server** (outside the repo, no git deploy).
 - **PHP**: the server runs **PHP 8.3** since 28 Sep 2026 (was 8.0.30); `composer.json` pins the platform to 8.3. PHP 8 constructs are fine; keep the style of the file you edit. Local syntax check: `C:\Utility\PHP\php.exe -l <file>`.
 - **Database**: MySQL (not MariaDB) — no `ADD COLUMN IF NOT EXISTS`.
 - **Composer**: `dompdf/dompdf ^2.0` (invoice PDFs), `phpoffice/phpspreadsheet ^1.29` (Calc fill / rates), `phpoffice/phpword ^1.4`; autoload at `vendor/autoload.php`.
+- **PDF text**: the server has no `pdftotext` and no Composer binary (checked 14 Oct 2026). The Booking follow-up supplier scan
+  uses `smalot/pdfparser` if present in `vendor/`, or `FOLLOWUP_PDFTOTEXT`; until then `tools\followup_local_scan.bat` reads the
+  PDFs on the office PC (pdftotext from Git: `C:\Utility\Git\mingw64\bin\pdftotext.exe`).
 - **Git-ignored** (per `.gitignore`): server-only `includes/config.php`, NetBeans build artifacts (`build/`, `dist/`, `nbproject/private/`), `SavannahExplorersGUI/`, PHP `error_log` files, and Dropbox "conflicted copy" PHP files.
 - **Java source files** require `git add -f` (NetBeans patterns in `.gitignore` would otherwise exclude them).

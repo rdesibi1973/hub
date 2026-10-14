@@ -830,6 +830,39 @@ include 'includes/header.php';
       <?php endif; ?>
     </div>
 
+    <?php
+    // Booking follow-up: open supplier / ticket items of this booking (a GRP member sees its group's), read-only here.
+    $fuRows = [];
+    try {
+        require_once __DIR__ . '/../operations/includes/followup_service.php';
+        $fuRows = followup_rows(db(), ['request_id' => (int)$r['id'], 'status' => 'open']);
+    } catch (Throwable $e) { $fuRows = null; }
+    $fuLink = '../operations/booking_followup.php?' . http_build_query(['request_id' => (int)$r['id']]
+              + (trim((string)($r['group_folder'] ?? '')) !== '' ? ['folder' => trim($r['group_folder'])] : []));
+    ?>
+    <div class="detail-label">Booking follow-up</div>
+    <div class="detail-value" id="rv-followup">
+      <?php if ($fuRows === null): ?>
+        <span class="text-muted">— not available</span>
+      <?php elseif (!$fuRows): ?>
+        <span class="text-muted">— nothing open</span>
+        <a href="<?= h($fuLink) ?>" style="margin-left:10px;font-size:.8rem;text-decoration:none">Follow-up page →</a>
+      <?php else: ?>
+        <?php foreach ($fuRows as $fu):
+            $fuRed = $fu['priority'] === '1-URGENT' || $fu['staff_status'] === 'problem'; ?>
+          <div style="font-size:.8rem;margin-bottom:3px">
+            <span style="font-size:.68rem;font-weight:700;border-radius:6px;padding:1px 7px;<?= $fuRed ? 'color:#a33;background:#f7dede' : 'color:#8a6d3b;background:#fcf3e3' ?>"><?= h(FU_ISSUE_LABELS[$fu['issue']] ?? $fu['issue']) ?></span>
+            <strong><?= h($fu['type'] === 'ticket' ? ($fu['service'] ?: 'Flight') : ($fu['supplier'] ?: '')) ?></strong>
+            <?= $fu['supplier_ref'] ? h($fu['supplier_ref']) : '' ?>
+            <span class="text-muted">· <?= h($fu['service_date'] ? date('d M', strtotime($fu['service_date'])) : '') ?>
+              <?= $fu['expiry_date'] ? '· expiry ' . h(date('d M', strtotime($fu['expiry_date']))) : '' ?>
+              · <?= h($fu['owner_name'] ?: 'not taken in charge') ?> · <?= h(FU_STATUS_LABELS[$fu['staff_status']] ?? $fu['staff_status']) ?></span>
+          </div>
+        <?php endforeach; ?>
+        <a href="<?= h($fuLink) ?>" style="font-size:.8rem;text-decoration:none">Open in Booking follow-up →</a>
+      <?php endif; ?>
+    </div>
+
   </div>
 </div>
 

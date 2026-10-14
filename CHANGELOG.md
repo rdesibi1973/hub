@@ -20,6 +20,27 @@ Running log of notable changes and current build state. Module-level "active / p
 
 ---
 
+## 2026-10-14 — Booking follow-up: provisional bookings + missing domestic tickets
+- The 9 Oct Excel of supplier bookings still provisional went back and forth by mail untouched. Now one page,
+  Operations → 📌 Booking follow-up (`modules/operations/booking_followup.php`, also on the Hub home, the Lead Tracker
+  bar and the Operations tabs): stat cards, tabs All open / Provisional / Tickets / Problem / Closed, filters (owner incl.
+  nobody, priority, supplier, trip month, search), Take in charge, inline contacted / status / notes, history per line,
+  "Run check now". Everyone logged in can view; edits need the new module `booking_followup_edit` (Admin → Roles,
+  "Booking follow-up (edit)"; added to the list in `admin/roles.php`, not in the server `MODULES`); admin also reassigns
+  and closes as not relevant. Request page: a "Booking follow-up" box with the booking's open lines (GRP: the group's).
+- The check (`modules/operations/includes/followup_service.php`): supplier documents in `<booking>/invoices/` (not `old/`)
+  of confirmed trips not ended, classified by `followup_classify.php` (ResRequest "Reservation Status: Provisional
+  (Expires …)", Orangi vouchers Confirmed with "x rooms provisional" notes, TNS / Sopa "will expire on", AeroCRS flight
+  "Request", "Status: OPTION" …; tested on the 410 PDFs of the current trips, with and without pdftotext -layout); tickets
+  from `ops_flight_tickets_report()` (flights in the next 14 days, no ticket file). Upsert by dedupe key, staff fields never
+  touched, auto-close (confirmed / ticket saved / trip ended / not found), re-open when still provisional, every change in
+  `booking_followup_events`. Tables: migration `069_booking_followup.sql` (or created on first use).
+- BlueHost cannot read PDFs (no pdftotext, no Composer): the server supplier scan says so and reads nothing new.
+  `tools\followup_local_scan.bat [--confirm]` reads the PDFs on the office PC (Git's pdftotext) and sends them to the new
+  Agent API action `followup_upsert`. Agent API: `followup_list`, `followup_scan`, `followup_update`, `followup_upsert`
+  (dry-run unless confirm). Cron `modules/operations/followup_cron.php` (tickets daily, supplier Monday). Memo digest:
+  section "📌 Booking follow-up" (new, problems, not taken in charge > 2 days, expiring ≤ 7 days, tickets ≤ 7 days).
+
 ## 2026-10-13 — CK tracker: SafariCheck reads programmes built in ITI
 - SafariCheck (cloud runner) only read a Wetu Word: a booking whose programme was made in ITI got
   "Word file not found", and an ITI Word export (no Wetu tables) would give false reds.

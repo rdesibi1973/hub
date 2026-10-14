@@ -31,7 +31,7 @@ without driving the web UI.
 | HTTPS only | Plain HTTP → 403. |
 | Rate limit | 60 calls/min → 429. |
 | Audit | Every call (including failures and dry-runs) → `agent_audit_log` (action, request_id, user, HTTP code, dry_run, payload, result, IP). |
-| Dry-run by default | `update_request`, `confirm_booking`, `send_booking_email`, `rollback_booking`, `rename_folder`, `import_group_folder`, `move_group_folder`, `set_request_status`, `cancel_invoice_payment`, `update_folder_status`, `import_zoho_invoice`, `create_invoice`, `update_invoice`, `memo_delete`, `create_agency`, `update_agency`, `save_agency_contact`, `delete_agency_contact`, `mail_send`, `mail_move` and `ck_request_check` (among others) do nothing unless the body has `"confirm": true`. |
+| Dry-run by default | `update_request`, `confirm_booking`, `send_booking_email`, `rollback_booking`, `rename_folder`, `import_group_folder`, `move_group_folder`, `set_request_status`, `cancel_invoice_payment`, `update_folder_status`, `import_zoho_invoice`, `create_invoice`, `update_invoice`, `memo_delete`, `create_agency`, `update_agency`, `save_agency_contact`, `delete_agency_contact`, `mail_send`, `mail_move`, `ck_request_check`, `followup_scan`, `followup_update` and `followup_upsert` (among others) do nothing unless the body has `"confirm": true`. |
 | No deletes | No delete endpoint (mail included), except `memo_delete`, which is soft (`deleted_at`, the row stays). Undo a confirm with `rollback_booking` (or BackOffice → Rollback). |
 | Mailbox | The key also reads `info@` (`mail_*`): keep `api.txt` as private as the mailbox password. |
 
@@ -1075,6 +1075,72 @@ curl -sH "$H" "$U?action=ops_lunch_boxes"
 curl -sH "$H" "$U?action=ops_medivac&from=2026-10-12&to=2026-11-12"
 curl -sH "$H" "$U?action=flight_tickets"
 ```
+
+### Booking follow-up — `followup_list`, `followup_scan`, `followup_update`, `followup_upsert`
+The open items the booking team chases (Hub: Operations → 📌 Booking follow-up, `modules/operations/booking_followup.php`;
+logic `modules/operations/includes/followup_service.php`, documents read by `followup_classify.php`; tables
+`booking_followups`, `booking_followup_events`, `booking_followup_docs`, `booking_followup_runs` — migration 069 or created on first use).
+- `type: supplier` — documents in `<booking>/invoices/` (top level; `invoices/old/` is never read) of confirmed bookings not
+  ended (same set as Operations: `_END` tag, not cancelled): `issue` `provisional`, `provisional_expired` (expiry printed and
+  past), `on_request` (flight invoice), `orangi_rooms_provisional` (voucher Confirmed with a note "… provisional"),
+  `unreadable` (no text in the PDF). Payment files (swift, receipt, bank …) are skipped.
+- `type: ticket` — domestic flights in the next 14 days of bookings with no ticket file (the `flight_tickets` logic):
+  `ticket_missing`; a Calc that cannot be read → `unreadable` with the reason.
+- One line per `dedupe_key`: request + supplier reference (WB…, booking ID), else request + supplier + service date;
+  tickets request + flight date + route. GRP: documents in the group folder belong to the group's first request (a
+  member's `request_id` filter shows them too).
+- The check writes only the document fields; `owner`, `contacted_at`, `staff_status`, `notes` are the staff's. Lines are never
+  deleted. They close with `close_reason`: `auto_confirmed` (the same reference in a document reading Confirmed without a
+  provisional note), `auto_ticket_saved`, `auto_trip_ended`, `auto_not_found` (the file left `invoices/` and nothing else has
+  that reference — check it was not moved without a confirmed one), `manual` (staff: `resolved`; admin: `not_relevant`).
+  A line still found provisional after a staff `resolved` (or an auto-close) is **re-opened**; `not_relevant` stays closed.
+- `priority` (computed): `1-URGENT` service ≤ 30 days, or expiry ≤ 7 days, or expired with service ≤ 90 days; `2-HIGH` ≤ 90
+  days; `3-NORMAL` later. Tickets: `1-URGENT` within 7 days, else `2-HIGH`.
+- **PDFs on the server:** BlueHost has no `pdftotext` and no Composer today, so `followup_scan` type `supplier` only uses
+  documents already read and returns `reader: "none"` + a `warning`. Two ways: (a) on the office PC run
+  `tools\followup_local_scan.bat [--confirm]` (reads `C:\Dropbox\001_Safari`, same rules, sends `followup_upsert`); (b) install a reader
+  on the server: `smalot/pdfparser` in `vendor/` (pure PHP), or a static `pdftotext` binary with its path in
+  `FOLLOWUP_PDFTOTEXT` (`includes/config.php`).
+
+#### `followup_list` (GET)
+`type` (`supplier` | `ticket`), `status` (`open` default | `closed` | `all`), `owner` (username | user id | `none`),
+`priority` (`1-URGENT` | `2-HIGH` | `3-NORMAL`, or `1`/`2`/`3`), `request_id`, `q` (client / folder / supplier / ref / notes).
+→ `count`, `last_check_at` `{supplier, ticket}`, `last_checks`, `rows[]` `{id, type, request_id, customer, folder, folder_url,
+file_url, start_date, end_date, service_date, days_left, supplier, supplier_ref, service, source_file, issue, issue_label,
+doc_status_text, expiry_date, expired, booked_by, owner, owner_name, contacted_at, staff_status, notes, priority,
+first_seen_at, last_seen_at, closed_at, closed_by, close_reason, events_count}` — not taken in charge first, then problems,
+priority, service date.
+
+#### `followup_scan` (POST)
+Runs the check. **Dry run unless `"confirm": true`** (the dry run returns what would change). `type` `supplier` | `ticket` |
+`all` (default), `request_id` (one booking). → `supplier` / `ticket` summaries `{added[], updated[], closed[] (+ reason),
+reopened[], unreadable[], unchanged}`; supplier also `units`, `units_complete`, `reader`, `partial` (time budget used up —
+run again, each PDF is read once per Dropbox revision), `errors[]`.
+
+#### `followup_update` (POST)
+`id` + any of `owner` (username / id / `null`), `contacted_at` (YYYY-MM-DD or `""`), `staff_status` (`open`, `in_progress`,
+`problem` — needs a note —, `resolved`, `not_relevant`), `notes`. Dry run unless `"confirm": true`. Acts as `AGENT_API_USER`
+with the follow-up admin rights (reassign, not relevant); every change is an event (who / when). → `changes {field: [old, new]}`, `row`.
+
+#### `followup_upsert` (POST)
+Supplier documents read elsewhere (office PC, Cowork) — also the way to load a baseline. Dry run unless `"confirm": true`.
+`rows[]` `{folder (path under /001_Safari, e.g. "00_2027/…" or "<GRP>/<member>") | request_id, source_file
+("invoices/x.pdf"), supplier?, supplier_ref?, service_date?, issue? | status: "confirmed", doc_status_text?, expiry_date?,
+booked_by?}` (max 2000), `scanned[]` = folders whose `invoices/` were read completely (their lines not sent close as
+`auto_not_found`; rows with `status: confirmed` close their reference). Folder names match by stem (status tags ignored).
+→ the summary + `matched`, `unmatched[]`.
+
+```bash
+curl -sA "$UA" -H "$H" "$U?action=followup_list&owner=none&priority=1"
+curl -sA "$UA" -H "$H" "$U?action=followup_list&request_id=2958&status=all"
+curl -sA "$UA" -H "$H" -X POST "$U?action=followup_scan" -d '{"type":"ticket"}'                                   # dry run
+curl -sA "$UA" -H "$H" -X POST "$U?action=followup_scan" -d '{"type":"all","confirm":true}'
+curl -sA "$UA" -H "$H" -X POST "$U?action=followup_update" -d '{"id":12,"staff_status":"problem","notes":"Lodge full on 1 Jan, alternatives asked"}'   # dry run
+curl -sA "$UA" -H "$H" -X POST "$U?action=followup_upsert" -d '{"rows":[{"folder":"12_30DEC_ElenaManfroni(UnEmozionePerSempre-PS-Roberto)_START30DEC_MIDT04JAN_END08JAN2027_BALANCE","source_file":"invoices/Lion'"'"'s paw-INV.pdf","supplier":"Lion'"'"'s Paw","supplier_ref":"WB41803","service_date":"2027-01-01","issue":"provisional_expired","doc_status_text":"Provisional (expires 28 Sep 2026)","expiry_date":"2026-09-28","booked_by":"Lydia"}],"scanned":[]}'   # dry run
+```
+Cron (cron-job.org): `modules/operations/followup_cron.php?token=…&type=ticket` daily 05:30, `&type=supplier` Monday 05:30
+(token `FOLLOWUP_CRON_TOKEN`, else `MEMO_CRON_TOKEN`; `&dry=1` = summary only). The memo digest (06:00) lists new lines,
+problems, lines not taken in charge for > 2 days, provisional expiring ≤ 7 days and tickets missing ≤ 7 days.
 
 ## Request timeline
 

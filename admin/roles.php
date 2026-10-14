@@ -3,12 +3,16 @@ require_once __DIR__ . '/../includes/db.php';
 require_once __DIR__ . '/../includes/auth.php';
 require_admin();
 
+// MODULES lives in includes/config.php (server-only); permissions added by code are listed here,
+// so saving a role keeps them.
+$all_modules = MODULES + ['booking_followup_edit' => 'Booking follow-up (edit)'];
+
 // ── Handle: save permissions ────────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_perms'])) {
     verify_csrf();
     $role_id = (int)($_POST['role_id'] ?? 0);
     $modules = $_POST['modules'] ?? [];
-    $valid   = array_keys(MODULES);
+    $valid   = array_keys($all_modules);
 
     $pdo->prepare('DELETE FROM role_permissions WHERE role_id = ?')->execute([$role_id]);
     $ins = $pdo->prepare('INSERT INTO role_permissions (role_id, module) VALUES (?, ?)');
@@ -94,7 +98,7 @@ include __DIR__ . '/../includes/layout_header.php';
           Module Access
         </div>
         <div class="perm-grid">
-          <?php foreach (MODULES as $key => $label): ?>
+          <?php foreach ($all_modules as $key => $label): ?>
           <?php $checked = in_array($key, $rperms, true); ?>
           <label class="perm-chip <?= $checked ? 'checked' : '' ?>">
             <input type="checkbox" name="modules[]" value="<?= e($key) ?>"

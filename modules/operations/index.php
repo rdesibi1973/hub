@@ -277,6 +277,7 @@ include __DIR__ . '/../../includes/layout_header.php';
   <a class="tab-btn" href="medivac.php"     style="text-decoration:none;">🏥 Medivac</a>
   <a class="tab-btn" href="lunch_boxes.php" style="text-decoration:none;">🍱 Lunch Boxes</a>
   <?php endif; ?>
+  <a class="tab-btn" href="booking_followup.php" style="text-decoration:none;">📌 Booking follow-up</a>
 </div>
 
 <!-- ═══ TAB 1: DAILY MOVEMENTS ═══ -->

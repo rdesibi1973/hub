@@ -15,6 +15,9 @@ outdated — this file wins where they disagree (PHP version, local lint).
   (numbering, recalculation, payments, folder status, PDF, import); `config.php` = bootstrap only.
 - `modules/memo/` — Memo Board; logic in `memo_lib.php` (follow-ups, next steps, routines).
 - `modules/iti/` — itinerary builder. `includes/` (root) — config (server-only), auth, db, mail.
+- `modules/operations/` — movements, Medivac, lunch boxes, **Booking follow-up** (`booking_followup.php`; logic
+  `includes/followup_service.php` + `followup_classify.php`, shared with the Agent API `followup_*` and
+  `tools/followup_local_scan.php`, which reads the supplier PDFs on the office PC because BlueHost cannot).
 - `migrations/NNN_name.sql` — not applied by deploy. `docs/` — AGENT_API, FOLDER_NAMING,
   INFRASTRUCTURE, KB_Quotazioni_Safari.
 

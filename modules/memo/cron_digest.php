@@ -124,7 +124,30 @@ function memo_digest_build(PDO $pdo, $ownerId, $today) {
         if ($r['key'] === 'afrasia') $d['sh_open'] = (int)$r['count'];
         if ($r['due']) $d['routines_due'][] = $r['title'];
     }
+
+    // Booking follow-up (modules/operations/booking_followup.php): what changed since the last digest.
+    $d['followup'] = null;
+    try {
+        require_once __DIR__ . '/../operations/includes/followup_service.php';
+        $st = $pdo->prepare("SELECT MAX(sent_at) FROM memo_digest_log WHERE digest_date < ?");
+        $st->execute(array($today));
+        $since = $st->fetchColumn() ?: date('Y-m-d H:i:s', strtotime($today . ' -1 day'));
+        $d['followup'] = followup_digest_data($pdo, $since, $today);
+    } catch (Throwable $e) {
+        error_log('memo digest: booking follow-up skipped: ' . $e->getMessage());
+    }
     return $d;
+}
+
+/** One booking follow-up line: "Manfroni — Lion's Paw WB41803 · Provisional expired · servizio 01/01 · nessuno". */
+function memo_digest_followup_item($r) {
+    $what = $r['type'] === 'ticket' ? ($r['service'] ? $r['service'] : 'volo') : trim($r['supplier'] . ' ' . $r['supplier_ref']);
+    $s = ($r['customer'] ? $r['customer'] : $r['folder_name']) . ' — ' . $what . ' · ' . $r['issue_label'];
+    if ($r['service_date']) $s .= ' · servizio ' . date('d/m', strtotime($r['service_date']));
+    if ($r['expiry_date'])  $s .= ' · scade ' . date('d/m', strtotime($r['expiry_date']));
+    $s .= ' · ' . ($r['owner_name'] ? $r['owner_name'] : 'nessuno');
+    if ($r['staff_status'] === 'problem' && $r['notes']) $s .= ' — ' . $r['notes'];
+    return $s;
 }
 
 /** First non-empty line of a memo body (max 160 chars). */
@@ -223,6 +246,30 @@ function memo_digest_render(array $d, $today) {
     if ($d['sh_open'] > 0) { $h[] = 'Fatture SH con saldo aperto (AfrAsia): <strong>' . $d['sh_open'] . '</strong>'; $t[] = 'Fatture SH con saldo aperto (AfrAsia): ' . $d['sh_open']; }
     if ($d['routines_due']) { $h[] = 'Routine da fare: ' . $e(implode(', ', $d['routines_due'])); $t[] = 'Routine da fare: ' . implode(', ', $d['routines_due']); }
     $section('🔁 Routine', $h, $t);
+
+    // 6. Booking follow-up (nothing when all empty)
+    $fu = isset($d['followup']) ? $d['followup'] : null;
+    if ($fu) {
+        $fuUrl = $hub . 'operations/booking_followup.php';
+        $groups = array('problem' => 'Problem', 'new' => 'Nuove dall\'ultimo digest', 'untaken' => 'Non prese in carico da più di 2 giorni',
+                        'expiring' => 'Provisional in scadenza entro 7 giorni', 'tickets' => 'Biglietti mancanti, volo entro 7 giorni');
+        $h = array(); $t = array();
+        foreach ($groups as $k => $label) {
+            if (!$fu[$k]) continue;
+            $items = array();
+            foreach (array_slice($fu[$k], 0, 12) as $r) $items[] = memo_digest_followup_item($r);
+            $more = count($fu[$k]) > 12 ? ' (+' . (count($fu[$k]) - 12) . ')' : '';
+            $h[] = '<strong>' . $e($label) . ' (' . count($fu[$k]) . ')</strong>' . $e($more) . '<br><span style="color:#555;">'
+                 . implode('<br>', array_map($e, $items)) . '</span>';
+            $t[] = $label . ' (' . count($fu[$k]) . ')' . $more . ":\n    " . implode("\n    ", $items);
+        }
+        if ($h) {
+            $h[] = '<a href="' . $fuUrl . '" style="color:#C0211B;">apri Booking follow-up</a>';
+            $t[] = $fuUrl;
+        }
+        $section('📌 Booking follow-up', $h, $t);
+        $counts .= '; fu_nuove=' . count($fu['new']) . '; fu_problemi=' . count($fu['problem']) . '; fu_non_prese=' . count($fu['untaken']);
+    }
 
     if (!$d['overdue'] && !$d['today'] && !$d['week'] && !$d['doing']) {
         array_unshift($html, '<p>Nessun memo in scadenza.</p>');
