@@ -5,7 +5,7 @@ require_admin();
 
 // MODULES lives in includes/config.php (server-only); permissions added by code are listed here,
 // so saving a role keeps them.
-$all_modules = MODULES + ['booking_followup_edit' => 'Booking follow-up (edit)'];
+$all_modules = MODULES + ['invoices' => 'Invoices', 'booking_followup_edit' => 'Booking follow-up (edit)'];
 
 // ── Handle: save permissions ────────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_perms'])) {
@@ -14,7 +14,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_perms'])) {
     $modules = $_POST['modules'] ?? [];
     $valid   = array_keys($all_modules);
 
-    $pdo->prepare('DELETE FROM role_permissions WHERE role_id = ?')->execute([$role_id]);
+    // Only the permissions shown on this page are replaced: one not listed here
+    // (a new module missing from MODULES) is kept, never silently dropped.
+    $ph = implode(',', array_fill(0, count($valid), '?'));
+    $pdo->prepare("DELETE FROM role_permissions WHERE role_id = ? AND module IN ($ph)")->execute(array_merge([$role_id], $valid));
     $ins = $pdo->prepare('INSERT INTO role_permissions (role_id, module) VALUES (?, ?)');
     foreach ($modules as $m) {
         if (in_array($m, $valid, true)) $ins->execute([$role_id, $m]);
