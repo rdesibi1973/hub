@@ -20,10 +20,14 @@ function require_login(): void {
         header('Location: ' . BASE_URL . '/login.php' . ($next ? "?next=$next" : ''));
         exit;
     }
-    // If session is stale (role_name missing), reload user data from DB.
+    // Reload role + permissions from the DB on every page (once per request), so a
+    // change in Admin → Roles / Users applies at once, without logging in again.
     // Use $pdo global (hub pages) or db() function (leads module) — whichever is available.
-    if (empty($_SESSION['role_name'])) {
-        $conn = $GLOBALS['pdo'] ?? (function_exists('db') ? db() : null);
+    static $reloaded = false;
+    if ($reloaded) return;
+    $conn = $GLOBALS['pdo'] ?? (function_exists('db') ? db() : null);
+    if ($conn !== null || empty($_SESSION['role_name'])) {
+        $reloaded = true;
         if ($conn === null) {
             // No DB connection available — force re-login
             $_SESSION = [];
