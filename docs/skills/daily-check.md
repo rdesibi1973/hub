@@ -1,6 +1,6 @@
 ---
 name: daily-check
-description: Savannah Explorers daily round ("fai il giro"): routine_status, incoming leads to assign, open SH/AfrAsia balances and their memos, weekly domestic flight tickets check, then routine_done. Mail is read by Roberto, not here.
+description: Savannah Explorers daily round ("fai il giro"): routine_status, incoming leads to assign, open SH/AfrAsia balances and their memos, weekly domestic flight tickets check, weekly Booking follow-up reminder, then routine_done. Mail is read by Roberto, not here.
 ---
 
 # Daily check ("il giro")
@@ -41,6 +41,15 @@ SH payment memos: every open SH invoice must have a `waiting` memo linked to it 
 
 On Monday, or the first round of the week: `flight_tickets` with `from` = today, `to` = today + 14 days, as in `back-office` §6. Report the bookings with `missing` (who booked it) and the tickets present but not yet sent. Other days skip this section.
 
+## 3c. Booking follow-up reminder (once a week)
+
+On Monday, or the first round of the week: `followup_list` (open lines) → only counts and dates, no review here:
+lines open, not taken in charge, Problem, last check of supplier documents / tickets / groups (`last_checks`).
+Remind Roberto in two lines that the weekly follow-up is due. The checks are run by hand (no cron for now):
+on the Hub page Operations → 📌 Booking follow-up → "Run check now" → **All** (tickets + groups), and the supplier
+PDFs from the office PC with `tools\followup_local_scan.bat --confirm`. Then the review with skill `booking-followup`.
+Other days skip this section.
+
 ## 4. Report (Italian, plain text, no emoji)
 
 ```
@@ -52,6 +61,9 @@ Leads da assegnare: <N>
 Saldi aperti SH: <N> (<totale>)
 - <SH-…> <cliente/agenzia> <saldo> scad. <data> [memo: ok / manca]
 In scadenza / scaduti (altre pratiche): ...
+
+Follow-up prenotazioni (solo il lunedì): <N> aperte, <N> non prese in carico, <N> Problem; ultimo controllo fornitori <data>, biglietti <data>, gruppi <data>
+→ da fare questa settimana: Run check (All) dalla pagina + scansione PDF dal PC, poi revisione (booking-followup)
 
 Biglietti voli interni (solo il lunedì, prossime 2 settimane): mancanti <N>, da inviare <M>
 - <cartella> – <volo> <data> – manca il biglietto (prenotato da <Glady/Lydia>)

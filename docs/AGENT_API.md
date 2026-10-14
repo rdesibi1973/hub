@@ -1150,7 +1150,7 @@ curl -sA "$UA" -H "$H" -X POST "$U?action=followup_scan" -d '{"type":"all","conf
 curl -sA "$UA" -H "$H" -X POST "$U?action=followup_update" -d '{"id":12,"staff_status":"problem","notes":"Lodge full on 1 Jan, alternatives asked"}'   # dry run
 curl -sA "$UA" -H "$H" -X POST "$U?action=followup_upsert" -d '{"rows":[{"folder":"12_30DEC_ElenaManfroni(UnEmozionePerSempre-PS-Roberto)_START30DEC_MIDT04JAN_END08JAN2027_BALANCE","source_file":"invoices/Lion'"'"'s paw-INV.pdf","supplier":"Lion'"'"'s Paw","supplier_ref":"WB41803","service_date":"2027-01-01","issue":"provisional_expired","doc_status_text":"Provisional (expires 28 Sep 2026)","expiry_date":"2026-09-28","booked_by":"Lydia"}],"scanned":[]}'   # dry run
 ```
-Cron (cron-job.org): `modules/operations/followup_cron.php?token=…&type=ticket` daily 05:30, `&type=group` daily 05:40, `&type=supplier` Monday 05:30
+Checks are run by hand for now (page → Run check now → All; office PC scan for the PDFs). Optional cron (cron-job.org, not set up): `modules/operations/followup_cron.php?token=…&type=ticket` daily 05:30, `&type=group` daily 05:40, `&type=supplier` Monday 05:30
 (token `FOLLOWUP_CRON_TOKEN`, else `MEMO_CRON_TOKEN`; `&dry=1` = summary only). The memo digest (06:00) lists new lines,
 problems, lines not taken in charge for > 2 days, provisional expiring ≤ 7 days and tickets missing ≤ 7 days.
 

@@ -187,7 +187,8 @@
       prioBadge(r.priority),
       '<span style="white-space:nowrap">' + dmy(svc) + '</span><span class="fu-days' + (r.days_left !== null && r.days_left <= 7 ? ' fu-late' : '') + '">' + days(r.days_left) + '</span>',
       '<span class="fu-client">' + esc(r.customer || r.folder_name) + '</span>' +
-        (r.folder_url ? '<a class="fu-folder" href="' + esc(r.folder_url) + '" target="_blank" rel="noopener" title="' + esc(r.folder) + '">📁 ' + esc(r.folder_name) + '</a>' : ''),
+        (r.folder_open_url ? '<span class="fu-folder"><a href="' + esc(r.folder_url) + '" target="_blank" rel="noopener" title="Open in Dropbox (web)">☁</a> ' +
+          '<a href="' + esc(r.folder_open_url) + '" title="Open in Windows Explorer — ' + esc(r.folder) + '">📂 ' + esc(r.folder_name) + '</a></span>' : ''),
       esc(r.type === 'ticket' ? (r.service || r.supplier || '') : (r.supplier || '')) + (r.type === 'group' && r.service ? '<span class="fu-days">' + esc(r.service) + '</span>' : ''),
       esc(r.supplier_ref || ''),
       '<span class="badge badge-issue' + issueCls + '">' + esc(ISSUE[r.issue] || r.issue) + '</span>',

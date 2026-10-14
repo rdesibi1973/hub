@@ -7,3 +7,9 @@ ALTER TABLE booking_followups MODIFY type ENUM('supplier','ticket','group') NOT 
 ALTER TABLE booking_followups MODIFY issue ENUM('provisional','provisional_expired','on_request','orangi_rooms_provisional',
     'ticket_missing','unreadable','group_to_finalize','group_znz_flight') NOT NULL;
 ALTER TABLE booking_followups ADD COLUMN details TEXT NULL;
+
+-- Edit rights (take in charge, contacted, status, notes, Run check now) for the Operations role (Glady, Lydia):
+-- the module is per role, like 'operations'. Everyone else logged in only views; admin / manager also reassign
+-- and close as not relevant. Changeable in Admin → Roles ("Booking follow-up (edit)"); users log in again after a change.
+INSERT IGNORE INTO role_permissions (role_id, module)
+SELECT id, 'booking_followup_edit' FROM roles WHERE name IN ('admin', 'operations');

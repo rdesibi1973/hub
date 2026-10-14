@@ -136,6 +136,7 @@ Prima di iniziare un lavoro leggi quella giusta con il connettore Dropbox e segu
 - preventivo / proposta → sales-agent
 - conferma pratica → booking-confirmation
 - verifica prenotazioni (fatture e conferme del booking team) → booking-check
+- follow-up prenotazioni (provisional, biglietti mancanti, gruppi a 60 giorni) → booking-followup
 - fatture e pagamenti → invoice-workflow
 - gruppi Il Diamante → diamante-groups
 - controllo pagamenti fornitori → supplier-payments-review

@@ -15,6 +15,7 @@ hub_db_timezone($pdo);
 
 $fuUser = current_user();
 $fuData = followup_page_data($pdo, $fuUser);
+$fuReader = followup_pdf_reader() !== null;   // BlueHost today: none → supplier PDFs are read by the office PC scan
 $page_title = 'Booking follow-up — Savannah Explorers Hub';
 
 $extra_css = '
@@ -44,8 +45,9 @@ table.fu-table tr.problem td{background:#FDF1F0}
 table.fu-table tr.problem td:first-child{box-shadow:inset 3px 0 0 var(--red)}
 table.fu-table tr.hist td{background:var(--off-white);font-size:.74rem}
 .fu-client{font-weight:700;color:var(--black)}
-.fu-folder{display:block;font-size:.7rem;color:var(--grey-mid);text-decoration:none;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.fu-folder:hover{color:var(--red)}
+.fu-folder{display:block;font-size:.7rem;color:var(--grey-mid);max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fu-folder a{color:inherit;text-decoration:none}
+.fu-folder a:hover{color:var(--red)}
 .fu-days{display:block;font-size:.7rem;color:var(--grey-mid)}
 .fu-late{color:var(--red-dk);font-weight:700}
 .badge-p1{background:var(--red-lt);color:var(--red-dk)} .badge-p2{background:var(--amber-lt);color:#7A4F01} .badge-p3{background:var(--grey-lt);color:var(--grey-dk)}
@@ -81,8 +83,12 @@ include __DIR__ . '/../../includes/layout_header.php';
       <select id="fu-run-type" aria-label="What to check">
         <option value="ticket">Tickets (next 14 days)</option>
         <option value="group">Groups (arrival ≤ 60 days)</option>
+        <?php if ($fuReader): ?>
         <option value="supplier">Supplier documents</option>
-        <option value="all">Both</option>
+        <?php else: ?>
+        <option value="supplier" disabled>Supplier documents — office PC scan (followup_local_scan.bat)</option>
+        <?php endif; ?>
+        <option value="all">All</option>
       </select>
       <button type="button" class="btn btn-primary btn-sm" id="fu-run-btn">▶ Run check now</button>
     </div>

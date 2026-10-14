@@ -752,7 +752,8 @@ function followup_scan(PDO $db, array $o = []): array {
 
     $reader = followup_pdf_reader();
     if ($type === 'supplier' || $type === 'all') {
-        $units = followup_units($db, $rid, $today);
+        // No PDF reader here: listing every invoices/ folder would find nothing new (the office PC scan sends them).
+        $units = $reader !== null ? followup_units($db, $rid, $today) : [];
         $token = $token ?? cp_retry(fn() => dropbox_get_access_token());
         $deadline = microtime(true) + (float)($o['budget'] ?? FU_SCAN_BUDGET);
         $cand = []; $confirmed = []; $doneReq = []; $partialReq = []; $errors = []; $complete = 0;
@@ -779,9 +780,9 @@ function followup_scan(PDO $db, array $o = []): array {
         $out['supplier'] = $sum + ['units' => count($units), 'units_complete' => $complete, 'partial' => $partial,
                                    'reader' => $reader ?? 'none', 'errors' => $errors]
                          + ($reader === null ? ['warning' => 'No PDF reader on the server (pdftotext / smalot/pdfparser): only documents already read are used. '
-                                                           . 'Run tools/followup_local_scan.php on the office PC, or install a reader (docs/AGENT_API.md, followup_scan).'] : [])
+                                                           . 'Supplier documents are read on the office PC: tools\followup_local_scan.bat --confirm.'] : [])
                          + ($partial && $reader !== null ? ['hint' => 'Time budget used up — run the check again to read the remaining documents (each PDF is read once).'] : []);
-        if ($confirm) followup_log_run($db, 'supplier', $source, $o['user_id'] ?? null, followup_counts($out['supplier']), $partial);
+        if ($confirm && $reader !== null) followup_log_run($db, 'supplier', $source, $o['user_id'] ?? null, followup_counts($out['supplier']), $partial);
     }
     if ($type === 'group' || $type === 'all') {
         $token = $token ?? cp_retry(fn() => dropbox_get_access_token());
@@ -1002,6 +1003,8 @@ function followup_out(array $r, string $today): array {
         'id' => (int)$r['id'], 'type' => $r['type'], 'request_id' => $r['request_id'] !== null ? (int)$r['request_id'] : null,
         'customer' => $r['customer_name'] ?? null, 'folder' => $r['folder'], 'folder_name' => basename((string)$r['folder']),
         'folder_url' => $r['folder'] ? followup_dropbox_url($dir) : null,
+        // Same as the Hub's "📂 Open": Windows Explorer on the office PCs (tools/savannah-open).
+        'folder_open_url' => $r['folder'] ? 'savannah://open?path=' . implode('/', array_map('rawurlencode', explode('/', '001_Safari/' . $r['folder']))) : null,
         'file_url' => $r['source_file'] ? followup_dropbox_url($dir . (dirname($r['source_file']) !== '.' ? '/' . dirname($r['source_file']) : ''),
                                                                 basename($r['source_file'])) : null,
         'start_date' => $r['start_date'], 'end_date' => $r['end_date'], 'service_date' => $r['service_date'],
