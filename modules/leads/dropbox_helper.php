@@ -150,6 +150,18 @@ function dropbox_download_text(string $token, string $path): ?string {
  * @throws RuntimeException on API error
  */
 function dropbox_move_folder(string $token, string $from_path, string $to_path): array {
+    // Case-only rename (fiandra → Fiandra): Dropbox paths are case-insensitive, so a
+    // direct move answers to/conflict. Go through a temporary name, back on failure.
+    if ($from_path !== $to_path && strcasecmp($from_path, $to_path) === 0) {
+        $tmp = $from_path . '__rename_' . date('His');
+        dropbox_move_folder($token, $from_path, $tmp);
+        try {
+            return dropbox_move_folder($token, $tmp, $to_path);
+        } catch (RuntimeException $e) {
+            try { dropbox_move_folder($token, $tmp, $from_path); } catch (RuntimeException $ignored) {}
+            throw $e;
+        }
+    }
     $ch = curl_init('https://api.dropboxapi.com/2/files/move_v2');
     curl_setopt_array($ch, [
         CURLOPT_POST           => true,
