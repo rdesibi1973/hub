@@ -242,8 +242,10 @@ changed meanwhile, e.g. saved from Excel), re-downloaded and re-verified.
 | `pax_sheet` (or `adults`/`teens`/`children`) | all other sheets deleted (names with trailing spaces handled) |
 | — | H6:I14 cleared |
 | `price_components` `[1625,255,70]` | F9 = `=1625+255+70` (never a hardcoded total) |
+| `august_supplement` `true` | adds `35 × safari nights` between 1 and 25 August to F9 (beach nights excluded: from `mid_date`, else Zanzibar/coast names in B/K). `false` = does not apply (no warning) |
 | `start_date` | A17 = date; A18+ `=SUM(A{n-1}+1)` extended to the last day, same format |
-| `days[]` | from row 17 + `row_offset`; each: `label` (B), `flight` = route id/name → C `=<cost_pp>*$B$1` from the rate table (or `flight_cost_pp`, warned if not in the table), `activity` `{rate: name/id}` (cost from table) or `{amount, desc}` → H/I, `hotel` → K, `repeat` n |
+| `days[]` | from row 17 + `row_offset`; each: `label` (B), `flight` = route id/name → C `=<cost_pp>*$B$1` from the rate table (or `flight_cost_pp`, warned if not in the table), `park_fees` (F) + `park_fees_desc` (G), `activity` `{rate: name/id}` (cost from table) or `{amount, desc}` → H/I, `accommodation` (J), `hotel` → K, `repeat` n (every value copied to each repeated row) |
+| `days[].accommodation`, `days[].park_fees` | a number (`279`) or a formula on numbers and cells (`"=279"`, `"=(250+71)*$B$1"`); `null` clears the cell. Changing `hotel` on a template row without `accommodation` → warning "hotel changed, J cost left from the template (Kifaru 1054)" |
 | `guests[]` `{name,title,country}` | rows 43+ A/B/F, upper case; country ITALY inferred for -PS/-LAM agencies |
 | `room_type` | A37; default `1 DBL` for MR+MRS |
 | `adults_teen_chd` | A35; default "2 adults" |
@@ -251,8 +253,12 @@ changed meanwhile, e.g. saved from Excel), re-downloaded and re-verified.
 | `mid_date` | first beach night, for the hotel-on-every-beach-night check |
 | `file` | which Calc if the folder has several |
 
-Returns `verify`: `passed`, `checks[]` (see below), `price_to_customer`, `total_price`, `total_costs`,
-`margin` (B10), `to_price_pp` (D10). HTTP 422 if a check has level `error`.
+Returns `f9` (the formula written), `august_supplement` `{safari_nights[], pp_per_night, amount_pp, added}`,
+`rows[]` `{row, date, cells {B…K}, changed[]}` — every day row as written (formulas as `"=215*$B$1 → 430"`)
+and the columns this call changed, to review before `confirm` — and `verify`: `passed`, `checks[]` (see below),
+`price_to_customer`, `total_price`, `total_costs`, `margin` (B10), `to_price_pp` (D10). HTTP 422 if a check has level `error`.
+fill_calc adds two checks: `error` a night with a hotel in K but J empty or 0 (except "own arrangement");
+`warn` safari nights between 1 and 25 August with no supplement in `price_components` and no `august_supplement`.
 
 ### `read_calc` (GET)
 Read-only. `request_id`, optional `file` (which Calc if the folder has several), `sheet` (pax sheet

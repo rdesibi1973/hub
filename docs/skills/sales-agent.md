@@ -27,6 +27,9 @@ Memo: at the start create one `doing` memo (clear title with the folder name, li
 2. `copy_program` → Word + Calc in the request folder (`NN_<folder>_<Prog>`).
 3. `get_rates` for programme prices per pax, flights, transfers.
 4. `fill_calc` → show key values (cost, margin, D9, D10, F9) → confirm after ok → `read_calc` to verify.
+   - Every day whose lodge you change or add (beach nights beyond the template too) needs `accommodation` (J): a number or a formula (`"=279"`, `"=(250+71)*$B$1"`); park fees in `park_fees` (F) / `park_fees_desc` (G) when they change. A "hotel changed, J cost left from the template" warning or a "Hotel without accommodation cost" error means the margin is wrong: fix it before showing prices.
+   - Safari nights 1–25 August: `"august_supplement": true` (35 pp per safari night, beach nights excluded, added to F9); `false` only if it really does not apply.
+   - Check `rows[]` of the dry run (B–K per day, `changed`) before the confirm.
 5. Which price goes in F9 (Price to customer):
    - Direct clients: STANDARD mode (markup 25%, D1) → rounded D9 = rack price → F9 (and H9).
    - Agencies: rounded D10 = STO price (markup TO in D2: 18% for standard agencies such as the Promoservice ones; 14% for EKO) → F9.

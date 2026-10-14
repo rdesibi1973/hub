@@ -707,6 +707,25 @@ function sc_calc_rule_checks(string $path, array $ctx = []): array {
     if ($missBeach) $res[] = ['level' => 'error', 'msg' => 'No hotel (col K) on beach night(s): ' . implode(', ', $missBeach) . '.'];
     if ($missOther) $res[] = ['level' => 'warn',  'msg' => 'No hotel (col K) on night(s): ' . implode(', ', $missOther) . '.'];
 
+    // 4b) Hotel in K → its cost in J (ACCOMMODATION), not empty / 0. Only when the
+    //     caller asks ($ctx['hotel_cost'] = 'error'|'warn': fill_calc), since older
+    //     Calcs sometimes carry the stay cost elsewhere. "Own arrangement" is exempt.
+    if (!empty($ctx['hotel_cost'])) {
+        $noCost = [];
+        foreach ($days as $i => $d) {
+            if ($i === count($days) - 1) break;
+            $k = sc_cell($v, 'K', $d['row']);
+            if ($k === '') continue;
+            $j = trim(sc_cell($v, 'J', $d['row']));
+            if (stripos($k . ' ' . $j, 'own arrangement') !== false) continue;
+            if ($j === '' || (is_numeric($j) && (float)$j <= 0)) {
+                $noCost[] = ($d['date'] ? sc_fmt($d['date']) : 'row ' . $d['row']) . ' (J' . $d['row'] . ', ' . $k . ')';
+            }
+        }
+        if ($noCost) $res[] = ['level' => $ctx['hotel_cost'] === 'error' ? 'error' : 'warn',
+                               'msg' => 'Hotel without accommodation cost (col J empty or 0): ' . implode('; ', $noCost) . '.'];
+    }
+
     // 5) Flight cost (col C) = <cost_pp>*$B$1 with a cost from the rate table.
     $known = isset($ctx['flight_costs']) && is_array($ctx['flight_costs']) ? $ctx['flight_costs'] : null;
     foreach ($days as $d) {

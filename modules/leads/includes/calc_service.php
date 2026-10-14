@@ -230,13 +230,50 @@ function calc_fmt_num(float $n): string {
     return rtrim(rtrim(number_format($n, 2, '.', ''), '0'), '.');
 }
 
+/** August supplement, USD per person per safari night (1–25 August). */
+const CALC_AUG_SUPPL_PPPN = 35;
+
+/**
+ * A cost cell value from days[] (accommodation J, park_fees F): a number, or a
+ * formula on numbers and cell refs ("=279", "=(250+71)*$B$1"). null clears the cell.
+ */
+function calc_cell_amount($val, string $what) {
+    if ($val === null) return null;
+    if (is_int($val) || is_float($val) || (is_string($val) && is_numeric(trim($val)))) return (float)$val;
+    $s = trim((string)$val);
+    if (preg_match('/^=[0-9A-Z$.+\-*\/() ]+$/i', $s)) return $s;
+    throw new InvalidArgumentException($what . ' must be a number or a formula like "=279" or "=(250+71)*$B$1".');
+}
+
+/** Cell as shown in fill_calc's rows[]: value, or "formula → value" (saved value if $cached). */
+function calc_cell_show($ws, string $ref, bool $cached) {
+    $c = $ws->getCell($ref);
+    $raw = $c->getValue();
+    if (is_object($raw)) $raw = (string)$raw;   // RichText
+    if ($raw === null || $raw === '') return null;
+    if (is_string($raw) && strpos($raw, '=') === 0) {
+        try { $val = $cached ? $c->getOldCalculatedValue() : $c->getCalculatedValue(); } catch (Throwable $e) { $val = '#ERR'; }
+        if (is_float($val)) $val = round($val, 2);
+        return $raw . ' → ' . ($val === null || $val === '' ? '?' : $val);
+    }
+    return is_float($raw) ? round($raw, 2) : $raw;
+}
+
+/** Day text (label + hotel) at the beach: Zanzibar / Pemba / Mafia / Kenya coast. */
+function calc_is_beach_text(string $text): bool {
+    foreach (sc_place_hits($text) as $h) { if ($h[2] === 'znz') return true; }
+    return (bool)preg_match('/\b(mafia|diani|watamu|malindi|mombasa|lamu|kilifi|ukunda|beach)\b/i', $text);
+}
+
 /**
  * Fill a booking's Calc. $in (see docs/AGENT_API.md → fill_calc):
  *   request_id, file?, pax_sheet?, adults?, teens?, children?, start_date (Y-m-d),
  *   price_components[] (→ F9 "=a+b+c"), days[] {row_offset?, label?, flight? (route id/name),
- *   flight_cost_pp?, activity? {amount?|rate?, desc?}, hotel?, repeat?}, guests[] {name,title,country?},
- *   room_type?, adults_teen_chd?, arrival?, departure?, mid_date? (first beach night), confirm?
+ *   flight_cost_pp?, activity? {amount?|rate?, desc?}, park_fees? (F), park_fees_desc? (G),
+ *   accommodation? (J), hotel? (K), repeat?}, guests[] {name,title,country?}, room_type?,
+ *   adults_teen_chd?, arrival?, departure?, mid_date? (first beach night), august_supplement?, confirm?
  * $commit false → everything is built and verified on a temp copy, nothing uploaded.
+ * The result lists every day row (B–K, "formula → value") with the columns this call changed.
  */
 function calc_fill(PDO $db, array $in, bool $commit): array {
     calc_require_spreadsheet();
@@ -294,12 +331,12 @@ function calc_fill(PDO $db, array $in, bool $commit): array {
         // ── 2) Clear H6:I14 ──────────────────────────────────────────────────
         foreach (['H', 'I'] as $col) for ($row = 6; $row <= 14; $row++) $ws->setCellValue($col . $row, null);
 
-        // ── 3) F9 = formula of the price components ──────────────────────────
+        // ── 3) F9 = formula of the price components (written after the days:
+        //       the August supplement is computed from them) ─────────────────
         $comps = isset($in['price_components']) && is_array($in['price_components']) ? $in['price_components'] : [];
         if (!$comps) throw new InvalidArgumentException('price_components is required, e.g. [1625, 255, 70] (see get_rates).');
-        $parts = [];
-        foreach ($comps as $c) $parts[] = calc_fmt_num(calc_num($c, 'price_components item'));
-        $ws->setCellValue('F9', '=' . implode('+', $parts));
+        $parts = []; $compVals = [];
+        foreach ($comps as $c) { $n = calc_num($c, 'price_components item'); $compVals[] = $n; $parts[] = calc_fmt_num($n); }
 
         // ── 4) Dates + days ──────────────────────────────────────────────────
         $start = (string)($in['start_date'] ?? '');
@@ -320,16 +357,32 @@ function calc_fill(PDO $db, array $in, bool $commit): array {
             if (is_string($a) && strpos($a, '=') === 0) $lastTpl = $row;
         }
 
+        // Template values of B–K before any change (rows[].changed, hotel-change warning).
+        $dayCols = ['B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K'];
+        $before = []; $tplJ = [];
+        for ($row = $first; $row <= $maxRow; $row++) {
+            foreach ($dayCols as $col) $before[$row][$col] = $ws->getCell($col . $row)->getValue();
+            $tplJ[$row] = calc_cell_show($ws, 'J' . $row, true);
+        }
+
         $flights = null; $acts = null;
         $cursor = $first;
         $lastRow = $lastTpl;
         foreach ((isset($in['days']) && is_array($in['days']) ? $in['days'] : []) as $k => $d) {
             if (isset($d['row_offset'])) $cursor = $first + (int)$d['row_offset'];
             $rep = max(1, (int)($d['repeat'] ?? 1));
+            // Cost cells are validated once per entry and copied to every repeated row.
+            $accom = array_key_exists('accommodation', $d) ? calc_cell_amount($d['accommodation'], 'days[' . $k . '].accommodation') : false;
+            $fees  = array_key_exists('park_fees', $d)     ? calc_cell_amount($d['park_fees'], 'days[' . $k . '].park_fees') : false;
             for ($j = 0; $j < $rep; $j++, $cursor++) {
                 $row = $cursor;
                 if ($row > $maxRow) throw new InvalidArgumentException('Too many days: row ' . $row . ' is past the itinerary table (last row ' . $maxRow . ').');
                 if (isset($d['label']) && $d['label'] !== '') $ws->setCellValue('B' . $row, (string)$d['label']);
+
+                // Park fees (F) + description (G); accommodation cost (J).
+                if ($fees !== false) $ws->setCellValue('F' . $row, $fees);
+                if (array_key_exists('park_fees_desc', $d)) $ws->setCellValue('G' . $row, $d['park_fees_desc'] === null ? null : (string)$d['park_fees_desc']);
+                if ($accom !== false) $ws->setCellValue('J' . $row, $accom);
 
                 // Flight: cost from the rate table (route) — never guessed.
                 if (!empty($d['flight']) || isset($d['flight_cost_pp'])) {
@@ -369,7 +422,15 @@ function calc_fill(PDO $db, array $in, bool $commit): array {
                     $ws->setCellValue('I' . $row, $desc);
                 }
 
-                if (array_key_exists('hotel', $d)) $ws->setCellValue('K' . $row, $d['hotel'] === null ? null : (string)$d['hotel']);
+                if (array_key_exists('hotel', $d)) {
+                    $newK = $d['hotel'] === null ? '' : trim((string)$d['hotel']);
+                    $oldK = trim((string)$before[$row]['K']);
+                    if ($accom === false && $oldK !== '' && $newK !== '' && strcasecmp($oldK, $newK) !== 0) {
+                        $warnings[] = 'Row ' . $row . ': hotel changed (' . $oldK . ' → ' . $newK . '), J cost left from the template ('
+                                    . $oldK . ' ' . ($tplJ[$row] === null ? 'empty' : $tplJ[$row]) . ') — pass "accommodation".';
+                    }
+                    $ws->setCellValue('K' . $row, $newK === '' ? null : $newK);
+                }
                 if ($row > $lastRow) $lastRow = $row;
             }
         }
@@ -385,6 +446,33 @@ function calc_fill(PDO $db, array $in, bool $commit): array {
         }
         $nDays = $lastRow - $first + 1;
         $endExpected = date('Y-m-d', strtotime($start . ' +' . ($nDays - 1) . ' days'));
+        $midDate = isset($in['mid_date']) && preg_match('/^\d{4}-\d{2}-\d{2}$/', (string)$in['mid_date']) ? (string)$in['mid_date'] : null;
+
+        // August supplement: safari nights (not beach: from mid_date, else by place
+        // name in B/K) between 1 and 25 August, CALC_AUG_SUPPL_PPPN pp each.
+        $augDates = [];
+        for ($row = $first; $row < $lastRow; $row++) {
+            $date = date('Y-m-d', strtotime($start . ' +' . ($row - $first) . ' days'));
+            if (substr($date, 5, 2) !== '08' || (int)substr($date, 8, 2) > 25) continue;
+            $beach = $midDate !== null ? $date >= $midDate
+                   : calc_is_beach_text($ws->getCell('B' . $row)->getValue() . ' ' . $ws->getCell('K' . $row)->getValue());
+            if (!$beach) $augDates[] = $date;
+        }
+        $augAmount = CALC_AUG_SUPPL_PPPN * count($augDates);
+        $augCheck  = null;
+        if (!empty($in['august_supplement'])) {
+            if ($augDates) {
+                if (in_array((float)$augAmount, $compVals, true)) $warnings[] = 'price_components already has ' . $augAmount . ' — check the August supplement is not counted twice.';
+                $parts[] = calc_fmt_num($augAmount);
+            } else {
+                $warnings[] = 'august_supplement: no safari night between 1 and 25 August — nothing added.';
+            }
+        } elseif ($augDates && !array_key_exists('august_supplement', $in) && !in_array((float)$augAmount, $compVals, true)) {
+            $augCheck = ['level' => 'warn', 'msg' => count($augDates) . ' safari night(s) between 1 and 25 August ('
+                        . implode(', ', array_map('sc_fmt', $augDates)) . ') but no August supplement (' . CALC_AUG_SUPPL_PPPN . ' pp × '
+                        . count($augDates) . ' = ' . $augAmount . ') in price_components — pass "august_supplement": true (or false if it does not apply).'];
+        }
+        $ws->setCellValue('F9', '=' . implode('+', $parts));
 
         // ── 5) Guests, room type, pax text, flights ──────────────────────────
         $guests = isset($in['guests']) && is_array($in['guests']) ? $in['guests'] : [];
@@ -436,8 +524,22 @@ function calc_fill(PDO $db, array $in, bool $commit): array {
         $writer->save($tmpOut);
         $bytes = (string)file_get_contents($tmpOut);
 
-        $expect = ['start' => $start, 'end' => $endExpected,
-                   'mid' => isset($in['mid_date']) && preg_match('/^\d{4}-\d{2}-\d{2}$/', (string)$in['mid_date']) ? $in['mid_date'] : null];
+        // Day rows as written (B–K, formulas with their value) + what this call changed.
+        $rows = [];
+        for ($row = $first; $row <= $lastRow; $row++) {
+            $cells = []; $changed = [];
+            foreach ($dayCols as $col) {
+                $show = calc_cell_show($ws, $col . $row, false);
+                if ($show !== null) $cells[$col] = $show;
+                $old = $before[$row][$col] ?? null;
+                $new = $ws->getCell($col . $row)->getValue();
+                if ((string)$old !== (string)$new) $changed[] = $col;
+            }
+            $rows[] = ['row' => $row, 'date' => date('Y-m-d', strtotime($start . ' +' . ($row - $first) . ' days')),
+                       'cells' => $cells, 'changed' => $changed];
+        }
+
+        $expect = ['start' => $start, 'end' => $endExpected, 'mid' => $midDate, 'extra_checks' => $augCheck ? [$augCheck] : []];
         $result = [
             'ok'        => true,
             'dry_run'   => !$commit,
@@ -447,6 +549,10 @@ function calc_fill(PDO $db, array $in, bool $commit): array {
             'days'      => $nDays,
             'start'     => $start,
             'end'       => $endExpected,
+            'f9'        => '=' . implode('+', $parts),
+            'august_supplement' => ['safari_nights' => $augDates, 'pp_per_night' => CALC_AUG_SUPPL_PPPN, 'amount_pp' => $augAmount,
+                                    'added' => !empty($in['august_supplement']) && $augDates ? true : false],
+            'rows'      => $rows,
             'warnings'  => $warnings,
         ];
 
@@ -482,7 +588,8 @@ function calc_fill(PDO $db, array $in, bool $commit): array {
  * values only): house rules + dates seen by the parser + key figures.
  */
 function calc_verify(string $path, array $expect): array {
-    $checks = sc_calc_rule_checks($path, ['mid' => $expect['mid'] ?? null, 'flight_costs' => bs_known_flight_costs()]);
+    $checks = sc_calc_rule_checks($path, ['mid' => $expect['mid'] ?? null, 'flight_costs' => bs_known_flight_costs(), 'hotel_cost' => 'error']);
+    foreach ($expect['extra_checks'] ?? [] as $c) $checks[] = $c;
     $v = sc_xlsx_cells($path);
     $trip = sc_trip_dates($v);
     if ($trip['start'] === $expect['start'] && $trip['end'] === $expect['end']) {
