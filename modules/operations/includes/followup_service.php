@@ -266,11 +266,34 @@ function followup_read_unit(PDO $db, array $u, string $token, float $deadline, b
     return ['docs' => $docs, 'complete' => $complete];
 }
 
-/** dedupe_key of a supplier document: request + reference, else request + supplier + service date. */
-function followup_supplier_key(int $requestId, array $d): string {
+/**
+ * dedupe_key of a supplier document: request + reference, else request + supplier + service date.
+ * $requestId: the owner request, or "F:<folder stem>" for a folder without a confirmed booking.
+ */
+function followup_supplier_key($requestId, array $d): string {
     if (($d['issue'] ?? null) === 'unreadable') return followup_key_fit('S|' . $requestId . '|file|' . followup_norm(basename((string)$d['source_file'])));
     if (!empty($d['supplier_ref'])) return followup_key_fit('S|' . $requestId . '|' . strtoupper(preg_replace('/\s+/', '', $d['supplier_ref'])));
     return followup_key_fit('S|' . $requestId . '|' . followup_norm((string)$d['supplier']) . '|' . ($d['service_date'] ?? ''));
+}
+
+/**
+ * Folder as the lines store it: path under /001_Safari ("10_27OCT_…/member"), or an absolute Dropbox
+ * path for a folder elsewhere ("/itineraries/…/Diamante/2027-Groups/01_19JAN_Panorama02_…").
+ */
+function followup_folder_norm(string $f): string {
+    $f = trim($f);
+    if ($f !== '' && $f[0] === '/' && !preg_match('#^/001_Safari(/|$)#i', $f)) return '/' . trim($f, '/');
+    return trim(preg_replace('#^/?001_Safari/#i', '', $f), '/');
+}
+
+/** Dropbox path of a stored folder. */
+function followup_folder_dir(string $folder): string {
+    return $folder !== '' && $folder[0] === '/' ? $folder : CK_BASE . '/' . $folder;
+}
+
+/** Key scope of a folder without a confirmed booking: "F:" + its stem (status tags off, so a rename keeps the lines). */
+function followup_folder_scope(string $folder): string {
+    return 'F:' . dropbox_folder_stem_safe(basename($folder));
 }
 
 /** Keys fit the 190-character unique index. */
@@ -285,13 +308,13 @@ function followup_key_fit(string $k): string {
  * → ['lines' => [key => line], 'confirmed' => [key => source_file]]
  */
 function followup_supplier_candidates(array $u, array $docs, string $today): array {
-    $rid = (int)$u['request']['id'];
+    $rid = !empty($u['request']['id']) ? (int)$u['request']['id'] : null;   // null: folder without a confirmed booking
     $lines = []; $confirmed = [];
     foreach ($docs as $d) {
         if (in_array($d['issue'] ?? null, ['provisional', 'provisional_expired'], true)) {   // expired is relative to today, not to when the PDF was read
             $d['issue'] = (!empty($d['expiry_date']) && $d['expiry_date'] < $today) ? 'provisional_expired' : 'provisional';
         }
-        $key = followup_supplier_key($rid, $d);
+        $key = followup_supplier_key($rid ?? followup_folder_scope($u['folder']), $d);
         if (($d['status'] ?? '') === 'confirmed' && empty($d['issue'])) { $confirmed[$key] = $d['source_file']; continue; }
         if (empty($d['issue'])) continue;                                          // no status printed (receipts, our own invoices …)
         $line = ['type' => 'supplier', 'dedupe_key' => $key, 'request_id' => $rid, 'folder' => $u['folder'],
@@ -621,6 +644,8 @@ function followup_brief(array $l): array {
  *        'confirmed' [key => file] references now confirmed (→ auto_confirmed)
  *        'ok'        request_ids whose tickets are saved (→ auto_ticket_saved)
  *        'only'      request_ids the run was limited to (null = all; every candidate must belong to one)
+ *        'only_folder' key scope "F:<stem>" of a folder without a confirmed booking (its lines only;
+ *                    'requests' => [0] when its documents were all read)
  * Dry run ($confirm false): the same summary, nothing written.
  */
 function followup_apply(PDO $db, string $type, array $cand, array $scope, bool $confirm, string $source, string $today): array {
@@ -628,8 +653,14 @@ function followup_apply(PDO $db, string $type, array $cand, array $scope, bool $
     $now = date('Y-m-d H:i:s');
     $sum = ['added' => [], 'updated' => [], 'closed' => [], 'reopened' => [], 'unreadable' => [], 'unchanged' => 0];
     $only = isset($scope['only']) ? array_map('intval', (array)$scope['only']) : null;   // request_ids the run looked at (null = all)
-    $st = $db->prepare("SELECT * FROM booking_followups WHERE type = ?" . ($only !== null ? " AND request_id IN (" . implode(',', $only ?: [0]) . ")" : ''));
-    $st->execute([$type]);
+    if (isset($scope['only_folder'])) {
+        $prefix = 'S|' . $scope['only_folder'] . '|';
+        $st = $db->prepare("SELECT * FROM booking_followups WHERE type = ? AND request_id IS NULL AND LEFT(dedupe_key, ?) = ?");
+        $st->execute([$type, strlen($prefix), $prefix]);
+    } else {
+        $st = $db->prepare("SELECT * FROM booking_followups WHERE type = ?" . ($only !== null ? " AND request_id IN (" . implode(',', $only ?: [0]) . ")" : ''));
+        $st->execute([$type]);
+    }
     $have = [];
     foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) $have[$r['dedupe_key']] = $r;
     $docFields = ['request_id', 'folder', 'start_date', 'end_date', 'service_date', 'supplier', 'supplier_ref', 'service',
@@ -847,14 +878,30 @@ function followup_upsert(PDO $db, array $rows, array $scanned, bool $confirm, st
                                <=> [substr_count($units[$b]['folder'], '/'), strcasecmp(basename($units[$b]['folder']), basename($rel)) !== 0]);
         return $hit[0];
     };
+    // A folder without a confirmed booking gets its own lines (request_id NULL, keys "S|F:<stem>|…"):
+    // group folders in /001_Safari (provisional GRP / set departures) and folders outside it (Diamante 20xx-Groups).
+    $folderUnit = function ($ref) use (&$units) {
+        if ($ref === null || is_int($ref) || ctype_digit((string)$ref)) return null;
+        $rel = followup_folder_norm((string)$ref);
+        if ($rel === '' || ($rel[0] !== '/' && !followup_group_kind(explode('/', $rel)[0]))) return null;
+        $k = 'f:' . strtolower($rel);
+        if (!isset($units[$k])) {
+            $d = parse_folder_dates(basename($rel));
+            $units[$k] = ['dir' => followup_folder_dir($rel), 'folder' => $rel, 'request' => null, 'request_ids' => [],
+                          'start_date' => $d['start_date'], 'end_date' => $d['end_date']];
+        }
+        return $k;
+    };
+    // Outside /001_Safari: never matched by name (a confirmed copy of the group in /001_Safari has its own lines).
+    $locate = fn($ref) => (is_string($ref) && strncmp(followup_folder_norm($ref), '/', 1) === 0) ? $folderUnit($ref) : ($find($ref) ?? $folderUnit($ref));
     $docs = []; $unmatched = []; $cached = 0;
     foreach ($rows as $i => $r) {
         $ref = $r['request_id'] ?? $r['folder'] ?? null;
-        $k = $ref !== null ? $find($ref) : null;
+        $k = $ref !== null ? $locate($ref) : null;
         // The folder as it is now on disk (the Hub record may keep an old status tag): the 📂 link must open it.
         if ($k !== null && !empty($r['folder'])) {
-            $units[$k]['folder'] = trim(preg_replace('#^/?001_Safari/#i', '', (string)$r['folder']), '/');
-            $units[$k]['dir'] = CK_BASE . '/' . $units[$k]['folder'];
+            $units[$k]['folder'] = followup_folder_norm((string)$r['folder']);
+            $units[$k]['dir'] = followup_folder_dir($units[$k]['folder']);
         }
         // Every document sent is kept for the group check (a collective GRP may have no confirmed request yet).
         if ($confirm && followup_cache_sent_doc($db, $r, $k !== null ? $units[$k]['dir'] : null)) $cached++;
@@ -882,9 +929,11 @@ function followup_upsert(PDO $db, array $rows, array $scanned, bool $confirm, st
                        'expiry_date' => $date($r['expiry_date'] ?? null), 'booked_by' => trim((string)($r['booked_by'] ?? '')) ?: null];
     }
     $doneUnits = [];
-    foreach ($scanned as $s) if (($k = $find($s)) !== null) { $doneUnits[$k] = true; $docs[$k] = $docs[$k] ?? []; }
-    $cand = []; $confirmed = []; $doneReq = []; $partialOwner = [];
+    foreach ($scanned as $s) if (($k = $locate($s)) !== null) { $doneUnits[$k] = true; $docs[$k] = $docs[$k] ?? []; }
+    $cand = []; $confirmed = []; $doneReq = []; $partialOwner = []; $folderDocs = [];
     foreach ($docs as $k => $list) {
+        if (!$units[$k]['request']) { $folderDocs[$k] = $list; continue; }
+        if ($confirm) followup_adopt_folder_lines($db, $units[$k]);
         $c = followup_supplier_candidates($units[$k], $list, $today);
         $cand += $c['lines']; $confirmed += $c['confirmed'];
         if (isset($doneUnits[$k])) $doneReq[] = (int)$units[$k]['request']['id'];
@@ -893,8 +942,37 @@ function followup_upsert(PDO $db, array $rows, array $scanned, bool $confirm, st
     $doneReq = array_values(array_filter(array_unique($doneReq), fn($x) => !isset($partialOwner[$x])));
     // Only the requests sent are in scope: other bookings' lines are left alone.
     $sum = followup_apply_subset($db, $cand, ['requests' => $doneReq, 'confirmed' => $confirmed],
-                                 array_unique(array_map(fn($k) => (int)$units[$k]['request']['id'], array_keys($docs))), $confirm, $source, $today);
-    return $sum + ['matched' => count($rows) - count($unmatched), 'unmatched' => $unmatched, 'folders' => count($docs), 'documents_kept' => $cached];
+                                 array_unique(array_map(fn($k) => (int)$units[$k]['request']['id'], array_diff(array_keys($docs), array_keys($folderDocs)))),
+                                 $confirm, $source, $today);
+    // Folders without a confirmed booking: one apply each, limited to that folder's lines.
+    foreach ($folderDocs as $k => $list) {
+        $c = followup_supplier_candidates($units[$k], $list, $today);
+        $s = followup_apply($db, 'supplier', $c['lines'], ['requests' => isset($doneUnits[$k]) ? [0] : [], 'confirmed' => $c['confirmed'],
+                                                         'only_folder' => followup_folder_scope($units[$k]['folder'])], $confirm, $source, $today);
+        foreach ($sum as $f => $v) $sum[$f] = is_array($v) ? array_merge($v, $s[$f]) : $v + $s[$f];
+    }
+    return $sum + ['matched' => count($rows) - count($unmatched), 'unmatched' => $unmatched, 'folders' => count($docs),
+                   'folders_without_booking' => count($folderDocs), 'documents_kept' => $cached];
+}
+
+/**
+ * A folder followed before its booking was confirmed (lines "S|F:<stem>|…", request_id NULL): its lines
+ * pass to the booking, with their owner, notes and history. A key the booking already has stays as it is.
+ */
+function followup_adopt_folder_lines(PDO $db, array $u): void {
+    $rid = (int)$u['request']['id'];
+    $from = 'S|' . followup_folder_scope($u['folder']) . '|';
+    $st = $db->prepare("SELECT id, dedupe_key FROM booking_followups WHERE type = 'supplier' AND request_id IS NULL AND LEFT(dedupe_key, ?) = ?");
+    $st->execute([strlen($from), $from]);
+    foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $l) {
+        $key = followup_key_fit('S|' . $rid . '|' . substr($l['dedupe_key'], strlen($from)));
+        try {
+            $db->prepare("UPDATE booking_followups SET request_id = ?, dedupe_key = ? WHERE id = ?")->execute([$rid, $key, (int)$l['id']]);
+            followup_event($db, (int)$l['id'], null, 'booking', null, 'confirmed booking #' . $rid);
+        } catch (Throwable $e) {
+            error_log('followup_adopt_folder_lines: ' . $e->getMessage());   // duplicate key: the booking already follows it
+        }
+    }
 }
 
 /** A document read elsewhere, stored like a server reading (rev 'local') so the group check can use it. */
@@ -902,7 +980,7 @@ function followup_cache_sent_doc(PDO $db, array $r, ?string $unitDir): bool {
     $file = trim((string)($r['source_file'] ?? ''));
     if ($file === '') return false;
     if (stripos($file, 'invoices/') !== 0) $file = 'invoices/' . ltrim($file, '/');
-    $dir = !empty($r['folder']) ? CK_BASE . '/' . trim(preg_replace('#^/?001_Safari/#i', '', (string)$r['folder']), '/') : $unitDir;
+    $dir = !empty($r['folder']) ? followup_folder_dir(followup_folder_norm((string)$r['folder'])) : $unitDir;
     if (!$dir) return false;
     $issue = $r['issue'] ?? null;
     $doc = ['status' => $issue ? ($issue === 'on_request' ? 'on_request' : ($issue === 'orangi_rooms_provisional' ? 'confirmed' : 'provisional'))
@@ -996,9 +1074,11 @@ function followup_rows(PDO $db, array $f = [], ?string $today = null): array {
          . ($w ? ' WHERE ' . implode(' AND ', $w) : '') . " ORDER BY b.closed_at IS NULL DESC, b.service_date ASC, b.id ASC";
     $st = $db->prepare($sql);
     $st->execute($a);
+    $found = $st->fetchAll(PDO::FETCH_ASSOC);
+    $log = followup_notes_log($db, array_map(fn($r) => (int)$r['id'], $found));
     $out = [];
-    foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
-        $r = followup_out($r, $today);
+    foreach ($found as $r) {
+        $r = followup_out($r, $today) + ['notes_log' => $log[(int)$r['id']] ?? []];
         if (!empty($f['priority']) && $r['priority'] !== $f['priority'] && substr($r['priority'], 0, 1) !== (string)$f['priority']) continue;
         $out[] = $r;
     }
@@ -1006,21 +1086,39 @@ function followup_rows(PDO $db, array $f = [], ?string $today = null): array {
     return $out;
 }
 
+/**
+ * Notes written on the lines, newest first: [followup_id => [{at, by, text}]]. Each note saved is
+ * an event (field notes); the line's `notes` column keeps the last one.
+ */
+function followup_notes_log(PDO $db, array $ids): array {
+    if (!$ids) return [];
+    $out = [];
+    $st = $db->query("SELECT e.followup_id, e.at, e.new_value, u.full_name, u.username
+                      FROM booking_followup_events e LEFT JOIN users u ON u.id = e.user_id
+                      WHERE e.field = 'notes' AND e.followup_id IN (" . implode(',', array_map('intval', $ids)) . ")
+                      ORDER BY e.at DESC, e.id DESC");
+    foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $e) {
+        if (trim((string)$e['new_value']) === '') continue;
+        $out[(int)$e['followup_id']][] = ['at' => $e['at'], 'by' => $e['full_name'] ?: $e['username'] ?: 'system', 'text' => $e['new_value']];
+    }
+    return $out;
+}
+
 /** Public shape of a line (page JSON and Agent API). */
 function followup_out(array $r, string $today): array {
     $svc = $r['service_date'] ?: $r['start_date'];
-    $dir = '/001_Safari/' . $r['folder'];
+    $dir = followup_folder_dir((string)$r['folder']);
+    $open = fn(string $p) => 'savannah://open?path=' . implode('/', array_map('rawurlencode', explode('/', ltrim($p, '/'))));
     return [
         'id' => (int)$r['id'], 'type' => $r['type'], 'request_id' => $r['request_id'] !== null ? (int)$r['request_id'] : null,
         'customer' => $r['customer_name'] ?? null, 'folder' => $r['folder'], 'folder_name' => basename((string)$r['folder']),
         'folder_url' => $r['folder'] ? followup_dropbox_url($dir) : null,
         // Same as the Hub's "📂 Open": Windows Explorer on the office PCs (tools/savannah-open).
-        'folder_open_url' => $r['folder'] ? 'savannah://open?path=' . implode('/', array_map('rawurlencode', explode('/', '001_Safari/' . $r['folder']))) : null,
+        'folder_open_url' => $r['folder'] ? $open($dir) : null,
         'file_url' => $r['source_file'] ? followup_dropbox_url($dir . (dirname($r['source_file']) !== '.' ? '/' . dirname($r['source_file']) : ''),
                                                                 basename($r['source_file'])) : null,
         // The document on the PC (handler opens PDF / Office files; an older handler selects it in Explorer).
-        'file_open_url' => $r['folder'] && $r['source_file']
-            ? 'savannah://open?path=' . implode('/', array_map('rawurlencode', explode('/', '001_Safari/' . $r['folder'] . '/' . $r['source_file']))) . '&open=file' : null,
+        'file_open_url' => $r['folder'] && $r['source_file'] ? $open($dir . '/' . $r['source_file']) . '&open=file' : null,
         'start_date' => $r['start_date'], 'end_date' => $r['end_date'], 'service_date' => $r['service_date'],
         'days_left' => $svc ? (int)round((strtotime($svc) - strtotime($today)) / 86400) : null,
         'supplier' => $r['supplier'], 'supplier_ref' => $r['supplier_ref'], 'service' => $r['service'],

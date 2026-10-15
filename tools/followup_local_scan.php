@@ -14,6 +14,8 @@
  *          --key-file=<path of api.txt>  (or env HUB_AGENT_KEY)  --url=https://hub.savannahexplorers.com/api/agent/index.php
  *          --today=YYYY-MM-DD (tests)  --no-send (classify only)  --cainfo=<CA bundle> (default: Git's, the office PHP has none)
  *          --no-ocr (PDFs without text stay "unreadable")
+ *          --extra=<folders;…> booking folders outside 001_Safari, wildcards allowed (default: the Diamante
+ *                  provisional groups, C:\Dropbox\itineraries\SafariClassic\it\Agenzia\Diamante\20*-Groups; "" = none)
  * Needs PHP with curl + openssl (the .bat loads them). Passport files are never opened (only invoices\).
  * A PDF without a text layer (scan, image printed to PDF) is read with the Windows OCR (tools\pdf_ocr.ps1);
  * its status text ends with "(OCR)".
@@ -25,6 +27,7 @@ require_once __DIR__ . '/../modules/operations/includes/followup_classify.php';
 $opt = ['root' => 'C:\\Dropbox\\001_Safari', 'pdftotext' => 'C:\\Utility\\Git\\mingw64\\bin\\pdftotext.exe',
         'key-file' => __DIR__ . '/../api.txt', 'url' => 'https://hub.savannahexplorers.com/api/agent/index.php',
         'today' => date('Y-m-d'), 'folder' => '', 'json' => '', 'confirm' => false, 'no-send' => false, 'no-ocr' => false,
+        'extra' => 'C:\\Dropbox\\itineraries\\SafariClassic\\it\\Agenzia\\Diamante\\20*-Groups',
         'cainfo' => 'C:\\Utility\\Git\\mingw64\\etc\\ssl\\certs\\ca-bundle.crt'];
 foreach (array_slice($argv, 1) as $a) {
     if (!preg_match('/^--([a-z\-]+)(?:=(.*))?$/', $a, $m) || !array_key_exists($m[1], $opt)) { fwrite(STDERR, "Unknown option $a\n"); exit(2); }
@@ -36,25 +39,35 @@ if (!is_dir($root)) { fwrite(STDERR, "Folder not found: $root\n"); exit(2); }
 if (!is_file($opt['pdftotext'])) { fwrite(STDERR, "pdftotext not found: {$opt['pdftotext']}\n"); exit(2); }
 
 // ── Booking folders of trips not ended: top level + 00_YYYY, and GRP member sub-folders ──
-$folders = [];   // rel path under 001_Safari => [start, end]
-$consider = function (string $rel) use (&$folders, $root, $today) {
-    $d = parse_folder_dates(basename($rel));
+// Key = the folder as the Hub stores it: path under 001_Safari, or "/<path under Dropbox>" for the
+// --extra folders (provisional groups kept outside 001_Safari until confirmed).
+$folders = [];   // key => ['trip' => [start, end], 'path' => local path]
+$consider = function (string $key, string $path) use (&$folders, $today) {
+    $d = parse_folder_dates(basename($path));
     if (!$d['end_date'] || $d['end_date'] < $today) return false;
-    $folders[$rel] = $d;
+    $folders[$key] = ['trip' => $d, 'path' => $path];
     return true;
 };
 foreach (scandir($root) as $n) {
     if ($n[0] === '.' || !is_dir("$root/$n")) continue;
     if (preg_match('/^00_20\d\d$/', $n)) {
-        foreach (scandir("$root/$n") as $m) if ($m[0] !== '.' && is_dir("$root/$n/$m") && folder_is_booking_leaf($m)) $consider("$n/$m");
+        foreach (scandir("$root/$n") as $m) if ($m[0] !== '.' && is_dir("$root/$n/$m") && folder_is_booking_leaf($m)) $consider("$n/$m", "$root/$n/$m");
     } elseif (folder_is_booking_leaf($n)) {
-        $consider($n);
+        $consider($n, "$root/$n");
     }
 }
-foreach (array_keys($folders) as $rel) {                    // GRP: members with their own invoices\
-    foreach (scandir("$root/$rel") as $m) {
-        if ($m[0] !== '.' && is_dir("$root/$rel/$m") && folder_is_booking_leaf($m) && is_dir("$root/$rel/$m/invoices")) {
-            $folders["$rel/$m"] = $folders[$rel];
+$home = dirname($root);                                      // the Dropbox folder on this PC
+foreach ($opt['extra'] === '' ? [] : explode(';', $opt['extra']) as $pattern) {
+    foreach (glob(rtrim(trim($pattern), '\\/'), GLOB_ONLYDIR) ?: [] as $dir) {
+        if (stripos($dir, $home) !== 0) { echo "  ! not under $home: $dir\n"; continue; }
+        $base = '/' . str_replace('\\', '/', trim(substr($dir, strlen($home)), '\\/'));
+        foreach (scandir($dir) as $n) if ($n[0] !== '.' && is_dir("$dir/$n") && folder_is_booking_leaf($n)) $consider("$base/$n", "$dir/$n");
+    }
+}
+foreach ($folders as $key => $f) {                          // GRP: members with their own invoices\
+    foreach (scandir($f['path']) as $m) {
+        if ($m[0] !== '.' && is_dir("{$f['path']}/$m") && folder_is_booking_leaf($m) && is_dir("{$f['path']}/$m/invoices")) {
+            $folders["$key/$m"] = ['trip' => $f['trip'], 'path' => "{$f['path']}/$m"];
         }
     }
 }
@@ -87,9 +100,11 @@ function followup_group_kind_local(string $name): bool {
 // ── Read and classify ──
 $rows = []; $scanned = []; $count = ['docs' => 0, 'issues' => 0, 'confirmed' => 0, 'unknown' => 0, 'unreadable' => 0, 'ocr' => 0];
 $tmp = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'fu_scan_' . getmypid() . '.txt';
-foreach ($folders as $rel => $trip) {
-    $dir = "$root/$rel/invoices";
-    $isGroup = followup_group_kind_local(explode('/', preg_replace('#^00_20\d\d/#', '', $rel))[0]);   // the top booking folder
+foreach ($folders as $rel => $fo) {
+    $trip = $fo['trip'];
+    $dir = "{$fo['path']}/invoices";
+    // The top booking folder is a group; --extra folders are all groups.
+    $isGroup = $rel[0] === '/' || followup_group_kind_local(explode('/', preg_replace('#^00_20\d\d/#', '', $rel))[0]);
     $ok = true;
     foreach (is_dir($dir) ? scandir($dir) : [] as $f) {
         if (!is_file("$dir/$f") || followup_skip_file($f)) continue;
@@ -131,7 +146,8 @@ foreach ($folders as $rel => $trip) {
 printf("%d PDF(s): %d to follow up, %d confirmed, %d unreadable, %d without a status (%d read with OCR)\n",
        $count['docs'], $count['issues'], $count['confirmed'], $count['unreadable'], $count['unknown'], $count['ocr']);
 foreach ($rows as $r) {
-    if ($r['issue']) printf("  %-22s %-38s %-12s %s\n", $r['issue'], substr($r['folder'], 0, 38), (string)$r['supplier_ref'], $r['doc_status_text']);
+    if ($r['issue']) printf("  %-22s %-38s %-12s %s\n", $r['issue'], substr($r['folder'][0] === '/' ? basename($r['folder']) : $r['folder'], 0, 38),
+                            (string)$r['supplier_ref'], $r['doc_status_text']);
 }
 if ($opt['json'] !== '') {
     file_put_contents($opt['json'], json_encode(['rows' => $rows, 'scanned' => $scanned], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));

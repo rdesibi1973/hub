@@ -176,6 +176,15 @@
       return '<option value="' + s + '"' + (s === r.staff_status ? ' selected' : '') + (s === 'not_relevant' && !D.me.is_admin ? ' disabled' : '') + '>' + STATUS[s] + '</option>';
     }).join('') + '</select>';
   }
+  /** Notes written so far, newest first, with date and author (a note older than the log: no date). */
+  function notesLog(r) {
+    var log = (r.notes_log || []).slice();
+    if (!log.length && r.notes) log.push({at: null, by: '', text: r.notes});
+    if (!log.length) return '';
+    return '<ul class="fu-notes">' + log.map(function (n) {
+      return '<li>' + (n.at ? '<span class="w">' + dmy(n.at) + (n.by ? ' · ' + esc(n.by) : '') + '</span>' : '') + esc(n.text) + '</li>';
+    }).join('') + '</ul>';
+  }
   function row(r) {
     var tr = document.createElement('tr');
     tr.dataset.id = r.id;
@@ -198,9 +207,8 @@
         '<a href="' + esc(r.file_open_url) + '" title="Open on this PC — ' + esc(r.source_file) + '">📄 ' + esc(r.source_file.replace(/^invoices\//, '')) + '</a></span>'
       : r.file_url ? '<a href="' + esc(r.file_url) + '" target="_blank" rel="noopener" title="' + esc(r.source_file) + '">📄 ' + esc(r.source_file.replace(/^invoices\//, '')) + '</a>' : '',
       ownerCell(r),
-      edit ? '<input type="date" data-f="contacted_at" value="' + esc(r.contacted_at || '') + '" aria-label="Contacted">' : esc(dmy(r.contacted_at)),
       statusCell(r),
-      edit ? '<textarea data-f="notes" aria-label="Notes" placeholder="Notes…">' + esc(r.notes || '') + '</textarea>' : esc(r.notes || ''),
+      notesLog(r) + (edit ? '<textarea data-f="notes" aria-label="Add a note" placeholder="Add a note…"></textarea>' : ''),
       state.tab === 'closed'
         ? '<span style="white-space:nowrap">' + dmyhm(r.closed_at) + '</span><span class="fu-days">' + esc(r.close_reason_label || '') + ' — ' + esc(r.closed_by || '') + '</span>'
         : '<span style="white-space:nowrap">' + dmy(r.last_seen_at) + '</span>',
@@ -215,7 +223,7 @@
     var head = ['Priority', state.tab === 'groups' ? 'Arrival' : 'Service', 'Client / folder',
                 state.tab === 'tickets' ? 'Flight' : state.tab === 'groups' ? 'Group' : 'Supplier',
                 'Ref', 'Issue', state.tab === 'groups' ? 'What we found' : 'Document status',
-                'Expiry', 'File', 'Owner', 'Contacted', 'Status', 'Notes', state.tab === 'closed' ? 'Closed' : 'Last check', ''];
+                'Expiry', 'File', 'Owner', 'Status', 'Notes', state.tab === 'closed' ? 'Closed' : 'Last check', ''];
     t.innerHTML = '<thead><tr>' + head.map(function (h) { return '<th>' + h + '</th>'; }).join('') + '</tr></thead>';
     var body = document.createElement('tbody');
     if (!list.length) {
@@ -288,7 +296,7 @@
         replaceRow(d.row);
         var keep = state.tab;
         renderTabs();
-        if (d.closed || d.reopened || change.take || 'owner' in change || 'staff_status' in change) { state.tab = keep; renderTable(); }
+        if (d.closed || d.reopened || change.take || 'owner' in change || 'staff_status' in change || 'notes' in change) { state.tab = keep; renderTable(); }
         else mark('<span class="fu-saved">✓ saved</span>');
       }
       return true;
@@ -322,24 +330,23 @@
     else change[f] = el.value;
     if (f === 'staff_status' && el.value === 'problem') {
       var notes = tr.querySelector('textarea[data-f=notes]');
-      if (notes && notes.value.trim() === '') {
+      var r = all().filter(function (x) { return x.id === parseInt(tr.dataset.id, 10); })[0];
+      if (notes && notes.value.trim() === '' && !(r && r.notes)) {
         var cell = el.parentNode, old = cell.querySelector('.fu-err'); if (old) old.remove();
         cell.insertAdjacentHTML('beforeend', '<span class="fu-err">Write a note first, then choose Problem</span>');
-        var r = all().filter(function (x) { return x.id === parseInt(tr.dataset.id, 10); })[0];
         el.value = r ? r.staff_status : 'open';
         notes.focus();
         return;
       }
-      change.notes = notes ? notes.value : undefined;
+      if (notes && notes.value.trim() !== '') change.notes = notes.value;   // a note being written goes with the status
     }
     save(tr, change, el.parentNode);
   });
   $('fu-table').addEventListener('focusout', function (ev) {
     var el = ev.target;
     if (el.dataset.f !== 'notes') return;
-    var tr = el.closest('tr[data-id]');
-    var r = all().filter(function (x) { return x.id === parseInt(tr.dataset.id, 10); })[0];
-    if (r && (r.notes || '') !== el.value.trim()) save(tr, {notes: el.value}, el.parentNode);
+    // Each note is added to the line's log (the textarea is for a new note, empty after saving).
+    if (el.value.trim() !== '') save(el.closest('tr[data-id]'), {notes: el.value}, el.parentNode);
   });
 
   // Filters

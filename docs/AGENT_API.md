@@ -1143,7 +1143,13 @@ logic `modules/operations/includes/followup_service.php`, documents read by `fol
 - One line per `dedupe_key`: request + supplier reference (WB…, booking ID), else request + supplier + service date;
   tickets request + flight date + route. GRP: documents in the group folder belong to the group's first request (a
   member's `request_id` filter shows them too).
-- The check writes only the document fields; `owner`, `contacted_at`, `staff_status`, `notes` are the staff's. Lines are never
+- **Folders without a confirmed booking** (sent by `followup_upsert`): group folders in `/001_Safari` (GRP, Diamante /
+  Panorama, `_PROVISIONAL`) and folders outside it (Diamante provisional groups, `/itineraries/SafariClassic/it/Agenzia/Diamante/20xx-Groups`)
+  get their own lines with `request_id` `null`, `folder` = path under `/001_Safari` or absolute Dropbox path, key
+  `S|F:<folder stem>|…`. When the booking is confirmed (folder in `/001_Safari` with the same stem), the next upsert moves
+  those lines to it, with owner, notes and history (event `booking`).
+- The check writes only the document fields; `owner`, `staff_status`, `notes` are the staff's. Each note saved is kept
+  (event `notes`, `notes_log` in the rows); `notes` is the last one. `contacted_at` is still accepted but no longer shown. Lines are never
   deleted. They close with `close_reason`: `auto_confirmed` (the same reference in a document reading Confirmed without a
   provisional note), `auto_ticket_saved`, `auto_trip_ended`, `auto_not_found` (the file left `invoices/` and nothing else has
   that reference — check it was not moved without a confirmed one), `manual` (staff: `resolved`; admin: `not_relevant`).
@@ -1152,7 +1158,8 @@ logic `modules/operations/includes/followup_service.php`, documents read by `fol
   days; `3-NORMAL` later. Tickets: `1-URGENT` within 7 days, else `2-HIGH`.
 - **PDFs on the server:** BlueHost has no `pdftotext` and no Composer today, so `followup_scan` type `supplier` only uses
   documents already read and returns `reader: "none"` + a `warning`. Two ways: (a) on the office PC run
-  `tools\followup_local_scan.bat [--confirm]` (reads `C:\Dropbox\001_Safari`, same rules, sends `followup_upsert`); (b) install a reader
+  `tools\followup_local_scan.bat [--confirm]` (reads `C:\Dropbox\001_Safari` and the Diamante `20*-Groups` folders (`--extra`),
+  same rules, PDFs without text through the Windows OCR, sends `followup_upsert`); (b) install a reader
   on the server: `smalot/pdfparser` in `vendor/` (pure PHP), or a static `pdftotext` binary with its path in
   `FOLLOWUP_PDFTOTEXT` (`includes/config.php`).
 
@@ -1160,8 +1167,8 @@ logic `modules/operations/includes/followup_service.php`, documents read by `fol
 `type` (`supplier` | `ticket` | `group`), `status` (`open` default | `closed` | `all`), `owner` (username | user id | `none`),
 `priority` (`1-URGENT` | `2-HIGH` | `3-NORMAL`, or `1`/`2`/`3`), `request_id`, `q` (client / folder / supplier / ref / notes).
 → `count`, `last_check_at` `{supplier, ticket}`, `last_checks`, `rows[]` `{id, type, request_id, customer, folder, folder_url,
-file_url, start_date, end_date, service_date, days_left, supplier, supplier_ref, service, source_file, issue, issue_label,
-doc_status_text, expiry_date, expired, booked_by, owner, owner_name, contacted_at, staff_status, notes, priority,
+file_url, folder_open_url, file_open_url, start_date, end_date, service_date, days_left, supplier, supplier_ref, service, source_file, issue, issue_label,
+doc_status_text, expiry_date, expired, booked_by, owner, owner_name, contacted_at, staff_status, notes, notes_log[] {at, by, text} (newest first), priority,
 first_seen_at, last_seen_at, closed_at, closed_by, close_reason, events_count}` — not taken in charge first, then problems,
 priority, service date.
 
@@ -1178,11 +1185,12 @@ with the follow-up admin rights (reassign, not relevant); every change is an eve
 
 #### `followup_upsert` (POST)
 Supplier documents read elsewhere (office PC, Cowork) — also the way to load a baseline. Dry run unless `"confirm": true`.
-`rows[]` `{folder (path under /001_Safari, e.g. "00_2027/…" or "<GRP>/<member>") | request_id, source_file
+`rows[]` `{folder (path under /001_Safari, e.g. "00_2027/…" or "<GRP>/<member>"; or an absolute Dropbox path "/itineraries/…" for a folder outside it) | request_id, source_file
 ("invoices/x.pdf"), supplier?, supplier_ref?, service_date?, issue? | status: "confirmed", doc_status_text?, expiry_date?,
 booked_by?}` (max 2000), `scanned[]` = folders whose `invoices/` were read completely (their lines not sent close as
 `auto_not_found`; rows with `status: confirmed` close their reference). Folder names match by stem (status tags ignored).
-→ the summary + `matched`, `unmatched[]`.
+A group folder without a confirmed booking, or a folder outside `/001_Safari`, gets its own lines (see above).
+→ the summary + `matched`, `unmatched[]`, `folders_without_booking`.
 
 ```bash
 curl -sA "$UA" -H "$H" "$U?action=followup_list&owner=none&priority=1"
