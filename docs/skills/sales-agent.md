@@ -40,6 +40,9 @@ Memo: at the start create one `doing` memo (clear title with the folder name, li
    - round up to the next multiple of 5; teen/child prices are NOT rounded;
    - ZNZ/Pemba transfers per car (not per person) in F10, after the per-person total;
    - flights in col C (Auric + fuel surcharge); in-park camps with concession fee in the accommodation column; August supplement only on safari nights.
+   - ZNZ airport transfers: 60 per car per leg, as in the templates (≈70 rack after markup); don't lower them.
+   - Mvuvi: the template cost is the July–August rate; for other periods use the STO contract in /000_Contracts/Zanzibar/Mvuvi (season + pax) + HB 25 pp. Deluxe 2 pax HB: 279 (16/1–31/3, Jul–Aug), 245 (1/4–30/6, 1/9–22/12), 313 (23/12–15/1, + compulsory dinners).
+   - Flight Arusha → Zanzibar: cost always 235 (`=235*$B$1`), same in the Hub rate table.
 7. Teens: AFTER the last `fill_calc` (it clears H6:I14), write the teen discount in H13 with the label in I13 (e.g. "teen discount (2 teens 13 y.o.)") and subtract it in F10 (e.g. `=F9*$B$1-H13*2`, with ZNZ transfers `=F9*$B$1+140-H13*2`), note "Inc teen discount" in G10. Keep cached values (edit the sheet XML, not via openpyxl).
 8. Calc not open in Excel on his PC; wait for Dropbox sync before the next Hub action.
 
@@ -52,6 +55,8 @@ Memo: at the start create one `doing` memo (clear title with the folder name, li
 5. `iti_document`: `docx` for agencies, `pdf` for direct clients; saved as `<ref_number>.docx/.pdf` in the request folder; on 409 ask before `overwrite: true`. Regenerate after every change.
 6. `iti_publish` only if Roberto wants the public link; he puts the link in the mail himself.
 
+Never name the airline of domestic flights or the balloon-safari operator (programme, Word, email): we know who operates them only after booking. In ITI, a flight taken from the route table shows its operator ("· Auric Air"): use `flights: [{custom: "Arusha → Serengeti (Seronera)"}]` instead of `flight_route_id`, and write inclusions as "voli interni Arusha – Serengeti e ritorno" / "safari in mongolfiera" with no company name.
+
 Italian programme rules: no shared-transfer disclaimer on Day 1; "Pranzo pic-nic nel cratere"; "under 12"; guide "in lingua italiana"; savannahexplorers.com; NIC as mandatory insurance in the exclusions; meal plan stated for beach and Arusha stays; price "NNNN USD - base N pax" (quota netta for agencies).
 
 ## 4. Quote email
@@ -61,6 +66,7 @@ Where the draft goes, subject, greeting/closing, signature and general style: fo
 - "Prezzi:" list, each line "usd per persona" (agencies: quota netta, base N pax); Totale per persona; transfers per car on their own line; totale pratica; single supplement as a separate total (e.g. "Totale pratica in doppia + singola").
 - "La quota include:" ("trasferimenti durante il safari"…) / "Non include:" (NIC USD 44 pp; Zanzibar tax USD 5 pppn paid at the hotel, only with Zanzibar; beach transfers named precisely…).
 - Domestic flights: "Le tariffe e disponibilità dei voli interni sono soggette a disponibilità al momento della prenotazione".
+- No airline name for domestic flights and no operator name for the balloon safari (known only after booking).
 - Only when the programme is attached: "Programma safari dettagliato allegato (considera la quota netta per il gruppo di N pax)."
 - Don't mention international flights unless asked; don't offer to "verify availability and block everything" on a loose ok.
 
