@@ -136,6 +136,9 @@ function iti_ps_program_out(PDO $db, int $id, string $lang = ''): array {
         'id' => (int)$p['id'], 'type' => $p['program_type'], 'stage' => $p['stage'] ?? null, 'status' => $p['status'],
         'ref_number' => isset($p['ref_number']) && $p['ref_number'] !== '' ? $p['ref_number'] : null,
         'safari_type' => $D['safari_type'],
+        'country' => $D['country'],   // own column, else from the destinations
+        // Imported from a partner's text: internal only, never printed (the supplier guard checks the texts).
+        'source' => !empty($p['source_supplier']) ? ['supplier' => $p['source_supplier'], 'file' => $p['source_file'] ?? null] : null,
         'sample_id' => $p['sample_program_id'] ? (int)$p['sample_program_id'] : null,
         'lead_request_id' => isset($p['lead_request_id']) && $p['lead_request_id'] ? (int)$p['lead_request_id'] : null,
         'title' => $D['title'], 'subtitle' => $D['subtitle'], 'intro' => $D['intro'], 'language' => $lang,
@@ -176,6 +179,7 @@ function iti_ps_schema(): void {
         iti_add_column('iti_programs', 'price_table_json', 'TEXT NULL DEFAULT NULL');
         foreach (ITI_PS_LANGS as $l) iti_add_column('iti_programs', 'price_notes_' . $l, 'TEXT NULL DEFAULT NULL');
         iti_ensure_doc_columns();   // pax_teens, room_type
+        iti_ensure_country_schema();   // country, source_supplier (imported programmes)
     } catch (PDOException $e) {
         error_log('iti_ps_schema: ' . $e->getMessage());
     }
@@ -184,7 +188,7 @@ function iti_ps_schema(): void {
 /** Header fields an agent may set, limited to the columns the live table really has. */
 function iti_ps_header_fields(): array {
     iti_ps_schema();
-    $f = ['ref_number', 'safari_type', 'display_language', 'display_currency', 'start_date', 'pax_adults', 'pax_teens', 'pax_children', 'price_table_json', 'price_notes'];
+    $f = ['ref_number', 'safari_type', 'country', 'display_language', 'display_currency', 'start_date', 'pax_adults', 'pax_teens', 'pax_children', 'price_table_json', 'price_notes'];
     foreach (ITI_PS_LANGS as $l) foreach (['title', 'subtitle', 'intro', 'price_notes'] as $k) $f[] = $k . '_' . $l;
     return array_values(array_intersect($f, iti_table_columns('iti_programs')));
 }
@@ -205,6 +209,10 @@ function iti_ps_header_values(array $fields): array {
             $v = $v === '' ? null : $v;
         }
         if ($k === 'ref_number') { $out[$k] = iti_ps_ref_check($v); continue; }
+        if ($k === 'country') {   // "KE", "TZ+KE"; null / "" = from the destinations
+            $out[$k] = ($v === null || trim((string)$v) === '') ? null : implode('+', iti_country_list($v));
+            continue;
+        }
         if ($k === 'pax_adults' || $k === 'pax_teens' || $k === 'pax_children') $v = max(0, min(60, (int)$v));
         if ($k === 'price_table_json') {
             // [{"label": "2 partecipanti", "price": 2905, "currency": "USD"}, …]
@@ -292,17 +300,7 @@ function iti_ps_create_personal(PDO $db, array $in, string $who, bool $go): arra
             if ($days !== null) iti_pb_set_days($db, $id, $days, true);
         } else {
             $db->beginTransaction();
-            $row = $set + ['program_type' => 'personal', 'status' => 'draft', 'created_by' => $who, 'duration_days' => count($items),
-                           'is_published' => 0, 'brand' => 'savannah_explorers'];
-            $row = array_intersect_key($row, array_flip(iti_table_columns('iti_programs')));
-            $db->prepare('INSERT INTO iti_programs (`' . implode('`,`', array_keys($row)) . '`) VALUES (' . implode(',', array_fill(0, count($row), '?')) . ')')
-               ->execute(array_values($row));
-            $id = (int)$db->lastInsertId();
-            foreach ($items as $i => $it) {
-                $db->prepare('INSERT INTO iti_program_days (program_id, day_number) VALUES (?, ?)')->execute([$id, $i + 1]);
-                iti_pb_day_write($db, (int)$db->lastInsertId(), $it);
-            }
-            iti_pb_renumber($db, $id);
+            $id = iti_ps_insert_blank($db, $set, $items, $who);
             $db->commit();
         }
     } catch (Throwable $e) { if ($db->inTransaction()) $db->rollBack(); throw $e; }
@@ -316,6 +314,25 @@ function iti_ps_create_personal(PDO $db, array $in, string $who, bool $go): arra
     $out = iti_ps_program_out($db, $id, $lang);
     // program_id + links at the top too: callers looked for them there and found null.
     return $plan + ['program_id' => $id, 'links' => $out['links'], 'terms' => $out['terms'], 'program' => $out];
+}
+
+/**
+ * Insert a blank personal programme: header $set (validated columns) + the days ($items from
+ * iti_pb_day_item()). The caller holds the transaction. Returns the new id.
+ */
+function iti_ps_insert_blank(PDO $db, array $set, array $items, string $who): int {
+    $row = $set + ['program_type' => 'personal', 'status' => 'draft', 'created_by' => $who, 'duration_days' => count($items),
+                   'is_published' => 0, 'brand' => 'savannah_explorers'];
+    $row = array_intersect_key($row, array_flip(iti_table_columns('iti_programs')));
+    $db->prepare('INSERT INTO iti_programs (`' . implode('`,`', array_keys($row)) . '`) VALUES (' . implode(',', array_fill(0, count($row), '?')) . ')')
+       ->execute(array_values($row));
+    $id = (int)$db->lastInsertId();
+    foreach ($items as $i => $it) {
+        $db->prepare('INSERT INTO iti_program_days (program_id, day_number) VALUES (?, ?)')->execute([$id, $i + 1]);
+        iti_pb_day_write($db, (int)$db->lastInsertId(), $it);
+    }
+    iti_pb_renumber($db, $id);
+    return $id;
 }
 
 /**

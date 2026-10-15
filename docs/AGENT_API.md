@@ -562,7 +562,8 @@ Word `copy_program` put in the request folder (`NN_<folder>_<Prog>Safari.docx`) 
 (e.g. `01_…_Pumba_Calc.xlsx`) picks the Word of that Calc (same `NN_` and programme). None or several → **409**, nothing
 created, with `word_candidates`, `calc_files`, `folder` and `hint`: resend with `fields.ref_number` or `calc_file` — never guess.
 **safari_type:** `private` ("Safari privato in Tanzania" / "Safari privato con guida" on the cover and facts line of web,
-PDF and Word) or `group` ("Safari di gruppo in Tanzania" / "Safari di gruppo con guida"; 5 languages). `fields.safari_type` wins;
+PDF and Word) or `group` ("Safari di gruppo in Tanzania" / "Safari di gruppo con guida"; 5 languages; the country follows the
+programme's `country` — see **Programmes outside Tanzania**). `fields.safari_type` wins;
 otherwise `group` when the sample is a group safari or `GRP` is in the ref_number, the Calc file or the request folder
 (`_DumaGRP`, `_GRP0301`, `GRP1508Simba`), else `private`. Same rule for `iti_final_from_calc` and the Hub's copy buttons;
 the plan shows it. `iti_program` returns `safari_type`; change it with `iti_update_program`.
@@ -606,7 +607,9 @@ transaction; `duration_days` follows. Dry-run (counts, validation errors) unless
 Dry-run unless confirm.
 
 #### `iti_inclusions` (GET) / `iti_update_inclusions` (POST)
-`iti_inclusions` → the standard rows `{std_id, text_<lang>}` by `included` / `excluded`.
+`iti_inclusions` `country?` (`TZ` | `KE` | `TZ+KE`) → the standard rows `{std_id, country, text_<lang>}` by `included` / `excluded`;
+with `country`, only that country's rows and the `ALL` ones (a Kenya programme never gets NIC / the Tanzania visa; TZ+KE gets both).
+`iti_standard_inclusions.country`: `TZ` (every row before Oct 2026), `KE` (eTA, health insurance USD 44 — seeded), `ALL` (set by hand for generic items).
 `iti_update_inclusions`: `program_id`, `included[]` and / or `excluded[]` — items `{std_id}`, `{text_<lang>…}` or a
 plain string (program language). Each list given replaces that list in one transaction; an empty list is refused.
 
@@ -620,6 +623,68 @@ plain string (program language). Each list given replaces that list in one trans
 - `iti_transfer_routes` `from? to?`; `iti_create_transfer_route` `fields`: `from_destination`*, `to_destination`*
   (id, name or code), `duration_min`, `distance_km`, `road_type` (`tarmac`|`gravel`|`mixed`), `notes_<lang>`.
 Duplicates are refused with the existing id. Dry-run unless confirm.
+
+#### Programmes outside Tanzania — country (Oct 2026)
+`iti_programs.country` (`TZ`, `KE`, mixed `TZ+KE`; `fields.country` in `iti_create_personal` / `iti_update_program`, `null` = from the
+destinations): empty → the countries of the programme's destinations (`iti_destinations.country`, the name: "Kenya"), else Tanzania.
+It sets the cover kicker ("Safari privato in Kenya", "Safari privé en Tanzanie et au Kenya") and the standard included / excluded
+of an import. `iti_program` returns `country` and `source` (`{supplier, file}` of an imported programme — internal, never printed).
+T&C and the contacts on the documents are always Savannah's (office + emergencies), whatever the country.
+Columns / table added lazily on first use (`iti_ensure_country_schema()`, no migration to run).
+
+#### `iti_create_destination` (POST)
+`fields`: `name_en`*, `country`* (`KE` / `TZ` / … or the name), `name_<lang>` (the documents print the destination only in
+the programme language: send `name_it` too), `code` (3–4 letters, unique; made from the name when missing: Amboseli → AMB,
+Tsavo West → TSW), `type` (`park` | `reserve` | `lake` | `city` | `beach` | `airport` | `other`), `region` (default from the
+type: park / reserve → National Parks, airport → Airports, else the country), `latitude`, `longitude`, `description_<lang>`.
+Same name (EN / IT) or code → **400** with `existing` (the row). Dry-run (`would_create`, `missing_names`) unless confirm → `created`.
+Cover photo afterwards with `iti_destination_photo`. Airports / airstrips stay separate rows (flights and transfers only).
+`iti_destinations` takes `country?` (`KE` or the name) and `missing=stub`; rows show `country`, `type`, `needs_completion`.
+
+#### `iti_import_program` (POST) — a partner's programme (text) → a Savannah personal programme
+The text (Word / PDF / email) is parsed by Claude (Cowork now; a Hub page with the Anthropic API later — same code path,
+`modules/iti/includes/iti_import_service.php`), never by PHP: the input is already structured.
+```json
+{ "lead_request_id": 3138, "country": "KE", "display_language": "it", "create_missing": true,
+  "fields": { "title_it": "Kenya Classic – Gruppo Bramardi", "title_en": "Kenya Classic", "pax_adults": 15,
+              "price_table_json": [...], "price_notes_it": "...", "ref_suffix": "KenyaClassic" },
+  "source": { "supplier": "BTG", "file": "BTG_Kenya_7N8D_....pdf" },
+  "days": [ { "day_title_en": "Nairobi – Amboseli", "day_title_it": "Nairobi – Amboseli",
+              "narrative_en": "...", "narrative_it": "...", "destination": "Amboseli National Park",
+              "end_lodge": "Kibo Safari Camp", "meals": "B,L,D",
+              "activities": [{"custom": "Game drive", "text_it": "Fotosafari"}],
+              "transfers": ["Nairobi – Amboseli, circa 4 ore"] } ],
+  "included": [{"text_en": "...", "text_it": "..."}], "excluded": [{"text_en": "...", "text_it": "..."}] }
+```
+- **Days:** the day items of `iti_set_days` (both languages stored: `_en` and `_<display_language>`) plus `destination` /
+  `end_lodge` as text (or `destination_id` / `end_lodge_id` to force a row), `meals` (`"B,L,D"`, `"(B,L,D)"`, `BB`, `HB`, `FB`, `AI`;
+  `meal_*` keys win). For new rows: `destination_type`, `destination_country` (required for a new destination of a mixed
+  programme), `destination_name_<lang>`, `end_lodge_type`, `end_lodge_category` (default from the name / `mid`).
+- **Name matching** (only rows of the programme's countries; airports never): exact 100 → same without the generic words
+  (Camp / Lodge / Resort / Hotel / & / Spa; National Park / Reserve …) 95 → one contained in the other 85 → similarity %; ≥ 80 and
+  not tied = matched. `matches[]` `{kind, text, matched_id, matched_name, score, candidates[]}`.
+- **Not found:** with `"create_missing": true` stubs are created (`needs_completion = 1`; a lodge's area = the day's
+  destination; a name that exists in another country or inactive → `conflict`, pass the id). Without it, `to_create[]` lists them
+  and a confirm stores them as free text on the day.
+- **Included / not included:** the lists given, plus the country's standard items not already there (`"standard": false` = only the given).
+- **ref_number:** `fields.ref_number`; else the request folder's programme Word (as `iti_create_personal`); with none there
+  `NN_<folder>_<ref_suffix or title before " – ">` (`01_Kenya2027(BramardiViaggi-Roberto)_KenyaClassic`). Several Words → 409.
+- **Supplier guard:** any text (all but `source`) containing a blocklisted term or `source.supplier` → **422** `supplier_hits[]`
+  `{field, term, supplier}`, nothing saved. Same guard on `iti_update_program`, `iti_update_day`, `iti_set_days`, `iti_add_day`,
+  `iti_update_inclusions`, `iti_save_texts` and `iti_document` (on the printed texts) for programmes with a `source.supplier`.
+  (Edits on the Hub page `program_edit.php` are not checked.)
+- **Dry run** (default) → `country`, `title`, `ref_number` / `ref_source`, `safari_type`, `terms_variant`, `days[]` `{day, title,
+  destination {state: matched|new|text, id, name}, lodge {…}, meals}`, `matches[]`, `to_create[]`, `included[]`, `excluded[]`,
+  `warnings[]` (day without destination / lodge, last day with a lodge, meals not given / no dinner / lunch on the last day,
+  `nights` ≠ days − 1, `_<lang>` texts missing or looking English, Tanzania items on a non-TZ programme, Kenya without eTA),
+  `photo_gaps[]`, `text_gaps[]` (lodges / destinations without photos or without text in the programme language).
+- **Confirm** → stubs, programme (blank, `stage` proposal, T&C of the request's channel), days and lists in **one transaction**
+  → `program_id`, `created {destinations[], lodges[]}`, `links`, `program`.
+
+#### `iti_supplier_blocklist` (GET / POST)
+GET → `blocklist` `{"BTG": ["BTG", "Bridge The Gap", "btgltd.com"], …}`. POST `supplier`, `add[]`, `remove[]` (names, brands,
+domains, e-mails, phone numbers — matched as whole words, any case; phones by their last 9 digits). Dry-run unless confirm.
+Also editable in the Hub: ITI → Settings → Partner names.
 
 #### `iti_save_as_sample` (POST)
 `program_id` (a finished personal program), `title` or `title_<lang>` (required), `code?` (Calc code) → a new sample:
@@ -675,8 +740,8 @@ day header and program cover (destination).
 
 #### `iti_lodges` (GET)
 `q?` (lodge / destination name), `destination?` (id, name or code), `active?` (`1` default, `0`, `all`),
-`missing?` (`photos` | `coords` | `website` | `description_<lang>` | `placeholder`), `limit?` ≤ 300 →
-`lodges[]` `{id, name, destination_id, destination, category, type, website, latitude, longitude, photos[], description_langs[], active}`.
+`missing?` (`photos` | `coords` | `website` | `description_<lang>` | `placeholder` | `stub` = made by `iti_import_program`, to complete), `limit?` ≤ 300 →
+`lodges[]` `{id, name, destination_id, destination, category, type, website, latitude, longitude, photos[], description_langs[], active, needs_completion}`.
 
 #### `iti_lodge` (GET)
 `lodge_id` → the same plus `phone, emergency_phone, email, address, description_<lang>` (all 5).
@@ -715,6 +780,7 @@ Photos afterwards with `iti_lodge_photos`.
 `lodge_id` / `destination_id`, `fields` `{…}`. Lodge: `website, phone, emergency_phone, email, address,
 description_<lang>, latitude, longitude, destination_id, category` (`budget|mid|luxury|ultra_luxury`), `lodge_type`
 (`lodge|tented_camp|hotel|mobile_camp|house`). Destination: `name_<lang>, description_<lang>, region, latitude, longitude`.
+Both: `needs_completion` (0 once an imported stub has its photos and texts).
 Returns `changes` `{field: {from, to}}` (only what differs). Dry-run unless `"confirm": true`.
 A lodge's name stays on the Lodges page — and so does its **season twin** (`season_twin_id`, "Same camp in the other
 season": a migration camp's counterpart in the other area, e.g. Tanzania Bush Camps Ndutu Mobile Camp ↔ Mara River

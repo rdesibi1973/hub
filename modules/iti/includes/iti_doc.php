@@ -13,28 +13,48 @@ require_once __DIR__ . '/iti_terms.php';   // T&C per channel (direct / agency),
 /**
  * Cover kicker + facts pill of a programme document by safari type (iti_programs.safari_type):
  * private safari or group departure (shared jeep). The only place these strings live, so the
- * web page, PDF and Word stay in step. Returns ['kicker', 'safari_pill'].
+ * web page, PDF and Word stay in step. $country = the programme's country (iti_program_country():
+ * "TZ", "KE", "TZ+KE") → "Safari privato in Kenya", "Safari privé en Tanzanie et au Kenya".
+ * Returns ['kicker', 'safari_pill'].
  */
-function iti_safari_labels(string $type, string $lang): array {
+function iti_safari_labels(string $type, string $lang, string $country = 'TZ'): array {
     $L = [
         'private' => [
-            'it' => ['Safari privato in Tanzania', 'Safari privato con guida'],
-            'en' => ['Private safari in Tanzania', 'Private guided safari'],
-            'fr' => ['Safari privé en Tanzanie', 'Safari privé avec guide'],
-            'es' => ['Safari privado en Tanzania', 'Safari privado con guía'],
-            'de' => ['Private Safari in Tansania', 'Private Safari mit Guide'],
+            'it' => ['Safari privato', 'Safari privato con guida'],
+            'en' => ['Private safari', 'Private guided safari'],
+            'fr' => ['Safari privé', 'Safari privé avec guide'],
+            'es' => ['Safari privado', 'Safari privado con guía'],
+            'de' => ['Private Safari', 'Private Safari mit Guide'],
         ],
         'group' => [
-            'it' => ['Safari di gruppo in Tanzania', 'Safari di gruppo con guida'],
-            'en' => ['Group safari in Tanzania', 'Guided group safari'],
-            'fr' => ['Safari en groupe en Tanzanie', 'Safari en groupe avec guide'],
-            'es' => ['Safari en grupo en Tanzania', 'Safari en grupo con guía'],
-            'de' => ['Gruppensafari in Tansania', 'Gruppensafari mit Guide'],
+            'it' => ['Safari di gruppo', 'Safari di gruppo con guida'],
+            'en' => ['Group safari', 'Guided group safari'],
+            'fr' => ['Safari en groupe', 'Safari en groupe avec guide'],
+            'es' => ['Safari en grupo', 'Safari en grupo con guía'],
+            'de' => ['Gruppensafari', 'Gruppensafari mit Guide'],
         ],
     ];
+    // "in <country>" per language, the preposition included (French: en Tanzanie, au Kenya, à Madagascar).
+    $in = [
+        'TZ' => ['it' => 'in Tanzania', 'en' => 'in Tanzania', 'fr' => 'en Tanzanie', 'es' => 'en Tanzania', 'de' => 'in Tansania'],
+        'KE' => ['it' => 'in Kenya', 'en' => 'in Kenya', 'fr' => 'au Kenya', 'es' => 'en Kenia', 'de' => 'in Kenia'],
+        'UG' => ['it' => 'in Uganda', 'en' => 'in Uganda', 'fr' => 'en Ouganda', 'es' => 'en Uganda', 'de' => 'in Uganda'],
+        'RW' => ['it' => 'in Ruanda', 'en' => 'in Rwanda', 'fr' => 'au Rwanda', 'es' => 'en Ruanda', 'de' => 'in Ruanda'],
+        'MG' => ['it' => 'in Madagascar', 'en' => 'in Madagascar', 'fr' => 'à Madagascar', 'es' => 'en Madagascar', 'de' => 'in Madagaskar'],
+    ];
+    $and = ['it' => ' e ', 'en' => ' and ', 'fr' => ' et ', 'es' => ' y ', 'de' => ' und '];
     $t = $L[$type] ?? $L['private'];
-    $v = $t[$lang] ?? $t['en'];
-    return ['kicker' => $v[0], 'safari_pill' => $v[1]];
+    $l = isset($t[$lang]) ? $lang : 'en';
+    $places = [];
+    foreach (preg_split('/[+,\s]+/', strtoupper($country), -1, PREG_SPLIT_NO_EMPTY) as $c) if (isset($in[$c])) $places[] = $in[$c][$l];
+    if (!$places) $places[] = $in['TZ'][$l];
+    if (count($places) > 1 && $l !== 'fr') {   // "in Tanzania e Kenya": one preposition, except French (en … et au …)
+        $prep = strtok($places[0], ' ');
+        foreach ($places as $i => $pl) if ($i > 0 && strpos($pl, $prep . ' ') === 0) $places[$i] = substr($pl, strlen($prep) + 1);
+    }
+    $last = array_pop($places);
+    $where = $places ? implode(', ', $places) . $and[$l] . $last : $last;
+    return ['kicker' => $t[$l][0] . ' ' . $where, 'safari_pill' => $t[$l][1]];
 }
 
 /** UI strings per language. */
@@ -216,7 +236,7 @@ function iti_doc_data(int $id, string $lang): ?array {
     iti_ensure_doc_columns();   // room_type, pax_teens, is_beach_stay (also from the public page)
     $p = iti_get_program($id);
     if (!$p) return null;
-    $T = iti_doc_labels($lang) + iti_safari_labels(iti_safari_type($p), $lang);
+    $T = iti_doc_labels($lang);   // + the cover kicker, once the destinations give the country (below)
 
     $days = iti_get_days($id);
     $lodgeIds = []; $destIds = [];
@@ -235,6 +255,9 @@ function iti_doc_data(int $id, string $lang): ?array {
         $in = implode(',', array_keys($destIds));
         foreach ($db->query("SELECT * FROM iti_destinations WHERE id IN ($in)")->fetchAll() as $r) $dests[(int)$r['id']] = $r;
     }
+    // "Safari privato in Kenya": the programme's country, else its destinations' (iti_functions.php).
+    $country = iti_program_country($p, $dests);
+    $T += iti_safari_labels(iti_safari_type($p), $lang, $country);
 
     // Internal flights of a day → "Dar es Salaam → Ruaha · Auric Air · 07:40–10:05".
     $fltSt = $db->prepare('SELECT f.*, r.from_airport, r.to_airport, r.operator FROM iti_day_flights f
@@ -382,6 +405,7 @@ function iti_doc_data(int $id, string $lang): ?array {
         'T'        => $T,
         'program'  => $p,
         'safari_type' => iti_safari_type($p),
+        'country'  => $country,
         'title'    => iti_doc_pick($p, 'title', $lang),
         'subtitle' => iti_doc_pick($p, 'subtitle', $lang),
         'intro'    => iti_doc_pick($p, 'intro', $lang),

@@ -95,14 +95,15 @@ function agent_audit(PDO $db, string $action, $reqId, array $payload, string $re
     global $agentUser;
     agent_ensure_schema($db);
     $dry = in_array($action, ['confirm_booking', 'send_booking_email', 'rollback_booking', 'fill_calc', 'iti_save_texts', 'update_rate', 'replace_flight_rates',
-                              'cancel_invoice_payment', 'update_folder_status', 'import_zoho_invoice', 'create_invoice', 'update_invoice', 'mail_send', 'mail_move',
+                              'cancel_invoice_payment', 'update_folder_status', 'import_zoho_invoice', 'create_invoice', 'update_invoice', 'send_invoice_email', 'mail_send', 'mail_move',
                               'iti_lodge_photos', 'iti_destination_photo', 'iti_update_lodge', 'iti_update_destination',
                               'iti_create_personal', 'iti_update_program', 'iti_update_day', 'iti_publish', 'iti_final_from_calc', 'iti_save_alias',
                               'iti_create_lodge', 'iti_set_days', 'iti_add_day', 'iti_delete_day', 'iti_update_inclusions',
                               'iti_create_flight_route', 'iti_create_activity', 'iti_create_transfer_route', 'iti_save_as_sample',
                               'create_request', 'add_flight_rates', 'timeline_update', 'summary_set', 'rename_folder',
                               'set_request_status', 'update_request', 'import_group_folder', 'move_group_folder', 'ck_request_check', 'memo_delete', 'create_agency', 'update_agency', 'save_agency_contact', 'delete_agency_contact',
-                              'followup_scan', 'followup_update', 'followup_upsert', 'iti_update_activity'], true) && empty($payload['confirm']);
+                              'followup_scan', 'followup_update', 'followup_upsert', 'iti_update_activity',
+                              'iti_create_destination', 'iti_import_program', 'iti_supplier_blocklist'], true) && empty($payload['confirm']);
     // Mail: keep who/what in the log, not message bodies or attachment content.
     if (in_array($action, ['mail_get', 'mail_attachment', 'iti_document', 'iti_vouchers'], true) && $code === 200) {
         $res = json_decode($resultJson, true);
@@ -194,6 +195,7 @@ function agent_require_method(string $m): void {
 function agent_iti_lib(): void {
     require_once __DIR__ . '/../iti/includes/iti_program_service.php';
     require_once __DIR__ . '/../iti/includes/iti_final.php';
+    require_once __DIR__ . '/../iti/includes/iti_import_service.php';   // import from text, new destinations, supplier guard
     require_once __DIR__ . '/dropbox_helper.php';          // Calc read from Dropbox
 }
 
@@ -1534,6 +1536,9 @@ try {
         $to  = (string)($in['lang'] ?? '');
         $texts = isset($in['texts']) && is_array($in['texts']) ? $in['texts'] : [];
         if (!$texts) agent_fail('texts is required: {"<key>": "<translated text>", …} (keys from iti_texts)');
+        agent_iti_lib();
+        try { iti_im_guard_input($db, $pid, $texts); }   // imported programme: no supplier name
+        catch (ItiImportException $e) { agent_fail($e->getMessage(), $e->http, $e->data); }
         try {
             if (empty($in['confirm'])) {
                 $c = iti_texts_collect($db, $pid, $to, true);
@@ -1624,8 +1629,10 @@ try {
         $pid = (int)($in['program_id'] ?? 0);
         $fmt = (string)($in['format'] ?? 'pdf');
         try {
+            iti_im_guard_document($db, $pid, (string)($in['lang'] ?? ''));   // imported programme: no supplier name in what is printed (422)
             $f = iti_export_file($pid, (string)($in['lang'] ?? ''), $fmt);
-        } catch (InvalidArgumentException $e) { agent_fail($e->getMessage(), stripos($e->getMessage(), 'not found') !== false ? 404 : 400); }
+        } catch (ItiImportException $e) { agent_fail($e->getMessage(), $e->http, $e->data); }
+        catch (InvalidArgumentException $e) { agent_fail($e->getMessage(), stripos($e->getMessage(), 'not found') !== false ? 404 : 400); }
         catch (Throwable $e) { agent_fail('Document not generated: ' . $e->getMessage(), 500); }
         $extra = ['format' => $f['format'], 'lang' => $f['lang']];
         $refName = iti_ps_document_name((array)iti_get_program($pid), $fmt);
@@ -1667,6 +1674,9 @@ try {
         $who = (string)($agentUser['username'] ?? 'claude_agent');
         if (!empty($in['lead_request_id'])) $agentReqId = (int)$in['lead_request_id'];
         try {
+            if ($agentAction === 'iti_update_program' || $agentAction === 'iti_update_day') {
+                iti_im_guard_input($db, (int)($in['program_id'] ?? 0), (array)($in['fields'] ?? []));   // imported programme: no supplier name
+            }
             switch ($agentAction) {
                 case 'iti_create_personal': $r = iti_ps_create_personal($db, $in, $who, $go); break;
                 case 'iti_update_program':  $r = iti_ps_update_program($db, (int)($in['program_id'] ?? 0), (array)($in['fields'] ?? []), $go); break;
@@ -1675,6 +1685,7 @@ try {
                 default:                    $r = $go ? iti_ps_save_alias($in, $who) : ['would_save' => ['type' => $in['type'] ?? null, 'text' => $in['text'] ?? null]];
             }
         } catch (ItiRefException $e) { agent_fail($e->getMessage(), 409, $e->data); }   // ref_number not derivable: candidates
+        catch (ItiImportException $e) { agent_fail($e->getMessage(), $e->http, $e->data); }
         catch (InvalidArgumentException $e) { agent_fail($e->getMessage(), 400); }
         agent_out(array_merge(['ok' => true, 'dry_run' => !$go], $r, $go ? [] : ['message' => 'Dry run — nothing saved. Resend with "confirm": true.']));
     }
@@ -1690,22 +1701,56 @@ try {
         $go = !empty($in['confirm']);
         $pid = (int)($in['program_id'] ?? 0);
         try {
+            $texts = array_intersect_key($in, array_flip(['days', 'fields', 'included', 'excluded', 'title', 'title_en', 'title_it', 'title_fr', 'title_es', 'title_de']));
+            iti_im_guard_input($db, $pid, $texts);   // imported programme: no supplier name
             switch ($agentAction) {
-                case 'iti_set_days':          $r = iti_pb_set_days($db, $pid, (array)($in['days'] ?? []), $go); break;
+                case 'iti_set_days':         $r = iti_pb_set_days($db, $pid, (array)($in['days'] ?? []), $go); break;
                 case 'iti_add_day':           $r = iti_pb_add_day($db, $pid, (int)($in['after_day'] ?? -1), (array)($in['fields'] ?? []), $go); break;
                 case 'iti_delete_day':        $r = iti_pb_delete_day($db, $pid, (int)($in['day'] ?? 0), $go); break;
                 case 'iti_update_inclusions': $r = iti_pb_update_inclusions($db, $pid, $in, $go); break;
                 default:                      $r = iti_pb_save_as_sample($db, $pid, $in, (string)($agentUser['username'] ?? 'claude_agent'), $go);
             }
-        } catch (InvalidArgumentException $e) { agent_fail($e->getMessage(), 400); }
+        } catch (ItiImportException $e) { agent_fail($e->getMessage(), $e->http, $e->data); }
+        catch (InvalidArgumentException $e) { agent_fail($e->getMessage(), 400); }
         if ($go && $agentAction !== 'iti_save_as_sample') $r['program'] = iti_ps_program_out($db, $pid);
         agent_out(array_merge(['ok' => true, 'dry_run' => !$go], $r, $go ? [] : ['message' => 'Dry run — nothing saved. Resend with "confirm": true.']));
     }
 
     // Master data for the days: lists (GET) and new rows (POST, dry-run unless confirm).
-    case 'iti_inclusions':
+    case 'iti_inclusions':   // country? = KE | TZ | TZ+KE: that country's rows + the ALL ones
         agent_iti_lib();
-        agent_out(['ok' => true] + iti_pb_standard_inclusions($db));
+        try { agent_out(['ok' => true, 'country' => ($in['country'] ?? '') !== '' ? implode('+', iti_country_list($in['country'])) : null]
+                        + iti_pb_standard_inclusions($db, (string)($in['country'] ?? ''))); }
+        catch (InvalidArgumentException $e) { agent_fail($e->getMessage(), 400); }
+
+    // ── ITI: new destinations, programmes imported from a partner's text, supplier names ──
+    // includes/iti_import_service.php. Dry-run unless "confirm": true.
+    case 'iti_create_destination':
+    case 'iti_import_program': {
+        agent_require_method('POST');
+        agent_iti_lib();
+        $go = !empty($in['confirm']);
+        if (!empty($in['lead_request_id'])) $agentReqId = (int)$in['lead_request_id'];
+        try {
+            $r = $agentAction === 'iti_create_destination'
+                ? iti_im_create_destination($db, isset($in['fields']) && is_array($in['fields']) ? $in['fields'] : [], $go)
+                : iti_im_import($db, $in, (string)($agentUser['username'] ?? 'claude_agent'), $go);
+        } catch (ItiImportException $e) { agent_fail($e->getMessage(), $e->http, $e->data); }   // duplicate (400 + existing), supplier name (422)
+        catch (ItiRefException $e) { agent_fail($e->getMessage(), 409, $e->data); }
+        catch (InvalidArgumentException $e) { agent_fail($e->getMessage(), 400); }
+        agent_out(array_merge(['ok' => true, 'dry_run' => !$go], $r, $go ? [] : ['message' => 'Dry run — nothing saved. Resend with "confirm": true.']));
+    }
+
+    // GET: the partner names / domains / e-mails / phones never printed. POST: supplier, add[], remove[] (dry-run unless confirm).
+    case 'iti_supplier_blocklist': {
+        agent_iti_lib();
+        if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST') agent_out(['ok' => true, 'blocklist' => iti_im_blocklist($db)]);
+        $go = !empty($in['confirm']);
+        try { $r = iti_im_blocklist_set($db, (string)($in['supplier'] ?? ''), (array)($in['add'] ?? []), (array)($in['remove'] ?? []),
+                                        (string)($agentUser['username'] ?? 'claude_agent'), $go); }
+        catch (InvalidArgumentException $e) { agent_fail($e->getMessage(), 400); }
+        agent_out(array_merge(['ok' => true, 'dry_run' => !$go], $r, $go ? [] : ['message' => 'Dry run — nothing saved. Resend with "confirm": true.']));
+    }
     case 'iti_flight_routes':
         agent_iti_lib();
         agent_out(['ok' => true, 'flight_routes' => iti_pb_flight_routes($db, $in)]);
@@ -2039,6 +2084,53 @@ try {
         agent_out(['ok' => true, 'path' => $meta['path_display'] ?? $path, 'size' => $meta['size'] ?? strlen($pdf),
                    'rev' => $meta['rev'] ?? null, 'overwritten' => $exists,
                    'invoice' => agent_invoice_out($inv)]);
+    }
+
+    // ── send_invoice_email ───────────────────────────────────────────────────
+    // Same as "Send by email" on the invoice page: PDF attached, From noreply@,
+    // Reply-To accountant@. Defaults from inv_mail_defaults(): To = request email,
+    // Cc = accountant@ + the request's sales. Dry-run unless "confirm": true.
+    case 'send_invoice_email': {
+        agent_require_method('POST');
+        $inv = agent_invoice($db, $in);
+        $id  = (int)$inv['id'];
+        $def = inv_mail_defaults($db, $inv);
+        $to  = array_key_exists('to', $in) ? $in['to'] : $def['to'];
+        // "cc" absent → default; "cc": "" / [] → no Cc. "cc_sales": false drops the sales from the default.
+        $cc  = array_key_exists('cc', $in) ? $in['cc'] : $def['cc'];
+        $sales = inv_sales_contact($db, $id);
+        if (!array_key_exists('cc', $in) && isset($in['cc_sales']) && !$in['cc_sales'] && $sales) {
+            $cc = array_values(array_filter(inv_mail_addrs($cc), fn($a) => strcasecmp($a, $sales['email']) !== 0));
+        }
+        $subject = trim((string)($in['subject'] ?? '')) ?: $def['subject'];
+        $body    = trim((string)($in['body'] ?? ''))    ?: $def['body'];
+        $toList  = inv_mail_addrs($to);
+        $toLower = array_map('strtolower', $toList);
+        $ccList  = array_values(array_filter(inv_mail_addrs($cc), fn($a) => !in_array(strtolower($a), $toLower, true)));
+        if (!$toList) agent_fail('No valid To address — the linked request has no email; pass "to"', 400, ['defaults' => $def]);
+        $email = ['to' => $toList, 'cc' => $ccList, 'subject' => $subject, 'body' => $body,
+                  'attachment' => inv_mail_filename($inv), 'from' => 'noreply@savannahexplorers.com', 'reply_to' => 'accountant@savannahexplorers.com'];
+        $warnings = [];
+        if ($inv['status'] === 'Cancelled') $warnings[] = 'Invoice ' . $inv['invoice_number'] . ' is Cancelled.';
+        if ($sales && !in_array(strtolower($sales['email']), array_map('strtolower', array_merge($toList, $ccList)), true)) {
+            $warnings[] = 'The sales of the request (' . $sales['name'] . ') is not in To / Cc.';
+        }
+        $extra = ['invoice' => agent_invoice_out($inv), 'sales' => $sales, 'warnings' => $warnings];
+        if (empty($in['confirm'])) {
+            agent_out(['ok' => true, 'dry_run' => true, 'email' => $email,
+                       'message' => 'Dry run — not sent. Resend with "confirm": true to send.'] + $extra);
+        }
+        try {
+            $sent = inv_send_email($db, $inv, $toList, $ccList, $subject, $body);
+        } catch (InvalidArgumentException $e) {
+            agent_fail($e->getMessage());
+        } catch (Throwable $e) {
+            agent_fail($e->getMessage(), 502);
+        }
+        $eventId = $sent['timeline_event_id'];
+        unset($sent['timeline_event_id']);
+        agent_out(['ok' => true, 'dry_run' => false, 'message' => 'Sent', 'email' => $sent + ['body' => $body],
+                   'timeline_event_id' => $eventId] + $extra);
     }
 
     // ── memo_list ────────────────────────────────────────────────────────────
@@ -2804,9 +2896,9 @@ try {
             'iti_update_day', 'iti_publish', 'iti_calc_plan', 'iti_final_from_calc', 'iti_save_alias',
             'iti_set_days', 'iti_add_day', 'iti_delete_day', 'iti_inclusions', 'iti_update_inclusions', 'iti_save_as_sample',
             'iti_flight_routes', 'iti_create_flight_route', 'iti_activities', 'iti_activity', 'iti_update_activity', 'iti_create_activity',
-            'iti_transfer_routes', 'iti_create_transfer_route', 'add_flight_rates',
+            'iti_transfer_routes', 'iti_create_transfer_route', 'iti_create_destination', 'iti_import_program', 'iti_supplier_blocklist', 'add_flight_rates',
             'find_invoices', 'get_invoice', 'add_invoice_payment', 'cancel_invoice_payment', 'update_folder_status',
-            'save_invoice_pdf', 'import_zoho_invoice', 'create_invoice', 'update_invoice', 'memo_list', 'memo_save', 'memo_set_status', 'memo_delete',
+            'save_invoice_pdf', 'send_invoice_email', 'import_zoho_invoice', 'create_invoice', 'update_invoice', 'memo_list', 'memo_save', 'memo_set_status', 'memo_delete',
             'routine_status', 'routine_done',
             'mail_folders', 'mail_list', 'mail_get', 'mail_attachment', 'mail_flag', 'mail_move', 'mail_draft', 'mail_send',
             'timeline_list', 'timeline_add', 'timeline_update', 'summary_set', 'request_resume', 'set_request_status',

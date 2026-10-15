@@ -160,6 +160,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         iti_flash_set('error', 'Could not duplicate.');
         iti_redirect('settings.php?tab=terms');
     }
+
+    // ---- Partner names never printed (iti_supplier_blocklist, admin only) ----
+    if ($do === 'supplier_add' && $admin) {
+        iti_ensure_country_schema();
+        $sup = mb_substr(trim($_POST['supplier'] ?? ''), 0, 80);
+        $terms = preg_split('/[\r\n,;]+/', (string)($_POST['terms'] ?? ''), -1, PREG_SPLIT_NO_EMPTY);
+        $st = $db->prepare('INSERT IGNORE INTO iti_supplier_blocklist (supplier, term, created_by) VALUES (?, ?, ?)');
+        $n = 0;
+        foreach ($terms as $t) if (($t = mb_substr(trim($t), 0, 160)) !== '' && $sup !== '') { $st->execute([$sup, $t, $_cu['username'] ?? null]); $n += $st->rowCount(); }
+        iti_flash_set($n ? 'success' : 'error', $n ? $n . ' term(s) added for ' . $sup . '.' : 'Supplier and at least one new term are required.');
+        iti_redirect('settings.php?tab=suppliers');
+    }
+    if ($do === 'supplier_del' && $admin) {
+        iti_ensure_country_schema();
+        $db->prepare('DELETE FROM iti_supplier_blocklist WHERE id = ?')->execute([(int)($_POST['id'] ?? 0)]);
+        iti_redirect('settings.php?tab=suppliers');
+    }
 }
 
 // ── Load data ────────────────────────────────────────────────────────────────
@@ -200,6 +217,11 @@ if ($tab === 'terms' && ($_GET['action'] ?? '') === 'edit' && ($eid = (int)($_GE
 }
 $terms_list = [];
 try { $terms_list = iti_get_terms(false); } catch (Exception $e) {}
+$supplier_terms = [];
+if ($tab === 'suppliers') {
+    iti_ensure_country_schema();
+    try { $supplier_terms = $db->query('SELECT * FROM iti_supplier_blocklist ORDER BY supplier, term')->fetchAll(); } catch (PDOException $e) {}
+}
 
 $LANGS = ['en'=>'English','it'=>'Italiano','fr'=>'Français','es'=>'Español','de'=>'Deutsch'];
 
@@ -233,6 +255,7 @@ include __DIR__ . '/../../includes/layout_header.php';
   <a href="settings.php?tab=profile" class="set-tab <?= $tab==='profile'?'active':'' ?>">👤 My Profile</a>
   <a href="settings.php?tab=company" class="set-tab <?= $tab==='company'?'active':'' ?>">🏢 Company &amp; Contacts</a>
   <a href="settings.php?tab=terms"   class="set-tab <?= $tab==='terms'?'active':''   ?>">📜 Terms &amp; Conditions</a>
+  <a href="settings.php?tab=suppliers" class="set-tab <?= $tab==='suppliers'?'active':'' ?>">🚫 Partner names</a>
 </div>
 
 <?php /* ════════════ PROFILE ════════════ */ if ($tab === 'profile'):
@@ -403,7 +426,7 @@ include __DIR__ . '/../../includes/layout_header.php';
   </div>
 </form>
 
-<?php /* ════════════ TERMS ════════════ */ else: ?>
+<?php /* ════════════ TERMS ════════════ */ elseif ($tab !== 'suppliers'): ?>
 <?php if (!$admin): ?>
   <div class="page-header"><div><h2>Terms &amp; Conditions</h2><div class="sub">Standard T&amp;C used in itineraries.</div></div></div>
   <div class="ro-note">🔒 Read-only. Only administrators can manage T&amp;C.</div>
@@ -545,6 +568,45 @@ include __DIR__ . '/../../includes/layout_header.php';
     </table>
   </div>
 <?php endif; /* inner terms admin if/elseif/else */ ?>
+
+<?php /* ════════════ PARTNER NAMES ════════════ */ elseif ($tab === 'suppliers'): ?>
+<div class="page-header"><div><h2>Partner names</h2>
+  <div class="sub">Names, domains, e-mails and phone numbers of the partners whose programmes we import (Kenya DMC, …).
+  They must never reach an agency or a client: the Agent API refuses an import or an edit of an imported programme,
+  and a Word / PDF of it, when a text contains one of them (whole word, any case; phone numbers by their digits).</div></div></div>
+<?php if (!$admin): ?><div class="ro-note">Only admins can change this list.</div><?php endif; ?>
+<div class="form-card" style="padding:0;overflow:hidden;margin-bottom:18px;">
+  <table class="kv-table">
+    <thead><tr><th style="width:160px;">Partner</th><th style="width:auto;">Term</th><th style="width:120px;">Added by</th><th style="width:80px;"></th></tr></thead>
+    <tbody>
+    <?php foreach ($supplier_terms as $t): ?>
+      <tr class="term-row">
+        <td><strong><?= h($t['supplier']) ?></strong></td>
+        <td><?= h($t['term']) ?></td>
+        <td class="text-muted"><?= h($t['created_by'] ?? '') ?></td>
+        <td><?php if ($admin): ?>
+          <form method="POST" action="settings.php?tab=suppliers" style="display:inline;" onsubmit="return confirm('Remove this term?');">
+            <input type="hidden" name="_action" value="supplier_del"><input type="hidden" name="id" value="<?= (int)$t['id'] ?>">
+            <button type="submit" style="background:none;border:none;cursor:pointer;font-size:.78rem;color:var(--red);text-decoration:underline;padding:0;">Remove</button>
+          </form>
+        <?php endif; ?></td>
+      </tr>
+    <?php endforeach; ?>
+    <?php if (!$supplier_terms): ?>
+      <tr><td colspan="4" style="text-align:center;padding:28px;color:var(--grey-mid);">No partner names yet.</td></tr>
+    <?php endif; ?>
+    </tbody>
+  </table>
+</div>
+<?php if ($admin): ?>
+<form method="POST" action="settings.php?tab=suppliers" class="form-card">
+  <input type="hidden" name="_action" value="supplier_add">
+  <div class="form-group"><label>Partner (short name, e.g. BTG)</label><input type="text" name="supplier" maxlength="80" required style="max-width:260px;"></div>
+  <div class="form-group"><label>Terms — one per line (name, brand, domain, e-mail, phone)</label>
+    <textarea name="terms" rows="4" placeholder="Bridge The Gap&#10;btgltd.com&#10;+254 …"></textarea></div>
+  <button type="submit" class="btn btn-red">Add</button>
+</form>
+<?php endif; ?>
 <?php endif; /* outer tab if/elseif/else */ ?>
 
 </main>

@@ -1177,6 +1177,111 @@ function iti_set_season_twin(int $lodgeId, int $twinId): void {
     }
 }
 
+// ── Countries (programmes outside Tanzania, Oct 2026) ────────────────────────
+// iti_destinations.country holds the name typed on the Destinations page ("Tanzania", "Kenya");
+// programmes (iti_programs.country) and standard inclusions use ISO2 codes: "TZ", "KE", a mixed
+// programme "TZ+KE"; standard inclusions also "ALL" (every country).
+const ITI_COUNTRIES = array('TZ' => 'Tanzania', 'KE' => 'Kenya', 'UG' => 'Uganda', 'RW' => 'Rwanda', 'MG' => 'Madagascar');
+
+/** ISO2 code of a country name or code ("Kenya", "ke", "Zanzibar" → TZ); '' when unknown. */
+function iti_country_code($v): string {
+    $v = trim((string)$v);
+    if ($v === '') return '';
+    $u = strtoupper($v);
+    if (isset(ITI_COUNTRIES[$u])) return $u;
+    foreach (ITI_COUNTRIES as $c => $n) if (strcasecmp($n, $v) === 0) return $c;
+    return (stripos($v, 'zanzibar') !== false || stripos($v, 'tanzan') !== false) ? 'TZ' : '';
+}
+
+/** "TZ+KE" / "KE" / ["Kenya", "TZ"] → codes in ITI_COUNTRIES order (Tanzania first); unknown → InvalidArgumentException. */
+function iti_country_list($v): array {
+    $parts = is_array($v) ? $v : preg_split('/[+,\/\s]+/', (string)$v, -1, PREG_SPLIT_NO_EMPTY);
+    $codes = array();
+    foreach ($parts as $x) {
+        $c = iti_country_code($x);
+        if ($c === '') throw new InvalidArgumentException('country "' . $x . '": use ' . implode(' | ', array_keys(ITI_COUNTRIES)) . ' (mixed: TZ+KE)');
+        $codes[$c] = true;
+    }
+    return array_values(array_intersect(array_keys(ITI_COUNTRIES), array_keys($codes)));
+}
+
+/**
+ * Country of a programme: its own column, else the countries of $dests (iti_destinations rows;
+ * airports ignored), else Tanzania. Returns "TZ", "KE", "TZ+KE", …
+ */
+function iti_program_country(array $p, array $dests = array()): string {
+    if (trim((string)($p['country'] ?? '')) !== '') {
+        try { $l = iti_country_list($p['country']); if ($l) return implode('+', $l); }
+        catch (InvalidArgumentException $e) {}
+    }
+    $codes = array();
+    foreach ($dests as $d) {
+        if (in_array($d['region'] ?? '', array('Airports', 'Airstrips', 'International'), true) || ($d['dest_type'] ?? '') === 'airport') continue;
+        $c = iti_country_code($d['country'] ?? '');
+        if ($c !== '') $codes[] = $c;
+    }
+    return $codes ? implode('+', iti_country_list($codes)) : 'TZ';
+}
+
+/**
+ * Columns / table for programmes outside Tanzania and programmes imported from a partner's text,
+ * added once if missing (no migration to run): iti_programs.country / source_supplier / source_file,
+ * iti_destinations.dest_type, needs_completion on destinations and lodges (stubs made by the import),
+ * iti_standard_inclusions.country (rows already there = TZ; the first run adds the Kenya exclusions)
+ * and iti_supplier_blocklist (partner names that must never reach a client; first run: BTG).
+ * Call it outside transactions and before iti_table_columns() caches the lists.
+ */
+function iti_ensure_country_schema(): void {
+    static $done = false;
+    if ($done) return;
+    $done = true;
+    $db = db();
+    try {
+        iti_add_column('iti_programs', 'country', 'VARCHAR(10) NULL DEFAULT NULL');
+        iti_add_column('iti_programs', 'source_supplier', 'VARCHAR(80) NULL DEFAULT NULL');
+        iti_add_column('iti_programs', 'source_file', 'VARCHAR(255) NULL DEFAULT NULL');
+        iti_add_column('iti_destinations', 'country', "VARCHAR(60) NOT NULL DEFAULT 'Tanzania'");
+        iti_add_column('iti_destinations', 'dest_type', 'VARCHAR(20) NULL DEFAULT NULL');
+        iti_add_column('iti_destinations', 'needs_completion', 'TINYINT(1) NOT NULL DEFAULT 0');
+        iti_add_column('iti_lodges', 'needs_completion', 'TINYINT(1) NOT NULL DEFAULT 0');
+        if (iti_add_column('iti_standard_inclusions', 'country', "VARCHAR(5) NOT NULL DEFAULT 'TZ'")) iti_seed_country_inclusions();
+        if (!$db->query("SHOW TABLES LIKE 'iti_supplier_blocklist'")->fetch()) {
+            iti_create_table('iti_supplier_blocklist',
+                'id INT UNSIGNED NOT NULL AUTO_INCREMENT, supplier VARCHAR(80) NOT NULL, term VARCHAR(160) NOT NULL,
+                 created_by VARCHAR(80) NULL DEFAULT NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                 PRIMARY KEY (id), UNIQUE KEY uq_supplier_term (supplier, term)');
+            $st = $db->prepare('INSERT INTO iti_supplier_blocklist (supplier, term, created_by) VALUES (?, ?, ?)');
+            foreach (array('Bridge The Gap', 'BTG', 'btgltd.com') as $t) $st->execute(array('BTG', $t, 'setup'));
+        }
+    } catch (PDOException $e) {
+        error_log('iti_ensure_country_schema: ' . $e->getMessage());
+    }
+}
+
+/** First run of iti_standard_inclusions.country: the Kenya exclusions (eTA and the health insurance, in force since 6 Oct 2026). */
+function iti_seed_country_inclusions(): void {
+    $rows = array(
+        array(900,
+              'Kenya mandatory health insurance, USD 44 per person (children included) plus portal fees, bought on the government portal together with the eTA',
+              "assicurazione sanitaria obbligatoria per il Kenya, USD 44 per persona (bambini inclusi) più le commissioni del portale, da acquistare sul portale governativo insieme all'eTA",
+              "assurance santé obligatoire pour le Kenya, 44 USD par personne (enfants compris) plus les frais du portail, à acheter sur le portail gouvernemental avec l'eTA",
+              'seguro médico obligatorio para Kenia, 44 USD por persona (niños incluidos) más las comisiones del portal, a comprar en el portal del gobierno junto con la eTA',
+              'Pflicht-Krankenversicherung für Kenia, 44 USD pro Person (Kinder inbegriffen) zzgl. Portalgebühren, zusammen mit der eTA auf dem Regierungsportal zu kaufen'),
+        array(901,
+              'Kenya Electronic Travel Authorisation (eTA)',
+              'autorizzazione elettronica di viaggio per il Kenya (eTA)',
+              'autorisation électronique de voyage pour le Kenya (eTA)',
+              'autorización electrónica de viaje para Kenia (eTA)',
+              'elektronische Reisegenehmigung für Kenia (eTA)'),
+    );
+    $st = db()->prepare("INSERT INTO iti_standard_inclusions (item_type, country, sort_order, text_en, text_it, text_fr, text_es, text_de, is_active)
+                         VALUES ('exclusion', 'KE', ?, ?, ?, ?, ?, ?, 1)");
+    foreach ($rows as $r) {
+        try { $st->execute($r); }
+        catch (PDOException $e) { error_log('iti_seed_country_inclusions: ' . $e->getMessage()); }
+    }
+}
+
 function iti_ensure_final_schema(): void {
     static $done = false;
     if ($done) return;

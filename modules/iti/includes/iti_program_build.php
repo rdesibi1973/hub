@@ -283,10 +283,25 @@ function iti_pb_days_raw(PDO $db, int $pid): array {
 
 // ── Included / not included ──────────────────────────────────────────────────
 
-function iti_pb_standard_inclusions(PDO $db): array {
+/**
+ * Standard included / not included rows. $country ("KE", "TZ+KE", '' = all): only the rows of
+ * those countries and the ones for every country (ALL) — a Kenya programme never gets the
+ * Tanzania items (NIC, Tanzania visa), a TZ+KE programme gets both.
+ */
+function iti_pb_standard_inclusions(PDO $db, string $country = ''): array {
+    iti_ensure_country_schema();
     $out = ['included' => [], 'excluded' => []];
-    foreach ($db->query('SELECT * FROM iti_standard_inclusions WHERE is_active = 1 ORDER BY item_type, sort_order, id')->fetchAll(PDO::FETCH_ASSOC) as $r) {
-        $x = ['std_id' => (int)$r['id']];
+    $sql = 'SELECT * FROM iti_standard_inclusions WHERE is_active = 1';
+    $args = [];
+    if (trim($country) !== '') {
+        $codes = array_merge(iti_country_list($country), ['ALL']);
+        $sql .= ' AND country IN (' . implode(',', array_fill(0, count($codes), '?')) . ')';
+        $args = $codes;
+    }
+    $st = $db->prepare($sql . ' ORDER BY item_type, sort_order, id');
+    $st->execute($args);
+    foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+        $x = ['std_id' => (int)$r['id'], 'country' => $r['country'] ?? 'TZ'];
         foreach (ITI_PS_LANGS as $l) $x['text_' . $l] = $r['text_' . $l];
         $out[$r['item_type'] === 'exclusion' ? 'excluded' : 'included'][] = $x;
     }
@@ -297,6 +312,21 @@ function iti_pb_standard_inclusions(PDO $db): array {
 function iti_pb_update_inclusions(PDO $db, int $pid, array $in, bool $go): array {
     $p = iti_ps_personal($pid);
     $lang = $p['display_language'] ?: 'it';
+    $lists = iti_pb_inclusion_rows($db, $in, $lang);
+    $plan = ['program_id' => $pid];
+    foreach ($lists as $type => $rows) $plan[$type === 'inclusion' ? 'included' : 'excluded'] = array_map(function ($r) use ($lang) { return $r['text_' . $lang]; }, $rows);
+    if (!$go) return $plan;
+    $db->beginTransaction();
+    try { iti_pb_inclusions_write($db, $pid, $lists); $db->commit(); }
+    catch (Throwable $e) { $db->rollBack(); throw $e; }
+    return $plan;
+}
+
+/**
+ * Validate included[] / excluded[] of $in (only the keys given) → ['inclusion' => rows, 'exclusion' => rows],
+ * each row {standard_inclusion_id, text_<lang>…}; text_$lang (the program language) is required.
+ */
+function iti_pb_inclusion_rows(PDO $db, array $in, string $lang): array {
     $lists = [];
     foreach (['included' => 'inclusion', 'excluded' => 'exclusion'] as $k => $type) {
         if (!array_key_exists($k, $in)) continue;
@@ -312,7 +342,7 @@ function iti_pb_update_inclusions(PDO $db, int $pid, array $in, bool $go): array
                 foreach (ITI_PS_LANGS as $l) $row['text_' . $l] = $s['text_' . $l];
             } else {
                 if (!is_array($x)) $x = ['text_' . $lang => (string)$x];
-                foreach (ITI_PS_LANGS as $l) if (isset($x['text_' . $l]) && trim((string)$x['text_' . $l]) !== '') $row['text_' . $l] = mb_substr(trim((string)$x['text_' . $l]), 0, 255);
+                foreach (ITI_PS_LANGS as $l) if (isset($x['text_' . $l]) && trim((string)$x['text_' . $l]) !== '') $row['text_' . $l] = mb_substr(trim((string)$x['text_' . $l]), 0, 1000);   // VARCHAR(1000) since migration 066
                 if ($row['text_' . $lang] === null) throw new InvalidArgumentException($k . '[' . $i . ']: text_' . $lang . ' (the program language) is required');
             }
             $rows[] = $row;
@@ -321,21 +351,18 @@ function iti_pb_update_inclusions(PDO $db, int $pid, array $in, bool $go): array
         $lists[$type] = $rows;
     }
     if (!$lists) throw new InvalidArgumentException('Send included[] and / or excluded[]');
-    $plan = ['program_id' => $pid];
-    foreach ($lists as $type => $rows) $plan[$type === 'inclusion' ? 'included' : 'excluded'] = array_map(function ($r) use ($lang) { return $r['text_' . $lang]; }, $rows);
-    if (!$go) return $plan;
-    $db->beginTransaction();
-    try {
-        foreach ($lists as $type => $rows) {
-            $db->prepare('DELETE FROM iti_program_inclusions WHERE program_id = ? AND item_type = ?')->execute([$pid, $type]);
-            foreach ($rows as $i => $r) {
-                $r = ['program_id' => $pid, 'item_type' => $type, 'sort_order' => $i + 1] + $r;
-                $db->prepare('INSERT INTO iti_program_inclusions (`' . implode('`,`', array_keys($r)) . '`) VALUES (' . implode(',', array_fill(0, count($r), '?')) . ')')->execute(array_values($r));
-            }
+    return $lists;
+}
+
+/** Replace a programme's lists with rows from iti_pb_inclusion_rows(); the caller holds the transaction. */
+function iti_pb_inclusions_write(PDO $db, int $pid, array $lists): void {
+    foreach ($lists as $type => $rows) {
+        $db->prepare('DELETE FROM iti_program_inclusions WHERE program_id = ? AND item_type = ?')->execute([$pid, $type]);
+        foreach ($rows as $i => $r) {
+            $r = ['program_id' => $pid, 'item_type' => $type, 'sort_order' => $i + 1] + $r;
+            $db->prepare('INSERT INTO iti_program_inclusions (`' . implode('`,`', array_keys($r)) . '`) VALUES (' . implode(',', array_fill(0, count($r), '?')) . ')')->execute(array_values($r));
         }
-        $db->commit();
-    } catch (Throwable $e) { $db->rollBack(); throw $e; }
-    return $plan;
+    }
 }
 
 // ── Master data: flight routes, activities, transfer routes ─────────────────

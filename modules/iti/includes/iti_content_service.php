@@ -86,6 +86,7 @@ function iti_cs_lodge_out(array $r, bool $full = false): array {
         'longitude' => $r['longitude'] !== null ? (float)$r['longitude'] : null,
         'photos' => iti_photos_decode($r['photos'] ?? null),
         'description_langs' => [], 'active' => (bool)$r['is_active'],
+        'needs_completion' => !empty($r['needs_completion']),   // stub made by iti_import_program
     ];
     foreach (ITI_CS_LANGS as $l) if (trim((string)($r['description_' . $l] ?? '')) !== '') $out['description_langs'][] = $l;
     if ($full) {
@@ -99,6 +100,7 @@ function iti_cs_lodge_out(array $r, bool $full = false): array {
 function iti_cs_destination_out(array $r, bool $full = false): array {
     $out = [
         'id' => (int)$r['id'], 'code' => $r['code'], 'name' => $r['name_en'], 'region' => $r['region'],
+        'country' => $r['country'] ?? null, 'type' => $r['dest_type'] ?? null, 'needs_completion' => !empty($r['needs_completion']),
         'latitude' => $r['latitude'] !== null ? (float)$r['latitude'] : null,
         'longitude' => $r['longitude'] !== null ? (float)$r['longitude'] : null,
         'cover_photo' => $r['cover_photo'] ?: null, 'photos' => iti_dest_photos($r), 'lodges' => (int)($r['n_lodges'] ?? 0),
@@ -126,6 +128,7 @@ function iti_cs_lodges(PDO $db, array $f): array {
         else { $w[] = '(d.name_en LIKE ? OR d.code = ?)'; $a[] = "%$d%"; $a[] = strtoupper($d); }
     }
     $miss = (string)($f['missing'] ?? '');
+    if ($miss === 'stub')    $w[] = in_array('needs_completion', iti_table_columns_cs($db, 'iti_lodges'), true) ? 'l.needs_completion = 1' : '0 = 1';
     if ($miss === 'photos')  $w[] = "(l.photos IS NULL OR l.photos IN ('', '[]', 'null'))";
     if ($miss === 'coords')  $w[] = '(l.latitude IS NULL OR l.longitude IS NULL)';
     if ($miss === 'website') $w[] = "(l.website IS NULL OR l.website = '')";
@@ -156,7 +159,12 @@ function iti_cs_destinations(PDO $db, array $f): array {
     $act = (string)($f['active'] ?? '1');
     if ($act !== 'all') { $w[] = 'd.is_active = ?'; $a[] = (int)$act; }
     if (($q = trim((string)($f['q'] ?? ''))) !== '') { $w[] = '(d.name_en LIKE ? OR d.name_it LIKE ? OR d.code = ? OR d.region LIKE ?)'; array_push($a, "%$q%", "%$q%", strtoupper($q), "%$q%"); }
+    if (($c = trim((string)($f['country'] ?? ''))) !== '') {   // "KE" or "Kenya" (the column holds the name)
+        $w[] = 'd.country = ?';
+        $a[] = defined('ITI_COUNTRIES') && isset(ITI_COUNTRIES[strtoupper($c)]) ? ITI_COUNTRIES[strtoupper($c)] : $c;
+    }
     $miss = (string)($f['missing'] ?? '');
+    if ($miss === 'stub') $w[] = in_array('needs_completion', iti_table_columns_cs($db, 'iti_destinations'), true) ? 'd.needs_completion = 1' : '0 = 1';
     if ($miss === 'photo' || $miss === 'photos') $w[] = "(d.cover_photo IS NULL OR d.cover_photo = '')";
     if ($miss === 'coords') $w[] = '(d.latitude IS NULL OR d.longitude IS NULL)';
     if (preg_match('/^description_(en|it|fr|es|de)$/', $miss)) $w[] = "(d.$miss IS NULL OR d.$miss = '' OR " . iti_placeholder_sql("d.$miss") . ")";
@@ -306,6 +314,8 @@ function iti_cs_update(PDO $db, string $kind, int $id, array $fields, bool $go):
     if (!$row) throw new InvalidArgumentException(($isLodge ? 'Lodge ' : ($isAct ? 'Activity ' : 'Destination ')) . $id . ' not found');
     $allowed = $isAct ? iti_cs_editable($kind)
              : array_merge(iti_cs_editable($kind), ['latitude', 'longitude'], $isLodge ? ['destination_id', 'category', 'lodge_type'] : []);
+    // A stub made by iti_import_program: 0 once photos / texts are done (only where the column exists).
+    if (!$isAct && array_key_exists('needs_completion', $row)) $allowed[] = 'needs_completion';
     $unknown = array_values(array_diff(array_keys($fields), $allowed));
     if ($unknown) throw new InvalidArgumentException('Not editable here: ' . implode(', ', $unknown) . ' — allowed: ' . implode(', ', $allowed));
 
@@ -333,6 +343,9 @@ function iti_cs_update(PDO $db, string $kind, int $id, array $fields, bool $go):
             $ok = $k === 'category' ? ['budget', 'mid', 'luxury', 'ultra_luxury'] : ['lodge', 'tented_camp', 'hotel', 'mobile_camp', 'house'];
             if (!in_array($v, $ok, true)) throw new InvalidArgumentException($k . ': ' . implode('|', $ok));
             $cur = (string)($row[$k] ?? '');
+        } elseif ($k === 'needs_completion') {
+            $v = empty($v) ? 0 : 1;
+            $cur = (int)$row[$k];
         } elseif ($k === 'latitude' || $k === 'longitude') {
             if ($v === '' || $v === null) $v = null;
             elseif (!is_numeric($v) || abs((float)$v) > ($k === 'latitude' ? 90 : 180)) throw new InvalidArgumentException($k . ': not a valid coordinate');
