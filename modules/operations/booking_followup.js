@@ -208,7 +208,8 @@
       : r.file_url ? '<a href="' + esc(r.file_url) + '" target="_blank" rel="noopener" title="' + esc(r.source_file) + '">📄 ' + esc(r.source_file.replace(/^invoices\//, '')) + '</a>' : '',
       ownerCell(r),
       statusCell(r),
-      notesLog(r) + (edit ? '<textarea data-f="notes" aria-label="Add a note" placeholder="Add a note…"></textarea>' : ''),
+      notesLog(r) + (edit ? '<textarea data-f="notes" aria-label="Add a note" placeholder="Add a note…"></textarea>' +
+                            '<div class="fu-save"><button type="button" class="btn btn-primary btn-sm" data-save="1" disabled>Save</button></div>' : ''),
       state.tab === 'closed'
         ? '<span style="white-space:nowrap">' + dmyhm(r.closed_at) + '</span><span class="fu-days">' + esc(r.close_reason_label || '') + ' — ' + esc(r.closed_by || '') + '</span>'
         : '<span style="white-space:nowrap">' + dmy(r.last_seen_at) + '</span>',
@@ -217,8 +218,31 @@
     tr.innerHTML = cells.map(function (c) { return '<td>' + c + '</td>'; }).join('');
     return tr;
   }
+  // ── Edits are saved with the row's Save button ──────────────────────────
+  function rowOf(tr) { var id = parseInt(tr.dataset.id, 10); return all().filter(function (x) { return x.id === id; })[0]; }
+  function field(tr, f) { return tr.querySelector('[data-f="' + f + '"]'); }
+  /** What the row's fields change on the line (owner, status, a new note). */
+  function changesOf(tr) {
+    var r = rowOf(tr), c = {}, el;
+    if (!r) return c;
+    if ((el = field(tr, 'owner')) && el.value !== String(r.owner_user_id === null ? '' : r.owner_user_id)) c.owner = el.value === '' ? null : parseInt(el.value, 10);
+    if ((el = field(tr, 'staff_status')) && el.value !== r.staff_status) c.staff_status = el.value;
+    if ((el = field(tr, 'notes')) && el.value.trim() !== '') c.notes = el.value;
+    return c;
+  }
+  function markDirty(tr) {
+    var dirty = Object.keys(changesOf(tr)).length > 0;
+    tr.classList.toggle('dirty', dirty);
+    var b = tr.querySelector('[data-save]');
+    if (b) b.disabled = !dirty;
+  }
   function renderTable() {
     var t = $('fu-table');
+    // Rows being edited keep what was typed / chosen when the table is drawn again (another row saved, a filter).
+    var pending = {};
+    Array.prototype.forEach.call(t.querySelectorAll('tr.dirty[data-id]'), function (tr) {
+      pending[tr.dataset.id] = ['owner', 'staff_status', 'notes'].map(function (f) { var el = field(tr, f); return el ? [f, el.value] : null; }).filter(Boolean);
+    });
     var list = sortRows(all().filter(function (r) { return inTab(r, state.tab) && passes(r); }));
     var head = ['Priority', state.tab === 'groups' ? 'Arrival' : 'Service', 'Client / folder',
                 state.tab === 'tickets' ? 'Flight' : state.tab === 'groups' ? 'Group' : 'Supplier',
@@ -235,6 +259,12 @@
       if (state.open[r.id]) body.appendChild(histRow(r, state.open[r.id], head.length));
     });
     t.appendChild(body);
+    Object.keys(pending).forEach(function (id) {
+      var tr = body.querySelector('tr[data-id="' + id + '"]');
+      if (!tr) return;
+      pending[id].forEach(function (p) { var el = field(tr, p[0]); if (el) el.value = p[1]; });
+      markDirty(tr);
+    });
   }
   /** Group lines: what the check collected (Excel, client folders, blocks, flights), above the history. */
   function detailsList(r) {
@@ -290,17 +320,24 @@
       if (html) cell.insertAdjacentHTML('beforeend', html);
     };
     change.id = id;
+    var btn = tr.querySelector('[data-save]');
+    if (btn && change.fromSave) { btn.disabled = true; btn.textContent = 'Saving…'; }
+    var fromSave = change.fromSave; delete change.fromSave;
     return post('update', change).then(function (d) {
-      if (!d.ok) { mark('<span class="fu-err">' + esc(d.error || 'Not saved') + '</span>'); return false; }
+      if (btn && fromSave) btn.textContent = 'Save';
+      if (!d.ok) { mark('<span class="fu-err">' + esc(d.error || 'Not saved') + '</span>'); if (btn) markDirty(tr); return false; }
       if (d.row) {
         replaceRow(d.row);
+        if (fromSave) tr.classList.remove('dirty');   // what was saved is now the line: nothing to keep
         var keep = state.tab;
         renderTabs();
-        if (d.closed || d.reopened || change.take || 'owner' in change || 'staff_status' in change || 'notes' in change) { state.tab = keep; renderTable(); }
-        else mark('<span class="fu-saved">✓ saved</span>');
+        state.tab = keep;
+        renderTable();
+        var nt = $('fu-table').querySelector('tr[data-id="' + id + '"] .fu-save');
+        if (nt && fromSave) nt.insertAdjacentHTML('beforeend', '<span class="fu-saved">✓ saved</span>');
       }
       return true;
-    }).catch(function (e) { mark('<span class="fu-err">' + esc(e.message) + '</span>'); return false; });
+    }).catch(function (e) { if (btn && fromSave) { btn.textContent = 'Save'; markDirty(tr); } mark('<span class="fu-err">' + esc(e.message) + '</span>'); return false; });
   }
 
   $('fu-table').addEventListener('click', function (ev) {
@@ -311,6 +348,18 @@
     var id = parseInt(tr.dataset.id, 10);
     if (b.dataset.take) save(tr, {take: true}, b.parentNode);
     else if (b.dataset.release) save(tr, {owner: null}, b.parentNode);
+    else if (b.dataset.save) {
+      var change = changesOf(tr), r = rowOf(tr);
+      if (!Object.keys(change).length) return;
+      if (change.staff_status === 'problem' && !change.notes && !(r && r.notes)) {
+        var old = b.parentNode.querySelector('.fu-err,.fu-saved'); if (old) old.remove();
+        b.parentNode.insertAdjacentHTML('beforeend', '<span class="fu-err">Problem needs a note: write it above, then Save</span>');
+        field(tr, 'notes').focus();
+        return;
+      }
+      change.fromSave = true;
+      save(tr, change, b.parentNode);
+    }
     else if (b.dataset.hist) {
       if (state.open[id]) { delete state.open[id]; renderTable(); return; }
       state.open[id] = 'loading';
@@ -321,32 +370,17 @@
       });
     }
   });
-  $('fu-table').addEventListener('change', function (ev) {
-    var el = ev.target, f = el.dataset.f;
-    if (!f || f === 'notes') return;
-    var tr = el.closest('tr[data-id]');
-    var change = {};
-    if (f === 'owner') change.owner = el.value === '' ? null : parseInt(el.value, 10);
-    else change[f] = el.value;
-    if (f === 'staff_status' && el.value === 'problem') {
-      var notes = tr.querySelector('textarea[data-f=notes]');
-      var r = all().filter(function (x) { return x.id === parseInt(tr.dataset.id, 10); })[0];
-      if (notes && notes.value.trim() === '' && !(r && r.notes)) {
-        var cell = el.parentNode, old = cell.querySelector('.fu-err'); if (old) old.remove();
-        cell.insertAdjacentHTML('beforeend', '<span class="fu-err">Write a note first, then choose Problem</span>');
-        el.value = r ? r.staff_status : 'open';
-        notes.focus();
-        return;
-      }
-      if (notes && notes.value.trim() !== '') change.notes = notes.value;   // a note being written goes with the status
-    }
-    save(tr, change, el.parentNode);
+  // Owner, status and a new note are only marked as changed here; the row's Save button sends them together.
+  ['change', 'input'].forEach(function (type) {
+    $('fu-table').addEventListener(type, function (ev) {
+      var tr = ev.target.dataset.f && ev.target.closest('tr[data-id]');
+      if (!tr) return;
+      var msg = tr.querySelector('.fu-save .fu-saved,.fu-save .fu-err'); if (msg) msg.remove();
+      markDirty(tr);
+    });
   });
-  $('fu-table').addEventListener('focusout', function (ev) {
-    var el = ev.target;
-    if (el.dataset.f !== 'notes') return;
-    // Each note is added to the line's log (the textarea is for a new note, empty after saving).
-    if (el.value.trim() !== '') save(el.closest('tr[data-id]'), {notes: el.value}, el.parentNode);
+  window.addEventListener('beforeunload', function (ev) {
+    if ($('fu-table').querySelector('tr.dirty')) { ev.preventDefault(); ev.returnValue = ''; }
   });
 
   // Filters

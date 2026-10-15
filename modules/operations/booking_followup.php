@@ -59,6 +59,9 @@ table.fu-table tr.hist td{background:var(--off-white);font-size:.74rem}
 .fu-notes li{padding:2px 0;border-bottom:1px dashed var(--grey-lt);color:var(--black);white-space:pre-wrap;overflow-wrap:anywhere}
 .fu-notes li:last-child{border-bottom:0}
 .fu-notes .w{display:block;color:var(--grey-mid);font-size:.68rem;white-space:nowrap}
+.fu-save{margin-top:4px;display:flex;align-items:center;gap:8px}
+.fu-save .btn:disabled{opacity:.35;cursor:default}
+table.fu-table tr.dirty td{background:#FFF8E1}
 .fu-table select:focus,.fu-table input:focus,.fu-table textarea:focus{outline:none;border-color:var(--red)}
 .fu-saved{font-size:.68rem;color:var(--green)} .fu-err{font-size:.68rem;color:var(--red-dk);display:block}
 .fu-hbtn{border:none;background:none;color:var(--grey-mid);cursor:pointer;font-size:.72rem;padding:0}
