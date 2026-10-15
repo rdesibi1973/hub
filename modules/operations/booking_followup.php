@@ -38,14 +38,19 @@ $extra_css = '
 .fu-chip{display:inline-flex;align-items:center;gap:6px;background:var(--navy-lt);color:var(--navy);border-radius:20px;padding:6px 12px;font-size:.78rem;font-weight:600;align-self:flex-end}
 .fu-chip[hidden]{display:none}
 .fu-chip button{border:none;background:none;color:inherit;cursor:pointer;font-size:.9rem}
-.table-wrap{overflow-x:auto}
+/* The list scrolls in its own frame: the horizontal scrollbar stays on screen, the header stays on top. */
+.table-wrap{overflow:auto;max-height:calc(100vh - 150px)}
 table.fu-table{font-size:.78rem}
-table.fu-table td,table.fu-table th{padding:8px 10px;vertical-align:top}
+table.fu-table td,table.fu-table th{padding:8px 8px;vertical-align:top}
+table.fu-table thead th{position:sticky;top:0;z-index:2}
+.fu-ref{display:block;font-size:.7rem;color:var(--grey-dk);font-weight:600}
 table.fu-table tr.problem td{background:#FDF1F0}
 table.fu-table tr.problem td:first-child{box-shadow:inset 3px 0 0 var(--red)}
 table.fu-table tr.hist td{background:var(--off-white);font-size:.74rem}
 .fu-client{font-weight:700;color:var(--black)}
-.fu-folder{display:block;font-size:.7rem;color:var(--grey-mid);max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fu-client{display:block;max-width:200px;overflow-wrap:anywhere}
+.fu-folder{display:block;font-size:.7rem;color:var(--grey-mid);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fu-folder.fu-file{max-width:150px}
 .fu-folder a{color:inherit;text-decoration:none}
 .fu-folder a:hover{color:var(--red)}
 .fu-days{display:block;font-size:.7rem;color:var(--grey-mid)}

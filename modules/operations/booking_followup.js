@@ -198,22 +198,23 @@
       '<span class="fu-client">' + esc(r.customer || r.folder_name) + '</span>' +
         (r.folder_open_url ? '<span class="fu-folder"><a href="' + esc(r.folder_url) + '" target="_blank" rel="noopener" title="Open in Dropbox (web)">☁</a> ' +
           '<a href="' + esc(r.folder_open_url) + '" title="Open in Windows Explorer — ' + esc(r.folder) + '">📂 ' + esc(r.folder_name) + '</a></span>' : ''),
-      esc(r.type === 'ticket' ? (r.service || r.supplier || '') : (r.supplier || '')) + (r.type === 'group' && r.service ? '<span class="fu-days">' + esc(r.service) + '</span>' : ''),
-      esc(r.supplier_ref || ''),
+      esc(r.type === 'ticket' ? (r.service || r.supplier || '') : (r.supplier || '')) + (r.type === 'group' && r.service ? '<span class="fu-days">' + esc(r.service) + '</span>' : '') +
+        (r.supplier_ref ? '<span class="fu-ref">' + esc(r.supplier_ref) + '</span>' : ''),
       '<span class="badge badge-issue' + issueCls + '">' + esc(ISSUE[r.issue] || r.issue) + '</span>',
-      esc(r.doc_status_text || '') + (r.booked_by ? '<span class="fu-days">booked by ' + esc(r.booked_by) + '</span>' : ''),
-      r.expiry_date ? '<span class="' + (r.expired ? 'fu-late' : '') + '" style="white-space:nowrap">' + dmy(r.expiry_date) + '</span>' : '',
-      r.file_open_url ? '<span class="fu-folder"><a href="' + esc(r.file_url) + '" target="_blank" rel="noopener" title="Open in Dropbox (web)">☁</a> ' +
+      esc(r.doc_status_text || '') + (r.booked_by ? '<span class="fu-days">booked by ' + esc(r.booked_by) + '</span>' : '') +
+        (r.expiry_date ? '<span class="fu-days' + (r.expired ? ' fu-late' : '') + '" style="white-space:nowrap">' + (r.expired ? 'expired ' : 'expires ') + dmy(r.expiry_date) + '</span>' : ''),
+      r.file_open_url ? '<span class="fu-folder fu-file"><a href="' + esc(r.file_url) + '" target="_blank" rel="noopener" title="Open in Dropbox (web)">☁</a> ' +
         '<a href="' + esc(r.file_open_url) + '" title="Open on this PC — ' + esc(r.source_file) + '">📄 ' + esc(r.source_file.replace(/^invoices\//, '')) + '</a></span>'
       : r.file_url ? '<a href="' + esc(r.file_url) + '" target="_blank" rel="noopener" title="' + esc(r.source_file) + '">📄 ' + esc(r.source_file.replace(/^invoices\//, '')) + '</a>' : '',
       ownerCell(r),
       statusCell(r),
       notesLog(r) + (edit ? '<textarea data-f="notes" aria-label="Add a note" placeholder="Add a note…"></textarea>' +
                             '<div class="fu-save"><button type="button" class="btn btn-primary btn-sm" data-save="1">Save</button></div>' : ''),
-      state.tab === 'closed'
+      (state.tab === 'closed'
         ? '<span style="white-space:nowrap">' + dmyhm(r.closed_at) + '</span><span class="fu-days">' + esc(r.close_reason_label || '') + ' — ' + esc(r.closed_by || '') + '</span>'
-        : '<span style="white-space:nowrap">' + dmy(r.last_seen_at) + '</span>',
-      '<button type="button" class="fu-hbtn" data-hist="1" title="History">🕘 ' + r.events_count + '</button>'
+        : '') +
+      '<button type="button" class="fu-hbtn" data-hist="1" title="History — last check ' + esc(dmy(r.last_seen_at)) + '">🕘 ' + r.events_count + '</button>' +
+        (state.tab === 'closed' ? '' : '<span class="fu-days" style="white-space:nowrap" title="Last check">' + dmy(r.last_seen_at) + '</span>')
     ];
     tr.innerHTML = cells.map(function (c) { return '<td>' + c + '</td>'; }).join('');
     return tr;
@@ -245,8 +246,8 @@
     var list = sortRows(all().filter(function (r) { return inTab(r, state.tab) && passes(r); }));
     var head = ['Priority', state.tab === 'groups' ? 'Arrival' : 'Service', 'Client / folder',
                 state.tab === 'tickets' ? 'Flight' : state.tab === 'groups' ? 'Group' : 'Supplier',
-                'Ref', 'Issue', state.tab === 'groups' ? 'What we found' : 'Document status',
-                'Expiry', 'File', 'Owner', 'Status', 'Notes', state.tab === 'closed' ? 'Closed' : 'Last check', ''];
+                'Issue', state.tab === 'groups' ? 'What we found' : 'Document status',
+                'File', 'Owner', 'Status', 'Notes', state.tab === 'closed' ? 'Closed' : 'Checked'];
     t.innerHTML = '<thead><tr>' + head.map(function (h) { return '<th>' + h + '</th>'; }).join('') + '</tr></thead>';
     var body = document.createElement('tbody');
     if (!list.length) {
