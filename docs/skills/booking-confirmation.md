@@ -11,7 +11,7 @@ Il Diamante Panorama groups do NOT follow this flow: use `diamante-groups`.
 
 Hub access and fixed rules: as in the project instructions (dry run first, confirm only after his ok; no mail without his ok; never passport numbers; stop and say so when something fails or doesn't add up).
 
-Memo: at the start create one `doing` memo (clear title, linked request, stable `ext_key` e.g. `work-<client>-conferma`); update it if Roberto says "parcheggia". When Roberto says the work is finished, delete it with `memo_delete` (dry run, then `confirm`; don't leave it as done). Never close it on your own.
+Memo: at the start create one `doing` memo (clear title, linked request, stable `ext_key` e.g. `work-<client>-conferma`); update it if Roberto says "parcheggia". When Roberto says the work is finished, delete it with `memo_delete` (dry run, then `confirm`; don't leave it as done). Never close it on your own. The memo covers only this session's work (e.g. "quote + reply to the agency"): later steps (waiting for the booking team's confirmations, invoice, final programme) do NOT go in its next_steps — they are done in a new session with a new memo (15 Oct 2026).
 
 ## 1. Identify the booking
 

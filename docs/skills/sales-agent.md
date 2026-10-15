@@ -11,7 +11,7 @@ Reply to Roberto in Italian; client/agency texts in the recipient's language. Sh
 Hub access and fixed rules: as in the project instructions (dry run first, confirm only after his ok; no mail without his ok; never passport numbers; stop and say so when something fails or doesn't add up).
 Full costing rules (Calc cells, flights, transfers, concession fees, TL groups): project memory `pricing-and-pdfs`. Read it before touching a Calc.
 
-Memo: at the start create one `doing` memo (clear title with the folder name, linked request, stable `ext_key` e.g. `work-<client>-preventivo`); update it if Roberto says "parcheggia" (where we are + exact next step). When Roberto says the work is finished, delete it with `memo_delete` (dry run, then `confirm`; don't leave it as done). Never close it on your own.
+Memo: at the start create one `doing` memo (clear title with the folder name, linked request, stable `ext_key` e.g. `work-<client>-preventivo`); update it if Roberto says "parcheggia" (where we are + exact next step). When Roberto says the work is finished, delete it with `memo_delete` (dry run, then `confirm`; don't leave it as done). Never close it on your own. The memo covers only this session's work (e.g. "quote + reply to the agency"): later steps (waiting for the booking team's confirmations, invoice, final programme) do NOT go in its next_steps — they are done in a new session with a new memo (15 Oct 2026).
 
 ## 1. The request
 
@@ -32,6 +32,7 @@ Memo: at the start create one `doing` memo (clear title with the folder name, li
    - Check `rows[]` of the dry run (B–K per day, `changed`) before the confirm.
 5. Which price goes in F9 (Price to customer):
    - Direct clients: STANDARD mode (markup 25%, D1) → rounded D9 = rack price → F9 (and H9).
+   - Direct clients with lodge changes and a beach extension: F9 = components, e.g. `=3625+270+435+195+2010+210` — standard programme rack + lodge-upgrade supplement (cost difference × 1.25, rounded up to 5: Kifaru → Orangi Luxury, 2 nights = 270) + domestic flights at the pricelist sale price + beach hotel at its rack rate + August supplement (added by `august_supplement`).
    - Agencies: rounded D10 = STO price (markup TO in D2: 18% for standard agencies such as the Promoservice ones; 14% for EKO) → F9.
    - STOSPEC programmes (a pricing mode, not an agency): D2 = 14% (16% for GRP files); rounded D10 → F9 only; delete H9/H10 and the I9/I10 labels.
    - The F9 figure is the same in Calc, programme and email.
@@ -43,6 +44,9 @@ Memo: at the start create one `doing` memo (clear title with the folder name, li
    - ZNZ airport transfers: 60 per car per leg, as in the templates (≈70 rack after markup); don't lower them.
    - Mvuvi: the template cost is the July–August rate; for other periods use the STO contract in /000_Contracts/Zanzibar/Mvuvi (season + pax) + HB 25 pp. Deluxe 2 pax HB: 279 (16/1–31/3, Jul–Aug), 245 (1/4–30/6, 1/9–22/12), 313 (23/12–15/1, + compulsory dinners).
    - Flight Arusha → Zanzibar: cost always 235 (`=235*$B$1`), same in the Hub rate table.
+   - Mafia extensions: flights from the Hub rate table (`flight` 60 Arusha → Mafia, 65 Mafia → Dar es Salaam); guests leave via Dar. Last day: Dar domestic → international terminal transfer, 50 per car in H/I ("Dar transfer domestic -> international airport"), added after the per-person total: F10 `=F9*$B$1+50`, G10 "Inc Dar transfer" (`fill_calc` does not write F10/G10: edit the sheet XML afterwards, keeping cached values for F10, B10, F11, F12). Pole Pole includes airport transfers on Mafia.
+   - Mafia hotel cost (Butiama, Pole Pole): rack rate − 20% (commission on rack), so the price to a direct client equals the hotel's own rack rate. Our agency pricelist (`PolePole_Pricelist_SE_2027`) is a sale price, not the cost.
+   - Day rows run 17–29 (row 30 = Totals): 13 days at most. A longer trip doesn't fit — say so at once and agree with Roberto what to shorten (e.g. a second North Serengeti night costs a beach night).
 7. Teens: AFTER the last `fill_calc` (it clears H6:I14), write the teen discount in H13 with the label in I13 (e.g. "teen discount (2 teens 13 y.o.)") and subtract it in F10 (e.g. `=F9*$B$1-H13*2`, with ZNZ transfers `=F9*$B$1+140-H13*2`), note "Inc teen discount" in G10. Keep cached values (edit the sheet XML, not via openpyxl).
 8. Calc not open in Excel on his PC; wait for Dropbox sync before the next Hub action.
 
@@ -51,9 +55,10 @@ Memo: at the start create one `doing` memo (clear title with the folder name, li
 1. `iti_samples` → closest sample; tell Roberto which and why.
 2. `iti_create_personal` with `sample_id`, `lead_request_id`, fields: `ref_number` = Calc name without `_Calc` (e.g. `01_MarcoCiaolo(OceanoPoint-Roberto)_PumbaSafari`), `title_<lang>`, `start_date`, `pax_adults`, `pax_teens`, `pax_children`, `display_language`, `price_table_json` (`[{label, price, currency}]` from the Calc), `price_notes_<lang>`.
 3. Client changes → `iti_update_day` (texts, lodge with `end_lodge`, meals, `room_type`) / `iti_update_program`.
-4. Check with `iti_program`: days, lodges, dates, prices; flag days without photo or text (lodge photos from the lodge's own website when missing).
+4. Check with `iti_program`: days, lodges, dates, prices; flag days without photo or text (lodge photos from the lodge's own website when missing). Destinations and lodges without a description in the programme language print in English: check them (`iti_destinations` / `iti_lodges` with `missing=description_<lang>`) and write the missing texts with `iti_update_destination` / `iti_update_lodge` (dry run first) before generating the file.
+   - Lodge not in the Hub (e.g. a beach hotel): `iti_create_lodge` (name, `destination_id` of the area, category, type, website, email, address, coordinates, `description_it` + `description_en`) → `iti_lodge_photos` with 6–8 photos (aerial view, room, beach, dining): extracted from the hotel's rate/brochure PDF in /000_Contracts (`pdfimages`, shrunk to ~1600 px, sent as `uploads`) or links from its official website. Dry run first for both.
 5. `iti_document`: `docx` for agencies, `pdf` for direct clients; saved as `<ref_number>.docx/.pdf` in the request folder; on 409 ask before `overwrite: true`. Regenerate after every change.
-6. `iti_publish` only if Roberto wants the public link; he puts the link in the mail himself.
+6. `links.public` is the client link (always on for personal programmes; `iti_publish` is only for samples). Put it in the email draft yourself: "Qui trovi il programma dettagliato giorno per giorno, con le foto dei lodge: <link>". Attach the PDF/Word only when Roberto asks.
 
 Never name the airline of domestic flights or the balloon-safari operator (programme, Word, email): we know who operates them only after booking. In ITI, a flight taken from the route table shows its operator ("· Auric Air"): use `flights: [{custom: "Arusha → Serengeti (Seronera)"}]` instead of `flight_route_id`, and write inclusions as "voli interni Arusha – Serengeti e ritorno" / "safari in mongolfiera" with no company name.
 
@@ -69,6 +74,8 @@ Where the draft goes, subject, greeting/closing, signature and general style: fo
 - No airline name for domestic flights and no operator name for the balloon safari (known only after booking).
 - Only when the programme is attached: "Programma safari dettagliato allegato (considera la quota netta per il gruppo di N pax)."
 - Don't mention international flights unless asked; don't offer to "verify availability and block everything" on a loose ok.
+- Mafia: flight Arusha – Mafia "non diretto, di solito con scalo a Dar es Salaam"; exclusions: "tasse del Parco Marino di Mafia, da pagare con carta di credito all'arrivo", "immersioni ed escursioni extra a Mafia".
+- Reply headers: the Gmail connector gives no Message-ID and the Hub Gmail mailbox may not be configured; then take In-Reply-To / References from the previous draft of the request (`mails/` subfolder) and say so in the report.
 
 ## 5. Report (Italian)
 
