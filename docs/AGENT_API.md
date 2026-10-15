@@ -239,7 +239,8 @@ changed meanwhile, e.g. saved from Excel), re-downloaded and re-verified.
 
 | Field | Rule applied |
 |---|---|
-| `pax_sheet` (or `adults`/`teens`/`children`) | all other sheets deleted (names with trailing spaces handled) |
+| `pax_sheet` (or `adults`/`teens`/`children`) | the other pax sheets deleted (names with trailing spaces handled); `RECAP` and non-pax sheets stay (GRP quotes). In a group calc only bare `NPAX` sheets go, client sheets like `1PAX Cacioli` stay. Kept-sheet formulas pointing at a deleted sheet → warning (#REF!) |
+| `keep_sheets` `["3PAX"]` | sheets kept even if they are pax sheets (422 if not in the Calc) |
 | — | H6:I14 cleared |
 | `price_components` `[1625,255,70]` | F9 = `=1625+255+70` (never a hardcoded total) |
 | `august_supplement` `true` | adds `35 × safari nights` between 1 and 25 August to F9 (beach nights excluded: from `mid_date`, else Zanzibar/coast names in B/K). `false` = does not apply (no warning) |
@@ -253,10 +254,11 @@ changed meanwhile, e.g. saved from Excel), re-downloaded and re-verified.
 | `mid_date` | first beach night, for the hotel-on-every-beach-night check |
 | `file` | which Calc if the folder has several |
 
-Returns `f9` (the formula written), `august_supplement` `{safari_nights[], pp_per_night, amount_pp, added}`,
+Returns `kept_sheets[]` / `removed_sheets[]`, `f9` (the formula written), `august_supplement` `{safari_nights[], pp_per_night, amount_pp, added}`,
 `rows[]` `{row, date, cells {B…K}, changed[]}` — every day row as written (formulas as `"=215*$B$1 → 430"`)
 and the columns this call changed, to review before `confirm` — and `verify`: `passed`, `checks[]` (see below),
-`price_to_customer`, `total_price`, `total_costs`, `margin` (B10), `to_price_pp` (D10). HTTP 422 if a check has level `error`.
+`price_to_customer`, `total_price`, `total_costs`, `margin` (B10), `to_price_pp` (D10) — all read on the filled pax sheet,
+also when RECAP is kept. HTTP 422 if a check has level `error`.
 fill_calc adds two checks: `error` a night with a hotel in K but J empty or 0 (except "own arrangement");
 `warn` safari nights between 1 and 25 August with no supplement in `price_components` and no `august_supplement`.
 

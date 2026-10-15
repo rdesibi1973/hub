@@ -315,12 +315,52 @@ function calc_fill(PDO $db, array $in, bool $commit): array {
         $keep = null;
         foreach ($ss->getSheetNames() as $i => $nm) { if (strcasecmp(trim($nm), $want) === 0) { $keep = $nm; break; } }
         if ($keep === null) throw new InvalidArgumentException('Sheet "' . $want . '" not in the Calc. Sheets: ' . implode(', ', $ss->getSheetNames()));
-        $removed = [];
-        foreach (array_reverse($ss->getSheetNames(), true) as $i => $nm) {
-            if ($nm !== $keep) { $ss->removeSheetByIndex($i); $removed[] = $nm; }
+
+        // Only the other pax sheets go. RECAP and every non-pax sheet stay (GRP quotes keep
+        // their RECAP). In a group calc a pax sheet is a bare "3PAX"; client sheets like
+        // "1PAX Cacioli" stay. keep_sheets[] saves more (trailing spaces / case ignored).
+        $names = $ss->getSheetNames();
+        $group = sc_has_recap($names);
+        $keepWant = isset($in['keep_sheets']) ? (array)$in['keep_sheets'] : [];
+        foreach ($keepWant as $w) {
+            $found = false;
+            foreach ($names as $nm) { if (strcasecmp(trim($nm), trim((string)$w)) === 0) { $found = true; break; } }
+            if (!$found) throw new InvalidArgumentException('keep_sheets: "' . $w . '" not in the Calc. Sheets: ' . implode(', ', $names));
         }
-        $ss->setActiveSheetIndex(0);
-        $ws = $ss->getActiveSheet();
+        $extra = []; $removed = [];
+        foreach ($names as $nm) {
+            if ($nm === $keep) continue;
+            $t = trim($nm);
+            $isPax = $group ? (bool)preg_match('/^\d+\s*PAX$/i', $t) : stripos($t, 'PAX') !== false;
+            foreach ($keepWant as $w) { if (strcasecmp($t, trim((string)$w)) === 0) { $isPax = false; break; } }
+            if ($isPax) $removed[] = $nm; else $extra[] = $nm;
+        }
+
+        // Kept sheets whose formulas point at a removed sheet would show #REF!.
+        if ($removed && $extra) {
+            $pats = [];
+            foreach ($removed as $nm) {
+                $pats[] = "'" . preg_quote(str_replace("'", "''", $nm), '/') . "'!";
+                if (preg_match('/^[A-Za-z0-9_.]+$/', $nm)) $pats[] = '(?<![A-Za-z0-9_.\'])' . preg_quote($nm, '/') . '!';
+            }
+            $re = '/' . implode('|', $pats) . '/i';
+            foreach ($extra as $nm) {
+                $xs = $ss->getSheetByName($nm);
+                $bad = [];
+                foreach ($xs->getCoordinates() as $coord) {
+                    $f = $xs->getCell($coord)->getValue();
+                    if (is_string($f) && strpos($f, '=') === 0 && preg_match($re, $f)) $bad[] = $coord;
+                }
+                if ($bad) $warnings[] = 'Sheet "' . trim($nm) . '": ' . count($bad) . ' formula(s) refer to removed sheets (e.g. '
+                                      . implode(', ', array_slice($bad, 0, 5)) . ') and will show #REF! — add those sheets to keep_sheets if they are needed.';
+            }
+        }
+
+        foreach (array_reverse($ss->getSheetNames(), true) as $i => $nm) {
+            if (in_array($nm, $removed, true)) $ss->removeSheetByIndex($i);
+        }
+        $ws = $ss->getSheetByName($keep);
+        $ss->setActiveSheetIndex($ss->getIndex($ws));
 
         if ($adults !== null) {
             $ws->setCellValue('B2', $adults); $ws->setCellValue('B3', $teens); $ws->setCellValue('B4', $children);
@@ -539,12 +579,13 @@ function calc_fill(PDO $db, array $in, bool $commit): array {
                        'cells' => $cells, 'changed' => $changed];
         }
 
-        $expect = ['start' => $start, 'end' => $endExpected, 'mid' => $midDate, 'extra_checks' => $augCheck ? [$augCheck] : []];
+        $expect = ['start' => $start, 'end' => $endExpected, 'mid' => $midDate, 'sheet' => $keep, 'extra_checks' => $augCheck ? [$augCheck] : []];
         $result = [
             'ok'        => true,
             'dry_run'   => !$commit,
             'file'      => $path,
             'sheet'     => $keep,
+            'kept_sheets'    => array_map('trim', $ss->getSheetNames()),
             'removed_sheets' => $removed,
             'days'      => $nDays,
             'start'     => $start,
@@ -588,9 +629,10 @@ function calc_fill(PDO $db, array $in, bool $commit): array {
  * values only): house rules + dates seen by the parser + key figures.
  */
 function calc_verify(string $path, array $expect): array {
-    $checks = sc_calc_rule_checks($path, ['mid' => $expect['mid'] ?? null, 'flight_costs' => bs_known_flight_costs(), 'hotel_cost' => 'error']);
+    $sheet = $expect['sheet'] ?? null;
+    $checks = sc_calc_rule_checks($path, ['mid' => $expect['mid'] ?? null, 'flight_costs' => bs_known_flight_costs(), 'hotel_cost' => 'error', 'sheet' => $sheet]);
     foreach ($expect['extra_checks'] ?? [] as $c) $checks[] = $c;
-    $v = sc_xlsx_cells($path);
+    $v = sc_xlsx_cells($path, $sheet);
     $trip = sc_trip_dates($v);
     if ($trip['start'] === $expect['start'] && $trip['end'] === $expect['end']) {
         $checks[] = ['level' => 'ok', 'msg' => 'Hub parser reads ' . sc_fmt($trip['start']) . ' → ' . sc_fmt($trip['end']) . '.'];

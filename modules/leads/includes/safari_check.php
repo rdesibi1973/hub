@@ -663,19 +663,20 @@ function sc_calc_day_rows(array $v, array $f): array {
  */
 function sc_calc_rule_checks(string $path, array $ctx = []): array {
     $res = [];
+    $sheet  = $ctx['sheet'] ?? null;   // fill_calc: the pax sheet it filled (a GRP quote keeps RECAP beside it)
     $sheets = sc_xlsx_sheets($path);
-    if (sc_has_recap($sheets)) {
+    if ($sheet === null && sc_has_recap($sheets)) {
         return [['level' => 'info', 'msg' => 'Group calc (RECAP) — single-booking calc rules skipped.']];
     }
 
-    // 1) Only the confirmed pax sheet.
+    // 1) Only the confirmed pax sheet (fill_calc has already chosen which sheets stay).
     $pax = [];
     foreach ($sheets as $s) { if (stripos($s, 'PAX') !== false) $pax[] = trim($s); }
-    if (count($pax) > 1) {
+    if ($sheet === null && count($pax) > 1) {
         $res[] = ['level' => 'error', 'msg' => 'Calc still has ' . count($pax) . ' pax sheets (' . implode(', ', $pax) . ') — keep only the confirmed one.'];
     }
 
-    $full = sc_xlsx_sheet($path);
+    $full = sc_xlsx_sheet($path, $sheet);
     $v = $full['v']; $f = $full['f'];
 
     // 2) H6:I14 (teen/child price, rack, sto, single supp, discounts) must be cleared.
