@@ -524,6 +524,120 @@ function inv_linked_request(PDO $db, int $invId): ?array {
 }
 
 /**
+ * Sales (agent) of the invoice's linked request, for the Cc of the invoice email:
+ * ['name' => …, 'email' => …] or null (no request, no agent, or the agent's user has no email).
+ */
+function inv_sales_contact(PDO $db, int $invId): ?array {
+    $s = $db->prepare("SELECT a.name,
+                              (SELECT u.email FROM users u WHERE u.agent_id = a.id AND u.email IS NOT NULL AND u.email <> ''
+                               ORDER BY u.is_active DESC, u.id LIMIT 1) AS email
+                         FROM invoices i JOIN requests r ON r.id = i.request_id JOIN agents a ON a.id = r.agent_id
+                        WHERE i.id = ?");
+    $s->execute([$invId]);
+    $r = $s->fetch(PDO::FETCH_ASSOC);
+    if (!$r || !filter_var(trim((string)$r['email']), FILTER_VALIDATE_EMAIL)) return null;
+    return ['name' => (string)$r['name'], 'email' => trim((string)$r['email'])];
+}
+
+/**
+ * Default Cc of the invoice email: $base addresses plus the sales of the request,
+ * unless the sales is already among $to / $base. Comma-separated string.
+ */
+function inv_mail_default_cc(PDO $db, int $invId, string $to, string $base = 'accountant@savannahexplorers.com'): string {
+    $cc    = array_values(array_filter(array_map('trim', preg_split('/[,;]+/', $base))));
+    $sales = inv_sales_contact($db, $invId);
+    if ($sales) {
+        $have = array_map('strtolower', array_merge($cc, array_map('trim', preg_split('/[,;]+/', $to))));
+        if (!in_array(strtolower($sales['email']), $have, true)) $cc[] = $sales['email'];
+    }
+    return implode(', ', $cc);
+}
+
+/** Valid addresses from "a@x, b@y; c@z" or a list; invalid ones are dropped, duplicates removed. */
+function inv_mail_addrs($v): array {
+    $out = [];
+    foreach (is_array($v) ? $v : preg_split('/[,;]+/', (string)$v) as $a) {
+        $a = trim((string)$a);
+        if ($a !== '' && filter_var($a, FILTER_VALIDATE_EMAIL) && !in_array(strtolower($a), array_map('strtolower', $out), true)) $out[] = $a;
+    }
+    return $out;
+}
+
+/**
+ * Default invoice email (the "Send by email" form on invoice_view.php and the Agent API
+ * send_invoice_email): To = the request's email, Cc = inv_mail_default_cc(), subject, body (Esther's receipt text).
+ */
+function inv_mail_defaults(PDO $db, array $inv): array {
+    $r  = inv_linked_request($db, (int)$inv['id']);
+    $to = trim((string)($r['email'] ?? ''));
+    return [
+        'to'      => $to,
+        'cc'      => inv_mail_default_cc($db, (int)$inv['id'], $to),
+        'subject' => $inv['bill_to_name'] . ' trip with Savannah Explorers',
+        'body'    => "Greetings from Savannah Explorers.\r\nKindly find your attached receipt and note that your money was successfully received into our bank account,\r\nWe wish you all the best for your upcoming safari/trip,\r\nRegards with thanks,\r\nEsther\r\n--\r\nSavannah Explorers Ltd\r\nEngosheraton - P.O. Box 16726\r\nArusha - Tanzania\r\nOffice +255 768 900 199\r\nEmergency Mobile Tanzania: +255 768 900 199 and +255 747 777 315\r\nEmail: accountant@savannahexplorers.com\r\nWebsite: savannahexplorers.net",
+    ];
+}
+
+/** [To list, Cc list] as sent: valid addresses only, a Cc address already in To dropped. */
+function inv_mail_recipients($to, $cc): array {
+    $toList  = inv_mail_addrs($to);
+    $toLower = array_map('strtolower', $toList);
+    return [$toList, array_values(array_filter(inv_mail_addrs($cc), fn($a) => !in_array(strtolower($a), $toLower, true)))];
+}
+
+/** File name of the invoice PDF attached to the email. */
+function inv_mail_filename(array $inv): string {
+    return 'Invoice_' . preg_replace('/[^A-Za-z0-9_-]/', '_', $inv['invoice_number']) . '.pdf';
+}
+
+/**
+ * Send the invoice PDF by email (BlueHost mail(), From noreply@, Reply-To accountant@).
+ * $to / $cc: string or list (inv_mail_addrs()); a Cc address already in To is dropped.
+ * Returns ['to' => [...], 'cc' => [...], 'subject', 'attachment']; RuntimeException on error.
+ */
+function inv_send_email(PDO $db, array $inv, $to, $cc, string $subject, string $body): array {
+    [$toList, $ccList] = inv_mail_recipients($to, $cc);
+    $subject = trim(str_replace(["\r", "\n"], ' ', $subject));
+    if (!$toList)              throw new InvalidArgumentException('No valid To address found');
+    if ($subject === '')       throw new InvalidArgumentException('Subject is required');
+    if (trim($body) === '')    throw new InvalidArgumentException('Body is required');
+
+    $id       = (int)$inv['id'];
+    $pdfData  = inv_pdf($inv, inv_items($db, $id), inv_payments($db, $id, true));
+    $filename = inv_mail_filename($inv);
+    $boundary = '----_Part_' . md5(uniqid('', true));
+
+    $headers  = "From: Savannah Explorers <noreply@savannahexplorers.com>\r\n";
+    $headers .= "Reply-To: accountant@savannahexplorers.com\r\n";
+    $headers .= "MIME-Version: 1.0\r\n";
+    $headers .= "Content-Type: multipart/mixed; boundary=\"{$boundary}\"\r\n";
+    if ($ccList) $headers .= "Cc: " . implode(', ', $ccList) . "\r\n";
+
+    $msgBody  = "--{$boundary}\r\n";
+    $msgBody .= "Content-Type: text/plain; charset=UTF-8\r\n";
+    $msgBody .= "Content-Transfer-Encoding: 8bit\r\n\r\n";
+    $msgBody .= $body . "\r\n\r\n";
+    $msgBody .= "--{$boundary}\r\n";
+    $msgBody .= "Content-Type: application/pdf; name=\"{$filename}\"\r\n";
+    $msgBody .= "Content-Disposition: attachment; filename=\"{$filename}\"\r\n";
+    $msgBody .= "Content-Transfer-Encoding: base64\r\n\r\n";
+    $msgBody .= chunk_split(base64_encode($pdfData)) . "\r\n";
+    $msgBody .= "--{$boundary}--";
+
+    if (!mail(implode(', ', $toList), $subject, $msgBody, $headers)) {
+        throw new RuntimeException('mail() returned false — check BlueHost mail log');
+    }
+    // Request timeline: mail_sent (page and Agent API alike).
+    $eventId = !empty($inv['request_id'])
+        ? timeline_log((int)$inv['request_id'], 'mail_sent', 'Invoice ' . $inv['invoice_number'] . ' sent by email', [
+            'body' => 'To: ' . implode(', ', $toList) . ($ccList ? "\nCc: " . implode(', ', $ccList) : '')
+                    . "\nSubject: " . $subject . "\nAttachment: " . $filename,
+            'refs' => ['invoice_id' => $id]])
+        : null;
+    return ['to' => $toList, 'cc' => $ccList, 'subject' => $subject, 'attachment' => $filename, 'timeline_event_id' => $eventId];
+}
+
+/**
  * Rename the invoice's Dropbox folder to the status $label (a FOLDER_TAG_OPTIONS
  * key), update practice_code / dropbox_url / payment_status, and re-tag the GRP
  * parent. Returns [new_name, new_tag, new_url, group_msg]; RuntimeException on error.

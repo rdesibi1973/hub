@@ -2104,9 +2104,7 @@ try {
         }
         $subject = trim((string)($in['subject'] ?? '')) ?: $def['subject'];
         $body    = trim((string)($in['body'] ?? ''))    ?: $def['body'];
-        $toList  = inv_mail_addrs($to);
-        $toLower = array_map('strtolower', $toList);
-        $ccList  = array_values(array_filter(inv_mail_addrs($cc), fn($a) => !in_array(strtolower($a), $toLower, true)));
+        [$toList, $ccList] = inv_mail_recipients($to, $cc);
         if (!$toList) agent_fail('No valid To address — the linked request has no email; pass "to"', 400, ['defaults' => $def]);
         $email = ['to' => $toList, 'cc' => $ccList, 'subject' => $subject, 'body' => $body,
                   'attachment' => inv_mail_filename($inv), 'from' => 'noreply@savannahexplorers.com', 'reply_to' => 'accountant@savannahexplorers.com'];

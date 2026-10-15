@@ -31,7 +31,7 @@ without driving the web UI.
 | HTTPS only | Plain HTTP → 403. |
 | Rate limit | 60 calls/min → 429. |
 | Audit | Every call (including failures and dry-runs) → `agent_audit_log` (action, request_id, user, HTTP code, dry_run, payload, result, IP). |
-| Dry-run by default | `update_request`, `confirm_booking`, `send_booking_email`, `rollback_booking`, `rename_folder`, `import_group_folder`, `move_group_folder`, `set_request_status`, `cancel_invoice_payment`, `update_folder_status`, `import_zoho_invoice`, `create_invoice`, `update_invoice`, `memo_delete`, `create_agency`, `update_agency`, `save_agency_contact`, `delete_agency_contact`, `mail_send`, `mail_move`, `ck_request_check`, `followup_scan`, `followup_update` and `followup_upsert` (among others) do nothing unless the body has `"confirm": true`. |
+| Dry-run by default | `update_request`, `confirm_booking`, `send_booking_email`, `rollback_booking`, `rename_folder`, `import_group_folder`, `move_group_folder`, `set_request_status`, `cancel_invoice_payment`, `update_folder_status`, `import_zoho_invoice`, `create_invoice`, `update_invoice`, `send_invoice_email`, `memo_delete`, `create_agency`, `update_agency`, `save_agency_contact`, `delete_agency_contact`, `mail_send`, `mail_move`, `ck_request_check`, `followup_scan`, `followup_update` and `followup_upsert` (among others) do nothing unless the body has `"confirm": true`. |
 | No deletes | No delete endpoint (mail included), except `memo_delete`, which is soft (`deleted_at`, the row stays). Undo a confirm with `rollback_booking` (or BackOffice → Rollback). |
 | Mailbox | The key also reads `info@` (`mail_*`): keep `api.txt` as private as the mailbox password. |
 
@@ -861,6 +861,23 @@ emailed invoice and the ZIP export — one template, `modules/invoices/includes/
 the old version when overwritten), `folder_path` (optional full Dropbox path, overrides the folder).
 Returns `path`, `size`, `rev`, `overwritten`.
 
+### `send_invoice_email` (POST)
+Same as **Send by email** on the invoice page (shared `inv_mail_defaults` / `inv_send_email` in
+`modules/invoices/includes/invoice_service.php`): the invoice PDF (same Dompdf render as `save_invoice_pdf`)
+attached as `Invoice_<number>.pdf`, sent with BlueHost `mail()` From `noreply@savannahexplorers.com`,
+Reply-To `accountant@savannahexplorers.com` (not from info@ — no copy in a Sent folder).
+`invoice_id`* or `invoice_number`*. Optional, each falls back to the page's default:
+- `to` (string `"a@x, b@y"` or list) — default the linked request's email; 400 when there is none.
+- `cc` — default `accountant@` + the **sales of the request** (agent → users.email), unless already in To.
+  `"cc": ""` / `[]` = no Cc. `"cc_sales": false` keeps the default Cc without the sales.
+- `subject` — default `<Bill to> trip with Savannah Explorers`; `body` — default Esther's receipt text
+  ("…your money was successfully received…"): pass a different body for an invoice not yet paid.
+
+Invalid addresses are dropped; a Cc already in To is not repeated. Dry-run unless `"confirm": true` →
+`email {to, cc, subject, body, attachment, from, reply_to}`, `invoice`, `sales {name, email}|null`,
+`warnings[]` (invoice Cancelled; sales not in To / Cc). After sending, the request timeline gets a `mail_sent`
+event "Invoice <number> sent by email" (`timeline_event_id`) — also when Esther sends from the page.
+
 ### `import_zoho_invoice` (POST)
 Brings an old Zoho invoice into Hub with its **original number** (Claude reads the Zoho PDF and sends the
 fields): `invoice_number`* (e.g. `INV-002417`), `bill_to_name`*, `issue_date`*, `items[]`*
@@ -904,6 +921,8 @@ curl -sH "$H" -X POST "$U?action=add_invoice_payment" -d '{"invoice_id":412,"dat
 curl -sH "$H" -X POST "$U?action=update_folder_status" -d '{"invoice_id":412,"status":"DEPOSIT"}'                 # preview
 curl -sH "$H" -X POST "$U?action=update_folder_status" -d '{"invoice_id":412,"status":"DEPOSIT","confirm":true}'
 curl -sH "$H" -X POST "$U?action=save_invoice_pdf" -d '{"invoice_id":412,"overwrite":true}'
+curl -sH "$H" -X POST "$U?action=send_invoice_email" -d '{"invoice_number":"SE-2026-0012"}'                   # preview: to / cc (with sales) / subject / body
+curl -sH "$H" -X POST "$U?action=send_invoice_email" -d '{"invoice_number":"SE-2026-0012","to":"booking@agency.it","confirm":true}'
 curl -sH "$H" -X POST "$U?action=create_invoice" -d '{"request_id":873,"agency_id":12,"issuer":"SE","items":[{"description":"Rossi 4 pax trip in Tanzania from 10 Feb until 16 Feb 2027","quantity":4,"unit_price":2450}]}'   # dry run
 curl -sH "$H" -X POST "$U?action=update_invoice" -d '{"invoice_number":"SE-2026-0012","due_date":"2026-12-01","confirm":true}'
 curl -sH "$H" -X POST "$U?action=cancel_invoice_payment" -d '{"invoice_id":412,"payment_id":901,"reason":"Recorded twice","confirm":true}'
@@ -1310,6 +1329,7 @@ same request + type + title within 60 s is logged once; a logging error never fa
 | `confirm_booking` / Confirm Safari | `confirmation` "Booking confirmed — <folder>" |
 | `rollback_booking` / Rollback | `status_change` "Confirmation rolled back" |
 | `send_booking_email` / BackOffice booking email | `mail_sent` |
+| `send_invoice_email` / invoice page Send by email | `mail_sent` "Invoice <number> sent by email" (`refs.invoice_id`) |
 | `create_invoice`, `update_invoice`, `import_zoho_invoice`, invoice cancelled / restored (request invoices) | `invoice` |
 | `add_invoice_payment`, `cancel_invoice_payment` (and the invoice page) | `payment` |
 | `update_folder_status` / Update Folder, BackOffice status change, request status change | `status_change` |

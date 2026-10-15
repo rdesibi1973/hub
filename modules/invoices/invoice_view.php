@@ -580,9 +580,14 @@ async function saveFollowUp(silent) {
 
 <?php
 // ── Prepare mail modal defaults ───────────────────────────────────────────────
-$mailTo      = ($linkedRequest['email'] ?? '') ?: '';
-$mailSubject = h($inv['bill_to_name']) . ' trip with Savannah Explorers';
-$mailBody    = "Greetings from Savannah Explorers.\r\nKindly find your attached receipt and note that your money was successfully received into our bank account,\r\nWe wish you all the best for your upcoming safari/trip,\r\nRegards with thanks,\r\nEsther\r\n--\r\nSavannah Explorers Ltd\r\nEngosheraton - P.O. Box 16726\r\nArusha - Tanzania\r\nOffice +255 768 900 199\r\nEmergency Mobile Tanzania: +255 768 900 199 and +255 747 777 315\r\nEmail: accountant@savannahexplorers.com\r\nWebsite: savannahexplorers.net";
+// Same defaults as the Agent API send_invoice_email (includes/invoice_service.php).
+// Cc: accountant + the sales of the request; Esther can delete it.
+$mailDefaults = inv_mail_defaults($db, $inv);
+$mailTo      = $mailDefaults['to'];
+$mailCc      = $mailDefaults['cc'];
+$mailSubject = $mailDefaults['subject'];
+$mailBody    = $mailDefaults['body'];
+$mailSales   = inv_sales_contact($db, $id);
 ?>
 
 <!-- ── MAIL MODAL ─────────────────────────────────────────────────────────── -->
@@ -605,9 +610,16 @@ $mailBody    = "Greetings from Savannah Explorers.\r\nKindly find your attached 
       <div>
         <label style="font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#888;display:block;margin-bottom:4px;">CC <span style="font-weight:400;font-style:italic;">(optional)</span></label>
         <input id="mailCc" type="text" placeholder="e.g. agent@example.com"
-               value="accountant@savannahexplorers.com"
+               value="<?= h($mailCc) ?>"
                style="width:100%;padding:9px 12px;border:1.5px solid #E8E8E8;border-radius:7px;font-family:inherit;font-size:.85rem;outline:none;"
                onfocus="this.style.borderColor='#C0211B'" onblur="this.style.borderColor='#E8E8E8'">
+        <?php if ($mailSales): ?>
+        <div id="mailSalesHint" style="font-size:.72rem;color:#888;margin-top:4px;">
+          Sales of the request: <strong><?= h($mailSales['name']) ?></strong> &lt;<?= h($mailSales['email']) ?>&gt;
+          <span id="mailSalesIn"> — receives a copy.<a href="#" onclick="mailSalesToggle(false);return false;" style="color:#C0211B;">Remove</a></span>
+          <span id="mailSalesOut" style="display:none;"> — not in Cc. <a href="#" onclick="mailSalesToggle(true);return false;" style="color:#C0211B;">Add</a></span>
+        </div>
+        <?php endif; ?>
       </div>
 
       <div>
@@ -655,6 +667,32 @@ function openMailModal() {
 }
 function closeMailModal() {
   document.getElementById('mailModal').style.display = 'none';
+}
+// Sales of the request in Cc: the hint follows what is typed in To / CC; Remove / Add edit the CC field.
+var MAIL_SALES = <?= json_encode($mailSales ? $mailSales['email'] : '') ?>;
+function mailAddrs(id) {
+  return document.getElementById(id).value.split(/[,;]+/).map(function(a){ return a.trim(); }).filter(Boolean);
+}
+function mailHas(list) {
+  var s = MAIL_SALES.toLowerCase();
+  return list.some(function(a){ return a.toLowerCase() === s; });
+}
+function mailSalesRefresh() {
+  if (!MAIL_SALES) return;
+  var inMail = mailHas(mailAddrs('mailCc')) || mailHas(mailAddrs('mailTo'));
+  document.getElementById('mailSalesIn').style.display  = inMail ? '' : 'none';
+  document.getElementById('mailSalesOut').style.display = inMail ? 'none' : '';
+}
+function mailSalesToggle(add) {
+  var cc = mailAddrs('mailCc');
+  var s  = MAIL_SALES.toLowerCase();
+  cc = cc.filter(function(a){ return a.toLowerCase() !== s; });
+  if (add) cc.push(MAIL_SALES);
+  document.getElementById('mailCc').value = cc.join(', ');
+  mailSalesRefresh();
+}
+if (MAIL_SALES) {
+  ['mailTo', 'mailCc'].forEach(function(id){ document.getElementById(id).addEventListener('input', mailSalesRefresh); });
 }
 // Close on backdrop click only when BOTH press and release happen on the
 // overlay itself. Otherwise a text selection started inside an input/textarea
