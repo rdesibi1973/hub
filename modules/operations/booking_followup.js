@@ -209,7 +209,7 @@
       ownerCell(r),
       statusCell(r),
       notesLog(r) + (edit ? '<textarea data-f="notes" aria-label="Add a note" placeholder="Add a note…"></textarea>' +
-                            '<div class="fu-save"><button type="button" class="btn btn-primary btn-sm" data-save="1" disabled>Save</button></div>' : ''),
+                            '<div class="fu-save"><button type="button" class="btn btn-primary btn-sm" data-save="1">Save</button></div>' : ''),
       state.tab === 'closed'
         ? '<span style="white-space:nowrap">' + dmyhm(r.closed_at) + '</span><span class="fu-days">' + esc(r.close_reason_label || '') + ' — ' + esc(r.closed_by || '') + '</span>'
         : '<span style="white-space:nowrap">' + dmy(r.last_seen_at) + '</span>',
@@ -231,10 +231,9 @@
     return c;
   }
   function markDirty(tr) {
-    var dirty = Object.keys(changesOf(tr)).length > 0;
-    tr.classList.toggle('dirty', dirty);
+    tr.classList.toggle('dirty', Object.keys(changesOf(tr)).length > 0);
     var b = tr.querySelector('[data-save]');
-    if (b) b.disabled = !dirty;
+    if (b) b.disabled = false;
   }
   function renderTable() {
     var t = $('fu-table');
@@ -350,7 +349,11 @@
     else if (b.dataset.release) save(tr, {owner: null}, b.parentNode);
     else if (b.dataset.save) {
       var change = changesOf(tr), r = rowOf(tr);
-      if (!Object.keys(change).length) return;
+      var prev = b.parentNode.querySelector('.fu-err,.fu-saved'); if (prev) prev.remove();
+      if (!Object.keys(change).length) {
+        b.parentNode.insertAdjacentHTML('beforeend', '<span class="fu-err">Nothing changed: choose an owner / status or write a note</span>');
+        return;
+      }
       if (change.staff_status === 'problem' && !change.notes && !(r && r.notes)) {
         var old = b.parentNode.querySelector('.fu-err,.fu-saved'); if (old) old.remove();
         b.parentNode.insertAdjacentHTML('beforeend', '<span class="fu-err">Problem needs a note: write it above, then Save</span>');
