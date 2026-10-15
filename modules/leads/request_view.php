@@ -651,6 +651,27 @@ include 'includes/header.php';
       <?php endif; ?>
     </div>
 
+    <?php if (($r['status'] ?? '') === 'Booked'):
+      // Read-only here (changed via Edit / BackOffice): DB value, else the folder tag — as in booked.php.
+      $ps = $r['payment_status'] ?: folder_payment_status($r);
+      $psStyle = match($ps) {
+          'Deposit'      => 'background:#fff3cd;color:#856404',
+          'Balance'      => 'background:#cfe2ff;color:#0a3678',
+          'Balance-Cash' => 'background:#d1ecf1;color:#0c5460',
+          'Paid'         => 'background:#d1e7dd;color:#155724',
+          'Cancelled'    => 'background:#f8d7da;color:#842029',
+          default        => 'background:#e2e8f0;color:#475569',
+      };
+    ?>
+    <div class="detail-label">Payment Status</div>
+    <div class="detail-value">
+      <span class="badge" style="<?= $psStyle ?>"><?= h($ps ?: 'Progress') ?></span>
+      <?php if (!$r['payment_status'] && $ps): ?>
+        <span style="font-size:.72rem;color:var(--grey-mid);margin-left:6px">from the folder tag</span>
+      <?php endif; ?>
+    </div>
+    <?php endif; ?>
+
     <div class="detail-label">Folder</div>
     <div class="detail-value">
       <?php $dbxPath = req_folder_path($r); ?>
