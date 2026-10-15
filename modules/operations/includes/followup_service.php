@@ -1018,6 +1018,9 @@ function followup_out(array $r, string $today): array {
         'folder_open_url' => $r['folder'] ? 'savannah://open?path=' . implode('/', array_map('rawurlencode', explode('/', '001_Safari/' . $r['folder']))) : null,
         'file_url' => $r['source_file'] ? followup_dropbox_url($dir . (dirname($r['source_file']) !== '.' ? '/' . dirname($r['source_file']) : ''),
                                                                 basename($r['source_file'])) : null,
+        // The document on the PC (handler opens PDF / Office files; an older handler selects it in Explorer).
+        'file_open_url' => $r['folder'] && $r['source_file']
+            ? 'savannah://open?path=' . implode('/', array_map('rawurlencode', explode('/', '001_Safari/' . $r['folder'] . '/' . $r['source_file']))) . '&open=file' : null,
         'start_date' => $r['start_date'], 'end_date' => $r['end_date'], 'service_date' => $r['service_date'],
         'days_left' => $svc ? (int)round((strtotime($svc) - strtotime($today)) / 86400) : null,
         'supplier' => $r['supplier'], 'supplier_ref' => $r['supplier_ref'], 'service' => $r['service'],

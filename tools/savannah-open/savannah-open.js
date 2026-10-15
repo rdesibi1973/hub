@@ -1,6 +1,7 @@
 // savannah-open.js — open a Dropbox folder in Explorer from a "savannah://" link.
 // Run by the protocol handler as:  wscript.exe savannah-open.js "<url>"
-// With "&open=calc" it opens the folder's quotation Excel instead (see pickCalc).
+// With "&open=calc" it opens the folder's quotation Excel instead (see pickCalc);
+// with "&open=file" a path to a document opens it (PDF / Office / image only), else the file is selected.
 //
 // Uses JScript via wscript.exe (no PowerShell) to avoid antivirus heuristics that
 // flag browser-spawned powershell.exe command lines. Security: the path is decoded,
@@ -17,6 +18,7 @@ var url = WScript.Arguments(0);
 
 // ── Extract the relative path from the URL ──────────────────────────────────
 var wantCalc = /[?&]open=calc(&|$)/i.test(url);
+var wantFile = /[?&]open=file(&|$)/i.test(url);   // open the document itself (only the types below), not just select it
 var calcUp   = /[?&]up=1(&|$)/.test(url);   // GRP member: Calc may be in the group folder
 var rel, m = /[?&]path=([^&]+)/.exec(url);
 if (m) { rel = m[1]; }
@@ -91,6 +93,8 @@ if (wantCalc && fso.FolderExists(full)) {
   else { warn("No Excel (*_Calc.xlsx) found in:\n" + full + "\n\nOpening the folder instead."); openExplorer('"' + full + '"'); }
 } else if (fso.FolderExists(full)) {
   openExplorer('"' + full + '"');
+} else if (wantFile && fso.FileExists(full) && /\.(pdf|xlsx|xlsm|xls|docx|doc|jpe?g|png|txt)$/i.test(full)) {
+  openExplorer('"' + full + '"');   // Explorer hands it to the default app; never scripts / programs
 } else if (fso.FileExists(full)) {
   openExplorer('/select,"' + full + '"');
 } else {

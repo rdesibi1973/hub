@@ -194,7 +194,9 @@
       '<span class="badge badge-issue' + issueCls + '">' + esc(ISSUE[r.issue] || r.issue) + '</span>',
       esc(r.doc_status_text || '') + (r.booked_by ? '<span class="fu-days">booked by ' + esc(r.booked_by) + '</span>' : ''),
       r.expiry_date ? '<span class="' + (r.expired ? 'fu-late' : '') + '" style="white-space:nowrap">' + dmy(r.expiry_date) + '</span>' : '',
-      r.file_url ? '<a href="' + esc(r.file_url) + '" target="_blank" rel="noopener" title="' + esc(r.source_file) + '">📄 ' + esc(r.source_file.replace(/^invoices\//, '')) + '</a>' : '',
+      r.file_open_url ? '<span class="fu-folder"><a href="' + esc(r.file_url) + '" target="_blank" rel="noopener" title="Open in Dropbox (web)">☁</a> ' +
+        '<a href="' + esc(r.file_open_url) + '" title="Open on this PC — ' + esc(r.source_file) + '">📄 ' + esc(r.source_file.replace(/^invoices\//, '')) + '</a></span>'
+      : r.file_url ? '<a href="' + esc(r.file_url) + '" target="_blank" rel="noopener" title="' + esc(r.source_file) + '">📄 ' + esc(r.source_file.replace(/^invoices\//, '')) + '</a>' : '',
       ownerCell(r),
       edit ? '<input type="date" data-f="contacted_at" value="' + esc(r.contacted_at || '') + '" aria-label="Contacted">' : esc(dmy(r.contacted_at)),
       statusCell(r),

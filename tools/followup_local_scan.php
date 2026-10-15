@@ -13,7 +13,10 @@
  * Options: --root=C:\Dropbox\001_Safari  --pdftotext=C:\Utility\Git\mingw64\bin\pdftotext.exe
  *          --key-file=<path of api.txt>  (or env HUB_AGENT_KEY)  --url=https://hub.savannahexplorers.com/api/agent/index.php
  *          --today=YYYY-MM-DD (tests)  --no-send (classify only)  --cainfo=<CA bundle> (default: Git's, the office PHP has none)
+ *          --no-ocr (PDFs without text stay "unreadable")
  * Needs PHP with curl + openssl (the .bat loads them). Passport files are never opened (only invoices\).
+ * A PDF without a text layer (scan, image printed to PDF) is read with the Windows OCR (tools\pdf_ocr.ps1);
+ * its status text ends with "(OCR)".
  */
 date_default_timezone_set('Africa/Dar_es_Salaam');
 require_once __DIR__ . '/../modules/leads/includes/folder_parser.php';
@@ -21,7 +24,7 @@ require_once __DIR__ . '/../modules/operations/includes/followup_classify.php';
 
 $opt = ['root' => 'C:\\Dropbox\\001_Safari', 'pdftotext' => 'C:\\Utility\\Git\\mingw64\\bin\\pdftotext.exe',
         'key-file' => __DIR__ . '/../api.txt', 'url' => 'https://hub.savannahexplorers.com/api/agent/index.php',
-        'today' => date('Y-m-d'), 'folder' => '', 'json' => '', 'confirm' => false, 'no-send' => false,
+        'today' => date('Y-m-d'), 'folder' => '', 'json' => '', 'confirm' => false, 'no-send' => false, 'no-ocr' => false,
         'cainfo' => 'C:\\Utility\\Git\\mingw64\\etc\\ssl\\certs\\ca-bundle.crt'];
 foreach (array_slice($argv, 1) as $a) {
     if (!preg_match('/^--([a-z\-]+)(?:=(.*))?$/', $a, $m) || !array_key_exists($m[1], $opt)) { fwrite(STDERR, "Unknown option $a\n"); exit(2); }
@@ -82,7 +85,7 @@ function followup_group_kind_local(string $name): bool {
 }
 
 // ── Read and classify ──
-$rows = []; $scanned = []; $count = ['docs' => 0, 'issues' => 0, 'confirmed' => 0, 'unknown' => 0, 'unreadable' => 0];
+$rows = []; $scanned = []; $count = ['docs' => 0, 'issues' => 0, 'confirmed' => 0, 'unknown' => 0, 'unreadable' => 0, 'ocr' => 0];
 $tmp = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'fu_scan_' . getmypid() . '.txt';
 foreach ($folders as $rel => $trip) {
     $dir = "$root/$rel/invoices";
@@ -96,9 +99,17 @@ foreach ($folders as $rel => $trip) {
         $pdf = $tmp . '.pdf';
         if (!@copy("$dir/$f", $pdf)) { $ok = false; echo "  ! not copied: $rel/invoices/$f\n"; continue; }
         exec('"' . $opt['pdftotext'] . '" -layout -q "' . $pdf . '" "' . $tmp . '"', $o, $rc);
+        $text = is_file($tmp) ? (string)file_get_contents($tmp) : '';
+        $ocr  = false;
+        if (trim($text, " \t\n\r\0\x0B\f") === '' && !$opt['no-ocr']) {   // no text layer (only page breaks): Windows OCR
+            @unlink($tmp);
+            exec('powershell -NoProfile -ExecutionPolicy Bypass -File "' . __DIR__ . '\\pdf_ocr.ps1" -Pdf "' . $pdf . '" -Out "' . $tmp . '"', $o, $orc);
+            if ($orc === 0 && is_file($tmp) && trim($t = (string)file_get_contents($tmp)) !== '') { $text = $t; $ocr = true; $count['ocr']++; }
+        }
         @unlink($pdf);
-        if ($rc !== 0 && !is_file($tmp)) { $ok = false; echo "  ! not read: $rel/invoices/$f\n"; continue; }
-        $c = followup_classify(is_file($tmp) ? (string)file_get_contents($tmp) : '', $f, $trip, $today);
+        if ($rc !== 0 && $text === '') { $ok = false; echo "  ! not read: $rel/invoices/$f\n"; continue; }
+        $c = followup_classify($text, $f, $trip, $today);
+        if ($ocr && $c['doc_status_text'] !== '') $c['doc_status_text'] .= ' (OCR)';
         $groupDoc = $isGroup;   // group folders: every PDF is sent, so the group check knows all its documents were read
         if ($c['issue']) {
             $count[$c['issue'] === 'unreadable' ? 'unreadable' : 'issues']++;
@@ -117,8 +128,8 @@ foreach ($folders as $rel => $trip) {
     if ($ok) $scanned[] = $rel;
 }
 @unlink($tmp);
-printf("%d PDF(s): %d to follow up, %d confirmed, %d unreadable, %d without a status\n",
-       $count['docs'], $count['issues'], $count['confirmed'], $count['unreadable'], $count['unknown']);
+printf("%d PDF(s): %d to follow up, %d confirmed, %d unreadable, %d without a status (%d read with OCR)\n",
+       $count['docs'], $count['issues'], $count['confirmed'], $count['unreadable'], $count['unknown'], $count['ocr']);
 foreach ($rows as $r) {
     if ($r['issue']) printf("  %-22s %-38s %-12s %s\n", $r['issue'], substr($r['folder'], 0, 38), (string)$r['supplier_ref'], $r['doc_status_text']);
 }
