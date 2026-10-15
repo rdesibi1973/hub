@@ -509,6 +509,17 @@ no `\ / : * ? " < > |`. `iti_create_personal` sets it from the folder; `iti_upda
 (`preview`, `edit`, `word`, `pdf`, `guide` (personal only, else null), `public` — `word` / `pdf` / `guide` need a Hub login).
 `terms` = the T&C the documents print: `{variant (direct | agency | custom), terms_id, name, source (program = chosen on the
 program | request = from the linked request | default), request_variant}`.
+`missing_texts[]` `{type (activity | lodge | destination), id, name, field (name_<lang> | description_<lang>), days[]}` = the
+catalogue texts that do not exist in the program language (`lang`, else the program's): the documents leave them out (see
+**Texts in the program language** below). Check it before `iti_document` and fill them with `iti_update_activity` /
+`iti_update_lodge` / `iti_update_destination`.
+
+**Texts in the program language (15 Oct 2026).** In every document (magazine web page, PDF, Word, guide sheet) the name and
+description of an activity, lodge or destination are printed only in the program language — never English or another
+language. Missing (or only the website blurb) → that box is not printed: an activity without its name in the language
+(and no day note in that language) is left out of the day's list, a destination without its name has no description box, a
+lodge without its description shows name, photos and contacts only. The program's own texts (title, intro, day titles and
+narratives, included / excluded, T&C) keep the language fallback.
 
 **T&C per client type:** direct clients (request folder `Name(Agent-Drct)`) get the standard version named DIRECT —
 balance and cancellation penalties at **60 days**; agencies the version named AGENTS — **45 days**. Set on create, when the
@@ -600,9 +611,10 @@ plain string (program language). Each list given replaces that list in one trans
 #### Master data: `iti_flight_routes`, `iti_activities`, `iti_transfer_routes` (GET) and `iti_create_…` (POST)
 - `iti_flight_routes` `q? from? to?` (airport name or code); `iti_create_flight_route` `fields`: `from_airport`*,
   `to_airport`*, `from_code`, `to_code`, `operator`, `flight_type` (`scheduled`|`charter`), `duration_min`, `notes_<lang>`.
-- `iti_activities` `q? destination?`; `iti_create_activity` `fields`: `name_en` / `name_it`*, `activity_type`
+- `iti_activities` (list with all 5 languages, see **ITI master data — activities**); `iti_create_activity` `fields`:
+  `name_en` / `name_it`*, `name_<lang>`, `activity_type`
   (`game_drive`|`walking_safari`|`cultural`|`boat`|`balloon`|`hiking`|`beach`|`other`), `destination_id` | `destination`,
-  `description_<lang>`, `duration_hours`.
+  `description_<lang>`, `duration_hours`. A language not given stays empty (no copy of another language, since 15 Oct 2026).
 - `iti_transfer_routes` `from? to?`; `iti_create_transfer_route` `fields`: `from_destination`*, `to_destination`*
   (id, name or code), `duration_min`, `distance_km`, `road_type` (`tarmac`|`gravel`|`mixed`), `notes_<lang>`.
 Duplicates are refused with the existing id. Dry-run unless confirm.
@@ -673,8 +685,8 @@ day header and program cover (destination).
 `iti_destination` (`destination_id`) adds `name_<lang>` and `description_<lang>`.
 
 `missing=description_<lang>` also lists texts that are only the website blurb ("Savannah Explorers - Tour Operator for Safari
-in Tanzania…"); `missing=placeholder` lists rows with that blurb in any language. The documents never print it (they fall back
-to another language or leave the box out).
+in Tanzania…"); `missing=placeholder` lists rows with that blurb in any language. The documents never print it: the box is
+left out (no other language — see **Texts in the program language** under `iti_program`).
 
 #### `iti_lodge_photos` (POST)
 `lodge_id` + one of: `photos` [ordered final list, ≤ 12, first = main] | `add` [appended] ; `remove?` [];
@@ -708,6 +720,31 @@ Camp; set on one camp, both are updated; shown as "⇄ …" in the Lodges list) 
 Not editable through the API; see the season
 rule under `iti_final_from_calc`. Its area (the "Parco Nazionale del Serengeti" under the name in the documents)
 is its `destination_id`: use the park / area, not the airstrip (`… Airstrip` destinations are for flights and transfers).
+
+### ITI master data — activities
+Code: `modules/iti/includes/iti_content_service.php` (same as lodges / destinations; Hub page ITI → Activities). The documents
+print an activity's `name_<lang>` in the program language only (descriptions are not printed today).
+
+#### `iti_activities` (GET)
+`q?` (any name), `destination?` (id, name or code), `active?` (`1` default, `0`, `all`),
+`missing?` (`name_<lang>` | `description_<lang>` — empty; a description holding only the website blurb counts as missing) →
+`activities[]` `{id, activity_type, destination_id, destination, duration_hours, active, name_en, name_it, name_fr, name_es,
+name_de, description_en, description_it, description_fr, description_es, description_de, name_langs[], description_langs[]}`.
+
+#### `iti_activity` (GET)
+`activity_id` → `activity` (the same shape, one row).
+
+#### `iti_update_activity` (POST)
+`activity_id`, `fields` `{…}`: `name_<lang>`, `description_<lang>` (`""` clears; `name_en` cannot be empty), `activity_type`
+(`game_drive|walking_safari|cultural|boat|balloon|hiking|beach|other`), `destination_id` (`null` = generic, valid everywhere),
+`duration_hours` (number or `null`). Returns `changes` `{field: {from, to}}` (only what differs). Dry-run unless
+`"confirm": true`; then also `activity` (the saved row). Audited like the other `iti_update_*`.
+
+```bash
+curl -sA "$UA" -H "$H" "$U?action=iti_activities&missing=name_fr"
+curl -sA "$UA" -H "$H" "$U?action=iti_activity&activity_id=4"
+curl -sA "$UA" -H "$H" -X POST "$U?action=iti_update_activity" -d '{"activity_id":4,"fields":{"name_fr":"Visite du village de Mto wa Mbu","name_de":"Besuch des Dorfes Mto wa Mbu"}}'   # dry run
+```
 
 ## Invoices
 

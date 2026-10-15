@@ -93,6 +93,26 @@ function iti_doc_pick(array $row, string $field, string $lang): string {
     return '';
 }
 
+/**
+ * Name / description of an activity, lodge or destination in $lang only — never another language
+ * (15 Oct 2026: a French programme printed English lodge texts). Missing (or the website blurb) →
+ * '' so the box is not printed, and the gap is noted in $missing (iti_doc_data()['missing_texts'],
+ * iti_program missing_texts[] in the Agent API) so it can be filled before the file is made.
+ */
+function iti_doc_own(array $row, string $field, string $lang, string $kind, array &$missing, int $day): string {
+    $v = trim((string)($row[$field . '_' . $lang] ?? ''));
+    if ($v !== '' && !iti_is_placeholder_text($v)) return $v;
+    $id = (int)($row['id'] ?? 0);
+    $key = $kind . '|' . $id . '|' . $field . '_' . $lang;
+    if (!isset($missing[$key])) {
+        $label = $kind === 'lodge' ? (string)($row['name'] ?? '')
+               : (trim((string)($row['name_en'] ?? '')) ?: trim((string)($row['name_it'] ?? '')) ?: (string)($row['code'] ?? ''));
+        $missing[$key] = ['type' => $kind, 'id' => $id, 'name' => $label, 'field' => $field . '_' . $lang, 'days' => []];
+    }
+    if (!in_array($day, $missing[$key]['days'], true)) $missing[$key]['days'][] = $day;
+    return '';
+}
+
 /** Meal flags of a day → short text ("pensione completa", "cena", …). */
 function iti_doc_meals(array $d, array $T): string {
     if (!empty($d['meal_all_inclusive'])) return $T['AI'];
@@ -223,8 +243,9 @@ function iti_doc_data(int $id, string $lang): ?array {
                              FROM iti_day_activities da LEFT JOIN iti_activities a ON a.id = da.activity_id
                             WHERE da.program_day_id = ? ORDER BY da.sort_order, da.id');
 
-    $out = []; $seenLodge = []; $seenDest = [];
+    $out = []; $seenLodge = []; $seenDest = []; $missing = [];
     foreach ($days as $d) {
+        $dn = (int)$d['day_number'];
         $transfers = [];
         foreach (iti_get_day_transfers((int)$d['id']) as $t) {   // translation in $lang, else the original text
             $tx = trim((string)($t['description_' . $lang] ?? '')) ?: trim((string)$t['description']);
@@ -248,8 +269,13 @@ function iti_doc_data(int $id, string $lang): ?array {
         $acts = [];
         $actSt->execute([(int)$d['id']]);
         foreach ($actSt->fetchAll() as $a) {
-            $name = !empty($a['activity_id']) ? iti_doc_pick($a, 'name', $lang) : '';
-            if ($name === '') $name = trim((string)($a['custom_note_' . $lang] ?? '')) ?: trim((string)($a['activity_custom'] ?? ''));
+            if (!empty($a['activity_id'])) {
+                // Catalogue activity: its name in $lang, else this day's note in $lang; never the English name.
+                $name = iti_doc_own(['id' => (int)$a['activity_id']] + $a, 'name', $lang, 'activity', $missing, $dn);
+                if ($name === '') $name = trim((string)($a['custom_note_' . $lang] ?? ''));
+            } else {
+                $name = trim((string)($a['custom_note_' . $lang] ?? '')) ?: trim((string)($a['activity_custom'] ?? ''));   // the programme's own text
+            }
             if ($name !== '') $acts[] = $name;
         }
 
@@ -258,10 +284,12 @@ function iti_doc_data(int $id, string $lang): ?array {
             $lr = $lodges[(int)$d['end_lodge_id']];
             $lodgeName = $lr['name'];
             $lodgeKey  = 'L' . $lr['id'];
-            if (!empty($lr['destination_id']) && isset($dests[(int)$lr['destination_id']])) $lodgeArea = iti_doc_pick($dests[(int)$lr['destination_id']], 'name', $lang);
+            if (!empty($lr['destination_id']) && isset($dests[(int)$lr['destination_id']])) {
+                $lodgeArea = iti_doc_own($dests[(int)$lr['destination_id']], 'name', $lang, 'destination', $missing, $dn);
+            }
             $lodgePhotos = iti_photos_decode($lr['photos'] ?? null);
             $lodgeUrl  = trim((string)($lr['website'] ?? ''));
-            if (empty($seenLodge[$lr['id']])) { $lodgeDesc = iti_doc_pick($lr, 'description', $lang); $seenLodge[$lr['id']] = true; }
+            if (empty($seenLodge[$lr['id']])) { $lodgeDesc = iti_doc_own($lr, 'description', $lang, 'lodge', $missing, $dn); $seenLodge[$lr['id']] = true; }
         } elseif (!empty($d['end_lodge_custom'])) {
             $lodgeName = $d['end_lodge_custom'];
             $lodgeKey  = 'C' . strtolower(trim($lodgeName));
@@ -269,8 +297,12 @@ function iti_doc_data(int $id, string $lang): ?array {
         $destName = ''; $destDesc = '';
         if (!empty($d['destination_id']) && isset($dests[(int)$d['destination_id']])) {
             $dr = $dests[(int)$d['destination_id']];
-            $destName = iti_doc_pick($dr, 'name', $lang);
-            if (empty($seenDest[$dr['id']])) { $destDesc = iti_doc_pick($dr, 'description', $lang); $seenDest[$dr['id']] = true; }
+            $destName = iti_doc_own($dr, 'name', $lang, 'destination', $missing, $dn);
+            if (empty($seenDest[$dr['id']])) {
+                $destDesc = iti_doc_own($dr, 'description', $lang, 'destination', $missing, $dn);
+                if ($destName === '') $destDesc = '';   // no box without its title in $lang
+                $seenDest[$dr['id']] = true;
+            }
         } elseif (!empty($d['destination_custom'])) {
             $destName = $d['destination_custom'];
         }
@@ -355,6 +387,8 @@ function iti_doc_data(int $id, string $lang): ?array {
         'intro'    => iti_doc_pick($p, 'intro', $lang),
         'duration' => $n . ' ' . ($n === 1 ? $T['day1'] : $T['days']) . ' / ' . max(0, $n - 1) . ' ' . ($n - 1 === 1 ? $T['night1'] : $T['nights']),
         'days'     => $out,
+        // Activity / lodge / destination texts not in $lang: left out of the document (iti_doc_own()).
+        'missing_texts' => array_values($missing),
         'incl'     => $incl,
         'excl'     => $excl,
         'prices'   => $prices,

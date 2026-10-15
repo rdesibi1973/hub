@@ -20,6 +20,19 @@ Running log of notable changes and current build state. Module-level "active / p
 
 ---
 
+## 2026-10-15 — ITI activities editable from the Agent API; documents print catalogue texts only in the programme language
+- Agent API: `iti_activities` returns `name_<lang>` / `description_<lang>` for the 5 languages + `name_langs[]` /
+  `description_langs[]` and takes `missing=name_<lang>|description_<lang>` (like lodges / destinations); new `iti_activity`
+  (`activity_id` → the row) and `iti_update_activity` (`activity_id` + `fields`: `name_<lang>`, `description_<lang>`,
+  `activity_type`, `destination_id` (null = generic), `duration_hours` → `changes {field: {from, to}}`, dry-run unless confirm).
+  Logic in `modules/iti/includes/iti_content_service.php` (`iti_cs_activities` / `iti_cs_activity_row` / `iti_cs_update`);
+  `iti_pb_activities()` removed. No migration: the 10 language columns were already there (SHOW COLUMNS, 15 Oct).
+- Documents (magazine web, PDF, Word, guide sheet — all built from `iti_doc_data()`): the name / description of an activity,
+  lodge or destination missing in the programme language is no longer replaced by the English one; the box is left out
+  (`iti_doc_own()`), and `iti_doc_data()['missing_texts']` / `iti_program` `missing_texts[]` list the gaps. The programme's
+  own texts keep the fallback.
+- `iti_create_activity` no longer copies the first name into the languages not given (that hid the gap).
+
 ## 2026-10-14 — Booking follow-up: groups 60 days before arrival (+ ARK-ZNZ seats)
 - New line type `group` (tab Groups, card "Groups to finalize", Run check "Groups"): every GRP folder, Il Diamante set
   departures and private groups tagged `_PROVISIONAL` arriving within 60 days. `group_to_finalize` collects client

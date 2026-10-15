@@ -13,6 +13,8 @@ require_once __DIR__ . '/iti_terms.php';   // iti_placeholder_sql(): the website
 const ITI_CS_LANGS = ['en', 'it', 'fr', 'es', 'de'];
 const ITI_CS_LODGE_MAX_PHOTOS = 12;
 
+const ITI_CS_ACTIVITY_TYPES = ['game_drive', 'walking_safari', 'cultural', 'boat', 'balloon', 'hiking', 'beach', 'other'];
+
 /** Text fields an agent may change (+ lat/lng, checked apart). */
 function iti_cs_editable(string $kind): array {
     $desc = [];
@@ -20,7 +22,58 @@ function iti_cs_editable(string $kind): array {
     if ($kind === 'lodge') return array_merge(['website', 'phone', 'emergency_phone', 'email', 'address'], $desc);
     $names = [];
     foreach (ITI_CS_LANGS as $l) $names[] = 'name_' . $l;
+    if ($kind === 'activity') return array_merge($names, $desc, ['activity_type', 'destination_id', 'duration_hours']);
     return array_merge($names, $desc, ['region']);
+}
+
+/** Activity row → API shape: every name_<lang> / description_<lang>, plus the languages that have one. */
+function iti_cs_activity_out(array $r): array {
+    $out = [
+        'id' => (int)$r['id'], 'activity_type' => $r['activity_type'],
+        'destination_id' => $r['destination_id'] !== null ? (int)$r['destination_id'] : null,
+        'destination' => $r['dest_name'] ?? null,
+        'duration_hours' => $r['duration_hours'] !== null ? (float)$r['duration_hours'] : null,
+        'active' => (bool)$r['is_active'], 'name_langs' => [], 'description_langs' => [],
+    ];
+    foreach (ITI_CS_LANGS as $l) {
+        $out['name_' . $l] = (string)($r['name_' . $l] ?? '');
+        $out['description_' . $l] = (string)($r['description_' . $l] ?? '');
+        if (trim($out['name_' . $l]) !== '') $out['name_langs'][] = $l;
+        if (trim($out['description_' . $l]) !== '' && !iti_is_placeholder_text($out['description_' . $l])) $out['description_langs'][] = $l;
+    }
+    return $out;
+}
+
+/**
+ * Activities. Filters: q (any name), destination (id, name or code), active (default 1, "all"),
+ * missing: name_<lang> | description_<lang> (empty; descriptions also the website placeholder).
+ */
+function iti_cs_activities(PDO $db, array $f): array {
+    $w = []; $a = [];
+    $act = (string)($f['active'] ?? '1');
+    if ($act !== 'all') { $w[] = 'a.is_active = ?'; $a[] = (int)$act; }
+    if (($q = trim((string)($f['q'] ?? ''))) !== '') {
+        $w[] = '(' . implode(' OR ', array_map(function ($l) { return 'a.name_' . $l . ' LIKE ?'; }, ITI_CS_LANGS)) . ')';
+        foreach (ITI_CS_LANGS as $l) $a[] = "%$q%";
+    }
+    if (($d = trim((string)($f['destination'] ?? ''))) !== '') {
+        if (ctype_digit($d)) { $w[] = 'a.destination_id = ?'; $a[] = (int)$d; }
+        else { $w[] = '(d.name_en LIKE ? OR d.code = ?)'; array_push($a, "%$d%", strtoupper($d)); }
+    }
+    $miss = (string)($f['missing'] ?? '');
+    if (preg_match('/^name_(en|it|fr|es|de)$/', $miss)) $w[] = "(a.$miss IS NULL OR TRIM(a.$miss) = '')";
+    if (preg_match('/^description_(en|it|fr|es|de)$/', $miss)) $w[] = "(a.$miss IS NULL OR TRIM(a.$miss) = '' OR " . iti_placeholder_sql("a.$miss") . ")";
+    $st = $db->prepare('SELECT a.*, d.name_en AS dest_name FROM iti_activities a LEFT JOIN iti_destinations d ON d.id = a.destination_id'
+                     . ($w ? ' WHERE ' . implode(' AND ', $w) : '') . ' ORDER BY a.name_en');
+    $st->execute($a);
+    return array_map('iti_cs_activity_out', $st->fetchAll(PDO::FETCH_ASSOC));
+}
+
+function iti_cs_activity_row(PDO $db, int $id): ?array {
+    $st = $db->prepare('SELECT a.*, d.name_en AS dest_name FROM iti_activities a LEFT JOIN iti_destinations d ON d.id = a.destination_id WHERE a.id = ?');
+    $st->execute([$id]);
+    $r = $st->fetch(PDO::FETCH_ASSOC);
+    return $r ?: null;
 }
 
 /** Lodge row → API shape; $full adds the descriptions. */
@@ -248,15 +301,30 @@ function iti_table_columns_cs(PDO $db, string $table): array {
  */
 function iti_cs_update(PDO $db, string $kind, int $id, array $fields, bool $go): array {
     $isLodge = $kind === 'lodge';
-    $row = $isLodge ? iti_cs_lodge_row($db, $id) : iti_cs_destination_row($db, $id);
-    if (!$row) throw new InvalidArgumentException(($isLodge ? 'Lodge ' : 'Destination ') . $id . ' not found');
-    $allowed = array_merge(iti_cs_editable($kind), ['latitude', 'longitude'], $isLodge ? ['destination_id', 'category', 'lodge_type'] : []);
+    $isAct = $kind === 'activity';
+    $row = $isLodge ? iti_cs_lodge_row($db, $id) : ($isAct ? iti_cs_activity_row($db, $id) : iti_cs_destination_row($db, $id));
+    if (!$row) throw new InvalidArgumentException(($isLodge ? 'Lodge ' : ($isAct ? 'Activity ' : 'Destination ')) . $id . ' not found');
+    $allowed = $isAct ? iti_cs_editable($kind)
+             : array_merge(iti_cs_editable($kind), ['latitude', 'longitude'], $isLodge ? ['destination_id', 'category', 'lodge_type'] : []);
     $unknown = array_values(array_diff(array_keys($fields), $allowed));
     if ($unknown) throw new InvalidArgumentException('Not editable here: ' . implode(', ', $unknown) . ' — allowed: ' . implode(', ', $allowed));
 
     $changes = [];
     foreach ($fields as $k => $v) {
-        if ($k === 'destination_id') {
+        if ($isAct && $k === 'destination_id') {   // an activity may be generic (null = valid everywhere)
+            $v = ($v === '' || $v === null || (int)$v === 0) ? null : (int)$v;
+            if ($v !== null && !iti_cs_destination_row($db, $v)) throw new InvalidArgumentException('destination_id ' . $v . ' not found');
+            $cur = $row[$k] !== null ? (int)$row[$k] : null;
+        } elseif ($k === 'activity_type') {
+            $v = trim((string)$v);
+            if (!in_array($v, ITI_CS_ACTIVITY_TYPES, true)) throw new InvalidArgumentException('activity_type: ' . implode('|', ITI_CS_ACTIVITY_TYPES));
+            $cur = (string)$row[$k];
+        } elseif ($k === 'duration_hours') {
+            if ($v === '' || $v === null) $v = null;
+            elseif (!is_numeric($v) || (float)$v < 0 || (float)$v >= 1000) throw new InvalidArgumentException('duration_hours: a number of hours (0–999.9) or null');
+            else $v = round((float)$v, 1);
+            $cur = $row[$k] !== null ? round((float)$row[$k], 1) : null;
+        } elseif ($k === 'destination_id') {
             $v = (int)$v;
             if (!$v || !iti_cs_destination_row($db, $v)) throw new InvalidArgumentException('destination_id ' . $v . ' not found');
             $cur = (int)$row[$k];
@@ -285,6 +353,8 @@ function iti_cs_update(PDO $db, string $kind, int $id, array $fields, bool $go):
     $set = []; $args = [];
     foreach ($changes as $k => $c) { $set[] = '`' . $k . '` = ?'; $args[] = $c['to']; }
     $args[] = $id;
-    $db->prepare('UPDATE ' . ($isLodge ? 'iti_lodges' : 'iti_destinations') . ' SET ' . implode(', ', $set) . ' WHERE id = ?')->execute($args);
+    $table = $isLodge ? 'iti_lodges' : ($isAct ? 'iti_activities' : 'iti_destinations');
+    $db->prepare('UPDATE ' . $table . ' SET ' . implode(', ', $set) . ' WHERE id = ?')->execute($args);
+    if ($isAct) $res['activity'] = iti_cs_activity_out(iti_cs_activity_row($db, $id));
     return $res;
 }

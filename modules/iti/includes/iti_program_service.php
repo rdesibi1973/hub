@@ -144,6 +144,8 @@ function iti_ps_program_out(PDO $db, int $id, string $lang = ''): array {
         'duration' => $D['duration'], 'published' => iti_program_is_public($p),   // personal: always, until cancelled
         'prices' => $D['prices'], 'price_notes' => $D['price_notes'],
         'included' => $D['incl'], 'excluded' => $D['excl'], 'terms' => iti_ps_terms_out($db, $p), 'days' => $days,
+        // Activity / lodge / destination texts missing in this language: the documents leave them out, never English.
+        'missing_texts' => $D['missing_texts'],
         'structure' => iti_pb_days_raw($db, $id),   // the days as stored (ids), same shape iti_set_days takes
         'links' => iti_ps_links($p, $lang),
     ];

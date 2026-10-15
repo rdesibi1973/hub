@@ -365,16 +365,6 @@ function iti_pb_create_flight_route(PDO $db, array $f, bool $go): array {
     return ['created' => ['id' => (int)$db->lastInsertId()] + $row];
 }
 
-function iti_pb_activities(PDO $db, array $f): array {
-    $w = ['a.is_active = 1']; $a = [];
-    if (($q = trim((string)($f['q'] ?? ''))) !== '') { $w[] = '(a.name_en LIKE ? OR a.name_it LIKE ?)'; array_push($a, "%$q%", "%$q%"); }
-    if (($d = trim((string)($f['destination'] ?? ''))) !== '') { $w[] = '(a.destination_id = ? OR d.name_en LIKE ? OR d.code = ?)'; array_push($a, (int)$d, "%$d%", strtoupper($d)); }
-    $st = $db->prepare('SELECT a.id, a.activity_type, a.name_en, a.name_it, a.destination_id, d.name_en AS destination, a.duration_hours
-                          FROM iti_activities a LEFT JOIN iti_destinations d ON d.id = a.destination_id WHERE ' . implode(' AND ', $w) . ' ORDER BY a.name_en');
-    $st->execute($a);
-    return $st->fetchAll(PDO::FETCH_ASSOC);
-}
-
 function iti_pb_create_activity(PDO $db, array $f, bool $go): array {
     $types = ['game_drive', 'walking_safari', 'cultural', 'boat', 'balloon', 'hiking', 'beach', 'other'];
     $row = ['activity_type' => (string)($f['activity_type'] ?? 'other'), 'is_active' => 1,
@@ -385,10 +375,16 @@ function iti_pb_create_activity(PDO $db, array $f, bool $go): array {
     foreach (array_merge(['en', 'it'], ITI_PS_LANGS) as $l) if ($first === '' && trim((string)($f['name_' . $l] ?? '')) !== '') $first = trim((string)$f['name_' . $l]);
     if ($first === '') throw new InvalidArgumentException('name_en or name_it is required');
     foreach (ITI_PS_LANGS as $l) {
-        $row['name_' . $l] = trim((string)($f['name_' . $l] ?? '')) ?: $first;   // NOT NULL columns: fall back to the given name
+        // A language not given stays empty (NOT NULL: ''): a copy of another language would hide the gap, and the
+        // documents never print a name in another language (iti_doc_own()). Fill it later with iti_update_activity.
+        $row['name_' . $l] = trim((string)($f['name_' . $l] ?? ''));
         $row['description_' . $l] = trim((string)($f['description_' . $l] ?? ''));
     }
-    $st = $db->prepare('SELECT id FROM iti_activities WHERE name_en = ? OR name_it = ?'); $st->execute([$row['name_en'], $row['name_it']]);
+    $given = array_values(array_filter([$row['name_en'], $row['name_it']], 'strlen'));
+    $st = $db->prepare('SELECT id FROM iti_activities WHERE ' . implode(' OR ', array_fill(0, count($given), '(name_en = ? OR name_it = ?)')));
+    $args = [];
+    foreach ($given as $n) array_push($args, $n, $n);
+    $st->execute($args);
     if ($id = $st->fetchColumn()) throw new InvalidArgumentException('Activity already exists: #' . $id);
     if (!$go) return ['would_create' => $row];
     $db->prepare('INSERT INTO iti_activities (`' . implode('`,`', array_keys($row)) . '`) VALUES (' . implode(',', array_fill(0, count($row), '?')) . ')')->execute(array_values($row));

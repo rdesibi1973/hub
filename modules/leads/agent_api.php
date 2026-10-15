@@ -102,7 +102,7 @@ function agent_audit(PDO $db, string $action, $reqId, array $payload, string $re
                               'iti_create_flight_route', 'iti_create_activity', 'iti_create_transfer_route', 'iti_save_as_sample',
                               'create_request', 'add_flight_rates', 'timeline_update', 'summary_set', 'rename_folder',
                               'set_request_status', 'update_request', 'import_group_folder', 'move_group_folder', 'ck_request_check', 'memo_delete', 'create_agency', 'update_agency', 'save_agency_contact', 'delete_agency_contact',
-                              'followup_scan', 'followup_update', 'followup_upsert'], true) && empty($payload['confirm']);
+                              'followup_scan', 'followup_update', 'followup_upsert', 'iti_update_activity'], true) && empty($payload['confirm']);
     // Mail: keep who/what in the log, not message bodies or attachment content.
     if (in_array($action, ['mail_get', 'mail_attachment', 'iti_document', 'iti_vouchers'], true) && $code === 200) {
         $res = json_decode($resultJson, true);
@@ -1709,9 +1709,23 @@ try {
     case 'iti_flight_routes':
         agent_iti_lib();
         agent_out(['ok' => true, 'flight_routes' => iti_pb_flight_routes($db, $in)]);
-    case 'iti_activities':
-        agent_iti_lib();
-        agent_out(['ok' => true, 'activities' => iti_pb_activities($db, $in)]);
+    case 'iti_activities':   // includes/iti_content_service.php, like lodges / destinations
+        agent_out(['ok' => true, 'activities' => iti_cs_activities($db, $in)]);
+    case 'iti_activity': {
+        $r = iti_cs_activity_row($db, (int)($in['activity_id'] ?? $in['id'] ?? 0));
+        if (!$r) agent_fail('Activity not found', 404);
+        agent_out(['ok' => true, 'activity' => iti_cs_activity_out($r)]);
+    }
+    // Names / descriptions in 5 languages, type, destination, duration. Dry-run unless "confirm": true.
+    case 'iti_update_activity': {
+        agent_require_method('POST');
+        $fields = isset($in['fields']) && is_array($in['fields']) ? $in['fields'] : [];
+        if (!$fields) agent_fail('fields is required: {"<column>": "<value>", …}');
+        $go = !empty($in['confirm']);
+        try { $r = iti_cs_update($db, 'activity', (int)($in['activity_id'] ?? 0), $fields, $go); }
+        catch (InvalidArgumentException $e) { agent_fail($e->getMessage(), stripos($e->getMessage(), 'not found') !== false ? 404 : 400); }
+        agent_out(array_merge(['ok' => true, 'dry_run' => !$go], $r, $go ? [] : ['message' => 'Dry run — nothing saved. Resend with "confirm": true.']));
+    }
     case 'iti_transfer_routes':
         agent_iti_lib();
         agent_out(['ok' => true, 'transfer_routes' => iti_pb_transfer_routes($db, $in)]);
@@ -2789,7 +2803,7 @@ try {
             'iti_update_lodge', 'iti_update_destination', 'iti_create_lodge', 'iti_samples', 'iti_program', 'iti_document', 'iti_vouchers', 'iti_create_personal', 'iti_update_program',
             'iti_update_day', 'iti_publish', 'iti_calc_plan', 'iti_final_from_calc', 'iti_save_alias',
             'iti_set_days', 'iti_add_day', 'iti_delete_day', 'iti_inclusions', 'iti_update_inclusions', 'iti_save_as_sample',
-            'iti_flight_routes', 'iti_create_flight_route', 'iti_activities', 'iti_create_activity',
+            'iti_flight_routes', 'iti_create_flight_route', 'iti_activities', 'iti_activity', 'iti_update_activity', 'iti_create_activity',
             'iti_transfer_routes', 'iti_create_transfer_route', 'add_flight_rates',
             'find_invoices', 'get_invoice', 'add_invoice_payment', 'cancel_invoice_payment', 'update_folder_status',
             'save_invoice_pdf', 'import_zoho_invoice', 'create_invoice', 'update_invoice', 'memo_list', 'memo_save', 'memo_set_status', 'memo_delete',
