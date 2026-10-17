@@ -195,17 +195,20 @@ function sr_folders(string $dir): array {
     return $out;
 }
 
-/** The header block only (up to the first empty line, max 64 KB), or null if unreadable. */
+/**
+ * The header block only (up to the first empty line, max 64 KB), or null if unreadable.
+ * BlueHost's Dovecot stores the Maildir files gzip-compressed; gzopen() reads plain files unchanged too.
+ */
 function sr_read_header(string $file): ?string {
-    $fh = @fopen($file, 'rb');
+    $fh = @gzopen($file, 'rb');
     if (!$fh) return null;
     $raw = '';
-    while (($line = fgets($fh, 8192)) !== false) {
+    while (($line = gzgets($fh, 8192)) !== false) {
         if (rtrim($line, "\r\n") === '') break;
         $raw .= $line;
         if (strlen($raw) >= 65536) break;
     }
-    fclose($fh);
+    gzclose($fh);
     return $raw;
 }
 
