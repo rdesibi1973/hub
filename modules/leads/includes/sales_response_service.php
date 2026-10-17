@@ -5,7 +5,8 @@
  * Subject, Message-ID, In-Reply-To, References (+ the auto-reply markers). Bodies and attachments are never
  * read, stored or shown. Spec: Cowork handoff "Sales responsiveness report", 17 Oct 2026 (Roberto).
  *
- * Used by modules/leads/sales_response_scan.php (CLI, cPanel cron: reads the Maildirs, links, emails),
+ * Used by modules/leads/sales_response_scan.php (CLI, cPanel cron) and sales_response_cron.php (cron-job.org URL),
+ * both through sr_run() (reads the Maildirs, links, emails),
  * modules/leads/sales_response.php (Hub page) and the Agent API sales_response_status. All three show
  * sr_report(), so the numbers are the same everywhere.
  * Tables: migrations/072_sales_response.sql (sr_schema() creates them too).
@@ -770,6 +771,103 @@ function sr_mailed_today(PDO $db, string $kind): bool {
     $st = $db->prepare("SELECT COUNT(*) FROM sales_response_run WHERE mailed LIKE ? AND ran_at >= ?");
     $st->execute(['%' . $kind . '%', date('Y-m-d') . ' 00:00:00']);
     return (int)$st->fetchColumn() > 0;
+}
+
+// ── Run (cPanel cron CLI and cron-job.org URL) ───────────────────────────────
+
+/** Send one sr_email() result, or with $print return it as text instead. */
+function sr_send(array $mail, bool $print, string &$out): bool {
+    [$subject, $html, $text] = $mail;
+    if ($print) {
+        $out .= "--- would send to " . sr_cfg()['to'] . " ---\nSubject: $subject\n\n$text\n";
+        return true;
+    }
+    require_once __DIR__ . '/../../../includes/mail_helper.php';
+    return send_hub_email(sr_cfg()['to'], $subject, $html, 'Savannah Explorers Hub', 'noreply@savannahexplorers.com', '', $text);
+}
+
+/**
+ * One run: incremental scan + relink + purge, then the mails that are due. Used by sales_response_scan.php (CLI)
+ * and sales_response_cron.php (cron-job.org), so both behave the same. Options (all optional, false by default):
+ *   cron    hourly mode: 07:xx EAT daily alert (only LIVE and something to report), Monday 07:xx weekly report
+ *   daily / weekly / report   send that mail now; week = 'YYYY-MM-DD' for weekly
+ *   print   collect the mails in 'output' instead of sending; no_scan  skip the scan
+ * A run already in progress (MySQL lock) → ['skipped' => true]. Errors are thrown: the caller passes them to
+ * sr_run_failed(). Returns ['counts', 'mailed', 'failed', 'output', 'line'].
+ */
+function sr_run(PDO $db, array $o = []): array {
+    $print = !empty($o['print']);
+    $today = date('Y-m-d');
+    $out = '';
+    if (!(int)$db->query("SELECT GET_LOCK('hub_sales_response_run', 0)")->fetchColumn()) {
+        return ['skipped' => true, 'line' => date('Y-m-d H:i:s') . ' EAT — SALESRESP: another run is in progress, skipped'];
+    }
+    try {
+        sr_schema($db);
+        $cfg = sr_cfg();
+        $first = !(int)$db->query("SELECT COUNT(*) FROM sales_response_scan_state")->fetchColumn();
+        $scan = [];
+        $counts = [];
+        if (empty($o['no_scan'])) {
+            $scan = sr_scan($db);
+            $link = sr_link($db);
+            $purged = sr_purge($db);
+            $counts = ['files_read' => array_sum(array_column($scan, 'read')), 'new_rows' => array_sum(array_column($scan, 'new')),
+                       'folders' => count($scan), 'purged' => $purged] + $link;
+        }
+
+        $cron = !empty($o['cron']);
+        $atSeven = (int)date('G') === 7;
+        $send = [];
+        if ($first || !empty($o['report'])) $send[] = 'first';
+        if (!empty($o['daily']) || ($cron && $atSeven && $cfg['live'] && !sr_mailed_today($db, 'daily'))) $send[] = 'daily';
+        if (!empty($o['weekly']) || ($cron && $atSeven && date('N') === '1' && !sr_mailed_today($db, 'weekly'))) $send[] = 'weekly';
+
+        $mailed = [];
+        $failed = false;
+        foreach ($send as $type) {
+            if ($type === 'first') $rep = sr_report($db, $today, null, 12);
+            elseif ($type === 'weekly') $rep = sr_report($db, $o['week'] ?? null);
+            else $rep = sr_report($db, null, null, 0);
+            if ($type === 'daily' && !$rep['unanswered'] && empty($o['daily'])) continue;   // nothing to report
+            if (sr_send(sr_email($type, $rep, ['date' => $today, 'scan' => $scan]), $print, $out)) $mailed[] = $type;
+            else $failed = true;
+        }
+        $mailedStr = $failed ? 'mail_failed' : ($mailed ? implode('+', $mailed) : 'none');
+        if (!$print) sr_log_run($db, true, null, $counts ?: null, $mailedStr);
+        $line = date('Y-m-d H:i:s') . ' EAT — SALESRESP: ' . json_encode($counts) . '; mailed=' . ($print ? 'print:' : '') . $mailedStr;
+        return ['counts' => $counts, 'mailed' => $mailedStr, 'failed' => $failed, 'output' => $out, 'line' => $line];
+    } finally {
+        $db->query("SELECT RELEASE_LOCK('hub_sales_response_run')");
+    }
+}
+
+/** Error text of a failed run, as logged and mailed. */
+function sr_error_text(Throwable $e): string {
+    return get_class($e) . ': ' . $e->getMessage() . ' (' . basename($e->getFile()) . ':' . $e->getLine() . ')';
+}
+
+/** A failed run: SCAN FAILED mail (at most once a day; without a DB a stamp file decides) and run log. */
+function sr_run_failed(?PDO $db, string $err, bool $print = false): void {
+    $today = date('Y-m-d');
+    $stamp = sys_get_temp_dir() . '/sales_response_failed_' . $today;
+    $already = false;
+    try {
+        $already = $db ? sr_mailed_today($db, 'failed') : is_file($stamp);
+    } catch (Throwable $e2) {
+        $already = is_file($stamp);
+    }
+    $out = '';
+    $sent = $already ? false : sr_send(sr_email('failed', null, ['date' => $today, 'error' => $err]), $print, $out);
+    if ($print) echo $out;
+    if ($sent && !$print) @touch($stamp);
+    if ($db && !$print) {
+        try {
+            sr_log_run($db, false, $err, null, $already ? 'none' : ($sent ? 'failed' : 'mail_failed'));
+        } catch (Throwable $e2) {
+            error_log('Sales Response run log failed: ' . $e2->getMessage());
+        }
+    }
 }
 
 // ── Email ────────────────────────────────────────────────────────────────────

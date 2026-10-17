@@ -20,7 +20,7 @@ outdated — this file wins where they disagree (PHP version, local lint).
   `tools/followup_local_scan.php`, which reads the supplier PDFs on the office PC because BlueHost cannot).
 - `modules/security/` — mail security scan (`mail_scan.php`, CLI only, cPanel cron; logic
   `includes/mail_security_service.php`, shared with the Agent API `mail_security_status`).
-- **Sales Response** (`modules/leads/sales_response.php`, CLI `sales_response_scan.php` on cPanel cron; logic
+- **Sales Response** (`modules/leads/sales_response.php`, CLI `sales_response_scan.php` on cPanel cron or `sales_response_cron.php` from cron-job.org; logic
   `includes/sales_response_service.php`, shared with the Agent API `sales_response_status`): seller reply times from
   Maildir **headers only** — never store or show mail bodies.
 - `migrations/NNN_name.sql` — not applied by deploy. `docs/` — AGENT_API, FOLDER_NAMING,

@@ -7,6 +7,7 @@
  *
  * cPanel → Cron Jobs, every hour at :05 (the server is on US time; the mails only go out at 07:xx EAT):
  *   5 * * * *  php /home4/savannp5/public_html/hub/modules/leads/sales_response_scan.php --cron
+ * or the same run from cron-job.org: sales_response_cron.php (one of the two is enough; a MySQL lock stops overlaps).
  *
  * Every run: incremental scan + relink. 07:xx EAT: daily alert (only with SALES_RESPONSE_LIVE and something to
  * report), Monday: weekly report (always; flagged TEST until LIVE). First run: TEST report with the mapping and
@@ -34,18 +35,8 @@ require_once __DIR__ . '/includes/sales_response_service.php';
 $opt   = getopt('', ['cron', 'check', 'daily', 'weekly', 'week:', 'report', 'print', 'no-scan']);
 $cron  = isset($opt['cron']);
 $print = isset($opt['print']);
-$today = date('Y-m-d');
 $cfg   = sr_cfg();
 $db    = null;
-
-function sr_send(array $mail, bool $print): bool {
-    [$subject, $html, $text] = $mail;
-    if ($print) {
-        echo "--- would send to " . sr_cfg()['to'] . " ---\nSubject: $subject\n\n$text\n";
-        return true;
-    }
-    return send_hub_email(sr_cfg()['to'], $subject, $html, 'Savannah Explorers Hub', 'noreply@savannahexplorers.com', '', $text);
-}
 
 try {
     $db = new PDO('mysql:host=' . DB_HOST . ';dbname=' . DB_NAME . ';charset=utf8mb4', DB_USER, DB_PASS,
@@ -75,58 +66,14 @@ try {
         exit(0);
     }
 
-    sr_schema($db);
-    $first = !(int)$db->query("SELECT COUNT(*) FROM sales_response_scan_state")->fetchColumn();
-    $scan = [];
-    $counts = [];
-    if (!isset($opt['no-scan'])) {
-        $scan = sr_scan($db);
-        $link = sr_link($db);
-        $purged = sr_purge($db);
-        $counts = ['files_read' => array_sum(array_column($scan, 'read')), 'new_rows' => array_sum(array_column($scan, 'new')),
-                   'folders' => count($scan), 'purged' => $purged] + $link;
-    }
-
-    $atSeven = (int)date('G') === 7;
-    $send = [];
-    if ($first || isset($opt['report'])) $send[] = 'first';
-    if (isset($opt['daily']) || ($cron && $atSeven && $cfg['live'] && !sr_mailed_today($db, 'daily'))) $send[] = 'daily';
-    if (isset($opt['weekly']) || ($cron && $atSeven && date('N') === '1' && !sr_mailed_today($db, 'weekly'))) $send[] = 'weekly';
-
-    $mailed = [];
-    $failed = false;
-    foreach ($send as $type) {
-        if ($type === 'first') $rep = sr_report($db, $today, null, 12);
-        elseif ($type === 'weekly') $rep = sr_report($db, $opt['week'] ?? null);
-        else $rep = sr_report($db, null, null, 0);
-        if ($type === 'daily' && !$rep['unanswered'] && !isset($opt['daily'])) continue;   // nothing to report
-        if (sr_send(sr_email($type, $rep, ['date' => $today, 'scan' => $scan]), $print)) $mailed[] = $type;
-        else $failed = true;
-    }
-    $mailedStr = $failed ? 'mail_failed' : ($mailed ? implode('+', $mailed) : 'none');
-    if (!$print) sr_log_run($db, true, null, $counts ?: null, $mailedStr);
-    echo date('Y-m-d H:i:s') . ' EAT — SALESRESP: ' . json_encode($counts) . '; mailed=' . ($print ? 'print:' : '') . $mailedStr . "\n";
-    exit($failed ? 1 : 0);
+    $res = sr_run($db, ['cron' => $cron, 'daily' => isset($opt['daily']), 'weekly' => isset($opt['weekly']), 'week' => $opt['week'] ?? null,
+                        'report' => isset($opt['report']), 'print' => $print, 'no_scan' => isset($opt['no-scan'])]);
+    echo ($res['output'] ?? '') . $res['line'] . "\n";
+    exit(!empty($res['failed']) ? 1 : 0);
 } catch (Throwable $e) {
-    $err = get_class($e) . ': ' . $e->getMessage() . ' (' . basename($e->getFile()) . ':' . $e->getLine() . ')';
+    $err = sr_error_text($e);
     fwrite(STDERR, $err . "\n");
     if (isset($opt['check'])) exit(1);
-    // At most one SCAN FAILED email a day (the cron runs hourly). Without a DB, a stamp file decides.
-    $stamp = sys_get_temp_dir() . '/sales_response_failed_' . $today;
-    $already = false;
-    try {
-        $already = $db ? sr_mailed_today($db, 'failed') : is_file($stamp);
-    } catch (Throwable $e2) {
-        $already = is_file($stamp);
-    }
-    $sent = $already ? false : sr_send(sr_email('failed', null, ['date' => $today, 'error' => $err]), $print);
-    if ($sent && !$print) @touch($stamp);
-    if ($db && !$print) {
-        try {
-            sr_log_run($db, false, $err, null, $already ? 'none' : ($sent ? 'failed' : 'mail_failed'));
-        } catch (Throwable $e2) {
-            fwrite(STDERR, 'Run log failed: ' . $e2->getMessage() . "\n");
-        }
-    }
+    sr_run_failed($db, $err, $print);
     exit(1);
 }
