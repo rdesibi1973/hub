@@ -771,24 +771,26 @@ function sr_mailed_today(PDO $db, string $kind): bool {
 
 // ── Email ────────────────────────────────────────────────────────────────────
 
-function sr_fmt_h(?float $h): string {
+function sr_fmt_h(?float $h, bool $en = false): string {
     if ($h === null) return '–';
-    return $h >= 48 ? number_format($h / 24, 1, ',', '') . ' g' : number_format($h, 1, ',', '') . ' h';
+    $dec = $en ? '.' : ',';
+    return $h >= 48 ? number_format($h / 24, 1, $dec, '') . ($en ? ' d' : ' g') : number_format($h, 1, $dec, '') . ' h';
 }
 
 function sr_fmt_pct(?float $p): string {
     return $p === null ? '–' : number_format($p, 0, ',', '') . '%';
 }
 
-/** Seller table columns: label => fn(metrics) → string. */
-function sr_metric_cols(): array {
-    return ['Entro 24h' => function ($m) { return sr_fmt_pct($m['pct_24h']) . ($m['due'] ? ' (' . $m['answered_24h'] . '/' . $m['due'] . ')' : ''); },
-            'Sera/weekend/festivi entro 24h' => function ($m) { return sr_fmt_pct($m['pct_off_24h']) . ($m['off_due'] ? ' (' . $m['off_answered_24h'] . '/' . $m['off_due'] . ')' : ''); },
-            'Tempo mediano' => function ($m) { return sr_fmt_h($m['median_h']); },
-            '90° percentile' => function ($m) { return sr_fmt_h($m['p90_h']); },
-            'Prima risposta nuovi lead (mediana)' => function ($m) { return sr_fmt_h($m['new_leads_median_h']) . ($m['new_leads'] ? ' (' . $m['new_leads'] . ')' : ''); },
-            'Mail clienti' => function ($m) { return (string)$m['client_msgs']; },
-            'Mail inviate' => function ($m) { return (string)$m['sent_msgs']; }];
+/** Seller table columns: label => fn(metrics) → string. $lang: it (emails) | en (Hub page). */
+function sr_metric_cols(string $lang = 'it'): array {
+    $en = $lang === 'en';
+    return [($en ? 'Within 24h' : 'Entro 24h') => function ($m) { return sr_fmt_pct($m['pct_24h']) . ($m['due'] ? ' (' . $m['answered_24h'] . '/' . $m['due'] . ')' : ''); },
+            ($en ? 'Evening / weekend / holiday within 24h' : 'Sera/weekend/festivi entro 24h') => function ($m) { return sr_fmt_pct($m['pct_off_24h']) . ($m['off_due'] ? ' (' . $m['off_answered_24h'] . '/' . $m['off_due'] . ')' : ''); },
+            ($en ? 'Median time' : 'Tempo mediano') => function ($m) use ($en) { return sr_fmt_h($m['median_h'], $en); },
+            ($en ? '90th percentile' : '90° percentile') => function ($m) use ($en) { return sr_fmt_h($m['p90_h'], $en); },
+            ($en ? 'First reply to new leads (median)' : 'Prima risposta nuovi lead (mediana)') => function ($m) use ($en) { return sr_fmt_h($m['new_leads_median_h'], $en) . ($m['new_leads'] ? ' (' . $m['new_leads'] . ')' : ''); },
+            ($en ? 'Client mails' : 'Mail clienti') => function ($m) { return (string)$m['client_msgs']; },
+            ($en ? 'Mails sent' : 'Mail inviate') => function ($m) { return (string)$m['sent_msgs']; }];
 }
 
 /**
