@@ -1325,8 +1325,9 @@ curl -sA "$UA" -H "$H" "$U?action=mail_security_status"
 
 How fast the sellers (Asia, Alessia, Anderson, Nuru, Agustin — not Roberto / Daniela) answer clients by email,
 request by request. `modules/leads/sales_response_scan.php` (cPanel cron, hourly at :05) reads only the **headers**
-(From, To, Cc, Date, Subject, Message-ID, In-Reply-To, References) of the sellers' mailboxes and info@ / safari@ /
-sales@ straight from the Maildirs — no bodies, no attachments, no IMAP. Logic `modules/leads/includes/sales_response_service.php`,
+(From, To, Cc, Date, Subject, Message-ID, In-Reply-To, References) of the sellers' mailboxes and sales@ straight
+from the Maildirs (not info@ = Roberto, not safari@ = Daniela: their replies are seen only when a seller's mailbox
+is in copy) — no bodies, no attachments, no IMAP. Logic `modules/leads/includes/sales_response_service.php`,
 tables `migrations/072_sales_response.sql`, page `modules/leads/sales_response.php` (admin). Emails to `SALES_RESPONSE_TO`
 (default savannah.explorers@gmail.com): daily 07:00 `[Sales Response] <date> – N mail senza risposta >24h` (only with
 `SALES_RESPONSE_LIVE` true and something to report), Monday `[Sales Response] Weekly <date>` (always, "TEST" until LIVE),

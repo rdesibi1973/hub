@@ -26,7 +26,9 @@ const SR_SILENT_DAYS   = 7;
 const SR_KEEP_MONTHS   = 12;
 const SR_OWN_DOMAINS   = ['savannahexplorers.com', 'theorangicollection.com'];
 const SR_OWN_ADDRESSES = ['savannah.explorers@gmail.com'];          // Roberto's Gmail: his replies count as ours
-const SR_SHARED_BOXES  = ['info@savannahexplorers.com', 'safari@savannahexplorers.com', 'sales@savannahexplorers.com'];
+// Shared mailbox read too (a reply from it counts as "Savannah answered"). Not info@ (Roberto) nor safari@ (Daniela):
+// Roberto, 17 Oct 2026 — their mailboxes are not monitored.
+const SR_SHARED_BOXES  = ['sales@savannahexplorers.com'];
 const SR_CLOSED        = ['Lost', 'Cancelled'];
 
 // Sellers in scope (Roberto, 17 Oct 2026). Requests of Roberto / Daniela are excluded by not being here.
@@ -56,6 +58,7 @@ const SR_FREEMAIL = ['gmail.com', 'googlemail.com', 'yahoo.com', 'yahoo.it', 'ya
     'proton.me', 'protonmail.com', 'mail.com', 'zoho.com', 'yandex.com', 'qq.com', 'bluewin.ch', 'pec.it'];
 
 const SR_LIMITS = ['WhatsApp e telefono non sono visibili.', 'Le risposte da indirizzi Gmail personali non sono visibili.',
+                   'Le caselle info@ e safari@ non sono lette: una loro risposta conta solo se il venditore è in copia.',
                    'Alcuni abbinamenti ambigui (stesso indirizzo su più richieste aperte) possono essere errati.',
                    'I lead arrivati dal modulo web non hanno una prima mail del cliente: la prima risposta non è misurabile.'];
 const SR_FOOTER = 'Misura solo la posta aziendale.';
