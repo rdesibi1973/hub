@@ -51,11 +51,16 @@ function mss_api_context(?string $bin = null): array {
             if (is_file($p)) return ['mode' => 'uapi', 'bin' => $p];
         }
     }
-    if (defined('CPANEL_API_TOKEN') && CPANEL_API_TOKEN !== '') {
-        return ['mode' => 'token', 'host' => defined('CPANEL_HOST') ? CPANEL_HOST : 'box2233.bluehost.com',
-                'user' => defined('CPANEL_USER') ? CPANEL_USER : 'savannp5', 'token' => CPANEL_API_TOKEN];
-    }
+    $tok = mss_token_context();
+    if ($tok) return $tok;
     throw new RuntimeException('No UAPI access: exec()/uapi not available and CPANEL_API_TOKEN not set in includes/config.php');
+}
+
+/** HTTPS UAPI with CPANEL_API_TOKEN, or null if no token is configured. */
+function mss_token_context(): ?array {
+    if (!defined('CPANEL_API_TOKEN') || CPANEL_API_TOKEN === '') return null;
+    return ['mode' => 'token', 'host' => defined('CPANEL_HOST') ? CPANEL_HOST : 'box2233.bluehost.com',
+            'user' => defined('CPANEL_USER') ? CPANEL_USER : 'savannp5', 'token' => CPANEL_API_TOKEN];
 }
 
 /** One UAPI call → its data (array). Any error throws: a half-read state would look like "filter removed". */

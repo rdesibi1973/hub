@@ -8,6 +8,8 @@
  *
  * Daily: email only if there are alerts. Monday: weekly report, always. Scan error: SCAN FAILED email.
  * First run: seeds the approved baseline and emails the full state.
+ * uapi fails when the account is at its process limit: with CPANEL_API_TOKEN in includes/config.php
+ * the scan retries over HTTPS UAPI (no extra processes) instead of sending SCAN FAILED.
  *
  * Options:
  *   --cron          run only between 06:00 and 06:59 EAT (for the hourly cron line)
@@ -56,7 +58,18 @@ try {
 
     $ctx    = mss_api_context($opt['uapi'] ?? null);
     $source = $ctx['mode'];
-    $snap   = mss_collect($ctx);
+    try {
+        $snap = mss_collect($ctx);
+    } catch (RuntimeException $e) {
+        // The CLI uapi needs extra processes: on the shared server it fails when the account hits its
+        // process limit ("fork: Resource temporarily unavailable"). HTTPS UAPI with the token does not.
+        $tok = $ctx['mode'] === 'uapi' && !isset($opt['uapi']) ? mss_token_context() : null;
+        if (!$tok) throw $e;
+        fwrite(STDERR, 'uapi failed, retrying over HTTPS with CPANEL_API_TOKEN: ' . $e->getMessage() . "\n");
+        $ctx    = $tok;
+        $source = 'token';
+        $snap   = mss_collect($ctx);
+    }
     $items  = mss_items($snap);
 
     if ($approve !== null) {
@@ -106,6 +119,7 @@ try {
 } catch (Throwable $e) {
     $err = get_class($e) . ': ' . $e->getMessage() . ' (' . basename($e->getFile()) . ':' . $e->getLine() . ')' . ($source ? " [source $source]" : '');
     fwrite(STDERR, $err . "\n");
+    if ($approve !== null) exit(1);   // run by hand: the error is on screen, no SCAN FAILED email / failed run
     $sent = mss_send($to, mss_email('failed', ['date' => $today, 'error' => $err]), $dry);
     if ($db && !$dry) {
         try {
