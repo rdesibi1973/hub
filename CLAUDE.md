@@ -18,7 +18,7 @@ outdated — this file wins where they disagree (PHP version, local lint).
 - `modules/operations/` — movements, Medivac, lunch boxes, **Booking follow-up** (`booking_followup.php`; logic
   `includes/followup_service.php` + `followup_classify.php`, shared with the Agent API `followup_*` and
   `tools/followup_local_scan.php`, which reads the supplier PDFs on the office PC because BlueHost cannot).
-- `modules/security/` — mail security scan (`mail_scan.php`, CLI only, cPanel cron; logic
+- `modules/security/` — mail security scan (`mail_scan.php`, CLI on cPanel cron, or `mail_scan_cron.php` from cron-job.org; logic
   `includes/mail_security_service.php`, shared with the Agent API `mail_security_status`).
 - **Sales Response** (`modules/leads/sales_response.php`, CLI `sales_response_scan.php` on cPanel cron or `sales_response_cron.php` from cron-job.org; logic
   `includes/sales_response_service.php`, shared with the Agent API `sales_response_status`): seller reply times from

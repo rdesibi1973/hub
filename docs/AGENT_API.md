@@ -1295,7 +1295,9 @@ problems, lines not taken in charge for > 2 days, provisional expiring ≤ 7 day
 ## Mail security (read-only)
 
 The cPanel account's mailboxes, filters, forwarders, auto-replies and catch-all are scanned by
-`modules/security/mail_scan.php` (cPanel cron, daily 06:30 EAT; logic `modules/security/includes/mail_security_service.php`,
+`modules/security/mail_scan.php` (cPanel cron, daily 06:30 EAT) or `modules/security/mail_scan_cron.php?token=…`
+(cron-job.org, daily 06:30 EAT; token `MAIL_SCAN_CRON_TOKEN`, else `MEMO_CRON_TOKEN`; cPanel token over HTTPS only, at most one
+scan a day; same run, `mss_run()`; logic `modules/security/includes/mail_security_service.php`,
 tables `migrations/071_mail_security.sql`). Daily email `[Mail Security] ALERT …` only on changes, Monday
 `[Mail Security] Weekly …` always, `[Mail Security] SCAN FAILED …` if the scan breaks — to `MAIL_SCAN_TO`
 (default savannah.explorers@gmail.com). Background: the Oct 2026 "GLAD" filter on agustin@ that redirected

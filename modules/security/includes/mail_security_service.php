@@ -4,7 +4,8 @@
  * forwarders, auto-replies, catch-all. Background: in Oct 2026 a filter named "GLAD" on agustin@
  * redirected client mail from ~50 free-mail domains to savanah.explorers@gmail.com (one "n").
  *
- * Used by modules/security/mail_scan.php (CLI, cPanel cron: scans, writes, emails) and by the Agent API
+ * Used by modules/security/mail_scan.php (CLI, cPanel cron) and mail_scan_cron.php (cron-job.org URL, token only),
+ * both through mss_run() (scans, writes, emails), and by the Agent API
  * mail_security_status (read-only: last run from the DB, never calls uapi from the web process).
  * Tables: migrations/071_mail_security.sql (mss_schema() creates them too).
  *
@@ -512,6 +513,123 @@ function mss_status(PDO $db): array {
             'counts' => $good ? json_decode((string)$good['counts_json'], true) : null,
             'alerts' => $g['alerts'] ?? [], 'high_items' => $g['high'] ?? [],
             'baseline_items' => (int)$db->query("SELECT COUNT(*) FROM mail_security_baseline")->fetchColumn()];
+}
+
+// ── Run (cPanel cron CLI and cron-job.org URL) ───────────────────────────────
+
+/**
+ * Read the current state: [$snap, $source, $note]. Token first; if the token call fails and $allowUapi, retry with
+ * the uapi command line and say so in $note (an expired / deleted token must not go unseen). The web endpoint passes
+ * $allowUapi = false: no uapi process from the web. $bin forces the uapi binary (CLI test of SCAN FAILED).
+ */
+function mss_collect_state(?string $bin, bool $allowUapi, ?string &$source = null): array {
+    $ctx = $allowUapi ? mss_api_context($bin) : mss_token_context();
+    if (!$ctx) throw new RuntimeException('CPANEL_API_TOKEN not set in includes/config.php (needed without uapi)');
+    $source = $ctx['mode'];
+    $note = '';
+    try {
+        $snap = mss_collect($ctx);
+    } catch (RuntimeException $e) {
+        $cli = $allowUapi && $ctx['mode'] === 'token' ? mss_uapi_context() : null;
+        if (!$cli) throw $e;
+        $note = 'The cPanel token did not work, the scan used uapi instead. Check CPANEL_API_TOKEN in includes/config.php '
+              . '(cPanel → Security → Manage API Tokens). Error: ' . $e->getMessage();
+        $source = 'uapi';
+        $snap = mss_collect($cli);
+    }
+    return [$snap, $source, $note];
+}
+
+function mss_to(): string {
+    return defined('MAIL_SCAN_TO') ? MAIL_SCAN_TO : 'savannah.explorers@gmail.com';
+}
+
+/** Send one mss_email() result, or with $dry echo it instead. */
+function mss_send(array $mail, bool $dry): bool {
+    [$subject, $html, $text] = $mail;
+    if ($dry) {
+        echo "--- DRY RUN: would send to " . mss_to() . " ---\nSubject: $subject\n\n$text\n";
+        return true;
+    }
+    require_once __DIR__ . '/../../../includes/mail_helper.php';
+    return send_hub_email(mss_to(), $subject, $html, 'Savannah Explorers Hub', 'noreply@savannahexplorers.com', '', $text);
+}
+
+/**
+ * One scan: collect, compare with the last snapshot and the approved baseline, email (first run: full state and
+ * baseline seed; Monday or 'weekly': weekly report; else only on alerts), save snapshot + run log. Used by
+ * mail_scan.php (CLI) and mail_scan_cron.php (cron-job.org). Options: dry, weekly, uapi (bin), allow_uapi (default true),
+ * once_a_day (skip if a good run is already logged today). A run in progress (MySQL lock) → skipped.
+ * Errors are thrown; $source says which access was used, for mss_run_failed(). Returns ['line', 'mailed', 'skipped'].
+ */
+function mss_run(PDO $db, array $o = [], ?string &$source = null): array {
+    $dry = !empty($o['dry']);
+    mss_schema($db);
+    if (!empty($o['once_a_day']) && !$dry) {
+        $st = $db->prepare("SELECT COUNT(*) FROM mail_security_run WHERE ok = 1 AND ran_at >= ?");
+        $st->execute([date('Y-m-d') . ' 00:00:00']);
+        if ((int)$st->fetchColumn()) return ['skipped' => true, 'mailed' => 'none', 'line' => date('Y-m-d H:i:s') . ' EAT — MAILSCAN: already ran today, skipped'];
+    }
+    if (!(int)$db->query("SELECT GET_LOCK('hub_mail_security_run', 0)")->fetchColumn()) {
+        return ['skipped' => true, 'mailed' => 'none', 'line' => date('Y-m-d H:i:s') . ' EAT — MAILSCAN: another run is in progress, skipped'];
+    }
+    try {
+        [$snap, $source, $note] = mss_collect_state($o['uapi'] ?? null, $o['allow_uapi'] ?? true, $source);
+        $items = mss_items($snap);
+        $last      = mss_last_snapshot($db);
+        $prevItems = $last ? mss_items($last['snapshot']) : null;
+        $first     = $last === null;
+
+        if ($first && !$dry) {   // seed: everything except HIGH items (those stay alerted until approved)
+            mss_approve($db, $items, array_keys(array_filter($items, function ($i) { return !$i['high']; })), 'first_run');
+        }
+        $baseline = $dry && $first
+            ? array_map(function ($i) { return sha1($i['value']); }, array_filter($items, function ($i) { return !$i['high']; }))
+            : mss_baseline($db);
+
+        $alerts = mss_alerts($items, $prevItems, $baseline);
+        $high   = mss_high_items($items, $baseline);
+        $counts = mss_counts($snap) + ['alerts' => count($alerts),
+                                       'high' => count(array_filter($alerts, function ($a) { return $a['level'] === 'HIGH'; }))];
+
+        $weekly = !empty($o['weekly']) || date('N') === '1';
+        $type = $first ? 'first' : ($weekly ? 'weekly' : ($alerts || $note !== '' ? 'alert' : null));
+        $mailed = 'none';
+        if ($type !== null) {
+            $mail = mss_email($type, ['date' => date('Y-m-d'), 'note' => $note, 'counts' => $counts, 'alerts' => $alerts, 'high' => $high, 'items' => $items,
+                                      'baseline_rows' => $type === 'weekly' ? mss_baseline_rows($db) : [],
+                                      'expected_diff' => $first ? mss_expected_diff($snap) : []]);
+            $mailed = mss_send($mail, $dry) ? $type : 'mail_failed';
+        }
+
+        if (!$dry) {
+            $snapId = mss_save_snapshot($db, $snap, $items, $last);
+            $removed = array_column(array_filter($alerts, function ($a) { return $a['change'] === 'removed'; }), 'key');
+            if ($removed) mss_unapprove($db, $removed);
+            mss_log_run($db, true, null, $snapId, $source, $counts, ['alerts' => $alerts, 'high' => $high], $mailed);
+        }
+        return ['skipped' => false, 'mailed' => $mailed, 'note' => $note,
+                'line' => date('Y-m-d H:i:s') . ' EAT — ' . mss_mailscan_line($counts) . '; mailed=' . ($dry ? 'dry' : $mailed)];
+    } finally {
+        $db->query("SELECT RELEASE_LOCK('hub_mail_security_run')");
+    }
+}
+
+/** Error text of a failed scan, as logged and mailed. */
+function mss_error_text(Throwable $e, ?string $source): string {
+    return get_class($e) . ': ' . $e->getMessage() . ' (' . basename($e->getFile()) . ':' . $e->getLine() . ')' . ($source ? " [source $source]" : '');
+}
+
+/** A failed scan: SCAN FAILED email and run log. */
+function mss_run_failed(?PDO $db, string $err, ?string $source, bool $dry = false): void {
+    $sent = mss_send(mss_email('failed', ['date' => date('Y-m-d'), 'error' => $err]), $dry);
+    if ($db && !$dry) {
+        try {
+            mss_log_run($db, false, $err, null, $source, null, null, $sent ? 'failed' : 'mail_failed');
+        } catch (Throwable $e2) {
+            error_log('Mail security run log failed: ' . $e2->getMessage());
+        }
+    }
 }
 
 // ── Email ────────────────────────────────────────────────────────────────────
