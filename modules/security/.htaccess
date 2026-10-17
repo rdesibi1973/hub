@@ -1,9 +1,17 @@
 Options -Indexes
-# CLI only (cPanel cron): nothing here is served over the web.
+# CLI only (cPanel cron): nothing here is served over the web,
+# except mail_scan_cron.php (cron-job.org, checks its own token).
 <IfModule mod_authz_core.c>
     Require all denied
+    <Files "mail_scan_cron.php">
+        Require all granted
+    </Files>
 </IfModule>
 <IfModule !mod_authz_core.c>
     Order allow,deny
     Deny from all
+    <Files "mail_scan_cron.php">
+        Order deny,allow
+        Allow from all
+    </Files>
 </IfModule>
