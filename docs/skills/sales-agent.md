@@ -30,12 +30,14 @@ Memo: at the start create one `doing` memo (clear title with the folder name, li
    - Every day whose lodge you change or add (beach nights beyond the template too) needs `accommodation` (J): a number or a formula (`"=279"`, `"=(250+71)*$B$1"`); park fees in `park_fees` (F) / `park_fees_desc` (G) when they change. A "hotel changed, J cost left from the template" warning or a "Hotel without accommodation cost" error means the margin is wrong: fix it before showing prices.
    - Safari nights 1–25 August: `"august_supplement": true` (35 pp per safari night, beach nights excluded, added to F9); `false` only if it really does not apply.
    - Check `rows[]` of the dry run (B–K per day, `changed`) before the confirm.
+   - `fill_calc` writes neither jeep (D) nor drinks (E), and does not clear activities (H/I) left on a template row that now holds another day (`"activity": null` leaves them). When the trip has more days than the template, or days move: in the dry run check that every safari day has D/E and that each activity sits on its own day. If not, after the confirm fix the sheet XML (D `=$D$5*$B$5`, E `=($B$2+$B$3)*4`, move/clear H/I), update the cached values (row 30 totals, B7, B9, D9, B10, D10), check with a recalculation on a copy, then `read_calc` (17 Oct 2026, Del Fiandra Calc 05).
 5. Which price goes in F9 (Price to customer):
    - Direct clients: STANDARD mode (markup 25%, D1) → rounded D9 = rack price → F9 (and H9).
+   - Direct clients: the programme (ITI / PDF) always shows the rack price (F9), also when we grant a discount or a special price. The discount or special price goes only in the quote email ("per voi possiamo fare … usd per persona"), never in the programme or the PDF, so a programme forwarded to an agency shows the rack. Never give a direct client the STO or net price. No "riservata / personale" disclaimers (16 Oct 2026).
    - Direct clients with lodge changes and a beach extension: F9 = components, e.g. `=3625+270+435+195+2010+210` — standard programme rack + lodge-upgrade supplement (cost difference × 1.25, rounded up to 5: Kifaru → Orangi Luxury, 2 nights = 270) + domestic flights at the pricelist sale price + beach hotel at its rack rate + August supplement (added by `august_supplement`).
    - Agencies: rounded D10 = STO price (markup TO in D2: 18% for standard agencies such as the Promoservice ones; 14% for EKO) → F9.
    - STOSPEC programmes (a pricing mode, not an agency): D2 = 14% (16% for GRP files); rounded D10 → F9 only; delete H9/H10 and the I9/I10 labels.
-   - The F9 figure is the same in Calc, programme and email.
+   - The F9 figure is the same in Calc, programme and email, except a special price for a direct client, which appears only in the email.
 6. On the first pass also:
    - keep only the PAX sheet for the pax count; clear H6:I14 when adults only;
    - round up to the next multiple of 5; teen/child prices are NOT rounded;
@@ -79,6 +81,7 @@ Where the draft goes, subject, greeting/closing, signature and general style: fo
 - Domestic flights: "Le tariffe e disponibilità dei voli interni sono soggette a disponibilità al momento della prenotazione".
 - No airline name for domestic flights and no operator name for the balloon safari (known only after booking).
 - Only when the programme is attached: "Programma safari dettagliato allegato (considera la quota netta per il gruppo di N pax)."
+- An agency sends us a programme we already quoted to its client as a direct: Roberto evaluates case by case — don't answer with prices before his decision (16 Oct 2026).
 - Don't mention international flights unless asked; don't offer to "verify availability and block everything" on a loose ok.
 - Mafia: flight Arusha – Mafia "non diretto, di solito con scalo a Dar es Salaam"; exclusions: "tasse del Parco Marino di Mafia, da pagare con carta di credito all'arrivo", "immersioni ed escursioni extra a Mafia".
 - Reply headers: the Gmail connector gives no Message-ID and the Hub Gmail mailbox may not be configured; then take In-Reply-To / References from the previous draft of the request (`mails/` subfolder) and say so in the report.
