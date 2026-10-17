@@ -28,6 +28,8 @@ Fixed rules as in the project instructions: never send without his explicit ok o
 - Take the signature's raw HTML from his PC (`device_stage_files` or the device shell) and paste it as is into the html part. Never rebuild it from the Dropbox connector `fetch` text: that is extracted plain text and loses the formatting (12 Oct 2026).
 - Attachments only when Roberto asks.
 - Write the file to his PC (device shell or `device_commit_files`); if the PC is not reachable, stop and tell him.
+- After writing, list `Exchange/Draft-mail` again and check the file is there before telling Roberto it is saved (drafts there have disappeared within a minute; 17 Oct 2026). If it is gone, say so and copy it back from the booking folder's `mails/`.
+- Booking confirmations to agencies: content and attachments as in `booking-confirmation` §7.
 
 ## 3. Subject
 

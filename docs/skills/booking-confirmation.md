@@ -43,10 +43,11 @@ Hand off to `invoice-workflow`.
 
 ## 5. Final programme (from the Calc)
 
-1. `iti_calc_plan` with `request_id`. If `blocking` is not empty: for each unknown Calc text propose the right lodge / activity / route (`iti_lodges`, …); `iti_save_alias` only after his ok. Never guess.
+1. `iti_calc_plan` with `request_id`. If `blocking` is not empty: for each unknown Calc text propose the right lodge / activity / route (`iti_lodges`, …); `iti_save_alias` only after his ok on THAT alias — a new blocking alias that shows up later (e.g. a route after the hotel alias) needs its own ok. Never guess.
+   If `sample` is null (no sample tagged with the Calc code), propose the closest sample and pass `sample_id`; then check `from_sample_day` against the Calc dates: a non-safari row at the end ("departure (own arrangement)") can take the sample's last day, leaving the real last safari day empty. Fix it after generating (`iti_update_day` the right day, `iti_delete_day` the extra one) and tell Roberto to tag the sample with the Calc code in the Hub (17 Oct 2026).
 2. `iti_final_from_calc` dry run → confirm after ok. No sample for the Calc programme code → say so, don't invent one.
 3. ITI `ref_number` = the Calc name without `_Calc` (e.g. `01_MarcoCiaolo(OceanoPoint-Roberto)_PumbaSafari`).
-4. Check with `iti_program`: days, lodges, dates, room types, meals; flag days without photo or text.
+4. Check with `iti_program`: days, lodges, dates, room types, meals; flag days without photo or text. Also flag sample texts that contradict the booking (e.g. "transfer condiviso con altri viaggiatori" on a private safari). Last safari day with a game drive (e.g. Manyara before the flight): breakfast + picnic lunch. Domestic flight on the day: `flights` with airline, flight_no, dep / arr from the booking (17 Oct 2026).
 5. `iti_document`: `docx` for agencies, `pdf` for direct clients, `guide` for the safari guide (same language as the client programme). Saved as `<ref_number>.docx/.pdf` in the booking folder; on 409 ask before `overwrite: true`.
 
 ## 6. Reminders (only if relevant)
@@ -54,7 +55,18 @@ Hand off to `invoice-workflow`.
 - Savannah needs passport copies (park permits) and a copy of the travel insurance: ask the agency/client.
 - Booking team: rooms booked exactly as per the request (room type and pax).
 
-## 7. Report (Italian, plain text, no emoji)
+## 7. Final confirmation to the agency (after `booking-check` is all OK)
+
+Reply in the agency's thread, from the mailbox it arrived on (`agency-email`). Model: the Waelti / Fenice mail of 17 Oct 2026. Content, in this order:
+1. "ti confermo la pratica: lodge e volo interno sono tutti prenotati e confermati."
+2. "Riepilogo:" day by day (date, what they do, lodge, meal plan); answers to the agency's open questions.
+3. Confirmed services: every stay (lodge, dates, nights, room, meal plan) and every domestic flight (airline, flight no., times, passengers, baggage Flightlink 20 kg hold + 5 kg hand (confirmed by Roberto 17 Oct 2026; other airlines: check)) — with the times the agency needs (e.g. for its own Zanzibar transfer). "Gli orari dei voli interni a volte vengono modificati dalla compagnia: in caso ti avvisiamo subito."
+4. NIC / travel insurance (copy with emergency evacuation cover) if still missing.
+5. Payment: first `find_invoices` with `request_id` — what is still unpaid. Lines as on the invoice ("<services>: <price> usd x <n> pax", "Totale: <n> usd"), invoice number and due date, then "Coordinate bancarie:" (SE: Exim Bank; SH: AfrAsia, see `invoice-workflow`). Already fully paid → say so instead.
+6. "Allego programma confermato ed invoice." — attachments ALWAYS: the final programme Word (`<ref_number>.docx`, regenerated after the last change) and the invoice PDF; check the invoice total = Calc total = mail total before attaching. The `links.public` line can be added too.
+Draft the complete .eml (with attachments), show it, send with `mail_send` (`attachments`, `reply_to_uid`, `request_id`; payload > a few MB → post it from a file, `--data-binary @file`) only after his ok on THAT text. Any change after the ok → show it again before sending. Never send a partial confirmation and fix it with a second mail (17 Oct 2026).
+
+## 8. Report (Italian, plain text, no emoji)
 
 ```
 Conferma <cartella> (prova)
