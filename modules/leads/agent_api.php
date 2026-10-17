@@ -2884,6 +2884,12 @@ try {
                   + (empty($in['confirm']) ? ['message' => 'Dry run — nothing written. Resend with "confirm": true.'] : []));
     }
 
+    // ── Mail security scan (modules/security/mail_scan.php, cPanel cron). Read-only: no uapi from the web process.
+    case 'mail_security_status': {
+        require_once __DIR__ . '/../security/includes/mail_security_service.php';
+        agent_out(mss_status($db));
+    }
+
     default:
         agent_fail('Unknown action "' . $agentAction . '"', 400, ['actions' => [
             'find_requests', 'list_agencies', 'create_agency', 'update_agency', 'save_agency_contact', 'delete_agency_contact', 'create_request', 'update_request', 'import_group_folder', 'move_group_folder', 'list_standard_programs',
@@ -2901,7 +2907,7 @@ try {
             'mail_folders', 'mail_list', 'mail_get', 'mail_attachment', 'mail_flag', 'mail_move', 'mail_draft', 'mail_send',
             'timeline_list', 'timeline_add', 'timeline_update', 'summary_set', 'request_resume', 'set_request_status',
             'payments_due', 'ck_status', 'ck_request_check', 'ops_movements', 'ops_lunch_boxes', 'ops_medivac', 'flight_tickets',
-            'followup_list', 'followup_scan', 'followup_update', 'followup_upsert',
+            'followup_list', 'followup_scan', 'followup_update', 'followup_upsert', 'mail_security_status',
         ]]);
     }
 } catch (Throwable $e) {

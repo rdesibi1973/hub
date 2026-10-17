@@ -1292,6 +1292,33 @@ Checks are run by hand for now (page → Run check now → All; office PC scan f
 (token `FOLLOWUP_CRON_TOKEN`, else `MEMO_CRON_TOKEN`; `&dry=1` = summary only). The memo digest (06:00) lists new lines,
 problems, lines not taken in charge for > 2 days, provisional expiring ≤ 7 days and tickets missing ≤ 7 days.
 
+## Mail security (read-only)
+
+The cPanel account's mailboxes, filters, forwarders, auto-replies and catch-all are scanned by
+`modules/security/mail_scan.php` (cPanel cron, daily 06:30 EAT; logic `modules/security/includes/mail_security_service.php`,
+tables `migrations/071_mail_security.sql`). Daily email `[Mail Security] ALERT …` only on changes, Monday
+`[Mail Security] Weekly …` always, `[Mail Security] SCAN FAILED …` if the scan breaks — to `MAIL_SCAN_TO`
+(default savannah.explorers@gmail.com). Background: the Oct 2026 "GLAD" filter on agustin@ that redirected
+client mail to savanah.explorers@gmail.com.
+
+HIGH: a filter delivering outside our domains (savannah.explorers@gmail.com counts as ours), discarding,
+bouncing, saving to a folder or piping; a filter with ≥ 5 "contains @domain" rules; a forwarder / catch-all
+to an outside address; any address that looks like ours but is not (savanah…, savannah-explorers@gmail…).
+Items in the approved baseline (seeded by the first run, HIGH items excluded) are not alerted again unless they change.
+Approve after checking: on the server `php ~/public_html/hub/modules/security/mail_scan.php --approve=<key>`
+(no API action for that yet).
+
+### `mail_security_status` (GET)
+Reads the last run from the DB (never calls cPanel). → `status` (`ok` | `alerts` | `scan_failed` | `stale` = no good
+scan for > 26 h | `never_run`), `last_run {at, ok, error, mailed}`, `last_good_scan {at, hours_ago, source (uapi|token),
+state_unchanged_since}`, `counts {mailboxes, filters, forwarders, autoreplies, catchall_not_fail, alerts, high}` (same
+as the email's `MAILSCAN:` line), `alerts[] {change (added|changed|removed|present), level (HIGH|normal), key, kind,
+label, old_label, reasons[], detail}`, `high_items[] {key, label, reasons[], approved}`, `baseline_items`.
+
+```bash
+curl -sA "$UA" -H "$H" "$U?action=mail_security_status"
+```
+
 ## Request timeline
 
 A running history and a short "where are we" summary for each request, so a new session can pick

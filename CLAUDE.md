@@ -18,6 +18,8 @@ outdated — this file wins where they disagree (PHP version, local lint).
 - `modules/operations/` — movements, Medivac, lunch boxes, **Booking follow-up** (`booking_followup.php`; logic
   `includes/followup_service.php` + `followup_classify.php`, shared with the Agent API `followup_*` and
   `tools/followup_local_scan.php`, which reads the supplier PDFs on the office PC because BlueHost cannot).
+- `modules/security/` — mail security scan (`mail_scan.php`, CLI only, cPanel cron; logic
+  `includes/mail_security_service.php`, shared with the Agent API `mail_security_status`).
 - `migrations/NNN_name.sql` — not applied by deploy. `docs/` — AGENT_API, FOLDER_NAMING,
   INFRASTRUCTURE, KB_Quotazioni_Safari.
 
