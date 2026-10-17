@@ -8,8 +8,10 @@
  * mail_security_status (read-only: last run from the DB, never calls uapi from the web process).
  * Tables: migrations/071_mail_security.sql (mss_schema() creates them too).
  *
- * Data source: the cPanel UAPI command line (`uapi --output=json Module func`, no token when run as the
- * cPanel user), else HTTPS UAPI with CPANEL_API_TOKEN (includes/config.php, server-only).
+ * Data source: HTTPS UAPI with CPANEL_API_TOKEN (includes/config.php, server-only) first: it starts no
+ * process on the account. Fallback: the cPanel UAPI command line (`uapi --output=json Module func`, no
+ * token as the cPanel user), which starts a cPanel process per call — on 17 Oct 2026 the account hit its
+ * process limit ("fork: Resource temporarily unavailable") right after two uapi scans.
  */
 
 const MSS_OWN_DOMAINS      = ['savannahexplorers.com', 'theorangicollection.com', 'kifarutentedlodge.com', 'mareraviewlodge.com'];
@@ -42,18 +44,22 @@ function mss_schema(PDO $db): void {
 
 // ── UAPI ─────────────────────────────────────────────────────────────────────
 
-/** How to reach UAPI: ['mode' => 'uapi', 'bin' => path] or ['mode' => 'token', ...]. $bin forces the CLI path. */
+/** How to reach UAPI: ['mode' => 'token', ...] first, else ['mode' => 'uapi', 'bin' => path]. $bin forces the CLI path. */
 function mss_api_context(?string $bin = null): array {
     if ($bin !== null && $bin !== '') return ['mode' => 'uapi', 'bin' => $bin];
+    $ctx = mss_token_context() ?? mss_uapi_context();
+    if ($ctx) return $ctx;
+    throw new RuntimeException('No UAPI access: CPANEL_API_TOKEN not set in includes/config.php and exec()/uapi not available');
+}
+
+/** The uapi command line, or null if exec() is disabled or uapi is missing. */
+function mss_uapi_context(): ?array {
     $disabled = array_map('trim', explode(',', (string)ini_get('disable_functions')));
-    if (function_exists('exec') && !in_array('exec', $disabled, true)) {
-        foreach (['/usr/bin/uapi', '/usr/local/cpanel/bin/uapi'] as $p) {
-            if (is_file($p)) return ['mode' => 'uapi', 'bin' => $p];
-        }
+    if (!function_exists('exec') || in_array('exec', $disabled, true)) return null;
+    foreach (['/usr/bin/uapi', '/usr/local/cpanel/bin/uapi'] as $p) {
+        if (is_file($p)) return ['mode' => 'uapi', 'bin' => $p];
     }
-    $tok = mss_token_context();
-    if ($tok) return $tok;
-    throw new RuntimeException('No UAPI access: exec()/uapi not available and CPANEL_API_TOKEN not set in includes/config.php');
+    return null;
 }
 
 /** HTTPS UAPI with CPANEL_API_TOKEN, or null if no token is configured. */
@@ -568,8 +574,14 @@ function mss_email(string $type, array $d): array {
             $txt  .= "First scan: everything found is listed below and saved as the approved baseline. Please check it.\n";
         } elseif ($type === 'weekly') {
             $subject = '[Mail Security] Weekly ' . $date . ' – ' . ($n ? $n . ' alert' . ($n > 1 ? 's' : '') : 'OK');
+        } elseif ($n === 0) {   // only the note (cPanel token not working, uapi used)
+            $subject = '[Mail Security] WARNING ' . $date . ' – cPanel token not working';
         } else {
             $subject = '[Mail Security] ALERT ' . $date . ' – ' . $n . ' change' . ($n > 1 ? 's' : '');
+        }
+        if (($d['note'] ?? '') !== '') {
+            $html .= '<p style="background:#fff3cd;padding:8px;"><b>Warning:</b> ' . $h($d['note']) . '</p>';
+            $txt  .= 'WARNING: ' . $d['note'] . "\n";
         }
 
         if ($type === 'first') {

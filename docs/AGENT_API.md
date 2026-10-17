@@ -1299,7 +1299,9 @@ The cPanel account's mailboxes, filters, forwarders, auto-replies and catch-all 
 tables `migrations/071_mail_security.sql`). Daily email `[Mail Security] ALERT …` only on changes, Monday
 `[Mail Security] Weekly …` always, `[Mail Security] SCAN FAILED …` if the scan breaks — to `MAIL_SCAN_TO`
 (default savannah.explorers@gmail.com). Background: the Oct 2026 "GLAD" filter on agustin@ that redirected
-client mail to savanah.explorers@gmail.com.
+client mail to savanah.explorers@gmail.com. cPanel is read over HTTPS UAPI with `CPANEL_API_TOKEN`
+(includes/config.php); the `uapi` command line is only the fallback (it starts processes on the account, which
+has a process limit) and a token failure sends `[Mail Security] WARNING … – cPanel token not working`.
 
 HIGH: a filter delivering outside our domains (savannah.explorers@gmail.com counts as ours), discarding,
 bouncing, saving to a folder or piping; a filter with ≥ 5 "contains @domain" rules; a forwarder / catch-all

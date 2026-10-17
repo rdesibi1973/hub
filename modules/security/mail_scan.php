@@ -8,8 +8,9 @@
  *
  * Daily: email only if there are alerts. Monday: weekly report, always. Scan error: SCAN FAILED email.
  * First run: seeds the approved baseline and emails the full state.
- * uapi fails when the account is at its process limit: with CPANEL_API_TOKEN in includes/config.php
- * the scan retries over HTTPS UAPI (no extra processes) instead of sending SCAN FAILED.
+ * Reads cPanel over HTTPS UAPI with CPANEL_API_TOKEN (includes/config.php; no process started on the
+ * account). If the token is missing the uapi command line is used; if the token call fails the scan
+ * retries with uapi and says so at the top of the email (an expired / deleted token must not go unseen).
  *
  * Options:
  *   --cron          run only between 06:00 and 06:59 EAT (for the hourly cron line)
@@ -58,16 +59,18 @@ try {
 
     $ctx    = mss_api_context($opt['uapi'] ?? null);
     $source = $ctx['mode'];
+    $note   = '';
     try {
         $snap = mss_collect($ctx);
     } catch (RuntimeException $e) {
-        // The CLI uapi needs extra processes: on the shared server it fails when the account hits its
-        // process limit ("fork: Resource temporarily unavailable"). HTTPS UAPI with the token does not.
-        $tok = $ctx['mode'] === 'uapi' && !isset($opt['uapi']) ? mss_token_context() : null;
-        if (!$tok) throw $e;
-        fwrite(STDERR, 'uapi failed, retrying over HTTPS with CPANEL_API_TOKEN: ' . $e->getMessage() . "\n");
-        $ctx    = $tok;
-        $source = 'token';
+        // Token rejected (expired / deleted) or cPanel HTTPS down: retry with the uapi command line.
+        $cli = $ctx['mode'] === 'token' ? mss_uapi_context() : null;
+        if (!$cli) throw $e;
+        $note = 'The cPanel token did not work, the scan used uapi instead. Check CPANEL_API_TOKEN in includes/config.php '
+              . '(cPanel → Security → Manage API Tokens). Error: ' . $e->getMessage();
+        fwrite(STDERR, $note . "\n");
+        $ctx    = $cli;
+        $source = 'uapi';
         $snap   = mss_collect($ctx);
     }
     $items  = mss_items($snap);
@@ -99,10 +102,10 @@ try {
     $counts = mss_counts($snap) + ['alerts' => count($alerts),
                                    'high' => count(array_filter($alerts, function ($a) { return $a['level'] === 'HIGH'; }))];
 
-    $type = $first ? 'first' : ($weekly ? 'weekly' : ($alerts ? 'alert' : null));
+    $type = $first ? 'first' : ($weekly ? 'weekly' : ($alerts || $note !== '' ? 'alert' : null));
     $mailed = 'none';
     if ($type !== null) {
-        $mail = mss_email($type, ['date' => $today, 'counts' => $counts, 'alerts' => $alerts, 'high' => $high, 'items' => $items,
+        $mail = mss_email($type, ['date' => $today, 'note' => $note, 'counts' => $counts, 'alerts' => $alerts, 'high' => $high, 'items' => $items,
                                   'baseline_rows' => $type === 'weekly' ? mss_baseline_rows($db) : [],
                                   'expected_diff' => $first ? mss_expected_diff($snap) : []]);
         $mailed = mss_send($to, $mail, $dry) ? $type : 'mail_failed';
