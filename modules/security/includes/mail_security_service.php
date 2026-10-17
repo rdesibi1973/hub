@@ -170,7 +170,8 @@ function mss_collect(array $ctx): array {
                          'start' => (string)($g['start'] ?? ''), 'stop' => (string)($g['stop'] ?? '')];
         }
         foreach (mss_call($ctx, 'Email', 'list_default_address', ['domain' => $dom]) as $c) {
-            $catch[strtolower((string)($c['domain'] ?? $dom))] = trim((string)($c['defaultaddress'] ?? ''));
+            // uapi returns the value quoted: "\":fail: No Such User Here\""
+            $catch[strtolower((string)($c['domain'] ?? $dom))] = trim((string)($c['defaultaddress'] ?? ''), " \t\"'");
         }
     }
     ksort($auto);
