@@ -2890,6 +2890,14 @@ try {
         agent_out(mss_status($db));
     }
 
+    // ── Sales responsiveness (modules/leads/sales_response_scan.php, cPanel cron). Read-only, headers only.
+    case 'sales_response_status': {
+        require_once __DIR__ . '/includes/sales_response_service.php';
+        $week = trim((string)($in['week'] ?? ''));
+        if ($week !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $week)) agent_fail('week must be YYYY-MM-DD (any day of the week)');
+        agent_out(sr_report($db, $week !== '' ? $week : null, (int)($in['agent_id'] ?? 0) ?: null));
+    }
+
     default:
         agent_fail('Unknown action "' . $agentAction . '"', 400, ['actions' => [
             'find_requests', 'list_agencies', 'create_agency', 'update_agency', 'save_agency_contact', 'delete_agency_contact', 'create_request', 'update_request', 'import_group_folder', 'move_group_folder', 'list_standard_programs',
@@ -2908,6 +2916,7 @@ try {
             'timeline_list', 'timeline_add', 'timeline_update', 'summary_set', 'request_resume', 'set_request_status',
             'payments_due', 'ck_status', 'ck_request_check', 'ops_movements', 'ops_lunch_boxes', 'ops_medivac', 'flight_tickets',
             'followup_list', 'followup_scan', 'followup_update', 'followup_upsert', 'mail_security_status',
+            'sales_response_status',
         ]]);
     }
 } catch (Throwable $e) {

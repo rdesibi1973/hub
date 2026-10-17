@@ -163,6 +163,7 @@ header {
   <a href="../invoices/booked_requests.php" class="">🧾 Invoices</a>
   <?php endif; ?>
   <?php if (($currentUser['role_name'] ?? '') === 'admin'): ?>
+  <a href="sales_response.php" class="<?= $cur==='sales_response.php'?'active':'' ?>">⏱ Sales Response</a>
   <a href="deleted_requests_list.php" class="<?= $cur==='deleted_requests_list.php'?'active':'' ?>">🗑️ Archive</a>
   <?php endif; ?>
   <a href="logout.php"    class="sub-nav-logout">Logout</a>

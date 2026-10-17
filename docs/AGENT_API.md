@@ -1321,6 +1321,43 @@ label, old_label, reasons[], detail}`, `high_items[] {key, label, reasons[], app
 curl -sA "$UA" -H "$H" "$U?action=mail_security_status"
 ```
 
+## Sales responsiveness (read-only)
+
+How fast the sellers (Asia, Alessia, Anderson, Nuru, Agustin — not Roberto / Daniela) answer clients by email,
+request by request. `modules/leads/sales_response_scan.php` (cPanel cron, hourly at :05) reads only the **headers**
+(From, To, Cc, Date, Subject, Message-ID, In-Reply-To, References) of the sellers' mailboxes and info@ / safari@ /
+sales@ straight from the Maildirs — no bodies, no attachments, no IMAP. Logic `modules/leads/includes/sales_response_service.php`,
+tables `migrations/072_sales_response.sql`, page `modules/leads/sales_response.php` (admin). Emails to `SALES_RESPONSE_TO`
+(default savannah.explorers@gmail.com): daily 07:00 `[Sales Response] <date> – N mail senza risposta >24h` (only with
+`SALES_RESPONSE_LIVE` true and something to report), Monday `[Sales Response] Weekly <date>` (always, "TEST" until LIVE),
+`[Sales Response] SCAN FAILED <date>` on errors. First run: TEST report with the seller mapping and 90 days.
+
+- **Linking**: 1. In-Reply-To = a mail already linked; 2. the counterpart address = request email / agency / agency
+  contact (or same company domain); several open requests → References, then folder name in the subject, else the most
+  recent one, `ambiguous`; 3. folder name `Name(Agency-Agent)` in the subject, only for a free-mail counterpart.
+  Lost / Cancelled requests keep their history (their replies count in the KPIs) but never appear in the alerts.
+- **client** = outside sender; **savannah** = from our domains (or Roberto's Gmail) to an outside address; internal
+  mail, auto-replies, lists, bounces and no-reply senders are ignored.
+- A wait = the first unanswered client mail (several in a row = one wait) until the next savannah mail.
+  Threshold 24 clock hours, always. Evening / weekend / holiday = 18:00–08:00 EAT, Sat, Sun, Tanzanian holidays
+  (`SR_HOLIDAYS`, Eid / Maulid dates are estimates). Waits starting on a seller's leave day (`leave_entries`) are
+  excluded from the KPIs but still listed as unanswered with `in_ferie`.
+
+### `sales_response_status` (GET)
+Params: `week` (any `YYYY-MM-DD` of the week; default last complete week), `agent_id`. Same numbers as the weekly email.
+→ `week {start, end}`, `previous_weeks` (4), `live`, `sellers[] {name, agent_id, agent_name, mailbox, leave_names[],
+mapping_error, week, prev (the 4 weeks before, pooled), total, weeks {monday: metrics}, open_unanswered}` where metrics =
+`{due, answered_24h, pct_24h, late, median_h, p90_h, answered, off_due, off_answered_24h, pct_off_24h, new_leads,
+new_leads_median_h, client_msgs, sent_msgs, on_leave_excluded}`; `unanswered[] {seller, request_id, folder, customer,
+client, first_client_at, last_client_at, client_msgs, hours_waiting, in_ferie, ambiguous, url}`, `new_leads[]`,
+`silent[]` (our mail last, client silent 7+ days, not Booked), `last_scan {status (ok|stale|scan_failed|never_run), …}`,
+`limits[]`, `footer`.
+
+```bash
+curl -sA "$UA" -H "$H" "$U?action=sales_response_status"
+curl -sA "$UA" -H "$H" "$U?action=sales_response_status&week=2026-10-12&agent_id=7"
+```
+
 ## Request timeline
 
 A running history and a short "where are we" summary for each request, so a new session can pick
