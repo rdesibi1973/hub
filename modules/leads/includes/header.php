@@ -156,7 +156,8 @@ header {
     <?php endif; ?>
   </a>
   <?php endif; ?>
-  <a href="requests_import_list.php" class="<?= in_array($cur,['requests_import_list.php','request_import_edit.php','reports_import.php']) ? 'active':'' ?>">Historical</a>
+  <?php // Historical (requests_import_list.php) and Archive (deleted_requests_list.php): hidden from the menu
+        // (Roberto, 18 Oct 2026); the pages still open by their address. ?>
   <?php endif; // !isLeadsRestricted ?>
   <a href="../iti/programs.php?type=personal" class="">🗺️ Itineraries</a>
   <?php if (in_array($currentUser['role_name'] ?? '', ['admin','manager'])): ?>
@@ -164,9 +165,6 @@ header {
   <a href="../invoices/booked_requests.php" class="">🧾 Invoices</a>
   <?php endif; ?>
   <a href="sales_response.php" class="<?= $cur==='sales_response.php'?'active':'' ?>">⏱ Sales Response</a>
-  <?php if (($currentUser['role_name'] ?? '') === 'admin'): ?>
-  <a href="deleted_requests_list.php" class="<?= $cur==='deleted_requests_list.php'?'active':'' ?>">🗑️ Archive</a>
-  <?php endif; ?>
   <a href="logout.php"    class="sub-nav-logout">Logout</a>
 </nav>
 
