@@ -2,7 +2,7 @@
 /**
  * procedures.php — "📘 Procedures": the office procedures, always the current version from Dropbox
  * /Operations/OfficeProcedures (procedures_service.php). Every logged-in user, read-only: PDFs only, a click on the
- * title opens the PDF in a new tab. Admins also get a link to the Dropbox folder (Word sources are edited there, in orig/).
+ * title opens the PDF in a new tab. Word sources are edited in Dropbox orig/.
  * Above the documents: how the office works, from the lead to the safari (Roberto, 18 Oct 2026; $flow below).
  * Meant to grow into the entry point of the Hub manual.
  */
@@ -12,7 +12,6 @@ requireLogin();
 require_once __DIR__ . '/includes/procedures_service.php';
 $pageTitle = 'Procedures';
 $currentUser = current_user();
-$admin = proc_is_admin();
 
 $list = null;
 $error = null;
@@ -59,9 +58,6 @@ include 'includes/header.php';
     <h2>📘 Procedures</h2>
     <div class="sub">Office procedures — always the current version from Dropbox. Each document has the English text first and the Italian text after.</div>
   </div>
-  <?php if ($admin): ?>
-  <a class="btn btn-outline" href="https://www.dropbox.com/home<?= h(str_replace('%2F', '/', rawurlencode(PROC_DIR))) ?>" target="_blank" rel="noopener" style="font-size:.8rem">Open folder in Dropbox ↗</a>
-  <?php endif; ?>
 </div>
 
 <style>
