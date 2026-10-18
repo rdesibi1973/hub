@@ -7,6 +7,6 @@ return [
     'insufficient_budget' => 'Insufficient budget',
     'trip_postponed'      => 'Trip postponed',
     'no_more_replies'     => 'No more replies',
-    'agent_request'       => 'Agent request',
+    'agent_request'       => 'Agency request – no follow-up',   // slug kept: requests already marked keep it
     'other'               => 'Other',
 ];
