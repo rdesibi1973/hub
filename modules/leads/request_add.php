@@ -176,7 +176,7 @@ include 'includes/header.php';
 
 <div class="page-header">
   <div>
-    <h2>New Request</h2>
+    <h2>New Request<?php require_once __DIR__ . '/includes/procedures_service.php'; echo proc_help_link('new_request'); ?></h2>
     <div class="sub"><a href="requests.php" class="text-muted" style="text-decoration:none">← Requests</a></div>
   </div>
 </div>

@@ -23,6 +23,9 @@ outdated — this file wins where they disagree (PHP version, local lint).
 - **Sales Response** (`modules/leads/sales_response.php`, CLI `sales_response_scan.php` on cPanel cron or `sales_response_cron.php` from cron-job.org; logic
   `includes/sales_response_service.php`, shared with the Agent API `sales_response_status`): seller reply times from
   Maildir **headers only** — never store or show mail bodies.
+- **Procedures** (`modules/leads/procedures.php`, proxy `procedure_file.php`; logic `includes/procedures_service.php`,
+  "?" links map `includes/procedures_map.php`): office procedure PDFs read live from Dropbox `/Operations/OfficeProcedures`
+  (one copy only, cached by `rev`); `orig/` Word sources for admins only, `old/` never.
 - `migrations/NNN_name.sql` — not applied by deploy. `docs/` — AGENT_API, FOLDER_NAMING,
   INFRASTRUCTURE, KB_Quotazioni_Safari.
 

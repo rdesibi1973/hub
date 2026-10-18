@@ -920,7 +920,8 @@ include 'includes/header.php';
 <!-- STANDARD PROGRAMS (Copy Programs) -->
 <?php if (!isLeadsRestricted() && $dbxPath): ?>
 <?php $stdPrograms = bs_std_programs(); $stdDisabled = bs_std_programs_disabled(); ?>
-<div class="section-label">Standard Programs</div>
+<?php require_once __DIR__ . '/includes/procedures_service.php'; ?>
+<div class="section-label">Standard Programs<?= proc_help_link('quotation') ?></div>
 <div class="table-wrap" style="max-width:1100px;margin-bottom:20px">
   <div style="padding:18px 22px">
     <div style="font-size:.8rem;color:var(--grey-mid);margin-bottom:14px">
@@ -1090,7 +1091,7 @@ if ($itiCanCreate) {
       <option value="<?= (int)$s['id'] ?>"><?= h($s['title_en']) ?> (<?= (int)$s['duration_days'] ?>d)</option>
       <?php endforeach; ?>
     </select>
-    <button type="submit" class="btn btn-outline" style="font-size:.75rem;padding:5px 12px;">📋 Create from sample</button>
+    <button type="submit" class="btn btn-outline" style="font-size:.75rem;padding:5px 12px;">📋 Create from sample</button><?php require_once __DIR__ . '/includes/procedures_service.php'; echo proc_help_link('quotation'); ?>
     <div style="flex-basis:100%;"><a href="../iti/program_final.php?request_id=<?= (int)$r['id'] ?>" class="btn btn-outline" style="font-size:.75rem;padding:5px 12px;"
        title="Build the itinerary program from this request's Calc (lodges, dates, guests)">🧩 Create Itinerary Program from Excel Calc</a></div>
   </form>

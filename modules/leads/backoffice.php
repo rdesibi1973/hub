@@ -928,7 +928,7 @@ include 'includes/header.php';
             <input type="hidden" name="q" value="<?= h($q) ?>">
             <input type="hidden" name="root" value="<?= h($root) ?>">
             <input type="hidden" name="in_files" value="<?= $inFiles ? '1' : '' ?>">
-            <div style="font-size:.68rem;color:#1A6B3A;font-weight:600;margin-bottom:6px">✅ Confirm Safari — enter dates as in the Excel</div>
+            <div style="font-size:.68rem;color:#1A6B3A;font-weight:600;margin-bottom:6px">✅ Confirm Safari — enter dates as in the Excel<?php require_once __DIR__ . '/includes/procedures_service.php'; echo proc_help_link('confirm_safari'); ?></div>
             <div style="display:flex;gap:8px;margin-bottom:6px;font-family:'Open Sans',sans-serif">
               <label style="font-size:.66rem;color:var(--grey-mid);flex:1">Booking type
                 <select name="cs_grp" onchange="document.getElementById('csgw<?= $rid ?>').style.display=this.value==='NONE'?'none':'block'" style="width:100%;font-size:.74rem;padding:4px 6px;border:1.5px solid var(--grey-lt);border-radius:5px">

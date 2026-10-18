@@ -339,6 +339,50 @@ function dropbox_list_files(string $token, string $path): array {
 }
 
 /**
+ * Files (not folders, one level deep) inside a Dropbox path, with their metadata:
+ * [['name', 'path' (path_display), 'size', 'modified' (server_modified, UTC ISO 8601), 'rev'], …].
+ * Returns null if the folder does not exist. Handles pagination. Other errors throw.
+ */
+function dropbox_list_file_entries(string $token, string $path): ?array {
+    $out    = [];
+    $cursor = null;
+    do {
+        if ($cursor) {
+            $url     = 'https://api.dropboxapi.com/2/files/list_folder/continue';
+            $payload = json_encode(['cursor' => $cursor]);
+        } else {
+            $url     = 'https://api.dropboxapi.com/2/files/list_folder';
+            $payload = json_encode(['path' => $path, 'recursive' => false]);
+        }
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_POST           => true,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_HTTPHEADER     => ['Authorization: Bearer ' . $token, 'Content-Type: application/json'],
+            CURLOPT_POSTFIELDS     => $payload,
+        ]);
+        $body = curl_exec($ch);
+        $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        if ($code === 409 && stripos((string)$body, 'not_found') !== false) return null;
+        if ($code !== 200) {
+            throw new RuntimeException("Dropbox list_folder failed (HTTP $code): $body");
+        }
+        $data = json_decode($body, true);
+        foreach ($data['entries'] ?? [] as $e) {
+            if (($e['.tag'] ?? '') !== 'file') continue;
+            $out[] = ['name' => (string)$e['name'], 'path' => (string)($e['path_display'] ?? ''), 'size' => (int)($e['size'] ?? 0),
+                      'modified' => (string)($e['server_modified'] ?? ''), 'rev' => (string)($e['rev'] ?? '')];
+        }
+        $cursor  = $data['cursor']   ?? null;
+        $hasMore = $data['has_more'] ?? false;
+    } while ($hasMore && $cursor);
+
+    return $out;
+}
+
+/**
  * List all sub-folders (one level deep) inside a Dropbox path.
  * Handles pagination automatically.
  *

@@ -42,7 +42,15 @@ include __DIR__ . '/includes/layout_header.php';
     <?php if (has_permission('leads') && !$is_admin_or_manager): ?>
     <a class="primary-card" href="<?= BASE_URL ?>/modules/leads/requests.php">
       <div class="pc-icon">📋</div>
-      <div class="pc-text"><h3>My Requests</h3><p>Your assigned requests</p></div>
+      <div class="pc-text"><h3>Lead Tracker</h3><p>Your requests and more</p></div>
+      <span class="pc-arrow">↗</span>
+    </a>
+    <?php endif; ?>
+
+    <?php if (has_permission('leads')): ?>
+    <a class="primary-card" href="<?= BASE_URL ?>/modules/leads/procedures.php">
+      <div class="pc-icon">📘</div>
+      <div class="pc-text"><h3>Office Procedures</h3><p>How we work in the Hub</p></div>
       <span class="pc-arrow">↗</span>
     </a>
     <?php endif; ?>

@@ -352,7 +352,7 @@ include 'includes/header.php';
 ?>
 
 <div class="page-header" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
-  <h2>✅ CK tracker <small style="font-size:.75rem;font-weight:400;color:var(--grey-mid)">— confirmed bookings in 001_Safari, from booking to CK</small></h2>
+  <h2>✅ CK tracker <small style="font-size:.75rem;font-weight:400;color:var(--grey-mid)">— confirmed bookings in 001_Safari, from booking to CK</small><?php require_once __DIR__ . '/includes/procedures_service.php'; echo proc_help_link('folder_status'); ?></h2>
 </div>
 
 <?php if ($scanError): ?>

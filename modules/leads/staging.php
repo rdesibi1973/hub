@@ -150,7 +150,7 @@ select:focus,input:focus{outline:none;border-color:#C0211B;box-shadow:0 0 0 2px 
 
 <div class="page-header">
   <div>
-    <h2>Incoming Leads
+    <h2>Incoming Leads<?php require_once __DIR__ . '/includes/procedures_service.php'; echo proc_help_link('new_request'); ?>
       <?php if ($total): ?>
         <span style="background:#C0211B;color:#fff;border-radius:12px;padding:2px 10px;font-size:.75rem;font-weight:700;margin-left:8px;vertical-align:middle"><?= $total ?></span>
       <?php endif; ?>
