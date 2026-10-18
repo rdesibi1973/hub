@@ -1,8 +1,9 @@
 <?php
-// modules/leads/sales_response_cron.php — hourly Sales Response run from cron-job.org (like followup_cron.php),
+// modules/leads/sales_response_cron.php — scheduled Sales Response run from cron-job.org (like followup_cron.php),
 // the same as the CLI `sales_response_scan.php --cron` (logic: sr_run() in includes/sales_response_service.php):
-//   every hour at :05   …/modules/leads/sales_response_cron.php?token=XXX
-// Scan + relink every call; 07:xx EAT daily alert (only with SALES_RESPONSE_LIVE), Monday 07:xx weekly report.
+//   daily 23:30 EAT (scan) and daily 07:05 EAT (mails)   …/modules/leads/sales_response_cron.php?token=XXX
+// Scan + relink every call; only a call at 07:xx EAT sends the daily alert (with SALES_RESPONSE_LIVE) and, on Monday,
+// the weekly report. A reminder from the page scans again first (sr_send_reminder()).
 // One of the two schedulers is enough; if both run, a MySQL lock skips the overlapping call.
 // Token: SALES_RESPONSE_CRON_TOKEN if defined in includes/config.php (server-only), else MEMO_CRON_TOKEN.
 

@@ -811,6 +811,20 @@ function sr_send_reminder(PDO $db, int $agentId, array $keys, string $by, bool $
     $seller = null;
     foreach (sr_sellers($db) as $s) if ($s['agent_id'] === $agentId) $seller = $s;
     if (!$seller) return ['ok' => false, 'error' => 'Not a seller in Sales Response: agent ' . $agentId];
+    // The scheduled scan runs once a day: read the mails delivered since, so a mail answered today is not reminded.
+    try {
+        if ((int)$db->query("SELECT GET_LOCK('hub_sales_response_run', 5)")->fetchColumn()) {
+            try {
+                sr_schema($db);
+                sr_scan($db);
+                sr_link($db);
+            } finally {
+                $db->query("SELECT RELEASE_LOCK('hub_sales_response_run')");
+            }
+        }
+    } catch (Throwable $e) {
+        error_log('Sales Response reminder: scan before the reminder failed: ' . $e->getMessage());
+    }
     $want = array_flip(array_map('strval', $keys));
     $items = array_values(array_filter(sr_report($db, null, $agentId, 0)['unanswered'], function ($u) use ($want) {
         return !$want || isset($want[sr_unanswered_key($u)]);

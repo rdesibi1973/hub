@@ -1327,7 +1327,7 @@ curl -sA "$UA" -H "$H" "$U?action=mail_security_status"
 
 How fast the sellers (Asia, Alessia, Anderson, Nuru, Agustin — not Roberto / Daniela) answer clients by email,
 request by request. `modules/leads/sales_response_scan.php --cron` (cPanel cron, hourly at :05) or
-`modules/leads/sales_response_cron.php?token=…` (cron-job.org, hourly at :05; token `SALES_RESPONSE_CRON_TOKEN`, else
+`modules/leads/sales_response_cron.php?token=…` (cron-job.org, daily 23:30 for the scan + 07:05 for the mails; token `SALES_RESPONSE_CRON_TOKEN`, else
 `MEMO_CRON_TOKEN`; same run, `sr_run()`, a MySQL lock skips overlaps) reads only the **headers**
 (From, To, Cc, Date, Subject, Message-ID, In-Reply-To, References) of the sellers' mailboxes and sales@ straight
 from the Maildirs (not info@ = Roberto, not safari@ = Daniela: their replies are seen only when a seller's mailbox

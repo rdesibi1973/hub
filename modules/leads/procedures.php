@@ -38,15 +38,15 @@ $flow = [
      [['Procedure: Confirmed trips, section 3', proc_url('DROPBOX-REQUESTS-CONFIRMED TRIPS.pdf', false, 1)], ['BackOffice', 'backoffice.php']]],
     ['Booking', 'Bookings', 'The booking team books all the services. When the bookings are complete, it informs the seller.',
      [['Booked', 'booked.php']]],
+    ['Booking + Sales', 'CK — check of the bookings', 'As soon as the bookings are complete — the sooner the better — booking and sales '
+     . 'check that every booking made matches the trip (services, dates, guests); when everything is right the folder gets its CK.',
+     [['CK tracker', 'ck_tracker.php'], ['Procedure: folder status, section 4', proc_url('DROPBOX-REQUESTS-CONFIRMED TRIPS.pdf', false, 2)]]],
     ['Sales + Accountant', 'Client confirmation and payments', 'The seller confirms the trip to the client and follows the client payments '
      . '(deposit, balance), checking with the accountant that every payment has been received.',
      [['Payments', 'payments.php'], ['Procedure: client payments, section 6', proc_url('DROPBOX-REQUESTS-CONFIRMED TRIPS.pdf', false, 3)]]],
     ['Booking + Accountant', 'Suppliers and flight tickets', 'Booking and accountant prepare the supplier payments, make sure no booked service '
      . 'is lost (deadlines, deposits), and receive and archive the domestic flight tickets in time.',
      [['Booking follow-up', '../operations/booking_followup.php']]],
-    ['Booking + Sales', 'CK — check of the bookings', 'Booking and sales check that every booking made matches the trip '
-     . '(services, dates, guests); when everything is right the folder gets its CK.',
-     [['CK tracker', 'ck_tracker.php'], ['Procedure: folder status, section 4', proc_url('DROPBOX-REQUESTS-CONFIRMED TRIPS.pdf', false, 2)]]],
     ['Operations', 'The safari', 'The operations team schedules the guides for the safari and hands off the file.',
      [['Operations', '../operations/index.php']]],
 ];
