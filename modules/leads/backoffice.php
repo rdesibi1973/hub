@@ -366,6 +366,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'
         'grp'     => $_POST['cs_grp']     ?? 'NONE',
         'grpcode' => $_POST['cs_grpcode'] ?? '',
         'grpmain' => $_POST['cs_grpmain'] ?? '',
+        'reopen_lost' => !empty($_POST['cs_reopen']),   // Lost request: the user agreed to reopen it (JS confirm)
     ]);
 
     if (!$plan['found']) {
@@ -511,7 +512,7 @@ if ($q !== '' && $inFiles) {
         $in   = implode(',', array_fill(0, count($segs), '?'));
         $vals = array_values($segs);
         $stmt = $db->prepare(
-            "SELECT r.id, r.customer_name, r.email, r.practice_code, r.group_folder, r.status, r.payment_status,
+            "SELECT r.id, r.customer_name, r.email, r.practice_code, r.group_folder, r.status, r.lost_reason, r.payment_status,
                     r.dropbox_url, r.pre_confirm_json, r.postpone_until, a.name AS agent_name
              FROM requests r LEFT JOIN agents a ON a.id = r.agent_id
              WHERE r.practice_code IN ($in) OR r.group_folder IN ($in)
@@ -554,7 +555,7 @@ if ($q !== '' && $inFiles) {
     // ── Bookings: search the requests table ────────────────────────────────────
     // '*' acts as a wildcard (like the old Java search): turn '*' into a SQL '%'.
     $like   = '%' . str_replace('*', '%', $q) . '%';
-    $sql    = "SELECT r.id, r.customer_name, r.email, r.practice_code, r.group_folder, r.status, r.payment_status,
+    $sql    = "SELECT r.id, r.customer_name, r.email, r.practice_code, r.group_folder, r.status, r.lost_reason, r.payment_status,
                       r.dropbox_url, r.pre_confirm_json, r.postpone_until, a.name AS agent_name
                FROM requests r LEFT JOIN agents a ON a.id = r.agent_id
                WHERE (r.customer_name LIKE ? OR r.practice_code LIKE ? OR r.group_folder LIKE ?)";
@@ -751,10 +752,13 @@ include 'includes/header.php';
         $canRegroup = in_array($r['status'] ?? '', ['Booked', 'Provisional'], true);
         // Confirm Safari applies to a not-yet-confirmed private booking (no _START tag,
         // not already Booked/Cancelled, not a group). GRP create/add stays in the Java tool.
+        // A Lost request too: the form first asks to reopen it (Lost → Quoted, Roberto 18 Oct 2026).
         $pcode      = trim($r['practice_code'] ?? '');
         $canConfirm = !$isGrp && $pcode !== ''
                     && stripos($pcode, '_START') === false
-                    && !in_array($r['status'] ?? '', ['Booked', 'Cancelled', 'Lost'], true);
+                    && !in_array($r['status'] ?? '', ['Booked', 'Cancelled'], true);
+        $isLost     = ($r['status'] ?? '') === 'Lost';
+        $lostLabel  = $isLost ? (bs_lost_reasons()[$r['lost_reason'] ?? ''] ?? (string)($r['lost_reason'] ?? '')) : '';
         // Rollback is offered for any Hub-confirmed booking (a stored snapshot). For a
         // group-create the handler still guards it: it only proceeds when this is the
         // group's sole member.
@@ -922,12 +926,15 @@ include 'includes/header.php';
             $rid = (int)$r['id'];
           ?>
           <?php if ($canConfirm): ?>
-          <form method="POST" id="cs<?= $rid ?>" style="display:<?= $isPreview ? 'block' : 'none' ?>;margin-top:6px;padding:10px;background:#eef6f0;border:1px solid #cfe6d6;border-radius:8px">
+          <form method="POST" id="cs<?= $rid ?>" style="display:<?= $isPreview ? 'block' : 'none' ?>;margin-top:6px;padding:10px;background:#eef6f0;border:1px solid #cfe6d6;border-radius:8px"
+                <?php if ($isLost): ?>onsubmit="return csReopen(this, <?= h(json_encode($r['customer_name'] ?: 'This request')) ?>, <?= h(json_encode($lostLabel)) ?>)"<?php endif; ?>>
             <input type="hidden" name="action" value="confirm_preview">
+            <?php if ($isLost): ?><input type="hidden" name="cs_reopen" value="<?= !empty($_POST['cs_reopen']) ? '1' : '' ?>"><?php endif; ?>
             <input type="hidden" name="request_id" value="<?= $rid ?>">
             <input type="hidden" name="q" value="<?= h($q) ?>">
             <input type="hidden" name="root" value="<?= h($root) ?>">
             <input type="hidden" name="in_files" value="<?= $inFiles ? '1' : '' ?>">
+            <?php if ($isLost): ?><div style="font-size:.68rem;color:#C0211B;font-weight:600;margin-bottom:6px">This request is Lost<?= $lostLabel !== '' ? ' (' . h($lostLabel) . ')' : '' ?>: it will be reopened (status → Quoted) before the confirmation.</div><?php endif; ?>
             <div style="font-size:.68rem;color:#1A6B3A;font-weight:600;margin-bottom:6px">✅ Confirm Safari — enter dates as in the Excel<?php require_once __DIR__ . '/includes/procedures_service.php'; echo proc_help_link('confirm_safari'); ?></div>
             <div style="display:flex;gap:8px;margin-bottom:6px;font-family:'Open Sans',sans-serif">
               <label style="font-size:.66rem;color:var(--grey-mid);flex:1">Booking type
@@ -1001,6 +1008,7 @@ include 'includes/header.php';
                 <input type="hidden" name="cs_dest"  value="<?= h($pv['fDestKey']) ?>">
                 <input type="hidden" name="cs_grp"   value="<?= h($pv['grpAction']) ?>">
                 <input type="hidden" name="cs_grpcode" value="<?= h($pv['grpCode']) ?>">
+                <?php if (!empty($_POST['cs_reopen'])): ?><input type="hidden" name="cs_reopen" value="1"><?php endif; ?>
                 <input type="hidden" name="q" value="<?= h($q) ?>">
                 <input type="hidden" name="root" value="<?= h($root) ?>">
                 <input type="hidden" name="in_files" value="<?= $inFiles ? '1' : '' ?>">
@@ -1291,6 +1299,14 @@ function toggleRename(id) {
 function toggleEl(elId) {
   var f = document.getElementById(elId);
   if (f) f.style.display = (f.style.display === 'none' || !f.style.display) ? 'block' : 'none';
+}
+// Confirm Safari on a Lost request: ask once to reopen it (Lost → Quoted); the server reopens it at the confirm.
+function csReopen(form, name, reason) {
+  var f = form.querySelector('input[name="cs_reopen"]');
+  if (!f || f.value === '1') return true;
+  if (!confirm(name + ' is Lost' + (reason ? ' (' + reason + ')' : '') + '.\n\nReopen it (status → Quoted) and continue with the confirmation?')) return false;
+  f.value = '1';
+  return true;
 }
 
 // Confirm Safari dates: 📅 opens the native calendar on a hidden date input;

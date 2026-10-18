@@ -672,9 +672,10 @@ function bs_confirm_plan(PDO $db, int $reqId, array $in): array {
              'dest_value' => $destValue, 'dest_suffix' => $destSuffix, 'errs' => [], 'new_name' => null, 'sub_name' => null,
              'member_name' => null, 'pd' => ['start_date' => null, 'end_date' => null],
              'token' => null, 'cur_path' => null, 'dbx_err' => '', 'grps' => [],
-             'block' => false, 'can_override' => false, 'block_msg' => '', 'fields' => []];
+             'block' => false, 'can_override' => false, 'block_msg' => '', 'fields' => [],
+             'reopen_lost' => !empty($in['reopen_lost']), 'lost' => null];
 
-    $stmt = $db->prepare("SELECT id, customer_name, practice_code, group_folder, dropbox_url, status, payment_status, agent_id
+    $stmt = $db->prepare("SELECT id, customer_name, practice_code, group_folder, dropbox_url, status, payment_status, agent_id, lost_reason
                           FROM requests WHERE id = ?");
     $stmt->execute([$reqId]);
     $r = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -682,6 +683,15 @@ function bs_confirm_plan(PDO $db, int $reqId, array $in): array {
     $oldFolder = trim($r['practice_code'] ?? '');
     if ($oldFolder === '') { $plan['error'] = 'This request has no folder (practice_code) to confirm.'; return $plan; }
     $plan['found'] = true; $plan['r'] = $r; $plan['old_folder'] = $oldFolder;
+    // A Lost request can be confirmed only once the user agrees to reopen it (Lost → Quoted, done by bs_confirm_commit()).
+    if (($r['status'] ?? '') === 'Lost') {
+        $reasons = bs_lost_reasons();
+        $plan['lost'] = $reasons[$r['lost_reason'] ?? ''] ?? (string)($r['lost_reason'] ?? '');
+        if (!$plan['reopen_lost']) {
+            $lostErr = 'This request is Lost' . ($plan['lost'] !== '' ? ' (' . $plan['lost'] . ')' : '')
+                            . ': confirm that it is reopened (status → Quoted) to continue.';
+        }
+    }
 
     // GRP code defaults to DDMM derived from the Start date when left blank.
     if ($grpAction !== 'NONE' && $grpCode === '' && strlen($fStart) >= 5 && ctype_digit(substr($fStart, 0, 2))) {
@@ -708,6 +718,7 @@ function bs_confirm_plan(PDO $db, int $reqId, array $in): array {
         $errs = array_merge($errs, $buildErr);
         if ($plan['new_name'] !== null) { $plan['pd'] = parse_folder_dates($plan['new_name']); $plan['sub_name'] = $oldFolder; }
     }
+    if (isset($lostErr)) array_unshift($errs, $lostErr);   // Lost and reopen not agreed: nothing moves
     $plan['grp_code'] = $grpCode;
     $plan['errs']     = $errs;
     $plan['fields']   = [
@@ -900,7 +911,20 @@ function bs_confirm_checks(array $plan): array {
  * A successful confirm is logged in the request timeline.
  */
 function bs_confirm_commit(PDO $db, array $plan, bool $proceed): array {
+    // Lost + reopen agreed: reopen exactly as the status menu does (Lost → Quoted, Lost reason/note cleared, timeline),
+    // then confirm. If the confirm then fails the request stays Quoted (reopened, as agreed).
+    $reopened = false;
+    if (empty($plan['errs']) && !empty($plan['found']) && ($plan['r']['status'] ?? '') === 'Lost' && !empty($plan['reopen_lost'])) {
+        $chk = bs_set_request_status($db, (int)$plan['r']['id'], 'Quoted', '', '', (int)($_SESSION['user_id'] ?? 0));
+        if (!$chk['ok']) return ['ok' => false, 'msg' => 'Could not reopen the request: ' . $chk['error']];
+        $plan['r']['status'] = 'Quoted';   // the rollback snapshot keeps Quoted, not Lost
+        $reopened = true;
+    }
     $res = bs_confirm_commit_run($db, $plan, $proceed);
+    if ($reopened) {
+        $res['reopened'] = true;
+        $res['msg'] = 'Request reopened (Lost → Quoted). ' . $res['msg'] . ($res['ok'] ? '' : ' The request stays Quoted.');
+    }
     if ($res['ok'] && !empty($plan['r']['id'])) {
         timeline_log((int)$plan['r']['id'], 'confirmation', 'Booking confirmed — ' . $res['folder'],
                      ['body' => ($res['group_folder'] ? 'Group: ' . $res['group_folder'] . "\n" : '') . 'Previous folder: ' . $plan['old_folder'],

@@ -346,6 +346,7 @@ function agent_confirm_input(array $in): array {
         'end'     => agent_cs_date($in['end'] ?? '', true),
         'dest'    => $dest,
         'grp'     => $in['grp'] ?? 'NONE',
+        'reopen_lost' => !empty($in['reopen_lost']),   // a Lost request: reopen it (Lost → Quoted) and confirm
         'grpcode' => $in['grp_code'] ?? '',
         'grpmain' => $in['grp_main'] ?? '',
     ];
@@ -1223,7 +1224,8 @@ try {
         $r    = agent_request($db, $in['request_id'] ?? 0);
         $plan = bs_confirm_plan($db, (int)$r['id'], agent_confirm_input($in));
         if (!$plan['found']) agent_fail($plan['error'], 400);
-        if ($plan['errs']) agent_fail('Invalid confirm data', 400, ['errors' => $plan['errs']]);
+        if ($plan['errs']) agent_fail('Invalid confirm data', 400, ['errors' => $plan['errs']]
+            + ($plan['lost'] !== null && !$plan['reopen_lost'] ? ['hint' => 'The request is Lost: resend with "reopen_lost": true to reopen it (Lost → Quoted) and confirm'] : []));
 
         $checks = bs_confirm_checks($plan);
         // Checks that block an API confirm unless "force": true.
@@ -1244,6 +1246,7 @@ try {
             'end_date'     => $plan['pd']['end_date'],
             'checks'       => $checks,
             'blocking'     => $blocking,
+            'reopen'       => $plan['lost'] !== null ? 'Lost (' . $plan['lost'] . ') → Quoted, then confirmed' : null,
         ];
         // Booking-team email as it will be after the confirm, with the edits in "email"
         // (same keys as send_booking_email); "email": {"send": true} sends it on confirm.

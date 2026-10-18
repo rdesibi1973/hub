@@ -321,6 +321,10 @@ Same input + `"confirm": true`. Without it → dry-run (= preview). With blockin
 unless `"force": true`. Moves the folder to `001_Safari`, renames it
 `MM_DDMON_<folder>_STARTddMON[_MIDTddMON]_ENDddMONyyyy_PROGRESS`, status → Booked,
 snapshot stored for Rollback.
+**Lost request** (Roberto, 18 Oct 2026): preview and confirm fail (400, `hint`) unless `"reopen_lost": true` — ask the
+seller first. With it, the preview shows `reopen` ("Lost (reason) → Quoted, then confirmed") and the confirm reopens the
+request exactly like the status menu (Lost → Quoted, Lost reason/note cleared, timeline) before moving the folder; if the
+move then fails the request stays Quoted. Cancelled requests are not confirmed from the BackOffice.
 
 **Booking email at confirm time.** `confirm_preview` and the `confirm_booking` dry run also return
 `email` (`to[]`, `cc[]`, `subject`, `body`, `sender_user_id`): the booking-team email as it will be
