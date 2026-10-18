@@ -309,6 +309,11 @@ function iti_mag_css(): string {
 .mag-chip b{font-weight:700;color:var(--red);margin-right:4px}
 .mag-daybody{display:grid;grid-template-columns:1.6fr 1fr;gap:40px}
 .mag-daybody.solo{grid-template-columns:1fr;max-width:720px}
+/* Short day text, long destination text: the destination goes below, full width, in two columns (no empty column). */
+.mag-daybody.stack{grid-template-columns:1fr;gap:18px}
+.mag-daybody.stack .mag-aside{border-left:0;border-top:2px solid var(--ochre);padding:14px 0 0;columns:2;column-gap:36px}
+.mag-daybody.stack .mag-aside .mag-kicker,.mag-daybody.stack .mag-aside h4{column-span:all}
+.mag-daybody.stack .mag-aside p{margin-top:0}
 .mag-aside{font-size:14px;color:#4a433d;border-left:2px solid var(--ochre);padding-left:18px}
 .mag-aside .mag-kicker{color:var(--ochre);margin-bottom:6px}
 .mag-aside h4{font-family:"Cormorant Garamond",Georgia,serif;font-size:22px;margin:0 0 6px;font-weight:600;color:var(--ink)}
@@ -362,6 +367,7 @@ function iti_mag_css(): string {
   .mag-cover h1{font-size:44px}.mag-sec h2{font-size:32px}.mag-day h3{font-size:28px}.mag-dayno{font-size:60px}
   .mag-intro,.mag-route,.mag-daybody,.mag-lodge,.mag-prices,.mag-lists{grid-template-columns:1fr;gap:24px}
   .mag-map{height:320px}.mag-hero{aspect-ratio:16/9}.mag-terms{columns:1}
+  .mag-daybody.stack .mag-aside{columns:1}
 }
 @media print{
   @page{size:A4;margin:14mm 13mm}
@@ -498,6 +504,8 @@ function iti_mag_render(array $D, string $publicUrl = '', bool $printBtn = true)
           $prevSame = $i > 0 && $d['lodge'] !== '' && ($days[$i - 1]['lodge_key'] !== '' ? $days[$i - 1]['lodge_key'] : $days[$i - 1]['lodge']) === $lk;
           $firstLodge = $d['lodge'] !== '' && !isset($seenLodge[$lk]);
           $aside = $d['dest_desc'] !== '';
+          // Two columns side by side only when the day text is about as long as the destination text; else stacked.
+          $stack = $aside && mb_strlen($d['dest_desc']) > 1.3 * (mb_strlen((string)$d['narrative']) + 60 * count($d['activities']));
       ?>
       <article class="mag-day" id="day-<?= (int)$d['n'] ?>">
         <?php for ($k = (int)$d['n'] + 1; $k <= (int)($d['n_to'] ?? 0); $k++): ?><span id="day-<?= $k ?>"></span><?php endfor; /* links to a day inside a block */ ?>
@@ -516,7 +524,7 @@ function iti_mag_render(array $D, string $publicUrl = '', bool $printBtn = true)
           <?php if ($d['lodge'] !== ''): ?><span class="mag-chip"><b><?= h($T['overnight']) ?></b><?= h($d['lodge']) ?><?= $d['room'] !== '' ? ' · ' . h($d['room']) : '' ?></span><?php endif; ?>
         </div>
 
-        <div class="mag-daybody<?= $aside ? '' : ' solo' ?>">
+        <div class="mag-daybody<?= !$aside ? ' solo' : ($stack ? ' stack' : '') ?>">
           <div>
             <?= iti_doc_paras($d['narrative']) ?>
             <?php if ($d['activities']): ?><p class="mag-acts"><b><?= h($T['activities']) ?></b><?= h(implode(' · ', $d['activities'])) ?></p><?php endif; ?>
