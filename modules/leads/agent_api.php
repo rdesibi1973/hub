@@ -2895,7 +2895,7 @@ try {
         require_once __DIR__ . '/includes/sales_response_service.php';
         $week = trim((string)($in['week'] ?? ''));
         if ($week !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $week)) agent_fail('week must be YYYY-MM-DD (any day of the week)');
-        agent_out(sr_report($db, $week !== '' ? $week : null, (int)($in['agent_id'] ?? 0) ?: null));
+        agent_out(sr_report($db, $week !== '' ? $week : null, (int)($in['agent_id'] ?? 0) ?: null, 4, !empty($in['exclude_leave'])));
     }
 
     default:

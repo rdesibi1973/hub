@@ -611,7 +611,7 @@ function sr_pct(int $a, int $b): ?float {
     return $b > 0 ? round(100 * $a / $b, 1) : null;
 }
 
-/** Metrics of a set of waits (already filtered: seller, weeks, not on leave) + message volumes. */
+/** Metrics of a set of waits (already filtered: seller, weeks, leave days if excluded) + message volumes. */
 function sr_metrics(array $eps, int $clientMsgs, int $sentMsgs, int $now): array {
     $due = $ok = $offDue = $offOk = 0;
     $resp = $newResp = [];
@@ -642,8 +642,11 @@ function sr_metrics(array $eps, int $clientMsgs, int $sentMsgs, int $now): array
  * The report shown by the weekly email, the Hub page and the Agent API.
  * $week: any date of the week (default last complete week); $nPrev: previous weeks pooled as "avg"
  * (pooled = all their waits together, not the mean of weekly percentages).
+ * $excludeLeave: leave out of the KPIs the waits that start on a seller's leave day. Off by default (Roberto,
+ * 18 Oct 2026: sellers on leave must still answer); on request only (page checkbox, API exclude_leave=1).
+ * Leave days are always shown as a note (in_ferie / on_leave).
  */
-function sr_report(PDO $db, ?string $week = null, ?int $agentId = null, int $nPrev = 4): array {
+function sr_report(PDO $db, ?string $week = null, ?int $agentId = null, int $nPrev = 4, bool $excludeLeave = false): array {
     sr_schema($db);
     $now = time();
     $ws = sr_week_start($week);
@@ -666,7 +669,7 @@ function sr_report(PDO $db, ?string $week = null, ?int $agentId = null, int $nPr
         if ($r && isset($byAgent[$r['agent_id']])) $perReq[$m['request_id']][] = $m;
     }
 
-    $eps = [];          // agent_id => week => [waits not on leave]
+    $eps = [];          // agent_id => week => [waits in the KPIs]
     $vol = [];          // agent_id => week => [client, sent]
     $leaveSkipped = []; // agent_id => week => n
     $unanswered = $newLeads = $silent = [];
@@ -690,7 +693,7 @@ function sr_report(PDO $db, ?string $week = null, ?int $agentId = null, int $nPr
             $onLeave = isset($leave[$aid][date('Y-m-d', $e['start'])]);
             if ($e['start'] >= $fromTs && $e['start'] < $toTs) {
                 $w = sr_week_of($e['start']);
-                if ($onLeave) $leaveSkipped[$aid][$w] = ($leaveSkipped[$aid][$w] ?? 0) + 1;
+                if ($onLeave && $excludeLeave) $leaveSkipped[$aid][$w] = ($leaveSkipped[$aid][$w] ?? 0) + 1;
                 else $eps[$aid][$w][] = $e;
                 if ($e['new_lead'] && $w === $ws) {
                     $newLeads[] = $base + ['first_client_at' => date('Y-m-d H:i', $e['start']),
@@ -744,7 +747,7 @@ function sr_report(PDO $db, ?string $week = null, ?int $agentId = null, int $nPr
     }
     return ['ok' => true, 'week' => ['start' => $ws, 'end' => date('Y-m-d', $toTs - 86400)], 'previous_weeks' => $nPrev,
             'generated_at' => date('Y-m-d H:i:s', $now), 'threshold_hours' => SR_THRESHOLD_H, 'timezone' => 'Africa/Dar_es_Salaam',
-            'live' => sr_cfg()['live'], 'sellers' => $rows, 'unanswered' => $unanswered, 'new_leads' => $newLeads, 'silent' => $silent,
+            'live' => sr_cfg()['live'], 'leave_excluded' => $excludeLeave, 'sellers' => $rows, 'unanswered' => $unanswered, 'new_leads' => $newLeads, 'silent' => $silent,
             'last_scan' => sr_last_run($db), 'limits' => SR_LIMITS, 'footer' => SR_FOOTER];
 }
 
@@ -981,10 +984,10 @@ function sr_email(string $type, ?array $rep, array $x = []): array {
             $row = [$s['name']];
             foreach ($cols as $fn) $row[] = $fn($s['week']) . ($s['prev'] && !$first ? ' [' . $fn($s['prev']) . ']' : '');
             $row[] = (string)$s['open_unanswered'];
-            $row[] = $s['week']['on_leave_excluded'] ? $s['week']['on_leave_excluded'] . ' escluse (ferie)' : '';
+            if ($rep['leave_excluded']) $row[] = $s['week']['on_leave_excluded'] ? $s['week']['on_leave_excluded'] . ' escluse (ferie)' : '';
             $rows[] = $row;
         }
-        $table(array_merge(['Venditore'], array_keys($cols), ['Senza risposta ora', 'Ferie']), $rows);
+        $table(array_merge(['Venditore'], array_keys($cols), ['Senza risposta ora'], $rep['leave_excluded'] ? ['Ferie'] : []), $rows);
         if ($first) {
             $sec('Ultime ' . ($rep['previous_weeks'] + 1) . ' settimane: % entro 24h (mediana)');
             $head = ['Settimana'];

@@ -21,7 +21,8 @@ $db = db();
 
 $week    = isset($_GET['week']) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $_GET['week']) ? $_GET['week'] : null;
 $agentId = (int)($_GET['agent_id'] ?? 0) ?: null;
-$rep     = sr_report($db, $week, $agentId);
+$noLeave = !empty($_GET['exclude_leave']);   // off by default: sellers on leave must still answer
+$rep     = sr_report($db, $week, $agentId, 4, $noLeave);
 $all     = sr_sellers($db);
 $ws      = $rep['week']['start'];
 $cols    = sr_metric_cols('en');
@@ -64,6 +65,9 @@ include 'includes/header.php';
       <?php endforeach; ?>
     </select>
   </label>
+  <label title="Leave out of the KPIs the client mails received on a seller's leave days (leave_entries)">
+    <input type="checkbox" name="exclude_leave" value="1" <?= $noLeave ? 'checked' : '' ?> onchange="this.form.submit()"> Exclude leave days
+  </label>
   <span>
     <?php if ($scan['status'] === 'never_run'): ?>
       <span class="sr-tag sr-warn">No scan yet</span>
@@ -82,7 +86,7 @@ include 'includes/header.php';
   <h3>Week <?= h($ws) ?> – <?= h($rep['week']['end']) ?> <span class="sr-prev" style="display:inline">(grey: the <?= (int)$rep['previous_weeks'] ?> weeks before, together)</span></h3>
   <div class="sr-wrap">
   <table class="sr-table">
-    <thead><tr><th>Seller</th><?php foreach (array_keys($cols) as $c): ?><th><?= h($c) ?></th><?php endforeach; ?><th>Unanswered now</th><th>Leave</th></tr></thead>
+    <thead><tr><th>Seller</th><?php foreach (array_keys($cols) as $c): ?><th><?= h($c) ?></th><?php endforeach; ?><th>Unanswered now</th><?php if ($noLeave): ?><th>Leave</th><?php endif; ?></tr></thead>
     <tbody>
     <?php foreach ($rep['sellers'] as $s): ?>
       <tr>
@@ -91,7 +95,7 @@ include 'includes/header.php';
         <td><?= h($fn($s['week'])) ?><?php if ($s['prev']): ?><span class="sr-prev"><?= h($fn($s['prev'])) ?></span><?php endif; ?></td>
         <?php endforeach; ?>
         <td><?= $s['open_unanswered'] ? '<span class="sr-tag sr-bad">' . (int)$s['open_unanswered'] . '</span>' : '0' ?></td>
-        <td><?= $s['week']['on_leave_excluded'] ? (int)$s['week']['on_leave_excluded'] . ' excluded' : '' ?></td>
+        <?php if ($noLeave): ?><td><?= $s['week']['on_leave_excluded'] ? (int)$s['week']['on_leave_excluded'] . ' excluded' : '' ?></td><?php endif; ?>
       </tr>
     <?php endforeach; ?>
     </tbody>
@@ -146,7 +150,7 @@ foreach ($lists as [$title, $list, $extra]): ?>
   info@ and safari@ are not read (their reply counts only if the seller is in copy); a few ambiguous matches may be wrong;
   leads from the web form have no first client mail, so their first reply cannot be measured.
   Threshold <?= SR_THRESHOLD_H ?> clock hours; evening / weekend / holiday = 18:00–08:00 EAT, Saturday, Sunday, Tanzanian public holidays.
-  Client mails received on a seller's leave days are left out of the KPIs.
+  <?= $noLeave ? "Client mails received on a seller's leave days are left out of the KPIs." : "Leave days count like any other day (\"on leave\" is only a note); tick \"Exclude leave days\" to leave them out." ?>
 </p>
 
 <?php include 'includes/footer.php'; ?>

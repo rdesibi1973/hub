@@ -1345,12 +1345,14 @@ tables `migrations/072_sales_response.sql`, page `modules/leads/sales_response.p
   mail, auto-replies, lists, bounces and no-reply senders are ignored.
 - A wait = the first unanswered client mail (several in a row = one wait) until the next savannah mail.
   Threshold 24 clock hours, always. Evening / weekend / holiday = 18:00–08:00 EAT, Sat, Sun, Tanzanian holidays
-  (`SR_HOLIDAYS`, Eid / Maulid dates are estimates). Waits starting on a seller's leave day (`leave_entries`) are
-  excluded from the KPIs but still listed as unanswered with `in_ferie`.
+  (`SR_HOLIDAYS`, Eid / Maulid dates are estimates). Leave days (`leave_entries`) count like any other day: sellers
+  on leave must still answer (Roberto, 18 Oct 2026); `in_ferie` / `on_leave` are only notes. On request
+  (`exclude_leave=1`, page checkbox) the waits starting on a leave day are left out of the KPIs (`on_leave_excluded`).
 
 ### `sales_response_status` (GET)
-Params: `week` (any `YYYY-MM-DD` of the week; default last complete week), `agent_id`. Same numbers as the weekly email.
-→ `week {start, end}`, `previous_weeks` (4), `live`, `sellers[] {name, agent_id, agent_name, mailbox, leave_names[],
+Params: `week` (any `YYYY-MM-DD` of the week; default last complete week), `agent_id`, `exclude_leave` (1 = leave days out
+of the KPIs; default 0, as the weekly email). Same numbers as the weekly email.
+→ `week {start, end}`, `previous_weeks` (4), `live`, `leave_excluded`, `sellers[] {name, agent_id, agent_name, mailbox, leave_names[],
 mapping_error, week, prev (the 4 weeks before, pooled), total, weeks {monday: metrics}, open_unanswered}` where metrics =
 `{due, answered_24h, pct_24h, late, median_h, p90_h, answered, off_due, off_answered_24h, pct_off_24h, new_leads,
 new_leads_median_h, client_msgs, sent_msgs, on_leave_excluded}`; `unanswered[] {seller, request_id, folder, customer,
