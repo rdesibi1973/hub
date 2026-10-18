@@ -1356,9 +1356,12 @@ of the KPIs; default 0, as the weekly email). Same numbers as the weekly email.
 mapping_error, week, prev (the 4 weeks before, pooled), total, weeks {monday: metrics}, open_unanswered}` where metrics =
 `{due, answered_24h, pct_24h, late, median_h, p90_h, answered, off_due, off_answered_24h, pct_off_24h, new_leads,
 new_leads_median_h, client_msgs, sent_msgs, on_leave_excluded}`; `unanswered[] {seller, request_id, folder, customer,
-client, first_client_at, last_client_at, client_msgs, hours_waiting, in_ferie, ambiguous, url}`, `new_leads[]`,
+client, subject (of the last client mail), first_client_at, last_client_at, client_msgs, hours_waiting, in_ferie, ambiguous, url}`, `new_leads[]`,
 `silent[]` (our mail last, client silent 7+ days, not Booked), `last_scan {status (ok|stale|scan_failed|never_run), …}`,
 `limits[]`, `footer`.
+Reminders: the Hub page (unanswered list, filter by seller, tick the mails) mails the seller the list from the Hub,
+reply-to `SALES_RESPONSE_TO`, logged in `sales_response_reminder` (shown as "reminded <date>"); logic `sr_send_reminder()`
+(`$confirm` false = preview), no Agent API action yet.
 
 ```bash
 curl -sA "$UA" -H "$H" "$U?action=sales_response_status"

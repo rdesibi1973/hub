@@ -109,6 +109,10 @@ function sr_schema(PDO $db): void {
         id INT AUTO_INCREMENT PRIMARY KEY, ran_at DATETIME NOT NULL, ok TINYINT(1) NOT NULL, error TEXT NULL,
         counts_json TEXT NULL, mailed VARCHAR(20) NULL, KEY idx_srr_ran (ran_at)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    $db->exec("CREATE TABLE IF NOT EXISTS sales_response_reminder (
+        id INT AUTO_INCREMENT PRIMARY KEY, sent_at DATETIME NOT NULL, agent_id INT NOT NULL, mailbox VARCHAR(120) NOT NULL,
+        n INT NOT NULL, items_json TEXT NOT NULL, sent_by VARCHAR(60) NOT NULL, KEY idx_srm_sent (sent_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
     $done = true;
 }
 
@@ -554,14 +558,14 @@ function sr_offhours(int $ts): bool {
 /** Unique linked client / savannah messages since $sinceTs, in date order. */
 function sr_messages(PDO $db, int $sinceTs): array {
     $st = $db->prepare("SELECT msg_key, MIN(date_utc) AS date_utc, MAX(direction) AS direction, MAX(from_addr) AS from_addr,
-                               MAX(request_id) AS request_id, MAX(ambiguous) AS ambiguous
+                               MAX(request_id) AS request_id, MAX(ambiguous) AS ambiguous, MAX(subject) AS subject
                         FROM mail_headers_index WHERE request_id IS NOT NULL AND direction IN ('client','savannah') AND date_utc >= ?
                         GROUP BY msg_key ORDER BY MIN(date_utc), msg_key");
     $st->execute([gmdate('Y-m-d H:i:s', $sinceTs)]);
     $out = [];
     foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
         $out[] = ['ts' => (int)strtotime($r['date_utc'] . ' UTC'), 'dir' => $r['direction'], 'from' => $r['from_addr'],
-                  'request_id' => (int)$r['request_id'], 'ambiguous' => (int)$r['ambiguous']];
+                  'request_id' => (int)$r['request_id'], 'ambiguous' => (int)$r['ambiguous'], 'subject' => (string)$r['subject']];
     }
     return $out;
 }
@@ -578,12 +582,13 @@ function sr_episodes(array $req, array $msgs): array {
         if ($m['dir'] === 'client') {
             if ($ep === null) {
                 $ep = ['request_id' => $req['id'], 'agent_id' => $req['agent_id'], 'start' => $m['ts'], 'last' => $m['ts'], 'n' => 1,
-                       'client' => $m['from'], 'answered' => null, 'by' => null, 'resp_h' => null, 'ambiguous' => $m['ambiguous'],
+                       'client' => $m['from'], 'subject' => $m['subject'], 'answered' => null, 'by' => null, 'resp_h' => null, 'ambiguous' => $m['ambiguous'],
                        'new_lead' => !$sent && !$eps && $req['recv_ts'] >= $m['ts'] - 14 * 86400];
             } else {
                 $ep['last'] = $m['ts'];
                 $ep['n']++;
                 $ep['client'] = $m['from'];
+                $ep['subject'] = $m['subject'];
                 $ep['ambiguous'] = max($ep['ambiguous'], $m['ambiguous']);
             }
         } else {
@@ -702,7 +707,7 @@ function sr_report(PDO $db, ?string $week = null, ?int $agentId = null, int $nPr
                 }
             }
             if ($open && $e['answered'] === null && $now - $e['start'] > SR_THRESHOLD_H * 3600) {
-                $unanswered[] = $base + ['client' => $e['client'], 'first_client_at' => date('Y-m-d H:i', $e['start']),
+                $unanswered[] = $base + ['client' => $e['client'], 'subject' => $e['subject'], 'first_client_at' => date('Y-m-d H:i', $e['start']),
                                          'last_client_at' => date('Y-m-d H:i', $e['last']), 'client_msgs' => $e['n'],
                                          'hours_waiting' => round(($now - $e['start']) / 3600, 1),
                                          'in_ferie' => $onLeave || isset($leave[$aid][$today]), 'ambiguous' => (bool)$e['ambiguous']];
@@ -749,6 +754,78 @@ function sr_report(PDO $db, ?string $week = null, ?int $agentId = null, int $nPr
             'generated_at' => date('Y-m-d H:i:s', $now), 'threshold_hours' => SR_THRESHOLD_H, 'timezone' => 'Africa/Dar_es_Salaam',
             'live' => sr_cfg()['live'], 'leave_excluded' => $excludeLeave, 'sellers' => $rows, 'unanswered' => $unanswered, 'new_leads' => $newLeads, 'silent' => $silent,
             'last_scan' => sr_last_run($db), 'limits' => SR_LIMITS, 'footer' => SR_FOOTER];
+}
+
+// ── Reminders to a seller ────────────────────────────────────────────────────
+
+/** Stable key of an unanswered wait (the page checkboxes, the reminder log). */
+function sr_unanswered_key(array $u): string {
+    return $u['request_id'] . '|' . $u['first_client_at'];
+}
+
+/** unanswered key => last reminder time (Y-m-d H:i), reminders of the last 60 days. */
+function sr_reminded(PDO $db): array {
+    sr_schema($db);
+    $out = [];
+    $st = $db->prepare("SELECT sent_at, items_json FROM sales_response_reminder WHERE sent_at >= ? ORDER BY sent_at");
+    $st->execute([date('Y-m-d H:i:s', time() - 60 * 86400)]);
+    foreach ($st as $r) {
+        foreach ((array)json_decode((string)$r['items_json'], true) as $k) $out[(string)$k] = substr($r['sent_at'], 0, 16);
+    }
+    return $out;
+}
+
+/** Reminder mail to one seller (English: the sales team is mixed). Headers-derived data only. [subject, html, text] */
+function sr_reminder_email(array $seller, array $items): array {
+    $h = function ($s) { return htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8'); };
+    $n = count($items);
+    $subject = '[Sales Response] Reminder: ' . $n . ' client mail' . ($n === 1 ? '' : 's') . ' waiting more than ' . SR_THRESHOLD_H . 'h';
+    $intro = 'Hi ' . $seller['name'] . ', ' . ($n === 1 ? 'this client mail has' : 'these client mails have')
+           . ' been waiting for a reply for more than ' . SR_THRESHOLD_H . ' hours:';
+    $outro = 'Please reply today. If one of them is already handled (by phone, WhatsApp, or from another address), just reply to this mail and say so.';
+    $td = 'style="padding:6px 8px;border-bottom:1px solid #eee;text-align:left;vertical-align:top;"';
+    $html = '<p>' . $h($intro) . '</p><table style="border-collapse:collapse;font-size:13px;"><tr>';
+    foreach (['Request', 'Client', 'Subject', 'Last client mail', 'Waiting'] as $c) $html .= '<th ' . $td . '>' . $h($c) . '</th>';
+    $html .= '</tr>';
+    $txt = $intro . "\n\n";
+    foreach ($items as $u) {
+        $req = $u['folder'] ?: '#' . $u['request_id'];
+        $client = trim($u['customer'] . ' <' . $u['client'] . '>');
+        $wait = sr_fmt_h($u['hours_waiting'], true);
+        $html .= '<tr><td ' . $td . '><a href="' . $h($u['url']) . '">' . $h($req) . '</a></td><td ' . $td . '>' . $h($client) . '</td><td ' . $td . '>'
+               . $h($u['subject'] ?? '') . '</td><td ' . $td . '>' . $h($u['last_client_at']) . '</td><td ' . $td . '>' . $h($wait) . '</td></tr>';
+        $txt .= '- ' . $req . ' | ' . $client . ' | ' . ($u['subject'] ?? '') . ' | last mail ' . $u['last_client_at'] . ' | waiting ' . $wait . "\n   " . $u['url'] . "\n";
+    }
+    $html .= '</table><p>' . $h($outro) . '</p>';
+    $txt .= "\n" . $outro . "\n";
+    return [$subject, $html, $txt];
+}
+
+/**
+ * Remind one seller of their unanswered client mails (> SR_THRESHOLD_H, as in sr_report()). $keys = sr_unanswered_key()
+ * values to include (empty = all of that seller). Mail from the Hub to the seller's mailbox, reply-to SALES_RESPONSE_TO
+ * (Roberto); send_hub_email() adds the signature of the logged-in sender. Logged in sales_response_reminder.
+ * $confirm false = preview only. Returns ['ok', 'to', 'n', 'subject', 'text', 'sent'] or ['ok' => false, 'error'].
+ */
+function sr_send_reminder(PDO $db, int $agentId, array $keys, string $by, bool $confirm = true): array {
+    $seller = null;
+    foreach (sr_sellers($db) as $s) if ($s['agent_id'] === $agentId) $seller = $s;
+    if (!$seller) return ['ok' => false, 'error' => 'Not a seller in Sales Response: agent ' . $agentId];
+    $want = array_flip(array_map('strval', $keys));
+    $items = array_values(array_filter(sr_report($db, null, $agentId, 0)['unanswered'], function ($u) use ($want) {
+        return !$want || isset($want[sr_unanswered_key($u)]);
+    }));
+    if (!$items) return ['ok' => false, 'error' => 'No unanswered client mail to remind ' . $seller['name'] . ' of (already answered?)'];
+    [$subject, $html, $text] = sr_reminder_email($seller, $items);
+    $res = ['ok' => true, 'to' => $seller['mailbox'], 'n' => count($items), 'subject' => $subject, 'text' => $text, 'sent' => false];
+    if (!$confirm) return $res;
+    require_once __DIR__ . '/../../../includes/mail_helper.php';
+    if (!send_hub_email($seller['mailbox'], $subject, $html, 'Savannah Explorers Hub', 'noreply@savannahexplorers.com', sr_cfg()['to'], $text)) {
+        return ['ok' => false, 'error' => 'The mail to ' . $seller['mailbox'] . ' could not be sent'];
+    }
+    $db->prepare("INSERT INTO sales_response_reminder (sent_at, agent_id, mailbox, n, items_json, sent_by) VALUES (?,?,?,?,?,?)")
+       ->execute([date('Y-m-d H:i:s'), $agentId, $seller['mailbox'], count($items), json_encode(array_map('sr_unanswered_key', $items)), substr($by, 0, 60)]);
+    return ['sent' => true] + $res;
 }
 
 // ── Runs ─────────────────────────────────────────────────────────────────────
