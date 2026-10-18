@@ -218,6 +218,21 @@ include __DIR__ . '/../../includes/layout_header.php';
   <?php endif; ?>
 </div>
 
+<!-- Client documents: public PDFs on the website (includes/client_docs.php) -->
+<?php $clientDocs = require __DIR__ . '/includes/client_docs.php'; ?>
+<div style="background:#fff;border:1px solid var(--grey-lt,#e5e5e5);border-radius:8px;padding:10px 14px;margin:10px 0 14px;font-size:.8rem">
+  <div style="font-weight:700;margin-bottom:6px">📎 Documents for clients <span style="font-weight:400;color:var(--grey-mid,#888);font-size:.75rem">— public links on our website: open, or copy the link into the client email</span></div>
+  <?php foreach ($clientDocs as $group => $files): ?>
+  <div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:4px 0">
+    <span style="min-width:250px;color:var(--grey-dk,#444)"><?= h($group) ?></span>
+    <?php foreach ($files as $lang => $file): ?>
+      <a href="<?= h(ITI_CLIENT_DOCS_BASE . rawurlencode($file)) ?>" target="_blank" rel="noopener" title="<?= h($file) ?>"
+         style="display:inline-block;border:1px solid var(--red,#C0211B);color:var(--red,#C0211B);border-radius:12px;padding:1px 10px;font-weight:600;font-size:.72rem;text-decoration:none">PDF <?= h($lang) ?></a>
+    <?php endforeach; ?>
+  </div>
+  <?php endforeach; ?>
+</div>
+
 <!-- Filtri -->
 <form method="GET" action="programs.php" class="filters">
   <input type="hidden" name="type" value="<?= h($tab) ?>">
