@@ -134,11 +134,11 @@ header {
   <a href="backoffice.php" class="<?= in_array($cur, ['backoffice.php','grp_groups.php','relink_folders.php','postponed.php'], true)?'active':'' ?>">🛠 BackOffice</a>
   <a href="requests.php"  class="<?= in_array($cur,['requests.php','request_add.php','request_edit.php','request_view.php']) ? 'active':'' ?>"><?= isLeadsRestricted() ? 'My Requests' : 'Requests' ?></a>
   <a href="pipeline.php"  class="<?= $cur==='pipeline.php' ? 'active':'' ?>">🔥 Pipeline</a>
+  <a href="sales_response.php" class="<?= $cur==='sales_response.php'?'active':'' ?>">⏱ Sales Response</a>
   <a href="ck_tracker.php"      class="<?= $cur==='ck_tracker.php'?'active':'' ?>">✅ CK Pipeline</a>
   <a href="booked.php"          class="<?= $cur==='booked.php'?'active':'' ?>">✈ Booked</a>
   <a href="payments.php"        class="<?= $cur==='payments.php'?'active':'' ?>">💳 Payments</a>
   <a href="email_templates.php" class="<?= $cur==='email_templates.php'?'active':'' ?>">📧 Templates</a>
-  <a href="procedures.php"      class="<?= in_array($cur, ['procedures.php', 'procedure_file.php'], true)?'active':'' ?>">📘 Procedures</a>
   <?php if (isLeadsRestricted()): // sellers get a direct link to their own Sales Team card ?>
   <a href="reports.php?rtype=team" class="<?= $cur==='reports.php' ? 'active':'' ?>">👥 Sales Team</a>
   <?php endif; ?>
@@ -160,11 +160,11 @@ header {
         // (Roberto, 18 Oct 2026); the pages still open by their address. ?>
   <?php endif; // !isLeadsRestricted ?>
   <a href="../iti/programs.php?type=personal" class="">🗺️ Itineraries</a>
+  <a href="procedures.php"      class="<?= in_array($cur, ['procedures.php', 'procedure_file.php'], true)?'active':'' ?>">📘 Procedures</a>
   <?php if (in_array($currentUser['role_name'] ?? '', ['admin','manager'])): ?>
   <span style="display:inline-block;width:1px;background:#E8E8E8;margin:8px 4px;align-self:stretch;"></span>
   <a href="../invoices/booked_requests.php" class="">🧾 Invoices</a>
   <?php endif; ?>
-  <a href="sales_response.php" class="<?= $cur==='sales_response.php'?'active':'' ?>">⏱ Sales Response</a>
   <a href="logout.php"    class="sub-nav-logout">Logout</a>
 </nav>
 
