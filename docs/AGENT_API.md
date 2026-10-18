@@ -1342,6 +1342,8 @@ reminders; anyone else: only their own agent, `users.agent_id`). Emails to `SALE
   contact (or same company domain); several open requests → References, then folder name in the subject, else the most
   recent one, `ambiguous`; 3. folder name `Name(Agency-Agent)` in the subject, only for a free-mail counterpart.
   Lost / Cancelled requests keep their history (their replies count in the KPIs) but never appear in the alerts.
+- **Direct clients only** (`SR_DIRECT_ONLY`): requests with `channel` = direct, or no channel + no agency + not an "(…-SB)"
+  folder. Agency / SB / Other requests are linked (better matching) but not counted anywhere (KPIs, lists, reminders).
 - **client** = outside sender; **savannah** = from our domains (or Roberto's Gmail) to an outside address; internal
   mail, auto-replies, lists, bounces and no-reply senders are ignored.
 - A wait = the first unanswered client mail (several in a row = one wait) until the next savannah mail.

@@ -113,9 +113,9 @@ a.sr-tag:hover{outline:1px solid currentColor}
   <p><b>Our rule</b> (Roberto to the team, 28 May 2026): every client email — inquiry, request or follow-up — gets a written
   <b>email reply within <?= SR_THRESHOLD_H ?> hours</b> of receipt. Anything agreed on WhatsApp or by phone must be confirmed by email:
   we keep a complete written history of every client conversation on our servers.</p>
-  <p>This page measures that rule from the company mailboxes, request by request: a client mail counts as answered when the
-  next email from us to the client goes out.</p>
-  <p class="sr-small">A reply counts only if it is sent from the company mail: a reply from a personal Gmail address, or from info@ / safari@
+  <p>This page measures that rule for our <b>direct clients</b> (not agencies, SB or other channels), from the company mailboxes,
+  request by request: a client mail counts as answered when the next email from us to the client goes out.</p>
+  <p class="sr-small">A reply counts only if it is sent from the company mail: a reply from Gmail or a similar personal address, or from info@ / safari@
   without the seller in copy, is not seen. A few client mails may be matched to the wrong request. Leads from the web form have no first
   client mail, so their first reply cannot be measured. <?= SR_THRESHOLD_H ?> clock hours, always; evening / weekend / holiday
   (18:00–08:00 EAT, Saturday, Sunday, Tanzanian public holidays) is shown apart.

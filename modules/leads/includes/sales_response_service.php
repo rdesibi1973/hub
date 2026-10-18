@@ -31,6 +31,9 @@ const SR_OWN_ADDRESSES = ['savannah.explorers@gmail.com'];          // Roberto's
 // Roberto, 17 Oct 2026 — their mailboxes are not monitored.
 const SR_SHARED_BOXES  = ['sales@savannahexplorers.com'];
 const SR_CLOSED        = ['Lost', 'Cancelled'];
+// Direct clients only (Roberto, 18 Oct 2026): requests with channel 'direct', or — older requests without a channel —
+// no agency and not an SB folder ("(Agent)" / "(Agent-Drct)"). Agency, SB and Other requests are still linked (better matching) but never counted.
+const SR_DIRECT_ONLY   = true;
 
 // Sellers in scope (Roberto, 17 Oct 2026). Requests of Roberto / Daniela are excluded by not being here.
 // agent / leave = name in agents.name / leave_entries.employee_name (exact, else "<name> …"); the first run
@@ -58,7 +61,7 @@ const SR_FREEMAIL = ['gmail.com', 'googlemail.com', 'yahoo.com', 'yahoo.it', 'ya
     'gmx.com', 'gmx.de', 'gmx.net', 'web.de', 't-online.de', 'orange.fr', 'free.fr', 'wanadoo.fr', 'laposte.net', 'sfr.fr',
     'proton.me', 'protonmail.com', 'mail.com', 'zoho.com', 'yandex.com', 'qq.com', 'bluewin.ch', 'pec.it'];
 
-const SR_LIMITS = ['WhatsApp e telefono non sono visibili.', 'Le risposte da indirizzi Gmail personali non sono visibili.',
+const SR_LIMITS = ['Solo clienti diretti: le richieste di agenzie, SB e Other non sono contate.', 'WhatsApp e telefono non sono visibili.', 'Le risposte da indirizzi Gmail personali non sono visibili.',
                    'Le caselle info@ e safari@ non sono lette: una loro risposta conta solo se il venditore è in copia.',
                    'Alcuni abbinamenti ambigui (stesso indirizzo su più richieste aperte) possono essere errati.',
                    'I lead arrivati dal modulo web non hanno una prima mail del cliente: la prima risposta non è misurabile.'];
@@ -393,8 +396,9 @@ function sr_requests(PDO $db): array {
     static $cache = null;
     if ($cache !== null) return $cache;
     $upd = sr_has_col($db, 'requests', 'updated_at') ? ', r.updated_at' : ', NULL AS updated_at';
+    $chn = sr_has_col($db, 'requests', 'channel') ? ', r.channel' : ', NULL AS channel';
     $rows = $db->query("SELECT r.id, r.agent_id, r.status, r.email, r.agency_id, r.practice_code, r.customer_name, r.date_received,
-                               r.start_date $upd, a.name AS agent_name
+                               r.start_date $upd $chn, a.name AS agent_name
                         FROM requests r LEFT JOIN agents a ON a.id = r.agent_id
                         WHERE r.date_received >= CURDATE() - INTERVAL 18 MONTH OR r.start_date >= CURDATE() - INTERVAL 60 DAY")
                ->fetchAll(PDO::FETCH_ASSOC);
@@ -405,6 +409,8 @@ function sr_requests(PDO $db): array {
         $r['recv_ts'] = $r['date_received'] ? (int)strtotime(substr($r['date_received'], 0, 10) . ' 00:00:00') : 0;
         $r['code'] = sr_folder_code((string)$r['practice_code']);
         $r['closed'] = in_array($r['status'], SR_CLOSED, true);
+        $ch = strtolower(trim((string)$r['channel']));
+        $r['direct'] = $ch === 'direct' || ($ch === '' && !(int)$r['agency_id'] && stripos((string)$r['practice_code'], '-SB)') === false);
         $out[$r['id']] = $r;
     }
     return $cache = $out;
@@ -671,7 +677,7 @@ function sr_report(PDO $db, ?string $week = null, ?int $agentId = null, int $nPr
     $perReq = [];
     foreach (sr_messages($db, min($fromTs, $scopeTs) - 30 * 86400) as $m) {
         $r = $reqs[$m['request_id']] ?? null;
-        if ($r && isset($byAgent[$r['agent_id']])) $perReq[$m['request_id']][] = $m;
+        if ($r && isset($byAgent[$r['agent_id']]) && ($r['direct'] || !SR_DIRECT_ONLY)) $perReq[$m['request_id']][] = $m;
     }
 
     $eps = [];          // agent_id => week => [waits in the KPIs]
