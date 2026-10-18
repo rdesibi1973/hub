@@ -1332,7 +1332,8 @@ request by request. `modules/leads/sales_response_scan.php --cron` (cPanel cron,
 (From, To, Cc, Date, Subject, Message-ID, In-Reply-To, References) of the sellers' mailboxes and sales@ straight
 from the Maildirs (not info@ = Roberto, not safari@ = Daniela: their replies are seen only when a seller's mailbox
 is in copy) — no bodies, no attachments, no IMAP. Logic `modules/leads/includes/sales_response_service.php`,
-tables `migrations/072_sales_response.sql`, page `modules/leads/sales_response.php` (admin). Emails to `SALES_RESPONSE_TO`
+tables `migrations/072_sales_response.sql`, page `modules/leads/sales_response.php` (admin / manager: every seller and
+reminders; anyone else: only their own agent, `users.agent_id`). Emails to `SALES_RESPONSE_TO`
 (default savannah.explorers@gmail.com): daily 07:00 `[Sales Response] <date> – N mail senza risposta >24h` (only with
 `SALES_RESPONSE_LIVE` true and something to report), Monday `[Sales Response] Weekly <date>` (always, "TEST" until LIVE),
 `[Sales Response] SCAN FAILED <date>` on errors. First run: TEST report with the seller mapping and 90 days.

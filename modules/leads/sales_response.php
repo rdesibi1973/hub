@@ -1,6 +1,7 @@
 <?php
 /**
- * sales_response.php — how fast the sellers answer clients by email (admin only for now).
+ * sales_response.php — how fast the sellers answer clients by email. Admin / manager: every seller, reminders.
+ * Everyone else: only their own numbers and mails (their agent = users.agent_id), no reminders.
  * Same numbers as the weekly email and the Agent API sales_response_status: sr_report() in
  * includes/sales_response_service.php. Headers only: no mail body is ever shown. Page in English, emails in Italian.
  * Unanswered list: filter by seller (ua), tick the mails and send the seller a reminder (sr_send_reminder()).
@@ -14,16 +15,22 @@ if (!defined('AGENT_API_KEY') && is_file(__DIR__ . '/../../includes/config.php')
 require_once __DIR__ . '/includes/sales_response_service.php';
 $pageTitle = 'Sales Response';
 $currentUser = current_user();
-if (($currentUser['role_name'] ?? '') !== 'admin') {
-    flash('Access denied.', 'error');
-    header('Location: requests.php'); exit;
-}
 $db = db();
+// Same rule as the nav / Pipeline: admin and manager see every seller; anyone else only their own agent.
+$isMgr = !(function_exists('isLeadsRestricted') && isLeadsRestricted()) && in_array($currentUser['role_name'] ?? '', ['admin', 'manager'], true);
+$myAgentId = 0;
+if (!$isMgr) {
+    $st = $db->prepare('SELECT agent_id FROM users WHERE id = ? LIMIT 1');
+    $st->execute([(int)$currentUser['id']]);
+    $myAgentId = (int)($st->fetchColumn() ?: 0);
+}
+$mySeller = null;
+foreach (sr_sellers($db) as $s) if ($myAgentId && $s['agent_id'] === $myAgentId) $mySeller = $s;
 
 $week    = isset($_GET['week']) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $_GET['week']) ? $_GET['week'] : null;
-$agentId = (int)($_GET['agent_id'] ?? 0) ?: null;
+$agentId = $isMgr ? ((int)($_GET['agent_id'] ?? 0) ?: null) : $myAgentId;
 $noLeave = !empty($_GET['exclude_leave']);   // off by default: sellers on leave must still answer
-$uaId    = (int)($_GET['ua'] ?? 0) ?: $agentId;   // unanswered list: seller filter (default All, or the page's seller)
+$uaId    = $isMgr ? ((int)($_GET['ua'] ?? 0) ?: $agentId) : $myAgentId;   // unanswered list: seller filter (default All)
 $selfUrl = function (array $set) use ($week, $agentId, $noLeave, $uaId) {
     $q = array_filter(['week' => $week, 'agent_id' => $agentId, 'exclude_leave' => $noLeave ? 1 : null, 'ua' => $uaId], function ($v) { return $v !== null; });
     return 'sales_response.php?' . http_build_query(array_filter(array_merge($q, $set), function ($v) { return $v !== null; }));
@@ -31,7 +38,9 @@ $selfUrl = function (array $set) use ($week, $agentId, $noLeave, $uaId) {
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'remind') {
     $to = (int)($_POST['agent_id'] ?? 0);
-    if (!hash_equals(csrf_token(), (string)($_POST['csrf'] ?? ''))) {
+    if (!$isMgr) {
+        flash('Only admin and managers can send reminders.', 'error');
+    } elseif (!hash_equals(csrf_token(), (string)($_POST['csrf'] ?? ''))) {
         flash('Session expired — reload the page and try again.', 'error');
     } elseif (empty($_POST['keys']) || !is_array($_POST['keys'])) {
         flash('Tick at least one mail for the reminder.', 'error');
@@ -48,6 +57,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'remin
     header('Location: ' . $selfUrl(['ua' => $to ?: null]) . '#unanswered'); exit;
 }
 
+if (!$isMgr && !$mySeller) {   // not one of the sellers measured here
+    include 'includes/header.php';
+    echo '<div class="page-header"><h2>⏱ Sales Response — replies to clients</h2></div><p>This page shows the email reply times of the '
+       . 'sales team. Your Hub user is not linked to one of the sellers measured here' . ($myAgentId ? '' : ' (no agent on your user)')
+       . ': ask Roberto if you think it should be.</p>';
+    include 'includes/footer.php';
+    exit;
+}
+
 $rep     = sr_report($db, $week, $agentId, 4, $noLeave);
 $all     = sr_sellers($db);
 $ws      = $rep['week']['start'];
@@ -60,6 +78,7 @@ $unanswered = array_values(array_filter($rep['unanswered'], function ($u) use ($
 $uaSeller = null;
 foreach ($all as $s) if ($uaId && $s['agent_id'] === $uaId) $uaSeller = $s;
 $reminded = sr_reminded($db);
+$canRemind = $isMgr && $uaSeller;
 
 include 'includes/header.php';
 ?>
@@ -83,9 +102,25 @@ a.sr-tag:hover{outline:1px solid currentColor}
 .sr-head form{font-size:.85rem}
 .sr-actions{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:10px;font-size:.85rem}
 .sr-hint{color:#777;font-size:.82rem}
+.sr-rule{background:#fff;border-left:4px solid #C0211B;border-radius:6px;padding:12px 16px;margin-bottom:16px;font-size:.88rem;line-height:1.6}
+.sr-rule p{margin:0 0 6px}.sr-rule p:last-child{margin:0}
+.sr-rule .sr-small{font-size:.78rem;color:var(--grey-dk,#555)}
 </style>
 
 <div class="page-header"><h2>⏱ Sales Response — replies to clients</h2></div>
+
+<div class="sr-rule">
+  <p><b>Our rule</b> (Roberto to the team, 28 May 2026): every client email — inquiry, request or follow-up — gets a written
+  <b>email reply within <?= SR_THRESHOLD_H ?> hours</b> of receipt. Anything agreed on WhatsApp or by phone must be confirmed by email:
+  we keep a complete written history of every client conversation on our servers.</p>
+  <p>This page measures that rule from the company mailboxes, request by request: a client mail counts as answered when the
+  next email from us to the client goes out.</p>
+  <p class="sr-small">A reply counts only if it is sent from the company mail: a reply from a personal Gmail address, or from info@ / safari@
+  without the seller in copy, is not seen. A few client mails may be matched to the wrong request. Leads from the web form have no first
+  client mail, so their first reply cannot be measured. <?= SR_THRESHOLD_H ?> clock hours, always; evening / weekend / holiday
+  (18:00–08:00 EAT, Saturday, Sunday, Tanzanian public holidays) is shown apart.
+  <?= $noLeave ? "Client mails received on a seller's leave days are left out of the KPIs." : 'Leave days count like any other day ("on leave" is only a note).' ?></p>
+</div>
 
 <form method="get" class="sr-filters">
   <label>Week
@@ -95,6 +130,7 @@ a.sr-tag:hover{outline:1px solid currentColor}
       <?php endforeach; ?>
     </select>
   </label>
+  <?php if ($isMgr): ?>
   <label>Seller
     <select name="agent_id" onchange="this.form.submit()">
       <option value="">All</option>
@@ -103,6 +139,7 @@ a.sr-tag:hover{outline:1px solid currentColor}
       <?php endforeach; ?>
     </select>
   </label>
+  <?php endif; ?>
   <label title="Leave out of the KPIs the client mails received on a seller's leave days (leave_entries)">
     <input type="checkbox" name="exclude_leave" value="1" <?= $noLeave ? 'checked' : '' ?> onchange="this.form.submit()"> Exclude leave days
   </label>
@@ -146,6 +183,7 @@ a.sr-tag:hover{outline:1px solid currentColor}
   <div style="padding:14px 18px">
   <div class="sr-head">
     <h3>Client mails unanswered for more than <?= SR_THRESHOLD_H ?>h (<?= count($unanswered) ?>)</h3>
+    <?php if ($isMgr): ?>
     <form method="get" action="sales_response.php#unanswered">
       <?php if ($week): ?><input type="hidden" name="week" value="<?= h($week) ?>"><?php endif; ?>
       <?php if ($agentId): ?><input type="hidden" name="agent_id" value="<?= (int)$agentId ?>"><?php endif; ?>
@@ -159,6 +197,7 @@ a.sr-tag:hover{outline:1px solid currentColor}
         </select>
       </label>
     </form>
+    <?php endif; ?>
   </div>
   <?php if (!$unanswered): ?><div style="color:#777;font-size:.85rem">none</div><?php else: ?>
   <form method="post" action="sales_response.php" id="sr-remind">
@@ -168,13 +207,13 @@ a.sr-tag:hover{outline:1px solid currentColor}
   <div class="sr-wrap">
   <table class="sr-table">
     <thead><tr>
-      <?php if ($uaSeller): ?><th style="min-width:0"><input type="checkbox" checked title="All / none" onclick="document.querySelectorAll('#sr-remind .sr-key').forEach(function (c) { c.checked = this.checked; }, this)"></th><?php endif; ?>
+      <?php if ($canRemind): ?><th style="min-width:0"><input type="checkbox" checked title="All / none" onclick="document.querySelectorAll('#sr-remind .sr-key').forEach(function (c) { c.checked = this.checked; }, this)"></th><?php endif; ?>
       <th>Seller</th><th>Request</th><th>Client</th><th>Subject</th><th>Last client mail</th><th>Waiting</th><th>Notes</th>
     </tr></thead>
     <tbody>
     <?php foreach ($unanswered as $u): $k = sr_unanswered_key($u); ?>
       <tr>
-        <?php if ($uaSeller): ?><td><input type="checkbox" class="sr-key" name="keys[]" value="<?= h($k) ?>" checked></td><?php endif; ?>
+        <?php if ($canRemind): ?><td><input type="checkbox" class="sr-key" name="keys[]" value="<?= h($k) ?>" checked></td><?php endif; ?>
         <td><?= h($u['seller']) ?></td>
         <td><a href="request_view.php?id=<?= (int)$u['request_id'] ?>"><?= h($u['folder'] ?: '#' . $u['request_id']) ?></a></td>
         <td><?= h($u['customer'] . ' <' . $u['client'] . '>') ?></td>
@@ -188,8 +227,9 @@ a.sr-tag:hover{outline:1px solid currentColor}
     </tbody>
   </table>
   </div>
+  <?php if ($isMgr): ?>
   <div class="sr-actions">
-    <?php if ($uaSeller): ?>
+    <?php if ($canRemind): ?>
       <button type="submit" class="btn btn-primary"
               onclick="var n = document.querySelectorAll('#sr-remind .sr-key:checked').length; if (!n) { alert('Tick at least one mail.'); return false; } return confirm('Send a reminder to <?= h(addslashes($uaSeller['name'] . ' (' . $uaSeller['mailbox'] . ')')) ?> for ' + n + ' mail(s)?');">
         ✉ Send reminder to <?= h($uaSeller['name']) ?>
@@ -199,6 +239,7 @@ a.sr-tag:hover{outline:1px solid currentColor}
       <span class="sr-hint">Choose a seller above (or click a number in “Unanswered now”) to send them a reminder.</span>
     <?php endif; ?>
   </div>
+  <?php endif; ?>
   </form>
   <?php endif; ?>
   </div>
@@ -206,7 +247,7 @@ a.sr-tag:hover{outline:1px solid currentColor}
 
 <?php
 $lists = [
-    ['New leads this week: first reply', $rep['new_leads'],
+    ['New leads this week: how long until our first reply', $rep['new_leads'],
      ['First client mail' => function ($l) { return $l['first_client_at']; },
       'First reply' => function ($l) { return $l['first_reply_at'] ?? 'no reply'; },
       'Time' => function ($l) use ($fh) { return $fh($l['hours']); },
@@ -240,12 +281,5 @@ foreach ($lists as [$title, $list, $extra]): ?>
 </div>
 <?php endforeach; ?>
 
-<p style="font-size:.78rem;color:var(--grey-dk,#555);line-height:1.6">
-  <b>Company mail only.</b> WhatsApp and phone are not visible; replies from personal Gmail addresses are not visible;
-  info@ and safari@ are not read (their reply counts only if the seller is in copy); a few ambiguous matches may be wrong;
-  leads from the web form have no first client mail, so their first reply cannot be measured.
-  Threshold <?= SR_THRESHOLD_H ?> clock hours; evening / weekend / holiday = 18:00–08:00 EAT, Saturday, Sunday, Tanzanian public holidays.
-  <?= $noLeave ? "Client mails received on a seller's leave days are left out of the KPIs." : "Leave days count like any other day (\"on leave\" is only a note); tick \"Exclude leave days\" to leave them out." ?>
-</p>
 
 <?php include 'includes/footer.php'; ?>
