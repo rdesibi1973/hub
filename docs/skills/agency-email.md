@@ -67,6 +67,7 @@ Every mail about a request/booking carries the Dropbox folder name: `Re: <origin
 ## 7. Staff mails
 
 English, short, factual: folder name in the subject, what to do, by when. Booking teams: rooms exactly as per the request (room type and pax). Incoming payment alerts: forward the agency's original payment mail with its attachment to Saruni and Doreen, folder name in the subject.
+Sending staff mails after Roberto's ok: if the Hub `mail_send` with `from: gmail` answers that Gmail is not configured, send from savannah.explorers@gmail.com with the Gmail connector (`send_message`), same text and signature; the mail is then not logged in the Hub timeline (19 Oct 2026).
 
 ## 8. Report to Roberto (Italian)
 

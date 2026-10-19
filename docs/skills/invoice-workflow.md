@@ -64,6 +64,7 @@ Savannah Holidays Ltd (SH invoices): AfrAsia account — details from Roberto (n
 A transfer the client/agency says was sent, or a payment advice (e.g. "Comunicazione di pagamento"), is NOT a received payment:
 - do NOT register it in the Hub, do NOT change invoice or folder status, never mark anything paid;
 - in the Calc write "ON THE WAY dd/mm/yyyy" in G11 (deposit) or G12 (balance);
+- every note written in the Calc is in English ("ON THE WAY", "RECEIVED", "incoming, not yet received"), never Italian ("in arrivo") (19 Oct 2026);
 - propose forwarding the agency's original payment mail, with its attachment, to Saruni and Doreen, with the folder name in the subject (draft, send only after his ok).
 
 ## 6. Payment received
