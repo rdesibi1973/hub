@@ -27,9 +27,10 @@ const SR_SILENT_DAYS   = 7;
 const SR_KEEP_MONTHS   = 12;
 const SR_OWN_DOMAINS   = ['savannahexplorers.com', 'theorangicollection.com'];
 const SR_OWN_ADDRESSES = ['savannah.explorers@gmail.com'];          // Roberto's Gmail: his replies count as ours
-// Shared mailbox read too (a reply from it counts as "Savannah answered"). Not info@ (Roberto) nor safari@ (Daniela):
-// Roberto, 17 Oct 2026 — their mailboxes are not monitored.
-const SR_SHARED_BOXES  = ['sales@savannahexplorers.com'];
+// Shared mailboxes read too (change request 19 Oct 2026): most direct leads arrive on info@ and are assigned in the Hub.
+// A linked client mail received there is a client message for the seller of the request; a reply sent from there counts
+// as "Savannah answered". Unlinked mail on them (spam, suppliers, newsletters, staff) is never counted nor listed.
+const SR_SHARED_BOXES  = ['info@savannahexplorers.com', 'safari@savannahexplorers.com', 'sales@savannahexplorers.com'];
 const SR_CLOSED        = ['Lost', 'Cancelled'];
 // Direct clients only (Roberto, 18 Oct 2026): requests with channel 'direct', or — older requests without a channel —
 // no agency and not an SB folder ("(Agent)" / "(Agent-Drct)"). Agency, SB and Other requests are still linked (better matching) but never counted.
@@ -62,7 +63,6 @@ const SR_FREEMAIL = ['gmail.com', 'googlemail.com', 'yahoo.com', 'yahoo.it', 'ya
     'proton.me', 'protonmail.com', 'mail.com', 'zoho.com', 'yandex.com', 'qq.com', 'bluewin.ch', 'pec.it'];
 
 const SR_LIMITS = ['Solo clienti diretti: le richieste di agenzie, SB e Other non sono contate.', 'WhatsApp e telefono non sono visibili.', 'Le risposte da indirizzi Gmail personali non sono visibili.',
-                   'Le caselle info@ e safari@ non sono lette: una loro risposta conta solo se il venditore è in copia.',
                    'Alcuni abbinamenti ambigui (stesso indirizzo su più richieste aperte) possono essere errati.',
                    'I lead arrivati dal modulo web non hanno una prima mail del cliente: la prima risposta non è misurabile.'];
 const SR_FOOTER = 'Misura solo la posta aziendale.';
@@ -460,8 +460,11 @@ function sr_pick(array $ids, array $reqs): int {
  *  3. subject — folder name "Name(Agency-Agent)" in the subject, only for a free-mail counterpart (a client
  *     writing from another personal address; a supplier writing about the booking must not count as the client).
  * A request must exist ≤ 14 days after the mail (it is often created the day after the first client mail).
+ * One of ours linked by thread counts only if its To/Cc reaches the client of that request (request / agency address,
+ * company domain, or an address the client already wrote from: $clientAddr) — a forward from info@ to the seller, or a
+ * note to a supplier in the same thread, is not an answer to the client (change request 19 Oct 2026).
  */
-function sr_link_one(array $m, array $reqs, array $byAddr, array $byDom, array $known): array {
+function sr_link_one(array $m, array $reqs, array $byAddr, array $byDom, array $known, array $clientAddr = []): array {
     $none = [null, null, 0];
     if ($m['direction'] !== 'client' && $m['direction'] !== 'savannah') return $none;
     $ts = strtotime($m['date_utc'] . ' UTC');
@@ -472,8 +475,17 @@ function sr_link_one(array $m, array $reqs, array $byAddr, array $byDom, array $
     $alive = function ($id) use ($reqs, $ts) { return isset($reqs[$id]) && $reqs[$id]['recv_ts'] <= $ts + 14 * 86400; };
     $fwd = (bool)preg_match('/^\s*(fwd?|i|tr|wg|inoltr\w*)\s*:/i', (string)$m['subject']);
 
+    $reaches = function (int $id) use ($m, $cp, $byAddr, $byDom, $clientAddr) {
+        if ($m['direction'] === 'client') return true;
+        foreach ($cp as $a) {
+            $d = sr_domain($a);
+            if (isset($byAddr[$a][$id]) || isset($clientAddr[$id][$a]) || ($d !== '' && !sr_is_free($d) && isset($byDom[$d][$id]))) return true;
+        }
+        return false;
+    };
+
     $irt = strtolower((string)$m['in_reply_to']);
-    if ($irt !== '' && isset($known[$irt]) && !($m['direction'] === 'savannah' && $fwd)) return [$known[$irt], 'thread', 0];
+    if ($irt !== '' && isset($known[$irt]) && !($m['direction'] === 'savannah' && $fwd) && $reaches($known[$irt])) return [$known[$irt], 'thread', 0];
 
     $cand = [];
     foreach ($cp as $a) {
@@ -510,11 +522,15 @@ function sr_link(PDO $db, int $days = SR_RELINK_DAYS): array {
     $reqs = sr_requests($db);
     [$byAddr, $byDom] = sr_contact_maps($db, $reqs);
     $since = gmdate('Y-m-d H:i:s', time() - $days * 86400);
-    $known = [];   // message_id => request_id
-    $st = $db->prepare("SELECT message_id, request_id FROM mail_headers_index
-                        WHERE request_id IS NOT NULL AND message_id IS NOT NULL AND date_utc < ? AND date_utc >= ?");
+    $known = [];        // message_id => request_id
+    $clientAddr = [];   // request_id => [address the client wrote from => true]
+    $st = $db->prepare("SELECT message_id, request_id, direction, from_addr FROM mail_headers_index
+                        WHERE request_id IS NOT NULL AND date_utc < ? AND date_utc >= ?");
     $st->execute([$since, gmdate('Y-m-d H:i:s', time() - ($days + 120) * 86400)]);
-    foreach ($st as $r) $known[$r['message_id']] = (int)$r['request_id'];
+    foreach ($st as $r) {
+        if ($r['message_id'] !== null) $known[$r['message_id']] = (int)$r['request_id'];
+        if ($r['direction'] === 'client') $clientAddr[(int)$r['request_id']][$r['from_addr']] = true;
+    }
 
     $st = $db->prepare("SELECT msg_key, message_id, in_reply_to, refs, date_utc, from_addr, to_addrs, subject, direction, request_id,
                                match_rule, ambiguous FROM mail_headers_index WHERE date_utc >= ? ORDER BY date_utc, id");
@@ -528,11 +544,12 @@ function sr_link(PDO $db, int $days = SR_RELINK_DAYS): array {
     $up = $db->prepare("UPDATE mail_headers_index SET request_id = ?, match_rule = ?, ambiguous = ? WHERE msg_key = ?");
     $n = ['messages' => count($msgs), 'linked' => 0, 'ambiguous' => 0, 'changed' => 0];
     foreach ($msgs as $k => $m) {
-        [$rid, $rule, $amb] = sr_link_one($m, $reqs, $byAddr, $byDom, $known);
+        [$rid, $rule, $amb] = sr_link_one($m, $reqs, $byAddr, $byDom, $known, $clientAddr);
         if ($rid !== null) {
             $n['linked']++;
             if ($amb) $n['ambiguous']++;
             if ($m['message_id'] !== null) $known[$m['message_id']] = $rid;
+            if ($m['direction'] === 'client') $clientAddr[$rid][$m['from_addr']] = true;
         }
         $old = $m['request_id'] === null ? null : (int)$m['request_id'];
         if ($m['mixed'] || $old !== $rid || $m['match_rule'] !== $rule || (int)$m['ambiguous'] !== $amb) {
@@ -561,19 +578,33 @@ function sr_offhours(int $ts): bool {
     return $h >= 18 || $h < 8 || (int)date('N', $ts) >= 6 || isset(sr_cfg()['holidays'][date('Y-m-d', $ts)]);
 }
 
-/** Unique linked client / savannah messages since $sinceTs, in date order. */
+/**
+ * Unique linked client / savannah messages since $sinceTs, in date order. One Message-ID = one message, however many
+ * mailboxes hold a copy (client mail To seller + Cc info@ counts once); 'boxes' = the mailboxes holding it.
+ */
 function sr_messages(PDO $db, int $sinceTs): array {
     $st = $db->prepare("SELECT msg_key, MIN(date_utc) AS date_utc, MAX(direction) AS direction, MAX(from_addr) AS from_addr,
-                               MAX(request_id) AS request_id, MAX(ambiguous) AS ambiguous, MAX(subject) AS subject
+                               MAX(request_id) AS request_id, MAX(ambiguous) AS ambiguous, MAX(subject) AS subject,
+                               GROUP_CONCAT(DISTINCT mailbox ORDER BY mailbox) AS boxes
                         FROM mail_headers_index WHERE request_id IS NOT NULL AND direction IN ('client','savannah') AND date_utc >= ?
                         GROUP BY msg_key ORDER BY MIN(date_utc), msg_key");
     $st->execute([gmdate('Y-m-d H:i:s', $sinceTs)]);
     $out = [];
     foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
         $out[] = ['ts' => (int)strtotime($r['date_utc'] . ' UTC'), 'dir' => $r['direction'], 'from' => $r['from_addr'],
-                  'request_id' => (int)$r['request_id'], 'ambiguous' => (int)$r['ambiguous'], 'subject' => (string)$r['subject']];
+                  'request_id' => (int)$r['request_id'], 'ambiguous' => (int)$r['ambiguous'], 'subject' => (string)$r['subject'],
+                  'boxes' => array_filter(explode(',', (string)$r['boxes']))];
     }
     return $out;
+}
+
+/** "info@, alessia@" — the mailboxes a client wrote to, shared ones first. */
+function sr_boxes_label(array $boxes): string {
+    $boxes = array_values(array_unique($boxes));
+    usort($boxes, function ($a, $b) {
+        return [!in_array($a, SR_SHARED_BOXES, true), $a] <=> [!in_array($b, SR_SHARED_BOXES, true), $b];
+    });
+    return implode(', ', array_map(function ($b) { return strstr($b, '@', true) . '@'; }, $boxes));
 }
 
 /**
@@ -589,10 +620,11 @@ function sr_episodes(array $req, array $msgs): array {
             if ($ep === null) {
                 $ep = ['request_id' => $req['id'], 'agent_id' => $req['agent_id'], 'start' => $m['ts'], 'last' => $m['ts'], 'n' => 1,
                        'client' => $m['from'], 'subject' => $m['subject'], 'answered' => null, 'by' => null, 'resp_h' => null, 'ambiguous' => $m['ambiguous'],
-                       'new_lead' => !$sent && !$eps && $req['recv_ts'] >= $m['ts'] - 14 * 86400];
+                       'boxes' => $m['boxes'], 'new_lead' => !$sent && !$eps && $req['recv_ts'] >= $m['ts'] - 14 * 86400];
             } else {
                 $ep['last'] = $m['ts'];
                 $ep['n']++;
+                $ep['boxes'] = array_merge($ep['boxes'], $m['boxes']);
                 $ep['client'] = $m['from'];
                 $ep['subject'] = $m['subject'];
                 $ep['ambiguous'] = max($ep['ambiguous'], $m['ambiguous']);
@@ -728,13 +760,14 @@ function sr_report(PDO $db, ?string $week = null, ?int $agentId = null, int $nPr
                 if ($e['new_lead'] && $w === $ws) {
                     $newLeads[] = $base + ['first_client_at' => date('Y-m-d H:i', $e['start']),
                                            'first_reply_at' => $e['answered'] ? date('Y-m-d H:i', $e['answered']) : null,
-                                           'hours' => $e['resp_h'], 'answered_by' => $e['by'], 'on_leave' => $onLeave];
+                                           'hours' => $e['resp_h'], 'answered_by' => $e['by'], 'on_leave' => $onLeave,
+                                           'written_to' => sr_boxes_label($e['boxes'])];
                 }
             }
             if ($open && $e['answered'] === null && $now - $e['start'] > SR_THRESHOLD_H * 3600) {
                 $unanswered[] = $base + ['client' => $e['client'], 'subject' => $e['subject'], 'first_client_at' => date('Y-m-d H:i', $e['start']),
                                          'last_client_at' => date('Y-m-d H:i', $e['last']), 'client_msgs' => $e['n'],
-                                         'hours_waiting' => round(($now - $e['start']) / 3600, 1),
+                                         'hours_waiting' => round(($now - $e['start']) / 3600, 1), 'written_to' => sr_boxes_label($e['boxes']),
                                          'in_ferie' => $onLeave || isset($leave[$aid][$today]), 'ambiguous' => (bool)$e['ambiguous']];
             }
         }
@@ -810,16 +843,18 @@ function sr_reminder_email(array $seller, array $items): array {
     $outro = 'Please reply today. If one of them is already handled (by phone, WhatsApp, or from another address), just reply to this mail and say so.';
     $td = 'style="padding:6px 8px;border-bottom:1px solid #eee;text-align:left;vertical-align:top;"';
     $html = '<p>' . $h($intro) . '</p><table style="border-collapse:collapse;font-size:13px;"><tr>';
-    foreach (['Request', 'Client', 'Subject', 'Last client mail', 'Waiting'] as $c) $html .= '<th ' . $td . '>' . $h($c) . '</th>';
+    foreach (['Request', 'Client', 'Subject', 'Last client mail', 'Written to', 'Waiting'] as $c) $html .= '<th ' . $td . '>' . $h($c) . '</th>';
     $html .= '</tr>';
     $txt = $intro . "\n\n";
     foreach ($items as $u) {
         $req = $u['folder'] ?: '#' . $u['request_id'];
         $client = trim($u['customer'] . ' <' . $u['client'] . '>');
         $wait = sr_fmt_h($u['hours_waiting'], true);
+        $to = $u['written_to'] ?? '';
         $html .= '<tr><td ' . $td . '><a href="' . $h($u['url']) . '">' . $h($req) . '</a></td><td ' . $td . '>' . $h($client) . '</td><td ' . $td . '>'
-               . $h($u['subject'] ?? '') . '</td><td ' . $td . '>' . $h($u['last_client_at']) . '</td><td ' . $td . '>' . $h($wait) . '</td></tr>';
-        $txt .= '- ' . $req . ' | ' . $client . ' | ' . ($u['subject'] ?? '') . ' | last mail ' . $u['last_client_at'] . ' | waiting ' . $wait . "\n   " . $u['url'] . "\n";
+               . $h($u['subject'] ?? '') . '</td><td ' . $td . '>' . $h($u['last_client_at']) . '</td><td ' . $td . '>' . $h($to) . '</td><td ' . $td . '>' . $h($wait) . '</td></tr>';
+        $txt .= '- ' . $req . ' | ' . $client . ' | ' . ($u['subject'] ?? '') . ' | last mail ' . $u['last_client_at'] . ($to !== '' ? ' to ' . $to : '')
+              . ' | waiting ' . $wait . "\n   " . $u['url'] . "\n";
     }
     $html .= '</table><p>' . $h($outro) . '</p>';
     $txt .= "\n" . $outro . "\n";
@@ -1049,10 +1084,11 @@ function sr_email(string $type, ?array $rep, array $x = []): array {
         foreach ($list as $i => $u) {
             $rows[] = [$u['seller'], ($u['folder'] ?: '#' . $u['request_id']) . ' ' . $u['url'], trim($u['customer'] . ' <' . $u['client'] . '>'),
                        $u['last_client_at'] . ($u['client_msgs'] > 1 ? ' (' . $u['client_msgs'] . ' mail)' : ''), sr_fmt_h($u['hours_waiting']),
+                       $u['written_to'] ?? '',
                        ($u['in_ferie'] ? 'in ferie' : '') . ($u['ambiguous'] ? ($u['in_ferie'] ? ', ' : '') . 'abbinamento incerto' : '')];
             $raw[$i][1] = $reqCell($u);
         }
-        $table(['Venditore', 'Richiesta', 'Cliente', 'Ultima mail cliente', 'In attesa da', 'Note'], $rows, $raw);
+        $table(['Venditore', 'Richiesta', 'Cliente', 'Ultima mail cliente', 'In attesa da', 'Scritto a', 'Note'], $rows, $raw);
     };
     $mapping = function () use ($rep, $sec, $table, $x) {
         $sec('Mappatura venditori (da confermare)');
@@ -1131,10 +1167,10 @@ function sr_email(string $type, ?array $rep, array $x = []): array {
             $rows = $raw = [];
             foreach ($rep['new_leads'] as $i => $l) {
                 $rows[] = [$l['seller'], ($l['folder'] ?: '#' . $l['request_id']) . ' ' . $l['url'], $l['first_client_at'],
-                           $l['first_reply_at'] ?? 'nessuna risposta', sr_fmt_h($l['hours'])];
+                           $l['written_to'] ?? '', $l['first_reply_at'] ?? 'nessuna risposta', sr_fmt_h($l['hours'])];
                 $raw[$i][1] = $reqCell($l);
             }
-            $table(['Venditore', 'Richiesta', 'Prima mail cliente', 'Prima risposta', 'Tempo'], $rows, $raw);
+            $table(['Venditore', 'Richiesta', 'Prima mail cliente', 'Scritto a', 'Prima risposta', 'Tempo'], $rows, $raw);
         }
         $sec('Clienti silenziosi da ' . SR_SILENT_DAYS . '+ giorni, nessun follow-up (informativo)');
         $rows = $raw = [];

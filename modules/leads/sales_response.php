@@ -143,9 +143,10 @@ a.sr-tag:hover{outline:1px solid currentColor}
   <b>email reply within <?= SR_THRESHOLD_H ?> hours</b> of receipt. Anything agreed on WhatsApp or by phone must be confirmed by email:
   we keep a complete written history of every client conversation on our servers.</p>
   <p>This page measures that rule for our <b>direct clients</b> (not agencies, SB or other channels), from the company mailboxes,
-  request by request: a client mail counts as answered when the next email from us to the client goes out.</p>
-  <p class="sr-small">A reply counts only if it is sent from the company mail: a reply from Gmail or a similar personal address, or from info@ / safari@
-  without the seller in copy, is not seen. A few client mails may be matched to the wrong request. Leads from the web form have no first
+  request by request: a client mail counts as answered when the next email from us to the client goes out.
+  Client mails received on info@ / safari@ count for the seller of the request too, and a reply from info@ / safari@ counts as an answer;
+  a forward to a colleague is not an answer.</p>
+  <p class="sr-small">A reply counts only if it is sent from the company mail: a reply from Gmail or a similar personal address is not seen. A few client mails may be matched to the wrong request. Leads from the web form have no first
   client mail, so their first reply cannot be measured. <?= SR_THRESHOLD_H ?> clock hours, always; evening / weekend / holiday
   (18:00–08:00 EAT, Saturday, Sunday, Tanzanian public holidays) is shown apart.
   <?= $noLeave ? "Client mails received on a seller's leave days are left out of the KPIs." : 'Leave days count like any other day ("on leave" is only a note).' ?></p>
@@ -263,7 +264,7 @@ $sellerFilter = function (string $param, ?int $cur, string $anchor) use ($isMgr,
   <table class="sr-table">
     <thead><tr>
       <?php if ($canRemind): ?><th style="min-width:0"><input type="checkbox" checked title="All / none" onclick="document.querySelectorAll('#sr-remind .sr-key').forEach(function (c) { c.checked = this.checked; }, this)"></th><?php endif; ?>
-      <th>Seller</th><th>Request</th><th>Client</th><th>Subject</th><th>Last client mail</th><th>Waiting</th><th>Notes</th>
+      <th>Seller</th><th>Request</th><th>Client</th><th>Subject</th><th>Last client mail</th><th>Written to</th><th>Waiting</th><th>Notes</th>
     </tr></thead>
     <tbody>
     <?php foreach ($unanswered as $u): $k = sr_unanswered_key($u); ?>
@@ -274,6 +275,7 @@ $sellerFilter = function (string $param, ?int $cur, string $anchor) use ($isMgr,
         <td><?= h($u['customer'] . ' <' . $u['client'] . '>') ?></td>
         <td class="sr-subj"><?= h($u['subject'] ?? '') ?></td>
         <td><?= h($u['last_client_at'] . ($u['client_msgs'] > 1 ? ' (' . $u['client_msgs'] . ' mails)' : '')) ?></td>
+        <td><?= h($u['written_to'] ?? '') ?></td>
         <td><?= h($fh($u['hours_waiting'])) ?></td>
         <td><?= h(implode(', ', array_filter([$u['in_ferie'] ? 'on leave' : '', $u['ambiguous'] ? 'uncertain match' : '',
                                               isset($reminded[$k]) ? 'reminded ' . $reminded[$k] : '']))) ?></td>
@@ -305,6 +307,7 @@ $bySeller = function (array $list, ?int $id) { return array_values(array_filter(
 $lists = [
     ['newleads', 'nl', $nlId, 'New leads in this period: how long until our first reply', $bySeller($rep['new_leads'], $nlId),
      ['First client mail' => function ($l) { return $l['first_client_at']; },
+      'Written to' => function ($l) { return (string)($l['written_to'] ?? ''); },
       'First reply' => function ($l) { return $l['first_reply_at'] ?? 'no reply'; },
       'Time' => function ($l) use ($fh) { return $fh($l['hours']); },
       'From' => function ($l) { return (string)$l['answered_by']; }]],

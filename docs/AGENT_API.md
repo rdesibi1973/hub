@@ -1333,9 +1333,10 @@ How fast the sellers (Asia, Alessia, Anderson, Nuru, Agustin — not Roberto / D
 request by request. `modules/leads/sales_response_scan.php --cron` (cPanel cron, hourly at :05) or
 `modules/leads/sales_response_cron.php?token=…` (cron-job.org, daily 23:30 for the scan + 07:05 for the mails; token `SALES_RESPONSE_CRON_TOKEN`, else
 `MEMO_CRON_TOKEN`; same run, `sr_run()`, a MySQL lock skips overlaps) reads only the **headers**
-(From, To, Cc, Date, Subject, Message-ID, In-Reply-To, References) of the sellers' mailboxes and sales@ straight
-from the Maildirs (not info@ = Roberto, not safari@ = Daniela: their replies are seen only when a seller's mailbox
-is in copy) — no bodies, no attachments, no IMAP. Logic `modules/leads/includes/sales_response_service.php`,
+(From, To, Cc, Date, Subject, Message-ID, In-Reply-To, References) of the sellers' mailboxes and the shared info@,
+safari@, sales@ (`SR_SHARED_BOXES`, since 19 Oct 2026) straight from the Maildirs — no bodies, no attachments, no IMAP.
+A linked client mail on a shared mailbox is a client message for the seller of the request (`written_to` shows where
+the client wrote); unlinked mail there is ignored. One Message-ID = one message (To seller + Cc info@ counts once). Logic `modules/leads/includes/sales_response_service.php`,
 tables `migrations/072_sales_response.sql`, page `modules/leads/sales_response.php` (admin / manager: every seller and
 reminders; anyone else: only their own agent, `users.agent_id`). Emails to `SALES_RESPONSE_TO`
 (default savannah.explorers@gmail.com): daily 07:00 `[Sales Response] <date> – N mail senza risposta >24h` (only with
@@ -1349,7 +1350,9 @@ reminders; anyone else: only their own agent, `users.agent_id`). Emails to `SALE
 - **Direct clients only** (`SR_DIRECT_ONLY`): requests with `channel` = direct, or no channel + no agency + not an "(…-SB)"
   folder. Agency / SB / Other requests are linked (better matching) but not counted anywhere (KPIs, lists, reminders).
 - **client** = outside sender; **savannah** = from our domains (or Roberto's Gmail) to an outside address; internal
-  mail, auto-replies, lists, bounces and no-reply senders are ignored.
+  mail, auto-replies, lists, bounces and no-reply senders are ignored. One of ours linked by thread counts only if its
+  To/Cc reaches the client of that request (request / agency address, company domain, or an address the client wrote
+  from): a forward from info@ to a seller is not an answer.
 - A wait = the first unanswered client mail (several in a row = one wait) until the next savannah mail.
   Threshold 24 clock hours, always. Evening / weekend / holiday = 18:00–08:00 EAT, Sat, Sun, Tanzanian holidays
   (`SR_HOLIDAYS`, Eid / Maulid dates are estimates). Leave days (`leave_entries`) count like any other day: sellers
@@ -1365,7 +1368,7 @@ of the KPIs; default 0, as the weekly email). Same numbers as the weekly email.
 mapping_error, week, prev (the 4 weeks before, pooled), total, weeks {monday: metrics}, open_unanswered}` where metrics =
 `{due, answered_24h, pct_24h, late, median_h, p90_h, answered, off_due, off_answered_24h, pct_off_24h, new_leads,
 new_leads_median_h, client_msgs, sent_msgs, on_leave_excluded}`; `unanswered[] {seller, request_id, folder, customer,
-client, subject (of the last client mail), first_client_at, last_client_at, client_msgs, hours_waiting, in_ferie, ambiguous, url}`, `new_leads[]`,
+client, subject (of the last client mail), first_client_at, last_client_at, client_msgs, hours_waiting, written_to ("info@, alessia@"), in_ferie, ambiguous, url}`, `new_leads[]` (with `written_to`),
 `silent[]` (our mail last, client silent 7+ days, not Booked), `last_scan {status (ok|stale|scan_failed|never_run), …}`,
 `limits[]`, `footer`.
 Reminders: the Hub page (unanswered list, filter by seller, tick the mails) mails the seller the list from the Hub,
