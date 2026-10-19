@@ -2898,7 +2898,18 @@ try {
         require_once __DIR__ . '/includes/sales_response_service.php';
         $week = trim((string)($in['week'] ?? ''));
         if ($week !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $week)) agent_fail('week must be YYYY-MM-DD (any day of the week)');
-        agent_out(sr_report($db, $week !== '' ? $week : null, (int)($in['agent_id'] ?? 0) ?: null, 4, !empty($in['exclude_leave'])));
+        // Any period instead of a week: month=YYYY-MM (vs the month before) or from/to=YYYY-MM-DD (vs the same days before).
+        $range = null;
+        $month = trim((string)($in['month'] ?? ''));
+        if ($month !== '') {
+            if (!preg_match('/^\d{4}-\d{2}$/', $month)) agent_fail('month must be YYYY-MM');
+            $range = ['from' => $month . '-01', 'to' => date('Y-m-t', strtotime($month . '-01')), 'prev_from' => date('Y-m-01', strtotime($month . '-01 -1 month'))];
+        } elseif (trim((string)($in['from'] ?? '')) !== '' || trim((string)($in['to'] ?? '')) !== '') {
+            $f = trim((string)($in['from'] ?? '')); $t = trim((string)($in['to'] ?? date('Y-m-d')));
+            if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $f) || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $t) || $t < $f) agent_fail('from / to must be YYYY-MM-DD, from <= to');
+            $range = ['from' => $f, 'to' => $t];
+        }
+        agent_out(sr_report($db, $week !== '' ? $week : null, (int)($in['agent_id'] ?? 0) ?: null, 4, !empty($in['exclude_leave']), $range));
     }
 
     default:

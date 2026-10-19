@@ -28,11 +28,31 @@ $mySeller = null;
 foreach (sr_sellers($db) as $s) if ($myAgentId && $s['agent_id'] === $myAgentId) $mySeller = $s;
 
 $week    = isset($_GET['week']) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $_GET['week']) ? $_GET['week'] : null;
+// Period: week (default, compared with the 4 weeks before), calendar month (vs the month before) or dates (vs the same
+// number of days before).
+$pmode   = in_array($_GET['period'] ?? '', ['month', 'range'], true) ? $_GET['period'] : 'week';
+$month   = isset($_GET['month']) && preg_match('/^\d{4}-\d{2}$/', $_GET['month']) ? $_GET['month'] : date('Y-m');
+$dFrom   = isset($_GET['from']) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $_GET['from']) ? $_GET['from'] : date('Y-m-01');
+$dTo     = isset($_GET['to']) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $_GET['to']) ? $_GET['to'] : date('Y-m-d');
+if ($dTo < $dFrom) [$dFrom, $dTo] = [$dTo, $dFrom];
+if (strtotime($dTo) - strtotime($dFrom) > 366 * 86400) $dFrom = date('Y-m-d', strtotime($dTo) - 366 * 86400);   // the index keeps 12 months
+$range = null;
+if ($pmode === 'month') {
+    $range = ['from' => $month . '-01', 'to' => date('Y-m-t', strtotime($month . '-01')),
+              'prev_from' => date('Y-m-01', strtotime($month . '-01 -1 month'))];
+} elseif ($pmode === 'range') {
+    $range = ['from' => $dFrom, 'to' => $dTo];
+}
+$periodQ = $pmode === 'month' ? ['period' => 'month', 'month' => $month]
+         : ($pmode === 'range' ? ['period' => 'range', 'from' => $dFrom, 'to' => $dTo] : ['week' => $week]);
 $agentId = $isMgr ? ((int)($_GET['agent_id'] ?? 0) ?: null) : $myAgentId;
 $noLeave = !empty($_GET['exclude_leave']);   // off by default: sellers on leave must still answer
 $uaId    = $isMgr ? ((int)($_GET['ua'] ?? 0) ?: $agentId) : $myAgentId;   // unanswered list: seller filter (default All)
-$selfUrl = function (array $set) use ($week, $agentId, $noLeave, $uaId) {
-    $q = array_filter(['week' => $week, 'agent_id' => $agentId, 'exclude_leave' => $noLeave ? 1 : null, 'ua' => $uaId], function ($v) { return $v !== null; });
+$nlId    = $isMgr ? ((int)($_GET['nl'] ?? 0) ?: $agentId) : $myAgentId;   // new leads list: seller filter
+$slId    = $isMgr ? ((int)($_GET['sl'] ?? 0) ?: $agentId) : $myAgentId;   // silent clients list: seller filter
+$selfUrl = function (array $set) use ($periodQ, $agentId, $noLeave, $uaId, $nlId, $slId) {
+    $q = array_filter($periodQ + ['agent_id' => $agentId, 'exclude_leave' => $noLeave ? 1 : null, 'ua' => $uaId, 'nl' => $nlId, 'sl' => $slId],
+                      function ($v) { return $v !== null; });
     return 'sales_response.php?' . http_build_query(array_filter(array_merge($q, $set), function ($v) { return $v !== null; }));
 };
 
@@ -66,7 +86,16 @@ if (!$isMgr && !$mySeller) {   // not one of the sellers measured here
     exit;
 }
 
-$rep     = sr_report($db, $week, $agentId, 4, $noLeave);
+$rep     = sr_report($db, $week, $agentId, 4, $noLeave, $range);
+$per     = $rep['period'];
+$monthOpts = [];
+for ($i = 0; $i < 12; $i++) $monthOpts[] = date('Y-m', strtotime(date('Y-m-01') . " -$i month"));
+$perTitle = $pmode === 'month' ? date('F Y', strtotime($per['from']))
+          : ($pmode === 'range' ? $per['from'] . ' – ' . $per['to'] : 'Week ' . $per['from'] . ' – ' . $per['to']);
+$perGrey  = $pmode === 'month' ? 'grey: ' . date('F Y', strtotime($per['prev_from']))
+          : ($pmode === 'range' ? 'grey: the ' . ((int)round((strtotime($per['to']) - strtotime($per['from'])) / 86400) + 1) . ' days before, '
+                                  . $per['prev_from'] . ' – ' . $per['prev_to']
+                                : 'grey: the ' . (int)$rep['previous_weeks'] . ' weeks before, together');
 $all     = sr_sellers($db);
 $ws      = $rep['week']['start'];
 $cols    = sr_metric_cols('en');
@@ -123,6 +152,14 @@ a.sr-tag:hover{outline:1px solid currentColor}
 </div>
 
 <form method="get" class="sr-filters">
+  <label>Period
+    <select name="period" onchange="this.form.submit()">
+      <?php foreach (['week' => 'Week', 'month' => 'Month', 'range' => 'Dates'] as $pv => $pl): ?>
+      <option value="<?= h($pv) ?>" <?= $pmode === $pv ? 'selected' : '' ?>><?= h($pl) ?></option>
+      <?php endforeach; ?>
+    </select>
+  </label>
+  <?php if ($pmode === 'week'): ?>
   <label>Week
     <select name="week" onchange="this.form.submit()">
       <?php foreach ($weekOpts as $w): ?>
@@ -130,6 +167,19 @@ a.sr-tag:hover{outline:1px solid currentColor}
       <?php endforeach; ?>
     </select>
   </label>
+  <?php elseif ($pmode === 'month'): ?>
+  <label>Month
+    <select name="month" onchange="this.form.submit()">
+      <?php foreach ($monthOpts as $mo): ?>
+      <option value="<?= h($mo) ?>" <?= $mo === $month ? 'selected' : '' ?>><?= h(date('F Y', strtotime($mo . '-01'))) ?></option>
+      <?php endforeach; ?>
+    </select>
+  </label>
+  <?php else: ?>
+  <label>From <input type="date" name="from" value="<?= h($dFrom) ?>" max="<?= h(date('Y-m-d')) ?>"></label>
+  <label>To <input type="date" name="to" value="<?= h($dTo) ?>" max="<?= h(date('Y-m-d')) ?>"></label>
+  <button type="submit" class="btn btn-sm">Show</button>
+  <?php endif; ?>
   <?php if ($isMgr): ?>
   <label>Seller
     <select name="agent_id" onchange="this.form.submit()">
@@ -158,7 +208,7 @@ a.sr-tag:hover{outline:1px solid currentColor}
 
 <div class="table-wrap sr-box">
   <div style="padding:14px 18px">
-  <h3>Week <?= h($ws) ?> – <?= h($rep['week']['end']) ?> <span class="sr-prev" style="display:inline">(grey: the <?= (int)$rep['previous_weeks'] ?> weeks before, together)</span></h3>
+  <h3><?= h($perTitle) ?> <span class="sr-prev" style="display:inline">(<?= h($perGrey) ?>)</span></h3>
   <div class="sr-wrap">
   <table class="sr-table">
     <thead><tr><th>Seller</th><?php foreach (array_keys($cols) as $c): ?><th><?= h($c) ?></th><?php endforeach; ?><th>Unanswered now</th><?php if ($noLeave): ?><th>Leave</th><?php endif; ?></tr></thead>
@@ -179,25 +229,30 @@ a.sr-tag:hover{outline:1px solid currentColor}
   </div>
 </div>
 
-<div class="table-wrap sr-box" id="unanswered">
-  <div style="padding:14px 18px">
-  <div class="sr-head">
-    <h3>Client mails unanswered for more than <?= SR_THRESHOLD_H ?>h (<?= count($unanswered) ?>)</h3>
-    <?php if ($isMgr): ?>
-    <form method="get" action="sales_response.php#unanswered">
-      <?php if ($week): ?><input type="hidden" name="week" value="<?= h($week) ?>"><?php endif; ?>
-      <?php if ($agentId): ?><input type="hidden" name="agent_id" value="<?= (int)$agentId ?>"><?php endif; ?>
-      <?php if ($noLeave): ?><input type="hidden" name="exclude_leave" value="1"><?php endif; ?>
+<?php
+// Seller filter of one list (managers only): $param = ua | nl | sl. Keeps the period, the page filters and the other lists' choices.
+$sellerFilter = function (string $param, ?int $cur, string $anchor) use ($isMgr, $periodQ, $agentId, $noLeave, $uaId, $nlId, $slId, $all) {
+    if (!$isMgr) return;
+    $keep = $periodQ + ['agent_id' => $agentId, 'exclude_leave' => $noLeave ? 1 : null, 'ua' => $uaId, 'nl' => $nlId, 'sl' => $slId];
+    unset($keep[$param]); ?>
+    <form method="get" action="sales_response.php#<?= h($anchor) ?>">
+      <?php foreach ($keep as $k => $v): if ($v === null || $v === 0) continue; ?><input type="hidden" name="<?= h($k) ?>" value="<?= h($v) ?>"><?php endforeach; ?>
       <label>Seller
-        <select name="ua" onchange="this.form.submit()">
+        <select name="<?= h($param) ?>" onchange="this.form.submit()">
           <option value="">All</option>
           <?php foreach ($all as $s): if (!$s['agent_id'] || ($agentId && $s['agent_id'] !== $agentId)) continue; ?>
-          <option value="<?= (int)$s['agent_id'] ?>" <?= $uaId === $s['agent_id'] ? 'selected' : '' ?>><?= h($s['name']) ?></option>
+          <option value="<?= (int)$s['agent_id'] ?>" <?= $cur === $s['agent_id'] ? 'selected' : '' ?>><?= h($s['name']) ?></option>
           <?php endforeach; ?>
         </select>
       </label>
     </form>
-    <?php endif; ?>
+<?php };
+?>
+<div class="table-wrap sr-box" id="unanswered">
+  <div style="padding:14px 18px">
+  <div class="sr-head">
+    <h3>Client mails unanswered for more than <?= SR_THRESHOLD_H ?>h (<?= count($unanswered) ?>)</h3>
+    <?php $sellerFilter('ua', $uaId, 'unanswered'); ?>
   </div>
   <?php if (!$unanswered): ?><div style="color:#777;font-size:.85rem">none</div><?php else: ?>
   <form method="post" action="sales_response.php" id="sr-remind">
@@ -246,21 +301,25 @@ a.sr-tag:hover{outline:1px solid currentColor}
 </div>
 
 <?php
+$bySeller = function (array $list, ?int $id) { return array_values(array_filter($list, function ($u) use ($id) { return !$id || $u['agent_id'] === $id; })); };
 $lists = [
-    ['New leads this week: how long until our first reply', $rep['new_leads'],
+    ['newleads', 'nl', $nlId, 'New leads in this period: how long until our first reply', $bySeller($rep['new_leads'], $nlId),
      ['First client mail' => function ($l) { return $l['first_client_at']; },
       'First reply' => function ($l) { return $l['first_reply_at'] ?? 'no reply'; },
       'Time' => function ($l) use ($fh) { return $fh($l['hours']); },
       'From' => function ($l) { return (string)$l['answered_by']; }]],
-    ['Clients silent for ' . SR_SILENT_DAYS . '+ days, no follow-up (for information)', $rep['silent'],
+    ['silent', 'sl', $slId, 'Clients silent for ' . SR_SILENT_DAYS . '+ days, no follow-up (for information)', $bySeller($rep['silent'], $slId),
      ['Status' => function ($l) { return $l['status']; },
       'Our last mail' => function ($l) { return $l['last_sent_at']; },
       'Days' => function ($l) { return $l['days'] . ' d'; }]],
 ];
-foreach ($lists as [$title, $list, $extra]): ?>
-<div class="table-wrap sr-box">
+foreach ($lists as [$anchor, $param, $cur, $title, $list, $extra]): ?>
+<div class="table-wrap sr-box" id="<?= h($anchor) ?>">
   <div style="padding:14px 18px">
-  <h3><?= h($title) ?></h3>
+  <div class="sr-head">
+    <h3><?= h($title) ?> (<?= count($list) ?>)</h3>
+    <?php $sellerFilter($param, $cur, $anchor); ?>
+  </div>
   <?php if (!$list): ?><div style="color:#777;font-size:.85rem">none</div><?php else: ?>
   <div class="sr-wrap">
   <table class="sr-table">

@@ -1357,7 +1357,9 @@ reminders; anyone else: only their own agent, `users.agent_id`). Emails to `SALE
   (`exclude_leave=1`, page checkbox) the waits starting on a leave day are left out of the KPIs (`on_leave_excluded`).
 
 ### `sales_response_status` (GET)
-Params: `week` (any `YYYY-MM-DD` of the week; default last complete week), `agent_id`, `exclude_leave` (1 = leave days out
+Params: `week` (any `YYYY-MM-DD` of the week; default last complete week), or `month` (`YYYY-MM`, compared with the month
+before), or `from` / `to` (`YYYY-MM-DD`, compared with the same number of days before) — then `week`/`prev` in the sellers
+are that period and the previous one, see `period`; `agent_id`, `exclude_leave` (1 = leave days out
 of the KPIs; default 0, as the weekly email). Same numbers as the weekly email.
 → `week {start, end}`, `previous_weeks` (4), `live`, `leave_excluded`, `sellers[] {name, agent_id, agent_name, mailbox, leave_names[],
 mapping_error, week, prev (the 4 weeks before, pooled), total, weeks {monday: metrics}, open_unanswered}` where metrics =

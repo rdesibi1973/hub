@@ -656,15 +656,34 @@ function sr_metrics(array $eps, int $clientMsgs, int $sentMsgs, int $now): array
  * $excludeLeave: leave out of the KPIs the waits that start on a seller's leave day. Off by default (Roberto,
  * 18 Oct 2026: sellers on leave must still answer); on request only (page checkbox, API exclude_leave=1).
  * Leave days are always shown as a note (in_ferie / on_leave).
+ * $range: any period instead of a week — ['from', 'to'] (Y-m-d, inclusive) and optionally ['prev_from', 'prev_to'],
+ * the period it is compared with (default: the same number of days just before). Then 'week' / 'prev' are that
+ * period and the previous one, 'weeks' has the two buckets 'prev' and 'cur'; $week and $nPrev are ignored.
  */
-function sr_report(PDO $db, ?string $week = null, ?int $agentId = null, int $nPrev = 4, bool $excludeLeave = false): array {
+function sr_report(PDO $db, ?string $week = null, ?int $agentId = null, int $nPrev = 4, bool $excludeLeave = false, ?array $range = null): array {
     sr_schema($db);
     $now = time();
-    $ws = sr_week_start($week);
-    $weeks = [];
-    for ($i = $nPrev; $i >= 0; $i--) $weeks[] = date('Y-m-d', strtotime($ws . ' 12:00:00') - 7 * $i * 86400);
-    $fromTs = strtotime($weeks[0] . ' 00:00:00');
-    $toTs = strtotime($ws . ' 00:00:00') + 7 * 86400;
+    if ($range) {
+        $curFrom = strtotime($range['from'] . ' 00:00:00');
+        $toTs = strtotime($range['to'] . ' 00:00:00') + 86400;
+        $prevFrom = !empty($range['prev_from']) ? strtotime($range['prev_from'] . ' 00:00:00') : $curFrom - ($toTs - $curFrom);
+        $fromTs = $prevFrom;
+        $ws = 'cur';
+        $weeks = ['prev', 'cur'];
+        $nPrev = 1;
+        $bucketOf = function (int $ts) use ($curFrom) { return $ts >= $curFrom ? 'cur' : 'prev'; };
+        $period = ['mode' => 'range', 'from' => date('Y-m-d', $curFrom), 'to' => date('Y-m-d', $toTs - 86400),
+                   'prev_from' => date('Y-m-d', $prevFrom), 'prev_to' => date('Y-m-d', $curFrom - 86400)];
+    } else {
+        $ws = sr_week_start($week);
+        $weeks = [];
+        for ($i = $nPrev; $i >= 0; $i--) $weeks[] = date('Y-m-d', strtotime($ws . ' 12:00:00') - 7 * $i * 86400);
+        $fromTs = strtotime($weeks[0] . ' 00:00:00');
+        $toTs = strtotime($ws . ' 00:00:00') + 7 * 86400;
+        $bucketOf = 'sr_week_of';
+        $period = ['mode' => 'week', 'from' => $ws, 'to' => date('Y-m-d', $toTs - 86400),
+                   'prev_from' => $weeks[0], 'prev_to' => date('Y-m-d', strtotime($ws . ' 12:00:00') - 86400)];
+    }
 
     $sellers = sr_sellers($db);
     if ($agentId) $sellers = array_values(array_filter($sellers, function ($s) use ($agentId) { return $s['agent_id'] === $agentId; }));
@@ -692,7 +711,7 @@ function sr_report(PDO $db, ?string $week = null, ?int $agentId = null, int $nPr
         foreach ($msgs as $m) {
             $lastTs = max($lastTs, $m['ts']);
             if ($m['ts'] < $fromTs || $m['ts'] >= $toTs) continue;
-            $w = sr_week_of($m['ts']);
+            $w = $bucketOf($m['ts']);
             $vol[$aid][$w][$m['dir'] === 'client' ? 0 : 1] = ($vol[$aid][$w][$m['dir'] === 'client' ? 0 : 1] ?? 0) + 1;
         }
         $open = !$r['closed'] && ($r['status'] === 'Booked'
@@ -703,7 +722,7 @@ function sr_report(PDO $db, ?string $week = null, ?int $agentId = null, int $nPr
         foreach (sr_episodes($r, $msgs) as $e) {
             $onLeave = isset($leave[$aid][date('Y-m-d', $e['start'])]);
             if ($e['start'] >= $fromTs && $e['start'] < $toTs) {
-                $w = sr_week_of($e['start']);
+                $w = $bucketOf($e['start']);
                 if ($onLeave && $excludeLeave) $leaveSkipped[$aid][$w] = ($leaveSkipped[$aid][$w] ?? 0) + 1;
                 else $eps[$aid][$w][] = $e;
                 if ($e['new_lead'] && $w === $ws) {
@@ -756,7 +775,7 @@ function sr_report(PDO $db, ?string $week = null, ?int $agentId = null, int $nPr
                    'weeks' => $perWeek,
                    'open_unanswered' => count(array_filter($unanswered, function ($u) use ($aid) { return $u['agent_id'] === $aid; }))];
     }
-    return ['ok' => true, 'week' => ['start' => $ws, 'end' => date('Y-m-d', $toTs - 86400)], 'previous_weeks' => $nPrev,
+    return ['ok' => true, 'week' => ['start' => $period['from'], 'end' => $period['to']], 'period' => $period, 'previous_weeks' => $nPrev,
             'generated_at' => date('Y-m-d H:i:s', $now), 'threshold_hours' => SR_THRESHOLD_H, 'timezone' => 'Africa/Dar_es_Salaam',
             'live' => sr_cfg()['live'], 'leave_excluded' => $excludeLeave, 'sellers' => $rows, 'unanswered' => $unanswered, 'new_leads' => $newLeads, 'silent' => $silent,
             'last_scan' => sr_last_run($db), 'limits' => SR_LIMITS, 'footer' => SR_FOOTER];
