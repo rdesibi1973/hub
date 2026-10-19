@@ -24,6 +24,7 @@ Fixed rules as in the project instructions: never send without his explicit ok o
 - Replies quote the original mail below the signature, as a normal reply does: a line "Il <gg/mm/aaaa hh:mm>, <mittente> ha scritto:" (English "On <date>, <sender> wrote:"), then the original body as received (`mail_get` `body`, with the earlier thread it contains), in a `<blockquote type="cite">` in the html part and with "> " lines in the text part; strip empty lines at the start (12 Oct 2026).
 - New mails (no thread) and mails to staff: `From` Gmail (savannah.explorers@gmail.com).
 - Signature at the bottom matching the address: `InfoSavannahExplorers.html` (info@) or `OfficeGmail.html` (Gmail), in `C:\Dropbox\001_Safari\99_office\`. The signature already holds "Rimango a disposizione…", "Buona giornata", "Roberto": don't repeat them in the body.
+- English mails: in the draft, replace the signature's Italian closing block ("Rimango a disposizione per maggiori informazioni e domande." / "Buona giornata" / "Roberto") with "Please do not hesitate to contact me for any further information." / "Best regards" / "Roberto" (same tags, html and text parts); leave the rest of the signature as it is (19 Oct 2026).
 - The signature images (Roberto's photo, Tripadvisor badge) are links to savannahexplorers.com: Thunderbird hides remote images when a draft is opened from file, recipients see them. Don't embed or change them.
 - Take the signature's raw HTML from his PC (`device_stage_files` or the device shell) and paste it as is into the html part. Never rebuild it from the Dropbox connector `fetch` text: that is extracted plain text and loses the formatting (12 Oct 2026).
 - Attachments only when Roberto asks.
@@ -38,7 +39,8 @@ Every mail about a request/booking carries the Dropbox folder name: `Re: <origin
 ## 4. Style
 
 - Italian: informal "tu"; opens "Buongiorno <Nome>,"; closes with "Rimango a disposizione per maggiori informazioni e domande." on its own line, then "Buona giornata" and "Roberto". Never "Cordiali saluti".
-- English / French / Spanish: same warm, professional trade tone and structure (greeting with the name, short closing, "Roberto").
+- English / French / Spanish: same warm, professional trade tone and structure (greeting with the name, short closing, "Roberto"). English: "program", never "programme" (19 Oct 2026).
+- Agencies: never the `links.public` programme link (it shows our net price); the programme goes as Word attachment (19 Oct 2026).
 - Official/legal letters: minimal, direct, formal.
 - Complaints: diplomatic, non-confrontational — acknowledge the feedback without admitting fault, de-escalate, propose a next step.
 - Short paragraphs; when there are several items, lists under short heading lines ("Programma:", "Prezzi:", "La quota include:", "Non include:").
