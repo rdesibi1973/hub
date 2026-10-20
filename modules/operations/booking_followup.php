@@ -3,8 +3,8 @@
  * booking_followup.php — Operations → Booking follow-up. Supplier bookings not confirmed and
  * domestic tickets not saved, filled by the weekly / daily check (followup_cron.php) or
  * "Run check now"; the booking team takes lines in charge here.
- * Every logged-in Hub user can view; edits need module booking_followup_edit (admin: also
- * reassign + not relevant). Data / changes: api/followup.php → includes/followup_service.php.
+ * Every logged-in Hub user can view; edits need module booking_followup_edit (owner: only the
+ * booking team, FU_OWNERS; admin: also not relevant). Data / changes: api/followup.php → includes/followup_service.php.
  * ?request_id=N or ?q=… open the page filtered (link from the request view).
  */
 require_once __DIR__ . '/../../includes/db.php';

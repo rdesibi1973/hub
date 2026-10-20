@@ -1270,9 +1270,9 @@ reopened[], unreadable[], unchanged}`; supplier also `units`, `units_complete`, 
 run again, each PDF is read once per Dropbox revision), `errors[]`.
 
 #### `followup_update` (POST)
-`id` + any of `owner` (username / id / `null`), `contacted_at` (YYYY-MM-DD or `""`), `staff_status` (`open`, `in_progress`,
+`id` + any of `owner` (username / id of the booking team — `glady`, `lydia`, `FU_OWNERS` — or `null`), `contacted_at` (YYYY-MM-DD or `""`), `staff_status` (`open`, `in_progress`,
 `problem` — needs a note —, `resolved`, `not_relevant`), `notes`. Dry run unless `"confirm": true`. Acts as `AGENT_API_USER`
-with the follow-up admin rights (reassign, not relevant); every change is an event (who / when). → `changes {field: [old, new]}`, `row`.
+with the follow-up admin rights (not relevant); every change is an event (who / when). → `changes {field: [old, new]}`, `row`.
 
 #### `followup_upsert` (POST)
 Supplier documents read elsewhere (office PC, Cowork) — also the way to load a baseline. Dry run unless `"confirm": true`.

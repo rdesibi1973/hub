@@ -159,15 +159,16 @@
     var n = p.charAt(0);
     return '<span class="badge badge-p' + n + '">' + esc(p.substr(2).toLowerCase()) + '</span>';
   }
+  /** Owner: one of the booking team (D.users = Glady / Lydia); "Take" only for them. */
   function ownerCell(r) {
     if (r.closed_at || !D.me.can_edit) return esc(r.owner_name || '—');
-    if (D.me.is_admin) {
-      return '<select data-f="owner" aria-label="Owner"><option value="">— nobody —</option>' + D.users.map(function (u) {
+    var known = r.owner_user_id === null || D.users.some(function (u) { return u.id === r.owner_user_id; });
+    var canTake = r.owner_user_id === null && D.users.some(function (u) { return u.id === D.me.id; });
+    return '<select data-f="owner" aria-label="Owner"><option value="">— nobody —</option>' +
+      (known ? '' : '<option value="' + r.owner_user_id + '" selected>' + esc(r.owner_name) + '</option>') +
+      D.users.map(function (u) {
         return '<option value="' + u.id + '"' + (u.id === r.owner_user_id ? ' selected' : '') + '>' + esc(u.name) + '</option>';
-      }).join('') + '</select>' + (r.owner_user_id === null ? ' <button type="button" class="btn btn-success btn-sm" data-take="1">Take</button>' : '');
-    }
-    if (r.owner_user_id === null) return '<button type="button" class="btn btn-success btn-sm" data-take="1">Take in charge</button>';
-    return esc(r.owner_name) + (r.owner_user_id === D.me.id ? ' <button type="button" class="fu-hbtn" data-release="1" title="Release this line">✕</button>' : '');
+      }).join('') + '</select>' + (canTake ? ' <button type="button" class="btn btn-success btn-sm" data-take="1">Take</button>' : '');
   }
   function statusCell(r) {
     if (!D.me.can_edit) return esc(STATUS[r.staff_status]);

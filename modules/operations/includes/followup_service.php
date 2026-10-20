@@ -44,6 +44,7 @@ const FU_REASON_LABELS = ['auto_confirmed' => 'confirmed document saved', 'auto_
                           'auto_trip_ended' => 'trip ended', 'auto_not_found' => 'document no longer in invoices/',
                           'manual' => 'closed by staff'];
 const FU_EDIT_PERMISSION = 'booking_followup_edit';
+const FU_OWNERS = ['glady', 'lydia'];    // usernames a line can be assigned to (booking team)
 
 // ── Schema (same DDL as migrations/069_booking_followup.sql) ─────────────────
 
@@ -1181,17 +1182,24 @@ function followup_page_data(PDO $db, array $user): array {
     $closed = array_values(array_filter(followup_rows($db, ['status' => 'closed']),
                                         fn($r) => $r['closed_at'] >= date('Y-m-d H:i:s', time() - 120 * 86400)));
     $recent = array_filter($closed, fn($r) => $r['closed_at'] >= date('Y-m-d H:i:s', time() - 7 * 86400));
-    $users = $db->query("SELECT id, username, full_name FROM users WHERE is_active = 1 ORDER BY full_name")->fetchAll(PDO::FETCH_ASSOC);
     return ['rows' => $open, 'closed' => $closed, 'stats' => followup_stats($open, $recent), 'runs' => followup_last_runs($db),
             'me' => ['id' => (int)$user['id'], 'can_edit' => followup_can_edit($user), 'is_admin' => followup_is_admin($user)],
-            'users' => array_map(fn($u) => ['id' => (int)$u['id'], 'name' => $u['full_name'] ?: $u['username']], $users),
+            'users' => followup_owner_users($db),
             'today' => date('Y-m-d')];
+}
+
+/** Who a line can be assigned to (FU_OWNERS, active users): [{id, name}]. */
+function followup_owner_users(PDO $db): array {
+    $st = $db->prepare("SELECT id, username, full_name FROM users WHERE is_active = 1 AND username IN ("
+                       . implode(',', array_fill(0, count(FU_OWNERS), '?')) . ") ORDER BY full_name");
+    $st->execute(FU_OWNERS);
+    return array_map(fn($u) => ['id' => (int)$u['id'], 'name' => $u['full_name'] ?: $u['username']], $st->fetchAll(PDO::FETCH_ASSOC));
 }
 
 // ── Staff changes ────────────────────────────────────────────────────────────
 
 /**
- * Change a line as a Hub user. $ch: take (bool), owner (user id | username | null — admin),
+ * Change a line as a Hub user. $ch: take (bool — FU_OWNERS only), owner (user id | username of FU_OWNERS | null),
  * contacted_at (Y-m-d | ''), staff_status, notes. $user: current_user() shape (id, role_name, permissions).
  * resolved / not_relevant close the line (manual); another status on a closed line re-opens it.
  * → ['ok', 'changes' => [field => [old, new]], 'row'] or ['ok' => false, 'error']. Dry run: nothing written.
@@ -1206,8 +1214,12 @@ function followup_update(PDO $db, int $id, array $ch, array $user, bool $confirm
     $admin = followup_is_admin($user);
     $uid = (int)$user['id'];
     $new = [];
+    $owners = followup_owner_users($db);
+    $ownerIds = array_column($owners, 'id');
+    $ownerNames = implode(' / ', array_column($owners, 'name')) ?: implode(' / ', FU_OWNERS);
 
     if (!empty($ch['take'])) {
+        if (!in_array($uid, $ownerIds, true)) return ['ok' => false, 'error' => 'Only ' . $ownerNames . ' can take a line in charge', 'code' => 403];
         if ($row['owner_user_id'] !== null && (int)$row['owner_user_id'] !== $uid && !$admin) {
             return ['ok' => false, 'error' => 'Already taken in charge by someone else', 'code' => 409];
         }
@@ -1224,9 +1236,9 @@ function followup_update(PDO $db, int $id, array $ch, array $user, bool $confirm
             if (!$oid) return ['ok' => false, 'error' => 'User "' . $o . '" not found', 'code' => 400];
             $oid = (int)$oid;
         }
-        $self = $oid === $uid && $row['owner_user_id'] === null || $oid === null && (int)$row['owner_user_id'] === $uid;
-        if (!$admin && !$self && $oid !== ($row['owner_user_id'] !== null ? (int)$row['owner_user_id'] : null)) {
-            return ['ok' => false, 'error' => 'Only an admin can reassign a line', 'code' => 403];
+        // Anyone who can edit assigns among the booking team (FU_OWNERS) or clears the owner.
+        if ($oid !== null && !in_array($oid, $ownerIds, true)) {
+            return ['ok' => false, 'error' => 'A line can only be assigned to ' . $ownerNames, 'code' => 400];
         }
         $new['owner_user_id'] = $oid;
     }
