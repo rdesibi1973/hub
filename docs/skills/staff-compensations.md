@@ -54,7 +54,7 @@ Memo: at the start create one `doing` memo (stable `ext_key` e.g. `work-commissi
   - Calc formulas are per room (e.g. `=527*$B$1/2` = 527 per double room). Other room types (single, triple): compare per person.
   - When unsure, list it and ask Roberto.
 - Trekking: 1%. Trekking + safari in one booking: 1% on the trekking part, the safari part follows the table above (e.g. Ruzzier Oct 2026: =2255*3*0.01+(3525-2255)*3*0.02).
-- Examples (Oct 2026): Boccale (Aug 2027, markup 12%, Orangi at Kifaru rate) → 1% — August is high season and shouldn't be sold at such low prices. Vella (Orangi at 610) kept at 2% as an exception.
+- Examples (Oct 2026): Boccale (Aug 2027, markup 12%, Orangi at Kifaru rate) → by rule 1% (August is high season and shouldn't be sold at such low prices), paid at 2% as an exception (verbal agreement with Anderson). Vella (Orangi at 610) kept at 2% as an exception.
 
 ### Asia, Alessia, Daniela
 
