@@ -94,13 +94,14 @@ function iti_ps_ref_from_request(PDO $db, int $rid, string $calcFile = ''): arra
 
 /**
  * File name of a programme document saved by the API: <ref_number>.docx / .pdf, guide sheet
- * <ref_number>_Guida.pdf. Null when the programme has no ref_number.
+ * <ref_number>_Guida.pdf / .docx. Null when the programme has no ref_number.
  */
 function iti_ps_document_name(array $p, string $format): ?string {
     $ref = trim((string)($p['ref_number'] ?? ''));
     if ($ref === '') return null;
     $format = strtolower(trim($format));
     if ($format === 'guide') return $ref . '_Guida.pdf';
+    if ($format === 'guide_docx' || $format === 'guide_word') return $ref . '_Guida.docx';
     return $ref . '.' . ($format === 'docx' || $format === 'word' ? 'docx' : 'pdf');
 }
 
@@ -114,6 +115,7 @@ function iti_ps_links(array $p, string $lang = ''): array {
         'word'    => $base . '/export_mag_word.php?id=' . (int)$p['id'] . '&lang=' . $lang,
         'pdf'     => $base . '/export_mag_word.php?id=' . (int)$p['id'] . '&lang=' . $lang . '&format=pdf',
         'guide'   => ($p['program_type'] ?? '') === 'personal' ? $base . '/export_mag_word.php?id=' . (int)$p['id'] . '&lang=' . $lang . '&format=guide' : null,
+        'guide_word' => ($p['program_type'] ?? '') === 'personal' ? $base . '/export_mag_word.php?id=' . (int)$p['id'] . '&lang=' . $lang . '&format=guide_docx' : null,
         'public'  => null,
     ];
     if (($pub = iti_public_url($p)) !== '') $out['public'] = $pub . '&lang=' . $lang;   // personal: always (token on first use)

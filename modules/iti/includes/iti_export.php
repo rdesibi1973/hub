@@ -2,8 +2,8 @@
 /**
  * iti_export.php — the programme document as a file (magazine layout):
  * Word (.docx, editable, iti_mag_word.php) or PDF (Dompdf, iti_mag_pdf.php),
- * or the simplified guide sheet as PDF (iti_guide_pdf.php).
- * Used by export_mag_word.php (?format=pdf / guide) and by the Agent API (iti_document).
+ * or the simplified guide sheet as PDF (iti_guide_pdf.php) or Word (iti_guide_word.php).
+ * Used by export_mag_word.php (?format=pdf / guide / guide_docx) and by the Agent API (iti_document).
  *
  * Keep PHP-7 style (no match / arrow functions / str_contains).
  */
@@ -12,9 +12,11 @@ require_once __DIR__ . '/iti_doc.php';
 require_once __DIR__ . '/iti_mag_pdf.php';    // also loads iti_mag_word.php
 
 require_once __DIR__ . '/iti_guide_pdf.php';
+require_once __DIR__ . '/iti_guide_word.php';
 
-// 'guide' = PDF for the safari guide (day by day + transfer / accommodation recap, no photos or prices).
-const ITI_EXPORT_FORMATS = ['pdf', 'docx', 'guide'];
+// 'guide' = PDF for the safari guide (safari days only + arrival flight, transfer / accommodation recap,
+// no photos or prices); 'guide_docx' = the same as an editable Word file.
+const ITI_EXPORT_FORMATS = ['pdf', 'docx', 'guide', 'guide_docx'];
 
 /**
  * Build the document of programme $id in $lang ('' = the programme's language, also for 'guide').
@@ -22,11 +24,14 @@ const ITI_EXPORT_FORMATS = ['pdf', 'docx', 'guide'];
  * InvalidArgumentException: unknown programme / format; RuntimeException: library missing.
  */
 function iti_export_file(int $id, string $lang, string $format): array {
-    $format = strtolower(trim($format)) === 'word' ? 'docx' : strtolower(trim($format));
-    if (!in_array($format, ITI_EXPORT_FORMATS, true)) throw new InvalidArgumentException('format must be pdf, docx or guide');
+    $format = strtolower(trim($format));
+    if ($format === 'word') $format = 'docx';
+    if ($format === 'guide_word') $format = 'guide_docx';
+    if (!in_array($format, ITI_EXPORT_FORMATS, true)) throw new InvalidArgumentException('format must be pdf, docx, guide or guide_docx');
     $program = $id > 0 ? iti_get_program($id) : false;
     if (!$program) throw new InvalidArgumentException('Program ' . $id . ' not found');
-    if ($format === 'guide' && ($program['program_type'] ?? '') !== 'personal') {
+    $guide = $format === 'guide' || $format === 'guide_docx';
+    if ($guide && ($program['program_type'] ?? '') !== 'personal') {
         throw new InvalidArgumentException('The guide sheet is only for personal programs (program ' . $id . ' is a ' . ($program['program_type'] ?: 'sample') . ')');
     }
     if ($lang === '') $lang = (string)($program['display_language'] ?? 'it');   // the guide sheet too: same language as the client's programme
@@ -40,8 +45,12 @@ function iti_export_file(int $id, string $lang, string $format): array {
     $D = iti_doc_data($id, $lang);
     $name = trim(preg_replace('/[^A-Za-z0-9]+/', '_', trim($D['title'])), '_') ?: 'Program';
     if ($format === 'guide') {
-        return ['name' => $name . '_GUIDE_' . strtoupper($lang) . '.pdf', 'mime' => 'application/pdf', 'content' => iti_guide_pdf_build($D),
+        return ['name' => $name . '_GUIDE_' . strtoupper($lang) . '.pdf', 'mime' => 'application/pdf', 'content' => iti_guide_pdf_build(iti_guide_data($D)),
                 'lang' => $lang, 'format' => 'pdf', 'title' => $D['title']];
+    }
+    if ($format === 'guide_docx') {
+        return ['name' => $name . '_GUIDE_' . strtoupper($lang) . '.docx', 'mime' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                'content' => iti_guide_word_build(iti_guide_data($D)), 'lang' => $lang, 'format' => 'docx', 'title' => $D['title']];
     }
     $name .= '_' . strtoupper($lang) . '.' . $format;
 

@@ -46,7 +46,10 @@ $pub = iti_public_url($program);   // personal: always (token made on first use)
 if ($pub !== '') $extra .= '<a href="' . h($pub) . '&lang=' . h($lang) . '" target="_blank">🔗 Public link</a>';
 $extra .= '<a href="export_mag_word.php?id=' . $id . '&lang=' . h($lang) . '">📄 Word</a>';   // editable, for agencies (Hub only)
 $extra .= '<a href="export_mag_word.php?id=' . $id . '&lang=' . h($lang) . '&format=pdf">📕 PDF</a>';   // magazine, rendered on the server
-if ($personal) $extra .= '<a href="export_mag_word.php?id=' . $id . '&lang=' . h($lang) . '&format=guide" title="Day by day + transfers and accommodation, no photos / intro / prices">🧭 Guide PDF</a>';
+if ($personal) {   // guide sheet: safari days only, arrival flight; Word = editable by hand
+    $extra .= '<a href="export_mag_word.php?id=' . $id . '&lang=' . h($lang) . '&format=guide_docx" title="Safari days (no Zanzibar / beach) + arrival flight, transfers and accommodation — editable Word">🧭 Guide Word</a>';
+    $extra .= '<a href="export_mag_word.php?id=' . $id . '&lang=' . h($lang) . '&format=guide" title="Safari days (no Zanzibar / beach) + arrival flight, transfers and accommodation, no photos / intro / prices">🧭 Guide PDF</a>';
+}
 require_once __DIR__ . '/includes/iti_mag.php';
 // Personal programme: the printed page carries the link to the digital itinerary (as the PDF and the Word do).
 iti_mag_page($D, iti_doc_lang_bar($lang, ['id' => $id], $extra, $personal ? [$lang] : null), $personal ? $pub : '', false);   // no nav PDF button: the bar has 📕 PDF

@@ -537,13 +537,17 @@ The program as a file in the magazine layout (cover, route map, stays, day by da
 included / excluded, contacts, terms). `program_id`, `format?` (`pdf` default, rendered on the server with Dompdf;
 `docx` = editable Word for agencies; `guide` = PDF for the safari guide: transfer / flight and accommodation
 recap with check-in / check-out, then the day by day — no photos, intro, prices, lodge descriptions or terms,
-file `…_GUIDE_<LANG>.pdf`; **personal programs only**, a sample → 400), `lang?` (default: the program's language, the guide sheet included).
-→ `file {program_id, name, mime, size, format, lang, content_base64}` (`format` is the file type: `guide` → `pdf`). Decode and save it as `file.name`.
+file `…_GUIDE_<LANG>.pdf`; `guide_docx` (or `guide_word`) = the same guide sheet as an editable Word, `…_GUIDE_<LANG>.docx`;
+**personal programs only**, a sample → 400), `lang?` (default: the program's language, the guide sheet included).
+The guide sheet (21 Oct 2026) has only the safari part: Zanzibar / beach nights and the departure day after them are left
+out (the day the clients fly to the sea stays, without the beach hotel); day 1 shows the arrival flight
+(`iti_program_booking.arrival_details`, from the Calc — only programs generated from a Calc have it).
+→ `file {program_id, name, mime, size, format, lang, content_base64}` (`format` is the file type: `guide` → `pdf`, `guide_docx` → `docx`). Decode and save it as `file.name`.
 To put it in Dropbox instead: `save: true` (the program's `lead_request_id` folder), or `request_id` / `folder_path`;
 `save_as?` (file name), `overwrite?` (an existing file is kept unless true; Dropbox keeps the old version)
 → `file` (no content), `saved_to`, `overwritten`. The audit log omits the file content.
 **File name** (`file.name` and the saved file) = the `ref_number`: `<ref>.docx` (docx), `<ref>.pdf` (pdf),
-`<ref>_Guida.pdf` (guide); `save_as` overrides it. A program without `ref_number` keeps the old name
+`<ref>_Guida.pdf` (guide), `<ref>_Guida.docx` (guide_docx); `save_as` overrides it. A program without `ref_number` keeps the old name
 (`<Title>_<LANG>.docx`) and the reply has `file.warning` — set it with `iti_update_program` first.
 The Word copied by `copy_program` has the same name as the `docx`: the first save → **409** (expected); ask Roberto
 before resending with `"overwrite": true`.
