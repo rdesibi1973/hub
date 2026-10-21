@@ -55,6 +55,7 @@ Memo: at the start create one `doing` memo (clear title, linked request, stable 
 - Content: group, dates, pax and rooms (exactly as per the request), lodges per night, activities (balloon, bush dinner, boma), Diamante REF.
 - Priority when checking supplier bookings: make sure the rooms are still held (not released), not just deposits.
 - Room-type changes (e.g. a triple) only when the group is closed; unsold block rooms decided 60 days before arrival; Tarangire Safari Lodge lunch booked only at the end, with final pax.
+- While the group is open, do not ask suppliers to update notes, names, rooms sold or invoices (ResRequest notes, Pure invoices…): it is extra work and confuses the suppliers. All of this is done once, when the group is closed. Before that, only make sure the block is still held.
 
 ## 6. Invoice
 
