@@ -1098,6 +1098,8 @@ Replies, threaded with In-Reply-To / References:
 - `in_reply_to` (Message-ID, `<…@…>`) + `references` (its References header, string or list) + `subject`
   — a message read with another tool (the Gmail connector). Gmail threads the draft under the original when
   the subject matches ("Re: <original subject>").
+- Both given: `in_reply_to` / `references` win over the original's headers. Only `<…@…>` tokens are kept in
+  References (original References + its Message-ID); an empty header on the original stays empty.
 
 - `mail_draft` saves it in **Drafts** — nothing is sent; Roberto sends it from webmail / Gmail / phone.
 - `mail_send` is a dry-run (→ `email` preview) unless `"confirm": true`; then it sends, keeps a copy in

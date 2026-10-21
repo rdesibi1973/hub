@@ -325,6 +325,49 @@ function mbx_html_to_text(string $html): string {
     return trim(preg_replace("/\n\s*\n\s*\n+/", "\n\n", $txt));
 }
 
+/**
+ * Value of one header in a raw header block ('' if missing or empty). Folded lines are unfolded
+ * (RFC 5322) and the value never runs into the next header: an empty "References:" line stays empty
+ * (Outlook writes them — 21 Oct 2026 the old \s* regex returned the following header as the value).
+ */
+function mbx_raw_header(string $raw, string $name): string {
+    $raw = preg_replace('/\r?\n[ \t]+/', ' ', str_replace("\r\n", "\n", $raw));
+    return preg_match('/^' . preg_quote($name, '/') . ':[ \t]*([^\n]*)$/mi', $raw, $m) ? trim($m[1]) : '';
+}
+
+/** The Message-IDs "<…@…>" in a header value, in order, without duplicates; anything else is dropped. */
+function mbx_msgids(string $s): array {
+    preg_match_all('/<[^<>\s@]+@[^<>\s@]+>/', $s, $m);
+    return array_values(array_unique($m[0]));
+}
+
+/**
+ * In-Reply-To + References for a reply. $orig = mbx_get() of the message replied to (reply_to_uid) or null;
+ * $in['in_reply_to'] / $in['references'] (string or list), when given, win over the original's values.
+ * Only "<…@…>" tokens are kept. → [inReplyTo, references] ('' when not a reply).
+ */
+function mbx_thread_headers(?array $orig, array $in): array {
+    $refsIn = is_array($in['references'] ?? null) ? implode(' ', $in['references']) : trim((string)($in['references'] ?? ''));
+    $inReplyTo = trim((string)($in['in_reply_to'] ?? ''));
+    if ($inReplyTo !== '') {
+        if ($inReplyTo[0] !== '<') $inReplyTo = '<' . $inReplyTo . '>';
+        if (!preg_match('/^<[^<>\s]+@[^<>\s]+>$/', $inReplyTo)) throw new InvalidArgumentException('in_reply_to must be a Message-ID like <abc@mail.gmail.com>');
+    } elseif ($orig) {
+        $inReplyTo = mbx_msgids((string)($orig['message_id'] ?? ''))[0] ?? '';
+    }
+    if ($inReplyTo === '') return ['', ''];
+    if (trim($refsIn) !== '') {
+        if (!preg_match('/^(<[^<>\s]+>\s?)*$/', trim((string)preg_replace('/\s+/', ' ', $refsIn)))) {
+            throw new InvalidArgumentException('references must be Message-IDs like "<a@b> <c@d>"');
+        }
+        $refs = mbx_msgids($refsIn);
+    } else {
+        $refs = $orig ? mbx_msgids((string)($orig['references'] ?? '')) : [];
+    }
+    if (!in_array($inReplyTo, $refs, true)) $refs[] = $inReplyTo;
+    return [$inReplyTo, implode(' ', $refs)];
+}
+
 /** One message with body text and attachment list. Null if the UID doesn't exist. */
 function mbx_get(string $folder, int $uid, bool $markSeen = false): ?array {
     $c = mbx_open($folder);
@@ -343,10 +386,7 @@ function mbx_get(string $folder, int $uid, bool $markSeen = false): ?array {
         if ($markSeen) imap_setflag_full($c, (string)$uid, '\\Seen', ST_UID);
 
         $raw = (string)imap_fetchheader($c, $uid, FT_UID);
-        $hdr = function (string $name) use ($raw): string {
-            return preg_match('/^' . preg_quote($name, '/') . ':\s*(.+(?:\r?\n[ \t].+)*)/mi', $raw, $m)
-                ? trim(preg_replace('/\r?\n[ \t]+/', ' ', $m[1])) : '';
-        };
+        $hdr = function (string $name) use ($raw): string { return mbx_raw_header($raw, $name); };
 
         return [
             'folder'      => $folder,
@@ -463,8 +503,7 @@ function mbx_compose(array $in) {
     $cc = $emails($in['cc'] ?? []);
     $bcc = $emails($in['bcc'] ?? []);
     $subject = trim((string)($in['subject'] ?? ''));
-    $reply = null;
-    $inReplyTo = $references = '';
+    $reply = $orig = null;
 
     if ((int)($in['reply_to_uid'] ?? 0) > 0) {
         $rf   = (string)($in['reply_folder'] ?? 'INBOX');
@@ -476,18 +515,9 @@ function mbx_compose(array $in) {
             $to  = array_column($src, 'email');
         }
         if ($subject === '') $subject = preg_match('/^\s*re:/i', $orig['subject']) ? $orig['subject'] : 'Re: ' . $orig['subject'];
-        $inReplyTo  = $orig['message_id'];
-        $references = trim($orig['references'] . ' ' . $orig['message_id']);
-    } elseif (trim((string)($in['in_reply_to'] ?? '')) !== '') {
-        // Thread on a message read with another tool: its Message-ID "<…@…>" (+ its References).
-        $inReplyTo = trim((string)$in['in_reply_to']);
-        if ($inReplyTo[0] !== '<') $inReplyTo = '<' . $inReplyTo . '>';
-        if (!preg_match('/^<[^<>\s]+@[^<>\s]+>$/', $inReplyTo)) throw new InvalidArgumentException('in_reply_to must be a Message-ID like <abc@mail.gmail.com>');
-        $refs = is_array($in['references'] ?? null) ? implode(' ', $in['references']) : (string)($in['references'] ?? '');
-        $refs = trim((string)preg_replace('/\s+/', ' ', $refs));
-        if (!preg_match('/^(<[^<>\s]+>\s?)*$/', $refs)) throw new InvalidArgumentException('references must be Message-IDs like "<a@b> <c@d>"');
-        $references = $refs === '' ? $inReplyTo : (strpos($refs, $inReplyTo) === false ? $refs . ' ' . $inReplyTo : $refs);
     }
+    // Threading: from the original (reply_to_uid) or a message read with another tool (in_reply_to + references).
+    [$inReplyTo, $references] = mbx_thread_headers($orig, $in);
     if (!$to) throw new InvalidArgumentException('to is required (or reply_to_uid)');
     if ($subject === '') throw new InvalidArgumentException('subject is required');
     $text = (string)($in['body'] ?? '');
