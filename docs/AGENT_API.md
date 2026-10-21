@@ -1340,7 +1340,7 @@ request by request. `modules/leads/sales_response_scan.php --cron` (cPanel cron,
 `modules/leads/sales_response_cron.php?token=…` (cron-job.org, daily 23:30 for the scan + 07:05 for the mails; token `SALES_RESPONSE_CRON_TOKEN`, else
 `MEMO_CRON_TOKEN`; same run, `sr_run()`, a MySQL lock skips overlaps) reads only the **headers**
 (From, To, Cc, Date, Subject, Message-ID, In-Reply-To, References) of the sellers' mailboxes and the shared info@,
-safari@, sales@ (`SR_SHARED_BOXES`, since 19 Oct 2026) straight from the Maildirs — no bodies, no attachments, no IMAP.
+safari@ (`SR_SHARED_BOXES`, since 19 Oct 2026; sales@ dropped 21 Oct 2026) straight from the Maildirs — no bodies, no attachments, no IMAP.
 A linked client mail on a shared mailbox is a client message for the seller of the request (`written_to` shows where
 the client wrote); unlinked mail there is ignored. One Message-ID = one message (To seller + Cc info@ counts once). Logic `modules/leads/includes/sales_response_service.php`,
 tables `migrations/072_sales_response.sql`, page `modules/leads/sales_response.php` (admin / manager: every seller and

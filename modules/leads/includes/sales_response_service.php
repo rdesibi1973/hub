@@ -30,7 +30,8 @@ const SR_OWN_ADDRESSES = ['savannah.explorers@gmail.com'];          // Roberto's
 // Shared mailboxes read too (change request 19 Oct 2026): most direct leads arrive on info@ and are assigned in the Hub.
 // A linked client mail received there is a client message for the seller of the request; a reply sent from there counts
 // as "Savannah answered". Unlinked mail on them (spam, suppliers, newsletters, staff) is never counted nor listed.
-const SR_SHARED_BOXES  = ['info@savannahexplorers.com', 'safari@savannahexplorers.com', 'sales@savannahexplorers.com'];
+// sales@ removed (Roberto, 21 Oct 2026): the mailbox is being deleted and forwarded to info@.
+const SR_SHARED_BOXES  = ['info@savannahexplorers.com', 'safari@savannahexplorers.com'];
 const SR_CLOSED        = ['Lost', 'Cancelled'];
 // Direct clients only (Roberto, 18 Oct 2026): requests with channel 'direct', or — older requests without a channel —
 // no agency and not an SB folder ("(Agent)" / "(Agent-Drct)"). Agency, SB and Other requests are still linked (better matching) but never counted.
