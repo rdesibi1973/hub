@@ -18,6 +18,7 @@ Memo: at the start create one `doing` memo (clear title, linked request, stable 
 
 - Provisional group folders: `C:\Dropbox\itineraries\SafariClassic\it\Agenzia\Diamante\2027-Groups` (`<MM>_<DDMMM>_PanoramaNN_(Diamante-PS-Roberto)_START…_END…_PROVISIONAL`).
 - Diamante price files: the two tariff Excels in `C:\Dropbox\itineraries\SafariClassic\it\Agenzia\Diamante\2027`.
+- Release date (written rule with Pure, 22 Oct 2026): Pure Tarangire and Pure Ndutu hold every Panorama block until 60 days before arrival (Pure mail saved as `Pure_60day_release_all_Panorama_2026-10-22.eml` in `2027-Groups` and in `bookings` of each confirmed group). Release date of a group = group start date minus 60 days: by then decide with Il Diamante, confirm the rooms sold and release the others at Pure and on our lodges (ResRequest). The release date is written in the Calc of each group (cell F3). The dates are followed in one Hub memo (`ext_key` `diamante-release-dates`), due on the next release date.
 - Diamante operations: reservation.africa@ildiamante.com (Vincenzo, Gianfranco, Claudia); Lorenzo at Il Diamante confirms prices when in doubt. Every client booking has a Diamante REF: always quote it.
 
 ## 2. Prices — decided case by case with Roberto

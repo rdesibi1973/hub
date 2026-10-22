@@ -23,6 +23,8 @@ Memo: at the start create one `doing` memo (clear title with the folder name, li
 
 ## 2. Programme and prices
 
+**Availability of our own lodges (Marera, Kifaru, Orangi Luxury, Arusha Explorers).** Before a proposal goes out, check the public ResRequest calendar https://theorangicollection.resrequest.com/page/public/availabilitycalendar in the built-in browser (no login). The calendar sits in an iframe (`reservation.php?20`): set the start date (`dateSelectorSelect` / `tempCalStartDate` + the text field, then `reloadPage()` in the iframe) and read the table. Each number = rooms free that night for that room type; 0 = full; `*` = provisional bookings on it. A couple needs Dbl rooms; "3 Sngl" rooms only after asking the booking team. If one of our lodges is full on a programme date, tell Roberto before generating the PDF / email: rooms marked `*` may be freed by the booking team, otherwise find an alternative (Roberto may send the proposal first and solve it once the client confirms) (22 Oct 2026, NicolaMarta).
+
 1. Pick the closest standard programme (Duma, DumaShort, Pumba, Simba, Kiboko, Gran Safari, Migrazione…) and say why. Stance: no North Serengeti in January, Manyara not recommended, Ndutu fine as a stop near the crater.
 2. `copy_program` → Word + Calc in the request folder (`NN_<folder>_<Prog>`).
 3. `get_rates` for programme prices per pax, flights, transfers.
@@ -49,6 +51,8 @@ Memo: at the start create one `doing` memo (clear title with the folder name, li
    - Flight Arusha → Zanzibar: cost always 235 (`=235*$B$1`), same in the Hub rate table.
    - Mafia extensions: flights from the Hub rate table (`flight` 60 Arusha → Mafia, 65 Mafia → Dar es Salaam); guests leave via Dar. Last day: Dar domestic → international terminal transfer, 50 per car in H/I ("Dar transfer domestic -> international airport"), added after the per-person total: F10 `=F9*$B$1+50`, G10 "Inc Dar transfer" (`fill_calc` does not write F10/G10: edit the sheet XML afterwards, keeping cached values for F10, B10, F11, F12). Pole Pole includes airport transfers on Mafia.
    - Mafia hotel cost (Butiama, Pole Pole): rack rate − 20% (commission on rack), so the price to a direct client equals the hotel's own rack rate. Our agency pricelist (`PolePole_Pricelist_SE_2027`) is a sale price, not the cost.
+   - Festive supplement (safari programmes, SIC included): 35 USD pp per night for the nights of 24, 25, 26 and 31 December (not 1 January), as its own item in `price_components` (e.g. `=2495+105+…`) (22 Oct 2026, FabrizioFlorio).
+   - `fill_calc` `days[]` are positional from row 17: to change one day only, use `row_offset` (e.g. 5 = sixth day), not the date; an activity is written as `{"amount", "desc"}`. Agency extras outside the standard package (e.g. private jeep + park fees + drinks, or a hotel such as Airport Planet Lodge) are quoted at cost × 1.14, rounded up to 5 USD, as their own price item (22 Oct 2026, FabrizioFlorio).
    - Day rows run 17–29 (row 30 = Totals): 13 days at most. A longer trip doesn't fit — say so at once and agree with Roberto what to shorten (e.g. a second North Serengeti night costs a beach night).
 7. Teens: AFTER the last `fill_calc` (it clears H6:I14), write the teen discount in H13 with the label in I13 (e.g. "teen discount (2 teens 13 y.o.)") and subtract it in F10 (e.g. `=F9*$B$1-H13*2`, with ZNZ transfers `=F9*$B$1+140-H13*2`), note "Inc teen discount" in G10. Keep cached values (edit the sheet XML, not via openpyxl).
 8. Calc not open in Excel on his PC; wait for Dropbox sync before the next Hub action.

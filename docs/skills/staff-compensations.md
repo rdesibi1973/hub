@@ -45,7 +45,7 @@ Memo: at the start create one `doing` memo (stable `ext_key` e.g. `work-commissi
 
   | Lodge | Standard cost, double room / night |
   |---|---|
-  | Arusha Explorers Lodge | 160 USD, HB |
+  | Arusha Explorers Lodge | 210 USD, HB (raised from 160 on 14 Oct 2026) |
   | Ngorongoro Marera Mountain View Lodge | 250 USD, FB |
   | Serengeti Kifaru Tented Lodge | 527 USD, FB |
   | Serengeti Orangi River Luxury Lodge | 740 USD, AI |
