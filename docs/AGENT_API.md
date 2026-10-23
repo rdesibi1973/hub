@@ -1340,7 +1340,13 @@ request by request. `modules/leads/sales_response_scan.php --cron` (cPanel cron,
 `modules/leads/sales_response_cron.php?token=…` (cron-job.org, daily 23:30 for the scan + 07:05 for the mails; token `SALES_RESPONSE_CRON_TOKEN`, else
 `MEMO_CRON_TOKEN`; same run, `sr_run()`, a MySQL lock skips overlaps) reads only the **headers**
 (From, To, Cc, Date, Subject, Message-ID, In-Reply-To, References) of the sellers' mailboxes and the shared info@,
-safari@ (`SR_SHARED_BOXES`, since 19 Oct 2026; sales@ dropped 21 Oct 2026) straight from the Maildirs — no bodies, no attachments, no IMAP.
+safari@ (`SR_SHARED_BOXES`, since 19 Oct 2026; sales@ dropped 21 Oct 2026) straight from the Maildirs — no bodies, no attachments —
+and, since 23 Oct 2026, the office Gmail of Roberto and Daniela over IMAP (`SR_GMAIL_BOXES`: "All Mail", the same header
+fields only, incremental on UID, at most `SR_GMAIL_MAX` a run). Their app passwords go in the server-only `includes/config.php`:
+`GMAIL_APP_PASSWORD` (savannah.explorers@gmail.com, also used by the `mail_*` actions) and `DANY_GMAIL_APP_PASSWORD`
+(dany.savexp@gmail.com); while one is missing that account is skipped (`gmail_skipped` in the run counts); a login /
+IMAP error makes the run fail (SCAN FAILED mail) after the rest is indexed. Sellers: Asia, Alessia, Anderson, Nuru,
+Agustin, Daniela (safari@) and Roberto (info@) since 23 Oct 2026; Daniela's / Roberto's reminders go to their Gmail.
 A linked client mail on a shared mailbox is a client message for the seller of the request (`written_to` shows where
 the client wrote); unlinked mail there is ignored. One Message-ID = one message (To seller + Cc info@ counts once). Logic `modules/leads/includes/sales_response_service.php`,
 tables `migrations/072_sales_response.sql`, page `modules/leads/sales_response.php` (admin / manager: every seller and
@@ -1353,8 +1359,9 @@ reminders; anyone else: only their own agent, `users.agent_id`). Emails to `SALE
   contact (or same company domain); several open requests → References, then folder name in the subject, else the most
   recent one, `ambiguous`; 3. folder name `Name(Agency-Agent)` in the subject, only for a free-mail counterpart.
   Lost / Cancelled requests keep their history (their replies count in the KPIs) but never appear in the alerts.
-- **Direct clients only** (`SR_DIRECT_ONLY`): requests with `channel` = direct, or no channel + no agency + not an "(…-SB)"
-  folder. Agency / SB / Other requests are linked (better matching) but not counted anywhere (KPIs, lists, reminders).
+- **Direct clients and agencies** (`SR_CHANNELS`; agencies since 23 Oct 2026): `channel` direct / agency, or for
+  requests without a channel: agency_id → agency, an "(…-SB)" folder → sb, else direct. SB / Other requests are linked
+  (better matching) but not counted anywhere (KPIs, lists, reminders).
 - **client** = outside sender; **savannah** = from our domains (or Roberto's Gmail) to an outside address; internal
   mail, auto-replies, lists, bounces and no-reply senders are ignored. One of ours linked by thread counts only if its
   To/Cc reaches the client of that request (request / agency address, company domain, or an address the client wrote
@@ -1374,8 +1381,9 @@ reminders; anyone else: only their own agent, `users.agent_id`). Emails to `SALE
 Params: `week` (any `YYYY-MM-DD` of the week; default last complete week), or `month` (`YYYY-MM`, compared with the month
 before), or `from` / `to` (`YYYY-MM-DD`, compared with the same number of days before) — then `week`/`prev` in the sellers
 are that period and the previous one, see `period`; `agent_id`, `exclude_leave` (1 = leave days out
-of the KPIs; default 0, as the weekly email). Same numbers as the weekly email.
-→ `week {start, end}`, `previous_weeks` (4), `live`, `leave_excluded`, `sellers[] {name, agent_id, agent_name, mailbox, leave_names[],
+of the KPIs; default 0, as the weekly email), `channel` (`direct` | `agency`; default both, as the weekly email).
+Same numbers as the weekly email.
+→ `week {start, end}`, `previous_weeks` (4), `live`, `leave_excluded`, `channel`, `sellers[] {name, agent_id, agent_name, mailbox, leave_names[],
 mapping_error, week, prev (the 4 weeks before, pooled), total, weeks {monday: metrics}, open_unanswered}` where metrics =
 `{due, answered_24h, pct_24h, late, median_h, p90_h, answered, off_due, off_answered_24h, pct_off_24h, new_leads,
 new_leads_median_h, office_n, office_median_h, client_msgs, sent_msgs, on_leave_excluded}`; `unanswered[] {seller, request_id, folder, customer,

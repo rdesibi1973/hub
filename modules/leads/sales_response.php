@@ -47,6 +47,8 @@ $periodQ = $pmode === 'month' ? ['period' => 'month', 'month' => $month]
          : ($pmode === 'range' ? ['period' => 'range', 'from' => $dFrom, 'to' => $dTo] : ['week' => $week]);
 $agentId = $isMgr ? ((int)($_GET['agent_id'] ?? 0) ?: null) : $myAgentId;
 $noLeave = !empty($_GET['exclude_leave']);   // off by default: sellers on leave must still answer
+$chan    = in_array($_GET['channel'] ?? '', SR_CHANNELS, true) ? $_GET['channel'] : null;   // direct | agency, default both
+$periodQ['channel'] = $chan;
 $uaId    = $isMgr ? ((int)($_GET['ua'] ?? 0) ?: $agentId) : $myAgentId;   // unanswered list: seller filter (default All)
 $nlId    = $isMgr ? ((int)($_GET['nl'] ?? 0) ?: $agentId) : $myAgentId;   // new leads list: seller filter
 $slId    = $isMgr ? ((int)($_GET['sl'] ?? 0) ?: $agentId) : $myAgentId;   // silent clients list: seller filter
@@ -86,7 +88,7 @@ if (!$isMgr && !$mySeller) {   // not one of the sellers measured here
     exit;
 }
 
-$rep     = sr_report($db, $week, $agentId, 4, $noLeave, $range);
+$rep     = sr_report($db, $week, $agentId, 4, $noLeave, $range, $chan);
 $per     = $rep['period'];
 $monthOpts = [];
 for ($i = 0; $i < 12; $i++) $monthOpts[] = date('Y-m', strtotime(date('Y-m-01') . " -$i month"));
@@ -147,14 +149,15 @@ a.sr-tag:hover{outline:1px solid currentColor}
   <p><b>Our rule</b> (Roberto to the team, 28 May 2026): every client email — inquiry, request or follow-up — gets a written
   <b>email reply within <?= SR_THRESHOLD_H ?> hours</b> of receipt. Anything agreed on WhatsApp or by phone must be confirmed by email:
   we keep a complete written history of every client conversation on our servers.</p>
-  <p>This page measures that rule for our <b>direct clients</b> (not agencies, SB or other channels), from the company mailboxes,
+  <p>This page measures that rule for our <b>direct clients and agencies</b> (not SB or other channels), from the company mailboxes
+  and the office Gmail of Roberto and Daniela,
   request by request: a client mail counts as answered when the next email from us to the client goes out.
   The seller's time starts when the seller has the request: at the client mail, or at the assignment in the Hub if that comes later;
   the time before (client mail → request in the Hub) is the office's and is shown apart.
   Once a safari is booked (folder in 001_Safari) the rule no longer applies: from the confirmation day its mails are not measured.
   Client mails received on info@ / safari@ count for the seller of the request too, and a reply from info@ / safari@ counts as an answer;
   a forward to a colleague is not an answer.</p>
-  <p class="sr-small">A reply counts only if it is sent from the company mail: a reply from Gmail or a similar personal address is not seen. A few client mails may be matched to the wrong request. Leads with no client mail (web form, phone)
+  <p class="sr-small">A reply counts only if it is sent from the company mail or the office Gmail of Roberto / Daniela: a reply from another personal address is not seen. A few client mails may be matched to the wrong request. Leads with no client mail (web form, phone)
   are measured from the assignment in the Hub. <?= SR_THRESHOLD_H ?> clock hours, always; evening / weekend / holiday
   (18:00–08:00 EAT, Saturday, Sunday, Tanzanian public holidays) is shown apart.
   <?= $noLeave ? "Client mails received on a seller's leave days are left out of the KPIs." : 'Leave days count like any other day ("on leave" is only a note).' ?></p>
@@ -199,6 +202,13 @@ a.sr-tag:hover{outline:1px solid currentColor}
     </select>
   </label>
   <?php endif; ?>
+  <label>Clients
+    <select name="channel" onchange="this.form.submit()">
+      <?php foreach (['' => 'Direct + agencies', 'direct' => 'Direct clients', 'agency' => 'Agencies'] as $cv => $cl): ?>
+      <option value="<?= h($cv) ?>" <?= (string)$chan === $cv ? 'selected' : '' ?>><?= h($cl) ?></option>
+      <?php endforeach; ?>
+    </select>
+  </label>
   <label title="Leave out of the KPIs the client mails received on a seller's leave days (leave_entries)">
     <input type="checkbox" name="exclude_leave" value="1" <?= $noLeave ? 'checked' : '' ?> onchange="this.form.submit()"> Exclude leave days
   </label>
@@ -326,10 +336,10 @@ $sellerFilter = function (string $param, ?int $cur, string $anchor) use ($isMgr,
   <div class="sr-actions">
     <?php if ($canRemind): ?>
       <button type="submit" class="btn btn-primary"
-              onclick="var n = document.querySelectorAll('#sr-remind .sr-key:checked').length; if (!n) { alert('Tick at least one mail.'); return false; } return confirm('Send a reminder to <?= h(addslashes($uaSeller['name'] . ' (' . $uaSeller['mailbox'] . ')')) ?> for ' + n + ' mail(s)?');">
+              onclick="var n = document.querySelectorAll('#sr-remind .sr-key:checked').length; if (!n) { alert('Tick at least one mail.'); return false; } return confirm('Send a reminder to <?= h(addslashes($uaSeller['name'] . ' (' . sr_remind_to($uaSeller) . ')')) ?> for ' + n + ' mail(s)?');">
         ✉ Send reminder to <?= h($uaSeller['name']) ?>
       </button>
-      <span class="sr-hint">To <?= h($uaSeller['mailbox']) ?>, replies come back to <?= h(sr_cfg()['to']) ?>. Only the ticked mails are listed.</span>
+      <span class="sr-hint">To <?= h(sr_remind_to($uaSeller)) ?>, replies come back to <?= h(sr_cfg()['to']) ?>. Only the ticked mails are listed.</span>
     <?php else: ?>
       <span class="sr-hint">Choose a seller above (or click a number in “Unanswered now”) to send them a reminder.</span>
     <?php endif; ?>

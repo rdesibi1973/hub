@@ -2909,7 +2909,10 @@ try {
             if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $f) || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $t) || $t < $f) agent_fail('from / to must be YYYY-MM-DD, from <= to');
             $range = ['from' => $f, 'to' => $t];
         }
-        agent_out(sr_report($db, $week !== '' ? $week : null, (int)($in['agent_id'] ?? 0) ?: null, 4, !empty($in['exclude_leave']), $range));
+        $chan = trim((string)($in['channel'] ?? ''));
+        if ($chan !== '' && !in_array($chan, SR_CHANNELS, true)) agent_fail('channel must be direct or agency (empty = both)');
+        agent_out(sr_report($db, $week !== '' ? $week : null, (int)($in['agent_id'] ?? 0) ?: null, 4, !empty($in['exclude_leave']), $range,
+                            $chan !== '' ? $chan : null));
     }
 
     default:

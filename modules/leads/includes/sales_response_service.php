@@ -17,6 +17,7 @@
  *   SALES_RESPONSE_SELLERS   ['Asia' => ['agent_id' => 7, 'leave' => 'Asia Caruso', 'mailbox' => '…'], …] merged over SR_SELLERS
  *   SALES_RESPONSE_HOLIDAYS  ['2027-03-10', …] replaces SR_HOLIDAYS
  *   SALES_RESPONSE_MAIL_ROOT Maildir root (default <home>/mail)
+ *   GMAIL_APP_PASSWORD, DANY_GMAIL_APP_PASSWORD  app passwords of the office Gmail accounts read (SR_GMAIL_BOXES)
  */
 
 const SR_THRESHOLD_H   = 24;     // Roberto: 24 clock hours, always (weekdays, evenings, weekends, holidays)
@@ -27,26 +28,33 @@ const SR_SILENT_DAYS   = 7;
 const SR_NOMAIL_DAYS   = 14;     // a new request with no mail at all is a wait only this long after the assignment
 const SR_KEEP_MONTHS   = 12;
 const SR_OWN_DOMAINS   = ['savannahexplorers.com', 'theorangicollection.com'];
-const SR_OWN_ADDRESSES = ['savannah.explorers@gmail.com'];          // Roberto's Gmail: his replies count as ours
+const SR_OWN_ADDRESSES = ['savannah.explorers@gmail.com', 'dany.savexp@gmail.com'];   // Roberto's / Daniela's office Gmail
+// Office Gmail accounts read over IMAP (headers only, "All Mail"), Roberto 23 Oct 2026: Roberto and Daniela also answer
+// from them. address => constant holding its app password (includes/config.php); not defined = skipped, shown in the scan.
+const SR_GMAIL_BOXES   = ['savannah.explorers@gmail.com' => 'GMAIL_APP_PASSWORD', 'dany.savexp@gmail.com' => 'DANY_GMAIL_APP_PASSWORD'];
+const SR_GMAIL_MAX     = 3000;   // headers read per Gmail account and run (the first 90-day read takes a few runs)
 // Shared mailboxes read too (change request 19 Oct 2026): most direct leads arrive on info@ and are assigned in the Hub.
 // A linked client mail received there is a client message for the seller of the request; a reply sent from there counts
 // as "Savannah answered". Unlinked mail on them (spam, suppliers, newsletters, staff) is never counted nor listed.
 // sales@ removed (Roberto, 21 Oct 2026): the mailbox is being deleted and forwarded to info@.
 const SR_SHARED_BOXES  = ['info@savannahexplorers.com', 'safari@savannahexplorers.com'];
 const SR_CLOSED        = ['Lost', 'Cancelled'];
-// Direct clients only (Roberto, 18 Oct 2026): requests with channel 'direct', or — older requests without a channel —
-// no agency and not an SB folder ("(Agent)" / "(Agent-Drct)"). Agency, SB and Other requests are still linked (better matching) but never counted.
-const SR_DIRECT_ONLY   = true;
+// Channels counted: direct clients (Roberto, 18 Oct 2026) and agencies (23 Oct 2026). sr_request_kind(): channel, or —
+// older requests without one — agency_id / an SB folder. SB and Other requests are still linked (better matching) but never counted.
+const SR_CHANNELS      = ['direct', 'agency'];
 
-// Sellers in scope (Roberto, 17 Oct 2026). Requests of Roberto / Daniela are excluded by not being here.
+// Sellers in scope (Roberto, 17 Oct 2026; Daniela and Roberto added 23 Oct 2026).
 // agent / leave = name in agents.name / leave_entries.employee_name (exact, else "<name> …"); the first run
 // mails the resolved mapping for Roberto to confirm. Fix a wrong match with SALES_RESPONSE_SELLERS (agent_id).
+// mailbox = the seller's company mailbox (read); remind = where reminders go (default mailbox).
 const SR_SELLERS = [
     ['name' => 'Asia',     'mailbox' => 'asia.caruso@savannahexplorers.com', 'agent' => 'Asia',     'leave' => 'Asia'],
     ['name' => 'Alessia',  'mailbox' => 'alessia@savannahexplorers.com',     'agent' => 'Alessia',  'leave' => 'Alessia'],
     ['name' => 'Anderson', 'mailbox' => 'anderson.jr@savannahexplorers.com', 'agent' => 'Anderson', 'leave' => 'Anderson'],
     ['name' => 'Nuru',     'mailbox' => 'nuru@savannahexplorers.com',        'agent' => 'Nuru',     'leave' => 'Nuru'],
     ['name' => 'Agustin',  'mailbox' => 'agustin@savannahexplorers.com',     'agent' => 'Agustin',  'leave' => 'Agustin'],
+    ['name' => 'Daniela',  'mailbox' => 'safari@savannahexplorers.com',      'agent' => 'Daniela',  'leave' => 'Daniela', 'remind' => 'dany.savexp@gmail.com'],
+    ['name' => 'Roberto',  'mailbox' => 'info@savannahexplorers.com',        'agent' => 'Roberto',  'leave' => 'Roberto', 'remind' => 'savannah.explorers@gmail.com'],
 ];
 
 // Tanzanian public holidays. Eid el-Fitr, Eid el-Adha and Maulid follow the moon: the dates below are the
@@ -64,7 +72,8 @@ const SR_FREEMAIL = ['gmail.com', 'googlemail.com', 'yahoo.com', 'yahoo.it', 'ya
     'gmx.com', 'gmx.de', 'gmx.net', 'web.de', 't-online.de', 'orange.fr', 'free.fr', 'wanadoo.fr', 'laposte.net', 'sfr.fr',
     'proton.me', 'protonmail.com', 'mail.com', 'zoho.com', 'yandex.com', 'qq.com', 'bluewin.ch', 'pec.it'];
 
-const SR_LIMITS = ['Solo clienti diretti: le richieste di agenzie, SB e Other non sono contate.', 'WhatsApp e telefono non sono visibili.', 'Le risposte da indirizzi Gmail personali non sono visibili.',
+const SR_LIMITS = ['Clienti diretti e agenzie: le richieste SB e Other non sono contate.', 'WhatsApp e telefono non sono visibili.',
+                   'Le risposte da indirizzi Gmail personali non sono visibili (i Gmail dell\'ufficio di Roberto e Daniela sono letti).',
                    'Alcuni abbinamenti ambigui (stesso indirizzo su più richieste aperte) possono essere errati.',
                    'Il tempo del venditore parte quando ha la richiesta: dalla mail del cliente o, se dopo, dall\'assegnazione nel Hub; il tempo prima (mail → richiesta nel Hub) è la colonna Ufficio.',
                    'I lead senza mail del cliente (modulo web, telefono) sono misurati dall\'assegnazione nel Hub.',
@@ -314,7 +323,7 @@ function sr_header_row(string $raw, int $mtime): array {
  * Index new files of every mailbox / folder (incremental on file mtime; first run: $backfillDays back).
  * Throws if a Maildir is missing or unreadable — silence must never mean OK. Returns per-folder counts.
  */
-function sr_scan(PDO $db, int $backfillDays = SR_BACKFILL_DAYS): array {
+function sr_scan(PDO $db, int $backfillDays = SR_BACKFILL_DAYS, int $gmailMax = SR_GMAIL_MAX): array {
     $root = sr_mail_root();
     if (!is_dir($root)) throw new RuntimeException('Mail root not found: ' . $root);
     $state = [];
@@ -367,7 +376,126 @@ function sr_scan(PDO $db, int $backfillDays = SR_BACKFILL_DAYS): array {
             $out[] = ['mailbox' => $mb, 'folder' => $fname, 'read' => $read, 'new' => $new];
         }
     }
+    // Office Gmail accounts: an error there does not stop the Maildirs; sr_run() reports it after linking.
+    foreach (SR_GMAIL_BOXES as $addr => $const) {
+        if (!defined($const) || (string)constant($const) === '') {
+            $out[] = ['mailbox' => $addr, 'folder' => 'Gmail', 'read' => 0, 'new' => 0, 'skipped' => $const . ' not set'];
+            continue;
+        }
+        try {
+            $out[] = sr_scan_gmail($db, $addr, (string)constant($const), $start - $backfillDays * 86400, $gmailMax, $ins, $up, $now);
+        } catch (Throwable $e) {
+            $out[] = ['mailbox' => $addr, 'folder' => 'Gmail', 'read' => 0, 'new' => 0, 'error' => $e->getMessage()];
+        }
+    }
     return $out;
+}
+
+// ── Gmail over IMAP (headers only) ──────────────────────────────────────────
+
+/** Header fields fetched from Gmail: the ones sr_header_row() reads, nothing else. */
+const SR_IMAP_FIELDS = 'FROM TO CC DATE SUBJECT MESSAGE-ID IN-REPLY-TO REFERENCES AUTO-SUBMITTED PRECEDENCE LIST-ID LIST-UNSUBSCRIBE '
+                     . 'CONTENT-TYPE X-AUTOREPLY X-AUTORESPOND X-AUTORESPONSE X-FAILED-RECIPIENTS';
+
+/**
+ * One IMAP command on an open connection: the untagged responses as [text, literals[]] ("{LIT}" marks where each
+ * literal was). Throws unless the tagged reply is OK.
+ */
+function sr_imap_cmd($fp, string $tag, string $cmd): array {
+    fwrite($fp, $tag . ' ' . $cmd . "\r\n");
+    $resps = [];
+    $cur = null;
+    while (true) {
+        $line = fgets($fp);
+        if ($line === false) throw new RuntimeException('IMAP connection lost (' . strtok($cmd, ' ') . ')');
+        if ($cur === null && strpos($line, $tag . ' ') === 0) {
+            if (stripos($line, $tag . ' OK') !== 0) throw new RuntimeException('IMAP ' . strtok($cmd, ' ') . ': ' . trim(substr($line, strlen($tag) + 1)));
+            return $resps;
+        }
+        if ($cur === null) $cur = ['text' => '', 'lits' => []];
+        if (preg_match('/\{(\d+)\}\r?\n$/', $line, $m)) {
+            $cur['text'] .= substr($line, 0, -strlen($m[0])) . '{LIT}';
+            $n = (int)$m[1];
+            $buf = '';
+            while (strlen($buf) < $n) {
+                $chunk = fread($fp, $n - strlen($buf));
+                if ($chunk === false || $chunk === '') throw new RuntimeException('IMAP connection lost in a literal');
+                $buf .= $chunk;
+            }
+            $cur['lits'][] = $buf;
+            continue;                                    // the response goes on after the literal
+        }
+        $cur['text'] .= rtrim($line, "\r\n");
+        $resps[] = $cur;
+        $cur = null;
+    }
+}
+
+function sr_imap_quote(string $s): string {
+    return '"' . str_replace(['\\', '"'], ['\\\\', '\\"'], $s) . '"';
+}
+
+/**
+ * Index new headers of one Gmail account's "All Mail" (received and sent). Incremental on UID (state row
+ * "All Mail#<uidvalidity>", last_mtime = last UID); first read: mail since $floorTs. At most $max headers a run.
+ */
+function sr_scan_gmail(PDO $db, string $addr, string $pass, int $floorTs, int $max, PDOStatement $ins, PDOStatement $up, string $now): array {
+    $fp = @stream_socket_client('ssl://imap.gmail.com:993', $errno, $errstr, 20);
+    if (!$fp) throw new RuntimeException("Gmail $addr: cannot connect ($errstr)");
+    stream_set_timeout($fp, 60);
+    try {
+        fgets($fp);                                                              // greeting
+        sr_imap_cmd($fp, 'a1', 'LOGIN ' . sr_imap_quote($addr) . ' ' . sr_imap_quote($pass));
+        $all = null;
+        foreach (sr_imap_cmd($fp, 'a2', 'LIST "" "*"') as $r) {               // "All Mail" has the \All flag in every language
+            if (preg_match('/^\* LIST \(([^)]*)\) \S+ (.+)$/i', $r['text'], $x) && stripos($x[1], '\All') !== false) {
+                $all = trim($x[2]);
+            }
+        }
+        if ($all === null) throw new RuntimeException("Gmail $addr: no All Mail folder (IMAP access to it off?)");
+        $uidv = 0;
+        foreach (sr_imap_cmd($fp, 'a3', 'EXAMINE ' . $all) as $r) {
+            if (preg_match('/UIDVALIDITY (\d+)/i', $r['text'], $x)) $uidv = (int)$x[1];
+        }
+        $folder = 'All Mail#' . $uidv;
+        $st = $db->prepare("SELECT last_mtime FROM sales_response_scan_state WHERE mailbox = ? AND folder = ?");
+        $st->execute([$addr, $folder]);
+        $last = $st->fetchColumn();
+        $search = $last === false ? 'UID SEARCH SINCE ' . date('j-M-Y', $floorTs) : 'UID SEARCH UID ' . ((int)$last + 1) . ':*';
+        $uids = [];
+        foreach (sr_imap_cmd($fp, 'a4', $search) as $r) {
+            if (preg_match('/^\* SEARCH\s*(.*)$/i', $r['text'], $x)) {
+                foreach (preg_split('/\s+/', trim($x[1])) as $u) if ($u !== '' && (int)$u > (int)$last) $uids[] = (int)$u;
+            }
+        }
+        sort($uids);
+        $uids = array_slice($uids, 0, $max);
+        $read = $new = 0;
+        $top = (int)$last;
+        foreach (array_chunk($uids, 200) as $i => $chunk) {
+            $resps = sr_imap_cmd($fp, 'f' . $i, 'UID FETCH ' . implode(',', $chunk) . ' (UID INTERNALDATE BODY.PEEK[HEADER.FIELDS (' . SR_IMAP_FIELDS . ')])');
+            foreach ($resps as $r) {
+                if (!preg_match('/UID (\d+)/', $r['text'], $u) || !$r['lits']) continue;
+                $uid = (int)$u[1];
+                $idate = preg_match('/INTERNALDATE "([^"]+)"/', $r['text'], $d) ? (int)strtotime($d[1]) : time();
+                $row = sr_header_row($r['lits'][0], $idate);
+                $read++;
+                $top = max($top, $uid);
+                $fk = 'uid:' . $uid;
+                $mk = sha1($row['message_id'] !== null ? $row['message_id'] : $addr . '|' . $folder . '|' . $fk);
+                $ins->execute([$addr, $folder, $fk, $mk, $row['message_id'], $row['in_reply_to'], $row['refs'],
+                               gmdate('Y-m-d H:i:s', $row['ts']), $row['date_src'], $row['from'], $row['to'], $row['subject'], $row['direction'], $now]);
+                $new += $ins->rowCount();
+            }
+            // Saved after every batch: a run cut short goes on from here next time.
+            if ($top > 0) $up->execute([$addr, $folder, $top, $read, $now]);
+        }
+        if ($last === false && $top === 0) $up->execute([$addr, $folder, 0, 0, $now]);   // nothing since the floor: start on UIDs
+        try { sr_imap_cmd($fp, 'z', 'LOGOUT'); } catch (Throwable $e) { /* closing anyway */ }
+        return ['mailbox' => $addr, 'folder' => 'Gmail', 'read' => $read, 'new' => $new, 'pending' => count($uids) === $max];
+    } finally {
+        fclose($fp);
+    }
 }
 
 /** Delete index rows older than 12 months. */
@@ -423,10 +551,17 @@ function sr_requests(PDO $db): array {
         $r['code'] = sr_folder_code((string)$r['practice_code']);
         $r['closed'] = in_array($r['status'], SR_CLOSED, true);
         $ch = strtolower(trim((string)$r['channel']));
-        $r['direct'] = $ch === 'direct' || ($ch === '' && !(int)$r['agency_id'] && stripos((string)$r['practice_code'], '-SB)') === false);
+        $r['kind'] = sr_request_kind($ch, (int)$r['agency_id'], (string)$r['practice_code']);
         $out[$r['id']] = $r;
     }
     return $cache = $out;
+}
+
+/** direct | agency | sb | other: the channel, or for older requests without one, agency_id / an "(…-SB)" folder. */
+function sr_request_kind(string $channel, int $agencyId, string $folder): string {
+    if ($channel !== '') return in_array($channel, ['direct', 'agency', 'sb'], true) ? $channel : 'other';
+    if (stripos($folder, '-SB)') !== false) return 'sb';
+    return $agencyId ? 'agency' : 'direct';
 }
 
 /** Contact maps: address => [request ids], domain (company domains only) => [request ids]. */
@@ -732,9 +867,12 @@ function sr_metrics(array $eps, int $clientMsgs, int $sentMsgs, int $now): array
  * $range: any period instead of a week — ['from', 'to'] (Y-m-d, inclusive) and optionally ['prev_from', 'prev_to'],
  * the period it is compared with (default: the same number of days just before). Then 'week' / 'prev' are that
  * period and the previous one, 'weeks' has the two buckets 'prev' and 'cur'; $week and $nPrev are ignored.
+ * $channel: 'direct' | 'agency' = only those requests; null = all of SR_CHANNELS.
  */
-function sr_report(PDO $db, ?string $week = null, ?int $agentId = null, int $nPrev = 4, bool $excludeLeave = false, ?array $range = null): array {
+function sr_report(PDO $db, ?string $week = null, ?int $agentId = null, int $nPrev = 4, bool $excludeLeave = false, ?array $range = null,
+                   ?string $channel = null): array {
     sr_schema($db);
+    $kinds = in_array($channel, SR_CHANNELS, true) ? [$channel] : SR_CHANNELS;
     $now = time();
     if ($range) {
         $curFrom = strtotime($range['from'] . ' 00:00:00');
@@ -771,7 +909,7 @@ function sr_report(PDO $db, ?string $week = null, ?int $agentId = null, int $nPr
     foreach (sr_messages($db, $since) as $m) {
         $r = $reqs[$m['request_id']] ?? null;
         if ($r && $r['conf_ts'] && $m['ts'] >= $r['conf_ts']) continue;   // booked: mail from the confirmation day on is not tracked
-        if ($r && isset($byAgent[$r['agent_id']]) && ($r['direct'] || !SR_DIRECT_ONLY)) $perReq[$m['request_id']][] = $m;
+        if ($r && isset($byAgent[$r['agent_id']]) && in_array($r['kind'], $kinds, true)) $perReq[$m['request_id']][] = $m;
     }
     // Waits with no client mail only for requests assigned after the mail index starts: nothing of theirs can be missing.
     $since = max($since, (int)strtotime((string)$db->query("SELECT MIN(date_utc) FROM mail_headers_index")->fetchColumn() . ' UTC') + 86400);
@@ -779,7 +917,7 @@ function sr_report(PDO $db, ?string $week = null, ?int $agentId = null, int $nPr
     // Only for SR_NOMAIL_DAYS: older ones with still no mail were handled elsewhere (WhatsApp, phone) or the address is wrong.
     foreach ($reqs as $rid => $r) {
         if (!isset($perReq[$rid]) && $r['assign_ts'] >= max($since, $now - SR_NOMAIL_DAYS * 86400) && trim((string)$r['email']) !== '' && isset($byAgent[$r['agent_id']])
-            && ($r['direct'] || !SR_DIRECT_ONLY)) $perReq[$rid] = [];
+            && in_array($r['kind'], $kinds, true)) $perReq[$rid] = [];
     }
 
     $eps = [];          // agent_id => week => [waits in the KPIs]
@@ -800,7 +938,7 @@ function sr_report(PDO $db, ?string $week = null, ?int $agentId = null, int $nPr
         $open = !$r['closed'] && ($r['status'] === 'Booked'
             ? ($r['start_date'] === null || $r['start_date'] >= $today)
             : ($r['recv_ts'] >= $scopeTs || $lastTs >= $scopeTs || ($r['updated_at'] && strtotime($r['updated_at']) >= $scopeTs)));
-        $base = ['agent_id' => $aid, 'seller' => $byAgent[$aid]['name'], 'request_id' => $rid, 'folder' => $r['practice_code'],
+        $base = ['agent_id' => $aid, 'seller' => $byAgent[$aid]['name'], 'request_id' => $rid, 'folder' => $r['practice_code'], 'channel' => $r['kind'],
                  'customer' => $r['customer_name'], 'status' => $r['status'], 'url' => sr_request_url($rid)];
         foreach (sr_episodes($r, $msgs, $since) as $e) {
             $onLeave = isset($leave[$aid][date('Y-m-d', $e['start'])]);
@@ -866,7 +1004,7 @@ function sr_report(PDO $db, ?string $week = null, ?int $agentId = null, int $nPr
     }
     return ['ok' => true, 'week' => ['start' => $period['from'], 'end' => $period['to']], 'period' => $period, 'previous_weeks' => $nPrev,
             'generated_at' => date('Y-m-d H:i:s', $now), 'threshold_hours' => SR_THRESHOLD_H, 'timezone' => 'Africa/Dar_es_Salaam',
-            'live' => sr_cfg()['live'], 'leave_excluded' => $excludeLeave, 'sellers' => $rows, 'unanswered' => $unanswered, 'new_leads' => $newLeads, 'silent' => $silent,
+            'live' => sr_cfg()['live'], 'leave_excluded' => $excludeLeave, 'channel' => $channel ?: 'all', 'sellers' => $rows, 'unanswered' => $unanswered, 'new_leads' => $newLeads, 'silent' => $silent,
             'last_scan' => sr_last_run($db), 'limits' => SR_LIMITS, 'footer' => SR_FOOTER];
 }
 
@@ -923,6 +1061,11 @@ function sr_reminder_email(array $seller, array $items): array {
  * (Roberto); send_hub_email() adds the signature of the logged-in sender. Logged in sales_response_reminder.
  * $confirm false = preview only. Returns ['ok', 'to', 'n', 'subject', 'text', 'sent'] or ['ok' => false, 'error'].
  */
+/** Where a seller's reminders go: 'remind' (Daniela, Roberto: their office Gmail), else the company mailbox. */
+function sr_remind_to(array $seller): string {
+    return (string)($seller['remind'] ?? $seller['mailbox']);
+}
+
 function sr_send_reminder(PDO $db, int $agentId, array $keys, string $by, bool $confirm = true): array {
     $seller = null;
     foreach (sr_sellers($db) as $s) if ($s['agent_id'] === $agentId) $seller = $s;
@@ -932,7 +1075,7 @@ function sr_send_reminder(PDO $db, int $agentId, array $keys, string $by, bool $
         if ((int)$db->query("SELECT GET_LOCK('hub_sales_response_run', 5)")->fetchColumn()) {
             try {
                 sr_schema($db);
-                sr_scan($db);
+                sr_scan($db, SR_BACKFILL_DAYS, 300);   // Gmail: a few hundred headers at most, the page is waiting
                 sr_link($db);
             } finally {
                 $db->query("SELECT RELEASE_LOCK('hub_sales_response_run')");
@@ -947,14 +1090,15 @@ function sr_send_reminder(PDO $db, int $agentId, array $keys, string $by, bool $
     }));
     if (!$items) return ['ok' => false, 'error' => 'No unanswered client mail to remind ' . $seller['name'] . ' of (already answered?)'];
     [$subject, $html, $text] = sr_reminder_email($seller, $items);
-    $res = ['ok' => true, 'to' => $seller['mailbox'], 'n' => count($items), 'subject' => $subject, 'text' => $text, 'sent' => false];
+    $to = sr_remind_to($seller);
+    $res = ['ok' => true, 'to' => $to, 'n' => count($items), 'subject' => $subject, 'text' => $text, 'sent' => false];
     if (!$confirm) return $res;
     require_once __DIR__ . '/../../../includes/mail_helper.php';
-    if (!send_hub_email($seller['mailbox'], $subject, $html, 'Savannah Explorers Hub', 'noreply@savannahexplorers.com', sr_cfg()['to'], $text)) {
-        return ['ok' => false, 'error' => 'The mail to ' . $seller['mailbox'] . ' could not be sent'];
+    if (!send_hub_email($to, $subject, $html, 'Savannah Explorers Hub', 'noreply@savannahexplorers.com', sr_cfg()['to'], $text)) {
+        return ['ok' => false, 'error' => 'The mail to ' . $to . ' could not be sent'];
     }
     $db->prepare("INSERT INTO sales_response_reminder (sent_at, agent_id, mailbox, n, items_json, sent_by) VALUES (?,?,?,?,?,?)")
-       ->execute([date('Y-m-d H:i:s'), $agentId, $seller['mailbox'], count($items), json_encode(array_map('sr_unanswered_key', $items)), substr($by, 0, 60)]);
+       ->execute([date('Y-m-d H:i:s'), $agentId, $to, count($items), json_encode(array_map('sr_unanswered_key', $items)), substr($by, 0, 60)]);
     return ['sent' => true] + $res;
 }
 
@@ -1024,6 +1168,13 @@ function sr_run(PDO $db, array $o = []): array {
             $purged = sr_purge($db);
             $counts = ['files_read' => array_sum(array_column($scan, 'read')), 'new_rows' => array_sum(array_column($scan, 'new')),
                        'folders' => count($scan), 'purged' => $purged] + $link;
+            foreach ($scan as $f) {
+                if (!empty($f['skipped'])) $counts['gmail_skipped'][] = $f['mailbox'] . ': ' . $f['skipped'];
+                if (!empty($f['pending'])) $counts['gmail_pending'][] = $f['mailbox'];
+            }
+            // A Gmail account that fails is a failed run (SCAN FAILED mail), after the rest is indexed and linked.
+            $gErr = array_filter(array_map(function ($f) { return empty($f['error']) ? null : $f['mailbox'] . ': ' . $f['error']; }, $scan));
+            if ($gErr) throw new RuntimeException(implode('; ', $gErr));
         }
 
         $cron = !empty($o['cron']);
