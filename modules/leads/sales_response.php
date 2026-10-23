@@ -149,10 +149,12 @@ a.sr-tag:hover{outline:1px solid currentColor}
   we keep a complete written history of every client conversation on our servers.</p>
   <p>This page measures that rule for our <b>direct clients</b> (not agencies, SB or other channels), from the company mailboxes,
   request by request: a client mail counts as answered when the next email from us to the client goes out.
+  The seller's time starts when the seller has the request: at the client mail, or at the assignment in the Hub if that comes later;
+  the time before (client mail → request in the Hub) is the office's and is shown apart.
   Client mails received on info@ / safari@ count for the seller of the request too, and a reply from info@ / safari@ counts as an answer;
   a forward to a colleague is not an answer.</p>
-  <p class="sr-small">A reply counts only if it is sent from the company mail: a reply from Gmail or a similar personal address is not seen. A few client mails may be matched to the wrong request. Leads from the web form have no first
-  client mail, so their first reply cannot be measured. <?= SR_THRESHOLD_H ?> clock hours, always; evening / weekend / holiday
+  <p class="sr-small">A reply counts only if it is sent from the company mail: a reply from Gmail or a similar personal address is not seen. A few client mails may be matched to the wrong request. Leads with no client mail (web form, phone)
+  are measured from the assignment in the Hub. <?= SR_THRESHOLD_H ?> clock hours, always; evening / weekend / holiday
   (18:00–08:00 EAT, Saturday, Sunday, Tanzanian public holidays) is shown apart.
   <?= $noLeave ? "Client mails received on a seller's leave days are left out of the KPIs." : 'Leave days count like any other day ("on leave" is only a note).' ?></p>
 </div>
@@ -235,7 +237,9 @@ a.sr-tag:hover{outline:1px solid currentColor}
   <div class="sr-legend">
     <b>How to read the table.</b> Black = <?= h($perTitle) ?>; the small grey number under it = the same figure for <?= h($perPrev) ?>, to compare
     (no grey number = no data then). A <i>wait</i> starts with a client mail; more client mails before our reply are the same wait,
-    and it ends when our next email to the client goes out.
+    and it ends when our next email to the client goes out. The seller's clock starts at the client mail or, if later, when the
+    request is assigned to the seller in the Hub: before that the seller cannot know about it. A new request with no client mail
+    (web form, phone) is a wait from the assignment to our first email.
     <dl>
       <dt>Within <?= SR_THRESHOLD_H ?>h</dt>
       <dd>Share of waits answered within <?= SR_THRESHOLD_H ?> hours; in brackets answered in time / waits counted. Only waits older than
@@ -247,7 +251,10 @@ a.sr-tag:hover{outline:1px solid currentColor}
       <dt>90th percentile</dt>
       <dd>9 replies out of 10 went out within this time; the slowest 1 in 10 took longer. Shows the long delays the median hides.</dd>
       <dt>First reply to new leads</dt>
-      <dd>Median time of our first reply to a new request; in brackets how many new requests (web-form leads cannot be measured).</dd>
+      <dd>Median time of our first reply to a new request, from the assignment in the Hub (or the client mail, if later); in brackets how many new requests.</dd>
+      <dt>Office: client mail → Hub</dt>
+      <dd>Not the seller's time: how long a new request's first client mail waited before the request was created in the Hub
+        (median; in brackets how many). Requests with no client mail, or created before the mail, are not in it.</dd>
       <dt>Client mails / Mails sent</dt>
       <dd>How many mails came from direct clients and how many we sent them, in the period. Volume only: they show how busy the seller was.</dd>
       <dt>Unanswered now</dt>
@@ -304,9 +311,9 @@ $sellerFilter = function (string $param, ?int $cur, string $anchor) use ($isMgr,
         <td><a href="request_view.php?id=<?= (int)$u['request_id'] ?>"><?= h($u['folder'] ?: '#' . $u['request_id']) ?></a></td>
         <td><?= h($u['customer'] . ' <' . $u['client'] . '>') ?></td>
         <td class="sr-subj"><?= h($u['subject'] ?? '') ?></td>
-        <td><?= h($u['last_client_at'] . ($u['client_msgs'] > 1 ? ' (' . $u['client_msgs'] . ' mails)' : '')) ?></td>
+        <td><?= h($u['no_client_mail'] ? 'none (web form / phone)' : $u['last_client_at'] . ($u['client_msgs'] > 1 ? ' (' . $u['client_msgs'] . ' mails)' : '')) ?></td>
         <td><?= h($u['written_to'] ?? '') ?></td>
-        <td><?= h($fh($u['hours_waiting'])) ?></td>
+        <td title="Since <?= h($u['waiting_since']) ?>"><?= h($fh($u['hours_waiting'])) ?><span class="sr-prev">since <?= h($u['waiting_since']) ?></span></td>
         <td><?= h(implode(', ', array_filter([$u['in_ferie'] ? 'on leave' : '', $u['ambiguous'] ? 'uncertain match' : '',
                                               isset($reminded[$k]) ? 'reminded ' . $reminded[$k] : '']))) ?></td>
       </tr>
@@ -336,10 +343,12 @@ $sellerFilter = function (string $param, ?int $cur, string $anchor) use ($isMgr,
 $bySeller = function (array $list, ?int $id) { return array_values(array_filter($list, function ($u) use ($id) { return !$id || $u['agent_id'] === $id; })); };
 $lists = [
     ['newleads', 'nl', $nlId, 'New leads in this period: how long until our first reply', $bySeller($rep['new_leads'], $nlId),
-     ['First client mail' => function ($l) { return $l['first_client_at']; },
+     ['First client mail' => function ($l) { return $l['first_client_at'] ?? 'none (web form / phone)'; },
+      'Assigned in Hub' => function ($l) { return (string)($l['assigned_at'] ?? ''); },
+      'Office' => function ($l) use ($fh) { return $fh($l['office_hours']); },
       'Written to' => function ($l) { return (string)($l['written_to'] ?? ''); },
       'First reply' => function ($l) { return $l['first_reply_at'] ?? 'no reply'; },
-      'Time' => function ($l) use ($fh) { return $fh($l['hours']); },
+      'Seller time' => function ($l) use ($fh) { return $fh($l['hours']); },
       'From' => function ($l) { return (string)$l['answered_by']; }]],
     ['silent', 'sl', $slId, 'Clients silent for ' . SR_SILENT_DAYS . '+ days, no follow-up (for information)', $bySeller($rep['silent'], $slId),
      ['Status' => function ($l) { return $l['status']; },

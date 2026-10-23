@@ -1360,7 +1360,11 @@ reminders; anyone else: only their own agent, `users.agent_id`). Emails to `SALE
   To/Cc reaches the client of that request (request / agency address, company domain, or an address the client wrote
   from): a forward from info@ to a seller is not an answer.
 - A wait = the first unanswered client mail (several in a row = one wait) until the next savannah mail.
-  Threshold 24 clock hours, always. Evening / weekend / holiday = 18:00–08:00 EAT, Sat, Sun, Tanzanian holidays
+  The seller's clock starts when the seller has the request (Roberto, 23 Oct 2026): a wait still open when the request is
+  assigned in the Hub (`requests.assigned_at`, else `created_at`) starts there, not at the client mail. The office's part of a
+  new lead (first client mail → `created_at`) is `office_h`. A new request whose first mail is ours, or with no mail yet
+  (web form, phone; needs a request email), is a wait from the assignment (`no_client_mail`), only if assigned after the
+  mail index starts. Threshold 24 clock hours, always. Evening / weekend / holiday = 18:00–08:00 EAT, Sat, Sun, Tanzanian holidays
   (`SR_HOLIDAYS`, Eid / Maulid dates are estimates). Leave days (`leave_entries`) count like any other day: sellers
   on leave must still answer (Roberto, 18 Oct 2026); `in_ferie` / `on_leave` are only notes. On request
   (`exclude_leave=1`, page checkbox) the waits starting on a leave day are left out of the KPIs (`on_leave_excluded`).
@@ -1373,8 +1377,10 @@ of the KPIs; default 0, as the weekly email). Same numbers as the weekly email.
 → `week {start, end}`, `previous_weeks` (4), `live`, `leave_excluded`, `sellers[] {name, agent_id, agent_name, mailbox, leave_names[],
 mapping_error, week, prev (the 4 weeks before, pooled), total, weeks {monday: metrics}, open_unanswered}` where metrics =
 `{due, answered_24h, pct_24h, late, median_h, p90_h, answered, off_due, off_answered_24h, pct_off_24h, new_leads,
-new_leads_median_h, client_msgs, sent_msgs, on_leave_excluded}`; `unanswered[] {seller, request_id, folder, customer,
-client, subject (of the last client mail), first_client_at, last_client_at, client_msgs, hours_waiting, written_to ("info@, alessia@"), in_ferie, ambiguous, url}`, `new_leads[]` (with `written_to`),
+new_leads_median_h, office_n, office_median_h, client_msgs, sent_msgs, on_leave_excluded}`; `unanswered[] {seller, request_id, folder, customer,
+client, subject (of the last client mail), first_client_at (null: no client mail), waiting_since (seller's clock), no_client_mail,
+last_client_at, client_msgs, hours_waiting (since waiting_since), written_to ("info@, alessia@"), in_ferie, ambiguous, url}`,
+`new_leads[]` (with `written_to`, `assigned_at`, `office_hours`, `hours` = seller time),
 `silent[]` (our mail last, client silent 7+ days, not Booked), `last_scan {status (ok|stale|scan_failed|never_run), …}`,
 `limits[]`, `footer`.
 Reminders: the Hub page (unanswered list, filter by seller, tick the mails) mails the seller the list from the Hub,

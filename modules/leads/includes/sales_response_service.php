@@ -24,6 +24,7 @@ const SR_BACKFILL_DAYS = 90;     // first run reads 90 days back
 const SR_RELINK_DAYS   = 90;     // links of the last 90 days are recomputed on every run (requests created after the mail)
 const SR_SCOPE_DAYS    = 90;     // a request is "open" with date_received / activity in the last 90 days (Booked: until start_date)
 const SR_SILENT_DAYS   = 7;
+const SR_NOMAIL_DAYS   = 14;     // a new request with no mail at all is a wait only this long after the assignment
 const SR_KEEP_MONTHS   = 12;
 const SR_OWN_DOMAINS   = ['savannahexplorers.com', 'theorangicollection.com'];
 const SR_OWN_ADDRESSES = ['savannah.explorers@gmail.com'];          // Roberto's Gmail: his replies count as ours
@@ -65,7 +66,8 @@ const SR_FREEMAIL = ['gmail.com', 'googlemail.com', 'yahoo.com', 'yahoo.it', 'ya
 
 const SR_LIMITS = ['Solo clienti diretti: le richieste di agenzie, SB e Other non sono contate.', 'WhatsApp e telefono non sono visibili.', 'Le risposte da indirizzi Gmail personali non sono visibili.',
                    'Alcuni abbinamenti ambigui (stesso indirizzo su più richieste aperte) possono essere errati.',
-                   'I lead arrivati dal modulo web non hanno una prima mail del cliente: la prima risposta non è misurabile.'];
+                   'Il tempo del venditore parte quando ha la richiesta: dalla mail del cliente o, se dopo, dall\'assegnazione nel Hub; il tempo prima (mail → richiesta nel Hub) è la colonna Ufficio.',
+                   'I lead senza mail del cliente (modulo web, telefono) sono misurati dall\'assegnazione nel Hub.'];
 const SR_FOOTER = 'Misura solo la posta aziendale.';
 
 // ── Config ───────────────────────────────────────────────────────────────────
@@ -398,8 +400,10 @@ function sr_requests(PDO $db): array {
     if ($cache !== null) return $cache;
     $upd = sr_has_col($db, 'requests', 'updated_at') ? ', r.updated_at' : ', NULL AS updated_at';
     $chn = sr_has_col($db, 'requests', 'channel') ? ', r.channel' : ', NULL AS channel';
+    $crt = sr_has_col($db, 'requests', 'created_at') ? ', r.created_at' : ', NULL AS created_at';
+    $asg = sr_has_col($db, 'requests', 'assigned_at') ? ', r.assigned_at' : ', NULL AS assigned_at';
     $rows = $db->query("SELECT r.id, r.agent_id, r.status, r.email, r.agency_id, r.practice_code, r.customer_name, r.date_received,
-                               r.start_date $upd $chn, a.name AS agent_name
+                               r.start_date $upd $chn $crt $asg, a.name AS agent_name
                         FROM requests r LEFT JOIN agents a ON a.id = r.agent_id
                         WHERE r.date_received >= CURDATE() - INTERVAL 18 MONTH OR r.start_date >= CURDATE() - INTERVAL 60 DAY")
                ->fetchAll(PDO::FETCH_ASSOC);
@@ -408,6 +412,9 @@ function sr_requests(PDO $db): array {
         $r['id'] = (int)$r['id'];
         $r['agent_id'] = (int)$r['agent_id'];
         $r['recv_ts'] = $r['date_received'] ? (int)strtotime(substr($r['date_received'], 0, 10) . ' 00:00:00') : 0;
+        // When the seller got the request: last agent change (assigned_at, since 12 Oct 2026), else creation in the Hub.
+        $r['create_ts'] = (int)strtotime((string)$r['created_at']) ?: 0;
+        $r['assign_ts'] = (int)strtotime((string)$r['assigned_at']) ?: $r['create_ts'];
         $r['code'] = sr_folder_code((string)$r['practice_code']);
         $r['closed'] = in_array($r['status'], SR_CLOSED, true);
         $ch = strtolower(trim((string)$r['channel']));
@@ -611,17 +618,33 @@ function sr_boxes_label(array $boxes): string {
 /**
  * Waits of one request. Several client mails in a row = one wait, from the first of them to the next
  * savannah mail. new_lead = first wait of a new request, with no savannah mail before it.
+ * The seller's clock starts when the seller has the request (Roberto, 23 Oct 2026): a wait still open when the request
+ * is assigned in the Hub starts at assign_ts, not at the client mail (mail_ts); a new lead's mail → Hub creation is
+ * office_h, the office's time. A new request whose first mail is ours (web form, phone: no client mail) gets a wait
+ * from the assignment to that mail — or still open — when $since (start of the mail read) shows nothing was missed.
  */
-function sr_episodes(array $req, array $msgs): array {
+function sr_episodes(array $req, array $msgs, int $since = 0): array {
     $eps = [];
     $ep = null;
     $sent = false;
+    $aTs = (int)($req['assign_ts'] ?? 0);
+    $firstOurs = $msgs ? ($msgs[0]['dir'] === 'savannah' ? $msgs[0]['ts'] : null) : PHP_INT_MAX;
+    if ($firstOurs !== null && $since > 0 && $aTs >= $since && $aTs <= time() && $firstOurs >= $aTs
+        && $req['recv_ts'] >= $aTs - 14 * 86400) {
+        $ans = $firstOurs === PHP_INT_MAX ? null : $msgs[0];
+        $eps[] = ['request_id' => $req['id'], 'agent_id' => $req['agent_id'], 'start' => $aTs, 'mail_ts' => null, 'last' => null, 'n' => 0,
+                  'client' => (string)$req['email'], 'subject' => 'New request with no client mail (web form / phone)',
+                  'answered' => $ans ? $ans['ts'] : null, 'by' => $ans ? $ans['from'] : null,
+                  'resp_h' => $ans ? round(($ans['ts'] - $aTs) / 3600, 2) : null, 'ambiguous' => 0, 'boxes' => [],
+                  'new_lead' => true, 'no_client_mail' => true, 'office_h' => null];
+    }
     foreach ($msgs as $m) {
         if ($m['dir'] === 'client') {
             if ($ep === null) {
-                $ep = ['request_id' => $req['id'], 'agent_id' => $req['agent_id'], 'start' => $m['ts'], 'last' => $m['ts'], 'n' => 1,
+                $ep = ['request_id' => $req['id'], 'agent_id' => $req['agent_id'], 'start' => $m['ts'], 'mail_ts' => $m['ts'], 'last' => $m['ts'], 'n' => 1,
                        'client' => $m['from'], 'subject' => $m['subject'], 'answered' => null, 'by' => null, 'resp_h' => null, 'ambiguous' => $m['ambiguous'],
-                       'boxes' => $m['boxes'], 'new_lead' => !$sent && !$eps && $req['recv_ts'] >= $m['ts'] - 14 * 86400];
+                       'boxes' => $m['boxes'], 'new_lead' => !$sent && !$eps && $req['recv_ts'] >= $m['ts'] - 14 * 86400,
+                       'no_client_mail' => false, 'office_h' => null];
             } else {
                 $ep['last'] = $m['ts'];
                 $ep['n']++;
@@ -635,13 +658,21 @@ function sr_episodes(array $req, array $msgs): array {
             if ($ep !== null) {
                 $ep['answered'] = $m['ts'];
                 $ep['by'] = $m['from'];
-                $ep['resp_h'] = round(($m['ts'] - $ep['start']) / 3600, 2);
                 $eps[] = $ep;
                 $ep = null;
             }
         }
     }
     if ($ep !== null) $eps[] = $ep;
+    $cTs = (int)($req['create_ts'] ?? 0);
+    foreach ($eps as &$e) {
+        if ($e['no_client_mail']) continue;
+        // Answered before the assignment (e.g. from info@): the wait is the client's, measured from the mail.
+        if ($aTs > $e['start'] && ($e['answered'] === null || $e['answered'] > $aTs)) $e['start'] = $aTs;
+        if ($e['answered'] !== null) $e['resp_h'] = round(($e['answered'] - $e['start']) / 3600, 2);
+        if ($e['new_lead'] && $cTs > $e['mail_ts']) $e['office_h'] = round(($cTs - $e['mail_ts']) / 3600, 2);
+    }
+    unset($e);
     return $eps;
 }
 
@@ -658,7 +689,7 @@ function sr_pct(int $a, int $b): ?float {
 /** Metrics of a set of waits (already filtered: seller, weeks, leave days if excluded) + message volumes. */
 function sr_metrics(array $eps, int $clientMsgs, int $sentMsgs, int $now): array {
     $due = $ok = $offDue = $offOk = 0;
-    $resp = $newResp = [];
+    $resp = $newResp = $office = [];
     $newN = 0;
     foreach ($eps as $e) {
         if ($e['answered'] !== null) $resp[] = $e['resp_h'];
@@ -666,6 +697,7 @@ function sr_metrics(array $eps, int $clientMsgs, int $sentMsgs, int $now): array
             $newN++;
             if ($e['answered'] !== null) $newResp[] = $e['resp_h'];
         }
+        if (($e['office_h'] ?? null) !== null) $office[] = $e['office_h'];
         if ($e['start'] + SR_THRESHOLD_H * 3600 > $now) continue;      // not yet due
         $in24 = $e['answered'] !== null && $e['resp_h'] <= SR_THRESHOLD_H;
         $due++;
@@ -679,6 +711,7 @@ function sr_metrics(array $eps, int $clientMsgs, int $sentMsgs, int $now): array
             'median_h' => sr_percentile($resp, 0.5), 'p90_h' => sr_percentile($resp, 0.9), 'answered' => count($resp),
             'off_due' => $offDue, 'off_answered_24h' => $offOk, 'pct_off_24h' => sr_pct($offOk, $offDue),
             'new_leads' => $newN, 'new_leads_median_h' => sr_percentile($newResp, 0.5),
+            'office_n' => count($office), 'office_median_h' => sr_percentile($office, 0.5),
             'client_msgs' => $clientMsgs, 'sent_msgs' => $sentMsgs];
 }
 
@@ -727,9 +760,18 @@ function sr_report(PDO $db, ?string $week = null, ?int $agentId = null, int $nPr
     $scopeTs = $now - SR_SCOPE_DAYS * 86400;
 
     $perReq = [];
-    foreach (sr_messages($db, min($fromTs, $scopeTs) - 30 * 86400) as $m) {
+    $since = min($fromTs, $scopeTs) - 30 * 86400;
+    foreach (sr_messages($db, $since) as $m) {
         $r = $reqs[$m['request_id']] ?? null;
         if ($r && isset($byAgent[$r['agent_id']]) && ($r['direct'] || !SR_DIRECT_ONLY)) $perReq[$m['request_id']][] = $m;
+    }
+    // Waits with no client mail only for requests assigned after the mail index starts: nothing of theirs can be missing.
+    $since = max($since, (int)strtotime((string)$db->query("SELECT MIN(date_utc) FROM mail_headers_index")->fetchColumn() . ' UTC') + 86400);
+    // New requests with a client address and no mail at all yet (web form / phone, not answered): a wait from the assignment.
+    // Only for SR_NOMAIL_DAYS: older ones with still no mail were handled elsewhere (WhatsApp, phone) or the address is wrong.
+    foreach ($reqs as $rid => $r) {
+        if (!isset($perReq[$rid]) && $r['assign_ts'] >= max($since, $now - SR_NOMAIL_DAYS * 86400) && trim((string)$r['email']) !== '' && isset($byAgent[$r['agent_id']])
+            && ($r['direct'] || !SR_DIRECT_ONLY)) $perReq[$rid] = [];
     }
 
     $eps = [];          // agent_id => week => [waits in the KPIs]
@@ -752,33 +794,38 @@ function sr_report(PDO $db, ?string $week = null, ?int $agentId = null, int $nPr
             : ($r['recv_ts'] >= $scopeTs || $lastTs >= $scopeTs || ($r['updated_at'] && strtotime($r['updated_at']) >= $scopeTs)));
         $base = ['agent_id' => $aid, 'seller' => $byAgent[$aid]['name'], 'request_id' => $rid, 'folder' => $r['practice_code'],
                  'customer' => $r['customer_name'], 'status' => $r['status'], 'url' => sr_request_url($rid)];
-        foreach (sr_episodes($r, $msgs) as $e) {
+        foreach (sr_episodes($r, $msgs, $since) as $e) {
             $onLeave = isset($leave[$aid][date('Y-m-d', $e['start'])]);
+            // first_client_at = the client's mail (null: none); waiting_since = the seller's clock (later of mail and assignment).
+            $times = ['first_client_at' => $e['mail_ts'] ? date('Y-m-d H:i', $e['mail_ts']) : null,
+                      'waiting_since' => date('Y-m-d H:i', $e['start']), 'no_client_mail' => $e['no_client_mail']];
             if ($e['start'] >= $fromTs && $e['start'] < $toTs) {
                 $w = $bucketOf($e['start']);
                 if ($onLeave && $excludeLeave) $leaveSkipped[$aid][$w] = ($leaveSkipped[$aid][$w] ?? 0) + 1;
                 else $eps[$aid][$w][] = $e;
                 if ($e['new_lead'] && $w === $ws) {
-                    $newLeads[] = $base + ['first_client_at' => date('Y-m-d H:i', $e['start']),
+                    $newLeads[] = $base + $times + [
+                                           'assigned_at' => $r['assign_ts'] ? date('Y-m-d H:i', $r['assign_ts']) : null,
+                                           'office_hours' => $e['office_h'],
                                            'first_reply_at' => $e['answered'] ? date('Y-m-d H:i', $e['answered']) : null,
                                            'hours' => $e['resp_h'], 'answered_by' => $e['by'], 'on_leave' => $onLeave,
                                            'written_to' => sr_boxes_label($e['boxes'])];
                 }
             }
             if ($open && $e['answered'] === null && $now - $e['start'] > SR_THRESHOLD_H * 3600) {
-                $unanswered[] = $base + ['client' => $e['client'], 'subject' => $e['subject'], 'first_client_at' => date('Y-m-d H:i', $e['start']),
-                                         'last_client_at' => date('Y-m-d H:i', $e['last']), 'client_msgs' => $e['n'],
+                $unanswered[] = $base + $times + ['client' => $e['client'], 'subject' => $e['subject'],
+                                         'last_client_at' => $e['last'] ? date('Y-m-d H:i', $e['last']) : null, 'client_msgs' => $e['n'],
                                          'hours_waiting' => round(($now - $e['start']) / 3600, 1), 'written_to' => sr_boxes_label($e['boxes']),
                                          'in_ferie' => $onLeave || isset($leave[$aid][$today]), 'ambiguous' => (bool)$e['ambiguous']];
             }
         }
         $lastMsg = end($msgs);
-        if ($open && $r['status'] !== 'Booked' && $lastMsg['dir'] === 'savannah' && $now - $lastMsg['ts'] >= SR_SILENT_DAYS * 86400) {
+        if ($open && $lastMsg && $r['status'] !== 'Booked' && $lastMsg['dir'] === 'savannah' && $now - $lastMsg['ts'] >= SR_SILENT_DAYS * 86400) {
             $silent[] = $base + ['last_sent_at' => date('Y-m-d H:i', $lastMsg['ts']), 'days' => (int)floor(($now - $lastMsg['ts']) / 86400)];
         }
     }
     usort($unanswered, function ($a, $b) { return $b['hours_waiting'] <=> $a['hours_waiting']; });
-    usort($newLeads, function ($a, $b) { return [$a['seller'], $a['first_client_at']] <=> [$b['seller'], $b['first_client_at']]; });
+    usort($newLeads, function ($a, $b) { return [$a['seller'], $a['waiting_since']] <=> [$b['seller'], $b['waiting_since']]; });
     usort($silent, function ($a, $b) { return [$a['seller'], -$a['days']] <=> [$b['seller'], -$b['days']]; });
 
     $rows = [];
@@ -819,7 +866,7 @@ function sr_report(PDO $db, ?string $week = null, ?int $agentId = null, int $nPr
 
 /** Stable key of an unanswered wait (the page checkboxes, the reminder log). */
 function sr_unanswered_key(array $u): string {
-    return $u['request_id'] . '|' . $u['first_client_at'];
+    return $u['request_id'] . '|' . ($u['first_client_at'] ?? $u['waiting_since']);
 }
 
 /** unanswered key => last reminder time (Y-m-d H:i), reminders of the last 60 days. */
@@ -853,8 +900,8 @@ function sr_reminder_email(array $seller, array $items): array {
         $wait = sr_fmt_h($u['hours_waiting'], true);
         $to = $u['written_to'] ?? '';
         $html .= '<tr><td ' . $td . '><a href="' . $h($u['url']) . '">' . $h($req) . '</a></td><td ' . $td . '>' . $h($client) . '</td><td ' . $td . '>'
-               . $h($u['subject'] ?? '') . '</td><td ' . $td . '>' . $h($u['last_client_at']) . '</td><td ' . $td . '>' . $h($to) . '</td><td ' . $td . '>' . $h($wait) . '</td></tr>';
-        $txt .= '- ' . $req . ' | ' . $client . ' | ' . ($u['subject'] ?? '') . ' | last mail ' . $u['last_client_at'] . ($to !== '' ? ' to ' . $to : '')
+               . $h($u['subject'] ?? '') . '</td><td ' . $td . '>' . $h($u['last_client_at'] ?? 'none (web form / phone)') . '</td><td ' . $td . '>' . $h($to) . '</td><td ' . $td . '>' . $h($wait) . '</td></tr>';
+        $txt .= '- ' . $req . ' | ' . $client . ' | ' . ($u['subject'] ?? '') . ' | last mail ' . ($u['last_client_at'] ?? 'none (web form / phone)') . ($to !== '' ? ' to ' . $to : '')
               . ' | waiting ' . $wait . "\n   " . $u['url'] . "\n";
     }
     $html .= '</table><p>' . $h($outro) . '</p>';
@@ -1045,6 +1092,7 @@ function sr_metric_cols(string $lang = 'it'): array {
             ($en ? 'Median time' : 'Tempo mediano') => function ($m) use ($en) { return sr_fmt_h($m['median_h'], $en); },
             ($en ? '90th percentile' : '90° percentile') => function ($m) use ($en) { return sr_fmt_h($m['p90_h'], $en); },
             ($en ? 'First reply to new leads (median)' : 'Prima risposta nuovi lead (mediana)') => function ($m) use ($en) { return sr_fmt_h($m['new_leads_median_h'], $en) . ($m['new_leads'] ? ' (' . $m['new_leads'] . ')' : ''); },
+            ($en ? 'Office: client mail → Hub (median)' : 'Ufficio: mail cliente → Hub (mediana)') => function ($m) use ($en) { return sr_fmt_h($m['office_median_h'], $en) . ($m['office_n'] ? ' (' . $m['office_n'] . ')' : ''); },
             ($en ? 'Client mails' : 'Mail clienti') => function ($m) { return (string)$m['client_msgs']; },
             ($en ? 'Mails sent' : 'Mail inviate') => function ($m) { return (string)$m['sent_msgs']; }];
 }
@@ -1084,7 +1132,8 @@ function sr_email(string $type, ?array $rep, array $x = []): array {
         $rows = $raw = [];
         foreach ($list as $i => $u) {
             $rows[] = [$u['seller'], ($u['folder'] ?: '#' . $u['request_id']) . ' ' . $u['url'], trim($u['customer'] . ' <' . $u['client'] . '>'),
-                       $u['last_client_at'] . ($u['client_msgs'] > 1 ? ' (' . $u['client_msgs'] . ' mail)' : ''), sr_fmt_h($u['hours_waiting']),
+                       $u['no_client_mail'] ? 'nessuna (web form / telefono)' : $u['last_client_at'] . ($u['client_msgs'] > 1 ? ' (' . $u['client_msgs'] . ' mail)' : ''),
+                       sr_fmt_h($u['hours_waiting']) . ' (dal ' . $u['waiting_since'] . ')',
                        $u['written_to'] ?? '',
                        ($u['in_ferie'] ? 'in ferie' : '') . ($u['ambiguous'] ? ($u['in_ferie'] ? ', ' : '') . 'abbinamento incerto' : '')];
             $raw[$i][1] = $reqCell($u);
@@ -1167,11 +1216,11 @@ function sr_email(string $type, ?array $rep, array $x = []): array {
             $sec('Nuovi lead della settimana: prima risposta');
             $rows = $raw = [];
             foreach ($rep['new_leads'] as $i => $l) {
-                $rows[] = [$l['seller'], ($l['folder'] ?: '#' . $l['request_id']) . ' ' . $l['url'], $l['first_client_at'],
-                           $l['written_to'] ?? '', $l['first_reply_at'] ?? 'nessuna risposta', sr_fmt_h($l['hours'])];
+                $rows[] = [$l['seller'], ($l['folder'] ?: '#' . $l['request_id']) . ' ' . $l['url'], $l['first_client_at'] ?? 'nessuna (web form / telefono)',
+                           $l['assigned_at'] ?? '', sr_fmt_h($l['office_hours']), $l['written_to'] ?? '', $l['first_reply_at'] ?? 'nessuna risposta', sr_fmt_h($l['hours'])];
                 $raw[$i][1] = $reqCell($l);
             }
-            $table(['Venditore', 'Richiesta', 'Prima mail cliente', 'Scritto a', 'Prima risposta', 'Tempo'], $rows, $raw);
+            $table(['Venditore', 'Richiesta', 'Prima mail cliente', 'Assegnata nel Hub', 'Ufficio', 'Scritto a', 'Prima risposta', 'Tempo venditore'], $rows, $raw);
         }
         $sec('Clienti silenziosi da ' . SR_SILENT_DAYS . '+ giorni, nessun follow-up (informativo)');
         $rows = $raw = [];
