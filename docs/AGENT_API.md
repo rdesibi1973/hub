@@ -1364,7 +1364,8 @@ reminders; anyone else: only their own agent, `users.agent_id`). Emails to `SALE
   assigned in the Hub (`requests.assigned_at`, else `created_at`) starts there, not at the client mail. The office's part of a
   new lead (first client mail → `created_at`) is `office_h`. A new request whose first mail is ours, or with no mail yet
   (web form, phone; needs a request email), is a wait from the assignment (`no_client_mail`), only if assigned after the
-  mail index starts. Threshold 24 clock hours, always. Evening / weekend / holiday = 18:00–08:00 EAT, Sat, Sun, Tanzanian holidays
+  mail index starts. Booked requests (`confirmation_date` set: Booked / Provisional, folder in /001_Safari/) are not
+  tracked from the confirmation day (Roberto, 23 Oct 2026): later mail and waits still open then are left out. Threshold 24 clock hours, always. Evening / weekend / holiday = 18:00–08:00 EAT, Sat, Sun, Tanzanian holidays
   (`SR_HOLIDAYS`, Eid / Maulid dates are estimates). Leave days (`leave_entries`) count like any other day: sellers
   on leave must still answer (Roberto, 18 Oct 2026); `in_ferie` / `on_leave` are only notes. On request
   (`exclude_leave=1`, page checkbox) the waits starting on a leave day are left out of the KPIs (`on_leave_excluded`).

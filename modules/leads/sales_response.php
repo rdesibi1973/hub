@@ -151,6 +151,7 @@ a.sr-tag:hover{outline:1px solid currentColor}
   request by request: a client mail counts as answered when the next email from us to the client goes out.
   The seller's time starts when the seller has the request: at the client mail, or at the assignment in the Hub if that comes later;
   the time before (client mail → request in the Hub) is the office's and is shown apart.
+  Once a safari is booked (folder in 001_Safari) the rule no longer applies: from the confirmation day its mails are not measured.
   Client mails received on info@ / safari@ count for the seller of the request too, and a reply from info@ / safari@ counts as an answer;
   a forward to a colleague is not an answer.</p>
   <p class="sr-small">A reply counts only if it is sent from the company mail: a reply from Gmail or a similar personal address is not seen. A few client mails may be matched to the wrong request. Leads with no client mail (web form, phone)

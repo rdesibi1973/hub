@@ -67,7 +67,8 @@ const SR_FREEMAIL = ['gmail.com', 'googlemail.com', 'yahoo.com', 'yahoo.it', 'ya
 const SR_LIMITS = ['Solo clienti diretti: le richieste di agenzie, SB e Other non sono contate.', 'WhatsApp e telefono non sono visibili.', 'Le risposte da indirizzi Gmail personali non sono visibili.',
                    'Alcuni abbinamenti ambigui (stesso indirizzo su più richieste aperte) possono essere errati.',
                    'Il tempo del venditore parte quando ha la richiesta: dalla mail del cliente o, se dopo, dall\'assegnazione nel Hub; il tempo prima (mail → richiesta nel Hub) è la colonna Ufficio.',
-                   'I lead senza mail del cliente (modulo web, telefono) sono misurati dall\'assegnazione nel Hub.'];
+                   'I lead senza mail del cliente (modulo web, telefono) sono misurati dall\'assegnazione nel Hub.',
+                   'Le richieste prenotate (in 001_Safari) non sono più misurate dal giorno della conferma.'];
 const SR_FOOTER = 'Misura solo la posta aziendale.';
 
 // ── Config ───────────────────────────────────────────────────────────────────
@@ -402,8 +403,9 @@ function sr_requests(PDO $db): array {
     $chn = sr_has_col($db, 'requests', 'channel') ? ', r.channel' : ', NULL AS channel';
     $crt = sr_has_col($db, 'requests', 'created_at') ? ', r.created_at' : ', NULL AS created_at';
     $asg = sr_has_col($db, 'requests', 'assigned_at') ? ', r.assigned_at' : ', NULL AS assigned_at';
+    $cnf = sr_has_col($db, 'requests', 'confirmation_date') ? ', r.confirmation_date' : ', NULL AS confirmation_date';
     $rows = $db->query("SELECT r.id, r.agent_id, r.status, r.email, r.agency_id, r.practice_code, r.customer_name, r.date_received,
-                               r.start_date $upd $chn $crt $asg, a.name AS agent_name
+                               r.start_date $upd $chn $crt $asg $cnf, a.name AS agent_name
                         FROM requests r LEFT JOIN agents a ON a.id = r.agent_id
                         WHERE r.date_received >= CURDATE() - INTERVAL 18 MONTH OR r.start_date >= CURDATE() - INTERVAL 60 DAY")
                ->fetchAll(PDO::FETCH_ASSOC);
@@ -415,6 +417,9 @@ function sr_requests(PDO $db): array {
         // When the seller got the request: last agent change (assigned_at, since 12 Oct 2026), else creation in the Hub.
         $r['create_ts'] = (int)strtotime((string)$r['created_at']) ?: 0;
         $r['assign_ts'] = (int)strtotime((string)$r['assigned_at']) ?: $r['create_ts'];
+        // Booked (folder in /001_Safari/, Booked or Provisional): not tracked from the confirmation day (Roberto, 23 Oct 2026:
+        // the booking team can take more than 24h). Unbooking clears confirmation_date.
+        $r['conf_ts'] = $r['confirmation_date'] ? (int)strtotime(substr($r['confirmation_date'], 0, 10) . ' 00:00:00') : 0;
         $r['code'] = sr_folder_code((string)$r['practice_code']);
         $r['closed'] = in_array($r['status'], SR_CLOSED, true);
         $ch = strtolower(trim((string)$r['channel']));
@@ -664,6 +669,8 @@ function sr_episodes(array $req, array $msgs, int $since = 0): array {
         }
     }
     if ($ep !== null) $eps[] = $ep;
+    // Booked: a wait still open at the confirmation is no longer tracked ($msgs stop there, see sr_report()).
+    if (!empty($req['conf_ts'])) $eps = array_values(array_filter($eps, function ($e) { return $e['answered'] !== null; }));
     $cTs = (int)($req['create_ts'] ?? 0);
     foreach ($eps as &$e) {
         if ($e['no_client_mail']) continue;
@@ -763,6 +770,7 @@ function sr_report(PDO $db, ?string $week = null, ?int $agentId = null, int $nPr
     $since = min($fromTs, $scopeTs) - 30 * 86400;
     foreach (sr_messages($db, $since) as $m) {
         $r = $reqs[$m['request_id']] ?? null;
+        if ($r && $r['conf_ts'] && $m['ts'] >= $r['conf_ts']) continue;   // booked: mail from the confirmation day on is not tracked
         if ($r && isset($byAgent[$r['agent_id']]) && ($r['direct'] || !SR_DIRECT_ONLY)) $perReq[$m['request_id']][] = $m;
     }
     // Waits with no client mail only for requests assigned after the mail index starts: nothing of theirs can be missing.
