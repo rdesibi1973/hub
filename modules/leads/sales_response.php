@@ -92,10 +92,11 @@ $monthOpts = [];
 for ($i = 0; $i < 12; $i++) $monthOpts[] = date('Y-m', strtotime(date('Y-m-01') . " -$i month"));
 $perTitle = $pmode === 'month' ? date('F Y', strtotime($per['from']))
           : ($pmode === 'range' ? $per['from'] . ' – ' . $per['to'] : 'Week ' . $per['from'] . ' – ' . $per['to']);
-$perGrey  = $pmode === 'month' ? 'grey: ' . date('F Y', strtotime($per['prev_from']))
-          : ($pmode === 'range' ? 'grey: the ' . ((int)round((strtotime($per['to']) - strtotime($per['from'])) / 86400) + 1) . ' days before, '
+$perPrev  = $pmode === 'month' ? date('F Y', strtotime($per['prev_from']))
+          : ($pmode === 'range' ? 'the ' . ((int)round((strtotime($per['to']) - strtotime($per['from'])) / 86400) + 1) . ' days before, '
                                   . $per['prev_from'] . ' – ' . $per['prev_to']
-                                : 'grey: the ' . (int)$rep['previous_weeks'] . ' weeks before, together');
+                                : 'the ' . (int)$rep['previous_weeks'] . ' weeks before, together');
+$perGrey  = 'small grey numbers: ' . $perPrev . ', to compare';
 $all     = sr_sellers($db);
 $ws      = $rep['week']['start'];
 $cols    = sr_metric_cols('en');
@@ -134,6 +135,10 @@ a.sr-tag:hover{outline:1px solid currentColor}
 .sr-rule{background:#fff;border-left:4px solid #C0211B;border-radius:6px;padding:12px 16px;margin-bottom:16px;font-size:.88rem;line-height:1.6}
 .sr-rule p{margin:0 0 6px}.sr-rule p:last-child{margin:0}
 .sr-rule .sr-small{font-size:.78rem;color:var(--grey-dk,#555)}
+.sr-legend{margin-top:12px;font-size:.8rem;line-height:1.5;color:var(--grey-dk,#555)}
+.sr-legend dl{display:grid;grid-template-columns:max-content 1fr;gap:3px 14px;margin:6px 0 0}
+.sr-legend dt{font-weight:600;color:#333}.sr-legend dd{margin:0}
+@media (max-width:640px){.sr-legend dl{grid-template-columns:1fr}.sr-legend dd{margin-bottom:6px}}
 </style>
 
 <div class="page-header"><h2>⏱ Sales Response — replies to clients</h2></div>
@@ -226,6 +231,31 @@ a.sr-tag:hover{outline:1px solid currentColor}
     <?php endforeach; ?>
     </tbody>
   </table>
+  </div>
+  <div class="sr-legend">
+    <b>How to read the table.</b> Black = <?= h($perTitle) ?>; the small grey number under it = the same figure for <?= h($perPrev) ?>, to compare
+    (no grey number = no data then). A <i>wait</i> starts with a client mail; more client mails before our reply are the same wait,
+    and it ends when our next email to the client goes out.
+    <dl>
+      <dt>Within <?= SR_THRESHOLD_H ?>h</dt>
+      <dd>Share of waits answered within <?= SR_THRESHOLD_H ?> hours; in brackets answered in time / waits counted. Only waits older than
+        <?= SR_THRESHOLD_H ?>h are counted, so the last day's mails are not in it yet.</dd>
+      <dt>Evening / weekend / holiday</dt>
+      <dd>The same, only for waits that started 18:00–08:00 EAT, on Saturday, Sunday or a Tanzanian public holiday.</dd>
+      <dt>Median time</dt>
+      <dd>The typical reply time: half of the replies went out faster, half slower. Answered waits only.</dd>
+      <dt>90th percentile</dt>
+      <dd>9 replies out of 10 went out within this time; the slowest 1 in 10 took longer. Shows the long delays the median hides.</dd>
+      <dt>First reply to new leads</dt>
+      <dd>Median time of our first reply to a new request; in brackets how many new requests (web-form leads cannot be measured).</dd>
+      <dt>Client mails / Mails sent</dt>
+      <dd>How many mails came from direct clients and how many we sent them, in the period. Volume only: they show how busy the seller was.</dd>
+      <dt>Unanswered now</dt>
+      <dd>Client mails waiting more than <?= SR_THRESHOLD_H ?>h for a reply <b>right now</b>, whatever period is chosen, so no grey number.
+        Click the red number for the list below.</dd>
+      <dt>h / d · –</dt>
+      <dd>Hours / days · no data. Few mails (e.g. 1/2) make the percentage unreliable: look at the numbers in brackets.</dd>
+    </dl>
   </div>
   </div>
 </div>
