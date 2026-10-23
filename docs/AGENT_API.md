@@ -718,6 +718,11 @@ from Excel Calc"):
   language. The Hub shows the reason next to the ★.
 - **Sample lodges kept only as text** ("Mara Pure Migration (Jul - Oct)") are read through the lodge aliases, else the closest
   lodge name, so the day still matches; the plan flags them ("link the lodge in the sample").
+- **Places check** (23 Oct 2026): the Calc label ("Znz-Home", "Karatu-Ark-ZNZ") and the sample day (titles + destination)
+  are read as places (Kili/JRO → Kilimanjaro, Ark → Arusha, Znz/Kiwengwa/Nungwi → Zanzibar, Ndutu → Serengeti, crater →
+  Ngorongoro…; unknown words such as "Home" are ignored). The Calc departure day takes the sample's last day only when
+  the places do not clash — "Znz-Home" never takes a "Karatu-Arusha-Kilimanjaro" departure: it is added from the Calc and
+  flagged "Departure not taken from the sample". A matched day whose places share nothing is flagged "Places differ".
 - **Migration camps, season rule:** a camp is a lodge of type `mobile_camp` or one with a season twin (`season_twin_id`, see
   Lodges). Open months: the camp's own (`season_months`, ticked on the lodge page — e.g. Untamed, which also opens in the
   central Serengeti April–June and November: all year), else by area: north (Mara / Kogatende) June–October, Ndutu

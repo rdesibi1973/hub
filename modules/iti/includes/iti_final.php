@@ -149,18 +149,32 @@ function iti_final_geo($row) {
 
 /**
  * A sample's days in order: id, day_number, end_lodge_id, lodge_name, destination_id,
- * latitude, longitude, lodge_text. Samples imported from WeTu often have the lodge
+ * latitude, longitude, lodge_text, title, places. Samples imported from WeTu often have the lodge
  * only as text ("Mara Pure Migration (Jul - Oct)"): it is read through the lodge
  * aliases, else the closest lodge name, so the day still matches the Calc;
- * 'lodge_text' keeps that text (null when the lodge is linked).
+ * 'lodge_text' keeps that text (null when the lodge is linked). 'title' = the first
+ * day title set; 'places' = iti_final_places() of the titles and destinations.
  */
 function iti_final_sample_days(PDO $db, int $sampleId): array {
-    $st = $db->prepare('SELECT d.id, d.day_number, d.end_lodge_id, d.end_lodge_custom, l.name AS lodge_name, l.destination_id, l.latitude, l.longitude
+    $titles = '';
+    foreach (ITI_LANGUAGES as $l) $titles .= ', d.day_title_' . $l;
+    $st = $db->prepare('SELECT d.id, d.day_number, d.end_lodge_id, d.end_lodge_custom, l.name AS lodge_name, l.destination_id, l.latitude, l.longitude,
+                               CONCAT_WS(\' \', dd.name_en, dd.name_it, ld.name_en, ld.name_it) AS dest_names' . $titles . '
                           FROM iti_program_days d LEFT JOIN iti_lodges l ON l.id = d.end_lodge_id
+                          LEFT JOIN iti_destinations dd ON dd.id = d.destination_id
+                          LEFT JOIN iti_destinations ld ON ld.id = l.destination_id
                          WHERE d.program_id = ? ORDER BY d.day_number');
     $st->execute(array($sampleId));
     $rows = $st->fetchAll(PDO::FETCH_ASSOC);
     foreach ($rows as $k => $r) {
+        $title = ''; $text = (string)$r['dest_names'];
+        foreach (ITI_LANGUAGES as $l) {
+            $t = trim((string)$r['day_title_' . $l]);
+            if ($title === '') $title = $t;
+            $text .= ' ' . $t;
+        }
+        $rows[$k]['title'] = $title;
+        $rows[$k]['places'] = iti_final_places($text);
         $rows[$k]['lodge_text'] = null;
         $txt = trim((string)$r['end_lodge_custom']);
         if ($r['end_lodge_id'] || $txt === '') continue;
@@ -195,10 +209,43 @@ function iti_final_lodge_from_text(string $txt): int {
 }
 
 /**
+ * Places a Calc label or a sample day names ("Karatu-Ark-ZNZ" → Karatu, Arusha, Zanzibar;
+ * "Pista di Ndutu" → Serengeti): [area => true]. Unknown words ("Home") are left out.
+ */
+function iti_final_places(string $text): array {
+    static $areas = array(
+        'Kilimanjaro'   => '/\b(kili|kilimanjaro|jro|kia|moshi)\b/u',
+        'Arusha'        => '/\b(arusha|ark)\b/u',
+        'Tarangire'     => '/\btarangire\b/u',
+        'Manyara'       => '/\b(manyara|mto wa mbu)\b/u',
+        'Karatu'        => '/\bkaratu\b/u',
+        'Ngorongoro'    => '/\b(ngorongoro|crater|cratere|cratère|krater|cráter)\b/u',
+        'Serengeti'     => '/\b(serengeti|ndutu|seronera|kogatende)\b/u',
+        'Lake Eyasi'    => '/\beyasi\b/u',
+        'Lake Natron'   => '/\bnatron\b/u',
+        'Zanzibar'      => '/\b(znz|zanzibar|zanzíbar|sansibar|stone ?town|nungwi|kendwa|kiwengwa|matemwe|pwani|paje|jambiani|michamvi|uroa)\b/u',
+        'Dar es Salaam' => '/\bdar\b/u',
+        'Nairobi'       => '/\b(nairobi|nbo)\b/u',
+        'Amboseli'      => '/\bamboseli\b/u',
+        'Masai Mara'    => '/\bma+sai mara\b/u',
+    );
+    $t = mb_strtolower($text, 'UTF-8');
+    $out = array();
+    foreach ($areas as $area => $re) if (preg_match($re, $t)) $out[$area] = true;
+    return $out;
+}
+
+/** Two place sets (iti_final_places()) that both name places and share none. */
+function iti_final_places_clash(array $a, array $b): bool {
+    return $a && $b && !array_intersect_key($a, $b);
+}
+
+/**
  * Align the plan's nights with a sample's days on the lodge sequence. Same lodge
  * = 2; same destination, or another lodge within ITI_FINAL_NEAR_KM (The Manor at
  * Ngorongoro ~ Marera in Karatu: two destinations, one area) = 1; the departure
- * day with the sample's last day = 2.
+ * day with the sample's last day = 2, unless the Calc label and the sample day name
+ * different places ("Znz-Home" vs "Karatu-Arusha-Kilimanjaro": the day is added from the Calc).
  * Returns ['map' => [planIndex => sampleIndex], 'score' => matched points, 'max' => 2 × the longer list].
  */
 function iti_final_match_sample(PDO $db, array $planDays, array $sampleDays): array {
@@ -206,17 +253,17 @@ function iti_final_match_sample(PDO $db, array $planDays, array $sampleDays): ar
     foreach ($planDays as $d) {
         $li = $d['lodge_id'] ? iti_final_lodge_info($db, (int)$d['lodge_id']) : null;
         $ka[] = array('l' => $d['lodge_id'], 'd' => $d['dest_id'], 'end' => $d['last'] && $d['hotel_text'] === '',
-                      'geo' => $li ? iti_final_geo($li) : null);
+                      'geo' => $li ? iti_final_geo($li) : null, 'p' => iti_final_places((string)$d['label']));
     }
     $m = count($sampleDays);
     foreach ($sampleDays as $j => $s) {
         $kb[] = array('l' => $s['end_lodge_id'] ? (int)$s['end_lodge_id'] : null,
                       'd' => $s['destination_id'] ? (int)$s['destination_id'] : null,
                       'end' => !$s['end_lodge_id'] && $j === $m - 1,
-                      'geo' => iti_final_geo($s));
+                      'geo' => iti_final_geo($s), 'p' => $s['places'] ?? array());
     }
     $score = function ($x, $y) {
-        if ($x['end'] && $y['end']) return 2;
+        if ($x['end'] && $y['end']) return iti_final_places_clash($x['p'], $y['p']) ? 0 : 2;
         if ($x['l'] && $x['l'] === $y['l']) return 2;
         if ($x['d'] && $x['d'] === $y['d']) return 1;
         if ($x['geo'] && $y['geo'] && iti_haversine($x['geo'][0], $x['geo'][1], $y['geo'][0], $y['geo'][1]) <= ITI_FINAL_NEAR_KM) return 1;
@@ -577,6 +624,20 @@ function iti_final_plan(PDO $db, array $calc, int $sampleId): array {
                 $days[$i]['flags'][] = 'Lodge changed from the sample (' . $s['lodge_name'] . ' → ' . $days[$i]['lodge_name']
                                      . '): the sample text is kept — check it does not name the old lodge.';
             }
+            $cp = iti_final_places((string)$days[$i]['label']);
+            if (iti_final_places_clash($cp, $s['places'])) {
+                $days[$i]['flags'][] = 'Places differ: Calc “' . $days[$i]['label'] . '” (' . implode(', ', array_keys($cp)) . ') vs sample day '
+                                     . (int)$s['day_number'] . ' “' . $s['title'] . '” (' . implode(', ', array_keys($s['places'])) . ') — check the day text.';
+            }
+        }
+        // Departure day left out by iti_final_match_sample(): the sample's leaves from elsewhere.
+        $lastS = $sampleDays ? $sampleDays[count($sampleDays) - 1] : null;
+        $lastC = $days ? $days[count($days) - 1] : null;
+        if ($lastS && $lastC && $lastC['sample_index'] === null && $lastC['hotel_text'] === '' && !$lastS['end_lodge_id']
+            && iti_final_places_clash(iti_final_places((string)$lastC['label']), $lastS['places'])) {
+            $days[count($days) - 1]['flags'][] = 'Departure not taken from the sample: its last day “' . $lastS['title'] . '” leaves from '
+                . implode(', ', array_keys($lastS['places'])) . ', the Calc “' . $lastC['label'] . '” from '
+                . implode(', ', array_keys(iti_final_places((string)$lastC['label']))) . '.';
         }
     }
 
