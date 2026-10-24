@@ -41,6 +41,39 @@ function iti_final_find_sample(PDO $db, string $code, string $lang) {
 }
 
 /**
+ * Tag a sample with a Calc code (hub_program_code), moving the code off every other
+ * sample that has it, so one code = one sample. $go false = only what would change.
+ * Returns ['code', 'sample' => {id, title}, 'previous_code' (the sample's own code it loses, or null),
+ * 'removed_from' => [{id, title}], 'changed' => bool].
+ */
+function iti_final_tag_sample(PDO $db, string $code, int $sampleId, bool $go): array {
+    $code = trim($code);
+    if ($code === '' || mb_strlen($code) > 80) throw new InvalidArgumentException('code: the Calc code, 1–80 characters');
+    $st = $db->prepare('SELECT id, program_type, status, title_it, title_en, hub_program_code FROM iti_programs WHERE id = ?');
+    $st->execute(array($sampleId));
+    $s = $st->fetch(PDO::FETCH_ASSOC);
+    if (!$s || $s['program_type'] !== 'sample') throw new InvalidArgumentException('Program #' . $sampleId . ' is not a sample');
+    if ($s['status'] === 'cancelled') throw new InvalidArgumentException('Sample #' . $sampleId . ' is cancelled');
+    $st = $db->prepare("SELECT id, title_it, title_en FROM iti_programs WHERE program_type = 'sample' AND hub_program_code = ? AND id <> ? ORDER BY id");
+    $st->execute(array($code, $sampleId));
+    $removed = array();
+    foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $o) $removed[] = array('id' => (int)$o['id'], 'title' => $o['title_it'] ?: $o['title_en']);
+    $prev = (string)$s['hub_program_code'] !== '' && $s['hub_program_code'] !== $code ? $s['hub_program_code'] : null;
+    $changed = $removed || $s['hub_program_code'] !== $code;
+    if ($go && $changed) {
+        $db->beginTransaction();
+        try {
+            $db->prepare("UPDATE iti_programs SET hub_program_code = NULL WHERE program_type = 'sample' AND hub_program_code = ? AND id <> ?")
+               ->execute(array($code, $sampleId));
+            $db->prepare('UPDATE iti_programs SET hub_program_code = ? WHERE id = ?')->execute(array($code, $sampleId));
+            $db->commit();
+        } catch (Throwable $e) { $db->rollBack(); throw $e; }
+    }
+    return array('code' => $code, 'sample' => array('id' => (int)$s['id'], 'title' => $s['title_it'] ?: $s['title_en']),
+                 'previous_code' => $prev, 'removed_from' => $removed, 'changed' => (bool)$changed);
+}
+
+/**
  * Months a sample title names: "LUG-SET" → [7,8,9], "DIC2026-MAR2027" → [12,1,2,3],
  * "ESTATE" → [6..9], "INVERNO" → [12,1,2,3]. Italian and English. [] = no season.
  */

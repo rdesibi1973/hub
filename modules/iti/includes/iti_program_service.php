@@ -454,6 +454,23 @@ function iti_ps_calc_plan(PDO $db, int $rid, array $in): array {
             '_calc' => $calc, '_sample_id' => $sample ? (int)$sample['id'] : 0, '_lang' => $lang];
 }
 
+/**
+ * Tag a sample with a Calc code (iti_final_tag_sample(): the code moves off the sample that had it).
+ * The code is given, or read from the Calc of request_id (file? for one of several Calc files).
+ */
+function iti_ps_tag_sample(PDO $db, array $in, bool $go): array {
+    iti_ensure_final_schema();
+    $sid = (int)($in['sample_id'] ?? 0);
+    if (!$sid) throw new InvalidArgumentException('sample_id is required');
+    $code = trim((string)($in['code'] ?? ''));
+    if ($code === '' && !empty($in['request_id'])) {
+        $calc = calc_read_request($db, (int)$in['request_id'], (string)($in['file'] ?? ''), '');
+        $code = iti_final_code_from_calc($calc['file']);
+    }
+    if ($code === '') throw new InvalidArgumentException('code or request_id is required');
+    return iti_final_tag_sample($db, $code, $sid, $go);
+}
+
 /** Generate the final programme (replaces an older final built from the same Calc file). */
 function iti_ps_calc_generate(PDO $db, int $rid, array $plan, array $who): array {
     if (!$plan['_sample_id']) throw new InvalidArgumentException('No sample for Calc code "' . $plan['code'] . '" — pass sample_id');

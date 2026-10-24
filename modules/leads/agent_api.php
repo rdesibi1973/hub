@@ -97,7 +97,7 @@ function agent_audit(PDO $db, string $action, $reqId, array $payload, string $re
     $dry = in_array($action, ['confirm_booking', 'send_booking_email', 'rollback_booking', 'fill_calc', 'iti_save_texts', 'update_rate', 'replace_flight_rates',
                               'cancel_invoice_payment', 'update_folder_status', 'import_zoho_invoice', 'create_invoice', 'update_invoice', 'send_invoice_email', 'mail_send', 'mail_move',
                               'iti_lodge_photos', 'iti_destination_photo', 'iti_update_lodge', 'iti_update_destination',
-                              'iti_create_personal', 'iti_update_program', 'iti_update_day', 'iti_publish', 'iti_final_from_calc', 'iti_save_alias',
+                              'iti_create_personal', 'iti_update_program', 'iti_update_day', 'iti_publish', 'iti_final_from_calc', 'iti_save_alias', 'iti_tag_sample',
                               'iti_create_lodge', 'iti_set_days', 'iti_add_day', 'iti_delete_day', 'iti_update_inclusions',
                               'iti_create_flight_route', 'iti_create_activity', 'iti_create_transfer_route', 'iti_save_as_sample',
                               'create_request', 'add_flight_rates', 'timeline_update', 'summary_set', 'rename_folder',
@@ -1670,6 +1670,7 @@ try {
     case 'iti_update_program':
     case 'iti_update_day':
     case 'iti_publish':
+    case 'iti_tag_sample':
     case 'iti_save_alias': {
         agent_require_method('POST');
         agent_iti_lib();
@@ -1685,11 +1686,13 @@ try {
                 case 'iti_update_program':  $r = iti_ps_update_program($db, (int)($in['program_id'] ?? 0), (array)($in['fields'] ?? []), $go); break;
                 case 'iti_update_day':      $r = iti_ps_update_day($db, (int)($in['program_id'] ?? 0), (int)($in['day'] ?? 0), (array)($in['fields'] ?? []), $go); break;
                 case 'iti_publish':         $r = iti_ps_publish($db, (int)($in['program_id'] ?? 0), !array_key_exists('publish', $in) || !empty($in['publish']), $go); break;
-                default:                    $r = $go ? iti_ps_save_alias($in, $who) : ['would_save' => ['type' => $in['type'] ?? null, 'text' => $in['text'] ?? null]];
+                case 'iti_tag_sample':      $r = iti_ps_tag_sample($db, $in, $go); break;
+                default:                   $r = $go ? iti_ps_save_alias($in, $who) : ['would_save' => ['type' => $in['type'] ?? null, 'text' => $in['text'] ?? null]];
             }
         } catch (ItiRefException $e) { agent_fail($e->getMessage(), 409, $e->data); }   // ref_number not derivable: candidates
         catch (ItiImportException $e) { agent_fail($e->getMessage(), $e->http, $e->data); }
         catch (InvalidArgumentException $e) { agent_fail($e->getMessage(), 400); }
+        catch (RuntimeException $e) { if ($agentAction !== 'iti_tag_sample') throw $e; agent_fail($e->getMessage(), 409); }   // Calc not readable
         agent_out(array_merge(['ok' => true, 'dry_run' => !$go], $r, $go ? [] : ['message' => 'Dry run — nothing saved. Resend with "confirm": true.']));
     }
 
@@ -2933,7 +2936,7 @@ try {
             'rollback_booking', 'iti_programs', 'iti_texts', 'iti_save_texts', 'update_rate', 'replace_flight_rates',
             'iti_lodges', 'iti_lodge', 'iti_destinations', 'iti_destination', 'iti_lodge_photos', 'iti_destination_photo',
             'iti_update_lodge', 'iti_update_destination', 'iti_create_lodge', 'iti_samples', 'iti_program', 'iti_document', 'iti_vouchers', 'iti_create_personal', 'iti_update_program',
-            'iti_update_day', 'iti_publish', 'iti_calc_plan', 'iti_final_from_calc', 'iti_save_alias',
+            'iti_update_day', 'iti_publish', 'iti_calc_plan', 'iti_final_from_calc', 'iti_save_alias', 'iti_tag_sample',
             'iti_set_days', 'iti_add_day', 'iti_delete_day', 'iti_inclusions', 'iti_update_inclusions', 'iti_save_as_sample',
             'iti_flight_routes', 'iti_create_flight_route', 'iti_activities', 'iti_activity', 'iti_update_activity', 'iti_create_activity',
             'iti_transfer_routes', 'iti_create_transfer_route', 'iti_create_destination', 'iti_import_program', 'iti_supplier_blocklist', 'add_flight_rates',

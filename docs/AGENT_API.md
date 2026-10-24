@@ -746,6 +746,13 @@ the programme Word copied next to that Calc, else the Calc's name without `_Calc
 `activity_id` | `transfer_route_id` / `flight_route_id`. A lodge alias without `lodge_id` = own arrangement
 (shown as free text). Dry-run unless confirm.
 
+#### `iti_tag_sample` (POST)
+`sample_id`, and `code` (the Calc code, e.g. `BeachSimba`) **or** `request_id` (+ `file?`: the code is read from that
+request's Calc name). Tags the sample with the code and moves the code off any other sample that had it (one code =
+one sample) → `code`, `sample` {id, title}, `previous_code` (the sample's own old code it loses, or null),
+`removed_from[]` {id, title}, `changed`. Dry-run unless confirm. Same as the Hub page "Create Itinerary Program from
+Excel Calc" → Sample program → **change** (23 Oct 2026; before, a tagged code could not be moved in the Hub).
+
 ### ITI master data — lodges and destinations
 Code: `modules/iti/includes/iti_content_service.php` (+ `iti_photos.php`, shared with the Lodges / Destinations pages).
 Photos are what the magazine layout (`&layout=mag`) shows: lodge card and stays (lodge, first photo = main),

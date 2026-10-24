@@ -83,6 +83,7 @@ mostrami il risultato, poi confirm dopo il mio ok.
 - **Finale (dopo la conferma):** `iti_calc_plan` con `request_id` → se `blocking` non è vuoto, proponimi per ogni
   testo il lodge / attività giusti (`iti_lodges`, …) e salvali con `iti_save_alias` dopo il mio ok →
   `iti_final_from_calc` (prova, poi confirm). Se manca il sample per il codice del Calc, dimmelo: non inventarlo.
+  Per legare (o spostare) un codice Calc a un sample: `iti_tag_sample` (prova, poi confirm dopo il mio ok).
 - **Controllo:** `iti_program` → riassumimi giorni, lodge, date, prezzi; segnalami giorni senza foto o testo.
   Anteprima interna: `links.preview`.
 - **File PDF / Word:** `iti_document` con `program_id`, `format` = `docx` per le agenzie (sempre Word), `pdf` per i

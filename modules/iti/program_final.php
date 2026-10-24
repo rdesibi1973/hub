@@ -49,8 +49,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit) {
         if ($action === 'set_sample') {
             $sid = (int)($_POST['sample_id'] ?? 0);
             if (!$sid || $code === '') throw new RuntimeException('Choose a sample.');
-            $db->prepare("UPDATE iti_programs SET hub_program_code = ? WHERE id = ? AND program_type = 'sample'")->execute([$code, $sid]);
-            iti_flash_set('success', 'Sample #' . $sid . ' is now used for Calc code "' . $code . '".');
+            $t = iti_final_tag_sample($db, $code, $sid, true);   // also moves the code off the previous sample
+            iti_flash_set('success', 'Sample #' . $sid . ' is now used for Calc code "' . $code . '"'
+                . ($t['removed_from'] ? ' (removed from #' . implode(', #', array_column($t['removed_from'], 'id')) . ')' : '')
+                . ($t['previous_code'] ? ' — it was tagged "' . $t['previous_code'] . '" before' : '') . '.');
         } elseif ($action === 'map') {
             $type = $_POST['type'] ?? '';
             iti_alias_save($type, (string)($_POST['alias'] ?? ''), [
@@ -85,8 +87,9 @@ if ($multiCalc) {   // the file picker replaces the reader's "several Calc files
 }
 $calcChanged = $active && $calc && $active['source_calc_rev'] && $active['source_calc_rev'] !== $calc['calc_rev'];
 
+$changeSample = $sample && $can_edit && !empty($_GET['change_sample']);   // "change": the picker again, with a sample tagged
 $samples = []; $suggestedSample = 0; $suggestedWhy = '';
-if ($calc && !$sample) {
+if ($calc && (!$sample || $changeSample)) {
     $samples = $db->query("SELECT id, title_en, title_it, display_language, duration_days, hub_program_code FROM iti_programs
                             WHERE program_type = 'sample' AND status <> 'cancelled' ORDER BY title_en")->fetchAll();
     $sug = iti_final_suggest_sample($db, $samples, $code, $calc, $plan['days'], $lang);
@@ -194,15 +197,20 @@ include __DIR__ . '/../../includes/layout_header.php';
 
 <div class="form-card" style="margin-bottom:18px;">
   <div class="form-section-title">Sample program <span style="font-weight:400;font-size:.8rem;color:var(--grey-mid)">Calc code “<?= h($code) ?>”</span></div>
-  <?php if ($sample): ?>
+  <?php if ($sample && !$changeSample): ?>
     <div style="font-size:.85rem;">
       #<?= (int)$sample['id'] ?> <strong><?= h($sample['title_it'] ?: $sample['title_en']) ?></strong> (<?= (int)$sample['duration_days'] ?> days, <?= h($sample['display_language']) ?>)
       <a href="program_edit.php?id=<?= (int)$sample['id'] ?>" style="margin-left:8px;">open</a>
+      <?php if ($can_edit): ?><a href="<?= h($self) ?>&amp;lang=<?= h($lang) ?>&amp;change_sample=1" style="margin-left:8px;">change</a><?php endif; ?>
     </div>
   <?php elseif ($can_edit): ?>
     <form method="POST" action="<?= h($self) ?>&amp;lang=<?= h($lang) ?>" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
       <input type="hidden" name="action" value="set_sample">
-      <span style="font-size:.85rem;">No sample is tagged “<?= h($code) ?>” yet — choose it once:</span>
+      <?php if ($sample): ?>
+        <span style="font-size:.85rem;">Now #<?= (int)$sample['id'] ?> — choose another sample for “<?= h($code) ?>” (the code moves to it):</span>
+      <?php else: ?>
+        <span style="font-size:.85rem;">No sample is tagged “<?= h($code) ?>” yet — choose it once:</span>
+      <?php endif; ?>
       <select name="sample_id" style="min-width:320px;">
         <option value="">— select —</option>
         <?php foreach ($samples as $s): $sug = (int)$s['id'] === $suggestedSample; ?>
@@ -210,6 +218,7 @@ include __DIR__ . '/../../includes/layout_header.php';
         <?php endforeach; ?>
       </select>
       <button type="submit" class="btn btn-red btn-sm">Use this sample</button>
+      <?php if ($sample): ?><a href="<?= h($self) ?>&amp;lang=<?= h($lang) ?>" class="btn btn-outline btn-sm">Cancel</a><?php endif; ?>
       <?php if ($suggestedSample): ?><span style="font-size:.78rem;color:var(--grey-mid);">★ proposed: <?= h($suggestedWhy) ?> — check it</span><?php endif; ?>
     </form>
   <?php endif; ?>
