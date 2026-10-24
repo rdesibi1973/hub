@@ -10,7 +10,7 @@
  *   tools\followup_local_scan.bat --confirm            write the lines
  *   tools\followup_local_scan.bat --folder=MattiaFerri --json=out.json   one booking, keep the rows
  *
- * Options: --root=C:\Dropbox\001_Safari  --pdftotext=C:\Utility\Git\mingw64\bin\pdftotext.exe
+ * Options: --root=C:\Dropbox\001_Safari  --pdftotext=C:\Utility\Git\mingw64\bin\pdftotext.exe (or ucrt64\, found by itself)
  *          --key-file=<path of api.txt>  (or env HUB_AGENT_KEY)  --url=https://hub.savannahexplorers.com/api/agent/index.php
  *          --today=YYYY-MM-DD (tests)  --no-send (classify only)  --cainfo=<CA bundle> (default: Git's, the office PHP has none)
  *          --no-ocr (PDFs without text stay "unreadable")
@@ -32,6 +32,11 @@ $opt = ['root' => 'C:\\Dropbox\\001_Safari', 'pdftotext' => 'C:\\Utility\\Git\\m
 foreach (array_slice($argv, 1) as $a) {
     if (!preg_match('/^--([a-z\-]+)(?:=(.*))?$/', $a, $m) || !array_key_exists($m[1], $opt)) { fwrite(STDERR, "Unknown option $a\n"); exit(2); }
     $opt[$m[1]] = isset($m[2]) ? $m[2] : true;
+}
+// Git for Windows 2.5x installs ucrt64\ instead of mingw64\: same tools, other folder.
+foreach (['pdftotext', 'cainfo'] as $k) {
+    $alt = str_ireplace('\\mingw64\\', '\\ucrt64\\', $opt[$k]);
+    if (!is_file($opt[$k]) && $alt !== $opt[$k] && is_file($alt)) $opt[$k] = $alt;
 }
 $today = $opt['today'];
 $root  = rtrim($opt['root'], '\\/');
@@ -87,7 +92,6 @@ function hub_post(array $opt, string $action, string $body, string $key): array 
     if ($opt['cainfo'] !== '' && is_file($opt['cainfo'])) curl_setopt($ch, CURLOPT_CAINFO, $opt['cainfo']);
     $res = curl_exec($ch);
     $out = [(int)curl_getinfo($ch, CURLINFO_HTTP_CODE), $res === false ? '' : (string)$res, curl_errno($ch) ? curl_error($ch) : ''];
-    curl_close($ch);
     return $out;
 }
 
