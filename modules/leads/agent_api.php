@@ -102,7 +102,7 @@ function agent_audit(PDO $db, string $action, $reqId, array $payload, string $re
                               'iti_create_flight_route', 'iti_create_activity', 'iti_create_transfer_route', 'iti_save_as_sample',
                               'create_request', 'add_flight_rates', 'timeline_update', 'summary_set', 'rename_folder',
                               'set_request_status', 'update_request', 'import_group_folder', 'move_group_folder', 'ck_request_check', 'memo_delete', 'create_agency', 'update_agency', 'save_agency_contact', 'delete_agency_contact',
-                              'followup_scan', 'followup_update', 'followup_upsert', 'iti_update_activity',
+                              'followup_scan', 'followup_update', 'followup_upsert', 'iti_update_activity', 'sales_response_dismiss',
                               'iti_create_destination', 'iti_import_program', 'iti_supplier_blocklist'], true) && empty($payload['confirm']);
     // Mail: keep who/what in the log, not message bodies or attachment content.
     if (in_array($action, ['mail_get', 'mail_attachment', 'iti_document', 'iti_vouchers'], true) && $code === 200) {
@@ -2915,6 +2915,17 @@ try {
                             $chan !== '' ? $chan : null));
     }
 
+    // Mark an unanswered client mail "no reply needed" (the client's last mail only closes the thread), or undo it.
+    case 'sales_response_dismiss': {
+        agent_require_method('POST');
+        require_once __DIR__ . '/includes/sales_response_service.php';
+        $res = sr_dismiss($db, trim((string)($in['key'] ?? '')), (string)$agentUser['username'], (string)($in['note'] ?? ''),
+                          !empty($in['undo']), !empty($in['confirm']));
+        if (!$res['ok']) agent_fail($res['error']);
+        $agentReqId = $res['item']['request_id'] ?? ((int)strtok($res['key'], '|') ?: null);
+        agent_out($res + (empty($in['confirm']) ? ['message' => 'Dry run — resend with "confirm": true to save.'] : []));
+    }
+
     default:
         agent_fail('Unknown action "' . $agentAction . '"', 400, ['actions' => [
             'find_requests', 'list_agencies', 'create_agency', 'update_agency', 'save_agency_contact', 'delete_agency_contact', 'create_request', 'update_request', 'import_group_folder', 'move_group_folder', 'list_standard_programs',
@@ -2933,7 +2944,7 @@ try {
             'timeline_list', 'timeline_add', 'timeline_update', 'summary_set', 'request_resume', 'set_request_status',
             'payments_due', 'ck_status', 'ck_request_check', 'ops_movements', 'ops_lunch_boxes', 'ops_medivac', 'flight_tickets',
             'followup_list', 'followup_scan', 'followup_update', 'followup_upsert', 'mail_security_status',
-            'sales_response_status',
+            'sales_response_status', 'sales_response_dismiss',
         ]]);
     }
 } catch (Throwable $e) {

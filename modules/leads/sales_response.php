@@ -5,6 +5,7 @@
  * Same numbers as the weekly email and the Agent API sales_response_status: sr_report() in
  * includes/sales_response_service.php. Headers only: no mail body is ever shown. Page in English, emails in Italian.
  * Unanswered list: filter by seller (ua), tick the mails and send the seller a reminder (sr_send_reminder()).
+ * Admin / manager can mark a wait "no reply needed" (the client's last mail only closes the thread) and undo it (sr_dismiss()).
  */
 ob_start();
 require_once 'config.php';
@@ -58,6 +59,27 @@ $selfUrl = function (array $set) use ($periodQ, $agentId, $noLeave, $uaId, $nlId
     return 'sales_response.php?' . http_build_query(array_filter(array_merge($q, $set), function ($v) { return $v !== null; }));
 };
 
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && (isset($_POST['dismiss']) || isset($_POST['undismiss']))) {
+    $undo = isset($_POST['undismiss']);
+    if (!$isMgr) {
+        flash('Only admin and managers can mark a mail "no reply needed".', 'error');
+    } elseif (!hash_equals(csrf_token(), (string)($_POST['csrf'] ?? ''))) {
+        flash('Session expired — reload the page and try again.', 'error');
+    } else {
+        try {
+            $res = sr_dismiss($db, (string)($undo ? $_POST['undismiss'] : $_POST['dismiss']), (string)($currentUser['username'] ?: $currentUser['full_name']),
+                              (string)($_POST['dismiss_note'] ?? ''), $undo);
+            if (!$res['ok']) flash($res['error'], 'error');
+            else flash(($undo ? 'Back in the unanswered list: ' : 'Marked "no reply needed": ')
+                       . ($res['item'] ? ($res['item']['folder'] ?: '#' . $res['item']['request_id']) : $res['key']) . '.');
+        } catch (Throwable $e) {
+            flash('Not saved: ' . $e->getMessage(), 'error');
+        }
+    }
+    ob_end_clean();
+    header('Location: ' . $selfUrl([]) . '#unanswered'); exit;
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'remind') {
     $to = (int)($_POST['agent_id'] ?? 0);
     if (!$isMgr) {
@@ -107,6 +129,7 @@ for ($i = 0; $i < 13; $i++) $weekOpts[] = date('Y-m-d', strtotime(sr_week_start(
 $scan = $rep['last_scan'];
 $fh = function (?float $v) { return sr_fmt_h($v, true); };
 $unanswered = array_values(array_filter($rep['unanswered'], function ($u) use ($uaId) { return !$uaId || $u['agent_id'] === $uaId; }));
+$dismissed  = array_values(array_filter($rep['dismissed'], function ($u) use ($uaId) { return !$uaId || $u['agent_id'] === $uaId; }));
 $uaSeller = null;
 foreach ($all as $s) if ($uaId && $s['agent_id'] === $uaId) $uaSeller = $s;
 $reminded = sr_reminded($db);
@@ -134,6 +157,10 @@ a.sr-tag:hover{outline:1px solid currentColor}
 .sr-head form{font-size:.85rem}
 .sr-actions{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:10px;font-size:.85rem}
 .sr-hint{color:#777;font-size:.82rem}
+.sr-dismiss{font-size:.75rem;padding:2px 8px;white-space:nowrap}
+.sr-done{margin-top:12px;font-size:.85rem}
+.sr-done summary{cursor:pointer;color:var(--grey-dk,#555)}
+.sr-done table{margin-top:8px}
 .sr-rule{background:#fff;border-left:4px solid #C0211B;border-radius:6px;padding:12px 16px;margin-bottom:16px;font-size:.88rem;line-height:1.6}
 .sr-rule p{margin:0 0 6px}.sr-rule p:last-child{margin:0}
 .sr-rule .sr-small{font-size:.78rem;color:var(--grey-dk,#555)}
@@ -308,11 +335,13 @@ $sellerFilter = function (string $param, ?int $cur, string $anchor) use ($isMgr,
   <input type="hidden" name="action" value="remind">
   <input type="hidden" name="csrf" value="<?= h(csrf_token()) ?>">
   <input type="hidden" name="agent_id" value="<?= (int)$uaId ?>">
+  <input type="hidden" name="dismiss_note" id="sr-dnote" value="">
   <div class="sr-wrap">
   <table class="sr-table">
     <thead><tr>
       <?php if ($canRemind): ?><th style="min-width:0"><input type="checkbox" checked title="All / none" onclick="document.querySelectorAll('#sr-remind .sr-key').forEach(function (c) { c.checked = this.checked; }, this)"></th><?php endif; ?>
       <th>Seller</th><th>Request</th><th>Client</th><th>Subject</th><th>Last client mail</th><th>Written to</th><th>Waiting</th><th>Notes</th>
+      <?php if ($isMgr): ?><th></th><?php endif; ?>
     </tr></thead>
     <tbody>
     <?php foreach ($unanswered as $u): $k = sr_unanswered_key($u); ?>
@@ -327,6 +356,8 @@ $sellerFilter = function (string $param, ?int $cur, string $anchor) use ($isMgr,
         <td title="Since <?= h($u['waiting_since']) ?>"><?= h($fh($u['hours_waiting'])) ?><span class="sr-prev">since <?= h($u['waiting_since']) ?></span></td>
         <td><?= h(implode(', ', array_filter([$u['in_ferie'] ? 'on leave' : '', $u['ambiguous'] ? 'uncertain match' : '',
                                               isset($reminded[$k]) ? 'reminded ' . $reminded[$k] : '']))) ?></td>
+        <?php if ($isMgr): ?><td><button type="submit" name="dismiss" value="<?= h($k) ?>" class="btn btn-sm sr-dismiss" onclick="return srDismiss()"
+          title="The client's last mail needs no answer (thanks, closing): take it out of the list, the alerts and the KPIs. It comes back if the client writes again.">No reply needed</button></td><?php endif; ?>
       </tr>
     <?php endforeach; ?>
     </tbody>
@@ -347,8 +378,43 @@ $sellerFilter = function (string $param, ?int $cur, string $anchor) use ($isMgr,
   <?php endif; ?>
   </form>
   <?php endif; ?>
+  <?php if ($dismissed): ?>
+  <details class="sr-done">
+    <summary>Marked “no reply needed” (<?= count($dismissed) ?>) — out of the list, the alerts and the KPIs until the client writes again</summary>
+    <form method="post" action="sales_response.php">
+    <input type="hidden" name="csrf" value="<?= h(csrf_token()) ?>">
+    <div class="sr-wrap">
+    <table class="sr-table">
+      <thead><tr><th>Seller</th><th>Request</th><th>Client</th><th>Subject</th><th>Last client mail</th><th>Marked</th><th>Note</th><?php if ($isMgr): ?><th></th><?php endif; ?></tr></thead>
+      <tbody>
+      <?php foreach ($dismissed as $u): ?>
+        <tr>
+          <td><?= h($u['seller']) ?></td>
+          <td><a href="request_view.php?id=<?= (int)$u['request_id'] ?>"><?= h($u['folder'] ?: '#' . $u['request_id']) ?></a></td>
+          <td><?= h($u['customer'] . ' <' . $u['client'] . '>') ?></td>
+          <td class="sr-subj"><?= h($u['subject'] ?? '') ?></td>
+          <td><?= h($u['last_client_at'] ?? 'none (web form / phone)') ?></td>
+          <td><?= h($u['dismissed_at'] . ' ' . $u['dismissed_by']) ?></td>
+          <td class="sr-subj"><?= h((string)$u['note']) ?></td>
+          <?php if ($isMgr): ?><td><button type="submit" name="undismiss" value="<?= h($u['key']) ?>" class="btn btn-sm sr-dismiss">Undo</button></td><?php endif; ?>
+        </tr>
+      <?php endforeach; ?>
+      </tbody>
+    </table>
+    </div>
+    </form>
+  </details>
+  <?php endif; ?>
   </div>
 </div>
+<script>
+function srDismiss() {
+    var n = prompt('No reply needed — why? (optional, e.g. "client said thanks, will update us")', '');
+    if (n === null) return false;
+    document.getElementById('sr-dnote').value = n;
+    return true;
+}
+</script>
 
 <?php
 $bySeller = function (array $list, ?int $id) { return array_values(array_filter($list, function ($u) use ($id) { return !$id || $u['agent_id'] === $id; })); };

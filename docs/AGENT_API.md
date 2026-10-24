@@ -1393,7 +1393,8 @@ mapping_error, week, prev (the 4 weeks before, pooled), total, weeks {monday: me
 `{due, answered_24h, pct_24h, late, median_h, p90_h, answered, off_due, off_answered_24h, pct_off_24h, new_leads,
 new_leads_median_h, office_n, office_median_h, client_msgs, sent_msgs, on_leave_excluded}`; `unanswered[] {seller, request_id, folder, customer,
 client, subject (of the last client mail), first_client_at (null: no client mail), waiting_since (seller's clock), no_client_mail,
-last_client_at, client_msgs, hours_waiting (since waiting_since), written_to ("info@, alessia@"), in_ferie, ambiguous, url}`,
+last_client_at, client_msgs, hours_waiting (since waiting_since), written_to ("info@, alessia@"), in_ferie, ambiguous, url, key}`,
+`dismissed[]` (waits marked "no reply needed", same fields + `dismissed_at, dismissed_by, note`),
 `new_leads[]` (with `written_to`, `assigned_at`, `office_hours`, `hours` = seller time),
 `silent[]` (our mail last, client silent 7+ days, not Booked), `last_scan {status (ok|stale|scan_failed|never_run), …}`,
 `limits[]`, `footer`.
@@ -1401,9 +1402,19 @@ Reminders: the Hub page (unanswered list, filter by seller, tick the mails) mail
 reply-to `SALES_RESPONSE_TO`, logged in `sales_response_reminder` (shown as "reminded <date>"); logic `sr_send_reminder()`
 (`$confirm` false = preview), no Agent API action yet.
 
+### `sales_response_dismiss` (POST, dry-run unless `confirm`)
+Mark an unanswered client mail "no reply needed" (24 Oct 2026): the client's last mail only closes the thread
+("thanks, I'll update you") — Sales Response sees headers only and cannot tell. Check the thread first (e.g. in Gmail).
+Body: `key` (= `unanswered[].key`, `request_id|Y-m-d H:i`), `note` (optional, why), `undo` (true = take the mark away;
+then `key` from `dismissed[]`), `confirm`. The marked wait leaves the unanswered list, the daily alert, the reminders and
+the KPIs; a newer client mail on the same wait brings it back. Table `sales_response_dismissed` (created on first use);
+the Hub page has the same button (admin / manager) and an Undo list. Logic `sr_dismiss()`.
+→ `{ok, key, item, done}`.
+
 ```bash
 curl -sA "$UA" -H "$H" "$U?action=sales_response_status"
 curl -sA "$UA" -H "$H" "$U?action=sales_response_status&week=2026-10-12&agent_id=7"
+curl -sA "$UA" -H "$H" -X POST "$U?action=sales_response_dismiss" -d '{"key":"1234|2026-10-22 15:45","note":"client said thanks, will update us","confirm":true}'
 ```
 
 ## Request timeline

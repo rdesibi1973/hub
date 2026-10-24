@@ -129,6 +129,12 @@ function sr_schema(PDO $db): void {
         id INT AUTO_INCREMENT PRIMARY KEY, sent_at DATETIME NOT NULL, agent_id INT NOT NULL, mailbox VARCHAR(120) NOT NULL,
         n INT NOT NULL, items_json TEXT NOT NULL, sent_by VARCHAR(60) NOT NULL, KEY idx_srm_sent (sent_at)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    // Waits marked "no reply needed" (the client's last mail was a thank-you / closing): out of the list, alerts and KPIs
+    // while no newer client mail comes (last_client_at = the wait's last client mail when it was marked).
+    $db->exec("CREATE TABLE IF NOT EXISTS sales_response_dismissed (
+        id INT AUTO_INCREMENT PRIMARY KEY, wait_key VARCHAR(80) NOT NULL, request_id INT NOT NULL, last_client_at VARCHAR(16) NOT NULL DEFAULT '',
+        dismissed_at DATETIME NOT NULL, dismissed_by VARCHAR(60) NOT NULL, note VARCHAR(255) NULL, UNIQUE KEY uq_srd_key (wait_key)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
     $done = true;
 }
 
@@ -902,6 +908,7 @@ function sr_report(PDO $db, ?string $week = null, ?int $agentId = null, int $nPr
     foreach ($sellers as $s) if ($s['agent_id']) $byAgent[$s['agent_id']] = $s;
     $reqs = sr_requests($db);
     $leave = sr_leave_days($db, $sellers);
+    $marked = sr_dismissed_map($db);
     $scopeTs = $now - SR_SCOPE_DAYS * 86400;
 
     $perReq = [];
@@ -923,7 +930,7 @@ function sr_report(PDO $db, ?string $week = null, ?int $agentId = null, int $nPr
     $eps = [];          // agent_id => week => [waits in the KPIs]
     $vol = [];          // agent_id => week => [client, sent]
     $leaveSkipped = []; // agent_id => week => n
-    $unanswered = $newLeads = $silent = [];
+    $unanswered = $newLeads = $silent = $dismissed = [];
     $today = date('Y-m-d', $now);
     foreach ($perReq as $rid => $msgs) {
         $r = $reqs[$rid];
@@ -945,6 +952,15 @@ function sr_report(PDO $db, ?string $week = null, ?int $agentId = null, int $nPr
             // first_client_at = the client's mail (null: none); waiting_since = the seller's clock (later of mail and assignment).
             $times = ['first_client_at' => $e['mail_ts'] ? date('Y-m-d H:i', $e['mail_ts']) : null,
                       'waiting_since' => date('Y-m-d H:i', $e['start']), 'no_client_mail' => $e['no_client_mail']];
+            // "No reply needed": not a wait at all (not in the KPIs, the list, the alerts) until the client writes again.
+            $key = sr_unanswered_key(['request_id' => $rid] + $times);
+            $lastAt = $e['last'] ? date('Y-m-d H:i', $e['last']) : '';
+            if ($e['answered'] === null && isset($marked[$key]) && $lastAt <= $marked[$key]['last_client_at']) {
+                if ($open) $dismissed[] = $base + $times + ['key' => $key, 'client' => $e['client'], 'subject' => $e['subject'],
+                                                           'last_client_at' => $lastAt ?: null, 'dismissed_at' => $marked[$key]['dismissed_at'],
+                                                           'dismissed_by' => $marked[$key]['dismissed_by'], 'note' => $marked[$key]['note']];
+                continue;
+            }
             if ($e['start'] >= $fromTs && $e['start'] < $toTs) {
                 $w = $bucketOf($e['start']);
                 if ($onLeave && $excludeLeave) $leaveSkipped[$aid][$w] = ($leaveSkipped[$aid][$w] ?? 0) + 1;
@@ -959,7 +975,7 @@ function sr_report(PDO $db, ?string $week = null, ?int $agentId = null, int $nPr
                 }
             }
             if ($open && $e['answered'] === null && $now - $e['start'] > SR_THRESHOLD_H * 3600) {
-                $unanswered[] = $base + $times + ['client' => $e['client'], 'subject' => $e['subject'],
+                $unanswered[] = $base + $times + ['key' => $key, 'client' => $e['client'], 'subject' => $e['subject'],
                                          'last_client_at' => $e['last'] ? date('Y-m-d H:i', $e['last']) : null, 'client_msgs' => $e['n'],
                                          'hours_waiting' => round(($now - $e['start']) / 3600, 1), 'written_to' => sr_boxes_label($e['boxes']),
                                          'in_ferie' => $onLeave || isset($leave[$aid][$today]), 'ambiguous' => (bool)$e['ambiguous']];
@@ -1004,7 +1020,7 @@ function sr_report(PDO $db, ?string $week = null, ?int $agentId = null, int $nPr
     }
     return ['ok' => true, 'week' => ['start' => $period['from'], 'end' => $period['to']], 'period' => $period, 'previous_weeks' => $nPrev,
             'generated_at' => date('Y-m-d H:i:s', $now), 'threshold_hours' => SR_THRESHOLD_H, 'timezone' => 'Africa/Dar_es_Salaam',
-            'live' => sr_cfg()['live'], 'leave_excluded' => $excludeLeave, 'channel' => $channel ?: 'all', 'sellers' => $rows, 'unanswered' => $unanswered, 'new_leads' => $newLeads, 'silent' => $silent,
+            'live' => sr_cfg()['live'], 'leave_excluded' => $excludeLeave, 'channel' => $channel ?: 'all', 'sellers' => $rows, 'unanswered' => $unanswered, 'dismissed' => $dismissed, 'new_leads' => $newLeads, 'silent' => $silent,
             'last_scan' => sr_last_run($db), 'limits' => SR_LIMITS, 'footer' => SR_FOOTER];
 }
 
@@ -1013,6 +1029,50 @@ function sr_report(PDO $db, ?string $week = null, ?int $agentId = null, int $nPr
 /** Stable key of an unanswered wait (the page checkboxes, the reminder log). */
 function sr_unanswered_key(array $u): string {
     return $u['request_id'] . '|' . ($u['first_client_at'] ?? $u['waiting_since']);
+}
+
+/** wait key => ['last_client_at', 'dismissed_at', 'dismissed_by', 'note'] of the waits marked "no reply needed". */
+function sr_dismissed_map(PDO $db): array {
+    sr_schema($db);
+    $out = [];
+    foreach ($db->query("SELECT wait_key, last_client_at, dismissed_at, dismissed_by, note FROM sales_response_dismissed") as $r) {
+        $out[$r['wait_key']] = ['last_client_at' => (string)$r['last_client_at'], 'dismissed_at' => substr($r['dismissed_at'], 0, 16),
+                                'dismissed_by' => $r['dismissed_by'], 'note' => $r['note']];
+    }
+    return $out;
+}
+
+/**
+ * Mark an unanswered wait "no reply needed" (the client's last mail closes the thread: "thanks, I'll let you know"),
+ * or with $undo take the mark away. $key = sr_unanswered_key(). The mark covers the client mails up to now: a newer
+ * client mail on the same wait shows it again. $confirm false = preview only.
+ * Returns ['ok', 'key', 'item', 'done'] or ['ok' => false, 'error'].
+ */
+function sr_dismiss(PDO $db, string $key, string $by, string $note = '', bool $undo = false, bool $confirm = true): array {
+    sr_schema($db);
+    if (!preg_match('/^\d+\|\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/', $key)) return ['ok' => false, 'error' => 'key must be "request_id|Y-m-d H:i" (unanswered[].key)'];
+    $rep = sr_report($db, null, null, 0);
+    $find = function (array $list) use ($key) {
+        foreach ($list as $u) if (sr_unanswered_key($u) === $key) return $u;
+        return null;
+    };
+    if ($undo) {
+        $st = $db->prepare("SELECT COUNT(*) FROM sales_response_dismissed WHERE wait_key = ?");
+        $st->execute([$key]);
+        if (!(int)$st->fetchColumn()) return ['ok' => false, 'error' => 'This wait is not marked "no reply needed": ' . $key];
+        $res = ['ok' => true, 'key' => $key, 'item' => $find($rep['dismissed']), 'done' => false];
+        if (!$confirm) return $res;
+        $db->prepare("DELETE FROM sales_response_dismissed WHERE wait_key = ?")->execute([$key]);
+        return ['done' => true] + $res;
+    }
+    $u = $find($rep['unanswered']);
+    if (!$u) return ['ok' => false, 'error' => 'No unanswered client mail with this key (already answered or marked?): ' . $key];
+    $res = ['ok' => true, 'key' => $key, 'item' => $u, 'done' => false];
+    if (!$confirm) return $res;
+    $db->prepare("REPLACE INTO sales_response_dismissed (wait_key, request_id, last_client_at, dismissed_at, dismissed_by, note) VALUES (?,?,?,?,?,?)")
+       ->execute([$key, (int)$u['request_id'], (string)($u['last_client_at'] ?? ''), date('Y-m-d H:i:s'), substr($by, 0, 60),
+                  trim($note) === '' ? null : mb_substr(trim($note), 0, 255)]);
+    return ['done' => true] + $res;
 }
 
 /** unanswered key => last reminder time (Y-m-d H:i), reminders of the last 60 days. */
