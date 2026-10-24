@@ -57,6 +57,7 @@ To edit a secret: change it **on the server** (outside the repo, no git deploy).
 - **Composer**: `dompdf/dompdf ^2.0` (invoice PDFs), `phpoffice/phpspreadsheet ^1.29` (Calc fill / rates), `phpoffice/phpword ^1.4`; autoload at `vendor/autoload.php`.
 - **PDF text**: the server has no `pdftotext` and no Composer binary (checked 14 Oct 2026). The Booking follow-up supplier scan
   uses `smalot/pdfparser` if present in `vendor/`, or `FOLLOWUP_PDFTOTEXT`; until then `tools\followup_local_scan.bat` reads the
-  PDFs on the office PC (pdftotext from Git: `C:\Utility\Git\mingw64\bin\pdftotext.exe`).
+  PDFs on the office PC (pdftotext from Git: `C:\Utility\Git\mingw64\bin\pdftotext.exe`, or `ucrt64\bin\` on
+  Git for Windows 2.5x — the script falls back to it by itself, same for the CA bundle).
 - **Git-ignored** (per `.gitignore`): server-only `includes/config.php`, NetBeans build artifacts (`build/`, `dist/`, `nbproject/private/`), `SavannahExplorersGUI/`, PHP `error_log` files, and Dropbox "conflicted copy" PHP files.
 - **Java source files** require `git add -f` (NetBeans patterns in `.gitignore` would otherwise exclude them).
