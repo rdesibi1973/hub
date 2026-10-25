@@ -5,11 +5,13 @@
  * the page dropbox_conflicts.php and the Agent API dropbox_conflicts / dropbox_conflicts_run.
  *
  * Each conflicted copy C ("X (Savannah Explorers's conflicted copy 2026-10-22[ 1]).xlsx", "X (Copia in conflitto di …
- * 2026-10-16).xlsx") is compared with its original O (same name without the bracket), sub-folders old/ left out:
+ * 2026-10-16).xlsx") is compared with its original O (same name without the bracket); sub-folders old/ and the
+ * top-level 00_… folders (archive of past years) are left out. Found by Dropbox search, then only those folders listed:
  *   identical    same content (hash) or same cells as O                                   → C to the Dropbox trash
  *   old_version  same as an earlier revision of O (Dropbox version history)                → trash
  *   already_in   every cell C changed (vs its base A, a revision of O) already has that value in O → trash
- *   merged       C and O changed different cells: C's cells are written into O (.xlsx only; the rewritten file is
+ *   merged       C and O changed different cells, C empties no cell, C at most 30 days old: C's cells are written
+ *                into O (.xlsx only; the rewritten file is
  *                read back and must differ from O in those cells only, before and after the rev-checked upload) → trash
  *   conflict     the same cell changed differently in both, sheets added / removed, too many changes (rows moved),
  *                not an .xlsx, or the rewrite would change other cells                     → the owner fixes it by hand
@@ -28,6 +30,7 @@
 
 require_once __DIR__ . '/../dropbox_helper.php';
 require_once __DIR__ . '/calc_service.php';
+require_once __DIR__ . '/folder_parser.php';
 require_once __DIR__ . '/ck_lib.php';
 require_once __DIR__ . '/timeline_service.php';
 require_once __DIR__ . '/../../memo/memo_lib.php';
@@ -35,6 +38,7 @@ require_once __DIR__ . '/../../../includes/mail_helper.php';
 
 const DBXC_MAX_REVS   = 8;     // earlier revisions of O read to find C's base
 const DBXC_MAX_MERGE  = 40;    // more changed cells than this = rows inserted / moved: not merged
+const DBXC_MERGE_DAYS = 30;    // older copies are not merged (Dropbox keeps ~30 days of versions)
 const DBXC_PAST_DAYS  = 7;     // trips ended longer ago: no memo / mail
 const DBXC_NIGHT_FROM = 1;     // nightly window, EAT hours [from, to)
 const DBXC_NIGHT_TO   = 7;
@@ -58,6 +62,8 @@ const DBXC_REASONS = [
     'same_cells' => 'the same cells were changed in both files',
     'structure'  => 'sheets were added, removed or renamed',
     'too_many'   => 'too many cells changed (rows inserted or moved?)',
+    'cleared'    => 'the copy empties cells that the original still has',
+    'too_old'    => 'the copy is more than ' . DBXC_MERGE_DAYS . ' days old',
     'not_xlsx'   => 'only .xlsx files are merged automatically',
     'rewrite'    => 'the Hub cannot rewrite this file without changing other cells',
 ];
@@ -124,11 +130,14 @@ function dbxc_parse_name(string $name): ?array {
     return ['original' => $m[1] . ($m[3] ?? ''), 'date' => $m[2]];
 }
 
-/** True when a path below CK_BASE goes through an old/ sub-folder (copies already archived by hand). */
-function dbxc_in_old(string $lowerPath): bool {
+/**
+ * Paths below CK_BASE left out: an old/ sub-folder (copies already archived by hand) and the top-level 00_… folders
+ * (00_2025 archive of past years, 00_CANCELED…: not booking folders, as ck_is_booking_folder()).
+ */
+function dbxc_skip_path(string $lowerPath): bool {
     $parts = explode('/', trim(substr($lowerPath, strlen(CK_BASE)), '/'));
     array_pop($parts);   // the file name
-    return in_array('old', $parts, true);
+    return in_array('old', $parts, true) || strpos($parts[0] ?? '', '00_') === 0;
 }
 
 // ── Dropbox ──────────────────────────────────────────────────────────────────
@@ -190,7 +199,7 @@ function dbxc_search_dirs(string $token): array {
             if ($code !== 200) throw new RuntimeException("Dropbox search failed (HTTP $code): " . json_encode($data));
             foreach ($data['matches'] ?? [] as $m) {
                 $e = $m['metadata']['metadata'] ?? [];
-                if (($e['.tag'] ?? '') !== 'file' || dbxc_in_old((string)$e['path_lower']) || !dbxc_parse_name((string)$e['name'])) continue;
+                if (($e['.tag'] ?? '') !== 'file' || dbxc_skip_path((string)$e['path_lower']) || !dbxc_parse_name((string)$e['name'])) continue;
                 $dirs[dirname((string)$e['path_display'])] = true;
             }
             if (empty($data['has_more'])) break;
@@ -263,11 +272,19 @@ function dbxc_trash(string $token, string $path, string $rev): void {
     if ($code !== 200) throw new RuntimeException("Dropbox delete failed (HTTP $code): " . ($data['error_summary'] ?? json_encode($data)));
 }
 
-/** Bytes of a file at a revision. */
-function dbxc_bytes(string $token, string $rev): string {
+/** Bytes of an earlier revision, or null when Dropbox no longer serves it (listed by list_revisions all the same). */
+function dbxc_bytes(string $token, string $rev): ?string {
     dbxc_keepalive();
     $dl = calc_dbx_download($token, 'rev:' . $rev);
-    if ($dl === null) throw new RuntimeException('Revision ' . $rev . ' not found in Dropbox.');
+    return $dl === null ? null : $dl['bytes'];
+}
+
+/** Bytes of a file as listed (dbxc_entry()): by path, and only if it is still at that rev. */
+function dbxc_current(string $token, array $e): string {
+    dbxc_keepalive();
+    $dl = calc_dbx_download($token, $e['path']);
+    if ($dl === null) throw new RuntimeException('File gone since the listing: ' . $e['name']);
+    if ($dl['rev'] !== $e['rev']) throw new RuntimeException('File changed during the run: ' . $e['name'] . ' — next run.');
     return $dl['bytes'];
 }
 
@@ -333,8 +350,10 @@ function dbxc_diff(array $a, array $b): array {
  * The decision once C's base A is known (dbxc_cells() shapes). → ['outcome' => already_in | merged | conflict,
  * 'reason' => DBXC_REASONS key|null, 'keys' => the cells to write into O (C's changes not yet in O), 'both' => the
  * cells O changed too, to another value]. Pure: no Dropbox, testable alone.
+ * Never merged: a copy that empties cells the original has (a wrong base would delete data), a copy older than
+ * DBXC_MERGE_DAYS ($recent false: its changes are likely stale and its real base may be out of the history).
  */
-function dbxc_decide(array $a, array $o, array $c, string $ext): array {
+function dbxc_decide(array $a, array $o, array $c, string $ext, bool $recent = true): array {
     $missing = [];
     foreach (dbxc_diff($a['cells'], $c['cells']) as $k) {
         if (($o['cells'][$k] ?? null) !== ($c['cells'][$k] ?? null)) $missing[] = $k;
@@ -348,10 +367,16 @@ function dbxc_decide(array $a, array $o, array $c, string $ext): array {
     foreach ($missing as $k) {
         if (!in_array(substr($k, 0, strrpos($k, '!')), $o['sheets'], true)) $sheetGone = true;
     }
+    $cleared = false;
+    foreach ($missing as $k) {
+        if (!isset($c['cells'][$k]) && isset($o['cells'][$k])) $cleared = true;
+    }
     $res['outcome'] = 'conflict';
     if ($a['sheets'] !== $c['sheets'] || $sheetGone)          $res['reason'] = 'structure';
     elseif ($res['both'])                                     $res['reason'] = 'same_cells';
+    elseif ($cleared)                                         $res['reason'] = 'cleared';
     elseif (count($missing) > DBXC_MAX_MERGE)                 $res['reason'] = 'too_many';
+    elseif (!$recent)                                         $res['reason'] = 'too_old';
     elseif ($ext !== 'xlsx')                                  $res['reason'] = 'not_xlsx';
     else                                                      $res['outcome'] = 'merged';
     return $res;
@@ -389,13 +414,7 @@ function dbxc_expected(array $o, array $c, array $keys): array {
  */
 function dbxc_merge(string $token, array $o, array $O, array $C, array $keys, bool $upload): array {
     calc_require_spreadsheet();
-    if ($upload) {
-        $dl = calc_dbx_download($token, $o['path']);
-        if ($dl === null || $dl['rev'] !== $o['rev']) throw new RuntimeException('The original changed during the run — not merged, next run.');
-        $bytes = $dl['bytes'];
-    } else {
-        $bytes = dbxc_bytes($token, $o['rev']);
-    }
+    $bytes = dbxc_current($token, $o);
     $expect = dbxc_expected($O, $C, $keys);
     $tmpIn = tempnam(sys_get_temp_dir(), 'dbxi');
     $tmpOut = tempnam(sys_get_temp_dir(), 'dbxo') . '.xlsx';
@@ -427,7 +446,7 @@ function dbxc_merge(string $token, array $o, array $O, array $C, array $keys, bo
     if (!$upload) return ['ok' => true, 'rev' => null, 'other' => []];
     $meta = calc_dbx_upload_update($token, $o['path'], $out, $o['rev']);
     $newRev = (string)($meta['rev'] ?? '');
-    $back = dbxc_cells(dbxc_bytes($token, $newRev), 'xlsx');
+    $back = dbxc_cells(dbxc_current($token, ['rev' => $newRev] + $o), 'xlsx');
     if ($back !== $expect) {
         throw new RuntimeException('Merged, but the original reads back different in ' . implode(', ', array_slice(dbxc_diff($expect['cells'], $back['cells']), 0, 10))
                                    . ' — check it (its previous version is in the Dropbox history).');
@@ -473,17 +492,25 @@ function dbxc_process(string $token, array $c, ?array $o, bool $live): array {
     }
     if (!in_array($ext, ['xlsx', 'xlsm', 'xls'], true)) return $finish('not_excel');
 
-    $C = dbxc_cells(dbxc_bytes($token, $c['rev']), $ext);
-    $O = dbxc_cells(dbxc_bytes($token, $o['rev']), $ext);
+    $C = dbxc_cells(dbxc_current($token, $c), $ext);
+    $O = dbxc_cells(dbxc_current($token, $o), $ext);
     if ($C === $O) return $finish('identical');
 
     // C's base: of the revisions of O saved before C (a few minutes' margin, O itself included), the one closest to C.
+    // Revisions Dropbox no longer serves are skipped.
     $best = null;
     $n = 0;
     foreach ($revs as $rv) {
         if ($rv['server'] === null || ($c['saved'] && $rv['server'] > $c['saved'] + 300)) continue;
-        if (++$n > DBXC_MAX_REVS) break;
-        $R = $rv['rev'] === $o['rev'] ? $O : dbxc_cells(dbxc_bytes($token, $rv['rev']), $ext);
+        if ($n >= DBXC_MAX_REVS) break;
+        if ($rv['rev'] === $o['rev']) {
+            $R = $O;
+        } else {
+            $bytes = dbxc_bytes($token, $rv['rev']);
+            if ($bytes === null) continue;
+            $R = dbxc_cells($bytes, $ext);
+        }
+        $n++;
         if ($R === $C) return $finish('old_version', ['base_saved' => date('Y-m-d H:i', $rv['server'])]);
         $d = count(dbxc_diff($R['cells'], $C['cells']));
         if ($best === null || $d < $best['d']) $best = ['d' => $d, 'cells' => $R, 'saved' => $rv['server']];
@@ -492,7 +519,7 @@ function dbxc_process(string $token, array $c, ?array $o, bool $live): array {
         $keys = dbxc_diff($O['cells'], $C['cells']);
         return $finish('no_history', ['cells' => dbxc_cell_rows($keys, null, $O, $C, []), 'n_cells' => count($keys)]);
     }
-    $dec = dbxc_decide($best['cells'], $O, $C, $ext);
+    $dec = dbxc_decide($best['cells'], $O, $C, $ext, $c['saved'] && $c['saved'] >= time() - DBXC_MERGE_DAYS * 86400);
     $detail = ['base_saved' => date('Y-m-d H:i', $best['saved']), 'n_cells' => count($dec['keys']), 'reason' => $dec['reason'],
                'cells' => dbxc_cell_rows($dec['keys'], $best['cells'], $O, $C, $dec['both'])];
     if ($dec['outcome'] !== 'merged') return $finish($dec['outcome'], $detail);
@@ -532,7 +559,7 @@ function dbxc_folder_info(PDO $db, string $folder): array {
     $u = null;
     foreach (ck_seller_names($folder) as $n) if ($u = ck_seller_user($db, $n)) break;
     $u = $u ?: ck_user_find($db, CK_OWNER_FALLBACK);
-    return ['request_id' => null, 'owner_user_id' => $u ? (int)$u['id'] : null, 'trip_end' => null];
+    return ['request_id' => null, 'owner_user_id' => $u ? (int)$u['id'] : null, 'trip_end' => parse_folder_dates($folder)['end_date']];
 }
 
 // ── Run ──────────────────────────────────────────────────────────────────────
@@ -564,7 +591,7 @@ function dbxc_run(PDO $db, array $opt = []): array {
         $found = [];
         foreach ($files as $lower => $f) {
             $p = dbxc_parse_name($f['name']);
-            if (!$p || $f['id'] === '' || dbxc_in_old($lower)) continue;
+            if (!$p || $f['id'] === '' || dbxc_skip_path($lower)) continue;
             $oLower = mb_strtolower(dirname($f['path']) . '/' . $p['original']);
             $found[$f['id']] = ['c' => $f, 'o' => $files[$oLower] ?? null];
         }
