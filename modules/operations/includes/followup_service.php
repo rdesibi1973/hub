@@ -744,6 +744,10 @@ function followup_service_type(array $l): string {
     $byIssue = ['transfer_missing' => 'transfer', 'flight_unpaid' => 'flight', 'client_flights_missing' => 'client_info',
                 'invoice_mismatch' => 'invoice', 'payment_mismatch' => 'payment'];
     if (isset($byIssue[$l['issue'] ?? ''])) return $byIssue[$l['issue']];
+    // SafariCheck points (ck_sc_booking_points()): transfer / flight / dates, every other one is about a stay.
+    if (strpos((string)($l['issue'] ?? ''), 'sc_') === 0) {
+        return ['sc_transfer' => 'transfer', 'sc_flight' => 'flight', 'sc_dates' => 'dates'][$l['issue']] ?? 'stay';
+    }
     if (preg_match('/\btransfers?\b|pick[\s-]?up|drop[\s-]?off/i', $txt)) return 'transfer';
     if (($l['issue'] ?? '') === 'booking_provisional') return followup_is_airline($txt) ? 'flight' : 'stay';
     if (followup_is_airline($txt)) return 'flight';
@@ -795,6 +799,8 @@ function followup_service_key(array $l): string {
 /**
  * Two lines of different checks about the same service of a booking: same request and audience, and the same
  * supplier reference, or the same service type + service date + supplier (a line without a date: the same words).
+ * Transfers and activities: type + date is enough — SafariCheck has no supplier and writes the Calc route, the Claude
+ * check writes "ZNZ airport → hotel" and the transfer supplier. Stays keep the lodge match (two lodges can share a date).
  */
 function followup_service_match(array $a, array $b): bool {
     if (empty($a['request_id']) || (int)$a['request_id'] !== (int)($b['request_id'] ?? 0)) return false;
@@ -804,6 +810,7 @@ function followup_service_match(array $a, array $b): bool {
     if (followup_service_type($a) !== followup_service_type($b)) return false;
     $who = fn($l) => trim((string)(($l['supplier'] ?? '') ?: ($l['service'] ?? '')));
     $da = ($a['service_date'] ?? null) ?: null; $db = ($b['service_date'] ?? null) ?: null;
+    if ($da && $db && in_array(followup_service_type($a), ['transfer', 'activity'], true)) return $da === $db;
     if ($da && $db) return $da === $db && followup_supplier_same($who($a), $who($b));
     $ta = followup_supplier_tokens($who($a)); $tb = followup_supplier_tokens($who($b));
     return $ta && $ta === $tb;
@@ -885,6 +892,28 @@ function followup_meta_set(PDO $db, string $k, string $v): void {
 }
 
 /**
+ * Once (25 Oct 2026, SafariCheck issues typed by followup_service_type()): service_key recomputed on every open line,
+ * so lines written without one (or with the old type guess) merge with the other checks' findings.
+ */
+function followup_backfill_keys(PDO $db): void {
+    try {
+        if (followup_meta_get($db, 'backfill_keys_2') !== null) return;
+        followup_meta_set($db, 'backfill_keys_2', date('Y-m-d H:i:s'));
+        $up = $db->prepare("UPDATE booking_followups SET service_key = ? WHERE id = ?");
+        // Lines without a key, and SafariCheck lines (their type now comes from the issue). A ck line keeps the type
+        // the Claude check sent (service_type lives only in its key).
+        foreach ($db->query("SELECT * FROM booking_followups WHERE closed_at IS NULL AND (service_key IS NULL OR type = 'safaricheck')")
+                    ->fetchAll(PDO::FETCH_ASSOC) as $l) {
+            $l['service_key'] = null;                                      // recompute the type too, not read it back
+            $k = followup_service_key($l);
+            $up->execute([$k, (int)$l['id']]);
+        }
+    } catch (Throwable $e) {
+        error_log('followup_backfill_keys: ' . $e->getMessage());
+    }
+}
+
+/**
  * Once, after migration 074: the SafariCheck points of every upcoming booking's last check become lines, and the
  * open lines get their service_key / due date and, when nobody owns them, their default owner (lines with an owner
  * are never reassigned). Runs on the first scan / page view; marked done in booking_followup_meta.
@@ -894,6 +923,7 @@ function followup_backfill(PDO $db): void {
     if ($done) return;
     $done = true;
     followup_schema($db);
+    followup_backfill_keys($db);
     try {
         if (followup_meta_get($db, 'backfill_074') !== null) return;
         followup_meta_set($db, 'backfill_074', date('Y-m-d H:i:s'));   // first: a failure below is not retried on every page
@@ -1936,7 +1966,7 @@ function followup_out(array $r, string $today): array {
         'priority' => followup_priority($r, $today),
         'due_date' => $due['due_date'], 'due_reason' => $due['due_reason'],
         'due_days' => $due['due_date'] ? (int)round((strtotime($due['due_date']) - strtotime($today)) / 86400) : null,
-        'service_type' => followup_service_type($r),
+        'service_type' => followup_service_type($r), 'service_key' => $r['service_key'] ?? null,
         // The checks reporting the line now (one line per service: supplier scan, SafariCheck, Claude check…).
         'sources' => $sources,
         // The booking's CK tracker row (search on the folder, status tags off).

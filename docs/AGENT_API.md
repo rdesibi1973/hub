@@ -1233,7 +1233,9 @@ what to do, ≤ 500 chars), source_file?, service_type?}` (`stay`, `flight`, `tr
   = the check found nothing → every open ck line of the booking closes. A second identical upsert changes nothing.
 - **Merge** (one list, migration 074): a finding about a service another check already has open for the booking (same
   audience and the same supplier ref, or the same service type + service date + supplier — "Serengeti Classic View Camp" =
-  "Serengeti Classic View" = "SCVC") is **not** a new line: `claude_check` is added to that line's `sources` (`merged[]`:
+  "Serengeti Classic View" = "SCVC"; for **transfers and activities type + date is enough**, whatever the text / supplier:
+  SafariCheck "Transfer 05 Feb · Karatu-Ark-ZNZ" = Claude "Transfer ZNZ airport → Z Hotel", supplier Iddi; stays keep the
+  lodge match) is **not** a new line: `claude_check` is added to that line's `sources` (`merged[]`:
   `{id (the line), into_type, into_issue, sources[], owner (its current owner — kept)}`). No more skipping supplier lines by
   hand: send every finding. When a later check no longer reports it, `claude_check` leaves the line (`cleared[]`); the line
   closes only when no other check reports it.
@@ -1316,8 +1318,9 @@ logic `modules/operations/includes/followup_service.php`, documents read by `fol
 - **One list** (Oct 2026, migration 074): every check writes here — `supplier_scan`, `ticket_scan`, `group_scan`, `safaricheck`
   (SafariCheck runner), `claude_check` (`ck_findings_upsert`), `manual` (staff, page "＋ Add line"). `sources` on each row:
   `[{source, label, issue, issue_label, text, since}]` = the checks reporting it now. A new finding about a service another
-  check has open (same request + audience, and the same supplier ref or the same service type + date + supplier) joins that
-  line (`service_key` = `R<request>|<type>|<date>|<supplier words>`); a check that no longer reports it leaves `sources`, the
+  check has open (same request + audience, and the same supplier ref or the same service type + date + supplier; transfers
+  and activities: type + date) joins that line (`service_key` = `R<request>|<type>|<date>|<supplier words>`, in the rows;
+  SafariCheck issues typed `sc_transfer` → transfer, `sc_flight` → flight, `sc_dates` → dates, the others → stay); a check that no longer reports it leaves `sources`, the
   line closes when none is left (`auto_trip_ended` always closes). A confirmed supplier document clears every "provisional"
   source of that service (`auto_confirmed` for all checks). Owner on insert (every check): `booking` → the CK folder's
   booking owner, `sales` → CK owner, `accounts` → Roberto, no booking owner → nobody; lines with an owner are never
@@ -1397,7 +1400,7 @@ logic `modules/operations/includes/followup_service.php`, documents read by `fol
 → `count`, `last_check_at` `{supplier, ticket}`, `last_checks`, `rows[]` `{id, type, audience, request_id, customer, folder, folder_url,
 file_url, folder_open_url, file_open_url, start_date, end_date, service_date, days_left, supplier, supplier_ref, service, source_file, issue, issue_label,
 doc_status_text, report_url, report_open_url, expiry_date, expired, booked_by, owner, owner_name, contacted_at, staff_status, notes, notes_log[] {at, by, text} (newest first), priority,
-due_date, due_reason, due_days, service_type, sources[] {source, label, issue, issue_label, text, since}, ck_tracker_url,
+due_date, due_reason, due_days, service_type, service_key, sources[] {source, label, issue, issue_label, text, since}, ck_tracker_url,
 first_seen_at, last_seen_at, closed_at, closed_by, close_reason, events_count}` — priority first (from the deadline), then the
 nearest deadline, not taken in charge, problems, service date.
 

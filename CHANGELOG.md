@@ -20,6 +20,15 @@ Running log of notable changes and current build state. Module-level "active / p
 
 ---
 
+## 2026-10-25 — Booking follow-up: Claude transfer findings merge with SafariCheck lines
+- Bug (Buffone, request 2802): `ck_findings_upsert` `transfer_missing` 5 / 10 Feb (supplier Iddi, "ZNZ airport → Z Hotel")
+  came back as `would_add` next to the open SafariCheck lines 187 / 188 ("Transfer 05 Feb · Karatu-Ark-ZNZ") — the match
+  still required the same supplier / service words. `followup_service_match()`: transfers and activities match on request +
+  type + date; stays keep the lodge match. On merge the line keeps its owner and gets `claude_check` in `sources`.
+- `followup_service_type()`: SafariCheck issues typed from the code (`sc_transfer` → transfer, `sc_flight` → flight,
+  `sc_dates` → dates, others → stay). `followup_backfill_keys()` (once, flag `backfill_keys_2`): service_key recomputed on
+  open lines without one and on every open SafariCheck line. `followup_list` rows show `service_key`.
+
 ## 2026-10-25 — One pipeline: CK tracker + Booking follow-up
 - **Migration 074** (additive; `followup_schema()` does the same on first use): `booking_followups` types `safaricheck` and
   `manual`, columns `sources` (JSON: the checks still reporting the line), `service_key`, `due_date`, `due_reason`; table
