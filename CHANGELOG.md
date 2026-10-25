@@ -20,6 +20,14 @@ Running log of notable changes and current build state. Module-level "active / p
 
 ---
 
+## 2026-10-25 — CK owner default = the seller of the folder
+- `ck_owner_rule()` defaults to `seller` (was `fixed:rdesibi`; `CK_OWNER_DEFAULT` in the server config still overrides).
+  Seller = the last name in the folder's `(…)` tag that is a Hub user (`ck_seller_names()`, `ck_seller_user()`):
+  username or first name, channel / destination tags and `TZ`/`KE` suffixes skipped; "Roberto" in a tag = `rdesibi`
+  (`CK_OWNER_TAG_ALIASES`; Roberto Capri is `roberto`). Sellers who left: `CK_OWNER_LEFT` in the server config
+  (`['sultan' => 'saruni', 'micky' => 'saruni']`). Not matched → no CK owner ("not assigned"); CK tracker tooltip names the
+  tag's seller, Owner filter "No CK owner". Owners set by hand and open sales lines keep their owner.
+
 ## 2026-10-25 — Booking follow-up: Claude transfer findings merge with SafariCheck lines
 - Bug (Buffone, request 2802): `ck_findings_upsert` `transfer_missing` 5 / 10 Feb (supplier Iddi, "ZNZ airport → Z Hotel")
   came back as `would_add` next to the open SafariCheck lines 187 / 188 ("Transfer 05 Feb · Karatu-Ark-ZNZ") — the match

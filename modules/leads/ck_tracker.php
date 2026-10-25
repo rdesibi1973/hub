@@ -257,7 +257,7 @@ try {
     unset($r);
 }
 $activeUsers = ck_active_users($db);
-$ownerF = trim((string)($_GET['owner'] ?? ''));   // '' all | me | none (no booking owner) | user id (CK or booking owner)
+$ownerF = trim((string)($_GET['owner'] ?? ''));   // '' all | me | none (no booking owner) | nock (no CK owner) | user id (CK or booking owner)
 
 // Agents present (for the filter). Everyone starts on All; a seller picks
 // their own name in "Sales" to see only their bookings.
@@ -285,6 +285,7 @@ $base = array_filter($rows, function ($r) use ($showPast, $agentF, $q, $qMatch, 
     if (!$showPast && $r['to_arrival'] !== null && $r['to_arrival'] < 0) return false;
     if ($agentF !== '' && strcasecmp($r['agent'], $agentF) !== 0) return false;
     if ($ownerF === 'none' && $r['owners']['booking_owner'] !== null) return false;
+    if ($ownerF === 'nock' && $r['owners']['ck_owner'] !== null) return false;
     if ($ownerF === 'me' && !$ownerIs($r, (int)$uid)) return false;
     if (ctype_digit($ownerF) && !$ownerIs($r, (int)$ownerF)) return false;
     return true;
@@ -485,6 +486,7 @@ include 'includes/header.php';
         <option value="">All</option>
         <option value="me" <?= $ownerF === 'me' ? 'selected' : '' ?>>Me</option>
         <option value="none" <?= $ownerF === 'none' ? 'selected' : '' ?>>No booking owner</option>
+        <option value="nock" <?= $ownerF === 'nock' ? 'selected' : '' ?>>No CK owner</option>
         <?php foreach ($activeUsers as $u): ?>
           <option value="<?= $u['id'] ?>" <?= $ownerF === (string)$u['id'] ? 'selected' : '' ?>><?= h($u['name']) ?></option>
         <?php endforeach; ?>
@@ -541,14 +543,16 @@ include 'includes/header.php';
       <td><?= h($r['agent']) ?: '<span style="color:var(--grey-mid)">—</span>' ?></td>
       <?php foreach (['ck_owner' => 'CK owner', 'booking_owner' => 'Booking owner'] as $of => $olabel):
           $ow = $r['owners'][$of];
-          $tip = !$ow ? 'Not assigned — nobody found in the Calc CHECKED column'
+          $tip = !$ow ? ($of === 'ck_owner'
+                         ? 'Not assigned — seller "' . (ck_agent_from_name($r['folder_name']) ?: '?') . '" in the folder tag is not an active Hub user: choose the CK owner'
+                         : 'Not assigned — nobody found in the Calc CHECKED column')
                : (!$ow['default'] ? 'Set by hand'
                : ($of === 'booking_owner' ? 'Default — Calc CHECKED column' . ($r['booking_owner_auto_text'] ? ': ' . $r['booking_owner_auto_text'] : '')
                                           : 'Default — rule ' . ck_owner_rule())); ?>
         <td class="ck-own<?= !$ow || $ow['default'] ? ' dflt' : '' ?>" title="<?= h($tip) ?>">
           <?php if ($r['can_owners']): ?>
             <select class="ck-owner-sel<?= !$ow || $ow['default'] ? ' dflt' : '' ?>" data-ck="<?= $id ?>" data-field="<?= $of ?>" aria-label="<?= h($olabel) ?>">
-              <option value=""><?= h($ow && $ow['default'] ? $ow['name'] . ' (default)' : ($of === 'booking_owner' ? 'not assigned (default)' : 'default')) ?></option>
+              <option value=""><?= h($ow && $ow['default'] ? $ow['name'] . ' (default)' : 'not assigned (default)') ?></option>
               <?php foreach ($activeUsers as $u): ?>
                 <option value="<?= $u['id'] ?>" <?= $ow && !$ow['default'] && $ow['user_id'] === $u['id'] ? 'selected' : '' ?>><?= h($u['name']) ?></option>
               <?php endforeach; ?>
@@ -964,7 +968,7 @@ document.querySelectorAll('.ck-owner-sel').forEach(function (sel) {
         prev = sel.value;
         var dflt = !d.owner || d.owner['default'];
         sel.classList.toggle('dflt', dflt); td.classList.toggle('dflt', dflt);
-        sel.options[0].textContent = d.owner && d.owner['default'] ? d.owner.name + ' (default)' : (sel.getAttribute('data-field') === 'booking_owner' ? 'not assigned (default)' : 'default');
+        sel.options[0].textContent = d.owner && d.owner['default'] ? d.owner.name + ' (default)' : 'not assigned (default)';
         msg.style.color = '#1A6B3A'; msg.textContent = '✓ saved';
         setTimeout(function () { msg.textContent = ''; }, 1500);
       })

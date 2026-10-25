@@ -1185,9 +1185,15 @@ needs_check, next_check_reason, ck_blocked, ck_blocked_by[], ck_ready, followup_
 `_CK` last; **refused with 409 while a booking is provisional**, a warning for other open lines).
 - **Owners** (Oct 2026, migration 073): `ck_owner` / `booking_owner` = `{user_id, username, name, email, default}` or `null`.
   `default: true` = not set by hand, computed by the rule (a later change of rule applies to every such row):
-  CK owner = `CK_OWNER_DEFAULT` in the server config — `fixed:<username>` (default `fixed:rdesibi`: Roberto handles every CK for
-  now) or `seller` (the Hub user linked to the request's sales agent; a seller who left → `CK_SELLER_HANDOVER`
-  `['sultan' => 'anderson', …]`); booking owner = the user named most often in the Calc CHECKED column among the stays
+  CK owner = `CK_OWNER_DEFAULT` in the server config — `seller` (**default since 25 Oct 2026**) or `fixed:<username>`.
+  `seller` = the seller in the folder tag: the last name of the `(…)` block that is a Hub user (username or first name),
+  channel / destination tags and country suffixes skipped — `(Asia-Drct)` → asia, `(AzetaviaggiTo-LAM-Daniela)` → daniela,
+  `(DimensioneAvventura-DanielaTZ-KE)` → daniela, `(Roberto-Goworld)` → rdesibi. **"Roberto" in a tag = rdesibi** (Roberto De
+  Sibi; Roberto Capri is the user `roberto`). Sellers who left → `CK_OWNER_LEFT` in the server config
+  (`['sultan' => 'saruni', 'micky' => 'saruni']`; the older `CK_SELLER_HANDOVER` is read too). Not matched to an active user
+  → `ck_owner: null` ("not assigned", set it by hand; CK tracker filter Owner → "No CK owner"). A folder without a `(…)`
+  block: the user linked to the request's sales agent. Owners set with `ck_set_owners` are kept; open sales lines keep
+  their owner (the default owner is given on insert only). Booking owner = the user named most often in the Calc CHECKED column among the stays
   ("Lydia", "Glady"; `booking_owner_calc` = the names read), none → `null` ("not assigned"). The Calc names are read once
   per 12 h (cached Calc, `ops_calc`), at most ~40 s per call: `owners_pending` > 0 → call again (`owners_refresh=0` skips it).
   Top level: `owner_rule`, `owners_pending`. Filter `owner=<username>` (CK or booking owner).

@@ -585,9 +585,9 @@ function ck_set_marker(PDO $db, string $token, int $folderId, bool $on, ?int $us
 // ── Owners: who answers for the CK (sales side) and who fixes the bookings ────
 // ck_folders.ck_owner_user_id / booking_owner_user_id; NULL = the default rule, computed
 // when read, so a later change of rule applies to every row nobody set by hand.
-//   CK owner       CK_OWNER_DEFAULT (server config): 'fixed:<username>' (default fixed:rdesibi —
-//                  Roberto handles every CK for now) or 'seller' (the user linked to the request's
-//                  sales agent; a seller who left → CK_SELLER_HANDOVER [username => username]).
+//   CK owner       CK_OWNER_DEFAULT (server config): 'seller' (default since 25 Oct 2026 — the seller in
+//                  the folder tag, "Roberto" = rdesibi; a seller who left → CK_OWNER_LEFT [name => username];
+//                  not matched → nobody) or 'fixed:<username>'.
 //   Booking owner  the booking-team member who signed the Calc CHECKED column most often among
 //                  the stays (cached in booking_owner_auto_*), else nobody.
 // Shared by the CK tracker page, the Agent API (ck_status / ck_set_owners) and Booking follow-up.
@@ -634,30 +634,85 @@ function ck_owner_out(?array $u, bool $default): ?array {
             'email' => $u['email'] ?: null, 'default' => $default];
 }
 
-/** The default rule of the CK owner: 'fixed:<username>' | 'seller'. */
+/** The default rule of the CK owner: 'seller' (default since 25 Oct 2026) | 'fixed:<username>'. */
 function ck_owner_rule(): string {
     $r = defined('CK_OWNER_DEFAULT') ? trim((string)CK_OWNER_DEFAULT) : '';
-    return $r !== '' ? $r : 'fixed:' . CK_OWNER_FALLBACK;
+    return $r !== '' ? $r : 'seller';
 }
 
-/** Default CK owner of a tracker row (ck_tracker_rows() shape: reqs with agent_id). */
+/**
+ * Seller name in a folder tag → Hub username. "Roberto" in a folder tag is Roberto De Sibi (rdesibi); Roberto Capri is
+ * the user "roberto" and never appears as "Roberto" in a tag.
+ */
+const CK_OWNER_TAG_ALIASES = ['roberto' => 'rdesibi'];
+
+/** Sellers who left → who follows their files: CK_OWNER_LEFT (server config, ['sultan' => 'saruni', …]), CK_SELLER_HANDOVER (older name). */
+function ck_owner_left(): array {
+    $m = [];
+    foreach (['CK_SELLER_HANDOVER', 'CK_OWNER_LEFT'] as $c) if (defined($c)) $m = array_merge($m, array_change_key_case((array)constant($c), CASE_LOWER));
+    return array_map('strtolower', $m);
+}
+
+/**
+ * The Hub user a seller name stands for (folder tag "(EkoSpostamenti-Roberto)" → rdesibi): alias, then a seller who left
+ * (→ the colleague following the files), then an active user by username or first name (one only). null = not matched.
+ */
+function ck_seller_user(PDO $db, string $name): ?array {
+    $n = strtolower(trim($name));
+    if ($n === '') return null;
+    $n = CK_OWNER_TAG_ALIASES[$n] ?? $n;
+    $left = ck_owner_left();
+    if (isset($left[$n])) return ck_user_find($db, $left[$n]);
+    $hits = [];
+    foreach (ck_users($db) as $u) {
+        $first = strtolower((string)strtok((string)$u['full_name'], ' '));
+        if (strcasecmp((string)$u['username'], $n) === 0) { $hits = [$u]; break; }
+        if ($first === $n) $hits[] = $u;
+    }
+    if (count($hits) !== 1) return null;                             // nobody, or two users with that first name
+    $u = $hits[0];
+    if ((int)$u['is_active'] === 1) return $u;
+    return isset($left[strtolower($u['username'])]) ? ck_user_find($db, $left[strtolower($u['username'])]) : null;
+}
+
+/**
+ * The names in a folder's (…) block that may be its seller, last first, without channel / destination tags and
+ * country suffixes: "(EkoSpostamenti-Roberto)" → Roberto, EkoSpostamenti; "(Roberto-Goworld)" → Goworld, Roberto;
+ * "(DimensioneAvventura-DanielaTZ-KE)" → Daniela, …; "(Anderson_EleonoraOngaro)" → EleonoraOngaro, Anderson.
+ */
+function ck_seller_names(string $name): array {
+    if (!preg_match('/\(([^)]+)\)/', $name, $m)) return [];
+    static $skip = ['drct', 'sb', 'lam', 'ps', 'tz', 'ke', 'mv', 'kenya', 'trek', 'znz', 'uganda', 'namibia', 'southafrica', 'sudafrica',
+                    'rwanda', 'madagascar', 'botswana', 'staff'];
+    $out = [];
+    foreach (array_reverse(preg_split('/[-_]+/', $m[1])) as $t) {
+        $t = preg_replace('/(?<=[a-z])(?:TZ|KE|ZNZ)+$/', '', trim($t));   // "DanielaTZ" → Daniela
+        if ($t !== '' && !in_array(strtolower($t), $skip, true)) $out[] = $t;
+    }
+    return $out;
+}
+
+/**
+ * Default CK owner of a tracker row (ck_tracker_rows() shape). Rule 'seller': the seller in the folder tag (the last
+ * name before ")" that is a Hub user, ck_seller_names()); a folder without a (…) block: the user linked to the
+ * request's sales agent.
+ * Not matched to an active user → null ("not assigned", fixed by hand on the CK tracker).
+ */
 function ck_default_ck_owner(PDO $db, array $row): ?array {
     $rule = ck_owner_rule();
     if ($rule === 'seller') {
-        $users = ck_users($db);
-        $hand  = defined('CK_SELLER_HANDOVER') ? array_change_key_case((array)CK_SELLER_HANDOVER, CASE_LOWER) : [];
+        $names = ck_seller_names((string)($row['folder_name'] ?? ''));
+        if ($names) {
+            foreach ($names as $n) if ($u = ck_seller_user($db, $n)) return $u;
+            return null;
+        }
         foreach ($row['reqs'] ?? [] as $q) {
             if (empty($q['agent_id'])) continue;
-            $seller = null;
-            foreach ($users as $u) {
-                if ((int)$u['agent_id'] !== (int)$q['agent_id']) continue;
-                if (!$seller || ((int)$u['is_active'] === 1 && (int)$seller['is_active'] !== 1)) $seller = $u;
+            foreach (ck_users($db) as $u) {
+                if ((int)$u['agent_id'] === (int)$q['agent_id'] && ($s = ck_seller_user($db, (string)$u['username']))) return $s;
             }
-            if (!$seller) continue;
-            if ((int)$seller['is_active'] === 1) return $seller;
-            if (isset($hand[strtolower($seller['username'])]) && ($h = ck_user_find($db, $hand[strtolower($seller['username'])]))) return $h;
         }
-        return ck_user_find($db, CK_OWNER_FALLBACK);
+        return null;
     }
     return ck_user_find($db, preg_replace('/^fixed:/i', '', $rule)) ?: ck_user_find($db, CK_OWNER_FALLBACK);
 }
