@@ -1593,7 +1593,7 @@ A Calc kept open in Excel on one PC while another PC (all on the same Dropbox ac
 `X (Copia in conflitto di … 2026-10-16).xlsx`, ` 1` added for a second one the same day. Since 25 Oct 2026
 `modules/leads/conflicts_cron.php?token=…` (cron-job.org every 15 min; works only 01:00–07:00 EAT, each call goes on
 where the last stopped until the night is done; token `DBX_CONFLICTS_CRON_TOKEN`, else `MEMO_CRON_TOKEN`) checks every
-copy in `/001_Safari` (sub-folders `old/` and the top-level `00_…` archives left out; found by Dropbox search, then
+copy in `/001_Safari` (sub-folders `old/` and top-level folders that are not bookings — `00_2025` / `2022` archives, `99_office` — left out; found by Dropbox search, then
 only those folders listed — the full tree is 56,000 files) against its original and the original's Dropbox version
 history, cell by cell (formula text, every sheet; revisions Dropbox no longer serves are skipped). Logic `modules/leads/includes/dbx_conflict_service.php`, tables
 `dbx_conflicts` / `dbx_conflict_meta` (created on first use), page `modules/leads/dropbox_conflicts.php`.

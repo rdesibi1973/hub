@@ -131,13 +131,13 @@ function dbxc_parse_name(string $name): ?array {
 }
 
 /**
- * Paths below CK_BASE left out: an old/ sub-folder (copies already archived by hand) and the top-level 00_… folders
- * (00_2025 archive of past years, 00_CANCELED…: not booking folders, as ck_is_booking_folder()).
+ * Paths below CK_BASE left out: an old/ sub-folder (copies already archived by hand) and any top-level folder that is
+ * not a booking folder, as on the CK tracker (ck_is_booking_folder(): 00_2025 / 2022 archives, 00_CANCELED, 99_office…).
  */
 function dbxc_skip_path(string $lowerPath): bool {
     $parts = explode('/', trim(substr($lowerPath, strlen(CK_BASE)), '/'));
     array_pop($parts);   // the file name
-    return in_array('old', $parts, true) || strpos($parts[0] ?? '', '00_') === 0;
+    return in_array('old', $parts, true) || !$parts || !ck_is_booking_folder($parts[0]);
 }
 
 // ── Dropbox ──────────────────────────────────────────────────────────────────

@@ -86,7 +86,7 @@ include 'includes/header.php';
 <div class="dc-info">
   <p>When a Calc stays open in Excel on one PC while someone else (or the Hub) saves it, Dropbox keeps both versions and adds a
   <b>conflicted copy</b> next to the original. Every night (01:00–07:00) the Hub compares each copy in <code>/001_Safari</code>
-  (not the <code>old/</code> sub-folders nor the <code>00_…</code> archives) with the original and its Dropbox version history, cell by cell:</p>
+  (not the <code>old/</code> sub-folders nor the archive folders like <code>00_2025</code>) with the original and its Dropbox version history, cell by cell:</p>
   <p><span class="dc-tag dc-auto">resolved</span> when the copy adds nothing, or when the copy and the original changed <i>different</i>
   cells: the copy's cells are written into the original, checked, and the copy goes to the Dropbox trash (restorable from Deleted files).<br>
   <span class="dc-tag dc-fix">to fix</span> when the <i>same</i> cells changed in both, or the file cannot be merged safely: the owner of the

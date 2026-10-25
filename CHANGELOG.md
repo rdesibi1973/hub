@@ -25,7 +25,7 @@ Running log of notable changes and current build state. Module-level "active / p
   Dropbox account, so Dropbox file locking cannot help). New nightly run `modules/leads/conflicts_cron.php` (cron-job.org
   every 15 min, works 01:00–07:00 EAT), logic `includes/dbx_conflict_service.php`, page `dropbox_conflicts.php`
   ("🔀 Conflicts" in the Lead Tracker menu), Agent API `dropbox_conflicts` / `dropbox_conflicts_run`.
-- Each copy in `/001_Safari` (not `old/`, not the `00_…` archives) is compared cell by cell with the original and its
+- Each copy in `/001_Safari` (not `old/`, not the top-level archives `00_…` / `2022` / `99_office`) is compared cell by cell with the original and its
   Dropbox version history: copies that add nothing, or that changed other cells than the original (merged into it,
   `.xlsx`, ≤ 40 cells, ≤ 30 days old, emptying no cell, read back before and after upload), go to the Dropbox trash; the
   rest → memo + email to the booking's CK owner. Found by Dropbox search (the full tree, 56,000 files, took 2 min and
