@@ -20,7 +20,7 @@ require_once __DIR__ . '/../../leads/includes/ck_lib.php';   // ck_is_other_dest
 
 const OPS_NIGHT_CUTOFF   = '06:00:00';
 const OPS_CALC_RECHECK   = 600;     // seconds before a cached Calc is compared with Dropbox again
-const OPS_CALC_VERSION   = 3;       // bump when ops_calc() reads differently: cached results are read again
+const OPS_CALC_VERSION   = 4;       // bump when ops_calc() reads differently: cached results are read again
 const OPS_WARN_DAYS      = 7;       // flight / time missing this close to the date → warning
 const OPS_TBA_RE         = '/\b(TBA|TBC|TBD)\b|to be (advised|confirmed)|da definire/i';
 /** Overnight in Arusha (Calc OVERNIGHT / HOTEL text). */
@@ -220,7 +220,7 @@ function ops_request_dirs(array $r): array {
  * read again only when the file's Dropbox revision changed (checked every OPS_CALC_RECHECK s).
  * Group calc (RECAP): the client's own sheet (ops_group_sheet), else RECAP = the whole group (warning).
  * → ['status' => ok|nofolder|nocalc|unreadable, 'msg'?, 'file'?, 'dir'?, 'sheet', 'group', 'start_date', 'end_date', 'pax',
- *    'arrival', 'departure', 'extra_details', 'days' [{date, label, hotel, flight_cost, park_fees}],
+ *    'arrival', 'departure', 'extra_details', 'days' [{date, label, hotel, flight_cost, park_fees, checked}],
  *    'guests' [{name, title, country, tba}], 'guests_tba', 'warnings']
  * No passport numbers (calc_reader.php never reads them). Dropbox errors throw RuntimeException.
  */
@@ -294,7 +294,7 @@ function ops_calc(PDO $db, array $r, bool $force = false): array {
     $days = [];
     foreach ($c['days'] as $d) {
         $days[] = ['date' => $d['date'], 'label' => $d['label'], 'hotel' => $d['hotel_text'],
-                   'flight_cost' => $d['flight_cost'], 'park_fees' => $d['park_fees_desc']];
+                   'flight_cost' => $d['flight_cost'], 'park_fees' => $d['park_fees_desc'], 'checked' => $d['checked']];   // CHECKED: booking owner (ck_lib.php)
     }
     $guests = [];
     foreach ($c['guests'] as $g) $guests[] = ['name' => $g['name'], 'title' => $g['title'], 'country' => $g['country'], 'tba' => $g['tba']];

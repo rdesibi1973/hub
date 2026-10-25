@@ -150,6 +150,15 @@ function memo_digest_followup_item($r) {
     return $s;
 }
 
+/** One CK finding: "Laffranchi — Sales · Client flights missing · 05/12 Transfer ZNZ — ask the client for the flights". */
+function memo_digest_ck_item($r) {
+    $s = ($r['customer'] ? $r['customer'] : $r['folder_name']) . ' — ' . ucfirst((string)$r['audience']) . ' · ' . $r['issue_label'];
+    if ($r['service_date']) $s .= ' · ' . date('d/m', strtotime($r['service_date']));
+    if ($r['service']) $s .= ' ' . $r['service'];
+    if ($r['doc_status_text']) $s .= ' — ' . (mb_strlen($r['doc_status_text']) > 120 ? mb_substr($r['doc_status_text'], 0, 117) . '…' : $r['doc_status_text']);
+    return $s;
+}
+
 /** First non-empty line of a memo body (max 160 chars). */
 function memo_digest_first_line($body) {
     foreach (preg_split('/\r?\n/', (string)$body) as $line) {
@@ -269,6 +278,39 @@ function memo_digest_render(array $d, $today) {
         }
         $section('📌 Booking follow-up', $h, $t);
         $counts .= '; fu_nuove=' . count($fu['new']) . '; fu_problemi=' . count($fu['problem']) . '; fu_non_prese=' . count($fu['untaken']);
+
+        // 7. CK findings (booking check before the CK): for Roberto only, nothing goes to the owners automatically.
+        $h = array(); $t = array();
+        $byOwner = array();
+        foreach ($fu['ck_new'] as $r) $byOwner[$r['owner_name'] ? $r['owner_name'] : 'nessuno'][] = $r;
+        foreach ($byOwner as $owner => $list) {
+            $items = array();
+            foreach (array_slice($list, 0, 12) as $r) $items[] = memo_digest_ck_item($r);
+            $h[] = '<strong>Nuove — ' . $e($owner) . ' (' . count($list) . ')</strong><br><span style="color:#555;">' . implode('<br>', array_map($e, $items)) . '</span>';
+            $t[] = 'Nuove — ' . $owner . ' (' . count($list) . "):\n    " . implode("\n    ", $items);
+        }
+        if ($fu['ck_old']) {
+            $items = array();
+            foreach (array_slice($fu['ck_old'], 0, 12) as $r) $items[] = memo_digest_ck_item($r) . ' · ' . ($r['owner_name'] ? $r['owner_name'] : 'nessuno');
+            $more = count($fu['ck_old']) > 12 ? ' (+' . (count($fu['ck_old']) - 12) . ')' : '';
+            $h[] = '<strong>Aperte da più di 3 giorni (' . count($fu['ck_old']) . ')</strong>' . $e($more) . '<br><span style="color:#555;">' . implode('<br>', array_map($e, $items)) . '</span>';
+            $t[] = 'Aperte da più di 3 giorni (' . count($fu['ck_old']) . ')' . $more . ":\n    " . implode("\n    ", $items);
+        }
+        if ($fu['ck_soon']) {
+            $items = array();
+            foreach ($fu['ck_soon'] as $folder => $list) {
+                $items[] = ($list[0]['customer'] ? $list[0]['customer'] : $list[0]['folder_name']) . ' — arrivo ' . date('d/m', strtotime($list[0]['start_date']))
+                         . ' · ' . count($list) . ' aperte';
+            }
+            $h[] = '<strong>Arrivo entro 60 giorni con findings aperte (' . count($fu['ck_soon']) . ')</strong><br><span style="color:#555;">' . implode('<br>', array_map($e, $items)) . '</span>';
+            $t[] = 'Arrivo entro 60 giorni con findings aperte (' . count($fu['ck_soon']) . "):\n    " . implode("\n    ", $items);
+        }
+        if ($h) {
+            $h[] = '<a href="' . $fuUrl . '?type=ck" style="color:#C0211B;">apri CK findings</a>';
+            $t[] = $fuUrl . '?type=ck';
+        }
+        $section('📋 CK findings', $h, $t);
+        $counts .= '; ck_nuove=' . count($fu['ck_new']) . '; ck_vecchie=' . count($fu['ck_old']) . '; ck_pratiche60=' . count($fu['ck_soon']);
     }
 
     if (!$d['overdue'] && !$d['today'] && !$d['week'] && !$d['doing']) {

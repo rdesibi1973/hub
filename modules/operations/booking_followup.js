@@ -6,18 +6,22 @@
   var API = 'api/followup.php';
   var ISSUE = {provisional: 'Provisional', provisional_expired: 'Provisional expired', on_request: 'On request',
                orangi_rooms_provisional: 'Rooms still provisional', ticket_missing: 'Ticket missing', unreadable: 'Unreadable',
-               group_to_finalize: 'Group to finalize', group_znz_flight: 'Group ARK-ZNZ flight'};
+               group_to_finalize: 'Group to finalize', group_znz_flight: 'Group ARK-ZNZ flight',
+               transfer_missing: 'Transfer missing', booking_provisional: 'Booking provisional', flight_unpaid: 'Flight not paid / ticketed',
+               client_flights_missing: 'Client flights missing', invoice_mismatch: 'Invoice mismatch', payment_mismatch: 'Payment mismatch', other: 'Other'};
+  var AUD = {booking: 'Booking', sales: 'Sales', accounts: 'Accounts'};
   var STATUS = {open: 'Open', in_progress: 'In progress', problem: 'Problem', resolved: 'Resolved', not_relevant: 'Not relevant'};
   var TABS = [
     {key: 'open', label: 'All open'},
     {key: 'provisional', label: 'Provisional'},
     {key: 'tickets', label: 'Tickets'},
     {key: 'groups', label: 'Groups'},
+    {key: 'ck', label: 'CK findings'},
     {key: 'problem', label: 'Problem'},
     {key: 'closed', label: 'Closed'}
   ];
   var params = new URLSearchParams(location.search);
-  var state = {tab: 'open', owner: '', prio: '', supplier: '', month: '', q: params.get('q') || '',
+  var state = {tab: params.get('type') === 'ck' ? 'ck' : 'open', owner: '', aud: '', prio: '', supplier: '', month: '', q: params.get('q') || '',
                request: params.get('request_id') ? parseInt(params.get('request_id'), 10) : null,
                group: params.get('folder') || '', open: {}};   // GRP member: the group's lines belong to the group's first request
   var $ = function (id) { return document.getElementById(id); };
@@ -46,6 +50,7 @@
     if (tab === 'provisional') return r.type === 'supplier';
     if (tab === 'tickets') return r.type === 'ticket';
     if (tab === 'groups') return r.type === 'group';
+    if (tab === 'ck') return r.type === 'ck';
     if (tab === 'problem') return r.staff_status === 'problem';
     return true;
   }
@@ -53,6 +58,7 @@
     if (state.request && r.request_id !== state.request && !(state.group && (r.folder || '').indexOf(state.group) >= 0)) return false;
     if (state.owner === 'none' && r.owner_user_id !== null) return false;
     if (state.owner && state.owner !== 'none' && String(r.owner_user_id) !== state.owner) return false;
+    if (state.aud && (r.audience || 'booking') !== state.aud) return false;
     if (state.prio && r.priority !== state.prio) return false;
     if (state.supplier && (r.supplier || '') !== state.supplier) return false;
     if (state.month && (r.start_date || '').substr(0, 7) !== state.month) return false;
@@ -83,7 +89,7 @@
       var r = D.runs[t[0]];
       parts.push(t[1] + ': ' + (r ? 'last check ' + dmyhm(r.at) + ' — ' + esc(r.by) + (r.partial ? ' (partial)' : '') : 'not checked yet'));
     });
-    $('fu-runs').innerHTML = parts.join(' · ') + (D.me.can_edit ? '' : ' · <strong>view only</strong>');
+    $('fu-runs').innerHTML = parts.join(' · ') + (D.me.can_edit ? '' : ' · <strong>view only</strong> (lines you own: editable)');
   }
   function renderStats() {
     var s = D.stats;
@@ -94,6 +100,7 @@
       ['expiring', 'Expiring ≤ 7 days', 'amber', function () { setTab('provisional'); }],
       ['tickets', 'Tickets missing', 'navy', function () { setTab('tickets'); }],
       ['groups', 'Groups to finalize', 'navy', function () { setTab('groups'); }],
+      ['ck', 'CK findings open', 'navy', function () { setTab('ck'); }],
       ['closed7', 'Closed last 7 days', 'green', function () { setTab('closed'); }]
     ];
     var box = $('fu-stats');
@@ -107,7 +114,7 @@
     });
   }
   function setTab(t) { state.tab = t; }
-  function resetFilters() { state.owner = state.prio = state.supplier = state.month = ''; }
+  function resetFilters() { state.owner = state.aud = state.prio = state.supplier = state.month = ''; }
   function renderTabs() {
     var box = $('fu-tabs');
     box.innerHTML = '';
@@ -142,6 +149,7 @@
       return [k, new Date(k + '-01T00:00:00').toLocaleDateString('en-GB', {month: 'short', year: 'numeric'})];
     })), state.month);
     $('fu-f-prio').value = state.prio;
+    $('fu-f-aud').value = state.aud;
     $('fu-f-q').value = state.q;
     var chip = $('fu-f-req');
     if (state.request) {
@@ -159,11 +167,16 @@
     var n = p.charAt(0);
     return '<span class="badge badge-p' + n + '">' + esc(p.substr(2).toLowerCase()) + '</span>';
   }
-  /** Owner: one of the booking team (D.users = Glady / Lydia); "Take" only for them. */
+  /** Same rules as followup_update(): the booking team or the line's owner work it; reassign = admin, owner, or the team on a line nobody owns. */
+  function canWork(r) { return D.me.can_edit || r.owner_user_id === D.me.id; }
+  function canReassign(r) { return D.me.is_admin || r.owner_user_id === D.me.id || (r.owner_user_id === null && D.me.can_edit); }
+  /** Owner: any active user (D.users); "Take" for the booking team on a line nobody owns. */
   function ownerCell(r) {
-    if (r.closed_at || !D.me.can_edit) return esc(r.owner_name || '—');
+    var canTake = !r.closed_at && r.owner_user_id === null && D.me.can_edit;
+    if (r.closed_at || !canReassign(r)) {
+      return esc(r.owner_name || '—') + (canTake ? ' <button type="button" class="btn btn-success btn-sm" data-take="1">Take</button>' : '');
+    }
     var known = r.owner_user_id === null || D.users.some(function (u) { return u.id === r.owner_user_id; });
-    var canTake = r.owner_user_id === null && D.users.some(function (u) { return u.id === D.me.id; });
     return '<select data-f="owner" aria-label="Owner"><option value="">— nobody —</option>' +
       (known ? '' : '<option value="' + r.owner_user_id + '" selected>' + esc(r.owner_name) + '</option>') +
       D.users.map(function (u) {
@@ -171,10 +184,11 @@
       }).join('') + '</select>' + (canTake ? ' <button type="button" class="btn btn-success btn-sm" data-take="1">Take</button>' : '');
   }
   function statusCell(r) {
-    if (!D.me.can_edit) return esc(STATUS[r.staff_status]);
-    var opts = ['open', 'in_progress', 'problem', 'resolved'].concat(D.me.is_admin || r.staff_status === 'not_relevant' ? ['not_relevant'] : []);
+    if (!canWork(r)) return esc(STATUS[r.staff_status]);
+    var nr = D.me.is_admin || r.owner_user_id === D.me.id;   // not relevant: admin or the current owner
+    var opts = ['open', 'in_progress', 'problem', 'resolved'].concat(nr || r.staff_status === 'not_relevant' ? ['not_relevant'] : []);
     return '<select data-f="staff_status" aria-label="Status">' + opts.map(function (s) {
-      return '<option value="' + s + '"' + (s === r.staff_status ? ' selected' : '') + (s === 'not_relevant' && !D.me.is_admin ? ' disabled' : '') + '>' + STATUS[s] + '</option>';
+      return '<option value="' + s + '"' + (s === r.staff_status ? ' selected' : '') + (s === 'not_relevant' && !nr ? ' disabled' : '') + '>' + STATUS[s] + '</option>';
     }).join('') + '</select>';
   }
   /** Notes written so far, newest first, with date and author (a note older than the log: no date). */
@@ -192,21 +206,26 @@
     if (r.staff_status === 'problem' && !r.closed_at) tr.className = 'problem';
     var svc = r.service_date || r.start_date;
     var issueCls = r.issue === 'provisional_expired' ? ' exp' : '';
-    var edit = D.me.can_edit;
+    var edit = canWork(r);
+    var ck = r.type === 'ck';
     var cells = [
       prioBadge(r.priority),
       '<span style="white-space:nowrap">' + dmy(svc) + '</span><span class="fu-days' + (r.days_left !== null && r.days_left <= 7 ? ' fu-late' : '') + '">' + days(r.days_left) + '</span>',
       '<span class="fu-client">' + esc(r.customer || r.folder_name) + '</span>' +
         (r.folder_open_url ? '<span class="fu-folder"><a href="' + esc(r.folder_url) + '" target="_blank" rel="noopener" title="Open in Dropbox (web)">☁</a> ' +
           '<a href="' + esc(r.folder_open_url) + '" title="Open in Windows Explorer — ' + esc(r.folder) + '">📂 ' + esc(r.folder_name) + '</a></span>' : ''),
-      esc(r.type === 'ticket' ? (r.service || r.supplier || '') : (r.supplier || '')) + (r.type === 'group' && r.service ? '<span class="fu-days">' + esc(r.service) + '</span>' : '') +
+      esc(r.type === 'ticket' || (ck && !r.supplier) ? (r.service || r.supplier || '') : (r.supplier || '')) +
+        ((r.type === 'group' || (ck && r.supplier)) && r.service ? '<span class="fu-days">' + esc(r.service) + '</span>' : '') +
         (r.supplier_ref ? '<span class="fu-ref">' + esc(r.supplier_ref) + '</span>' : ''),
-      '<span class="badge badge-issue' + issueCls + '">' + esc(ISSUE[r.issue] || r.issue) + '</span>',
+      '<span class="badge badge-issue' + issueCls + '">' + esc(ISSUE[r.issue] || r.issue_label || r.issue) + '</span>' +
+        (ck ? '<br><span class="badge badge-aud ' + esc(r.audience) + '" title="Routed to">' + esc(AUD[r.audience] || r.audience) + '</span>' : ''),
       esc(r.doc_status_text || '') + (r.booked_by ? '<span class="fu-days">booked by ' + esc(r.booked_by) + '</span>' : '') +
         (r.expiry_date ? '<span class="fu-days' + (r.expired ? ' fu-late' : '') + '" style="white-space:nowrap">' + (r.expired ? 'expired ' : 'expires ') + dmy(r.expiry_date) + '</span>' : ''),
-      r.file_open_url ? '<span class="fu-folder fu-file"><a href="' + esc(r.file_url) + '" target="_blank" rel="noopener" title="Open in Dropbox (web)">☁</a> ' +
+      (r.file_open_url ? '<span class="fu-folder fu-file"><a href="' + esc(r.file_url) + '" target="_blank" rel="noopener" title="Open in Dropbox (web)">☁</a> ' +
         '<a href="' + esc(r.file_open_url) + '" title="Open on this PC — ' + esc(r.source_file) + '">📄 ' + esc(r.source_file.replace(/^invoices\//, '')) + '</a></span>'
-      : r.file_url ? '<a href="' + esc(r.file_url) + '" target="_blank" rel="noopener" title="' + esc(r.source_file) + '">📄 ' + esc(r.source_file.replace(/^invoices\//, '')) + '</a>' : '',
+      : r.file_url ? '<a href="' + esc(r.file_url) + '" target="_blank" rel="noopener" title="' + esc(r.source_file) + '">📄 ' + esc(r.source_file.replace(/^invoices\//, '')) + '</a>' : '') +
+        (r.report_url ? '<span class="fu-folder fu-file"><a href="' + esc(r.report_url) + '" target="_blank" rel="noopener" title="Booking check report (Dropbox web)">☁</a> ' +
+          '<a href="' + esc(r.report_open_url) + '" title="Open the booking check report on this PC">📋 booking-check</a></span>' : ''),
       ownerCell(r),
       statusCell(r),
       notesLog(r) + (edit ? '<textarea data-f="notes" aria-label="Add a note" placeholder="Add a note…"></textarea>' +
@@ -246,8 +265,8 @@
     });
     var list = sortRows(all().filter(function (r) { return inTab(r, state.tab) && passes(r); }));
     var head = ['Priority', state.tab === 'groups' ? 'Arrival' : 'Service', 'Client / folder',
-                state.tab === 'tickets' ? 'Flight' : state.tab === 'groups' ? 'Group' : 'Supplier',
-                'Issue', state.tab === 'groups' ? 'What we found' : 'Document status',
+                state.tab === 'tickets' ? 'Flight' : state.tab === 'groups' ? 'Group' : state.tab === 'ck' ? 'Supplier / service' : 'Supplier',
+                'Issue', state.tab === 'groups' ? 'What we found' : state.tab === 'ck' ? 'What to do' : 'Document status',
                 'File', 'Owner', 'Status', 'Notes', state.tab === 'closed' ? 'Closed' : 'Checked'];
     t.innerHTML = '<thead><tr>' + head.map(function (h) { return '<th>' + h + '</th>'; }).join('') + '</tr></thead>';
     var body = document.createElement('tbody');
@@ -389,7 +408,7 @@
   });
 
   // Filters
-  [['fu-f-owner', 'owner'], ['fu-f-prio', 'prio'], ['fu-f-supplier', 'supplier'], ['fu-f-month', 'month']].forEach(function (p) {
+  [['fu-f-owner', 'owner'], ['fu-f-aud', 'aud'], ['fu-f-prio', 'prio'], ['fu-f-supplier', 'supplier'], ['fu-f-month', 'month']].forEach(function (p) {
     $(p[0]).addEventListener('change', function () { state[p[1]] = this.value; render(); });
   });
   $('fu-f-q').addEventListener('input', function () { state.q = this.value.trim(); renderTabs(); renderTable(); });

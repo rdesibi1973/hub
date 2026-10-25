@@ -20,6 +20,30 @@ Running log of notable changes and current build state. Module-level "active / p
 
 ---
 
+## 2026-10-25 — CK owners, booking owners and CK findings in Booking follow-up
+- **Migration 073** (additive; `ck_ensure_schema()` / `followup_schema()` do the same on first use): `ck_folders` gets
+  `ck_owner_user_id`, `booking_owner_user_id`, `owners_updated_at/_by`, the cached default booking owner
+  (`booking_owner_auto_id/_text/_at`) and the last booking check (`findings_checked_at`, `findings_report_path`);
+  `booking_followups` gets type `ck`, `audience` (`booking` / `sales` / `accounts`, NULL = booking), `issue` VARCHAR(40)
+  (was ENUM), `doc_status_text` VARCHAR(500), close reason `auto_resolved`.
+- Owners (`ck_lib.php`): CK owner default from `CK_OWNER_DEFAULT` (`fixed:rdesibi` when not set; `seller` = the user
+  linked to the request's agent, `CK_SELLER_HANDOVER` for sellers who left); booking owner default = the name most
+  often in the Calc CHECKED column among the stays (read through the cached `ops_calc()`, `OPS_CALC_VERSION` 4 adds
+  `checked`). CK tracker: two owner columns (grey = default, inline select of every active user for admin and the row's
+  owners), owner filter (me / user / no booking owner), "📌 N findings open" link, warning when setting `_CK` with
+  open lines. Owner changes logged in `ck_events`.
+- CK findings: `followup_ck_upsert()` — the findings of a booking check replace the booking's open ck lines (new →
+  default owner by audience, missing → `auto_resolved`, resolved but still reported → re-opened); passport numbers
+  stripped. `followup_ck_drafts()` — one English mail draft per owner, nothing sent.
+- Booking follow-up: owners open to **every active user** (no more Glady / Lydia only); the current owner of a line
+  works it without the module; reassign / not relevant: admin or the current owner. Tab + stat card "CK findings",
+  filter "For" (audience), report link on ck lines; request view shows ck lines.
+- Agent API: `ck_status` adds `ck_owner`, `booking_owner`, `open_findings`, `open_followup`, `ck_ready`,
+  `findings_checked_at` (+ `owner` filter, `owners_pending`); new `ck_set_owners`, `ck_findings_upsert` (both dry-run
+  unless confirm), `ck_findings_drafts` (read-only); `followup_list` accepts `type=ck`, `audience`; `rename_folder`
+  warns when adding `_CK` with open lines. Memo digest: section "CK findings" (new by owner, open > 3 days, arrivals
+  < 60 days).
+
 ## 2026-10-15 — ITI activities editable from the Agent API; documents print catalogue texts only in the programme language
 - Agent API: `iti_activities` returns `name_<lang>` / `description_<lang>` for the 5 languages + `name_langs[]` /
   `description_langs[]` and takes `missing=name_<lang>|description_<lang>` (like lodges / destinations); new `iti_activity`

@@ -10,7 +10,13 @@
  *                  confirmed with rooms still provisional (followup_classify.php reads them)
  *   type ticket    domestic flights in the next 14 days with no ticket file in the folder
  *                  (ops_flight_tickets_report(), the flight_tickets action)
+ *   type group     group folders 60 days before arrival (to finalise, ARK-ZNZ seats)
+ *   type ck        findings of the booking check before the CK (Cowork, booking-check skill, sent with
+ *                  the Agent API ck_findings_upsert), routed by audience: booking → the CK folder's
+ *                  booking owner, sales → its CK owner, accounts → Roberto (ck_lib.php owners)
  *
+ * Owners: any active Hub user. The booking team (module booking_followup_edit) works every line;
+ * the current owner of a line works it too (a seller owning a sales line, without the module).
  * The check writes only the document fields; owner / contacted / staff status / notes are the
  * staff's. Lines are never deleted: they close (auto_confirmed, auto_ticket_saved,
  * auto_trip_ended, auto_not_found, manual) and re-open when the check still finds them.
@@ -31,7 +37,15 @@ const FU_GROUP_DAYS       = 60;         // group check: arrivals in the next N d
 const FU_ISSUES  = ['provisional', 'provisional_expired', 'on_request', 'orangi_rooms_provisional', 'ticket_missing', 'unreadable',
                     'group_to_finalize', 'group_znz_flight'];
 const FU_STATUSES = ['open', 'in_progress', 'problem', 'resolved', 'not_relevant'];
-const FU_REASONS = ['auto_confirmed', 'auto_ticket_saved', 'auto_trip_ended', 'auto_not_found', 'manual'];
+const FU_REASONS = ['auto_confirmed', 'auto_ticket_saved', 'auto_trip_ended', 'auto_not_found', 'auto_resolved', 'manual'];
+const FU_TYPES   = ['supplier', 'ticket', 'group', 'ck'];
+const FU_AUDIENCES = ['booking', 'sales', 'accounts'];   // ck lines; NULL (supplier / ticket / group) = booking
+const FU_AUDIENCE_LABELS = ['booking' => 'Booking', 'sales' => 'Sales', 'accounts' => 'Accounts'];
+/** ck issue codes the booking check uses (free VARCHAR(40): other codes are kept as sent). */
+const FU_CK_ISSUE_LABELS = ['transfer_missing' => 'Transfer missing', 'booking_provisional' => 'Booking provisional',
+                            'flight_unpaid' => 'Flight not paid / ticketed', 'client_flights_missing' => 'Client flights missing',
+                            'invoice_mismatch' => 'Invoice mismatch', 'payment_mismatch' => 'Payment mismatch', 'other' => 'Other'];
+const FU_ACCOUNTS_OWNER = 'rdesibi';     // accounts findings (client invoices / payments): Roberto
 /** Worst first: the issue a line shows when several documents carry the same reference. */
 const FU_ISSUE_RANK = ['provisional_expired' => 0, 'provisional' => 1, 'on_request' => 2, 'orangi_rooms_provisional' => 3,
                        'ticket_missing' => 4, 'unreadable' => 5, 'group_to_finalize' => 6, 'group_znz_flight' => 7];
@@ -42,19 +56,18 @@ const FU_STATUS_LABELS = ['open' => 'Open', 'in_progress' => 'In progress', 'pro
                           'not_relevant' => 'Not relevant'];
 const FU_REASON_LABELS = ['auto_confirmed' => 'confirmed document saved', 'auto_ticket_saved' => 'ticket saved',
                           'auto_trip_ended' => 'trip ended', 'auto_not_found' => 'document no longer in invoices/',
-                          'manual' => 'closed by staff'];
+                          'auto_resolved' => 'no longer reported by the CK check', 'manual' => 'closed by staff'];
 const FU_EDIT_PERMISSION = 'booking_followup_edit';
-const FU_OWNERS = ['glady', 'lydia'];    // usernames a line can be assigned to (booking team)
 
-// ── Schema (same DDL as migrations/069_booking_followup.sql) ─────────────────
+// ── Schema (same DDL as migrations 069, 070, 073) ────────────────────────────
 
 function followup_schema(PDO $db): void {
     static $done = false;
     if ($done) return;
-    $issues = "'" . implode("','", FU_ISSUES) . "'";
     $db->exec("CREATE TABLE IF NOT EXISTS booking_followups (
         id              INT AUTO_INCREMENT PRIMARY KEY,
-        type            ENUM('supplier','ticket','group') NOT NULL,
+        type            ENUM('supplier','ticket','group','ck') NOT NULL,
+        audience        ENUM('booking','sales','accounts') NULL,
         dedupe_key      VARCHAR(190) NOT NULL,
         request_id      INT NULL,
         folder          VARCHAR(255) NULL,
@@ -65,8 +78,8 @@ function followup_schema(PDO $db): void {
         supplier_ref    VARCHAR(60) NULL,
         service         VARCHAR(255) NULL,
         source_file     VARCHAR(500) NULL,
-        issue           ENUM($issues) NOT NULL,
-        doc_status_text VARCHAR(255) NULL,
+        issue           VARCHAR(40) NOT NULL,
+        doc_status_text VARCHAR(500) NULL,
         expiry_date     DATE NULL,
         booked_by       VARCHAR(80) NULL,
         owner_user_id   INT NULL,
@@ -77,7 +90,7 @@ function followup_schema(PDO $db): void {
         last_seen_at    DATETIME NOT NULL,
         closed_at       DATETIME NULL,
         closed_by       VARCHAR(20) NULL,
-        close_reason    ENUM('auto_confirmed','auto_ticket_saved','auto_trip_ended','auto_not_found','manual') NULL,
+        close_reason    ENUM('auto_confirmed','auto_ticket_saved','auto_trip_ended','auto_not_found','auto_resolved','manual') NULL,
         scan_source     VARCHAR(10) NULL,
         details         TEXT NULL,
         UNIQUE KEY uq_followup_key (dedupe_key),
@@ -85,7 +98,7 @@ function followup_schema(PDO $db): void {
         KEY idx_followup_closed (closed_at),
         KEY idx_followup_owner (owner_user_id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
-    followup_schema_upgrade($db, $issues);
+    followup_schema_upgrade($db);
     $db->exec("CREATE TABLE IF NOT EXISTS booking_followup_events (
         id          INT AUTO_INCREMENT PRIMARY KEY,
         followup_id INT NOT NULL,
@@ -118,21 +131,26 @@ function followup_schema(PDO $db): void {
 }
 
 /**
- * Tables created by migration 069 / the first version: add the group type and `details`
- * (migration 070 does the same). Checked once in INFORMATION_SCHEMA; each ALTER may fail harmlessly.
+ * Tables of an older version: group type + `details` (migration 070), ck type, free issue code, audience,
+ * auto_resolved (migration 073). Checked once in INFORMATION_SCHEMA; each ALTER may fail harmlessly.
  */
-function followup_schema_upgrade(PDO $db, string $issues): void {
+function followup_schema_upgrade(PDO $db): void {
     try {
-        $st = $db->query("SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
-                          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'booking_followups' AND COLUMN_NAME = 'details'");
-        if ((int)$st->fetchColumn() > 0) return;
+        $st = $db->query("SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'booking_followups' AND COLUMN_NAME IN ('details', 'audience')");
+        $have = $st->fetchAll(PDO::FETCH_COLUMN);
+        if (count($have) === 2) return;
     } catch (Throwable $e) {
         return;   // no INFORMATION_SCHEMA (tests)
     }
-    foreach (["ALTER TABLE booking_followups MODIFY type ENUM('supplier','ticket','group') NOT NULL",
-              "ALTER TABLE booking_followups MODIFY issue ENUM($issues) NOT NULL",
-              "ALTER TABLE booking_followups ADD COLUMN details TEXT NULL"] as $sql) {
-        try { $db->exec($sql); } catch (Throwable $e) { error_log('followup_schema_upgrade: ' . $e->getMessage()); }
+    $sql = ["ALTER TABLE booking_followups MODIFY type ENUM('supplier','ticket','group','ck') NOT NULL",
+            "ALTER TABLE booking_followups MODIFY issue VARCHAR(40) NOT NULL",
+            "ALTER TABLE booking_followups MODIFY doc_status_text VARCHAR(500) NULL",
+            "ALTER TABLE booking_followups MODIFY close_reason ENUM('auto_confirmed','auto_ticket_saved','auto_trip_ended','auto_not_found','auto_resolved','manual') NULL",
+            "ALTER TABLE booking_followups ADD COLUMN audience ENUM('booking','sales','accounts') NULL AFTER type"];
+    if (!in_array('details', $have, true)) $sql[] = "ALTER TABLE booking_followups ADD COLUMN details TEXT NULL";
+    foreach ($sql as $q) {
+        try { $db->exec($q); } catch (Throwable $e) { error_log('followup_schema_upgrade: ' . $e->getMessage()); }
     }
 }
 
@@ -148,6 +166,11 @@ function followup_is_admin(array $user): bool {
 /** Booking team (module booking_followup_edit) or admin. */
 function followup_can_edit(array $user): bool {
     return followup_is_admin($user) || in_array(FU_EDIT_PERMISSION, (array)($user['permissions'] ?? []), true);
+}
+
+/** May work this line (take in charge, contacted, status, notes): the booking team, or its current owner. */
+function followup_can_work(array $user, array $row): bool {
+    return followup_can_edit($user) || ($row['owner_user_id'] !== null && (int)$row['owner_user_id'] === (int)($user['id'] ?? 0));
 }
 
 // ── Bookings and their folders ───────────────────────────────────────────────
@@ -633,6 +656,7 @@ function followup_event(PDO $db, int $id, ?int $userId, string $field, $old, $ne
 /** A line as the summary lists it. */
 function followup_brief(array $l): array {
     return array_filter(['id' => isset($l['id']) ? (int)$l['id'] : null, 'request_id' => (int)$l['request_id'], 'folder' => $l['folder'],
+                         'audience' => $l['audience'] ?? null, 'owner_user_id' => isset($l['owner_user_id']) ? (int)$l['owner_user_id'] : null,
                          'supplier' => $l['supplier'] ?? null, 'ref' => $l['supplier_ref'] ?? null, 'service' => $l['service'] ?? null,
                          'service_date' => $l['service_date'] ?? null, 'issue' => $l['issue'], 'file' => $l['source_file'] ?? null,
                          'status' => $l['doc_status_text'] ?? null], fn($v) => $v !== null && $v !== '');
@@ -664,7 +688,7 @@ function followup_apply(PDO $db, string $type, array $cand, array $scope, bool $
     }
     $have = [];
     foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) $have[$r['dedupe_key']] = $r;
-    $docFields = ['request_id', 'folder', 'start_date', 'end_date', 'service_date', 'supplier', 'supplier_ref', 'service',
+    $docFields = ['audience', 'request_id', 'folder', 'start_date', 'end_date', 'service_date', 'supplier', 'supplier_ref', 'service',
                   'source_file', 'issue', 'doc_status_text', 'expiry_date', 'booked_by', 'details'];
     $logged = ['issue', 'doc_status_text', 'expiry_date', 'source_file', 'service_date'];
 
@@ -674,8 +698,9 @@ function followup_apply(PDO $db, string $type, array $cand, array $scope, bool $
         if (!$old) {
             $sum['added'][] = followup_brief($l);
             if ($confirm) {
-                $cols = array_merge(['type', 'dedupe_key'], $docFields, ['first_seen_at', 'last_seen_at', 'scan_source']);
-                $vals = array_merge([$type, $key], array_map(fn($f) => $l[$f] ?? null, $docFields), [$now, $now, $source]);
+                // ck lines get their default owner on insert only (staff reassign later; the check never touches it again).
+                $cols = array_merge(['type', 'dedupe_key'], $docFields, ['owner_user_id', 'first_seen_at', 'last_seen_at', 'scan_source']);
+                $vals = array_merge([$type, $key], array_map(fn($f) => $l[$f] ?? null, $docFields), [$l['owner_user_id'] ?? null, $now, $now, $source]);
                 $db->prepare("INSERT INTO booking_followups (" . implode(',', $cols) . ") VALUES (" . implode(',', array_fill(0, count($cols), '?')) . ")")
                    ->execute($vals);
                 followup_event($db, (int)$db->lastInsertId(), null, 'created', null, ($l['doc_status_text'] ?? '') . ($l['source_file'] ? ' — ' . $l['source_file'] : ''));
@@ -708,7 +733,8 @@ function followup_apply(PDO $db, string $type, array $cand, array $scope, bool $
             foreach ($diff as $f => $v) if (in_array($f, $logged, true)) followup_event($db, $id, null, $f, $v[0], $v[1]);
             if ($reopen) {
                 $what = $type === 'ticket' ? 'ticket still missing' : ($type === 'group' ? 'group still to finalize'
-                      : 'still ' . strtolower(FU_ISSUE_LABELS[$l['issue']]) . ($l['source_file'] ? ' in ' . $l['source_file'] : ''));
+                      : ($type === 'ck' ? 'still reported by CK check'
+                      : 'still ' . strtolower(FU_ISSUE_LABELS[$l['issue']]) . ($l['source_file'] ? ' in ' . $l['source_file'] : '')));
                 followup_event($db, $id, null, 'reopened', ($old['close_reason'] ?? '') . ($old['staff_status'] === 'resolved' ? ' / resolved' : ''), $what);
                 if ($old['staff_status'] === 'resolved') followup_event($db, $id, null, 'staff_status', 'resolved', 'open');
             }
@@ -728,6 +754,7 @@ function followup_apply(PDO $db, string $type, array $cand, array $scope, bool $
         elseif ($type === 'supplier' && isset($scope['confirmed'][$key])) $reason = 'auto_confirmed';
         elseif ($type === 'ticket' && isset($scope['ok'][$rid])) $reason = 'auto_ticket_saved';
         elseif ($type === 'group' && !empty($scope['complete_type'])) $reason = 'auto_not_found';   // folder renamed / cancelled / moved
+        elseif ($type === 'ck') { if (isset($done[$rid])) $reason = 'auto_resolved'; }               // the new check of the booking no longer reports it
         elseif (isset($done[$rid]) && ($type === 'supplier'
                 || $old['service_date'] >= $today && $old['service_date'] <= ($scope['to'] ?? '9999-12-31'))) $reason = 'auto_not_found';
         if (!$reason) continue;
@@ -1007,6 +1034,175 @@ function followup_apply_subset(PDO $db, array $cand, array $scope, array $reques
     return $sum;
 }
 
+// ── CK findings (booking check before the CK) ────────────────────────────────
+
+/** Passport numbers never stored: "passport no. YA1234567" / "passport: …" → "[removed]". */
+function followup_strip_passport(string $s): string {
+    return preg_replace('/(pass(?:port|aporto)\w*\s*(?:no\.?|n\.?|nr\.?|number|numero|#)?\s*[:#]?\s*)[A-Z]{0,3}\d[A-Z0-9]{4,}/iu', '$1[removed]', $s);
+}
+
+/** Label of an issue code (supplier / ticket / group / ck; an unknown ck code is shown as written). */
+function followup_issue_label(string $issue): string {
+    return FU_ISSUE_LABELS[$issue] ?? FU_CK_ISSUE_LABELS[$issue] ?? ucfirst(str_replace('_', ' ', $issue));
+}
+
+/**
+ * The findings of one booking check replace that booking's open ck lines: new ones are added with their
+ * default owner (booking → the CK folder's booking owner, sales → its CK owner, accounts → Roberto), the
+ * ones still reported are updated (document fields only), the ones not reported any more close as
+ * auto_resolved; a line staff closed as resolved and still reported re-opens.
+ * $findings[] {audience, issue, service_date?, service, supplier?, text, source_file?}; $meta {checked_at?, report_path?}.
+ * $ckRow: ck_tracker_rows() row of the booking (ck_tracker_row_for()).
+ * → ['ok', 'dry_run', 'would_add'|'added', 'would_update'|'updated', 'would_close'|'closed', 'reopened', 'unchanged',
+ *    'owners', 'errors'] (each line with owner username); ['ok' => false, 'error'] on bad input.
+ */
+function followup_ck_upsert(PDO $db, int $requestId, array $ckRow, array $findings, array $meta, bool $confirm, ?string $today = null): array {
+    followup_schema($db);
+    ck_ensure_schema($db);
+    $today = $today ?? date('Y-m-d');
+    $owners = ck_owners_resolve($db, $ckRow);
+    $acc = ck_user_find($db, FU_ACCOUNTS_OWNER);
+    $ownerOf = ['booking' => $owners['booking_owner']['user_id'] ?? null, 'sales' => $owners['ck_owner']['user_id'] ?? null,
+                'accounts' => $acc ? (int)$acc['id'] : null];
+    $date = fn($v) => ($v && preg_match('/^\d{4}-\d{2}-\d{2}$/', (string)$v)) ? (string)$v : null;
+    $report = trim((string)($meta['report_path'] ?? ''));
+    $cand = []; $errors = [];
+    foreach ($findings as $i => $f) {
+        if (!is_array($f)) { $errors[] = ['finding' => $i, 'error' => 'not an object']; continue; }
+        $aud = (string)($f['audience'] ?? '');
+        $issue = strtolower(trim((string)($f['issue'] ?? '')));
+        $text = trim(followup_strip_passport((string)($f['text'] ?? '')));
+        if (!in_array($aud, FU_AUDIENCES, true)) { $errors[] = ['finding' => $i, 'error' => 'audience must be ' . implode(', ', FU_AUDIENCES)]; continue; }
+        if (!preg_match('/^[a-z0-9_]{2,40}$/', $issue)) { $errors[] = ['finding' => $i, 'error' => 'issue: short code, a-z 0-9 _ (e.g. ' . implode(', ', array_keys(FU_CK_ISSUE_LABELS)) . ')']; continue; }
+        if ($text === '') { $errors[] = ['finding' => $i, 'error' => 'text is required (what is wrong / what to do)']; continue; }
+        $svc = mb_substr(trim(followup_strip_passport((string)($f['service'] ?? ''))), 0, 255);
+        $sd = $date($f['service_date'] ?? null);
+        $key = followup_key_fit('CK|' . $requestId . '|' . $aud . '|' . $issue . '|' . ($sd ?? '') . '|' . substr(followup_norm($svc), 0, 80));
+        if (isset($cand[$key])) { $errors[] = ['finding' => $i, 'error' => 'same audience / issue / service_date / service as finding ' . $cand[$key]['_i'] . ' — merged into it']; continue; }
+        $cand[$key] = ['_i' => $i, 'type' => 'ck', 'audience' => $aud, 'dedupe_key' => $key, 'request_id' => $requestId,
+                       'folder' => $ckRow['folder_name'], 'start_date' => $ckRow['start_date'], 'end_date' => $ckRow['end_date'],
+                       'service_date' => $sd, 'supplier' => mb_substr(trim((string)($f['supplier'] ?? '')), 0, 150) ?: null,
+                       'supplier_ref' => null, 'service' => $svc !== '' ? $svc : null,
+                       'source_file' => mb_substr(trim((string)($f['source_file'] ?? '')), 0, 500) ?: null,
+                       'issue' => $issue, 'doc_status_text' => mb_substr($text, 0, 500), 'expiry_date' => $date($f['expiry_date'] ?? null),
+                       'booked_by' => null, 'details' => $report !== '' ? json_encode(['report_path' => $report], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) : null,
+                       'owner_user_id' => $ownerOf[$aud]];
+    }
+    if ($errors && count($errors) === count($findings)) return ['ok' => false, 'error' => 'No valid finding', 'errors' => $errors];
+    foreach ($cand as &$c) unset($c['_i']);
+    unset($c);
+    $sum = followup_apply($db, 'ck', $cand, ['requests' => [$requestId], 'only' => [$requestId]], $confirm, 'agent', $today);
+    if ($confirm) {
+        $at = trim((string)($meta['checked_at'] ?? ''));
+        $db->prepare("UPDATE ck_folders SET findings_checked_at = ?, findings_report_path = ? WHERE id = ?")
+           ->execute([preg_match('/^\d{4}-\d{2}-\d{2}/', $at) ? substr(str_replace('T', ' ', $at), 0, 19) : date('Y-m-d H:i:s'),
+                      $report !== '' ? mb_substr($report, 0, 500) : null, (int)$ckRow['id']]);
+    }
+    // Owner of each line as username: the default for a new line, the current one for an existing line.
+    $users = ck_users($db);
+    $cur = [];
+    $st = $db->prepare("SELECT id, owner_user_id FROM booking_followups WHERE type = 'ck' AND request_id = ?");
+    $st->execute([$requestId]);
+    foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) $cur[(int)$r['id']] = $r['owner_user_id'];
+    $withOwner = fn(array $list) => array_map(function ($b) use ($users, $cur) {
+        $oid = isset($b['id']) ? ($cur[$b['id']] ?? null) : ($b['owner_user_id'] ?? null);
+        unset($b['owner_user_id']);
+        return $b + ['owner' => $oid && isset($users[(int)$oid]) ? $users[(int)$oid]['username'] : null];
+    }, $list);
+    $p = $confirm ? '' : 'would_';
+    return ['ok' => true, 'dry_run' => !$confirm, 'request_id' => $requestId, 'ck_folder_id' => (int)$ckRow['id'], 'folder' => $ckRow['folder_name'],
+            $p . 'add' => $withOwner($sum['added']), $p . 'update' => $withOwner($sum['updated']),
+            $p . 'close' => $withOwner($sum['closed']), $p . 'reopen' => $withOwner($sum['reopened']),
+            'unchanged' => $sum['unchanged'],
+            'owners' => ['booking' => $owners['booking_owner']['username'] ?? null, 'sales' => $owners['ck_owner']['username'] ?? null,
+                         'accounts' => $acc['username'] ?? null],
+            'errors' => $errors];
+}
+
+/** Open lines per request: [request_id => ['ck' => n, 'supplier' => n, 'ticket' => n, 'group' => n, 'ck_audience' => {booking, sales, accounts}]]. */
+function followup_open_counts(PDO $db): array {
+    followup_schema($db);
+    $out = [];
+    foreach ($db->query("SELECT request_id, type, COALESCE(audience, 'booking') AS aud, COUNT(*) AS n FROM booking_followups
+                         WHERE closed_at IS NULL AND request_id IS NOT NULL GROUP BY request_id, type, aud")->fetchAll(PDO::FETCH_ASSOC) as $r) {
+        $rid = (int)$r['request_id'];
+        $out[$rid] = $out[$rid] ?? ['ck' => 0, 'supplier' => 0, 'ticket' => 0, 'group' => 0, 'ck_audience' => ['booking' => 0, 'sales' => 0, 'accounts' => 0]];
+        $out[$rid][$r['type']] += (int)$r['n'];
+        if ($r['type'] === 'ck') $out[$rid]['ck_audience'][$r['aud']] += (int)$r['n'];
+    }
+    return $out;
+}
+
+/** The open counts of a CK tracker row (all its requests summed). */
+function followup_open_for_row(array $counts, array $ckRow): array {
+    $s = ['ck' => 0, 'supplier' => 0, 'ticket' => 0, 'group' => 0, 'ck_audience' => ['booking' => 0, 'sales' => 0, 'accounts' => 0]];
+    foreach ($ckRow['reqs'] as $q) {
+        $c = $counts[(int)$q['id']] ?? null;
+        if (!$c) continue;
+        foreach (['ck', 'supplier', 'ticket', 'group'] as $k) $s[$k] += $c[$k];
+        foreach ($c['ck_audience'] as $a => $n) $s['ck_audience'][$a] += $n;
+    }
+    return $s;
+}
+
+/**
+ * Mail drafts of the open ck lines, one per owner, in English. Read-only: nothing is sent (Cowork turns
+ * each into an .eml for Roberto). $f: request_ids [] or since (Y-m-d: lines seen by a check since then).
+ * → [{to_user, to_name, to_email, subject, html, text, lines[]}] (lines without an owner: to_user null).
+ */
+function followup_ck_drafts(PDO $db, array $f, ?string $today = null): array {
+    $today = $today ?? date('Y-m-d');
+    $ids = array_values(array_filter(array_map('intval', (array)($f['request_ids'] ?? []))));
+    $rows = array_filter(followup_rows($db, ['status' => 'open', 'type' => 'ck'], $today), function ($r) use ($ids, $f) {
+        if ($ids && !in_array((int)$r['request_id'], $ids, true)) return false;
+        if (!empty($f['since']) && substr((string)$r['last_seen_at'], 0, 10) < $f['since']) return false;
+        return true;
+    });
+    $users = ck_users($db);
+    $by = [];
+    foreach ($rows as $r) $by[(int)$r['owner_user_id']][] = $r;
+    $e = fn($s) => htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8');
+    $page = 'https://hub.savannahexplorers.com/modules/operations/booking_followup.php';
+    $out = [];
+    foreach ($by as $oid => $lines) {
+        $u = $oid ? ($users[$oid] ?? null) : null;
+        $first = $u ? strtok((string)($u['full_name'] ?: $u['username']), ' ') : 'team';
+        usort($lines, fn($a, $b) => [$a['start_date'] ?? '9999', $a['folder'], $a['service_date'] ?? ''] <=> [$b['start_date'] ?? '9999', $b['folder'], $b['service_date'] ?? '']);
+        $book = [];
+        foreach ($lines as $l) $book[$l['folder']][] = $l;
+        $html = '<p>Dear ' . $e($first) . ',</p><p>the booking check before the CK found these open points. '
+              . 'Please fix them and update the line in Booking follow-up (status / note) when done.</p>';
+        $text = "Dear $first,\n\nthe booking check before the CK found these open points. Please fix them and update the line in Booking follow-up (status / note) when done.\n";
+        foreach ($book as $folder => $ls) {
+            $l0 = $ls[0];
+            $title = ($l0['customer'] ?: $l0['folder_name']) . ($l0['start_date'] ? ' — arrival ' . date('d M Y', strtotime($l0['start_date'])) : '');
+            $html .= '<h3 style="font-size:14px;margin:16px 0 4px">' . $e($title) . '</h3><p style="margin:0 0 6px;color:#666;font-size:12px">' . $e($folder) . '</p><ul>';
+            $text .= "\n" . $title . "\n" . $folder . "\n";
+            foreach ($ls as $l) {
+                $what = trim(($l['service_date'] ? date('d M', strtotime($l['service_date'])) . ' · ' : '') . ($l['service'] ?: $l['supplier'] ?: ''));
+                $html .= '<li><b>' . $e($l['issue_label']) . '</b>' . ($what !== '' ? ' — ' . $e($what) : '') . ': ' . $e($l['doc_status_text'])
+                       . ($l['source_file'] ? ' <span style="color:#666">(' . $e($l['source_file']) . ')</span>' : '') . '</li>';
+                $text .= '- ' . $l['issue_label'] . ($what !== '' ? ' — ' . $what : '') . ': ' . $l['doc_status_text'] . ($l['source_file'] ? ' (' . $l['source_file'] . ')' : '') . "\n";
+            }
+            $html .= '</ul>';
+            if (!empty($l0['report_url'])) { $html .= '<p style="font-size:12px"><a href="' . $e($l0['report_url']) . '">Booking check report</a></p>'; $text .= 'Report: ' . $l0['report_url'] . "\n"; }
+        }
+        $html .= '<p><a href="' . $page . '">Open Booking follow-up</a></p><p>Thank you,<br>Roberto</p>';
+        $text .= "\nBooking follow-up: $page\n\nThank you,\nRoberto\n";
+        $n = count($lines); $nb = count($book);
+        $out[] = ['to_user' => $u['username'] ?? null, 'to_name' => $u ? ($u['full_name'] ?: $u['username']) : null, 'to_email' => $u['email'] ?? null,
+                  'subject' => 'CK check: ' . $n . ' open point' . ($n === 1 ? '' : 's') . ' on ' . $nb . ' booking' . ($nb === 1 ? '' : 's')
+                             . ($nb === 1 ? ' — ' . ($lines[0]['customer'] ?: $lines[0]['folder_name']) : ''),
+                  'html' => '<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#222;line-height:1.4">' . $html . '</div>',
+                  'text' => $text,
+                  'lines' => array_map(fn($l) => ['id' => $l['id'], 'request_id' => $l['request_id'], 'folder' => $l['folder'], 'audience' => $l['audience'],
+                                                  'issue' => $l['issue'], 'service_date' => $l['service_date'], 'service' => $l['service'],
+                                                  'text' => $l['doc_status_text'], 'staff_status' => $l['staff_status']], $lines)];
+    }
+    usort($out, fn($a, $b) => [$a['to_user'] === null, $a['to_name']] <=> [$b['to_user'] === null, $b['to_name']]);
+    return $out;
+}
+
 /** dropbox_folder_stem() without loading the Dropbox helper first. */
 function dropbox_folder_stem_safe(string $name): string {
     require_once __DIR__ . '/../../leads/dropbox_helper.php';
@@ -1023,6 +1219,7 @@ function followup_priority(array $l, string $today): string {
     $svc = $l['service_date'] ?: $l['start_date'];
     $days = $svc ? (int)round((strtotime($svc) - strtotime($today)) / 86400) : 999;
     if ($l['type'] === 'ticket') return $days <= 7 ? '1-URGENT' : '2-HIGH';
+    if ($l['type'] === 'ck') return $days <= 30 ? '1-URGENT' : ($days <= 60 ? '2-HIGH' : '3-NORMAL');   // the CK is due ~60 days out
     $exp = $l['expiry_date'] ? (int)round((strtotime($l['expiry_date']) - strtotime($today)) / 86400) : null;
     if ($days <= 30 || ($exp !== null && $exp >= 0 && $exp <= 7) || ($exp !== null && $exp < 0 && $days <= 90)) return '1-URGENT';
     return $days <= 90 ? '2-HIGH' : '3-NORMAL';
@@ -1035,8 +1232,8 @@ function followup_dropbox_url(string $path, ?string $previewFile = null): string
 }
 
 /**
- * Lines with owner / customer / priority. $f: type, status open (default) | closed | all, owner
- * (user id, username or 'none'), priority, request_id (+ its GRP's lines), q, ids.
+ * Lines with owner / customer / priority. $f: type, audience (booking includes the lines without one),
+ * status open (default) | closed | all, owner (user id, username or 'none'), priority, request_id (+ its GRP's lines), q, ids.
  */
 function followup_rows(PDO $db, array $f = [], ?string $today = null): array {
     followup_schema($db);
@@ -1045,7 +1242,8 @@ function followup_rows(PDO $db, array $f = [], ?string $today = null): array {
     $status = $f['status'] ?? 'open';
     if ($status === 'open') $w[] = 'b.closed_at IS NULL';
     elseif ($status === 'closed') $w[] = 'b.closed_at IS NOT NULL';
-    if (!empty($f['type']) && in_array($f['type'], ['supplier', 'ticket', 'group'], true)) { $w[] = 'b.type = ?'; $a[] = $f['type']; }
+    if (!empty($f['type']) && in_array($f['type'], FU_TYPES, true)) { $w[] = 'b.type = ?'; $a[] = $f['type']; }
+    if (!empty($f['audience']) && in_array($f['audience'], FU_AUDIENCES, true)) { $w[] = "COALESCE(b.audience, 'booking') = ?"; $a[] = $f['audience']; }
     if (!empty($f['ids'])) { $ids = array_map('intval', (array)$f['ids']); $w[] = 'b.id IN (' . implode(',', $ids ?: [0]) . ')'; }
     if (isset($f['owner']) && $f['owner'] !== '') {
         if ($f['owner'] === 'none') $w[] = 'b.owner_user_id IS NULL';
@@ -1110,8 +1308,18 @@ function followup_out(array $r, string $today): array {
     $svc = $r['service_date'] ?: $r['start_date'];
     $dir = followup_folder_dir((string)$r['folder']);
     $open = fn(string $p) => 'savannah://open?path=' . implode('/', array_map('rawurlencode', explode('/', ltrim($p, '/'))));
+    $details = !empty($r['details']) ? json_decode((string)$r['details'], true) : null;
+    // ck lines: the folder's booking-check.html (path under the folder, or a full Dropbox / local path).
+    $report = null;
+    if ($r['type'] === 'ck' && !empty($details['report_path'])) {
+        $rp = str_replace('\\', '/', (string)$details['report_path']);
+        if (preg_match('#(?:^|/)(001_Safari/.+)$#i', $rp, $m)) $rp = '/' . $m[1];
+        elseif ($rp[0] !== '/') $rp = $dir . '/' . ltrim($rp, '/');
+        $report = $rp;
+    }
     return [
-        'id' => (int)$r['id'], 'type' => $r['type'], 'request_id' => $r['request_id'] !== null ? (int)$r['request_id'] : null,
+        'id' => (int)$r['id'], 'type' => $r['type'], 'audience' => $r['audience'] ?? 'booking',
+        'request_id' => $r['request_id'] !== null ? (int)$r['request_id'] : null,
         'customer' => $r['customer_name'] ?? null, 'folder' => $r['folder'], 'folder_name' => basename((string)$r['folder']),
         'folder_url' => $r['folder'] ? followup_dropbox_url($dir) : null,
         // Same as the Hub's "📂 Open": Windows Explorer on the office PCs (tools/savannah-open).
@@ -1123,7 +1331,9 @@ function followup_out(array $r, string $today): array {
         'start_date' => $r['start_date'], 'end_date' => $r['end_date'], 'service_date' => $r['service_date'],
         'days_left' => $svc ? (int)round((strtotime($svc) - strtotime($today)) / 86400) : null,
         'supplier' => $r['supplier'], 'supplier_ref' => $r['supplier_ref'], 'service' => $r['service'],
-        'source_file' => $r['source_file'], 'issue' => $r['issue'], 'issue_label' => FU_ISSUE_LABELS[$r['issue']] ?? $r['issue'],
+        'source_file' => $r['source_file'], 'issue' => $r['issue'], 'issue_label' => followup_issue_label((string)$r['issue']),
+        'report_url' => $report ? followup_dropbox_url(dirname($report), basename($report)) : null,
+        'report_open_url' => $report ? $open($report) . '&open=file' : null,
         'doc_status_text' => $r['doc_status_text'], 'expiry_date' => $r['expiry_date'],
         'expired' => $r['expiry_date'] !== null && $r['expiry_date'] < $today,
         'booked_by' => $r['booked_by'],
@@ -1135,7 +1345,7 @@ function followup_out(array $r, string $today): array {
         'closed_at' => $r['closed_at'], 'closed_by' => $r['closed_by'] === 'system' ? 'system' : (($r['closed_by_name'] ?? null) ?: $r['closed_by']),
         'close_reason' => $r['close_reason'], 'close_reason_label' => $r['close_reason'] ? FU_REASON_LABELS[$r['close_reason']] : null,
         'events_count' => (int)($r['events_count'] ?? 0), 'source' => $r['scan_source'],
-        'details' => !empty($r['details']) ? json_decode((string)$r['details'], true) : null,
+        'details' => $details,
     ];
 }
 
@@ -1164,7 +1374,7 @@ function followup_events(PDO $db, int $id): array {
 
 /** Stat cards of the page. */
 function followup_stats(array $open, array $closedRecent): array {
-    $s = ['untaken' => 0, 'urgent' => 0, 'problem' => 0, 'expiring' => 0, 'tickets' => 0, 'groups' => 0, 'closed7' => count($closedRecent)];
+    $s = ['untaken' => 0, 'urgent' => 0, 'problem' => 0, 'expiring' => 0, 'tickets' => 0, 'groups' => 0, 'ck' => 0, 'closed7' => count($closedRecent)];
     foreach ($open as $r) {
         if ($r['owner_user_id'] === null) $s['untaken']++;
         if ($r['priority'] === '1-URGENT') $s['urgent']++;
@@ -1172,6 +1382,7 @@ function followup_stats(array $open, array $closedRecent): array {
         if ($r['expiry_date'] && !$r['expired'] && (strtotime($r['expiry_date']) - time()) / 86400 <= 7) $s['expiring']++;
         if ($r['issue'] === 'ticket_missing') $s['tickets']++;
         if ($r['issue'] === 'group_to_finalize') $s['groups']++;
+        if ($r['type'] === 'ck') $s['ck']++;
     }
     return $s;
 }
@@ -1188,19 +1399,20 @@ function followup_page_data(PDO $db, array $user): array {
             'today' => date('Y-m-d')];
 }
 
-/** Who a line can be assigned to (FU_OWNERS, active users): [{id, name}]. */
+/** Who a line can be assigned to: every active Hub user, [{id, name}]. */
 function followup_owner_users(PDO $db): array {
-    $st = $db->prepare("SELECT id, username, full_name FROM users WHERE is_active = 1 AND username IN ("
-                       . implode(',', array_fill(0, count(FU_OWNERS), '?')) . ") ORDER BY full_name");
-    $st->execute(FU_OWNERS);
-    return array_map(fn($u) => ['id' => (int)$u['id'], 'name' => $u['full_name'] ?: $u['username']], $st->fetchAll(PDO::FETCH_ASSOC));
+    return array_map(fn($u) => ['id' => (int)$u['id'], 'name' => $u['full_name'] ?: $u['username']],
+                     $db->query("SELECT id, username, full_name FROM users WHERE is_active = 1 ORDER BY full_name, username")->fetchAll(PDO::FETCH_ASSOC));
 }
 
 // ── Staff changes ────────────────────────────────────────────────────────────
 
 /**
- * Change a line as a Hub user. $ch: take (bool — FU_OWNERS only), owner (user id | username of FU_OWNERS | null),
+ * Change a line as a Hub user. $ch: take (bool), owner (user id | username of an active user | null),
  * contacted_at (Y-m-d | ''), staff_status, notes. $user: current_user() shape (id, role_name, permissions).
+ * Who: take / contacted / status / notes → the booking team (module booking_followup_edit) or the line's
+ * current owner; reassign → admin or the current owner (a line nobody owns: also the booking team);
+ * not_relevant → admin or the current owner.
  * resolved / not_relevant close the line (manual); another status on a closed line re-opens it.
  * → ['ok', 'changes' => [field => [old, new]], 'row'] or ['ok' => false, 'error']. Dry run: nothing written.
  */
@@ -1210,17 +1422,16 @@ function followup_update(PDO $db, int $id, array $ch, array $user, bool $confirm
     $st->execute([$id]);
     $row = $st->fetch(PDO::FETCH_ASSOC);
     if (!$row) return ['ok' => false, 'error' => 'Line ' . $id . ' not found', 'code' => 404];
-    if (!followup_can_edit($user)) return ['ok' => false, 'error' => 'You can only view this page (module ' . FU_EDIT_PERMISSION . ')', 'code' => 403];
+    if (!followup_can_work($user, $row)) {
+        return ['ok' => false, 'error' => 'You can work only the lines you own (or ask Roberto for the module ' . FU_EDIT_PERMISSION . ')', 'code' => 403];
+    }
     $admin = followup_is_admin($user);
     $uid = (int)$user['id'];
+    $isOwner = $row['owner_user_id'] !== null && (int)$row['owner_user_id'] === $uid;
     $new = [];
-    $owners = followup_owner_users($db);
-    $ownerIds = array_column($owners, 'id');
-    $ownerNames = implode(' / ', array_column($owners, 'name')) ?: implode(' / ', FU_OWNERS);
 
     if (!empty($ch['take'])) {
-        if (!in_array($uid, $ownerIds, true)) return ['ok' => false, 'error' => 'Only ' . $ownerNames . ' can take a line in charge', 'code' => 403];
-        if ($row['owner_user_id'] !== null && (int)$row['owner_user_id'] !== $uid && !$admin) {
+        if ($row['owner_user_id'] !== null && !$isOwner && !$admin) {
             return ['ok' => false, 'error' => 'Already taken in charge by someone else', 'code' => 409];
         }
         $new['owner_user_id'] = $uid;
@@ -1236,9 +1447,10 @@ function followup_update(PDO $db, int $id, array $ch, array $user, bool $confirm
             if (!$oid) return ['ok' => false, 'error' => 'User "' . $o . '" not found', 'code' => 400];
             $oid = (int)$oid;
         }
-        // Anyone who can edit assigns among the booking team (FU_OWNERS) or clears the owner.
-        if ($oid !== null && !in_array($oid, $ownerIds, true)) {
-            return ['ok' => false, 'error' => 'A line can only be assigned to ' . $ownerNames, 'code' => 400];
+        // Reassign: admin or the current owner; a line nobody owns can be assigned by the booking team too.
+        $changing = $oid !== ($row['owner_user_id'] !== null ? (int)$row['owner_user_id'] : null);
+        if ($changing && !$admin && !$isOwner && !($row['owner_user_id'] === null && followup_can_edit($user))) {
+            return ['ok' => false, 'error' => 'Only an admin or the current owner can reassign this line', 'code' => 403];
         }
         $new['owner_user_id'] = $oid;
     }
@@ -1251,7 +1463,9 @@ function followup_update(PDO $db, int $id, array $ch, array $user, bool $confirm
     if (array_key_exists('staff_status', $ch)) {
         $s = (string)$ch['staff_status'];
         if (!in_array($s, FU_STATUSES, true)) return ['ok' => false, 'error' => 'staff_status must be one of ' . implode(', ', FU_STATUSES), 'code' => 400];
-        if ($s === 'not_relevant' && !$admin) return ['ok' => false, 'error' => 'Only an admin can close a line as not relevant', 'code' => 403];
+        if ($s === 'not_relevant' && !$admin && !$isOwner && $row['staff_status'] !== 'not_relevant') {
+            return ['ok' => false, 'error' => 'Only an admin or the current owner can close a line as not relevant', 'code' => 403];
+        }
         $new['staff_status'] = $s;
     }
     $finalStatus = $new['staff_status'] ?? $row['staff_status'];
@@ -1287,14 +1501,23 @@ function followup_update(PDO $db, int $id, array $ch, array $user, bool $confirm
 /**
  * What Roberto's morning digest lists: new lines since $since, problems, lines nobody took in
  * charge for > 2 days, provisional expiring ≤ 7 days, tickets missing ≤ 7 days.
+ * CK findings apart: ck_new (since $since), ck_old (open > 3 days), ck_soon (arrival < 60 days) — by owner.
  */
 function followup_digest_data(PDO $db, ?string $since, ?string $today = null): array {
     $today = $today ?? date('Y-m-d');
     $open = followup_rows($db, ['status' => 'open'], $today);
-    $d = ['new' => [], 'problem' => [], 'untaken' => [], 'expiring' => [], 'tickets' => []];
+    $d = ['new' => [], 'problem' => [], 'untaken' => [], 'expiring' => [], 'tickets' => [], 'ck_new' => [], 'ck_old' => [], 'ck_soon' => []];
     $in7 = date('Y-m-d', strtotime($today . ' +7 days'));
+    $in60 = date('Y-m-d', strtotime($today . ' +60 days'));
     $old = date('Y-m-d H:i:s', time() - 2 * 86400);
+    $old3 = date('Y-m-d H:i:s', time() - 3 * 86400);
     foreach ($open as $r) {
+        if ($r['type'] === 'ck') {
+            if ($since && $r['first_seen_at'] > $since) $d['ck_new'][] = $r;
+            elseif ($r['first_seen_at'] < $old3) $d['ck_old'][] = $r;
+            if ($r['start_date'] && $r['start_date'] >= $today && $r['start_date'] < $in60) $d['ck_soon'][$r['folder']][] = $r;
+            continue;
+        }
         if ($since && $r['first_seen_at'] > $since) $d['new'][] = $r;
         if ($r['staff_status'] === 'problem') $d['problem'][] = $r;
         if ($r['owner_user_id'] === null && $r['first_seen_at'] < $old) $d['untaken'][] = $r;

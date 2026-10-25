@@ -8,11 +8,15 @@
  * band by days to arrival (suppliers start penalties ~90 days out):
  *   red < 60 days · amber 60–90 · grey > 90.
  * Anyone with Leads access can set / remove the _CK marker; the Hub records who.
+ * Each row has a CK owner (sales side) and a booking owner (who fixes the bookings), default
+ * shown in grey (rule in ck_lib.php); admin and the row's current owners change them inline.
+ * Open findings of the booking check live in Booking follow-up (type ck).
  */
 require_once 'config.php';
 require_once 'dropbox_helper.php';
 require_once 'includes/folder_parser.php';
 require_once 'includes/ck_lib.php';
+require_once __DIR__ . '/../operations/includes/followup_service.php';   // open findings per booking
 requireLogin();
 $pageTitle = 'CK tracker';
 $db = db();
@@ -138,6 +142,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'run_c
     exit;
 }
 
+// ── Owners (JS, inline select): admin and the row's current owners ────────────
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'set_owner') {
+    ob_start();
+    $res = ['ok' => false, 'msg' => 'Folder not found.'];
+    try {
+        $row = ck_tracker_row_for($db, (int)($_POST['ck_id'] ?? 0), null);
+        $field = (string)($_POST['field'] ?? '');
+        if ($row && !in_array($field, ['ck_owner', 'booking_owner'], true)) $res = ['ok' => false, 'msg' => 'Unknown field.'];
+        elseif ($row && !ck_can_set_owners($db, $cu, $row)) $res = ['ok' => false, 'msg' => 'Only an admin or the current owners can change the owners.'];
+        elseif ($row) {
+            $r = ck_set_owners($db, $row, [$field => trim((string)($_POST['value'] ?? '')) ?: null], $uid, true);
+            $res = $r['ok'] ? ['ok' => true, 'owner' => $r['owners'][$field]] : ['ok' => false, 'msg' => $r['error']];
+        }
+    } catch (Throwable $e) {
+        $res = ['ok' => false, 'msg' => 'Error: ' . $e->getMessage()];
+    }
+    ob_end_clean();
+    header('Content-Type: application/json');
+    echo json_encode($res);
+    exit;
+}
+
 // ── Actions: set / remove _CK, run the automatic check ────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array($_POST['action'] ?? '', ['ck_on', 'ck_off', 'run_check'], true)) {
     try {
@@ -148,13 +174,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array($_POST['action'] ?? '', ['
         } else {
             $token = dropbox_get_access_token();
             $res   = ck_set_marker($db, $token, (int)($_POST['ck_id'] ?? 0), $_POST['action'] === 'ck_on', $uid);
+            // _CK with open points in Booking follow-up: allowed, but said.
+            if ($res['ok'] && $_POST['action'] === 'ck_on' && ($row = ck_tracker_row_for($db, (int)$_POST['ck_id'], null))) {
+                $o = followup_open_for_row(followup_open_counts($db), $row);
+                if ($o['ck'] + $o['supplier'] + $o['ticket'] > 0) {
+                    $res['msg'] .= ' — ⚠ still open in Booking follow-up: ' . $o['ck'] . ' CK finding(s), ' . $o['supplier'] . ' supplier, ' . $o['ticket'] . ' ticket.';
+                }
+            }
             flash($res['msg'], $res['ok'] ? 'info' : 'error');
         }
     } catch (Throwable $e) {
         flash('Error — nothing was changed: ' . $e->getMessage(), 'error');
     }
     parse_str((string)($_POST['return_qs'] ?? ''), $rq);
-    $rq = array_intersect_key($rq, array_flip(['view', 'past', 'agent', 'q']));
+    $rq = array_intersect_key($rq, array_flip(['view', 'past', 'agent', 'owner', 'q']));
     header('Location: ck_tracker.php' . ($rq ? '?' . http_build_query($rq) : '') . '#ck' . (int)($_POST['ck_id'] ?? 0));
     exit;
 }
@@ -198,6 +231,18 @@ try {
 // Every tracked folder + its requests, agent, urgency band (includes/ck_lib.php,
 // shared with the Agent API ck_status).
 $rows = ck_tracker_rows($db);
+// Owners: the default booking owner is read from the Calc CHECKED column (cached 12 h; a few seconds per visit, the rest next time).
+try { ck_owners_refresh_auto($db, $rows, 6); } catch (Throwable $e) { error_log('ck_tracker owners: ' . $e->getMessage()); }
+$openCounts = [];
+try { $openCounts = followup_open_counts($db); } catch (Throwable $e) { error_log('ck_tracker findings: ' . $e->getMessage()); }
+foreach ($rows as &$r) {
+    $r['owners'] = ck_owners_resolve($db, $r);
+    $r['open']   = followup_open_for_row($openCounts, $r);
+    $r['can_owners'] = ck_can_set_owners($db, $cu, $r);
+}
+unset($r);
+$activeUsers = ck_active_users($db);
+$ownerF = trim((string)($_GET['owner'] ?? ''));   // '' all | me | none (no booking owner) | user id (CK or booking owner)
 
 // Agents present (for the filter). Everyone starts on All; a seller picks
 // their own name in "Sales" to see only their bookings.
@@ -216,11 +261,17 @@ $qMatch = function (array $r) use ($q): bool {
     }
     return true;
 };
-$base = array_filter($rows, function ($r) use ($showPast, $agentF, $q, $qMatch) {
+$ownerIs = function (array $r, int $id): bool {
+    return in_array($id, [(int)($r['owners']['ck_owner']['user_id'] ?? 0), (int)($r['owners']['booking_owner']['user_id'] ?? 0)], true);
+};
+$base = array_filter($rows, function ($r) use ($showPast, $agentF, $q, $qMatch, $ownerF, $ownerIs, $uid) {
     if ($r['other']) return false;
     if ($q !== '') return $qMatch($r);
     if (!$showPast && $r['to_arrival'] !== null && $r['to_arrival'] < 0) return false;
     if ($agentF !== '' && strcasecmp($r['agent'], $agentF) !== 0) return false;
+    if ($ownerF === 'none' && $r['owners']['booking_owner'] !== null) return false;
+    if ($ownerF === 'me' && !$ownerIs($r, (int)$uid)) return false;
+    if (ctype_digit($ownerF) && !$ownerIs($r, (int)$ownerF)) return false;
     return true;
 });
 $counts = ['red' => 0, 'amber' => 0, 'grey' => 0, 'booking' => 0, 'done' => 0, 'chkred' => 0];
@@ -263,8 +314,9 @@ $CHK_STYLE = [
 ];
 $qsKeep = array_filter(['view' => $view, 'past' => $showPast ? '1' : '', 'q' => $q],
                        fn($v) => $v !== '');
-// The chosen agent is kept by the tabs, tiles and links.
+// The chosen agent / owner is kept by the tabs, tiles and links.
 if ($agentF !== '') $qsKeep['agent'] = $agentF;
+if ($ownerF !== '') $qsKeep['owner'] = $ownerF;
 // Tiles and tabs leave the search.
 $link = fn(array $over) => 'ck_tracker.php?' . http_build_query(array_filter(array_merge($qsKeep, ['q' => null], $over), fn($v) => $v !== null));
 $fmtD = fn(?string $d) => $d ? date('d M y', strtotime($d)) : '';
@@ -280,6 +332,8 @@ $evLabel = function (array $e): string {
         'check'      => 'Automatic check: ' . strtoupper((string)$e['to_value']),
         'confirmed'  => '☑ Ticked: ' . $e['to_value'] . ($e['from_value'] ? ' — “' . $e['from_value'] . '”' : ''),
         'unconfirmed'=> '☐ Unticked: ' . $e['to_value'] . ($e['from_value'] ? ' (' . $e['from_value'] . ')' : ''),
+        'ck_owner'      => 'CK owner: ' . $e['from_value'] . ' → ' . $e['to_value'],
+        'booking_owner' => 'Booking owner: ' . $e['from_value'] . ' → ' . $e['to_value'],
         default      => $e['event'],
     };
 };
@@ -331,6 +385,13 @@ $extra_css = '
 .ck-lastnote a{color:inherit;text-decoration:none}
 .ck-lastnote small{color:var(--grey-mid)}
 .ck-ncount{background:#fff3cd;color:#856404;font-weight:700;border-radius:8px;padding:0 6px;font-size:.66rem}
+.ck-own{font-size:.76rem;white-space:nowrap}
+.ck-own.dflt{color:var(--grey-mid)}
+.ck-own select{font-size:.74rem;padding:2px 4px;border:1px solid var(--grey-lt);border-radius:6px;max-width:130px;background:#fff;color:var(--black)}
+.ck-own select.dflt{color:var(--grey-mid)}
+.ck-own .msg{display:block;font-size:.66rem;white-space:normal}
+.ck-find{font-size:.68rem;font-weight:700;border-radius:6px;padding:2px 7px;white-space:nowrap;text-decoration:none;display:inline-block;margin-top:4px;color:#8a6d3b;background:#fcf3e3}
+.ck-find.none{color:#1A6B3A;background:#E6F4EA}
 .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:200;display:flex;align-items:flex-start;justify-content:center;padding:40px 16px;overflow-y:auto}
 .modal-overlay.hidden{display:none}
 .modal-box{background:#fff;border-radius:10px;box-shadow:0 8px 40px rgba(0,0,0,.2);width:100%}
@@ -390,6 +451,16 @@ include 'includes/header.php';
         <?php endforeach; ?>
       </select>
     </label>
+    <label title="CK owner or booking owner">Owner
+      <select name="owner" onchange="this.form.submit()">
+        <option value="">All</option>
+        <option value="me" <?= $ownerF === 'me' ? 'selected' : '' ?>>Me</option>
+        <option value="none" <?= $ownerF === 'none' ? 'selected' : '' ?>>No booking owner</option>
+        <?php foreach ($activeUsers as $u): ?>
+          <option value="<?= $u['id'] ?>" <?= $ownerF === (string)$u['id'] ? 'selected' : '' ?>><?= h($u['name']) ?></option>
+        <?php endforeach; ?>
+      </select>
+    </label>
     <label title="Trips that already started"><input type="checkbox" name="past" value="1" <?= $showPast ? 'checked' : '' ?> onchange="this.form.submit()"> Started trips</label>
   </form>
 </div>
@@ -399,7 +470,9 @@ include 'includes/header.php';
 <?php else: ?>
 <table class="ck-table">
   <thead><tr>
-    <th><input type="checkbox" id="ckSelAll" title="Select all rows"> Arrival</th><th>Booking</th><th>Sales</th><th>Stage</th><th>Check</th>
+    <th><input type="checkbox" id="ckSelAll" title="Select all rows"> Arrival</th><th>Booking</th><th>Sales</th>
+    <th title="Who answers for the CK (grey = default rule)">CK owner</th><th title="Who fixes the bookings (grey = from the Calc CHECKED column)">Booking owner</th>
+    <th>Stage</th><th>Check</th>
     <th><?= $view === 'done' ? 'CK' : 'Waiting for CK' ?></th><th></th>
   </tr></thead>
   <tbody>
@@ -436,6 +509,25 @@ include 'includes/header.php';
         </div>
       </td>
       <td><?= h($r['agent']) ?: '<span style="color:var(--grey-mid)">—</span>' ?></td>
+      <?php foreach (['ck_owner' => 'CK owner', 'booking_owner' => 'Booking owner'] as $of => $olabel):
+          $ow = $r['owners'][$of];
+          $tip = !$ow ? 'Not assigned — nobody found in the Calc CHECKED column'
+               : (!$ow['default'] ? 'Set by hand'
+               : ($of === 'booking_owner' ? 'Default — Calc CHECKED column' . ($r['booking_owner_auto_text'] ? ': ' . $r['booking_owner_auto_text'] : '')
+                                          : 'Default — rule ' . ck_owner_rule())); ?>
+        <td class="ck-own<?= !$ow || $ow['default'] ? ' dflt' : '' ?>" title="<?= h($tip) ?>">
+          <?php if ($r['can_owners']): ?>
+            <select class="ck-owner-sel<?= !$ow || $ow['default'] ? ' dflt' : '' ?>" data-ck="<?= $id ?>" data-field="<?= $of ?>" aria-label="<?= h($olabel) ?>">
+              <option value=""><?= h($ow && $ow['default'] ? $ow['name'] . ' (default)' : ($of === 'booking_owner' ? 'not assigned (default)' : 'default')) ?></option>
+              <?php foreach ($activeUsers as $u): ?>
+                <option value="<?= $u['id'] ?>" <?= $ow && !$ow['default'] && $ow['user_id'] === $u['id'] ? 'selected' : '' ?>><?= h($u['name']) ?></option>
+              <?php endforeach; ?>
+            </select>
+          <?php else: ?>
+            <?= $ow ? h($ow['name']) : 'not assigned' ?>
+          <?php endif; ?>
+        </td>
+      <?php endforeach; ?>
       <td>
         <?php if ($r['stage']): ?>
           <span class="ck-tag" style="color:<?= $st[0] ?>;background:<?= $st[1] ?>"><?= h($r['stage']) ?></span>
@@ -471,6 +563,14 @@ include 'includes/header.php';
         <?php if ($rowMsg && $rowMsg['id'] === $id && !$rowMsg['ok']): ?>
           <div class="ck-sub" style="color:#a33"><?= h($rowMsg['msg']) ?></div>
         <?php endif; ?>
+        <?php $oc = $r['open']['ck_audience']; $nOpen = $r['open']['ck'];
+              $fuUrl = $r['reqs'] ? '../operations/booking_followup.php?' . http_build_query(['request_id' => (int)$r['reqs'][0]['id'], 'type' => 'ck']) : ''; ?>
+        <?php if ($nOpen > 0 && $fuUrl): ?>
+          <div><a class="ck-find" href="<?= h($fuUrl) ?>" target="_blank"
+                  title="Open CK findings in Booking follow-up — booking <?= $oc['booking'] ?> · sales <?= $oc['sales'] ?> · accounts <?= $oc['accounts'] ?>">📌 <?= $nOpen ?> finding<?= $nOpen === 1 ? '' : 's' ?> open</a></div>
+        <?php elseif ($r['findings_checked_at']): ?>
+          <div><span class="ck-find none" title="Booking check <?= h(date('d M H:i', strtotime($r['findings_checked_at']))) ?>">📌 no open finding</span></div>
+        <?php endif; ?>
       </td>
       <td>
         <?php if ((int)$r['has_ck']): ?>
@@ -488,7 +588,11 @@ include 'includes/header.php';
         <?php endif; ?>
       </td>
       <td class="ck-actions" style="white-space:nowrap">
-        <form method="post" onsubmit="return confirm(<?= h(json_encode(((int)$r['has_ck'] ? 'Remove the CK from ' : 'Set CK on ') . $r['folder_name'] . '?\n\nThe Dropbox folder will be renamed.')) ?>)">
+        <?php $openAll = $r['open']['ck'] + $r['open']['supplier'] + $r['open']['ticket'];
+              $ckWarn = !(int)$r['has_ck'] && $openAll > 0
+                  ? "\n\n⚠ Still open in Booking follow-up: " . $r['open']['ck'] . ' CK finding(s), ' . $r['open']['supplier'] . ' supplier, ' . $r['open']['ticket'] . ' ticket.'
+                  : ''; ?>
+        <form method="post" onsubmit="return confirm(<?= h(json_encode(((int)$r['has_ck'] ? 'Remove the CK from ' : 'Set CK on ') . $r['folder_name'] . '?' . $ckWarn . "\n\nThe Dropbox folder will be renamed.")) ?>)">
           <input type="hidden" name="action" value="<?= (int)$r['has_ck'] ? 'ck_off' : 'ck_on' ?>">
           <input type="hidden" name="ck_id" value="<?= $id ?>">
           <input type="hidden" name="return_qs" value="<?= h(http_build_query($qsKeep)) ?>">
@@ -794,6 +898,28 @@ function fallbackCopy(t, el) {
   });
 })();
 function flashCopied(el) { var o = el.textContent; el.textContent = '✓ Copied'; setTimeout(function(){ el.textContent = o; }, 1200); }
+// Owners: saved as soon as one is picked; the empty option = back to the default rule.
+document.querySelectorAll('.ck-owner-sel').forEach(function (sel) {
+  var prev = sel.value;
+  sel.addEventListener('change', function () {
+    var td = sel.parentNode, msg = td.querySelector('.msg');
+    if (!msg) { msg = document.createElement('span'); msg.className = 'msg'; td.appendChild(msg); }
+    msg.style.color = 'var(--grey-mid)'; msg.textContent = 'saving…';
+    sel.disabled = true;
+    notesPost({action: 'set_owner', ck_id: sel.getAttribute('data-ck'), field: sel.getAttribute('data-field'), value: sel.value})
+      .then(function (d) {
+        sel.disabled = false;
+        if (!d.ok) { sel.value = prev; msg.style.color = '#a33'; msg.textContent = d.msg || 'not saved'; return; }
+        prev = sel.value;
+        var dflt = !d.owner || d.owner['default'];
+        sel.classList.toggle('dflt', dflt); td.classList.toggle('dflt', dflt);
+        sel.options[0].textContent = d.owner && d.owner['default'] ? d.owner.name + ' (default)' : (sel.getAttribute('data-field') === 'booking_owner' ? 'not assigned (default)' : 'default');
+        msg.style.color = '#1A6B3A'; msg.textContent = '✓ saved';
+        setTimeout(function () { msg.textContent = ''; }, 1500);
+      })
+      .catch(function (e) { sel.disabled = false; sel.value = prev; msg.style.color = '#a33'; msg.textContent = e.message; });
+  });
+});
 </script>
 
 <?php include 'includes/footer.php'; ?>

@@ -3,9 +3,11 @@
  * booking_followup.php — Operations → Booking follow-up. Supplier bookings not confirmed and
  * domestic tickets not saved, filled by the weekly / daily check (followup_cron.php) or
  * "Run check now"; the booking team takes lines in charge here.
- * Every logged-in Hub user can view; edits need module booking_followup_edit (owner: only the
- * booking team, FU_OWNERS; admin: also not relevant). Data / changes: api/followup.php → includes/followup_service.php.
- * ?request_id=N or ?q=… open the page filtered (link from the request view).
+ * Also the CK findings of the booking check (type ck, audience booking / sales / accounts).
+ * Every logged-in Hub user can view; edits need module booking_followup_edit, or being the line's owner
+ * (owners: any active user; reassign / not relevant: admin or the current owner).
+ * Data / changes: api/followup.php → includes/followup_service.php.
+ * ?request_id=N, ?q=…, ?type=ck open the page filtered (links from the request view / CK tracker).
  */
 require_once __DIR__ . '/../../includes/db.php';
 require_once __DIR__ . '/../../includes/auth.php';
@@ -26,7 +28,9 @@ $extra_css = '
 .fu-run select{padding:7px 12px;border:1.5px solid var(--grey-lt);border-radius:20px;font-family:inherit;font-size:.8rem;background:var(--white)}
 .fu-msg{display:none;margin:0 0 16px;padding:12px 16px;border-radius:8px;font-size:.82rem;line-height:1.5;background:var(--navy-lt);color:#123a5c}
 .fu-msg.err{background:var(--red-lt);color:var(--red-dk)}
-.fu-stats{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:12px;margin-bottom:18px}
+.fu-stats{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:12px;margin-bottom:18px}
+.badge-aud{background:var(--off-white);color:var(--grey-dk);text-transform:none;letter-spacing:0;font-size:.66rem;margin-top:3px;display:inline-block}
+.badge-aud.sales{background:#EEF3F9;color:#1a3a5c} .badge-aud.accounts{background:#F3ECF8;color:#5B2C83}
 .stat-card{background:var(--white);border-radius:10px;box-shadow:0 1px 8px rgba(0,0,0,.08);padding:14px 16px;border-top:3px solid var(--grey-lt);cursor:pointer}
 .stat-card .v{font-family:Merriweather,serif;font-size:1.5rem;font-weight:700;color:var(--black);font-variant-numeric:tabular-nums}
 .stat-card .l{font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--grey-mid);margin-top:2px}
@@ -114,6 +118,8 @@ include __DIR__ . '/../../includes/layout_header.php';
 
   <div class="filters" id="fu-filters">
     <div><label for="fu-f-owner">Owner</label><select id="fu-f-owner"></select></div>
+    <div><label for="fu-f-aud">For</label>
+      <select id="fu-f-aud"><option value="">All</option><option value="booking">Booking</option><option value="sales">Sales</option><option value="accounts">Accounts</option></select></div>
     <div><label for="fu-f-prio">Priority</label>
       <select id="fu-f-prio"><option value="">All</option><option value="1-URGENT">1 – Urgent</option><option value="2-HIGH">2 – High</option><option value="3-NORMAL">3 – Normal</option></select></div>
     <div><label for="fu-f-supplier">Supplier</label><select id="fu-f-supplier"></select></div>

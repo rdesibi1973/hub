@@ -872,8 +872,9 @@ include 'includes/header.php';
         <?php foreach ($fuRows as $fu):
             $fuRed = $fu['priority'] === '1-URGENT' || $fu['staff_status'] === 'problem'; ?>
           <div style="font-size:.8rem;margin-bottom:3px">
-            <span style="font-size:.68rem;font-weight:700;border-radius:6px;padding:1px 7px;<?= $fuRed ? 'color:#a33;background:#f7dede' : 'color:#8a6d3b;background:#fcf3e3' ?>"><?= h(FU_ISSUE_LABELS[$fu['issue']] ?? $fu['issue']) ?></span>
-            <strong><?= h($fu['type'] === 'ticket' ? ($fu['service'] ?: 'Flight') : ($fu['supplier'] ?: '')) ?></strong>
+            <span style="font-size:.68rem;font-weight:700;border-radius:6px;padding:1px 7px;<?= $fuRed ? 'color:#a33;background:#f7dede' : 'color:#8a6d3b;background:#fcf3e3' ?>"><?= $fu['type'] === 'ck' ? 'CK · ' . h(FU_AUDIENCE_LABELS[$fu['audience']] ?? $fu['audience']) . ' · ' : '' ?><?= h(followup_issue_label((string)$fu['issue'])) ?></span>
+            <strong><?= h($fu['type'] === 'ticket' || ($fu['type'] === 'ck' && !$fu['supplier']) ? ($fu['service'] ?: ($fu['type'] === 'ck' ? '' : 'Flight')) : ($fu['supplier'] ?: '')) ?></strong>
+            <?php if ($fu['type'] === 'ck' && $fu['doc_status_text']): ?><span class="text-muted"><?= h(mb_strimwidth($fu['doc_status_text'], 0, 110, '…')) ?></span><?php endif; ?>
             <?= $fu['supplier_ref'] ? h($fu['supplier_ref']) : '' ?>
             <span class="text-muted">· <?= h($fu['service_date'] ? date('d M', strtotime($fu['service_date'])) : '') ?>
               <?= $fu['expiry_date'] ? '· expiry ' . h(date('d M', strtotime($fu['expiry_date']))) : '' ?>

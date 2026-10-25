@@ -103,7 +103,7 @@ function agent_audit(PDO $db, string $action, $reqId, array $payload, string $re
                               'create_request', 'add_flight_rates', 'timeline_update', 'summary_set', 'rename_folder',
                               'set_request_status', 'update_request', 'import_group_folder', 'move_group_folder', 'ck_request_check', 'memo_delete', 'create_agency', 'update_agency', 'save_agency_contact', 'delete_agency_contact',
                               'followup_scan', 'followup_update', 'followup_upsert', 'iti_update_activity', 'sales_response_dismiss',
-                              'iti_create_destination', 'iti_import_program', 'iti_supplier_blocklist'], true) && empty($payload['confirm']);
+                              'ck_set_owners', 'ck_findings_upsert', 'iti_create_destination', 'iti_import_program', 'iti_supplier_blocklist'], true) && empty($payload['confirm']);
     // Mail: keep who/what in the log, not message bodies or attachment content.
     if (in_array($action, ['mail_get', 'mail_attachment', 'iti_document', 'iti_vouchers'], true) && $code === 200) {
         $res = json_decode($resultJson, true);
@@ -1865,6 +1865,20 @@ try {
             'warnings'         => $pv['warnings'],
         ];
         if ($curIn !== '' && !$v['relink']) $out['warnings'][] = 'current_path equals the stored path — plain rename.';
+        // _CK while the booking still has open points in Booking follow-up: warn, never block.
+        require_once __DIR__ . '/includes/ck_lib.php';
+        if (ck_has_marker($v['new_name']) && !ck_has_marker(basename((string)$v['folder']))) {
+            try {
+                require_once __DIR__ . '/../operations/includes/followup_service.php';
+                $rowCk = ck_tracker_row_for($db, null, (int)$r['id']);
+                $open = $rowCk ? followup_open_for_row(followup_open_counts($db), $rowCk) : null;
+                if ($open && $open['ck'] + $open['supplier'] + $open['ticket'] > 0) {
+                    $out['warnings'][] = 'Setting _CK with open Booking follow-up lines: ' . $open['ck'] . ' CK finding(s), ' . $open['supplier']
+                                       . ' supplier, ' . $open['ticket'] . ' ticket — see followup_list request_id=' . (int)$r['id'] . '.';
+                }
+                if ($rowCk && $rowCk['findings_checked_at'] === null) $out['warnings'][] = 'Setting _CK but no booking check was sent for this booking (ck_findings_upsert).';
+            } catch (Throwable $e) { error_log('rename_folder CK warning: ' . $e->getMessage()); }
+        }
         if (!$go) $out['calc_dates'] = $pv['calc_dates'];
         if (!$go && $withFiles) $out['file_renames'] = $pv['file_renames'];
         if ($pv['candidates']) $out['candidates'] = $pv['candidates'];
@@ -2748,12 +2762,27 @@ try {
             $list[] = $r;
         }
         usort($list, fn($a, $b) => [$a['start_date'] ?? '9999-12-31', $a['folder_name']] <=> [$b['start_date'] ?? '9999-12-31', $b['folder_name']]);
+        // Owners (ck_lib.php): the default booking owner is read from each Calc's CHECKED column, cached; the rest next call.
+        require_once __DIR__ . '/../operations/includes/followup_service.php';
+        if (!isset($in['owners_refresh']) || !empty($in['owners_refresh'])) { @set_time_limit(120); ck_owners_refresh_auto($db, $list, 40); }
+        $ownerF = trim((string)($in['owner'] ?? ''));
+        $openCounts = followup_open_counts($db);
+        $stale = date('Y-m-d H:i:s', time() - CK_OWNER_AUTO_TTL);
+        $pending = 0;
+        foreach ($list as $i => $r) {
+            $list[$i]['_owners'] = ck_owners_resolve($db, $r);
+            if ($ownerF !== '' && !in_array(strtolower($ownerF), [strtolower($list[$i]['_owners']['ck_owner']['username'] ?? ''),
+                                                                  strtolower($list[$i]['_owners']['booking_owner']['username'] ?? '')], true)) { unset($list[$i]); continue; }
+            if ($r['reqs'] && ($r['to_arrival'] === null || $r['to_arrival'] >= 0) && ($r['booking_owner_auto_at'] === null || $r['booking_owner_auto_at'] <= $stale)) $pending++;
+        }
+        $list = array_values($list);
         $points = ck_check_points($db, array_column($list, 'last_check_id'));
         $base = defined('BASE_URL') ? rtrim((string)BASE_URL, '/') : '';
         if (!preg_match('#^https?://#', $base)) $base = 'https://' . ($_SERVER['HTTP_HOST'] ?? '') . $base;
         $rows = [];
         foreach ($list as $r) {
             $cid = (int)$r['last_check_id'];
+            $open = followup_open_for_row($openCounts, $r);
             $rows[] = [
                 'ck_folder_id'    => (int)$r['id'],
                 'request_id'      => $r['reqs'] ? (int)$r['reqs'][0]['id'] : null,
@@ -2779,10 +2808,72 @@ try {
                 'check_error'     => $r['chk_error'] ?: null,
                 'report_url'      => $cid ? $base . '/modules/leads/ck_report.php?id=' . $cid : null,
                 'last_note'       => $r['last_note'] !== '' ? $r['last_note'] : null,
+                'ck_owner'        => $r['_owners']['ck_owner'],
+                'booking_owner'   => $r['_owners']['booking_owner'],
+                'booking_owner_calc' => $r['booking_owner_auto_text'],
+                'open_findings'   => $open['ck_audience'],
+                'open_followup'   => ['supplier' => $open['supplier'], 'ticket' => $open['ticket'], 'group' => $open['group']],
+                'findings_checked_at' => $r['findings_checked_at'],
+                'findings_report_path' => $r['findings_report_path'],
+                // CK can be set: the booking check ran (ck_findings_upsert) and no ck / supplier / ticket line is open.
+                'ck_ready'        => $r['findings_checked_at'] !== null && $open['ck'] + $open['supplier'] + $open['ticket'] === 0,
             ];
         }
-        agent_out(['ok' => true, 'count' => count($rows), 'scan_warning' => $scanError, 'rows' => $rows,
-                   'hint' => 'Add _CK with rename_folder (it keeps _CK last); re-run a check with ck_request_check.']);
+        agent_out(['ok' => true, 'count' => count($rows), 'scan_warning' => $scanError, 'owner_rule' => ck_owner_rule(),
+                   'owners_pending' => $pending, 'rows' => $rows,
+                   'hint' => 'Add _CK with rename_folder (it keeps _CK last); re-run a check with ck_request_check.'
+                           . ($pending ? ' ' . $pending . ' booking owner(s) not read from the Calc yet — call again.' : '')]);
+    }
+
+    // Owners of a CK tracker row (ck_lib.php). Dry-run unless "confirm": true. The key acts with admin rights.
+    case 'ck_set_owners': {
+        agent_require_method('POST');
+        require_once __DIR__ . '/dropbox_helper.php';
+        require_once __DIR__ . '/includes/ck_lib.php';
+        $fid = (int)($in['ck_folder_id'] ?? 0); $rid = (int)($in['request_id'] ?? 0);
+        if ($fid <= 0 && $rid <= 0) agent_fail('request_id or ck_folder_id is required');
+        if ($rid > 0) $agentReqId = agent_request($db, $rid)['id'];
+        $row = ck_tracker_row_for($db, $fid ?: null, $rid ?: null);
+        if (!$row) agent_fail('No CK folder in /001_Safari for this ' . ($fid > 0 ? 'ck_folder_id' : 'request') . ' (see ck_status)', 404);
+        $ch = array_intersect_key($in, array_flip(['ck_owner', 'booking_owner']));
+        $res = ck_set_owners($db, $row, $ch, (int)$agentUser['id'], !empty($in['confirm']));
+        if (!$res['ok']) agent_fail($res['error']);
+        agent_out($res + ['ck_folder_id' => (int)$row['id'], 'folder' => $row['folder_name']]
+                  + (empty($in['confirm']) ? ['message' => 'Dry run — resend with "confirm": true to save.'] : []));
+    }
+
+    // Findings of a booking check (booking-check skill) → ck lines in Booking follow-up. Dry-run unless "confirm": true.
+    case 'ck_findings_upsert': {
+        agent_require_method('POST');
+        require_once __DIR__ . '/dropbox_helper.php';
+        require_once __DIR__ . '/includes/ck_lib.php';
+        require_once __DIR__ . '/../operations/includes/followup_service.php';
+        $rid = (int)($in['request_id'] ?? 0);
+        if ($rid <= 0) agent_fail('request_id is required');
+        $agentReqId = agent_request($db, $rid)['id'];
+        $findings = $in['findings'] ?? null;
+        if (!is_array($findings)) agent_fail('findings[] is required (empty array = the check found nothing: every open ck line closes)');
+        if (count($findings) > 200) agent_fail('At most 200 findings per booking');
+        $row = ck_tracker_row_for($db, null, $rid);
+        if (!$row) agent_fail('No CK folder in /001_Safari for this request (see ck_status)', 404);
+        $res = followup_ck_upsert($db, $rid, $row, $findings, ['checked_at' => $in['checked_at'] ?? null, 'report_path' => $in['report_path'] ?? null],
+                                  !empty($in['confirm']));
+        if (!$res['ok']) agent_fail($res['error'], 400, ['errors' => $res['errors'] ?? []]);
+        agent_out($res + (empty($in['confirm']) ? ['message' => 'Dry run — nothing written. Resend with "confirm": true.'] : []));
+    }
+
+    // Open ck lines → one mail draft per owner (English). Read-only: nothing is sent.
+    case 'ck_findings_drafts': {
+        require_once __DIR__ . '/includes/ck_lib.php';
+        require_once __DIR__ . '/../operations/includes/followup_service.php';
+        $ids = $in['request_ids'] ?? [];
+        if (is_string($ids)) $ids = preg_split('/\s*,\s*/', trim($ids), -1, PREG_SPLIT_NO_EMPTY);
+        if (!is_array($ids)) agent_fail('request_ids must be an array or a comma-separated list');
+        $since = trim((string)($in['since'] ?? '')) !== '' ? agent_iso_date($in['since'], 'since') : null;
+        if (!$ids && !$since) agent_fail('request_ids or since (YYYY-MM-DD) is required');
+        $drafts = followup_ck_drafts($db, ['request_ids' => $ids, 'since' => $since]);
+        agent_out(['ok' => true, 'count' => count($drafts), 'drafts' => $drafts,
+                   'hint' => 'Nothing was sent. Save each draft as an .eml in C:\\Dropbox\\Exchange\\Draft-mail\\ for Roberto to approve and send.']);
     }
 
     // Queue a SafariCheck run (ck_folders.check_requested_at) and start the runner, as "Run check"
@@ -2838,9 +2929,10 @@ try {
         require_once __DIR__ . '/../operations/includes/followup_service.php';
         $status = (string)($in['status'] ?? 'open');
         if (!in_array($status, ['open', 'closed', 'all'], true)) agent_fail('status must be open, closed or all');
-        if (!empty($in['type']) && !in_array($in['type'], ['supplier', 'ticket', 'group'], true)) agent_fail('type must be supplier, ticket or group');
+        if (!empty($in['type']) && !in_array($in['type'], FU_TYPES, true)) agent_fail('type must be ' . implode(', ', FU_TYPES));
+        if (!empty($in['audience']) && !in_array($in['audience'], FU_AUDIENCES, true)) agent_fail('audience must be ' . implode(', ', FU_AUDIENCES));
         if ((int)($in['request_id'] ?? 0) > 0) $agentReqId = agent_request($db, $in['request_id'])['id'];
-        $rows = followup_rows($db, ['status' => $status, 'type' => $in['type'] ?? null, 'owner' => $in['owner'] ?? '',
+        $rows = followup_rows($db, ['status' => $status, 'type' => $in['type'] ?? null, 'audience' => $in['audience'] ?? null, 'owner' => $in['owner'] ?? '',
                                     'priority' => $in['priority'] ?? null, 'request_id' => $in['request_id'] ?? null, 'q' => $in['q'] ?? null]);
         $runs = followup_last_runs($db);
         agent_out(['ok' => true, 'count' => count($rows), 'last_check_at' => ['supplier' => $runs['supplier']['at'] ?? null, 'ticket' => $runs['ticket']['at'] ?? null],
@@ -2945,7 +3037,7 @@ try {
             'routine_status', 'routine_done',
             'mail_folders', 'mail_list', 'mail_get', 'mail_attachment', 'mail_flag', 'mail_move', 'mail_draft', 'mail_send',
             'timeline_list', 'timeline_add', 'timeline_update', 'summary_set', 'request_resume', 'set_request_status',
-            'payments_due', 'ck_status', 'ck_request_check', 'ops_movements', 'ops_lunch_boxes', 'ops_medivac', 'flight_tickets',
+            'payments_due', 'ck_status', 'ck_request_check', 'ck_set_owners', 'ck_findings_upsert', 'ck_findings_drafts', 'ops_movements', 'ops_lunch_boxes', 'ops_medivac', 'flight_tickets',
             'followup_list', 'followup_scan', 'followup_update', 'followup_upsert', 'mail_security_status',
             'sales_response_status', 'sales_response_dismiss',
         ]]);

@@ -5,8 +5,9 @@
  *   GET  ?action=events&id=N                     history of a line
  *   POST ?action=update  {id, take?, owner?, contacted_at?, staff_status?, notes?}
  *   POST ?action=scan    {type: supplier|ticket|all}       ("Run check now")
- * Viewing: any logged-in Hub user. Changes: module booking_followup_edit or admin
- * (followup_update() checks; reassign / not_relevant admin only). Logic: includes/followup_service.php.
+ * Viewing: any logged-in Hub user. Changes: module booking_followup_edit, admin, or the line's current
+ * owner (followup_update() checks; reassign / not_relevant: admin or the current owner). Run check: the module.
+ * Logic: includes/followup_service.php.
  */
 ob_start();
 require_once __DIR__ . '/../../leads/config.php';     // $pdo, auth, Dropbox keys (server-only)
@@ -37,15 +38,15 @@ try {
     if (stripos((string)($_SERVER['CONTENT_TYPE'] ?? ''), 'application/json') === false) fu_json(['ok' => false, 'error' => 'JSON body expected'], 415);
     $in = json_decode((string)file_get_contents('php://input'), true);
     if (!is_array($in)) fu_json(['ok' => false, 'error' => 'Invalid JSON'], 400);
-    if (!followup_can_edit($user)) fu_json(['ok' => false, 'error' => 'View only — ask Roberto for the booking follow-up edit permission'], 403);
 
-    if ($action === 'update') {
+    if ($action === 'update') {   // the line's owner may work it without the module: followup_update() decides
         $ch = array_intersect_key($in, array_flip(['take', 'owner', 'contacted_at', 'staff_status', 'notes']));
         $res = followup_update($db, (int)($in['id'] ?? 0), $ch, $user);
         if (!$res['ok']) fu_json($res, $res['code'] ?? 400);
         fu_json($res);
     }
     if ($action === 'scan') {
+        if (!followup_can_edit($user)) fu_json(['ok' => false, 'error' => 'View only — ask Roberto for the booking follow-up edit permission'], 403);
         $res = followup_scan($db, ['type' => $in['type'] ?? 'all', 'confirm' => true, 'source' => 'page', 'user_id' => (int)$user['id'],
                                    'budget' => 150]);   // stay inside the browser / PHP time limit; the next run reads the rest
         $out = ['ok' => true, 'summary' => []];

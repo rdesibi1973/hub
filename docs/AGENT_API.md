@@ -31,7 +31,7 @@ without driving the web UI.
 | HTTPS only | Plain HTTP → 403. |
 | Rate limit | 60 calls/min → 429. |
 | Audit | Every call (including failures and dry-runs) → `agent_audit_log` (action, request_id, user, HTTP code, dry_run, payload, result, IP). |
-| Dry-run by default | `update_request`, `confirm_booking`, `send_booking_email`, `rollback_booking`, `rename_folder`, `import_group_folder`, `move_group_folder`, `set_request_status`, `cancel_invoice_payment`, `update_folder_status`, `import_zoho_invoice`, `create_invoice`, `update_invoice`, `send_invoice_email`, `memo_delete`, `create_agency`, `update_agency`, `save_agency_contact`, `delete_agency_contact`, `mail_send`, `mail_move`, `ck_request_check`, `followup_scan`, `followup_update` and `followup_upsert` (among others) do nothing unless the body has `"confirm": true`. |
+| Dry-run by default | `update_request`, `confirm_booking`, `send_booking_email`, `rollback_booking`, `rename_folder`, `import_group_folder`, `move_group_folder`, `set_request_status`, `cancel_invoice_payment`, `update_folder_status`, `import_zoho_invoice`, `create_invoice`, `update_invoice`, `send_invoice_email`, `memo_delete`, `create_agency`, `update_agency`, `save_agency_contact`, `delete_agency_contact`, `mail_send`, `mail_move`, `ck_request_check`, `ck_set_owners`, `ck_findings_upsert`, `followup_scan`, `followup_update` and `followup_upsert` (among others) do nothing unless the body has `"confirm": true`. |
 | No deletes | No delete endpoint (mail included), except `memo_delete`, which is soft (`deleted_at`, the row stays). Undo a confirm with `rollback_booking` (or BackOffice → Rollback). |
 | Mailbox | The key also reads `info@` (`mail_*`): keep `api.txt` as private as the mailbox password. |
 
@@ -1172,7 +1172,50 @@ Tanzania only; trips already started are left out unless `past=1` or `q`.
 (red < 60 days · amber 60–90 · grey > 90), stage, ck_due (booking done, no _CK), waiting_days, has_ck, ck_at,
 ck_by, check_requested_at, last_checked_at, overall (green|yellow|red|grey|error), n_red, n_yellow,
 reds[] / yellows[] ("Section — Title" of the open points; confirmed ones left out), check_error, report_url,
-last_note}`. To set `_CK` use `rename_folder` (it keeps `_CK` last).
+last_note, ck_owner, booking_owner, booking_owner_calc, open_findings {booking, sales, accounts}, open_followup {supplier,
+ticket, group}, findings_checked_at, findings_report_path, ck_ready}`. To set `_CK` use `rename_folder` (it keeps `_CK` last;
+its dry run warns — never blocks — when the booking still has open ck / supplier / ticket lines or no booking check was sent).
+- **Owners** (Oct 2026, migration 073): `ck_owner` / `booking_owner` = `{user_id, username, name, email, default}` or `null`.
+  `default: true` = not set by hand, computed by the rule (a later change of rule applies to every such row):
+  CK owner = `CK_OWNER_DEFAULT` in the server config — `fixed:<username>` (default `fixed:rdesibi`: Roberto handles every CK for
+  now) or `seller` (the Hub user linked to the request's sales agent; a seller who left → `CK_SELLER_HANDOVER`
+  `['sultan' => 'anderson', …]`); booking owner = the user named most often in the Calc CHECKED column among the stays
+  ("Lydia", "Glady"; `booking_owner_calc` = the names read), none → `null` ("not assigned"). The Calc names are read once
+  per 12 h (cached Calc, `ops_calc`), at most ~40 s per call: `owners_pending` > 0 → call again (`owners_refresh=0` skips it).
+  Top level: `owner_rule`, `owners_pending`. Filter `owner=<username>` (CK or booking owner).
+- `ck_ready: true` = a booking check was sent (`ck_findings_upsert`) and no ck / supplier / ticket line of the booking is open.
+
+### `ck_set_owners` (POST)
+`ck_folder_id` or `request_id` + `ck_owner?` / `booking_owner?` (username or user id of an active user; `null` = back to the
+default rule). **Dry run unless `"confirm": true`.** Every change is logged in `ck_events` (`ck_owner` / `booking_owner`,
+from → to). → `changes {field: [from, to]}`, `owners {ck_owner, booking_owner}` after. Hub page: CK tracker, the two owner
+columns (admin and the row's current owners).
+
+### `ck_findings_upsert` (POST)
+The findings of a booking check (skill `booking-check`) → lines `type: ck` in Booking follow-up, routed to the right owner.
+**Dry run unless `"confirm": true`.** `request_id`, `checked_at` (ISO), `report_path` (the folder's `booking-check.html`:
+name under the folder, `/001_Safari/…` or the local `C:\Dropbox\001_Safari\…` path), `findings[]` (max 200):
+`{audience: booking|sales|accounts, issue, service_date? (YYYY-MM-DD), service (Calc text), supplier?, text (what is wrong /
+what to do, ≤ 500 chars), source_file?}`.
+- `issue`: short code — `transfer_missing`, `booking_provisional`, `flight_unpaid`, `client_flights_missing`,
+  `invoice_mismatch`, `payment_mismatch`, `other` (any `a-z0-9_` code up to 40 chars is kept).
+- Owner on insert: `booking` → the CK folder's booking owner, `sales` → its CK owner, `accounts` → Roberto. Never changed by
+  a later upsert (staff reassign); `staff_status`, `notes`, `contacted_at` are never touched.
+- The findings **replace** the booking's open ck lines: key `CK|request|audience|issue|service_date|service` → new lines
+  added, the ones still reported updated (text, file), the ones not sent close as `auto_resolved`; a line staff closed as
+  `resolved` and still reported re-opens (event "still reported by CK check"); `not_relevant` stays closed. `findings: []`
+  = the check found nothing → every open ck line of the booking closes. A second identical upsert changes nothing.
+- Passport numbers: never in `text` (a "passport no. …" number is replaced by `[removed]`).
+- → dry run: `would_add[]`, `would_update[]`, `would_close[]`, `would_reopen[]`; confirm: `add[]`, `update[]`, `close[]`,
+  `reopen[]` — each `{id?, request_id, folder, audience, service, service_date, issue, file, status (text), owner (username)}`;
+  `unchanged`, `owners {booking, sales, accounts}`, `errors[]` (findings skipped and why).
+
+### `ck_findings_drafts` (GET)
+Open ck lines grouped by owner → **one mail draft per owner** in English. **Read-only: it does not send.** `request_ids`
+(array or `2958,3001`) or `since` (YYYY-MM-DD: lines seen by a check since then). → `drafts[]` `{to_user, to_name, to_email,
+subject, html, text, lines[] {id, request_id, folder, audience, issue, service_date, service, text, staff_status}}` (lines
+nobody owns: `to_user: null`). Cowork saves each draft as an `.eml` in `C:\Dropbox\Exchange\Draft-mail\`; Roberto approves
+and sends (no automatic mail to owners).
 
 ### `ck_request_check` (POST)
 `request_id` or `ck_folder_id`. Queues a SafariCheck run (`check_requested_at`) and starts the runner, as
@@ -1222,6 +1265,10 @@ curl -sH "$H" "$U?action=payments_due&days=21"
 curl -sH "$H" "$U?action=payments_due&overdue=1&issuer=SH"
 curl -sH "$H" "$U?action=ck_status&has_ck=0&start_before=2027-01-15"
 curl -sH "$H" -X POST "$U?action=ck_request_check" -d '{"request_id":2958}'                 # dry-run
+curl -sA "$UA" -H "$H" "$U?action=ck_status&owner=lydia"
+curl -sA "$UA" -H "$H" -X POST "$U?action=ck_set_owners" -d '{"request_id":2958,"booking_owner":"glady"}'                 # dry-run
+curl -sA "$UA" -H "$H" -X POST "$U?action=ck_findings_upsert" -d '{"request_id":2958,"checked_at":"2026-10-25T10:00:00","report_path":"booking-check.html","findings":[{"audience":"booking","issue":"transfer_missing","service_date":"2026-12-05","service":"Transfer ZNZ airport - hotel","text":"No transfer booked for the ZNZ arrival: book it and save the confirmation in bookings/"}]}'   # dry-run
+curl -sA "$UA" -H "$H" "$U?action=ck_findings_drafts&since=2026-10-25"
 curl -sH "$H" "$U?action=ops_movements&from=2026-10-14&to=2026-10-28"
 curl -sH "$H" "$U?action=ops_lunch_boxes"
 curl -sH "$H" "$U?action=ops_medivac&from=2026-10-12&to=2026-11-12"
@@ -1249,6 +1296,16 @@ logic `modules/operations/includes/followup_service.php`, documents read by `fol
   closed by staff is **not** re-opened by the next check; a group folder no longer found closes as `auto_not_found`.
   PDF facts come from the server reader or from the office PC scan (`followup_upsert` keeps every document sent, also for
   group folders without a confirmed request); the Excel is read on the server.
+- `type: ck` (Oct 2026, migration 073) — findings of the booking check before the CK, sent by `ck_findings_upsert` (see
+  there). `audience` `booking` (missing transfer, provisional booking, domestic flight not paid / ticketed → the booking
+  owner), `sales` (information missing from the client: international flights, room requests, names → the CK owner),
+  `accounts` (client invoice / payment that doesn't match → Roberto). Supplier / ticket / group lines have `audience`
+  `booking`. `issue` is a free short code; `doc_status_text` = what is wrong / what to do; `report_url` /
+  `report_open_url` = the folder's `booking-check.html`. Priority: ≤ 30 days `1-URGENT`, ≤ 60 `2-HIGH`, later `3-NORMAL`.
+- **Owners: any active Hub user** (since 25 Oct 2026; before only Glady / Lydia). The booking team (module
+  `booking_followup_edit`) takes in charge and edits every line; the **current owner** of a line can edit it too
+  (status, notes, take) without the module — e.g. a seller who owns a `sales` line. Reassign and `not_relevant`: admin or
+  the current owner (a line nobody owns can also be assigned by the booking team).
 - One line per `dedupe_key`: request + supplier reference (WB…, booking ID), else request + supplier + service date;
   tickets request + flight date + route. GRP: documents in the group folder belong to the group's first request (a
   member's `request_id` filter shows them too).
@@ -1273,11 +1330,12 @@ logic `modules/operations/includes/followup_service.php`, documents read by `fol
   `FOLLOWUP_PDFTOTEXT` (`includes/config.php`).
 
 #### `followup_list` (GET)
-`type` (`supplier` | `ticket` | `group`), `status` (`open` default | `closed` | `all`), `owner` (username | user id | `none`),
+`type` (`supplier` | `ticket` | `group` | `ck`), `audience` (`booking` — includes the lines without one — | `sales` | `accounts`),
+`status` (`open` default | `closed` | `all`), `owner` (username | user id | `none`),
 `priority` (`1-URGENT` | `2-HIGH` | `3-NORMAL`, or `1`/`2`/`3`), `request_id`, `q` (client / folder / supplier / ref / notes).
-→ `count`, `last_check_at` `{supplier, ticket}`, `last_checks`, `rows[]` `{id, type, request_id, customer, folder, folder_url,
+→ `count`, `last_check_at` `{supplier, ticket}`, `last_checks`, `rows[]` `{id, type, audience, request_id, customer, folder, folder_url,
 file_url, folder_open_url, file_open_url, start_date, end_date, service_date, days_left, supplier, supplier_ref, service, source_file, issue, issue_label,
-doc_status_text, expiry_date, expired, booked_by, owner, owner_name, contacted_at, staff_status, notes, notes_log[] {at, by, text} (newest first), priority,
+doc_status_text, report_url, report_open_url, expiry_date, expired, booked_by, owner, owner_name, contacted_at, staff_status, notes, notes_log[] {at, by, text} (newest first), priority,
 first_seen_at, last_seen_at, closed_at, closed_by, close_reason, events_count}` — not taken in charge first, then problems,
 priority, service date.
 
@@ -1288,7 +1346,7 @@ reopened[], unreadable[], unchanged}`; supplier also `units`, `units_complete`, 
 run again, each PDF is read once per Dropbox revision), `errors[]`.
 
 #### `followup_update` (POST)
-`id` + any of `owner` (username / id of the booking team — `glady`, `lydia`, `FU_OWNERS` — or `null`), `contacted_at` (YYYY-MM-DD or `""`), `staff_status` (`open`, `in_progress`,
+`id` + any of `owner` (username / id of any active Hub user, or `null`), `contacted_at` (YYYY-MM-DD or `""`), `staff_status` (`open`, `in_progress`,
 `problem` — needs a note —, `resolved`, `not_relevant`), `notes`. Dry run unless `"confirm": true`. Acts as `AGENT_API_USER`
 with the follow-up admin rights (not relevant); every change is an event (who / when). → `changes {field: [old, new]}`, `row`.
 
@@ -1312,7 +1370,9 @@ curl -sA "$UA" -H "$H" -X POST "$U?action=followup_upsert" -d '{"rows":[{"folder
 ```
 Checks are run by hand for now (page → Run check now → All; office PC scan for the PDFs). Optional cron (cron-job.org, not set up): `modules/operations/followup_cron.php?token=…&type=ticket` daily 05:30, `&type=group` daily 05:40, `&type=supplier` Monday 05:30
 (token `FOLLOWUP_CRON_TOKEN`, else `MEMO_CRON_TOKEN`; `&dry=1` = summary only). The memo digest (06:00) lists new lines,
-problems, lines not taken in charge for > 2 days, provisional expiring ≤ 7 days and tickets missing ≤ 7 days.
+problems, lines not taken in charge for > 2 days, provisional expiring ≤ 7 days and tickets missing ≤ 7 days, and a
+section "CK findings" for Roberto: new ck lines since the last digest by owner, ck lines open > 3 days, bookings arriving
+within 60 days with open ck lines. No mail goes to the owners automatically.
 
 ## Mail security (read-only)
 

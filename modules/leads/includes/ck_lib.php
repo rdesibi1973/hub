@@ -108,6 +108,16 @@ function ck_ensure_schema(PDO $db): void {
         'check_trigger'      => 'VARCHAR(12) NULL',
         'last_check_id'      => 'INT NULL',
         'last_checked_at'    => 'DATETIME NULL',
+        // Owners and CK findings (migration 073).
+        'ck_owner_user_id'        => 'INT NULL',
+        'booking_owner_user_id'   => 'INT NULL',
+        'owners_updated_at'       => 'DATETIME NULL',
+        'owners_updated_by'       => 'INT NULL',
+        'booking_owner_auto_id'   => 'INT NULL',
+        'booking_owner_auto_text' => 'VARCHAR(120) NULL',
+        'booking_owner_auto_at'   => 'DATETIME NULL',
+        'findings_checked_at'     => 'DATETIME NULL',
+        'findings_report_path'    => 'VARCHAR(500) NULL',
     ] as $col => $def) {
         if (!in_array($col, $have, true)) $db->exec("ALTER TABLE ck_folders ADD COLUMN $col $def");
     }
@@ -357,7 +367,7 @@ function ck_tracker_rows(PDO $db): array {
 
     // Requests per folder: a private safari by practice_code, a GRP by group_folder.
     $byPc = []; $byGrp = [];
-    $rq = $db->query("SELECT r.id, r.customer_name, r.practice_code, r.group_folder, r.pax, a.name AS agent_name
+    $rq = $db->query("SELECT r.id, r.customer_name, r.practice_code, r.group_folder, r.dropbox_url, r.pax, r.agent_id, a.name AS agent_name
                       FROM requests r LEFT JOIN agents a ON a.id = r.agent_id
                       WHERE (r.group_folder IS NOT NULL AND r.group_folder <> '')
                          OR r.dropbox_url LIKE '%001_Safari%'");
@@ -484,6 +494,221 @@ function ck_set_marker(PDO $db, string $token, int $folderId, bool $on, ?int $us
     }
     return ['ok' => true, 'msg' => ($on ? '✅ CK set: ' : '↩ CK removed: ') . $new
                                    . ($n ? " ($n request" . ($n === 1 ? '' : 's') . ' updated)' : '')];
+}
+
+// ── Owners: who answers for the CK (sales side) and who fixes the bookings ────
+// ck_folders.ck_owner_user_id / booking_owner_user_id; NULL = the default rule, computed
+// when read, so a later change of rule applies to every row nobody set by hand.
+//   CK owner       CK_OWNER_DEFAULT (server config): 'fixed:<username>' (default fixed:rdesibi —
+//                  Roberto handles every CK for now) or 'seller' (the user linked to the request's
+//                  sales agent; a seller who left → CK_SELLER_HANDOVER [username => username]).
+//   Booking owner  the booking-team member who signed the Calc CHECKED column most often among
+//                  the stays (cached in booking_owner_auto_*), else nobody.
+// Shared by the CK tracker page, the Agent API (ck_status / ck_set_owners) and Booking follow-up.
+
+const CK_OWNER_FALLBACK  = 'rdesibi';   // CK owner when the rule finds nobody
+const CK_OWNER_AUTO_TTL  = 43200;       // seconds before the Calc CHECKED names are read again
+
+/** Every user (also inactive ones, for names): [id => row]. */
+function ck_users(PDO $db): array {
+    static $users = null;
+    if ($users === null) {
+        $users = [];
+        foreach ($db->query("SELECT id, username, full_name, email, is_active, agent_id FROM users ORDER BY full_name")->fetchAll(PDO::FETCH_ASSOC) as $u) {
+            $users[(int)$u['id']] = $u;
+        }
+    }
+    return $users;
+}
+
+/** Active users for the owner selects: [{id, username, name}]. */
+function ck_active_users(PDO $db): array {
+    $out = [];
+    foreach (ck_users($db) as $u) {
+        if ((int)$u['is_active'] === 1) $out[] = ['id' => (int)$u['id'], 'username' => $u['username'], 'name' => $u['full_name'] ?: $u['username']];
+    }
+    return $out;
+}
+
+/** An active user by id or username, or null. */
+function ck_user_find(PDO $db, $ref): ?array {
+    $ref = trim((string)$ref);
+    if ($ref === '') return null;
+    foreach (ck_users($db) as $id => $u) {
+        if ((int)$u['is_active'] !== 1) continue;
+        if (ctype_digit($ref) ? $id === (int)$ref : strcasecmp($u['username'], $ref) === 0) return $u;
+    }
+    return null;
+}
+
+/** Owner as the page / API show it, or null. */
+function ck_owner_out(?array $u, bool $default): ?array {
+    if (!$u) return null;
+    return ['user_id' => (int)$u['id'], 'username' => $u['username'], 'name' => $u['full_name'] ?: $u['username'],
+            'email' => $u['email'] ?: null, 'default' => $default];
+}
+
+/** The default rule of the CK owner: 'fixed:<username>' | 'seller'. */
+function ck_owner_rule(): string {
+    $r = defined('CK_OWNER_DEFAULT') ? trim((string)CK_OWNER_DEFAULT) : '';
+    return $r !== '' ? $r : 'fixed:' . CK_OWNER_FALLBACK;
+}
+
+/** Default CK owner of a tracker row (ck_tracker_rows() shape: reqs with agent_id). */
+function ck_default_ck_owner(PDO $db, array $row): ?array {
+    $rule = ck_owner_rule();
+    if ($rule === 'seller') {
+        $users = ck_users($db);
+        $hand  = defined('CK_SELLER_HANDOVER') ? array_change_key_case((array)CK_SELLER_HANDOVER, CASE_LOWER) : [];
+        foreach ($row['reqs'] ?? [] as $q) {
+            if (empty($q['agent_id'])) continue;
+            $seller = null;
+            foreach ($users as $u) {
+                if ((int)$u['agent_id'] !== (int)$q['agent_id']) continue;
+                if (!$seller || ((int)$u['is_active'] === 1 && (int)$seller['is_active'] !== 1)) $seller = $u;
+            }
+            if (!$seller) continue;
+            if ((int)$seller['is_active'] === 1) return $seller;
+            if (isset($hand[strtolower($seller['username'])]) && ($h = ck_user_find($db, $hand[strtolower($seller['username'])]))) return $h;
+        }
+        return ck_user_find($db, CK_OWNER_FALLBACK);
+    }
+    return ck_user_find($db, preg_replace('/^fixed:/i', '', $rule)) ?: ck_user_find($db, CK_OWNER_FALLBACK);
+}
+
+/** CK owner and booking owner of a row: ['ck_owner' => ck_owner_out()|null, 'booking_owner' => …]. */
+function ck_owners_resolve(PDO $db, array $row): array {
+    $users = ck_users($db);
+    $ck = !empty($row['ck_owner_user_id']) && isset($users[(int)$row['ck_owner_user_id']])
+        ? ck_owner_out($users[(int)$row['ck_owner_user_id']], false) : ck_owner_out(ck_default_ck_owner($db, $row), true);
+    if (!empty($row['booking_owner_user_id']) && isset($users[(int)$row['booking_owner_user_id']])) {
+        $bk = ck_owner_out($users[(int)$row['booking_owner_user_id']], false);
+    } else {
+        $bk = !empty($row['booking_owner_auto_id']) && isset($users[(int)$row['booking_owner_auto_id']])
+            ? ck_owner_out($users[(int)$row['booking_owner_auto_id']], true) : null;
+    }
+    return ['ck_owner' => $ck, 'booking_owner' => $bk];
+}
+
+/**
+ * The booking-team member named most often in the CHECKED column, counted once per stay
+ * (consecutive nights in one hotel). $days: [{hotel, checked}]. Names match a user's username
+ * or first name ("Lydia", "checked Glady 12/3"). → ['user' => row|null, 'text' => names seen]
+ */
+function ck_booking_owner_from_calc(PDO $db, array $days): array {
+    $names = [];   // token => user id
+    foreach (ck_users($db) as $id => $u) {
+        if ((int)$u['is_active'] !== 1) continue;
+        foreach ([$u['username'], strtok((string)$u['full_name'], ' ')] as $n) {
+            $n = strtolower(trim((string)$n));
+            if (strlen($n) >= 3 && !isset($names[$n])) $names[$n] = $id;
+        }
+    }
+    $stays = []; $prev = null;
+    foreach ($days as $d) {
+        $hotel = trim((string)($d['hotel'] ?? ''));
+        if ($hotel === '') { $prev = null; continue; }
+        if ($prev !== strtolower($hotel)) $stays[] = '';
+        $stays[count($stays) - 1] .= ' ' . trim((string)($d['checked'] ?? ''));
+        $prev = strtolower($hotel);
+    }
+    $count = []; $seen = [];
+    foreach ($stays as $txt) {
+        $hit = [];
+        foreach (preg_split('/[^a-z]+/', strtolower($txt), -1, PREG_SPLIT_NO_EMPTY) as $tok) {
+            foreach ($names as $n => $id) {
+                if ($tok === $n || (strlen($n) >= 4 && strpos($tok, $n) === 0)) { $hit[$id] = true; $seen[$tok] = true; }
+            }
+        }
+        foreach (array_keys($hit) as $id) $count[$id] = ($count[$id] ?? 0) + 1;
+    }
+    if (!$count) return ['user' => null, 'text' => ''];
+    arsort($count);   // stable: on a tie the first name found wins
+    return ['user' => ck_users($db)[(int)array_key_first($count)], 'text' => substr(implode(', ', array_keys($seen)), 0, 120)];
+}
+
+/**
+ * Read the default booking owner from the Calc (ops_calc(), cached on its Dropbox rev) for rows not read
+ * in the last CK_OWNER_AUTO_TTL seconds, within $budget seconds; the rest at the next call. Trips not started,
+ * Tanzania only. Updates $rows in place. → number of rows read.
+ */
+function ck_owners_refresh_auto(PDO $db, array &$rows, float $budget): int {
+    require_once __DIR__ . '/../../operations/includes/ops_service.php';
+    $deadline = microtime(true) + $budget;
+    $stale = date('Y-m-d H:i:s', time() - CK_OWNER_AUTO_TTL);
+    $n = 0;
+    foreach ($rows as &$r) {
+        if ($r['other'] || !$r['reqs'] || ($r['to_arrival'] !== null && $r['to_arrival'] < 0)) continue;
+        if ($r['booking_owner_auto_at'] !== null && $r['booking_owner_auto_at'] > $stale) continue;
+        if (microtime(true) > $deadline) break;
+        $req = $r['reqs'][0];
+        foreach ($r['reqs'] as $q) if ((int)$q['id'] < (int)$req['id']) $req = $q;
+        $c = ops_calc_safe($db, $req);
+        if ($c['status'] === 'error') continue;                 // Dropbox: try again next time
+        $g = $c['status'] === 'ok' ? ck_booking_owner_from_calc($db, $c['days']) : ['user' => null, 'text' => ''];
+        $r['booking_owner_auto_id']   = $g['user'] ? (int)$g['user']['id'] : null;
+        $r['booking_owner_auto_text'] = $g['text'] !== '' ? $g['text'] : null;
+        $r['booking_owner_auto_at']   = date('Y-m-d H:i:s');
+        $db->prepare("UPDATE ck_folders SET booking_owner_auto_id = ?, booking_owner_auto_text = ?, booking_owner_auto_at = ? WHERE id = ?")
+           ->execute([$r['booking_owner_auto_id'], $r['booking_owner_auto_text'], $r['booking_owner_auto_at'], (int)$r['id']]);
+        $n++;
+    }
+    unset($r);
+    return $n;
+}
+
+/** Admin (isLeadsAdmin) or one of the row's current owners. */
+function ck_can_set_owners(PDO $db, array $user, array $row): bool {
+    if (!empty($user['ck_admin'])) return true;                                  // Agent API
+    if (function_exists('isLeadsAdmin') ? isLeadsAdmin() : in_array($user['role_name'] ?? '', ['admin', 'manager'], true)) return true;
+    $o = ck_owners_resolve($db, $row);
+    $uid = (int)($user['id'] ?? 0);
+    return $uid > 0 && in_array($uid, [(int)($o['ck_owner']['user_id'] ?? 0), (int)($o['booking_owner']['user_id'] ?? 0)], true);
+}
+
+/**
+ * Set or clear (null / '' = back to the default rule) the owners of a tracker row.
+ * $ch: ck_owner?, booking_owner? (user id or username). Logged in ck_events (ck_owner / booking_owner).
+ * → ['ok', 'changes' => [field => [from, to]], 'owners' => ck_owners_resolve() after] or ['ok' => false, 'error'].
+ */
+function ck_set_owners(PDO $db, array $row, array $ch, ?int $userId, bool $confirm): array {
+    ck_ensure_schema($db);
+    $label = fn(?array $o) => $o ? $o['name'] . ($o['default'] ? ' (default)' : '') : 'nobody';
+    $before = ck_owners_resolve($db, $row);
+    $set = [];
+    foreach (['ck_owner' => 'ck_owner_user_id', 'booking_owner' => 'booking_owner_user_id'] as $k => $col) {
+        if (!array_key_exists($k, $ch)) continue;
+        $v = $ch[$k];
+        if ($v === null || $v === '' || $v === 'default') { $set[$col] = null; continue; }
+        $u = ck_user_find($db, $v);
+        if (!$u) return ['ok' => false, 'error' => $k . ': no active user "' . $v . '"'];
+        $set[$col] = (int)$u['id'];
+    }
+    if (!$set) return ['ok' => false, 'error' => 'Send ck_owner and / or booking_owner (username, or null = back to default)'];
+    $after = $row;
+    foreach ($set as $col => $v) $after[$col] = $v;
+    $afterO = ck_owners_resolve($db, $after);
+    $changes = [];
+    foreach (['ck_owner', 'booking_owner'] as $k) {
+        if ((int)($row[$k . '_user_id'] ?? 0) !== (int)($after[$k . '_user_id'] ?? 0)) $changes[$k] = [$label($before[$k]), $label($afterO[$k])];
+    }
+    if ($confirm && $changes) {
+        $now = ck_now();
+        $cols = implode(', ', array_map(fn($c) => "$c = ?", array_keys($set)));
+        $db->prepare("UPDATE ck_folders SET $cols, owners_updated_at = ?, owners_updated_by = ? WHERE id = ?")
+           ->execute([...array_values($set), $now, $userId, (int)$row['id']]);
+        foreach ($changes as $k => $v) ck_log($db, (int)$row['id'], $k, mb_substr($v[0], 0, 255), mb_substr($v[1], 0, 255), $userId, 'hub', $now);
+    }
+    return ['ok' => true, 'dry_run' => !$confirm, 'changes' => $changes, 'owners' => $afterO];
+}
+
+/** The tracker row of a ck_folders id or of a request (a GRP member finds its group). */
+function ck_tracker_row_for(PDO $db, ?int $folderId, ?int $requestId): ?array {
+    foreach (ck_tracker_rows($db) as $r) {
+        if ($folderId ? (int)$r['id'] === $folderId
+                      : in_array((int)$requestId, array_map(fn($x) => (int)$x['id'], $r['reqs']), true)) return $r;
+    }
+    return null;
 }
 
 // ── Automatic SafariCheck (safariagent on GitHub Actions) ─────────────────────
