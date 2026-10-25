@@ -15,7 +15,8 @@
  * more than 7 days without a check), then again when the last check is older than 60 and 30 days before arrival
  * (next_check_reason first_check | recheck_60 | recheck_30).
  * _CK is blocked while a booking is provisional (open line with a provisional issue from any check, or a document in
- * invoices/ read as provisional by the last supplier scan) — no override; other open lines only warn.
+ * invoices/ read as provisional by the last supplier scan) and, for a group, until it is marked closed
+ * (ck_set_group_closed()) — no override; other open lines only warn.
  */
 require_once __DIR__ . '/ck_lib.php';
 require_once __DIR__ . '/../../operations/includes/followup_service.php';
@@ -111,7 +112,23 @@ function ck_pipeline_block(PDO $db, array $row, ?string $token = null, ?array $r
             error_log('ck_pipeline_block: invoices/ not listed: ' . $e->getMessage());
         }
     }
-    return ['blocked' => (bool)$by, 'by' => $by, 'lines' => $ids, 'files' => $files];
+    // A group gets _CK only once marked closed (ck_set_group_closed()); both reasons listed when both apply.
+    $groupOpen = !empty($row['is_group']) && empty($row['group_closed_at']);
+    $prov = (bool)$by;
+    if ($groupOpen) $by[] = CK_GROUP_OPEN_MSG;
+    return ['blocked' => (bool)$by, 'by' => $by, 'provisional' => $prov, 'group_open' => $groupOpen, 'lines' => $ids, 'files' => $files];
+}
+
+/**
+ * The refusal of a ck_pipeline_block() result: "Still provisional: Serengeti Classic View 29 Dec – provisional, expired
+ * 31 Jul. Group not closed: mark it closed in the CK tracker first" (each part only when it applies).
+ */
+function ck_pipeline_block_message(array $block): string {
+    $prov = array_values(array_filter($block['by'], fn($t) => $t !== CK_GROUP_OPEN_MSG));
+    $parts = [];
+    if ($prov) $parts[] = 'Still provisional: ' . implode('; ', $prov);
+    if (!empty($block['group_open'])) $parts[] = CK_GROUP_OPEN_MSG;
+    return implode('. ', $parts);
 }
 
 /** Folders with supplier documents: [stem => true] — read by a supplier scan, or listed by the last SafariCheck. */
@@ -184,6 +201,7 @@ function ck_pipeline_annotate(PDO $db, array &$rows, ?string $today = null): voi
             'next_due_date' => $next['due_date'] ?? null, 'next_due_reason' => $next['due_reason'] ?? null,
             'next_due_days' => $next ? $days($today, $next['due_date']) : null,
             'blocked' => $block['blocked'], 'blocked_by' => $block['by'],
+            'blocked_provisional' => $block['provisional'], 'group_open' => $block['group_open'],
             'last_claude_check_at' => $lastClaude, 'last_safaricheck_at' => $lastSc,
             'days_since_check' => $lastClaude ? $days($lastClaude, $today) : null,
             'needs_check' => $reason !== null, 'next_check_reason' => $reason,
@@ -195,20 +213,24 @@ function ck_pipeline_annotate(PDO $db, array &$rows, ?string $today = null): voi
 
 /**
  * Memo digest "Bookings pipeline": bookings blocked from the CK by a provisional booking and arriving within
- * 60 days, and bookings waiting for their first check. → ['blocked' => [row], 'first_check' => [row]] (row: folder,
- * customer, start_date, to_arrival, by / reason).
+ * 60 days, groups arriving within 60 days not marked closed, and bookings waiting for their first check.
+ * → ['blocked' => [row], 'groups_open' => [row], 'first_check' => [row]] (row: folder, customer, start_date, to_arrival,
+ * by / waiting).
  */
 function ck_pipeline_digest(PDO $db, ?string $today = null): array {
     require_once __DIR__ . '/../dropbox_helper.php';
     $today = $today ?? ck_now('Y-m-d');
     $rows = array_values(array_filter(ck_tracker_rows($db), fn($r) => !$r['other'] && $r['to_arrival'] !== null && $r['to_arrival'] >= 0));
     ck_pipeline_annotate($db, $rows, $today);
-    $out = ['blocked' => [], 'first_check' => []];
+    $out = ['blocked' => [], 'groups_open' => [], 'first_check' => []];
     usort($rows, fn($a, $b) => [$a['start_date'], $a['folder_name']] <=> [$b['start_date'], $b['folder_name']]);
     foreach ($rows as $r) {
         $b = ['ck_folder_id' => (int)$r['id'], 'folder' => $r['folder_name'], 'customer' => ck_customer_label($r['folder_name']),
               'start_date' => $r['start_date'], 'to_arrival' => $r['to_arrival']];
-        if ($r['pl']['blocked'] && !(int)$r['has_ck'] && $r['to_arrival'] <= 60) $out['blocked'][] = $b + ['by' => $r['pl']['blocked_by']];
+        if ($r['pl']['blocked_provisional'] && !(int)$r['has_ck'] && $r['to_arrival'] <= 60) {
+            $out['blocked'][] = $b + ['by' => array_values(array_filter($r['pl']['blocked_by'], fn($t) => $t !== CK_GROUP_OPEN_MSG))];
+        }
+        if ($r['pl']['group_open'] && !(int)$r['has_ck'] && $r['to_arrival'] <= 60) $out['groups_open'][] = $b;
         if ($r['pl']['next_check_reason'] === 'first_check') $out['first_check'][] = $b + ['waiting' => $r['waiting']];
     }
     return $out;

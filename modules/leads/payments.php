@@ -350,7 +350,7 @@ include 'includes/header.php';
 ?>
 
 <div class="page-header">
-  <h2>💳 Payments to collect <span id="rowCount" style="font-size:.8rem;font-weight:400;color:var(--grey-mid)">(<?= count($rows) ?>)</span><?php require_once __DIR__ . '/includes/procedures_service.php'; echo proc_help_link('payments'); ?></h2>
+  <h2>💳 Payments to collect <span id="rowCount" style="font-size:.8rem;font-weight:400;color:var(--grey-mid)">(<?= count($rows) ?>)</span><?php require_once __DIR__ . '/includes/procedures_service.php'; echo proc_help_link('payments') . proc_help_link('ck_payments'); ?></h2>
 </div>
 
 <form method="GET" class="filters">

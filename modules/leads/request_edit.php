@@ -111,7 +111,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $tok = null;
             try { $tok = dropbox_get_access_token(); } catch (Throwable $e) { /* open lines only */ }
             $ckBlock = $ckRow ? ck_pipeline_block($db, $ckRow, $tok) : ['blocked' => false];
-            if ($ckBlock['blocked']) $errors[] = '_CK cannot be set while a booking is still provisional: ' . implode('; ', $ckBlock['by']) . '.';
+            if ($ckBlock['blocked']) $errors[] = '_CK cannot be set yet — ' . ck_pipeline_block_message($ckBlock) . '.';
             break;
         }
     }

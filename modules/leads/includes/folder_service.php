@@ -573,10 +573,10 @@ function folder_rename(PDO $db, int $requestId, string $newName, ?int $userId, a
     $curPath = null;
     try {
         $token = dropbox_get_access_token();
-        // _CK while a booking is still provisional: refused, no override (ck_pipeline.php).
+        // _CK while a booking is still provisional or a group is not closed: refused, no override (ck_pipeline.php).
         $block = fs_ck_block($db, $v, $token);
         if ($block['blocked']) {
-            return ['ok' => false, 'code' => 409, 'msg' => '⛔ No _CK while a booking is still provisional: ' . implode('; ', $block['by']) . '.',
+            return ['ok' => false, 'code' => 409, 'msg' => '⛔ No _CK yet — ' . ck_pipeline_block_message($block) . '.',
                     'ck_blocked_by' => $block['by']];
         }
         if ($v['relink']) {

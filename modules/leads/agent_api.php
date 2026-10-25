@@ -103,7 +103,7 @@ function agent_audit(PDO $db, string $action, $reqId, array $payload, string $re
                               'create_request', 'add_flight_rates', 'timeline_update', 'summary_set', 'rename_folder',
                               'set_request_status', 'update_request', 'import_group_folder', 'move_group_folder', 'ck_request_check', 'memo_delete', 'create_agency', 'update_agency', 'save_agency_contact', 'delete_agency_contact',
                               'followup_scan', 'followup_update', 'followup_upsert', 'iti_update_activity', 'sales_response_dismiss',
-                              'ck_set_owners', 'ck_findings_upsert', 'iti_create_destination', 'iti_import_program', 'iti_supplier_blocklist'], true) && empty($payload['confirm']);
+                              'ck_set_owners', 'ck_set_group_closed', 'ck_findings_upsert', 'iti_create_destination', 'iti_import_program', 'iti_supplier_blocklist'], true) && empty($payload['confirm']);
     // Mail: keep who/what in the log, not message bodies or attachment content.
     if (in_array($action, ['mail_get', 'mail_attachment', 'iti_document', 'iti_vouchers'], true) && $code === 200) {
         $res = json_decode($resultJson, true);
@@ -1865,13 +1865,13 @@ try {
             'warnings'         => $pv['warnings'],
         ];
         if ($curIn !== '' && !$v['relink']) $out['warnings'][] = 'current_path equals the stored path — plain rename.';
-        // _CK while a booking is still provisional: refused (409, also on the dry run; no override — ck_pipeline.php).
+        // _CK while a booking is still provisional or a group is not closed: refused (409, also on the dry run; no override — ck_pipeline.php).
         // Other open points in Booking follow-up: a warning only.
         require_once __DIR__ . '/includes/ck_pipeline.php';
         if (ck_has_marker($v['new_name']) && !ck_has_marker(basename((string)$v['folder']))) {
             $block = fs_ck_block($db, $v, dropbox_get_access_token());
             if ($block['blocked']) {
-                agent_fail('No _CK while a booking is still provisional: ' . implode('; ', $block['by']) . '.', 409,
+                agent_fail(ck_pipeline_block_message($block), 409,
                            $out + ['ck_blocked' => true, 'ck_blocked_by' => $block['by']]);
             }
             try {
@@ -2840,7 +2840,13 @@ try {
                 'days_since_check' => $r['pl']['days_since_check'],
                 'needs_check'     => $r['pl']['needs_check'],
                 'next_check_reason' => $r['pl']['next_check_reason'],
-                // No _CK while a booking is provisional (open lines; rename_folder also reads the invoices/ documents).
+                // Groups: _CK only once marked closed (ck_set_group_closed).
+                'is_group'        => (bool)$r['is_group'],
+                'group_closed'    => !empty($r['group_closed_at']),
+                'group_closed_at' => $r['group_closed_at'] ?? null,
+                'group_closed_by' => $r['group_closed_by_name'] ?? null,
+                // No _CK while a booking is provisional (open lines; rename_folder also reads the invoices/ documents)
+                // or a group is not closed ("Group not closed: …").
                 'ck_blocked'      => $r['pl']['blocked'],
                 'ck_blocked_by'   => $r['pl']['blocked_by'],
                 // CK can be set: the booking check ran (ck_findings_upsert), nothing provisional, no line open.
@@ -2870,6 +2876,23 @@ try {
         if (!$res['ok']) agent_fail($res['error']);
         agent_out($res + ['ck_folder_id' => (int)$row['id'], 'folder' => $row['folder_name']]
                   + (empty($in['confirm']) ? ['message' => 'Dry run — resend with "confirm": true to save.'] : []));
+    }
+
+    // Group closed / reopened (CK tracker "Group closed"): a group gets _CK only once closed. Dry-run unless "confirm": true.
+    case 'ck_set_group_closed': {
+        agent_require_method('POST');
+        require_once __DIR__ . '/dropbox_helper.php';
+        require_once __DIR__ . '/includes/ck_lib.php';
+        $fid = (int)($in['ck_folder_id'] ?? 0); $rid = (int)($in['request_id'] ?? 0);
+        if ($fid <= 0 && $rid <= 0) agent_fail('request_id or ck_folder_id is required');
+        $closed = array_key_exists('closed', $in) ? filter_var($in['closed'], FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE) : null;
+        if ($closed === null) agent_fail('closed (true | false) is required');
+        if ($rid > 0) $agentReqId = agent_request($db, $rid)['id'];
+        $row = ck_tracker_row_for($db, $fid ?: null, $rid ?: null);
+        if (!$row) agent_fail('No CK folder in /001_Safari for this ' . ($fid > 0 ? 'ck_folder_id' : 'request') . ' (see ck_status)', 404);
+        $res = ck_set_group_closed($db, $row, $closed, (int)$agentUser['id'], !empty($in['confirm']));
+        if (!$res['ok']) agent_fail($res['error'], 409);
+        agent_out($res + (empty($in['confirm']) ? ['message' => 'Dry run — resend with "confirm": true to save.'] : []));
     }
 
     // Findings of a booking check (booking-check skill) → ck lines in Booking follow-up. Dry-run unless "confirm": true.
@@ -3070,7 +3093,7 @@ try {
             'routine_status', 'routine_done',
             'mail_folders', 'mail_list', 'mail_get', 'mail_attachment', 'mail_flag', 'mail_move', 'mail_draft', 'mail_send',
             'timeline_list', 'timeline_add', 'timeline_update', 'summary_set', 'request_resume', 'set_request_status',
-            'payments_due', 'ck_status', 'ck_request_check', 'ck_set_owners', 'ck_findings_upsert', 'ck_findings_drafts', 'ops_movements', 'ops_lunch_boxes', 'ops_medivac', 'flight_tickets',
+            'payments_due', 'ck_status', 'ck_request_check', 'ck_set_owners', 'ck_set_group_closed', 'ck_findings_upsert', 'ck_findings_drafts', 'ops_movements', 'ops_lunch_boxes', 'ops_medivac', 'flight_tickets',
             'followup_list', 'followup_scan', 'followup_update', 'followup_upsert', 'mail_security_status',
             'sales_response_status', 'sales_response_dismiss',
         ]]);

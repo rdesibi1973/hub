@@ -20,6 +20,20 @@ Running log of notable changes and current build state. Module-level "active / p
 
 ---
 
+## 2026-10-25 — CK procedure, "?" links, "Group closed"
+- New office procedure **CK AND BOOKING FOLLOW-UP** (Dropbox `/Operations/OfficeProcedures`, Word source in `orig/`, same
+  layout as the other procedures, English then Italian): listed by the procedures page automatically.
+- "?" links: `procedures_map.php` keys `ck_followup` (page 1) and `ck_payments` (section 6, page 2); on Booking follow-up and
+  the CK tracker (next to `folder_status`), and `ck_payments` on Payments. `proc_help_link($key, $base)`: `$base` for pages
+  outside `modules/leads/` (Booking follow-up now loads `modules/leads/config.php` for the Dropbox listing, as its API does).
+- **Group closed** (migration 075, also created by `ck_ensure_schema()`): `ck_folders.group_closed_at` / `group_closed_by`,
+  `ck_events` `group_closed` / `group_reopened`. `ck_is_group_folder()` (GRPnnnn, Diamante / Panorama, GRUPPO, `_PROVISIONAL`,
+  folders used as `group_folder`). `_CK` on a group not closed is refused everywhere the provisional block applies
+  (`ck_pipeline_block()`: CK tracker Set CK, Rename…, `rename_folder` 409, request edit) with "Group not closed: mark it closed
+  in the CK tracker first"; `ck_pipeline_block_message()` words both reasons. CK tracker: group state + "👥 Group closed" /
+  "↩ Reopen group" (admin, CK owner, booking owner), "Blocked" tile counts open groups too. Agent API: `ck_status` `is_group`,
+  `group_closed`, `group_closed_at`, `group_closed_by`; new `ck_set_group_closed`. Digest: groups arriving ≤ 60 days not closed.
+
 ## 2026-10-25 — CK owner default = the seller of the folder
 - `ck_owner_rule()` defaults to `seller` (was `fixed:rdesibi`; `CK_OWNER_DEFAULT` in the server config still overrides).
   Seller = the last name in the folder's `(…)` tag that is a Hub user (`ck_seller_names()`, `ck_seller_user()`):

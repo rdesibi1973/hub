@@ -14,6 +14,8 @@
 require_once __DIR__ . '/../../includes/db.php';
 require_once __DIR__ . '/../../includes/auth.php';
 require_login();
+require_once __DIR__ . '/../leads/config.php';                        // Dropbox keys: the procedure "?" link (as api/followup.php)
+require_once __DIR__ . '/../leads/includes/procedures_service.php';
 require_once __DIR__ . '/includes/followup_service.php';
 hub_db_timezone($pdo);
 
@@ -105,7 +107,7 @@ include __DIR__ . '/../../includes/layout_header.php';
 <main>
   <div class="fu-head">
     <div>
-      <div class="page-title">📌 Booking follow-up</div>
+      <div class="page-title">📌 Booking follow-up<?= proc_help_link('ck_followup', '../leads/') ?></div>
       <div class="fu-sub" id="fu-runs"></div>
     </div>
     <?php if ($fuData['me']['can_edit']): ?>

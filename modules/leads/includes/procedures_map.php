@@ -10,4 +10,6 @@ return [
     'new_request'    => ['file' => 'DROPBOX-REQUESTS-CONFIRMED TRIPS.pdf', 'page' => 1, 'title' => 'Procedure: new request and Dropbox folder (section 2)'],
     'payments'       => ['file' => 'DROPBOX-REQUESTS-CONFIRMED TRIPS.pdf', 'page' => 3, 'title' => 'Procedure: client payments (section 6)'],
     'folder_status'  => ['file' => 'DROPBOX-REQUESTS-CONFIRMED TRIPS.pdf', 'page' => 2, 'title' => 'Procedure: folder status up to CK (section 4)'],
+    'ck_followup'    => ['file' => 'CK AND BOOKING FOLLOW-UP.pdf',          'page' => 1, 'title' => 'Procedure: CK, Booking follow-up and incoming payments'],
+    'ck_payments'    => ['file' => 'CK AND BOOKING FOLLOW-UP.pdf',          'page' => 2, 'title' => 'Procedure: incoming client payments (section 6)'],
 ];

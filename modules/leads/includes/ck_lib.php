@@ -118,6 +118,9 @@ function ck_ensure_schema(PDO $db): void {
         'booking_owner_auto_at'   => 'DATETIME NULL',
         'findings_checked_at'     => 'DATETIME NULL',
         'findings_report_path'    => 'VARCHAR(500) NULL',
+        // Group closed: final pax / room list, unsold rooms and seats released (migration 075).
+        'group_closed_at'         => 'DATETIME NULL',
+        'group_closed_by'         => 'INT NULL',
     ] as $col => $def) {
         if (!in_array($col, $have, true)) $db->exec("ALTER TABLE ck_folders ADD COLUMN $col $def");
     }
@@ -349,7 +352,7 @@ function ck_record_rename(PDO $db, string $oldName, string $newName, ?int $userI
  */
 function ck_tracker_rows(PDO $db): array {
     ck_ensure_schema($db);
-    $folders = $db->query("SELECT f.*, u.full_name AS ck_by_name,
+    $folders = $db->query("SELECT f.*, u.full_name AS ck_by_name, gu.full_name AS group_closed_by_name,
                                   c.overall AS chk_overall, c.n_red AS chk_red, c.n_yellow AS chk_yellow,
                                   c.created_at AS chk_at, c.error AS chk_error,
                                   (SELECT COUNT(*) FROM ck_notes n WHERE n.ck_folder_id = f.id) AS note_count,
@@ -362,6 +365,7 @@ function ck_tracker_rows(PDO $db): array {
                                      ORDER BY n3.created_at DESC, n3.id DESC LIMIT 1) AS last_note_by
                            FROM ck_folders f
                            LEFT JOIN users u ON u.id = f.ck_by
+                           LEFT JOIN users gu ON gu.id = f.group_closed_by
                            LEFT JOIN ck_checks c ON c.id = f.last_check_id
                            WHERE f.gone = 0")->fetchAll(PDO::FETCH_ASSOC);
 
@@ -402,6 +406,7 @@ function ck_tracker_rows(PDO $db): array {
             'reqs'       => $reqs,
             'agent'      => $agent,
             'is_grp'     => stripos($f['folder_name'], 'GRP') !== false || isset($byGrp[$key]),
+            'is_group'   => ck_is_group_folder($f['folder_name'], isset($byGrp[$key])),
             'other'      => ck_is_other_destination($f['folder_name']),
             'to_arrival' => $toArrival,
             'band'       => $band,
@@ -435,6 +440,43 @@ function ck_check_points(PDO $db, array $checkIds): array {
         $out[(int)$c['id']] = $p;
     }
     return $out;
+}
+
+// ── Groups: "Group closed" before the _CK (Roberto, 25 Oct 2026) ─────────────
+// A group gets _CK only once a person marked it closed on the CK tracker: final pax and room list, unsold rooms /
+// seats released (ck_folders.group_closed_at / group_closed_by; ck_events group_closed / group_reopened).
+// The block itself is in ck_pipeline_block() with the provisional one.
+
+const CK_GROUP_OPEN_MSG = 'Group not closed: mark it closed in the CK tracker first';
+
+/**
+ * Is a top-level folder a group: GRPnnnn (GRP + DDMM), Il Diamante / Panorama set departures, "GRUPPO", a block tagged
+ * _PROVISIONAL (same detection as the follow-up group scan, followup_group_kind()), or a folder Hub requests use as
+ * their group_folder ($hasGroupRequests, rename_folder is_group).
+ */
+function ck_is_group_folder(string $name, bool $hasGroupRequests = false): bool {
+    if ($hasGroupRequests) return true;
+    if (preg_match('/GRP\d{4}|\(Diamante|Panorama|GRUPPO/i', $name)) return true;
+    return (bool)preg_match('/[_-]PROVISIONAL$/i', preg_replace('/(?:[_-]+CK)+$/i', '', trim($name)));
+}
+
+/**
+ * Mark a group closed ($closed) or reopen it. Only group rows; logged in ck_events. Who: ck_can_set_owners() (admin,
+ * the row's CK owner or booking owner) — the caller checks. → ['ok', 'dry_run', 'changed', 'group_closed', …] or ['ok' => false, 'error'].
+ */
+function ck_set_group_closed(PDO $db, array $row, bool $closed, ?int $userId, bool $confirm): array {
+    ck_ensure_schema($db);
+    if (empty($row['is_group'])) return ['ok' => false, 'error' => 'Not a group folder: ' . $row['folder_name']];
+    $was = !empty($row['group_closed_at']);
+    $out = ['ok' => true, 'dry_run' => !$confirm, 'ck_folder_id' => (int)$row['id'], 'folder' => $row['folder_name'],
+            'changed' => $was !== $closed, 'group_closed' => $closed];
+    if (!$confirm || $was === $closed) return $out + ['group_closed_at' => $row['group_closed_at'] ?? null];
+    $now = ck_now();
+    $db->prepare("UPDATE ck_folders SET group_closed_at = ?, group_closed_by = ? WHERE id = ?")
+       ->execute([$closed ? $now : null, $closed ? $userId : null, (int)$row['id']]);
+    ck_log($db, (int)$row['id'], $closed ? 'group_closed' : 'group_reopened', $was ? (string)$row['group_closed_at'] : null,
+           $closed ? $now : null, $userId, 'hub', $now);
+    return $out + ['group_closed_at' => $closed ? $now : null];
 }
 
 // ── SafariCheck points about bookings → Booking follow-up (type safaricheck) ─
@@ -544,7 +586,7 @@ function ck_sync_requests(PDO $db, string $old, string $new): int {
 /**
  * Add ($on) or remove the _CK marker: rename the Dropbox folder, sync the
  * requests, and log it with the user. Dropbox first; the DB only if it succeeds.
- * _CK is refused while a booking is still provisional (ck_pipeline_block(), no override).
+ * _CK is refused while a booking is still provisional or a group is not closed (ck_pipeline_block(), no override).
  *
  * @return array{ok:bool,msg:string,blocked_by?:array}
  */
@@ -564,8 +606,7 @@ function ck_set_marker(PDO $db, string $token, int $folderId, bool $on, ?int $us
         $tr = ck_tracker_row_for($db, $folderId, null);
         $block = $tr ? ck_pipeline_block($db, $tr, $token) : ['blocked' => false];
         if ($block['blocked']) {
-            return ['ok' => false, 'msg' => '⛔ No CK while a booking is still provisional: ' . implode('; ', $block['by']) . '.',
-                    'blocked_by' => $block['by']];
+            return ['ok' => false, 'msg' => '⛔ No CK yet — ' . ck_pipeline_block_message($block) . '.', 'blocked_by' => $block['by']];
         }
     }
     $new = ck_name_with_marker($old, $on);

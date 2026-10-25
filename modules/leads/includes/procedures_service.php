@@ -109,14 +109,15 @@ function proc_known_files(): array {
 /**
  * Small "?" link to the procedure for $key (procedures_map.php), opening in a new tab at the mapped page.
  * Empty string if the key is unknown or the file is not in Dropbox (never a broken link).
+ * $base: path from the calling page to modules/leads/ ('../leads/' for a page in modules/operations/).
  */
-function proc_help_link(string $key): string {
+function proc_help_link(string $key, string $base = ''): string {
     static $map = null;
     if ($map === null) $map = require __DIR__ . '/procedures_map.php';
     $m = $map[$key] ?? null;
     if (!$m || !in_array($m['file'], proc_known_files(), true)) return '';
     $h = function ($s) { return htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8'); };
-    return '<a href="' . $h(proc_url($m['file'], false, (int)$m['page'])) . '" target="_blank" rel="noopener" title="' . $h($m['title']) . '"'
+    return '<a href="' . $h($base . proc_url($m['file'], false, (int)$m['page'])) . '" target="_blank" rel="noopener" title="' . $h($m['title']) . '"'
          . ' style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;'
          . 'border:1px solid #C0211B;color:#C0211B;font-size:.7rem;font-weight:700;text-decoration:none;vertical-align:middle;margin-left:6px;line-height:1">?</a>';
 }

@@ -13,7 +13,8 @@
  * Open findings of the booking check live in Booking follow-up (type ck).
  * Pipeline (includes/ck_pipeline.php): stage confirmed → booked → issues → ready → ck, the open Booking follow-up lines
  * of every check, the nearest deadline (row colour: red = an urgent line, amber = a high one, else the SafariCheck
- * colour), the Claude check due (view "To check"). _CK is refused while a booking is still provisional.
+ * colour), the Claude check due (view "To check"). _CK is refused while a booking is still provisional, and on a
+ * group until it is marked "Group closed" (admin, CK owner or booking owner).
  */
 require_once 'config.php';
 require_once 'dropbox_helper.php';
@@ -169,10 +170,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'set_o
     exit;
 }
 
-// ── Actions: set / remove _CK, run the automatic check ────────────────────────
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array($_POST['action'] ?? '', ['ck_on', 'ck_off', 'run_check'], true)) {
+// ── Actions: set / remove _CK, run the automatic check, group closed / reopened ─
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array($_POST['action'] ?? '', ['ck_on', 'ck_off', 'run_check', 'group_close', 'group_reopen'], true)) {
     try {
-        if ($_POST['action'] === 'run_check') {
+        if ($_POST['action'] === 'group_close' || $_POST['action'] === 'group_reopen') {
+            // Admin, the row's CK owner or booking owner (ck_can_set_owners()).
+            $row = ck_tracker_row_for($db, (int)($_POST['ck_id'] ?? 0), null);
+            if (!$row) flash('Folder not found.', 'error');
+            elseif (!ck_can_set_owners($db, $cu, $row)) flash('Only an admin, the CK owner or the booking owner can close / reopen a group.', 'error');
+            else {
+                $res = ck_set_group_closed($db, $row, $_POST['action'] === 'group_close', $uid, true);
+                flash($res['ok'] ? ($_POST['action'] === 'group_close' ? '👥 Group closed: ' : '👥 Group reopened: ') . $row['folder_name'] : $res['error'],
+                      $res['ok'] ? 'info' : 'error');
+            }
+        } elseif ($_POST['action'] === 'run_check') {
             // Shown on the row itself (the page reopens scrolled to it, the top flash is out of view).
             $res = ck_request_check($db, [(int)($_POST['ck_id'] ?? 0)], 'manual');
             $_SESSION['ck_row_msg'] = ['id' => (int)($_POST['ck_id'] ?? 0)] + $res;
@@ -357,6 +368,8 @@ $evLabel = function (array $e): string {
         'unconfirmed'=> '☐ Unticked: ' . $e['to_value'] . ($e['from_value'] ? ' (' . $e['from_value'] . ')' : ''),
         'ck_owner'      => 'CK owner: ' . $e['from_value'] . ' → ' . $e['to_value'],
         'booking_owner' => 'Booking owner: ' . $e['from_value'] . ' → ' . $e['to_value'],
+        'group_closed'   => '👥 Group closed',
+        'group_reopened' => '👥 Group reopened',
         default      => $e['event'],
     };
 };
@@ -419,6 +432,8 @@ $extra_css = '
 .ck-need{font-size:.66rem;font-weight:700;border-radius:6px;padding:2px 7px;display:inline-block;margin-top:3px;color:#1a3a5c;background:#eef3f9}
 .ck-block{font-size:.66rem;font-weight:700;border-radius:6px;padding:2px 7px;display:inline-block;margin-top:3px;color:#a33;background:#f7dede;cursor:help}
 .ck-late{color:#C0211B;font-weight:700}
+.ck-group{font-size:.68rem;font-weight:700;margin-top:4px;color:#8a6d3b}
+.ck-group.closed{color:#1A6B3A}
 .ck-btn:disabled{opacity:.45;cursor:not-allowed}
 .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:200;display:flex;align-items:flex-start;justify-content:center;padding:40px 16px;overflow-y:auto}
 .modal-overlay.hidden{display:none}
@@ -441,7 +456,7 @@ include 'includes/header.php';
 ?>
 
 <div class="page-header" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
-  <h2>✅ CK tracker <small style="font-size:.75rem;font-weight:400;color:var(--grey-mid)">— confirmed bookings in 001_Safari, from booking to CK</small><?php require_once __DIR__ . '/includes/procedures_service.php'; echo proc_help_link('folder_status'); ?></h2>
+  <h2>✅ CK tracker <small style="font-size:.75rem;font-weight:400;color:var(--grey-mid)">— confirmed bookings in 001_Safari, from booking to CK</small><?php require_once __DIR__ . '/includes/procedures_service.php'; echo proc_help_link('ck_followup') . proc_help_link('folder_status'); ?></h2>
 </div>
 
 <?php if ($scanError): ?>
@@ -456,7 +471,7 @@ include 'includes/header.php';
   <a class="ck-tile green" href="<?= h($link(['view' => 'done'])) ?>"><b><?= $counts['done'] ?></b><span>CK done</span></a>
   <a class="ck-tile red"   href="<?= h($link(['view' => 'chkred'])) ?>"><b><?= $counts['chkred'] ?></b><span>No CK · automatic check RED</span></a>
   <a class="ck-tile blue"  href="<?= h($link(['view' => 'tocheck'])) ?>" title="Booked for more than <?= CK_PL_FIRST_CHECK_DAYS ?> days and never checked, or last check older than 60 / 30 days before arrival"><b><?= $counts['tocheck'] ?></b><span>To check (Claude check due)</span></a>
-  <a class="ck-tile amber" href="<?= h($link(['view' => 'missing'])) ?>" title="No _CK possible while a booking is still provisional"><b><?= $counts['blocked'] ?></b><span>Blocked · booking still provisional</span></a>
+  <a class="ck-tile amber" href="<?= h($link(['view' => 'missing'])) ?>" title="No _CK possible while a booking is still provisional or a group is not closed"><b><?= $counts['blocked'] ?></b><span>Blocked · provisional / group open</span></a>
 </div>
 
 <div class="ck-bar">
@@ -569,6 +584,20 @@ include 'includes/header.php';
         <div class="ck-sub">
           <?= $r['in_stage'] !== null ? 'for ' . $r['in_stage'] . ' d' : '<span title="Already in this stage when tracking started">before tracking</span>' ?>
         </div>
+        <?php if ($r['is_group']): $gc = !empty($r['group_closed_at']); ?>
+          <div class="ck-group<?= $gc ? ' closed' : '' ?>" title="<?= $gc ? 'Final pax and room list, unsold rooms / seats released' : 'No _CK until the group is closed: final pax and room list, unsold rooms / seats released' ?>">
+            👥 <?= $gc ? 'Group closed' . ($r['group_closed_by_name'] ? ' by ' . h($r['group_closed_by_name']) : '') . ' · ' . h($fmtD($r['group_closed_at'])) : 'Group open' ?></div>
+          <?php if ($r['can_owners']): ?>
+            <form method="post" style="margin-top:3px" onsubmit="return confirm(<?= h(json_encode($gc
+                ? 'Reopen the group ' . $r['folder_name'] . '?' . "\n\nIt cannot get _CK until it is closed again."
+                : 'Mark the group ' . $r['folder_name'] . ' as closed?' . "\n\nFinal pax and room list done, unsold rooms / seats released.")) ?>)">
+              <input type="hidden" name="action" value="<?= $gc ? 'group_reopen' : 'group_close' ?>">
+              <input type="hidden" name="ck_id" value="<?= $id ?>">
+              <input type="hidden" name="return_qs" value="<?= h(http_build_query($qsKeep)) ?>">
+              <button class="ck-btn run" type="submit"><?= $gc ? '↩ Reopen group' : '👥 Group closed' ?></button>
+            </form>
+          <?php endif; ?>
+        <?php endif; ?>
       </td>
       <td class="ck-pl">
         <?php if ($pl):
@@ -592,8 +621,9 @@ include 'includes/header.php';
           <?php if ($pl['needs_check']): ?>
             <div><span class="ck-need" title="<?= h(CK_PL_CHECK_REASONS[$pl['next_check_reason']]) ?>">🔎 <?= h(CK_PL_CHECK_REASONS[$pl['next_check_reason']]) ?></span></div>
           <?php endif; ?>
-          <?php if ($pl['blocked']): ?>
-            <div><span class="ck-block" title="<?= h(implode("\n", $pl['blocked_by'])) ?>">⛔ <?= (int)$r['has_ck'] ? 'CK set but still provisional' : 'No CK: still provisional' ?></span></div>
+          <?php if ((int)$r['has_ck'] ? $pl['blocked_provisional'] : $pl['blocked']): ?>
+            <div><span class="ck-block" title="<?= h(implode("\n", $pl['blocked_by'])) ?>">⛔ <?= (int)$r['has_ck'] ? 'CK set but still provisional'
+                : 'No CK: ' . implode(' + ', array_filter([$pl['blocked_provisional'] ? 'still provisional' : '', $pl['group_open'] ? 'group open' : ''])) ?></span></div>
           <?php endif; ?>
         <?php else: ?><span class="ck-sub">—</span><?php endif; ?>
       </td>
@@ -654,7 +684,7 @@ include 'includes/header.php';
           <?php if ((int)$r['has_ck']): ?>
             <button class="ck-btn off" type="submit">↩ Remove CK</button>
           <?php else: ?>
-            <button class="ck-btn" type="submit"<?= $ckBlocked ? ' disabled title="' . h("No CK while a booking is still provisional:\n" . implode("\n", $pl['blocked_by'])) . '"' : '' ?>>✅ Set CK</button>
+            <button class="ck-btn" type="submit"<?= $ckBlocked ? ' disabled title="' . h("No CK yet:\n" . implode("\n", $pl['blocked_by'])) . '"' : '' ?>>✅ Set CK</button>
           <?php endif; ?>
         </form>
         <form method="post" style="margin-top:4px" class="ck-runform">

@@ -395,6 +395,8 @@ renamed and every request of the group is updated. No email is sent (unlike Resc
   follow-up line with a provisional issue from any check, or a document now in `invoices/` (not `old/`) read as provisional /
   on request by the last supplier scan (`ck_pipeline_block()`). The same rule in BackOffice → Rename…, the CK tracker "Set CK"
   and the request edit form. Other open lines: a warning ("Setting _CK with N open Booking follow-up line(s) …").
+- **Adding `_CK` to a group not marked closed → 409** "Group not closed: mark it closed in the CK tracker first" (no
+  override; `ck_set_group_closed`). Both reasons in one message when both apply: "Still provisional: …. Group not closed: …".
 - **Warnings (dry run, never blocking):** date tag malformed (`START29OC`), START / MIDT / END not in
   order (e.g. END before START) or spanning > 60 days, `_CK` not last, `MM_DDMON_` prefix ≠ START,
   `_CK` / status tag / START / END dropped from the current name, another request already using the name,
@@ -1181,8 +1183,9 @@ reds[] / yellows[] ("Section — Title" of the open points; confirmed ones left 
 last_note, ck_owner, booking_owner, booking_owner_calc, open_findings {booking, sales, accounts}, open_followup {supplier,
 ticket, group, safaricheck, manual}, findings_checked_at, findings_report_path, pipeline_stage, open_lines, open_by_audience,
 open_by_source, urgent_lines, next_due_date, next_due_reason, last_claude_check_at, last_safaricheck_at, days_since_check,
-needs_check, next_check_reason, ck_blocked, ck_blocked_by[], ck_ready, followup_url}`. To set `_CK` use `rename_folder` (it keeps
-`_CK` last; **refused with 409 while a booking is provisional**, a warning for other open lines).
+needs_check, next_check_reason, is_group, group_closed, group_closed_at, group_closed_by (name), ck_blocked, ck_blocked_by[],
+ck_ready, followup_url}`. To set `_CK` use `rename_folder` (it keeps `_CK` last; **refused with 409 while a booking is
+provisional or a group is not closed**, a warning for other open lines).
 - **Owners** (Oct 2026, migration 073): `ck_owner` / `booking_owner` = `{user_id, username, name, email, default}` or `null`.
   `default: true` = not set by hand, computed by the rule (a later change of rule applies to every such row):
   CK owner = `CK_OWNER_DEFAULT` in the server config — `seller` (**default since 25 Oct 2026**) or `fixed:<username>`.
@@ -1214,7 +1217,18 @@ needs_check, next_check_reason, ck_blocked, ck_blocked_by[], ck_ready, followup_
   `provisional`, `provisional_expired`, `on_request`, `orangi_rooms_provisional` or `booking_provisional`. `rename_folder`, the
   CK tracker "Set CK" button and the request edit form also refuse a document now in `invoices/` (not `old/`) that the last
   supplier scan read as provisional / on request. Other open lines (transfers, tickets, client info…) only warn.
+- **Groups: `_CK` only after "Group closed"** (Roberto, 25 Oct 2026; migration 075): `is_group` = a GRPnnnn folder, Il Diamante /
+  Panorama, a name with `GRUPPO`, a block tagged `_PROVISIONAL`, or a folder Hub requests use as `group_folder`
+  (`ck_is_group_folder()`). Until a person marks it closed (final pax and room list, unsold rooms / seats released) —
+  CK tracker button "👥 Group closed" or `ck_set_group_closed` — `ck_blocked_by[]` includes "Group not closed: mark it closed in
+  the CK tracker first". `group_closed_at` / `group_closed_by` = when / who; reopening clears them. Private files are not affected.
 - `ck_ready: true` = a booking check was sent (`ck_findings_upsert`), nothing provisional and no line of the booking open.
+
+### `ck_set_group_closed` (POST)
+`request_id` or `ck_folder_id` + `closed` (`true` = group closed, `false` = reopen). **Dry run unless `"confirm": true`.** Group
+rows only (409 "Not a group folder" otherwise). Logged in `ck_events` (`group_closed` / `group_reopened`, who / when). The key
+acts with admin rights; on the CK tracker the button is for admin, the row's CK owner and booking owner. → `{ok, dry_run,
+ck_folder_id, folder, changed, group_closed, group_closed_at}`.
 
 ### `ck_set_owners` (POST)
 `ck_folder_id` or `request_id` + `ck_owner?` / `booking_owner?` (username or user id of an active user; `null` = back to the
@@ -1309,6 +1323,7 @@ curl -sH "$H" -X POST "$U?action=ck_request_check" -d '{"request_id":2958}'     
 curl -sA "$UA" -H "$H" "$U?action=ck_status&owner=lydia"
 curl -sA "$UA" -H "$H" "$U?action=ck_status&needs_check=1&owners_refresh=0"                # the bookings to check now
 curl -sA "$UA" -H "$H" -X POST "$U?action=ck_set_owners" -d '{"request_id":2958,"booking_owner":"glady"}'                 # dry-run
+curl -sA "$UA" -H "$H" -X POST "$U?action=ck_set_group_closed" -d '{"request_id":1144,"closed":true}'                    # dry-run
 curl -sA "$UA" -H "$H" -X POST "$U?action=ck_findings_upsert" -d '{"request_id":2958,"checked_at":"2026-10-25T10:00:00","report_path":"booking-check.html","findings":[{"audience":"booking","issue":"transfer_missing","service_date":"2026-12-05","service":"Transfer ZNZ airport - hotel","text":"No transfer booked for the ZNZ arrival: book it and save the confirmation in bookings/"}]}'   # dry-run
 curl -sA "$UA" -H "$H" "$U?action=ck_findings_drafts&since=2026-10-25"
 curl -sH "$H" "$U?action=ops_movements&from=2026-10-14&to=2026-10-28"

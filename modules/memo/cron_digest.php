@@ -308,6 +308,12 @@ function memo_digest_render(array $d, $today) {
             $h[] = '<strong>CK bloccato, prenotazioni provisional, arrivo entro 60 giorni (' . count($pl['blocked']) . ')</strong><br><span style="color:#555;">' . implode('<br>', array_map($e, $items)) . '</span>';
             $t[] = 'CK bloccato, prenotazioni provisional, arrivo entro 60 giorni (' . count($pl['blocked']) . "):\n    " . implode("\n    ", $items);
         }
+        if ($pl && !empty($pl['groups_open'])) {
+            $items = array();
+            foreach ($pl['groups_open'] as $b) $items[] = $b['customer'] . ' — arrivo ' . date('d/m', strtotime($b['start_date'])) . ' (' . $b['to_arrival'] . ' gg)';
+            $h[] = '<strong>Gruppi non chiusi, arrivo entro 60 giorni (' . count($pl['groups_open']) . ')</strong><br><span style="color:#555;">' . implode('<br>', array_map($e, $items)) . '</span>';
+            $t[] = 'Gruppi non chiusi, arrivo entro 60 giorni (' . count($pl['groups_open']) . "):\n    " . implode("\n    ", $items);
+        }
         if ($pl && $pl['first_check']) {
             $items = array();
             foreach (array_slice($pl['first_check'], 0, 15) as $b) $items[] = $b['customer'] . ' — arrivo ' . date('d/m', strtotime($b['start_date'])) . ($b['waiting'] !== null ? ' · prenotata da ' . $b['waiting'] . ' gg' : '');
@@ -345,7 +351,7 @@ function memo_digest_render(array $d, $today) {
         }
         $section('📋 Bookings pipeline', $h, $t);
         $counts .= '; ck_nuove=' . count($fu['ck_new']) . '; ck_vecchie=' . count($fu['ck_old']) . '; ck_pratiche60=' . count($fu['ck_soon'])
-                 . '; urgenti=' . array_sum(array_map('count', $fu['urgent'])) . ($pl ? '; ck_bloccati=' . count($pl['blocked']) . '; primo_check=' . count($pl['first_check']) : '');
+                 . '; urgenti=' . array_sum(array_map('count', $fu['urgent'])) . ($pl ? '; ck_bloccati=' . count($pl['blocked']) . '; gruppi_aperti=' . count(isset($pl['groups_open']) ? $pl['groups_open'] : array()) . '; primo_check=' . count($pl['first_check']) : '');
     }
 
     if (!$d['overdue'] && !$d['today'] && !$d['week'] && !$d['doing']) {
