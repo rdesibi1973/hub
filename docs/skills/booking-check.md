@@ -6,9 +6,10 @@ description: Verify a booked safari: every service of the Calc (stays, flights, 
 # Booking check
 
 Use when Roberto asks to verify the bookings of a safari ("verifica le prenotazioni", "controlla la pratica X", "è tutto prenotato?"), or types /booking-check. One safari per run; for a list (e.g. "le partenze di novembre") run it per safari and give a short summary at the end.
+Which bookings: when Roberto asks for a round ("fai i CK", "cosa c'è da controllare") take them from `ck_status&needs_check=1` and give the reason for each (`next_check_reason`: `first_check` right after the bookings are done, `recheck_60` / `recheck_30` before arrival), nearest arrival first; not by month (25 Oct 2026).
 Reply in Italian. The report file is in English (the booking team, Glady and Lydia, act on it).
 
-This is a CHECK: never edit the Calc, never move, rename or delete files, never send mail, never read mailboxes. The evidence is only what the booking team saved in Dropbox: invoices / service vouchers in `invoices/`, transfer confirmations (mails) in `bookings/`. Missing there = missing.
+This is a CHECK: never edit the Calc (only exception, with Roberto's ok: flight details pasted as screenshots — see §4), never move, rename or delete files, never send mail, never read mailboxes. The evidence is only what the booking team saved in Dropbox: invoices / service vouchers in `invoices/`, transfer confirmations (mails) in `bookings/`. Missing there = missing.
 
 **Passport numbers: supplier documents often contain them (reservation notes, guest lists). Never copy them into the report or the chat, not even partially.** Guest names are fine; leave out dates of birth.
 
@@ -21,6 +22,8 @@ This is a CHECK: never edit the Calc, never move, rename or delete files, never 
 - `evidence[]`: every file in `invoices/` and `bookings/` (`scope` `group` = the GRP folder's), `old` = inside an `old…` sub-folder.
 
 422 "several pax sheets, none marked CONF": look at the sheet names. Two real parts of one trip (e.g. `16PAX` + `2PAX ZNZ`) → call once per `sheet` and check both; old quotes left next to the confirmed one → say so and stop (the Calc must be cleaned first). No Calc → say so and stop.
+
+Calc sheet rule (Roberto, 25 Oct 2026): first the RECAP sheet (for GRP it is the one that counts), then the CONF sheet when the Excel has several worksheets — CONF on one sheet only, the one in use; otherwise the Excel must have a single worksheet. Two or more sheets marked CONF → don't check: say so and draft a mail (skill agency-email) asking the seller of the folder to keep CONF only on the sheet in use and remove it elsewhere. A Calc found only as a Dropbox conflicted copy ("… conflicted copy …" / "Copia in conflitto …") with no main file → the Hub can't read it: tell Roberto and, with his ok, rename the latest copy to the normal Calc name (older versions stay in `old/`).
 
 ## 2. Read every evidence file
 
@@ -51,7 +54,15 @@ Amount: if a document's total differs from `calc_invoice` or the flight cost, no
 
 Domestic flight tickets are saved in `flights/` and are often issued only a few weeks or days before arrival. A flight correctly booked (confirmed invoice / pro-forma, right date, route and pax) with no ticket yet is NOT an error: info "ticket not issued yet — checked by the weekly ticket round (back-office §6)". If the ticket is there, check names, date, flight and times against the Calc.
 
-Client's own international flights (booked by the client, no flight cost in the Calc): clients usually do not send us their tickets, so no ticket in `IntFlights/` / `flights/` is normal, never an error. Check only the dates: arrival / departure date in `calc.arrival` / `calc.departure` = first / last day of the Calc and of the Word program → OK (times are not checked). Different dates → CHECK. Never compare with the client's first request or booking form (`CustomerInfo.txt`): the client may have changed flights since; the Calc holds the latest data. Empty ARRIVAL / DEPARTURE details → CHECK "ask the client for the flight details".
+Client's own international flights (booked by the client, no flight cost in the Calc): clients usually do not send us their tickets, so no ticket in `IntFlights/` / `flights/` is normal, never an error. Check only the dates: arrival / departure date in `calc.arrival` / `calc.departure` = first / last day of the Calc and of the Word program → OK. Different dates → CHECK. Times are checked only when the first night / last night is in Karatu, Manyara / Mto wa Mbu or Tarangire (the drive to / from the airport is long and we never drive in the dark — daylight about 06:30–18:30): drive 2.5 h to / from Arusha (ARK / Arusha town), 4 h to / from JRO (Kilimanjaro). Arrival: landing + about 1 h (international) / 30 min (domestic) + drive must reach the lodge before 18:30. Departure: leaving the lodge not before 06:30 + drive must reach the airport by check-in (international 3 h, domestic 90 min before departure). Same rule for domestic flights leaving from ARK / landing at ARK on a day that starts or ends in those places. Not feasible → CHECK with the times (e.g. "lands JRO 17:30, 4 h to Karatu → after dark: add a night in Arusha"). Never compare with the client's first request or booking form (`CustomerInfo.txt`): the client may have changed flights since; the Calc holds the latest data. Empty ARRIVAL / DEPARTURE details → CHECK "ask the client for the flight details".
+
+Flight details pasted in the Calc as screenshots (pictures under ARRIVAL / DEPARTURE DETAILS, so `calc.arrival` / `departure` come back empty): read the pictures and, with Roberto's ok, replace them with text rows in the usual format (`TK 1322 01JAN BLQIST 1055 1535`, one leg per row, PNR at the end) by editing the xlsx XML in place (inline strings, remove the drawing) — never re-save with openpyxl (it drops the saved formula values the Hub reads). Never invent a flight number that is cut in the picture: write `????` and say so.
+
+Who does what — route each finding to the right people:
+- Airport pick-ups / drop-offs of the client on the mainland (JRO, ARK, also at night) are Savannah's own transfers, handled by operations through the Arrivals / Departures page: not a booking-team item, not a finding (note them in the report only).
+- Transfers by external suppliers (Zanzibar — Iddi —, Dar, Mafia…), lodges, domestic flights, payments to suppliers → booking team (`audience: booking`).
+- Information missing from the client (flights, names, requests) → `audience: sales` (CK owner).
+- Client invoice / payment that doesn't match → `audience: accounts` (Roberto). Before reporting a payment difference, read the comment on the Calc deposit / balance cell: it usually quotes the bank statement with the amount actually received.
 
 Status of each service:
 - **OK**: evidence found and everything matches.
@@ -72,7 +83,18 @@ Save it in `local_folder` as `booking-check.html` (replace the previous one — 
 
 Badge colours: OK green, CHECK amber, MISSING red, IN-HOUSE grey. Never passport numbers.
 
-## 6. Reply (Italian, plain text, no emoji)
+## 6. Findings to the Hub (Booking follow-up)
+
+After writing the report, send the open points to the Hub so the owners follow them: `ck_findings_upsert` with `request_id`, `checked_at`, `report_path` (the folder's `booking-check.html`) and `findings[]` `{audience, issue, service_date, service, supplier?, text, source_file?}` (issues: `transfer_missing`, `transfer_unconfirmed`, `booking_provisional`, `flight_unpaid`, `client_flights_missing`, `invoice_mismatch`, `payment_mismatch`, `other`). One finding per CHECK / MISSING row that needs action; IN-HOUSE and info notes are not findings. Text in English, what is wrong + what to do, never passport numbers.
+
+- First the dry run: show Roberto the lines and the owner each one gets (`booking` → booking owner, `sales` → CK owner, `accounts` → Roberto); `confirm: true` only after his ok.
+- Send every finding, also when another check already reports it (supplier scan, ticket scan, SafariCheck): the Hub merges lines with the same service (`would_merge[]` in the dry run, `merged[]` after) and adds `claude_check` to their `sources`, keeping the existing owner. Show the merges to Roberto with the dry run.
+- Fix first what Roberto can fix now (invoice text, payment, names): those never become lines.
+- `findings: []` when everything is fine: it closes any open ck line and the booking shows `ck_ready` in the CK tracker.
+- `_CK` is blocked by the Hub while a booking is still provisional (provisional, expired provisional, on request, Orangi rooms provisional, `booking_provisional`): `ck_status` shows `ck_blocked` + `ck_blocked_by[]` and `rename_folder` refuses `_CK` (409). If `ck_blocked`, never propose `_CK`: say what blocks it. Other open lines (transfers, tickets, client info) only give a warning.
+- No mail to the owners: on request, `ck_findings_drafts` → `.eml` drafts in `C:\Dropbox\Exchange\Draft-mail\` for Roberto (skill agency-email).
+
+## 7. Reply (Italian, plain text, no emoji)
 
 ```
 Verifica prenotazioni <cartella>

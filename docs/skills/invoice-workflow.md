@@ -65,13 +65,14 @@ A transfer the client/agency says was sent, or a payment advice (e.g. "Comunicaz
 - do NOT register it in the Hub, do NOT change invoice or folder status, never mark anything paid;
 - in the Calc write "ON THE WAY dd/mm/yyyy" in G11 (deposit) or G12 (balance);
 - every note written in the Calc is in English ("ON THE WAY", "RECEIVED", "incoming, not yet received"), never Italian ("in arrivo") (19 Oct 2026);
+- writing in the Calc: never re-save the file with openpyxl (it drops the saved values of every formula, and `read_calc` / the Hub then miss totals and balances). Insert the note directly into the sheet XML (inline string, other files of the .xlsx copied unchanged), or open the Calc in Excel; first keep a copy in `old/`; afterwards check `read_calc` has no warnings (25 Oct 2026);
 - propose forwarding the agency's original payment mail, with its attachment, to Saruni and Doreen, with the folder name in the subject (draft, send only after his ok).
 
 ## 6. Payment received
 
 Money actually on the account (bank statement / AfrAsia) or cash collected by Saruni.
 1. `add_invoice_payment` dry run: date, amount, method, reference. It refuses duplicates (same amount + reference): never force `allow_duplicate` without asking. Confirm after ok.
-2. Calc: amount in F11 (deposit) or F12 (balance), "RECEIVED dd/mm/yyyy" in G11/G12, the bank-statement line as a cell comment. NEVER in columns N "DEPOSIT PD" / O "BALANCE PD" (those are payments to suppliers). Calc not open in Excel on his PC; wait for Dropbox sync before the next Hub action.
+2. Calc: amount in F11 (deposit) or F12 (balance), "RECEIVED dd/mm/yyyy" in G11/G12, the bank-statement line as a cell comment. NEVER in columns N "DEPOSIT PD" / O "BALANCE PD" (those are payments to suppliers). Calc not open in Excel on his PC; wait for Dropbox sync before the next Hub action. Write it as in §5 (no openpyxl re-save).
 3. Folder status = what is still due: deposit received → `BALANCE`, or `BALANCE-CASH` when the balance will be paid in cash (ask if unclear); everything received → `PAID` (= fully paid). `DEPOSIT` only while the deposit is still due. `update_folder_status` dry run → confirm after ok.
 4. Offer the updated `save_invoice_pdf` (`overwrite: true`).
 5. SH invoice: its payment memo closes by itself when fully paid; after a partial payment propose updating it (new balance, next chase date). If a supplier must now be paid, remind Roberto (from `next_steps`).
