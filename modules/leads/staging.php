@@ -282,6 +282,9 @@ select:focus,input:focus{outline:none;border-color:#C0211B;box-shadow:0 0 0 2px 
             <label style="font-size:.75rem;font-weight:600;display:block;margin-bottom:4px">👤 Customer Name</label>
             <input type="text" name="customer_name_override" id="customerNameInput"
                    placeholder="Customer name" oninput="onCustomerNameInput()">
+            <div id="surnameGuessHint" style="display:none;font-size:.72rem;color:#b26a00;margin-top:3px">
+              ✨ Surname guessed from the email address — please check
+            </div>
           </div>
         </div>
         <div class="form-row">
@@ -673,6 +676,27 @@ function fixNameCase(name) {
   }).join(' ');
 }
 
+// Single first name + "firstname.surname@" / "firstnamesurname91@" / "s.surname@" → "Firstname Surname".
+// Returns '' when the email gives no safe guess.
+function guessSurnameFromEmail(name, email) {
+  const first = String(name || '').trim();
+  if (!first || /\s/.test(first) || !/^[a-zà-ÿ'-]{2,}$/i.test(first)) return '';
+  const local = String(email || '').split('@')[0].toLowerCase();
+  const f = first.toLowerCase();
+  const tokens = local.split(/[._\-+]+/).map(t => t.replace(/[^a-zà-ÿ]/g, '')).filter(Boolean);
+  let surname = '';
+  if (tokens.length >= 2) {
+    const i = tokens.findIndex(t => t === f || t === f[0]);
+    const rest = tokens.filter((t, j) => j !== i && t.length >= 3);
+    if (i !== -1 && rest.length === 1) surname = rest[0];
+  } else if (tokens.length === 1) {
+    const t = tokens[0];
+    if (t.startsWith(f) && t.length - f.length >= 3) surname = t.slice(f.length);
+    else if (t.endsWith(f) && t.length - f.length >= 3) surname = t.slice(0, t.length - f.length);
+  }
+  return surname ? fixNameCase(first + ' ' + surname) : '';
+}
+
 function openDrawer(id) {
   const l = LEADS[id];
   if (!l) return;
@@ -685,7 +709,9 @@ function openDrawer(id) {
   // Populate editable name; reset folder state
   currentLeadName = l.customer_name;
   setFolderEdited(false);
-  document.getElementById('customerNameInput').value = fixNameCase(l.customer_name);
+  const guessedName = guessSurnameFromEmail(l.customer_name, l.email);
+  document.getElementById('customerNameInput').value = guessedName || fixNameCase(l.customer_name);
+  document.getElementById('surnameGuessHint').style.display = guessedName ? '' : 'none';
   document.getElementById('approveAgent').value = '';
   document.querySelector('#approveForm input[name="channel"][value="direct"]').checked = true;
   clearAgency();
