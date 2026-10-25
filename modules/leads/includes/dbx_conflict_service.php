@@ -69,9 +69,10 @@ function dbxc_live(): bool {
 function dbxc_schema(PDO $db): void {
     static $done = false;
     if ($done) return;
+    // file_id: Dropbox file id of the copy (kept when the booking folder is renamed _DEPOSIT → _BALANCE …).
     $db->exec("CREATE TABLE IF NOT EXISTS dbx_conflicts (
         id INT AUTO_INCREMENT PRIMARY KEY,
-        path_hash CHAR(40) NOT NULL,
+        file_id VARCHAR(64) NOT NULL,
         path VARCHAR(1000) NOT NULL,
         original_path VARCHAR(1000) NOT NULL,
         folder VARCHAR(255) NOT NULL,
@@ -90,7 +91,7 @@ function dbxc_schema(PDO $db): void {
         checked_at DATETIME NOT NULL,
         resolved_at DATETIME NULL,
         mailed_at DATETIME NULL,
-        UNIQUE KEY uq_dbxc_path (path_hash),
+        UNIQUE KEY uq_dbxc_file (file_id),
         KEY idx_dbxc_status (status, owner_user_id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
     $db->exec("CREATE TABLE IF NOT EXISTS dbx_conflict_meta (
@@ -134,6 +135,7 @@ function dbxc_in_old(string $lowerPath): bool {
 
 /** POST a Dropbox RPC endpoint → [http code, decoded body]. */
 function dbxc_api(string $token, string $endpoint, array $payload): array {
+    dbxc_keepalive();
     $ch = curl_init('https://api.dropboxapi.com/2/' . $endpoint);
     curl_setopt_array($ch, [
         CURLOPT_POST           => true,
@@ -148,9 +150,23 @@ function dbxc_api(string $token, string $endpoint, array $payload): array {
     return [$code, json_decode((string)$body, true) ?: ['raw' => (string)$body]];
 }
 
+/**
+ * Keep the MySQL connection alive during long Dropbox / Excel work (BlueHost drops a connection idle for about two
+ * minutes: "MySQL server has gone away"). dbxc_keepalive($db) at the start of a run, dbxc_keepalive() between steps.
+ */
+function dbxc_keepalive(?PDO $set = null): void {
+    static $db = null, $last = 0;
+    if ($set) { $db = $set; $last = time(); return; }
+    if ($db && time() - $last >= 20) {
+        $db->query("SELECT 1");
+        $last = time();
+    }
+}
+
 /** Dropbox file entry → the fields used here. */
 function dbxc_entry(array $e): array {
     return [
+        'id'     => (string)($e['id'] ?? ''),
         'path'   => (string)$e['path_display'],
         'lower'  => (string)$e['path_lower'],
         'name'   => (string)$e['name'],
@@ -161,19 +177,76 @@ function dbxc_entry(array $e): array {
     ];
 }
 
-/** Every file below CK_BASE outside old/ sub-folders: [path_lower => dbxc_entry()]. */
-function dbxc_list(string $token): array {
-    $out = [];
-    [$code, $data] = dbxc_api($token, 'files/list_folder', ['path' => CK_BASE, 'recursive' => true, 'limit' => 2000]);
-    while (true) {
-        if ($code !== 200) throw new RuntimeException("Dropbox list_folder failed (HTTP $code): " . json_encode($data));
-        foreach ($data['entries'] ?? [] as $e) {
-            if (($e['.tag'] ?? '') !== 'file' || dbxc_in_old((string)$e['path_lower'])) continue;
-            $out[(string)$e['path_lower']] = dbxc_entry($e);
+/**
+ * The folders below CK_BASE (outside old/) holding a conflicted copy, by Dropbox search on the file name: a full
+ * recursive listing of /001_Safari is 56,000 files and two minutes. → [path_display of the folder => true]
+ */
+function dbxc_search_dirs(string $token): array {
+    $dirs = [];
+    foreach (['conflicted copy', 'Copia in conflitto'] as $q) {
+        [$code, $data] = dbxc_api($token, 'files/search_v2', ['query' => $q,
+            'options' => ['path' => CK_BASE, 'filename_only' => true, 'max_results' => 1000, 'file_status' => 'active']]);
+        while (true) {
+            if ($code !== 200) throw new RuntimeException("Dropbox search failed (HTTP $code): " . json_encode($data));
+            foreach ($data['matches'] ?? [] as $m) {
+                $e = $m['metadata']['metadata'] ?? [];
+                if (($e['.tag'] ?? '') !== 'file' || dbxc_in_old((string)$e['path_lower']) || !dbxc_parse_name((string)$e['name'])) continue;
+                $dirs[dirname((string)$e['path_display'])] = true;
+            }
+            if (empty($data['has_more'])) break;
+            dbxc_keepalive();
+            [$code, $data] = dbxc_api($token, 'files/search/continue_v2', ['cursor' => $data['cursor']]);
         }
-        if (empty($data['has_more'])) break;
-        [$code, $data] = dbxc_api($token, 'files/list_folder/continue', ['cursor' => $data['cursor']]);
     }
+    return $dirs;
+}
+
+/**
+ * The files of these folders (not recursive, several at once): [path_lower => dbxc_entry()]. A folder gone or
+ * renamed since is skipped (its copies are found again under the new name by dbxc_search_dirs()).
+ */
+function dbxc_list_dirs(string $token, array $dirs, int $concurrency = 8): array {
+    $out = [];
+    $queue = array_values($dirs);
+    $mh = curl_multi_init();
+    $live = [];
+    $start = function (string $endpoint, array $payload) use ($token, $mh, &$live) {
+        $ch = curl_init('https://api.dropboxapi.com/2/' . $endpoint);
+        curl_setopt_array($ch, [
+            CURLOPT_POST => true, CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 60,
+            CURLOPT_HTTPHEADER => ['Authorization: Bearer ' . $token, 'Content-Type: application/json'],
+            CURLOPT_POSTFIELDS => json_encode($payload),
+        ]);
+        curl_multi_add_handle($mh, $ch);
+        $live[(int)$ch] = $ch;
+    };
+    $next = function () use (&$queue, $start) {
+        if ($queue) $start('files/list_folder', ['path' => array_shift($queue), 'recursive' => false, 'limit' => 2000]);
+    };
+    for ($i = 0; $i < $concurrency; $i++) $next();
+    do {
+        curl_multi_exec($mh, $running);
+        if ($running) curl_multi_select($mh, 1.0);
+        while ($info = curl_multi_info_read($mh)) {
+            $ch = $info['handle'];
+            unset($live[(int)$ch]);
+            $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            $data = json_decode((string)curl_multi_getcontent($ch), true) ?: [];
+            curl_multi_remove_handle($mh, $ch);
+            curl_close($ch);
+            if ($code === 200) {
+                foreach ($data['entries'] ?? [] as $e) {
+                    if (($e['.tag'] ?? '') === 'file') $out[(string)$e['path_lower']] = dbxc_entry($e);
+                }
+                if (!empty($data['has_more'])) { $start('files/list_folder/continue', ['cursor' => $data['cursor']]); continue; }
+            } elseif ($code !== 409) {
+                throw new RuntimeException("Dropbox list_folder failed (HTTP $code): " . json_encode($data));
+            }
+            $next();
+        }
+        dbxc_keepalive();
+    } while ($running || $live);
+    curl_multi_close($mh);
     return $out;
 }
 
@@ -192,6 +265,7 @@ function dbxc_trash(string $token, string $path, string $rev): void {
 
 /** Bytes of a file at a revision. */
 function dbxc_bytes(string $token, string $rev): string {
+    dbxc_keepalive();
     $dl = calc_dbx_download($token, 'rev:' . $rev);
     if ($dl === null) throw new RuntimeException('Revision ' . $rev . ' not found in Dropbox.');
     return $dl['bytes'];
@@ -479,19 +553,23 @@ function dbxc_run(PDO $db, array $opt = []): array {
     if (!$db->query("SELECT GET_LOCK('dbxc_run', 0)")->fetchColumn()) return ['ok' => false, 'msg' => 'Another run is in progress.'] + $sum;
     try {
         @ini_set('memory_limit', '512M');
+        dbxc_keepalive($db);
+        $rows = [];
+        foreach ($db->query("SELECT * FROM dbx_conflicts")->fetchAll(PDO::FETCH_ASSOC) as $r) $rows[$r['file_id']] = $r;
+        // Folders to list: those the search finds now + those of the copies still open (to see the ones fixed by hand).
         $token = dropbox_get_access_token();
-        $files = dbxc_list($token);
+        $dirs = dbxc_search_dirs($token);
+        foreach ($rows as $r) if ($r['status'] === 'open') $dirs[dirname($r['path'])] = true;
+        $files = dbxc_list_dirs($token, array_keys($dirs));
         $found = [];
         foreach ($files as $lower => $f) {
             $p = dbxc_parse_name($f['name']);
-            if (!$p) continue;
+            if (!$p || $f['id'] === '' || dbxc_in_old($lower)) continue;
             $oLower = mb_strtolower(dirname($f['path']) . '/' . $p['original']);
-            $found[sha1($lower)] = ['c' => $f, 'o' => $files[$oLower] ?? null];
+            $found[$f['id']] = ['c' => $f, 'o' => $files[$oLower] ?? null];
         }
         $sum['conflicts'] = count($found);
 
-        $rows = [];
-        foreach ($db->query("SELECT * FROM dbx_conflicts")->fetchAll(PDO::FETCH_ASSOC) as $r) $rows[$r['path_hash']] = $r;
         $gone = $db->prepare("UPDATE dbx_conflicts SET status = 'gone', resolved_at = ? WHERE id = ?");
         foreach ($rows as $h => $r) {
             if ($r['status'] === 'open' && !isset($found[$h])) { $gone->execute([$now, $r['id']]); $sum['gone']++; }
@@ -508,7 +586,7 @@ function dbxc_run(PDO $db, array $opt = []): array {
         }
         uasort($pending, fn($a, $b) => [$a['c']['path'], $a['c']['saved']] <=> [$b['c']['path'], $b['c']['saved']]);
 
-        $save = $db->prepare("INSERT INTO dbx_conflicts (path_hash, path, original_path, folder, request_id, owner_user_id, trip_end, c_rev, o_rev,
+        $save = $db->prepare("INSERT INTO dbx_conflicts (file_id, path, original_path, folder, request_id, owner_user_id, trip_end, c_rev, o_rev,
                                   c_saved_at, outcome, status, action, detail, first_seen_at, last_seen_at, checked_at, resolved_at)
                               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                               ON DUPLICATE KEY UPDATE mailed_at = IF(status = 'open', mailed_at, NULL), path = VALUES(path), original_path = VALUES(original_path), folder = VALUES(folder),
