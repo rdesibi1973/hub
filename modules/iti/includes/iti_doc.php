@@ -233,11 +233,17 @@ function iti_doc_is_park(array $d): bool {
     return (bool)preg_match('/national park|conservation area|game reserve|national reserve|conservancy/i', (string)($d['name_en'] ?? ''));
 }
 
+/** A free-text activity that is a game drive: "Fotosafari", "Game drive", "safari fotografico", "Pirschfahrt"… */
+function iti_doc_is_drive_text(string $txt): bool {
+    return (bool)preg_match('/\b(game[\s-]?drives?|foto[\s-]?safari|photo[\s-]?safari|safari[\s-]?(fotogr|photo)\w*|pirschfahrt\w*)\b/iu', $txt);
+}
+
 /**
  * Last safari day of a programme ($days = iti_get_days() rows): the last day that leaves from or
  * arrives in a park / reserve, or has a game drive / walking safari. Departure = where the night
  * before was spent (lodge area, else destination) and the day's start destination / start lodge's
- * area; arrival = the day's destination or its lodge's area. Null when there is none
+ * area; arrival = the day's destination or its lodge's area. A free-text activity counts as a game
+ * drive by its text (iti_doc_is_drive_text()). Null when there is none
  * (beach / trekking only). Serengeti → flight to Zanzibar = the flight day.
  */
 function iti_doc_last_safari_day(PDO $db, array $days): ?int {
@@ -259,6 +265,13 @@ function iti_doc_last_safari_day(PDO $db, array $days): ?int {
     $st = $db->query("SELECT DISTINCT da.program_day_id FROM iti_day_activities da JOIN iti_activities a ON a.id = da.activity_id
                        WHERE a.activity_type IN ('game_drive', 'walking_safari') AND da.program_day_id IN (" . implode(',', $dayIds) . ')');
     foreach ($st->fetchAll(PDO::FETCH_COLUMN) as $x) $drives[(int)$x] = true;
+    // Free-text activities ("Fotosafari" / "Game drive" in the samples imported from WeTu): by their text.
+    $st = $db->query('SELECT * FROM iti_day_activities WHERE activity_id IS NULL AND program_day_id IN (' . implode(',', $dayIds) . ')');
+    foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $a) {
+        $txt = (string)($a['activity_custom'] ?? '');
+        foreach ($a as $k => $v) if (strpos($k, 'custom_note_') === 0) $txt .= ' ' . $v;
+        if (iti_doc_is_drive_text($txt)) $drives[(int)$a['program_day_id']] = true;
+    }
 
     $last = null; $prev = [];   // $prev: where the night before was spent
     foreach ($days as $d) {

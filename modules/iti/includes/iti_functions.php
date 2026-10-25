@@ -1084,6 +1084,7 @@ function iti_ensure_doc_columns(): void {
         // Tip note on the last safari day of the client documents (iti_doc_tip_note()), per programme; first run:
         // the texts in ITI Settings and the "Tips" line in the standard "not included" items.
         if (iti_add_column('iti_programs', 'show_tip_note', 'TINYINT(1) NOT NULL DEFAULT 1')) iti_seed_tip_note();
+        if (iti_setting('seed_ndutu_reserve') === '') iti_seed_ndutu_reserve();
         // ref_number = the programme Word's name ("01_LucaDeSanctis(LasciatiViaggiare-Daniela)_SafariGrandeMigrazioneEstate",
         // 72 characters): 60 was too short.
         $c = db()->query("SHOW COLUMNS FROM iti_programs LIKE 'ref_number'")->fetch(PDO::FETCH_ASSOC);
@@ -1178,6 +1179,24 @@ function iti_seed_tip_note(): void {
            ));
     } catch (PDOException $e) {
         error_log('iti_seed_tip_note inclusion: ' . $e->getMessage());
+    }
+}
+
+/**
+ * Once: Ndutu (inside the Ngorongoro Conservation Area) is a protected area — dest_type 'reserve', so the
+ * day leaving it is a safari day for the tip note (iti_doc_is_park()). Its airstrip and a type set by hand
+ * are left alone. Done when iti_settings.seed_ndutu_reserve is set.
+ */
+function iti_seed_ndutu_reserve(): void {
+    iti_ensure_country_schema();   // iti_destinations.dest_type
+    try {
+        $n = db()->exec("UPDATE iti_destinations SET dest_type = 'reserve'
+                          WHERE CONCAT_WS(' ', name_en, name_it, code) LIKE '%ndutu%'
+                            AND COALESCE(region, '') NOT IN ('Airports', 'Airstrips') AND COALESCE(dest_type, '') IN ('', 'other')
+                            AND name_en NOT LIKE '%airstrip%'");
+        iti_set_setting('seed_ndutu_reserve', date('Y-m-d') . ' (' . (int)$n . ')');
+    } catch (PDOException $e) {
+        error_log('iti_seed_ndutu_reserve: ' . $e->getMessage());
     }
 }
 

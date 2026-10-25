@@ -533,8 +533,9 @@ no text in the language, or no safari day) — see **Tip note** below; check it 
 last safari day with a quiet note on tipping the guide (about 10 USD per adult per safari day, at the client's discretion).
 Last safari day = the last day that leaves from or arrives in a park / reserve / conservation area (destination `type`
 `park` | `reserve`, region "National Parks", or "National Park" / "Conservation Area" / "Reserve" in its name; departure = where
-the night before was spent or the day's start; arrival = the day's destination or its lodge's area) or has a `game_drive` /
-`walking_safari` activity. Serengeti → flight to Zanzibar = the flight day; a beach or trekking-only program has none.
+the night before was spent or the day's start; arrival = the day's destination or its lodge's area; Ndutu is set to `reserve`
+once on the server) or has a `game_drive` / `walking_safari` activity — or a free-text activity whose text is a game drive
+("Fotosafari", "Game drive", "safari fotografico"…, as in the samples imported from WeTu). Serengeti → flight to Zanzibar = the flight day; a beach or trekking-only program has none.
 Worked out when the document is made — nothing is written in the days, old programs get it too. The text is the one in
 ITI Settings → Tip note for the program language (none there → no note). Per program: `show_tip_note` (default 1; copied by
 `iti_create_personal`, `iti_save_as_sample` and `iti_final_from_calc` from the sample), set with `iti_update_program`.
