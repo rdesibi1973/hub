@@ -3077,6 +3077,24 @@ try {
         agent_out($res + (empty($in['confirm']) ? ['message' => 'Dry run — resend with "confirm": true to save.'] : []));
     }
 
+    // ── Dropbox conflicted copies in /001_Safari (nightly conflicts_cron.php; page dropbox_conflicts.php).
+    case 'dropbox_conflicts': {
+        require_once __DIR__ . '/includes/dbx_conflict_service.php';
+        agent_out(['ok' => true] + dbxc_report($db, (int)($in['owner_user_id'] ?? 0) ?: null, max(1, min(365, (int)($in['days'] ?? 30)))));
+    }
+
+    // Check now. Dry run: analyse only (merges are built and read back, not uploaded). confirm: resolve what is safe
+    // (trash / merge) even before DBX_CONFLICTS_LIVE; owners' memos and mails stay with the nightly run.
+    case 'dropbox_conflicts_run': {
+        agent_require_method('POST');
+        require_once __DIR__ . '/includes/dbx_conflict_service.php';
+        @set_time_limit(300);
+        $res = dbxc_run($db, ['live' => !empty($in['confirm']), 'notify' => false, 'budget' => max(10, min(240, (int)($in['budget'] ?? 120)))]);
+        if (empty($res['ok'])) agent_fail($res['msg'] ?? 'Run failed', 409);
+        agent_out($res + (empty($in['confirm'])
+            ? ['message' => 'Dry run — nothing changed in Dropbox. Resend with "confirm": true to resolve what is safe.'] : []));
+    }
+
     default:
         agent_fail('Unknown action "' . $agentAction . '"', 400, ['actions' => [
             'find_requests', 'list_agencies', 'create_agency', 'update_agency', 'save_agency_contact', 'delete_agency_contact', 'create_request', 'update_request', 'import_group_folder', 'move_group_folder', 'list_standard_programs',
@@ -3095,7 +3113,7 @@ try {
             'timeline_list', 'timeline_add', 'timeline_update', 'summary_set', 'request_resume', 'set_request_status',
             'payments_due', 'ck_status', 'ck_request_check', 'ck_set_owners', 'ck_set_group_closed', 'ck_findings_upsert', 'ck_findings_drafts', 'ops_movements', 'ops_lunch_boxes', 'ops_medivac', 'flight_tickets',
             'followup_list', 'followup_scan', 'followup_update', 'followup_upsert', 'mail_security_status',
-            'sales_response_status', 'sales_response_dismiss',
+            'sales_response_status', 'sales_response_dismiss', 'dropbox_conflicts', 'dropbox_conflicts_run',
         ]]);
     }
 } catch (Throwable $e) {

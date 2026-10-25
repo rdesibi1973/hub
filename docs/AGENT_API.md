@@ -1586,6 +1586,49 @@ curl -sA "$UA" -H "$H" "$U?action=sales_response_status&week=2026-10-12&agent_id
 curl -sA "$UA" -H "$H" -X POST "$U?action=sales_response_dismiss" -d '{"key":"1234|2026-10-22 15:45","note":"client said thanks, will update us","confirm":true}'
 ```
 
+## Dropbox conflicted copies
+
+A Calc kept open in Excel on one PC while another PC (all on the same Dropbox account) or the Hub saves it leaves a
+"conflicted copy" next to the original: `X (Savannah Explorers's conflicted copy 2026-10-22).xlsx`,
+`X (Copia in conflitto di … 2026-10-16).xlsx`, ` 1` added for a second one the same day. Since 25 Oct 2026
+`modules/leads/conflicts_cron.php?token=…` (cron-job.org every 30 min; works only 01:00–07:00 EAT, each call goes on
+where the last stopped until the night is done; token `DBX_CONFLICTS_CRON_TOKEN`, else `MEMO_CRON_TOKEN`) checks every
+copy in `/001_Safari` (sub-folders `old/` left out) against its original and the original's Dropbox version history,
+cell by cell (formula text, every sheet). Logic `modules/leads/includes/dbx_conflict_service.php`, tables
+`dbx_conflicts` / `dbx_conflict_meta` (created on first use), page `modules/leads/dropbox_conflicts.php`.
+
+- Resolved by the Hub — the copy goes to the Dropbox trash (restorable from Deleted files), a timeline event on the
+  request: `identical`, `old_version` (= an earlier revision of the original), `already_in` (its changes are already
+  in the original), `merged` (copy and original changed different cells: the copy's cells are written into the
+  original, `.xlsx` only, at most 40 cells; the rewritten file must read back equal to the original plus those cells,
+  before and after the rev-checked upload, else nothing is uploaded).
+- For a person: `conflict` (`reason`: same cells changed in both, sheets added / removed, too many cells, not `.xlsx`,
+  rewrite would change other cells), `no_original`, `not_excel`, `no_history`, `error`.
+- Owner = the booking's CK owner (`ck_owners_resolve()`, the seller in the folder tag; not matched → rdesibi). Live
+  nights only: one memo per owner and booking on the Memo Board (`source` dropbox, `ext_key` dbxc:…, rewritten each
+  night, closed when the copies are gone) and one email per owner with the new copies to fix and what the Hub resolved
+  on their bookings. Trips ended more than 7 days ago: resolved when safe, nobody asked to fix them.
+- **`DBX_CONFLICTS_LIVE`** (server config, `includes/config.php`): until true the nightly run only analyses (nothing
+  moved, written, memoed or mailed; merges are built and read back but not uploaded) and the page shows what it would do.
+
+### `dropbox_conflicts` (GET)
+Params: `owner_user_id` (only that owner's), `days` (closed ones, default 30).
+→ `live`, `last_run {at, live, conflicts, checked, left, gone, outcomes, errors[], notified}`, `last_done` (date),
+`open[]` and `closed[]` `{id, path, file, original, folder, request_id, owner, owner_user_id, trip_end, saved_at, outcome,
+outcome_label, auto (resolved by the Hub when live), status (open | resolved | gone = fixed by hand), action (trashed |
+merged), reason, error, base_saved, n_cells, cells[] {cell ("2pax!J20"), base, original, copy, both}, first_seen_at,
+checked_at, resolved_at, mailed_at, dropbox_url}`.
+
+### `dropbox_conflicts_run` (POST, dry-run unless `confirm`)
+Check now, `budget` seconds (default 120, max 240; `left` > 0 = call again). Dry run: analysis only. `confirm`: also
+resolves what is safe (trash / merge), even before `DBX_CONFLICTS_LIVE`; memos and mails stay with the nightly run.
+→ `{ok, live, conflicts, checked, left, gone, outcomes {outcome: n}, errors[], done}`.
+
+```bash
+curl -sA "$UA" -H "$H" "$U?action=dropbox_conflicts"
+curl -sA "$UA" -H "$H" -X POST "$U?action=dropbox_conflicts_run" -d '{"budget":120}'
+```
+
 ## Request timeline
 
 A running history and a short "where are we" summary for each request, so a new session can pick

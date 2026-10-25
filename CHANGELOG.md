@@ -20,6 +20,17 @@ Running log of notable changes and current build state. Module-level "active / p
 
 ---
 
+## 2026-10-25 — Dropbox conflicted copies: nightly check
+- Calc kept open in Excel on one PC while another PC or the Hub saves it → Dropbox "conflicted copy" (all PCs share one
+  Dropbox account, so Dropbox file locking cannot help). New nightly run `modules/leads/conflicts_cron.php` (cron-job.org
+  every 30 min, works 01:00–07:00 EAT), logic `includes/dbx_conflict_service.php`, page `dropbox_conflicts.php`
+  ("🔀 Conflicts" in the Lead Tracker menu), Agent API `dropbox_conflicts` / `dropbox_conflicts_run`.
+- Each copy in `/001_Safari` (not `old/`) is compared cell by cell with the original and its Dropbox version history:
+  copies that add nothing, or that changed other cells than the original (merged into it, `.xlsx`, ≤ 40 cells, read back
+  before and after upload), go to the Dropbox trash; the rest → memo + email to the booking's CK owner.
+- **Not live yet**: until `DBX_CONFLICTS_LIVE` is set in `includes/config.php` the run only analyses. To do on the
+  server: add the cron-job.org job, check the page after a night, then set the constant.
+
 ## 2026-10-25 — CK procedure, "?" links, "Group closed"
 - New office procedure **CK AND BOOKING FOLLOW-UP** (Dropbox `/Operations/OfficeProcedures`, Word source in `orig/`, same
   layout as the other procedures, English then Italian): listed by the procedures page automatically.

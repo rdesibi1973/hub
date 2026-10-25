@@ -136,6 +136,7 @@ header {
   <a href="pipeline.php"  class="<?= $cur==='pipeline.php' ? 'active':'' ?>">🔥 Pipeline</a>
   <a href="sales_response.php" class="<?= $cur==='sales_response.php'?'active':'' ?>">⏱ Sales Response</a>
   <a href="ck_tracker.php"      class="<?= $cur==='ck_tracker.php'?'active':'' ?>">✅ CK Pipeline</a>
+  <a href="dropbox_conflicts.php" class="<?= $cur==='dropbox_conflicts.php'?'active':'' ?>">🔀 Conflicts</a>
   <a href="booked.php"          class="<?= $cur==='booked.php'?'active':'' ?>">✈ Booked</a>
   <a href="payments.php"        class="<?= $cur==='payments.php'?'active':'' ?>">💳 Payments</a>
   <a href="email_templates.php" class="<?= $cur==='email_templates.php'?'active':'' ?>">📧 Templates</a>
