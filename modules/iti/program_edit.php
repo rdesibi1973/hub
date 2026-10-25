@@ -75,6 +75,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (isset($_POST['safari_type']) && in_array($_POST['safari_type'], ITI_SAFARI_TYPES, true)) {   // cover + facts of the documents
             $db->prepare('UPDATE iti_programs SET safari_type=? WHERE id=?')->execute([$_POST['safari_type'], $id]);
         }
+        if (isset($_POST['show_tip_note'])) {   // tip note on the last safari day (iti_doc_tip_note())
+            $db->prepare('UPDATE iti_programs SET show_tip_note=? WHERE id=?')->execute([$_POST['show_tip_note'] === '1' ? 1 : 0, $id]);
+        }
         // Hub leads request link (personal programs)
         if (isset($_POST['lead_request_id'])) {
             iti_ensure_lead_link();
@@ -900,6 +903,15 @@ include __DIR__ . '/../../includes/layout_header.php';
           <option value="group" <?= iti_safari_type($program)==='group'?'selected':'' ?>>Group safari (shared jeep)</option>
         </select>
         <span class="form-hint">Cover and facts line of the programme: "Safari privato…" or "Safari di gruppo…"</span>
+      </div>
+      <?php endif; ?>
+      <?php if (array_key_exists('show_tip_note', $program)):
+          $tipDay = iti_doc_last_safari_day($db, iti_get_days($id)); ?>
+      <div class="form-group">
+        <label>Tip note</label>
+        <input type="hidden" name="show_tip_note" value="0">
+        <label class="check-label" style="margin-top:8px;"><input type="checkbox" name="show_tip_note" value="1" <?= (int)$program['show_tip_note'] === 1 ? 'checked' : '' ?>> Show tip note</label>
+        <span class="form-hint"><?= $tipDay !== null ? 'On day ' . $tipDay . ' (last safari day)' : 'No safari day in this program: no note' ?> of the web page, PDF and Word — not the guide sheet. Text: ITI Settings → Tip note.</span>
       </div>
       <?php endif; ?>
       <div class="form-group">

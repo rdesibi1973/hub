@@ -107,6 +107,7 @@ td{vertical-align:top}
 .recap td{padding:6px 4px;border-bottom:1px solid #E6DDD0}
 .recap td.lbl{width:25%;padding-top:8px}
 .recap p{margin:0 0 2px}
+.tip{border-left:2px solid #E6DDD0;padding:4px 10px;margin:8px 0 4px;font-size:8.5pt;font-style:italic;color:#6F675F}
 .dest{border-left:4px solid #B5822F;background:#FBF8F3;padding:7px 10px;margin:6px 0 10px}
 .dest p,.dest li{font-size:8.5pt;color:#4A433D}
 .lodge td{background:#F6F0E6;padding:8px}
@@ -252,6 +253,7 @@ td{vertical-align:top}
 <p><span class="lbl"><?= h($T['overnight']) ?></span>&nbsp;&nbsp; <b><?= h($d['lodge']) ?></b> <span class="note">&nbsp;·&nbsp; <?= h($M['see_day'] . ' ' . $seenLodge[$lk]) ?></span></p>
 <?php   endif;
         $prevKey = $d['lodge'] !== '' ? $lk : ''; ?>
+<?php if (!empty($d['tip_note'])): ?><p class="tip nobrk"><?= h($d['tip_note']) ?></p><?php endif; ?>
 </div>
 <?php endforeach; ?>
 

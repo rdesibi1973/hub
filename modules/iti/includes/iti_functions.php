@@ -1081,6 +1081,9 @@ function iti_ensure_doc_columns(): void {
         iti_add_column('iti_lodges', 'season_months', 'VARCHAR(40) NULL DEFAULT NULL');
         // Private safari or group departure: cover kicker + facts pill of the documents (iti_safari_labels()).
         if (iti_add_column('iti_programs', 'safari_type', "VARCHAR(10) NOT NULL DEFAULT 'private'")) iti_seed_safari_types();
+        // Tip note on the last safari day of the client documents (iti_doc_tip_note()), per programme; first run:
+        // the texts in ITI Settings and the "Tips" line in the standard "not included" items.
+        if (iti_add_column('iti_programs', 'show_tip_note', 'TINYINT(1) NOT NULL DEFAULT 1')) iti_seed_tip_note();
         // ref_number = the programme Word's name ("01_LucaDeSanctis(LasciatiViaggiare-Daniela)_SafariGrandeMigrazioneEstate",
         // 72 characters): 60 was too short.
         $c = db()->query("SHOW COLUMNS FROM iti_programs LIKE 'ref_number'")->fetch(PDO::FETCH_ASSOC);
@@ -1135,6 +1138,46 @@ function iti_seed_safari_types(): void {
     foreach ($steps as $sql) {
         try { $db->exec($sql); }
         catch (PDOException $e) { error_log('iti_seed_safari_types: ' . $e->getMessage()); }
+    }
+}
+
+// Tip note of the client documents (meeting with the guides, Oct 2026: tips are not the guide's topic at the
+// arrival briefing): texts approved by Roberto on 25 Oct 2026, copied once into ITI Settings → Tip note
+// (tip_note_<lang>), where they are edited. A language left empty there prints no note.
+const ITI_TIP_NOTE_TEXTS = array(
+    'it' => "Al termine del safari, se la tua guida ti ha fatto vivere un'esperienza speciale, una mancia a tua discrezione è un gesto sempre molto apprezzato: come riferimento, circa 10 USD per adulto per ogni giorno di safari.",
+    'en' => 'At the end of your safari, if your guide has made your experience special, a tip at your discretion is always greatly appreciated: as a guideline, around 10 USD per adult for each safari day.',
+    'fr' => "À la fin de votre safari, si votre guide a rendu votre expérience inoubliable, un pourboire à votre discrétion est toujours très apprécié : à titre indicatif, environ 10 USD par adulte et par jour de safari.",
+    'es' => 'Al final de tu safari, si tu guía ha hecho de tu experiencia algo especial, una propina a tu criterio siempre se agradece mucho: como referencia, unos 10 USD por adulto y día de safari.',
+    'de' => 'Am Ende Ihrer Safari: Wenn Ihr Guide Ihr Erlebnis zu etwas Besonderem gemacht hat, ist ein Trinkgeld nach Ihrem Ermessen stets sehr willkommen – als Richtwert etwa 10 USD pro Erwachsenem und Safaritag.',
+);
+
+/**
+ * First run of show_tip_note: the note texts into iti_settings (an existing key is kept) and the
+ * standard "not included" line for the guide's tips, every country (new programmes only).
+ */
+function iti_seed_tip_note(): void {
+    $db = db();
+    try {
+        $st = $db->prepare('INSERT IGNORE INTO iti_settings (skey, svalue) VALUES (?, ?)');
+        foreach (ITI_TIP_NOTE_TEXTS as $l => $t) $st->execute(array('tip_note_' . $l, $t));
+    } catch (PDOException $e) {
+        error_log('iti_seed_tip_note settings: ' . $e->getMessage());
+    }
+    iti_ensure_country_schema();   // iti_standard_inclusions.country
+    try {
+        if ($db->query("SELECT id FROM iti_standard_inclusions WHERE item_type = 'exclusion' AND text_en LIKE 'Tips (%'")->fetch()) return;
+        $db->prepare("INSERT INTO iti_standard_inclusions (item_type, country, sort_order, text_en, text_it, text_fr, text_es, text_de, is_active)
+                      VALUES ('exclusion', 'ALL', 800, ?, ?, ?, ?, ?, 1)")
+           ->execute(array(
+               'Tips (as a guideline, 10 USD per adult per day for the guide)',
+               'Mance (indicativamente 10 USD per adulto al giorno per la guida)',
+               'Pourboires (à titre indicatif, 10 USD par adulte et par jour pour le guide)',
+               'Propinas (como referencia, 10 USD por adulto y día para el guía)',
+               'Trinkgelder (Richtwert 10 USD pro Erwachsenem und Tag für den Guide)',
+           ));
+    } catch (PDOException $e) {
+        error_log('iti_seed_tip_note inclusion: ' . $e->getMessage());
     }
 }
 

@@ -281,6 +281,11 @@ function iti_mag_word_build(array $D): array {
             $r->addText($d['lodge'], 'mwBodyB');
             $r->addText('  ·  ' . $M['see_day'] . ' ' . $seenLodge[$lk], 'mwNote');
         }
+        if (!empty($d['tip_note'])) {   // last safari day: a quiet note (thin rule on the left, small grey italic)
+            $s->addText($d['tip_note'], ['name' => 'Calibri', 'size' => 9.5, 'italic' => true, 'color' => $MUTE],
+                        ['spaceBefore' => 80, 'spaceAfter' => 120, 'indentation' => ['left' => 160],
+                         'borderLeftSize' => 6, 'borderLeftColor' => 'E6DDD0', 'keepLines' => true]);
+        }
         $prevKey = $d['lodge'] !== '' ? $lk : '';
     }
 

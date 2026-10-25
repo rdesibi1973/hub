@@ -161,6 +161,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         iti_redirect('settings.php?tab=terms');
     }
 
+    // ---- Tip note of the client documents, one text per language (admin only; empty = no note in that language) ----
+    if ($do === 'tip_note' && $admin) {
+        foreach (ITI_LANGS as $lc) {
+            if (array_key_exists('tip_note_'.$lc, $_POST)) iti_set_setting('tip_note_'.$lc, trim(preg_replace('/\s+/u', ' ', (string)$_POST['tip_note_'.$lc])));
+        }
+        iti_flash_set('success', 'Tip note saved.');
+        iti_redirect('settings.php?tab=tips');
+    }
+
     // ---- Partner names never printed (iti_supplier_blocklist, admin only) ----
     if ($do === 'supplier_add' && $admin) {
         iti_ensure_country_schema();
@@ -206,6 +215,7 @@ if ($admin) {
     $user_list = $ul->fetchAll();
 }
 
+if ($tab === 'tips') iti_ensure_doc_columns();   // first run: the tip note texts (iti_seed_tip_note())
 $S = iti_settings_all();
 $get = fn(string $k, string $d = '') => ($S[$k] ?? '') !== '' ? $S[$k] : $d;
 
@@ -255,6 +265,7 @@ include __DIR__ . '/../../includes/layout_header.php';
   <a href="settings.php?tab=profile" class="set-tab <?= $tab==='profile'?'active':'' ?>">👤 My Profile</a>
   <a href="settings.php?tab=company" class="set-tab <?= $tab==='company'?'active':'' ?>">🏢 Company &amp; Contacts</a>
   <a href="settings.php?tab=terms"   class="set-tab <?= $tab==='terms'?'active':''   ?>">📜 Terms &amp; Conditions</a>
+  <a href="settings.php?tab=tips" class="set-tab <?= $tab==='tips'?'active':'' ?>">💬 Tip note</a>
   <a href="settings.php?tab=suppliers" class="set-tab <?= $tab==='suppliers'?'active':'' ?>">🚫 Partner names</a>
 </div>
 
@@ -424,6 +435,20 @@ include __DIR__ . '/../../includes/layout_header.php';
     <div style="margin-top:16px;"><button type="submit" class="btn btn-red">💾 Save Company Settings</button></div>
     <?php endif; ?>
   </div>
+</form>
+
+<?php /* ════════════ TIP NOTE ════════════ */ elseif ($tab === 'tips'): ?>
+<div class="page-header"><div><h2>Tip note</h2>
+  <div class="sub">A quiet note at the end of the last safari day of the client documents (web page, PDF, Word — not the guide sheet),
+  in the program language. A language left empty prints no note. Each program can switch it off (editor → Tip note).</div></div></div>
+<?php if (!$admin): ?><div class="ro-note">🔒 Read-only. Only administrators can change the tip note.</div><?php endif; ?>
+<form method="POST" action="settings.php?tab=tips" class="form-card">
+  <input type="hidden" name="_action" value="tip_note">
+  <?php foreach ($LANGS as $code => $name): ?>
+    <div class="form-group"><label><?= h($name) ?></label>
+      <textarea name="tip_note_<?= $code ?>" rows="3" <?= $admin ? '' : 'disabled' ?>><?= h($S['tip_note_'.$code] ?? '') ?></textarea></div>
+  <?php endforeach; ?>
+  <?php if ($admin): ?><button type="submit" class="btn btn-red">💾 Save</button><?php endif; ?>
 </form>
 
 <?php /* ════════════ TERMS ════════════ */ elseif ($tab !== 'suppliers'): ?>

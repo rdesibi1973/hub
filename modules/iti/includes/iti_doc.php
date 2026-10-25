@@ -226,6 +226,73 @@ function iti_doc_day_photos(PDO $db, array &$days, array $p): string {
     return $cover;
 }
 
+/** A park, reserve or conservation area (Ngorongoro): its type, the "National Parks" region or its English name. */
+function iti_doc_is_park(array $d): bool {
+    if (in_array(strtolower(trim((string)($d['dest_type'] ?? ''))), ['park', 'reserve'], true)) return true;
+    if (($d['region'] ?? '') === 'National Parks') return true;
+    return (bool)preg_match('/national park|conservation area|game reserve|national reserve|conservancy/i', (string)($d['name_en'] ?? ''));
+}
+
+/**
+ * Last safari day of a programme ($days = iti_get_days() rows): the last day that leaves from or
+ * arrives in a park / reserve, or has a game drive / walking safari. Departure = where the night
+ * before was spent (lodge area, else destination) and the day's start destination / start lodge's
+ * area; arrival = the day's destination or its lodge's area. Null when there is none
+ * (beach / trekking only). Serengeti → flight to Zanzibar = the flight day.
+ */
+function iti_doc_last_safari_day(PDO $db, array $days): ?int {
+    if (!$days) return null;
+    $lodgeIds = []; $dayIds = [];
+    foreach ($days as $d) {
+        $dayIds[] = (int)$d['id'];
+        foreach (['start_lodge_id', 'end_lodge_id'] as $k) if (!empty($d[$k])) $lodgeIds[(int)$d[$k]] = true;
+    }
+    $lodgeDest = [];
+    if ($lodgeIds) {
+        foreach ($db->query('SELECT id, destination_id FROM iti_lodges WHERE id IN (' . implode(',', array_keys($lodgeIds)) . ')')->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            if (!empty($r['destination_id'])) $lodgeDest[(int)$r['id']] = (int)$r['destination_id'];
+        }
+    }
+    $parks = [];
+    foreach ($db->query('SELECT * FROM iti_destinations')->fetchAll(PDO::FETCH_ASSOC) as $r) if (iti_doc_is_park($r)) $parks[(int)$r['id']] = true;
+    $drives = [];
+    $st = $db->query("SELECT DISTINCT da.program_day_id FROM iti_day_activities da JOIN iti_activities a ON a.id = da.activity_id
+                       WHERE a.activity_type IN ('game_drive', 'walking_safari') AND da.program_day_id IN (" . implode(',', $dayIds) . ')');
+    foreach ($st->fetchAll(PDO::FETCH_COLUMN) as $x) $drives[(int)$x] = true;
+
+    $last = null; $prev = [];   // $prev: where the night before was spent
+    foreach ($days as $d) {
+        $from = $prev;   // + the start set on the day (often an airstrip: the lodge of the night before still counts)
+        if (!empty($d['start_destination_id'])) $from[] = (int)$d['start_destination_id'];
+        if (!empty($d['start_lodge_id']) && isset($lodgeDest[(int)$d['start_lodge_id']])) $from[] = $lodgeDest[(int)$d['start_lodge_id']];
+        $to = [];
+        if (!empty($d['destination_id'])) $to[] = (int)$d['destination_id'];
+        if (!empty($d['end_lodge_id']) && isset($lodgeDest[(int)$d['end_lodge_id']])) $to[] = $lodgeDest[(int)$d['end_lodge_id']];
+        $hit = isset($drives[(int)$d['id']]);
+        foreach (array_merge($from, $to) as $x) if (isset($parks[$x])) $hit = true;
+        if ($hit) $last = (int)$d['day_number'];
+        $prev = [];
+        if (!empty($d['end_lodge_id']) && isset($lodgeDest[(int)$d['end_lodge_id']])) $prev[] = $lodgeDest[(int)$d['end_lodge_id']];
+        elseif (!empty($d['destination_id'])) $prev[] = (int)$d['destination_id'];
+    }
+    return $last;
+}
+
+/**
+ * Tip note of the client documents (magazine page, PDF, Word — never the guide sheet): the text of
+ * ITI Settings → Tip note in $lang, on the last safari day (iti_doc_last_safari_day()). Worked out
+ * at render time, nothing stored in the days. Off for the programme (show_tip_note = 0), no text in
+ * $lang or no safari day → ['day' => null, 'text' => ''].
+ */
+function iti_doc_tip_note(PDO $db, array $p, array $days, string $lang): array {
+    $none = ['day' => null, 'text' => ''];
+    if ((int)($p['show_tip_note'] ?? 1) !== 1) return $none;
+    $text = trim(iti_setting('tip_note_' . $lang));
+    if ($text === '') return $none;
+    $day = iti_doc_last_safari_day($db, $days);
+    return $day === null ? $none : ['day' => $day, 'text' => $text];
+}
+
 /**
  * Everything the document needs, in $lang:
  * program, days[] (title, transfer, duration, meals, narrative, destination, lodge, activities),
@@ -366,10 +433,13 @@ function iti_doc_data(int $id, string $lang): ?array {
             'room'       => $lodgeName !== '' ? trim((string)($d['room_type'] ?? '')) : '',   // "1 Double + 1 Twin", free text
             'beach'      => $beach,
             'activities' => $acts,
+            'tip_note'   => '',            // set below on the last safari day
         ];
     }
 
     $cover = iti_doc_day_photos($db, $out, $p);
+    $tip = iti_doc_tip_note($db, $p, $days, $lang);
+    foreach ($out as $i => $d) if ($d['n'] === $tip['day']) $out[$i]['tip_note'] = $tip['text'];
 
     // Included / not included: this programme's rows, text in $lang with fallbacks.
     $incl = []; $excl = [];
@@ -413,6 +483,7 @@ function iti_doc_data(int $id, string $lang): ?array {
         'days'     => $out,
         // Activity / lodge / destination texts not in $lang: left out of the document (iti_doc_own()).
         'missing_texts' => array_values($missing),
+        'tip_note_day' => $tip['day'],   // day with the tip note, null = none (off, no text in $lang, no safari day)
         'incl'     => $incl,
         'excl'     => $excl,
         'prices'   => $prices,

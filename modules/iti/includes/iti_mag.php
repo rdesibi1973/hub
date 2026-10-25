@@ -122,6 +122,7 @@ function iti_mag_compact_days(array $days, array $T, array $M): array {
         }
         $out[$i]['n_to'] = $d['n'];
         $out[$i]['date_to'] = $d['date'] ?? null;
+        if (!empty($d['tip_note'])) $out[$i]['tip_note'] = $d['tip_note'];   // the tip note stays at the end of the block
     }
     foreach ($out as $i => $b) {   // a block shows the meals of most of its days (the arrival day often differs)
         if (!empty($b['n_to'])) { arsort($meals[$i]); $out[$i]['meals'] = (string)key($meals[$i]); }
@@ -336,6 +337,8 @@ function iti_mag_css(): string {
 .mag-lodge.noph{grid-template-columns:1fr}
 .mag-again{margin:22px 0 0;padding:12px 16px;background:var(--sand);border-radius:4px;font-size:14px}
 .mag-again b{font-family:"Cormorant Garamond",Georgia,serif;font-size:19px;font-weight:600}
+/* Tip note on the last safari day: a quiet note, not a highlight. */
+.mag-tip{margin:22px 0 0;padding:10px 16px;border-left:2px solid var(--line);font-size:13.5px;font-style:italic;color:var(--mute)}
 
 /* Prices, lists, contacts, terms */
 .mag table{width:100%;border-collapse:collapse;font-size:14.5px}
@@ -382,7 +385,7 @@ function iti_mag_css(): string {
   .leaflet-control-zoom{display:none}
   .mag-day{padding:9mm 0 2mm;break-inside:auto}
   .mag-hero{break-after:avoid;aspect-ratio:3/1}   /* lower band: a tall photo + heading left half-empty pages */
-  .mag-hero,.mag-lodge-ph,.mag-stay,.mag-again,tr,.mag-lists li{break-inside:avoid}
+  .mag-hero,.mag-lodge-ph,.mag-stay,.mag-again,.mag-tip,tr,.mag-lists li{break-inside:avoid}
   .mag-dayhead,.mag-sec h2,.mag-sec h3{break-after:avoid}
   .mag-stays{break-before:avoid}
   .mag-map{height:110mm}
@@ -558,6 +561,7 @@ function iti_mag_render(array $D, string $publicUrl = '', bool $printBtn = true)
         <?php elseif ($d['lodge'] !== '' && !$prevSame): ?>
           <div class="mag-again"><span class="mag-kicker"><?= h($T['overnight']) ?></span><br><b><?= h($d['lodge']) ?></b> — <a href="#day-<?= (int)$seenLodge[$lk] ?>"><?= h($M['see_day']) ?> <?= (int)$seenLodge[$lk] ?></a></div>
         <?php endif; ?>
+        <?php if (!empty($d['tip_note'])): ?><p class="mag-tip"><?= h($d['tip_note']) ?></p><?php endif; ?>
       </article>
       <?php endforeach; ?>
     </section>

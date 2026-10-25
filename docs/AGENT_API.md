@@ -526,6 +526,20 @@ program | request = from the linked request | default), request_variant}`.
 catalogue texts that do not exist in the program language (`lang`, else the program's): the documents leave them out (see
 **Texts in the program language** below). Check it before `iti_document` and fill them with `iti_update_activity` /
 `iti_update_lodge` / `iti_update_destination`.
+`show_tip_note` (0 | 1) and `tip_note_day` = the day the tip note lands on in this language, null = no note (switched off,
+no text in the language, or no safari day) — see **Tip note** below; check it before `iti_document`.
+
+**Tip note (25 Oct 2026).** The client documents (magazine web page / public link, PDF, Word — never the guide sheet) end the
+last safari day with a quiet note on tipping the guide (about 10 USD per adult per safari day, at the client's discretion).
+Last safari day = the last day that leaves from or arrives in a park / reserve / conservation area (destination `type`
+`park` | `reserve`, region "National Parks", or "National Park" / "Conservation Area" / "Reserve" in its name; departure = where
+the night before was spent or the day's start; arrival = the day's destination or its lodge's area) or has a `game_drive` /
+`walking_safari` activity. Serengeti → flight to Zanzibar = the flight day; a beach or trekking-only program has none.
+Worked out when the document is made — nothing is written in the days, old programs get it too. The text is the one in
+ITI Settings → Tip note for the program language (none there → no note). Per program: `show_tip_note` (default 1; copied by
+`iti_create_personal`, `iti_save_as_sample` and `iti_final_from_calc` from the sample), set with `iti_update_program`.
+The standard "not included" items have a "Tips (as a guideline, 10 USD per adult per day for the guide)" line (country `ALL`)
+for new programs; add it to an existing personal program with `iti_update_inclusions` only when asked.
 
 **Texts in the program language (15 Oct 2026).** In every document (magazine web page, PDF, Word, guide sheet) the name and
 description of an activity, lodge or destination are printed only in the program language — never English or another
@@ -543,7 +557,7 @@ With no T&C chosen, the documents use the linked request's version.
 The program as a file in the magazine layout (cover, route map, stays, day by day with photos, prices,
 included / excluded, contacts, terms). `program_id`, `format?` (`pdf` default, rendered on the server with Dompdf;
 `docx` = editable Word for agencies; `guide` = PDF for the safari guide: transfer / flight and accommodation
-recap with check-in / check-out, then the day by day — no photos, intro, prices, lodge descriptions or terms,
+recap with check-in / check-out, then the day by day — no photos, intro, prices, lodge descriptions, terms or tip note,
 file `…_GUIDE_<LANG>.pdf`; `guide_docx` (or `guide_word`) = the same guide sheet as an editable Word, `…_GUIDE_<LANG>.docx`;
 **personal programs only**, a sample → 400), `lang?` (default: the program's language, the guide sheet included).
 The guide sheet (21 Oct 2026) has only the safari part: Zanzibar / beach nights and the departure day after them are left
@@ -568,7 +582,7 @@ curl -sH "$H" "$U?action=iti_document&program_id=412&format=guide&save=1"       
 #### `iti_create_personal` (POST)
 `sample_id`, `lead_request_id?` (Hub request), `calc_file?`, `fields?` — any of `ref_number`, `title_<lang>`, `subtitle_<lang>`, `intro_<lang>`,
 `start_date` (YYYY-MM-DD: dates appear on the cover and on each day), `pax_adults`, `pax_teens` (under 16), `pax_children` (under 12),
-`display_language`, `display_currency`, `safari_type` (`private` | `group`), `price_table_json` (`[{label, price, currency, bold?}]`; `bold: true` prints the row in bold — a row starting "Totale pratica" / "Total booking" is bold unless `bold: false`), `price_notes_<lang>`.
+`display_language`, `display_currency`, `safari_type` (`private` | `group`), `show_tip_note` (0 | 1, see **Tip note**; default from the sample), `price_table_json` (`[{label, price, currency, bold?}]`; `bold: true` prints the row in bold — a row starting "Totale pratica" / "Total booking" is bold unless `bold: false`), `price_notes_<lang>`.
 Copies the sample (days, activities, prices, inclusions) as a draft proposal, with the T&C of the request's client type
 (`fields.terms_variant` = `direct` | `agency` forces one). Dry-run unless `"confirm": true` (→ plan with `terms_variant`,
 `ref_number` and `ref_source`); confirmed → `program_id`, `links`, `terms` and the full `program`.
@@ -584,7 +598,7 @@ otherwise `group` when the sample is a group safari or `GRP` is in the ref_numbe
 the plan shows it. `iti_program` returns `safari_type`; change it with `iti_update_program`.
 
 #### `iti_update_program` (POST)
-`program_id`, `fields` (same list — `ref_number` included, see the rule above — plus `terms_variant` = `direct` | `agency` | `auto` (from the linked request)) → `changes`
+`program_id`, `fields` (same list — `ref_number` and `show_tip_note` included, see the rules above — plus `terms_variant` = `direct` | `agency` | `auto` (from the linked request)) → `changes`
 (a T&C change shows as `terms_id` with `variant_from` / `variant_to`). Dry-run unless confirm. Refused when the program has
 its own dedicated T&C (edit those in the Hub).
 
