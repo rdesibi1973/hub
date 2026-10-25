@@ -51,6 +51,8 @@ Amount: if a document's total differs from `calc_invoice` or the flight cost, no
 
 Domestic flight tickets are saved in `flights/` and are often issued only a few weeks or days before arrival. A flight correctly booked (confirmed invoice / pro-forma, right date, route and pax) with no ticket yet is NOT an error: info "ticket not issued yet — checked by the weekly ticket round (back-office §6)". If the ticket is there, check names, date, flight and times against the Calc.
 
+Client's own international flights (booked by the client, no flight cost in the Calc): clients usually do not send us their tickets, so no ticket in `IntFlights/` / `flights/` is normal, never an error. Check only the dates: arrival / departure date in `calc.arrival` / `calc.departure` = first / last day of the Calc and of the Word program → OK (times are not checked). Different dates → CHECK. Never compare with the client's first request or booking form (`CustomerInfo.txt`): the client may have changed flights since; the Calc holds the latest data. Empty ARRIVAL / DEPARTURE details → CHECK "ask the client for the flight details".
+
 Status of each service:
 - **OK**: evidence found and everything matches.
 - **CHECK**: evidence found but something differs or is unclear (pax, dates, room, provisional, amount).

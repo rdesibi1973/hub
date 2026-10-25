@@ -88,6 +88,7 @@ Where the draft goes, subject, greeting/closing, signature and general style: fo
 - Domestic flights: "Le tariffe e disponibilità dei voli interni sono soggette a disponibilità al momento della prenotazione".
 - No airline name for domestic flights and no operator name for the balloon safari (known only after booking).
 - Only when the programme is attached: "Programma safari dettagliato allegato (considera la quota netta per il gruppo di N pax)."
+- Group departures (Simba / Duma / Nyumbu di gruppo, GRP): never "base N pax" or "quota netta per il gruppo di N pax" in the email, the ITI price table or the price notes: the group may hold other travellers. Write "quota netta per persona" and close with "Programma safari dettagliato allegato (quota netta per persona)." (23 Oct 2026, DiCredico).
 - Agencies: no `links.public` link in the email (net price); programme as Word attachment (19 Oct 2026).
 - English emails and programme texts: write "program", never "programme" (Roberto's preference, 19 Oct 2026).
 - An agency sends us a programme we already quoted to its client as a direct: Roberto evaluates case by case — don't answer with prices before his decision (16 Oct 2026).

@@ -1,11 +1,11 @@
 ---
 name: social-post
-description: Prepare and schedule social posts for Savannah Explorers and The Orangi Collection on Facebook, Instagram, TikTok and YouTube: right brand and hashtags, Tuesday blog, Thursday/Saturday photo/video posts, TikTok and YouTube Shorts, composer steps.
+description: Prepare and schedule social posts for Savannah Explorers and The Orangi Collection on Facebook, Instagram, TikTok, YouTube and LinkedIn: right brand and hashtags, Tuesday blog, Thursday/Saturday photo/video posts, TikTok and YouTube Shorts, composer steps.
 ---
 
-# Social posts (Facebook, Instagram, TikTok, YouTube)
+# Social posts (Facebook, Instagram, TikTok, YouTube, LinkedIn)
 
-Use when Roberto asks for social posts ("post Facebook", "post Instagram", "TikTok", "YouTube", "programma i post", blog of the week, photo/video post), or types /social-post.
+Use when Roberto asks for social posts ("post Facebook", "post Instagram", "TikTok", "YouTube", "LinkedIn", "programma i post", blog of the week, photo/video post), or types /social-post.
 Talk to Roberto in Italian; posts are in English.
 
 Before every social session read the Project doc `claude/SOCIAL_PLAYBOOK.md` (account IDs, step-by-step procedures for Meta, TikTok and YouTube, past mistakes — it is the detailed reference; this file is the short checklist). Calendar and status of every post: `claude/SOCIAL_FB_2026Q4.md`; post texts: `claude/SOCIAL_FOTO_POST_2026-10.md` — update both at the end.
@@ -14,11 +14,12 @@ Before every social session read the Project doc `claude/SOCIAL_PLAYBOOK.md` (ac
 
 | Brand | What goes there | Hashtag |
 |---|---|---|
-| Savannah Explorers (FB + IG @savannahexplorers, TikTok @savannahexplorers, YouTube youtube.com/savannahexplorers) | blog, safaris, sightings, guests on safari, travel info (visa, insurance) | only #SavannahExplorers |
+| Savannah Explorers (FB + IG @savannahexplorers, TikTok @savannahexplorers, YouTube youtube.com/savannahexplorers = channel "Savannah Explorers - Tour Operator" @Savannahexplorers, ID UCgJqzK6k2rUOrVlgD7eCM8A; LinkedIn page SAVANNAH EXPLORERS LIMITED, linkedin.com/company/6229406) | blog, safaris, sightings, guests on safari, travel info (visa, insurance) | only #SavannahExplorers |
 | The Orangi Collection (FB + IG @theorangicollection, TikTok @theorangicollection) | anything about the lodges: Kifaru, Marera, Orangi River, Arusha Explorers Lodge (including the hide and bush dinners) | only #TheOrangiCollection |
 
 - Never cross-tag the two brands. Never use the separate "Serengeti Kifaru Tented Lodge" page.
 - Before scheduling, check the active account: "Post to" in Meta, the profile name in TikTok (tiktok.com/profile), the channel in YouTube Studio.
+- YouTube: the same Google account has several channels and Studio opens the last one used. Before every upload check the channel name top left and the URL (`/channel/UCgJqzK6k2rUOrVlgD7eCM8A`). Never upload to "Roberto Safari Tanzania" (in Oct 2026 three Shorts went there by mistake).
 
 ## 2. Cadence
 
@@ -26,6 +27,7 @@ Before every social session read the Project doc `claude/SOCIAL_PLAYBOOK.md` (ac
 - Thursday 10:00 EAT: one photo/video post for Savannah Explorers and one for The Orangi Collection, FB + IG.
 - Saturday 10:00 EAT: a second photo/video post for The Orangi Collection, FB + IG.
 - TikTok and YouTube Shorts: the same vertical videos, at 18:00 EAT.
+- LinkedIn (trade audience): only Stefano's video series (from the Things to Know article), with his LinkedIn text, Thursday 10:00 EAT, same day as the FB/IG Reel.
 - Scheduling windows: Meta 20 minutes to 29 days ahead; TikTok about 10 days ahead. Beyond that, save as draft or note it in the calendar and tell Roberto.
 
 ## 3. Before proposing: already published?
@@ -49,12 +51,14 @@ Before every social session read the Project doc `claude/SOCIAL_PLAYBOOK.md` (ac
 
 ## 6. Scheduling
 
-Use Claude in Chrome (Claude uploads files ≤ 10 MB itself from `/mnt/user-data/uploads/social/`) or the built-in browser; Roberto selects only files over 10 MB. Follow the playbook step by step:
+Use Claude in Chrome (Claude uploads files ≤ 10 MB itself from `/mnt/user-data/uploads/social/`) or the built-in browser; Roberto selects only files over 10 MB. One tab per platform: never reuse the tab of a composer with a file uploaded until that post is scheduled (the upload is lost). Follow the playbook step by step:
 - Meta (§4, §6): same exact size for all carousel photos; vertical videos in the Reels composer (Instagram max 60 s); dates first, then hours with arrow keys, verify 10 / 0 / AM; "Schedule", never "Share now".
 - TikTok Studio (§7): set "Schedule", date and time FIRST, then write the description (TikTok drops hashtags written before), re-read it, then "Schedule". Never click "Post now"; if the content check hangs, switch off "Content check lite". Scheduled TikTok posts cannot be edited.
-- YouTube Studio (§7): Shorts, "not made for kids", Visibility → Schedule, time zone GMT+3 Local Time.
+- YouTube Studio (§7): check the channel first; Shorts, "not made for kids", Visibility → Schedule, time zone GMT+3 Local Time; wait until the upload is complete before leaving the tab.
+- LinkedIn (playbook §7): Start a post → Video → Roberto uploads → Next → text → clock icon → date from the calendar, time from the list (East Africa Time) → Next → Schedule; stay on the page until "Your upload is complete".
+- Permanent deletions (YouTube "Delete forever", etc.) are done by Roberto; Claude can set a wrong post to Private.
 After scheduling, reload each platform's scheduled list (scroll to the end) and verify date, time, platform and brand of every post.
 
 ## 7. Close
 
-Tell Roberto in Italian what is scheduled (brand, platform, date/time, title) and anything left open. Update the calendar and texts docs, add any new mistake to `SOCIAL_PLAYBOOK.md` §5, and update Hub memo #36 (ext_key `social-fb-blog-2026q4`) when the PC is linked.
+Tell Roberto in Italian what is scheduled (brand, platform, date/time, title) and anything left open. Update the calendar and texts docs, add any new mistake to `SOCIAL_PLAYBOOK.md` §5, and update Hub memo #36 (ext_key `social-fb-blog-2026q4`): via Agent API from the PC, or via the Hub Memo Board in Chrome (Edit → text in the Quill editor, next step in `#m_next_title`, Save).
