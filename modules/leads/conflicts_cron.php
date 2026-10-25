@@ -1,6 +1,7 @@
 <?php
-// modules/leads/conflicts_cron.php — nightly check of the Dropbox conflicted copies in /001_Safari, from cron-job.org
-// every 15 min (logic: dbxc_nightly() in includes/dbx_conflict_service.php):
+// modules/leads/conflicts_cron.php — nightly check of the Dropbox conflicted copies in /001_Safari, standalone. Normally
+// not needed: ck_cron.php (every 30 min) already runs it after its reply. Logic: dbxc_nightly() in
+// includes/dbx_conflict_service.php:
 //   …/modules/leads/conflicts_cron.php?token=XXX
 // Works only between 01:00 and 07:00 EAT and until the night's run is complete: each call goes on where the last one
 // stopped (about 4 min of work per call), then the owners get their memos and mails (with DBX_CONFLICTS_LIVE).

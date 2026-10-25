@@ -22,8 +22,8 @@ Running log of notable changes and current build state. Module-level "active / p
 
 ## 2026-10-25 — Dropbox conflicted copies: nightly check
 - Calc kept open in Excel on one PC while another PC or the Hub saves it → Dropbox "conflicted copy" (all PCs share one
-  Dropbox account, so Dropbox file locking cannot help). New nightly run `modules/leads/conflicts_cron.php` (cron-job.org
-  every 15 min, works 01:00–07:00 EAT), logic `includes/dbx_conflict_service.php`, page `dropbox_conflicts.php`
+  Dropbox account, so Dropbox file locking cannot help). New nightly run, started by the existing `ck_cron.php` job
+  after its reply (works 01:00–07:00 EAT; standalone `conflicts_cron.php` also available), logic `includes/dbx_conflict_service.php`, page `dropbox_conflicts.php`
   ("🔀 Conflicts" in the Lead Tracker menu), Agent API `dropbox_conflicts` / `dropbox_conflicts_run`.
 - Each copy in `/001_Safari` (not `old/`, not the top-level archives `00_…` / `2022` / `99_office`) is compared cell by cell with the original and its
   Dropbox version history: copies that add nothing, or that changed other cells than the original (merged into it,

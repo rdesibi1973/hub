@@ -1,7 +1,7 @@
 <?php
 /**
  * dbx_conflict_service.php — Dropbox "conflicted copies" in /001_Safari: mostly the *_Calc.xlsx kept open in Excel on
- * one PC while another PC (same Dropbox account) or the Hub saves it. Shared by the nightly run (conflicts_cron.php),
+ * one PC while another PC (same Dropbox account) or the Hub saves it. Shared by the nightly run (ck_cron.php / conflicts_cron.php),
  * the page dropbox_conflicts.php and the Agent API dropbox_conflicts / dropbox_conflicts_run.
  *
  * Each conflicted copy C ("X (Savannah Explorers's conflicted copy 2026-10-22[ 1]).xlsx", "X (Copia in conflitto di …
@@ -664,7 +664,7 @@ function dbxc_run(PDO $db, array $opt = []): array {
 }
 
 /**
- * Nightly entry point (conflicts_cron.php, every 30 min): inside DBXC_NIGHT_FROM–DBXC_NIGHT_TO EAT, until the day's
+ * Nightly entry point (ck_cron.php every 30 min, or conflicts_cron.php): inside DBXC_NIGHT_FROM–DBXC_NIGHT_TO EAT, until the day's
  * run is complete (each call continues where the last one stopped).
  */
 function dbxc_nightly(PDO $db): string {

@@ -2,7 +2,8 @@
 // modules/leads/ck_cron.php
 // Scheduled CK-tracker scan, so stage / _CK changes made in Dropbox get their
 // real date even when nobody opens ck_tracker.php. It also starts the nightly
-// SafariCheck run once a day (ck_nightly_dispatch). Call from the external cron
+// SafariCheck run once a day (ck_nightly_dispatch); at night it also checks the Dropbox conflicted copies,
+// after the reply (dbxc_nightly). Call from the external cron
 // service (same one as the memo reminders), e.g. every 30 min:
 //   https://hub.savannahexplorers.com/modules/leads/ck_cron.php?token=XXX
 //
@@ -39,3 +40,23 @@ try {
     http_response_code(500);
     echo 'CK scan failed: ' . $e->getMessage() . "\n";
 }
+
+// Dropbox conflicted copies (includes/dbx_conflict_service.php): does something only 01:00–07:00 EAT until the night
+// is done, and runs after the reply is closed, so cron-job.org's 30 s limit does not apply. Result in the page.
+ignore_user_abort(true);
+@set_time_limit(330);
+if (function_exists('litespeed_finish_request')) litespeed_finish_request();
+elseif (function_exists('fastcgi_finish_request')) fastcgi_finish_request();
+else flush();
+ob_start();   // nothing more reaches the caller
+try {
+    if (!defined('AGENT_API_KEY') && is_file(__DIR__ . '/../../includes/config.php')) {
+        require_once __DIR__ . '/../../includes/config.php';   // DBX_CONFLICTS_LIVE
+    }
+    require_once __DIR__ . '/includes/dbx_conflict_service.php';
+    $dbxMsg = dbxc_nightly(db());
+} catch (Throwable $e) {
+    $dbxMsg = 'failed: ' . $e->getMessage();
+}
+try { dbxc_meta_set(db(), 'last_cron', date('Y-m-d H:i:s') . ' (ck_cron) ' . mb_substr($dbxMsg, 0, 400)); } catch (Throwable $ignored) {}
+ob_end_clean();

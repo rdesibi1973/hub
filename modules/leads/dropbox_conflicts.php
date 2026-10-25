@@ -1,7 +1,7 @@
 <?php
 /**
  * dropbox_conflicts.php — Dropbox conflicted copies in /001_Safari (Calc open in Excel on two PCs): what the nightly
- * run (conflicts_cron.php) resolved by itself and what the owners still have to fix. Admin / manager: every owner,
+ * run (ck_cron.php) resolved by itself and what the owners still have to fix. Admin / manager: every owner,
  * "Analyse now" (never changes a file). Anyone else: only the bookings they own.
  * Same data as the Agent API dropbox_conflicts: dbxc_report() in includes/dbx_conflict_service.php.
  */

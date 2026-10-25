@@ -24,7 +24,7 @@ outdated — this file wins where they disagree (PHP version, local lint).
 - **Sales Response** (`modules/leads/sales_response.php`, CLI `sales_response_scan.php` on cPanel cron or `sales_response_cron.php` from cron-job.org; logic
   `includes/sales_response_service.php`, shared with the Agent API `sales_response_status`): seller reply times from
   Maildir **headers only** — never store or show mail bodies.
-- **Dropbox conflicted copies** (`modules/leads/dropbox_conflicts.php`, nightly `conflicts_cron.php` from cron-job.org; logic
+- **Dropbox conflicted copies** (`modules/leads/dropbox_conflicts.php`, nightly from `ck_cron.php` after its reply; logic
   `includes/dbx_conflict_service.php`, shared with the Agent API `dropbox_conflicts*`): copies in `/001_Safari` resolved when
   safe (trash / cell merge), else memo + mail to the CK owner. Analysis only until `DBX_CONFLICTS_LIVE`.
 - **Procedures** (`modules/leads/procedures.php`, proxy `procedure_file.php`; logic `includes/procedures_service.php`,
