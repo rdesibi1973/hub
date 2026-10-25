@@ -5,6 +5,7 @@
  *   GET  ?action=events&id=N                     history of a line
  *   POST ?action=update  {id, take?, owner?, contacted_at?, staff_status?, notes?}
  *   POST ?action=scan    {type: supplier|ticket|all}       ("Run check now")
+ *   POST ?action=add     {request_id, audience, text, service?, service_date?, due_date?, owner?}   ("Add line", the module)
  * Viewing: any logged-in Hub user. Changes: module booking_followup_edit, admin, or the line's current
  * owner (followup_update() checks; reassign / not_relevant: admin or the current owner). Run check: the module.
  * Logic: includes/followup_service.php.
@@ -40,10 +41,14 @@ try {
     if (!is_array($in)) fu_json(['ok' => false, 'error' => 'Invalid JSON'], 400);
 
     if ($action === 'update') {   // the line's owner may work it without the module: followup_update() decides
-        $ch = array_intersect_key($in, array_flip(['take', 'owner', 'contacted_at', 'staff_status', 'notes']));
+        $ch = array_intersect_key($in, array_flip(['take', 'owner', 'contacted_at', 'staff_status', 'notes', 'due_date']));
         $res = followup_update($db, (int)($in['id'] ?? 0), $ch, $user);
         if (!$res['ok']) fu_json($res, $res['code'] ?? 400);
         fu_json($res);
+    }
+    if ($action === 'add') {      // a line by hand: followup_manual_add() checks the module
+        $res = followup_manual_add($db, $user, $in);
+        fu_json($res, $res['ok'] ? 200 : ($res['code'] ?? 400));
     }
     if ($action === 'scan') {
         if (!followup_can_edit($user)) fu_json(['ok' => false, 'error' => 'View only — ask Roberto for the booking follow-up edit permission'], 403);

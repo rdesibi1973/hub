@@ -136,6 +136,14 @@ function memo_digest_build(PDO $pdo, $ownerId, $today) {
     } catch (Throwable $e) {
         error_log('memo digest: booking follow-up skipped: ' . $e->getMessage());
     }
+    // Bookings pipeline (CK tracker): blocked from the CK by a provisional booking, waiting for the first check.
+    $d['pipeline'] = null;
+    try {
+        require_once __DIR__ . '/../leads/includes/ck_pipeline.php';
+        $d['pipeline'] = ck_pipeline_digest($pdo, $today);
+    } catch (Throwable $e) {
+        error_log('memo digest: bookings pipeline skipped: ' . $e->getMessage());
+    }
     return $d;
 }
 
@@ -279,8 +287,34 @@ function memo_digest_render(array $d, $today) {
         $section('📌 Booking follow-up', $h, $t);
         $counts .= '; fu_nuove=' . count($fu['new']) . '; fu_problemi=' . count($fu['problem']) . '; fu_non_prese=' . count($fu['untaken']);
 
-        // 7. CK findings (booking check before the CK): for Roberto only, nothing goes to the owners automatically.
+        // 7. Bookings pipeline (one list of every check): URGENT lines by owner, bookings blocked from the CK because a
+        //    booking is still provisional (arrival ≤ 60 days), bookings waiting for their first check; then the new /
+        //    old check findings. For Roberto only, nothing goes to the owners automatically.
         $h = array(); $t = array();
+        foreach ($fu['urgent'] as $owner => $list) {
+            $items = array();
+            foreach (array_slice($list, 0, 12) as $r) {
+                $items[] = memo_digest_followup_item($r) . ($r['due_date'] ? ' · entro ' . date('d/m', strtotime($r['due_date'])) . ' (' . $r['due_reason'] . ')' : '');
+            }
+            $more = count($list) > 12 ? ' (+' . (count($list) - 12) . ')' : '';
+            $label = 'Urgenti — ' . ($owner !== '' ? $owner : 'nessuno') . ' (' . count($list) . ')';
+            $h[] = '<strong>' . $e($label) . '</strong>' . $e($more) . '<br><span style="color:#555;">' . implode('<br>', array_map($e, $items)) . '</span>';
+            $t[] = $label . $more . ":\n    " . implode("\n    ", $items);
+        }
+        $pl = isset($d['pipeline']) ? $d['pipeline'] : null;
+        if ($pl && $pl['blocked']) {
+            $items = array();
+            foreach ($pl['blocked'] as $b) $items[] = $b['customer'] . ' — arrivo ' . date('d/m', strtotime($b['start_date'])) . ' · ' . implode('; ', $b['by']);
+            $h[] = '<strong>CK bloccato, prenotazioni provisional, arrivo entro 60 giorni (' . count($pl['blocked']) . ')</strong><br><span style="color:#555;">' . implode('<br>', array_map($e, $items)) . '</span>';
+            $t[] = 'CK bloccato, prenotazioni provisional, arrivo entro 60 giorni (' . count($pl['blocked']) . "):\n    " . implode("\n    ", $items);
+        }
+        if ($pl && $pl['first_check']) {
+            $items = array();
+            foreach (array_slice($pl['first_check'], 0, 15) as $b) $items[] = $b['customer'] . ' — arrivo ' . date('d/m', strtotime($b['start_date'])) . ($b['waiting'] !== null ? ' · prenotata da ' . $b['waiting'] . ' gg' : '');
+            $more = count($pl['first_check']) > 15 ? ' (+' . (count($pl['first_check']) - 15) . ')' : '';
+            $h[] = '<strong>Da controllare — primo check (' . count($pl['first_check']) . ')</strong>' . $e($more) . '<br><span style="color:#555;">' . implode('<br>', array_map($e, $items)) . '</span>';
+            $t[] = 'Da controllare — primo check (' . count($pl['first_check']) . ')' . $more . ":\n    " . implode("\n    ", $items);
+        }
         $byOwner = array();
         foreach ($fu['ck_new'] as $r) $byOwner[$r['owner_name'] ? $r['owner_name'] : 'nessuno'][] = $r;
         foreach ($byOwner as $owner => $list) {
@@ -306,11 +340,12 @@ function memo_digest_render(array $d, $today) {
             $t[] = 'Arrivo entro 60 giorni con findings aperte (' . count($fu['ck_soon']) . "):\n    " . implode("\n    ", $items);
         }
         if ($h) {
-            $h[] = '<a href="' . $fuUrl . '?type=ck" style="color:#C0211B;">apri CK findings</a>';
-            $t[] = $fuUrl . '?type=ck';
+            $h[] = '<a href="' . $fuUrl . '" style="color:#C0211B;">apri Booking follow-up</a> · <a href="' . $hub . 'leads/ck_tracker.php?view=tocheck" style="color:#C0211B;">CK tracker — da controllare</a>';
+            $t[] = $fuUrl . "\n" . $hub . 'leads/ck_tracker.php?view=tocheck';
         }
-        $section('📋 CK findings', $h, $t);
-        $counts .= '; ck_nuove=' . count($fu['ck_new']) . '; ck_vecchie=' . count($fu['ck_old']) . '; ck_pratiche60=' . count($fu['ck_soon']);
+        $section('📋 Bookings pipeline', $h, $t);
+        $counts .= '; ck_nuove=' . count($fu['ck_new']) . '; ck_vecchie=' . count($fu['ck_old']) . '; ck_pratiche60=' . count($fu['ck_soon'])
+                 . '; urgenti=' . array_sum(array_map('count', $fu['urgent'])) . ($pl ? '; ck_bloccati=' . count($pl['blocked']) . '; primo_check=' . count($pl['first_check']) : '');
     }
 
     if (!$d['overdue'] && !$d['today'] && !$d['week'] && !$d['doing']) {

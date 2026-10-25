@@ -1865,16 +1865,22 @@ try {
             'warnings'         => $pv['warnings'],
         ];
         if ($curIn !== '' && !$v['relink']) $out['warnings'][] = 'current_path equals the stored path — plain rename.';
-        // _CK while the booking still has open points in Booking follow-up: warn, never block.
-        require_once __DIR__ . '/includes/ck_lib.php';
+        // _CK while a booking is still provisional: refused (409, also on the dry run; no override — ck_pipeline.php).
+        // Other open points in Booking follow-up: a warning only.
+        require_once __DIR__ . '/includes/ck_pipeline.php';
         if (ck_has_marker($v['new_name']) && !ck_has_marker(basename((string)$v['folder']))) {
+            $block = fs_ck_block($db, $v, dropbox_get_access_token());
+            if ($block['blocked']) {
+                agent_fail('No _CK while a booking is still provisional: ' . implode('; ', $block['by']) . '.', 409,
+                           $out + ['ck_blocked' => true, 'ck_blocked_by' => $block['by']]);
+            }
             try {
-                require_once __DIR__ . '/../operations/includes/followup_service.php';
                 $rowCk = ck_tracker_row_for($db, null, (int)$r['id']);
                 $open = $rowCk ? followup_open_for_row(followup_open_counts($db), $rowCk) : null;
-                if ($open && $open['ck'] + $open['supplier'] + $open['ticket'] > 0) {
-                    $out['warnings'][] = 'Setting _CK with open Booking follow-up lines: ' . $open['ck'] . ' CK finding(s), ' . $open['supplier']
-                                       . ' supplier, ' . $open['ticket'] . ' ticket — see followup_list request_id=' . (int)$r['id'] . '.';
+                if ($open && $open['total'] > 0) {
+                    $out['warnings'][] = 'Setting _CK with ' . $open['total'] . ' open Booking follow-up line(s) (none provisional): booking '
+                                       . $open['audience']['booking'] . ', sales ' . $open['audience']['sales'] . ', accounts ' . $open['audience']['accounts']
+                                       . ' — see followup_list request_id=' . (int)$r['id'] . '.';
                 }
                 if ($rowCk && $rowCk['findings_checked_at'] === null) $out['warnings'][] = 'Setting _CK but no booking check was sent for this booking (ck_findings_upsert).';
             } catch (Throwable $e) { error_log('rename_folder CK warning: ' . $e->getMessage()); }
@@ -2746,6 +2752,7 @@ try {
         $hasCk  = isset($in['has_ck']) && $in['has_ck'] !== '' ? !empty($in['has_ck']) && $in['has_ck'] !== '0' : null;
         $q      = trim((string)($in['q'] ?? ''));
         $past   = !empty($in['past']) && $in['past'] !== '0';
+        $needsCheck = !empty($in['needs_check']) && $in['needs_check'] !== '0';
         $list = [];
         foreach (ck_tracker_rows($db) as $r) {
             if ($r['other']) continue;                                                   // no CK outside Tanzania
@@ -2776,6 +2783,10 @@ try {
             if ($r['reqs'] && ($r['to_arrival'] === null || $r['to_arrival'] >= 0) && ($r['booking_owner_auto_at'] === null || $r['booking_owner_auto_at'] <= $stale)) $pending++;
         }
         $list = array_values($list);
+        // Pipeline (includes/ck_pipeline.php): stage, deadlines, _CK block, the Claude check due (first / re-check).
+        require_once __DIR__ . '/includes/ck_pipeline.php';
+        ck_pipeline_annotate($db, $list);
+        if ($needsCheck) $list = array_values(array_filter($list, fn($r) => $r['pl']['needs_check']));
         $points = ck_check_points($db, array_column($list, 'last_check_id'));
         $base = defined('BASE_URL') ? rtrim((string)BASE_URL, '/') : '';
         if (!preg_match('#^https?://#', $base)) $base = 'https://' . ($_SERVER['HTTP_HOST'] ?? '') . $base;
@@ -2812,16 +2823,35 @@ try {
                 'booking_owner'   => $r['_owners']['booking_owner'],
                 'booking_owner_calc' => $r['booking_owner_auto_text'],
                 'open_findings'   => $open['ck_audience'],
-                'open_followup'   => ['supplier' => $open['supplier'], 'ticket' => $open['ticket'], 'group' => $open['group']],
+                'open_followup'   => ['supplier' => $open['supplier'], 'ticket' => $open['ticket'], 'group' => $open['group'],
+                                      'safaricheck' => $open['safaricheck'], 'manual' => $open['manual']],
                 'findings_checked_at' => $r['findings_checked_at'],
                 'findings_report_path' => $r['findings_report_path'],
-                // CK can be set: the booking check ran (ck_findings_upsert) and no ck / supplier / ticket line is open.
-                'ck_ready'        => $r['findings_checked_at'] !== null && $open['ck'] + $open['supplier'] + $open['ticket'] === 0,
+                // The pipeline: one list of open lines (any check), the nearest deadline, the Claude check due.
+                'pipeline_stage'  => $r['pl']['stage'],
+                'open_lines'      => $r['pl']['open'],
+                'open_by_audience' => $r['pl']['open_by_audience'],
+                'open_by_source'  => (object)$r['pl']['open_by_source'],
+                'urgent_lines'    => $r['pl']['urgent'],
+                'next_due_date'   => $r['pl']['next_due_date'],
+                'next_due_reason' => $r['pl']['next_due_reason'],
+                'last_claude_check_at' => $r['pl']['last_claude_check_at'],
+                'last_safaricheck_at'  => $r['pl']['last_safaricheck_at'],
+                'days_since_check' => $r['pl']['days_since_check'],
+                'needs_check'     => $r['pl']['needs_check'],
+                'next_check_reason' => $r['pl']['next_check_reason'],
+                // No _CK while a booking is provisional (open lines; rename_folder also reads the invoices/ documents).
+                'ck_blocked'      => $r['pl']['blocked'],
+                'ck_blocked_by'   => $r['pl']['blocked_by'],
+                // CK can be set: the booking check ran (ck_findings_upsert), nothing provisional, no line open.
+                'ck_ready'        => $r['findings_checked_at'] !== null && !$r['pl']['blocked'] && $r['pl']['open'] === 0,
+                'followup_url'    => $r['reqs'] ? $base . '/modules/operations/booking_followup.php?request_id=' . (int)$r['reqs'][0]['id'] : null,
             ];
         }
         agent_out(['ok' => true, 'count' => count($rows), 'scan_warning' => $scanError, 'owner_rule' => ck_owner_rule(),
                    'owners_pending' => $pending, 'rows' => $rows,
-                   'hint' => 'Add _CK with rename_folder (it keeps _CK last); re-run a check with ck_request_check.'
+                   'hint' => 'Add _CK with rename_folder (it keeps _CK last; refused while ck_blocked); re-run a check with ck_request_check.'
+                           . ($needsCheck ? ' needs_check=1: the bookings to check now (next_check_reason).' : '')
                            . ($pending ? ' ' . $pending . ' booking owner(s) not read from the Calc yet — call again.' : '')]);
     }
 
@@ -2931,9 +2961,12 @@ try {
         if (!in_array($status, ['open', 'closed', 'all'], true)) agent_fail('status must be open, closed or all');
         if (!empty($in['type']) && !in_array($in['type'], FU_TYPES, true)) agent_fail('type must be ' . implode(', ', FU_TYPES));
         if (!empty($in['audience']) && !in_array($in['audience'], FU_AUDIENCES, true)) agent_fail('audience must be ' . implode(', ', FU_AUDIENCES));
+        if (!empty($in['source']) && !in_array($in['source'], FU_TYPE_SOURCE, true)) agent_fail('source must be ' . implode(', ', FU_TYPE_SOURCE));
+        $dueBefore = trim((string)($in['due_before'] ?? '')) !== '' ? agent_iso_date($in['due_before'], 'due_before') : null;
         if ((int)($in['request_id'] ?? 0) > 0) $agentReqId = agent_request($db, $in['request_id'])['id'];
         $rows = followup_rows($db, ['status' => $status, 'type' => $in['type'] ?? null, 'audience' => $in['audience'] ?? null, 'owner' => $in['owner'] ?? '',
-                                    'priority' => $in['priority'] ?? null, 'request_id' => $in['request_id'] ?? null, 'q' => $in['q'] ?? null]);
+                                    'priority' => $in['priority'] ?? null, 'request_id' => $in['request_id'] ?? null, 'q' => $in['q'] ?? null,
+                                    'source' => $in['source'] ?? null, 'due_before' => $dueBefore]);
         $runs = followup_last_runs($db);
         agent_out(['ok' => true, 'count' => count($rows), 'last_check_at' => ['supplier' => $runs['supplier']['at'] ?? null, 'ticket' => $runs['ticket']['at'] ?? null],
                    'last_checks' => $runs, 'rows' => $rows]);

@@ -147,7 +147,18 @@ try {
            ->execute([$checkId, $now, (int)$f['id']]);
         ck_log($db, (int)$f['id'], 'check',
                null, isset($r['error']) ? 'error' : ($r['overall'] ?? ''), null, 'agent', $now);
-        ck_api_out(['ok' => true, 'check_id' => $checkId]);
+        // Booking points (stays, transfers, flights, dates, pax) → Booking follow-up, one list with the other checks.
+        $fu = null;
+        if (!isset($r['error']) && is_array($r['checks'] ?? null)) {
+            try {
+                require_once __DIR__ . '/../operations/includes/followup_service.php';
+                $row = ck_tracker_row_for($db, (int)$f['id'], null);
+                if ($row) $fu = followup_counts(followup_safaricheck_sync($db, $row, $r['checks'], is_array($r['facts'] ?? null) ? $r['facts'] : []));
+            } catch (Throwable $e) {
+                error_log('ck_agent_api: SafariCheck points not written to Booking follow-up: ' . $e->getMessage());
+            }
+        }
+        ck_api_out(['ok' => true, 'check_id' => $checkId, 'followup' => $fu]);
     }
 
     ck_api_out(['ok' => false, 'msg' => 'Unknown action'], 400);

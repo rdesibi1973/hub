@@ -143,6 +143,18 @@ function followup_group_facts(array &$out, string $flat, string $one, bool $isFl
 }
 
 /**
+ * Supplier payment terms: days before arrival the (balance / full) payment is due ("Full payment 30 days prior to
+ * arrival", "balance due 45 days before arrival; groups 60 days"). The largest number found (the earliest date), or null.
+ */
+function followup_payment_days(string $one): ?int {
+    $n = [];
+    if (preg_match_all('/\b(?:payment|balance|paid|settled)\b[^.;]{0,80}?\b(\d{2,3})\s*days?\s*(?:prior|before|ahead)/i', $one, $m)) $n = array_merge($n, $m[1]);
+    if (preg_match_all('/\b(\d{2,3})\s*days?\s*(?:prior|before)\s*(?:to\s*)?(?:the\s*)?(?:arrival|check[\s-]?in|travel|departure)[^.;]{0,40}?\b(?:payment|balance|paid)\b/i', $one, $m)) $n = array_merge($n, $m[1]);
+    $n = array_filter(array_map('intval', $n), fn($x) => $x >= 7 && $x <= 180);
+    return $n ? max($n) : null;
+}
+
+/**
  * Classify a supplier document.
  * $trip = ['start_date' => …, 'end_date' => …] of the booking (service-date fallback), $today = Y-m-d.
  * → ['status' => confirmed|provisional|on_request|cancelled|unknown|unreadable,
@@ -277,6 +289,7 @@ function followup_classify(string $text, string $file, array $trip = [], ?string
     }
 
     followup_group_facts($out, $flat, $one, $isFlight, $file);
+    $out['payment_days'] = followup_payment_days($one);
 
     $out['status'] = $status ?? 'unknown';
     if ($status === 'provisional') {

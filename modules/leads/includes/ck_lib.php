@@ -437,6 +437,82 @@ function ck_check_points(PDO $db, array $checkIds): array {
     return $out;
 }
 
+// ── SafariCheck points about bookings → Booking follow-up (type safaricheck) ─
+// Only the points about what was booked become follow-up lines (followup_safaricheck_sync()); naming points
+// ("Lodge not found in Word: SCVC(Ndutu)", "Lodge in Word not in Excel") and document-only points (prices, Word
+// texts, sheets) stay in the CK tracker / report. [section, title regex, issue code, service type]; red / yellow
+// points not ticked "correct / confirmed" only. Listed in docs/AGENT_API.md (Booking follow-up — SafariCheck lines).
+const CK_SC_BOOKING_POINTS = [
+    ['Accommodation', '/^Nights differ: /',        'sc_nights_differ',   'stay'],
+    ['Accommodation', '/^Check-in differs: /',     'sc_checkin_differs', 'stay'],
+    ['Accommodation', '/^Invoice dates differ: /', 'sc_invoice_dates',   'stay'],
+    ['Accommodation', '/^Rooms differ: /',         'sc_rooms_differ',    'stay'],
+    ['Accommodation', '/^Basis differs: /',        'sc_basis_differs',   'stay'],
+    ['Accommodation', '/^GRP rooms short: /',      'sc_grp_rooms_short', 'stay'],
+    ['Accommodation', '/^GRP unsold rooms: /',     'sc_grp_unsold',      'stay'],
+    ['Transfers',     '/^Transfer \d{1,2} \w{3} · |^Transfer no date · /', 'sc_transfer', 'transfer'],
+    ['Transfers',     '/^Excel note: /',           'sc_transfer',        'transfer'],
+    ['Flights',       '/^Flight in Word not in Excel$/', 'sc_flight',    'flight'],
+    ['Flights',       '/^Flights invoiced but not quoted$/', 'sc_flight', 'flight'],
+    ['Arrival',       '/^Arrival flight not on the trip/',   'sc_dates', 'dates'],
+    ['Departure',     '/^Departure flight not on the trip/', 'sc_dates', 'dates'],
+    ['Dates',         '/^(?:Start|End) date mismatch$/',     'sc_dates', 'dates'],
+    ['PAX',           '/^PAX count mismatch$/',    'sc_pax',             'stay'],
+];
+const CK_SC_ISSUE_LABELS = ['sc_nights_differ' => 'Nights differ', 'sc_checkin_differs' => 'Check-in differs', 'sc_invoice_dates' => 'Invoice dates differ',
+                            'sc_rooms_differ' => 'Rooms differ', 'sc_basis_differs' => 'Basis differs', 'sc_grp_rooms_short' => 'GRP rooms short',
+                            'sc_grp_unsold' => 'GRP unsold rooms', 'sc_transfer' => 'Transfer', 'sc_flight' => 'Flight', 'sc_dates' => 'Dates',
+                            'sc_pax' => 'PAX'];
+
+/** "29 Dec" inside the trip (folder dates; a January date of a December trip is next year), or null. */
+function ck_sc_date(string $dm, ?string $start, ?string $end): ?string {
+    if (!preg_match('/\b(\d{1,2})\s+([A-Za-z]{3})/', $dm, $m) || !$start) return null;
+    $mon = date_parse($m[2] . ' 1 2000')['month'] ?? null;
+    if (!$mon) return null;
+    foreach ([(int)substr($start, 0, 4), (int)substr($start, 0, 4) + 1] as $y) {
+        if (!checkdate($mon, (int)$m[1], $y)) continue;
+        $d = sprintf('%04d-%02d-%02d', $y, $mon, (int)$m[1]);
+        if ($d >= date('Y-m-d', strtotime($start . ' -1 day')) && $d <= date('Y-m-d', strtotime(($end ?: $start) . ' +1 day'))) return $d;
+    }
+    return null;
+}
+
+/**
+ * The booking points of a SafariCheck result: [{key, section, title, status, detail, issue, service_type, supplier,
+ * service_date}]. $checks: checks_json; $facts: facts_json (Excel stays → the check-in date of a lodge point).
+ */
+function ck_sc_booking_points(array $checks, array $facts): array {
+    $start = $facts['excel']['start'] ?? $facts['word']['start'] ?? null;
+    $end = $facts['excel']['end'] ?? $facts['word']['end'] ?? null;
+    $stays = $facts['excel']['stays'] ?? [];
+    $out = [];
+    foreach ($checks as $c) {
+        if (!in_array($c['status'] ?? '', ['red', 'yellow'], true) || !empty($c['confirmed'])) continue;
+        $title = (string)($c['title'] ?? '');
+        $hit = null;
+        foreach (CK_SC_BOOKING_POINTS as $p) {
+            if (strcasecmp($p[0], (string)($c['section'] ?? '')) === 0 && preg_match($p[1], $title)) { $hit = $p; break; }
+        }
+        if (!$hit) continue;
+        $supplier = null; $date = null;
+        if ($hit[3] === 'stay' && strpos($title, ': ') !== false) {
+            $supplier = trim(substr($title, strpos($title, ': ') + 2));
+            foreach ($stays as $s) {
+                if (!empty($s['start']) && (strcasecmp((string)$s['lodge'], $supplier) === 0
+                    || (function_exists('followup_supplier_same') && followup_supplier_same((string)$s['lodge'], $supplier)))) { $date = $s['start']; break; }
+            }
+        } elseif ($hit[3] === 'transfer') {
+            $date = ck_sc_date($title, $start, $end);
+        } elseif ($hit[3] === 'dates') {
+            $date = $start;
+        }
+        $out[] = ['key' => (string)(($c['key'] ?? '') !== '' ? $c['key'] : $c['section'] . '|' . $title), 'section' => (string)$c['section'],
+                  'title' => $title, 'status' => $c['status'], 'detail' => trim((string)($c['detail'] ?? '')),
+                  'issue' => $hit[2], 'service_type' => $hit[3], 'supplier' => $supplier, 'service_date' => $date];
+    }
+    return $out;
+}
+
 /** Dropbox web URL from an API path (same shape as backoffice.php). */
 function ck_url_from_path(string $path): string {
     return 'https://www.dropbox.com/home/' . implode('/', array_map('rawurlencode', explode('/', ltrim($path, '/'))));
@@ -468,8 +544,9 @@ function ck_sync_requests(PDO $db, string $old, string $new): int {
 /**
  * Add ($on) or remove the _CK marker: rename the Dropbox folder, sync the
  * requests, and log it with the user. Dropbox first; the DB only if it succeeds.
+ * _CK is refused while a booking is still provisional (ck_pipeline_block(), no override).
  *
- * @return array{ok:bool,msg:string}
+ * @return array{ok:bool,msg:string,blocked_by?:array}
  */
 function ck_set_marker(PDO $db, string $token, int $folderId, bool $on, ?int $userId): array {
     ck_ensure_schema($db);
@@ -481,6 +558,15 @@ function ck_set_marker(PDO $db, string $token, int $folderId, bool $on, ?int $us
     $old = $row['folder_name'];
     if (ck_has_marker($old) === $on) {
         return ['ok' => false, 'msg' => $on ? 'The folder already has _CK.' : 'The folder has no _CK.'];
+    }
+    if ($on) {
+        require_once __DIR__ . '/ck_pipeline.php';
+        $tr = ck_tracker_row_for($db, $folderId, null);
+        $block = $tr ? ck_pipeline_block($db, $tr, $token) : ['blocked' => false];
+        if ($block['blocked']) {
+            return ['ok' => false, 'msg' => '⛔ No CK while a booking is still provisional: ' . implode('; ', $block['by']) . '.',
+                    'blocked_by' => $block['by']];
+        }
     }
     $new = ck_name_with_marker($old, $on);
     try {

@@ -533,6 +533,23 @@ function fs_rename_record(PDO $db, int $requestId, bool $isGrp, string $folder, 
 }
 
 /**
+ * A rename that adds _CK ($v from fs_rename_validate) while the booking still has a provisional booking: the reasons
+ * (ck_pipeline_block(): open follow-up lines + with $token the invoices/ documents read as provisional).
+ * → ['blocked' => bool, 'by' => [text]] (not adding _CK, or no CK tracker row: not blocked).
+ */
+function fs_ck_block(PDO $db, array $v, ?string $token): array {
+    require_once __DIR__ . '/ck_pipeline.php';
+    if (!ck_has_marker($v['new_name']) || ck_has_marker(basename((string)$v['folder']))) return ['blocked' => false, 'by' => []];
+    try {
+        $row = ck_tracker_row_for($db, null, (int)$v['r']['id']);
+        return $row ? ck_pipeline_block($db, $row, $token) : ['blocked' => false, 'by' => []];
+    } catch (Throwable $e) {
+        error_log('fs_ck_block: ' . $e->getMessage());
+        return ['blocked' => false, 'by' => []];
+    }
+}
+
+/**
  * Free rename (BackOffice "Rename…", API rename_folder): rename the Dropbox folder,
  * update the Hub (practice_code / group_folder, dropbox_url, status / payment_status
  * when the new suffix carries a status tag), record it in the CK tracker and log a
@@ -556,6 +573,12 @@ function folder_rename(PDO $db, int $requestId, string $newName, ?int $userId, a
     $curPath = null;
     try {
         $token = dropbox_get_access_token();
+        // _CK while a booking is still provisional: refused, no override (ck_pipeline.php).
+        $block = fs_ck_block($db, $v, $token);
+        if ($block['blocked']) {
+            return ['ok' => false, 'code' => 409, 'msg' => '⛔ No _CK while a booking is still provisional: ' . implode('; ', $block['by']) . '.',
+                    'ck_blocked_by' => $block['by']];
+        }
         if ($v['relink']) {
             $rl = fs_relink_resolve($token, $v['current_path']);
             if (isset($rl['error'])) return ['ok' => false, 'msg' => $rl['error'], 'code' => $rl['code']];

@@ -100,6 +100,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $errors[] = 'Parent folder name cannot contain spaces. Please remove the space (e.g. use BALANCE_CK instead of BALANCE CK).';
     }
 
+    // ── _CK while a booking is still provisional: refused (same rule as the CK tracker and Rename, ck_pipeline.php) ──
+    if (!$errors) {
+        foreach (['practice_code', 'group_folder'] as $fk) {
+            $oldF = trim((string)($req[$fk] ?? '')); $newF = trim((string)($v[$fk] ?? ''));
+            if ($newF === '' || $newF === $oldF || !preg_match('/_CK(?=_|$)/i', $newF) || preg_match('/_CK(?=_|$)/i', $oldF)) continue;
+            require_once 'dropbox_helper.php';
+            require_once 'includes/ck_pipeline.php';
+            $ckRow = ck_tracker_row_for($db, null, (int)$req['id']);
+            $tok = null;
+            try { $tok = dropbox_get_access_token(); } catch (Throwable $e) { /* open lines only */ }
+            $ckBlock = $ckRow ? ck_pipeline_block($db, $ckRow, $tok) : ['blocked' => false];
+            if ($ckBlock['blocked']) $errors[] = '_CK cannot be set while a booking is still provisional: ' . implode('; ', $ckBlock['by']) . '.';
+            break;
+        }
+    }
+
     // ── Payment status ↔ folder tag (the folder is the source of truth) ──
     // Changing the payment status retags the folder (renamed below); editing
     // the folder's tag sets the payment status. Staff cannot rename folders,

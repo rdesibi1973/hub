@@ -10,7 +10,8 @@ outdated — this file wins where they disagree (PHP version, local lint).
 ## Where things are
 - `modules/leads/` — requests, BackOffice, payments, CK, pricing, **Agent API** (`agent_api.php`,
   entry `api/agent/index.php`). Shared logic in `modules/leads/includes/`
-  (`booking_service.php`, `calc_service.php`, `folder_parser.php`, `grp_status.php`, `ck_lib.php`).
+  (`booking_service.php`, `calc_service.php`, `folder_parser.php`, `grp_status.php`, `ck_lib.php`,
+  `ck_pipeline.php` = CK tracker stage / deadlines / `_CK` block over the Booking follow-up lines).
 - `modules/invoices/` — invoices, credit notes. Shared logic: `includes/invoice_service.php`
   (numbering, recalculation, payments, folder status, PDF, import); `config.php` = bootstrap only.
 - `modules/memo/` — Memo Board; logic in `memo_lib.php` (follow-ups, next steps, routines).

@@ -11,12 +11,16 @@
  * Each row has a CK owner (sales side) and a booking owner (who fixes the bookings), default
  * shown in grey (rule in ck_lib.php); admin and the row's current owners change them inline.
  * Open findings of the booking check live in Booking follow-up (type ck).
+ * Pipeline (includes/ck_pipeline.php): stage confirmed → booked → issues → ready → ck, the open Booking follow-up lines
+ * of every check, the nearest deadline (row colour: red = an urgent line, amber = a high one, else the SafariCheck
+ * colour), the Claude check due (view "To check"). _CK is refused while a booking is still provisional.
  */
 require_once 'config.php';
 require_once 'dropbox_helper.php';
 require_once 'includes/folder_parser.php';
 require_once 'includes/ck_lib.php';
 require_once __DIR__ . '/../operations/includes/followup_service.php';   // open findings per booking
+require_once 'includes/ck_pipeline.php';
 requireLogin();
 $pageTitle = 'CK tracker';
 $db = db();
@@ -27,6 +31,7 @@ ck_ensure_schema($db);
 $VIEWS = [
     'missing' => 'Missing CK',
     'chkred'  => 'Check RED',
+    'tocheck' => 'To check',
     'booking' => 'In booking',
     'done'    => 'CK done',
     'all'     => 'All',
@@ -173,12 +178,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array($_POST['action'] ?? '', ['
             $_SESSION['ck_row_msg'] = ['id' => (int)($_POST['ck_id'] ?? 0)] + $res;
         } else {
             $token = dropbox_get_access_token();
+            // Refused while a booking is still provisional (ck_set_marker() → ck_pipeline_block()).
             $res   = ck_set_marker($db, $token, (int)($_POST['ck_id'] ?? 0), $_POST['action'] === 'ck_on', $uid);
-            // _CK with open points in Booking follow-up: allowed, but said.
+            // _CK with other open points in Booking follow-up: allowed, but said.
             if ($res['ok'] && $_POST['action'] === 'ck_on' && ($row = ck_tracker_row_for($db, (int)$_POST['ck_id'], null))) {
                 $o = followup_open_for_row(followup_open_counts($db), $row);
-                if ($o['ck'] + $o['supplier'] + $o['ticket'] > 0) {
-                    $res['msg'] .= ' — ⚠ still open in Booking follow-up: ' . $o['ck'] . ' CK finding(s), ' . $o['supplier'] . ' supplier, ' . $o['ticket'] . ' ticket.';
+                if ($o['total'] > 0) {
+                    $res['msg'] .= ' — ⚠ still open in Booking follow-up: ' . $o['total'] . ' line(s) (booking ' . $o['audience']['booking']
+                                 . ', sales ' . $o['audience']['sales'] . ', accounts ' . $o['audience']['accounts'] . ').';
                 }
             }
             flash($res['msg'], $res['ok'] ? 'info' : 'error');
@@ -241,6 +248,14 @@ foreach ($rows as &$r) {
     $r['can_owners'] = ck_can_set_owners($db, $cu, $r);
 }
 unset($r);
+// Pipeline: stage, open lines of every check, nearest deadline, _CK block, Claude check due.
+try {
+    ck_pipeline_annotate($db, $rows);
+} catch (Throwable $e) {
+    error_log('ck_tracker pipeline: ' . $e->getMessage());
+    foreach ($rows as &$r) $r['pl'] = null;
+    unset($r);
+}
 $activeUsers = ck_active_users($db);
 $ownerF = trim((string)($_GET['owner'] ?? ''));   // '' all | me | none (no booking owner) | user id (CK or booking owner)
 
@@ -274,16 +289,19 @@ $base = array_filter($rows, function ($r) use ($showPast, $agentF, $q, $qMatch, 
     if (ctype_digit($ownerF) && !$ownerIs($r, (int)$ownerF)) return false;
     return true;
 });
-$counts = ['red' => 0, 'amber' => 0, 'grey' => 0, 'booking' => 0, 'done' => 0, 'chkred' => 0];
+$counts = ['red' => 0, 'amber' => 0, 'grey' => 0, 'booking' => 0, 'done' => 0, 'chkred' => 0, 'tocheck' => 0, 'blocked' => 0];
 foreach ($base as $r) {
     if ($r['missing'] && $r['band']) $counts[$r['band']]++;
     if ($r['missing'] && $r['chk_overall'] === 'red') $counts['chkred']++;
+    if (!empty($r['pl']['needs_check'])) $counts['tocheck']++;
+    if (!empty($r['pl']['blocked']) && !(int)$r['has_ck']) $counts['blocked']++;
     if (in_array($r['stage'], CK_BOOKING_STAGES, true)) $counts['booking']++;
     if ((int)$r['has_ck']) $counts['done']++;
 }
 $list = $q !== '' ? $base : array_filter($base, fn($r) => match ($view) {
     'missing' => $r['missing'],
     'chkred'  => $r['missing'] && $r['chk_overall'] === 'red',
+    'tocheck' => !empty($r['pl']['needs_check']),
     'booking' => in_array($r['stage'], CK_BOOKING_STAGES, true),
     'done'    => (bool)(int)$r['has_ck'],
     default   => true,
@@ -306,6 +324,10 @@ $STAGE_STYLE = [
     'Deposit'      => ['#8a6d3b', '#fcf3e3'], 'Paid'    => ['#1A6B3A', '#E6F4EA'],
     'Progress'     => ['#6B7280', '#F3F4F6'], 'Confirmed' => ['#6B7280', '#F3F4F6'],
     'Provisional'  => ['#B26A00', '#FFF4E0'], 'Cancelled' => ['#a33', '#f7dede'],
+];
+$PL_STYLE = [
+    'confirmed' => ['#6B7280', '#F3F4F6'], 'booked' => ['#1a3a5c', '#EAF1F8'], 'issues' => ['#8a6d3b', '#fcf3e3'],
+    'ready'     => ['#1A6B3A', '#E6F4EA'], 'ck'     => ['#1A6B3A', '#d5eedd'],
 ];
 $CHK_STYLE = [
     'green'  => ['#1A6B3A', '#E6F4EA', '🟢'], 'yellow' => ['#8a6d3b', '#fcf3e3', '🟡'],
@@ -392,6 +414,11 @@ $extra_css = '
 .ck-own .msg{display:block;font-size:.66rem;white-space:normal}
 .ck-find{font-size:.68rem;font-weight:700;border-radius:6px;padding:2px 7px;white-space:nowrap;text-decoration:none;display:inline-block;margin-top:4px;color:#8a6d3b;background:#fcf3e3}
 .ck-find.none{color:#1A6B3A;background:#E6F4EA}
+.ck-find.urg{color:#a33;background:#f7dede}
+.ck-need{font-size:.66rem;font-weight:700;border-radius:6px;padding:2px 7px;display:inline-block;margin-top:3px;color:#1a3a5c;background:#eef3f9}
+.ck-block{font-size:.66rem;font-weight:700;border-radius:6px;padding:2px 7px;display:inline-block;margin-top:3px;color:#a33;background:#f7dede;cursor:help}
+.ck-late{color:#C0211B;font-weight:700}
+.ck-btn:disabled{opacity:.45;cursor:not-allowed}
 .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:200;display:flex;align-items:flex-start;justify-content:center;padding:40px 16px;overflow-y:auto}
 .modal-overlay.hidden{display:none}
 .modal-box{background:#fff;border-radius:10px;box-shadow:0 8px 40px rgba(0,0,0,.2);width:100%}
@@ -427,6 +454,8 @@ include 'includes/header.php';
   <a class="ck-tile blue"  href="<?= h($link(['view' => 'booking'])) ?>"><b><?= $counts['booking'] ?></b><span>Still in booking (PROGRESS)</span></a>
   <a class="ck-tile green" href="<?= h($link(['view' => 'done'])) ?>"><b><?= $counts['done'] ?></b><span>CK done</span></a>
   <a class="ck-tile red"   href="<?= h($link(['view' => 'chkred'])) ?>"><b><?= $counts['chkred'] ?></b><span>No CK · automatic check RED</span></a>
+  <a class="ck-tile blue"  href="<?= h($link(['view' => 'tocheck'])) ?>" title="Booked for more than <?= CK_PL_FIRST_CHECK_DAYS ?> days and never checked, or last check older than 60 / 30 days before arrival"><b><?= $counts['tocheck'] ?></b><span>To check (Claude check due)</span></a>
+  <a class="ck-tile amber" href="<?= h($link(['view' => 'missing'])) ?>" title="No _CK possible while a booking is still provisional"><b><?= $counts['blocked'] ?></b><span>Blocked · booking still provisional</span></a>
 </div>
 
 <div class="ck-bar">
@@ -472,7 +501,7 @@ include 'includes/header.php';
   <thead><tr>
     <th><input type="checkbox" id="ckSelAll" title="Select all rows"> Arrival</th><th>Booking</th><th>Sales</th>
     <th title="Who answers for the CK (grey = default rule)">CK owner</th><th title="Who fixes the bookings (grey = from the Calc CHECKED column)">Booking owner</th>
-    <th>Stage</th><th>Check</th>
+    <th>Stage</th><th title="Pipeline: open Booking follow-up lines of every check, nearest deadline, last Claude check">Pipeline</th><th>Check</th>
     <th><?= $view === 'done' ? 'CK' : 'Waiting for CK' ?></th><th></th>
   </tr></thead>
   <tbody>
@@ -481,7 +510,8 @@ include 'includes/header.php';
       $rel = ltrim(CK_BASE, '/') . '/' . $r['folder_name'];
       $st  = $STAGE_STYLE[$r['stage']] ?? ['#6B7280', '#F3F4F6'];
   ?>
-    <tr id="ck<?= $id ?>" class="<?= $r['missing'] && $r['band'] ? 'b-' . $r['band'] : '' ?>">
+    <?php $pl = $r['pl']; $rowCls = $pl ? ($pl['colour'] && $pl['colour'] !== 'green' ? 'b-' . $pl['colour'] : '') : ($r['missing'] && $r['band'] ? 'b-' . $r['band'] : ''); ?>
+    <tr id="ck<?= $id ?>" class="<?= $rowCls ?>">
       <td class="ck-arr">
         <input type="checkbox" class="ck-sel" value="<?= $id ?>" title="Select for Re-check selected">
         <b><?= h($fmtD($r['start_date'])) ?: '—' ?></b>
@@ -536,6 +566,33 @@ include 'includes/header.php';
           <?= $r['in_stage'] !== null ? 'for ' . $r['in_stage'] . ' d' : '<span title="Already in this stage when tracking started">before tracking</span>' ?>
         </div>
       </td>
+      <td class="ck-pl">
+        <?php if ($pl):
+            $plSt = $PL_STYLE[$pl['stage']];
+            $fuUrl = $r['reqs'] ? '../operations/booking_followup.php?' . http_build_query(['request_id' => (int)$r['reqs'][0]['id']]) : ''; ?>
+          <span class="ck-tag" style="color:<?= $plSt[0] ?>;background:<?= $plSt[1] ?>"><?= h($pl['stage_label']) ?></span>
+          <?php if ($pl['open'] && $fuUrl):
+              $oa = $pl['open_by_audience'];
+              $srcTxt = implode(', ', array_map(fn($t, $n) => (FU_SOURCE_LABELS[$t] ?? $t) . ' ' . $n, array_keys($pl['open_by_source']), $pl['open_by_source'])); ?>
+            <div><a class="ck-find<?= $pl['urgent'] ? ' urg' : '' ?>" href="<?= h($fuUrl) ?>" target="_blank"
+                    title="Open in Booking follow-up — booking <?= $oa['booking'] ?> · sales <?= $oa['sales'] ?> · accounts <?= $oa['accounts'] ?><?= $srcTxt !== '' ? ' — ' . h($srcTxt) : '' ?>">📌 <?= $pl['open'] ?> open<?= $pl['urgent'] ? ' · ' . $pl['urgent'] . ' urgent' : '' ?></a></div>
+          <?php elseif ($r['findings_checked_at']): ?>
+            <div><span class="ck-find none" title="Claude check <?= h(date('d M H:i', strtotime($r['findings_checked_at']))) ?>">📌 nothing open</span></div>
+          <?php endif; ?>
+          <?php if ($pl['next_due_date']): ?>
+            <div class="ck-sub<?= $pl['next_due_days'] !== null && $pl['next_due_days'] <= FU_DUE_URGENT ? ' ck-late' : '' ?>" title="Nearest deadline: <?= h($pl['next_due_reason']) ?>">
+              ⏱ <?= h($fmtD($pl['next_due_date'])) ?> · <?= $pl['next_due_days'] < 0 ? abs($pl['next_due_days']) . ' d late' : 'in ' . $pl['next_due_days'] . ' d' ?></div>
+          <?php endif; ?>
+          <div class="ck-sub" title="Last Claude booking check (ck_findings_upsert)<?= $pl['last_safaricheck_at'] ? ' · SafariCheck ' . h(date('d M', strtotime($pl['last_safaricheck_at']))) : ' · no SafariCheck yet' ?>">
+            <?= $pl['days_since_check'] !== null ? 'checked ' . $pl['days_since_check'] . ' d ago' : 'not checked by Claude' ?></div>
+          <?php if ($pl['needs_check']): ?>
+            <div><span class="ck-need" title="<?= h(CK_PL_CHECK_REASONS[$pl['next_check_reason']]) ?>">🔎 <?= h(CK_PL_CHECK_REASONS[$pl['next_check_reason']]) ?></span></div>
+          <?php endif; ?>
+          <?php if ($pl['blocked']): ?>
+            <div><span class="ck-block" title="<?= h(implode("\n", $pl['blocked_by'])) ?>">⛔ <?= (int)$r['has_ck'] ? 'CK set but still provisional' : 'No CK: still provisional' ?></span></div>
+          <?php endif; ?>
+        <?php else: ?><span class="ck-sub">—</span><?php endif; ?>
+      </td>
       <?php $running = $r['check_requested_at'] && (strtotime(ck_now()) - strtotime($r['check_requested_at'])) / 60 <= 10; ?>
       <td class="ck-chkcell" data-ck="<?= $id ?>">
         <?php if ($running): ?><div class="ck-inprog">⏳ Report in progress</div><?php endif; ?>
@@ -563,14 +620,6 @@ include 'includes/header.php';
         <?php if ($rowMsg && $rowMsg['id'] === $id && !$rowMsg['ok']): ?>
           <div class="ck-sub" style="color:#a33"><?= h($rowMsg['msg']) ?></div>
         <?php endif; ?>
-        <?php $oc = $r['open']['ck_audience']; $nOpen = $r['open']['ck'];
-              $fuUrl = $r['reqs'] ? '../operations/booking_followup.php?' . http_build_query(['request_id' => (int)$r['reqs'][0]['id'], 'type' => 'ck']) : ''; ?>
-        <?php if ($nOpen > 0 && $fuUrl): ?>
-          <div><a class="ck-find" href="<?= h($fuUrl) ?>" target="_blank"
-                  title="Open CK findings in Booking follow-up — booking <?= $oc['booking'] ?> · sales <?= $oc['sales'] ?> · accounts <?= $oc['accounts'] ?>">📌 <?= $nOpen ?> finding<?= $nOpen === 1 ? '' : 's' ?> open</a></div>
-        <?php elseif ($r['findings_checked_at']): ?>
-          <div><span class="ck-find none" title="Booking check <?= h(date('d M H:i', strtotime($r['findings_checked_at']))) ?>">📌 no open finding</span></div>
-        <?php endif; ?>
       </td>
       <td>
         <?php if ((int)$r['has_ck']): ?>
@@ -588,10 +637,12 @@ include 'includes/header.php';
         <?php endif; ?>
       </td>
       <td class="ck-actions" style="white-space:nowrap">
-        <?php $openAll = $r['open']['ck'] + $r['open']['supplier'] + $r['open']['ticket'];
+        <?php $openAll = $r['open']['total'];
               $ckWarn = !(int)$r['has_ck'] && $openAll > 0
-                  ? "\n\n⚠ Still open in Booking follow-up: " . $r['open']['ck'] . ' CK finding(s), ' . $r['open']['supplier'] . ' supplier, ' . $r['open']['ticket'] . ' ticket.'
-                  : ''; ?>
+                  ? "\n\n⚠ Still open in Booking follow-up: " . $openAll . ' line(s) — booking ' . $r['open']['audience']['booking']
+                    . ', sales ' . $r['open']['audience']['sales'] . ', accounts ' . $r['open']['audience']['accounts'] . '.'
+                  : '';
+              $ckBlocked = !(int)$r['has_ck'] && !empty($pl['blocked']); ?>
         <form method="post" onsubmit="return confirm(<?= h(json_encode(((int)$r['has_ck'] ? 'Remove the CK from ' : 'Set CK on ') . $r['folder_name'] . '?' . $ckWarn . "\n\nThe Dropbox folder will be renamed.")) ?>)">
           <input type="hidden" name="action" value="<?= (int)$r['has_ck'] ? 'ck_off' : 'ck_on' ?>">
           <input type="hidden" name="ck_id" value="<?= $id ?>">
@@ -599,7 +650,7 @@ include 'includes/header.php';
           <?php if ((int)$r['has_ck']): ?>
             <button class="ck-btn off" type="submit">↩ Remove CK</button>
           <?php else: ?>
-            <button class="ck-btn" type="submit">✅ Set CK</button>
+            <button class="ck-btn" type="submit"<?= $ckBlocked ? ' disabled title="' . h("No CK while a booking is still provisional:\n" . implode("\n", $pl['blocked_by'])) . '"' : '' ?>>✅ Set CK</button>
           <?php endif; ?>
         </form>
         <form method="post" style="margin-top:4px" class="ck-runform">

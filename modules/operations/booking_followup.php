@@ -3,7 +3,9 @@
  * booking_followup.php — Operations → Booking follow-up. Supplier bookings not confirmed and
  * domestic tickets not saved, filled by the weekly / daily check (followup_cron.php) or
  * "Run check now"; the booking team takes lines in charge here.
- * Also the CK findings of the booking check (type ck, audience booking / sales / accounts).
+ * Also the CK findings of the booking check (type ck, audience booking / sales / accounts), the SafariCheck booking
+ * points (type safaricheck) and lines added by hand (type manual): one list — a line found by several checks shows
+ * each of them ("found by"), its priority comes from its deadline (due_date).
  * Every logged-in Hub user can view; edits need module booking_followup_edit, or being the line's owner
  * (owners: any active user; reassign / not relevant: admin or the current owner).
  * Data / changes: api/followup.php → includes/followup_service.php.
@@ -81,6 +83,18 @@ table.fu-table tr.dirty td{background:#FFF8E1}
 .fu-det{margin:0 0 8px;padding:0 0 8px;border-bottom:1px solid var(--grey-lt);list-style:none}
 .fu-det li{padding:1px 0;color:var(--grey-dk)} .fu-det b{color:var(--black);font-weight:600;margin-right:6px}
 .fu-ev .w{color:var(--grey-mid);margin-right:8px;font-variant-numeric:tabular-nums}
+.fu-det .w{color:var(--grey-mid);font-size:.68rem}
+.fu-due{display:block;font-size:.7rem;color:var(--grey-dk);white-space:nowrap;margin-top:3px}
+.fu-due.fu-late{color:var(--red-dk);font-weight:700}
+.fu-srcs{display:flex;flex-wrap:wrap;gap:3px;margin-top:4px}
+.fu-src{font-size:.64rem;background:var(--off-white);color:var(--grey-dk);border-radius:8px;padding:1px 6px;white-space:nowrap;cursor:help}
+.fu-add{background:var(--white);border-radius:10px;box-shadow:0 1px 8px rgba(0,0,0,.08);padding:14px 16px;margin-bottom:16px;display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px;align-items:end}
+.fu-add[hidden]{display:none}
+.fu-add label{display:block;font-size:.68rem;font-weight:700;color:var(--grey-dk);margin-bottom:3px}
+.fu-add input,.fu-add select,.fu-add textarea{width:100%;box-sizing:border-box;font-family:inherit;font-size:.78rem;border:1.5px solid var(--grey-lt);border-radius:6px;padding:5px 7px}
+.fu-add .wide{grid-column:span 3}
+.fu-add .acts{grid-column:span 6;display:flex;gap:8px;align-items:center}
+@media(max-width:900px){.fu-add{grid-template-columns:1fr 1fr}.fu-add .wide,.fu-add .acts{grid-column:span 2}}
 @media(max-width:1200px){.fu-stats{grid-template-columns:repeat(4,minmax(0,1fr))}}
 @media(max-width:600px){.fu-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.fu-run{margin-left:0}}
 ';
@@ -107,10 +121,25 @@ include __DIR__ . '/../../includes/layout_header.php';
         <option value="all">All</option>
       </select>
       <button type="button" class="btn btn-primary btn-sm" id="fu-run-btn">▶ Run check now</button>
+      <button type="button" class="btn btn-outline btn-sm" id="fu-add-btn" title="A problem found outside the checks (by phone, by mail…)">＋ Add line</button>
     </div>
     <?php endif; ?>
   </div>
   <div class="fu-msg" id="fu-msg"></div>
+  <?php if ($fuData['me']['can_edit']): ?>
+  <div class="fu-add" id="fu-add" hidden>
+    <div><label for="fu-add-req">Request #</label><input type="number" id="fu-add-req" min="1" placeholder="2073"></div>
+    <div><label for="fu-add-aud">For</label>
+      <select id="fu-add-aud"><option value="booking">Booking</option><option value="sales">Sales</option><option value="accounts">Accounts</option></select></div>
+    <div class="wide"><label for="fu-add-text">What is wrong / what to do</label><input type="text" id="fu-add-text" maxlength="500" placeholder="Lodge called: 2 rooms instead of 3, rebook"></div>
+    <div><label for="fu-add-owner">Owner</label><select id="fu-add-owner"></select></div>
+    <div><label for="fu-add-svc">Supplier / service</label><input type="text" id="fu-add-svc" maxlength="255" placeholder="Serengeti Classic View"></div>
+    <div><label for="fu-add-sdate">Service date</label><input type="date" id="fu-add-sdate"></div>
+    <div><label for="fu-add-due">Deadline</label><input type="date" id="fu-add-due" title="Empty: 14 days before the service"></div>
+    <div class="acts"><button type="button" class="btn btn-primary btn-sm" id="fu-add-save">Add</button>
+      <button type="button" class="btn btn-outline btn-sm" id="fu-add-cancel">Cancel</button><span id="fu-add-msg"></span></div>
+  </div>
+  <?php endif; ?>
 
   <div class="fu-stats" id="fu-stats"></div>
 
@@ -123,6 +152,7 @@ include __DIR__ . '/../../includes/layout_header.php';
     <div><label for="fu-f-prio">Priority</label>
       <select id="fu-f-prio"><option value="">All</option><option value="1-URGENT">1 – Urgent</option><option value="2-HIGH">2 – High</option><option value="3-NORMAL">3 – Normal</option></select></div>
     <div><label for="fu-f-supplier">Supplier</label><select id="fu-f-supplier"></select></div>
+    <div><label for="fu-f-src">Found by</label><select id="fu-f-src"></select></div>
     <div><label for="fu-f-month">Trip month</label><select id="fu-f-month"></select></div>
     <div><label for="fu-f-q">Search</label><input type="search" id="fu-f-q" placeholder="Client, folder, ref…"></div>
     <span class="fu-chip" id="fu-f-req" hidden></span>

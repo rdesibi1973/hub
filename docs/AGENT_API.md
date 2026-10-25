@@ -390,6 +390,11 @@ renamed and every request of the group is updated. No email is sent (unlike Resc
   allowed roots or a file · 409 folder not found in Dropbox (stored path, then search: the message suggests
   `current_path` and `candidates[]` lists up to 3 folders in `/001_Safari` found by the customer name),
   `current_path` already used by another request, destination folder already exists · 502 Dropbox/DB failure.
+- **Adding `_CK` while a booking is provisional → 409** (also on the dry run; no override — Roberto, 25 Oct 2026):
+  `ck_blocked: true`, `ck_blocked_by[]` ("Serengeti Classic View 29 Dec – provisional, expired 31 Jul"): an open Booking
+  follow-up line with a provisional issue from any check, or a document now in `invoices/` (not `old/`) read as provisional /
+  on request by the last supplier scan (`ck_pipeline_block()`). The same rule in BackOffice → Rename…, the CK tracker "Set CK"
+  and the request edit form. Other open lines: a warning ("Setting _CK with N open Booking follow-up line(s) …").
 - **Warnings (dry run, never blocking):** date tag malformed (`START29OC`), START / MIDT / END not in
   order (e.g. END before START) or spanning > 60 days, `_CK` not last, `MM_DDMON_` prefix ≠ START,
   `_CK` / status tag / START / END dropped from the current name, another request already using the name,
@@ -1167,14 +1172,17 @@ no START in the folder).
 The CK tracker: every booking folder at the top of `/001_Safari` (a private safari or a whole GRP). Runs the
 same Dropbox scan as the page first (`scan=0` skips it; a failed scan → `scan_warning`, last known state).
 Tanzania only; trips already started are left out unless `past=1` or `q`.
-`has_ck=0|1`, `start_before` (YYYY-MM-DD), `q` (folder / customer / agent words).
+`has_ck=0|1`, `start_before` (YYYY-MM-DD), `q` (folder / customer / agent words), `needs_check=1` (the bookings the Claude
+booking check should take now — see Pipeline below).
 → `rows[]` `{ck_folder_id, request_id, request_ids[], folder, agent, start_date, days_to_arrival, band
 (red < 60 days · amber 60–90 · grey > 90), stage, ck_due (booking done, no _CK), waiting_days, has_ck, ck_at,
 ck_by, check_requested_at, last_checked_at, overall (green|yellow|red|grey|error), n_red, n_yellow,
 reds[] / yellows[] ("Section — Title" of the open points; confirmed ones left out), check_error, report_url,
 last_note, ck_owner, booking_owner, booking_owner_calc, open_findings {booking, sales, accounts}, open_followup {supplier,
-ticket, group}, findings_checked_at, findings_report_path, ck_ready}`. To set `_CK` use `rename_folder` (it keeps `_CK` last;
-its dry run warns — never blocks — when the booking still has open ck / supplier / ticket lines or no booking check was sent).
+ticket, group, safaricheck, manual}, findings_checked_at, findings_report_path, pipeline_stage, open_lines, open_by_audience,
+open_by_source, urgent_lines, next_due_date, next_due_reason, last_claude_check_at, last_safaricheck_at, days_since_check,
+needs_check, next_check_reason, ck_blocked, ck_blocked_by[], ck_ready, followup_url}`. To set `_CK` use `rename_folder` (it keeps
+`_CK` last; **refused with 409 while a booking is provisional**, a warning for other open lines).
 - **Owners** (Oct 2026, migration 073): `ck_owner` / `booking_owner` = `{user_id, username, name, email, default}` or `null`.
   `default: true` = not set by hand, computed by the rule (a later change of rule applies to every such row):
   CK owner = `CK_OWNER_DEFAULT` in the server config — `fixed:<username>` (default `fixed:rdesibi`: Roberto handles every CK for
@@ -1183,7 +1191,24 @@ its dry run warns — never blocks — when the booking still has open ck / supp
   ("Lydia", "Glady"; `booking_owner_calc` = the names read), none → `null` ("not assigned"). The Calc names are read once
   per 12 h (cached Calc, `ops_calc`), at most ~40 s per call: `owners_pending` > 0 → call again (`owners_refresh=0` skips it).
   Top level: `owner_rule`, `owners_pending`. Filter `owner=<username>` (CK or booking owner).
-- `ck_ready: true` = a booking check was sent (`ck_findings_upsert`) and no ck / supplier / ticket line of the booking is open.
+- **Pipeline** (Oct 2026, migration 074; `modules/leads/includes/ck_pipeline.php`, the same as the CK tracker "Pipeline" column).
+  `pipeline_stage`: `confirmed` (booked, no supplier document in `invoices/` yet) → `booked` (documents present, not checked by
+  both SafariCheck and the Claude check) → `issues` (at least one open Booking follow-up line, any check, any audience) →
+  `ready` (SafariCheck and Claude check done, nothing open, nothing provisional) → `ck` (`_CK` set).
+  `open_lines` / `open_by_audience {booking, sales, accounts}` / `open_by_source {supplier_scan, ticket_scan, group_scan,
+  safaricheck, claude_check, manual}` / `urgent_lines`; `next_due_date` / `next_due_reason` = the nearest deadline of its open
+  lines (see Booking follow-up — deadlines). `last_claude_check_at` (= `findings_checked_at`), `last_safaricheck_at`,
+  `days_since_check` (Claude check).
+- **Check early, then again**: `needs_check: true` + `next_check_reason` — `first_check` (documents present, booked for more
+  than 7 days — `booking_done_at` — and never checked by Claude), `recheck_60` / `recheck_30` (arrival within 60 / 30 days and
+  the last Claude check older than that mark). Trips started, outside Tanzania: never. `needs_check=1` keeps only those rows,
+  so Cowork takes "the bookings to check this week" instead of whole months.
+- **`_CK` blocked while a booking is provisional** (Roberto, 25 Oct 2026; no force flag): `ck_blocked: true` + `ck_blocked_by[]`
+  ("Serengeti Classic View 29 Dec – provisional, expired 31 Jul") when an open line of the booking has, from any check, issue
+  `provisional`, `provisional_expired`, `on_request`, `orangi_rooms_provisional` or `booking_provisional`. `rename_folder`, the
+  CK tracker "Set CK" button and the request edit form also refuse a document now in `invoices/` (not `old/`) that the last
+  supplier scan read as provisional / on request. Other open lines (transfers, tickets, client info…) only warn.
+- `ck_ready: true` = a booking check was sent (`ck_findings_upsert`), nothing provisional and no line of the booking open.
 
 ### `ck_set_owners` (POST)
 `ck_folder_id` or `request_id` + `ck_owner?` / `booking_owner?` (username or user id of an active user; `null` = back to the
@@ -1196,7 +1221,8 @@ The findings of a booking check (skill `booking-check`) → lines `type: ck` in 
 **Dry run unless `"confirm": true`.** `request_id`, `checked_at` (ISO), `report_path` (the folder's `booking-check.html`:
 name under the folder, `/001_Safari/…` or the local `C:\Dropbox\001_Safari\…` path), `findings[]` (max 200):
 `{audience: booking|sales|accounts, issue, service_date? (YYYY-MM-DD), service (Calc text), supplier?, text (what is wrong /
-what to do, ≤ 500 chars), source_file?}`.
+what to do, ≤ 500 chars), source_file?, service_type?}` (`stay`, `flight`, `transfer`, `activity`, `payment`, `invoice`,
+`client_info`, `dates`, `other` — guessed from the issue and the texts when not sent).
 - `issue`: short code — `transfer_missing`, `booking_provisional`, `flight_unpaid`, `client_flights_missing`,
   `invoice_mismatch`, `payment_mismatch`, `other` (any `a-z0-9_` code up to 40 chars is kept).
 - Owner on insert: `booking` → the CK folder's booking owner, `sales` → its CK owner, `accounts` → Roberto. Never changed by
@@ -1205,10 +1231,17 @@ what to do, ≤ 500 chars), source_file?}`.
   added, the ones still reported updated (text, file), the ones not sent close as `auto_resolved`; a line staff closed as
   `resolved` and still reported re-opens (event "still reported by CK check"); `not_relevant` stays closed. `findings: []`
   = the check found nothing → every open ck line of the booking closes. A second identical upsert changes nothing.
+- **Merge** (one list, migration 074): a finding about a service another check already has open for the booking (same
+  audience and the same supplier ref, or the same service type + service date + supplier — "Serengeti Classic View Camp" =
+  "Serengeti Classic View" = "SCVC") is **not** a new line: `claude_check` is added to that line's `sources` (`merged[]`:
+  `{id (the line), into_type, into_issue, sources[], owner (its current owner — kept)}`). No more skipping supplier lines by
+  hand: send every finding. When a later check no longer reports it, `claude_check` leaves the line (`cleared[]`); the line
+  closes only when no other check reports it.
 - Passport numbers: never in `text` (a "passport no. …" number is replaced by `[removed]`).
-- → dry run: `would_add[]`, `would_update[]`, `would_close[]`, `would_reopen[]`; confirm: `add[]`, `update[]`, `close[]`,
-  `reopen[]` — each `{id?, request_id, folder, audience, service, service_date, issue, file, status (text), owner (username)}`;
-  `unchanged`, `owners {booking, sales, accounts}`, `errors[]` (findings skipped and why).
+- → dry run: `would_add[]`, `would_merge[]`, `would_update[]`, `would_close[]`, `would_clear[]`, `would_reopen[]`; confirm:
+  `add[]`, `merged[]`, `update[]`, `close[]`, `cleared[]`, `reopen[]` — each `{id?, request_id, folder, audience, service,
+  service_date, issue, file, status (text), owner (username)}`; `unchanged`, `owners {booking, sales, accounts}`, `errors[]`
+  (findings skipped and why).
 
 ### `ck_findings_drafts` (GET)
 Open ck lines grouped by owner → **one mail draft per owner** in English. **Read-only: it does not send.** `request_ids`
@@ -1266,6 +1299,7 @@ curl -sH "$H" "$U?action=payments_due&overdue=1&issuer=SH"
 curl -sH "$H" "$U?action=ck_status&has_ck=0&start_before=2027-01-15"
 curl -sH "$H" -X POST "$U?action=ck_request_check" -d '{"request_id":2958}'                 # dry-run
 curl -sA "$UA" -H "$H" "$U?action=ck_status&owner=lydia"
+curl -sA "$UA" -H "$H" "$U?action=ck_status&needs_check=1&owners_refresh=0"                # the bookings to check now
 curl -sA "$UA" -H "$H" -X POST "$U?action=ck_set_owners" -d '{"request_id":2958,"booking_owner":"glady"}'                 # dry-run
 curl -sA "$UA" -H "$H" -X POST "$U?action=ck_findings_upsert" -d '{"request_id":2958,"checked_at":"2026-10-25T10:00:00","report_path":"booking-check.html","findings":[{"audience":"booking","issue":"transfer_missing","service_date":"2026-12-05","service":"Transfer ZNZ airport - hotel","text":"No transfer booked for the ZNZ arrival: book it and save the confirmation in bookings/"}]}'   # dry-run
 curl -sA "$UA" -H "$H" "$U?action=ck_findings_drafts&since=2026-10-25"
@@ -1279,6 +1313,33 @@ curl -sH "$H" "$U?action=flight_tickets"
 The open items the booking team chases (Hub: Operations → 📌 Booking follow-up, `modules/operations/booking_followup.php`;
 logic `modules/operations/includes/followup_service.php`, documents read by `followup_classify.php`; tables
 `booking_followups`, `booking_followup_events`, `booking_followup_docs`, `booking_followup_runs` — migration 069 or created on first use).
+- **One list** (Oct 2026, migration 074): every check writes here — `supplier_scan`, `ticket_scan`, `group_scan`, `safaricheck`
+  (SafariCheck runner), `claude_check` (`ck_findings_upsert`), `manual` (staff, page "＋ Add line"). `sources` on each row:
+  `[{source, label, issue, issue_label, text, since}]` = the checks reporting it now. A new finding about a service another
+  check has open (same request + audience, and the same supplier ref or the same service type + date + supplier) joins that
+  line (`service_key` = `R<request>|<type>|<date>|<supplier words>`); a check that no longer reports it leaves `sources`, the
+  line closes when none is left (`auto_trip_ended` always closes). A confirmed supplier document clears every "provisional"
+  source of that service (`auto_confirmed` for all checks). Owner on insert (every check): `booking` → the CK folder's
+  booking owner, `sales` → CK owner, `accounts` → Roberto, no booking owner → nobody; lines with an owner are never
+  reassigned automatically (the first run after 074 gives the open lines without an owner their default once).
+- `type: safaricheck` — the SafariCheck points about **bookings** (red / yellow, not ticked "correct"), written when the runner
+  posts a result (`ck_agent_api.php`); the result replaces the booking's open safaricheck lines. Mapped titles
+  (`CK_SC_BOOKING_POINTS`, `ck_lib.php`): Accommodation `Nights differ:`, `Check-in differs:`, `Invoice dates differ:`,
+  `Rooms differ:`, `Basis differs:`, `GRP rooms short:`, `GRP unsold rooms:`; Transfers `Transfer <date> · …`, `Excel note:`;
+  Flights `Flight in Word not in Excel`, `Flights invoiced but not quoted`; Arrival / Departure `… flight not on the trip …`;
+  Dates `Start / End date mismatch`; PAX `PAX count mismatch`. Issues `sc_nights_differ`, `sc_checkin_differs`,
+  `sc_invoice_dates`, `sc_rooms_differ`, `sc_basis_differs`, `sc_grp_rooms_short`, `sc_grp_unsold`, `sc_transfer`,
+  `sc_flight`, `sc_dates`, `sc_pax`. Naming points ("Lodge not found in Word: …", "Lodge in Word not in Excel: …") and
+  document-only points (prices, Word texts, sheets) stay in the CK tracker. Ticking a point in the SafariCheck report closes its
+  line (`auto_resolved`, unless another check reports it).
+- `type: manual` — added from the page by the booking team (`request_id`, audience, text, service?, service date?, deadline?,
+  owner?), closed by staff only; its deadline is editable.
+- **Deadlines and priority**: `due_date` / `due_reason` / `due_days` = the earliest of the provisional expiry printed on the
+  document; the supplier payment of a stay (check-in − 30 days: Orangi Collection always — changes within 30 days only by
+  Roberto —, other lodges the days read in the document terms, `payment_days`, else 30); group block release (arrival − 60
+  days: GRP / Il Diamante / `_PROVISIONAL`); a domestic flight's ticketing time limit on the pro-forma, else the flight − 7
+  days; otherwise the service (or arrival) − 14 days. `priority` from it: `1-URGENT` overdue or ≤ 7 days, `2-HIGH` ≤ 30 days,
+  `3-NORMAL` later. Default sort: priority, nearest deadline, not taken in charge, problems, service date.
 - `type: supplier` — documents in `<booking>/invoices/` (top level; `invoices/old/` is never read) of confirmed bookings not
   ended (same set as Operations: `_END` tag, not cancelled): `issue` `provisional`, `provisional_expired` (expiry printed and
   past), `on_request` (flight invoice), `orangi_rooms_provisional` (voucher Confirmed with a note "… provisional"),
@@ -1301,7 +1362,7 @@ logic `modules/operations/includes/followup_service.php`, documents read by `fol
   owner), `sales` (information missing from the client: international flights, room requests, names → the CK owner),
   `accounts` (client invoice / payment that doesn't match → Roberto). Supplier / ticket / group lines have `audience`
   `booking`. `issue` is a free short code; `doc_status_text` = what is wrong / what to do; `report_url` /
-  `report_open_url` = the folder's `booking-check.html`. Priority: ≤ 30 days `1-URGENT`, ≤ 60 `2-HIGH`, later `3-NORMAL`.
+  `report_open_url` = the folder's `booking-check.html` (shown on every line of the booking).
 - **Owners: any active Hub user** (since 25 Oct 2026; before only Glady / Lydia). The booking team (module
   `booking_followup_edit`) takes in charge and edits every line; the **current owner** of a line can edit it too
   (status, notes, take) without the module — e.g. a seller who owns a `sales` line. Reassign and `not_relevant`: admin or
@@ -1320,8 +1381,6 @@ logic `modules/operations/includes/followup_service.php`, documents read by `fol
   provisional note), `auto_ticket_saved`, `auto_trip_ended`, `auto_not_found` (the file left `invoices/` and nothing else has
   that reference — check it was not moved without a confirmed one), `manual` (staff: `resolved`; admin: `not_relevant`).
   A line still found provisional after a staff `resolved` (or an auto-close) is **re-opened**; `not_relevant` stays closed.
-- `priority` (computed): `1-URGENT` service ≤ 30 days, or expiry ≤ 7 days, or expired with service ≤ 90 days; `2-HIGH` ≤ 90
-  days; `3-NORMAL` later. Tickets: `1-URGENT` within 7 days, else `2-HIGH`.
 - **PDFs on the server:** BlueHost has no `pdftotext` and no Composer today, so `followup_scan` type `supplier` only uses
   documents already read and returns `reader: "none"` + a `warning`. Two ways: (a) on the office PC run
   `tools\followup_local_scan.bat [--confirm]` (reads `C:\Dropbox\001_Safari` and the Diamante `20*-Groups` folders (`--extra`),
@@ -1330,31 +1389,34 @@ logic `modules/operations/includes/followup_service.php`, documents read by `fol
   `FOLLOWUP_PDFTOTEXT` (`includes/config.php`).
 
 #### `followup_list` (GET)
-`type` (`supplier` | `ticket` | `group` | `ck`), `audience` (`booking` — includes the lines without one — | `sales` | `accounts`),
+`type` (`supplier` | `ticket` | `group` | `ck` | `safaricheck` | `manual`), `audience` (`booking` — includes the lines without one — | `sales` | `accounts`),
 `status` (`open` default | `closed` | `all`), `owner` (username | user id | `none`),
-`priority` (`1-URGENT` | `2-HIGH` | `3-NORMAL`, or `1`/`2`/`3`), `request_id`, `q` (client / folder / supplier / ref / notes).
+`priority` (`1-URGENT` | `2-HIGH` | `3-NORMAL`, or `1`/`2`/`3`), `request_id`, `q` (client / folder / supplier / ref / notes),
+`source` (a check in the line's sources: `supplier_scan` | `ticket_scan` | `group_scan` | `safaricheck` | `claude_check` | `manual`),
+`due_before` (YYYY-MM-DD: deadline on or before).
 → `count`, `last_check_at` `{supplier, ticket}`, `last_checks`, `rows[]` `{id, type, audience, request_id, customer, folder, folder_url,
 file_url, folder_open_url, file_open_url, start_date, end_date, service_date, days_left, supplier, supplier_ref, service, source_file, issue, issue_label,
 doc_status_text, report_url, report_open_url, expiry_date, expired, booked_by, owner, owner_name, contacted_at, staff_status, notes, notes_log[] {at, by, text} (newest first), priority,
-first_seen_at, last_seen_at, closed_at, closed_by, close_reason, events_count}` — not taken in charge first, then problems,
-priority, service date.
+due_date, due_reason, due_days, service_type, sources[] {source, label, issue, issue_label, text, since}, ck_tracker_url,
+first_seen_at, last_seen_at, closed_at, closed_by, close_reason, events_count}` — priority first (from the deadline), then the
+nearest deadline, not taken in charge, problems, service date.
 
 #### `followup_scan` (POST)
 Runs the check. **Dry run unless `"confirm": true`** (the dry run returns what would change). `type` `supplier` | `ticket` | `group` |
-`all` (default), `request_id` (one booking). → `supplier` / `ticket` summaries `{added[], updated[], closed[] (+ reason),
-reopened[], unreadable[], unchanged}`; supplier also `units`, `units_complete`, `reader`, `partial` (time budget used up —
+`all` (default), `request_id` (one booking). → `supplier` / `ticket` summaries `{added[], updated[], merged[] (joined another
+check's line), closed[] (+ reason), cleared[] (this check left a line another check still reports), reopened[], unreadable[], unchanged}`; supplier also `units`, `units_complete`, `reader`, `partial` (time budget used up —
 run again, each PDF is read once per Dropbox revision), `errors[]`.
 
 #### `followup_update` (POST)
 `id` + any of `owner` (username / id of any active Hub user, or `null`), `contacted_at` (YYYY-MM-DD or `""`), `staff_status` (`open`, `in_progress`,
-`problem` — needs a note —, `resolved`, `not_relevant`), `notes`. Dry run unless `"confirm": true`. Acts as `AGENT_API_USER`
+`problem` — needs a note —, `resolved`, `not_relevant`), `notes`, `due_date` (lines `type: manual` only). Dry run unless `"confirm": true`. Acts as `AGENT_API_USER`
 with the follow-up admin rights (not relevant); every change is an event (who / when). → `changes {field: [old, new]}`, `row`.
 
 #### `followup_upsert` (POST)
 Supplier documents read elsewhere (office PC, Cowork) — also the way to load a baseline. Dry run unless `"confirm": true`.
 `rows[]` `{folder (path under /001_Safari, e.g. "00_2027/…" or "<GRP>/<member>"; or an absolute Dropbox path "/itineraries/…" for a folder outside it) | request_id, source_file
 ("invoices/x.pdf"), supplier?, supplier_ref?, service_date?, issue? | status: "confirmed", doc_status_text?, expiry_date?,
-booked_by?}` (max 2000), `scanned[]` = folders whose `invoices/` were read completely (their lines not sent close as
+booked_by?, payment_days? (supplier payment N days before check-in, read in the terms), ticket_limit?}` (max 2000), `scanned[]` = folders whose `invoices/` were read completely (their lines not sent close as
 `auto_not_found`; rows with `status: confirmed` close their reference). Folder names match by stem (status tags ignored).
 A group folder without a confirmed booking, or a folder outside `/001_Safari`, gets its own lines (see above).
 → the summary + `matched`, `unmatched[]`, `folders_without_booking`.
@@ -1371,8 +1433,9 @@ curl -sA "$UA" -H "$H" -X POST "$U?action=followup_upsert" -d '{"rows":[{"folder
 Checks are run by hand for now (page → Run check now → All; office PC scan for the PDFs). Optional cron (cron-job.org, not set up): `modules/operations/followup_cron.php?token=…&type=ticket` daily 05:30, `&type=group` daily 05:40, `&type=supplier` Monday 05:30
 (token `FOLLOWUP_CRON_TOKEN`, else `MEMO_CRON_TOKEN`; `&dry=1` = summary only). The memo digest (06:00) lists new lines,
 problems, lines not taken in charge for > 2 days, provisional expiring ≤ 7 days and tickets missing ≤ 7 days, and a
-section "CK findings" for Roberto: new ck lines since the last digest by owner, ck lines open > 3 days, bookings arriving
-within 60 days with open ck lines. No mail goes to the owners automatically.
+section "Bookings pipeline" for Roberto: URGENT lines by owner, bookings blocked from the CK by a provisional booking and
+arriving within 60 days, bookings waiting for their first check, then new check findings (Claude / SafariCheck) by owner and
+findings open > 3 days. No mail goes to the owners automatically.
 
 ## Mail security (read-only)
 

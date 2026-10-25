@@ -142,7 +142,8 @@ foreach ($folders as $rel => $fo) {
                    'service_date' => $c['service_date'], 'issue' => $c['issue'], 'status' => $c['status'],
                    'doc_status_text' => $c['doc_status_text'], 'expiry_date' => $c['expiry_date'], 'booked_by' => $c['booked_by'],
                    'block_text' => $c['block_text'] ?? null, 'names_tba' => $c['names_tba'] ?? false, 'flight_pax' => $c['flight_pax'] ?? null,
-                   'flight_znz' => $c['flight_znz'] ?? false, 'flight_text' => $c['flight_text'] ?? null, 'ticket_limit' => $c['ticket_limit'] ?? null];
+                   'flight_znz' => $c['flight_znz'] ?? false, 'flight_text' => $c['flight_text'] ?? null, 'ticket_limit' => $c['ticket_limit'] ?? null,
+                   'payment_days' => $c['payment_days'] ?? null];
     }
     if ($ok) $scanned[] = $rel;
 }

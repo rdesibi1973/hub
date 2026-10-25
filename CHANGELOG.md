@@ -20,6 +20,41 @@ Running log of notable changes and current build state. Module-level "active / p
 
 ---
 
+## 2026-10-25 — One pipeline: CK tracker + Booking follow-up
+- **Migration 074** (additive; `followup_schema()` does the same on first use): `booking_followups` types `safaricheck` and
+  `manual`, columns `sources` (JSON: the checks still reporting the line), `service_key`, `due_date`, `due_reason`; table
+  `booking_followup_meta`. The first scan / page view after deploy (`followup_backfill()`, once) writes the SafariCheck points of
+  every upcoming booking's last check, and gives the open lines their service key, deadline and — when nobody owns them — their
+  default owner.
+- **One list**: every check writes into `booking_followups` (supplier / ticket / group scans, SafariCheck, Claude check,
+  staff). A finding about a service another check has open (`followup_service_match()`: same request + audience, same supplier
+  ref or same service type + date + supplier, initials too) joins that line's `sources` instead of a new line; a check that
+  no longer reports it leaves `sources`; the line closes when none is left. A confirmed supplier document clears every
+  "provisional" source of that service (`followup_clear_confirmed()`). `followup_apply()` rewritten for it.
+- **SafariCheck booking points** → lines `type: safaricheck` when the runner posts a result (`ck_sc_booking_points()`,
+  `CK_SC_BOOKING_POINTS` in `ck_lib.php`: stays, transfers, flights, dates, pax; naming / document points stay in the CK
+  tracker). Ticking a point in the SafariCheck report closes its line (`ck_confirm.php`).
+- **Owner on insert for every check** (booking → booking owner, sales → CK owner, accounts → Roberto); never reassigned.
+- **Deadlines** (`followup_due()`): provisional expiry, supplier payment (check-in − 30 days; Orangi always; other lodges the
+  days read in the document terms — `followup_classify()` reads `payment_days`, `FU_CLASSIFY_VERSION` 3, the office PC scan
+  sends it), group release (arrival − 60), ticketing limit or flight − 7, else service − 14. Priority from the deadline:
+  URGENT overdue / ≤ 7 days, HIGH ≤ 30. Default sort by priority and deadline.
+- **Pipeline** (`modules/leads/includes/ck_pipeline.php`): stage confirmed → booked → issues → ready → ck, nearest deadline,
+  days since the Claude check, `needs_check` / `next_check_reason` (first check after 7 days booked, re-check at 60 / 30 days
+  before arrival). CK tracker: "Pipeline" column, row colour red / amber from the lines' priority (else the SafariCheck
+  colour), view + tile "To check", tile "Blocked".
+- **`_CK` blocked while a booking is provisional** (no override): `ck_set_marker()` (CK tracker button disabled with the
+  reasons), `folder_rename()` (BackOffice Rename…, Agent API `rename_folder` → 409, also on the dry run), request edit form.
+- Booking follow-up page: deadline under the priority, "found by" chips, filter "Found by", tab "Checks" (Claude check +
+  SafariCheck), link to the CK tracker row and the booking-check report on every line of the booking, "＋ Add line" (manual
+  lines with an editable deadline).
+- Agent API: `ck_status` (`pipeline_stage`, `open_lines`, `open_by_audience`, `open_by_source`, `next_due_date`, `needs_check`
+  filter + `next_check_reason`, `ck_blocked`, `ck_blocked_by[]`, `last_claude_check_at`, `last_safaricheck_at`),
+  `ck_findings_upsert` (`merged[]` / `would_merge[]`, `cleared[]`, `service_type`), `followup_list` (`source`, `due_before`;
+  rows with `sources[]`, `due_date`, `due_reason`), `rename_folder` (409 block), `followup_upsert` (`payment_days`).
+- Memo digest: section "CK findings" → "Bookings pipeline" (URGENT lines by owner, CK blocked by provisional bookings ≤ 60
+  days, first checks due).
+
 ## 2026-10-25 — CK owners, booking owners and CK findings in Booking follow-up
 - **Migration 073** (additive; `ck_ensure_schema()` / `followup_schema()` do the same on first use): `ck_folders` gets
   `ck_owner_user_id`, `booking_owner_user_id`, `owners_updated_at/_by`, the cached default booking owner

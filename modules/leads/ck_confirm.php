@@ -94,6 +94,17 @@ try {
     } catch (Throwable $e) {
         error_log('ck_confirm: history not written: ' . $e->getMessage());
     }
+    // A booking point ticked: its Booking follow-up line closes (unless another check still reports it).
+    // Unticked: the next SafariCheck run writes it again.
+    if (!empty($in['on'])) {
+        try {
+            require_once __DIR__ . '/../operations/includes/followup_service.php';
+            $row = ck_tracker_row_for($db, (int)$frow['id'], null);
+            if ($row) followup_safaricheck_confirmed($db, $row, $key, ($cu['full_name'] ?? '') ?: ($cu['username'] ?? '?'));
+        } catch (Throwable $e) {
+            error_log('ck_confirm: follow-up line not closed: ' . $e->getMessage());
+        }
+    }
     ck_confirm_out(['ok' => true, 'checks' => (object)$checks]);
 } catch (Throwable $e) {
     ck_confirm_out(['ok' => false, 'msg' => $e->getMessage()], 500);
