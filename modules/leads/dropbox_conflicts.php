@@ -140,7 +140,8 @@ foreach ($tables as [$title, $list, $isOpen]): ?>
             $tag = ['dc-fix', 'to fix'];
         } ?>
       <tr>
-        <td class="dc-file"><?= $r['request_id'] ? '<a href="request_view.php?id=' . (int)$r['request_id'] . '">' . h($r['folder']) . '</a>' : h($r['folder']) ?></td>
+        <td class="dc-file"><?= $r['request_id'] ? '<a href="request_view.php?id=' . (int)$r['request_id'] . '">' . h($r['folder']) . '</a>' : h($r['folder']) ?>
+            <span class="dc-why"><a href="<?= h(dbxc_dropbox_url(CK_BASE . '/' . $r['folder'])) ?>" target="_blank" rel="noopener">folder</a></span></td>
         <td class="dc-file"><a href="<?= h($r['dropbox_url']) ?>" target="_blank" rel="noopener"><?= h($r['file']) ?></a>
             <span class="dc-why">Original: <?= h($r['original']) ?></span></td>
         <td class="dc-nowrap"><?= h($r['saved_at'] ? substr($r['saved_at'], 0, 16) : '') ?></td>
