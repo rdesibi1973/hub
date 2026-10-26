@@ -456,12 +456,39 @@ function dbxc_merge(string $token, array $o, array $O, array $C, array $keys, bo
 
 // ── One conflicted copy ──────────────────────────────────────────────────────
 
-/** The cells to show for a copy: [{cell, base, original, copy, both}]. */
+/** Passport columns of the guest list: ['Sheet!E' => header row] for every header cell "PASSPORT (NO.)" / "PASSAPORTO" (short, no digits). */
+function dbxc_passport_cols(array ...$files): array {
+    $cols = [];
+    foreach ($files as $f) {
+        foreach ($f['cells'] ?? [] as $k => $v) {
+            if (!preg_match('/^s:\W*PASS(PORT|APORTO|EPORT)\b[^0-9]{0,15}$/i', $v)) continue;
+            if (!preg_match('/^(.*)!([A-Z]+)(\d+)$/', $k, $m)) continue;
+            $key = $m[1] . '!' . $m[2];
+            $cols[$key] = min($cols[$key] ?? PHP_INT_MAX, (int)$m[3]);
+        }
+    }
+    return $cols;
+}
+
+/**
+ * A dbxc_show() value without passport numbers: a cell below a passport header → "(hidden)"; in any other text, a
+ * document-like token (6–10 letters and digits, at least one letter and five digits: "YA1234567") → "[hidden]".
+ */
+function dbxc_private(string $k, ?string $v, array $pcols): string {
+    if ($v !== null && preg_match('/^(.*)!([A-Z]+)(\d+)$/', $k, $m) && isset($pcols[$m[1] . '!' . $m[2]]) && (int)$m[3] > $pcols[$m[1] . '!' . $m[2]]) {
+        return '(hidden)';
+    }
+    if ($v !== null && $v[0] === 's') $v = (string)preg_replace('/\b(?=[A-Z0-9]*[A-Z])(?=(?:[A-Z]*\d){5})[A-Z0-9]{6,10}\b/i', '[hidden]', $v);
+    return dbxc_show($v);
+}
+
+/** The cells to show for a copy: [{cell, base, original, copy, both}], passport numbers hidden (dbxc_private()). */
 function dbxc_cell_rows(array $keys, ?array $a, array $o, array $c, array $both): array {
+    $pcols = dbxc_passport_cols($o, $c, $a ?? []);
     $rows = [];
     foreach (array_slice($keys, 0, DBXC_MAX_MERGE) as $k) {
-        $rows[] = ['cell' => $k, 'base' => $a ? dbxc_show($a['cells'][$k] ?? null) : null,
-                   'original' => dbxc_show($o['cells'][$k] ?? null), 'copy' => dbxc_show($c['cells'][$k] ?? null),
+        $rows[] = ['cell' => $k, 'base' => $a ? dbxc_private($k, $a['cells'][$k] ?? null, $pcols) : null,
+                   'original' => dbxc_private($k, $o['cells'][$k] ?? null, $pcols), 'copy' => dbxc_private($k, $c['cells'][$k] ?? null, $pcols),
                    'both' => in_array($k, $both, true)];
     }
     return $rows;

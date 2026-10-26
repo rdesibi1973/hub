@@ -1621,7 +1621,8 @@ Params: `owner_user_id` (only that owner's), `days` (closed ones, default 30).
 → `live`, `last_run {at, live, conflicts, checked, left, gone, past, outcomes, errors[], notified}`, `last_done` (date),
 `open[]` and `closed[]` `{id, path, file, original, folder, request_id, owner, owner_user_id, trip_end, saved_at, outcome,
 outcome_label, auto (resolved by the Hub when live), status (open | resolved | gone = fixed by hand), action (trashed |
-merged), reason, error, base_saved, n_cells, cells[] {cell ("2pax!J20"), base, original, copy, both}, first_seen_at,
+merged), reason, error, base_saved, n_cells, cells[] {cell ("2pax!J20"), base, original, copy, both — passport numbers
+never stored: "(hidden)" below a PASSPORT header, "[hidden]" for a document-like token in other text}, first_seen_at,
 checked_at, resolved_at, mailed_at, dropbox_url}`.
 
 ### `dropbox_conflicts_run` (POST, dry-run unless `confirm`)
