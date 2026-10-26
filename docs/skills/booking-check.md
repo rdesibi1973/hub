@@ -92,6 +92,7 @@ After writing the report, send the open points to the Hub so the owners follow t
 - Fix first what Roberto can fix now (invoice text, payment, names): those never become lines.
 - `findings: []` when everything is fine: it closes any open ck line and the booking shows `ck_ready` in the CK tracker.
 - `_CK` is blocked by the Hub while a booking is still provisional (provisional, expired provisional, on request, Orangi rooms provisional, `booking_provisional`): `ck_status` shows `ck_blocked` + `ck_blocked_by[]` and `rename_folder` refuses `_CK` (409). If `ck_blocked`, never propose `_CK`: say what blocks it. Other open lines (transfers, tickets, client info) only give a warning.
+- Groups (GRP folders, Il Diamante / Panorama, "GRUPPO" folders): `_CK` only when the group is closed (final pax and room list, unsold rooms / seats released). Never propose `_CK` on an open group, whatever else is fine (Roberto, 25 Oct 2026).
 - No mail to the owners: on request, `ck_findings_drafts` → `.eml` drafts in `C:\Dropbox\Exchange\Draft-mail\` for Roberto (skill agency-email).
 
 ## 7. Reply (Italian, plain text, no emoji)

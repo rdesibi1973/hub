@@ -17,7 +17,7 @@ Memo: at the start create one `doing` memo (clear title with the folder name, li
 
 - Roberto points to the mail. Agency requests often arrive in Gmail, not Bluehost: search both before saying a mail isn't there. Note the address it arrived on: the reply goes from the same one.
 - Summarise: client / agency, pax (adults, teens 12–15, children under 12), dates, budget, wishes.
-- `find_requests` (name, email, agency) for duplicates. Not in the Hub → `create_request` with agency, agent, date, pax, period, initial request, `notify_agent: true`.
+- `find_requests` (name, email, agency) for duplicates. Not in the Hub → `create_request` with agency, agent, date, pax, period, initial request, `notify_agent: true` — **always**, also in the dry run: the API default is false and the seller must always be notified.
 - Agency not in the Hub: `list_agencies` (try the short name and part of the name) first; if it is really missing, propose `create_agency` (name, type `savannah` / `promoservice` for Promoservice agencies / `lamprati`, email if known) — dry run, show Roberto the short name used in the folder tag, `confirm` after his ok; a 409 means it exists: use that id.
 - Naming: fam trips → agency + "FamTrip"; Kenya in the name if included; agency private groups get an agency+month code (e.g. TTOCT), never "GRP" unless it is a gruppo a raccolta.
 

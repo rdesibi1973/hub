@@ -23,7 +23,7 @@ Count the Incoming Leads still to assign and list them, one line each (name, sou
 If Roberto wants: duplicates check with `find_requests` (name, email, agency) and a proposed agent.
 - Folder naming: fam trips use the agency name and "FamTrip" as client (never the staff name, never `-Drct`); trips including Kenya show Kenya in the name.
 - Alessia and Alessandra are different agents; Roberto De Sibi (id 14) is not Roberto Capri.
-- Assigning/creating: always `notify_agent: true`.
+- Assigning/creating: always `notify_agent: true` (the API default is false: never omit it, the seller must always be notified).
 - Agency not in the Hub: `list_agencies` (try the short name and part of the name) first; if it is really missing, propose `create_agency` (name, type `savannah` / `promoservice` for Promoservice agencies / `lamprati`, email if known) — dry run, show Roberto the short name used in the folder tag, `confirm` after his ok; a 409 means it exists: use that id.
 
 ## 3. Payments / AfrAsia (if due)
