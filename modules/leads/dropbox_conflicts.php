@@ -43,7 +43,6 @@ $owners = [];
 foreach (array_merge($rep['open'], $rep['closed']) as $r) if ($r['owner_user_id']) $owners[$r['owner_user_id']] = $r['owner'];
 asort($owners);
 $lastCron = dbxc_meta($db, 'last_cron');
-$past = date('Y-m-d', strtotime('-' . DBXC_PAST_DAYS . ' days'));
 
 $cellTable = function (array $r) {
     if (!$r['cells']) return;
@@ -86,7 +85,8 @@ include 'includes/header.php';
 <div class="dc-info">
   <p>When a Calc stays open in Excel on one PC while someone else (or the Hub) saves it, Dropbox keeps both versions and adds a
   <b>conflicted copy</b> next to the original. Every night (01:00–07:00) the Hub compares each copy in <code>/001_Safari</code>
-  (not the <code>old/</code> sub-folders nor the archive folders like <code>00_2025</code>) with the original and its Dropbox version history, cell by cell:</p>
+  (not the <code>old/</code> sub-folders, the archive folders like <code>00_2025</code>, nor trips ended more than
+  <?= DBXC_PAST_DAYS ?> days ago) with the original and its Dropbox version history, cell by cell:</p>
   <p><span class="dc-tag dc-auto">resolved</span> when the copy adds nothing, or when the copy and the original changed <i>different</i>
   cells: the copy's cells are written into the original, checked, and the copy goes to the Dropbox trash (restorable from Deleted files).<br>
   <span class="dc-tag dc-fix">to fix</span> when the <i>same</i> cells changed in both, or the file cannot be merged safely: the owner of the
@@ -137,7 +137,7 @@ foreach ($tables as [$title, $list, $isOpen]): ?>
         } elseif ($r['auto']) {
             $tag = ['dc-plan', $rep['live'] ? 'next run' : 'will be resolved'];
         } else {
-            $tag = ($r['trip_end'] && $r['trip_end'] < $past) ? ['dc-grey', 'past trip'] : ['dc-fix', 'to fix'];
+            $tag = ['dc-fix', 'to fix'];
         } ?>
       <tr>
         <td class="dc-file"><?= $r['request_id'] ? '<a href="request_view.php?id=' . (int)$r['request_id'] . '">' . h($r['folder']) . '</a>' : h($r['folder']) ?></td>

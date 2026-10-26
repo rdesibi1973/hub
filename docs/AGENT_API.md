@@ -1611,13 +1611,14 @@ history, cell by cell (formula text, every sheet; revisions Dropbox no longer se
 - Owner = the booking's CK owner (`ck_owners_resolve()`, the seller in the folder tag; not matched → rdesibi). Live
   nights only: one memo per owner and booking on the Memo Board (`source` dropbox, `ext_key` dbxc:…, rewritten each
   night, closed when the copies are gone) and one email per owner with the new copies to fix and what the Hub resolved
-  on their bookings. Trips ended more than 7 days ago: resolved when safe, nobody asked to fix them.
+  on their bookings. Trips ended more than 7 days ago are ignored: not analysed, not resolved, not listed (their rows
+  are deleted on the next run).
 - **`DBX_CONFLICTS_LIVE`** (server config, `includes/config.php`): until true the nightly run only analyses (nothing
   moved, written, memoed or mailed; merges are built and read back but not uploaded) and the page shows what it would do.
 
 ### `dropbox_conflicts` (GET)
 Params: `owner_user_id` (only that owner's), `days` (closed ones, default 30).
-→ `live`, `last_run {at, live, conflicts, checked, left, gone, outcomes, errors[], notified}`, `last_done` (date),
+→ `live`, `last_run {at, live, conflicts, checked, left, gone, past, outcomes, errors[], notified}`, `last_done` (date),
 `open[]` and `closed[]` `{id, path, file, original, folder, request_id, owner, owner_user_id, trip_end, saved_at, outcome,
 outcome_label, auto (resolved by the Hub when live), status (open | resolved | gone = fixed by hand), action (trashed |
 merged), reason, error, base_saved, n_cells, cells[] {cell ("2pax!J20"), base, original, copy, both}, first_seen_at,
@@ -1626,7 +1627,7 @@ checked_at, resolved_at, mailed_at, dropbox_url}`.
 ### `dropbox_conflicts_run` (POST, dry-run unless `confirm`)
 Check now, `budget` seconds (default 120, max 240; `left` > 0 = call again). Dry run: analysis only. `confirm`: also
 resolves what is safe (trash / merge), even before `DBX_CONFLICTS_LIVE`; memos and mails stay with the nightly run.
-→ `{ok, live, conflicts, checked, left, gone, outcomes {outcome: n}, errors[], done}`.
+→ `{ok, live, conflicts, checked, left, gone, past (copies of past trips skipped), outcomes {outcome: n}, errors[], done}`.
 
 ```bash
 curl -sA "$UA" -H "$H" "$U?action=dropbox_conflicts"

@@ -21,8 +21,8 @@
  *
  * Until DBX_CONFLICTS_LIVE is true (server config) the nightly run only analyses: nothing is moved, written, memoed or
  * mailed, and the page shows what it would do. Live: one memo per booking on the owner's Memo Board (rewritten each
- * night, closed when the copies are gone) and one mail per owner per night with the new ones. Trips ended more than
- * DBXC_PAST_DAYS days ago are still resolved when safe, but nobody is asked to fix them.
+ * night, closed when the copies are gone) and one mail per owner per night with the new ones. Copies of trips ended
+ * more than DBXC_PAST_DAYS days ago are ignored: not analysed, not resolved, not shown.
  *
  * Requires config.php, dropbox_helper.php, includes/calc_service.php (download / rev-checked upload, PhpSpreadsheet),
  * includes/ck_lib.php, ../memo/memo_lib.php and includes/mail_helper.php (loaded here).
@@ -39,7 +39,7 @@ require_once __DIR__ . '/../../../includes/mail_helper.php';
 const DBXC_MAX_REVS   = 8;     // earlier revisions of O read to find C's base
 const DBXC_MAX_MERGE  = 40;    // more changed cells than this = rows inserted / moved: not merged
 const DBXC_MERGE_DAYS = 30;    // older copies are not merged (Dropbox keeps ~30 days of versions)
-const DBXC_PAST_DAYS  = 7;     // trips ended longer ago: no memo / mail
+const DBXC_PAST_DAYS  = 7;     // trips ended longer ago: ignored
 const DBXC_NIGHT_FROM = 1;     // nightly window, EAT hours [from, to)
 const DBXC_NIGHT_TO   = 7;
 const DBXC_PAGE_URL   = 'https://hub.savannahexplorers.com/modules/leads/dropbox_conflicts.php';
@@ -562,13 +562,19 @@ function dbxc_folder_info(PDO $db, string $folder): array {
     return ['request_id' => null, 'owner_user_id' => $u ? (int)$u['id'] : null, 'trip_end' => parse_folder_dates($folder)['end_date']];
 }
 
+/** Copies of trips that ended before this date are ignored. */
+function dbxc_past_date(): string {
+    return date('Y-m-d', strtotime('-' . DBXC_PAST_DAYS . ' days'));
+}
+
 // ── Run ──────────────────────────────────────────────────────────────────────
 
 /**
  * Find and process the conflicted copies. $opt: live (default DBX_CONFLICTS_LIVE), budget (seconds, default 240),
  * notify (memos + mails once nothing is left to check; default = live). Copies are checked again when C or O
  * changed, when a planned action can now be done (live), or after an error (once a day). Copies gone since the
- * last run are marked gone (someone fixed them). → summary.
+ * last run are marked gone (someone fixed them). Copies of past trips (dbxc_past_date()) are skipped and their
+ * rows deleted. → summary.
  */
 function dbxc_run(PDO $db, array $opt = []): array {
     dbxc_schema($db);
@@ -576,11 +582,13 @@ function dbxc_run(PDO $db, array $opt = []): array {
     $notify = $opt['notify'] ?? $live;
     $until  = time() + (int)($opt['budget'] ?? 240);
     $now    = date('Y-m-d H:i:s');
-    $sum    = ['live' => $live, 'conflicts' => 0, 'checked' => 0, 'left' => 0, 'gone' => 0, 'outcomes' => [], 'errors' => [], 'notified' => null];
+    $past   = dbxc_past_date();
+    $sum    = ['live' => $live, 'conflicts' => 0, 'checked' => 0, 'left' => 0, 'gone' => 0, 'past' => 0, 'outcomes' => [], 'errors' => [], 'notified' => null];
     if (!$db->query("SELECT GET_LOCK('dbxc_run', 0)")->fetchColumn()) return ['ok' => false, 'msg' => 'Another run is in progress.'] + $sum;
     try {
         @ini_set('memory_limit', '512M');
         dbxc_keepalive($db);
+        $db->prepare("DELETE FROM dbx_conflicts WHERE trip_end < ?")->execute([$past]);
         $rows = [];
         foreach ($db->query("SELECT * FROM dbx_conflicts")->fetchAll(PDO::FETCH_ASSOC) as $r) $rows[$r['file_id']] = $r;
         // Folders to list: those the search finds now + those of the copies still open (to see the ones fixed by hand).
@@ -592,8 +600,10 @@ function dbxc_run(PDO $db, array $opt = []): array {
         foreach ($files as $lower => $f) {
             $p = dbxc_parse_name($f['name']);
             if (!$p || $f['id'] === '' || dbxc_skip_path($lower)) continue;
+            $info = dbxc_folder_info($db, dbxc_folder($f['path']));
+            if ($info['trip_end'] && $info['trip_end'] < $past) { $sum['past']++; continue; }
             $oLower = mb_strtolower(dirname($f['path']) . '/' . $p['original']);
-            $found[$f['id']] = ['c' => $f, 'o' => $files[$oLower] ?? null];
+            $found[$f['id']] = ['c' => $f, 'o' => $files[$oLower] ?? null, 'info' => $info];
         }
         $sum['conflicts'] = count($found);
 
@@ -636,7 +646,7 @@ function dbxc_run(PDO $db, array $opt = []): array {
             }
             if ($res['action'] === 'merged') $merged[$o['lower']] = true;
             $folder = dbxc_folder($c['path']);
-            $info = dbxc_folder_info($db, $folder);
+            $info = $x['info'];
             $done = $res['action'] !== null;
             $save->execute([$h, $c['path'], dirname($c['path']) . '/' . (dbxc_parse_name($c['name'])['original'] ?? ''), $folder,
                             $info['request_id'], $info['owner_user_id'], $info['trip_end'], $c['rev'], $res['o_rev'],
@@ -692,7 +702,7 @@ function dbxc_dropbox_url(string $path): string {
 function dbxc_open_by_owner(PDO $db): array {
     $st = $db->prepare("SELECT * FROM dbx_conflicts WHERE status = 'open' AND outcome NOT IN ('identical','old_version','already_in','merged')
                           AND (trip_end IS NULL OR trip_end >= ?) ORDER BY folder, path");
-    $st->execute([date('Y-m-d', strtotime('-' . DBXC_PAST_DAYS . ' days'))]);
+    $st->execute([dbxc_past_date()]);
     $out = [];
     foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
         $uid = (int)($r['owner_user_id'] ?: (ck_user_find($db, CK_OWNER_FALLBACK)['id'] ?? 0));
@@ -776,7 +786,7 @@ function dbxc_notify(PDO $db): array {
     $users = ck_users($db);
     $since = dbxc_meta($db, 'last_mail') ?? date('Y-m-d H:i:s', strtotime('-1 day'));
     $st = $db->prepare("SELECT * FROM dbx_conflicts WHERE status = 'resolved' AND resolved_at >= ? AND (trip_end IS NULL OR trip_end >= ?)");
-    $st->execute([$since, date('Y-m-d', strtotime('-' . DBXC_PAST_DAYS . ' days'))]);
+    $st->execute([$since, dbxc_past_date()]);
     $auto = [];
     foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) $auto[(int)$r['owner_user_id']][] = $r;
     $mark = $db->prepare("UPDATE dbx_conflicts SET mailed_at = ? WHERE id = ?");
@@ -847,13 +857,13 @@ function dbxc_row_out(array $r, array $users): array {
 }
 
 /**
- * Open copies (to fix, or planned when not live) and the ones resolved / gone in the last $days days. $ownerId:
- * only that owner's. → ['live', 'last_run', 'last_done', 'open' => [...], 'closed' => [...]]
+ * Open copies (to fix, or planned when not live) and the ones resolved / gone in the last $days days, past trips
+ * left out. $ownerId: only that owner's. → ['live', 'last_run', 'last_done', 'open' => [...], 'closed' => [...]]
  */
 function dbxc_report(PDO $db, ?int $ownerId = null, int $days = 30): array {
     dbxc_schema($db);
     $users = ck_users($db);
-    $w = $ownerId ? ' AND owner_user_id = ' . (int)$ownerId : '';
+    $w = ' AND (trip_end IS NULL OR trip_end >= ' . $db->quote(dbxc_past_date()) . ')' . ($ownerId ? ' AND owner_user_id = ' . (int)$ownerId : '');
     $open = $db->query("SELECT * FROM dbx_conflicts WHERE status = 'open'$w ORDER BY folder, path")->fetchAll(PDO::FETCH_ASSOC);
     $st = $db->prepare("SELECT * FROM dbx_conflicts WHERE status <> 'open' AND resolved_at >= ?$w ORDER BY resolved_at DESC LIMIT 300");
     $st->execute([date('Y-m-d', strtotime("-$days days"))]);

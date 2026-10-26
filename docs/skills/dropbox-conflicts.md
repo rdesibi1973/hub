@@ -15,7 +15,8 @@ passport numbers; stop and say so when something fails or doesn't add up). API r
 ## What the Hub already does (don't redo it)
 
 Every night (01:00–07:00 EAT) the Hub compares each conflicted copy in `/001_Safari` (not `old/`, not the archives)
-with its original and the Dropbox version history, cell by cell. It resolves by itself — copy to the Dropbox trash —
+with its original and the Dropbox version history, cell by cell. Trips ended more than 7 days ago are ignored
+(not analysed, not listed). It resolves by itself — copy to the Dropbox trash —
 when the copy adds nothing, or when copy and original changed *different* cells (it writes the copy's cells into the
 original, `.xlsx` only, ≤ 40 cells, copy ≤ 30 days old, emptying no cell). Everything else is "to fix": with
 `DBX_CONFLICTS_LIVE` on, the booking's owner (the seller in the folder tag) gets a memo and an email.
@@ -26,8 +27,7 @@ original, `.xlsx` only, ≤ 40 cells, copy ≤ 30 days old, emptying no cell). E
 1. `dropbox_conflicts` (GET) → `live`, `last_run.at`, `open[]`.
 2. If `last_run.at` is older than 2 days: `dropbox_conflicts_run` (POST, **without** `confirm`: it only reads) with
    `{"budget": 240}`; again while `left` > 0. Then `dropbox_conflicts` again.
-3. Keep the rows with `auto` false and a trip not ended more than 7 days ago (`trip_end` empty or ≥ today − 7).
-   Rows with `auto` true are the Hub's ("will be resolved" / "next run"): just count them.
+3. Keep the rows with `auto` false. Rows with `auto` true are the Hub's ("will be resolved" / "next run"): just count them.
 
 ## 2. Look at each copy
 
@@ -51,7 +51,7 @@ Local path = `C:\Dropbox` + `path`. Read only; never open them in Excel (that lo
 
 ```
 Copie in conflitto – <data> (modalità <live|solo analisi>, ultimo controllo <data>)
-Risolte dal Hub: <N>   Da sistemare: <N>   (viaggi passati esclusi: <N>)
+Risolte dal Hub: <N>   Da sistemare: <N>
 
 <cliente> – <file copia> (<owner>, salvata <data>)
   Differenze: <cella: originale → copia, …>
