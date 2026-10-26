@@ -129,7 +129,7 @@ foreach ($tables as [$title, $list, $isOpen]): ?>
   <?php if (!$list): ?><div class="dc-hint">none</div><?php else: ?>
   <div class="dc-wrap">
   <table class="dc-table">
-    <thead><tr><th>Booking</th><th>Conflicted copy</th><th>Saved</th><th>Owner</th><th>Result</th><th>Cells</th><th><?= $isOpen ? 'First seen' : 'Closed' ?></th></tr></thead>
+    <thead><tr><th>Booking folder</th><th>Conflicted copy</th><th>Saved</th><th>Owner</th><th>Result</th><th>Cells</th><th><?= $isOpen ? 'First seen' : 'Closed' ?></th></tr></thead>
     <tbody>
     <?php foreach ($list as $r):
         if (!$isOpen) {
@@ -141,7 +141,8 @@ foreach ($tables as [$title, $list, $isOpen]): ?>
         } ?>
       <tr>
         <td class="dc-file"><?= $r['request_id'] ? '<a href="request_view.php?id=' . (int)$r['request_id'] . '">' . h($r['folder']) . '</a>' : h($r['folder']) ?></td>
-        <td class="dc-file"><a href="<?= h($r['dropbox_url']) ?>" target="_blank" rel="noopener"><?= h($r['file']) ?></a></td>
+        <td class="dc-file"><a href="<?= h($r['dropbox_url']) ?>" target="_blank" rel="noopener"><?= h($r['file']) ?></a>
+            <span class="dc-why">Original: <?= h($r['original']) ?></span></td>
         <td class="dc-nowrap"><?= h($r['saved_at'] ? substr($r['saved_at'], 0, 16) : '') ?></td>
         <td><?= h($r['owner'] ?? '—') ?></td>
         <td><span class="dc-tag <?= $tag[0] ?>"><?= h($tag[1]) ?></span>
