@@ -308,7 +308,7 @@ function calc_read_file(string $path, string $wantSheet = ''): array {
 /**
  * The sheet of a group calc for one client: the client sheet whose name matches the
  * customer ("1PAX Cacioli" ~ AnnamariaCaciolli, as Payments matches a RECAP row), the
- * only client sheet, else RECAP (the whole group) with a warning.
+ * only client sheet (or the only "…PAX…" one), else RECAP (the whole group) with a warning.
  * Shared by Operations (ops_group_sheet) and calc_read_request().
  * @return array{sheet:string, whole:bool, warning:string}
  */
@@ -326,6 +326,10 @@ function calc_group_sheet(array $sheets, string $customer): array {
     }
     if (count($best) === 1) return ['sheet' => $best[0], 'whole' => false, 'warning' => ''];
     if (count($clients) === 1) return ['sheet' => $clients[0], 'whole' => false, 'warning' => ''];
+    // Extra non-pax sheets (e.g. "MASAI") are not clients: the only "…PAX…" sheet is.
+    $pax = [];
+    foreach ($clients as $s) { if (stripos($s, 'PAX') !== false) $pax[] = $s; }
+    if (count($pax) === 1) return ['sheet' => $pax[0], 'whole' => false, 'warning' => ''];
     return ['sheet' => $recap, 'whole' => true,
             'warning' => 'Group calc: no client sheet named like "' . $customer . '" (' . implode(', ', array_map('trim', $clients))
                        . ') — read RECAP, the whole group.'];

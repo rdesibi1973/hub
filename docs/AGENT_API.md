@@ -281,7 +281,7 @@ name). Reads the booking's Calc (no PhpSpreadsheet needed) and returns:
 - **GRP member** (client sub-folder of a group): no Calc in its own folder → the group Calc in the group
   folder above it (warning; `file` is looked up there too). `folder` stays the client folder, `calc_folder`
   is where the Calc was found. A group Calc found there without `sheet` → the client's sheet (named like the
-  customer, or the only client sheet); no match → 422 listing the client sheets. Same rule in `fill_calc`,
+  customer, or the only client sheet / the only `…PAX…` sheet); no match → 422 listing the client sheets. Same rule in `fill_calc`,
   `booking_check`, `iti_calc_plan` / `iti_final_from_calc` (documents are still saved in the client folder).
 - `flight_cost` is the saved FLIGHTS amount of that day (e.g. `=215*$B$1` → 430 for 2 pax).
 
