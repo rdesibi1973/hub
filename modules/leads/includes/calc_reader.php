@@ -306,8 +306,76 @@ function calc_read_file(string $path, string $wantSheet = ''): array {
 }
 
 /**
- * A Hub request's Calc: locate it in the request's Dropbox folder, download it
- * (with its Dropbox rev, to detect later changes) and read it.
+ * The sheet of a group calc for one client: the client sheet whose name matches the
+ * customer ("1PAX Cacioli" ~ AnnamariaCaciolli, as Payments matches a RECAP row), the
+ * only client sheet, else RECAP (the whole group) with a warning.
+ * Shared by Operations (ops_group_sheet) and calc_read_request().
+ * @return array{sheet:string, whole:bool, warning:string}
+ */
+function calc_group_sheet(array $sheets, string $customer): array {
+    require_once __DIR__ . '/calc_payments.php';   // cp_name_tokens / cp_name_score
+    $clients = calc_group_client_sheets($sheets);
+    $recap = '';
+    foreach ($sheets as $s) { if (stripos($s, 'recap') !== false) { $recap = $s; break; } }
+    $tok = cp_name_tokens((string)preg_replace('/_?GRP\d+/i', '', $customer));
+    $best = []; $max = 0;
+    foreach ($clients as $s) {
+        $score = $tok ? cp_name_score($tok, $s) : 0;
+        if ($score > $max) { $max = $score; $best = [$s]; }
+        elseif ($score === $max && $score > 0) $best[] = $s;
+    }
+    if (count($best) === 1) return ['sheet' => $best[0], 'whole' => false, 'warning' => ''];
+    if (count($clients) === 1) return ['sheet' => $clients[0], 'whole' => false, 'warning' => ''];
+    return ['sheet' => $recap, 'whole' => true,
+            'warning' => 'Group calc: no client sheet named like "' . $customer . '" (' . implode(', ', array_map('trim', $clients))
+                       . ') — read RECAP, the whole group.'];
+}
+
+/**
+ * Folders where a request's Calc may be: its own folder, then — for a GRP member
+ * (group_folder set and not the booking itself) — the group folder above it, where the
+ * group Calc lives. Same rule as invoice_calc.php / ops_request_dirs().
+ * Needs booking_service.php (req_folder_path).
+ */
+function calc_request_dirs(array $r): array {
+    $dir = req_folder_path($r);
+    if ($dir === '') return [];
+    $dirs = [$dir];
+    $gf = trim((string)($r['group_folder'] ?? ''));
+    if ($gf !== '' && strcasecmp($gf, trim((string)($r['practice_code'] ?? ''))) !== 0 && dirname($dir) !== $dir) {
+        $dirs[] = dirname($dir);
+    }
+    return $dirs;
+}
+
+/**
+ * Locate a request's Calc (calc_request_dirs, first folder with a match).
+ * @return array{dir:string, pick:array, in_group:bool}
+ * @throws InvalidArgumentException (no folder / no Calc / "file" not found)
+ */
+function calc_locate_request(string $token, array $r, string $file = ''): array {
+    $dirs = calc_request_dirs($r);
+    if (!$dirs) throw new InvalidArgumentException('This request has no Dropbox folder.');
+    $err = null;
+    foreach ($dirs as $i => $d) {
+        try {
+            return ['dir' => $d, 'pick' => calc_pick_file(dropbox_list_files($token, $d), $file, $d), 'in_group' => $i > 0];
+        } catch (InvalidArgumentException $e) {
+            if ($err === null) $err = $e;   // the request folder's message (it is the one to fix)
+        }
+    }
+    if (count($dirs) > 1) {
+        throw new InvalidArgumentException($err->getMessage() . ' Not in the group folder ' . $dirs[1] . ' either.');
+    }
+    throw $err;
+}
+
+/**
+ * A Hub request's Calc: locate it in the request's Dropbox folder (GRP member: else
+ * the group folder), download it (with its Dropbox rev, to detect later changes) and read it.
+ * A group Calc of the group folder read with no $sheet → this client's sheet (calc_group_sheet).
+ * 'folder' stays the request's own folder (documents are saved there); 'calc_folder' is
+ * where the Calc was found.
  * Needs dropbox_helper.php, booking_service.php (req_folder_path) and
  * calc_service.php (calc_dbx_download) loaded.
  * @throws InvalidArgumentException (not found / not finalised) | RuntimeException (Dropbox)
@@ -317,29 +385,42 @@ function calc_read_request(PDO $db, int $requestId, string $file = '', string $s
     $st->execute([$requestId]);
     $r = $st->fetch(PDO::FETCH_ASSOC);
     if (!$r) throw new InvalidArgumentException('Request ' . $requestId . ' not found.');
-    $dir = req_folder_path($r);
-    if ($dir === '') throw new InvalidArgumentException('This request has no Dropbox folder.');
+    $own = req_folder_path($r);
 
     $token = dropbox_get_access_token();
-    $pick  = calc_pick_file(dropbox_list_files($token, $dir), $file, $dir);
+    $loc   = calc_locate_request($token, $r, $file);
+    $dir   = $loc['dir'];
+    $pick  = $loc['pick'];
     $path  = $dir . '/' . $pick['file'];
     $dl    = calc_dbx_download($token, $path);
     if ($dl === null) throw new RuntimeException('Could not download ' . $path);
 
     $tmp = tempnam(sys_get_temp_dir(), 'calcrd_');
     file_put_contents($tmp, $dl['bytes']);
+    $warnings = $pick['warnings'];
+    if ($loc['in_group']) $warnings[] = 'No Calc in the client folder — used the group Calc ' . $path . '.';
     try {
+        $sheets = sc_xlsx_sheets($tmp);
+        if ($loc['in_group'] && trim($sheet) === '' && sc_has_recap($sheets)) {
+            $g = calc_group_sheet($sheets, (string)($r['customer_name'] ?? ''));
+            if ($g['whole']) {
+                throw new InvalidArgumentException('Group calc ' . $pick['file'] . ': no client sheet named like "' . ($r['customer_name'] ?? '')
+                    . '" (' . implode(', ', array_map('trim', calc_group_client_sheets($sheets))) . ') — pass "sheet" (the client\'s sheet, or RECAP for the whole group).');
+            }
+            $sheet = $g['sheet'];
+        }
         $data = calc_read_file($tmp, $sheet);
     } finally {
         @unlink($tmp);
     }
-    $data['warnings'] = array_merge($pick['warnings'], $data['warnings']);
+    $data['warnings'] = array_merge($warnings, $data['warnings']);
     return array_merge([
-        'request_id' => (int)$r['id'],
-        'folder'     => $dir,
-        'file'       => $pick['file'],
-        'candidates' => $pick['candidates'],   // every *_Calc.xlsx of the folder
-        'calc_path'  => $path,
-        'calc_rev'   => $dl['rev'],
+        'request_id'  => (int)$r['id'],
+        'folder'      => $own,
+        'calc_folder' => $dir,
+        'file'        => $pick['file'],
+        'candidates'  => $pick['candidates'],   // every *_Calc.xlsx of that folder
+        'calc_path'   => $path,
+        'calc_rev'    => $dl['rev'],
     ], $data);
 }

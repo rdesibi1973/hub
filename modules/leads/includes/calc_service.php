@@ -284,13 +284,13 @@ function calc_fill(PDO $db, array $in, bool $commit): array {
     $st->execute([(int)($in['request_id'] ?? 0)]);
     $r = $st->fetch(PDO::FETCH_ASSOC);
     if (!$r) throw new InvalidArgumentException('Request not found.');
-    $dir = req_folder_path($r);
-    if ($dir === '') throw new InvalidArgumentException('This request has no Dropbox folder.');
-
     $token = dropbox_get_access_token();
-    $pick  = calc_pick_file(dropbox_list_files($token, $dir), (string)($in['file'] ?? ''), $dir);
+    $loc   = calc_locate_request($token, $r, (string)($in['file'] ?? ''));   // GRP member: else the group folder
+    $dir   = $loc['dir'];
+    $pick  = $loc['pick'];
     $file  = $pick['file'];
     $warnings = array_merge($warnings, $pick['warnings']);
+    if ($loc['in_group']) $warnings[] = 'No Calc in the client folder — this is the group Calc ' . $dir . '/' . $file . '.';
     $path = $dir . '/' . $file;
     $dl = calc_dbx_download($token, $path);
     if ($dl === null) throw new RuntimeException('Could not download ' . $path);

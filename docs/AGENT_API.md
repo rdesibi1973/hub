@@ -252,7 +252,7 @@ changed meanwhile, e.g. saved from Excel), re-downloaded and re-verified.
 | `adults_teen_chd` | A35; default "2 adults" |
 | `arrival`, `departure` | A51, A56 |
 | `mid_date` | first beach night, for the hotel-on-every-beach-night check |
-| `file` | which Calc if the folder has several |
+| `file` | which Calc if the folder has several (GRP member with no Calc of its own: the group folder's Calc, warning) |
 
 Returns `kept_sheets[]` / `removed_sheets[]`, `f9` (the formula written), `august_supplement` `{safari_nights[], pp_per_night, amount_pp, added}`,
 `rows[]` `{row, date, cells {B…K}, changed[]}` — every day row as written (formulas as `"=215*$B$1 → 430"`)
@@ -278,6 +278,11 @@ name). Reads the booking's Calc (no PhpSpreadsheet needed) and returns:
 - Group calcs (RECAP sheet): pass `sheet` = the client's own sheet (`"1PAX Cacioli"`: that client's days,
   guests and flights) or `"RECAP"` (the whole group: every client's guests and flights). Without `sheet` → 422
   listing the client sheets.
+- **GRP member** (client sub-folder of a group): no Calc in its own folder → the group Calc in the group
+  folder above it (warning; `file` is looked up there too). `folder` stays the client folder, `calc_folder`
+  is where the Calc was found. A group Calc found there without `sheet` → the client's sheet (named like the
+  customer, or the only client sheet); no match → 422 listing the client sheets. Same rule in `fill_calc`,
+  `booking_check`, `iti_calc_plan` / `iti_final_from_calc` (documents are still saved in the client folder).
 - `flight_cost` is the saved FLIGHTS amount of that day (e.g. `=215*$B$1` → 430 for 2 pax).
 
 ### `booking_check` (GET)
@@ -730,6 +735,7 @@ Only needed for samples: a personal program's link is on without it (unpublish d
 Plan: `calc` (file, files = every Calc of the folder, rev, pax), `sample`, `nights[]` (date, label, hotel text → lodge, state, meal, activities,
 from_sample_day, flags), `unmapped` {lodge|activity|route: {norm: text}}, `blocking`, `existing_finals` (id, calc_file,
 superseded_by). Several Calc files (e.g. the same safari with other lodges) → pass `file`; each file has its own final.
+GRP member: the Calc is found in the group folder when the client folder has none, read on the client's sheet (see `read_calc`).
 `iti_final_from_calc` with `"confirm": true` generates the final program (an older final built from the same Calc
 file is superseded) → `program_id`, `program`. 409 when the Calc cannot be read.
 How the plan and the final are built (`modules/iti/includes/iti_final.php`, same on the Hub page "Create Itinerary Program

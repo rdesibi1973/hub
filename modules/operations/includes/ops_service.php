@@ -315,21 +315,7 @@ function ops_calc(PDO $db, array $r, bool $force = false): array {
  * → ['sheet' => name, 'whole' => bool, 'warning' => '']
  */
 function ops_group_sheet(array $sheets, array $r): array {
-    $clients = calc_group_client_sheets($sheets);
-    $recap = '';
-    foreach ($sheets as $s) if (stripos($s, 'recap') !== false) { $recap = $s; break; }
-    $tok = cp_name_tokens(preg_replace('/_?GRP\d+/i', '', (string)$r['customer_name']));
-    $best = []; $max = 0;
-    foreach ($clients as $s) {
-        $score = $tok ? cp_name_score($tok, $s) : 0;
-        if ($score > $max) { $max = $score; $best = [$s]; }
-        elseif ($score === $max && $score > 0) $best[] = $s;
-    }
-    if (count($best) === 1) return ['sheet' => $best[0], 'whole' => false, 'warning' => ''];
-    if (count($clients) === 1) return ['sheet' => $clients[0], 'whole' => false, 'warning' => ''];
-    return ['sheet' => $recap, 'whole' => true,
-            'warning' => 'Group calc: no client sheet named like "' . $r['customer_name'] . '" (' . implode(', ', array_map('trim', $clients))
-                       . ') — read RECAP, the whole group.'];
+    return calc_group_sheet($sheets, (string)$r['customer_name']);   // calc_reader.php
 }
 
 /** ops_calc() that never throws: a Dropbox error becomes status "error". */
