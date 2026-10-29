@@ -43,14 +43,29 @@ From each document note: supplier / property, kind (invoice, pro-forma, service 
 
 | Service | Must match |
 |---|---|
-| Stay | check-in / check-out (nights), pax adults + children, rooms vs `room_config`, meal plan when the Calc states it (HB/FB), status confirmed |
+| Stay | check-in / check-out (nights), pax adults + children, rooms vs `room_config`, meal plan when the Calc states it (HB/FB), status confirmed; the document must also agree with itself: nights in the header = arrival → departure = quantity on the invoice lines (Butiama PRO 2026/AUG/1147: header 6 nights, lines billed 5 → CHECK) |
 | Flight | date, route (all legs), pax, status; times consistent with `calc.arrival` / `departure` for the first / last leg |
 | Transfer | date, pick-up / drop-off, the flight it meets (vs `arrival` / `departure` and the flight invoices); a reply like "noted" / "confirmed" counts as confirmation |
 | Activity | a supplier booking (balloon, Mto wa Mbu walk, Materuni…): a document with the date and pax. Activities of our own lodges (`own: true`: "Natural Walk" = Marera Walking and Iraqw families; bush dinner at Orangi, also when the text is just "Bush dinner" on an Orangi night) → "in-house", no evidence needed, but note it if the SV doesn't mention it |
 
 GRP folders (group departures): a group block with more rooms or flight seats than the pax of the folder is normal (they are held for other participants, e.g. 3 doubles for a couple, or a return leg nobody of this folder flies). Rule: unsold rooms / seats are released 60 days before arrival. Before that date write only an info note ("group block: N rooms / seats over the folder's pax, release date <arrival - 60 days>") and do not count it as CHECK; from 60 days before arrival mark it CHECK with "release unsold rooms / seats".
 
-Amount: if a document's total differs from `calc_invoice` or the flight cost, note the difference (info, not an error: taxes, levies, extras).
+Amount — invoiced must be ≤ quoted (Roberto, 26 Oct 2026). Rules in "Invoice vs Calc" below.
+
+### Invoice vs Calc (amount check)
+
+Compare, per service, the supplier's NET amount (after its commission line, e.g. Butiama "COMMISSION 20%") with the Calc cost of the same service: stays → column J of the night block (sum of its nights), flights → column C, activities → column H, transfers → the column the Calc uses on that row. `calc_invoice` ("Invoice $…") is what the booking team wrote, not the quoted cost: use it only as a hint.
+- One invoice ↔ several Calc rows / blocks (Roberto, 26 Oct 2026): group by supplier, not by row. The beach nights (Zanzibar, Mafia, Pemba: one row per night, sometimes the cost on the first row only), or the same lodge twice in the trip (Karatu / Marera before and after the Serengeti, Arusha at the start and at the end) are usually ONE supplier invoice. Compare the invoice with the SUM of all the Calc rows of that supplier that fall inside the invoice's dates, and its nights with the total nights of those blocks (each block's check-in / check-out must appear on the invoice). Only when the supplier sent separate invoices per block compare them block by block. The +5 USD tolerance is per invoice.
+- **Invoiced ≤ Calc cost + 5 USD → OK.** Lower is normal (the Calc often overestimates: Mtoni 320 vs 460): no finding, mention the saving only in the report.
+- **More than Calc cost + 5 USD → CHECK**, finding `invoice_mismatch` (`audience: booking`), text "invoice <amount> vs quoted <amount> (+<diff>)" and the likely cause.
+- Concession fee (in-park / Serengeti camps: 71 USD pp per night + 1% levy) and WMA fee (33 USD pp per night + levy) are inside the Calc accommodation cost: when the supplier bills them on a separate document or line, add them up before comparing. A lower contract figure (e.g. 59) is fine.
+- Beach hotels with commission (Butiama: rack − 20%): compare the net.
+- Auric / domestic flights: the Calc includes the fuel surcharge; compare with the invoice total, fuel included.
+- Single supplement: the Calc day rows are costed in double; the single supplement written above the cost table (H6:I14 block, e.g. "single supplement (only dbl+sgl)") is extra money for the single room. When the booking has a single, the stays may exceed the Calc cost by up to that amount in total (whole trip, not per stay) + 5 USD.
+- Child / teen discounts (above the cost table, e.g. H13 "teen discount", child price): the Calc rows cost everyone as adults and the discount lowers the client price. The amount check stays against the adult cost, but the lodge must bill the children / teens at its child rate: children billed as adults on a stay → CHECK (we gave a discount we are not getting).
+- August (1–25 Aug) and festive (24, 25, 26, 31 Dec) supplements charged by a lodge must be in the Calc cost too; if they are not → CHECK.
+- Own lodges (Orangi Collection SV, `own: true`) and in-house items: no amount check.
+- Currency other than USD: info only (no conversion).
 
 Domestic flight tickets are saved in `flights/` and are often issued only a few weeks or days before arrival. A flight correctly booked (confirmed invoice / pro-forma, right date, route and pax) with no ticket yet is NOT an error: info "ticket not issued yet — checked by the weekly ticket round (back-office §6)". If the ticket is there, check names, date, flight and times against the Calc.
 

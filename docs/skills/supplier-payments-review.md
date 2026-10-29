@@ -22,7 +22,7 @@ Memo: at the start create one `doing` memo (clear title, stable `ext_key` e.g. `
 
 1. Real booking: find the client/group in the Hub (`find_requests`) and its folder in `/001_Safari/`. Not found → flag.
 2. Cancelled: folder in `/001_Safari/00_CANCELED` → must NOT be paid (unless it is a cancellation fee Roberto agreed).
-3. Amount vs Calc: compare with the booking's Calc cost for that supplier (accommodation / activities / flights / transfers columns, right day rows, pax and rooms). Columns N "DEPOSIT PD" and O "BALANCE PD" show what was already paid to that supplier: deduct it, nothing paid twice.
+3. Amount vs Calc: compare with the booking's Calc cost for that supplier (accommodation / activities / flights / transfers columns, right day rows, pax and rooms) with the rules of `booking-check` → "Invoice vs Calc" (net after commission, concession / WMA fees, single supplement and child / teen discounts above the cost table, tolerance + 5 USD). Invoiced more than quoted + 5 USD → flag it in "Da chiarire" before Roberto approves (26 Oct 2026). Also check the invoice agrees with itself (nights in the header = nights billed on the lines) and with the Calc nights. Columns N "DEPOSIT PD" and O "BALANCE PD" show what was already paid to that supplier: deduct it, nothing paid twice.
 4. TL free: for group activities (e.g. Nickson / Mto wa Mbu) the agency tour leader is free — don't pay the TL.
 5. Duplicates: same supplier + client/date twice in this list, or already paid in a previous month's list → flag.
 6. Arithmetic: re-add each supplier breakdown and the tab/grand totals in code; report any difference.
