@@ -41,6 +41,11 @@ outdated — this file wins where they disagree (PHP version, local lint).
 - JS: `node --check` if available, else `python -c "import esprima; esprima.parseScript(open(f).read())"`.
 - UI changes: build a static harness (page HTML + JS + mocked XHR) in the scratchpad and look at it
   in the browser pane. Say clearly what could only be tested on the server.
+- **Shell commands (avoids permission prompts):** no `for`/`while` loops, `$(…)` or shell variables
+  in Bash commands — they always trigger a manual approval. To lint several files, run
+  `C:/Utility/PHP/php.exe -l <file>` once per file with the explicit path (several commands joined by `;` are fine);
+  for anything more complex, write a script in the scratchpad and run it with
+  `C:/Utility/PHP/php.exe <script>` or `python <script>`.
 
 ## Server facts
 - **PHP 8.3** since 28 Sep 2026 (was 8.0). New code may use PHP 8, but match the file you edit
