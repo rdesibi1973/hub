@@ -51,6 +51,12 @@ Savannah Explorers Ltd (SE invoices, USD):
 - Account Number: 0030024670 (USD)
 - Swift: EXTNTZTZ
 
+Savannah Explorers Ltd also has a CRDB account — agencies may pay there, it is ours (confirmed by Roberto 30 Oct 2026, GoWorld deposit for SE-2026-0640):
+- Bank: CRDB Bank PLC, Tanzania
+- Account Number: 0250467872701
+- Swift: CORUTZTZXXX
+Check an announced payment on the account it was actually sent to (see the POP), not only on Exim.
+
 Savannah Holidays Ltd (SH invoices): AfrAsia account — details from Roberto (not recorded here yet).
 
 ## 4. Change an invoice

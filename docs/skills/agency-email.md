@@ -16,19 +16,21 @@ Fixed rules as in the project instructions: never send without his explicit ok o
 - Find the request/booking (`find_requests`) for the folder name and the facts (dates, pax, lodges, payments). Never invent facts: if something is unknown, ask Roberto or leave a clear [DA COMPLETARE].
 - Before asking the client/agency for anything (international flights, passports, insurance, other data), check what we already have: the Calc in the booking folder (arrival/departure details with flight, airport, time, airline) as well as the folder's subfolders. Empty subfolders don't mean the data is missing (29 Oct 2026).
 - If Roberto gives exact wording, use it verbatim.
+- Gmail threads: read them through the Hub (`mail_get` with `mailbox=gmail`), which gives the Message-ID for `In-Reply-To` and the attachments (`mail_attachment`); the Gmail connector gives neither. Don't tell Roberto an attachment or a Message-ID can't be fetched before trying the Hub (31 Oct 2026).
+- Write only what is verified: guide language, availability, contacts, prices, flight routes. If not checked, write "verifichiamo" or ask Roberto; never take prices from old Calcs (e.g. 2012) without saying so (31 Oct 2026).
 
 ## 2. Where the draft goes
 
 - ALWAYS a draft as an `.eml` file in `C:\Dropbox\Exchange\Draft-mail` (Dropbox `/Exchange/Draft-mail/`), named `YYYY-MM-DD_<folder name>_<topic>.eml`; when the mail is about a request/booking, save a copy in that folder's `mails` subfolder too. No Hub `mail_draft`, no Gmail-connector drafts (12 Oct 2026).
 - The .eml must be HTML: multipart text + html, header `X-Unsent: 1`, UTF-8; default font, no width limit (remove the `max-width` from the signature div).
-- Replies: `From` = the address the mail arrived on (info@savannahexplorers.com or savannah.explorers@gmail.com); `To` = the sender; subject "Re: …"; `In-Reply-To` and `References` = the original Message-ID (from `mail_get` or the Gmail connector) so it threads.
+- Replies: `From` = the address the mail arrived on (info@savannahexplorers.com or savannah.explorers@gmail.com); `To` = the sender; subject "Re: …"; `In-Reply-To` and `References` = the original Message-ID (from `mail_get` or the Gmail connector) so it threads. Mandatory: if the Message-ID really can't be found, say so in the report to Roberto. Subject with a single "Re:" (never "Re: Re:").
 - Replies quote the original mail below the signature, as a normal reply does: a line "Il <gg/mm/aaaa hh:mm>, <mittente> ha scritto:" (English "On <date>, <sender> wrote:"), then the original body as received (`mail_get` `body`, with the earlier thread it contains), in a `<blockquote type="cite">` in the html part and with "> " lines in the text part; strip empty lines at the start (12 Oct 2026).
 - New mails (no thread) and mails to staff: `From` Gmail (savannah.explorers@gmail.com).
 - Signature at the bottom matching the address: `InfoSavannahExplorers.html` (info@) or `OfficeGmail.html` (Gmail), in `C:\Dropbox\001_Safari\99_office\`. The signature already holds "Rimango a disposizione…", "Buona giornata", "Roberto": don't repeat them in the body.
 - English mails: in the draft, replace the signature's Italian closing block ("Rimango a disposizione per maggiori informazioni e domande." / "Buona giornata" / "Roberto") with "Please do not hesitate to contact me for any further information." / "Best regards" / "Roberto" (same tags, html and text parts); leave the rest of the signature as it is (19 Oct 2026).
 - The signature images (Roberto's photo, Tripadvisor badge) are links to savannahexplorers.com: Thunderbird hides remote images when a draft is opened from file, recipients see them. Don't embed or change them.
 - Take the signature's raw HTML from his PC (`device_stage_files` or the device shell) and paste it as is into the html part. Never rebuild it from the Dropbox connector `fetch` text: that is extracted plain text and loses the formatting (12 Oct 2026).
-- Attachments only when Roberto asks.
+- Attachments only when Roberto asks — this includes price lists and the Word programme. If one seems useful, ask; don't attach it on your own (31 Oct 2026).
 - Write the file to his PC (device shell or `device_commit_files`); if the PC is not reachable, stop and tell him.
 - After writing, list `Exchange/Draft-mail` again and check the file is there before telling Roberto it is saved (drafts there have disappeared within a minute; 17 Oct 2026). If it is gone, say so and copy it back from the booking folder's `mails/`.
 - Booking confirmations to agencies: content and attachments as in `booking-confirmation` §7.
@@ -39,9 +41,9 @@ Every mail about a request/booking carries the Dropbox folder name: `Re: <origin
 
 ## 4. Style
 
-- Italian: informal "tu"; opens "Buongiorno <Nome>," — "Ciao <Nome>," only with people Roberto is closer to (più confidenza), "Buongiorno" with everyone else (26 Oct 2026); closes with "Rimango a disposizione per maggiori informazioni e domande." on its own line, then "Buona giornata" and "Roberto". Never "Cordiali saluti".
+- Italian: informal "tu"; always opens "Buongiorno <Nome>," — "Ciao <Nome>," only when Roberto asks for it in that mail or his own last mail in the thread already uses "Ciao" (31 Oct 2026); closes with "Rimango a disposizione per maggiori informazioni e domande." on its own line, then "Buona giornata" and "Roberto". Never "Cordiali saluti".
 - English / French / Spanish: same warm, professional trade tone and structure (greeting with the name, short closing, "Roberto"). English: "program", never "programme" (19 Oct 2026).
-- Agencies: never the `links.public` programme link (it shows our net price); the programme goes as Word attachment (19 Oct 2026).
+- Agencies: never the `links.public` programme link (it shows our net price); the programme goes as Word attachment, when Roberto asks for it (19 Oct 2026).
 - Payment reminders / short follow-ups to agencies: speak for the company to the agency team ("ve lo confermiamo", "quando fate il bonifico"), keep "mandami"; say plainly what is missing ("non mi risulta ancora arrivato in contabilità e non abbiamo la contabile"); "per favore"; only the figures needed (invoice number and amount, no balance or due date unless asked); no lists for 1–2 items (26 Oct 2026).
 - Official/legal letters: minimal, direct, formal.
 - Complaints: diplomatic, non-confrontational — acknowledge the feedback without admitting fault, de-escalate, propose a next step.
@@ -78,3 +80,5 @@ Staff mails with attachments: don't send them from the Gmail connector or the Hu
 ## 8. Report to Roberto (Italian)
 
 Show from / to / cc, subject, full text, attachments, then: "Bozza salvata in Exchange/Draft-mail/<file>.eml (da <indirizzo>). Serve da te: ok sul testo e sui destinatari."
+
+Never say a mail "has been sent" unless you checked it: Roberto said so in this session, or it is in Sent (Hub `mail_list` on the Sent folder / Gmail `in:sent`). Otherwise write "da inviare" (31 Oct 2026).
