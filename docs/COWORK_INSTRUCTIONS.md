@@ -141,7 +141,7 @@ Prima di iniziare un lavoro leggi quella giusta con il connettore Dropbox e segu
 - copie in conflitto Dropbox (Calc salvati da due PC) → dropbox-conflicts
 - fatture e pagamenti → invoice-workflow
 - lavoro d'ufficio (pagamenti da sollecitare, CK, arrivi / partenze, lunch box, Medivac, biglietti voli interni,
-  voucher, rooming list, ResRequest) → back-office
+  voucher, rooming list, ResRequest, info di viaggio prima della partenza) → back-office
 - gruppi Il Diamante → diamante-groups
 - gruppi e safari privati Yeadimtravel (Israele, Golan) → yeadim-groups
 - controllo pagamenti fornitori → supplier-payments-review

@@ -1,6 +1,6 @@
 ---
 name: back-office
-description: Savannah office clerk work (not sales): chase payments at due dates, CK after bookings, arrivals/departures cross-check, lunch boxes, Medivac list, domestic flight tickets, vouchers, rooming lists, ResRequest checks.
+description: Savannah office clerk work (not sales): chase payments at due dates, CK after bookings, arrivals/departures cross-check, lunch boxes, Medivac list, domestic flight tickets, vouchers, rooming lists, ResRequest checks, pre-departure travel info mails.
 ---
 
 # Back office (office clerk, not a seller)
@@ -72,7 +72,27 @@ Once a week (Monday, or the first round of the week — see `daily-check`): `fli
 - Rooming lists to lodges: rooms exactly as per the request (room type and pax), names as in the Calc; propose the mail to the lodge.
 - ResRequest (Orangi Collection lodges): check that our confirmations still match what is booked (dates, rooms, pax), as in the ResRequest plan; flag differences. Read-only.
 
-## 8. Report (Italian, plain text, no emoji)
+## 8. Travel info before departure (Jambo, visa, NIC / ZIC, Ebola form)
+
+The pre-departure mail, same as the Hub Booked page button "✈ Travel info" (Agent API `predeparture_list` /
+`predeparture_email`, see `docs/AGENT_API.md`). Default window: arrivals in the next 21 days.
+- `predeparture_list` with `only_unsent: 1` (and `days` if Roberto gives a period). Show Roberto a table: arrival, folder,
+  agency / direct (`-Drct` in the folder tag = direct client), email, proposed `lang` and `countries`.
+- `defaults` are a guess (itinerary if linked, else folder words; language falls back to `it`). Check them: language of
+  the client / agency from the thread or the Calc; countries from the Calc / programme (`tz` mainland, `znz` Zanzibar,
+  `ke` Kenya). Pemba / Mafia count as `znz`.
+- Recipient: the request email; if empty or wrong, find the right one (thread, agency contacts) and pass `to`. Agency
+  bookings: the mail goes to the agency for their clients — adapt the greeting / opening ("vi giriamo le informazioni di
+  viaggio per i vostri clienti …") with `body`, or ask Roberto whether the agency wants it at all.
+- `predeparture_email` dry run for each → show Roberto recipient, subject and the text (short summary is fine when he has
+  already seen one in the same language). Send only after his ok, with `"confirm": true`: it goes from the Hub as the
+  request's agent (signature, Reply-To), logged on the request, and the Booked page shows ✓.
+- If Roberto wants a draft instead: `.eml` per `agency-email` with the dry-run subject and body (then the Booked page
+  doesn't show it as sent).
+- Never add facts the mail doesn't have; if an entry rule changed (visa, NIC, Ebola form), tell Roberto: the texts are in
+  `modules/leads/includes/predeparture_service.php` (Claude Code changes them).
+
+## 9. Report (Italian, plain text, no emoji)
 
 ```
 Back office – <data> – periodo <dal> <al>
@@ -86,6 +106,7 @@ Lunch box: <date> – <N> persone – differenze: ...
 Medivac: <N> persone – mancano nazionalità: ...
 Biglietti voli interni: mancanti <N>, da inviare <M>
 Voucher / rooming list / ResRequest: ...
+Info di viaggio: <N> partenze entro 21 gg senza mail → <inviate / da approvare>
 
 Non verificato (manca l'azione API): ...
 Serve da te: ...
