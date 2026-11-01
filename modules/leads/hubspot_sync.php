@@ -574,6 +574,106 @@ function hs_contact_to_lead(array $contact): ?array {
 }
 
 /**
+ * Collected Forms (non-HubSpot forms on the website, form-type CAPTURED) only map
+ * email/phone onto the contact: custom fields such as nome_e_cognome, numero di
+ * persone, date_del_viaggio live in the submission alone. This reads them back:
+ * contact profile (v1) → form-id of the submission at $convMs → form-integrations
+ * submissions of that form → values. Needs the token scope `forms`; without it
+ * returns ['error' => 'scope'] once and stops calling for the rest of the run.
+ * @return array{values?: array<string,string>, error?: string}
+ */
+function hs_fetch_captured_values(string $contactId, int $convMs): array {
+    static $noScope = false;
+    if ($noScope) return ['error' => 'scope'];
+
+    try {
+        $prof = hs_curl("https://api.hubapi.com/contacts/v1/contact/vid/{$contactId}/profile"
+            . '?formSubmissionMode=all&propertyMode=value_only&showListMemberships=false');
+    } catch (RuntimeException $e) {
+        return ['error' => 'profile'];
+    }
+    $sub = null;
+    foreach ($prof['form-submissions'] ?? [] as $s) {
+        // Contact properties carry ms rounded to the second on some paths: match within 2s
+        if ($convMs && abs((int)($s['timestamp'] ?? 0) - $convMs) <= 2000) { $sub = $s; break; }
+    }
+    if (!$sub) $sub = $prof['form-submissions'][0] ?? null; // newest first
+    if (!$sub || strtoupper($sub['form-type'] ?? '') !== 'CAPTURED') return [];
+
+    $formId = $sub['form-id'] ?? '';
+    $ts     = (int)($sub['timestamp'] ?? 0);
+    $after  = null;
+    for ($page = 0; $page < 3 && $formId; $page++) {
+        $url = "https://api.hubapi.com/form-integrations/v1/submissions/forms/{$formId}?limit=50"
+             . ($after ? '&after=' . urlencode($after) : '');
+        try {
+            $data = hs_curl($url);
+        } catch (RuntimeException $e) {
+            if (str_contains($e->getMessage(), 'HTTP 403')) { $noScope = true; return ['error' => 'scope']; }
+            return ['error' => 'submissions'];
+        }
+        foreach ($data['results'] ?? [] as $r) {
+            if (abs((int)($r['submittedAt'] ?? 0) - $ts) > 2000) continue;
+            $vals = [];
+            foreach ($r['values'] ?? [] as $v) {
+                $n = trim($v['name'] ?? ''); $val = trim((string)($v['value'] ?? ''));
+                if ($n !== '' && $val !== '') $vals[$n] = $val;
+            }
+            return ['values' => $vals];
+        }
+        $after = $data['paging']['next']['after'] ?? null;
+        if (!$after) break;
+    }
+    return ['error' => 'not_found'];
+}
+
+/**
+ * Fills a Form lead with the Collected Forms fields that are not on the contact
+ * (name, pax, period, free text). No-op for HubSpot forms and iBot leads.
+ */
+function hs_enrich_captured_form(array $lead): array {
+    if (($lead['source'] ?? '') !== 'Form' || empty($lead['contact_id'])) return $lead;
+    $res = hs_fetch_captured_values((string)$lead['contact_id'], (int)($lead['date_created_ms'] ?? 0));
+    if (($res['error'] ?? '') === 'scope') {
+        $lead['initial_request'] .= "\n\n(Collected Form fields not read: HubSpot token lacks the 'forms' scope — see the notification email)";
+        return $lead;
+    }
+    return empty($res['values']) ? $lead : hs_apply_captured_values($lead, $res['values']);
+}
+
+/** Maps Collected Forms values onto the lead: name if missing, pax, period, text lines. */
+function hs_apply_captured_values(array $lead, array $values): array {
+    $lines = [];
+    $extra = '';
+    foreach ($values as $key => $val) {
+        $k = strtolower($key);
+        if (in_array($k, ['email', 'phone', 'mobilephone'], true)) continue;
+        $label = ucfirst(str_replace('_', ' ', $key));
+        if (mb_strlen($label) > 60) $label = mb_substr($label, 0, 57) . '...';
+        $lines[] = "$label: $val";
+        $extra  .= ' ' . $val;
+
+        $nameLike = preg_match('/(^|_)(nome|name|cognome|surname)/', $k);
+        if ($nameLike && ($lead['customer_name'] === '' || $lead['customer_name'] === $lead['email'])) {
+            $lead['customer_name'] = $val;
+        } elseif (preg_match('/persone|people|pax|partecipanti|travell?ers/', $k) && !$lead['pax']
+                  && preg_match('/\d+/', $val, $m) && (int)$m[0] > 0 && (int)$m[0] < 100) {
+            $lead['pax'] = (int)$m[0];
+        } elseif (preg_match('/date|period|quando|when/', $k) && !$lead['period']) {
+            $lead['period'] = mb_substr($val, 0, 200);
+        }
+    }
+    if (!$lines) return $lead;
+
+    $lead['initial_request'] .= "\n\nForm fields:\n" . implode("\n", $lines);
+    if (in_array($lead['destination'], ['', 'Other'], true)) {
+        $lead['destination'] = hs_map_destination($extra);
+    }
+    $lead['raw_data']['_captured_form'] = $values;
+    return $lead;
+}
+
+/**
  * Fetches all new leads (contacts + tickets) since $since ms.
  * Tickets take priority: if iBot creates both a contact and a ticket for the
  * same person, only the ticket lead is returned (richer data, avoids duplicates).
@@ -619,7 +719,11 @@ function hs_insert_lead(PDO $db, array $lead, bool $dryRun = false): array {
         return ['status' => 'skipped', 'message' => "Already {$row['action']}: $name"];
     }
 
-    $dup = hs_check_duplicates($db, $name, $lead['email'], $lead['phone'], $hsId);
+    // Only for leads about to be staged: costs 2+ API calls per lead
+    $lead = hs_enrich_captured_form($lead);
+    $name = $lead['customer_name'];
+
+    $dup =hs_check_duplicates($db, $name, $lead['email'], $lead['phone'], $hsId);
 
     // Downgrade 'definite' to 'returning' for old matches, map to 'possible' for DB storage
     $dbDupFlag = $dup['flag'];
