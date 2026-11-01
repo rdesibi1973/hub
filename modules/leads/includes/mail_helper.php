@@ -58,6 +58,7 @@ function substitute_vars(string $text, array $req, array $dates, string $agent_n
 /**
  * Send an HTML email via PHPMailer (PHP mail() transport).
  * $attachments = [['tmp_path'=>..., 'name'=>...], ...]
+ * $sig_user_id: whose signature to append (default: the logged-in user; the Agent API has no session).
  */
 function send_hub_email(
     string $to,
@@ -66,7 +67,8 @@ function send_hub_email(
     string $from_name,
     string $from_email,
     string $reply_to = '',
-    array  $attachments = []
+    array  $attachments = [],
+    int    $sig_user_id = 0
 ): bool {
     $mail = new PHPMailer(true);
     try {
@@ -88,7 +90,7 @@ function send_hub_email(
 
         // Append the logged-in user's HTML signature, if any.
         if (function_exists('get_user_signature_html')) {
-            $sigUid = (int)($_SESSION['user_id'] ?? 0);
+            $sigUid = $sig_user_id ?: (int)($_SESSION['user_id'] ?? 0);
             $sig = $sigUid > 0 ? get_user_signature_html($sigUid) : '';
             if ($sig !== '') {
                 $body_html .= '<br><br><hr style="border:none;border-top:1px solid #ccc;margin:12px 0;">' . $sig;

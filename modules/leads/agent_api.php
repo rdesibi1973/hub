@@ -103,7 +103,7 @@ function agent_audit(PDO $db, string $action, $reqId, array $payload, string $re
                               'create_request', 'add_flight_rates', 'timeline_update', 'summary_set', 'rename_folder',
                               'set_request_status', 'update_request', 'import_group_folder', 'move_group_folder', 'ck_request_check', 'memo_delete', 'create_agency', 'update_agency', 'save_agency_contact', 'delete_agency_contact',
                               'followup_scan', 'followup_update', 'followup_upsert', 'iti_update_activity', 'sales_response_dismiss',
-                              'ck_set_owners', 'ck_set_group_closed', 'ck_findings_upsert', 'iti_create_destination', 'iti_import_program', 'iti_supplier_blocklist'], true) && empty($payload['confirm']);
+                              'ck_set_owners', 'ck_set_group_closed', 'ck_findings_upsert', 'iti_create_destination', 'iti_import_program', 'iti_supplier_blocklist', 'predeparture_email'], true) && empty($payload['confirm']);
     // Mail: keep who/what in the log, not message bodies or attachment content.
     if (in_array($action, ['mail_get', 'mail_attachment', 'iti_document', 'iti_vouchers'], true) && $code === 200) {
         $res = json_decode($resultJson, true);
@@ -3095,6 +3095,52 @@ try {
             ? ['message' => 'Dry run — nothing changed in Dropbox. Resend with "confirm": true to resolve what is safe.'] : []));
     }
 
+    // ── Pre-departure travel info (Booked "✈ Travel info"; logic includes/predeparture_service.php) ──
+    // Booked requests arriving within `days` (default 21), with the last travel-info mail and the defaults.
+    case 'predeparture_list': {
+        require_once __DIR__ . '/includes/predeparture_service.php';
+        $days = isset($in['days']) ? max(0, min(120, (int)$in['days'])) : PREDEP_DUE_DAYS;
+        $list = predep_due($db, $days, !empty($in['only_unsent']));
+        agent_out(['ok' => true, 'days' => $days, 'count' => count($list), 'requests' => array_map(fn($r) => agent_request_out($r) + [
+            'arrival' => $r['start_date_parsed'], 'email' => $r['email'] ?? null, 'travel_info_sent' => $r['predep_sent'],
+            'defaults' => $r['defaults'],
+        ], $list)]);
+    }
+
+    // Build the travel-info mail (lang, countries default from the itinerary / folder; to, subject, body
+    // override). Dry run = preview; "confirm": true sends as the request's agent and logs it in request_notes.
+    case 'predeparture_email': {
+        require_once __DIR__ . '/includes/predeparture_service.php';
+        $r   = agent_request($db, $in['request_id'] ?? 0);
+        $def = predep_defaults($db, $r);
+        $lang = strtolower(trim((string)($in['lang'] ?? '')));
+        if ($lang !== '' && !isset(PREDEP_SUBJECTS[$lang])) agent_fail('lang must be ' . implode(' | ', array_keys(PREDEP_SUBJECTS)));
+        $lang = $lang ?: $def['lang'];
+        $countries = $def['countries'];
+        if (isset($in['countries'])) {
+            $countries = is_array($in['countries']) ? $in['countries'] : preg_split('/[\s,+]+/', (string)$in['countries'], -1, PREG_SPLIT_NO_EMPTY);
+            $countries = array_map('strtolower', $countries);
+            if ($bad = array_diff($countries, PREDEP_COUNTRIES)) agent_fail('Unknown countries: ' . implode(', ', $bad) . ' (use ' . implode(' | ', PREDEP_COUNTRIES) . ')');
+            if (!$countries) agent_fail('countries: at least one of ' . implode(' | ', PREDEP_COUNTRIES));
+        }
+        $mail = predep_build($r, $lang, $countries, predep_start_date($r));
+        if (trim((string)($in['subject'] ?? '')) !== '') $mail['subject'] = trim((string)$in['subject']);
+        if (trim((string)($in['body'] ?? '')) !== '')    $mail['body']    = (string)$in['body'];
+        $to = isset($in['to']) ? (is_array($in['to']) ? $in['to'] : preg_split('/[,;]+/', (string)$in['to'])) : preg_split('/[,;]+/', (string)($r['email'] ?? ''));
+        $to = array_values(array_filter(array_map('trim', $to)));
+        $sender = predep_sender($db, $r['agent_id'] ?? null);
+        $preview = ['request' => agent_request_out($r), 'lang' => $lang, 'countries' => array_values($countries),
+                    'arrival' => predep_start_date($r), 'travel_info_sent' => $db->query("SELECT MAX(rn.created_at) FROM request_notes rn WHERE rn.request_id = " . (int)$r['id'] . " AND " . predep_note_sql($db))->fetchColumn() ?: null,
+                    'email' => ['from' => $sender ? $sender['full_name'] . ' <' . $sender['email'] . '>' : null, 'to' => $to,
+                                'subject' => $mail['subject'], 'body' => $mail['body']]];
+        if (empty($in['confirm'])) {
+            agent_out(['ok' => true, 'dry_run' => true] + $preview + ['message' => 'Dry run — not sent. Resend with "confirm": true to send.']);
+        }
+        $res = predep_send($db, $r, $to, $mail['subject'], $mail['body'], isset($agentUser['id']) ? (int)$agentUser['id'] : null);
+        if (!$res['ok']) agent_fail($res['msg'], 409, $preview);
+        agent_out(['ok' => true, 'dry_run' => false, 'message' => $res['msg']] + $preview);
+    }
+
     default:
         agent_fail('Unknown action "' . $agentAction . '"', 400, ['actions' => [
             'find_requests', 'list_agencies', 'create_agency', 'update_agency', 'save_agency_contact', 'delete_agency_contact', 'create_request', 'update_request', 'import_group_folder', 'move_group_folder', 'list_standard_programs',
@@ -3114,6 +3160,7 @@ try {
             'payments_due', 'ck_status', 'ck_request_check', 'ck_set_owners', 'ck_set_group_closed', 'ck_findings_upsert', 'ck_findings_drafts', 'ops_movements', 'ops_lunch_boxes', 'ops_medivac', 'flight_tickets',
             'followup_list', 'followup_scan', 'followup_update', 'followup_upsert', 'mail_security_status',
             'sales_response_status', 'sales_response_dismiss', 'dropbox_conflicts', 'dropbox_conflicts_run',
+            'predeparture_list', 'predeparture_email',
         ]]);
     }
 } catch (Throwable $e) {

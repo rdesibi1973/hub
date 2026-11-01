@@ -6,7 +6,9 @@
  * znz = Zanzibar, ke = Kenya); the seller edits it in the send modal before sending.
  * Facts: docs/skills/agency-email.md §5 (entry requirements, 26 Oct 2026). Jambo / insurance PDFs:
  * modules/iti/includes/client_docs.php (public links on the website).
+ * Shared with the Agent API (predeparture_list / predeparture_email).
  */
+require_once __DIR__ . '/folder_parser.php';
 
 /** Subject prefixes per language: also how the page spots a mail already sent (request_notes.subject). */
 const PREDEP_SUBJECTS = [
@@ -256,4 +258,64 @@ function predep_build(array $req, string $lang, array $countries, ?string $start
         'subject' => PREDEP_SUBJECTS[$lang] . ($folder !== '' ? ' - ' . $folder : ''),
         'body'    => $html,
     ];
+}
+
+/** Arrival date (YYYY-MM-DD or null) of a request, from its folder. */
+function predep_start_date(array $req): ?string {
+    return parse_folder_dates(get_date_folder($req))['start_date'];
+}
+
+/**
+ * Booked requests (as the Booked page: Booked / Paid / Balance / Deposit, not cancelled) arriving from
+ * today to today + $days, arrival order. Each: the request row + start_date, predep_sent (last travel-info
+ * mail, or null), defaults (lang, countries). $only_unsent drops the ones already sent.
+ */
+function predep_due(PDO $pdo, int $days = PREDEP_DUE_DAYS, bool $only_unsent = false): array {
+    $rows = $pdo->query(
+        "SELECT r.*, a.name AS agent_name,
+                (SELECT MAX(rn.created_at) FROM request_notes rn WHERE rn.request_id = r.id AND " . predep_note_sql($pdo) . ") AS predep_sent
+         FROM requests r LEFT JOIN agents a ON a.id = r.agent_id
+         WHERE r.status IN ('Booked','Paid','Balance','Deposit')
+           AND (r.payment_status IS NULL OR r.payment_status != 'Cancelled')"
+    )->fetchAll(PDO::FETCH_ASSOC);
+    $from = date('Y-m-d');
+    $to   = date('Y-m-d', strtotime('+' . max(0, $days) . ' days'));
+    $out  = [];
+    foreach ($rows as $r) {
+        $start = predep_start_date($r);
+        if ($start === null || $start < $from || $start > $to) continue;
+        if (($r['payment_status'] ?: folder_payment_status($r)) === 'Cancelled') continue;
+        if ($only_unsent && $r['predep_sent']) continue;
+        $out[] = $r + ['start_date_parsed' => $start, 'defaults' => predep_defaults($pdo, $r)];
+    }
+    usort($out, fn($a, $b) => strcmp($a['start_date_parsed'], $b['start_date_parsed']));
+    return $out;
+}
+
+/** The Hub user who signs for the request's agent (users.agent_id): ['id', 'full_name', 'email'] or null. */
+function predep_sender(PDO $pdo, $agent_id): ?array {
+    if (!$agent_id) return null;
+    $st = $pdo->prepare("SELECT id, full_name, email FROM users WHERE agent_id = ? ORDER BY is_active DESC, id LIMIT 1");
+    $st->execute([(int)$agent_id]);
+    $u = $st->fetch(PDO::FETCH_ASSOC);
+    return ($u && filter_var($u['email'], FILTER_VALIDATE_EMAIL)) ? $u : null;
+}
+
+/**
+ * Send a travel-info mail as the request's agent (From / Reply-To / signature, BCC to the agent as
+ * every Hub mail), logged in request_notes like the Booked page — so the page shows it as sent.
+ * Returns ['ok' => bool, 'msg' => string].
+ */
+function predep_send(PDO $pdo, array $req, array $to, string $subject, string $body, ?int $log_user_id): array {
+    require_once __DIR__ . '/mail_helper.php';
+    $sender = predep_sender($pdo, $req['agent_id'] ?? null);
+    if (!$sender) return ['ok' => false, 'msg' => 'No Hub user with an email address for the agent of this request.'];
+    $to = array_values(array_filter(array_map('trim', $to), fn($a) => filter_var($a, FILTER_VALIDATE_EMAIL)));
+    if (!$to) return ['ok' => false, 'msg' => 'No valid recipient.'];
+    if (!send_hub_email(implode(', ', $to), $subject, $body, $sender['full_name'] ?: 'Savannah Explorers', $sender['email'],
+                        $sender['email'], [], (int)$sender['id'])) {
+        return ['ok' => false, 'msg' => 'Send failed. Check server mail configuration.'];
+    }
+    log_email_note($pdo, (int)$req['id'], $log_user_id, $subject, $body);
+    return ['ok' => true, 'msg' => 'Sent to ' . implode(', ', $to) . ' as ' . $sender['email']];
 }

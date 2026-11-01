@@ -1641,6 +1641,34 @@ curl -sA "$UA" -H "$H" "$U?action=dropbox_conflicts"
 curl -sA "$UA" -H "$H" -X POST "$U?action=dropbox_conflicts_run" -d '{"budget":120}'
 ```
 
+## Pre-departure travel info
+
+The mail sent before the trip, also from Leads → Booked "✈ Travel info" (1 Nov 2026): Jambo PDF, passport, Tanzania visa
+(eservices.immigration.go.tz) / Kenya eTA, NIC / ZIC (+ insurance PDF) / Kenya health insurance, Ebola health form
+(afyamsafiri.moh.go.tz, Zanzibar healthtravelznz.mohz.go.tz), own travel insurance with evacuation, Zanzibar hotel tax.
+Logic `modules/leads/includes/predeparture_service.php`. Languages `it | en | fr | es`; countries `tz` (mainland Tanzania),
+`znz` (Zanzibar), `ke` (Kenya) — only those items go in. Defaults: language and country of the linked itinerary
+(`iti_programs.lead_request_id`), else words in the folder / request type (Zanzibar, beach, Kenya, Masai Mara, Serengeti…),
+language `it` — a guess: check `countries` before sending. A mail counts as sent when a `request_notes` email starts
+with the subject prefix (`Informazioni di viaggio`, `Travel information`, `Informations de voyage`, `Información para el viaje`).
+
+### `predeparture_list` (GET)
+Booked requests (Booked / Paid / Balance / Deposit, not cancelled) arriving from today to today + `days` (default 21,
+max 120), arrival order; `only_unsent` drops those already sent.
+→ `{days, count, requests[] {…request, arrival, email, travel_info_sent (datetime | null), defaults {lang, countries[]}}}`.
+
+### `predeparture_email` (POST, dry-run unless `confirm`)
+`request_id`; optional `lang`, `countries` (array or "tz,znz"), `to` (array or comma list; default the request email),
+`subject`, `body` (HTML, replaces the built one). Sent from the Hub as the request's agent (From / Reply-To / signature,
+BCC to the agent), logged in `request_notes` (the Booked page shows ✓).
+→ `{dry_run, request, lang, countries, arrival, travel_info_sent, email {from, to[], subject, body}}`; 409 when the agent
+has no Hub user with an email or the send fails.
+
+```bash
+curl -sA "$UA" -H "$H" "$U?action=predeparture_list&only_unsent=1"
+curl -sA "$UA" -H "$H" -X POST "$U?action=predeparture_email" -d '{"request_id":123,"lang":"it","countries":["tz","znz"]}'
+```
+
 ## Request timeline
 
 A running history and a short "where are we" summary for each request, so a new session can pick

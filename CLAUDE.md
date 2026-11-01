@@ -30,6 +30,8 @@ outdated — this file wins where they disagree (PHP version, local lint).
 - **Procedures** (`modules/leads/procedures.php`, proxy `procedure_file.php`; logic `includes/procedures_service.php`,
   "?" links map `includes/procedures_map.php`): office procedure PDFs read live from Dropbox `/Operations/OfficeProcedures`
   (one copy only, cached by `rev`); `orig/` Word sources for admins only, `old/` never.
+- **Travel info** (Booked "✈ Travel info"; logic `includes/predeparture_service.php`, shared with the Agent API
+  `predeparture_*`): pre-departure mail per language / country — Jambo, visa, NIC / ZIC, Ebola form.
 - `migrations/NNN_name.sql` — not applied by deploy. `docs/` — AGENT_API, FOLDER_NAMING,
   INFRASTRUCTURE, KB_Quotazioni_Safari.
 
