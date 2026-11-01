@@ -235,6 +235,13 @@ ksort($tpl_by_cat);
     document.getElementById('sendOverlay').style.display = 'flex';
   };
 
+  // Fill the body from a page (e.g. Booked "Travel info"), after openSend().
+  window.setSendBody = function(html) {
+    if (!sendQuill) return;
+    sendQuill.root.innerHTML = '';
+    sendQuill.clipboard.dangerouslyPasteHTML(0, html || '');
+  };
+
   window.closeSend = function() {
     document.getElementById('sendOverlay').style.display = 'none';
   };

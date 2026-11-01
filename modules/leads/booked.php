@@ -3,6 +3,7 @@ ob_start(); // capture any warnings/notices from includes
 require_once 'config.php';
 require_once 'includes/folder_parser.php';
 require_once 'includes/mail_helper.php';
+require_once 'includes/predeparture_service.php';
 requireLogin();
 
 $cu          = current_user();
@@ -39,6 +40,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             'body'    => substitute_vars($t['body_html'], $row, $dates, $agent_name, $agent_email),
             'to'      => $row['email'] ?? '',
         ]);
+        exit;
+    }
+
+    // Pre-departure travel info: without lang → the defaults (language, countries) and the mail built
+    // from them; with lang + countries[] → the mail for that choice. Sent through send_email.
+    if ($action === 'predeparture_email') {
+        $req = db()->prepare("SELECT * FROM requests WHERE id = ?");
+        $req->execute([(int)$_POST['request_id']]);
+        $row = $req->fetch(PDO::FETCH_ASSOC);
+        if (!$row) { echo json_encode(['ok'=>false,'msg'=>'Request not found.']); exit; }
+        $def       = predep_defaults(db(), $row);
+        $lang      = isset(PREDEP_SUBJECTS[$_POST['lang'] ?? '']) ? $_POST['lang'] : $def['lang'];
+        $countries = isset($_POST['lang']) ? array_values(array_intersect(PREDEP_COUNTRIES, (array)($_POST['countries'] ?? []))) : $def['countries'];
+        $mail      = predep_build($row, $lang, $countries, parse_folder_dates(get_date_folder($row))['start_date']);
+        echo json_encode(['ok'=>true, 'lang'=>$lang, 'countries'=>$countries, 'to'=>$row['email'] ?? '',
+                          'subject'=>$mail['subject'], 'body'=>$mail['body']]);
         exit;
     }
 
@@ -113,7 +130,8 @@ $rows = db()->query(
             r.group_folder, r.practice_code, r.period, r.status, r.agent_id,
             r.source, r.payment_status, r.date_received, r.confirmation_date, r.dropbox_url,
             a.name AS agent_name,
-            (SELECT COUNT(*) FROM request_notes rn WHERE rn.request_id = r.id AND rn.note_type='email_sent') AS note_count
+            (SELECT COUNT(*) FROM request_notes rn WHERE rn.request_id = r.id AND rn.note_type='email_sent') AS note_count,
+            (SELECT MAX(rn.created_at) FROM request_notes rn WHERE rn.request_id = r.id AND " . predep_note_sql(db()) . ") AS predep_sent
      FROM requests r
      LEFT JOIN agents a ON a.id = r.agent_id
      WHERE r.status IN ('Booked','Paid','Balance','Deposit')
@@ -287,10 +305,19 @@ include 'includes/header.php';
             </span>
           <?php else: ?>—<?php endif; ?>
         </td>
-        <td style="text-align:center">
+        <td style="text-align:center;white-space:nowrap" onclick="event.stopPropagation()">
           <button type="button" class="btn btn-outline btn-sm"
-                  onclick="event.stopPropagation();openSend(<?= $r['id'] ?>, '<?= addslashes(h($r['customer_name'])) ?>', '<?= addslashes(h($r['email'] ?? '')) ?>')">
+                  onclick="openSend(<?= $r['id'] ?>, '<?= addslashes(h($r['customer_name'])) ?>', '<?= addslashes(h($r['email'] ?? '')) ?>')">
             ✉ Send
+          </button>
+          <?php
+            // Travel info due: arrival within PREDEP_DUE_DAYS and not sent yet → red button.
+            $predep_due = $has_date && !$is_past && !$r['predep_sent'] && $r['start_ts'] - $today_ts <= PREDEP_DUE_DAYS * 86400;
+          ?>
+          <button type="button" class="btn btn-sm <?= $predep_due ? 'btn-red' : 'btn-outline' ?>" id="predepBtn<?= (int)$r['id'] ?>"
+                  title="<?= $r['predep_sent'] ? 'Travel info sent on ' . h(date('d M Y', strtotime($r['predep_sent']))) : 'Pre-departure mail: Jambo, visa, NIC / ZIC, Ebola health form' ?>"
+                  onclick="openPredep(<?= (int)$r['id'] ?>, '<?= addslashes(h($r['customer_name'])) ?>')">
+            ✈ Travel info<?= $r['predep_sent'] ? ' ✓' : '' ?>
           </button>
         </td>
       </tr>
@@ -315,8 +342,98 @@ include 'includes/send_modal.php';
   </div>
 </div>
 
+<!-- ── Travel info (pre-departure) options ───────────────────────────────── -->
+<div class="modal-overlay hidden" id="predepOverlay" style="display:none">
+  <div class="modal-box" style="max-width:460px">
+    <div class="modal-header">
+      <h3>✈ Travel info — <span id="predepCustomer"></span></h3>
+      <button type="button" class="modal-close" onclick="closePredep()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="predep_req_id">
+      <label class="m-label">Language</label>
+      <select id="predep_lang" class="m-input" style="margin-bottom:14px">
+        <option value="it">Italiano</option><option value="en">English</option>
+        <option value="fr">Français</option><option value="es">Español</option>
+      </select>
+      <label class="m-label">Trip includes <span style="font-weight:400;color:var(--grey-mid)">— guessed from the itinerary / folder, please check</span></label>
+      <div style="display:flex;flex-direction:column;gap:6px;font-size:.82rem;margin-top:4px">
+        <label><input type="checkbox" class="predep-c" value="tz"> Tanzania mainland <span style="color:var(--grey-mid)">— visa, NIC, Ebola form</span></label>
+        <label><input type="checkbox" class="predep-c" value="znz"> Zanzibar <span style="color:var(--grey-mid)">— visa, ZIC, Zanzibar health form, hotel tax</span></label>
+        <label><input type="checkbox" class="predep-c" value="ke"> Kenya <span style="color:var(--grey-mid)">— eTA, Kenya health insurance</span></label>
+      </div>
+      <div id="predepAlert" style="display:none;margin-top:12px;padding:10px 14px;border-radius:6px;font-size:.82rem;background:#ffebee;color:#c62828"></div>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn btn-outline" onclick="closePredep()">Cancel</button>
+      <button type="button" class="btn btn-red" id="btnPredep" onclick="preparePredep()">Prepare email →</button>
+    </div>
+  </div>
+</div>
+
 <script>
 const TODAY_TS = <?= $today_ts ?>;
+const PREDEP_SUBJECTS = <?= json_encode(array_values(PREDEP_SUBJECTS), JSON_UNESCAPED_UNICODE) ?>;
+
+function predepPost(params) {
+  return fetch('booked.php', {
+    method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'},
+    body: new URLSearchParams(params).toString()
+  }).then(function(r) { return r.json(); });
+}
+
+function predepAlert(msg) {
+  var a = document.getElementById('predepAlert');
+  a.textContent = msg || '';
+  a.style.display = msg ? 'block' : 'none';
+}
+
+// Opens the options dialog with the defaults the server guesses for this booking.
+function openPredep(id, customer) {
+  document.getElementById('predep_req_id').value = id;
+  document.getElementById('predepCustomer').textContent = customer;
+  predepAlert('');
+  var btn = document.getElementById('btnPredep');
+  btn.disabled = true; btn.textContent = 'Loading…';
+  document.getElementById('predepOverlay').style.display = 'flex';
+  predepPost({action:'predeparture_email', request_id:id}).then(function(d) {
+    btn.disabled = false; btn.textContent = 'Prepare email →';
+    if (!d.ok) { predepAlert(d.msg); return; }
+    document.getElementById('predep_lang').value = d.lang;
+    document.querySelectorAll('.predep-c').forEach(function(c) { c.checked = d.countries.indexOf(c.value) >= 0; });
+  }).catch(function(e) { btn.disabled = false; btn.textContent = 'Prepare email →'; predepAlert('Error: ' + e.message); });
+}
+
+function closePredep() { document.getElementById('predepOverlay').style.display = 'none'; }
+
+// Builds the mail for the chosen language / countries and hands it to the send modal (editable there).
+function preparePredep() {
+  var id = document.getElementById('predep_req_id').value;
+  var p = new URLSearchParams({action:'predeparture_email', request_id:id, lang:document.getElementById('predep_lang').value});
+  var any = false;
+  document.querySelectorAll('.predep-c').forEach(function(c) { if (c.checked) { p.append('countries[]', c.value); any = true; } });
+  if (!any) { predepAlert('Tick at least one country.'); return; }
+  var btn = document.getElementById('btnPredep');
+  btn.disabled = true;
+  predepPost(p).then(function(d) {
+    btn.disabled = false;
+    if (!d.ok) { predepAlert(d.msg); return; }
+    closePredep();
+    openSend(id, document.getElementById('predepCustomer').textContent, d.to, d.subject);
+    setSendBody(d.body);
+  }).catch(function(e) { btn.disabled = false; predepAlert('Error: ' + e.message); });
+}
+
+// After a send: a travel-info mail ticks that row's button.
+window.onEmailSent = function(id, subject) {
+  if (!PREDEP_SUBJECTS.some(function(s) { return subject.indexOf(s) === 0; })) return;
+  var b = document.getElementById('predepBtn' + id);
+  if (!b) return;
+  b.classList.remove('btn-red'); b.classList.add('btn-outline');
+  if (b.textContent.indexOf('✓') < 0) b.textContent = b.textContent.trim() + ' ✓';
+  b.title = 'Travel info sent today';
+};
+document.querySelector('#predepOverlay .modal-box').addEventListener('click', function(e) { e.stopPropagation(); });
 
 function updateTable() {
   const agent    = document.getElementById('filterAgent').value;
