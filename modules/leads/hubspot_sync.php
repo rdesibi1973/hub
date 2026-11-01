@@ -655,6 +655,9 @@ function hs_apply_captured_values(array $lead, array $values): array {
 
         $nameLike = preg_match('/(^|_)(nome|name|cognome|surname)/', $k);
         if ($nameLike && ($lead['customer_name'] === '' || $lead['customer_name'] === $lead['email'])) {
+            // The header was built with the email as name: fix its "Name:" line too
+            $lead['initial_request'] = preg_replace('/^Name: ' . preg_quote($lead['customer_name'], '/') . '$/m',
+                'Name: ' . str_replace(['\\', '$'], ['\\\\', '\\$'], $val), $lead['initial_request'], 1);
             $lead['customer_name'] = $val;
         } elseif (preg_match('/persone|people|pax|partecipanti|travell?ers/', $k) && !$lead['pax']
                   && preg_match('/\d+/', $val, $m) && (int)$m[0] > 0 && (int)$m[0] < 100) {
