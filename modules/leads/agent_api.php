@@ -2177,7 +2177,7 @@ try {
         }
         $warnings = [];
         if ((int)$cn['invoice_id'] === $id) {
-            $warnings[] = 'This is the credit note\'s own source invoice: the refund is taken back on the invoice, but the request value stays reduced by the credit note total.';
+            $warnings[] = 'This is the credit note\'s own source invoice: the refund is taken back on the invoice and the request value goes back up by the amount applied.';
         }
         if (empty($in['confirm'])) {
             agent_out(array_merge(['ok' => true, 'dry_run' => true, 'date' => $date, 'warnings' => $warnings,

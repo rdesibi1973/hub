@@ -936,10 +936,11 @@ Refused with **409**:
 - credit note and invoice in different currencies (the credit note page takes an FX rate for these);
 - Cancelled credit note or Cancelled invoice;
 - the credit note already applied to that invoice (an active application: cancel it on the credit note page first).
-The credit note's own source invoice is accepted, with a `warnings[]` line: the refund is taken back on the
-invoice, but the request value stays reduced by the credit note total (`sync_request_value`).
+The credit note's own source invoice is accepted, with a `warnings[]` line. Request value (`sync_request_value`):
+credit applied to an invoice of the same request is no longer subtracted, so the value goes back up by that amount;
+credit not applied, or applied to another request, stays subtracted.
 Dry-run unless `"confirm": true` → `amount_cn`, `amount_invoice`, `fx_rate`, `cn_remaining_after`, `cn_status_after`,
-`balance_after`, `invoice_status_after`, `credit_note`, `invoice`, `warnings`. Confirmed → `allocation_id`, `amount`,
+`balance_after`, `invoice_status_after`, `request_value_change`, `credit_note`, `invoice`, `warnings`. Confirmed → `allocation_id`, `amount`,
 `credit_note`, `invoice`, `memos_closed`, `folder`, `warnings`. The folder is **not** renamed automatically.
 Needs `migrations/076_credit_note_applied.sql` (new payment method).
 

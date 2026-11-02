@@ -29,6 +29,8 @@ Running log of notable changes and current build state. Module-level "active / p
 - Credit note page too: same-currency credit pays the exact amount (no more floor to the unit; floor only with a rate); cancelling
   a payment made with a credit note gives the credit back; no new credit note on a cancelled invoice; issue / apply / cancel go
   in the request timeline; applying closes payment memos. The refusals over balance, other currency and second application are API only.
+- Request value (`sync_request_value`): credit applied to an invoice of the same request is no longer subtracted. Credit that is not
+  applied, or applied to another request, still is. No stored value changed when this went in.
 
 ## 2026-10-25 — Dropbox conflicted copies: nightly check
 - Calc kept open in Excel on one PC while another PC or the Hub saves it → Dropbox "conflicted copy" (all PCs share one

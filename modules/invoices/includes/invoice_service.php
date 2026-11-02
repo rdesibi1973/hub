@@ -90,8 +90,9 @@ function inv_status_for(string $cur, float $paid, float $balance): string {
 }
 
 // ── Sync request value_usd from linked invoice totals ────────────────────────
-// Sums the `total` of all non-Cancelled invoices linked to the same request
-// and writes the result to requests.value_usd.
+// Sums the `total` of all non-Cancelled invoices linked to the same request,
+// minus its credit notes, and writes the result to requests.value_usd. Credit
+// applied to an invoice of the same request stayed in the booking: not subtracted.
 // Pass either the invoice id (most callers) or 0 with an explicit $requestId.
 function sync_request_value(PDO $db, int $invoice_id, int $request_id = 0): void {
     if (!$request_id) {
@@ -111,9 +112,16 @@ function sync_request_value(PDO $db, int $invoice_id, int $request_id = 0): void
                 SELECT COALESCE(SUM(total), 0)
                 FROM credit_notes
                 WHERE request_id = ? AND status != 'Cancelled'
+            ) + (
+                SELECT COALESCE(SUM(a.amount_cn), 0)
+                FROM credit_note_allocations a
+                JOIN credit_notes c ON c.id = a.credit_note_id
+                JOIN invoices i ON i.id = a.invoice_id
+                WHERE c.request_id = ? AND c.status != 'Cancelled' AND a.cancelled_at IS NULL
+                  AND i.request_id = ? AND i.status != 'Cancelled'
             )
          WHERE id = ?"
-    )->execute([$request_id, $request_id, $request_id]);
+    )->execute([$request_id, $request_id, $request_id, $request_id, $request_id]);
 }
 
 // ── Credit note number: CN-2026-0001 ─────────────────────────────────────────
@@ -342,6 +350,7 @@ function cn_apply_plan(PDO $db, array $cn, array $inv, float $amountCn, float $f
         'cn_status_after'      => cn_status_for((float)$cn['total'], cn_allocated_amount($db, $cnId) + $amountCn),
         'balance_after'        => $balanceAfter,
         'invoice_status_after' => inv_status_for($inv['status'], round((float)$inv['amount_paid'] + $amountInvoice, 2), $balanceAfter),
+        'request_value_change' => !empty($cn['request_id']) && (int)$cn['request_id'] === (int)$inv['request_id'] ? $amountCn : 0.0,
     ];
 }
 

@@ -90,7 +90,7 @@ Our own credit notes `CN-YYYY-NNNN`, always issued on an invoice. A supplier's c
 - Issue: `create_credit_note` with `invoice_id`, `amount`, `reason`, `date` if not today. It records the refund as a negative payment, so the balance of that invoice goes UP by the amount and the request value goes down. Show Roberto `next_number`, `balance_after` and any `warnings`; confirm after his ok.
 - Use the credit on an invoice: `apply_credit_note` with `credit_note_number` (or `credit_note_id`), `invoice_id`, `amount` only for a partial use (default: all the remaining). Show Roberto `amount_invoice`, `balance_after`, `invoice_status_after`, `cn_remaining_after`, `cn_status_after` and any `warnings`; confirm after his ok.
 - Never `allow_overpaid` without asking. Refused (409), report it and don't work around it: over the remaining credit, over the invoice balance, another currency (only the credit note page takes an FX rate), cancelled credit note or invoice, credit note already applied to that invoice.
-- A credit note applied to its own source invoice is accepted with a warning: the request value stays reduced by the credit note. Tell Roberto.
+- A credit note applied to its own source invoice, or to another invoice of the same request, is accepted: the request value goes back up by the amount applied (`request_value_change`). Tell Roberto.
 - To undo an application: Cancel on the credit note page, or `cancel_invoice_payment` on the `Credit note` payment (the credit comes back).
 - Afterwards, as for a payment (§6): folder status from what is still due, offer `save_invoice_pdf` with `overwrite: true`. Applying a credit is not money on the account: nothing to check on the bank statement.
 
