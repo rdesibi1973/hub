@@ -1,11 +1,11 @@
 ---
 name: invoice-workflow
-description: Create or change a Savannah invoice (SE/SH) and register payments in the Hub and the Calc: dry run, Calc check, confirm after ok, folder status, invoice PDF to Dropbox.
+description: Create or change a Savannah invoice (SE/SH), register payments in the Hub and the Calc, issue and apply credit notes: dry run, Calc check, confirm after ok, folder status, invoice PDF to Dropbox.
 ---
 
 # Invoice workflow (Hub)
 
-Use when Roberto asks to make, fix or check an invoice ("fattura"), to register a payment ("è arrivato il bonifico", "pagamento ricevuto", "hanno mandato la contabile"), or types /invoice-workflow.
+Use when Roberto asks to make, fix or check an invoice ("fattura"), to register a payment ("è arrivato il bonifico", "pagamento ricevuto", "hanno mandato la contabile"), to issue or use a credit note ("credit note", "nota di credito", "CN"), or types /invoice-workflow.
 Reply to Roberto in Italian, short: what you prepared, what needs his ok, next step.
 
 Hub access and fixed rules: as in the project instructions (dry run first, confirm only after his ok; no mail without his ok; never passport numbers; stop and say so when something fails or doesn't add up).
@@ -83,7 +83,18 @@ Money actually on the account (bank statement / AfrAsia) or cash collected by Sa
 4. Offer the updated `save_invoice_pdf` (`overwrite: true`).
 5. SH invoice: its payment memo closes by itself when fully paid; after a partial payment propose updating it (new balance, next chase date). If a supplier must now be paid, remind Roberto (from `next_steps`).
 
-## 7. Report (Italian, plain text, no emoji)
+## 7. Credit notes
+
+Our own credit notes `CN-YYYY-NNNN`, always issued on an invoice. A supplier's credit note is not this: it is a memo (`waiting`).
+- Check first: `list_credit_notes` (`invoice_id`, `request_id`, `agency_id` or `status`) → total, applied, remaining, source invoice, where it was applied. `get_invoice` shows the same under `credit_notes[]`.
+- Issue: `create_credit_note` with `invoice_id`, `amount`, `reason`, `date` if not today. It records the refund as a negative payment, so the balance of that invoice goes UP by the amount and the request value goes down. Show Roberto `next_number`, `balance_after` and any `warnings`; confirm after his ok.
+- Use the credit on an invoice: `apply_credit_note` with `credit_note_number` (or `credit_note_id`), `invoice_id`, `amount` only for a partial use (default: all the remaining). Show Roberto `amount_invoice`, `balance_after`, `invoice_status_after`, `cn_remaining_after`, `cn_status_after` and any `warnings`; confirm after his ok.
+- Never `allow_overpaid` without asking. Refused (409), report it and don't work around it: over the remaining credit, over the invoice balance, another currency (only the credit note page takes an FX rate), cancelled credit note or invoice, credit note already applied to that invoice.
+- A credit note applied to its own source invoice is accepted with a warning: the request value stays reduced by the credit note. Tell Roberto.
+- To undo an application: Cancel on the credit note page, or `cancel_invoice_payment` on the `Credit note` payment (the credit comes back).
+- Afterwards, as for a payment (§6): folder status from what is still due, offer `save_invoice_pdf` with `overwrite: true`. Applying a credit is not money on the account: nothing to check on the bank statement.
+
+## 8. Report (Italian, plain text, no emoji)
 
 ```
 Fattura <SE/SH>-… (prova) – <cartella pratica>

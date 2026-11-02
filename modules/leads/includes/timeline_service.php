@@ -134,7 +134,7 @@ function tl_log_invoice(PDO $db, int $invId, string $what, array $extraRefs = []
         $st->execute([$invId]);
         $i = $st->fetch(PDO::FETCH_ASSOC);
         if (!$i || !(int)$i['request_id']) return;
-        $type = in_array($what, ['payment recorded', 'payment cancelled'], true) ? 'payment' : 'invoice';
+        $type = in_array($what, ['payment recorded', 'payment cancelled'], true) || strpos($what, 'credit note ') === 0 ? 'payment' : 'invoice';
         timeline_log((int)$i['request_id'], $type, 'Invoice ' . $i['invoice_number'] . ' — ' . $what,
             ['body' => 'Total ' . $i['currency'] . ' ' . number_format((float)$i['total'], 2) . ' · paid ' . number_format((float)$i['amount_paid'], 2)
                        . ' · balance ' . number_format((float)$i['balance_due'], 2) . ' · ' . $i['status'],

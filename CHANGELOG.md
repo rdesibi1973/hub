@@ -20,6 +20,16 @@ Running log of notable changes and current build state. Module-level "active / p
 
 ---
 
+## 2026-11-02 — Credit notes in the Agent API
+- New actions `list_credit_notes`, `create_credit_note`, `apply_credit_note`; `get_invoice.credit_notes[]` with applied, remaining
+  and `applied_to[]`. Logic in `invoice_service.php` (`cn_create`, `cn_apply_plan`, `cn_find`), shared with `cn_add.php` / `cn_view.php`.
+- Credit note status `Issued` → `Partially applied` → `Applied`; payment method `Credit note` for applied credits.
+  **`migrations/076_credit_note_applied.sql` must run before the deploy:** `sql_mode` is not strict, so without the new ENUM value
+  the method would silently be stored empty. It also updates what was applied already (CN-2026-0006 → Applied, payment 838).
+- Credit note page too: same-currency credit pays the exact amount (no more floor to the unit; floor only with a rate); cancelling
+  a payment made with a credit note gives the credit back; no new credit note on a cancelled invoice; issue / apply / cancel go
+  in the request timeline; applying closes payment memos. The refusals over balance, other currency and second application are API only.
+
 ## 2026-10-25 — Dropbox conflicted copies: nightly check
 - Calc kept open in Excel on one PC while another PC or the Hub saves it → Dropbox "conflicted copy" (all PCs share one
   Dropbox account, so Dropbox file locking cannot help). New nightly run, started by the existing `ck_cron.php` job

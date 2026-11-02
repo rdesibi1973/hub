@@ -1169,8 +1169,10 @@ function bs_rollback_run(PDO $db, int $reqId, bool $commit): array {
  * Build the post-confirmation booking-notification email (ports the Java
  * showSafariBookingEmailDialog template). $grpMain != '' → the "added to group"
  * variant. Returns ['to','cc','subject','body'] (to/cc comma-separated).
+ * $routingName: whose name decides the recipients, when the mail is signed by someone else
+ * (default $sessionFullName).
  */
-function bo_booking_email(string $folder, string $agentEmail, string $grpMain, string $sessionFullName): array {
+function bo_booking_email(string $folder, string $agentEmail, string $grpMain, string $sessionFullName, ?string $routingName = null): array {
     // Agent code = last token inside the last (…) block, e.g. "(GoWorld-PS-Roberto)" → "Roberto".
     $agentCode = '';
     if (preg_match_all('/\(([^)]+)\)/', $folder, $m) && !empty($m[1])) {
@@ -1178,7 +1180,7 @@ function bo_booking_email(string $folder, string $agentEmail, string $grpMain, s
         if ($parts) $agentCode = (string)end($parts);
     }
     $grpAdd  = ($grpMain !== '');
-    $fnLower = strtolower(trim($sessionFullName));
+    $fnLower = strtolower(trim($routingName ?? $sessionFullName));
 
     $to = ['accountant@savannahexplorers.com', 'glady@savannahexplorers.com', 'operations@savannahexplorers.com'];
     $addNuru = in_array(strtolower($agentCode), ['roberto','robertocapri','eleonoraongaro','alessia','daniela'], true)
@@ -1237,7 +1239,8 @@ function bs_parse_emails($list): array {
 /**
  * Apply edits to a booking email (bo_booking_email() output). $edit keys, all optional:
  * to / cc (replace the template list), to_add / cc_add, to_remove / cc_remove, subject,
- * body (replaces the whole text), body_extra (inserted before "Thanks"),
+ * body (replaces the whole text; the template's "Thanks / Best Regards" closing is kept unless
+ * the text already has one or keep_closing is false), body_extra (inserted before "Thanks"),
  * no_invoice (drops the "Esther - prepare the not paid invoice" line, e.g. group options).
  * Returns ['to'=>[], 'cc'=>[], 'subject'=>string, 'body'=>string].
  */
@@ -1259,6 +1262,10 @@ function bs_booking_email_edit(array $mail, array $edit): array {
 
     $bodyIn = trim(str_replace("\r\n", "\n", (string)($edit['body'] ?? '')));
     $body   = $bodyIn !== '' ? $bodyIn : $mail['body'];
+    $closingAt = strrpos($mail['body'], "\nThanks\n");
+    if ($bodyIn !== '' && ($edit['keep_closing'] ?? true) && $closingAt !== false && stripos($bodyIn, 'regards') === false) {
+        $body .= "\n\n" . substr($mail['body'], $closingAt + 1);
+    }
     if (!empty($edit['no_invoice'])) {
         $body = preg_replace('/^Esther - prepare the not paid invoice\n/m', '', $body);
     }
@@ -1271,34 +1278,38 @@ function bs_booking_email_edit(array $mail, array $edit): array {
     return $out;
 }
 
+/** Reply-To address and HTML signature of a Hub user ('' when missing). */
+function bs_mail_sender(int $userId): array {
+    if (!function_exists('get_user_signature_html')) {
+        $sig = __DIR__ . '/../../../includes/signature_helper.php';
+        if (is_file($sig)) require_once $sig;
+    }
+    $out = ['reply_to' => '', 'signature' => ''];
+    if ($userId <= 0) return $out;
+    try {
+        $u = db()->prepare('SELECT email FROM users WHERE id = ? AND is_active = 1 LIMIT 1');
+        $u->execute([$userId]);
+        $em = (string)($u->fetchColumn() ?: '');
+        if (filter_var($em, FILTER_VALIDATE_EMAIL)) $out['reply_to'] = $em;
+    } catch (Throwable $e) { /* non-blocking */ }
+    if (function_exists('get_user_signature_html')) $out['signature'] = get_user_signature_html($userId);
+    return $out;
+}
+
 /**
  * Send a plain booking-team email from noreply@, with Reply-To + HTML signature of
  * $userId (when set). Returns ['success'=>bool, 'message'=>string].
  */
 function bs_send_mail(array $toList, array $ccList, string $subject, string $body, int $userId): array {
-    if (!function_exists('get_user_signature_html')) {
-        $sig = __DIR__ . '/../../../includes/signature_helper.php';
-        if (is_file($sig)) require_once $sig;
-    }
     if (empty($toList)) return ['success' => false, 'message' => 'No valid To addresses.'];
 
-    $replyTo = '';
+    $sender  = bs_mail_sender($userId);
+    $replyTo = $sender['reply_to'];
+    $sig     = $sender['signature'];
     $signatureHtml = $signaturePlain = '';
-    if ($userId > 0) {
-        try {
-            $u = db()->prepare('SELECT email FROM users WHERE id = ? AND is_active = 1 LIMIT 1');
-            $u->execute([$userId]);
-            $em = (string)($u->fetchColumn() ?: '');
-            if (filter_var($em, FILTER_VALIDATE_EMAIL)) $replyTo = $em;
-        } catch (Throwable $e) { /* non-blocking */ }
-
-        if (function_exists('get_user_signature_html')) {
-            $sig = get_user_signature_html($userId);
-            if ($sig !== '') {
-                $signatureHtml  = '<br><br><hr style="border:none;border-top:1px solid #ccc;margin:12px 0;">' . $sig;
-                $signaturePlain = "\r\n\r\n--\r\n" . (function_exists('signature_html_to_plain') ? signature_html_to_plain($sig) : strip_tags($sig));
-            }
-        }
+    if ($sig !== '') {
+        $signatureHtml  = '<br><br><hr style="border:none;border-top:1px solid #ccc;margin:12px 0;">' . $sig;
+        $signaturePlain = "\r\n\r\n--\r\n" . (function_exists('signature_html_to_plain') ? signature_html_to_plain($sig) : strip_tags($sig));
     }
 
     $toStr = implode(', ', $toList);

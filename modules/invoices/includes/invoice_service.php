@@ -18,13 +18,17 @@ const INV_STATUSES = [
 ];
 
 const CN_STATUSES = [
-    'Issued'    => 'inv-paid',
-    'Cancelled' => 'inv-cancelled',
+    'Issued'            => 'inv-paid',
+    'Partially applied' => 'inv-partial',
+    'Applied'           => 'inv-draft',
+    'Cancelled'         => 'inv-cancelled',
 ];
 
 const INV_CURRENCIES  = ['USD', 'EUR'];
 const INV_ISSUERS     = ['Savannah Explorers Ltd', 'Savannah Holidays Ltd'];
 const INV_METHODS     = ['Bank Transfer', 'Credit Card', 'Cash', 'Other'];
+// Only for payments made by applying a credit note: not a choice in INV_METHODS.
+const INV_METHOD_CREDIT_NOTE = 'Credit note';
 const INV_TERMS_OPTS  = ['Due on Receipt', 'Net 7', 'Net 15', 'Net 30', 'Net 60'];
 
 const INV_DEFAULT_TC    = '30% deposit at the time of booking, balance within 60 days before the trip starts';
@@ -70,20 +74,19 @@ function recalculate_invoice(PDO $db, int $id): void {
     $stmt->execute([$id]);
     $cur = (string)$stmt->fetchColumn();
 
-    // $paid is the NET of payments minus refunds (refunds are stored as
-    // negative invoice_payments rows linked to credit notes).
-    $newStatus = $cur;
-    if ($cur !== 'Cancelled') {
-        if ($paid > 0.001) {
-            $newStatus = ($balance <= 0.001) ? 'Fully Paid' : 'Partially Paid';
-        } elseif (in_array($cur, ['Partially Paid', 'Fully Paid'])) {
-            // all positive payments cancelled, or fully refunded back to <= 0
-            $newStatus = 'New';
-        }
-    }
+    $newStatus = inv_status_for($cur, $paid, $balance);
 
     $db->prepare("UPDATE invoices SET subtotal=?,total=?,amount_paid=?,balance_due=?,status=?,updated_at=NOW() WHERE id=?")
        ->execute([round($subtotal,2), round($subtotal,2), round($paid,2), $balance, $newStatus, $id]);
+}
+
+// $paid is the NET of payments minus refunds (refunds are stored as
+// negative invoice_payments rows linked to credit notes).
+function inv_status_for(string $cur, float $paid, float $balance): string {
+    if ($cur === 'Cancelled') return $cur;
+    if ($paid > 0.001) return ($balance <= 0.001) ? 'Fully Paid' : 'Partially Paid';
+    // all positive payments cancelled, or fully refunded back to <= 0
+    return in_array($cur, ['Partially Paid', 'Fully Paid']) ? 'New' : $cur;
 }
 
 // ── Sync request value_usd from linked invoice totals ────────────────────────
@@ -173,6 +176,56 @@ function sync_cn_invoice_payment(PDO $db, int $cnId): void {
     sync_request_value($db, $invoiceId);
 }
 
+// ── Errors for a new credit note on $inv (cn_add.php, Agent API) ─────────────
+function cn_new_errors(array $inv, array $items, string $issueDate): array {
+    $errors = [];
+    if ($inv['status'] === 'Cancelled') $errors[] = 'Invoice ' . $inv['invoice_number'] . ' is cancelled.';
+    if (!$issueDate) $errors[] = 'Issue date is required.';
+    if (empty($items)) $errors[] = 'At least one credit line with an amount is required.';
+    $cnTotal = inv_items_total($items);
+    if ($cnTotal > (float)$inv['total'] + 0.001) {
+        $errors[] = 'Credit note total (' . fmt_money($cnTotal, $inv['currency'])
+                  . ') cannot exceed the invoice total (' . fmt_money((float)$inv['total'], $inv['currency']) . ').';
+    }
+    return $errors;
+}
+
+// ── Create a credit note on $inv: the refund goes on it as a negative payment ─
+// $items: [{description, quantity, unit_price, line_total}], checked with cn_new_errors().
+function cn_create(PDO $db, array $inv, array $items, string $issueDate, string $reason, string $notes, ?int $uid): array {
+    $invoiceId = (int)$inv['id'];
+    $db->beginTransaction();
+    try {
+        $cnNum = generate_cn_number($db);
+        $db->prepare("INSERT INTO credit_notes
+            (cn_number, invoice_id, request_id, customer_id, bill_to_name, bill_to_address,
+             issuer, currency, issue_date, reason, notes, status, created_by)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,'Issued',?)")
+           ->execute([
+                $cnNum, $invoiceId, $inv['request_id'], $inv['customer_id'],
+                $inv['bill_to_name'], $inv['bill_to_address'],
+                $inv['issuer'], $inv['currency'], $issueDate,
+                $reason ?: null, $notes ?: null, $uid,
+           ]);
+        $cnId = (int)$db->lastInsertId();
+
+        $sort = 0;
+        foreach ($items as $item) {
+            $db->prepare("INSERT INTO credit_note_items (credit_note_id,sort_order,description,quantity,unit_price,line_total) VALUES (?,?,?,?,?,?)")
+               ->execute([$cnId,$sort++,$item['description'],$item['quantity'],$item['unit_price'],$item['line_total']]);
+        }
+
+        recalculate_credit_note($db, $cnId);
+        sync_cn_invoice_payment($db, $cnId); // creates the negative payment + resyncs
+        $db->commit();
+    } catch (\Throwable $e) {
+        if ($db->inTransaction()) $db->rollBack();
+        throw $e;
+    }
+    tl_log_invoice($db, $invoiceId, 'credit note ' . $cnNum . ' issued', ['credit_note_id' => $cnId, 'cn_number' => $cnNum]);
+    return ['credit_note_id' => $cnId, 'cn_number' => $cnNum];
+}
+
 // ── Format monetary amount ────────────────────────────────────────────────────
 function fmt_money(float $amount, string $currency): string {
     $sym = ($currency === 'EUR') ? '€' : '$';
@@ -194,72 +247,162 @@ function cn_remaining_credit(PDO $db, int $cnId): float {
     return round($total - cn_allocated_amount($db, $cnId), 2);
 }
 
-// ── Apply part of a credit note's credit to another invoice ──────────────────
-// $amountCn   : amount to deduct from the CN, in the CN's currency
-// $fxRate     : CN currency -> invoice currency (1 when same currency)
-// The invoice amount = floor(amountCn * fxRate) to the unit, then recorded as a
-// POSITIVE payment on the target invoice (method "Other", reference = CN number).
-// Returns the new allocation id. Throws on validation failure.
-function cn_apply_to_invoice(
-    PDO $db, int $cnId, int $targetInvoiceId,
-    float $amountCn, float $fxRate, string $allocDate, ?string $note, int $uid
-): int {
-    $cn = $db->prepare("SELECT * FROM credit_notes WHERE id=?");
-    $cn->execute([$cnId]);
-    $cn = $cn->fetch();
-    if (!$cn) throw new \RuntimeException('Credit note not found.');
-    if ($cn['status'] !== 'Issued') throw new \RuntimeException('Credit note is not active.');
+// ── Credit note status from its credit usage (a Cancelled one stays Cancelled) ─
+function cn_status_for(float $total, float $applied): string {
+    if ($applied <= 0.001) return 'Issued';
+    return $applied >= $total - 0.001 ? 'Applied' : 'Partially applied';
+}
 
-    $inv = $db->prepare("SELECT * FROM invoices WHERE id=?");
-    $inv->execute([$targetInvoiceId]);
-    $inv = $inv->fetch();
-    if (!$inv) throw new \RuntimeException('Target invoice not found.');
+function cn_refresh_status(PDO $db, int $cnId): void {
+    $s = $db->prepare("SELECT total FROM credit_notes WHERE id=?");
+    $s->execute([$cnId]);
+    $db->prepare("UPDATE credit_notes SET status=?, updated_at=NOW() WHERE id=? AND status<>'Cancelled'")
+       ->execute([cn_status_for((float)$s->fetchColumn(), cn_allocated_amount($db, $cnId)), $cnId]);
+}
+
+// ── Allocations of a credit note, active first (with the target invoice) ─────
+function cn_allocations(PDO $db, int $cnId): array {
+    $s = $db->prepare(
+        "SELECT a.*, i.invoice_number, i.currency AS invoice_currency, i.bill_to_name
+         FROM credit_note_allocations a
+         LEFT JOIN invoices i ON i.id = a.invoice_id
+         WHERE a.credit_note_id=?
+         ORDER BY a.cancelled_at IS NOT NULL, a.alloc_date, a.id"
+    );
+    $s->execute([$cnId]);
+    return $s->fetchAll(PDO::FETCH_ASSOC);
+}
+
+// ── Credit notes with their source invoice and the request's agency ──────────
+// $f: id, number, invoice_id, request_id, agency_id, status (all optional).
+function cn_find(PDO $db, array $f, int $limit = 100): array {
+    $cols  = ['id' => 'cn.id', 'number' => 'cn.cn_number', 'invoice_id' => 'cn.invoice_id',
+              'request_id' => 'cn.request_id', 'agency_id' => 'r.agency_id', 'status' => 'cn.status'];
+    $where = []; $args = [];
+    foreach ($cols as $k => $col) {
+        if (isset($f[$k]) && $f[$k] !== '' && $f[$k] !== 0) { $where[] = "$col = ?"; $args[] = $f[$k]; }
+    }
+    $s = $db->prepare("SELECT cn.*, i.invoice_number, r.agency_id
+                       FROM credit_notes cn
+                       LEFT JOIN invoices i ON i.id = cn.invoice_id
+                       LEFT JOIN requests r ON r.id = cn.request_id"
+                      . ($where ? " WHERE " . implode(' AND ', $where) : "")
+                      . " ORDER BY cn.issue_date DESC, cn.id DESC LIMIT " . max(1, $limit));
+    $s->execute($args);
+    return $s->fetchAll(PDO::FETCH_ASSOC);
+}
+
+// ── Checks for applying a credit note to an invoice ──────────────────────────
+// Returns what would happen; RuntimeException when it is refused.
+// $opts['strict'] (Agent API) also refuses another currency, a second active
+// application on the same invoice and more than the invoice balance (unless
+// $opts['allow_overpaid']). The invoice page allows those: it has an FX rate.
+function cn_apply_plan(PDO $db, array $cn, array $inv, float $amountCn, float $fxRate, array $opts = []): array {
+    if ($cn['status'] === 'Cancelled') throw new \RuntimeException('Credit note ' . $cn['cn_number'] . ' is cancelled.');
     if ($inv['status'] === 'Cancelled') throw new \RuntimeException('Cannot apply credit to a cancelled invoice.');
 
+    $cnId      = (int)$cn['id'];
+    $remaining = cn_remaining_credit($db, $cnId);
+    if ($remaining <= 0.001) throw new \RuntimeException('Credit note ' . $cn['cn_number'] . ' is already fully applied.');
     $amountCn = round($amountCn, 2);
     if ($amountCn <= 0) throw new \RuntimeException('Amount must be greater than zero.');
-
-    $remaining = cn_remaining_credit($db, $cnId);
     if ($amountCn > $remaining + 0.001) {
         throw new \RuntimeException('Amount exceeds remaining credit (' . fmt_money($remaining, $cn['currency']) . ').');
     }
 
+    $strict = !empty($opts['strict']);
+    $same   = $cn['currency'] === $inv['currency'];
+    if ($strict && !$same) {
+        throw new \RuntimeException('Credit note ' . $cn['cn_number'] . ' is in ' . $cn['currency'] . ', invoice ' . $inv['invoice_number'] . ' in ' . $inv['currency'] . '.');
+    }
+    if ($strict) {
+        $s = $db->prepare("SELECT id FROM credit_note_allocations WHERE credit_note_id=? AND invoice_id=? AND cancelled_at IS NULL LIMIT 1");
+        $s->execute([$cnId, (int)$inv['id']]);
+        $dup = (int)$s->fetchColumn();
+        if ($dup) throw new \RuntimeException('Credit note ' . $cn['cn_number'] . ' is already applied to invoice ' . $inv['invoice_number'] . ' (allocation ' . $dup . ').');
+    }
+
     if ($fxRate <= 0) $fxRate = 1.0;
-    // Floor to the unit in the invoice currency.
-    $amountInvoice = floor($amountCn * $fxRate);
+    // Same currency at rate 1: the exact amount. With a rate: floor to the unit in the invoice currency.
+    $amountInvoice = ($same && abs($fxRate - 1.0) < 0.0000001) ? $amountCn : floor($amountCn * $fxRate);
     if ($amountInvoice <= 0) throw new \RuntimeException('Resulting invoice amount is zero after rounding.');
 
-    $payNote = 'Credit note ' . $cn['cn_number']
-             . ' (' . fmt_money($amountCn, $cn['currency']) . ' @ ' . rtrim(rtrim(number_format($fxRate, 6, '.', ''), '0'), '.') . ')'
-             . ($note ? ' — ' . $note : '');
+    $balance = round((float)$inv['balance_due'], 2);
+    if ($strict && $amountInvoice > $balance + 0.005 && empty($opts['allow_overpaid'])) {
+        throw new \RuntimeException('Amount ' . fmt_money($amountInvoice, $inv['currency']) . ' is more than the balance due '
+                                    . fmt_money($balance, $inv['currency']) . ' of invoice ' . $inv['invoice_number'] . ' ("allow_overpaid": true to accept it).');
+    }
 
+    $balanceAfter = round($balance - $amountInvoice, 2);
+    return [
+        'amount_cn'            => $amountCn,
+        'amount_invoice'       => (float)$amountInvoice,
+        'fx_rate'              => $fxRate,
+        'cn_remaining_after'   => round($remaining - $amountCn, 2),
+        'cn_status_after'      => cn_status_for((float)$cn['total'], cn_allocated_amount($db, $cnId) + $amountCn),
+        'balance_after'        => $balanceAfter,
+        'invoice_status_after' => inv_status_for($inv['status'], round((float)$inv['amount_paid'] + $amountInvoice, 2), $balanceAfter),
+    ];
+}
+
+// ── Apply part of a credit note's credit to an invoice ───────────────────────
+// $amountCn   : amount to deduct from the CN, in the CN's currency
+// $fxRate     : CN currency -> invoice currency (1 when same currency)
+// Recorded as a POSITIVE payment on the target invoice (method "Credit note",
+// reference = CN number); see cn_apply_plan() for the amount and $opts.
+// Returns the new allocation id. Throws on validation failure.
+function cn_apply_to_invoice(
+    PDO $db, int $cnId, int $targetInvoiceId,
+    float $amountCn, float $fxRate, string $allocDate, ?string $note, int $uid,
+    array $opts = [], ?array &$closedMemos = null
+): int {
     $db->beginTransaction();
     try {
+        // Rows locked so that two requests at once cannot spend the same credit.
+        $cn = $db->prepare("SELECT * FROM credit_notes WHERE id=? FOR UPDATE");
+        $cn->execute([$cnId]);
+        $cn = $cn->fetch(PDO::FETCH_ASSOC);
+        if (!$cn) throw new \RuntimeException('Credit note not found.');
+
+        $inv = $db->prepare("SELECT * FROM invoices WHERE id=? FOR UPDATE");
+        $inv->execute([$targetInvoiceId]);
+        $inv = $inv->fetch(PDO::FETCH_ASSOC);
+        if (!$inv) throw new \RuntimeException('Target invoice not found.');
+
+        $plan = cn_apply_plan($db, $cn, $inv, $amountCn, $fxRate, $opts);
+        $payNote = 'Credit note ' . $cn['cn_number']
+                 . ' (' . fmt_money($plan['amount_cn'], $cn['currency']) . ' @ ' . rtrim(rtrim(number_format($plan['fx_rate'], 6, '.', ''), '0'), '.') . ')'
+                 . ($note ? ' — ' . $note : '');
+
         // Positive payment on the target invoice, in invoice currency.
         $db->prepare("INSERT INTO invoice_payments (invoice_id,payment_date,amount,method,reference,notes) VALUES (?,?,?,?,?,?)")
-           ->execute([$targetInvoiceId, $allocDate, $amountInvoice, 'Other', $cn['cn_number'], $payNote]);
+           ->execute([$targetInvoiceId, $allocDate, $plan['amount_invoice'], INV_METHOD_CREDIT_NOTE, $cn['cn_number'], $payNote]);
         $payId = (int)$db->lastInsertId();
 
         $db->prepare("INSERT INTO credit_note_allocations
             (credit_note_id, invoice_id, payment_id, amount_cn, amount_invoice, fx_rate, alloc_date, notes, created_by)
             VALUES (?,?,?,?,?,?,?,?,?)")
-           ->execute([$cnId, $targetInvoiceId, $payId, $amountCn, $amountInvoice, $fxRate, $allocDate, $note ?: null, $uid]);
+           ->execute([$cnId, $targetInvoiceId, $payId, $plan['amount_cn'], $plan['amount_invoice'], $plan['fx_rate'], $allocDate, $note ?: null, $uid]);
         $allocId = (int)$db->lastInsertId();
 
+        cn_refresh_status($db, $cnId);
         recalculate_invoice($db, $targetInvoiceId);
         sync_request_value($db, $targetInvoiceId);
 
         $db->commit();
-        return $allocId;
     } catch (\Throwable $e) {
-        $db->rollBack();
+        if ($db->inTransaction()) $db->rollBack();
         throw $e;
     }
+    $closedMemos = inv_after_payment($db, $targetInvoiceId, $plan['amount_invoice'], $allocDate, $cn['cn_number'],
+        'credit note ' . $cn['cn_number'] . ' applied',
+        ['credit_note_id' => $cnId, 'cn_number' => $cn['cn_number'], 'payment_id' => $payId, 'payment_amount' => $plan['amount_invoice'], 'payment_date' => $allocDate]);
+    return $allocId;
 }
 
 // ── Cancel an allocation: removes the linked payment, frees the credit ───────
 function cn_cancel_allocation(PDO $db, int $allocId): void {
-    $a = $db->prepare("SELECT * FROM credit_note_allocations WHERE id=? AND cancelled_at IS NULL");
+    $a = $db->prepare("SELECT a.*, c.cn_number FROM credit_note_allocations a LEFT JOIN credit_notes c ON c.id = a.credit_note_id WHERE a.id=? AND a.cancelled_at IS NULL");
     $a->execute([$allocId]);
     $a = $a->fetch();
     if (!$a) return;
@@ -272,6 +415,7 @@ function cn_cancel_allocation(PDO $db, int $allocId): void {
         }
         $db->prepare("UPDATE credit_note_allocations SET cancelled_at=NOW() WHERE id=?")->execute([$allocId]);
 
+        cn_refresh_status($db, (int)$a['credit_note_id']);
         recalculate_invoice($db, (int)$a['invoice_id']);
         sync_request_value($db, (int)$a['invoice_id']);
 
@@ -280,6 +424,8 @@ function cn_cancel_allocation(PDO $db, int $allocId): void {
         $db->rollBack();
         throw $e;
     }
+    tl_log_invoice($db, (int)$a['invoice_id'], 'credit note ' . $a['cn_number'] . ' application cancelled',
+                   ['credit_note_id' => (int)$a['credit_note_id'], 'cn_number' => $a['cn_number'], 'payment_id' => (int)$a['payment_id']]);
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -342,6 +488,13 @@ function inv_add_payment(PDO $db, int $invId, string $date, float $amount, strin
     recalculate_invoice($db, $invId);
     sync_request_value($db, $invId);
 
+    $closedMemos = inv_after_payment($db, $invId, $amount, $date, $ref, 'payment recorded',
+                   ['payment_id' => $pid, 'payment_amount' => $amount, 'payment_date' => $date, 'payment_reference' => $ref]);
+    return $pid;
+}
+
+/** After a new payment: close the memos waiting for it (returned) and log it in the request timeline. */
+function inv_after_payment(PDO $db, int $invId, float $amount, string $date, string $ref, string $what, array $refs): array {
     // A memo problem must never undo / fail the payment.
     $closedMemos = [];
     try {
@@ -352,15 +505,21 @@ function inv_add_payment(PDO $db, int $invId, string $date, float $amount, strin
     } catch (\Throwable $e) {
         error_log('memo_on_payment failed for invoice ' . $invId . ': ' . $e->getMessage());
     }
-    tl_log_invoice($db, $invId, 'payment recorded',
-                   ['payment_id' => $pid, 'payment_amount' => $amount, 'payment_date' => $date, 'payment_reference' => $ref]);
-    return $pid;
+    tl_log_invoice($db, $invId, $what, $refs);
+    return $closedMemos;
 }
 
 /** Cancel a payment (kept for history) and recalculate. False if nothing matched. */
 function inv_cancel_payment(PDO $db, int $paymentId, int $invId, string $reason): bool {
     $st = $db->prepare("UPDATE invoice_payments SET cancelled_at=NOW(), cancellation_reason=? WHERE id=? AND invoice_id=?");
     $st->execute([$reason, $paymentId, $invId]);
+    // A payment made with a credit note gives the credit back.
+    $al = $db->prepare("SELECT id, credit_note_id FROM credit_note_allocations WHERE payment_id=? AND cancelled_at IS NULL");
+    $al->execute([$paymentId]);
+    foreach ($al->fetchAll(PDO::FETCH_ASSOC) as $a) {
+        $db->prepare("UPDATE credit_note_allocations SET cancelled_at=NOW() WHERE id=?")->execute([(int)$a['id']]);
+        cn_refresh_status($db, (int)$a['credit_note_id']);
+    }
     recalculate_invoice($db, $invId);
     sync_request_value($db, $invId);
     $ok = $st->rowCount() > 0;

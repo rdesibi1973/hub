@@ -17,7 +17,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             foreach ($outstanding->fetchAll(PDO::FETCH_COLUMN) as $aId) {
                 cn_cancel_allocation($db, (int)$aId);
             }
-            $db->prepare("UPDATE credit_notes SET status='Cancelled', updated_at=NOW() WHERE id=? AND status='Issued'")
+            $db->prepare("UPDATE credit_notes SET status='Cancelled', updated_at=NOW() WHERE id=? AND status<>'Cancelled'")
                ->execute([$cnId]);
             sync_cn_invoice_payment($db, $cnId); // cancels the linked refund + resyncs
             echo json_encode(['ok'=>true]); exit;
@@ -94,14 +94,7 @@ $items = $db->prepare("SELECT * FROM credit_note_items WHERE credit_note_id=? OR
 $items->execute([$id]); $items = $items->fetchAll();
 
 // Allocations (credit used to pay other invoices)
-$allocs = $db->prepare(
-    "SELECT a.*, i.invoice_number, i.currency AS invoice_currency, i.bill_to_name
-     FROM credit_note_allocations a
-     LEFT JOIN invoices i ON i.id = a.invoice_id
-     WHERE a.credit_note_id=?
-     ORDER BY a.cancelled_at IS NOT NULL, a.alloc_date, a.id"
-);
-$allocs->execute([$id]); $allocs = $allocs->fetchAll();
+$allocs = cn_allocations($db, $id);
 
 $remainingCredit = cn_remaining_credit($db, $id);
 
@@ -128,7 +121,7 @@ $sym = $cn['currency'] === 'EUR' ? '€' : '$';
   </div>
   <div class="gap-8">
     <a href="cn_pdf.php?id=<?= $id ?>&download=1" class="btn btn-outline" target="_blank">🖨 PDF</a>
-    <?php if ($cn['status'] === 'Issued' && isInvoiceAdmin()): ?>
+    <?php if ($cn['status'] !== 'Cancelled' && isInvoiceAdmin()): ?>
       <button class="btn btn-danger" onclick="cancelCn()">Cancel</button>
     <?php elseif ($cn['status'] === 'Cancelled' && isInvoiceAdmin()): ?>
       <button class="btn btn-outline" onclick="restoreCn()">↩ Restore</button>
@@ -299,7 +292,7 @@ $sym = $cn['currency'] === 'EUR' ? '€' : '$';
              style="padding:7px 10px;border:1.5px solid var(--grey-lt);border-radius:6px;font-family:inherit;font-size:.83rem;width:110px" oninput="calcApplied()">
     </div>
     <div class="form-group" style="gap:4px">
-      <label style="font-size:.7rem">Will pay (floored)</label>
+      <label style="font-size:.7rem">Will pay</label>
       <input type="text" id="appliedPreview" readonly style="padding:7px 10px;border:1.5px solid var(--grey-lt);border-radius:6px;font-family:inherit;font-size:.83rem;width:120px;background:var(--off-white);color:var(--grey-dk)">
     </div>
     <div class="form-group" style="gap:4px;flex:1;min-width:160px">
@@ -309,7 +302,7 @@ $sym = $cn['currency'] === 'EUR' ? '€' : '$';
     <button class="btn btn-green" type="button" onclick="applyCredit()">Apply Credit</button>
   </div>
   <div style="font-size:.75rem;color:var(--grey-mid);margin-top:10px;">
-    The credit is deducted in <?= h($cn['currency']) ?>; the invoice receives <code>floor(amount × rate)</code> in its own currency, recorded as a payment.
+    The credit is deducted in <?= h($cn['currency']) ?> and recorded as a payment on the invoice: the exact amount in the same currency, otherwise <code>floor(amount × rate)</code> in the invoice's currency.
   </div>
   <span id="applyMsg" style="font-size:.8rem;display:none;margin-top:8px;"></span>
 </div>
@@ -406,7 +399,7 @@ function calcApplied() {
   var fx  = parseFloat(document.getElementById('fxRate').value) || 0;
   var cur = document.getElementById('targetCurrency').value || CN_CURRENCY;
   var sym = cur === 'EUR' ? '€' : '$';
-  var applied = Math.floor(amt * fx);
+  var applied = (cur === CN_CURRENCY && fx === 1) ? amt : Math.floor(amt * fx);
   document.getElementById('appliedPreview').value = sym + applied.toLocaleString('en-US');
 }
 

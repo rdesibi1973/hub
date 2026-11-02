@@ -144,7 +144,7 @@ approve, Edit Request and the Java `api_create_request.php`). The folder name ke
 
 ### `update_request` (POST)
 **Dry-run unless `"confirm": true`** (since 9 Oct 2026; before, it wrote at the first call).
-`request_id` + any of `customer_name, email, whatsapp, source, destination, period, pax, value_usd,
+`request_id` + any of `customer_name, email, whatsapp, source, destination, period, start_date, pax, value_usd,
 commission_pct, date_paid, initial_request, notes, agency_id, channel` (top level or inside `fields`; `""` / `null` clears).
 `commission_usd` is recomputed when `value_usd` or `commission_pct` change. Status / folder are **not**
 editable here (use `set_request_status` below, `confirm_booking` / BackOffice, `rename_folder`).
@@ -155,6 +155,10 @@ editable here (use `set_request_status` below, `confirm_booking` / BackOffice, `
 - The folder is **not** renamed: when the folder's `(Agency-Agent)` tag does not name the new agency,
   `warnings[]` gives the suggested folder name — rename it with `rename_folder`.
 - A changed `customer_name` follows the `create_request` name rule (400 on `(` `)` `[` `]`).
+- `start_date` (`YYYY-MM-DD`, for date changes on Booked requests) writes a `status_change` timeline event
+  "Start date changed: <from> → <to>". Only this field changes, for this request only (not the other members
+  of a group): when the folder's `_START` differs, `warnings[]` says so — the Booked list, CK tracker and Travel
+  info read the date from the folder, so rename it with `rename_folder`; the Calc is not touched.
 
 Dry run → `{dry_run: true, changes: {field: {from, to}}, ignored, warnings, request}` — only the fields that differ
 (`7890` = `7890.00`). With `confirm` → `{dry_run: false, updated: [fields], changes, ignored, warnings, request}`.
@@ -346,12 +350,16 @@ done; retry with `send_booking_email`). Without `send` nothing is mailed. A `sen
 ### `send_booking_email` (POST)
 `request_id` (must be Booked). Edits of the template, all optional:
 `to[]` / `cc[]` (replace the template lists), `to_add[]` / `cc_add[]`, `to_remove[]` / `cc_remove[]`,
-`subject`, `body` (replaces the whole template text; signature and Reply-To are still added),
-`body_extra` (inserted before "Thanks"), `no_invoice` (true → drops the "Esther - prepare the not
-paid invoice" line, e.g. group options invoiced when the group closes), `sender_name`.
-Without `"confirm": true` → returns the email that *would* be sent. No valid To → 400.
-Signed with the request agent's name, signature and Reply-To. Shared logic:
-`bs_booking_email_edit()` (booking_service.php).
+`subject`, `body` (replaces the template text; the "Thanks / Best Regards, <sender>" closing, signature and
+Reply-To are still added), `keep_closing` (default true; false → no closing after `body`; also not added when
+`body` already contains "regards"), `body_extra` (inserted before "Thanks"), `no_invoice` (true → drops the
+"Esther - prepare the not paid invoice" line, e.g. group options invoiced when the group closes),
+`sign_as` (Hub username, e.g. `roberto`: active user whose name, HTML signature and Reply-To are used instead of the
+request agent's; unknown → 404; recipients stay those of the request's agent — add the signer with `cc_add` if wanted),
+`sender_name` (only the name in the closing, wins over `sign_as`; signature and Reply-To do not change).
+Without `"confirm": true` → returns the email that *would* be sent, with `sender_name`, `reply_to` and
+`has_signature`. No valid To → 400. Same keys in the `email` object of `confirm_preview` / `confirm_booking`.
+Shared logic: `bs_booking_email_edit()`, `bs_mail_sender()` (booking_service.php).
 
 ### `rollback_booking` (POST)
 `request_id`. Undoes a Hub confirmation exactly like BackOffice → Rollback…: moves the folder
@@ -877,8 +885,9 @@ total, paid, balance, status, request_id, folder, follow_up}`.
 ### `get_invoice` (GET)
 → `invoice` (+ address, terms, notes, T&C, created/updated), `items[]`, `payments[]`
 (`{id, date, amount, method, reference, notes, cancelled, cancelled_at, cancellation_reason}`, cancelled
-ones included), `credit_notes[]`, `folder` (`{request_id, folder, current_tag, payment_status,
-group_folder, dropbox_path}` or null), `pdf_name`, `methods`, `folder_statuses`.
+ones included), `credit_notes[]` (those issued on this invoice: `{id, number, date, currency, total, applied,
+remaining, status, reason, applied_to[]}`, see `list_credit_notes`), `folder` (`{request_id, folder, current_tag,
+payment_status, group_folder, dropbox_path}` or null), `pdf_name`, `methods`, `folder_statuses`.
 
 ### `add_invoice_payment` (POST)
 `date` (YYYY-MM-DD, default today), `amount`* (> 0), `method` (`Bank Transfer`|`Credit Card`|`Cash`|`Other`,
@@ -893,7 +902,51 @@ The folder is **not** renamed automatically.
 
 ### `cancel_invoice_payment` (POST)
 `payment_id`*, `reason`*. The payment is kept, marked cancelled, and the invoice recalculated.
+A payment made by `apply_credit_note` gives the credit back to the credit note (remaining and status updated).
 Without `"confirm": true` → returns the payment and `balance_after` only.
+
+### `list_credit_notes` (GET)
+Filters, all optional: `invoice_id` (the invoice the credit note was issued on), `request_id`, `agency_id` (the
+request's agency), `status` (`Issued`|`Partially applied`|`Applied`|`Cancelled`), `limit` ≤ 200 (default 100).
+→ `credit_notes[]` `{id, number, date, currency, total, applied, remaining, status, reason, invoice_id,
+invoice_number, request_id, agency_id, bill_to, applied_to[]}`. `applied_to[]` lists the active applications:
+`{allocation_id, invoice_id, invoice_number, amount, amount_invoice, currency, date, payment_id}`.
+`remaining` is 0 on a Cancelled credit note.
+
+### `create_credit_note` (POST)
+`invoice_id`* (or `invoice_number`), `amount`* (> 0), `reason`*, `date` (YYYY-MM-DD, default today). Same logic as
+"+ Credit Note" on the invoice page (`cn_create`), with one credit line: number `CN-YYYY-NNNN`, the refund is
+recorded on the invoice as a **negative payment** (method `Other`, reference = CN number), so its balance goes
+**up** by the amount, and the request value goes down by it. Event in the request timeline.
+- **409** when the amount is above the invoice total, or on a Cancelled invoice.
+- `warnings[]`: credit above the amount paid; a credit note of the same amount already on the invoice. Neither blocks.
+Dry-run unless `"confirm": true` → `next_number`, `invoice`, `amount`, `balance_after`, `request_value_change`,
+`warnings`. Confirmed → `credit_note`, `invoice`, `folder`. No PDF is saved and the folder is not renamed.
+
+### `apply_credit_note` (POST)
+`credit_note_id`* or `credit_note_number`*, `invoice_id`* (or `invoice_number`) of the invoice to pay,
+`amount` (default: all the remaining credit), `date` (default today), `notes`, `allow_overpaid`.
+Same logic as "Apply Credit" on the credit note page (`cn_apply_to_invoice`), in the same currency only:
+a payment on the invoice (method `Credit note`, reference = CN number) for the exact amount, CN status
+`Issued` → `Partially applied` → `Applied`, invoice balance, status and request value recalculated, memos with
+`auto_close_on_payment` closed as with any payment, event in the request timeline.
+Refused with **409**:
+- amount above the remaining credit, or the credit note already fully applied;
+- amount above the invoice balance, unless `"allow_overpaid": true`;
+- credit note and invoice in different currencies (the credit note page takes an FX rate for these);
+- Cancelled credit note or Cancelled invoice;
+- the credit note already applied to that invoice (an active application: cancel it on the credit note page first).
+The credit note's own source invoice is accepted, with a `warnings[]` line: the refund is taken back on the
+invoice, but the request value stays reduced by the credit note total (`sync_request_value`).
+Dry-run unless `"confirm": true` → `amount_cn`, `amount_invoice`, `fx_rate`, `cn_remaining_after`, `cn_status_after`,
+`balance_after`, `invoice_status_after`, `credit_note`, `invoice`, `warnings`. Confirmed → `allocation_id`, `amount`,
+`credit_note`, `invoice`, `memos_closed`, `folder`, `warnings`. The folder is **not** renamed automatically.
+Needs `migrations/076_credit_note_applied.sql` (new payment method).
+
+```bash
+curl -sH "$H" "$U?action=list_credit_notes&invoice_id=331"
+curl -sH "$H" -X POST "$U?action=apply_credit_note" -d '{"credit_note_number":"CN-2026-0003","invoice_id":331}'
+```
 
 ### `update_folder_status` (POST)
 `status`* = `PROGRESS`|`PROVISIONAL`|`DEPOSIT`|`BALANCE`|`BALANCE-CASH`|`FULLY PAID` (`PAID` accepted).
@@ -958,7 +1011,7 @@ Same as **Edit Invoice**. `invoice_id` / `invoice_number`, then only the fields 
 `create_invoice`, top level or in `fields`; `request_id: 0` unlinks) and/or `items` (replaces **all** the lines).
 Refused (409): a Cancelled invoice; another `issuer` (it is in the number — cancel and create a new one);
 another `currency` once payments exist; a new total below the amount paid unless `"allow_overpaid": true`
-(then issue the credit note on the Hub page). Payments and status are recalculated, and the request value.
+(then `create_credit_note` for the refund). Payments and status are recalculated, and the request value.
 Dry-run unless `"confirm": true` → `changes {field: {from, to}}` (items / total included), `balance_after`.
 The Dropbox PDF is not updated — `save_invoice_pdf` with `"overwrite": true` afterwards.
 
@@ -1710,6 +1763,7 @@ same request + type + title within 60 s is logged once; a logging error never fa
 | `create_invoice`, `update_invoice`, `import_zoho_invoice`, invoice cancelled / restored (request invoices) | `invoice` |
 | `add_invoice_payment`, `cancel_invoice_payment` (and the invoice page) | `payment` |
 | `update_folder_status` / Update Folder, BackOffice status change, request status change | `status_change` |
+| `update_request` with a new `start_date` | `status_change` "Start date changed: <from> → <to>" |
 
 ### `timeline_list` (GET)
 `request_id`*, `limit` (default 50, ≤ 500), `since` (`YYYY-MM-DD[ HH:MM]`), `types` (comma list),

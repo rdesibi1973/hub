@@ -30,8 +30,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $reason    = trim($_POST['reason'] ?? '');
     $notes     = trim($_POST['notes'] ?? '');
 
-    if (!$issueDate) $errors[] = 'Issue date is required.';
-
     $items = [];
     foreach ($_POST['items'] ?? [] as $item) {
         $desc = trim($item['description'] ?? '');
@@ -49,39 +47,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             ];
         }
     }
-    if (empty($items)) $errors[] = 'At least one credit line with an amount is required.';
-
-    $cnTotal = array_sum(array_column($items, 'line_total'));
-    if ($cnTotal > (float)$inv['total'] + 0.001) {
-        $errors[] = 'Credit note total (' . fmt_money($cnTotal, $inv['currency'])
-                  . ') cannot exceed the invoice total (' . fmt_money((float)$inv['total'], $inv['currency']) . ').';
-    }
+    $errors = cn_new_errors($inv, $items, $issueDate);
 
     if (!$errors) {
-        $cnNum = generate_cn_number($db);
-        $uid   = current_user()['id'];
-
-        $db->prepare("INSERT INTO credit_notes
-            (cn_number, invoice_id, request_id, customer_id, bill_to_name, bill_to_address,
-             issuer, currency, issue_date, reason, notes, status, created_by)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,'Issued',?)")
-           ->execute([
-                $cnNum, $invoiceId, $inv['request_id'], $inv['customer_id'],
-                $inv['bill_to_name'], $inv['bill_to_address'],
-                $inv['issuer'], $inv['currency'], $issueDate,
-                $reason ?: null, $notes ?: null, $uid,
-           ]);
-
-        $cnId = (int)$db->lastInsertId();
-
-        $sort = 0;
-        foreach ($items as $item) {
-            $db->prepare("INSERT INTO credit_note_items (credit_note_id,sort_order,description,quantity,unit_price,line_total) VALUES (?,?,?,?,?,?)")
-               ->execute([$cnId,$sort++,$item['description'],$item['quantity'],$item['unit_price'],$item['line_total']]);
-        }
-
-        recalculate_credit_note($db, $cnId);
-        sync_cn_invoice_payment($db, $cnId); // creates the negative payment + resyncs
+        $new   = cn_create($db, $inv, $items, $issueDate, $reason, $notes, current_user()['id']);
+        $cnNum = $new['cn_number'];
+        $cnId  = $new['credit_note_id'];
 
         flash("Credit note {$cnNum} created. Refund applied to {$inv['invoice_number']}.");
         header("Location: cn_view.php?id=$cnId"); exit;
