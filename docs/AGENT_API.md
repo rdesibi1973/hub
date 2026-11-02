@@ -940,8 +940,8 @@ The credit note's own source invoice is accepted, with a `warnings[]` line. Requ
 credit applied to an invoice of the same request is no longer subtracted, so the value goes back up by that amount;
 credit not applied, or applied to another request, stays subtracted.
 Dry-run unless `"confirm": true` → `amount_cn`, `amount_invoice`, `fx_rate`, `cn_remaining_after`, `cn_status_after`,
-`balance_after`, `invoice_status_after`, `request_value_change`, `credit_note`, `invoice`, `warnings`. Confirmed → `allocation_id`, `amount`,
-`credit_note`, `invoice`, `memos_closed`, `folder`, `warnings`. The folder is **not** renamed automatically.
+`balance_after`, `invoice_status_after`, `request_value_change`, `credit_note`, `invoice`, `warnings`. Confirmed → the same
+fields (from the saved data) + `allocation_id`, `payment_id`, `amount`, `memos_closed`, `folder`. The folder is **not** renamed automatically.
 Needs `migrations/076_credit_note_applied.sql` (new payment method).
 
 ```bash

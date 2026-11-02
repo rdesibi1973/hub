@@ -2191,11 +2191,17 @@ try {
         } catch (RuntimeException $e) {
             agent_fail($e->getMessage(), 409, $context);
         }
-        $after = cn_find($db, ['id' => (int)$cn['id']], 1);
-        agent_out(['ok' => true, 'dry_run' => false, 'allocation_id' => $allocId, 'date' => $date, 'warnings' => $warnings,
-                   'amount' => $plan['amount_cn'], 'credit_note' => agent_credit_note_out($db, $after[0]),
-                   'invoice' => agent_invoice_out(inv_get($db, $id)), 'memos_closed' => $closedMemos,
-                   'folder' => agent_invoice_folder($db, $id)]);
+        $after    = cn_find($db, ['id' => (int)$cn['id']], 1);
+        $cnOut    = agent_credit_note_out($db, $after[0]);
+        $invAfter = agent_invoice_out(inv_get($db, $id));
+        $alloc    = array_values(array_filter($cnOut['applied_to'], fn($a) => $a['allocation_id'] === $allocId));
+        // Same fields as the dry run, from the saved data.
+        agent_out(array_merge(['ok' => true, 'dry_run' => false, 'allocation_id' => $allocId, 'payment_id' => $alloc[0]['payment_id'] ?? null,
+                               'date' => $date, 'warnings' => $warnings, 'amount' => $plan['amount_cn']], $plan, [
+                   'cn_remaining_after' => $cnOut['remaining'], 'cn_status_after' => $cnOut['status'],
+                   'balance_after' => $invAfter['balance'], 'invoice_status_after' => $invAfter['status'],
+                   'credit_note' => $cnOut, 'invoice' => $invAfter, 'memos_closed' => $closedMemos,
+                   'folder' => agent_invoice_folder($db, $id)]));
     }
 
     // ── update_folder_status ─────────────────────────────────────────────────
