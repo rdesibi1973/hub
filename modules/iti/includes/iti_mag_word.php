@@ -152,7 +152,7 @@ function iti_mag_word_build(array $D): array {
     $s->addText($T['brief'], 'mwKicker', 'mwTight');
     $s->addTitle($M['overview'], 1);
     iti_mw_paras($s, $D['intro']);
-    $stays = iti_mag_stays($D['days']);
+    $stays = iti_mag_stays($D['days'], $T);
     $nNights = 0; $lodges = [];
     foreach ($stays as $st) { $nNights += $st['nights']; $lodges[$st['lodge']] = true; }
     // Recap: same look as the price table — red caps labels, body-text values, thin sand rules,
@@ -221,7 +221,7 @@ function iti_mag_word_build(array $D): array {
             $cc = $tb->addCell(7100, ['valign' => 'center']);
             $cc->addText(iti_mag_stay_kicker($st, $T), 'mwKicker', 'mwTight');
             $cc->addText($st['lodge'], 'mwH4', 'mwTight');
-            $cc->addText(($st['dest'] !== '' ? $st['dest'] . ' · ' : '') . $st['nights'] . ' ' . ($st['nights'] === 1 ? $T['night1'] : $T['nights']) . ' · ' . $st['meals'] . ($st['room'] !== '' ? ' · ' . $st['room'] : ''), 'mwSmall', 'mwTight');
+            $cc->addText(($st['dest'] !== '' ? $st['dest'] . ' · ' : '') . $st['nights'] . ' ' . ($st['nights'] === 1 ? $T['night1'] : $T['nights']) . ($st['meals'] !== '' ? ' · ' . $st['meals'] : '') . ($st['room'] !== '' ? ' · ' . $st['room'] : ''), 'mwSmall', 'mwTight');
         }
     }
 

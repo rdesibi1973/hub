@@ -63,7 +63,7 @@ function iti_mag_pdf_html(array $D, array &$tmp): string {
     $routeNames = iti_mag_route_names($D['days']);
     $dateRange = iti_mag_date_range($D, $M);
     $paxLabel = iti_mag_pax($D, $M);
-    $stays = iti_mag_stays($D['days']);
+    $stays = iti_mag_stays($D['days'], $T);
     $foot = 'Savannah Explorers  ·  ' . ($D['contacts'][0]['phone'] ?? '') . '  ·  ' . ($D['contacts'][0]['email'] ?? '');
     $pub = isset($D['public_url']) ? (string)$D['public_url'] : '';   // digital itinerary (personal programme): a button, not the URL in clear, set by iti_export_file()
 
@@ -204,7 +204,7 @@ td{vertical-align:top}
 <tr class="nobrk"><td style="width:120pt"><?= $ph ?></td><td>
 <p class="kick"><?= h(iti_mag_stay_kicker($st, $T)) ?></p>
 <h4><?= h($st['lodge']) ?></h4>
-<span class="small"><?= h(($st['dest'] !== '' ? $st['dest'] . ' · ' : '') . $st['nights'] . ' ' . ($st['nights'] === 1 ? $T['night1'] : $T['nights']) . ' · ' . $st['meals'] . ($st['room'] !== '' ? ' · ' . $st['room'] : '')) ?></span>
+<span class="small"><?= h(($st['dest'] !== '' ? $st['dest'] . ' · ' : '') . $st['nights'] . ' ' . ($st['nights'] === 1 ? $T['night1'] : $T['nights']) . ($st['meals'] !== '' ? ' · ' . $st['meals'] : '') . ($st['room'] !== '' ? ' · ' . $st['room'] : '')) ?></span>
 </td></tr>
 <?php endforeach; ?>
 </table>

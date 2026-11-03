@@ -146,6 +146,32 @@ function iti_doc_meals(array $d, array $T): string {
     return $p ? implode(', ', $p) : $T['none'];
 }
 
+/**
+ * Meal text of a stay in the stays summary: what is served at that lodge, not the check-in day's flags
+ * (that day's breakfast and lunch are often eaten elsewhere). $byN = the program's days by number.
+ * All inclusive on any night → all inclusive. Several nights → the meals of most of the full days.
+ * One night → lunch and dinner of that day + breakfast of the next.
+ */
+function iti_doc_stay_meals(array $byN, int $day, int $nights, array $T): string {
+    for ($n = $day; $n < $day + $nights; $n++) {
+        if (!empty($byN[$n]['meal_flags']['meal_all_inclusive'])) return $T['AI'];
+    }
+    if ($nights > 1) {
+        $count = [];
+        for ($n = $day + 1; $n < $day + $nights; $n++) {
+            $m = iti_doc_meals($byN[$n]['meal_flags'] ?? [], $T);
+            $count[$m] = ($count[$m] ?? 0) + 1;
+        }
+        arsort($count);
+        return (string)key($count);
+    }
+    return iti_doc_meals([
+        'meal_breakfast' => !empty($byN[$day + 1]['meal_flags']['meal_breakfast']),
+        'meal_lunch'     => !empty($byN[$day]['meal_flags']['meal_lunch']),
+        'meal_dinner'    => !empty($byN[$day]['meal_flags']['meal_dinner']),
+    ], $T);
+}
+
 /** "Arusha – Tarangire 2 ore di trasferimento." → "2 ore" (duration only), or ''. */
 function iti_doc_duration(string $transfer): string {
     if (preg_match('/(\d+(?:[.,]\d+)?(?:\s*-\s*\d+(?:[.,]\d+)?)?\s*(?:ore|ora|minuti|hours?|hrs?|h|heures?|horas?|Stunden?))\b/iu', $transfer, $m)) {
@@ -432,6 +458,7 @@ function iti_doc_data(int $id, string $lang): ?array {
             'flights'    => $flights,
             'duration'   => $transfers ? iti_doc_duration($transfers[0]) : '',
             'meals'      => iti_doc_meals($d, $T),
+            'meal_flags' => array_intersect_key($d, array_flip(['meal_breakfast', 'meal_lunch', 'meal_dinner', 'meal_all_inclusive'])),   // for iti_doc_stay_meals()
             'narrative'  => iti_doc_pick($d, 'narrative', $lang),
             'dest'       => $destName,
             'dest_desc'  => $destDesc,

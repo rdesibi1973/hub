@@ -89,7 +89,7 @@ function iti_im_guard_document(PDO $db, int $pid, string $lang): void {
     $lang = in_array($lang, ITI_PS_LANGS, true) ? $lang : ($p['display_language'] ?: 'it');
     $D = iti_doc_data($pid, $lang);
     $days = [];
-    foreach ($D['days'] as $d) { unset($d['lodge_photos'], $d['dest_photo'], $d['lodge_key'], $d['lodge_url']); $days[] = $d; }
+    foreach ($D['days'] as $d) { unset($d['lodge_photos'], $d['dest_photo'], $d['lodge_key'], $d['lodge_url'], $d['meal_flags']); $days[] = $d; }
     $print = ['title' => $D['title'], 'subtitle' => $D['subtitle'], 'intro' => $D['intro'], 'days' => $days, 'included' => $D['incl'],
               'excluded' => $D['excl'], 'prices' => $D['prices'], 'price_notes' => $D['price_notes']];
     iti_im_supplier_guard(iti_im_supplier_hits($print, iti_im_supplier_terms($db, (string)$p['source_supplier'])));

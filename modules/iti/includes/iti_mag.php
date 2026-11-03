@@ -63,8 +63,12 @@ function iti_mag_labels(string $lang): array {
     return isset($L[$lang]) ? $L[$lang] : $L['en'];
 }
 
-/** Consecutive nights in the same lodge (and room) → one stay row (first day, nights, photo, …). */
-function iti_mag_stays(array $days): array {
+/**
+ * Consecutive nights in the same lodge (and room) → one stay row (first day, nights, photo, …).
+ * With $T (client documents) 'meals' = the meals served at the lodge (iti_doc_stay_meals()), '' for a
+ * free-text hotel booked by the agency; without it (guide sheet) the first day's meals.
+ */
+function iti_mag_stays(array $days, ?array $T = null): array {
     $stays = []; $prevKey = ''; $prevN = -1;
     foreach ($days as $d) {
         if ($d['lodge'] === '') { $prevKey = ''; continue; }
@@ -77,6 +81,14 @@ function iti_mag_stays(array $days): array {
                         'meals' => $d['meals'], 'photo' => $d['lodge_photos'] ? $d['lodge_photos'][0] : ''];
         }
         $prevKey = $key; $prevN = $d['n'];
+    }
+    if ($T !== null) {
+        $byN = [];
+        foreach ($days as $d) $byN[$d['n']] = $d;
+        foreach ($stays as &$s) {
+            $s['meals'] = strpos($byN[$s['day']]['lodge_key'], 'C') === 0 ? '' : iti_doc_stay_meals($byN, $s['day'], $s['nights'], $T);
+        }
+        unset($s);
     }
     // A later stay in the same lodge reuses the photo found on the first one.
     $photo = [];
@@ -401,8 +413,8 @@ function iti_mag_css(): string {
 function iti_mag_render(array $D, string $publicUrl = '', bool $printBtn = true): string {
     $T = $D['T'];
     $M = iti_mag_labels($D['lang']);
-    $stays = iti_mag_stays($D['days']);
-    $cover = iti_mag_cover($D);
+    $stays = iti_mag_stays($D['days'], $T);
+$cover = iti_mag_cover($D);
     $routeNames = iti_mag_route_names($D['days']);
     $map = isset($D['map']) ? $D['map'] : ['route' => [], 'markers' => [], 'legend' => []];
     $hasMap = count($map['markers']) >= 2;
@@ -489,7 +501,7 @@ function iti_mag_render(array $D, string $publicUrl = '', bool $printBtn = true)
               <div class="mag-stay-b">
                 <div class="mag-stay-day"><?= h(iti_mag_stay_kicker($s, $T)) ?></div>
                 <div class="mag-stay-name"><?= h($s['lodge']) ?></div>
-                <div class="mag-stay-meta"><?= $s['dest'] !== '' ? h($s['dest']) . ' · ' : '' ?><?= (int)$s['nights'] ?> <?= h($s['nights'] === 1 ? $T['night1'] : $T['nights']) ?> · <?= h($s['meals']) ?><?= $s['room'] !== '' ? ' · ' . h($s['room']) : '' ?></div>
+                <div class="mag-stay-meta"><?= $s['dest'] !== '' ? h($s['dest']) . ' · ' : '' ?><?= (int)$s['nights'] ?> <?= h($s['nights'] === 1 ? $T['night1'] : $T['nights']) ?><?= $s['meals'] !== '' ? ' · ' . h($s['meals']) : '' ?><?= $s['room'] !== '' ? ' · ' . h($s['room']) : '' ?></div>
               </div>
             </a>
           <?php endforeach; ?>

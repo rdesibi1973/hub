@@ -569,7 +569,7 @@ With no T&C chosen, the documents use the linked request's version.
 
 #### `iti_document` (GET)
 The program as a file in the magazine layout (cover, route map, stays, day by day with photos, prices,
-included / excluded, contacts, terms). `program_id`, `format?` (`pdf` default, rendered on the server with Dompdf;
+included / excluded, contacts, terms). The stays summary shows the meals served at each lodge, not the check-in day's (full days; 1 night: lunch and dinner of the day + breakfast of the next; all inclusive on any night → all inclusive), and no meals for free-text hotels booked by the agency. `program_id`, `format?` (`pdf` default, rendered on the server with Dompdf;
 `docx` = editable Word for agencies; `guide` = PDF for the safari guide: transfer / flight and accommodation
 recap with check-in / check-out, then the day by day — no photos, intro, prices, lodge descriptions, terms or tip note,
 file `…_GUIDE_<LANG>.pdf`; `guide_docx` (or `guide_word`) = the same guide sheet as an editable Word, `…_GUIDE_<LANG>.docx`;
