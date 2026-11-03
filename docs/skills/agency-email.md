@@ -33,6 +33,7 @@ Fixed rules as in the project instructions: never send without his explicit ok o
 - Attachments only when Roberto asks — this includes price lists and the Word programme. If one seems useful, ask; don't attach it on your own (31 Oct 2026).
 - Write the file to his PC (device shell or `device_commit_files`); if the PC is not reachable, stop and tell him.
 - After writing, list `Exchange/Draft-mail` again and check the file is there before telling Roberto it is saved (drafts there have disappeared within a minute; 17 Oct 2026). If it is gone, say so and copy it back from the booking folder's `mails/`.
+- After sending: when Roberto okays sending ("ok, manda"), Claude sends the mail itself (Hub `mail_send`, or the Gmail connector for staff mails), checks it is in Sent, then deletes the draft from `Exchange/Draft-mail` straight away; the copy in the booking folder's `mails/` stays. This way nobody sends it again from Thunderbird (3 Nov 2026: the booking and Iddi mails went out twice, once from the Hub and once from Thunderbird). When Roberto sends the draft from Thunderbird himself, Claude doesn't send it: it only checks Sent and deletes the draft.
 - Booking confirmations to agencies: content and attachments as in `booking-confirmation` §7.
 
 ## 3. Subject
@@ -82,3 +83,5 @@ Staff mails with attachments: don't send them from the Gmail connector or the Hu
 Show from / to / cc, subject, full text, attachments, then: "Bozza salvata in Exchange/Draft-mail/<file>.eml (da <indirizzo>). Serve da te: ok sul testo e sui destinatari."
 
 Never say a mail "has been sent" unless you checked it: Roberto said so in this session, or it is in Sent (Hub `mail_list` on the Sent folder / Gmail `in:sent`). Otherwise write "da inviare" (31 Oct 2026).
+
+After sending, report: sent from <address>, found in Sent, draft deleted from Draft-mail (3 Nov 2026).
