@@ -901,6 +901,7 @@ include __DIR__ . '/../../includes/layout_header.php';
         <select name="safari_type">
           <option value="private" <?= iti_safari_type($program)==='private'?'selected':'' ?>>Private safari</option>
           <option value="group" <?= iti_safari_type($program)==='group'?'selected':'' ?>>Group safari (shared jeep)</option>
+          <option value="beach" <?= iti_safari_type($program)==='beach'?'selected':'' ?>>Beach stay (no safari)</option>
         </select>
         <span class="form-hint">Cover and facts line of the programme: "Safari privato…" or "Safari di gruppo…"</span>
       </div>

@@ -250,7 +250,10 @@ changed meanwhile, e.g. saved from Excel), re-downloaded and re-verified.
 | `august_supplement` `true` | adds `35 × safari nights` between 1 and 25 August to F9 (beach nights excluded: from `mid_date`, else Zanzibar/coast names in B/K). `false` = does not apply (no warning) |
 | `start_date` | A17 = date; A18+ `=SUM(A{n-1}+1)` extended to the last day, same format |
 | `days[]` | from row 17 + `row_offset`; each: `label` (B), `flight` = route id/name → C `=<cost_pp>*$B$1` from the rate table (or `flight_cost_pp`, warned if not in the table), `park_fees` (F) + `park_fees_desc` (G), `activity` `{rate: name/id}` (cost from table) or `{amount, desc}` → H/I, `accommodation` (J), `hotel` → K, `repeat` n (every value copied to each repeated row) |
-| `days[].accommodation`, `days[].park_fees` | a number (`279`) or a formula on numbers and cells (`"=279"`, `"=(250+71)*$B$1"`); `null` clears the cell. Changing `hotel` on a template row without `accommodation` → warning "hotel changed, J cost left from the template (Kifaru 1054)" |
+| `days[].accommodation`, `days[].park_fees`, `days[].jeep` (D), `days[].drinks` (E) | a number (`279`) or a formula on numbers and cells (`"=279"`, `"=(250+71)*$B$1"`); `null` clears the cell. Changing `hotel` on a template row without `accommodation` → warning "hotel changed, J cost left from the template (Kifaru 1054)" |
+| `no_jeep` `true` | beach-only stay on a safari template: clears jeep (D) and drinks (E) on every day row; `days[].jeep` / `drinks` still win. Totals and the summary cells are recalculated |
+| `days[].activity.amount` | a number or a formula, as above (`"=50+(50+15)*$B$1"`) |
+| `total_price` (F10), `total_price_note` (G10) | when costs are added after the per-person total: `"=F9*$B$1+100"`, `"Inc Dar transfers"`. Not given = the template's F10 / G10 stay; `total_price_note: null` clears G10 |
 | `guests[]` `{name,title,country}` | rows 43+ A/B/F, upper case; country ITALY inferred for -PS/-LAM agencies |
 | `room_type` | A37; default `1 DBL` for MR+MRS |
 | `adults_teen_chd` | A35; default "2 adults" |
@@ -258,7 +261,7 @@ changed meanwhile, e.g. saved from Excel), re-downloaded and re-verified.
 | `mid_date` | first beach night, for the hotel-on-every-beach-night check |
 | `file` | which Calc if the folder has several (GRP member with no Calc of its own: the group folder's Calc, warning) |
 
-Returns `kept_sheets[]` / `removed_sheets[]`, `f9` (the formula written), `august_supplement` `{safari_nights[], pp_per_night, amount_pp, added}`,
+Returns `kept_sheets[]` / `removed_sheets[]`, `f9` (the formula written), `f10` (`"=F9*$B$1+100 → 3500"`), `august_supplement` `{safari_nights[], pp_per_night, amount_pp, added}`,
 `rows[]` `{row, date, cells {B…K}, changed[]}` — every day row as written (formulas as `"=215*$B$1 → 430"`)
 and the columns this call changed, to review before `confirm` — and `verify`: `passed`, `checks[]` (see below),
 `price_to_customer`, `total_price`, `total_costs`, `margin` (B10), `to_price_pp` (D10) — all read on the filled pax sheet,
@@ -596,7 +599,7 @@ curl -sH "$H" "$U?action=iti_document&program_id=412&format=guide&save=1"       
 #### `iti_create_personal` (POST)
 `sample_id`, `lead_request_id?` (Hub request), `calc_file?`, `fields?` — any of `ref_number`, `title_<lang>`, `subtitle_<lang>`, `intro_<lang>`,
 `start_date` (YYYY-MM-DD: dates appear on the cover and on each day), `pax_adults`, `pax_teens` (under 16), `pax_children` (under 12),
-`display_language`, `display_currency`, `safari_type` (`private` | `group`), `show_tip_note` (0 | 1, see **Tip note**; default from the sample), `price_table_json` (`[{label, price, currency, bold?}]`; `bold: true` prints the row in bold — a row starting "Totale pratica" / "Total booking" is bold unless `bold: false`), `price_notes_<lang>`.
+`display_language`, `display_currency`, `safari_type` (`private` | `group` | `beach`), `show_tip_note` (0 | 1, see **Tip note**; default from the sample), `price_table_json` (`[{label, price, currency, bold?}]`; `bold: true` prints the row in bold — a row starting "Totale pratica" / "Total booking" is bold unless `bold: false`), `price_notes_<lang>`.
 Copies the sample (days, activities, prices, inclusions) as a draft proposal, with the T&C of the request's client type
 (`fields.terms_variant` = `direct` | `agency` forces one). Dry-run unless `"confirm": true` (→ plan with `terms_variant`,
 `ref_number` and `ref_source`); confirmed → `program_id`, `links`, `terms` and the full `program`.
@@ -606,9 +609,10 @@ Word `copy_program` put in the request folder (`NN_<folder>_<Prog>Safari.docx`) 
 created, with `word_candidates`, `calc_files`, `folder` and `hint`: resend with `fields.ref_number` or `calc_file` — never guess.
 **safari_type:** `private` ("Safari privato in Tanzania" / "Safari privato con guida" on the cover and facts line of web,
 PDF and Word) or `group` ("Safari di gruppo in Tanzania" / "Safari di gruppo con guida"; 5 languages; the country follows the
-programme's `country` — see **Programmes outside Tanzania**). `fields.safari_type` wins;
-otherwise `group` when the sample is a group safari or `GRP` is in the ref_number, the Calc file or the request folder
-(`_DumaGRP`, `_GRP0301`, `GRP1508Simba`), else `private`. Same rule for `iti_final_from_calc` and the Hub's copy buttons;
+programme's `country` — see **Programmes outside Tanzania**) or `beach` (no safari: "Soggiorno al mare in Tanzania" / "Soggiorno al mare",
+section "Il viaggio in breve"; T&C unchanged). `fields.safari_type` wins;
+otherwise the sample's when it is a group safari or a beach stay, `group` when `GRP` is in the ref_number, the Calc file or the request folder
+(`_DumaGRP`, `_GRP0301`, `GRP1508Simba`), else `private`. `beach` is never set by itself: pass it. Same rule for `iti_final_from_calc` and the Hub's copy buttons;
 the plan shows it. `iti_program` returns `safari_type`; change it with `iti_update_program`.
 
 #### `iti_update_program` (POST)

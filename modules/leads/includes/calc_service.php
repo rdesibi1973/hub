@@ -269,8 +269,9 @@ function calc_is_beach_text(string $text): bool {
  * Fill a booking's Calc. $in (see docs/AGENT_API.md → fill_calc):
  *   request_id, file?, pax_sheet?, adults?, teens?, children?, start_date (Y-m-d),
  *   price_components[] (→ F9 "=a+b+c"), days[] {row_offset?, label?, flight? (route id/name),
- *   flight_cost_pp?, activity? {amount?|rate?, desc?}, park_fees? (F), park_fees_desc? (G),
- *   accommodation? (J), hotel? (K), repeat?}, guests[] {name,title,country?}, room_type?,
+ *   flight_cost_pp?, jeep? (D), drinks? (E), activity? {amount?|rate?, desc?}, park_fees? (F), park_fees_desc? (G),
+ *   accommodation? (J), hotel? (K), repeat?}, no_jeep? (clears D and E on every row), total_price? (F10),
+ *   total_price_note? (G10), guests[] {name,title,country?}, room_type?,
  *   adults_teen_chd?, arrival?, departure?, mid_date? (first beach night), august_supplement?, confirm?
  * $commit false → everything is built and verified on a temp copy, nothing uploaded.
  * The result lists every day row (B–K, "formula → value") with the columns this call changed.
@@ -405,6 +406,11 @@ function calc_fill(PDO $db, array $in, bool $commit): array {
             $tplJ[$row] = calc_cell_show($ws, 'J' . $row, true);
         }
 
+        // Beach-only stay on a safari template: no jeep, no drinks (days[].jeep / drinks still win).
+        if (!empty($in['no_jeep'])) {
+            for ($row = $first; $row <= $maxRow; $row++) { $ws->setCellValue('D' . $row, null); $ws->setCellValue('E' . $row, null); }
+        }
+
         $flights = null; $acts = null;
         $cursor = $first;
         $lastRow = $lastTpl;
@@ -414,10 +420,16 @@ function calc_fill(PDO $db, array $in, bool $commit): array {
             // Cost cells are validated once per entry and copied to every repeated row.
             $accom = array_key_exists('accommodation', $d) ? calc_cell_amount($d['accommodation'], 'days[' . $k . '].accommodation') : false;
             $fees  = array_key_exists('park_fees', $d)     ? calc_cell_amount($d['park_fees'], 'days[' . $k . '].park_fees') : false;
+            $jeep  = array_key_exists('jeep', $d)          ? calc_cell_amount($d['jeep'], 'days[' . $k . '].jeep') : false;
+            $drink = array_key_exists('drinks', $d)        ? calc_cell_amount($d['drinks'], 'days[' . $k . '].drinks') : false;
             for ($j = 0; $j < $rep; $j++, $cursor++) {
                 $row = $cursor;
                 if ($row > $maxRow) throw new InvalidArgumentException('Too many days: row ' . $row . ' is past the itinerary table (last row ' . $maxRow . ').');
                 if (isset($d['label']) && $d['label'] !== '') $ws->setCellValue('B' . $row, (string)$d['label']);
+
+                // Jeep (D), drinks (E).
+                if ($jeep !== false) $ws->setCellValue('D' . $row, $jeep);
+                if ($drink !== false) $ws->setCellValue('E' . $row, $drink);
 
                 // Park fees (F) + description (G); accommodation cost (J).
                 if ($fees !== false) $ws->setCellValue('F' . $row, $fees);
@@ -456,7 +468,8 @@ function calc_fill(PDO $db, array $in, bool $commit): array {
                         $amount = $ar['cost'];
                         if ($desc === '') $desc = $ar['name'];
                     } else {
-                        $amount = calc_num($a['amount'] ?? null, 'activity.amount');
+                        $amount = calc_cell_amount($a['amount'] ?? null, 'activity.amount');
+                        if ($amount === null) throw new InvalidArgumentException('activity.amount must be a number or a formula like "=279" or "=(250+71)*$B$1".');
                     }
                     $ws->setCellValue('H' . $row, $amount);
                     $ws->setCellValue('I' . $row, $desc);
@@ -513,6 +526,14 @@ function calc_fill(PDO $db, array $in, bool $commit): array {
                         . count($augDates) . ' = ' . $augAmount . ') in price_components — pass "august_supplement": true (or false if it does not apply).'];
         }
         $ws->setCellValue('F9', '=' . implode('+', $parts));
+
+        // F10 / G10: per-car transfers added after the per-person total ("=F9*$B$1+100", "Inc Dar transfers").
+        if (isset($in['total_price'])) {
+            $ws->setCellValue('F10', calc_cell_amount($in['total_price'], 'total_price'));
+        }
+        if (array_key_exists('total_price_note', $in)) {
+            $ws->setCellValue('G10', $in['total_price_note'] === null ? null : (string)$in['total_price_note']);
+        }
 
         // ── 5) Guests, room type, pax text, flights ──────────────────────────
         $guests = isset($in['guests']) && is_array($in['guests']) ? $in['guests'] : [];
@@ -591,6 +612,7 @@ function calc_fill(PDO $db, array $in, bool $commit): array {
             'start'     => $start,
             'end'       => $endExpected,
             'f9'        => '=' . implode('+', $parts),
+            'f10'       => calc_cell_show($ws, 'F10', false),
             'august_supplement' => ['safari_nights' => $augDates, 'pp_per_night' => CALC_AUG_SUPPL_PPPN, 'amount_pp' => $augAmount,
                                     'added' => !empty($in['august_supplement']) && $augDates ? true : false],
             'rows'      => $rows,

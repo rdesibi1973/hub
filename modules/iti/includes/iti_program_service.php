@@ -207,7 +207,7 @@ function iti_ps_header_values(array $fields): array {
     foreach ($fields as $k => $v) {
         if ($k === 'display_language' && !in_array($v, ITI_PS_LANGS, true)) throw new InvalidArgumentException('display_language: en|it|fr|es|de');
         if ($k === 'display_currency' && !in_array($v, ['USD', 'EUR'], true)) throw new InvalidArgumentException('display_currency: USD|EUR');
-        if ($k === 'safari_type' && !in_array($v, ITI_SAFARI_TYPES, true)) throw new InvalidArgumentException('safari_type: private | group');
+        if ($k === 'safari_type' && !in_array($v, ITI_SAFARI_TYPES, true)) throw new InvalidArgumentException('safari_type: private | group | beach');
         if ($k === 'start_date') {
             if ($v !== null && $v !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', (string)$v)) throw new InvalidArgumentException('start_date: YYYY-MM-DD');
             $v = $v === '' ? null : $v;
@@ -245,7 +245,7 @@ function iti_ps_personal(int $id): array {
 /**
  * Proposal for a client: a copy of a sample, or a blank programme (no sample_id) for trips with
  * no matching sample. $in: sample_id?, lead_request_id?, calc_file?, fields? {ref_number, title_<lang>, subtitle_<lang>,
- * intro_<lang>, safari_type (private | group; default from the sample / GRP tags), show_tip_note (0 | 1; default from the sample, else 1), start_date, pax_adults, pax_teens (under 16), pax_children (under 12), display_language, display_currency,
+ * intro_<lang>, safari_type (private | group | beach; default from the sample / GRP tags), show_tip_note (0 | 1; default from the sample, else 1), start_date, pax_adults, pax_teens (under 16), pax_children (under 12), display_language, display_currency,
  * price_table_json, price_notes_<lang>}, days? [day items, see iti_program_build.php] (replace
  * the sample's days). Blank programme: title_<display_language> and days[] are required.
  */
@@ -295,7 +295,7 @@ function iti_ps_create_personal(PDO $db, array $in, string $who, bool $go): arra
     }
     if ($days !== null) $plan['days'] = count($items);
     $plan['ref_number'] = $ref['ref_number'];
-    // private | group: given, else from the sample and the GRP tags (iti_duplicate_program() applies the same rule).
+    // private | group | beach: given, else from the sample and the GRP tags (iti_duplicate_program() applies the same rule).
     $plan['safari_type'] = $set['safari_type'] ?? iti_safari_type_auto($db, $set, $s);
     $plan['ref_source'] = $ref['source'] !== null ? $ref['source'] . (isset($ref['file']) ? ': ' . $ref['file'] : '') : null;
     // T&C of the linked request's channel: direct client (Drct) 60 days, agency 45 days.

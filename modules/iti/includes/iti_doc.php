@@ -12,10 +12,10 @@ require_once __DIR__ . '/iti_terms.php';   // T&C per channel (direct / agency),
 
 /**
  * Cover kicker + facts pill of a programme document by safari type (iti_programs.safari_type):
- * private safari or group departure (shared jeep). The only place these strings live, so the
- * web page, PDF and Word stay in step. $country = the programme's country (iti_program_country():
+ * private safari, group departure (shared jeep) or beach stay. The only place these strings live, so
+ * the web page, PDF and Word stay in step. $country = the programme's country (iti_program_country():
  * "TZ", "KE", "TZ+KE") → "Safari privato in Kenya", "Safari privé en Tanzanie et au Kenya".
- * Returns ['kicker', 'safari_pill'].
+ * Returns ['kicker', 'safari_pill'], and for a beach stay 'brief' (the section title, no "safari").
  */
 function iti_safari_labels(string $type, string $lang, string $country = 'TZ'): array {
     $L = [
@@ -32,6 +32,13 @@ function iti_safari_labels(string $type, string $lang, string $country = 'TZ'): 
             'fr' => ['Safari en groupe', 'Safari en groupe avec guide'],
             'es' => ['Safari en grupo', 'Safari en grupo con guía'],
             'de' => ['Gruppensafari', 'Gruppensafari mit Guide'],
+        ],
+        'beach' => [
+            'it' => ['Soggiorno al mare', 'Soggiorno al mare', 'Il viaggio in breve'],
+            'en' => ['Beach stay', 'Beach stay', 'Your trip at a glance'],
+            'fr' => ['Séjour balnéaire', 'Séjour balnéaire', 'Votre voyage en bref'],
+            'es' => ['Estancia de playa', 'Estancia de playa', 'Tu viaje en breve'],
+            'de' => ['Strandaufenthalt', 'Strandaufenthalt', 'Ihre Reise im Überblick'],
         ],
     ];
     // "in <country>" per language, the preposition included (French: en Tanzanie, au Kenya, à Madagascar).
@@ -54,7 +61,7 @@ function iti_safari_labels(string $type, string $lang, string $country = 'TZ'): 
     }
     $last = array_pop($places);
     $where = $places ? implode(', ', $places) . $and[$l] . $last : $last;
-    return ['kicker' => $t[$l][0] . ' ' . $where, 'safari_pill' => $t[$l][1]];
+    return ['kicker' => $t[$l][0] . ' ' . $where, 'safari_pill' => $t[$l][1]] + (isset($t[$l][2]) ? ['brief' => $t[$l][2]] : []);
 }
 
 /** UI strings per language. */
@@ -363,7 +370,7 @@ function iti_doc_data(int $id, string $lang): ?array {
     }
     // "Safari privato in Kenya": the programme's country, else its destinations' (iti_functions.php).
     $country = iti_program_country($p, $dests);
-    $T += iti_safari_labels(iti_safari_type($p), $lang, $country);
+    $T = iti_safari_labels(iti_safari_type($p), $lang, $country) + $T;   // first: a beach stay has its own 'brief'
 
     // Internal flights of a day → "Dar es Salaam → Ruaha · Auric Air · 07:40–10:05".
     $fltSt = $db->prepare('SELECT f.*, r.from_airport, r.to_airport, r.operator FROM iti_day_flights f

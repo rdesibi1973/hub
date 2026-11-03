@@ -1096,20 +1096,20 @@ function iti_ensure_doc_columns(): void {
     }
 }
 
-const ITI_SAFARI_TYPES = array('private', 'group');
+const ITI_SAFARI_TYPES = array('private', 'group', 'beach');
 
-/** Safari type of a programme row: 'group' or 'private' (default, also when the column is missing). */
+/** Safari type of a programme row: 'group', 'beach' or 'private' (default, also when the column is missing). */
 function iti_safari_type(array $p): string {
-    return ($p['safari_type'] ?? '') === 'group' ? 'group' : 'private';
+    return in_array($p['safari_type'] ?? '', ITI_SAFARI_TYPES, true) ? $p['safari_type'] : 'private';
 }
 
 /**
- * Safari type for a new personal programme when none is given: group when its sample is a
- * group safari, or "GRP" is in the ref. number, the Calc file or the linked request's folder
- * (_DumaGRP, _GRP0301, GRP1508Simba); otherwise private.
+ * Safari type for a new personal programme when none is given: the sample's when it is a group
+ * safari or a beach stay; group when "GRP" is in the ref. number, the Calc file or the linked
+ * request's folder (_DumaGRP, _GRP0301, GRP1508Simba); otherwise private.
  */
 function iti_safari_type_auto(PDO $db, array $p, ?array $sample = null): string {
-    if ($sample && iti_safari_type($sample) === 'group') return 'group';
+    if ($sample && iti_safari_type($sample) !== 'private') return iti_safari_type($sample);
     $hay = (string)($p['ref_number'] ?? '') . ' ' . basename((string)($p['source_calc_path'] ?? ''));
     if (!empty($p['lead_request_id'])) {
         $st = $db->prepare('SELECT practice_code FROM requests WHERE id = ?');
