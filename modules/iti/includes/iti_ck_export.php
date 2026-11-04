@@ -154,16 +154,22 @@ function iti_ck_program_data(PDO $db, array $p, int $requestId, string $clientFo
     }
 
     // Prices: the USD rows of the client's price table; totals, children and supplements skipped.
-    $adult = null; $teen = null;
+    // A "total per person" row is the adult price: the first row is then only a part of it
+    // (safari + flight + supplements), and the Calc's price per person is that total.
+    $adult = null; $teen = null; $adultTotal = null;
     $rows = json_decode((string)($p['price_table_json'] ?? ''), true);
     foreach (is_array($rows) ? $rows : [] as $r) {
         if (!is_array($r) || !isset($r['price']) || !is_numeric($r['price']) || ($r['currency'] ?? 'USD') !== 'USD') continue;
         $l = mb_strtolower((string)($r['label'] ?? ''));
+        if ($adultTotal === null && preg_match('/\b(total|totale|gesamt)/u', $l)
+            && preg_match('/per person|per persona|a persona|par personne|por persona|pro person/u', $l)
+            && !preg_match('/teen|ragazz|adolesc|jugend|child|bambin|enfant|niñ|kind|chd/u', $l)) $adultTotal = (float)$r['price'];
         if (!empty($r['bold']) || preg_match('/\b(total|totale|gesamt)/u', $l)) continue;
         if (preg_match('/teen|ragazz|adolesc|jugend/u', $l)) { if ($teen === null) $teen = (float)$r['price']; continue; }
         if (preg_match('/child|bambin|enfant|niñ|kind|chd|suppl|single|singol|sconto|discount|riduzion/u', $l)) continue;
         if ($adult === null) $adult = (float)$r['price'];
     }
+    if ($adultTotal !== null) $adult = $adultTotal;
 
     // File names of this programme's Word: saved by the API (<ref_number>.docx) or downloaded (<Title>_<LANG>.docx).
     $names = [];
