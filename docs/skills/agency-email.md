@@ -76,7 +76,7 @@ Every mail about a request/booking carries the Dropbox folder name: `Re: <origin
 
 English, short, factual: folder name in the subject, what to do, by when. Booking teams: rooms exactly as per the request (room type and pax). Incoming payment alerts: forward the agency's original payment mail with its attachment to Saruni and Doreen, folder name in the subject.
 Sending staff mails after Roberto's ok: if the Hub `mail_send` with `from: gmail` answers that Gmail is not configured, send from savannah.explorers@gmail.com with the Gmail connector (`send_message`), same text and signature; the mail is then not logged in the Hub timeline (19 Oct 2026).
-Staff mails with attachments: don't send them from the Gmail connector or the Hub; leave the `.eml` draft (attachments included) in `Exchange/Draft-mail` and Roberto sends it from Thunderbird (22 Oct 2026).
+Staff mails with attachments: after Roberto's ok, send them with the Hub `mail_send` (`from: gmail`, `attachments[]` `{name, content_base64}`, `request_id` for the booking timeline): dry run first, check from / to / subject / attachments, then `confirm`. Never from the Gmail connector (no attachments). If the Hub refuses (Gmail not configured, file over 10 MB), leave the `.eml` draft (attachments included) in `Exchange/Draft-mail` and Roberto sends it from Thunderbird (3 Nov 2026; replaces the 22 Oct rule).
 
 ## 8. Report to Roberto (Italian)
 
