@@ -80,7 +80,8 @@ function iti_cs_activity_row(PDO $db, int $id): ?array {
 function iti_cs_lodge_out(array $r, bool $full = false): array {
     $out = [
         'id' => (int)$r['id'], 'name' => $r['name'], 'destination_id' => (int)$r['destination_id'],
-        'destination' => $r['dest_name'] ?? null, 'category' => $r['category'], 'type' => $r['lodge_type'],
+        'destination' => $r['dest_name'] ?? null, 'category' => $r['category'],
+        'lodge_type' => $r['lodge_type'], 'type' => $r['lodge_type'],   // lodge_type = the name used to write it; type kept for older callers
         'website' => $r['website'] ?: null,
         'latitude' => $r['latitude'] !== null ? (float)$r['latitude'] : null,
         'longitude' => $r['longitude'] !== null ? (float)$r['longitude'] : null,

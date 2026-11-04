@@ -801,7 +801,8 @@ day header and program cover (destination).
 #### `iti_lodges` (GET)
 `q?` (lodge / destination name), `destination?` (id, name or code), `active?` (`1` default, `0`, `all`),
 `missing?` (`photos` | `coords` | `website` | `description_<lang>` | `placeholder` | `stub` = made by `iti_import_program`, to complete), `limit?` ≤ 300 →
-`lodges[]` `{id, name, destination_id, destination, category, type, website, latitude, longitude, photos[], description_langs[], active, needs_completion}`.
+`lodges[]` `{id, name, destination_id, destination, category, lodge_type, type, website, latitude, longitude, photos[], description_langs[], active, needs_completion}`.
+`lodge_type` is the name used by `iti_create_lodge` / `iti_update_lodge`; `type` is the same value, kept for older callers.
 
 #### `iti_lodge` (GET)
 `lodge_id` → the same plus `phone, emergency_phone, email, address, description_<lang>` (all 5).
@@ -832,7 +833,7 @@ the new photo replaces the old cover.
 
 #### `iti_create_lodge` (POST)
 `fields`: `name`*, `destination_id`*, `category` (`budget`|`mid`|`luxury`|`ultra_luxury`), `lodge_type`
-(`lodge`|`tented_camp`|`hotel`|`mobile_camp`|`house`) + any field of `iti_update_lodge`. A name that already exists
+(`lodge`|`tented_camp`|`hotel`|`mobile_camp`|`house`) + any field of `iti_update_lodge` except `needs_completion`. A name that already exists
 (exact or contained) → 400 with the existing lodge. Dry-run unless `"confirm": true`; then `created` (the lodge).
 Photos afterwards with `iti_lodge_photos`.
 
