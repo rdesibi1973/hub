@@ -1884,9 +1884,10 @@ function followup_rows(PDO $db, array $f = [], ?string $today = null): array {
     $st->execute($a);
     $found = $st->fetchAll(PDO::FETCH_ASSOC);
     $log = followup_notes_log($db, array_map(fn($r) => (int)$r['id'], $found));
+    $live = followup_live_folders($db);
     $out = [];
     foreach ($found as $r) {
-        $r = followup_out($r, $today) + ['notes_log' => $log[(int)$r['id']] ?? []];
+        $r = followup_out($r, $today, $live) + ['notes_log' => $log[(int)$r['id']] ?? []];
         if (!empty($f['priority']) && $r['priority'] !== $f['priority'] && substr($r['priority'], 0, 1) !== (string)$f['priority']) continue;
         if (!empty($f['source']) && !in_array($f['source'], array_column($r['sources'], 'source'), true)) continue;
         if (!empty($f['due_before']) && (!$r['due_date'] || $r['due_date'] > $f['due_before'])) continue;
@@ -1919,10 +1920,35 @@ function followup_notes_log(PDO $db, array $ids): array {
     return $out;
 }
 
-/** Public shape of a line (page JSON and Agent API). */
-function followup_out(array $r, string $today): array {
+/**
+ * Names of the folders at the top of /001_Safari, as the CK scan last saw them (followed by Dropbox id):
+ * [stem => name]. requests.group_folder can stay behind after a rename, this cannot.
+ */
+function followup_live_folders(PDO $db): array {
+    ck_ensure_schema($db);
+    $live = [];
+    foreach ($db->query("SELECT folder_name FROM ck_folders WHERE gone = 0")->fetchAll(PDO::FETCH_COLUMN) as $n) {
+        $live[dropbox_folder_stem_safe((string)$n)] = (string)$n;
+    }
+    return $live;
+}
+
+/**
+ * The path with its booking folder as it is named now: a line keeps the name of its check's last run,
+ * so after a status rename its link would open the parent folder. Same stem only: other names stay.
+ */
+function followup_path_current(string $path, array $live): string {
+    $segs = explode('/', $path);
+    foreach ($segs as &$s) $s = $live[dropbox_folder_stem_safe($s)] ?? $s;
+    unset($s);
+    return implode('/', $segs);
+}
+
+/** Public shape of a line (page JSON and Agent API). $live: followup_live_folders(). */
+function followup_out(array $r, string $today, array $live = []): array {
     $svc = $r['service_date'] ?: $r['start_date'];
-    $dir = followup_folder_dir((string)$r['folder']);
+    $r['folder'] = followup_path_current((string)$r['folder'], $live);
+    $dir = followup_folder_dir($r['folder']);
     $open = fn(string $p) => 'savannah://open?path=' . implode('/', array_map('rawurlencode', explode('/', ltrim($p, '/'))));
     $details = !empty($r['details']) ? json_decode((string)$r['details'], true) : null;
     // ck lines: the folder's booking-check.html (path under the folder, or a full Dropbox / local path).
@@ -1931,7 +1957,7 @@ function followup_out(array $r, string $today): array {
         $rp = str_replace('\\', '/', (string)$details['report_path']);
         if (preg_match('#(?:^|/)(001_Safari/.+)$#i', $rp, $m)) $rp = '/' . $m[1];
         elseif ($rp[0] !== '/') $rp = $dir . '/' . ltrim($rp, '/');
-        $report = $rp;
+        $report = followup_path_current($rp, $live);
     }
     $due = followup_due($r);
     $top = explode('/', ltrim((string)$r['folder'], '/'))[0];
