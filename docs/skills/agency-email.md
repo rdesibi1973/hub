@@ -82,6 +82,6 @@ Staff mails with attachments: after Roberto's ok, send them with the Hub `mail_s
 
 Show from / to / cc, subject, full text, attachments, then: "Bozza salvata in Exchange/Draft-mail/<file>.eml (da <indirizzo>). Serve da te: ok sul testo e sui destinatari."
 
-Never say a mail "has been sent" unless you checked it: Roberto said so in this session, or it is in Sent (Hub `mail_list` on the Sent folder / Gmail `in:sent`). Otherwise write "da inviare" (31 Oct 2026).
+Never say a mail "has been sent" unless you checked it: Roberto said so in this session, or it is in Sent (Hub `mail_list` on the Sent folders / Gmail `in:sent`). info@ has two Sent folders: check both `INBOX.Sent` (Hub / webmail) and `INBOX.Sent Messages` (Thunderbird) (5 Nov 2026). Otherwise write "da inviare" (31 Oct 2026).
 
 After sending, report: sent from <address>, found in Sent, draft deleted from Draft-mail (3 Nov 2026).

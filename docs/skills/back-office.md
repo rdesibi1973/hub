@@ -69,6 +69,11 @@ Once a week (Monday, or the first round of the week — see `daily-check`): `fli
 ## 7. Vouchers, rooming lists, ResRequest
 
 - Vouchers: for departures in the next 30 days, check the vouchers are in the folder and were sent.
+- Generating vouchers — two ways, depending on the programme (5 Nov 2026):
+  - ITI programme (Hub personal/final programme linked to the booking, `iti_programs` with `lead_request_id`): `iti_vouchers` with `program_id` (`preview: true` first), or the "Vouchers" button in the ITI editor;
+  - WeTu programme (Word made in WeTu, no ITI programme): the Hub voucher generator from Word + Calc (https://hub.savannahexplorers.com/modules/iti/vouchers.php, Roberto logs in in the browser; upload the booking's programme .docx and the Calc .xlsx). Don't create an ITI final programme just to get vouchers.
+  In the review: travellers, rooms and meal basis per lodge, transfers; fill flight number and time on the arrival and departure transfers (from the Calc A51 / A56). The PDF goes in the booking's `vouchers/` sub-folder.
+- New flight plan or client phone numbers from the agency: arrival / departure in the Calc (A51 / A56); client phones as a note in the Calc next to the guest names (column G), not in the Hub (5 Nov 2026).
 - Rooming lists to lodges: rooms exactly as per the request (room type and pax), names as in the Calc; propose the mail to the lodge.
 - ResRequest (Orangi Collection lodges): check that our confirmations still match what is booked (dates, rooms, pax), as in the ResRequest plan; flag differences. Read-only.
 
