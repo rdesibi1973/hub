@@ -352,10 +352,10 @@ function agent_confirm_input(array $in): array {
     ];
 }
 
-/** The Hub user who owns a request's agent (signature / Reply-To), or 0. */
+/** The active Hub user who owns a request's agent (signature / Reply-To), or 0 (a user who left signs nothing). */
 function agent_user_for_agent(PDO $db, $agentId): array {
     if (!$agentId) return ['id' => 0, 'full_name' => ''];
-    $st = $db->prepare("SELECT id, full_name FROM users WHERE agent_id = ? ORDER BY is_active DESC, id LIMIT 1");
+    $st = $db->prepare("SELECT id, full_name FROM users WHERE agent_id = ? AND is_active = 1 ORDER BY id LIMIT 1");
     $st->execute([(int)$agentId]);
     $u = $st->fetch(PDO::FETCH_ASSOC);
     return $u ? ['id' => (int)$u['id'], 'full_name' => (string)$u['full_name']] : ['id' => 0, 'full_name' => ''];

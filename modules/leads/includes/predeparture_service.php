@@ -292,10 +292,10 @@ function predep_due(PDO $pdo, int $days = PREDEP_DUE_DAYS, bool $only_unsent = f
     return $out;
 }
 
-/** The Hub user who signs for the request's agent (users.agent_id): ['id', 'full_name', 'email'] or null. */
+/** The active Hub user who signs for the request's agent (users.agent_id): ['id', 'full_name', 'email'] or null. */
 function predep_sender(PDO $pdo, $agent_id): ?array {
     if (!$agent_id) return null;
-    $st = $pdo->prepare("SELECT id, full_name, email FROM users WHERE agent_id = ? ORDER BY is_active DESC, id LIMIT 1");
+    $st = $pdo->prepare("SELECT id, full_name, email FROM users WHERE agent_id = ? AND is_active = 1 ORDER BY id LIMIT 1");
     $st->execute([(int)$agent_id]);
     $u = $st->fetch(PDO::FETCH_ASSOC);
     return ($u && filter_var($u['email'], FILTER_VALIDATE_EMAIL)) ? $u : null;

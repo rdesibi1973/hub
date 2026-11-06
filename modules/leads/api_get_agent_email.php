@@ -1,9 +1,9 @@
 <?php
 /**
  * api_get_agent_email.php
- * Returns the email of the agent assigned to a request identified by practice_code.
+ * Returns the email of the (active) Hub user of the agent assigned to a request identified by practice_code.
  * POST: { "folder_name": "01_01JAN_..." }
- * Response: { "success": true, "email": "roberto.capri@savannahexplorers.com" }
+ * Response: { "success": true, "email": "anderson.jr@savannahexplorers.com" }
  */
 define('HS_INCLUDED', true);
 require_once __DIR__ . '/../../includes/config.php';
@@ -90,7 +90,7 @@ try {
         $s3 = $pdo->prepare(
             "SELECT u.email FROM requests r
              JOIN users u ON u.agent_id = r.agent_id
-             WHERE r.id = ? AND u.email IS NOT NULL AND u.email <> ''
+             WHERE r.id = ? AND u.is_active = 1 AND u.email IS NOT NULL AND u.email <> ''
              ORDER BY u.id ASC LIMIT 1"
         );
         $s3->execute([$requestId]);

@@ -697,8 +697,8 @@ function inv_linked_request(PDO $db, int $invId): ?array {
  */
 function inv_sales_contact(PDO $db, int $invId): ?array {
     $s = $db->prepare("SELECT a.name,
-                              (SELECT u.email FROM users u WHERE u.agent_id = a.id AND u.email IS NOT NULL AND u.email <> ''
-                               ORDER BY u.is_active DESC, u.id LIMIT 1) AS email
+                              (SELECT u.email FROM users u WHERE u.agent_id = a.id AND u.is_active = 1
+                                      AND u.email IS NOT NULL AND u.email <> '' ORDER BY u.id LIMIT 1) AS email
                          FROM invoices i JOIN requests r ON r.id = i.request_id JOIN agents a ON a.id = r.agent_id
                         WHERE i.id = ?");
     $s->execute([$invId]);

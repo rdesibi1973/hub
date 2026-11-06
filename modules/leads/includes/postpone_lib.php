@@ -108,7 +108,7 @@ function booking_cc_agent_email(PDO $db, $agentId): string {
 
 function pp_agent_email(PDO $db, $agentId): string {
     if (!$agentId) return '';
-    $st = $db->prepare("SELECT email FROM users WHERE agent_id = ? AND email IS NOT NULL AND email <> '' ORDER BY is_active DESC, id LIMIT 1");
+    $st = $db->prepare("SELECT email FROM users WHERE agent_id = ? AND is_active = 1 AND email IS NOT NULL AND email <> '' ORDER BY id LIMIT 1");
     $st->execute([(int)$agentId]);
     return (string)($st->fetchColumn() ?: '');
 }

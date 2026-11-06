@@ -682,8 +682,8 @@ function ck_owner_rule(): string {
 }
 
 /**
- * Seller name in a folder tag → Hub username. "Roberto" in a folder tag is Roberto De Sibi (rdesibi); Roberto Capri is
- * the user "roberto" and never appears as "Roberto" in a tag.
+ * Seller name in a folder tag → Hub username. "Roberto" in a folder tag is Roberto De Sibi (rdesibi); Roberto Capri (user
+ * "roberto.capri", inactive since Nov 2026) never appears as "Roberto" in a tag.
  */
 const CK_OWNER_TAG_ALIASES = ['roberto' => 'rdesibi'];
 

@@ -357,8 +357,11 @@ done; retry with `send_booking_email`). Without `send` nothing is mailed. A `sen
 Reply-To are still added), `keep_closing` (default true; false → no closing after `body`; also not added when
 `body` already contains "regards"), `body_extra` (inserted before "Thanks"), `no_invoice` (true → drops the
 "Esther - prepare the not paid invoice" line, e.g. group options invoiced when the group closes),
-`sign_as` (Hub username, e.g. `roberto`: active user whose name, HTML signature and Reply-To are used instead of the
-request agent's; unknown → 404; recipients stay those of the request's agent — add the signer with `cc_add` if wanted),
+`sign_as` (Hub **username**, not the agent name — Roberto De Sibi is `rdesibi`: active user whose name, HTML signature and
+Reply-To are used instead of the request agent's; unknown or inactive → 404; recipients stay those of the request's agent —
+add the signer with `cc_add` if wanted). Not needed for agent "Roberto" (folders `-Roberto`): its user is already rdesibi.
+Only active users sign: a request whose agent's user is inactive (e.g. Roberto Capri, agent 9) gets no signature / Reply-To,
+and no Cc to that user,
 `sender_name` (only the name in the closing, wins over `sign_as`; signature and Reply-To do not change).
 Without `"confirm": true` → returns the email that *would* be sent, with `sender_name`, `reply_to` and
 `has_signature`. No valid To → 400. Same keys in the `email` object of `confirm_preview` / `confirm_booking`.

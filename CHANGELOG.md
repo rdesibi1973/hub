@@ -20,6 +20,20 @@ Running log of notable changes and current build state. Module-level "active / p
 
 ---
 
+## 2026-11-06 — Roberto Capri deactivated; agent "Roberto" = Roberto De Sibi
+- Checked: agent 14 "Roberto" (folders `-Roberto`) was already linked to user 1 `rdesibi` (`users.agent_id = 14`), so the
+  booking mail of e.g. request 3181 is signed Roberto De Sibi / Reply-To info@ without `sign_as`. The Capri signature came only
+  from `sign_as: "roberto"`, which was Capri's username.
+- DB (no migration): user 15 Roberto Capri → `is_active = 0`, username `roberto` → `roberto.capri` (history kept; agent 9
+  was already inactive). He can no longer log in (`auth.php` / `api_login.php`), `sign_as: "roberto"` now 404s.
+- Inactive users no longer sign or receive mail as the request's agent: `is_active = 1` added to `agent_user_for_agent()`
+  (agent_api.php), `pp_agent_email()` (postpone_lib.php, booking Cc), `inv_sales_contact()` (invoice Cc), `predep_sender()`
+  (Travel info), `api_get_agent_email.php` and the memo reminder cron (`cron_reminders.php`). Before, they fell back to an
+  inactive user (`ORDER BY is_active DESC`). New-request / reassign notifications already filtered active users; Sales Response
+  sellers and the memo digest never included Capri.
+- Capri still owns 75 requests (agent 9: 10 Booked, all travelled and `_CK`; 65 old Inquiry) — not reassigned, Roberto decides.
+- `docs/AGENT_API.md`: `sign_as` is the username (`rdesibi`), not needed for agent "Roberto".
+
 ## 2026-11-02 — Credit notes in the Agent API
 - New actions `list_credit_notes`, `create_credit_note`, `apply_credit_note`; `get_invoice.credit_notes[]` with applied, remaining
   and `applied_to[]`. Logic in `invoice_service.php` (`cn_create`, `cn_apply_plan`, `cn_find`), shared with `cn_add.php` / `cn_view.php`.

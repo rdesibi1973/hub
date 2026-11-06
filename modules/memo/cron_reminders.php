@@ -37,7 +37,7 @@ $sql =
     "m.reminder_at, m.recur_rule, m.reminder_emails, u.email AS user_email, u.full_name AS user_name, " .
     memo_link_columns() . " " .
     "FROM memos m " .
-    "JOIN users u ON u.id = m.user_id " . memo_link_joins() .
+    "JOIN users u ON u.id = m.user_id AND u.is_active = 1 " . memo_link_joins() .
     "WHERE m.deleted_at IS NULL " .
     "AND m.status IN ('open','doing','waiting') " .
     "AND m.reminder_at IS NOT NULL " .
