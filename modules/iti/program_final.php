@@ -23,10 +23,18 @@ $user     = $_cu['username'] ?? 'system';
 $rid      = (int)($_REQUEST['request_id'] ?? 0);
 $file     = trim((string)($_REQUEST['file'] ?? ''));   // one of several Calc files of the folder ('' = the highest number)
 $sheetReq = trim((string)($_REQUEST['sheet'] ?? ''));  // pax sheet chosen by the user ('' = the reader decides)
+// Pax sheets whose prices go in the price table (quote for 10 / 11 / 12 pax): ticked by the user
+// (ps_set=1), else '*' = every pax sheet unless the Calc is a group calc or has a CONF sheet.
+$psSet    = !empty($_REQUEST['ps_set']);
+$psReq    = array_values(array_filter(array_map('trim', (array)($_REQUEST['price_sheets'] ?? [])), 'strlen'));
 $self     = 'program_final.php?request_id=' . $rid . ($file !== '' ? '&file=' . rawurlencode($file) : '')
           . ($sheetReq !== '' ? '&sheet=' . rawurlencode($sheetReq) : '');
+if ($psSet) {
+    $self .= '&ps_set=1';
+    foreach ($psReq as $ps) $self .= '&price_sheets%5B%5D=' . rawurlencode($ps);
+}
 
-$st = $db->prepare('SELECT id, customer_name, practice_code, status FROM requests WHERE id = ?');
+$st = $db->prepare('SELECT id, customer_name, practice_code, status, group_folder FROM requests WHERE id = ?');
 $st->execute([$rid]);
 $req = $st->fetch();
 if (!$req) { iti_flash_set('error', 'Hub request not found.'); iti_redirect('programs.php'); }
@@ -37,7 +45,8 @@ $lang = in_array($_REQUEST['lang'] ?? '', ITI_LANGUAGES, true) ? $_REQUEST['lang
 $calc = null; $calcErr = '';
 $calcPick = null;   // the Calc was found but needs a choice: ['file', 'candidates', 'sheets']
 try {
-    $calc = calc_read_request($db, $rid, $file, $sheetReq);
+    $isGrp = trim((string)($req['group_folder'] ?? '')) !== '';   // GRP departure: one price only by default
+    $calc = calc_read_request($db, $rid, $file, $sheetReq, $psSet ? $psReq : ($isGrp ? [] : ['*']));
 } catch (CalcSheetException $e) {
     $calcErr  = $e->getMessage();
     $calcPick = $e->data;
@@ -220,6 +229,47 @@ include __DIR__ . '/../../includes/layout_header.php';
   <div class="form-section-title">Calc</div>
   <?php if ($multiCalc) echo $fileForm($calc['candidates'], $calc['file']); ?>
   <?php if (count($sheetList) > 1) echo $sheetForm($calc['file'], $sheetList, $calc['sheet']); ?>
+  <?php
+    $paxSheets = array_values(array_filter($sheetList, function ($s) { return stripos($s, 'PAX') !== false; }));
+    $priceOpts = $calc['price_options'] ?? [];
+    $ticked = [];
+    foreach ($priceOpts as $o) $ticked[] = strtolower($o['sheet']);
+    if (!$priceOpts && $psSet) foreach ($psReq as $ps) $ticked[] = strtolower($ps);
+  ?>
+  <?php if (count($paxSheets) > 1): ?>
+  <form method="GET" action="program_final.php" style="margin:4px 0 10px;padding:8px 10px;background:#fafafa;border:1px solid var(--grey-lt);border-radius:6px;">
+    <input type="hidden" name="request_id" value="<?= $rid ?>">
+    <input type="hidden" name="lang" value="<?= h($lang) ?>">
+    <input type="hidden" name="file" value="<?= h($calc['file']) ?>">
+    <input type="hidden" name="sheet" value="<?= h(trim($calc['sheet'])) ?>">
+    <input type="hidden" name="ps_set" value="1">
+    <div style="font-size:.85rem;margin-bottom:4px;">Prices in the programme — one row per ticked sheet (quote for several group sizes):</div>
+    <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;">
+      <?php foreach ($paxSheets as $s): $isMain = strcasecmp(trim($s), trim($calc['sheet'])) === 0; ?>
+        <label style="font-size:.85rem;white-space:nowrap;">
+          <input type="checkbox" name="price_sheets[]" value="<?= h(trim($s)) ?>" <?= $isMain || in_array(strtolower(trim($s)), $ticked, true) ? 'checked' : '' ?> <?= $isMain ? 'disabled title="The sheet the programme is built from"' : '' ?>>
+          <?= h(trim($s)) ?>
+        </label>
+      <?php endforeach; ?>
+      <button type="submit" class="btn btn-outline btn-sm">Update prices</button>
+    </div>
+    <?php if (count($priceOpts) > 1): ?>
+      <div style="font-size:.8rem;margin-top:6px;line-height:1.6;">
+        <?php foreach (iti_final_price_options_table($priceOpts, $lang) as $row): ?>
+          <div><?= h($row['label']) ?>: <strong><?= number_format($row['price'], 0, ',', '.') ?> <?= h($row['currency']) ?></strong></div>
+        <?php endforeach; ?>
+        <?php foreach ($priceOpts as $o): if ($o['price_to_customer'] === null || $o['price_to_customer'] <= 0): ?>
+          <div style="color:#8a6d00;">⚠ <?= h($o['sheet']) ?>: no price to customer in the sheet — left out.</div>
+        <?php endif; endforeach; ?>
+        <?php if (trim((string)($req['group_folder'] ?? '')) !== ''): ?>
+          <div style="color:#c62828;">⚠ Group departure (GRP): never “base N pax” — the group may hold other travellers. Untick the other sheets.</div>
+        <?php endif; ?>
+      </div>
+    <?php else: ?>
+      <div style="font-size:.78rem;color:var(--grey-mid);margin-top:4px;">Only the sheet <?= h(trim($calc['sheet'])) ?>: price per person and total, as for a confirmed booking.</div>
+    <?php endif; ?>
+  </form>
+  <?php endif; ?>
   <div style="font-size:.85rem;line-height:1.7;">
     <strong><?= h($calc['file']) ?></strong> · sheet <?= h($calc['sheet']) ?><br>
     <?= $fmtD($calc['start_date']) ?> → <?= $fmtD($calc['end_date']) ?> · <?= (int)$calc['nights'] ?> nights ·

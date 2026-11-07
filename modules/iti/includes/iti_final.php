@@ -377,6 +377,7 @@ function iti_final_price_table(array $calc, string $lang): array {
         'de' => array('Erwachsener', 'Jugendlicher (12–15 J.)', 'Kind (unter 12 J.)', 'Gesamtpreis', array('Erwachsener', 'Erwachsene'), array('Jugendlicher', 'Jugendliche'), array('Kind', 'Kinder')),
     );
     $t = $L[$lang] ?? $L['en'];
+    if (!empty($calc['price_options']) && count($calc['price_options']) > 1) return iti_final_price_options_table($calc['price_options'], $lang);
     $adult = $calc['price_to_customer'] ?? null;
     if ($adult === null || $adult <= 0) return array();
     $pax = $calc['pax'] ?? array();
@@ -392,6 +393,26 @@ function iti_final_price_table(array $calc, string $lang): array {
     if (!empty($calc['price_total']) && $calc['price_total'] > 0) {
         $rows[] = array('label' => $t[3] . ($who ? ' (' . implode(', ', $who) . ')' : ''), 'price' => round((float)$calc['price_total']),
                         'currency' => 'USD', 'bold' => true);
+    }
+    return $rows;
+}
+
+/**
+ * Price table of a quote with one pax sheet per group size (calc_add_price_options()): one row per
+ * sheet, "per person, based on N pax", smallest group first; no total (it differs per option).
+ * Two sheets with the same pax count are told apart by the sheet name.
+ */
+function iti_final_price_options_table(array $opts, string $lang): array {
+    $L = array('it' => 'Quota per persona, base %d pax', 'en' => 'Per person, based on %d pax', 'fr' => 'Prix par personne, base %d pax',
+               'es' => 'Precio por persona, base %d pax', 'de' => 'Preis pro Person, Basis %d Pax');
+    $fmt = $L[$lang] ?? $L['en'];
+    $count = array();
+    foreach ($opts as $o) $count[$o['pax_total']] = ($count[$o['pax_total']] ?? 0) + 1;
+    $rows = array();
+    foreach ($opts as $o) {
+        if ($o['price_to_customer'] === null || $o['price_to_customer'] <= 0 || $o['pax_total'] <= 0) continue;
+        $rows[] = array('label' => sprintf($fmt, $o['pax_total']) . ($count[$o['pax_total']] > 1 ? ' (' . $o['sheet'] . ')' : ''),
+                        'price' => round((float)$o['price_to_customer']), 'currency' => 'USD');
     }
     return $rows;
 }

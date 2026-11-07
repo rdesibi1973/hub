@@ -746,8 +746,18 @@ Dry-run unless confirm.
 Only needed for samples: a personal program's link is on without it (unpublish does not turn it off; cancel does).
 
 #### `iti_calc_plan` (GET) / `iti_final_from_calc` (POST)
-`request_id`, `sample_id?` (default: the sample whose Calc code matches the file name), `lang?`, `file?`, `sheet?`.
-Plan: `calc` (file, files = every Calc of the folder, rev, pax), `sample`, `nights[]` (date, label, hotel text → lodge, state, meal, activities,
+`request_id`, `sample_id?` (default: the sample whose Calc code matches the file name), `lang?`, `file?`, `sheet?`,
+`price_sheets?` (list or `"10PAX,11PAX,12PAX"`).
+- **`sheet`**: the pax sheet the programme is built from. A quote Calc often has several pax sheets and none marked CONF:
+  without `sheet` → 400, and the message lists the sheets.
+- **`price_sheets`** (quote for several group sizes): the price table gets one row per sheet, "Quota per persona, base N pax",
+  smallest group first, with no total. The `sheet` is always included. A sheet whose nights or hotels differ from `sheet` is
+  flagged in `calc.warnings` and `same_itinerary: false`, because it is another itinerary, not a price option. Never for GRP
+  group departures ("base N pax" is forbidden there).
+
+Plan: `calc` (file, files = every Calc of the folder, rev, pax, sheet, sheets = pickable sheets, warnings,
+price_options [{sheet, pax_total, pax, price_to_customer, nights, same_itinerary}], price_table = the rows the programme
+will get), `sample`, `nights[]` (date, label, hotel text → lodge, state, meal, activities,
 from_sample_day, flags), `unmapped` {lodge|activity|route: {norm: text}}, `blocking`, `existing_finals` (id, calc_file,
 superseded_by). Several Calc files (e.g. the same safari with other lodges) → pass `file`; each file has its own final.
 GRP member: the Calc is found in the group folder when the client folder has none, read on the client's sheet (see `read_calc`).

@@ -396,6 +396,60 @@ function calc_locate_request(string $token, array $r, string $file = ''): array 
     throw $err;
 }
 
+/** "Lodge A|Lodge B|…": the hotel of each night, to tell a price option from another itinerary. */
+function calc_hotel_signature(array $days) {
+    $h = array();
+    foreach ($days as $d) $h[] = strtolower(preg_replace('/\s+/', ' ', trim((string)($d['hotel_text'] ?? ''))));
+    return implode('|', $h);
+}
+
+/**
+ * Price options of a quote (one pax sheet per group size: 10 / 11 / 12 pax): read every sheet
+ * of $priceSheets from the same local Calc and add $data['price_options'] =
+ * [{sheet, pax_total, pax, price_to_customer, nights, same_itinerary}] (sorted by pax, the read
+ * sheet always included), when at least two sheets are given. A sheet whose nights or hotels
+ * differ from the read one is flagged (same_itinerary false + a warning): it is another
+ * itinerary, not a price option. Unknown sheet names are skipped with a warning.
+ */
+function calc_add_price_options($path, array $sheets, array $data, array $priceSheets) {
+    if (count($priceSheets) === 1 && trim((string)$priceSheets[0]) === '*') {
+        // Default of the Hub page: every pax sheet, unless the Calc is a group calc (RECAP) or
+        // has a sheet marked CONF (a confirmed booking: the other sheets are old quotes).
+        $priceSheets = array();
+        $conf = false;
+        foreach ($sheets as $s) { if (stripos($s, 'CONF') !== false) $conf = true; }
+        if (!$conf && !sc_has_recap($sheets)) {
+            foreach ($sheets as $s) { if (stripos($s, 'PAX') !== false) $priceSheets[] = $s; }
+        }
+    }
+    $want = array(trim((string)$data['sheet']));
+    foreach ($priceSheets as $ps) {
+        $ps = trim((string)$ps);
+        if ($ps === '') continue;
+        $hit = null;
+        foreach ($sheets as $s) { if (strcasecmp(trim($s), $ps) === 0) $hit = trim($s); }
+        if ($hit === null) { $data['warnings'][] = 'Price sheet "' . $ps . '" not found in the Calc — skipped.'; continue; }
+        $dup = false;
+        foreach ($want as $w) { if (strcasecmp($w, $hit) === 0) $dup = true; }
+        if (!$dup) $want[] = $hit;
+    }
+    if (count($want) < 2) return $data;
+    $sig  = calc_hotel_signature($data['days']);
+    $opts = array();
+    foreach ($want as $s) {
+        $d = strcasecmp($s, trim((string)$data['sheet'])) === 0 ? $data : calc_read_file($path, $s);
+        $same = (int)$d['nights'] === (int)$data['nights'] && calc_hotel_signature($d['days']) === $sig;
+        if (!$same) $data['warnings'][] = 'Sheet "' . $s . '" has other nights or hotels than "' . trim((string)$data['sheet'])
+                                         . '" — it looks like another itinerary, not a price option.';
+        $p = $d['pax'];
+        $opts[] = array('sheet' => $s, 'pax_total' => (int)$p['adults'] + (int)$p['teen'] + (int)$p['child'], 'pax' => $p,
+                        'price_to_customer' => $d['price_to_customer'], 'nights' => (int)$d['nights'], 'same_itinerary' => $same);
+    }
+    usort($opts, function ($a, $b) { return $a['pax_total'] - $b['pax_total']; });
+    $data['price_options'] = $opts;
+    return $data;
+}
+
 /**
  * A Hub request's Calc: locate it in the request's Dropbox folder (GRP member: else
  * the group folder), download it (with its Dropbox rev, to detect later changes) and read it.
@@ -406,7 +460,7 @@ function calc_locate_request(string $token, array $r, string $file = ''): array 
  * calc_service.php (calc_dbx_download) loaded.
  * @throws InvalidArgumentException (not found / not finalised) | RuntimeException (Dropbox)
  */
-function calc_read_request(PDO $db, int $requestId, string $file = '', string $sheet = ''): array {
+function calc_read_request(PDO $db, int $requestId, string $file = '', string $sheet = '', array $priceSheets = array()): array {
     $st = $db->prepare('SELECT * FROM requests WHERE id = ?');
     $st->execute([$requestId]);
     $r = $st->fetch(PDO::FETCH_ASSOC);
@@ -437,6 +491,7 @@ function calc_read_request(PDO $db, int $requestId, string $file = '', string $s
             $sheet = $g['sheet'];
         }
         $data = calc_read_file($tmp, $sheet);
+        if ($priceSheets) $data = calc_add_price_options($tmp, $sheets, $data, $priceSheets);
     } catch (InvalidArgumentException $e) {
         if (!$sheets) throw $e;   // not a readable .xlsx: nothing to choose from
         throw new CalcSheetException($e->getMessage(), array(

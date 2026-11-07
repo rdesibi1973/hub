@@ -438,7 +438,11 @@ function iti_ps_publish(PDO $db, int $id, bool $publish, bool $go): array {
 /** Calc of a Hub request → plan (sample, nights, what is not mapped yet). */
 function iti_ps_calc_plan(PDO $db, int $rid, array $in): array {
     iti_ensure_final_schema();
-    $calc = calc_read_request($db, $rid, (string)($in['file'] ?? ''), (string)($in['sheet'] ?? ''));
+    // price_sheets: pax sheets whose prices go in the price table (quote for 10 / 11 / 12 pax), list or "a,b"
+    $ps = $in['price_sheets'] ?? [];
+    if (is_string($ps)) $ps = explode(',', $ps);
+    $ps = is_array($ps) ? array_values(array_filter(array_map('trim', array_map('strval', $ps)), 'strlen')) : [];
+    $calc = calc_read_request($db, $rid, (string)($in['file'] ?? ''), (string)($in['sheet'] ?? ''), $ps);
     $lang = in_array($in['lang'] ?? '', ITI_PS_LANGS, true) ? $in['lang'] : 'it';
     $code = iti_final_code_from_calc($calc['file']);
     $sample = !empty($in['sample_id']) ? iti_get_program((int)$in['sample_id']) : iti_final_find_sample($db, $code, $lang);
@@ -452,7 +456,9 @@ function iti_ps_calc_plan(PDO $db, int $rid, array $in): array {
                      'activities' => array_map(function ($a) { return $a['text'] . ' [' . $a['state'] . ']'; }, $d['acts'] ?? []),
                      'from_sample_day' => $d['sample_index'] !== null ? $d['sample_index'] + 1 : null, 'flags' => $d['flags'] ?? []];
     }
-    return ['calc' => ['file' => $calc['file'], 'files' => $calc['candidates'] ?? [], 'rev' => $calc['calc_rev'] ?? null, 'pax' => $calc['pax'] ?? null],
+    return ['calc' => ['file' => $calc['file'], 'files' => $calc['candidates'] ?? [], 'rev' => $calc['calc_rev'] ?? null, 'pax' => $calc['pax'] ?? null,
+                       'sheet' => $calc['sheet'] ?? null, 'sheets' => $calc['sheets'] ?? [], 'warnings' => $calc['warnings'] ?? [],
+                       'price_options' => $calc['price_options'] ?? [], 'price_table' => iti_final_price_table($calc, $lang)],
             'code' => $code, 'sample' => $sample ? ['id' => (int)$sample['id'], 'title' => iti_doc_pick($sample, 'title', $lang)] : null,
             'nights' => $nights, 'unmapped' => $plan['unmapped'], 'blocking' => $plan['blocking'], 'flags' => $plan['flags'],
             'existing_finals' => array_map(function ($f) { return ['id' => (int)$f['id'], 'calc_file' => $f['source_calc_path'] ? basename($f['source_calc_path']) : null,
