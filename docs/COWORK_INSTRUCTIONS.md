@@ -148,6 +148,9 @@ Prima di iniziare un lavoro leggi quella giusta con il connettore Dropbox e segu
 - commissioni dei venditori → staff-compensations
 - mail ad agenzie, clienti, staff → agency-email
 - post Facebook / Instagram → social-post
+`rules-client-documents.md`, nella stessa cartella, non è uno skill: sono le regole su ciò che vedono agenzie e clienti
+(prezzi, link, nomi da non mostrare, diciture, esclusioni). sales-agent, agency-email e booking-confirmation lo richiamano.
+Una regola di questo tipo si cambia solo lì.
 Quando correggo un errore di procedura o scopriamo un modo migliore di lavorare, a fine lavoro
 proponimi la modifica del file interessato (cosa cambia); dopo il mio ok aggiornalo:
 - dal PC (shell su `C:\Dropbox`), modificando il file sul posto;
