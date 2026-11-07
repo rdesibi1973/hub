@@ -22,7 +22,9 @@ $can_edit = true;   // all staff since 7 Oct 2026 (was admin/manager)
 $user     = $_cu['username'] ?? 'system';
 $rid      = (int)($_REQUEST['request_id'] ?? 0);
 $file     = trim((string)($_REQUEST['file'] ?? ''));   // one of several Calc files of the folder ('' = the highest number)
-$self     = 'program_final.php?request_id=' . $rid . ($file !== '' ? '&file=' . rawurlencode($file) : '');
+$sheetReq = trim((string)($_REQUEST['sheet'] ?? ''));  // pax sheet chosen by the user ('' = the reader decides)
+$self     = 'program_final.php?request_id=' . $rid . ($file !== '' ? '&file=' . rawurlencode($file) : '')
+          . ($sheetReq !== '' ? '&sheet=' . rawurlencode($sheetReq) : '');
 
 $st = $db->prepare('SELECT id, customer_name, practice_code, status FROM requests WHERE id = ?');
 $st->execute([$rid]);
@@ -33,8 +35,12 @@ $lang = in_array($_REQUEST['lang'] ?? '', ITI_LANGUAGES, true) ? $_REQUEST['lang
 
 // ── Read the Calc (Dropbox) ─────────────────────────────────
 $calc = null; $calcErr = '';
+$calcPick = null;   // the Calc was found but needs a choice: ['file', 'candidates', 'sheets']
 try {
-    $calc = calc_read_request($db, $rid, $file, (string)($_REQUEST['sheet'] ?? ''));
+    $calc = calc_read_request($db, $rid, $file, $sheetReq);
+} catch (CalcSheetException $e) {
+    $calcErr  = $e->getMessage();
+    $calcPick = $e->data;
 } catch (Throwable $e) {
     $calcErr = $e->getMessage();
 }
@@ -82,6 +88,42 @@ foreach ($finals as $f) {   // the active final of THIS Calc file
     if (!$f['superseded_by'] && $calc && basename((string)$f['source_calc_path']) === $calc['file']) { $active = $f; break; }
 }
 $multiCalc = $calc && count($calc['candidates'] ?? []) > 1;
+$sheetList = $calc ? ($calc['sheets'] ?? []) : ($calcPick['sheets'] ?? []);
+// Pickers: one form per choice (changing the file drops the sheet: another workbook has other sheets).
+$fileForm = function (array $candidates, string $current) use ($rid, $lang, $finals) {
+    ob_start(); ?>
+  <form method="GET" action="program_final.php" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px;">
+    <input type="hidden" name="request_id" value="<?= $rid ?>">
+    <input type="hidden" name="lang" value="<?= h($lang) ?>">
+    <span style="font-size:.85rem;"><?= count($candidates) ?> Calc files in the folder — each one gets its own program:</span>
+    <select name="file" onchange="this.form.submit()" style="max-width:520px;">
+      <?php foreach ($candidates as $cf):
+        $has = false;
+        foreach ($finals as $f) { if (!$f['superseded_by'] && basename((string)$f['source_calc_path']) === $cf) { $has = (int)$f['id']; break; } } ?>
+        <option value="<?= h($cf) ?>" <?= $cf === $current ? 'selected' : '' ?>><?= h($cf) ?><?= $has ? ' — program #' . $has : '' ?></option>
+      <?php endforeach; ?>
+    </select>
+    <noscript><button type="submit" class="btn btn-outline btn-sm">Open</button></noscript>
+  </form>
+<?php return ob_get_clean();
+};
+$sheetForm = function (string $fileName, array $sheets, string $current) use ($rid, $lang) {
+    ob_start(); ?>
+  <form method="GET" action="program_final.php" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px;">
+    <input type="hidden" name="request_id" value="<?= $rid ?>">
+    <input type="hidden" name="lang" value="<?= h($lang) ?>">
+    <input type="hidden" name="file" value="<?= h($fileName) ?>">
+    <span style="font-size:.85rem;">Sheet of the Calc (pax option) to build the program from:</span>
+    <select name="sheet" onchange="this.form.submit()" style="min-width:220px;">
+      <?php if ($current === ''): ?><option value="">— choose the sheet —</option><?php endif; ?>
+      <?php foreach ($sheets as $s): ?>
+        <option value="<?= h($s) ?>" <?= strcasecmp(trim($s), trim($current)) === 0 ? 'selected' : '' ?>><?= h(trim($s)) ?></option>
+      <?php endforeach; ?>
+    </select>
+    <noscript><button type="submit" class="btn btn-outline btn-sm">Open</button></noscript>
+  </form>
+<?php return ob_get_clean();
+};
 if ($multiCalc) {   // the file picker replaces the reader's "several Calc files" warning
     $calc['warnings'] = array_values(array_filter($calc['warnings'], function ($w) { return strpos($w, 'Several Calc files') !== 0; }));
 }
@@ -128,7 +170,17 @@ include __DIR__ . '/../../includes/layout_header.php';
   <a href="../leads/request_view.php?id=<?= $rid ?>" class="btn btn-outline btn-sm">← Request</a>
 </div>
 
-<?php if ($calcErr): ?>
+<?php if ($calcPick && count($calcPick['sheets']) > 0): ?>
+  <div class="form-card" style="border-left:4px solid #f0ad00;margin-bottom:18px;">
+    <div class="form-section-title">Choose the Calc sheet</div>
+    <div style="font-size:.85rem;margin-bottom:10px;">
+      <strong><?= h($calcPick['file']) ?></strong> has more than one sheet — choose the one with the option the client is getting.
+      <div style="font-size:.78rem;color:var(--grey-mid);margin-top:4px;"><?= h($calcErr) ?></div>
+    </div>
+    <?php if (count($calcPick['candidates'] ?? []) > 1) echo $fileForm($calcPick['candidates'], $calcPick['file']); ?>
+    <?= $sheetForm($calcPick['file'], $calcPick['sheets'], $sheetReq) ?>
+  </div>
+<?php elseif ($calcErr): ?>
   <div class="form-card" style="border-left:4px solid var(--red);margin-bottom:18px;">
     <strong>The Calc cannot be used yet.</strong><br><?= h($calcErr) ?>
   </div>
@@ -166,21 +218,8 @@ include __DIR__ . '/../../includes/layout_header.php';
 <?php if ($calc): ?>
 <div class="form-card" style="margin-bottom:18px;">
   <div class="form-section-title">Calc</div>
-  <?php if ($multiCalc): ?>
-  <form method="GET" action="program_final.php" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px;">
-    <input type="hidden" name="request_id" value="<?= $rid ?>">
-    <input type="hidden" name="lang" value="<?= h($lang) ?>">
-    <span style="font-size:.85rem;"><?= count($calc['candidates']) ?> Calc files in the folder — each one gets its own program:</span>
-    <select name="file" onchange="this.form.submit()" style="max-width:520px;">
-      <?php foreach ($calc['candidates'] as $cf):
-        $has = false;
-        foreach ($finals as $f) { if (!$f['superseded_by'] && basename((string)$f['source_calc_path']) === $cf) { $has = (int)$f['id']; break; } } ?>
-        <option value="<?= h($cf) ?>" <?= $cf === $calc['file'] ? 'selected' : '' ?>><?= h($cf) ?><?= $has ? ' — program #' . $has : '' ?></option>
-      <?php endforeach; ?>
-    </select>
-    <noscript><button type="submit" class="btn btn-outline btn-sm">Open</button></noscript>
-  </form>
-  <?php endif; ?>
+  <?php if ($multiCalc) echo $fileForm($calc['candidates'], $calc['file']); ?>
+  <?php if (count($sheetList) > 1) echo $sheetForm($calc['file'], $sheetList, $calc['sheet']); ?>
   <div style="font-size:.85rem;line-height:1.7;">
     <strong><?= h($calc['file']) ?></strong> · sheet <?= h($calc['sheet']) ?><br>
     <?= $fmtD($calc['start_date']) ?> → <?= $fmtD($calc['end_date']) ?> · <?= (int)$calc['nights'] ?> nights ·

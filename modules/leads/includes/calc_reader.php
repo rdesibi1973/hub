@@ -19,6 +19,28 @@
 require_once __DIR__ . '/safari_check.php';
 
 /**
+ * The Calc was found but cannot be read as it is (several pax sheets and none marked CONF,
+ * group calc with no client sheet, sheet not found): carries what a page needs to let the
+ * user choose — 'file', 'candidates' (Calc files of the folder), 'sheets' (pickable sheets).
+ */
+class CalcSheetException extends InvalidArgumentException {
+    public $data = [];
+    public function __construct($msg, array $data = array()) { parent::__construct($msg); $this->data = $data; }
+}
+
+/**
+ * The sheets a user can pick: the pax sheets ("2PAX", "4PAX CONF", "2PAX Fabio Zanelli")
+ * and RECAP, in workbook order; every sheet when none of them says PAX or RECAP.
+ */
+function calc_pickable_sheets(array $sheets) {
+    $out = array();
+    foreach ($sheets as $s) {
+        if (stripos($s, 'PAX') !== false || stripos($s, 'recap') !== false) $out[] = $s;
+    }
+    return $out ? $out : array_values($sheets);
+}
+
+/**
  * The Calc to use among a folder's file names: the given $file (must exist), else
  * the "*_Calc.xlsx" with the highest leading number.
  * @return array{file:string, candidates:string[], warnings:string[]}
@@ -403,6 +425,7 @@ function calc_read_request(PDO $db, int $requestId, string $file = '', string $s
     file_put_contents($tmp, $dl['bytes']);
     $warnings = $pick['warnings'];
     if ($loc['in_group']) $warnings[] = 'No Calc in the client folder — used the group Calc ' . $path . '.';
+    $sheets = array();
     try {
         $sheets = sc_xlsx_sheets($tmp);
         if ($loc['in_group'] && trim($sheet) === '' && sc_has_recap($sheets)) {
@@ -414,6 +437,10 @@ function calc_read_request(PDO $db, int $requestId, string $file = '', string $s
             $sheet = $g['sheet'];
         }
         $data = calc_read_file($tmp, $sheet);
+    } catch (InvalidArgumentException $e) {
+        if (!$sheets) throw $e;   // not a readable .xlsx: nothing to choose from
+        throw new CalcSheetException($e->getMessage(), array(
+            'file' => $pick['file'], 'candidates' => $pick['candidates'], 'sheets' => calc_pickable_sheets($sheets)));
     } finally {
         @unlink($tmp);
     }
@@ -424,6 +451,7 @@ function calc_read_request(PDO $db, int $requestId, string $file = '', string $s
         'calc_folder' => $dir,
         'file'        => $pick['file'],
         'candidates'  => $pick['candidates'],   // every *_Calc.xlsx of that folder
+        'sheets'      => calc_pickable_sheets($sheets),   // to switch sheet (quotes keep several pax sheets)
         'calc_path'   => $path,
         'calc_rev'    => $dl['rev'],
     ], $data);
