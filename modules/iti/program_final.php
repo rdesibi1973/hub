@@ -10,6 +10,7 @@ require_once __DIR__ . '/../../includes/auth.php';
 require_login();
 require_once __DIR__ . '/includes/iti_functions.php';
 require_once __DIR__ . '/includes/iti_final.php';
+require_once __DIR__ . '/includes/iti_ai_service.php';
 require_once __DIR__ . '/../leads/dropbox_constants.php';   // DROPBOX_* keys (server-only file, like iti_import_sto.php)
 require_once __DIR__ . '/../leads/dropbox_helper.php';
 require_once __DIR__ . '/../leads/includes/booking_service.php';
@@ -314,6 +315,7 @@ include __DIR__ . '/../../includes/layout_header.php';
 </div>
 
 <?php if ($plan): ?>
+<?php iti_ai_panel('calc'); ?>
 <?php if ($plan['blocking'] && $can_edit): ?>
 <div class="form-card" style="margin-bottom:18px;border-left:4px solid var(--red);">
   <div class="form-section-title">To map before generating (saved as aliases — asked only once)</div>

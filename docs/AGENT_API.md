@@ -510,7 +510,7 @@ and the descriptions of the program's lodges and destinations. Without `all`, on
 ### `iti_save_texts` (POST)
 `program_id`, `lang`, `texts` `{"<key>": "<translation>", …}`, `overwrite?` (default false: only empty fields are written,
 so edited translations are kept). Dry-run unless `"confirm": true`. Lets Claude translate programs in a session
-(no Anthropic API billing); the Hub "Translate" button does the same through the API when `ANTHROPIC_API_KEY` is set.
+(no Anthropic API billing). The Hub "Translate" button was removed from the program preview on 8 Nov 2026 (`iti_translate.php` is kept, unused).
 
 ### ITI personal programs (Cowork)
 Code: `modules/iti/includes/iti_program_service.php` (+ `iti_final.php` for the Calc). Only **personal**

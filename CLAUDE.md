@@ -15,6 +15,8 @@ outdated — this file wins where they disagree (PHP version, local lint).
 - `modules/invoices/` — invoices, credit notes. Shared logic: `includes/invoice_service.php`
   (numbering, recalculation, payments, folder status, PDF, import); `config.php` = bootstrap only.
 - `modules/memo/` — Memo Board; logic in `memo_lib.php` (follow-ups, next steps, routines).
+- **AI buttons of ITI** (logic `modules/iti/includes/iti_ai_service.php`, limits in ITI → Settings → AI): every new AI button calls
+  `iti_ai_call()`, which checks the spending limits and records the real cost in `iti_ai_usage`; never a separate connection.
 - `modules/iti/` — itinerary builder. `includes/` (root) — config (server-only), auth, db, mail.
 - `modules/operations/` — movements, Medivac, lunch boxes, **Booking follow-up** (`booking_followup.php`; logic
   `includes/followup_service.php` + `followup_classify.php`, shared with the Agent API `followup_*` and

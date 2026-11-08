@@ -8,6 +8,7 @@
 require_once __DIR__ . '/../../includes/auth.php';
 require_login();
 require_once __DIR__ . '/includes/iti_functions.php';
+require_once __DIR__ . '/includes/iti_ai_service.php';
 
 $db    = db();
 $_cu   = current_user();
@@ -186,6 +187,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $db->prepare('DELETE FROM iti_supplier_blocklist WHERE id = ?')->execute([(int)($_POST['id'] ?? 0)]);
         iti_redirect('settings.php?tab=suppliers');
     }
+
+    // ---- AI limits and who sees the buttons being tested (admin only) ----
+    if ($do === 'ai_save' && $admin) {
+        iti_set_setting('ai_enabled', isset($_POST['ai_enabled']) ? '1' : '0');
+        foreach (['ai_limit_month', 'ai_limit_user', 'ai_limit_click'] as $k) {
+            iti_set_setting($k, (string)max(0, round((float)($_POST[$k] ?? 0), 2)));
+        }
+        iti_set_setting('ai_users', implode(',', array_map('intval', (array)($_POST['ai_users'] ?? []))));
+        iti_flash_set('success', 'AI limits saved.');
+        iti_redirect('settings.php?tab=ai');
+    }
 }
 
 // ── Load data ────────────────────────────────────────────────────────────────
@@ -267,6 +279,7 @@ include __DIR__ . '/../../includes/layout_header.php';
   <a href="settings.php?tab=terms"   class="set-tab <?= $tab==='terms'?'active':''   ?>">📜 Terms &amp; Conditions</a>
   <a href="settings.php?tab=tips" class="set-tab <?= $tab==='tips'?'active':'' ?>">💬 Tip note</a>
   <a href="settings.php?tab=suppliers" class="set-tab <?= $tab==='suppliers'?'active':'' ?>">🚫 Partner names</a>
+  <a href="settings.php?tab=ai" class="set-tab <?= $tab==='ai'?'active':'' ?>">✨ AI</a>
 </div>
 
 <?php /* ════════════ PROFILE ════════════ */ if ($tab === 'profile'):
@@ -450,6 +463,9 @@ include __DIR__ . '/../../includes/layout_header.php';
   <?php endforeach; ?>
   <?php if ($admin): ?><button type="submit" class="btn btn-red">💾 Save</button><?php endif; ?>
 </form>
+
+<?php /* ════════════ AI ════════════ */ elseif ($tab === 'ai'): ?>
+<?php include __DIR__ . '/includes/iti_ai_settings_tab.php'; ?>
 
 <?php /* ════════════ TERMS ════════════ */ elseif ($tab !== 'suppliers'): ?>
 <?php if (!$admin): ?>

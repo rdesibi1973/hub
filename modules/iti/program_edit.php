@@ -7,6 +7,7 @@ require_once __DIR__ . '/../../includes/auth.php';
 require_login();
 require_once __DIR__ . '/includes/iti_functions.php';
 require_once __DIR__ . '/includes/iti_program_service.php';   // client price table (same rules as the Agent API)
+require_once __DIR__ . '/includes/iti_ai_service.php';
 iti_ps_schema();
 
 $db   = db();
@@ -778,7 +779,7 @@ include __DIR__ . '/../../includes/layout_header.php';
     <?php if ($active_tab === 'days'): ?>
     <button type="button" id="btn-save-current" onclick="saveCurrentDay()" class="btn btn-red btn-sm">💾 Save</button>
     <?php endif; ?>
-    <a href="program_doc.php?id=<?= $id ?>" class="btn btn-outline btn-sm" target="_blank" title="The program as the client sees it (translate missing texts there)">👁 Preview</a>
+    <a href="program_doc.php?id=<?= $id ?>" class="btn btn-outline btn-sm" target="_blank" title="The program as the client sees it">👁 Preview</a>
     <?php if ($public_url !== ''): ?>
     <a href="<?= h($public_url) ?>" target="_blank" class="btn btn-green btn-sm">🔗 Public Link</a>
     <button type="button" class="btn btn-outline btn-sm" onclick="navigator.clipboard.writeText(<?= h(json_encode($public_url)) ?>).then(()=>{this.textContent='✔ Copiato'})">📋 Copy link</button>
@@ -816,6 +817,8 @@ include __DIR__ . '/../../includes/layout_header.php';
     <?php endif; ?>
   </div>
 </div>
+
+<?php iti_ai_panel('program'); ?>
 
 <!-- Main tabs -->
 <!-- ── Program Details collapsible panel ── -->
