@@ -1576,9 +1576,40 @@ function iti_alias_save(string $type, string $text, array $targets, ?string $mea
     $row['created_by'] = $user;
     $upd = array();
     foreach (array_keys($row) as $c) if ($c !== 'alias') $upd[] = '`' . $c . '` = VALUES(`' . $c . '`)';
+    $upd[] = '`created_at` = NOW()';   // with created_by: who last changed it and when, so a review also sees changed aliases
     db()->prepare('INSERT INTO `' . ITI_ALIAS_TYPES[$type]['table'] . '` (`' . implode('`,`', array_keys($row)) . '`) VALUES ('
                   . implode(',', array_fill(0, count($row), '?')) . ') ON DUPLICATE KEY UPDATE ' . implode(', ', $upd))
         ->execute(array_values($row));
+}
+
+// Aliases of one type with the name of what they point to (page ITI → Aliases, Agent API iti_aliases).
+// $since = 'YYYY-MM-DD': only those saved or changed from that day on.
+function iti_alias_rows(PDO $db, string $type, string $q = '', int $lodgeId = 0, string $since = ''): array {
+    $where = array('1=1'); $params = array();
+    if ($q !== '') { $where[] = 'a.alias LIKE ?'; $params[] = '%' . iti_alias_norm($q) . '%'; }
+    if ($since !== '') { $where[] = 'a.created_at >= ?'; $params[] = $since; }
+    if ($type === 'lodge') {
+        if ($lodgeId) { $where[] = 'a.lodge_id = ?'; $params[] = $lodgeId; }
+        $sql = 'SELECT a.*, l.name AS target, d.name_en AS target_sub
+                  FROM iti_lodge_aliases a
+                  LEFT JOIN iti_lodges l ON l.id = a.lodge_id
+                  LEFT JOIN iti_destinations d ON d.id = l.destination_id';
+    } elseif ($type === 'activity') {
+        $sql = 'SELECT a.*, x.name_en AS target, x.name_it AS target_sub
+                  FROM iti_activity_aliases a
+                  LEFT JOIN iti_activities x ON x.id = a.activity_id';
+    } else {
+        $sql = "SELECT a.*, CONCAT(fd.name_en, ' → ', td.name_en) AS target,
+                       CONCAT(fr.from_airport, ' → ', fr.to_airport, IFNULL(CONCAT(' (', fr.operator, ')'), '')) AS target_sub
+                  FROM iti_route_aliases a
+                  LEFT JOIN iti_transfer_routes tr ON tr.id = a.transfer_route_id
+                  LEFT JOIN iti_destinations fd ON fd.id = tr.from_destination
+                  LEFT JOIN iti_destinations td ON td.id = tr.to_destination
+                  LEFT JOIN iti_flight_routes fr ON fr.id = a.flight_route_id";
+    }
+    $st = $db->prepare($sql . ' WHERE ' . implode(' AND ', $where) . ' ORDER BY a.alias');
+    $st->execute($params);
+    return $st->fetchAll();
 }
 
 // Seed from the texts found in the 27 Calc templates (/itineraries/SafariClassic/it)

@@ -57,30 +57,7 @@ foreach (ITI_ALIAS_TYPES as $t => $def) {
     $counts[$t] = (int)$db->query('SELECT COUNT(*) FROM `' . $def['table'] . '`')->fetchColumn();
 }
 
-$where = array('1=1'); $params = array();
-if ($q !== '') { $where[] = 'a.alias LIKE ?'; $params[] = '%' . iti_alias_norm($q) . '%'; }
-if ($type === 'lodge') {
-    if ($lodge_fil) { $where[] = 'a.lodge_id = ?'; $params[] = $lodge_fil; }
-    $sql = 'SELECT a.*, l.name AS target, d.name_en AS target_sub
-              FROM iti_lodge_aliases a
-              LEFT JOIN iti_lodges l ON l.id = a.lodge_id
-              LEFT JOIN iti_destinations d ON d.id = l.destination_id';
-} elseif ($type === 'activity') {
-    $sql = 'SELECT a.*, x.name_en AS target, x.name_it AS target_sub
-              FROM iti_activity_aliases a
-              LEFT JOIN iti_activities x ON x.id = a.activity_id';
-} else {
-    $sql = "SELECT a.*, CONCAT(fd.name_en, ' → ', td.name_en) AS target,
-                   CONCAT(fr.from_airport, ' → ', fr.to_airport, IFNULL(CONCAT(' (', fr.operator, ')'), '')) AS target_sub
-              FROM iti_route_aliases a
-              LEFT JOIN iti_transfer_routes tr ON tr.id = a.transfer_route_id
-              LEFT JOIN iti_destinations fd ON fd.id = tr.from_destination
-              LEFT JOIN iti_destinations td ON td.id = tr.to_destination
-              LEFT JOIN iti_flight_routes fr ON fr.id = a.flight_route_id";
-}
-$st = $db->prepare($sql . ' WHERE ' . implode(' AND ', $where) . ' ORDER BY a.alias');
-$st->execute($params);
-$rows = $st->fetchAll();
+$rows = iti_alias_rows($db, $type, $q, $lodge_fil);
 
 // Pickers for the add form.
 $opt_lodges = array(); $opt_acts = array(); $opt_tr = array(); $opt_fl = array();

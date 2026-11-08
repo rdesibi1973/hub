@@ -1672,6 +1672,11 @@ try {
     }
 
     // ── ITI personal programmes: samples, create (proposal), Calc → final, edit, publish ──
+    case 'iti_aliases':   // read only: the review of the mappings
+        agent_iti_lib();
+        try { agent_out(['ok' => true] + iti_ps_aliases($db, $in)); }
+        catch (InvalidArgumentException $e) { agent_fail($e->getMessage(), 400); }
+
     case 'iti_samples':
         agent_iti_lib();
         agent_out(['ok' => true, 'samples' => iti_ps_samples($db, trim((string)($in['q'] ?? '')))]);
@@ -3313,7 +3318,7 @@ try {
             'rollback_booking', 'iti_programs', 'iti_texts', 'iti_save_texts', 'update_rate', 'replace_flight_rates',
             'iti_lodges', 'iti_lodge', 'iti_destinations', 'iti_destination', 'iti_lodge_photos', 'iti_destination_photo',
             'iti_update_lodge', 'iti_update_destination', 'iti_create_lodge', 'iti_samples', 'iti_program', 'iti_document', 'iti_vouchers', 'iti_create_personal', 'iti_update_program',
-            'iti_update_day', 'iti_publish', 'iti_calc_plan', 'iti_final_from_calc', 'iti_save_alias', 'iti_tag_sample',
+            'iti_update_day', 'iti_publish', 'iti_calc_plan', 'iti_final_from_calc', 'iti_save_alias', 'iti_aliases', 'iti_tag_sample',
             'iti_set_days', 'iti_add_day', 'iti_delete_day', 'iti_inclusions', 'iti_update_inclusions', 'iti_save_as_sample',
             'iti_flight_routes', 'iti_create_flight_route', 'iti_activities', 'iti_activity', 'iti_update_activity', 'iti_create_activity',
             'iti_transfer_routes', 'iti_create_transfer_route', 'iti_create_destination', 'iti_import_program', 'iti_supplier_blocklist', 'add_flight_rates',

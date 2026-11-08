@@ -505,3 +505,26 @@ function iti_ps_save_alias(array $in, string $who): array {
     iti_alias_save($type, $text, $ids, $meal, $who);
     return ['alias' => iti_alias_norm($text), 'type' => $type, 'ids' => array_filter($ids), 'meal_basis' => $meal];
 }
+
+/** Read only, for the review of the mappings. $in: type (lodge|activity|route, default all), since (YYYY-MM-DD), q. */
+function iti_ps_aliases(PDO $db, array $in): array {
+    iti_ensure_final_schema();
+    $type  = trim((string)($in['type'] ?? ''));
+    $since = trim((string)($in['since'] ?? ''));
+    if ($type !== '' && !array_key_exists($type, ITI_ALIAS_TYPES)) throw new InvalidArgumentException('type: lodge | activity | route');
+    if ($since !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $since)) throw new InvalidArgumentException('since: YYYY-MM-DD');
+    $idCols = ['lodge_id', 'activity_id', 'transfer_route_id', 'flight_route_id'];
+    $out = []; $counts = [];
+    foreach ($type !== '' ? [$type] : array_keys(ITI_ALIAS_TYPES) as $t) {
+        $rows = iti_alias_rows($db, $t, trim((string)($in['q'] ?? '')), 0, $since);
+        $counts[$t] = ['total' => count($rows), 'maps_to_nothing' => 0];
+        foreach ($rows as $r) {
+            $ids = [];
+            foreach ($idCols as $c) if (!empty($r[$c])) $ids[$c] = (int)$r[$c];
+            if (!$ids) $counts[$t]['maps_to_nothing']++;
+            $out[] = ['type' => $t, 'alias' => $r['alias'], 'target' => $r['target'], 'target_detail' => $r['target_sub'], 'ids' => (object)$ids,
+                      'meal_basis' => $r['meal_basis'] ?? null, 'maps_to_nothing' => !$ids, 'changed_by' => $r['created_by'], 'changed_at' => $r['created_at']];
+        }
+    }
+    return ['counts' => $counts, 'aliases' => $out];
+}

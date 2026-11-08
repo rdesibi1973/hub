@@ -799,6 +799,13 @@ the programme Word copied next to that Calc, else the Calc's name without `_Calc
 `activity_id` | `transfer_route_id` / `flight_route_id`. A lodge alias without `lodge_id` = own arrangement
 (shown as free text). Dry-run unless confirm.
 
+#### `iti_aliases` (GET)
+Read only, for the review of the Calc mappings. Optional `type` (`lodge`|`activity`|`route`, default all), `since`
+(`YYYY-MM-DD`: saved or changed from that day on), `q` (part of the alias). Returns `counts` (per type: `total`, `maps_to_nothing`)
+and `aliases[]`: `type`, `alias`, `target`, `target_detail` (lodge: destination; activity: Italian name; route: the flight),
+`ids`, `meal_basis`, `maps_to_nothing` (true = known text with no target: on purpose for "medivac" or an own-arrangement hotel,
+to check otherwise), `changed_by`, `changed_at`. Corrections go through `iti_save_alias` after Roberto's ok.
+
 #### `iti_tag_sample` (POST)
 `sample_id`, and `code` (the Calc code, e.g. `BeachSimba`) **or** `request_id` (+ `file?`: the code is read from that
 request's Calc name). Tags the sample with the code and moves the code off any other sample that had it (one code =
