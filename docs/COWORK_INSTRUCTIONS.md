@@ -139,6 +139,7 @@ Prima di iniziare un lavoro leggi quella giusta con il connettore Dropbox e segu
 - verifica prenotazioni (fatture e conferme del booking team) → booking-check
 - follow-up prenotazioni (provisional, biglietti mancanti, gruppi a 60 giorni) → booking-followup
 - copie in conflitto Dropbox (Calc salvati da due PC) → dropbox-conflicts
+- revisione dei mapping del Calc (alias sbagliati o sospetti) → mapping-review
 - fatture e pagamenti → invoice-workflow
 - lavoro d'ufficio (pagamenti da sollecitare, CK, arrivi / partenze, lunch box, Medivac, biglietti voli interni,
   voucher, rooming list, ResRequest, info di viaggio prima della partenza) → back-office
