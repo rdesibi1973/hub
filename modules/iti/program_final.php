@@ -57,6 +57,8 @@ try {
 $code   = $calc ? iti_final_code_from_calc($calc['file']) : '';
 $sample = $calc ? iti_final_find_sample($db, $code, $lang) : null;
 
+$aiMapKey = 'iti_ai_map_' . $rid;   // last AI proposals of this request, until the session ends
+
 // ── POST ────────────────────────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit) {
     $action = $_POST['action'] ?? '';
@@ -84,6 +86,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit) {
             $res = iti_final_generate($db, $rid, $calc, (int)$sample['id'], $lang, ['id' => $_cu['id'] ?? null, 'username' => $user]);
             iti_flash_set('success', 'Itinerary program #' . $res['program_id'] . ' generated'
                 . ($res['superseded'] ? ' — it replaces #' . implode(', #', $res['superseded']) : '') . '. Review the flagged days.');
+        } elseif ($action === 'ai_map_texts') {
+            if (!iti_ai_can_see()) throw new RuntimeException('The AI buttons are not enabled for your user.');
+            if (!$calc) throw new RuntimeException('The Calc could not be read: ' . $calcErr);
+            @set_time_limit(280);
+            $p = iti_final_plan($db, $calc, $sample ? (int)$sample['id'] : 0);
+            $_SESSION[$aiMapKey] = iti_ai_propose_mappings($p['unmapped'], $p['hints'], $rid);
+            iti_flash_set('success', 'AI proposals ready below (' . number_format(iti_ai_run_spent(), 2) . ' USD). Nothing is saved until you press Map on each line.');
         }
     } catch (Throwable $e) {
         iti_flash_set('error', $e->getMessage());
@@ -315,12 +324,14 @@ include __DIR__ . '/../../includes/layout_header.php';
 </div>
 
 <?php if ($plan): ?>
-<?php iti_ai_panel('calc'); ?>
+<?php $aiMap = $_SESSION[$aiMapKey] ?? [];
+      iti_ai_panel('calc', ['post_to' => $self . '&lang=' . $lang,
+                            'idle' => ['map_texts' => array_filter($plan['unmapped']) ? '' : 'Every Calc text is already mapped.']]); ?>
 <?php if ($plan['blocking'] && $can_edit): ?>
 <div class="form-card" style="margin-bottom:18px;border-left:4px solid var(--red);">
   <div class="form-section-title">To map before generating (saved as aliases — asked only once)</div>
   <?php foreach (['lodge' => 'Hotel', 'activity' => 'Activity', 'route' => 'Route'] as $type => $lbl): ?>
-    <?php foreach ($plan['unmapped'][$type] as $text): ?>
+    <?php foreach ($plan['unmapped'][$type] as $text): $ai = $aiMap[$type][$text] ?? null; ?>
     <form method="POST" action="<?= h($self) ?>&amp;lang=<?= h($lang) ?>" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:6px 0;border-bottom:1px solid var(--grey-lt);">
       <input type="hidden" name="action" value="map">
       <input type="hidden" name="type" value="<?= $type ?>">
@@ -328,15 +339,16 @@ include __DIR__ . '/../../includes/layout_header.php';
       <span style="min-width:90px;font-size:.75rem;color:var(--grey-mid);"><?= $lbl ?></span>
       <code style="min-width:220px;"><?= h($text) ?></code>
       <?php if ($type === 'lodge'): ?>
-        <select name="lodge_id" style="max-width:340px;"><?= iti_options($opt['lodge'], iti_final_suggest_lodge($text, $optName['lodge'], $plan['hints']['lodge_date'][$text] ?? null), '— nothing (own arrangement / not a lodge) —') ?></select>
+        <select name="lodge_id" style="max-width:340px;"><?= iti_options($opt['lodge'], ($ai['lodge_id'] ?? 0) ?: iti_final_suggest_lodge($text, $optName['lodge'], $plan['hints']['lodge_date'][$text] ?? null), '— nothing (own arrangement / not a lodge) —') ?></select>
         <select name="meal_basis"><?= iti_options(ITI_MEAL_BASIS, $plan['hints']['lodge_meal'][$text] ?? null, '— meal: lodge default —') ?></select>
       <?php elseif ($type === 'activity'): ?>
-        <select name="activity_id" style="max-width:380px;"><?= iti_options($opt['activity'], iti_alias_suggest($text, $opt['activity']), '— nothing (not an activity) —') ?></select>
+        <select name="activity_id" style="max-width:380px;"><?= iti_options($opt['activity'], ($ai['activity_id'] ?? 0) ?: iti_alias_suggest($text, $opt['activity']), '— nothing (not an activity) —') ?></select>
       <?php else: ?>
-        <select name="transfer_route_id" style="max-width:260px;"><?= iti_options($opt['transfer'], null, '— no transfer —') ?></select>
-        <select name="flight_route_id" style="max-width:260px;"><?= iti_options($opt['flight'], null, '— no flight —') ?></select>
+        <select name="transfer_route_id" style="max-width:260px;"><?= iti_options($opt['transfer'], ($ai['transfer_route_id'] ?? 0) ?: null, '— no transfer —') ?></select>
+        <select name="flight_route_id" style="max-width:260px;"><?= iti_options($opt['flight'], ($ai['flight_route_id'] ?? 0) ?: null, '— no flight —') ?></select>
       <?php endif; ?>
       <button type="submit" class="btn btn-outline btn-sm">💾 Map</button>
+      <?= iti_ai_map_note($ai) ?>
     </form>
     <?php endforeach; ?>
   <?php endforeach; ?>
