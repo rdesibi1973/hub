@@ -523,8 +523,9 @@ function iti_final_price_table(array $calc, string $lang): array {
     };
     $disc = function ($label, $d) use ($t) { return ($d !== null && $d > 0) ? $label . ', ' . $t[8] . ' ' . round((float)$d) . ' USD' : $label; };
     $add($open ? 1 : (int)($pax['adults'] ?? 0), $t[0], $adult, $t[4]);
-    $add($open ? 1 : (int)($pax['teen'] ?? 0), $disc($t[1], $calc['discount_teen'] ?? null), $calc['price_teen'] ?? null, $t[5]);
-    $add($open ? 1 : (int)($pax['child'] ?? 0), $disc($t[2], $calc['discount_child'] ?? null), $calc['price_child'] ?? null, $t[6]);
+    $listed = function ($price) use ($adult) { return ($price !== null && $price < $adult) ? 1 : 0; };   // group price list: only a real reduction
+    $add($open ? $listed($calc['price_teen'] ?? null) : (int)($pax['teen'] ?? 0), $disc($t[1], $calc['discount_teen'] ?? null), $calc['price_teen'] ?? null, $t[5]);
+    $add($open ? $listed($calc['price_child'] ?? null) : (int)($pax['child'] ?? 0), $disc($t[2], $calc['discount_child'] ?? null), $calc['price_child'] ?? null, $t[6]);
     $singles = $open ? 1 : iti_final_single_rooms((string)($calc['room_config'] ?? ''));
     if ($singles > 0 && !empty($calc['single_supp']) && $calc['single_supp'] > 0) {
         $rows[] = array('label' => $t[7] . ($singles > 1 ? ' (× ' . $singles . ')' : ''), 'price' => round((float)$calc['single_supp']), 'currency' => 'USD');
