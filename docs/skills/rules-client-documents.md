@@ -34,6 +34,7 @@ When a rule changes, change it here (with the date) and not in a skill.
 ## 5. Costs outside the quote (exclusions)
 
 - **NIC**, the mandatory insurance for Tanzania: USD 44 per person. It is NIC, not a Zanzibar insurance; in force since 1 Oct 2026, bought before travel or on arrival; it does not replace the client's own travel insurance (26 Oct 2026).
+- **Zanzibar entry:** no separate visa, the Tanzania visa covers it. NIC also covers Zanzibar: ZIC is not needed, don't mention it. Flights Serengeti (Seronera) – Dar es Salaam: no direct flights, they stop in Zanzibar; don't say whether clients change plane (9 Nov 2026, RemoLenci).
 - **Zanzibar** infrastructure tax: USD 5 per person per night, paid at the hotel. Only with Zanzibar.
 - **Kenya:** mandatory Kenya health insurance, USD 44 per person (children included) plus the portal fees, bought only on the government portal together with the eTA (etakenya.go.ke or insurance.ecitizen.go.ke; no policy document: keep the reference and the "Valid" screenshot). In force since 6 Oct 2026; EAC citizens exempt. Italian exclusion line: "assicurazione sanitaria obbligatoria per il Kenya, USD 44 per persona (bambini inclusi) più le commissioni del portale, da acquistare sul portale governativo insieme all'eTA" (15 Oct 2026).
 - **Mafia:** "tasse del Parco Marino di Mafia, da pagare con carta di credito all'arrivo", "immersioni ed escursioni extra a Mafia". The flight Arusha – Mafia is "non diretto, di solito con scalo a Dar es Salaam".
