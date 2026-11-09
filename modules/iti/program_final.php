@@ -311,6 +311,9 @@ include __DIR__ . '/../../includes/layout_header.php';
     <table style="margin:8px 0;border-collapse:collapse;">
       <tr><td style="padding:2px 16px 2px 0;color:var(--grey-mid);">Adults / teenagers / children</td>
           <td><?= $groupOpen ? 'not final' : '<strong>' . (int)$calc['pax']['adults'] . ' / ' . (int)$calc['pax']['teen'] . ' / ' . (int)$calc['pax']['child'] . '</strong>' ?></td></tr>
+      <?php if (!$groupOpen && trim((string)($calc['pax_text'] ?? '')) !== ''): ?>
+      <tr><td style="padding:2px 16px 2px 0;color:var(--grey-mid);">Written in the Calc</td><td><?= h($calc['pax_text']) ?></td></tr>
+      <?php endif; ?>
       <tr><td style="padding:2px 16px 2px 0;color:var(--grey-mid);">Room types</td>
           <td><?= $groupOpen ? 'not final' : ($calc['room_config'] !== '' ? '<strong>' . h($calc['room_config']) . '</strong>' : $missing) ?></td></tr>
       <tr><td style="padding:2px 16px 2px 0;color:var(--grey-mid);">Dates</td>

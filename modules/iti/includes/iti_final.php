@@ -441,6 +441,22 @@ function iti_final_is_day_trip(?array $route, int $dayDestination): bool {
     return $route !== null && $dayDestination > 0 && (int)$route['from_id'] === $dayDestination;
 }
 
+/**
+ * The seller's "ADULTS/TEEN/CHD" text as numbers: "2 ADULTS + 2 CHILDREN" → adults 2, teen 0, child 2.
+ * null when any part of the text is not understood (it is then only shown, never compared).
+ */
+function iti_final_pax_from_text(string $text): ?array {
+    $out = array('adults' => 0, 'teen' => 0, 'child' => 0);
+    $left = preg_replace_callback('/(\d+)\s*(adults?|adulti|adulto|adt|ad|teen(?:ager)?s?|ragazz[oi]|child(?:ren)?|chd|kids?|bambin[oi])\b/iu', function ($m) use (&$out) {
+        $w = strtolower($m[2]);
+        $k = preg_match('/^ad/', $w) ? 'adults' : (preg_match('/^(teen|ragazz)/', $w) ? 'teen' : 'child');
+        $out[$k] += (int)$m[1];
+        return ' ';
+    }, trim($text));
+    if ($out['adults'] + $out['teen'] + $out['child'] === 0) return null;
+    return preg_replace('/\s*(?:\+|,|&|\/|\band\b|\be\b)\s*|\s+/iu', '', (string)$left) === '' ? $out : null;
+}
+
 /** Single rooms in the Calc's room text: "1 DOUBLE + 1 SINGLE" → 1, "2 singole" / "SGL x 2" → 2, "SINGLE" → 1. */
 function iti_final_single_rooms(string $rooms): int {
     if (!preg_match_all('/(?:(\d+)\s*[x×]?\s*)?(?<![a-z])(?:singles?|singol[ae]|sgl)\b(?:\s*[x×]\s*(\d+))?/iu', $rooms, $m, PREG_SET_ORDER)) return 0;
@@ -469,6 +485,11 @@ function iti_final_calc_review(array $calc): array {
     if (!$open && $rooms === '' && !$isRecap) $openErrors[] = 'Enter the room types in the cell under ROOMS TYPE.';
     if (!$open && $rooms !== '' && iti_final_room_text($rooms, 'en') === null) {
         $warnings[] = 'Room types "' . $rooms . '" not recognised: they go on the program as written in the Calc, not translated. Check them in the program.';
+    }
+    $paxText = trim((string)($calc['pax_text'] ?? ''));
+    $written = (!$open && !$isRecap && $paxText !== '') ? iti_final_pax_from_text($paxText) : null;
+    if ($written !== null && ($written['adults'] !== $a || $written['teen'] !== $t || $written['child'] !== $c)) {
+        $warnings[] = 'The Calc says "' . $paxText . '", but B2:B4 say ' . $a . ' adults / ' . $t . ' teenagers / ' . $c . ' children: the program uses B2:B4, correct whichever is wrong.';
     }
     $start = $calc['start_date'] ?? null;
     $noDate = !$start;
