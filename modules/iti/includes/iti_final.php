@@ -390,6 +390,48 @@ function iti_final_resolve_seller(PDO $db, int $requestId, string $username, str
     return $username;
 }
 
+/**
+ * The Calc's room text in the program's language: "1 single" → "1 camera singola", "2 DBL + 1 twin" → "2 camere matrimoniali + 1 …".
+ * Only the room types of the Calc (SINGLE / DOUBLE / TWIN / TRIPLE / QUAD / FAMILY, also their short and Italian forms);
+ * null when a part is not one of them (free text stays as the seller wrote it, the confirmation step says so).
+ */
+function iti_final_room_text(string $rooms, string $lang): ?string {
+    $names = array(
+        'it' => array('single' => array('camera singola', 'camere singole'), 'double' => array('camera matrimoniale', 'camere matrimoniali'),
+                      'twin' => array('camera doppia con letti separati', 'camere doppie con letti separati'), 'triple' => array('camera tripla', 'camere triple'),
+                      'quad' => array('camera quadrupla', 'camere quadruple'), 'family' => array('camera familiare', 'camere familiari')),
+        'en' => array('single' => array('single room', 'single rooms'), 'double' => array('double room', 'double rooms'),
+                      'twin' => array('twin room', 'twin rooms'), 'triple' => array('triple room', 'triple rooms'),
+                      'quad' => array('quadruple room', 'quadruple rooms'), 'family' => array('family room', 'family rooms')),
+        'fr' => array('single' => array('chambre individuelle', 'chambres individuelles'), 'double' => array('chambre double', 'chambres doubles'),
+                      'twin' => array('chambre à lits jumeaux', 'chambres à lits jumeaux'), 'triple' => array('chambre triple', 'chambres triples'),
+                      'quad' => array('chambre quadruple', 'chambres quadruples'), 'family' => array('chambre familiale', 'chambres familiales')),
+        'es' => array('single' => array('habitación individual', 'habitaciones individuales'), 'double' => array('habitación doble', 'habitaciones dobles'),
+                      'twin' => array('habitación con dos camas', 'habitaciones con dos camas'), 'triple' => array('habitación triple', 'habitaciones triples'),
+                      'quad' => array('habitación cuádruple', 'habitaciones cuádruples'), 'family' => array('habitación familiar', 'habitaciones familiares')),
+        'de' => array('single' => array('Einzelzimmer', 'Einzelzimmer'), 'double' => array('Doppelzimmer', 'Doppelzimmer'),
+                      'twin' => array('Zweibettzimmer', 'Zweibettzimmer'), 'triple' => array('Dreibettzimmer', 'Dreibettzimmer'),
+                      'quad' => array('Vierbettzimmer', 'Vierbettzimmer'), 'family' => array('Familienzimmer', 'Familienzimmer')),
+    );
+    $words = array('single' => 'single', 'singles' => 'single', 'sgl' => 'single', 'singola' => 'single', 'singole' => 'single',
+                   'double' => 'double', 'doubles' => 'double', 'dbl' => 'double', 'matrimoniale' => 'double', 'matrimoniali' => 'double',
+                   'twin' => 'twin', 'twins' => 'twin', 'twn' => 'twin',
+                   'triple' => 'triple', 'triples' => 'triple', 'tpl' => 'triple', 'tripla' => 'triple',
+                   'quad' => 'quad', 'quads' => 'quad', 'quadruple' => 'quad', 'quadrupla' => 'quad',
+                   'family' => 'family', 'familiare' => 'family');
+    $t = isset($names[$lang]) ? $names[$lang] : $names['en'];
+    $out = array();
+    foreach (preg_split('/\s*(?:\+|,|&|;|\band\b|\be\b)\s*/iu', trim($rooms)) as $part) {
+        if (!preg_match('/^(?:(\d+)\s*[x×]?\s*)?(?:(?:camer[ae]|rooms?)\s+)?([a-z]+)(?:\s+rooms?)?(?:\s*[x×]\s*(\d+))?$/iu', $part, $m)) return null;
+        $w = strtolower($m[2]);
+        if (!isset($words[$w])) return null;
+        $n = max((int)$m[1], (int)($m[3] ?? 0));
+        $forms = $t[$words[$w]];
+        $out[] = $n > 0 ? $n . ' ' . $forms[$n > 1 ? 1 : 0] : $forms[0];
+    }
+    return $out ? implode(' + ', $out) : null;
+}
+
 /** Single rooms in the Calc's room text: "1 DOUBLE + 1 SINGLE" → 1, "2 singole" / "SGL x 2" → 2, "SINGLE" → 1. */
 function iti_final_single_rooms(string $rooms): int {
     if (!preg_match_all('/(?:(\d+)\s*[x×]?\s*)?(?<![a-z])(?:singles?|singol[ae]|sgl)\b(?:\s*[x×]\s*(\d+))?/iu', $rooms, $m, PREG_SET_ORDER)) return 0;
@@ -414,6 +456,9 @@ function iti_final_calc_review(array $calc): array {
 
     if ($a + $t + $c <= 0) $errors[] = 'Enter the number of adults, teenagers and children (B2:B4).';
     if ($rooms === '' && !$isRecap) $errors[] = 'Enter the room types in the cell under ROOMS TYPE.';
+    if ($rooms !== '' && iti_final_room_text($rooms, 'en') === null) {
+        $warnings[] = 'Room types "' . $rooms . '" not recognised: they go on the program as written in the Calc, not translated. Check them in the program.';
+    }
     $start = $calc['start_date'] ?? null;
     $noDate = !$start;
     foreach (($calc['days'] ?? array()) as $d) if (empty($d['date'])) $noDate = true;
@@ -958,7 +1003,7 @@ function iti_final_generate(PDO $db, int $requestId, array $calc, int $sampleId,
                 'start_custom'   => $prevLodge ? null : $prevCustom,
                 'end_lodge_id'   => $d['lodge_id'],
                 'end_lodge_custom' => $d['lodge_id'] ? null : $d['lodge_custom'],
-                'room_type'      => ($d['lodge_id'] || $d['lodge_custom']) && $calc['room_config'] !== '' ? mb_substr($calc['room_config'], 0, 100) : null,
+                'room_type'      => ($d['lodge_id'] || $d['lodge_custom']) && $calc['room_config'] !== '' ? mb_substr(iti_final_room_text($calc['room_config'], $lang) ?? $calc['room_config'], 0, 100) : null,
                 'booked_status'  => $d['invoice'] !== '' ? mb_substr($d['invoice'], 0, 40) : null,
                 'booked_by'      => $d['checked'] !== '' ? mb_substr($d['checked'], 0, 60) : null,
                 'needs_review'   => ($isNew || $d['sample_lodge'] !== null) ? 1 : 0,
