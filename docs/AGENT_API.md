@@ -769,6 +769,7 @@ and a single supplement row when the room types have singles (also for 1 pax). T
 **Group departure still filling up:** `group_open: 1` (Hub: the tick on the confirmation step) lifts the pax and room types requirement (`review.open_errors`);
 dates stay required. The program then has `pax_open` 1, safari type group, no participants, no room types and no total: only the price list per person (adult, teen and
 child with discount, single supplement). Regenerate without it when the group is final.
+**Day trip:** a day added from the Calc in the same lodge as the night before keeps its route when the route starts where the lodge is (Karatu → Lake Eyasi, lodge in Karatu); the day text is then the description of the place reached.
 **Seller:** the program goes under the request's seller (`seller` in the plan = username; pass `seller` for another active one), in `created_by`;
 who generates it stays in `generated_by`, so someone can finalise programs for other sellers.
 

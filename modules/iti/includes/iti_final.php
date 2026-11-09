@@ -432,6 +432,15 @@ function iti_final_room_text(string $rooms, string $lang): ?string {
     return $out ? implode(' + ', $out) : null;
 }
 
+/**
+ * A day added from the Calc, in the same lodge as the night before, is a day trip when its route alias starts
+ * from where the lodge is (Karatu → Lake Eyasi, lodge in Karatu). Another route on such a day ("Arusha → Serengeti"
+ * on the second night in the Serengeti) is only the label's alias: no transfer that day.
+ */
+function iti_final_is_day_trip(?array $route, int $dayDestination): bool {
+    return $route !== null && $dayDestination > 0 && (int)$route['from_id'] === $dayDestination;
+}
+
 /** Single rooms in the Calc's room text: "1 DOUBLE + 1 SINGLE" → 1, "2 singole" / "SGL x 2" → 2, "SINGLE" → 1. */
 function iti_final_single_rooms(string $rooms): int {
     if (!preg_match_all('/(?:(\d+)\s*[x×]?\s*)?(?<![a-z])(?:singles?|singol[ae]|sgl)\b(?:\s*[x×]\s*(\d+))?/iu', $rooms, $m, PREG_SET_ORDER)) return 0;
@@ -987,7 +996,7 @@ function iti_final_generate(PDO $db, int $requestId, array $calc, int $sampleId,
             return (bool)$st->fetchColumn();
         };
         $routeName = function ($trId) use ($db) {
-            $st = $db->prepare('SELECT fd.name_en AS f, td.name_en AS t, tr.duration_min, tr.distance_km FROM iti_transfer_routes tr
+            $st = $db->prepare('SELECT fd.name_en AS f, td.name_en AS t, tr.duration_min, tr.distance_km, tr.from_destination AS from_id, tr.to_destination AS to_id FROM iti_transfer_routes tr
                                   JOIN iti_destinations fd ON fd.id = tr.from_destination
                                   JOIN iti_destinations td ON td.id = tr.to_destination WHERE tr.id = ?');
             $st->execute(array($trId));
@@ -1030,19 +1039,23 @@ function iti_final_generate(PDO $db, int $requestId, array $calc, int $sampleId,
             }
             if ($isNew) {
                 // Another night in the same lodge: no transfer, a full day there (the destination
-                // text is already shown in the day's destination block).
+                // text is already shown in the day's destination block), unless it is a day trip.
                 $stay = $d['lodge_id'] && $d['lodge_id'] === $prevLodge;
+                $trip = ($d['route'] && $d['route']['transfer_route_id']) ? ($routeName($d['route']['transfer_route_id']) ?: null) : null;
+                $excursion = $stay && iti_final_is_day_trip($trip, (int)$d['dest_id']);
                 if ($d['dest_id']) $vals['destination_id'] = $d['dest_id'];
                 foreach (ITI_LANGUAGES as $l) { $vals['day_title_' . $l] = ''; $vals['narrative_' . $l] = ''; }
                 $vals['day_title_' . $lang] = mb_substr($d['label'], 0, 200);
-                $vals['narrative_' . $lang] = $stay ? iti_final_stay_text($lang, $isBeach($d['dest_id'])) : $destDesc($d['dest_id']);
+                $vals['narrative_' . $lang] = $excursion ? ($destDesc((int)$trip['to_id']) ?: iti_final_stay_text($lang, false))
+                                            : ($stay ? iti_final_stay_text($lang, $isBeach($d['dest_id'])) : $destDesc($d['dest_id']));
                 $vals['program_id'] = $newId;
                 $vals = array_intersect_key($vals, array_flip($dayCols));
                 $db->prepare('INSERT INTO iti_program_days (`' . implode('`,`', array_keys($vals)) . '`) VALUES ('
                              . implode(',', array_fill(0, count($vals), '?')) . ')')->execute(array_values($vals));
                 $dayId = (int)$db->lastInsertId();
-                // Transfer / flight of an added day, from its route alias (none on a stay day).
-                if (!$stay && $d['route'] && $d['route']['transfer_route_id'] && ($r = $routeName($d['route']['transfer_route_id']))) {
+                // Transfer / flight of an added day, from its route alias (none on a stay day, except a day trip).
+                if ($trip && (!$stay || $excursion)) {
+                    $r = $trip;
                     $notes = iti_build_transfer_notes($r['f'], $r['t'], (int)$r['duration_min'], $r['distance_km'] !== null ? (int)$r['distance_km'] : 0);
                     $tr = array('description' => $notes[$lang] ?? $notes['en'], 'tr' => $notes);   // all languages at once
                     iti_transfers_replace($db, $dayId, array($tr));
