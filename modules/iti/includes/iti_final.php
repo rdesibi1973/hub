@@ -442,9 +442,10 @@ function iti_final_single_rooms(string $rooms): int {
 
 /**
  * What the seller must have filled in the Calc before an itinerary program is built from it.
- * 'errors' stop the program (pax, room types, dates not left at the template's); 'warnings' are shown on the
- * confirmation step: the total (F10) is the seller's, and the Hub only compares it with the sum it expects.
- * Returns array('errors', 'warnings', 'singles', 'expected_total').
+ * 'errors' stop the program (dates not left at the template's); 'open_errors' too (pax, room types), unless
+ * $calc['group_open']: a group departure still filling up. 'warnings' are shown on the confirmation step:
+ * the total (F10) is the seller's, and the Hub only compares it with the sum it expects.
+ * Returns array('errors', 'open_errors', 'warnings', 'singles', 'expected_total').
  */
 function iti_final_calc_review(array $calc): array {
     $pax = isset($calc['pax']) ? $calc['pax'] : array();
@@ -452,11 +453,12 @@ function iti_final_calc_review(array $calc): array {
     $isRecap = strcasecmp(trim((string)($calc['sheet'] ?? '')), 'RECAP') === 0;   // the whole group: no rooms or total of one client
     $rooms = trim((string)($calc['room_config'] ?? ''));
     $singles = iti_final_single_rooms($rooms);
-    $errors = array(); $warnings = array();
+    $open = !empty($calc['group_open']);   // group departure still filling up: participants and rooms not known yet
+    $errors = array(); $warnings = array(); $openErrors = array();
 
-    if ($a + $t + $c <= 0) $errors[] = 'Enter the number of adults, teenagers and children (B2:B4).';
-    if ($rooms === '' && !$isRecap) $errors[] = 'Enter the room types in the cell under ROOMS TYPE.';
-    if ($rooms !== '' && iti_final_room_text($rooms, 'en') === null) {
+    if (!$open && $a + $t + $c <= 0) $openErrors[] = 'Enter the number of adults, teenagers and children (B2:B4).';
+    if (!$open && $rooms === '' && !$isRecap) $openErrors[] = 'Enter the room types in the cell under ROOMS TYPE.';
+    if (!$open && $rooms !== '' && iti_final_room_text($rooms, 'en') === null) {
         $warnings[] = 'Room types "' . $rooms . '" not recognised: they go on the program as written in the Calc, not translated. Check them in the program.';
     }
     $start = $calc['start_date'] ?? null;
@@ -470,7 +472,7 @@ function iti_final_calc_review(array $calc): array {
     }
 
     $expected = null;
-    if (!$isRecap && count($calc['price_options'] ?? array()) <= 1) {
+    if (!$isRecap && !$open && count($calc['price_options'] ?? array()) <= 1) {
         $need = array(array($t, $calc['price_teen'] ?? null, 'teenager price'), array($c, $calc['price_child'] ?? null, 'child price'),
                       array($singles, $calc['single_supp'] ?? null, 'single supplement'));
         $complete = !empty($calc['price_to_customer']);
@@ -489,7 +491,7 @@ function iti_final_calc_review(array $calc): array {
                         . ' USD. The total on the program is F10: correct it in the Calc unless the difference is intended.';
         }
     }
-    return array('errors' => $errors, 'warnings' => $warnings, 'singles' => $singles, 'expected_total' => $expected);
+    return array('errors' => $errors, 'open_errors' => $openErrors, 'warnings' => $warnings, 'singles' => $singles, 'expected_total' => $expected);
 }
 
 /**
@@ -508,7 +510,8 @@ function iti_final_price_table(array $calc, string $lang): array {
         'de' => array('Erwachsener', 'Jugendlicher (12–15 J.)', 'Kind (unter 12 J.)', 'Gesamtpreis', array('Erwachsener', 'Erwachsene'), array('Jugendlicher', 'Jugendliche'), array('Kind', 'Kinder'), 'Einzelzimmerzuschlag', 'Ermäßigung'),
     );
     $t = $L[$lang] ?? $L['en'];
-    if (!empty($calc['price_options']) && count($calc['price_options']) > 1) return iti_final_price_options_table($calc['price_options'], $lang);
+    $open = !empty($calc['group_open']);   // group still filling up: the price list per person, no total, never "base N pax"
+    if (!$open && !empty($calc['price_options']) && count($calc['price_options']) > 1) return iti_final_price_options_table($calc['price_options'], $lang);
     $adult = $calc['price_to_customer'] ?? null;
     if ($adult === null || $adult <= 0) return array();
     $pax = $calc['pax'] ?? array();
@@ -519,14 +522,14 @@ function iti_final_price_table(array $calc, string $lang): array {
         $who[]  = $n . ' ' . $forms[$n > 1 ? 1 : 0];
     };
     $disc = function ($label, $d) use ($t) { return ($d !== null && $d > 0) ? $label . ', ' . $t[8] . ' ' . round((float)$d) . ' USD' : $label; };
-    $add((int)($pax['adults'] ?? 0), $t[0], $adult, $t[4]);
-    $add((int)($pax['teen'] ?? 0), $disc($t[1], $calc['discount_teen'] ?? null), $calc['price_teen'] ?? null, $t[5]);
-    $add((int)($pax['child'] ?? 0), $disc($t[2], $calc['discount_child'] ?? null), $calc['price_child'] ?? null, $t[6]);
-    $singles = iti_final_single_rooms((string)($calc['room_config'] ?? ''));
+    $add($open ? 1 : (int)($pax['adults'] ?? 0), $t[0], $adult, $t[4]);
+    $add($open ? 1 : (int)($pax['teen'] ?? 0), $disc($t[1], $calc['discount_teen'] ?? null), $calc['price_teen'] ?? null, $t[5]);
+    $add($open ? 1 : (int)($pax['child'] ?? 0), $disc($t[2], $calc['discount_child'] ?? null), $calc['price_child'] ?? null, $t[6]);
+    $singles = $open ? 1 : iti_final_single_rooms((string)($calc['room_config'] ?? ''));
     if ($singles > 0 && !empty($calc['single_supp']) && $calc['single_supp'] > 0) {
         $rows[] = array('label' => $t[7] . ($singles > 1 ? ' (× ' . $singles . ')' : ''), 'price' => round((float)$calc['single_supp']), 'currency' => 'USD');
     }
-    if (!empty($calc['price_total']) && $calc['price_total'] > 0) {
+    if (!$open && !empty($calc['price_total']) && $calc['price_total'] > 0) {
         $rows[] = array('label' => $t[3] . ($who ? ' (' . implode(', ', $who) . ')' : ''), 'price' => round((float)$calc['price_total']),
                         'currency' => 'USD', 'bold' => true);
     }
@@ -861,8 +864,11 @@ function iti_final_plan(PDO $db, array $calc, int $sampleId): array {
     if ($sampleId && count($sampleDays) !== count($days)) {
         $flags[] = 'The sample has ' . count($sampleDays) . ' days, the Calc ' . count($days) . ' — days are added / removed to match the Calc.';
     }
+    if (!empty($calc['group_open'])) {
+        $flags[] = 'Group not final: the program has no participants, no room types and no total, only the price list per person. Regenerate it when the group is final.';
+    }
     if (!empty($calc['dates_indicative'])) {
-        $flags[] = 'Dates confirmed as indicative: the documents show the period with "indicative dates" and no date day by day.';
+        $flags[] ='Dates confirmed as indicative: the documents show the period with "indicative dates" and no date day by day.';
     }
     return array('days' => $days, 'blocking' => $blocking, 'unmapped' => $unmapped, 'hints' => $hints, 'flags' => $flags,
                  'sample_days' => count($sampleDays));
@@ -906,7 +912,7 @@ function iti_final_generate(PDO $db, int $requestId, array $calc, int $sampleId,
     iti_ensure_final_schema();
     if (!in_array($lang, ITI_LANGUAGES, true)) $lang = 'it';
     $review = iti_final_calc_review($calc);
-    if ($review['errors']) throw new RuntimeException('Complete the Calc first: ' . implode(' ', $review['errors']));
+    if ($review['errors'] || $review['open_errors']) throw new RuntimeException('Complete the Calc first: ' . implode(' ', array_merge($review['errors'], $review['open_errors'])));
     $plan = iti_final_plan($db, $calc, $sampleId);
     if (!$sampleId) throw new RuntimeException('Choose the sample program first.');
     if ($plan['blocking']) throw new RuntimeException('Map these Calc texts first: ' . implode(' ', $plan['blocking']));
@@ -925,7 +931,9 @@ function iti_final_generate(PDO $db, int $requestId, array $calc, int $sampleId,
     }
     if (empty($titles['title_en'])) $titles['title_en'] = iti_final_title((string)$sample['title_en'], $customer) ?: (string)$sample['title_en'];
     $owner = iti_final_resolve_seller($db, $requestId, (string)($who['seller'] ?? ''), (string)($who['username'] ?? 'system'));
-    $newId = iti_duplicate_program($sampleId, 'personal', $owner, $titles + array(
+    $groupOpen = !empty($calc['group_open']);
+    $newId = iti_duplicate_program($sampleId, 'personal', $owner, $titles + ($groupOpen ? array('safari_type' => 'group') : array()) + array(
+        'pax_open'         => $groupOpen ? 1 : 0,
         'lead_request_id'  => $requestId,
         'ref_number'       => iti_final_ref_number($db, $requestId, $calc),
         'price_table_json' => ($pt = iti_final_price_table($calc, $lang)) ? json_encode($pt, JSON_UNESCAPED_UNICODE) : null,
@@ -1003,7 +1011,7 @@ function iti_final_generate(PDO $db, int $requestId, array $calc, int $sampleId,
                 'start_custom'   => $prevLodge ? null : $prevCustom,
                 'end_lodge_id'   => $d['lodge_id'],
                 'end_lodge_custom' => $d['lodge_id'] ? null : $d['lodge_custom'],
-                'room_type'      => ($d['lodge_id'] || $d['lodge_custom']) && $calc['room_config'] !== '' ? mb_substr(iti_final_room_text($calc['room_config'], $lang) ?? $calc['room_config'], 0, 100) : null,
+                'room_type'      => !$groupOpen && ($d['lodge_id'] || $d['lodge_custom']) && $calc['room_config'] !== '' ? mb_substr(iti_final_room_text($calc['room_config'], $lang) ?? $calc['room_config'], 0, 100) : null,
                 'booked_status'  => $d['invoice'] !== '' ? mb_substr($d['invoice'], 0, 40) : null,
                 'booked_by'      => $d['checked'] !== '' ? mb_substr($d['checked'], 0, 60) : null,
                 'needs_review'   => ($isNew || $d['sample_lodge'] !== null) ? 1 : 0,

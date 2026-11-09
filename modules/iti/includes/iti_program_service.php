@@ -148,6 +148,7 @@ function iti_ps_program_out(PDO $db, int $id, string $lang = ''): array {
         'title' => $D['title'], 'subtitle' => $D['subtitle'], 'intro' => $D['intro'], 'language' => $lang,
         'currency' => $p['display_currency'] ?? null, 'start_date' => $p['start_date'] ?? null,
         'dates_indicative' => (int)($p['dates_indicative'] ?? 0),
+        'pax_open' => (int)($p['pax_open'] ?? 0),   // group departure still filling up
         'pax_adults' => (int)($p['pax_adults'] ?? 0), 'pax_teens' => (int)($p['pax_teens'] ?? 0), 'pax_children' => (int)($p['pax_children'] ?? 0),
         'duration' => $D['duration'], 'published' => iti_program_is_public($p),   // personal: always, until cancelled
         'prices' => $D['prices'], 'price_notes' => $D['price_notes'],
@@ -466,6 +467,7 @@ function iti_ps_calc_plan(PDO $db, int $rid, array $in): array {
     $ps = is_array($ps) ? array_values(array_filter(array_map('trim', array_map('strval', $ps)), 'strlen')) : [];
     $calc = calc_read_request($db, $rid, (string)($in['file'] ?? ''), (string)($in['sheet'] ?? ''), $ps);
     $calc['dates_indicative'] = in_array($in['dates_indicative'] ?? 0, [1, true, '1'], true);   // the Calc does not say: asked, as on the Hub page
+    $calc['group_open'] = in_array($in['group_open'] ?? 0, [1, true, '1'], true);               // group departure: participants and rooms not final yet
     $lang = in_array($in['lang'] ?? '', ITI_PS_LANGS, true) ? $in['lang'] : 'it';
     $code = iti_final_code_from_calc($calc['file']);
     $sample = !empty($in['sample_id']) ? iti_get_program((int)$in['sample_id']) : iti_final_find_sample($db, $code, $lang);

@@ -1086,6 +1086,8 @@ function iti_ensure_doc_columns(): void {
         if (iti_add_column('iti_programs', 'show_tip_note', 'TINYINT(1) NOT NULL DEFAULT 1')) iti_seed_tip_note();
         // Dates only indicative (asked on the Calc confirmation step): period + label on the documents, no date day by day.
         iti_add_column('iti_programs', 'dates_indicative', 'TINYINT(1) NOT NULL DEFAULT 0');
+        // Group departure still filling up: no participants on the documents (iti_mag_pax()).
+        iti_add_column('iti_programs', 'pax_open', 'TINYINT(1) NOT NULL DEFAULT 0');
         if (iti_setting('seed_ndutu_reserve') === '') iti_seed_ndutu_reserve();
         // ref_number = the programme Word's name ("01_LucaDeSanctis(LasciatiViaggiare-Daniela)_SafariGrandeMigrazioneEstate",
         // 72 characters): 60 was too short.

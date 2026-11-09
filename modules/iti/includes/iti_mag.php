@@ -203,7 +203,7 @@ function iti_mag_date_range(array $D, array $M): string {
 function iti_mag_pax(array $D, array $M): string {
     if (!empty($D['pax_label'])) return (string)$D['pax_label'];
     $p = $D['program'];
-    if (($p['program_type'] ?? '') !== 'personal') return '';
+    if (($p['program_type'] ?? '') !== 'personal' || !empty($p['pax_open'])) return '';
     $a = (int)($p['pax_adults'] ?? 0); $t = (int)($p['pax_teens'] ?? 0); $c = (int)($p['pax_children'] ?? 0);
     $out = [];
     if ($a) $out[] = $a . ' ' . ($a === 1 ? $M['adult'] : $M['adults']);

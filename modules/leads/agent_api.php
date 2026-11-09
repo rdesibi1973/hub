@@ -1870,7 +1870,7 @@ try {
             $public = array_filter($plan, function ($k) { return $k[0] !== '_'; }, ARRAY_FILTER_USE_KEY);
             if ($agentAction === 'iti_calc_plan' || empty($in['confirm'])) {
                 agent_out(array_merge(['ok' => true, 'dry_run' => true], $public,
-                    ['message' => $plan['review']['errors'] ? 'Complete the Calc first: see review.errors.' : ($plan['blocking'] ? 'Map the unmapped texts with iti_save_alias, then generate.' : 'Ready — POST iti_final_from_calc with "confirm": true to generate.')]));
+                    ['message' => ($plan['review']['errors'] || $plan['review']['open_errors']) ? 'Complete the Calc first: see review.errors / review.open_errors (group departure not final yet: group_open 1).' : ($plan['blocking'] ? 'Map the unmapped texts with iti_save_alias, then generate.' : 'Ready — POST iti_final_from_calc with "confirm": true to generate.')]));
             }
             agent_require_method('POST');
             $res = iti_ps_calc_generate($db, (int)$r['id'], $plan, ['id' => $agentUser['id'] ?? null, 'username' => $agentUser['username'] ?? 'claude_agent']);

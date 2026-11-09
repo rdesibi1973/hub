@@ -766,6 +766,9 @@ the template's (not in the past; if not known yet, likely dates, then `dates_ind
 F10, filled by the seller with discounts and supplements; `warnings` reports when it differs from adults × F9 + teenagers and
 children at their prices + single supplement × singles. The price table shows the teen / child price with its discount in the label,
 and a single supplement row when the room types have singles (also for 1 pax). The Hub page asks to confirm pax, rooms, dates and prices first.
+**Group departure still filling up:** `group_open: 1` (Hub: the tick on the confirmation step) lifts the pax and room types requirement (`review.open_errors`);
+dates stay required. The program then has `pax_open` 1, safari type group, no participants, no room types and no total: only the price list per person (adult, teen and
+child with discount, single supplement). Regenerate without it when the group is final.
 **Seller:** the program goes under the request's seller (`seller` in the plan = username; pass `seller` for another active one), in `created_by`;
 who generates it stays in `generated_by`, so someone can finalise programs for other sellers.
 

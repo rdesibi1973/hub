@@ -59,6 +59,8 @@ $sample = $calc ? iti_final_find_sample($db, $code, $lang) : null;
 
 // Step 1: several Calc files → the user picks one. Step 2: what was read is confirmed (pax, rooms, dates, prices).
 // Then sample, mappings, generate. The confirmation holds for this file, sheet and version of the Calc only.
+$groupOpen    = !empty($_REQUEST['group_open']);   // group departure still filling up: participants and rooms not required
+if ($calc) $calc['group_open'] = $groupOpen;
 $review       = $calc ? iti_final_calc_review($calc) : null;
 $mustPickFile = $calc && count($calc['candidates'] ?? []) > 1 && $file === '';
 $okToken      = $calc ? substr(md5($calc['file'] . '|' . $calc['sheet'] . '|' . ($calc['calc_rev'] ?? '')), 0, 12) : '';
@@ -66,10 +68,10 @@ $datesMode    = in_array($_REQUEST['dates'] ?? '', ['exact', 'indicative'], true
 $sellers       = $calc ? iti_final_sellers($db) : [];         // the program goes under this seller; who generates it stays in generated_by
 $sellerDefault = $calc ? iti_final_request_seller($db, $rid) : '';
 $sellerReq     = trim((string)($_REQUEST['seller'] ?? ''));
-$dataOk       = $calc && !$mustPickFile && !$review['errors'] && ($_REQUEST['ok'] ?? '') === $okToken && $datesMode !== '' && isset($sellers[$sellerReq]);
+$dataOk       = $calc && !$mustPickFile && !$review['errors'] && !$review['open_errors'] && ($_REQUEST['ok'] ?? '') === $okToken && $datesMode !== '' && isset($sellers[$sellerReq]);
 $selfBase     = $self;
 if ($dataOk) {
-    $self .= '&ok=' . $okToken . '&dates=' . $datesMode . '&seller=' . rawurlencode($sellerReq);
+    $self .= '&ok=' . $okToken . '&dates=' . $datesMode . '&seller=' . rawurlencode($sellerReq) . ($groupOpen ? '&group_open=1' : '');
     $calc['dates_indicative'] = $datesMode === 'indicative';
 }
 
@@ -308,9 +310,9 @@ include __DIR__ . '/../../includes/layout_header.php';
     <?php $missing = '<strong style="color:var(--red);">missing</strong>'; $priceRows = iti_final_price_table($calc, 'en'); /* this page is in English; the program uses its own language */ ?>
     <table style="margin:8px 0;border-collapse:collapse;">
       <tr><td style="padding:2px 16px 2px 0;color:var(--grey-mid);">Adults / teenagers / children</td>
-          <td><strong><?= (int)$calc['pax']['adults'] ?> / <?= (int)$calc['pax']['teen'] ?> / <?= (int)$calc['pax']['child'] ?></strong></td></tr>
+          <td><?= $groupOpen ? 'not final' : '<strong>' . (int)$calc['pax']['adults'] . ' / ' . (int)$calc['pax']['teen'] . ' / ' . (int)$calc['pax']['child'] . '</strong>' ?></td></tr>
       <tr><td style="padding:2px 16px 2px 0;color:var(--grey-mid);">Room types</td>
-          <td><?= $calc['room_config'] !== '' ? '<strong>' . h($calc['room_config']) . '</strong>' : $missing ?></td></tr>
+          <td><?= $groupOpen ? 'not final' : ($calc['room_config'] !== '' ? '<strong>' . h($calc['room_config']) . '</strong>' : $missing) ?></td></tr>
       <tr><td style="padding:2px 16px 2px 0;color:var(--grey-mid);">Dates</td>
           <td><strong><?= $fmtD($calc['start_date']) ?> → <?= $fmtD($calc['end_date']) ?></strong> · <?= (int)$calc['nights'] ?> nights</td></tr>
       <tr><td style="padding:2px 16px 2px 0;color:var(--grey-mid);vertical-align:top;">On the program</td>
@@ -323,7 +325,7 @@ include __DIR__ . '/../../includes/layout_header.php';
     Arrival: <?= h($calc['arrival'] ?: '—') ?> · Departure: <?= h($calc['departure'] ?: '—') ?>
     <?php foreach ($calc['warnings'] as $w): ?><div style="color:#8a6d00;">⚠ <?= h($w) ?></div><?php endforeach; ?>
     <?php foreach ($review['warnings'] as $w): ?><div style="color:#8a6d00;">⚠ <?= h($w) ?></div><?php endforeach; ?>
-    <?php foreach ($review['errors'] as $w): ?><div style="color:var(--red);font-weight:600;">✖ <?= h($w) ?></div><?php endforeach; ?>
+    <?php foreach (array_merge($review['errors'], $review['open_errors']) as $w): ?><div style="color:var(--red);font-weight:600;">✖ <?= h($w) ?></div><?php endforeach; ?>
   </div>
   <div style="margin-top:12px;">
     <?php if ($review['errors']): ?>
@@ -336,6 +338,10 @@ include __DIR__ . '/../../includes/layout_header.php';
         <?php if ($file !== ''): ?><input type="hidden" name="file" value="<?= h($file) ?>"><?php endif; ?>
         <?php if ($sheetReq !== ''): ?><input type="hidden" name="sheet" value="<?= h($sheetReq) ?>"><?php endif; ?>
         <?php if ($psSet): ?><input type="hidden" name="ps_set" value="1"><?php foreach ($psReq as $ps): ?><input type="hidden" name="price_sheets[]" value="<?= h($ps) ?>"><?php endforeach; endif; ?>
+        <label style="font-size:.85rem;font-weight:600;display:block;">
+          <input type="checkbox" name="group_open" value="1" <?= $review['open_errors'] ? 'required' : '' ?> <?= $groupOpen ? 'checked' : '' ?>> Group departure: participants and rooms not final yet
+        </label>
+        <div style="font-size:.78rem;color:var(--grey-mid);margin-bottom:10px;"><?= $review['open_errors'] ? 'Not a group? Complete the Calc in Dropbox, then reload this page. ' : '' ?>When ticked, the program has no participants, no room types and no total, only the price list per person. Regenerate it when the group is final.</div>
         <label style="font-size:.85rem;font-weight:600;display:block;margin-bottom:10px;">Seller (program owner)
           <select name="seller" required style="margin-left:8px;font-weight:400;">
             <?php if (!isset($sellers[$sellerDefault])): ?><option value="">— choose the seller —</option><?php endif; ?>
@@ -348,7 +354,7 @@ include __DIR__ . '/../../includes/layout_header.php';
         <button type="submit" class="btn btn-red">✓ Data is correct — continue</button>
       </form>
     <?php else: ?>
-      <span style="font-size:.85rem;color:#2e7d32;font-weight:600;">✓ Data confirmed · <?= $datesMode === 'indicative' ? 'indicative' : 'exact' ?> dates · seller <?= h($sellers[$sellerReq]) ?></span>
+      <span style="font-size:.85rem;color:#2e7d32;font-weight:600;">✓ Data confirmed · <?= $datesMode === 'indicative' ? 'indicative' : 'exact' ?> dates · seller <?= h($sellers[$sellerReq]) ?><?= $groupOpen ? ' · group not final' : '' ?></span>
       <a href="<?= h($selfBase . '&lang=' . $lang) ?>" style="margin-left:8px;font-size:.85rem;">change</a>
     <?php endif; ?>
   </div>
