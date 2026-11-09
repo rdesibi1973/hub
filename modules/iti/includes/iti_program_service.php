@@ -484,10 +484,11 @@ function iti_ps_calc_plan(PDO $db, int $rid, array $in): array {
                        'price_options' => $calc['price_options'] ?? [], 'price_table' => iti_final_price_table($calc, $lang)],
             'code' => $code, 'sample' => $sample ? ['id' => (int)$sample['id'], 'title' => iti_doc_pick($sample, 'title', $lang)] : null,
             'review' => iti_final_calc_review($calc),   // pax, rooms, dates required (errors); total vs prices and supplements (warnings)
+            'seller' => iti_final_request_seller($db, $rid),   // default owner of the program (pass "seller" for another one)
             'nights' => $nights, 'unmapped' => $plan['unmapped'], 'blocking' => $plan['blocking'], 'flags' => $plan['flags'],
             'existing_finals' => array_map(function ($f) { return ['id' => (int)$f['id'], 'calc_file' => $f['source_calc_path'] ? basename($f['source_calc_path']) : null,
                                                                    'superseded_by' => $f['superseded_by'] ? (int)$f['superseded_by'] : null]; }, iti_final_list($db, $rid)),
-            '_calc' => $calc, '_sample_id' => $sample ? (int)$sample['id'] : 0, '_lang' => $lang, '_dates_given' => array_key_exists('dates_indicative', $in)];
+            '_calc' => $calc, '_sample_id' => $sample ? (int)$sample['id'] : 0, '_lang' => $lang, '_dates_given' => array_key_exists('dates_indicative', $in), '_seller' => trim((string)($in['seller'] ?? ''))];
 }
 
 /**
@@ -512,7 +513,7 @@ function iti_ps_calc_generate(PDO $db, int $rid, array $plan, array $who): array
     if (empty($plan['_dates_given'])) throw new InvalidArgumentException('dates_indicative is required: 0 = the Calc dates are exact, 1 = only indicative');
     if (!$plan['_sample_id']) throw new InvalidArgumentException('No sample for Calc code "' . $plan['code'] . '" — pass sample_id');
     if ($plan['blocking']) throw new InvalidArgumentException('Map these Calc texts first (iti_save_alias): ' . implode(' ', $plan['blocking']));
-    $res = iti_final_generate($db, $rid, $plan['_calc'], $plan['_sample_id'], $plan['_lang'], $who);
+    $res = iti_final_generate($db, $rid, $plan['_calc'], $plan['_sample_id'], $plan['_lang'], $who + ['seller' => $plan['_seller'] ?? '']);
     return ['program_id' => (int)$res['program_id'], 'superseded' => $res['superseded'],
             'program' => iti_ps_program_out($db, (int)$res['program_id'], $plan['_lang'])];
 }

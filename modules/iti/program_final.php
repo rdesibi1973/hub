@@ -63,10 +63,13 @@ $review       = $calc ? iti_final_calc_review($calc) : null;
 $mustPickFile = $calc && count($calc['candidates'] ?? []) > 1 && $file === '';
 $okToken      = $calc ? substr(md5($calc['file'] . '|' . $calc['sheet'] . '|' . ($calc['calc_rev'] ?? '')), 0, 12) : '';
 $datesMode    = in_array($_REQUEST['dates'] ?? '', ['exact', 'indicative'], true) ? $_REQUEST['dates'] : '';   // asked with the confirmation
-$dataOk       = $calc && !$mustPickFile && !$review['errors'] && ($_REQUEST['ok'] ?? '') === $okToken && $datesMode !== '';
+$sellers       = $calc ? iti_final_sellers($db) : [];         // the program goes under this seller; who generates it stays in generated_by
+$sellerDefault = $calc ? iti_final_request_seller($db, $rid) : '';
+$sellerReq     = trim((string)($_REQUEST['seller'] ?? ''));
+$dataOk       = $calc && !$mustPickFile && !$review['errors'] && ($_REQUEST['ok'] ?? '') === $okToken && $datesMode !== '' && isset($sellers[$sellerReq]);
 $selfBase     = $self;
 if ($dataOk) {
-    $self .= '&ok=' . $okToken . '&dates=' . $datesMode;
+    $self .= '&ok=' . $okToken . '&dates=' . $datesMode . '&seller=' . rawurlencode($sellerReq);
     $calc['dates_indicative'] = $datesMode === 'indicative';
 }
 
@@ -97,7 +100,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit) {
             if (!$calc) throw new RuntimeException('The Calc could not be read: ' . $calcErr);
             if (!$dataOk) throw new RuntimeException('Confirm the data read from the Calc first.');
             if (!$sample) throw new RuntimeException('Choose the sample program first.');
-            $res = iti_final_generate($db, $rid, $calc, (int)$sample['id'], $lang, ['id' => $_cu['id'] ?? null, 'username' => $user]);
+            $res = iti_final_generate($db, $rid, $calc, (int)$sample['id'], $lang, ['id' => $_cu['id'] ?? null, 'username' => $user, 'seller' => $sellerReq]);
             iti_flash_set('success', 'Itinerary program #' . $res['program_id'] . ' generated'
                 . ($res['superseded'] ? ' — it replaces #' . implode(', #', $res['superseded']) : '') . '. Review the flagged days.');
         } elseif ($action === 'ai_map_texts') {
@@ -333,13 +336,19 @@ include __DIR__ . '/../../includes/layout_header.php';
         <?php if ($file !== ''): ?><input type="hidden" name="file" value="<?= h($file) ?>"><?php endif; ?>
         <?php if ($sheetReq !== ''): ?><input type="hidden" name="sheet" value="<?= h($sheetReq) ?>"><?php endif; ?>
         <?php if ($psSet): ?><input type="hidden" name="ps_set" value="1"><?php foreach ($psReq as $ps): ?><input type="hidden" name="price_sheets[]" value="<?= h($ps) ?>"><?php endforeach; endif; ?>
+        <label style="font-size:.85rem;font-weight:600;display:block;margin-bottom:10px;">Seller (program owner)
+          <select name="seller" required style="margin-left:8px;font-weight:400;">
+            <?php if (!isset($sellers[$sellerDefault])): ?><option value="">— choose the seller —</option><?php endif; ?>
+            <?php foreach ($sellers as $un => $nm): ?><option value="<?= h($un) ?>" <?= $un === $sellerDefault ? 'selected' : '' ?>><?= h($nm) ?></option><?php endforeach; ?>
+          </select>
+        </label>
         <div style="font-size:.85rem;font-weight:600;margin-bottom:4px;">Are these dates exact or indicative?</div>
         <label style="font-size:.85rem;display:block;"><input type="radio" name="dates" value="exact" required> Exact — the documents show the date of each day</label>
         <label style="font-size:.85rem;display:block;margin-bottom:10px;"><input type="radio" name="dates" value="indicative" required> Indicative — the documents show the period marked "indicative dates", with no date day by day</label>
         <button type="submit" class="btn btn-red">✓ Data is correct — continue</button>
       </form>
     <?php else: ?>
-      <span style="font-size:.85rem;color:#2e7d32;font-weight:600;">✓ Data confirmed · <?= $datesMode === 'indicative' ? 'indicative' : 'exact' ?> dates</span>
+      <span style="font-size:.85rem;color:#2e7d32;font-weight:600;">✓ Data confirmed · <?= $datesMode === 'indicative' ? 'indicative' : 'exact' ?> dates · seller <?= h($sellers[$sellerReq]) ?></span>
       <a href="<?= h($selfBase . '&lang=' . $lang) ?>" style="margin-left:8px;font-size:.85rem;">change</a>
     <?php endif; ?>
   </div>

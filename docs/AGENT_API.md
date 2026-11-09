@@ -766,6 +766,8 @@ the template's (not in the past; if not known yet, likely dates, then `dates_ind
 F10, filled by the seller with discounts and supplements; `warnings` reports when it differs from adults × F9 + teenagers and
 children at their prices + single supplement × singles. The price table shows the teen / child price with its discount in the label,
 and a single supplement row when the room types have singles (also for 1 pax). The Hub page asks to confirm pax, rooms, dates and prices first.
+**Seller:** the program goes under the request's seller (`seller` in the plan = username; pass `seller` for another active one), in `created_by`;
+who generates it stays in `generated_by`, so someone can finalise programs for other sellers.
 
 Plan: `calc` (file, files = every Calc of the folder, rev, pax, sheet, sheets = pickable sheets, warnings,
 price_options [{sheet, pax_total, pax, price_to_customer, nights, same_itinerary}], price_table = the rows the programme

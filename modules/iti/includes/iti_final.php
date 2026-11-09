@@ -362,6 +362,34 @@ function iti_final_same_kind(array $a, array $b): bool {
     return (bool)array_intersect_key($words($a), $words($b));
 }
 
+/** Who a program can be put under: active Hub users tied to a seller, [username => full name]. */
+function iti_final_sellers(PDO $db): array {
+    $st = $db->prepare('SELECT username, full_name FROM users WHERE agent_id IS NOT NULL AND is_active = 1 AND username <> ? ORDER BY full_name');
+    $st->execute(array(defined('AGENT_API_USER') ? AGENT_API_USER : 'claude_agent'));
+    $out = array();
+    foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $u) $out[$u['username']] = trim((string)$u['full_name']) !== '' ? $u['full_name'] : $u['username'];
+    return $out;
+}
+
+/** Username of the request's seller, '' when none is an active user. */
+function iti_final_request_seller(PDO $db, int $requestId): string {
+    $st = $db->prepare('SELECT u.username FROM requests r JOIN users u ON u.agent_id = r.agent_id
+                         WHERE r.id = ? AND u.is_active = 1 AND u.username <> ? ORDER BY u.id LIMIT 1');
+    $st->execute(array($requestId, defined('AGENT_API_USER') ? AGENT_API_USER : 'claude_agent'));
+    return (string)$st->fetchColumn();
+}
+
+/** Owner of a generated program: the seller asked for, else the request's seller, else $fallback (who generates it). */
+function iti_final_resolve_seller(PDO $db, int $requestId, string $username, string $fallback): string {
+    if ($username === '') {
+        $s = iti_final_request_seller($db, $requestId);
+        return $s !== '' ? $s : $fallback;
+    }
+    $sellers = iti_final_sellers($db);
+    if (!isset($sellers[$username])) throw new RuntimeException('Seller "' . $username . '" is not an active seller of the Hub.');
+    return $username;
+}
+
 /** Single rooms in the Calc's room text: "1 DOUBLE + 1 SINGLE" → 1, "2 singole" / "SGL x 2" → 2, "SINGLE" → 1. */
 function iti_final_single_rooms(string $rooms): int {
     if (!preg_match_all('/(?:(\d+)\s*[x×]?\s*)?(?<![a-z])(?:singles?|singol[ae]|sgl)\b(?:\s*[x×]\s*(\d+))?/iu', $rooms, $m, PREG_SET_ORDER)) return 0;
@@ -826,7 +854,8 @@ function iti_final_ref_number(PDO $db, int $requestId, array $calc) {
 /**
  * Build the final programme. $calc must come from calc_read_request() (calc_path,
  * calc_rev). Throws RuntimeException when the plan still has blocking items.
- * $who = ['id' => users.id, 'username' => ...]. Returns ['program_id', 'superseded' => int[], 'plan'].
+ * $who = ['id' => users.id, 'username' => ..., 'seller' => username of the program's owner ('' = the request's seller)]:
+ * the owner goes in created_by (the consultant), who presses the button in generated_by. Returns ['program_id', 'superseded' => int[], 'plan'].
  */
 function iti_final_generate(PDO $db, int $requestId, array $calc, int $sampleId, string $lang, array $who): array {
     iti_ensure_final_schema();
@@ -850,7 +879,8 @@ function iti_final_generate(PDO $db, int $requestId, array $calc, int $sampleId,
         $titles['title_' . $l] = (string)$sample['title_' . $l] !== '' ? iti_final_title((string)$sample['title_' . $l], $customer) : '';
     }
     if (empty($titles['title_en'])) $titles['title_en'] = iti_final_title((string)$sample['title_en'], $customer) ?: (string)$sample['title_en'];
-    $newId = iti_duplicate_program($sampleId, 'personal', (string)($who['username'] ?? 'system'), $titles + array(
+    $owner = iti_final_resolve_seller($db, $requestId, (string)($who['seller'] ?? ''), (string)($who['username'] ?? 'system'));
+    $newId = iti_duplicate_program($sampleId, 'personal', $owner, $titles + array(
         'lead_request_id'  => $requestId,
         'ref_number'       => iti_final_ref_number($db, $requestId, $calc),
         'price_table_json' => ($pt = iti_final_price_table($calc, $lang)) ? json_encode($pt, JSON_UNESCAPED_UNICODE) : null,
