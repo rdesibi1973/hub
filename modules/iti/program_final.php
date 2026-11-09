@@ -288,7 +288,7 @@ include __DIR__ . '/../../includes/layout_header.php';
     </div>
     <?php if (count($priceOpts) > 1): ?>
       <div style="font-size:.8rem;margin-top:6px;line-height:1.6;">
-        <?php foreach (iti_final_price_options_table($priceOpts, $lang) as $row): ?>
+        <?php foreach (iti_final_price_options_table($priceOpts, 'en') as $row): ?>
           <div><?= h($row['label']) ?>: <strong><?= number_format($row['price'], 0, ',', '.') ?> <?= h($row['currency']) ?></strong></div>
         <?php endforeach; ?>
         <?php foreach ($priceOpts as $o): if ($o['price_to_customer'] === null || $o['price_to_customer'] <= 0): ?>
@@ -305,12 +305,12 @@ include __DIR__ . '/../../includes/layout_header.php';
   <?php endif; ?>
   <div style="font-size:.85rem;line-height:1.7;">
     <strong><?= h($calc['file']) ?></strong> · sheet <?= h($calc['sheet']) ?>
-    <?php $missing = '<strong style="color:var(--red);">missing</strong>'; $priceRows = iti_final_price_table($calc, $lang); ?>
+    <?php $missing = '<strong style="color:var(--red);">missing</strong>'; $priceRows = iti_final_price_table($calc, 'en'); /* this page is in English; the program uses its own language */ ?>
     <table style="margin:8px 0;border-collapse:collapse;">
       <tr><td style="padding:2px 16px 2px 0;color:var(--grey-mid);">Adults / teenagers / children</td>
           <td><strong><?= (int)$calc['pax']['adults'] ?> / <?= (int)$calc['pax']['teen'] ?> / <?= (int)$calc['pax']['child'] ?></strong></td></tr>
       <tr><td style="padding:2px 16px 2px 0;color:var(--grey-mid);">Room types</td>
-          <td><?= $calc['room_config'] !== '' ? '<strong>' . h($calc['room_config']) . '</strong>' . ($review['singles'] ? ' · ' . (int)$review['singles'] . ' single' : '') : $missing ?></td></tr>
+          <td><?= $calc['room_config'] !== '' ? '<strong>' . h($calc['room_config']) . '</strong>' : $missing ?></td></tr>
       <tr><td style="padding:2px 16px 2px 0;color:var(--grey-mid);">Dates</td>
           <td><strong><?= $fmtD($calc['start_date']) ?> → <?= $fmtD($calc['end_date']) ?></strong> · <?= (int)$calc['nights'] ?> nights</td></tr>
       <tr><td style="padding:2px 16px 2px 0;color:var(--grey-mid);vertical-align:top;">On the program</td>
@@ -435,7 +435,7 @@ include __DIR__ . '/../../includes/layout_header.php';
         <td style="font-size:.8rem;">
           <?php foreach ($d['acts'] as $a): ?><div><code><?= h($a['text']) ?></code> <?= $badge($a['state']) ?></div><?php endforeach; ?>
         </td>
-        <td style="font-size:.8rem;"><?= $d['sample_index'] !== null ? 'Giorno ' . ($d['sample_index'] + 1) : ($sample ? '<span class="badge" style="background:#fff8e1;color:#8a6d00;">new</span>' : '—') ?></td>
+        <td style="font-size:.8rem;"><?= $d['sample_index'] !== null ? 'Day ' . ($d['sample_index'] + 1) : ($sample ? '<span class="badge" style="background:#fff8e1;color:#8a6d00;">new</span>' : '—') ?></td>
         <td style="font-size:.75rem;color:var(--grey-mid);"><?= h(trim($d['invoice'] . ' ' . $d['checked'])) ?></td>
       </tr>
       <?php if ($d['flags']): ?>
