@@ -465,6 +465,7 @@ function iti_ps_calc_plan(PDO $db, int $rid, array $in): array {
     if (is_string($ps)) $ps = explode(',', $ps);
     $ps = is_array($ps) ? array_values(array_filter(array_map('trim', array_map('strval', $ps)), 'strlen')) : [];
     $calc = calc_read_request($db, $rid, (string)($in['file'] ?? ''), (string)($in['sheet'] ?? ''), $ps);
+    $calc['dates_indicative'] = in_array($in['dates_indicative'] ?? 0, [1, true, '1'], true);   // the Calc does not say: asked, as on the Hub page
     $lang = in_array($in['lang'] ?? '', ITI_PS_LANGS, true) ? $in['lang'] : 'it';
     $code = iti_final_code_from_calc($calc['file']);
     $sample = !empty($in['sample_id']) ? iti_get_program((int)$in['sample_id']) : iti_final_find_sample($db, $code, $lang);
@@ -480,14 +481,13 @@ function iti_ps_calc_plan(PDO $db, int $rid, array $in): array {
     }
     return ['calc' => ['file' => $calc['file'], 'files' => $calc['candidates'] ?? [], 'rev' => $calc['calc_rev'] ?? null, 'pax' => $calc['pax'] ?? null,
                        'sheet' => $calc['sheet'] ?? null, 'sheets' => $calc['sheets'] ?? [], 'warnings' => $calc['warnings'] ?? [],
-                       'dates_indicative' => !empty($calc['dates_indicative']),
                        'price_options' => $calc['price_options'] ?? [], 'price_table' => iti_final_price_table($calc, $lang)],
             'code' => $code, 'sample' => $sample ? ['id' => (int)$sample['id'], 'title' => iti_doc_pick($sample, 'title', $lang)] : null,
             'review' => iti_final_calc_review($calc),   // pax, rooms, dates required (errors); total vs prices and supplements (warnings)
             'nights' => $nights, 'unmapped' => $plan['unmapped'], 'blocking' => $plan['blocking'], 'flags' => $plan['flags'],
             'existing_finals' => array_map(function ($f) { return ['id' => (int)$f['id'], 'calc_file' => $f['source_calc_path'] ? basename($f['source_calc_path']) : null,
                                                                    'superseded_by' => $f['superseded_by'] ? (int)$f['superseded_by'] : null]; }, iti_final_list($db, $rid)),
-            '_calc' => $calc, '_sample_id' => $sample ? (int)$sample['id'] : 0, '_lang' => $lang];
+            '_calc' => $calc, '_sample_id' => $sample ? (int)$sample['id'] : 0, '_lang' => $lang, '_dates_given' => array_key_exists('dates_indicative', $in)];
 }
 
 /**
@@ -509,6 +509,7 @@ function iti_ps_tag_sample(PDO $db, array $in, bool $go): array {
 
 /** Generate the final programme (replaces an older final built from the same Calc file). */
 function iti_ps_calc_generate(PDO $db, int $rid, array $plan, array $who): array {
+    if (empty($plan['_dates_given'])) throw new InvalidArgumentException('dates_indicative is required: 0 = the Calc dates are exact, 1 = only indicative');
     if (!$plan['_sample_id']) throw new InvalidArgumentException('No sample for Calc code "' . $plan['code'] . '" — pass sample_id');
     if ($plan['blocking']) throw new InvalidArgumentException('Map these Calc texts first (iti_save_alias): ' . implode(' ', $plan['blocking']));
     $res = iti_final_generate($db, $rid, $plan['_calc'], $plan['_sample_id'], $plan['_lang'], $who);

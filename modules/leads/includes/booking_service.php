@@ -880,6 +880,14 @@ function bs_confirm_checks(array $plan): array {
     } catch (Throwable $e) {
         $checks[] = ['level' => 'info', 'msg' => 'Excel checks skipped — ' . $e->getMessage()];
     }
+    // Itinerary programs of this request still on indicative dates: a confirmed booking needs the real ones.
+    try {
+        $st = db()->prepare("SELECT id FROM iti_programs WHERE lead_request_id = ? AND dates_indicative = 1 AND superseded_by IS NULL AND status <> 'cancelled'");
+        $st->execute([(int)$plan['request_id']]);
+        foreach ($st->fetchAll(PDO::FETCH_COLUMN) as $pid) {
+            $checks[] = ['level' => 'warn', 'msg' => 'Itinerary program #' . (int)$pid . ' has indicative dates — enter the real dates in the Calc and regenerate it.'];
+        }
+    } catch (Throwable $e) { /* columns not there yet: no ITI program uses them */ }
     if ($plan['dbx_err'] !== '') {
         $checks[] = ['level' => 'info', 'msg' => 'Dropbox error while checking: ' . $plan['dbx_err']];
     } elseif (!$curPath) {

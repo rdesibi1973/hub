@@ -317,7 +317,6 @@ function calc_read_file(string $path, string $wantSheet = ''): array {
         'extra_details'     => $below('EXTRA DETAILS'),
         'start_date'        => $start,
         'end_date'          => $end,
-        'dates_indicative'  => sc_dates_indicative($v),
         'nights'            => $days ? count($days) - 1 : 0,
         'days'              => $days,
         'guests'            => $guests,

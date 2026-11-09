@@ -548,10 +548,10 @@ catalogue texts that do not exist in the program language (`lang`, else the prog
 `show_tip_note` (0 | 1) and `tip_note_day` = the day the tip note lands on in this language, null = no note (switched off,
 no text in the language, or no safari day) — see **Tip note** below; check it before `iti_document`.
 
-**Indicative dates (9 Nov 2026).** When the client has not fixed the dates, the Calc holds likely ones and an empty cell above
-the DATE row says `DATE INDICATIVE` (whole cell; delete it when the real dates are in). `iti_calc_plan` returns `calc.dates_indicative`,
-`iti_final_from_calc` sets the program's `dates_indicative` (0 | 1, also in `iti_program` / `iti_update_program`). The documents
-then show the period with "date indicative" and no date day by day. Confirm Safari reports an `error` while the cell is there.
+**Indicative dates (9 Nov 2026).** When the client has not fixed the dates, the Calc holds likely ones. The Calc does not say
+which kind they are: the Hub page asks after reading it, and `iti_final_from_calc` with confirm requires `dates_indicative` (0 = exact,
+1 = indicative; ask the seller). It is stored on the program (0 | 1, also in `iti_program` / `iti_update_program`). The documents
+then show the period with "date indicative" and no date day by day. Confirm Safari warns while a program of the request is on indicative dates.
 
 **Tip note (25 Oct 2026).** The client documents (magazine web page / public link, PDF, Word — never the guide sheet) end the
 last safari day with a quiet note on tipping the guide (about 10 USD per adult per safari day, at the client's discretion).
@@ -761,7 +761,7 @@ Only needed for samples: a personal program's link is on without it (unpublish d
   group departures ("base N pax" is forbidden there).
 
 **Required in the Calc (9 Nov 2026):** adults / teenagers / children, room types (cell under ROOMS TYPE) and dates that are not
-the template's (not in the past; if not known yet, likely dates + the `DATE INDICATIVE` cell). The plan's `review` =
+the template's (not in the past; if not known yet, likely dates, then `dates_indicative: 1`). The plan's `review` =
 `{errors[], warnings[], singles, expected_total}`: with `errors` nothing is generated (409). The total on the program is always
 F10, filled by the seller with discounts and supplements; `warnings` reports when it differs from adults × F9 + teenagers and
 children at their prices + single supplement × singles. The price table shows the teen / child price with its discount in the label,

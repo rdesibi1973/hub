@@ -393,7 +393,7 @@ function iti_final_calc_review(array $calc): array {
         $errors[] = 'Enter the trip dates in the DATE column.';
     } elseif ($start < date('Y-m-d')) {
         $errors[] = 'The trip starts on ' . $start . ', in the past: dates left from the template? Enter the real dates; if they are not known yet, '
-                  . 'enter likely ones and write DATE INDICATIVE in an empty cell above the DATE row.';
+                  . 'enter likely ones: the next step asks whether they are exact or indicative.';
     }
 
     $expected = null;
@@ -789,7 +789,7 @@ function iti_final_plan(PDO $db, array $calc, int $sampleId): array {
         $flags[] = 'The sample has ' . count($sampleDays) . ' days, the Calc ' . count($days) . ' — days are added / removed to match the Calc.';
     }
     if (!empty($calc['dates_indicative'])) {
-        $flags[] = 'The Calc dates are marked DATE INDICATIVE: the documents show the period with "indicative dates" and no date day by day.';
+        $flags[] = 'Dates confirmed as indicative: the documents show the period with "indicative dates" and no date day by day.';
     }
     return array('days' => $days, 'blocking' => $blocking, 'unmapped' => $unmapped, 'hints' => $hints, 'flags' => $flags,
                  'sample_days' => count($sampleDays));

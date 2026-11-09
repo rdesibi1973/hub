@@ -62,8 +62,13 @@ $sample = $calc ? iti_final_find_sample($db, $code, $lang) : null;
 $review       = $calc ? iti_final_calc_review($calc) : null;
 $mustPickFile = $calc && count($calc['candidates'] ?? []) > 1 && $file === '';
 $okToken      = $calc ? substr(md5($calc['file'] . '|' . $calc['sheet'] . '|' . ($calc['calc_rev'] ?? '')), 0, 12) : '';
-$dataOk       = $calc && !$mustPickFile && !$review['errors'] && ($_REQUEST['ok'] ?? '') === $okToken;
-if ($dataOk) $self .= '&ok=' . $okToken;
+$datesMode    = in_array($_REQUEST['dates'] ?? '', ['exact', 'indicative'], true) ? $_REQUEST['dates'] : '';   // asked with the confirmation
+$dataOk       = $calc && !$mustPickFile && !$review['errors'] && ($_REQUEST['ok'] ?? '') === $okToken && $datesMode !== '';
+$selfBase     = $self;
+if ($dataOk) {
+    $self .= '&ok=' . $okToken . '&dates=' . $datesMode;
+    $calc['dates_indicative'] = $datesMode === 'indicative';
+}
 
 $aiMapKey = 'iti_ai_map_' . $rid;   // last AI proposals of this request, until the session ends
 
@@ -304,7 +309,7 @@ include __DIR__ . '/../../includes/layout_header.php';
       <tr><td style="padding:2px 16px 2px 0;color:var(--grey-mid);">Room types</td>
           <td><?= $calc['room_config'] !== '' ? '<strong>' . h($calc['room_config']) . '</strong>' . ($review['singles'] ? ' · ' . (int)$review['singles'] . ' single' : '') : $missing ?></td></tr>
       <tr><td style="padding:2px 16px 2px 0;color:var(--grey-mid);">Dates</td>
-          <td><strong><?= $fmtD($calc['start_date']) ?> → <?= $fmtD($calc['end_date']) ?></strong> · <?= (int)$calc['nights'] ?> nights<?= !empty($calc['dates_indicative']) ? ' <strong style="color:#8a6d00;">(indicative dates)</strong>' : '' ?></td></tr>
+          <td><strong><?= $fmtD($calc['start_date']) ?> → <?= $fmtD($calc['end_date']) ?></strong> · <?= (int)$calc['nights'] ?> nights</td></tr>
       <tr><td style="padding:2px 16px 2px 0;color:var(--grey-mid);vertical-align:top;">On the program</td>
           <td><?php if ($priceRows): foreach ($priceRows as $pr): ?><div><?= !empty($pr['bold']) ? '<strong>' : '' ?><?= h($pr['label']) ?>: <?= number_format($pr['price'], 0, ',', '.') ?> <?= h($pr['currency']) ?><?= !empty($pr['bold']) ? '</strong>' : '' ?></div><?php endforeach; else: ?>no price<?php endif; ?></td></tr>
     </table>
@@ -321,9 +326,21 @@ include __DIR__ . '/../../includes/layout_header.php';
     <?php if ($review['errors']): ?>
       <span style="font-size:.85rem;color:var(--red);">Complete the Calc in Dropbox, then reload this page.</span>
     <?php elseif (!$dataOk): ?>
-      <a href="<?= h($self . '&lang=' . $lang . '&ok=' . $okToken) ?>" class="btn btn-red">✓ Data is correct — continue</a>
+      <form method="GET" action="program_final.php">
+        <input type="hidden" name="request_id" value="<?= $rid ?>">
+        <input type="hidden" name="lang" value="<?= h($lang) ?>">
+        <input type="hidden" name="ok" value="<?= h($okToken) ?>">
+        <?php if ($file !== ''): ?><input type="hidden" name="file" value="<?= h($file) ?>"><?php endif; ?>
+        <?php if ($sheetReq !== ''): ?><input type="hidden" name="sheet" value="<?= h($sheetReq) ?>"><?php endif; ?>
+        <?php if ($psSet): ?><input type="hidden" name="ps_set" value="1"><?php foreach ($psReq as $ps): ?><input type="hidden" name="price_sheets[]" value="<?= h($ps) ?>"><?php endforeach; endif; ?>
+        <div style="font-size:.85rem;font-weight:600;margin-bottom:4px;">Are these dates exact or indicative?</div>
+        <label style="font-size:.85rem;display:block;"><input type="radio" name="dates" value="exact" required> Exact — the documents show the date of each day</label>
+        <label style="font-size:.85rem;display:block;margin-bottom:10px;"><input type="radio" name="dates" value="indicative" required> Indicative — the documents show the period marked "indicative dates", with no date day by day</label>
+        <button type="submit" class="btn btn-red">✓ Data is correct — continue</button>
+      </form>
     <?php else: ?>
-      <span style="font-size:.85rem;color:#2e7d32;font-weight:600;">✓ Data confirmed</span>
+      <span style="font-size:.85rem;color:#2e7d32;font-weight:600;">✓ Data confirmed · <?= $datesMode === 'indicative' ? 'indicative' : 'exact' ?> dates</span>
+      <a href="<?= h($selfBase . '&lang=' . $lang) ?>" style="margin-left:8px;font-size:.85rem;">change</a>
     <?php endif; ?>
   </div>
 </div>

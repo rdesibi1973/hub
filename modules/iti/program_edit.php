@@ -888,7 +888,7 @@ include __DIR__ . '/../../includes/layout_header.php';
         <?php if (array_key_exists('dates_indicative', $program)): ?>
         <input type="hidden" name="dates_indicative" value="0">
         <label class="check-label" style="margin-top:8px;"><input type="checkbox" name="dates_indicative" value="1" <?= (int)$program['dates_indicative'] === 1 ? 'checked' : '' ?>> Indicative dates</label>
-        <span class="form-hint">Documents show the period marked "indicative dates", with no date day by day. From the Calc: cell DATE INDICATIVE.</span>
+        <span class="form-hint">Documents show the period marked "indicative dates", with no date day by day.</span>
         <?php endif; ?>
       </div>
       <div class="form-group">
