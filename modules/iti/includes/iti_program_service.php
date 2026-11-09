@@ -48,6 +48,15 @@ function iti_ps_ref_check($v): ?string {
     return $v;
 }
 
+/** Free wording of the participants line: one line, '' → null, at most 200 characters (the column). */
+function iti_ps_pax_label_check($v): ?string {
+    if ($v === null) return null;
+    $v = trim((string)preg_replace('/\s+/u', ' ', (string)$v));
+    if ($v === '') return null;
+    if (mb_strlen($v) > 200) throw new InvalidArgumentException('pax_label: max 200 characters (' . mb_strlen($v) . ' given)');
+    return $v;
+}
+
 /**
  * ref_number of a client programme = the name of the programme Word copy_program put in the
  * request folder, without extension ("01_MarcoCiaolo(OceanoPoint-Roberto)_PumbaSafari").
@@ -128,6 +137,8 @@ function iti_ps_program_out(PDO $db, int $id, string $lang = ''): array {
     if (!$p) throw new InvalidArgumentException('Program ' . $id . ' not found');
     $lang = in_array($lang, ITI_PS_LANGS, true) ? $lang : (in_array($p['display_language'] ?? '', ITI_PS_LANGS, true) ? $p['display_language'] : 'it');
     $D = iti_doc_data($id, $lang);
+    $paxLabels = [];
+    foreach (ITI_PS_LANGS as $l) $paxLabels['pax_label_' . $l] = $p['pax_label_' . $l] ?? null;
     $days = [];
     foreach ($D['days'] as $d) {
         $days[] = ['day' => $d['n'], 'date' => $d['date'] ?? null, 'title' => $d['title'], 'destination' => $d['dest'], 'lodge' => $d['lodge'], 'room' => $d['room'],
@@ -148,7 +159,8 @@ function iti_ps_program_out(PDO $db, int $id, string $lang = ''): array {
         'title' => $D['title'], 'subtitle' => $D['subtitle'], 'intro' => $D['intro'], 'language' => $lang,
         'currency' => $p['display_currency'] ?? null, 'start_date' => $p['start_date'] ?? null,
         'dates_indicative' => (int)($p['dates_indicative'] ?? 0),
-        'pax_open' => (int)($p['pax_open'] ?? 0),   // group departure still filling up
+        'pax_open' => (int)($p['pax_open'] ?? 0),   // participants not fixed: no number and no total on the documents
+        'pax_label' => $D['pax_label'] !== '' ? $D['pax_label'] : null,   // wording printed in this language instead of the number
         'pax_adults' => (int)($p['pax_adults'] ?? 0), 'pax_teens' => (int)($p['pax_teens'] ?? 0), 'pax_children' => (int)($p['pax_children'] ?? 0),
         'duration' => $D['duration'], 'published' => iti_program_is_public($p),   // personal: always, until cancelled
         'prices' => $D['prices'], 'price_notes' => $D['price_notes'],
@@ -157,7 +169,7 @@ function iti_ps_program_out(PDO $db, int $id, string $lang = ''): array {
         'missing_texts' => $D['missing_texts'],
         'structure' => iti_pb_days_raw($db, $id),   // the days as stored (ids), same shape iti_set_days takes
         'links' => iti_ps_links($p, $lang),
-    ];
+    ] + $paxLabels;
 }
 
 /** Samples Cowork can start from: id, Calc code, titles, days, route. */
@@ -194,8 +206,8 @@ function iti_ps_schema(): void {
 /** Header fields an agent may set, limited to the columns the live table really has. */
 function iti_ps_header_fields(): array {
     iti_ps_schema();
-    $f = ['ref_number', 'safari_type', 'show_tip_note', 'country', 'display_language', 'display_currency', 'start_date', 'dates_indicative', 'pax_adults', 'pax_teens', 'pax_children', 'price_table_json', 'price_notes'];
-    foreach (ITI_PS_LANGS as $l) foreach (['title', 'subtitle', 'intro', 'price_notes'] as $k) $f[] = $k . '_' . $l;
+    $f = ['ref_number', 'safari_type', 'show_tip_note', 'country', 'display_language', 'display_currency', 'start_date', 'dates_indicative', 'pax_open', 'pax_adults', 'pax_teens', 'pax_children', 'price_table_json', 'price_notes'];
+    foreach (ITI_PS_LANGS as $l) foreach (['title', 'subtitle', 'intro', 'price_notes', 'pax_label'] as $k) $f[] = $k . '_' . $l;
     return array_values(array_intersect($f, iti_table_columns('iti_programs')));
 }
 
@@ -215,12 +227,13 @@ function iti_ps_header_values(array $fields): array {
             $v = $v === '' ? null : $v;
         }
         if ($k === 'ref_number') { $out[$k] = iti_ps_ref_check($v); continue; }
+        if (strpos($k, 'pax_label_') === 0) { $out[$k] = iti_ps_pax_label_check($v); continue; }
         if ($k === 'country') {   // "KE", "TZ+KE"; null / "" = from the destinations
             $out[$k] = ($v === null || trim((string)$v) === '') ? null : implode('+', iti_country_list($v));
             continue;
         }
         if ($k === 'pax_adults' || $k === 'pax_teens' || $k === 'pax_children') $v = max(0, min(60, (int)$v));
-        if ($k === 'show_tip_note' || $k === 'dates_indicative') {   // tip note on the last safari day / dates only indicative on the client documents
+        if ($k === 'show_tip_note' || $k === 'dates_indicative' || $k === 'pax_open') {   // tip note on the last safari day / dates only indicative / participants not fixed on the client documents
             if (!in_array($v, [0, 1, true, false, '0', '1'], true)) throw new InvalidArgumentException($k . ': 0 | 1');
             $v = (int)(bool)$v;
         }
@@ -247,7 +260,7 @@ function iti_ps_personal(int $id): array {
 /**
  * Proposal for a client: a copy of a sample, or a blank programme (no sample_id) for trips with
  * no matching sample. $in: sample_id?, lead_request_id?, calc_file?, fields? {ref_number, title_<lang>, subtitle_<lang>,
- * intro_<lang>, safari_type (private | group | beach; default from the sample / GRP tags), show_tip_note (0 | 1; default from the sample, else 1), start_date, pax_adults, pax_teens (under 16), pax_children (under 12), display_language, display_currency,
+ * intro_<lang>, safari_type (private | group | beach; default from the sample / GRP tags), show_tip_note (0 | 1; default from the sample, else 1), start_date, pax_adults, pax_teens (under 16), pax_children (under 12), pax_open (0 | 1), pax_label_<lang>, display_language, display_currency,
  * price_table_json, price_notes_<lang>}, days? [day items, see iti_program_build.php] (replace
  * the sample's days). Blank programme: title_<display_language> and days[] are required.
  */

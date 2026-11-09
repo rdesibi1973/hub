@@ -199,7 +199,7 @@ function iti_mag_date_range(array $D, array $M): string {
     return $ind ? $s . ' (' . $M['dates_ind'] . ')' : $s;
 }
 
-/** "2 adulti · 1 ragazzo (minori di 16 anni) · 1 bambino (minori di 12 anni)" for personal programmes ('' for samples). */
+/** Participants line: the free wording if there is one, else "2 adulti · 1 ragazzo (minori di 16 anni) · 1 bambino (minori di 12 anni)" for personal programmes ('' for samples and with pax_open). */
 function iti_mag_pax(array $D, array $M): string {
     if (!empty($D['pax_label'])) return (string)$D['pax_label'];
     $p = $D['program'];

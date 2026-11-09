@@ -451,11 +451,11 @@ function iti_pb_create_transfer_route(PDO $db, array $f, bool $go): array {
  */
 function iti_pb_save_as_sample(PDO $db, int $pid, array $in, string $who, bool $go): array {
     $p = iti_ps_personal($pid);
-    $set = ['lead_request_id' => null, 'ref_number' => null, 'start_date' => null, 'pax_adults' => 2, 'pax_teens' => 0, 'pax_children' => 0, 'stage' => 'proposal',
+    $set = ['lead_request_id' => null, 'ref_number' => null, 'start_date' => null, 'pax_adults' => 2, 'pax_teens' => 0, 'pax_children' => 0, 'pax_open' => 0, 'stage' => 'proposal',
             'status' => 'draft', 'hub_program_code' => trim((string)($in['code'] ?? '')) ?: null];
     $cols = iti_table_columns('iti_programs');
     foreach (['price_table_json', 'source_calc_path', 'source_calc_rev', 'generated_at', 'generated_by', 'superseded_by', 'superseded_at'] as $c) if (in_array($c, $cols, true)) $set[$c] = null;
-    foreach (ITI_PS_LANGS as $l) if (in_array('price_notes_' . $l, $cols, true)) $set['price_notes_' . $l] = null;
+    foreach (ITI_PS_LANGS as $l) foreach (['price_notes_', 'pax_label_'] as $c) if (in_array($c . $l, $cols, true)) $set[$c . $l] = null;
     $title = trim((string)($in['title'] ?? ''));
     foreach (ITI_PS_LANGS as $l) {
         $t = trim((string)($in['title_' . $l] ?? '')) ?: $title;

@@ -547,6 +547,16 @@ catalogue texts that do not exist in the program language (`lang`, else the prog
 `iti_update_lodge` / `iti_update_destination`.
 `show_tip_note` (0 | 1) and `tip_note_day` = the day the tip note lands on in this language, null = no note (switched off,
 no text in the language, or no safari day) — see **Tip note** below; check it before `iti_document`.
+`pax_open` (0 | 1), `pax_label` (the wording printed in this language, null = none) and `pax_label_<lang>` (the five stored values) — see **Open participants** below.
+
+**Open participants (9 Nov 2026).** For fam trips and offers "base 4/5/6 pax + 1 TL", where a fixed number would be wrong.
+`pax_label_<lang>` = free wording, one line, max 200 characters (`da 4 a 6 partecipanti + 1 accompagnatore`): when filled it replaces the
+computed number on the cover, the recap, the magazine web page and every `iti_document` format (pdf, docx, guide). It is per language, with
+no fallback: empty in the document's language = the computed line. `pax_open` = 1, on any safari type: no number on the documents (with no
+`pax_label`, no participants line at all) and no booking total — a price row starting "Totale pratica" / "Total booking" / "Prix total" /
+"Precio total" / "Gesamt" is not printed and not in `prices`; it stays stored and comes back with `pax_open` 0. The other rows and the
+notes are printed as written, so write the rates per person there (`Base 4 partecipanti`, …). Both are set with `iti_create_personal` /
+`iti_update_program` (dry-run unless confirm) or, for the wording, in the Hub editor ("Dicitura partecipanti"); `iti_save_as_sample` clears them. Vouchers keep the numbers.
 
 **Indicative dates (9 Nov 2026).** When the client has not fixed the dates, the Calc holds likely ones. The Calc does not say
 which kind they are: the Hub page asks after reading it, and `iti_final_from_calc` with confirm requires `dates_indicative` (0 = exact,
@@ -606,7 +616,7 @@ curl -sH "$H" "$U?action=iti_document&program_id=412&format=guide&save=1"       
 
 #### `iti_create_personal` (POST)
 `sample_id`, `lead_request_id?` (Hub request), `calc_file?`, `fields?` — any of `ref_number`, `title_<lang>`, `subtitle_<lang>`, `intro_<lang>`,
-`start_date` (YYYY-MM-DD: dates appear on the cover and on each day), `pax_adults`, `pax_teens` (under 16), `pax_children` (under 12),
+`start_date` (YYYY-MM-DD: dates appear on the cover and on each day), `pax_adults`, `pax_teens` (under 16), `pax_children` (under 12), `pax_open` (0 | 1) and `pax_label_<lang>` (see **Open participants**),
 `display_language`, `display_currency`, `safari_type` (`private` | `group` | `beach`), `show_tip_note` (0 | 1, see **Tip note**; default from the sample), `price_table_json` (`[{label, price, currency, bold?}]`; `bold: true` prints the row in bold — a row starting "Totale pratica" / "Total booking" is bold unless `bold: false`), `price_notes_<lang>`.
 Copies the sample (days, activities, prices, inclusions) as a draft proposal, with the T&C of the request's client type
 (`fields.terms_variant` = `direct` | `agency` forces one). Dry-run unless `"confirm": true` (→ plan with `terms_variant`,
@@ -624,7 +634,7 @@ otherwise the sample's when it is a group safari or a beach stay, `group` when `
 the plan shows it. `iti_program` returns `safari_type`; change it with `iti_update_program`.
 
 #### `iti_update_program` (POST)
-`program_id`, `fields` (same list — `ref_number` and `show_tip_note` included, see the rules above — plus `terms_variant` = `direct` | `agency` | `auto` (from the linked request), and `lead_request_id` = the Hub request to link, null to unlink: a new link applies the request's T&C, unless `terms_variant` is given, and adds a timeline line) → `changes`
+`program_id`, `fields` (same list — `ref_number`, `show_tip_note`, `pax_open` and `pax_label_<lang>` included, see the rules above; an empty `pax_label_<lang>` clears it — plus `terms_variant` = `direct` | `agency` | `auto` (from the linked request), and `lead_request_id` = the Hub request to link, null to unlink: a new link applies the request's T&C, unless `terms_variant` is given, and adds a timeline line) → `changes`
 (a T&C change shows as `terms_id` with `variant_from` / `variant_to`). Dry-run unless confirm. Refused when the program has
 its own dedicated T&C (edit those in the Hub).
 

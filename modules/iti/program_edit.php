@@ -41,7 +41,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     // ── Salva header programma ──
     if ($sub === 'header') {
-        try { $refNum = iti_ps_ref_check($_POST['ref_number'] ?? ''); }   // also the programme file name
+        $paxLabels = [];
+        try {
+            $refNum = iti_ps_ref_check($_POST['ref_number'] ?? '');   // also the programme file name
+            foreach (ITI_PS_LANGS as $l) if (isset($_POST['pax_label_' . $l])) $paxLabels['pax_label_' . $l] = iti_ps_pax_label_check($_POST['pax_label_' . $l]);
+        }
         catch (InvalidArgumentException $e) {
             iti_flash_set('error', 'Program header not saved — ' . $e->getMessage());
             iti_redirect("program_edit.php?id={$id}&tab=info");
@@ -72,6 +76,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         ]);
         if (isset($_POST['pax_teens'])) {   // column from iti_ps_schema()
             $db->prepare('UPDATE iti_programs SET pax_teens=? WHERE id=?')->execute([max(0, (int)$_POST['pax_teens']), $id]);
+        }
+        if ($paxLabels) {   // documents: wording instead of the number of participants
+            $db->prepare('UPDATE iti_programs SET `' . implode('`=?, `', array_keys($paxLabels)) . '`=? WHERE id=?')->execute(array_merge(array_values($paxLabels), [$id]));
         }
         if (isset($_POST['safari_type']) && in_array($_POST['safari_type'], ITI_SAFARI_TYPES, true)) {   // cover + facts of the documents
             $db->prepare('UPDATE iti_programs SET safari_type=? WHERE id=?')->execute([$_POST['safari_type'], $id]);
@@ -1026,6 +1033,21 @@ include __DIR__ . '/../../includes/layout_header.php';
         <label>Children <span style="font-weight:400;color:var(--grey-mid);">(under 12)</span></label>
         <input type="number" name="pax_children" min="0" value="<?= (int)$program['pax_children'] ?>">
       </div>
+      <?php if (array_key_exists('pax_label_it', $program)):
+          $paxLang = in_array($program['display_language'], ITI_PS_LANGS, true) ? $program['display_language'] : 'it'; ?>
+      <div class="form-group" style="grid-column:span 2;">
+        <label>Dicitura partecipanti <span style="font-weight:400;color:var(--grey-mid);">(<?= strtoupper($paxLang) ?>)</span></label>
+        <input type="text" name="pax_label_<?= $paxLang ?>" maxlength="200" value="<?= h($program['pax_label_' . $paxLang] ?? '') ?>" placeholder="da 4 a 6 partecipanti + 1 accompagnatore">
+        <span class="form-hint">Replaces the number of participants on the cover, recap, web page, PDF, Word and guide. Empty = the number of participants.</span>
+        <details style="margin-top:6px;">
+          <summary style="cursor:pointer;font-size:.8rem;color:var(--grey-mid);">Other languages</summary>
+          <?php foreach (array_diff(ITI_PS_LANGS, [$paxLang]) as $l): ?>
+          <label style="margin-top:8px;"><?= strtoupper($l) ?></label>
+          <input type="text" name="pax_label_<?= $l ?>" maxlength="200" value="<?= h($program['pax_label_' . $l] ?? '') ?>">
+          <?php endforeach; ?>
+        </details>
+      </div>
+      <?php endif; ?>
       <?php else: ?>
       <input type="hidden" name="pax_adults"   value="<?= (int)$program['pax_adults'] ?>">
       <input type="hidden" name="pax_teens"    value="<?= (int)($program['pax_teens'] ?? 0) ?>">

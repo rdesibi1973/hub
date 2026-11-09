@@ -518,6 +518,8 @@ function iti_doc_data(int $id, string $lang): ?array {
     if (!empty($p['price_table_json'])) {
         $pj = json_decode($p['price_table_json'], true);
         if (is_array($pj)) $prices = $pj;
+        // Participants not fixed: rates per person only. The stored row stays, and is back if pax_open returns to 0.
+        if (!empty($p['pax_open'])) $prices = array_values(array_filter($prices, function ($pr) { return !iti_doc_price_is_total((array)$pr); }));
     }
 
     $n = count($out);
@@ -540,6 +542,7 @@ function iti_doc_data(int $id, string $lang): ?array {
         'excl'     => $excl,
         'prices'   => $prices,
         'price_notes' => trim((string)($p['price_notes_' . $lang] ?? ($p['price_notes'] ?? ''))),
+        'pax_label' => trim((string)($p['pax_label_' . $lang] ?? '')),   // this language only: replaces the computed line (iti_mag_pax())
         'terms'    => $terms,
         // Route map (airports + numbered overnight stops), used by the magazine layout.
         'map'      => iti_get_program_map($days),
@@ -560,6 +563,11 @@ function iti_doc_data(int $id, string $lang): ?array {
  */
 function iti_doc_price_bold(array $pr): bool {
     if (array_key_exists('bold', $pr)) return !empty($pr['bold']);
+    return iti_doc_price_is_total($pr);
+}
+
+/** A price-table row that is the total of the booking, in any language. */
+function iti_doc_price_is_total(array $pr): bool {
     return (bool)preg_match('/^\s*(totale\s+(pratica|viaggio|complessivo)|total\s+(booking|trip|price|du\s+voyage|del\s+viaje)|prix\s+total|precio\s+total|gesamt)/iu', (string)($pr['label'] ?? ''));
 }
 
