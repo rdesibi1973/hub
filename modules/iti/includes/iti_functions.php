@@ -1084,6 +1084,8 @@ function iti_ensure_doc_columns(): void {
         // Tip note on the last safari day of the client documents (iti_doc_tip_note()), per programme; first run:
         // the texts in ITI Settings and the "Tips" line in the standard "not included" items.
         if (iti_add_column('iti_programs', 'show_tip_note', 'TINYINT(1) NOT NULL DEFAULT 1')) iti_seed_tip_note();
+        // Dates still a placeholder (Calc cell "DATE INDICATIVE"): period + label on the documents, no date day by day.
+        iti_add_column('iti_programs', 'dates_indicative', 'TINYINT(1) NOT NULL DEFAULT 0');
         if (iti_setting('seed_ndutu_reserve') === '') iti_seed_ndutu_reserve();
         // ref_number = the programme Word's name ("01_LucaDeSanctis(LasciatiViaggiare-Daniela)_SafariGrandeMigrazioneEstate",
         // 72 characters): 60 was too short.

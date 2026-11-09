@@ -173,6 +173,11 @@ function calc_read_file(string $path, string $wantSheet = ''): array {
     };
     $priceTeen  = $priceLeft('Teenager price');
     $priceChild = $priceLeft('Child price');
+    // Same block: single supplement ("single supplement" or "single supp"), teenager / child discount.
+    $singleSupp = $priceLeft('single supplement');
+    if ($singleSupp === null) $singleSupp = $priceLeft('single supp');
+    $discTeen  = $priceLeft('teenager discount');
+    $discChild = $priceLeft('child discount');
 
     // ── Day table ─────────────────────────────────────────────────────────────
     $hdr = 16;
@@ -312,6 +317,7 @@ function calc_read_file(string $path, string $wantSheet = ''): array {
         'extra_details'     => $below('EXTRA DETAILS'),
         'start_date'        => $start,
         'end_date'          => $end,
+        'dates_indicative'  => sc_dates_indicative($v),
         'nights'            => $days ? count($days) - 1 : 0,
         'days'              => $days,
         'guests'            => $guests,
@@ -323,6 +329,9 @@ function calc_read_file(string $path, string $wantSheet = ''): array {
         'price_sto'         => $priceSto,
         'price_teen'        => $priceTeen,
         'price_child'       => $priceChild,
+        'single_supp'       => $singleSupp,
+        'discount_teen'     => $discTeen,
+        'discount_child'    => $discChild,
         'warnings'          => $warnings,
     ];
 }

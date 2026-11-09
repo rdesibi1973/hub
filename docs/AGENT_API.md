@@ -548,6 +548,11 @@ catalogue texts that do not exist in the program language (`lang`, else the prog
 `show_tip_note` (0 | 1) and `tip_note_day` = the day the tip note lands on in this language, null = no note (switched off,
 no text in the language, or no safari day) — see **Tip note** below; check it before `iti_document`.
 
+**Indicative dates (9 Nov 2026).** When the client has not fixed the dates, the Calc holds likely ones and an empty cell above
+the DATE row says `DATE INDICATIVE` (whole cell; delete it when the real dates are in). `iti_calc_plan` returns `calc.dates_indicative`,
+`iti_final_from_calc` sets the program's `dates_indicative` (0 | 1, also in `iti_program` / `iti_update_program`). The documents
+then show the period with "date indicative" and no date day by day. Confirm Safari reports an `error` while the cell is there.
+
 **Tip note (25 Oct 2026).** The client documents (magazine web page / public link, PDF, Word — never the guide sheet) end the
 last safari day with a quiet note on tipping the guide (about 10 USD per adult per safari day, at the client's discretion).
 Last safari day = the last day that leaves from or arrives in a park / reserve / conservation area (destination `type`
@@ -619,7 +624,7 @@ otherwise the sample's when it is a group safari or a beach stay, `group` when `
 the plan shows it. `iti_program` returns `safari_type`; change it with `iti_update_program`.
 
 #### `iti_update_program` (POST)
-`program_id`, `fields` (same list — `ref_number` and `show_tip_note` included, see the rules above — plus `terms_variant` = `direct` | `agency` | `auto` (from the linked request)) → `changes`
+`program_id`, `fields` (same list — `ref_number` and `show_tip_note` included, see the rules above — plus `terms_variant` = `direct` | `agency` | `auto` (from the linked request), and `lead_request_id` = the Hub request to link, null to unlink: a new link applies the request's T&C, unless `terms_variant` is given, and adds a timeline line) → `changes`
 (a T&C change shows as `terms_id` with `variant_from` / `variant_to`). Dry-run unless confirm. Refused when the program has
 its own dedicated T&C (edit those in the Hub).
 
@@ -754,6 +759,13 @@ Only needed for samples: a personal program's link is on without it (unpublish d
   smallest group first, with no total. The `sheet` is always included. A sheet whose nights or hotels differ from `sheet` is
   flagged in `calc.warnings` and `same_itinerary: false`, because it is another itinerary, not a price option. Never for GRP
   group departures ("base N pax" is forbidden there).
+
+**Required in the Calc (9 Nov 2026):** adults / teenagers / children, room types (cell under ROOMS TYPE) and dates that are not
+the template's (not in the past; if not known yet, likely dates + the `DATE INDICATIVE` cell). The plan's `review` =
+`{errors[], warnings[], singles, expected_total}`: with `errors` nothing is generated (409). The total on the program is always
+F10, filled by the seller with discounts and supplements; `warnings` reports when it differs from adults × F9 + teenagers and
+children at their prices + single supplement × singles. The price table shows the teen / child price with its discount in the label,
+and a single supplement row when the room types have singles (also for 1 pax). The Hub page asks to confirm pax, rooms, dates and prices first.
 
 Plan: `calc` (file, files = every Calc of the folder, rev, pax, sheet, sheets = pickable sheets, warnings,
 price_options [{sheet, pax_total, pax, price_to_customer, nights, same_itinerary}], price_table = the rows the programme

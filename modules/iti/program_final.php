@@ -57,6 +57,14 @@ try {
 $code   = $calc ? iti_final_code_from_calc($calc['file']) : '';
 $sample = $calc ? iti_final_find_sample($db, $code, $lang) : null;
 
+// Step 1: several Calc files → the user picks one. Step 2: what was read is confirmed (pax, rooms, dates, prices).
+// Then sample, mappings, generate. The confirmation holds for this file, sheet and version of the Calc only.
+$review       = $calc ? iti_final_calc_review($calc) : null;
+$mustPickFile = $calc && count($calc['candidates'] ?? []) > 1 && $file === '';
+$okToken      = $calc ? substr(md5($calc['file'] . '|' . $calc['sheet'] . '|' . ($calc['calc_rev'] ?? '')), 0, 12) : '';
+$dataOk       = $calc && !$mustPickFile && !$review['errors'] && ($_REQUEST['ok'] ?? '') === $okToken;
+if ($dataOk) $self .= '&ok=' . $okToken;
+
 $aiMapKey = 'iti_ai_map_' . $rid;   // last AI proposals of this request, until the session ends
 
 // ── POST ────────────────────────────────────────────────────
@@ -82,6 +90,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit) {
             iti_flash_set('success', 'Alias "' . iti_alias_norm((string)$_POST['alias']) . '" saved.');
         } elseif ($action === 'generate') {
             if (!$calc) throw new RuntimeException('The Calc could not be read: ' . $calcErr);
+            if (!$dataOk) throw new RuntimeException('Confirm the data read from the Calc first.');
             if (!$sample) throw new RuntimeException('Choose the sample program first.');
             $res = iti_final_generate($db, $rid, $calc, (int)$sample['id'], $lang, ['id' => $_cu['id'] ?? null, 'username' => $user]);
             iti_flash_set('success', 'Itinerary program #' . $res['program_id'] . ' generated'
@@ -116,6 +125,7 @@ $fileForm = function (array $candidates, string $current) use ($rid, $lang, $fin
     <input type="hidden" name="lang" value="<?= h($lang) ?>">
     <span style="font-size:.85rem;"><?= count($candidates) ?> Calc files in the folder — each one gets its own program:</span>
     <select name="file" onchange="this.form.submit()" style="max-width:520px;">
+      <?php if ($current === ''): ?><option value="">— choose the Calc —</option><?php endif; ?>
       <?php foreach ($candidates as $cf):
         $has = false;
         foreach ($finals as $f) { if (!$f['superseded_by'] && basename((string)$f['source_calc_path']) === $cf) { $has = (int)$f['id']; break; } } ?>
@@ -234,9 +244,14 @@ include __DIR__ . '/../../includes/layout_header.php';
 </div>
 <?php endif; ?>
 
-<?php if ($calc): ?>
+<?php if ($calc && $mustPickFile): ?>
+<div class="form-card" style="border-left:4px solid #f0ad00;margin-bottom:18px;">
+  <div class="form-section-title">Choose the Calc</div>
+  <?= $fileForm($calc['candidates'], '') ?>
+</div>
+<?php elseif ($calc): ?>
 <div class="form-card" style="margin-bottom:18px;">
-  <div class="form-section-title">Calc</div>
+  <div class="form-section-title">Calc — check what was read</div>
   <?php if ($multiCalc) echo $fileForm($calc['candidates'], $calc['file']); ?>
   <?php if (count($sheetList) > 1) echo $sheetForm($calc['file'], $sheetList, $calc['sheet']); ?>
   <?php
@@ -281,19 +296,39 @@ include __DIR__ . '/../../includes/layout_header.php';
   </form>
   <?php endif; ?>
   <div style="font-size:.85rem;line-height:1.7;">
-    <strong><?= h($calc['file']) ?></strong> · sheet <?= h($calc['sheet']) ?><br>
-    <?= $fmtD($calc['start_date']) ?> → <?= $fmtD($calc['end_date']) ?> · <?= (int)$calc['nights'] ?> nights ·
-    <?= (int)$calc['pax']['adults'] ?> adults<?= $calc['pax']['teen'] ? ', ' . (int)$calc['pax']['teen'] . ' teen' : '' ?><?= $calc['pax']['child'] ? ', ' . (int)$calc['pax']['child'] . ' child' . ($calc['pax']['child'] > 1 ? 'ren' : '') : '' ?>
-    · room: <?= h($calc['room_config'] ?: '—') ?><br>
+    <strong><?= h($calc['file']) ?></strong> · sheet <?= h($calc['sheet']) ?>
+    <?php $missing = '<strong style="color:var(--red);">missing</strong>'; $priceRows = iti_final_price_table($calc, $lang); ?>
+    <table style="margin:8px 0;border-collapse:collapse;">
+      <tr><td style="padding:2px 16px 2px 0;color:var(--grey-mid);">Adults / teenagers / children</td>
+          <td><strong><?= (int)$calc['pax']['adults'] ?> / <?= (int)$calc['pax']['teen'] ?> / <?= (int)$calc['pax']['child'] ?></strong></td></tr>
+      <tr><td style="padding:2px 16px 2px 0;color:var(--grey-mid);">Room types</td>
+          <td><?= $calc['room_config'] !== '' ? '<strong>' . h($calc['room_config']) . '</strong>' . ($review['singles'] ? ' · ' . (int)$review['singles'] . ' single' : '') : $missing ?></td></tr>
+      <tr><td style="padding:2px 16px 2px 0;color:var(--grey-mid);">Dates</td>
+          <td><strong><?= $fmtD($calc['start_date']) ?> → <?= $fmtD($calc['end_date']) ?></strong> · <?= (int)$calc['nights'] ?> nights<?= !empty($calc['dates_indicative']) ? ' <strong style="color:#8a6d00;">(indicative dates)</strong>' : '' ?></td></tr>
+      <tr><td style="padding:2px 16px 2px 0;color:var(--grey-mid);vertical-align:top;">On the program</td>
+          <td><?php if ($priceRows): foreach ($priceRows as $pr): ?><div><?= !empty($pr['bold']) ? '<strong>' : '' ?><?= h($pr['label']) ?>: <?= number_format($pr['price'], 0, ',', '.') ?> <?= h($pr['currency']) ?><?= !empty($pr['bold']) ? '</strong>' : '' ?></div><?php endforeach; else: ?>no price<?php endif; ?></td></tr>
+    </table>
     <?php $gKnown = array_filter($calc['guests'], function ($g) { return empty($g['tba']); });
           $gTba   = count($calc['guests']) - count($gKnown); ?>
     Guests: <?= h(implode(', ', array_map(function ($g) { return trim($g['title'] . ' ' . $g['name']); }, $gKnown))) ?>
     <?= $gTba || !$calc['guests'] ? '<em>' . ($gKnown ? '+ ' : '') . ($gTba ?: '') . ' TBA</em>' : '' ?><br>
     Arrival: <?= h($calc['arrival'] ?: '—') ?> · Departure: <?= h($calc['departure'] ?: '—') ?>
     <?php foreach ($calc['warnings'] as $w): ?><div style="color:#8a6d00;">⚠ <?= h($w) ?></div><?php endforeach; ?>
+    <?php foreach ($review['warnings'] as $w): ?><div style="color:#8a6d00;">⚠ <?= h($w) ?></div><?php endforeach; ?>
+    <?php foreach ($review['errors'] as $w): ?><div style="color:var(--red);font-weight:600;">✖ <?= h($w) ?></div><?php endforeach; ?>
+  </div>
+  <div style="margin-top:12px;">
+    <?php if ($review['errors']): ?>
+      <span style="font-size:.85rem;color:var(--red);">Complete the Calc in Dropbox, then reload this page.</span>
+    <?php elseif (!$dataOk): ?>
+      <a href="<?= h($self . '&lang=' . $lang . '&ok=' . $okToken) ?>" class="btn btn-red">✓ Data is correct — continue</a>
+    <?php else: ?>
+      <span style="font-size:.85rem;color:#2e7d32;font-weight:600;">✓ Data confirmed</span>
+    <?php endif; ?>
   </div>
 </div>
 
+<?php if ($dataOk): ?>
 <div class="form-card" style="margin-bottom:18px;">
   <div class="form-section-title">Sample program <span style="font-weight:400;font-size:.8rem;color:var(--grey-mid)">Calc code “<?= h($code) ?>”</span></div>
   <?php if ($sample && !$changeSample): ?>
@@ -399,6 +434,7 @@ include __DIR__ . '/../../includes/layout_header.php';
   </form>
   <?php endif; ?>
 </div>
+<?php endif; ?>
 <?php endif; ?>
 <?php endif; ?>
 </main>

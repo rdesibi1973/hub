@@ -79,6 +79,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (isset($_POST['show_tip_note'])) {   // tip note on the last safari day (iti_doc_tip_note())
             $db->prepare('UPDATE iti_programs SET show_tip_note=? WHERE id=?')->execute([$_POST['show_tip_note'] === '1' ? 1 : 0, $id]);
         }
+        if (isset($_POST['dates_indicative'])) {   // documents: period + "indicative dates", no date day by day
+            $db->prepare('UPDATE iti_programs SET dates_indicative=? WHERE id=?')->execute([$_POST['dates_indicative'] === '1' ? 1 : 0, $id]);
+        }
         // Hub leads request link (personal programs)
         if (isset($_POST['lead_request_id'])) {
             iti_ensure_lead_link();
@@ -882,6 +885,11 @@ include __DIR__ . '/../../includes/layout_header.php';
         <label>Start Date</label>
         <input type="date" name="start_date" value="<?= h($program['start_date'] ?? '') ?>">
         <span class="form-hint">End date calculated automatically</span>
+        <?php if (array_key_exists('dates_indicative', $program)): ?>
+        <input type="hidden" name="dates_indicative" value="0">
+        <label class="check-label" style="margin-top:8px;"><input type="checkbox" name="dates_indicative" value="1" <?= (int)$program['dates_indicative'] === 1 ? 'checked' : '' ?>> Indicative dates</label>
+        <span class="form-hint">Documents show the period marked "indicative dates", with no date day by day. From the Calc: cell DATE INDICATIVE.</span>
+        <?php endif; ?>
       </div>
       <div class="form-group">
         <label>Status</label>

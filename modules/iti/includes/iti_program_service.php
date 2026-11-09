@@ -147,6 +147,7 @@ function iti_ps_program_out(PDO $db, int $id, string $lang = ''): array {
         'lead_request_id' => isset($p['lead_request_id']) && $p['lead_request_id'] ? (int)$p['lead_request_id'] : null,
         'title' => $D['title'], 'subtitle' => $D['subtitle'], 'intro' => $D['intro'], 'language' => $lang,
         'currency' => $p['display_currency'] ?? null, 'start_date' => $p['start_date'] ?? null,
+        'dates_indicative' => (int)($p['dates_indicative'] ?? 0),
         'pax_adults' => (int)($p['pax_adults'] ?? 0), 'pax_teens' => (int)($p['pax_teens'] ?? 0), 'pax_children' => (int)($p['pax_children'] ?? 0),
         'duration' => $D['duration'], 'published' => iti_program_is_public($p),   // personal: always, until cancelled
         'prices' => $D['prices'], 'price_notes' => $D['price_notes'],
@@ -192,7 +193,7 @@ function iti_ps_schema(): void {
 /** Header fields an agent may set, limited to the columns the live table really has. */
 function iti_ps_header_fields(): array {
     iti_ps_schema();
-    $f = ['ref_number', 'safari_type', 'show_tip_note', 'country', 'display_language', 'display_currency', 'start_date', 'pax_adults', 'pax_teens', 'pax_children', 'price_table_json', 'price_notes'];
+    $f = ['ref_number', 'safari_type', 'show_tip_note', 'country', 'display_language', 'display_currency', 'start_date', 'dates_indicative', 'pax_adults', 'pax_teens', 'pax_children', 'price_table_json', 'price_notes'];
     foreach (ITI_PS_LANGS as $l) foreach (['title', 'subtitle', 'intro', 'price_notes'] as $k) $f[] = $k . '_' . $l;
     return array_values(array_intersect($f, iti_table_columns('iti_programs')));
 }
@@ -218,8 +219,8 @@ function iti_ps_header_values(array $fields): array {
             continue;
         }
         if ($k === 'pax_adults' || $k === 'pax_teens' || $k === 'pax_children') $v = max(0, min(60, (int)$v));
-        if ($k === 'show_tip_note') {   // tip note on the last safari day of the client documents
-            if (!in_array($v, [0, 1, true, false, '0', '1'], true)) throw new InvalidArgumentException('show_tip_note: 0 | 1');
+        if ($k === 'show_tip_note' || $k === 'dates_indicative') {   // tip note on the last safari day / dates only indicative on the client documents
+            if (!in_array($v, [0, 1, true, false, '0', '1'], true)) throw new InvalidArgumentException($k . ': 0 | 1');
             $v = (int)(bool)$v;
         }
         if ($k === 'price_table_json') {
@@ -356,11 +357,21 @@ function iti_ps_update_program(PDO $db, int $id, array $fields, bool $go): array
         if (!in_array($variant, ['direct', 'agency', 'auto'], true)) throw new InvalidArgumentException('terms_variant: direct | agency | auto');
         unset($fields['terms_variant']);
     }
+    $lead = false;   // false = not asked; null = remove the link
+    if (array_key_exists('lead_request_id', $fields)) {
+        iti_ensure_lead_link();
+        $lead = (int)$fields['lead_request_id'] ?: null;
+        unset($fields['lead_request_id']);
+        if ($lead && !iti_get_lead_request($lead)) throw new InvalidArgumentException('lead_request_id ' . $lead . ' not found');
+    }
     $vals = iti_ps_header_values($fields);
     $changes = [];
     foreach ($vals as $k => $v) {
         $cur = $p[$k] ?? null;
         if ((string)$cur !== (string)$v) $changes[$k] = ['from' => $cur, 'to' => $v];
+    }
+    if ($lead !== false && (int)($p['lead_request_id'] ?? 0) !== (int)$lead) {
+        $changes['lead_request_id'] = ['from' => $p['lead_request_id'] ?? null, 'to' => $lead];
     }
     if ($variant !== null) {
         if (iti_terms_has_override($db, $id)) throw new InvalidArgumentException('Program ' . $id . ' has its own dedicated T&C (Hub editor → T&C): remove it there first');
@@ -379,6 +390,17 @@ function iti_ps_update_program(PDO $db, int $id, array $fields, bool $go): array
         foreach ($changes as $k => $c) { $sets[] = '`' . $k . '` = ?'; $args[] = $c['to']; }
         $args[] = $id;
         $db->prepare('UPDATE iti_programs SET ' . implode(', ', $sets) . ' WHERE id = ?')->execute($args);
+    }
+    $linked = $lead && isset($changes['lead_request_id']);
+    if ($linked && $go) {   // same as the Hub editor: T&C of the request's channel, and a line in its timeline
+        require_once __DIR__ . '/iti_terms.php';
+        if ($variant === null) iti_terms_apply($db, $id);
+        require_once __DIR__ . '/../../leads/includes/timeline_service.php';
+        timeline_log($lead, 'program_update', 'Personal program linked (#' . $id . ')', ['refs' => ['program_id' => $id]]);
+    }
+    if ($linked) {
+        require_once __DIR__ . '/iti_terms.php';
+        return ['id' => $id, 'changes' => $changes, 'terms_variant_of_request' => iti_terms_variant_for_request($db, $lead)];
     }
     return ['id' => $id, 'changes' => $changes];
 }
@@ -458,8 +480,10 @@ function iti_ps_calc_plan(PDO $db, int $rid, array $in): array {
     }
     return ['calc' => ['file' => $calc['file'], 'files' => $calc['candidates'] ?? [], 'rev' => $calc['calc_rev'] ?? null, 'pax' => $calc['pax'] ?? null,
                        'sheet' => $calc['sheet'] ?? null, 'sheets' => $calc['sheets'] ?? [], 'warnings' => $calc['warnings'] ?? [],
+                       'dates_indicative' => !empty($calc['dates_indicative']),
                        'price_options' => $calc['price_options'] ?? [], 'price_table' => iti_final_price_table($calc, $lang)],
             'code' => $code, 'sample' => $sample ? ['id' => (int)$sample['id'], 'title' => iti_doc_pick($sample, 'title', $lang)] : null,
+            'review' => iti_final_calc_review($calc),   // pax, rooms, dates required (errors); total vs prices and supplements (warnings)
             'nights' => $nights, 'unmapped' => $plan['unmapped'], 'blocking' => $plan['blocking'], 'flags' => $plan['flags'],
             'existing_finals' => array_map(function ($f) { return ['id' => (int)$f['id'], 'calc_file' => $f['source_calc_path'] ? basename($f['source_calc_path']) : null,
                                                                    'superseded_by' => $f['superseded_by'] ? (int)$f['superseded_by'] : null]; }, iti_final_list($db, $rid)),

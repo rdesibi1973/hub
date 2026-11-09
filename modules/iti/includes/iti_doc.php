@@ -456,6 +456,10 @@ function iti_doc_data(int $id, string $lang): ?array {
         $date = null;   // real date when the programme has a start date (personal / final)
         if (!empty($p['start_date']) && preg_match('/^\d{4}-\d{2}-\d{2}$/', (string)$p['start_date'])) {
             $date = date('Y-m-d', strtotime($p['start_date'] . ' +' . ((int)$d['day_number'] - 1) . ' days'));
+            if (!empty($p['dates_indicative'])) {   // only the period, labelled (iti_mag_date_range()); no date day by day
+                $indRange = array(isset($indRange) ? $indRange[0] : $date, $date);
+                $date = null;
+            }
         }
         $out[] = [
             'n'          => (int)$d['day_number'],
@@ -528,6 +532,7 @@ function iti_doc_data(int $id, string $lang): ?array {
         'intro'    => iti_doc_pick($p, 'intro', $lang),
         'duration' => $n . ' ' . ($n === 1 ? $T['day1'] : $T['days']) . ' / ' . max(0, $n - 1) . ' ' . ($n - 1 === 1 ? $T['night1'] : $T['nights']),
         'days'     => $out,
+        'indicative_range' => isset($indRange) ? $indRange : null,   // [first, last] when the dates are only indicative
         // Activity / lodge / destination texts not in $lang: left out of the document (iti_doc_own()).
         'missing_texts' => array_values($missing),
         'tip_note_day' => $tip['day'],   // day with the tip note, null = none (off, no text in $lang, no safari day)

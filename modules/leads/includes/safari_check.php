@@ -174,6 +174,24 @@ function sc_has_recap(array $sheetNames): bool {
     return false;
 }
 
+/**
+ * True when the Calc's dates are only a placeholder: a cell above the DATE header row says
+ * "DATE INDICATIVE" (also "INDICATIVE DATES" / "DATES INDICATIVE"). Whole cell, any column.
+ * The team deletes that cell when the real dates are in.
+ */
+function sc_dates_indicative(array $v): bool {
+    $hdr = 16;
+    foreach ($v as $ref => $val) {
+        if (strcasecmp(trim((string)$val), 'DATE') === 0) { list($c, $r) = sc_ref_split($ref); if ($c === 'A') { $hdr = $r; break; } }
+    }
+    foreach ($v as $ref => $val) {
+        if (sc_ref_split($ref)[1] >= $hdr) continue;
+        $t = strtoupper(preg_replace('/\s+/', ' ', trim((string)$val)));
+        if (in_array($t, ['DATE INDICATIVE', 'INDICATIVE DATES', 'DATES INDICATIVE'], true)) return true;
+    }
+    return false;
+}
+
 /** Excel serial or text date → 'Y-m-d', or null. */
 function sc_parse_xlsx_date(string $v): ?string {
     $v = trim($v);
@@ -484,6 +502,11 @@ function sc_run_checks(array $ctx): array {
         }
     } elseif ($grpAction !== 'NONE') {
         $res[] = ['level' => 'warn', 'msg' => 'No RECAP tab in the Excel — confirm this really is a group before creating/adding a GRP.'];
+    }
+
+    // Dates still a placeholder: a confirmed booking needs the real ones.
+    if (sc_dates_indicative($cells)) {
+        $res[] = ['level' => 'error', 'msg' => 'Excel dates are marked DATE INDICATIVE — enter the real dates and delete that cell before confirming.'];
     }
 
     $trip = sc_trip_dates($cells);

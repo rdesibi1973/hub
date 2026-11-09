@@ -19,7 +19,7 @@ function iti_mag_labels(string $lang): array {
                  'website' => 'Sito web', 'start' => 'Arrivo', 'end' => 'Partenza', 'km' => 'km in linea d\'aria',
                  'destinations' => 'Destinazioni', 'lodges' => 'Sistemazioni', 'online' => 'Itinerario digitale', 'online_btn' => 'Apri l’itinerario digitale',
                  'about_dest' => 'La destinazione', 'pdf' => 'Scarica PDF',
-                 'adult' => 'adulto', 'adults' => 'adulti', 'child' => 'bambino', 'children' => 'bambini', 'dates' => 'Date',
+                 'adult' => 'adulto', 'adults' => 'adulti', 'child' => 'bambino', 'children' => 'bambini', 'dates' => 'Date', 'dates_ind' => 'date indicative',
                  'teen' => 'ragazzo', 'teens' => 'ragazzi', 'teen_age' => '(minori di 16 anni)', 'child_age' => '(minori di 12 anni)',
                  'months' => ['gennaio', 'febbraio', 'marzo', 'aprile', 'maggio', 'giugno', 'luglio', 'agosto', 'settembre', 'ottobre', 'novembre', 'dicembre'],
                  'wdays' => ['dom', 'lun', 'mar', 'mer', 'gio', 'ven', 'sab']],
@@ -28,7 +28,7 @@ function iti_mag_labels(string $lang): array {
                  'website' => 'Website', 'start' => 'Arrival', 'end' => 'Departure', 'km' => 'km as the crow flies',
                  'destinations' => 'Destinations', 'lodges' => 'Accommodation', 'online' => 'Digital itinerary', 'online_btn' => 'Open the digital itinerary',
                  'about_dest' => 'The destination', 'pdf' => 'Download PDF',
-                 'adult' => 'adult', 'adults' => 'adults', 'child' => 'child', 'children' => 'children', 'dates' => 'Dates',
+                 'adult' => 'adult', 'adults' => 'adults', 'child' => 'child', 'children' => 'children', 'dates' => 'Dates', 'dates_ind' => 'indicative dates',
                  'teen' => 'teenager', 'teens' => 'teenagers', 'teen_age' => '(under 16)', 'child_age' => '(under 12)',
                  'months' => ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'],
                  'wdays' => ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']],
@@ -37,7 +37,7 @@ function iti_mag_labels(string $lang): array {
                  'website' => 'Site web', 'start' => 'Arrivée', 'end' => 'Départ', 'km' => 'km à vol d\'oiseau',
                  'destinations' => 'Destinations', 'lodges' => 'Hébergements', 'online' => 'Itinéraire numérique', 'online_btn' => 'Ouvrir l’itinéraire numérique',
                  'about_dest' => 'La destination', 'pdf' => 'Télécharger le PDF',
-                 'adult' => 'adulte', 'adults' => 'adultes', 'child' => 'enfant', 'children' => 'enfants', 'dates' => 'Dates',
+                 'adult' => 'adulte', 'adults' => 'adultes', 'child' => 'enfant', 'children' => 'enfants', 'dates' => 'Dates', 'dates_ind' => 'dates indicatives',
                  'teen' => 'adolescent', 'teens' => 'adolescents', 'teen_age' => '(moins de 16 ans)', 'child_age' => '(moins de 12 ans)',
                  'months' => ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'],
                  'wdays' => ['dim', 'lun', 'mar', 'mer', 'jeu', 'ven', 'sam']],
@@ -46,7 +46,7 @@ function iti_mag_labels(string $lang): array {
                  'website' => 'Sitio web', 'start' => 'Llegada', 'end' => 'Salida', 'km' => 'km en línea recta',
                  'destinations' => 'Destinos', 'lodges' => 'Alojamientos', 'online' => 'Itinerario digital', 'online_btn' => 'Abrir el itinerario digital',
                  'about_dest' => 'El destino', 'pdf' => 'Descargar PDF',
-                 'adult' => 'adulto', 'adults' => 'adultos', 'child' => 'niño', 'children' => 'niños', 'dates' => 'Fechas',
+                 'adult' => 'adulto', 'adults' => 'adultos', 'child' => 'niño', 'children' => 'niños', 'dates' => 'Fechas', 'dates_ind' => 'fechas orientativas',
                  'teen' => 'adolescente', 'teens' => 'adolescentes', 'teen_age' => '(menos de 16 años)', 'child_age' => '(menos de 12 años)',
                  'months' => ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'],
                  'wdays' => ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb']],
@@ -55,7 +55,7 @@ function iti_mag_labels(string $lang): array {
                  'website' => 'Webseite', 'start' => 'Ankunft', 'end' => 'Abreise', 'km' => 'km Luftlinie',
                  'destinations' => 'Reiseziele', 'lodges' => 'Unterkünfte', 'online' => 'Digitale Reiseroute', 'online_btn' => 'Digitale Reiseroute öffnen',
                  'about_dest' => 'Das Reiseziel', 'pdf' => 'PDF herunterladen',
-                 'adult' => 'Erwachsener', 'adults' => 'Erwachsene', 'child' => 'Kind', 'children' => 'Kinder', 'dates' => 'Reisedaten',
+                 'adult' => 'Erwachsener', 'adults' => 'Erwachsene', 'child' => 'Kind', 'children' => 'Kinder', 'dates' => 'Reisedaten', 'dates_ind' => 'voraussichtliche Daten',
                  'teen' => 'Jugendlicher', 'teens' => 'Jugendliche', 'teen_age' => '(unter 16)', 'child_age' => '(unter 12)',
                  'months' => ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'],
                  'wdays' => ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa']],
@@ -182,14 +182,21 @@ function iti_mag_date(string $ymd, array $M, bool $year = true, bool $wday = fal
     return ($wday ? $M['wdays'][(int)date('w', $t)] . ' ' : '') . (int)date('j', $t) . ' ' . $M['months'][(int)date('n', $t) - 1] . ($year ? ' ' . date('Y', $t) : '');
 }
 
-/** Travel dates of the cover: "12 – 17 marzo 2027" (or across months / years). */
+/** Travel dates of the cover: "12 – 17 marzo 2027" (or across months / years), "… (date indicative)" when not final. */
 function iti_mag_date_range(array $D, array $M): string {
     $days = $D['days'];
-    if (!$days || empty($days[0]['date'])) return '';
-    $a = $days[0]['date']; $b = $days[count($days) - 1]['date'];
-    if (substr($a, 0, 7) === substr($b, 0, 7)) return (int)substr($a, 8) . ' – ' . iti_mag_date($b, $M);
-    if (substr($a, 0, 4) === substr($b, 0, 4)) return iti_mag_date($a, $M, false) . ' – ' . iti_mag_date($b, $M);
-    return iti_mag_date($a, $M) . ' – ' . iti_mag_date($b, $M);
+    $ind = !empty($D['indicative_range']);
+    if ($ind) {
+        list($a, $b) = $D['indicative_range'];
+    } elseif ($days && !empty($days[0]['date'])) {
+        $a = $days[0]['date']; $b = $days[count($days) - 1]['date'];
+    } else {
+        return '';
+    }
+    if (substr($a, 0, 7) === substr($b, 0, 7)) $s = (int)substr($a, 8) . ' – ' . iti_mag_date($b, $M);
+    elseif (substr($a, 0, 4) === substr($b, 0, 4)) $s = iti_mag_date($a, $M, false) . ' – ' . iti_mag_date($b, $M);
+    else $s = iti_mag_date($a, $M) . ' – ' . iti_mag_date($b, $M);
+    return $ind ? $s . ' (' . $M['dates_ind'] . ')' : $s;
 }
 
 /** "2 adulti · 1 ragazzo (minori di 16 anni) · 1 bambino (minori di 12 anni)" for personal programmes ('' for samples). */

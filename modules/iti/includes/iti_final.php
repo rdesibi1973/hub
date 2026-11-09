@@ -362,19 +362,77 @@ function iti_final_same_kind(array $a, array $b): bool {
     return (bool)array_intersect_key($words($a), $words($b));
 }
 
+/** Single rooms in the Calc's room text: "1 DOUBLE + 1 SINGLE" → 1, "2 singole" / "SGL x 2" → 2, "SINGLE" → 1. */
+function iti_final_single_rooms(string $rooms): int {
+    if (!preg_match_all('/(?:(\d+)\s*[x×]?\s*)?(?<![a-z])(?:singles?|singol[ae]|sgl)\b(?:\s*[x×]\s*(\d+))?/iu', $rooms, $m, PREG_SET_ORDER)) return 0;
+    $n = 0;
+    foreach ($m as $g) $n += max(1, (int)($g[1] ?? 0), (int)($g[2] ?? 0));
+    return $n;
+}
+
+/**
+ * What the seller must have filled in the Calc before an itinerary program is built from it.
+ * 'errors' stop the program (pax, room types, dates not left at the template's); 'warnings' are shown on the
+ * confirmation step: the total (F10) is the seller's, and the Hub only compares it with the sum it expects.
+ * Returns array('errors', 'warnings', 'singles', 'expected_total').
+ */
+function iti_final_calc_review(array $calc): array {
+    $pax = isset($calc['pax']) ? $calc['pax'] : array();
+    $a = (int)($pax['adults'] ?? 0); $t = (int)($pax['teen'] ?? 0); $c = (int)($pax['child'] ?? 0);
+    $isRecap = strcasecmp(trim((string)($calc['sheet'] ?? '')), 'RECAP') === 0;   // the whole group: no rooms or total of one client
+    $rooms = trim((string)($calc['room_config'] ?? ''));
+    $singles = iti_final_single_rooms($rooms);
+    $errors = array(); $warnings = array();
+
+    if ($a + $t + $c <= 0) $errors[] = 'Enter the number of adults, teenagers and children (B2:B4).';
+    if ($rooms === '' && !$isRecap) $errors[] = 'Enter the room types in the cell under ROOMS TYPE.';
+    $start = $calc['start_date'] ?? null;
+    $noDate = !$start;
+    foreach (($calc['days'] ?? array()) as $d) if (empty($d['date'])) $noDate = true;
+    if ($noDate) {
+        $errors[] = 'Enter the trip dates in the DATE column.';
+    } elseif ($start < date('Y-m-d')) {
+        $errors[] = 'The trip starts on ' . $start . ', in the past: dates left from the template? Enter the real dates; if they are not known yet, '
+                  . 'enter likely ones and write DATE INDICATIVE in an empty cell above the DATE row.';
+    }
+
+    $expected = null;
+    if (!$isRecap && count($calc['price_options'] ?? array()) <= 1) {
+        $need = array(array($t, $calc['price_teen'] ?? null, 'teenager price'), array($c, $calc['price_child'] ?? null, 'child price'),
+                      array($singles, $calc['single_supp'] ?? null, 'single supplement'));
+        $complete = !empty($calc['price_to_customer']);
+        foreach ($need as $n) {
+            if ($n[0] > 0 && (empty($n[1]) || $n[1] <= 0)) { $complete = false; $warnings[] = 'No ' . $n[2] . ' in the Calc: it will not be on the program.'; }
+        }
+        if ($complete) {
+            $expected = $a * (float)$calc['price_to_customer'] + $t * (float)($calc['price_teen'] ?? 0)
+                      + $c * (float)($calc['price_child'] ?? 0) + $singles * (float)($calc['single_supp'] ?? 0);
+        }
+        $total = $calc['price_total'] ?? null;
+        if ($total === null || $total <= 0) {
+            $warnings[] = 'Tot price (F10) is empty: the program will have no total.';
+        } elseif ($expected !== null && abs($total - $expected) > 1) {
+            $warnings[] = 'Tot price (F10) is ' . round($total) . ' USD, but prices, discounts and supplements add up to ' . round($expected)
+                        . ' USD. The total on the program is F10: correct it in the Calc unless the difference is intended.';
+        }
+    }
+    return array('errors' => $errors, 'warnings' => $warnings, 'singles' => $singles, 'expected_total' => $expected);
+}
+
 /**
  * Price table of a final programme from the Calc — the price to the customer: per person
- * for each pax type the Calc has (adult F9, teenager "Teenager price", child "Child price"),
- * then the total (F10, bold). [] when the Calc has no price to customer.
+ * for each pax type the Calc has (adult F9, teenager "Teenager price", child "Child price", with their
+ * discount in the label), the single supplement when the rooms have singles, then the total (F10, bold).
+ * [] when the Calc has no price to customer.
  * Rows [{label, price, currency, bold?}] as iti_doc_data() reads price_table_json.
  */
 function iti_final_price_table(array $calc, string $lang): array {
     $L = array(
-        'it' => array('Adulto', 'Ragazzo (12–15 anni)', 'Bambino (sotto i 12 anni)', 'Totale pratica', array('adulto', 'adulti'), array('ragazzo', 'ragazzi'), array('bambino', 'bambini')),
-        'en' => array('Adult', 'Teenager (12–15)', 'Child (under 12)', 'Total booking', array('adult', 'adults'), array('teenager', 'teenagers'), array('child', 'children')),
-        'fr' => array('Adulte', 'Adolescent (12–15 ans)', 'Enfant (moins de 12 ans)', 'Prix total', array('adulte', 'adultes'), array('adolescent', 'adolescents'), array('enfant', 'enfants')),
-        'es' => array('Adulto', 'Adolescente (12–15 años)', 'Niño (menor de 12 años)', 'Precio total', array('adulto', 'adultos'), array('adolescente', 'adolescentes'), array('niño', 'niños')),
-        'de' => array('Erwachsener', 'Jugendlicher (12–15 J.)', 'Kind (unter 12 J.)', 'Gesamtpreis', array('Erwachsener', 'Erwachsene'), array('Jugendlicher', 'Jugendliche'), array('Kind', 'Kinder')),
+        'it' => array('Adulto', 'Ragazzo (12–15 anni)', 'Bambino (sotto i 12 anni)', 'Totale pratica', array('adulto', 'adulti'), array('ragazzo', 'ragazzi'), array('bambino', 'bambini'), 'Supplemento camera singola', 'sconto'),
+        'en' => array('Adult', 'Teenager (12–15)', 'Child (under 12)', 'Total booking', array('adult', 'adults'), array('teenager', 'teenagers'), array('child', 'children'), 'Single room supplement', 'discount'),
+        'fr' => array('Adulte', 'Adolescent (12–15 ans)', 'Enfant (moins de 12 ans)', 'Prix total', array('adulte', 'adultes'), array('adolescent', 'adolescents'), array('enfant', 'enfants'), 'Supplément chambre individuelle', 'réduction'),
+        'es' => array('Adulto', 'Adolescente (12–15 años)', 'Niño (menor de 12 años)', 'Precio total', array('adulto', 'adultos'), array('adolescente', 'adolescentes'), array('niño', 'niños'), 'Suplemento habitación individual', 'descuento'),
+        'de' => array('Erwachsener', 'Jugendlicher (12–15 J.)', 'Kind (unter 12 J.)', 'Gesamtpreis', array('Erwachsener', 'Erwachsene'), array('Jugendlicher', 'Jugendliche'), array('Kind', 'Kinder'), 'Einzelzimmerzuschlag', 'Ermäßigung'),
     );
     $t = $L[$lang] ?? $L['en'];
     if (!empty($calc['price_options']) && count($calc['price_options']) > 1) return iti_final_price_options_table($calc['price_options'], $lang);
@@ -387,9 +445,14 @@ function iti_final_price_table(array $calc, string $lang): array {
         $rows[] = array('label' => $label, 'price' => round((float)$price), 'currency' => 'USD');
         $who[]  = $n . ' ' . $forms[$n > 1 ? 1 : 0];
     };
+    $disc = function ($label, $d) use ($t) { return ($d !== null && $d > 0) ? $label . ', ' . $t[8] . ' ' . round((float)$d) . ' USD' : $label; };
     $add((int)($pax['adults'] ?? 0), $t[0], $adult, $t[4]);
-    $add((int)($pax['teen'] ?? 0), $t[1], $calc['price_teen'] ?? null, $t[5]);
-    $add((int)($pax['child'] ?? 0), $t[2], $calc['price_child'] ?? null, $t[6]);
+    $add((int)($pax['teen'] ?? 0), $disc($t[1], $calc['discount_teen'] ?? null), $calc['price_teen'] ?? null, $t[5]);
+    $add((int)($pax['child'] ?? 0), $disc($t[2], $calc['discount_child'] ?? null), $calc['price_child'] ?? null, $t[6]);
+    $singles = iti_final_single_rooms((string)($calc['room_config'] ?? ''));
+    if ($singles > 0 && !empty($calc['single_supp']) && $calc['single_supp'] > 0) {
+        $rows[] = array('label' => $t[7] . ($singles > 1 ? ' (× ' . $singles . ')' : ''), 'price' => round((float)$calc['single_supp']), 'currency' => 'USD');
+    }
     if (!empty($calc['price_total']) && $calc['price_total'] > 0) {
         $rows[] = array('label' => $t[3] . ($who ? ' (' . implode(', ', $who) . ')' : ''), 'price' => round((float)$calc['price_total']),
                         'currency' => 'USD', 'bold' => true);
@@ -725,6 +788,9 @@ function iti_final_plan(PDO $db, array $calc, int $sampleId): array {
     if ($sampleId && count($sampleDays) !== count($days)) {
         $flags[] = 'The sample has ' . count($sampleDays) . ' days, the Calc ' . count($days) . ' — days are added / removed to match the Calc.';
     }
+    if (!empty($calc['dates_indicative'])) {
+        $flags[] = 'The Calc dates are marked DATE INDICATIVE: the documents show the period with "indicative dates" and no date day by day.';
+    }
     return array('days' => $days, 'blocking' => $blocking, 'unmapped' => $unmapped, 'hints' => $hints, 'flags' => $flags,
                  'sample_days' => count($sampleDays));
 }
@@ -765,6 +831,8 @@ function iti_final_ref_number(PDO $db, int $requestId, array $calc) {
 function iti_final_generate(PDO $db, int $requestId, array $calc, int $sampleId, string $lang, array $who): array {
     iti_ensure_final_schema();
     if (!in_array($lang, ITI_LANGUAGES, true)) $lang = 'it';
+    $review = iti_final_calc_review($calc);
+    if ($review['errors']) throw new RuntimeException('Complete the Calc first: ' . implode(' ', $review['errors']));
     $plan = iti_final_plan($db, $calc, $sampleId);
     if (!$sampleId) throw new RuntimeException('Choose the sample program first.');
     if ($plan['blocking']) throw new RuntimeException('Map these Calc texts first: ' . implode(' ', $plan['blocking']));
@@ -788,6 +856,7 @@ function iti_final_generate(PDO $db, int $requestId, array $calc, int $sampleId,
         'price_table_json' => ($pt = iti_final_price_table($calc, $lang)) ? json_encode($pt, JSON_UNESCAPED_UNICODE) : null,
         'stage'            => 'final',
         'start_date'       => $calc['start_date'],
+        'dates_indicative' => !empty($calc['dates_indicative']) ? 1 : 0,
         'duration_days'    => count($calc['days']),
         'pax_adults'       => max(1, (int)$pax['adults']),
         'pax_teens'        => (int)$pax['teen'],      // under 16 (column from iti_ensure_doc_columns())
