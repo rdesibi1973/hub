@@ -67,7 +67,7 @@ function iti_sc_route_specs(): array {
         '17-55' => ['min' => 180],                                  // Arusha – Marangu (90)
         '17-1'  => ['min' => 45, 'new' => true],                    // Arusha – Arusha National Park
         '52-18' => ['min' => 60],                                   // Karatu – Lake Eyasi (90)
-        '9-14'  => ['min' => 90],                                   // Ngorongoro – Serengeti (270)
+        '9-14'  => ['min' => 180],                                  // Ngorongoro – Serengeti (270; Mbogo text 1,5 ore; Roberto 10 Nov 2026: 3 h)
         '14-19' => ['min' => 300, 'new' => true],                   // Serengeti – Lake Natron
         '19-17' => ['min' => 300, 'new' => true],                   // Lake Natron – Arusha
         '53-30' => ['min' => 90],                                   // Moshi – Kilimanjaro Airport (#4): Mbogo (22) day 13 (Roberto, 10 Nov 2026)
