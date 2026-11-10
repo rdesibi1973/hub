@@ -263,7 +263,9 @@ function iti_ps_personal(int $id): array {
  * no matching sample. $in: sample_id?, lead_request_id?, calc_file?, fields? {ref_number, title_<lang>, subtitle_<lang>,
  * intro_<lang>, safari_type (private | group | beach; default from the sample / GRP tags), show_tip_note (0 | 1; default from the sample, else 1), start_date, pax_adults, pax_teens (under 16), pax_children (under 12), pax_open (0 | 1), pax_label_<lang>, display_language, display_currency,
  * price_table_json, price_notes_<lang>}, days? [day items, see iti_program_build.php] (replace
- * the sample's days). Blank programme: title_<display_language> and days[] are required.
+ * the sample's days), price_level? (rack | sto | stospec | custom + custom_markup | none; default the request's level:
+ * per-person prices 2–6 pax + notes from the sample's Calc template, iti_price_service.php).
+ * Blank programme: title_<display_language> and days[] are required.
  */
 function iti_ps_create_personal(PDO $db, array $in, string $who, bool $go): array {
     iti_ps_schema();          // before anything caches the column list
@@ -316,6 +318,18 @@ function iti_ps_create_personal(PDO $db, array $in, string $who, bool $go): arra
     $plan['ref_source'] = $ref['source'] !== null ? $ref['source'] . (isset($ref['file']) ? ': ' . $ref['file'] : '') : null;
     // T&C of the linked request's channel: direct client (Drct) 60 days, agency 45 days.
     $plan['terms_variant'] = $tv !== 'auto' ? $tv : (isset($set['lead_request_id']) ? iti_terms_variant_for_request($db, $set['lead_request_id']) : null);
+    // Price table at a price level (iti_price_service.php): price_level given (rack | sto | stospec | custom + custom_markup),
+    // else the linked request's (direct client → rack, else its agency's); "none" or fields.price_table_json = no automatic table.
+    if ($s && !array_key_exists('price_table_json', $set)) {
+        require_once __DIR__ . '/iti_price_service.php';
+        $lvlIn = isset($in['price_level']) ? strtolower(trim((string)$in['price_level'])) : null;
+        $pp = iti_price_plan($db, $s, $lvlIn, $in['custom_markup'] ?? null, isset($set['lead_request_id']) ? (int)$set['lead_request_id'] : null, $lang);
+        if ($pp !== null) {
+            $plan['prices'] = array_diff_key($pp, ['notes' => 1]) + ['notes' => $pp['notes'][$lang] ?? null];
+            $cols = iti_table_columns('iti_programs');
+            foreach (iti_price_set($pp) as $k => $v) if (in_array($k, $cols, true) && !array_key_exists($k, $set)) $set[$k] = $v;   // given notes win
+        }
+    }
     if (!$go) return $plan;
 
     try {

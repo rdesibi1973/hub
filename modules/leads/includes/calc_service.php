@@ -118,15 +118,51 @@ function calc_template_path(string $program): ?string {
     return null;
 }
 
+// Season folder of the Calc templates the prices are read from (the price list of the season, Roberto 10 Nov 2026).
+if (!defined('CALC_PRICE_SEASON_DIR')) define('CALC_PRICE_SEASON_DIR', '/itineraries/SafariClassic/it/Agenzia/2026-27/');
+
+/**
+ * Template candidates for prices, best first: the season folder's copy, then the standard template.
+ * $program = a standard program label ("Kiboko", "MigrationSummer") or a sample's Calc code (the
+ * code a copied Calc ends with: "Kiboko", "MigrazioneEstate", "Simba3").
+ */
+function calc_price_template_candidates(string $program): array {
+    $p = trim($program);
+    $src = calc_template_path($p);
+    if ($src === null) {
+        foreach (bs_std_programs() as $progs) foreach ($progs as $files) foreach ($files as $f) {
+            if (!preg_match('/\.xlsx?$/i', $f['dst'])) continue;
+            $codes = [preg_replace('/_Calc\.xlsx?$/i', '', $f['dst']), preg_replace('/_Calc\.xlsx?$/i', '', basename($f['src']))];
+            foreach ($codes as $c) if (strcasecmp($c, $p) === 0) { $src = $f['src']; break 4; }
+        }
+    }
+    $out = [];
+    if ($src !== null) {
+        if (strpos($src, '/Gruppi/') === false) $out[] = CALC_PRICE_SEASON_DIR . basename($src);
+        $out[] = $src;
+    } elseif (preg_match('/^[A-Za-z0-9_-]+$/', $p)) {   // a code with no standard program: <code>_Calc.xlsx
+        $out[] = CALC_PRICE_SEASON_DIR . $p . '_Calc.xlsx';
+        $out[] = '/itineraries/SafariClassic/it/' . $p . '_Calc.xlsx';
+    }
+    return array_values(array_unique($out));
+}
+
 /**
  * Program prices per pax sheet from the program's Calc template:
- * [['sheet','pax','rack','sto','single_suppl','teen_discount','child_discount'], …].
+ * [['sheet','pax','rack','sto','single_suppl','teen_discount','child_discount',
+ *   'cost' (B6:B8: bank commission + costs + camping extras), 'pax_total' (B1),
+ *   'stospec' (cost × 1.14 ÷ pax, up to 5 USD; 1.16 on GRP files), 'sto_formula' (the same at the sheet's
+ *   D2), 'sto_check' (sto_formula = the typed STO H10: the cost behind the price is the one in the Calc)], …].
+ * The season folder's template wins over the standard one (CALC_PRICE_SEASON_DIR).
  */
 function calc_program_prices(string $token, string $program): array {
-    $src = calc_template_path($program);
-    if ($src === null) throw new InvalidArgumentException('Unknown program "' . $program . '" — see list_standard_programs.');
-    $bytes = dropbox_download_text($token, $src);
-    if ($bytes === null) throw new RuntimeException('Template not found in Dropbox: ' . $src);
+    $cands = calc_price_template_candidates($program);
+    if (!$cands) throw new InvalidArgumentException('Unknown program "' . $program . '" — see list_standard_programs (or a sample\'s Calc code).');
+    $bytes = null; $src = null;
+    foreach ($cands as $c) { $bytes = dropbox_download_text($token, $c); if ($bytes !== null) { $src = $c; break; } }
+    if ($bytes === null) throw new RuntimeException('Template not found in Dropbox: ' . implode(' / ', $cands));
+    require_once __DIR__ . '/price_level_service.php';
+    $grp = (bool)preg_match('/GRP|\/Gruppi\//', $src);
     $tmp = tempnam(sys_get_temp_dir(), 'calctpl_');
     file_put_contents($tmp, $bytes);
     try {
@@ -140,11 +176,20 @@ function calc_program_prices(string $token, string $program): array {
                 try { $v = $ws->getCell($ref)->getCalculatedValue(); } catch (Throwable $e) { return null; }
                 return is_numeric($v) ? round((float)$v, 2) : null;
             };
-            $out[] = ['sheet' => $ws->getTitle(), 'pax' => (int)$num('B1') ?: (int)preg_replace('/\D/', '', $name),
-                      'rack' => $num('H9'), 'sto' => $num('H10'), 'single_suppl' => $num('H11'),
-                      'teen_discount' => $num('H13'), 'child_discount' => $num('H14')];
+            $cost = 0.0; $haveCost = false;
+            foreach (['B6', 'B7', 'B8'] as $ref) { $v = $num($ref); if ($v !== null) { $cost += $v; $haveCost = true; } }
+            $paxTotal = (int)$num('B1');
+            $row = ['sheet' => $ws->getTitle(), 'pax' => $paxTotal ?: (int)preg_replace('/\D/', '', $name),
+                    'rack' => $num('H9'), 'sto' => $num('H10'), 'single_suppl' => $num('H11'),
+                    'teen_discount' => $num('H13'), 'child_discount' => $num('H14'),
+                    'cost' => $haveCost ? round($cost, 2) : null, 'pax_total' => $paxTotal ?: null];
+            $row['stospec'] = price_level_sheet_price($row, 'stospec', null, $grp);
+            $d2 = $num('D2');
+            $row['sto_formula'] = ($haveCost && $paxTotal && $d2 !== null) ? price_level_roundup5($cost * (1 + $d2) / $paxTotal) : null;
+            $row['sto_check'] = $row['sto_formula'] !== null && $row['sto'] !== null ? ((int)$row['sto_formula'] === (int)round($row['sto'])) : null;
+            $out[] = $row;
         }
-        return ['template' => $src, 'sheets' => $out];
+        return ['template' => $src, 'grp' => $grp, 'stospec_markup' => price_level_markup('stospec', null, $grp), 'sheets' => $out];
     } finally {
         @unlink($tmp);
     }

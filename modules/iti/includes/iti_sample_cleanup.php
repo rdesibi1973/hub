@@ -360,6 +360,129 @@ function iti_sc_plan_link(PDO $db): array {
     return $out;
 }
 
+// ── follow-ups (Roberto, 10 Nov 2026) ───────────────────────────────────────
+
+const ITI_SC_GAMEDRIVE_DAY = ['program' => 29, 'day' => 4, 'text' => 'Fotosafari sulla strada per Serengeti Centrale'];
+const ITI_SC_GAMEDRIVE_TEXTS = [
+    'it' => 'Fotosafari sulla strada per il Serengeti Centrale', 'en' => 'Game drive on the way to Central Serengeti',
+    'fr' => 'Safari photo en route vers le Serengeti central', 'es' => 'Safari fotográfico de camino al Serengeti Central',
+    'de' => 'Pirschfahrt auf dem Weg in die zentrale Serengeti',
+];
+// 199's group jeep line (no other sample has it, so no translation to copy).
+const ITI_SC_GROUP_JEEP = [
+    'it' => 'jeep 4x4 Land Rover o Toyota Land Cruiser attrezzata per safari, condivisa con gli altri partecipanti del gruppo',
+    'en' => '4x4 Land Rover or Toyota Land Cruiser equipped for safari, shared with the other members of the group',
+    'fr' => '4x4 Land Rover ou Toyota Land Cruiser équipé pour le safari, partagé avec les autres participants du groupe',
+    'es' => '4x4 Land Rover o Toyota Land Cruiser equipado para safari, compartido con los demás participantes del grupo',
+    'de' => '4x4 Land Rover oder Toyota Land Cruiser mit Safari-Ausstattung, geteilt mit den anderen Gruppenteilnehmern',
+];
+const ITI_SC_INCL_FILL = [199, 250];   // samples whose included / excluded rows get the translations of the other samples
+
+/** "programme(s)" → "program(s)" (English UI rule). */
+function iti_sc_program_spelling(string $t): string {
+    return (string)preg_replace(['/\bprogrammes\b/u', '/\bprogramme\b/u', '/\bProgrammes\b/u', '/\bProgramme\b/u'], ['programs', 'program', 'Programs', 'Program'], $t);
+}
+
+/** #29 day 4: the free-text "transfer" becomes the day's game-drive activity. */
+function iti_sc_plan_gamedrive(PDO $db): ?array {
+    $g = ITI_SC_GAMEDRIVE_DAY;
+    $st = $db->prepare('SELECT d.id FROM iti_program_days d WHERE d.program_id = ? AND d.day_number = ?');
+    $st->execute([$g['program'], $g['day']]);
+    $dayId = (int)$st->fetchColumn();
+    if (!$dayId) return null;
+    $st = $db->prepare('SELECT * FROM iti_day_transfers WHERE program_day_id = ? AND transfer_route_id IS NULL');
+    $st->execute([$dayId]);
+    $tr = null;
+    foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $t) if (iti_sc_norm((string)$t['description']) === iti_sc_norm($g['text'])) $tr = $t;
+    if (!$tr) return null;
+    $st = $db->prepare('SELECT * FROM iti_day_activities WHERE program_day_id = ? ORDER BY sort_order, id');
+    $st->execute([$dayId]);
+    $acts = $st->fetchAll(PDO::FETCH_ASSOC);
+    $replace = null;
+    foreach ($acts as $a) if (empty($a['activity_id']) && iti_sc_norm((string)$a['activity_custom']) === 'fotosafari') { $replace = $a; break; }
+    return ['day_id' => $dayId, 'transfer' => $tr, 'activity' => $replace,
+            'before' => ['transfer' => $tr['description'], 'activities' => array_map(function ($a) { return $a['activity_custom'] ?: ('#' . $a['activity_id']); }, $acts)],
+            'after' => ITI_SC_GAMEDRIVE_TEXTS];
+}
+
+function iti_sc_apply_gamedrive(PDO $db): int {
+    $p = iti_sc_plan_gamedrive($db);
+    if (!$p) return 0;
+    $cols = ['activity_id' => null, 'activity_custom' => ITI_SC_GAMEDRIVE_TEXTS['it']];
+    $have = iti_table_columns('iti_day_activities');
+    foreach (ITI_TR_LANGS as $l) if (in_array('custom_note_' . $l, $have, true)) $cols['custom_note_' . $l] = ITI_SC_GAMEDRIVE_TEXTS[$l];
+    $db->beginTransaction();
+    try {
+        $db->prepare('DELETE FROM iti_day_transfers WHERE id = ?')->execute([(int)$p['transfer']['id']]);
+        if ($p['activity']) {
+            $db->prepare('UPDATE iti_day_activities SET `' . implode('` = ?, `', array_keys($cols)) . '` = ? WHERE id = ?')->execute(array_merge(array_values($cols), [(int)$p['activity']['id']]));
+        } else {
+            $row = ['program_day_id' => $p['day_id'], 'sort_order' => 1] + $cols;
+            $db->prepare('INSERT INTO iti_day_activities (`' . implode('`,`', array_keys($row)) . '`) VALUES (' . implode(',', array_fill(0, count($row), '?')) . ')')->execute(array_values($row));
+        }
+        $db->commit();
+    } catch (Throwable $e) { $db->rollBack(); throw $e; }
+    return 1;
+}
+
+/**
+ * Inclusions: (1) "programme" → "program" in every English text of the samples and of the standard rows;
+ * (2) 199 / 250: the empty translations filled from another sample's row with the same Italian text
+ * (the most used translation), 199's group jeep line from ITI_SC_GROUP_JEEP.
+ * Returns rows [table, id, col, program, before, after].
+ */
+function iti_sc_plan_inclusions(PDO $db): array {
+    $rows = [];
+    $samples = iti_sc_samples($db);
+    $ids = array_keys($samples);
+    if (!$ids) return [];
+    $st = $db->query('SELECT * FROM iti_program_inclusions WHERE program_id IN (' . implode(',', array_map('intval', $ids)) . ') ORDER BY program_id, item_type, sort_order, id');
+    $all = $st->fetchAll(PDO::FETCH_ASSOC);
+    // Translations by Italian text, from the samples that have them (spelling fixed).
+    $tr = [];
+    foreach ($all as $r) {
+        $k = trim((string)$r['text_it']);
+        if ($k === '') continue;
+        foreach (['en', 'fr', 'es', 'de'] as $l) {
+            $v = trim((string)($r['text_' . $l] ?? ''));
+            if ($v === '' || $v === $k) continue;
+            if ($l === 'en') $v = iti_sc_program_spelling($v);
+            $tr[$k][$l][$v] = ($tr[$k][$l][$v] ?? 0) + 1;
+        }
+    }
+    foreach (ITI_TR_LANGS as $l) if ($l !== 'it') $tr[ITI_SC_GROUP_JEEP['it']][$l] = [ITI_SC_GROUP_JEEP[$l] => 999];
+    foreach ($all as $r) {
+        $pid = (int)$r['program_id'];
+        $label = iti_sc_title($samples[$pid]) . ' · ' . ($r['item_type'] === 'exclusion' ? 'not included' : 'included');
+        foreach (['en', 'fr', 'es', 'de'] as $l) {
+            $cur = trim((string)($r['text_' . $l] ?? ''));
+            $new = $cur;
+            $it = trim((string)$r['text_it']);
+            if (in_array($pid, ITI_SC_INCL_FILL, true) && ($cur === '' || $cur === $it) && isset($tr[$it][$l])) {
+                arsort($tr[$it][$l]);
+                $new = (string)key($tr[$it][$l]);
+            }
+            if ($l === 'en' && $new !== '') $new = iti_sc_program_spelling($new);
+            if ($new !== $cur) $rows[] = ['table' => 'iti_program_inclusions', 'id' => (int)$r['id'], 'col' => 'text_' . $l, 'program' => $label, 'lang' => $l, 'before' => $cur, 'after' => $new];
+        }
+    }
+    try {
+        foreach ($db->query('SELECT id, text_en FROM iti_standard_inclusions')->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $v = (string)$r['text_en'];
+            if (($n = iti_sc_program_spelling($v)) !== $v) $rows[] = ['table' => 'iti_standard_inclusions', 'id' => (int)$r['id'], 'col' => 'text_en', 'program' => 'standard row #' . $r['id'], 'lang' => 'en', 'before' => $v, 'after' => $n];
+        }
+    } catch (PDOException $e) { /* table missing: nothing to fix */ }
+    return $rows;
+}
+
+/** Personal programmes whose English inclusions still say "programme" (information only: already sent to clients). */
+function iti_sc_personal_programme_count(PDO $db): int {
+    try {
+        return (int)$db->query("SELECT COUNT(DISTINCT i.program_id) FROM iti_program_inclusions i JOIN iti_programs p ON p.id = i.program_id
+                                 WHERE p.program_type = 'personal' AND i.text_en LIKE '%programme%'")->fetchColumn();
+    } catch (PDOException $e) { return 0; }
+}
+
 function iti_sc_apply_link(PDO $db): int {
     $plan = iti_sc_plan_link($db);
     if ($plan['missing_routes']) throw new RuntimeException('Apply "Transfer catalogue" first: routes missing ' . implode(', ', $plan['missing_routes']));

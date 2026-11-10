@@ -1,8 +1,10 @@
 <?php
 require_once 'config.php';
 require_once __DIR__ . '/includes/agency_service.php';
+require_once __DIR__ . '/includes/price_level_service.php';
 $pageTitle = 'Agencies';
 $db = db();
+price_level_schema($db);   // agencies.price_level / custom_markup
 requireLogin();
 if (isLeadsRestricted()) { header('Location: requests.php'); exit; }
 
@@ -32,7 +34,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($action === 'edit') {
         $res = agency_update($db, (int)$_POST['id'], ['nome' => $_POST['nome'] ?? '', 'short_name' => $_POST['short_name'] ?? '',
                                                       'type' => $_POST['type'] ?? 'savannah', 'attiva' => isset($_POST['attiva']) ? 1 : 0,
-                                                      'address' => $_POST['address'] ?? '', 'email' => $_POST['email'] ?? '']);
+                                                      'address' => $_POST['address'] ?? '', 'email' => $_POST['email'] ?? '',
+                                                      'price_level' => $_POST['price_level'] ?? 'sto', 'custom_markup' => $_POST['custom_markup'] ?? null]);
         if ($res['ok']) $success = 'Agency updated.';
         else            $errors[] = $res['error'];
     }
@@ -179,6 +182,7 @@ include 'includes/header.php';
         <th>Short Name</th>
         <th>Email</th>
         <th>Contacts</th>
+        <th title="Markup the quotes to this agency use (RACK 25 %, STO 18 %, STOSPEC 14 %)">Price level</th>
         <th style="text-align:center">Active</th>
         <th></th>
       </tr>
@@ -212,11 +216,14 @@ include 'includes/header.php';
             </div>
           <?php endforeach; endif; ?>
         </td>
+        <?php $agLvl = array_key_exists((string)($ag['price_level'] ?? ''), PRICE_LEVELS) ? $ag['price_level'] : 'sto';
+              $agMk  = $agLvl === 'custom' && ($ag['custom_markup'] ?? null) !== null ? (float)$ag['custom_markup'] : null; ?>
+        <td class="view-<?= $ag['id'] ?>" style="font-size:.8rem;white-space:nowrap;<?= $agLvl !== 'sto' ? 'font-weight:600;' : 'color:var(--grey-mid);' ?>"><?= h(price_level_label($agLvl, $agMk)) ?></td>
         <td class="view-<?= $ag['id'] ?>" style="text-align:center">
           <?= $ag['attiva'] ? '<span style="color:#1A6B3A">✓</span>' : '<span style="color:#C0211B">✗</span>' ?>
         </td>
 
-        <td class="edit-<?= $ag['id'] ?>" style="display:none" colspan="5">
+        <td class="edit-<?= $ag['id'] ?>" style="display:none" colspan="6">
           <?php $agType = $ag['type'] ?? 'savannah'; ?>
           <form method="POST" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
             <input type="hidden" name="action" value="edit">
@@ -228,6 +235,17 @@ include 'includes/header.php';
             <label style="display:flex;align-items:center;gap:4px;font-size:.82rem;cursor:pointer;white-space:nowrap;"><input type="radio" name="type" value="savannah" <?= $agType==='savannah'?'checked':'' ?>> Savannah</label>
             <label style="display:flex;align-items:center;gap:4px;font-size:.82rem;cursor:pointer;white-space:nowrap;"><input type="radio" name="type" value="promoservice" <?= $agType==='promoservice'?'checked':'' ?>> Promo (-PS)</label>
             <label style="display:flex;align-items:center;gap:4px;font-size:.82rem;cursor:pointer;white-space:nowrap;"><input type="radio" name="type" value="lamprati" <?= $agType==='lamprati'?'checked':'' ?>> Lamprati (-LAM)</label>
+            <label style="display:flex;align-items:center;gap:4px;font-size:.82rem;white-space:nowrap;" title="Markup of the quotes to this agency">
+              Price level
+              <select name="price_level" onchange="this.parentNode.querySelector('.mk').style.display = this.value === 'custom' ? '' : 'none'" style="font-size:.82rem;padding:3px 5px;">
+                <?php foreach (['rack' => 'RACK 25 %', 'sto' => 'STO 18 %', 'stospec' => 'STOSPEC 14 %', 'custom' => 'Custom'] as $k => $lab): ?>
+                  <option value="<?= $k ?>" <?= $agLvl === $k ? 'selected' : '' ?>><?= h($lab) ?></option>
+                <?php endforeach; ?>
+              </select>
+              <span class="mk" style="<?= $agLvl === 'custom' ? '' : 'display:none' ?>">
+                <input type="number" name="custom_markup" min="12" max="40" step="0.5" value="<?= $agMk !== null ? h(rtrim(rtrim(number_format($agMk * 100, 1, '.', ''), '0'), '.')) : '' ?>" style="width:60px;padding:3px 5px;" title="Never below 12 %"> %
+              </span>
+            </label>
             <label style="display:flex;align-items:center;gap:4px;font-size:.82rem;white-space:nowrap;">
               <input type="checkbox" name="attiva" <?= $ag['attiva']?'checked':'' ?>> Active
             </label>
@@ -251,7 +269,7 @@ include 'includes/header.php';
 
       <!-- CONTACTS MANAGEMENT ROW (separate from the agency edit form) -->
       <tr class="contacts-<?= $ag['id'] ?>" style="display:none">
-        <td colspan="6" style="background:var(--grey-bg,#f7f7f7);padding:14px 16px;">
+        <td colspan="7" style="background:var(--grey-bg,#f7f7f7);padding:14px 16px;">
           <div style="font-weight:600;font-size:.82rem;margin-bottom:10px;">Contacts &mdash; <?= h($ag['nome']) ?></div>
 
           <?php $cs = $contactsByAgency[$ag['id']] ?? []; ?>

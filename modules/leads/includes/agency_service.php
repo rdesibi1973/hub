@@ -103,6 +103,33 @@ function agency_create(PDO $db, array $f, bool $dryRun = false): array {
  */
 function agency_update(PDO $db, int $id, array $f, bool $dryRun = false): array {
     $res = ['ok' => false, 'error' => null, 'error_code' => null, 'changes' => [], 'duplicates' => []];
+    // Price level (rack | sto | stospec | custom + custom_markup): price_level_service.php, saved on its own.
+    if (array_key_exists('price_level', $f)) {
+        require_once __DIR__ . '/price_level_service.php';
+        price_level_schema($db);
+        try { list($lvl, $mk) = price_level_check($f['price_level'], $f['custom_markup'] ?? null); }
+        catch (InvalidArgumentException $e) { return array_merge($res, ['error' => $e->getMessage(), 'error_code' => 'price_level']); }
+        $cur = price_level_of_agency($db, $id);
+        $lvlChange = $cur['level'] !== $lvl || (string)$cur['markup'] !== (string)$mk;
+        unset($f['price_level'], $f['custom_markup']);
+        $sub = $f ? agency_update($db, $id, $f, $dryRun) : null;
+        if ($sub && !$sub['ok']) return $sub;
+        if ($sub === null) {
+            $st = $db->prepare('SELECT id, nome, short_name, type, attiva, address, email FROM agencies WHERE id = ?'); $st->execute([$id]);
+            $row = $st->fetch(PDO::FETCH_ASSOC);
+            if (!$row) return array_merge($res, ['error' => 'Agency ' . $id . ' not found.', 'error_code' => 'not_found']);
+            $res['agency'] = ['id' => $id, 'nome' => $row['nome'], 'short_name' => $row['short_name'], 'type' => $row['type'],
+                              'attiva' => (int)$row['attiva'], 'address' => $row['address'], 'email' => $row['email']];
+        }
+        $res = $sub ?: array_merge($res, ['ok' => true]);
+        if ($lvlChange) $res['changes']['price_level'] = ['from' => $cur['label'], 'to' => price_level_label($lvl, $mk)];
+        $res['price_level'] = ['level' => $lvl, 'markup' => $mk, 'label' => price_level_label($lvl, $mk)];
+        if (!$dryRun && $lvlChange) {
+            try { $db->prepare('UPDATE agencies SET price_level = ?, custom_markup = ? WHERE id = ?')->execute([$lvl, $mk, $id]); }
+            catch (PDOException $e) { error_log('agency_update price_level: ' . $e->getMessage()); return array_merge($res, ['ok' => false, 'error' => 'Database error while saving the price level.', 'error_code' => 'db']); }
+        }
+        return $res;
+    }
     $st = $db->prepare('SELECT id, nome, short_name, type, attiva, address, email FROM agencies WHERE id = ?');
     $st->execute([$id]);
     $cur = $st->fetch(PDO::FETCH_ASSOC);

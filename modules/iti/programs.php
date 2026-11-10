@@ -110,16 +110,36 @@ if ($action === 'duplicate' && $id && $can_edit) {
         iti_flash_set('error', 'Duplicate failed, nothing was copied: ' . $e->getMessage());
         iti_redirect("programs.php?type={$tab}");
     }
+    $price_msg = '';
     if ($new_id && $lead_id) {
         require_once __DIR__ . '/includes/iti_terms.php';
         iti_terms_apply(db(), (int)$new_id);   // T&C of the request's channel (direct 60 days / agency 45)
+        // Prices at the request's level (direct client → RACK, else the agency's): iti_price_service.php. Never blocks the copy.
+        try {
+            require_once __DIR__ . '/includes/iti_price_service.php';
+            iti_add_column('iti_programs', 'price_table_json', 'TEXT NULL DEFAULT NULL');   // present on the server since Oct 2026
+            foreach (ITI_LANGS as $l) iti_add_column('iti_programs', 'price_notes_' . $l, 'TEXT NULL DEFAULT NULL');
+            $pp = iti_price_plan(db(), $src_p, null, null, $lead_id, (string)($src_p['display_language'] ?: 'it'));
+            if ($pp && empty($pp['error'])) {
+                $pset = array_intersect_key(iti_price_set($pp), array_flip(iti_table_columns('iti_programs')));
+                if ($pset) {
+                    db()->prepare('UPDATE iti_programs SET `' . implode('` = ?, `', array_keys($pset)) . '` = ? WHERE id = ?')->execute(array_merge(array_values($pset), [(int)$new_id]));
+                    $price_msg = ' Prices filled at ' . $pp['label'] . ' (' . $pp['source'] . ') — check them in Program Details.';
+                }
+            } elseif ($pp && !empty($pp['error'])) {
+                $price_msg = ' No price table: ' . $pp['error'];
+            }
+        } catch (Throwable $e) {
+            error_log('ITI price fill #' . $new_id . ': ' . $e->getMessage());
+            $price_msg = ' Prices not filled (' . $e->getMessage() . ').';
+        }
         require_once __DIR__ . '/../leads/includes/timeline_service.php';
         timeline_log($lead_id, 'program_update', 'Personal program created (#' . $new_id . ')',
                      ['body' => 'From sample #' . $id . ': ' . ($src_p['title_en'] ?? ''), 'refs' => ['program_id' => (int)$new_id]]);
     }
     if ($new_id) {
         $dest_label = $dest_type === 'personal' ? 'Personal' : 'Sample';
-        iti_flash_set('success', "Program duplicated as {$dest_label}.");
+        iti_flash_set('success', "Program duplicated as {$dest_label}." . $price_msg);
         iti_redirect("program_edit.php?id={$new_id}");
     }
 }

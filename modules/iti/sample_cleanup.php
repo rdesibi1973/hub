@@ -25,6 +25,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             case 'nyumbu': $id = iti_sc_apply_nyumbu($db, (string)($cu['username'] ?? 'admin')); $msg = 'Private sample NYUMBU SAFARI created: #' . $id . '.'; break;
             case 'routes': $n = iti_sc_apply_routes($db); $msg = $n . ' route(s) created / updated.'; break;
             case 'link':   $n = iti_sc_apply_link($db); $msg = $n . ' day(s) linked to the transfer list.'; break;
+            case 'gamedrive':  $n = iti_sc_apply_gamedrive($db); $msg = $n ? '#29 day 4: game drive activity set, transfer text removed.' : 'Nothing to change.'; break;
+            case 'inclusions': $n = iti_sc_apply_rows($db, iti_sc_plan_inclusions($db)); $msg = $n . ' inclusion text(s) updated.'; break;
             default: throw new RuntimeException('Unknown section.');
         }
         error_log('ITI sample_cleanup ' . $sec . ' by ' . ($cu['username'] ?? '?') . ': ' . $msg);
@@ -41,6 +43,9 @@ $nyumbu = iti_sc_plan_nyumbu($db);
 $routes = iti_sc_plan_routes($db);
 $link   = iti_sc_plan_link($db);
 $routesTodo = count(array_filter($routes, fn($r) => $r['new'] || $r['changes']));
+$gamedrive  = iti_sc_plan_gamedrive($db);
+$incl       = iti_sc_plan_inclusions($db);
+$inclPersonal = iti_sc_personal_programme_count($db);
 
 $page_title = 'Sample clean-up — Itinerary Builder';
 $extra_css = iti_extra_css() . '
@@ -140,6 +145,30 @@ function sc_apply_btn(string $sec, string $label, bool $enabled = true): string 
   <div style="margin-top:12px;font-weight:600;font-size:.82rem;">Free texts that stay (not a road transfer, or no route): translate them or replace them in the editor</div>
   <table class="sc-t"><tr><th>Sample</th><th>Day</th><th>Text</th></tr>
   <?php foreach ($link['unmatched'] as $u): ?><tr><td><?= h($u['program']) ?></td><td><?= (int)$u['day'] ?></td><td><?= h($u['text']) ?></td></tr><?php endforeach; ?></table>
+  <?php endif; ?>
+</div>
+
+<div class="sc-sec" id="gamedrive">
+  <h3>6a · #29 day 4 — "Fotosafari sulla strada…" becomes the day's activity</h3>
+  <div class="sub">Not a transfer: the free text is removed and the day's "Fotosafari" activity gets this wording in 5 languages.</div>
+  <?php if (!$gamedrive): ?><div class="sc-ok">Nothing to change.</div><?php else: ?>
+  <table class="sc-t"><tr><th>Before</th><th>After</th></tr>
+  <tr><td class="sc-del">Transfer: <?= h($gamedrive['before']['transfer']) ?><br>Activities: <?= h(implode(', ', $gamedrive['before']['activities'])) ?></td>
+      <td class="sc-add">No transfer<br>Activity: <?= implode('<br>', array_map(fn($l, $t) => h($l . ': ' . $t), array_keys($gamedrive['after']), $gamedrive['after'])) ?></td></tr>
+  </table>
+  <?= sc_apply_btn('gamedrive', '#29 day 4') ?>
+  <?php endif; ?>
+</div>
+
+<div class="sc-sec" id="inclusions">
+  <h3>6b · Included / not included — translations of 199 and 250, "programme" → "program"</h3>
+  <div class="sub">199 / 250: empty translations copied from the other samples' rows with the same Italian text. Every sample and standard row: English "programme" → "program".
+    <?php if ($inclPersonal): ?> <?= (int)$inclPersonal ?> personal program(s) still say "programme": not changed (already sent).<?php endif; ?></div>
+  <?php if (!$incl): ?><div class="sc-ok">Nothing to change.</div><?php else: ?>
+  <table class="sc-t"><tr><th>Where</th><th>Lang</th><th>Before</th><th>After</th></tr>
+  <?php foreach ($incl as $r): ?><tr><td><?= h($r['program']) ?></td><td><?= h($r['lang']) ?></td><td class="sc-del"><?= h($r['before'] !== '' ? $r['before'] : '(empty)') ?></td><td class="sc-add"><?= h($r['after']) ?></td></tr><?php endforeach; ?>
+  </table>
+  <?= sc_apply_btn('inclusions', count($incl) . ' texts') ?>
   <?php endif; ?>
 </div>
 </main>

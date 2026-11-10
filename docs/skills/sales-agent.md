@@ -38,11 +38,16 @@ Memo: at the start create one `doing` memo (clear title with the folder name, li
    - An activity left on a template row that now holds another day (e.g. lunch boxes on a Serengeti day, natural walk on the departure day): `amount: null` is refused, so write `"activity": {"amount": "=0", "desc": ""}` to zero it — otherwise its cost stays in the totals (3 Nov 2026, Daniela2paxAgo27).
    - `fill_calc` writes neither jeep (D) nor drinks (E), and does not clear activities (H/I) left on a template row that now holds another day (`"activity": null` leaves them). When the trip has more days than the template, or days move: in the dry run check that every safari day has D/E and that each activity sits on its own day. If not, after the confirm fix the sheet XML (D `=$D$5*$B$5`, E `=($B$2+$B$3)*4`, move/clear H/I), update the cached values (row 30 totals, B7, B9, D9, B10, D10), check with a recalculation on a copy, then `read_calc` (17 Oct 2026, Del Fiandra Calc 05).
    - Beach booked by the agency itself ("a ZNZ si arrangia l'agenzia"): start from the safari-only programme (e.g. `Simba`, not `BeachSimba`) and add the beach nights yourself as "<place> - own arrangement" (no J cost, no beach transfers) up to the departure day. `fill_calc` cannot clear labels (B) or dates of leftover template rows, so a Beach template with more beach nights than the trip leaves extra days and fails the check. When the safari gets shorter, the row that becomes a beach day keeps the template's jeep/drinks (D/E): clear them in the sheet XML as above (21 Oct 2026, AmedeoMarino).
-5. Which price goes in F9 (Price to customer):
+5. **Price level (10 Nov 2026).** Quote at the level of the request: the request page "Price level" line, or `list_agencies`
+   `price_level` — direct client → RACK 25 %; agencies STO 18 % (default) or STOSPEC 14 % (partners with volume; GRP files 16 %) or a
+   custom markup. **Never quote below the agency's level, and never an ad-hoc markup (e.g. 10 %), without Roberto's ok; never below
+   12 %** (staff-commission threshold). `get_rates` gives `rack`, `sto` and `stospec` per pax sheet; a `sto_check: false` means the
+   template's typed STO and its costs disagree — tell Roberto before quoting.
+   Which price goes in F9 (Price to customer):
    - Direct clients: STANDARD mode (markup 25%, D1) → rounded D9 = rack price → F9 (and H9).
    - Direct clients, special price or discount: only in the email, the programme shows the rack (`rules-client-documents` §1).
    - Direct clients with lodge changes and a beach extension: F9 = components, e.g. `=3625+270+435+195+2010+210` — standard programme rack + lodge-upgrade supplement (cost difference × 1.25, rounded up to 5: Kifaru → Orangi Luxury, 2 nights = 270) + domestic flights at the pricelist sale price + beach hotel at its rack rate + August supplement (added by `august_supplement`).
-   - Agencies: rounded D10 = STO price (markup TO in D2: 18% for standard agencies such as the Promoservice ones; 14% for EKO and for Etnia (21 Oct 2026)) → F9. `fill_calc` does not change D2: when the markup differs from the template's, set D2 in the sheet XML after the confirm, with the cached values (B9, D9, D10, B10).
+   - Agencies: rounded D10 at the agency's level (markup TO in D2: 18% STO for standard agencies such as the Promoservice ones; 14% STOSPEC for the partners set on stospec in the Hub, e.g. EKO) → F9. `fill_calc` does not change D2: when the markup differs from the template's, set D2 in the sheet XML after the confirm, with the cached values (B9, D9, D10, B10).
    - STOSPEC programmes (a pricing mode, not an agency): D2 = 14% (16% for GRP files); rounded D10 → F9 only; delete H9/H10 and the I9/I10 labels.
 6. On the first pass also:
    - keep only the PAX sheet for the pax count; clear H6:I14 when adults only;
@@ -64,7 +69,10 @@ Memo: at the start create one `doing` memo (clear title with the folder name, li
 ## 3. Client programme (ITI, Magazine layout)
 
 1. `iti_samples` → closest sample; tell Roberto which and why.
-2. `iti_create_personal` with `sample_id`, `lead_request_id`, fields: `ref_number` = Calc name without `_Calc` (e.g. `01_MarcoCiaolo(OceanoPoint-Roberto)_PumbaSafari`), `title_<lang>`, `start_date`, `pax_adults`, `pax_teens`, `pax_children`, `display_language`, `price_table_json` (`[{label, price, currency}]` from the Calc), `price_notes_<lang>`.
+2. `iti_create_personal` with `sample_id`, `lead_request_id`, fields: `ref_number` = Calc name without `_Calc` (e.g. `01_MarcoCiaolo(OceanoPoint-Roberto)_PumbaSafari`), `title_<lang>`, `start_date`, `pax_adults`, `pax_teens`, `pax_children`, `display_language`. Prices: with a sample that has a Calc code, the price table (2–6 pax per person) and the notes (single
+   supplement, teen / child reductions, high-season supplement, "net rates valid for travel until 31 December 2027") are filled at the
+   request's level by themselves — check `prices` in the dry run (`price_level` overrides it; `none` = no table). When the client's
+   Calc has its own price (changed lodges, extras), pass `price_table_json` (`[{label, price, currency}]` from the Calc) and `price_notes_<lang>` instead.
 3. Client changes → `iti_update_day` (texts, lodge with `end_lodge`, meals, `room_type`) / `iti_update_program`.
 4. Check with `iti_program`: days, lodges, dates, prices; flag days without photo or text (lodge photos from the lodge's own website when missing). Destinations and lodges without a description in the programme language print in English: check them (`iti_destinations` / `iti_lodges` with `missing=description_<lang>`) and write the missing texts with `iti_update_destination` / `iti_update_lodge` (dry run first) before generating the file.
    - Lodge not in the Hub (e.g. a beach hotel): `iti_create_lodge` (name, `destination_id` of the area, category, type, website, email, address, coordinates, `description_it` + `description_en`) → `iti_lodge_photos` with 6–8 photos (aerial view, room, beach, dining): extracted from the hotel's rate/brochure PDF in /000_Contracts (`pdfimages`, shrunk to ~1600 px, sent as `uploads`) or links from its official website. Dry run first for both.

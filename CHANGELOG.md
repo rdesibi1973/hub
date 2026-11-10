@@ -20,6 +20,19 @@ Running log of notable changes and current build state. Module-level "active / p
 
 ---
 
+## 2026-11-10 — Price levels RACK / STO / STOSPEC; sample clean-up follow-ups
+- `includes/price_level_service.php`: `agencies.price_level` (rack | sto default | stospec | custom) + `custom_markup` (lazy columns),
+  12 % floor, GRP STOSPEC 16 %. Hub Agencies (column + edit), request page "Price level" (direct client → RACK), Agent API
+  `list_agencies` / `update_agency`.
+- `get_rates` (`calc_program_prices`): season folder `/Agenzia/2026-27/` first (the root Nyumbu_Calc still had the old prices),
+  sample Calc codes accepted, per sheet `cost`, `stospec` (cost × 1.14 ÷ pax, up to 5), `sto_formula` / `sto_check`.
+- `iti/includes/iti_price_service.php`: new personal programme from a sample with a Calc code → price table 2–6 pax at the level +
+  notes in 5 languages (single, teen / child, high season 35 USD, valid until 31 Dec 2027; ITI settings `price_valid_until`,
+  `price_season_supplement`). `iti_create_personal` `price_level`; Hub "Create from sample" of a request fills it too.
+- Clean-up page section 6: #29 day 4 free text → game-drive activity (5 languages); 199 / 250 inclusions translated from the other
+  samples; "programme" → "program" in English inclusions (samples + standard rows).
+- Docs: AGENT_API, `docs/ITI_module_reference_EN.md` (now in the repo: transfer catalogue, price levels), skill sales-agent.
+
 ## 2026-11-10 — ITI samples clean-up, transfers from the catalogue in every language
 - Dry run (Agent API, read-only) of the 25 samples: "shared arrival transfer" sentence on day 1 of 12 private samples (it/en/fr;
   no sample has any es/de narrative); group samples 199/200/201 with client name / date in the en/fr titles and "private safari"

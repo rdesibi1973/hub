@@ -69,7 +69,8 @@ curl -sH "$H" "$U?action=find_requests&status=Quoted,Hot-Quoted&agent=rdesibi&ch
 ```
 
 ### `list_agencies` (GET)
-`q` → `[{id, name, short_name, type, active, address, email, contacts[]}]` (inactive agencies included);
+`q` → `[{id, name, short_name, type, active, address, email, price_level {level, markup, label}, contacts[]}]` (inactive agencies included);
+`price_level.level` = `rack` | `sto` (default) | `stospec` | `custom` (`markup` = fraction, e.g. 0.15) — the level to quote this agency at;
 `contacts[]` = `{id, agency_id, name, role, email, phone, primary, notes}`, primary first.
 
 ### `create_agency` (POST)
@@ -98,6 +99,8 @@ belongs to another agency); unknown id → 404.
 → `{dry_run: true, agency: {…after}, changes: {field: {from, to}}, warning}`; with `confirm` → `{updated: true, …}`;
 nothing different → `{unchanged: true}`. Changing the short name does **not** rename Dropbox folders: old folders keep the
 old `(Short-Agent)` tag (`warning`).
+`price_level` (`rack` | `sto` | `stospec` | `custom`) + `custom_markup` (0.15 or 15 = 15 %; never below 12 % → 400; `custom_markup`
+alone implies `custom`) → `changes.price_level {from, to}` and `agency.price_level`.
 
 ```bash
 curl -sA "$UA" -H "$H" -X POST "$U?action=update_agency" -d '{"agency_id":164,"address":"Via Roma 1, 00100 Roma"}'                 # dry run
@@ -215,7 +218,14 @@ Returns `copied`, `skipped` (already there), `missing` (template not found), `un
 (filter one list only), `date?` (default today). Every word of the filter must match ("Arusha Zanzibar" → routes with both);
 the reply echoes `filter {route, activity}`. Flights match route / origin / destination / airline, activities name / category / notes.
 - `program.sheets[]`: prices read from the program's **Calc template** (the single source of truth),
-  per pax sheet: `rack` (H9), `sto` (H10), `single_suppl` (H11), `teen_discount` (H13), `child_discount` (H14).
+  per pax sheet: `rack` (H9), `sto` (H10), `single_suppl` (H11), `teen_discount` (H13), `child_discount` (H14),
+  and since Nov 2026 `cost` (B6:B8), `pax_total` (B1), `stospec` (cost × 1.14 ÷ pax, rounded up to 5 USD; 1.16 on GRP files),
+  `sto_formula` (the same at the sheet's D2) and `sto_check` (`sto_formula` = typed H10; `false` = the template's typed STO and
+  its costs disagree — check the Calc before quoting). `program.template` = the file read: the season folder
+  (`/itineraries/SafariClassic/it/Agenzia/2026-27/`) wins over the standard template; `program` also takes a sample's Calc code
+  (`Kiboko`, `MigrazioneEstate`, `Simba3`). `program.grp`, `program.stospec_markup`.
+- **Price levels** (agency `price_level`, see `list_agencies`): RACK 25 % direct clients, STO 18 % standard agencies (default),
+  STOSPEC 14 % partners (GRP 16 %), custom ≥ 12 %. Quote at the agency's level; below it only with Roberto's ok.
 - `flights[]`: `route`, `cost_pp` (rate_pax — what we pay, written in the Calc), `sale_pp` (sale_pax — price to agency) valid on `date`.
 - `activities[]`: activities / transfers / safari-fixed with `cost` (rate), `sale`, `per` (pax|fixed).
 
@@ -625,6 +635,15 @@ curl -sH "$H" "$U?action=iti_document&program_id=412&format=guide&save=1"       
 Copies the sample (days, activities, prices, inclusions) as a draft proposal, with the T&C of the request's client type
 (`fields.terms_variant` = `direct` | `agency` forces one). Dry-run unless `"confirm": true` (→ plan with `terms_variant`,
 `ref_number` and `ref_source`); confirmed → `program_id`, `links`, `terms` and the full `program`.
+**Prices (Nov 2026):** `price_level?` (`rack` | `sto` | `stospec` | `custom` + `custom_markup` | `none`). Default: the linked
+request's level — direct client (channel direct / `-Drct` folder) → `rack`, else the agency's `price_level` (default `sto`); no
+request and no `price_level` → no table. With a sample that has a Calc code, `price_table_json` gets "Per person, based on N pax"
+for 2–6 pax at that level (rack H9, sto H10, stospec / custom = cost × (1 + markup) ÷ pax, rounded up to 5 USD; GRP files
+STOSPEC 16 %) and `price_notes_<lang>` (5 languages) the single supplement, teen / child reductions, the high-season supplement
+(35 USD pp per night, 1–25 Aug and 24/25/26/31 Dec) and "Net rates valid for travel until 31 December 2027" (rack: "Rates…").
+The plan shows `prices {level, label, source, code, template, rows, notes (program language), prices {pax: price}, warning}`
+or `prices.error` (no Calc code, template not readable): nothing is filled then. `fields.price_table_json` /
+`price_notes_<lang>` given win. Samples never carry prices. Same automatic table on the Hub "Create from sample" of a request.
 **ref_number:** `fields.ref_number` wins. Otherwise, with `lead_request_id`, it is the name (no extension) of the programme
 Word `copy_program` put in the request folder (`NN_<folder>_<Prog>Safari.docx`) when there is exactly one; `calc_file`
 (e.g. `01_…_Pumba_Calc.xlsx`) picks the Word of that Calc (same `NN_` and programme). None or several → **409**, nothing

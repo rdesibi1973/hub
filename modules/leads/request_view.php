@@ -622,6 +622,20 @@ include 'includes/header.php';
     <div class="detail-label">Pax</div>
     <div class="detail-value"><?= $r['pax'] ?: '<span class="text-muted">—</span>' ?></div>
 
+    <?php // Price level to quote (price_level_service.php): direct client → RACK, else the agency's level.
+    require_once __DIR__ . '/includes/price_level_service.php';
+    try { $pl = price_level_for_request($db, (int)$r['id']); } catch (Throwable $e) { $pl = null; }
+    if ($pl): ?>
+    <div class="detail-label">Price level</div>
+    <div class="detail-value">
+      <span class="badge" style="<?= $pl['level'] === 'sto' ? 'background:#e2e8f0;color:#475569' : 'background:#fff3cd;color:#856404' ?>"><?= h($pl['label']) ?></span>
+      <span style="font-size:.75rem;color:var(--grey-mid);margin-left:6px;">
+        <?= $pl['source'] === 'direct' ? 'direct client' : ($pl['source'] === 'agency' ? 'level of ' . h((string)$pl['agency']) . (in_array($cu['role_name'] ?? '', ['admin', 'manager'], true) ? ' · <a href="agencies.php?q=' . urlencode((string)$pl['agency']) . '">change</a>' : '') : 'no agency on the request: standard level') ?>
+        · never below this level without Roberto's ok
+      </span>
+    </div>
+    <?php endif; ?>
+
     <div class="detail-label">Status</div>
     <div class="detail-value">
       <?php if ($canEdit): ?>

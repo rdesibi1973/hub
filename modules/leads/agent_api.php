@@ -752,15 +752,20 @@ try {
         $q = trim((string)($in['q'] ?? ''));
         if ($q === '') agent_fail('q is required');
         $like = '%' . $q . '%';
-        $st = $db->prepare("SELECT id, nome, short_name, type, attiva, address, email FROM agencies
+        require_once __DIR__ . '/includes/price_level_service.php';
+        price_level_schema($db);
+        $st = $db->prepare("SELECT id, nome, short_name, type, attiva, address, email, price_level, custom_markup FROM agencies
                             WHERE nome LIKE ? OR short_name LIKE ? ORDER BY nome LIMIT 50");
         $st->execute([$like, $like]);
         $rows     = $st->fetchAll(PDO::FETCH_ASSOC);
         $contacts = agency_contacts($db, array_column($rows, 'id'));
         $out = [];
         foreach ($rows as $a) {
+            $lvl = array_key_exists((string)$a['price_level'], PRICE_LEVELS) ? $a['price_level'] : 'sto';
+            $mk  = $lvl === 'custom' && $a['custom_markup'] !== null ? (float)$a['custom_markup'] : null;
             $out[] = ['id' => (int)$a['id'], 'name' => $a['nome'], 'short_name' => $a['short_name'], 'type' => $a['type'],
                       'active' => (bool)$a['attiva'], 'address' => $a['address'], 'email' => $a['email'],
+                      'price_level' => ['level' => $lvl, 'markup' => $mk, 'label' => price_level_label($lvl, $mk)],
                       'contacts' => array_map('agent_agency_contact', $contacts[(int)$a['id']] ?? [])];
         }
         agent_out(['ok' => true, 'agencies' => $out]);
@@ -803,10 +808,12 @@ try {
         $src = isset($in['fields']) && is_array($in['fields']) ? $in['fields'] + $in : $in;
         $f = [];
         foreach (['name' => 'nome', 'nome' => 'nome', 'short_name' => 'short_name', 'type' => 'type',
-                  'active' => 'attiva', 'address' => 'address', 'email' => 'email'] as $k => $col) {
+                  'active' => 'attiva', 'address' => 'address', 'email' => 'email',
+                  'price_level' => 'price_level', 'custom_markup' => 'custom_markup'] as $k => $col) {
             if (array_key_exists($k, $src)) $f[$col] = $src[$k];
         }
-        if (!$f) agent_fail('Nothing to change — give name, short_name, type, active, address and/or email');
+        if (array_key_exists('custom_markup', $f) && !array_key_exists('price_level', $f)) $f['price_level'] = 'custom';
+        if (!$f) agent_fail('Nothing to change — give name, short_name, type, active, address, email and/or price_level (rack | sto | stospec | custom + custom_markup)');
         if (array_key_exists('attiva', $f) && !is_bool($f['attiva']) && !in_array($f['attiva'], [0, 1, '0', '1'], true)) {
             agent_fail('active must be true or false');
         }
@@ -820,6 +827,7 @@ try {
         $a   = $res['agency'];
         $out = ['id' => $a['id'], 'name' => $a['nome'], 'short_name' => $a['short_name'], 'type' => $a['type'],
                 'active' => (bool)$a['attiva'], 'address' => $a['address'], 'email' => $a['email']];
+        if (isset($res['price_level'])) $out['price_level'] = $res['price_level'];
         $changes = [];
         foreach ($res['changes'] as $k => $c) {
             $changes[['nome' => 'name', 'attiva' => 'active'][$k] ?? $k] = $k === 'attiva'
