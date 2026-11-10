@@ -179,9 +179,19 @@ function calc_program_prices(string $token, string $program): array {
             $cost = 0.0; $haveCost = false;
             foreach (['B6', 'B7', 'B8'] as $ref) { $v = $num($ref); if ($v !== null) { $cost += $v; $haveCost = true; } }
             $paxTotal = (int)$num('B1');
+            // Single supplement / teen / child reductions: the H cell next to their label in column I. The single
+            // supplement is in row 11 (Duma, DumaShort, ZNZDumaShort…) or 12 (Pumba, Simba, Kiboko…); teen 13, child 14.
+            $byLabel = ['single' => null, 'teen' => null, 'child' => null];
+            for ($r = 5; $r <= 15; $r++) {
+                $lab = strtolower(trim((string)$ws->getCell('I' . $r)->getValue()));
+                if ($lab === '' || strpos($lab, 'price') !== false) continue;   // "Teenager price" / "Child price" rows
+                foreach (['single' => 'singl', 'teen' => 'teen', 'child' => 'child'] as $k => $pat) {
+                    if ($byLabel[$k] === null && strpos($lab, $pat) !== false) $byLabel[$k] = 'H' . $r;
+                }
+            }
             $row = ['sheet' => $ws->getTitle(), 'pax' => $paxTotal ?: (int)preg_replace('/\D/', '', $name),
-                    'rack' => $num('H9'), 'sto' => $num('H10'), 'single_suppl' => $num('H11'),
-                    'teen_discount' => $num('H13'), 'child_discount' => $num('H14'),
+                    'rack' => $num('H9'), 'sto' => $num('H10'), 'single_suppl' => $num($byLabel['single'] ?: 'H11'),
+                    'teen_discount' => $num($byLabel['teen'] ?: 'H13'), 'child_discount' => $num($byLabel['child'] ?: 'H14'),
                     'cost' => $haveCost ? round($cost, 2) : null, 'pax_total' => $paxTotal ?: null];
             $row['stospec'] = price_level_sheet_price($row, 'stospec', null, $grp);
             $d2 = $num('D2');

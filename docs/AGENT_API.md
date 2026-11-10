@@ -218,7 +218,8 @@ Returns `copied`, `skipped` (already there), `missing` (template not found), `un
 (filter one list only), `date?` (default today). Every word of the filter must match ("Arusha Zanzibar" → routes with both);
 the reply echoes `filter {route, activity}`. Flights match route / origin / destination / airline, activities name / category / notes.
 - `program.sheets[]`: prices read from the program's **Calc template** (the single source of truth),
-  per pax sheet: `rack` (H9), `sto` (H10), `single_suppl` (H11), `teen_discount` (H13), `child_discount` (H14),
+  per pax sheet: `rack` (H9), `sto` (H10), `single_suppl`, `teen_discount`, `child_discount` (the H cell next to the
+  "single supplement" / "teenager discount" / "child discount" label in column I: single in row 11 or 12 depending on the template, teen 13, child 14),
   and since Nov 2026 `cost` (B6:B8), `pax_total` (B1), `stospec` (cost × 1.14 ÷ pax, rounded up to 5 USD; 1.16 on GRP files),
   `sto_formula` (the same at the sheet's D2) and `sto_check` (`sto_formula` = typed H10; `false` = the template's typed STO and
   its costs disagree — check the Calc before quoting). `program.template` = the file read: the season folder
