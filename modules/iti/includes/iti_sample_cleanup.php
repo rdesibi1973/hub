@@ -70,7 +70,7 @@ function iti_sc_route_specs(): array {
         '9-14'  => ['min' => 90],                                   // Ngorongoro – Serengeti (270)
         '14-19' => ['min' => 300, 'new' => true],                   // Serengeti – Lake Natron
         '19-17' => ['min' => 300, 'new' => true],                   // Lake Natron – Arusha
-        '55-30' => ['min' => 90, 'new' => true, 'ask' => 'Mbogo (22) day 13 "Trasferimento all\'aeroporto del Kilimanjaro 1,5 ore": from Marangu (day 12 ends there)'],
+        '53-30' => ['min' => 90],                                   // Moshi – Kilimanjaro Airport (#4): Mbogo (22) day 13 (Roberto, 10 Nov 2026)
         '6-17'  => ['min' => 120],                                  // Lake Manyara – Arusha
     ];
 }
@@ -105,7 +105,7 @@ function iti_sc_text_map(): array {
         'Ngorongoro – Serengeti 1,5 ore di trasferimento.'                    => [['9-14']],
         'Dal Serengeti al lago Natron 5 ore circa di transfer.'               => [['14-19']],
         'Trasferimento Natron – Arusha 5 ore circa.'                          => [['19-17']],
-        'Trasferimento all’aeroporto del Kilimanjaro 1,5 ore circa.'          => [['55-30']],
+        'Trasferimento all’aeroporto del Kilimanjaro 1,5 ore circa.'          => [['53-30']],   // Mbogo day 13: from Moshi
         'Manyara-Arusha 2 ore circa di trasferimento + volo Arusha-Zanzibar.' => [['6-17'], 'flights' => ['Arusha → Zanzibar']],
         'volo Zanzibar-Arusha + Arusha – Tarangire 2 ore di trasferimento.'   => [['17-15'], 'flights' => ['Zanzibar → Arusha'], 'flight_first' => true],
         'Zanzibar – Serengeti con volo interno'                               => ['flights' => ['Zanzibar → Serengeti']],
