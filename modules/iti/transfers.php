@@ -20,6 +20,14 @@ $id     = (int)($_REQUEST['id'] ?? 0);
 // ── POST ────────────────────────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit) {
 
+    // Deactivate first: its form posts no route fields, so it must not reach the From/To checks below
+    if ($action === 'delete' && $id) {
+        $tbl = $tab === 'road' ? 'iti_transfer_routes' : 'iti_flight_routes';
+        $db->prepare("UPDATE {$tbl} SET is_active=0 WHERE id=?")->execute([$id]);
+        iti_flash_set('success', 'Route deactivated.');
+        iti_redirect('transfers.php?tab=' . ($tab === 'road' ? 'road' : 'flight'));
+    }
+
     if ($tab === 'road') {
         $f = [
             'from_destination' => (int)($_POST['from_destination'] ?? 0),
@@ -89,9 +97,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit) {
             $db->prepare('UPDATE iti_transfer_routes SET `' . implode('` = ?, `', array_keys($tr_extra)) . '` = ? WHERE id = ?')
                ->execute(array_merge(array_values($tr_extra), [$id]));
             iti_flash_set('success', 'Transfer route updated. Programmes linked to it print the new label.');
-        } elseif ($action === 'delete' && $id) {
-            $db->prepare('UPDATE iti_transfer_routes SET is_active=0 WHERE id=?')->execute([$id]);
-            iti_flash_set('success', 'Route deactivated.');
         }
         } catch (\PDOException $e) {
             error_log('ITI transfer save failed: ' . $e->getMessage());
@@ -133,9 +138,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit) {
                  notes_en=?,notes_it=?,notes_fr=?,notes_es=?,notes_de=?,is_active=? WHERE id=?'
             )->execute([$f['from_airport'],$f['from_code'],$f['to_airport'],$f['to_code'],$f['operator'],$f['flight_type'],$f['duration_min'],$f['notes_en'],$f['notes_it'],$f['notes_fr'],$f['notes_es'],$f['notes_de'],$f['is_active'],$id]);
             iti_flash_set('success', 'Flight route updated.');
-        } elseif ($action === 'delete' && $id) {
-            $db->prepare('UPDATE iti_flight_routes SET is_active=0 WHERE id=?')->execute([$id]);
-            iti_flash_set('success', 'Route deactivated.');
         }
         iti_redirect('transfers.php?tab=flight');
     }
