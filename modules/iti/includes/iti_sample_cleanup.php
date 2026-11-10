@@ -377,6 +377,29 @@ const ITI_SC_GROUP_JEEP = [
     'de' => '4x4 Land Rover oder Toyota Land Cruiser mit Safari-Ausstattung, geteilt mit den anderen Gruppenteilnehmern',
 ];
 const ITI_SC_INCL_FILL = [199, 250];   // samples whose included / excluded rows get the translations of the other samples
+// Spanish / German of the standard sample rows (no sample has them): by the Italian text. The guide line follows the language.
+const ITI_SC_INCL_ES_DE = [
+    'trasferimenti menzionati nel programma' => ['es' => 'traslados mencionados en el programa', 'de' => 'im Programm genannte Transfers'],
+    'ingressi ai parchi “single entry” validità 24 ore' => ['es' => 'entradas a los parques “single entry”, válidas 24 horas', 'de' => 'Parkeintritte „single entry“, 24 Stunden gültig'],
+    'attività indicate nel programma' => ['es' => 'actividades indicadas en el programa', 'de' => 'im Programm angegebene Aktivitäten'],
+    'guida professionale in lingua italiana' => ['es' => 'guía profesional de habla hispana', 'de' => 'professioneller deutschsprachiger Guide'],
+    'jeep 4x4 ad uso esclusivo Land Rover o Toyota Land Cruiser attrezzata per safari' => ['es' => '4x4 Land Rover o Toyota Land Cruiser de uso exclusivo, equipado para safari', 'de' => '4x4 Land Rover oder Toyota Land Cruiser zur exklusiven Nutzung, mit Safari-Ausstattung'],
+    'pensione completa salvo dove diversamente indicato nel programma' => ['es' => 'pensión completa salvo indicación contraria en el programa', 'de' => 'Vollpension, sofern im Programm nicht anders angegeben'],
+    'borraccia safari in omaggio' => ['es' => 'cantimplora de safari de regalo', 'de' => 'Safari-Trinkflasche als Geschenk'],
+    'acqua minerale sulla jeep' => ['es' => 'agua mineral en el vehículo', 'de' => 'Mineralwasser im Fahrzeug'],
+    'copertura Medivac Flying Doctors (eliambulanza in caso di evacuazione medica, disponibile se ci fornisci i dati della tua assicurazione di viaggio; non copre ricovero e spese mediche)'
+        => ['es' => 'cobertura Medivac Flying Doctors (ambulancia aérea en caso de evacuación médica, disponible si nos facilitas los datos de tu seguro de viaje; no cubre hospitalización ni gastos médicos)',
+            'de' => 'Medivac-Flying-Doctors-Schutz (Luftrettung bei medizinischer Evakuierung, verfügbar, wenn Sie uns die Daten Ihrer Reiseversicherung mitteilen; Krankenhausaufenthalt und Arztkosten sind nicht gedeckt)'],
+    'il volo aereo internazionale (Italia-Tanzania e ritorno)' => ['es' => 'el vuelo internacional de ida y vuelta a Tanzania', 'de' => 'der internationale Flug nach Tansania und zurück'],
+    'il visto d’ingresso (VISA)' => ['es' => 'el visado de entrada', 'de' => 'das Einreisevisum'],
+    "l'assicurazione sanitaria obbligatoria per i visitatori in Tanzania (NIC) e a Zanzibar (ZIC)" => ['es' => 'el seguro médico obligatorio para visitantes en Tanzania (NIC) y Zanzíbar (ZIC)', 'de' => 'die obligatorische Krankenversicherung für Besucher in Tansania (NIC) und auf Sansibar (ZIC)'],
+    '“Zanzibar Infrastructure Tax” da pagare direttamente al hotel a Zanzibar.' => ['es' => '“Zanzibar Infrastructure Tax”, a pagar directamente en el hotel de Zanzíbar.', 'de' => '„Zanzibar Infrastructure Tax“, direkt im Hotel auf Sansibar zu zahlen.'],
+    'le bevande presso hotel/lodge e campi tendati' => ['es' => 'las bebidas en hoteles, lodges y campamentos de tiendas', 'de' => 'Getränke in Hotels, Lodges und Zeltcamps'],
+    'il servizio lavanderia' => ['es' => 'el servicio de lavandería', 'de' => 'der Wäscheservice'],
+    'i supplementi del periodo Natale/Capodanno, Pasqua e mese di Agosto' => ['es' => 'los suplementos de Navidad/Año Nuevo, Semana Santa y agosto', 'de' => 'Zuschläge für Weihnachten/Neujahr, Ostern und August'],
+    'mance e spese di carattere personale' => ['es' => 'propinas y gastos personales', 'de' => 'Trinkgelder und persönliche Ausgaben'],
+    'tutto quanto non espressamente incluso nel prezzo.' => ['es' => 'todo lo que no esté expresamente incluido en el precio.', 'de' => 'alles, was nicht ausdrücklich im Preis enthalten ist.'],
+];
 
 /** "programme(s)" → "program(s)" (English UI rule). */
 function iti_sc_program_spelling(string $t): string {
@@ -451,6 +474,7 @@ function iti_sc_plan_inclusions(PDO $db): array {
         }
     }
     foreach (ITI_TR_LANGS as $l) if ($l !== 'it') $tr[ITI_SC_GROUP_JEEP['it']][$l] = [ITI_SC_GROUP_JEEP[$l] => 999];
+    foreach (ITI_SC_INCL_ES_DE as $it => $t) foreach ($t as $l => $v) if (empty($tr[$it][$l])) $tr[$it][$l] = [$v => 999];
     foreach ($all as $r) {
         $pid = (int)$r['program_id'];
         $label = iti_sc_title($samples[$pid]) . ' · ' . ($r['item_type'] === 'exclusion' ? 'not included' : 'included');

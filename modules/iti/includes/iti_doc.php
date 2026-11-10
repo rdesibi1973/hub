@@ -511,6 +511,16 @@ function iti_doc_data(int $id, string $lang): ?array {
                          WHERE pi.program_id = ? ORDER BY pi.sort_order, pi.id');
     $st->execute([$id]);
     foreach ($st->fetchAll() as $r) {
+        // No text in $lang (own row nor its standard row): printed with the fallback language (en → it), and
+        // reported in missing_texts (type included / excluded, field text_<lang>) so it can be translated (Nov 2026).
+        if (trim((string)($r['text_' . $lang] ?? '')) === '' && trim((string)($r['s_' . $lang] ?? '')) === '') {
+            $any = iti_doc_pick($r, 'text', $lang) ?: iti_doc_pick($r, 's', $lang);
+            if ($any !== '') {
+                $kind = $r['item_type'] === 'exclusion' ? 'excluded' : 'included';
+                $missing[$kind . '|' . (int)$r['id'] . '|text_' . $lang] = ['type' => $kind, 'id' => (int)$r['id'], 'name' => mb_substr($any, 0, 80),
+                                                                             'field' => 'text_' . $lang, 'days' => []];
+            }
+        }
         $txt = iti_doc_pick($r, 'text', $lang);
         if ($txt === '') $txt = iti_doc_pick($r, 's', $lang);
         if ($txt === '') continue;
