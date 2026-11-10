@@ -234,8 +234,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                        ->execute([($end_id !== null || $end_txt !== null) && $room !== '' ? $room : null, $day_id]);
                 }
 
-                // ── Transfers: re-insert from array (unchanged texts keep their translations) ──
-                iti_transfers_replace($db, $day_id, array_values((array)($_POST['transfer_desc'] ?? [])));
+                // ── Transfers: re-insert from array (unchanged free texts keep their translations) ──
+                // transfer_route_id[] (same rows): "<route>" / "<route>:g" = from the transfer list, '' = free text.
+                $tr_items = [];
+                $tr_rids  = array_values((array)($_POST['transfer_route_id'] ?? []));
+                foreach (array_values((array)($_POST['transfer_desc'] ?? [])) as $i => $txt) {
+                    $rid = trim((string)($tr_rids[$i] ?? ''));
+                    if (preg_match('/^(\d+)(:g)?$/', $rid, $rm) && isset(iti_tr_routes($db)[(int)$rm[1]])) $tr_items[] = ['route' => (int)$rm[1], 'game_drive' => !empty($rm[2]) ? 1 : 0];
+                    else $tr_items[] = (string)$txt;
+                }
+                iti_transfers_replace($db, $day_id, $tr_items);
 
                 // ── Activities: delete all then re-insert from array ──
                 // The form has no field for the per-language texts (custom_note_it…): keep them,
@@ -661,6 +669,17 @@ $lodges_grouped  = iti_lodges_grouped();
 $destinations_list = iti_get_destinations();
 $transfer_map    = iti_transfer_routes_map();
 $flight_map      = iti_flight_routes_map();
+// Transfer list of the day editor: catalogue routes labelled in the programme language (iti_transfer_service.php).
+$tr_lang = in_array($program['display_language'] ?? '', ITI_LANGS, true) ? $program['display_language'] : 'it';
+$tr_route_opts = [];
+foreach (iti_tr_routes_list($db) as $_r) {
+    $_lab = $_r['labels'][$tr_lang] ?: ($_r['from_name'] . ' – ' . $_r['to_name']);
+    $tr_route_opts[] = ['id' => (string)$_r['id'], 'label' => $_lab, 'group' => 'Transfer list'];
+    if (iti_tr_is_park_route($db, iti_tr_routes($db)[$_r['id']])) {
+        $_g = iti_tr_label($db, $_r['id'], $tr_lang, true)['text'];
+        if ($_g !== '') $tr_route_opts[] = ['id' => $_r['id'] . ':g', 'label' => $_g, 'group' => 'Transfer list — with a game drive on the way'];
+    }
+}
 // Distinct airline operators from flight routes for combo suggestions
 $airline_opts = [];
 try {
@@ -1323,33 +1342,27 @@ include __DIR__ . '/../../includes/layout_header.php';
         <div style="font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--grey-mid);margin-bottom:10px;">🚌 Transfer <span style="font-weight:400;">(optional)</span></div>
 
         <?php
-        $tr_combo_opts = [];
-        foreach ($transfer_map as $_tid => $_tr) {
-            $_dur = (int)($_tr['duration_min'] ?? 0);
-            $_km  = (int)($_tr['distance_km']  ?? 0);
-            $_meta = [];
-            if ($_dur > 0) $_meta[] = iti_fmt_duration($_dur);
-            if ($_km  > 0) $_meta[] = $_km  . ' km';
-            $_suffix = $_meta ? ' (' . implode(', ', $_meta) . ')' : '';
-            $tr_combo_opts[] = ['label' => ($_tr['from_name']??'').' → '.($_tr['to_name']??'').$_suffix];
-        }
-        foreach ($flight_map as $_fid => $_fl)
-            $tr_combo_opts[] = ['label' => 'Flight: '.($_fl['from_airport']??'').' → '.($_fl['to_airport']??'')];
-        $tr_opts_json = json_encode(array_map(fn($o)=>['id'=>'','label'=>$o['label'],'group'=>'Suggestions'], $tr_combo_opts), JSON_HEX_APOS);
+        // Catalogue routes (labels in the programme language, printed in every language): id "<route>" or
+        // "<route>:g" (with a game drive on the way). Free text stays possible (no id: translated per language).
+        $tr_opts_json = json_encode($tr_route_opts, JSON_HEX_APOS);
         ?>
 
         <div id="transfer-rows-<?= $current_day_data['id'] ?>">
-        <?php foreach ($current_transfers as $tr): ?>
+        <?php foreach ($current_transfers as $tr):
+            $_rid = !empty($tr['transfer_route_id']) ? (int)$tr['transfer_route_id'] . (!empty($tr['game_drive']) ? ':g' : '') : '';
+            $_txt = $_rid !== '' ? (iti_tr_label($db, (int)$tr['transfer_route_id'], $tr_lang, !empty($tr['game_drive']))['text'] ?: $tr['description']) : $tr['description']; ?>
         <div class="array-row" style="display:flex;gap:8px;align-items:center;margin-bottom:6px;">
           <div class="iti-combo" style="flex:1;max-width:none;">
             <div class="iti-combo-inner">
               <input type="text" name="transfer_desc[]" class="iti-combo-text" autocomplete="off"
-                     value="<?= h($tr['description']) ?>"
-                     placeholder="e.g. Transfer to Arusha airport ~30 min">
+                     value="<?= h($_txt) ?>"
+                     placeholder="Choose a route from the list, or type a free text">
               <button type="button" class="iti-combo-arrow" tabindex="-1">▾</button>
             </div>
+            <input type="hidden" name="transfer_route_id[]" class="tr-route-id" value="<?= h($_rid) ?>">
             <div class="iti-combo-drop" data-opts='<?= $tr_opts_json ?>' data-no-clear="1"></div>
           </div>
+          <span class="tr-kind" title="<?= $_rid !== '' ? 'From the transfer list: printed in every language' : 'Free text: needs a translation for each language' ?>" style="font-size:.7rem;color:var(--grey-mid);white-space:nowrap;"><?= $_rid !== '' ? '📋 list' : '✎ free text' ?></span>
           <button type="button" class="btn btn-danger btn-sm" onclick="this.closest('.array-row').remove()">✕</button>
         </div>
         <?php endforeach; ?>
@@ -1896,7 +1909,7 @@ function addIncRow(type) {
 document.querySelectorAll('.iti-combo').forEach(function(combo) {
     var input  = combo.querySelector('.iti-combo-text');
     var drop   = combo.querySelector('.iti-combo-drop');
-    var hidId  = combo.querySelector('input[name$="_id"]');
+    var hidId  = combo.querySelector('input[name$="_id"]') || combo.querySelector('input.tr-route-id');   // transfer rows: route id of the list
     var hidTxt = combo.querySelector('input[name$="_custom"]');
     if (!input || !drop) return;
     var opts   = JSON.parse(drop.dataset.opts || '[]');
@@ -1942,8 +1955,8 @@ document.querySelectorAll('.iti-combo').forEach(function(combo) {
             hint.textContent = '✎ Save as custom: "' + q + '"';
             hint.addEventListener('mousedown', function(e) {
                 e.preventDefault();
-                hidId.value  = '';
-                hidTxt.value = q;
+                if (hidId)  hidId.value  = '';
+                if (hidTxt) hidTxt.value = q;
                 closeDrop();
             });
             drop.appendChild(hint);
@@ -1969,8 +1982,8 @@ document.querySelectorAll('.iti-combo').forEach(function(combo) {
 
     input.addEventListener('focus', function() { openDrop(); });
     input.addEventListener('input', function() {
-        hidId.value  = '';
-        hidTxt.value = this.value;
+        if (hidId)  hidId.value  = '';
+        if (hidTxt) hidTxt.value = this.value;
         renderDrop(this.value);
         drop.classList.add('open');
     });
@@ -1983,23 +1996,12 @@ document.querySelectorAll('.iti-combo').forEach(function(combo) {
 
 <?php if ($current_day_data): ?>
 <script>
-var trOptsJson   = <?= json_encode(array_map(fn($o)=>['id'=>'','label'=>$o['label'],'group'=>'Suggestions'], array_merge(
-    array_map(function($_tr){
-        $dur = (int)($_tr['duration_min'] ?? 0);
-        $km  = (int)($_tr['distance_km']  ?? 0);
-        $meta = [];
-        if ($dur > 0) $meta[] = iti_fmt_duration($dur);
-        if ($km  > 0) $meta[] = $km . ' km';
-        $suffix = $meta ? ' (' . implode(', ', $meta) . ')' : '';
-        return ['label'=>($_tr['from_name']??'').' → '.($_tr['to_name']??'').$suffix];
-    }, array_values($transfer_map)),
-    array_map(fn($_fl)=>['label'=>'Flight: '.($_fl['from_airport']??'').' → '.($_fl['to_airport']??'')], array_values($flight_map))
-))) ?>;
+var trOptsJson   = <?= json_encode($tr_route_opts) ?>;   // catalogue routes (id "<route>" / "<route>:g"), labels in the programme language
 var actOptsJson  = <?= json_encode(array_map(fn($a)=>['id'=>(string)$a['id'],'label'=>$a['name_en'].(($a['dest_name_en']??'')?' — '.($a['dest_name_en']??''):''),'group'=>ITI_ACTIVITY_TYPES[$a['activity_type']]??'Other'], $activities_list)) ?>;
 var flOptsJson   = <?= json_encode(array_map(fn($_fl)=>['id'=>(string)array_search($_fl,$flight_map),'label'=>($_fl['from_airport']??'').' → '.($_fl['to_airport']??''),'group'=>'Flight routes'], array_values($flight_map))) ?>;
 var airlineOptsJson = <?= json_encode($airline_opts) ?>;
 
-function makeCombo(inputAttrs, hiddenName, hiddenVal, opts, noId) {
+function makeCombo(inputAttrs, hiddenName, hiddenVal, opts, noId, routeIdName) {
     var wrap = document.createElement('div');
     wrap.className = 'iti-combo';
     wrap.style.cssText = 'flex:1;max-width:none;';
@@ -2016,6 +2018,11 @@ function makeCombo(inputAttrs, hiddenName, hiddenVal, opts, noId) {
         hid.type = 'hidden'; hid.name = hiddenName; hid.value = hiddenVal || '';
         wrap.appendChild(hid);
     }
+    if (routeIdName) {   // transfer rows: the catalogue route id of the pick
+        var rid = document.createElement('input');
+        rid.type = 'hidden'; rid.name = routeIdName; rid.className = 'tr-route-id'; rid.value = '';
+        wrap.appendChild(rid);
+    }
     var drop = document.createElement('div');
     drop.className = 'iti-combo-drop';
     drop.dataset.opts = JSON.stringify(opts);
@@ -2030,12 +2037,15 @@ function addTransferRow(dayId) {
     var row = document.createElement('div');
     row.className = 'array-row';
     row.style.cssText = 'display:flex;gap:8px;align-items:center;margin-bottom:6px;';
-    var combo = makeCombo({name:'transfer_desc[]', placeholder:'e.g. Transfer to Arusha airport ~30 min'}, '', '', trOptsJson, true);
+    // Hidden transfer_route_id[] ('' = free text): a pick from the list sets it, typing clears it.
+    var combo = makeCombo({name:'transfer_desc[]', placeholder:'Choose a route from the list, or type a free text'}, '', '', trOptsJson, true, 'transfer_route_id[]');
     combo.style.flex = '1';
+    var kind = document.createElement('span');
+    kind.className = 'tr-kind'; kind.style.cssText = 'font-size:.7rem;color:var(--grey-mid);white-space:nowrap;';
     var btn = document.createElement('button');
     btn.type = 'button'; btn.className = 'btn btn-danger btn-sm'; btn.textContent = '✕';
     btn.onclick = function(){ this.closest('.array-row').remove(); };
-    row.appendChild(combo); row.appendChild(btn);
+    row.appendChild(combo); row.appendChild(kind); row.appendChild(btn);
     document.getElementById('transfer-rows-' + dayId).appendChild(row);
     row.querySelector('.iti-combo-text').focus();
 }

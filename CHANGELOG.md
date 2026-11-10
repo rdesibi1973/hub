@@ -20,6 +20,25 @@ Running log of notable changes and current build state. Module-level "active / p
 
 ---
 
+## 2026-11-10 — ITI samples clean-up, transfers from the catalogue in every language
+- Dry run (Agent API, read-only) of the 25 samples: "shared arrival transfer" sentence on day 1 of 12 private samples (it/en/fr;
+  no sample has any es/de narrative); group samples 199/200/201 with client name / date in the en/fr titles and "private safari"
+  in the en/fr intro; 36 distinct free-text transfers, Italian only. `iti_transfer_routes` was **not** empty (~96 routes from
+  `iti_import_transfers.php`), but its durations disagreed with the samples (Roberto: the sample texts win).
+- New `includes/iti_transfer_service.php`: route labels per language (written `label_<lang>` or generated: short place names +
+  via-point + duration), `game_drive` flag ("with a game drive on the way"), the shared-sentence strip. Lazy columns:
+  `iti_transfer_routes.via_destination`, `label_<lang>`; `iti_day_transfers.transfer_route_id`, `game_drive`.
+- Documents (`iti_doc_data`): a linked transfer prints its label in the document language; a free text prints only in the
+  program language or with its translation, else it is left out and listed in `missing_texts` (type `transfer`). Private
+  safaris never print the shared-transfer sentence (group safaris keep it).
+- Hub editor: transfers picked from the list (labels in the program language, game-drive variants for park → park routes);
+  free text still possible. Transfers & Flights page: via + labels per language.
+- Agent API: day items `transfers: [{transfer_route_id, game_drive}]`; `iti_transfer_routes` returns labels;
+  `iti_create_transfer_route` takes via / labels; new `iti_update_transfer_route` (dry-run unless confirm).
+- New admin page `modules/iti/sample_cleanup.php` (logic `includes/iti_sample_cleanup.php`): dry run → Apply per section —
+  shared sentence, group titles, new private sample NYUMBU SAFARI (copy of 199, code Nyumbu), catalogue durations / new routes,
+  sample transfers → routes (+ flights split out of "volo …" texts). Not applied yet.
+
 ## 2026-11-06 — Roberto Capri deactivated; agent "Roberto" = Roberto De Sibi
 - Checked: agent 14 "Roberto" (folders `-Roberto`) was already linked to user 1 `rdesibi` (`users.agent_id = 14`), so the
   booking mail of e.g. request 3181 is signed Roberto De Sibi / Reply-To info@ without `sign_as`. The Capri signature came only

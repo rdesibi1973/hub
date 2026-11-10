@@ -14,6 +14,8 @@
  * the translations (columns added lazily by iti_transfers_schema()).
  */
 
+require_once __DIR__ . '/iti_transfer_service.php';   // catalogue transfers (labels in every language)
+
 const ITI_TEXT_LANGS = ['en', 'it', 'fr', 'es', 'de'];
 
 /** Translation columns of iti_day_transfers that exist (description_<lang>); $refresh after an ALTER. */
@@ -38,6 +40,7 @@ function iti_transfers_schema(PDO $db): void {
     static $done = false;
     if ($done) return;
     $done = true;
+    iti_tr_schema($db);   // catalogue link columns too (transfer_route_id, game_drive, route labels)
     if (count(iti_transfers_tr_cols($db)) === count(ITI_TEXT_LANGS)) return;
     foreach (ITI_TEXT_LANGS as $l) {
         try { $db->exec('ALTER TABLE iti_day_transfers ADD COLUMN description_' . $l . ' VARCHAR(500) NULL'); } catch (PDOException $e) {}
@@ -46,11 +49,28 @@ function iti_transfers_schema(PDO $db): void {
 }
 
 /**
- * Replace the transfers of a day. $items: "text" or ['description' => text, 'tr' => [lang => translation]].
- * A transfer whose text is unchanged keeps its translations (the editor and the API rewrite the whole list).
+ * Replace the transfers of a day. $items: "text" or ['description' => text, 'tr' => [lang => translation]]
+ * or ['route' => transfer_route_id, 'game_drive' => 0|1] (catalogue transfer: `description` = its label
+ * in the programme language, no translations — the documents print the route label of their language).
+ * A free-text transfer whose text is unchanged keeps its translations (the editor and the API rewrite the whole list).
  */
 function iti_transfers_replace(PDO $db, int $dayId, array $items): void {
     $cols = iti_transfers_tr_cols($db);
+    $routes = iti_tr_routes($db);   // also adds transfer_route_id / game_drive (iti_tr_schema)
+    $srcLang = null;
+    foreach ($items as $i => $it) {
+        if (!is_array($it) || empty($it['route'])) continue;
+        $rid = (int)$it['route'];
+        if (!isset($routes[$rid])) throw new InvalidArgumentException('transfer_route_id ' . $rid . ' not found (iti_transfer_routes)');
+        if ($srcLang === null) {
+            $st = $db->prepare('SELECT p.display_language FROM iti_program_days d JOIN iti_programs p ON p.id = d.program_id WHERE d.id = ?');
+            $st->execute([$dayId]);
+            $srcLang = in_array($l = (string)$st->fetchColumn(), ITI_TEXT_LANGS, true) ? $l : 'it';
+        }
+        $label = iti_tr_label($db, $routes[$rid], $srcLang, !empty($it['game_drive']))['text'];
+        if ($label === '') $label = iti_tr_label($db, $routes[$rid], 'en', !empty($it['game_drive']))['text'];   // only for the editor; the documents use the live label
+        $items[$i]['description'] = $label;
+    }
     $keep = [];
     if ($cols) {
         $st = $db->prepare('SELECT * FROM iti_day_transfers WHERE program_day_id = ? ORDER BY sort_order, id');
@@ -65,7 +85,14 @@ function iti_transfers_replace(PDO $db, int $dayId, array $items): void {
     foreach ($items as $it) {
         $desc = trim(is_array($it) ? (string)($it['description'] ?? '') : (string)$it);
         if ($desc === '') continue;
-        $row = ['program_day_id' => $dayId, 'description' => $desc, 'sort_order' => ++$n];
+        $row = ['program_day_id' => $dayId, 'description' => mb_substr($desc, 0, 255), 'sort_order' => ++$n];
+        if (is_array($it) && !empty($it['route'])) {
+            $row['transfer_route_id'] = (int)$it['route'];
+            $row['game_drive'] = empty($it['game_drive']) ? 0 : 1;
+            $db->prepare('INSERT INTO iti_day_transfers (`' . implode('`,`', array_keys($row)) . '`) VALUES ('
+                         . implode(',', array_fill(0, count($row), '?')) . ')')->execute(array_values($row));
+            continue;
+        }
         foreach ($cols as $c) {
             $l = substr($c, 12);
             $v = is_array($it) && isset($it['tr'][$l]) ? trim((string)$it['tr'][$l]) : '';
@@ -132,7 +159,8 @@ function iti_texts_collect(PDO $db, int $id, string $to, bool $all = false): arr
         }
         $trs->execute([$did]);
         foreach ($trs->fetchAll(PDO::FETCH_ASSOC) as $t) {
-            if (!array_key_exists('description_' . $to, $t)) continue;
+            if (!array_key_exists('description_' . $to, $t) || !empty($t['transfer_route_id'])) continue;   // catalogue transfer: label per language
+
             $add('t' . (int)$t['id'], $t['description'], $t['description_' . $to], 'iti_day_transfers', (int)$t['id'], 'description_' . $to);
         }
     }

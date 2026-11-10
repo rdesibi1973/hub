@@ -9,6 +9,7 @@ require_login();
 require_once __DIR__ . '/includes/iti_functions.php';
 
 $db       = db();
+iti_tr_schema($db);   // via_destination, label_<lang> (iti_transfer_service.php)
 $_cu      = current_user();
 $can_edit = true;   // all staff since 7 Oct 2026 (was admin/manager)
 
@@ -29,6 +30,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit) {
             'is_active'        => isset($_POST['is_active']) ? 1 : 0,
         ];
         foreach (ITI_LANGS as $lang) $f["notes_{$lang}"] = trim($_POST["notes_{$lang}"] ?? '');
+        // Via-point and the label printed in the programmes (empty = generated: places + duration) — iti_transfer_service.php
+        iti_tr_schema($db);
+        $tr_extra = ['via_destination' => (int)($_POST['via_destination'] ?? 0) ?: null];
+        foreach (ITI_LANGS as $lang) { $v = trim($_POST["label_{$lang}"] ?? ''); $tr_extra["label_{$lang}"] = $v === '' ? null : mb_substr($v, 0, 255); }
 
         if (!$f['from_destination'] || !$f['to_destination']) {
             iti_flash_set('error', 'From and To destinations are required.');
@@ -43,6 +48,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit) {
                   notes_en,notes_it,notes_fr,notes_es,notes_de,is_active)
                  VALUES (?,?,?,?,?,?,?,?,?,?,?)'
             )->execute([$f['from_destination'],$f['to_destination'],$f['duration_min'],$f['distance_km'],$f['road_type'],$f['notes_en'],$f['notes_it'],$f['notes_fr'],$f['notes_es'],$f['notes_de'],$f['is_active']]);
+            $tr_new_id = (int)$db->lastInsertId();
+            $db->prepare('UPDATE iti_transfer_routes SET `' . implode('` = ?, `', array_keys($tr_extra)) . '` = ? WHERE id = ?')
+               ->execute(array_merge(array_values($tr_extra), [$tr_new_id]));
             $msg = 'Transfer route created.';
 
             // Optional: also create the reverse route (to → from)
@@ -78,7 +86,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit) {
                  from_destination=?,to_destination=?,duration_min=?,distance_km=?,road_type=?,
                  notes_en=?,notes_it=?,notes_fr=?,notes_es=?,notes_de=?,is_active=? WHERE id=?'
             )->execute([$f['from_destination'],$f['to_destination'],$f['duration_min'],$f['distance_km'],$f['road_type'],$f['notes_en'],$f['notes_it'],$f['notes_fr'],$f['notes_es'],$f['notes_de'],$f['is_active'],$id]);
-            iti_flash_set('success', 'Transfer route updated.');
+            $db->prepare('UPDATE iti_transfer_routes SET `' . implode('` = ?, `', array_keys($tr_extra)) . '` = ? WHERE id = ?')
+               ->execute(array_merge(array_values($tr_extra), [$id]));
+            iti_flash_set('success', 'Transfer route updated. Programmes linked to it print the new label.');
         } elseif ($action === 'delete' && $id) {
             $db->prepare('UPDATE iti_transfer_routes SET is_active=0 WHERE id=?')->execute([$id]);
             iti_flash_set('success', 'Route deactivated.');
@@ -213,6 +223,25 @@ include __DIR__ . '/../../includes/layout_header.php';
       <label for="is_active" style="margin:0;text-transform:none;font-size:.85rem;">Active</label>
     </div>
   </div>
+
+  <div class="form-grid">
+    <div class="form-group">
+      <label>Via <span style="font-weight:400;font-size:.7rem">(optional, printed between From and To: "Karatu – Ngorongoro – Serengeti")</span></label>
+      <select name="via_destination">
+        <?= iti_options($dest_map, $row['via_destination'] ?? null, '— none —') ?>
+      </select>
+    </div>
+  </div>
+
+  <div class="form-section-title">Label printed in the programmes <span style="font-weight:400;font-size:.8rem;color:var(--grey-mid)">× 5 languages — empty = generated (shown in grey)</span></div>
+  <?php $tr_gen = $row ? iti_tr_labels($db, array_merge($row, array_fill_keys(array_map(fn($l) => 'label_' . $l, ITI_LANGS), null))) : []; ?>
+  <?php foreach (ITI_LANGS as $lang): ?>
+  <div class="form-group" style="margin-bottom:8px;">
+    <label><?= ITI_LANG_LABELS[$lang] ?></label>
+    <input type="text" name="label_<?= $lang ?>" maxlength="255" value="<?= h($row["label_{$lang}"] ?? '') ?>"
+           placeholder="<?= h($tr_gen[$lang] ?? 'Generated from the destinations and the duration') ?>">
+  </div>
+  <?php endforeach; ?>
 
   <?php if ($action === 'add'): ?>
   <div class="form-group" style="flex-direction:row;align-items:center;gap:10px;margin-bottom:8px;">
@@ -447,13 +476,14 @@ include __DIR__ . '/../../includes/layout_header.php';
 
 <div class="table-wrap">
   <table>
-    <thead><tr><th>From</th><th>To</th><th>Duration</th><th>Distance</th><th>Road</th><th>Status</th><th></th></tr></thead>
+    <thead><tr><th>From</th><th>To</th><th>Printed as (IT / EN)</th><th>Duration</th><th>Distance</th><th>Road</th><th>Status</th><th></th></tr></thead>
     <tbody>
     <?php if ($road_routes): ?>
-      <?php foreach ($road_routes as $r): ?>
+      <?php foreach ($road_routes as $r): $tr_lab = iti_tr_labels($db, $r); ?>
       <tr>
         <td style="font-weight:600;"><?= h($r['from_name']) ?></td>
         <td style="font-weight:600;"><?= h($r['to_name']) ?></td>
+        <td style="font-size:.75rem;"><?= h($tr_lab['it']) ?><br><span class="text-muted"><?= h($tr_lab['en']) ?></span></td>
         <td><?= $r['duration_min'] ? $r['duration_min'].' min' : '—' ?></td>
         <td class="text-muted"><?= $r['distance_km'] ? $r['distance_km'].' km' : '—' ?></td>
         <td><span class="badge status-inquiry"><?= ITI_ROAD_TYPES[$r['road_type']] ?? h($r['road_type']) ?></span></td>
@@ -462,7 +492,7 @@ include __DIR__ . '/../../includes/layout_header.php';
       </tr>
       <?php endforeach; ?>
     <?php else: ?>
-      <tr><td colspan="7"><div class="empty-state"><div class="icon">🚗</div><p>No transfer routes yet.</p></div></td></tr>
+      <tr><td colspan="8"><div class="empty-state"><div class="icon">🚗</div><p>No transfer routes yet.</p></div></td></tr>
     <?php endif; ?>
     </tbody>
   </table>

@@ -198,6 +198,7 @@ function iti_ps_schema(): void {
         foreach (ITI_PS_LANGS as $l) iti_add_column('iti_programs', 'price_notes_' . $l, 'TEXT NULL DEFAULT NULL');
         iti_ensure_doc_columns();   // pax_teens, room_type
         iti_ensure_country_schema();   // country, source_supplier (imported programmes)
+        iti_transfers_schema(db());   // day transfers: translations + catalogue link (DDL, before any transaction)
     } catch (PDOException $e) {
         error_log('iti_ps_schema: ' . $e->getMessage());
     }

@@ -12,15 +12,16 @@
  *   destination_id | destination (name or code), destination_custom,
  *   start_lodge_id, start_destination_id, start_custom, transfer_route_id, transfer_custom,
  *   meal_breakfast / meal_lunch / meal_dinner / meal_all_inclusive (0/1),
- *   transfers  [ "Dar airport – Serena Hotel, 40 min" | {description, text_<lang>?} … ]  (replaces the day's list;
- *              an unchanged text keeps its translations)
+ *   transfers  [ {transfer_route_id, game_drive?} | "Dar airport – Serena Hotel, 40 min" | {description, text_<lang>?} … ]
+ *              (replaces the day's list; a catalogue route prints its label in every language; an unchanged
+ *              free text keeps its translations)
  *   activities [ {activity_id} | {activity: "<name>"} | {custom: "<text>", text_<lang>?: "<translation>"} … ]
  *   flights    [ {flight_route_id | custom, airline?, dep?: "07:40", arr?: "10:05", note_<lang>?} … ]
  */
 
 /** Day columns an agent may set (limited to the live table). */
 function iti_pb_day_columns(): array {
-    iti_ps_schema();   // room_type, before the column list is cached
+    iti_ps_schema();   // room_type and the day-transfer columns, before the column list is cached (and before any transaction)
     $c = ['end_lodge_id', 'end_lodge_custom', 'room_type', 'destination_id', 'destination_custom', 'start_lodge_id', 'start_destination_id',
           'start_custom', 'transfer_route_id', 'transfer_custom', 'meal_breakfast', 'meal_lunch', 'meal_dinner', 'meal_all_inclusive'];
     foreach (ITI_PS_LANGS as $l) { $c[] = 'day_title_' . $l; $c[] = 'narrative_' . $l; }
@@ -80,7 +81,15 @@ function iti_pb_day_item(PDO $db, array $f): array {
     }
     if ($children['transfers'] !== null) {
         $tr = [];
+        $routes = iti_tr_routes($db);
         foreach ($children['transfers'] as $t) {
+            // {"transfer_route_id": 15, "game_drive": 0|1}: from the catalogue, printed in every language.
+            if (is_array($t) && !empty($t['transfer_route_id'])) {
+                $rid = (int)$t['transfer_route_id'];
+                if (!isset($routes[$rid]) || empty($routes[$rid]['is_active'])) throw new InvalidArgumentException('transfer_route_id ' . $rid . ' not found or inactive (iti_transfer_routes)');
+                $tr[] = ['route' => $rid, 'game_drive' => empty($t['game_drive']) ? 0 : 1];
+                continue;
+            }
             $txt = trim(is_array($t) ? (string)($t['description'] ?? $t['text'] ?? '') : (string)$t);
             if ($txt === '') continue;
             $row = ['description' => mb_substr($txt, 0, 255), 'tr' => []];
@@ -257,8 +266,14 @@ function iti_pb_days_raw(PDO $db, int $pid): array {
             elseif (strpos($c, 'meal_') === 0) $v = (int)$v;
             $row[$c] = $v;
         }
-        $q = $db->prepare('SELECT description FROM iti_day_transfers WHERE program_day_id = ? ORDER BY sort_order, id'); $q->execute([$id]);
-        $row['transfers'] = $q->fetchAll(PDO::FETCH_COLUMN);
+        // Free text → the text; catalogue transfer → {transfer_route_id, game_drive, description} (same shape iti_set_days takes).
+        $q = $db->prepare('SELECT * FROM iti_day_transfers WHERE program_day_id = ? ORDER BY sort_order, id'); $q->execute([$id]);
+        $row['transfers'] = [];
+        foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $t) {
+            $row['transfers'][] = !empty($t['transfer_route_id'])
+                ? ['transfer_route_id' => (int)$t['transfer_route_id'], 'game_drive' => (int)($t['game_drive'] ?? 0), 'description' => $t['description']]
+                : $t['description'];
+        }
         $q = $db->prepare('SELECT a.*, x.name_en AS activity_name FROM iti_day_activities a LEFT JOIN iti_activities x ON x.id = a.activity_id WHERE a.program_day_id = ? ORDER BY a.sort_order, a.id'); $q->execute([$id]);
         $row['activities'] = [];
         foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $a) {
@@ -418,29 +433,79 @@ function iti_pb_create_activity(PDO $db, array $f, bool $go): array {
     return ['created' => ['id' => (int)$db->lastInsertId()] + $row];
 }
 
+/** Active routes (from? / to?: name or code), each with its label in the 5 languages (iti_tr_routes_list()). */
 function iti_pb_transfer_routes(PDO $db, array $f): array {
-    $w = ['t.is_active = 1']; $a = [];
-    foreach (['from' => 'f', 'to' => 'd'] as $k => $al) if (($v = trim((string)($f[$k] ?? ''))) !== '') { $w[] = "($al.name_en LIKE ? OR $al.code = ?)"; array_push($a, "%$v%", strtoupper($v)); }
-    $st = $db->prepare('SELECT t.id, t.from_destination, f.name_en AS from_name, t.to_destination, d.name_en AS to_name, t.duration_min, t.distance_km, t.road_type
-                          FROM iti_transfer_routes t LEFT JOIN iti_destinations f ON f.id = t.from_destination LEFT JOIN iti_destinations d ON d.id = t.to_destination
-                         WHERE ' . implode(' AND ', $w) . ' ORDER BY f.name_en, d.name_en LIMIT 200');
-    $st->execute($a);
-    return $st->fetchAll(PDO::FETCH_ASSOC);
+    $out = [];
+    $dests = iti_tr_dests($db);
+    $match = function ($id, $v) use ($dests) {
+        $d = $dests[(int)$id] ?? [];
+        return stripos((string)($d['name_en'] ?? ''), $v) !== false || strtoupper((string)($d['code'] ?? '')) === strtoupper($v);
+    };
+    foreach (iti_tr_routes_list($db) as $r) {
+        if (($v = trim((string)($f['from'] ?? ''))) !== '' && !$match($r['from_destination'], $v)) continue;
+        if (($v = trim((string)($f['to'] ?? ''))) !== '' && !$match($r['to_destination'], $v)) continue;
+        $out[] = $r;
+    }
+    return $out;
+}
+
+/** Route fields from an API body: via_destination (id / name / code, null = none), duration_min, distance_km, road_type, label_<lang>, notes_<lang>. */
+function iti_pb_route_fields(PDO $db, array $f): array {
+    $row = [];
+    if (array_key_exists('via_destination', $f) || array_key_exists('via', $f)) {
+        $v = $f['via_destination'] ?? $f['via'];
+        $row['via_destination'] = $v === null || $v === '' || $v === 0 ? null : iti_pb_lookup($db, 'destination', $v);
+    }
+    foreach (['duration_min', 'distance_km'] as $k) if (array_key_exists($k, $f)) $row[$k] = $f[$k] === null || $f[$k] === '' ? null : max(0, (int)$f[$k]);
+    if (array_key_exists('road_type', $f)) {
+        if (!in_array($f['road_type'], ['tarmac', 'gravel', 'mixed'], true)) throw new InvalidArgumentException('road_type: tarmac|gravel|mixed');
+        $row['road_type'] = $f['road_type'];
+    }
+    foreach (ITI_PS_LANGS as $l) {
+        if (array_key_exists('label_' . $l, $f)) { $v = trim((string)$f['label_' . $l]); $row['label_' . $l] = $v === '' ? null : mb_substr($v, 0, 255); }
+        if (array_key_exists('notes_' . $l, $f)) $row['notes_' . $l] = trim((string)$f['notes_' . $l]);
+    }
+    return $row;
 }
 
 function iti_pb_create_transfer_route(PDO $db, array $f, bool $go): array {
+    iti_tr_schema($db);
     $row = ['from_destination' => iti_pb_lookup($db, 'destination', $f['from_destination'] ?? $f['from'] ?? ''),
             'to_destination' => iti_pb_lookup($db, 'destination', $f['to_destination'] ?? $f['to'] ?? ''),
-            'duration_min' => isset($f['duration_min']) ? (int)$f['duration_min'] : null,
-            'distance_km' => isset($f['distance_km']) ? (int)$f['distance_km'] : null,
-            'road_type' => (string)($f['road_type'] ?? 'tarmac'), 'is_active' => 1];
-    if (!in_array($row['road_type'], ['tarmac', 'gravel', 'mixed'], true)) throw new InvalidArgumentException('road_type: tarmac|gravel|mixed');
-    foreach (ITI_PS_LANGS as $l) $row['notes_' . $l] = trim((string)($f['notes_' . $l] ?? ''));
+            'duration_min' => 0, 'distance_km' => null, 'road_type' => 'tarmac', 'is_active' => 1];
+    $row = array_merge($row, iti_pb_route_fields($db, $f));
+    if ($row['duration_min'] === null) $row['duration_min'] = 0;   // NOT NULL column
+    foreach (ITI_PS_LANGS as $l) if (!isset($row['notes_' . $l])) $row['notes_' . $l] = '';
     $st = $db->prepare('SELECT id FROM iti_transfer_routes WHERE from_destination = ? AND to_destination = ?'); $st->execute([$row['from_destination'], $row['to_destination']]);
-    if ($id = $st->fetchColumn()) throw new InvalidArgumentException('Transfer route already exists: #' . $id);
-    if (!$go) return ['would_create' => $row];
+    if ($id = $st->fetchColumn()) throw new InvalidArgumentException('Transfer route already exists: #' . $id . ' — change it with iti_update_transfer_route');
+    $labels = iti_tr_labels($db, $row);
+    if (!$go) return ['would_create' => $row, 'labels' => $labels];
     $db->prepare('INSERT INTO iti_transfer_routes (`' . implode('`,`', array_keys($row)) . '`) VALUES (' . implode(',', array_fill(0, count($row), '?')) . ')')->execute(array_values($row));
-    return ['created' => ['id' => (int)$db->lastInsertId()] + $row];
+    $id = (int)$db->lastInsertId();
+    iti_tr_routes($db, true);
+    return ['created' => ['id' => $id] + $row, 'labels' => $labels];
+}
+
+/** Change a route: via, duration, distance, road type, labels / notes per language, is_active. Every programme linked to it prints the new label. */
+function iti_pb_update_transfer_route(PDO $db, int $id, array $f, bool $go): array {
+    $routes = iti_tr_routes($db);
+    if (!isset($routes[$id])) throw new InvalidArgumentException('Transfer route ' . $id . ' not found');
+    $set = iti_pb_route_fields($db, $f);
+    if (array_key_exists('is_active', $f)) $set['is_active'] = empty($f['is_active']) ? 0 : 1;
+    if (array_key_exists('duration_min', $set) && $set['duration_min'] === null) $set['duration_min'] = 0;
+    if (!$set) throw new InvalidArgumentException('fields: via_destination, duration_min, distance_km, road_type, label_<lang>, notes_<lang>, is_active');
+    $before = $routes[$id];
+    $after = array_merge($before, $set);
+    $st = $db->prepare('SELECT COUNT(*) FROM iti_day_transfers WHERE transfer_route_id = ?'); $st->execute([$id]);
+    $plan = ['route_id' => $id, 'changes' => array_map(function ($k) use ($before, $set) { return ['field' => $k, 'before' => $before[$k] ?? null, 'after' => $set[$k]]; }, array_keys($set)),
+             'labels_before' => iti_tr_labels($db, $before), 'labels_after' => iti_tr_labels($db, $after), 'linked_day_transfers' => (int)$st->fetchColumn()];
+    if (!$go) return $plan;
+    $sets = []; $args = [];
+    foreach ($set as $k => $v) { $sets[] = '`' . $k . '` = ?'; $args[] = $v; }
+    $args[] = $id;
+    $db->prepare('UPDATE iti_transfer_routes SET ' . implode(', ', $sets) . ' WHERE id = ?')->execute($args);
+    iti_tr_routes($db, true);
+    return $plan;
 }
 
 // ── Save as sample ───────────────────────────────────────────────────────────

@@ -541,10 +541,14 @@ no `\ / : * ? " < > |`. `iti_create_personal` sets it from the folder; `iti_upda
 (`preview`, `edit`, `word`, `pdf`, `guide` (personal only, else null), `public` — `word` / `pdf` / `guide` need a Hub login).
 `terms` = the T&C the documents print: `{variant (direct | agency | custom), terms_id, name, source (program = chosen on the
 program | request = from the linked request | default), request_variant}`.
-`missing_texts[]` `{type (activity | lodge | destination), id, name, field (name_<lang> | description_<lang>), days[]}` = the
+`missing_texts[]` `{type (activity | lodge | destination | transfer), id, name, field (name_<lang> | description_<lang>), days[]}` = the
 catalogue texts that do not exist in the program language (`lang`, else the program's): the documents leave them out (see
 **Texts in the program language** below). Check it before `iti_document` and fill them with `iti_update_activity` /
-`iti_update_lodge` / `iti_update_destination`.
+`iti_update_lodge` / `iti_update_destination`. `transfer` (Nov 2026) = a free-text day transfer with no `description_<lang>` in
+a language other than the program's (`id` = the day-transfer row): replace it with a catalogue route (`iti_update_day`
+`transfers: [{transfer_route_id}]`) or translate it (`iti_texts` / `iti_save_texts`, key `t<id>`).
+On a **private** safari the documents never print the sentence "the arrival transfer may be shared with other Savannah
+Explorers travellers" (any language); group safaris keep it.
 `show_tip_note` (0 | 1) and `tip_note_day` = the day the tip note lands on in this language, null = no note (switched off,
 no text in the language, or no safari day) — see **Tip note** below; check it before `iti_document`.
 `pax_open` (0 | 1), `pax_label` (the wording printed in this language, null = none) and `pax_label_<lang>` (the five stored values) — see **Open participants** below.
@@ -648,8 +652,14 @@ Every key optional: `day_title_<lang>`, `narrative_<lang>`, `end_lodge_id` | `en
 `room_type` (free text in the program language, e.g. "1 camera matrimoniale + 1 tripla"; shown next to the lodge, ignored with no overnight), `destination_id` | `destination` (name or code), `destination_custom`, `start_lodge_id`, `start_destination_id`,
 `start_custom`, `transfer_route_id`, `transfer_custom`, `meal_breakfast` / `meal_lunch` / `meal_dinner` /
 `meal_all_inclusive` (0/1), and three lists — each one given **replaces** the day's list (`[]` = none):
-- `transfers`: `["Dar airport – Serena Hotel, about 40 min", …]` (text shown on the day, program language) or
-  `[{description, text_<lang>?: "<translation>"}]`; a transfer whose text is unchanged keeps its translations;
+- `transfers`: **preferred** `[{transfer_route_id, game_drive?: 0|1}]` — a road transfer from the catalogue (`iti_transfer_routes`),
+  printed in every document language with the route label ("Karatu – Ngorongoro – Serengeti, circa 3 ore" / "…, about 3 hours");
+  `game_drive: 1` = "with a game drive on the way", no time. Free text only when no route fits:
+  `["Dar airport – Serena Hotel, about 40 min", …]` (program language) or `[{description, text_<lang>?: "<translation>"}]`;
+  a free text whose text is unchanged keeps its translations, and a document in another language prints it only with its
+  `text_<lang>` (else left out and listed in `missing_texts`). `structure[]` returns catalogue transfers as
+  `{transfer_route_id, game_drive, description}` (description = the label in the program language) and free texts as strings.
+  Flights go in `flights`, not inside a transfer text;
 - `activities`: `[{activity_id} | {activity: "<name>"} | {custom: "<text>", text_<lang>?: "<translation>"}]` (see `iti_activities`; a catalogue activity shows its own name);
   a free-text activity (`custom`, stored as `activity_custom` + `custom_note_<lang>`, e.g. "Fotosafari" / "Game drive" in
   samples imported from WeTu) shows its `text_<lang>`, else the custom text. The Hub editor lists these too and keeps their
@@ -685,9 +695,22 @@ plain string (program language). Each list given replaces that list in one trans
   `name_en` / `name_it`*, `name_<lang>`, `activity_type`
   (`game_drive`|`walking_safari`|`cultural`|`boat`|`balloon`|`hiking`|`beach`|`other`), `destination_id` | `destination`,
   `description_<lang>`, `duration_hours`. A language not given stays empty (no copy of another language, since 15 Oct 2026).
-- `iti_transfer_routes` `from? to?`; `iti_create_transfer_route` `fields`: `from_destination`*, `to_destination`*
-  (id, name or code), `duration_min`, `distance_km`, `road_type` (`tarmac`|`gravel`|`mixed`), `notes_<lang>`.
+- `iti_transfer_routes` `from? to?` (name or code) → `{id, from_destination, from_name, via_destination, via_name, to_destination,
+  to_name, duration_min, distance_km, road_type, labels {<lang>: text}, own_labels {<lang>: written label}}`.
+  `iti_create_transfer_route` `fields`: `from_destination`*, `to_destination`* (id, name or code), `via_destination`
+  (printed between them), `duration_min`, `distance_km`, `road_type` (`tarmac`|`gravel`|`mixed`), `label_<lang>`, `notes_<lang>`
+  → also `labels` (what the documents will print).
+- `iti_update_transfer_route` (Nov 2026) `route_id`, `fields`: the same (`via_destination: null` removes it, `label_<lang>: ""` goes back
+  to the generated label) + `is_active` → `changes`, `labels_before` / `labels_after`, `linked_day_transfers` (every programme linked to
+  the route prints the new label). Dry-run unless confirm.
 Duplicates are refused with the existing id. Dry-run unless confirm.
+
+**Transfer labels (10 Nov 2026).** A route prints `label_<lang>` when written; otherwise it is generated: the short place names in the
+document language (park / conservation-area / "Town" words dropped: "Parco Nazionale del Serengeti" → "Serengeti"), the via-point,
+and the duration ("circa 1 ora e mezza", "about 1.5 hours", "environ 1 h 30", "aprox. 1 hora y media", "ca. 1,5 Stunden"). A place
+without its name in the language → the transfer is left out and `missing_texts` lists the destination (`name_<lang>`). The durations
+are those the samples sell (Roberto, 10 Nov 2026), not road estimates. Hub page: ITI → Transfers & Flights (via + labels);
+the day editor picks transfers from this list (free text still possible).
 
 #### Programmes outside Tanzania — country (Oct 2026)
 `iti_programs.country` (`TZ`, `KE`, mixed `TZ+KE`; `fields.country` in `iti_create_personal` / `iti_update_program`, `null` = from the

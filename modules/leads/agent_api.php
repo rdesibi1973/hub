@@ -99,7 +99,7 @@ function agent_audit(PDO $db, string $action, $reqId, array $payload, string $re
                               'iti_lodge_photos', 'iti_destination_photo', 'iti_update_lodge', 'iti_update_destination',
                               'iti_create_personal', 'iti_update_program', 'iti_update_day', 'iti_publish', 'iti_final_from_calc', 'iti_save_alias', 'iti_tag_sample',
                               'iti_create_lodge', 'iti_set_days', 'iti_add_day', 'iti_delete_day', 'iti_update_inclusions',
-                              'iti_create_flight_route', 'iti_create_activity', 'iti_create_transfer_route', 'iti_save_as_sample',
+                              'iti_create_flight_route', 'iti_create_activity', 'iti_create_transfer_route', 'iti_update_transfer_route', 'iti_save_as_sample',
                               'create_request', 'add_flight_rates', 'timeline_update', 'summary_set', 'rename_folder',
                               'set_request_status', 'update_request', 'import_group_folder', 'move_group_folder', 'ck_request_check', 'memo_delete', 'create_agency', 'update_agency', 'save_agency_contact', 'delete_agency_contact',
                               'followup_scan', 'followup_update', 'followup_upsert', 'iti_update_activity', 'sales_response_dismiss',
@@ -1859,6 +1859,16 @@ try {
         } catch (InvalidArgumentException $e) { agent_fail($e->getMessage(), 400); }
         agent_out(array_merge(['ok' => true, 'dry_run' => !$go], $r, $go ? [] : ['message' => 'Dry run — nothing saved. Resend with "confirm": true.']));
     }
+    // Via-point, duration, labels per language… of a catalogue route (every linked programme follows). Dry-run unless confirm.
+    case 'iti_update_transfer_route': {
+        agent_require_method('POST');
+        agent_iti_lib();
+        $go = !empty($in['confirm']);
+        $f = isset($in['fields']) && is_array($in['fields']) ? $in['fields'] : [];
+        try { $r = iti_pb_update_transfer_route($db, (int)($in['route_id'] ?? $in['transfer_route_id'] ?? 0), $f, $go); }
+        catch (InvalidArgumentException $e) { agent_fail($e->getMessage(), stripos($e->getMessage(), 'not found') !== false ? 404 : 400); }
+        agent_out(array_merge(['ok' => true, 'dry_run' => !$go], $r, $go ? [] : ['message' => 'Dry run — nothing saved. Resend with "confirm": true.']));
+    }
 
     // Calc of a Hub request → final programme. GET: the plan; POST + confirm: generate.
     case 'iti_calc_plan':
@@ -3321,7 +3331,7 @@ try {
             'iti_update_day', 'iti_publish', 'iti_calc_plan', 'iti_final_from_calc', 'iti_save_alias', 'iti_aliases', 'iti_tag_sample',
             'iti_set_days', 'iti_add_day', 'iti_delete_day', 'iti_inclusions', 'iti_update_inclusions', 'iti_save_as_sample',
             'iti_flight_routes', 'iti_create_flight_route', 'iti_activities', 'iti_activity', 'iti_update_activity', 'iti_create_activity',
-            'iti_transfer_routes', 'iti_create_transfer_route', 'iti_create_destination', 'iti_import_program', 'iti_supplier_blocklist', 'add_flight_rates',
+            'iti_transfer_routes', 'iti_create_transfer_route', 'iti_update_transfer_route', 'iti_create_destination', 'iti_import_program', 'iti_supplier_blocklist', 'add_flight_rates',
             'find_invoices', 'get_invoice', 'add_invoice_payment', 'cancel_invoice_payment', 'list_credit_notes', 'create_credit_note', 'apply_credit_note', 'update_folder_status',
             'save_invoice_pdf', 'send_invoice_email', 'import_zoho_invoice', 'create_invoice', 'update_invoice', 'memo_list', 'memo_save', 'memo_set_status', 'memo_delete',
             'routine_status', 'routine_done',

@@ -380,12 +380,23 @@ function iti_doc_data(int $id, string $lang): ?array {
                             WHERE da.program_day_id = ? ORDER BY da.sort_order, da.id');
 
     $out = []; $seenLodge = []; $seenDest = []; $missing = [];
+    $srcLang = in_array($p['display_language'] ?? '', ITI_LANGUAGES, true) ? $p['display_language'] : 'it';
+    $isGroup = iti_safari_type($p) === 'group';
     foreach ($days as $d) {
         $dn = (int)$d['day_number'];
-        $transfers = [];
-        foreach (iti_get_day_transfers((int)$d['id']) as $t) {   // translation in $lang, else the original text
-            $tx = trim((string)($t['description_' . $lang] ?? '')) ?: trim((string)$t['description']);
-            if ($tx !== '') $transfers[] = $tx;
+        // Catalogue transfer → the route label in $lang; free text → its translation in $lang, the text itself
+        // only in the programme language. Missing → not printed, listed in missing_texts (iti_transfer_service.php).
+        $transfers = []; $trDur = '';
+        foreach (iti_get_day_transfers((int)$d['id']) as $t) {
+            $tr = iti_tr_row_text($db, $t, $lang, $srcLang);
+            foreach ($tr['missing'] as $m) {
+                $key = $m['type'] . '|' . $m['id'] . '|' . $m['field'];
+                if (!isset($missing[$key])) $missing[$key] = $m + ['days' => []];
+                if (!in_array($dn, $missing[$key]['days'], true)) $missing[$key]['days'][] = $dn;
+            }
+            if ($tr['text'] === '') continue;
+            if (!$transfers) $trDur = $tr['duration'] !== '' ? $tr['duration'] : iti_doc_duration($tr['text']);
+            $transfers[] = $tr['text'];
         }
         $flights = [];
         $fltSt->execute([(int)$d['id']]);
@@ -467,10 +478,11 @@ function iti_doc_data(int $id, string $lang): ?array {
             'title'      => $title,
             'transfers'  => $transfers,
             'flights'    => $flights,
-            'duration'   => $transfers ? iti_doc_duration($transfers[0]) : '',
+            'duration'   => $trDur,
             'meals'      => iti_doc_meals($d, $T),
             'meal_flags' => array_intersect_key($d, array_flip(['meal_breakfast', 'meal_lunch', 'meal_dinner', 'meal_all_inclusive'])),   // for iti_doc_stay_meals()
-            'narrative'  => iti_doc_pick($d, 'narrative', $lang),
+            // "The arrival transfer may be shared…": only on group safaris (Roberto, 10 Nov 2026).
+            'narrative'  => $isGroup ? iti_doc_pick($d, 'narrative', $lang) : iti_tr_shared_strip(iti_doc_pick($d, 'narrative', $lang)),
             'dest'       => $destName,
             'dest_desc'  => $destDesc,
             'dest_photo' => '',            // set by iti_doc_day_photos() below
