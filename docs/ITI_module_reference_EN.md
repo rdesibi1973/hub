@@ -113,7 +113,7 @@ Markup on cost in the Calc templates (season folder `/itineraries/SafariClassic/
 |---|---|---|---|
 | `rack` | 25 % (D1) | Direct clients | H9 (typed) |
 | `sto` | 18 % (D2) | Standard agencies / TO — **default** | H10 (typed) |
-| `stospec` | 14 % (16 % on GRP files) | Partner agencies with volume | cost (B6:B8) × 1.14 ÷ pax, rounded up to 5 USD |
+| `stospec` | 14 % (16 % on GRP files) | Partner agencies with volume | the published STOSPEC Calc in `/2026-27/STOSPEC/` (F9) when it exists — prices already sent win; else cost (B6:B8) × 1.14 ÷ pax, rounded up to 5 USD |
 | `custom` | `agencies.custom_markup` | Case by case | cost × (1 + markup) ÷ pax, up to 5 USD |
 
 - Never below 12 % (staff-commission threshold); below 14 % only case by case (confirmed groups), with Roberto's ok.

@@ -199,10 +199,59 @@ function calc_program_prices(string $token, string $program): array {
             $row['sto_check'] = $row['sto_formula'] !== null && $row['sto'] !== null ? ((int)$row['sto_formula'] === (int)round($row['sto'])) : null;
             $out[] = $row;
         }
-        return ['template' => $src, 'grp' => $grp, 'stospec_markup' => price_level_markup('stospec', null, $grp), 'sheets' => $out];
+        // STOSPEC already published (Roberto, 10 Nov 2026): the STOSPEC Calc of the season, when there is one, wins over the
+        // computed price — its "Price to customer" (F9) per pax sheet. The computed one stays in stospec_formula.
+        $spec = $grp ? null : calc_stospec_prices($token, $src);
+        foreach ($out as $i => $row) {
+            $out[$i]['stospec_formula'] = $row['stospec'];
+            $out[$i]['stospec_source'] = 'formula';
+            if ($spec && isset($spec['prices'][(int)$row['pax']])) {
+                $out[$i]['stospec'] = $spec['prices'][(int)$row['pax']];
+                $out[$i]['stospec_source'] = 'stospec_calc';
+            }
+        }
+        return ['template' => $src, 'grp' => $grp, 'stospec_markup' => price_level_markup('stospec', null, $grp),
+                'stospec_template' => $spec ? $spec['template'] : null, 'sheets' => $out];
     } finally {
         @unlink($tmp);
     }
+}
+
+// Folder of the published STOSPEC Calcs (F9 = the STOSPEC price per person of each pax sheet).
+if (!defined('CALC_STOSPEC_DIR')) define('CALC_STOSPEC_DIR', CALC_PRICE_SEASON_DIR . 'STOSPEC/');
+
+/**
+ * Published STOSPEC prices of a template: the STOSPEC Calc with the same name ("Pumba_Calc.xlsx"), or
+ * "<Name>_CalcSTOSPEC.xlsx" / "<Name>STOSPEC_Calc.xlsx" (Duma, Simba), in CALC_STOSPEC_DIR.
+ * Returns ['template', 'prices' => [pax => F9]] or null (none, or unreadable: the computed price is used).
+ */
+function calc_stospec_prices(string $token, string $templatePath): ?array {
+    $base = basename($templatePath);
+    $name = preg_replace('/_Calc\.xlsx?$/i', '', $base);
+    foreach ([$base, $name . '_CalcSTOSPEC.xlsx', $name . 'STOSPEC_Calc.xlsx'] as $cand) {
+        try { $bytes = dropbox_download_text($token, CALC_STOSPEC_DIR . $cand); } catch (Throwable $e) { return null; }
+        if ($bytes === null) continue;
+        $tmp = tempnam(sys_get_temp_dir(), 'calcspec_');
+        file_put_contents($tmp, $bytes);
+        try {
+            $ss = \PhpOffice\PhpSpreadsheet\IOFactory::load($tmp);
+            $prices = [];
+            foreach ($ss->getWorksheetIterator() as $ws) {
+                $title = trim($ws->getTitle());
+                if (stripos($title, 'PAX') === false) continue;
+                try { $v = $ws->getCell('F9')->getCalculatedValue(); } catch (Throwable $e) { $v = null; }
+                $pax = (int)preg_replace('/\D/', '', $title);
+                if ($pax > 0 && is_numeric($v) && $v > 0 && !isset($prices[$pax])) $prices[$pax] = (int)round((float)$v);
+            }
+            return $prices ? ['template' => CALC_STOSPEC_DIR . $cand, 'prices' => $prices] : null;
+        } catch (Throwable $e) {
+            error_log('calc_stospec_prices ' . $cand . ': ' . $e->getMessage());
+            return null;
+        } finally {
+            @unlink($tmp);
+        }
+    }
+    return null;
 }
 
 // ════════════════════════════════════════════════════════════════════════════

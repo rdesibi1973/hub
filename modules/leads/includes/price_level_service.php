@@ -96,12 +96,15 @@ function price_level_roundup5(float $v): int {
 
 /**
  * Price per person of one Calc pax sheet (calc_program_prices() row) at a level: rack = H9, sto = H10
- * (the prices typed in the Calc), stospec / custom = cost × (1 + markup) ÷ pax, rounded up to 5 USD.
+ * (the prices typed in the Calc), stospec = the published STOSPEC Calc's F9 when there is one (calc_program_prices()
+ * sets it), else and for custom = cost × (1 + markup) ÷ pax, rounded up to 5 USD.
  * Null when the sheet lacks what is needed.
  */
 function price_level_sheet_price(array $sheet, string $level, ?float $custom = null, bool $grp = false): ?int {
     if ($level === 'rack') return $sheet['rack'] !== null ? (int)round($sheet['rack']) : null;
     if ($level === 'sto')  return $sheet['sto']  !== null ? (int)round($sheet['sto'])  : null;
+    // STOSPEC set by calc_program_prices(): the published STOSPEC Calc's price when there is one, else the computed one.
+    if ($level === 'stospec' && isset($sheet['stospec']) && $sheet['stospec'] !== null) return (int)$sheet['stospec'];
     if (empty($sheet['cost']) || empty($sheet['pax_total'])) return null;
     return price_level_roundup5($sheet['cost'] * (1 + price_level_markup($level, $custom, $grp)) / $sheet['pax_total']);
 }

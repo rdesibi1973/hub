@@ -220,7 +220,10 @@ the reply echoes `filter {route, activity}`. Flights match route / origin / dest
 - `program.sheets[]`: prices read from the program's **Calc template** (the single source of truth),
   per pax sheet: `rack` (H9), `sto` (H10), `single_suppl`, `teen_discount`, `child_discount` (the H cell next to the
   "single supplement" / "teenager discount" / "child discount" label in column I: single in row 11 or 12 depending on the template, teen 13, child 14),
-  and since Nov 2026 `cost` (B6:B8), `pax_total` (B1), `stospec` (cost × 1.14 ÷ pax, rounded up to 5 USD; 1.16 on GRP files),
+  and since Nov 2026 `cost` (B6:B8), `pax_total` (B1), `stospec` = the **published** STOSPEC price when a STOSPEC Calc exists in
+  `/2026-27/STOSPEC/` (its F9 per pax sheet; file `<Name>_Calc.xlsx`, `<Name>_CalcSTOSPEC.xlsx` or `<Name>STOSPEC_Calc.xlsx`;
+  `stospec_source: stospec_calc`, `program.stospec_template`), else computed (cost × 1.14 ÷ pax, rounded up to 5 USD; 1.16 on GRP
+  files; `stospec_source: formula`); `stospec_formula` = the computed one always (e.g. Gran Safari: published 4255, computed 4250),
   `sto_formula` (the same at the sheet's D2) and `sto_check` (`sto_formula` = typed H10; `false` = the template's typed STO and
   its costs disagree — check the Calc before quoting). `program.template` = the file read: the season folder
   (`/itineraries/SafariClassic/it/Agenzia/2026-27/`) wins over the standard template; `program` also takes a sample's Calc code
