@@ -635,6 +635,11 @@ try {
          HAVING COUNT(*) > 1 AND SUM(COALESCE(status, '') NOT IN ('Cancelled', 'Lost')) >= 1"
     )->fetchAll(PDO::FETCH_ASSOC);
 } catch (Throwable $e) { $sameFolder = []; }   // the warning is optional
+// Trips already ended don't matter any more (no follow-up, no CK): keep only folders ending today or later, or undated.
+$sameFolder = array_values(array_filter($sameFolder, function ($sf) {
+    $end = parse_folder_dates((string)$sf['folder'])['end_date'] ?: parse_folder_dates((string)$sf['grp'])['end_date'];
+    return !$end || $end >= date('Y-m-d');
+}));
 
 $extra_css = '
 .bo-note{background:#EAF1F8;border-left:4px solid #1a3a5c;padding:12px 16px;border-radius:8px;font-size:.85rem;color:#1a3a5c;margin-bottom:18px}
