@@ -971,6 +971,11 @@ function followup_backfill(PDO $db): void {
         error_log('followup_close_stale: ' . $e->getMessage());
     }
     try {
+        followup_ck_close_paid($db);                // every page view / scan: Claude-check deposit / balance lines paid
+    } catch (Throwable $e) {
+        error_log('followup_ck_close_paid: ' . $e->getMessage());
+    }
+    try {
         if (followup_meta_get($db, 'backfill_074') !== null) return;
         followup_meta_set($db, 'backfill_074', date('Y-m-d H:i:s'));   // first: a failure below is not retried on every page
         require_once __DIR__ . '/../../leads/dropbox_helper.php';
@@ -999,6 +1004,98 @@ function followup_backfill(PDO $db): void {
     } catch (Throwable $e) {
         error_log('followup_backfill: ' . $e->getMessage());
     }
+}
+
+// ── Claude check lines the Hub can verify itself (11 Nov 2026) ───────────────
+// The Claude check (Cowork, ck_findings_upsert) only closes its lines when it runs again on the booking. What the Hub
+// can see for itself closes them before: a client payment recorded on the request's invoices, a final program saved in
+// the folder after the check. The other lines are marked "to re-check" after FU_CK_RECHECK_DAYS without a new check.
+
+const FU_CK_RECHECK_DAYS = 14;
+const FU_CK_DEPOSIT_RE   = '/\b(?:deposit|acconto)\b/i';
+const FU_CK_BALANCE_RE   = '/\b(?:balance|saldo)\b/i';
+const FU_CK_NOT_PAID_RE  = '/not\s+(?:yet\s+)?(?:received|paid)|missing|unpaid|non\s+(?:ancora\s+)?(?:ricevut|pagat)/i';
+const FU_CK_PROGRAM_RE   = '/\b(?:final\s+program(?:me)?|programma\s+finale|final\s+itinerary)\b/i';
+const FU_CK_STAGE_DEPOSIT_PAID = ['Balance', 'Balance-Cash', 'Paid'];   // folder tag after the deposit (_BALANCE = balance due)
+
+/**
+ * Every page view / scan: an open Claude-check line saying a client deposit (or balance) was not received closes
+ * (auto_resolved) when the Hub knows it was: a payment on the request's invoices (deposit) or the invoices paid in full
+ * (balance), or the request / folder status past it (Balance / Paid for a deposit, Paid for a balance). → lines closed.
+ */
+function followup_ck_close_paid(PDO $db): int {
+    $n = 0;
+    $lines = $db->query("SELECT b.*, r.payment_status, f.stage FROM booking_followups b
+                         LEFT JOIN requests r ON r.id = b.request_id LEFT JOIN ck_folders f ON f.folder_name = b.folder AND f.gone = 0
+                         WHERE b.closed_at IS NULL AND b.type = 'ck' AND b.request_id IS NOT NULL")->fetchAll(PDO::FETCH_ASSOC);
+    $inv = $db->prepare("SELECT COUNT(*) n, COALESCE(SUM(amount_paid), 0) paid, COALESCE(SUM(balance_due), 0) due, GROUP_CONCAT(invoice_number) nos
+                         FROM invoices WHERE request_id = ? AND status <> 'Void'");
+    foreach ($lines as $l) {
+        $txt = ($l['service'] ?? '') . ' ' . ($l['doc_status_text'] ?? '');
+        if (!preg_match(FU_CK_NOT_PAID_RE, $txt)) continue;
+        $deposit = (bool)preg_match(FU_CK_DEPOSIT_RE, $txt);
+        $balance = !$deposit && preg_match(FU_CK_BALANCE_RE, $txt);
+        if (!$deposit && !$balance) continue;
+        $status = ($l['payment_status'] ?? '') ?: ($l['stage'] ?? '');
+        try {
+            $inv->execute([(int)$l['request_id']]);
+            $i = $inv->fetch(PDO::FETCH_ASSOC);
+        } catch (Throwable $e) {
+            $i = ['n' => 0, 'paid' => 0, 'due' => 0, 'nos' => null];   // no invoices table (tests)
+        }
+        $why = null;
+        if ($deposit && (float)$i['paid'] > 0) $why = 'payment of ' . number_format((float)$i['paid'], 2) . ' recorded on ' . $i['nos'];
+        elseif ($deposit && in_array($status, FU_CK_STAGE_DEPOSIT_PAID, true)) $why = 'booking status ' . $status . ' (deposit received)';
+        elseif ($balance && (int)$i['n'] > 0 && (float)$i['paid'] > 0 && (float)$i['due'] <= 0.009) $why = 'invoices ' . $i['nos'] . ' paid in full';
+        elseif ($balance && $status === 'Paid') $why = 'booking status Paid';
+        if (!$why) continue;
+        followup_close_line($db, $l, 'auto_resolved', ($deposit ? 'deposit' : 'balance') . ' received: ' . $why);
+        $n++;
+    }
+    return $n;
+}
+
+/**
+ * Daily scan (Dropbox): an open Claude-check line saying the final program is missing closes (auto_resolved) when the
+ * booking folder has a program (.docx / .pdf at the top, not an invoice, a CK report or a deposit slip) saved after the
+ * check first reported it. → lines closed.
+ */
+function followup_ck_close_program(PDO $db, string $token): int {
+    $n = 0;
+    $live = followup_live_folders($db);
+    foreach ($db->query("SELECT * FROM booking_followups WHERE closed_at IS NULL AND type = 'ck' AND folder IS NOT NULL")->fetchAll(PDO::FETCH_ASSOC) as $l) {
+        if (!preg_match(FU_CK_PROGRAM_RE, ($l['service'] ?? '') . ' ' . ($l['doc_status_text'] ?? ''))) continue;
+        $dir = followup_folder_dir(followup_path_current((string)$l['folder'], $live));
+        try {
+            $files = dropbox_list_file_entries($token, $dir) ?? [];
+        } catch (Throwable $e) {
+            error_log('followup_ck_close_program: ' . $e->getMessage());
+            continue;
+        }
+        $since = strtotime((string)$l['first_seen_at']);
+        foreach ($files as $f) {
+            if (!preg_match('/\.(docx|pdf)$/i', $f['name']) || preg_match('/invoice|fattura|booking-check|deposit|balance|receipt|swift|voucher|^~\$/i', $f['name'])) continue;
+            if (strtotime($f['modified']) <= $since) continue;
+            followup_close_line($db, $l, 'auto_resolved', 'final program saved in the folder: ' . $f['name'] . ' (' . substr($f['modified'], 0, 10) . ')');
+            $n++;
+            break;
+        }
+    }
+    return $n;
+}
+
+/**
+ * Open Claude-check lines not seen by a check for FU_CK_RECHECK_DAYS: `recheck` = the date of that check, and the text
+ * starts "To re-check (Claude check of …)" — the booking check should run again on the booking. (Rows, in place.)
+ */
+function followup_mark_recheck(array &$out, string $today): void {
+    $limit = date('Y-m-d', strtotime($today . ' -' . FU_CK_RECHECK_DAYS . ' days'));
+    foreach ($out as &$r) {
+        if ($r['closed_at'] !== null || $r['type'] !== 'ck' || substr((string)$r['last_seen_at'], 0, 10) >= $limit) continue;
+        $r['recheck'] = substr((string)$r['last_seen_at'], 0, 10);
+        $r['doc_status_text'] = 'To re-check (Claude check of ' . date('d M', strtotime($r['recheck'])) . ') — ' . (string)$r['doc_status_text'];
+    }
+    unset($r);
 }
 
 // ── Rules of 11 Nov 2026 (docs/HUB_FOLLOWUP_RULES_HANDOFF.md) ────────────────
@@ -1643,6 +1740,15 @@ function followup_scan(PDO $db, array $o = []): array {
         $out['group'] = $sum + ['groups' => $g['groups'], 'window' => [$today, date('Y-m-d', strtotime($today . ' +' . FU_GROUP_DAYS . ' days'))],
                                 'errors' => $g['errors']];
         if ($confirm) followup_log_run($db, 'group', $source, $o['user_id'] ?? null, followup_counts($out['group']), !$g['complete'] && !$rid);
+    }
+    // Claude-check "final program missing" lines: a program saved in the folder after the check closes them (Dropbox).
+    if ($confirm && !$rid) {
+        try {
+            $token = $token ?? cp_retry(fn() => dropbox_get_access_token());
+            $out['ck_program_closed'] = followup_ck_close_program($db, $token);
+        } catch (Throwable $e) {
+            error_log('followup_ck_close_program: ' . $e->getMessage());
+        }
     }
     if ($type === 'ticket' || $type === 'all') {
         $t = followup_ticket_candidates($db, $today, $rid);
@@ -2324,6 +2430,7 @@ function followup_rows(PDO $db, array $f = [], ?string $today = null): array {
         $out[] = $r;
     }
     followup_mark_waiting_flight($db, $out);
+    followup_mark_recheck($out, $today);
     if (!empty($f['priority'])) $out = array_values(array_filter($out, fn($r) => $r['priority'] === $f['priority'] || substr($r['priority'], 0, 1) === (string)$f['priority']));
     // The booking-check report (sent with the ck lines) on every line of the booking.
     $rep = [];

@@ -1614,6 +1614,12 @@ logic `modules/operations/includes/followup_service.php`, documents read by `fol
   - **Transfers waiting for the client's flight** — an open transfer line of a booking with an open
     `client_flights_missing` line on that day (or, undated, on the first / last day) has no deadline, priority `3-NORMAL`,
     `waiting_flight {line_id, owner}` and its text starts "Waiting for the client's flight (line #…)".
+  - **Claude-check lines the Hub can verify** — a "deposit / balance not received" line closes (`auto_resolved`) when
+    the request's invoices have a payment (deposit) or are paid in full (balance), or the status is past it (Balance /
+    Paid for a deposit, Paid for a balance) — every page view and scan; a "final program missing" line closes when a
+    program (.docx / .pdf at the top of the folder, not an invoice / CK report / payment slip) was saved after the check —
+    daily scan. Other Claude-check lines not seen by a check for 14 days: `recheck` (date of that check) and the text
+    starts "To re-check (Claude check of …)": run the booking check again on that booking.
   - **Lines of a folder with several requests** belong to the first **active** one (lowest id), never to a Cancelled / Lost
     duplicate (GRP0101: request 1144 unlinked once, its lines → 2263). BackOffice warns when two requests point at the same folder.
 - `type: manual` — added from the page by the booking team (`request_id`, audience, text, service?, service date?, deadline?,
