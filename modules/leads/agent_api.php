@@ -105,10 +105,11 @@ function agent_audit(PDO $db, string $action, $reqId, array $payload, string $re
                               'followup_scan', 'followup_update', 'followup_upsert', 'iti_update_activity', 'sales_response_dismiss',
                               'ck_set_owners', 'ck_set_group_closed', 'ck_findings_upsert', 'iti_create_destination', 'iti_import_program', 'iti_supplier_blocklist', 'predeparture_email'], true) && empty($payload['confirm']);
     // Mail: keep who/what in the log, not message bodies or attachment content.
-    if (in_array($action, ['mail_get', 'mail_attachment', 'iti_document', 'iti_vouchers'], true) && $code === 200) {
+    if (in_array($action, ['mail_get', 'mail_attachment', 'staff_mail_get', 'staff_mail_attachment', 'iti_document', 'iti_vouchers'], true) && $code === 200) {
         $res = json_decode($resultJson, true);
         $m   = $res['message'] ?? $res['attachment'] ?? $res['file'] ?? [];
         $resultJson = json_encode(['ok' => true, 'logged' => 'content omitted', 'uid' => $m['uid'] ?? null,
+                                   'mailbox' => $m['mailbox'] ?? null, 'key' => $m['key'] ?? null,
                                    'subject' => $m['subject'] ?? null, 'name' => $m['name'] ?? null,
                                    'saved_to' => $res['saved_to'] ?? null], JSON_UNESCAPED_UNICODE);
     }
@@ -579,6 +580,66 @@ function agent_mail_uids(array $in): array {
     if (!$uids) agent_fail('uid (or uids) is required');
     if (count($uids) > 100) agent_fail('At most 100 uids per call');
     return $uids;
+}
+
+/**
+ * Answer with an attachment (mail_attachment / staff_mail_attachment): base64, or with request_id (booking folder) /
+ * folder_path saved to Dropbox instead. Existing file kept unless "overwrite": true. $info = what the answer shows.
+ */
+function agent_attachment_out(PDO $db, array $in, array $info, string $content): void {
+    $dir = rtrim(trim((string)($in['folder_path'] ?? '')), '/');
+    if ($dir === '' && (int)($in['request_id'] ?? 0) <= 0) {
+        agent_out(['ok' => true, 'attachment' => $info + ['content_base64' => base64_encode($content)]]);
+    }
+    require_once __DIR__ . '/dropbox_helper.php';
+    $token = dropbox_get_access_token();
+    if ($dir !== '') {
+        if ($dir[0] !== '/') agent_fail('folder_path must be a full Dropbox path starting with /');
+        if (!dropbox_path_exists($token, $dir)) agent_fail('folder_path ' . $dir . ' not found in Dropbox', 404);
+    } else {
+        $r = agent_request($db, $in['request_id']);
+        if (!$r['practice_code']) agent_fail('Request ' . $r['id'] . ' has no folder — pass folder_path', 409);
+        $dir = agent_request_dropbox_dir($token, $r);
+    }
+    $name = trim((string)($in['save_as'] ?? '')) ?: $info['name'];
+    $name = trim(str_replace(['/', '\\', ':', '*', '?', '"', '<', '>', '|'], '_', $name));
+    $path = $dir . '/' . $name;
+    $overwrite = !empty($in['overwrite']);
+    $exists = dropbox_path_exists($token, $path);
+    if ($exists && !$overwrite) {
+        agent_fail('File already exists: ' . $path, 409, ['path' => $path, 'hint' => 'Use save_as for another name, or "overwrite": true.']);
+    }
+    try {
+        $meta = dropbox_upload_text($token, $path, $content, $overwrite ? 'overwrite' : 'add');
+    } catch (RuntimeException $e) {
+        agent_fail($e->getMessage(), 502, ['path' => $path]);
+    }
+    agent_out(['ok' => true, 'attachment' => $info, 'saved_to' => $meta['path_display'] ?? $path, 'overwritten' => $exists]);
+}
+
+// ── Staff mailboxes @savannahexplorers.com, read-only (logic in includes/staff_mail_service.php) ──
+function agent_staff_mail_lib(): void {
+    require_once __DIR__ . '/../../includes/staff_mail_service.php';
+    if (!sm_enabled()) agent_fail('Staff mail reading is switched off (STAFF_MAIL_API in includes/config.php)', 503);
+}
+
+/** mailbox / folder / key of one message, validated (404 if not found). */
+function agent_staff_mail_ref(array $in): array {
+    $box = sm_box((string)($in['mailbox'] ?? ''));
+    $folder = trim((string)($in['folder'] ?? ''));
+    $key = trim((string)($in['key'] ?? ''));
+    if ($box === null) agent_fail('mailbox must be one of staff_mail_mailboxes (e.g. glady or glady@savannahexplorers.com)');
+    if ($folder === '' || $key === '') agent_fail('folder and key (from staff_mail_search) are required');
+    return [$box, $folder, $key];
+}
+
+/** reason (≥ BM_REASON_MIN characters) or fail. */
+function agent_staff_mail_reason(array $in): string {
+    try {
+        return bm_check_reason((string)($in['reason'] ?? ''));
+    } catch (InvalidArgumentException $e) {
+        agent_fail('reason is required: why this mail is read (at least ' . BM_REASON_MIN . ' characters)');
+    }
 }
 
 // ── Memo Board (logic in modules/memo/memo_lib.php) ─────────────────────────
@@ -2748,35 +2809,7 @@ try {
         }
         if (!$att) agent_fail('Attachment ' . $part . ' not found in message ' . $uid, 404);
         $info = ['uid' => $uid, 'part' => $part, 'name' => $att['name'], 'mime' => $att['mime'], 'size' => $att['size']];
-
-        $dir = rtrim(trim((string)($in['folder_path'] ?? '')), '/');
-        if ($dir === '' && (int)($in['request_id'] ?? 0) <= 0) {
-            agent_out(['ok' => true, 'attachment' => $info + ['content_base64' => base64_encode($att['content'])]]);
-        }
-        require_once __DIR__ . '/dropbox_helper.php';
-        $token = dropbox_get_access_token();
-        if ($dir !== '') {
-            if ($dir[0] !== '/') agent_fail('folder_path must be a full Dropbox path starting with /');
-            if (!dropbox_path_exists($token, $dir)) agent_fail('folder_path ' . $dir . ' not found in Dropbox', 404);
-        } else {
-            $r = agent_request($db, $in['request_id']);
-            if (!$r['practice_code']) agent_fail('Request ' . $r['id'] . ' has no folder — pass folder_path', 409);
-            $dir = agent_request_dropbox_dir($token, $r);
-        }
-        $name = trim((string)($in['save_as'] ?? '')) ?: $att['name'];
-        $name = trim(str_replace(['/', '\\', ':', '*', '?', '"', '<', '>', '|'], '_', $name));
-        $path = $dir . '/' . $name;
-        $overwrite = !empty($in['overwrite']);
-        $exists = dropbox_path_exists($token, $path);
-        if ($exists && !$overwrite) {
-            agent_fail('File already exists: ' . $path, 409, ['path' => $path, 'hint' => 'Use save_as for another name, or "overwrite": true.']);
-        }
-        try {
-            $meta = dropbox_upload_text($token, $path, $att['content'], $overwrite ? 'overwrite' : 'add');
-        } catch (RuntimeException $e) {
-            agent_fail($e->getMessage(), 502, ['path' => $path]);
-        }
-        agent_out(['ok' => true, 'attachment' => $info, 'saved_to' => $meta['path_display'] ?? $path, 'overwritten' => $exists]);
+        agent_attachment_out($db, $in, $info, $att['content']);
     }
 
     case 'mail_flag': {
@@ -3235,6 +3268,72 @@ try {
                   + (empty($in['confirm']) ? ['message' => 'Dry run — nothing written. Resend with "confirm": true.'] : []));
     }
 
+    // ── Staff mailboxes @savannahexplorers.com (Maildir on the server, read-only; includes/staff_mail_service.php).
+    // Files are never renamed or moved: mails stay unread for their owner. No move / delete / send.
+    case 'staff_mail_mailboxes': {
+        agent_staff_mail_lib();
+        agent_out(['ok' => true, 'mailboxes' => sm_mailbox_list()]);
+    }
+
+    case 'staff_mail_search': {
+        agent_staff_mail_lib();
+        $boxes = [];
+        $raw = $in['mailbox'] ?? ($in['mailboxes'] ?? '');
+        $list = is_array($raw) ? $raw : preg_split('/[\s,;]+/', (string)$raw, -1, PREG_SPLIT_NO_EMPTY);
+        foreach ($list as $b) {
+            if (strtolower(trim((string)$b)) === 'all') { $boxes = []; break; }
+            $addr = sm_box((string)$b);
+            if ($addr === null) agent_fail('Unknown mailbox "' . $b . '" — see staff_mail_mailboxes');
+            $boxes[$addr] = $addr;
+        }
+        $since = !empty($in['since']) ? strtotime(agent_iso_date($in['since'], 'since')) : strtotime('today -' . SM_DEFAULT_DAYS . ' days');
+        $before = !empty($in['before']) ? strtotime(agent_iso_date($in['before'], 'before')) : strtotime('tomorrow');
+        if ($before <= $since) agent_fail('before must be after since');
+        @set_time_limit(60);
+        $f = ['mailboxes' => array_values($boxes), 'folder' => trim((string)($in['folder'] ?? '')), 'since_ts' => $since, 'before_ts' => $before,
+              'from' => (string)($in['from'] ?? ''), 'to' => (string)($in['to'] ?? ''), 'subject' => (string)($in['subject'] ?? ''),
+              'q' => (string)($in['q'] ?? ''), 'message_id' => (string)($in['message_id'] ?? ''),
+              'limit' => (int)($in['limit'] ?? 30) ?: 30, 'cursor' => (string)($in['cursor'] ?? '')];
+        $res = sm_search($f);
+        if (trim($f['q']) !== '') {   // a text search reads bodies: recorded like an opening
+            bm_log($db, $agentUser, 'api_search', $boxes ? mb_substr(implode(',', $boxes), 0, 120) : 'all', null, null,
+                   'q: ' . $f['q'] . (trim((string)($in['reason'] ?? '')) !== '' ? ' — ' . trim((string)$in['reason']) : ''));
+        }
+        agent_out(['ok' => true, 'since' => date('Y-m-d', $since), 'before' => date('Y-m-d', $before)] + $res);
+    }
+
+    case 'staff_mail_get': {
+        agent_staff_mail_lib();
+        [$box, $folder, $key] = agent_staff_mail_ref($in);
+        $reason = agent_staff_mail_reason($in);
+        $msg = sm_get($box, $folder, $key);
+        if (!$msg) agent_fail('Mail not found: ' . $box . ' / ' . $folder . ' / ' . $key, 404);
+        if ((int)($in['request_id'] ?? 0) > 0) $agentReqId = (int)$in['request_id'];
+        bm_log($db, $agentUser, 'api_get', $box, sm_log_key($box, $folder, $key, $msg['message_id']), $agentReqId, $reason);
+        agent_out(['ok' => true, 'message' => $msg]);
+    }
+
+    // Base64, or saved to Dropbox with request_id / folder_path (as mail_attachment). Passport files refused.
+    case 'staff_mail_attachment': {
+        agent_staff_mail_lib();
+        [$box, $folder, $key] = agent_staff_mail_ref($in);
+        $part = trim((string)($in['part'] ?? ''));
+        if (!preg_match('/^\d+(\.\d+)*$/', $part)) agent_fail('part (from staff_mail_get attachments) is required');
+        $reason = agent_staff_mail_reason($in);
+        try {
+            $att = sm_attachment($box, $folder, $key, $part);
+        } catch (DomainException $e) {
+            agent_fail($e->getMessage(), 403);
+        } catch (LengthException $e) {
+            agent_fail($e->getMessage(), 413);
+        }
+        if (!$att) agent_fail('Attachment ' . $part . ' not found in ' . $box . ' / ' . $folder . ' / ' . $key, 404);
+        if ((int)($in['request_id'] ?? 0) > 0) $agentReqId = (int)$in['request_id'];
+        bm_log($db, $agentUser, 'api_attachment', $box, sm_log_key($box, $folder, $key, $att['message_id']), $agentReqId, $reason);
+        agent_attachment_out($db, $in, ['mailbox' => $box, 'folder' => $folder, 'key' => $key, 'part' => $part,
+                                        'name' => $att['name'], 'mime' => $att['mime'], 'size' => $att['size']], $att['content']);
+    }
+
     // ── Mail security scan (modules/security/mail_scan.php, cPanel cron). Read-only: no uapi from the web process.
     case 'mail_security_status': {
         require_once __DIR__ . '/../security/includes/mail_security_service.php';
@@ -3353,6 +3452,7 @@ try {
             'save_invoice_pdf', 'send_invoice_email', 'import_zoho_invoice', 'create_invoice', 'update_invoice', 'memo_list', 'memo_save', 'memo_set_status', 'memo_delete',
             'routine_status', 'routine_done',
             'mail_folders', 'mail_list', 'mail_get', 'mail_attachment', 'mail_flag', 'mail_move', 'mail_draft', 'mail_send',
+            'staff_mail_mailboxes', 'staff_mail_search', 'staff_mail_get', 'staff_mail_attachment',
             'timeline_list', 'timeline_add', 'timeline_update', 'summary_set', 'request_resume', 'set_request_status',
             'payments_due', 'ck_status', 'ck_request_check', 'ck_set_owners', 'ck_set_group_closed', 'ck_findings_upsert', 'ck_findings_drafts', 'ops_movements', 'ops_lunch_boxes', 'ops_medivac', 'flight_tickets',
             'followup_list', 'followup_scan', 'followup_update', 'followup_upsert', 'mail_security_status',

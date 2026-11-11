@@ -1318,6 +1318,65 @@ curl -sH "$H" -X POST "$U?action=mail_draft" -d '{"from":"gmail","to":"agent@age
 curl -sH "$H" -X POST "$U?action=mail_send"  -d '{"from":"gmail","to":"staff@savannahexplorers.com","subject":"Lunch boxes 14 Oct","body":"…"}'   # dry-run
 ```
 
+## Staff mailboxes (read-only)
+
+Search and read **any mailbox @savannahexplorers.com** — booking (glady@, operations@), sellers, shared boxes — for
+Cowork, without passwords: the files are read straight from the server Maildir (`~/mail/savannahexplorers.com/<user>/`).
+Logic: root `includes/staff_mail_service.php` (MIME parsing shared with `booking_mail_service.php`). Roberto's rule
+(11 Nov 2026, `docs/STAFF_NOTICE_MAIL.md`): read by the administrator, or by the agent on his request, for work
+reasons, with the reason recorded.
+
+- **Read-only**: Maildir files are opened for reading only, never renamed or moved — flags do not change, unread
+  mails stay unread for their owner. No move, delete, flag or send (to answer, use `mail_draft` / `mail_send`).
+- **Mailboxes** = every directory with `cur/` under the domain: a new employee appears by themselves. **Folders** =
+  `INBOX` + sub-folders (`Sent`, `Archive`, personal ones); trash, junk / spam and drafts are never read.
+- **Passports**: numbers are masked as `[removed]` in subjects and texts ("passport no. …" and machine-readable MRZ
+  lines). Attachments whose name says passport / passaporto / pasaporte / passeport / reisepass are listed as
+  `withheld: true` (name hidden) and never returned or saved. A passport scan with a generic name (`IMG_1234.jpg`)
+  is not recognised: don't save attachments of passport mails — passports go through the Hub Passports flow.
+- **Log**: `staff_mail_get` / `staff_mail_attachment` need `reason` (≥ 10 characters) → `mail_access_log` (the
+  Booking mail access record: who, mailbox, Message-ID hash, request, reason; actions `api_get`, `api_attachment`)
+  and `agent_audit_log` (without body or file). A search with `q` (reads bodies) is recorded as `api_search` with the query.
+- Off when `define('STAFF_MAIL_API', false);` is in the server-only `includes/config.php` (→ 503).
+- A message is addressed by `mailbox` (`glady` or `glady@savannahexplorers.com`) + `folder` + `key` (the Maildir
+  base name, stable when the owner reads or flags the mail), all from `staff_mail_search`.
+
+### `staff_mail_mailboxes` (GET)
+→ `mailboxes[]` `{mailbox, folders[]}`.
+
+### `staff_mail_search` (GET)
+`mailbox` (one, a list `glady,nuru`, or `all` / empty = every mailbox), `folder` (empty = all), `since` / `before`
+(YYYY-MM-DD, `before` excluded; default the last 30 days), `from`, `to` (To + Cc), `subject`, `q` (text: subject,
+addresses and body), `message_id` (the whole thread: Message-ID, In-Reply-To or References), `limit` ≤ 100 (default 30),
+`cursor`, optional `reason` (written with a `q` search). Every word of a filter must appear (case-insensitive). Newest first.
+→ `messages[]` `{mailbox, folder, key, date, from, to, subject, direction (client | savannah | internal | auto),
+message_id, size, has_attachments}`, `scanned {files, headers, bodies}`, `truncated`, `next_cursor`.
+
+How it stays fast: 1) the period is applied on the Maildir file names (they start with the delivery time — no file
+opened); 2) only the header block is read for `from` / `to` / `subject` / `message_id`; 3) the body (first 512 KB, text
+parts only) is read for `q` only when the headers did not already match. Per call at most 4000 headers, 400 bodies and
+20 seconds: then `truncated: true` and `next_cursor` — call again with `cursor` to continue the same search.
+Narrow by mailbox and period for text searches over months. Nothing is indexed or stored.
+
+### `staff_mail_get` (GET)
+`mailbox`*, `folder`*, `key`*, `reason`*, optional `request_id` (written in the logs). → `message` `{mailbox, folder, key,
+date, from, reply_to, to, cc, subject, direction, message_id, in_reply_to, references, body (plain text; HTML converted;
+passport numbers masked), body_truncated, has_html, attachments[] {part, name, mime, size, withheld}}`.
+
+### `staff_mail_attachment` (GET)
+`mailbox`*, `folder`*, `key`*, `part`* (from `staff_mail_get`), `reason`*. → `attachment {mailbox, folder, key, part, name,
+mime, size, content_base64}` (≤ 10 MB, else 413). With `request_id` (booking folder) or `folder_path` the file is **saved
+to Dropbox** instead → `saved_to` (`save_as`, `overwrite` as `mail_attachment`). A passport file → 403.
+
+```bash
+curl -sH "$H" "$U?action=staff_mail_mailboxes"
+curl -sH "$H" "$U?action=staff_mail_search&mailbox=glady,operations&q=Rossi%20Ndutu&since=2026-10-01"
+curl -sH "$H" "$U?action=staff_mail_search&mailbox=nuru&from=client@gmail.com"
+curl -sH "$H" "$U?action=staff_mail_search&mailbox=all&message_id=CAF12ab@mail.gmail.com"      # the whole thread
+curl -sH "$H" "$U?action=staff_mail_get&mailbox=glady&folder=INBOX&key=1731312000.M12P34.box2233,S=5120&reason=Rossi%20booking%20check"
+curl -sH "$H" "$U?action=staff_mail_attachment&mailbox=glady&folder=INBOX&key=1731312000.M12P34.box2233,S=5120&part=2&reason=Lodge%20voucher&request_id=2958"
+```
+
 ## Back office (read-only)
 
 The data of the Hub back-office pages, for the Cowork "back-office" skill (`docs/skills/back-office.md`).
