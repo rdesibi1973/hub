@@ -964,6 +964,7 @@ function followup_backfill(PDO $db): void {
     followup_backfill_keys($db);
     followup_rules_once($db);
     followup_rules_once_b($db);
+    followup_rules_once_c($db);
     try {
         followup_close_stale($db, date('Y-m-d'));   // every page view / scan: trips over, cancelled requests
     } catch (Throwable $e) {
@@ -1088,6 +1089,37 @@ function followup_rules_once(PDO $db): void {
         } catch (Throwable $e) {
             error_log($fn . ': ' . $e->getMessage());
         }
+    }
+}
+
+/**
+ * Once (meta rules_2026_11c): an open undated SafariCheck transfer note joins every open dated transfer line of its
+ * booking (the note under the Calc grid is about all its transfers — Meco: 16 and 29 Dec). A note with no dated line
+ * stays: the next SafariCheck run dates it with the first Calc transfer (followup_sc_fold_undated()).
+ */
+function followup_rules_once_c(PDO $db): void {
+    try {
+        if (followup_meta_get($db, 'rules_2026_11c') !== null) return;
+        followup_meta_set($db, 'rules_2026_11c', date('Y-m-d H:i:s'));
+        foreach ($db->query("SELECT * FROM booking_followups WHERE closed_at IS NULL AND type = 'safaricheck' AND issue = 'sc_transfer'
+                             AND service_date IS NULL AND request_id IS NOT NULL")->fetchAll(PDO::FETCH_ASSOC) as $l) {
+            $st = $db->prepare("SELECT * FROM booking_followups WHERE closed_at IS NULL AND request_id = ? AND service_date IS NOT NULL AND service_key LIKE ?");
+            $st->execute([(int)$l['request_id'], 'R' . (int)$l['request_id'] . '|transfer|%']);
+            $lines = $st->fetchAll(PDO::FETCH_ASSOC);
+            if (!$lines) continue;
+            $mine = json_decode((string)$l['details'], true) ?: [];
+            $mineKeys = (array)($mine['sc_keys'] ?? [$mine['sc_key'] ?? '']);
+            foreach ($lines as $t) {
+                $d = json_decode((string)$t['details'], true) ?: [];
+                $d['sc_keys'] = array_values(array_filter(array_unique(array_merge($d['sc_keys'] ?? (isset($d['sc_key']) ? [$d['sc_key']] : []), $mineKeys))));
+                $db->prepare("UPDATE booking_followups SET details = ?, doc_status_text = ? WHERE id = ?")
+                   ->execute([json_encode($d, JSON_UNESCAPED_UNICODE), mb_substr($t['doc_status_text'] . ' | ' . $l['doc_status_text'], 0, 500), (int)$t['id']]);
+                followup_event($db, (int)$t['id'], null, 'source', null, 'Excel note of line #' . $l['id'] . ' (about every transfer of the booking)');
+            }
+            followup_close_line($db, $l, 'auto_merged', 'Excel note about every transfer: joined lines #' . implode(', #', array_column($lines, 'id')));
+        }
+    } catch (Throwable $e) {
+        error_log('followup_rules_once_c: ' . $e->getMessage());
     }
 }
 
@@ -2048,25 +2080,39 @@ function followup_safaricheck_sync(PDO $db, array $ckRow, array $checks, array $
                                                  'check_id' => !empty($ckRow['last_check_id']) ? (int)$ckRow['last_check_id'] : null], JSON_UNESCAPED_UNICODE)]
                      + ($sales ? ['owner_user_id' => $seller] : []);
     }
-    followup_sc_fold_undated($cand);
+    followup_sc_fold_undated($cand, $facts);
     return followup_apply($db, 'safaricheck', $cand, ['requests' => [$rid], 'only' => [$rid]], $confirm, 'agent', $today ?? date('Y-m-d'));
 }
 
 /**
- * An undated transfer point ('Excel note: Transfer waiting for Iddi') joins the booking's transfer when it has exactly
- * one dated transfer: one line per transfer. With several (or none) dated transfers it stays a line of its own.
+ * An undated transfer point ('Excel note: Transfer waiting for Iddi', written under the Calc grid) is about every
+ * transfer of the booking (Lydia, 11 Nov 2026):
+ *   - the booking has dated transfer points → the note joins each of them (text + its SafariCheck key);
+ *   - none → the note stays one line, dated with the first Calc transfer (facts excel.transfers, SafariCheck runner
+ *     2026-11-11) and listing their days; its key is kept, so the line keeps owner and status.
  */
-function followup_sc_fold_undated(array &$cand): void {
+function followup_sc_fold_undated(array &$cand, array $facts = []): void {
     $dated = array_keys(array_filter($cand, fn($c) => $c['service_type'] === 'transfer' && !empty($c['service_date'])));
-    if (count($dated) !== 1) return;
-    $k0 = $dated[0];
+    $calc = array_values(array_filter(array_map(fn($t) => (string)($t['date'] ?? ''), (array)($facts['excel']['transfers'] ?? [])),
+                                      fn($d) => (bool)preg_match('/^\d{4}-\d{2}-\d{2}$/', $d)));
+    sort($calc);
     foreach ($cand as $k => $c) {
         if ($c['service_type'] !== 'transfer' || !empty($c['service_date'])) continue;
-        $cand[$k0]['service'] = mb_substr($cand[$k0]['service'] . ' + ' . $c['service'], 0, 255);
-        $cand[$k0]['doc_status_text'] = mb_substr($cand[$k0]['doc_status_text'] . ' | ' . $c['doc_status_text'], 0, 500);
-        $d = json_decode($cand[$k0]['details'], true);
-        $d['sc_keys'] = array_values(array_unique(array_merge($d['sc_keys'] ?? [], json_decode($c['details'], true)['sc_keys'] ?? [])));
-        $cand[$k0]['details'] = json_encode($d, JSON_UNESCAPED_UNICODE);
+        if (!$dated) {
+            if ($calc) {
+                $cand[$k]['service_date'] = $calc[0];
+                $cand[$k]['service'] = mb_substr($c['service'] . ' — transfers ' . implode(', ', array_map(fn($d) => date('d M', strtotime($d)), array_unique($calc))), 0, 255);
+            }
+            continue;
+        }
+        $mine = json_decode($c['details'], true)['sc_keys'] ?? [];
+        foreach ($dated as $k0) {
+            $cand[$k0]['service'] = mb_substr($cand[$k0]['service'] . ' + ' . $c['service'], 0, 255);
+            $cand[$k0]['doc_status_text'] = mb_substr($cand[$k0]['doc_status_text'] . ' | ' . $c['doc_status_text'], 0, 500);
+            $d = json_decode($cand[$k0]['details'], true);
+            $d['sc_keys'] = array_values(array_unique(array_merge($d['sc_keys'] ?? [], $mine)));
+            $cand[$k0]['details'] = json_encode($d, JSON_UNESCAPED_UNICODE);
+        }
         unset($cand[$k]);
     }
 }
