@@ -1594,6 +1594,24 @@ logic `modules/operations/includes/followup_service.php`, documents read by `fol
   `sc_flight`, `sc_dates`, `sc_pax`. Naming points ("Lodge not found in Word: …", "Lodge in Word not in Excel: …") and
   document-only points (prices, Word texts, sheets) stay in the CK tracker. Ticking a point in the SafariCheck report closes its
   line (`auto_resolved`, unless another check reports it).
+- **Rules of 11 Nov 2026** (`docs/HUB_FOLLOWUP_RULES_HANDOFF.md`):
+  - **Trip over / request gone** — on every scan and page view, every open line of a trip whose end (else start) is past
+    closes (`auto_trip_ended`, SafariCheck and manual lines too), and the lines of a `Cancelled` / `Lost` request close
+    (`auto_request_cancelled`) — unless an active request has the same folder: then they move to it (event `request_id`).
+  - **One line per transfer and day** — `service_key` of a dated transfer = `R<request>|transfer|<date>`; SafariCheck and the
+    Claude check merge their transfer points of the same day into one candidate (keys `SC|<req>|transfer|<date>`,
+    `CK|<req>|<audience>|transfer|<date>`), and a SafariCheck transfer joins the Claude check's line of that day (any
+    audience). Older duplicate lines were merged once (`auto_merged`).
+  - **"Word ≠ Excel" to the seller** — `sc_pax`, `sc_dates`, `sc_basis_differs`, `sc_nights_differ`, `sc_checkin_differs`:
+    `audience` `sales`, owner = the seller in the folder tag (`-Roberto` → Roberto; Micky / Sultan: English-speaking
+    clients → Agustin, Italian → Anderson, by the ITI program language; Sara → no owner, Roberto assigns). Open lines
+    were moved once. Groups not closed (`_PROVISIONAL`, Il Diamante / GRP before "group closed" on the CK tracker): no
+    pax / Word lines.
+  - **Transfers waiting for the client's flight** — an open transfer line of a booking with an open
+    `client_flights_missing` line on that day (or, undated, on the first / last day) has no deadline, priority `3-NORMAL`,
+    `waiting_flight {line_id, owner}` and its text starts "Waiting for the client's flight (line #…)".
+  - **Lines of a folder with several requests** belong to the first **active** one (lowest id), never to a Cancelled / Lost
+    duplicate (GRP0101: request 1144 unlinked once, its lines → 2263). BackOffice warns when two requests point at the same folder.
 - `type: manual` — added from the page by the booking team (`request_id`, audience, text, service?, service date?, deadline?,
   owner?), closed by staff only; its deadline is editable.
 - **Deadlines and priority**: `due_date` / `due_reason` / `due_days` = the earliest of the provisional expiry printed on the
@@ -1641,7 +1659,9 @@ logic `modules/operations/includes/followup_service.php`, documents read by `fol
   (event `notes`, `notes_log` in the rows); `notes` is the last one. `contacted_at` is still accepted but no longer shown. Lines are never
   deleted. They close with `close_reason`: `auto_confirmed` (the same reference in a document reading Confirmed without a
   provisional note), `auto_ticket_saved`, `auto_trip_ended`, `auto_not_found` (the file left `invoices/` and nothing else has
-  that reference — check it was not moved without a confirmed one), `manual` (staff: `resolved`; admin: `not_relevant`).
+  that reference — check it was not moved without a confirmed one), `auto_request_cancelled`, `auto_merged` (joined another
+  line of the same service), `manual` (staff: `resolved`; admin: `not_relevant`). `auto_trip_ended`, `auto_request_cancelled`
+  and `auto_merged` are never re-opened by a check.
   A line still found provisional after a staff `resolved` (or an auto-close) is **re-opened**; `not_relevant` stays closed.
 - **PDFs on the server:** BlueHost has no `pdftotext` and no Composer today, so `followup_scan` type `supplier` only uses
   documents already read and returns `reader: "none"` + a `warning`. Two ways: (a) on the office PC run

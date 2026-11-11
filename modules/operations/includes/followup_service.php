@@ -31,7 +31,11 @@
  * the current owner of a line works it too (a seller owning a sales line, without the module).
  * The check writes only the document fields; owner / contacted / staff status / notes are the
  * staff's. Lines are never deleted: they close (auto_confirmed, auto_ticket_saved,
- * auto_trip_ended, auto_not_found, manual) and re-open when the check still finds them.
+ * auto_trip_ended, auto_not_found, auto_request_cancelled, auto_merged, manual) and re-open when the check still finds them.
+ *
+ * Rules of 11 Nov 2026 (docs/HUB_FOLLOWUP_RULES_HANDOFF.md): followup_close_stale() closes trips over / cancelled requests
+ * on every page view and scan; one line per transfer and day; SafariCheck "Word ≠ Excel" points → the seller (sales);
+ * transfers waiting for the client's flight; a folder's lines belong to its first active request (ck_reqs_sorted()).
  * Every change → booking_followup_events (user_id NULL = the check).
  *
  * Reading PDFs on the server needs pdftotext (exec, or FOLLOWUP_PDFTOTEXT = path of a binary)
@@ -49,7 +53,17 @@ const FU_GROUP_DAYS       = 60;         // group check: arrivals in the next N d
 const FU_ISSUES  = ['provisional', 'provisional_expired', 'on_request', 'orangi_rooms_provisional', 'ticket_missing', 'unreadable',
                     'group_to_finalize', 'group_znz_flight'];
 const FU_STATUSES = ['open', 'in_progress', 'problem', 'resolved', 'not_relevant'];
-const FU_REASONS = ['auto_confirmed', 'auto_ticket_saved', 'auto_trip_ended', 'auto_not_found', 'auto_resolved', 'manual'];
+const FU_REASONS = ['auto_confirmed', 'auto_ticket_saved', 'auto_trip_ended', 'auto_not_found', 'auto_resolved', 'auto_request_cancelled', 'auto_merged', 'manual'];
+const FU_REASON_ENUM = "ENUM('auto_confirmed','auto_ticket_saved','auto_trip_ended','auto_not_found','auto_resolved','auto_request_cancelled','auto_merged','manual')";
+/**
+ * Rules of 11 Nov 2026 (docs/HUB_FOLLOWUP_RULES_HANDOFF.md §3): SafariCheck "Word ≠ Excel" points go to the seller
+ * (audience sales, owner = the seller in the folder tag), not to the booking team.
+ */
+const FU_SALES_SC_ISSUES = ['sc_pax', 'sc_dates', 'sc_basis_differs', 'sc_nights_differ', 'sc_checkin_differs'];
+/** Sellers who left whose clients are split by language (ITI program language): en (any non-Italian) / it → first name. */
+const FU_SELLER_BY_LANG = ['micky' => ['en' => 'Agustin', 'it' => 'Anderson'], 'sultan' => ['en' => 'Agustin', 'it' => 'Anderson']];
+/** Sellers who left with no successor yet: the line stays without owner (Roberto assigns it). */
+const FU_SELLER_ASK = ['sara'];
 const FU_TYPES   = ['supplier', 'ticket', 'group', 'ck', 'safaricheck', 'manual'];
 /** The check behind each line type, as `sources` names it. */
 const FU_TYPE_SOURCE = ['supplier' => 'supplier_scan', 'ticket' => 'ticket_scan', 'group' => 'group_scan', 'ck' => 'claude_check',
@@ -82,7 +96,8 @@ const FU_STATUS_LABELS = ['open' => 'Open', 'in_progress' => 'In progress', 'pro
                           'not_relevant' => 'Not relevant'];
 const FU_REASON_LABELS = ['auto_confirmed' => 'confirmed document saved', 'auto_ticket_saved' => 'ticket saved',
                           'auto_trip_ended' => 'trip ended', 'auto_not_found' => 'document no longer in invoices/',
-                          'auto_resolved' => 'no longer reported by the check', 'manual' => 'closed by staff'];
+                          'auto_resolved' => 'no longer reported by the check', 'auto_request_cancelled' => 'request cancelled / lost',
+                          'auto_merged' => 'merged into another line of the same service', 'manual' => 'closed by staff'];
 const FU_EDIT_PERMISSION = 'booking_followup_edit';
 
 // ── Schema (same DDL as migrations 069, 070, 073, 074) ───────────────────────
@@ -116,7 +131,7 @@ function followup_schema(PDO $db): void {
         last_seen_at    DATETIME NOT NULL,
         closed_at       DATETIME NULL,
         closed_by       VARCHAR(20) NULL,
-        close_reason    ENUM('auto_confirmed','auto_ticket_saved','auto_trip_ended','auto_not_found','auto_resolved','manual') NULL,
+        close_reason    " . FU_REASON_ENUM . " NULL,
         scan_source     VARCHAR(10) NULL,
         details         TEXT NULL,
         sources         TEXT NULL,
@@ -163,7 +178,21 @@ function followup_schema(PDO $db): void {
         summary_json MEDIUMTEXT NULL,
         KEY idx_followup_run_at (at)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    followup_schema_reasons($db);
     $done = true;
+}
+
+/** close_reason of an older table: + auto_request_cancelled, auto_merged (11 Nov 2026). Checked once, then marked in meta. */
+function followup_schema_reasons(PDO $db): void {
+    try {
+        if (followup_meta_get($db, 'reasons_2') !== null) return;
+        $t = (string)$db->query("SELECT COLUMN_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE()
+                                 AND TABLE_NAME = 'booking_followups' AND COLUMN_NAME = 'close_reason'")->fetchColumn();
+        if (strpos($t, 'auto_merged') === false) $db->exec("ALTER TABLE booking_followups MODIFY close_reason " . FU_REASON_ENUM . " NULL");
+        followup_meta_set($db, 'reasons_2', date('Y-m-d H:i:s'));
+    } catch (Throwable $e) {
+        error_log('followup_schema_reasons: ' . $e->getMessage());
+    }
 }
 
 /**
@@ -184,7 +213,7 @@ function followup_schema_upgrade(PDO $db): void {
     if (!in_array('audience', $have, true)) {
         array_push($sql, "ALTER TABLE booking_followups MODIFY issue VARCHAR(40) NOT NULL",
                    "ALTER TABLE booking_followups MODIFY doc_status_text VARCHAR(500) NULL",
-                   "ALTER TABLE booking_followups MODIFY close_reason ENUM('auto_confirmed','auto_ticket_saved','auto_trip_ended','auto_not_found','auto_resolved','manual') NULL",
+                   "ALTER TABLE booking_followups MODIFY close_reason " . FU_REASON_ENUM . " NULL",
                    "ALTER TABLE booking_followups ADD COLUMN audience ENUM('booking','sales','accounts') NULL AFTER type");
     }
     if (!in_array('details', $have, true)) $sql[] = "ALTER TABLE booking_followups ADD COLUMN details TEXT NULL";
@@ -667,7 +696,7 @@ function followup_group_candidates(PDO $db, string $today, string $token, bool $
     // Hub requests of each folder (the first one owns the lines; a collective GRP may have none yet).
     $reqs = [];
     if ($folders) {
-        foreach ($db->query("SELECT id, customer_name, practice_code, group_folder, dropbox_url FROM requests
+        foreach ($db->query("SELECT id, customer_name, practice_code, group_folder, dropbox_url, status FROM requests
                              WHERE (payment_status IS NULL OR payment_status <> 'Cancelled')")->fetchAll(PDO::FETCH_ASSOC) as $r) {
             $rel = folder_rel_path($r);
             if (!preg_match('#^001_Safari/(?:00_20\d\d/)?([^/]+)#i', $rel, $m)) continue;
@@ -676,8 +705,7 @@ function followup_group_candidates(PDO $db, string $today, string $token, bool $
     }
     $lines = []; $errors = []; $names = [];
     foreach ($folders as $name => $g) {
-        $owner = null;
-        foreach ($reqs[dropbox_folder_stem_safe($name)] ?? [] as $r) if (!$owner || (int)$r['id'] < (int)$owner['id']) $owner = $r;
+        $owner = ck_reqs_sorted($reqs[dropbox_folder_stem_safe($name)] ?? [])[0] ?? null;   // active first, then lowest id
         if ($requestId && (!$owner || !in_array($requestId, array_map(fn($r) => (int)$r['id'], $reqs[dropbox_folder_stem_safe($name)] ?? []), true))) continue;
         $dir = CK_BASE . '/' . $name;
         try {
@@ -788,8 +816,15 @@ function followup_supplier_same(string $a, string $b): bool {
     return false;
 }
 
-/** request | service type | service date | supplier words — the service a line is about (merging, see followup_service_match()). */
+/**
+ * request | service type | service date | supplier words — the service a line is about (merging, see followup_service_match()).
+ * A transfer with a date: request | transfer | date only (one line per transfer and day, 11 Nov 2026 — SafariCheck writes the
+ * Calc route, the Claude check its own words).
+ */
 function followup_service_key(array $l): string {
+    if (followup_service_type($l) === 'transfer' && !empty($l['service_date'])) {
+        return followup_key_fit('R' . (int)($l['request_id'] ?? 0) . '|transfer|' . $l['service_date']);
+    }
     $who = $l['supplier'] ?? '';
     if ($who === '' || $who === null) $who = $l['service'] ?? '';
     return followup_key_fit('R' . (int)($l['request_id'] ?? 0) . '|' . followup_service_type($l) . '|' . (($l['service_date'] ?? null) ?: '-')
@@ -804,6 +839,9 @@ function followup_service_key(array $l): string {
  */
 function followup_service_match(array $a, array $b): bool {
     if (empty($a['request_id']) || (int)$a['request_id'] !== (int)($b['request_id'] ?? 0)) return false;
+    // One line per transfer and day, whoever reports it (booking or sales audience).
+    $da0 = ($a['service_date'] ?? null) ?: null;
+    if ($da0 && $da0 === (($b['service_date'] ?? null) ?: null) && followup_service_type($a) === 'transfer' && followup_service_type($b) === 'transfer') return true;
     if ((($a['audience'] ?? null) ?: 'booking') !== (($b['audience'] ?? null) ?: 'booking')) return false;
     $ref = fn($l) => strtoupper(preg_replace('/\s+/', '', (string)($l['supplier_ref'] ?? '')));
     if ($ref($a) !== '' && $ref($a) === $ref($b)) return true;
@@ -924,6 +962,12 @@ function followup_backfill(PDO $db): void {
     $done = true;
     followup_schema($db);
     followup_backfill_keys($db);
+    followup_rules_once($db);
+    try {
+        followup_close_stale($db, date('Y-m-d'));   // every page view / scan: trips over, cancelled requests
+    } catch (Throwable $e) {
+        error_log('followup_close_stale: ' . $e->getMessage());
+    }
     try {
         if (followup_meta_get($db, 'backfill_074') !== null) return;
         followup_meta_set($db, 'backfill_074', date('Y-m-d H:i:s'));   // first: a failure below is not retried on every page
@@ -952,6 +996,180 @@ function followup_backfill(PDO $db): void {
         }
     } catch (Throwable $e) {
         error_log('followup_backfill: ' . $e->getMessage());
+    }
+}
+
+// ── Rules of 11 Nov 2026 (docs/HUB_FOLLOWUP_RULES_HANDOFF.md) ────────────────
+
+/** Close an open line by the system, with its event. */
+function followup_close_line(PDO $db, array $l, string $reason, string $note): void {
+    $db->prepare("UPDATE booking_followups SET closed_at = ?, closed_by = 'system', close_reason = ? WHERE id = ? AND closed_at IS NULL")
+       ->execute([date('Y-m-d H:i:s'), $reason, (int)$l['id']]);
+    followup_event($db, (int)$l['id'], null, 'closed', null, $reason . ($note !== '' ? ' — ' . $note : ''));
+}
+
+/**
+ * Move a line to another request of the same folder (dedupe_key, sources keys and service_key follow). When the target
+ * request already has the same line, this one closes as auto_merged instead. → the line id the work continues on.
+ */
+function followup_move_line(PDO $db, array $l, int $to, string $why): int {
+    $from = (int)$l['request_id'];
+    $key = (string)$l['dedupe_key'];
+    $p = explode('|', $key, 3);
+    $new = count($p) === 3 && in_array($p[0], ['S', 'T', 'CK', 'SC', 'M'], true) && $p[1] === (string)$from
+         ? followup_key_fit($p[0] . '|' . $to . '|' . $p[2]) : $key;
+    if ($new !== $key) {
+        $st = $db->prepare("SELECT id FROM booking_followups WHERE dedupe_key = ?");
+        $st->execute([$new]);
+        if ($other = $st->fetchColumn()) {
+            if ($l['closed_at'] === null) followup_close_line($db, $l, 'auto_merged', 'same line already on request ' . $to . ' (#' . $other . '), ' . $why);
+            return (int)$other;
+        }
+    }
+    $src = followup_sources($l);
+    foreach ($src as &$e) if (($e['key'] ?? null) === $key) $e['key'] = $new;
+    unset($e);
+    $l2 = ['request_id' => $to] + $l;
+    $db->prepare("UPDATE booking_followups SET request_id = ?, dedupe_key = ?, sources = ?, service_key = ? WHERE id = ?")
+       ->execute([$to, $new, followup_sources_json($src), followup_service_key($l2), (int)$l['id']]);
+    followup_event($db, (int)$l['id'], null, 'request_id', (string)$from, $to . ' — ' . $why);
+    return (int)$l['id'];
+}
+
+/**
+ * Every page view / scan: close the open lines of a trip that is over (all types, SafariCheck included — no check runs
+ * on them any more) and of a Cancelled / Lost request. A cancelled request whose folder an active request still uses
+ * (a duplicate, GRP0101) does not close its lines: they move to that active request. → ['closed' => n, 'moved' => n].
+ */
+function followup_close_stale(PDO $db, string $today): array {
+    $out = ['closed' => 0, 'moved' => 0];
+    $rows = $db->query("SELECT b.*, r.status AS req_status FROM booking_followups b LEFT JOIN requests r ON r.id = b.request_id
+                        WHERE b.closed_at IS NULL")->fetchAll(PDO::FETCH_ASSOC);
+    $rowOf = null;
+    foreach ($rows as $l) {
+        $end = ($l['end_date'] ?? null) ?: ($l['start_date'] ?? null);
+        if ($end && $end < $today) {
+            followup_close_line($db, $l, 'auto_trip_ended', 'trip ended ' . $end);
+            $out['closed']++;
+            continue;
+        }
+        if ($l['request_id'] === null || !in_array((string)$l['req_status'], CK_REQ_CLOSED, true)) continue;
+        if ($rowOf === null) {
+            $rowOf = [];
+            require_once __DIR__ . '/../../leads/dropbox_helper.php';
+            foreach (ck_tracker_rows($db) as $r) foreach ($r['reqs'] as $q) $rowOf[(int)$q['id']] = $r;
+        }
+        $row = $rowOf[(int)$l['request_id']] ?? null;
+        $main = $row && $row['reqs'] ? ck_reqs_sorted($row['reqs'])[0] : null;
+        if ($main && ck_req_active($main) && (int)$main['id'] !== (int)$l['request_id']) {
+            followup_move_line($db, $l, (int)$main['id'], 'request ' . $l['request_id'] . ' is ' . $l['req_status'] . ', request ' . $main['id'] . ' has the same folder');
+            $out['moved']++;
+            continue;
+        }
+        followup_close_line($db, $l, 'auto_request_cancelled', 'request ' . $l['request_id'] . ' is ' . $l['req_status']);
+        $out['closed']++;
+    }
+    return $out;
+}
+
+/** Once (meta rules_2026_11): GRP0101 duplicate, one line per transfer and day, "Word ≠ Excel" lines to the seller. */
+function followup_rules_once(PDO $db): void {
+    try {
+        if (followup_meta_get($db, 'rules_2026_11') !== null) return;
+        followup_meta_set($db, 'rules_2026_11', date('Y-m-d H:i:s'));   // first: a failure below is not retried on every page
+    } catch (Throwable $e) {
+        error_log('followup_rules_once: ' . $e->getMessage());
+        return;
+    }
+    foreach (['followup_fix_grp0101', 'followup_merge_transfers', 'followup_sales_reassign'] as $fn) {
+        try {
+            $fn($db);
+        } catch (Throwable $e) {
+            error_log($fn . ': ' . $e->getMessage());
+        }
+    }
+}
+
+/**
+ * GRP0101 (handoff §6): request 1144 "Giulia" is a Cancelled duplicate of 2746 "Giulia Brando" still linked to the same
+ * folder. Only when that is still true: 1144 is unlinked from the folder and its lines (115–118, 229, 230 and any open
+ * one) move to 2263 (Federica Lanza, the group's first active request) or else 2746.
+ */
+function followup_fix_grp0101(PDO $db): void {
+    $req = [];
+    foreach ($db->query("SELECT id, status, practice_code, group_folder, dropbox_url FROM requests WHERE id IN (1144, 2263, 2746)")->fetchAll(PDO::FETCH_ASSOC) as $r) $req[(int)$r['id']] = $r;
+    $dup = $req[1144] ?? null; $right = $req[2746] ?? null;
+    $norm = fn($s) => mb_strtolower(trim((string)$s));
+    if (!$dup || !$right || !in_array($dup['status'], CK_REQ_CLOSED, true) || !ck_req_active($right)
+        || $norm($dup['practice_code']) === '' || $norm($dup['practice_code']) !== $norm($right['practice_code'])
+        || $norm($dup['group_folder']) !== $norm($right['group_folder'])) {
+        error_log('followup_fix_grp0101: skipped, requests no longer as described');
+        return;
+    }
+    $to = isset($req[2263]) && ck_req_active($req[2263]) && $norm($req[2263]['group_folder']) === $norm($right['group_folder']) ? 2263 : 2746;
+    $st = $db->query("SELECT * FROM booking_followups WHERE request_id = 1144 AND (closed_at IS NULL OR id IN (115, 116, 117, 118, 229, 230))");
+    foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $l) followup_move_line($db, $l, $to, 'request 1144 is a cancelled duplicate of 2746 (GRP0101)');
+    $db->prepare("UPDATE requests SET practice_code = NULL, group_folder = NULL, dropbox_url = NULL WHERE id = 1144")->execute();
+    followup_meta_set($db, 'grp0101_fix', 'request 1144 unlinked from ' . mb_substr($dup['group_folder'] . '/' . $dup['practice_code'], 0, 200) . ', lines → ' . $to);
+}
+
+/**
+ * One line per transfer and day (handoff §2): open transfer lines of the same request and date merge into the oldest
+ * (sources joined, the others close as auto_merged), and the SafariCheck / Claude check keys of every open transfer line
+ * take the per-day form, so the next check finds the line again instead of opening a new one.
+ */
+function followup_merge_transfers(PDO $db): void {
+    $groups = [];
+    foreach ($db->query("SELECT * FROM booking_followups WHERE closed_at IS NULL AND service_date IS NOT NULL AND request_id IS NOT NULL ORDER BY id")
+                ->fetchAll(PDO::FETCH_ASSOC) as $l) {
+        if (followup_service_type($l) === 'transfer') $groups[(int)$l['request_id'] . '|' . $l['service_date']][] = $l;
+    }
+    $taken = fn(string $k) => (function () use ($db, $k) { $s = $db->prepare("SELECT id FROM booking_followups WHERE dedupe_key = ?"); $s->execute([$k]); return (bool)$s->fetchColumn(); })();
+    foreach ($groups as $ls) {
+        $keep = array_shift($ls);
+        $src = followup_sources($keep);
+        $aud = ($keep['audience'] ?? null) ?: 'booking';
+        foreach ($ls as $d) {
+            foreach (followup_sources($d) as $t => $e) if (!isset($src[$t])) $src[$t] = $e;
+            followup_close_line($db, $d, 'auto_merged', 'same transfer as line #' . $keep['id']);
+            followup_event($db, (int)$keep['id'], null, 'source', null, 'merged line #' . $d['id'] . ' (same transfer and day)');
+            if ($keep['owner_user_id'] === null && $d['owner_user_id'] !== null) {
+                $db->prepare("UPDATE booking_followups SET owner_user_id = ? WHERE id = ?")->execute([(int)$d['owner_user_id'], (int)$keep['id']]);
+                followup_event($db, (int)$keep['id'], null, 'owner', null, $d['owner_user_id']);
+            }
+        }
+        // Per-day keys: the line's own key and the SafariCheck / Claude check entries.
+        $rid = (int)$keep['request_id'];
+        $per = ['safaricheck' => followup_transfer_key('safaricheck', $rid, $aud, $keep['service_date']),
+                'claude_check' => followup_transfer_key('ck', $rid, $aud, $keep['service_date'])];
+        foreach ($per as $t => $k) if (isset($src[$t])) $src[$t]['key'] = $k;
+        $own = FU_TYPE_SOURCE[$keep['type']] ?? '';
+        $newKey = isset($per[$own]) && $per[$own] !== $keep['dedupe_key'] && !$taken($per[$own]) ? $per[$own] : $keep['dedupe_key'];
+        $db->prepare("UPDATE booking_followups SET dedupe_key = ?, sources = ?, service_key = ? WHERE id = ?")
+           ->execute([$newKey, followup_sources_json($src), followup_service_key($keep), (int)$keep['id']]);
+    }
+}
+
+/**
+ * "Word ≠ Excel" lines to the seller (handoff §3): open SafariCheck lines with an FU_SALES_SC_ISSUES issue become
+ * audience sales, owner = the seller (followup_seller_owner()). On a group not closed they close (no pax / Word checks).
+ */
+function followup_sales_reassign(PDO $db): void {
+    require_once __DIR__ . '/../../leads/dropbox_helper.php';
+    $rowOf = [];
+    foreach (ck_tracker_rows($db) as $r) foreach ($r['reqs'] as $q) $rowOf[(int)$q['id']] = $r;
+    $in = implode(',', array_map(fn($i) => $db->quote($i), FU_SALES_SC_ISSUES));
+    foreach ($db->query("SELECT * FROM booking_followups WHERE closed_at IS NULL AND type = 'safaricheck' AND issue IN ($in)")->fetchAll(PDO::FETCH_ASSOC) as $l) {
+        $row = $rowOf[(int)$l['request_id']] ?? null;
+        if ($row && !empty($row['is_group']) && empty($row['group_closed_at'])) {
+            followup_close_line($db, $l, 'auto_resolved', 'group not closed: no pax / Word checks');
+            continue;
+        }
+        if (($l['audience'] ?? null) === 'sales') continue;
+        $owner = $row ? followup_seller_owner($db, $row, (int)$l['request_id']) : null;
+        $db->prepare("UPDATE booking_followups SET audience = 'sales', owner_user_id = ? WHERE id = ?")->execute([$owner, (int)$l['id']]);
+        followup_event($db, (int)$l['id'], null, 'audience', $l['audience'] ?? 'booking', 'sales (Word ≠ Excel → the seller)');
+        if ((string)$owner !== (string)$l['owner_user_id']) followup_event($db, (int)$l['id'], null, 'owner', $l['owner_user_id'], $owner);
     }
 }
 
@@ -1014,7 +1232,8 @@ function followup_apply(PDO $db, string $type, array $cand, array $scope, bool $
         $st->execute([$type]);
     }
     $have = [];
-    foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) $have[$r['dedupe_key']] = $r;
+    // A line merged into another one (auto_merged) answers through the line it joined (its sources), not itself.
+    foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) if ($r['close_reason'] !== 'auto_merged') $have[$r['dedupe_key']] = $r;
     // Lines of other checks this source was merged into, by the key it reported them with.
     if (!isset($scope['only_folder'])) {
         $st = $db->prepare("SELECT * FROM booking_followups WHERE type <> ? AND sources LIKE ?" . $inOnly);
@@ -1037,7 +1256,8 @@ function followup_apply(PDO $db, string $type, array $cand, array $scope, bool $
     $logged = ['issue', 'doc_status_text', 'expiry_date', 'source_file', 'service_date'];
     $srcLabel = fn(array $l) => $tag . ': ' . followup_issue_label((string)$l['issue']) . (!empty($l['doc_status_text']) ? ' — ' . mb_substr((string)$l['doc_status_text'], 0, 200) : '');
     // Not re-opened: not relevant (admin), trip ended, and a group the booking team closed (they finalise it).
-    $mayReopen = fn(array $old) => $old['closed_at'] !== null && $old['staff_status'] !== 'not_relevant' && $old['close_reason'] !== 'auto_trip_ended'
+    $mayReopen = fn(array $old) => $old['closed_at'] !== null && $old['staff_status'] !== 'not_relevant'
+                                   && !in_array($old['close_reason'], ['auto_trip_ended', 'auto_request_cancelled', 'auto_merged'], true)
                                    && !($old['type'] === 'group' && $old['close_reason'] === 'manual');
     $reopenSql = function (array $old, array &$set) {
         $set[] = 'closed_at = NULL'; $set[] = 'closed_by = NULL'; $set[] = 'close_reason = NULL';
@@ -1563,7 +1783,15 @@ function followup_ck_upsert(PDO $db, int $requestId, array $ckRow, array $findin
         if ($stype !== '' && !in_array($stype, FU_SERVICE_TYPES, true)) { $errors[] = ['finding' => $i, 'error' => 'service_type must be ' . implode(', ', FU_SERVICE_TYPES)]; continue; }
         $svc = mb_substr(trim(followup_strip_passport((string)($f['service'] ?? ''))), 0, 255);
         $sd = $date($f['service_date'] ?? null);
-        $key = followup_key_fit('CK|' . $requestId . '|' . $aud . '|' . $issue . '|' . ($sd ?? '') . '|' . substr(followup_norm($svc), 0, 80));
+        // One line per transfer and day (11 Nov 2026): the transfer findings of the same date are merged.
+        $isTransfer = $sd && ($stype === 'transfer' || ($stype === '' && followup_service_type(['issue' => $issue, 'service' => $svc, 'type' => 'ck']) === 'transfer'));
+        $key = $isTransfer ? followup_transfer_key('ck', $requestId, $aud, $sd)
+                           : followup_key_fit('CK|' . $requestId . '|' . $aud . '|' . $issue . '|' . ($sd ?? '') . '|' . substr(followup_norm($svc), 0, 80));
+        if ($isTransfer && isset($cand[$key])) {
+            $cand[$key]['doc_status_text'] = mb_substr($cand[$key]['doc_status_text'] . ' | ' . $text, 0, 500);
+            if ($svc !== '') $cand[$key]['service'] = mb_substr(($cand[$key]['service'] ? $cand[$key]['service'] . ' + ' : '') . $svc, 0, 255);
+            continue;
+        }
         if (isset($cand[$key])) { $errors[] = ['finding' => $i, 'error' => 'same audience / issue / service_date / service as finding ' . $cand[$key]['_i'] . ' — merged into it']; continue; }
         $cand[$key] = ['_i' => $i, 'type' => 'ck', 'audience' => $aud, 'dedupe_key' => $key, 'request_id' => $requestId,
                        'folder' => $ckRow['folder_name'], 'start_date' => $ckRow['start_date'], 'end_date' => $ckRow['end_date'],
@@ -1706,9 +1934,12 @@ function followup_sc_key(int $requestId, string $scKey): string {
     return followup_key_fit('SC|' . $requestId . '|' . substr(followup_norm($scKey), 0, 150));
 }
 
-/** The request owning a CK folder's lines: the first one (a GRP's group lines belong to its first request too). */
+/**
+ * The request owning a CK folder's lines (a GRP's group lines too): the first of ck_reqs_sorted() — an active request
+ * before a Cancelled / Lost one linked to the same folder, then the lowest id.
+ */
 function followup_ck_row_request(array $ckRow): ?int {
-    return $ckRow['reqs'] ? min(array_map(fn($q) => (int)$q['id'], $ckRow['reqs'])) : null;
+    return $ckRow['reqs'] ? (int)ck_reqs_sorted($ckRow['reqs'])[0]['id'] : null;
 }
 
 /**
@@ -1720,19 +1951,77 @@ function followup_ck_row_request(array $ckRow): ?int {
 function followup_safaricheck_sync(PDO $db, array $ckRow, array $checks, array $facts, bool $confirm = true, ?string $today = null): array {
     $rid = followup_ck_row_request($ckRow);
     if (!$rid || $ckRow['other']) return followup_sum_init();
+    // A group not closed yet (_PROVISIONAL block, Il Diamante before closing): rooms are still being sold, no pax / Word checks.
+    $openGroup = !empty($ckRow['is_group']) && empty($ckRow['group_closed_at']);
+    $seller = null; $sellerDone = false;
     $cand = [];
     foreach (ck_sc_booking_points($checks, $facts) as $p) {
-        $key = followup_sc_key($rid, $p['key']);
-        $cand[$key] = ['type' => 'safaricheck', 'audience' => 'booking', 'dedupe_key' => $key, 'request_id' => $rid,
+        $sales = in_array($p['issue'], FU_SALES_SC_ISSUES, true);
+        if ($sales && $openGroup) continue;
+        $text = mb_substr(trim(preg_replace('/\s+/', ' ', $p['detail'] !== '' ? $p['detail'] : $p['title'])), 0, 500);
+        // One line per transfer and day: the points of the same date become one candidate.
+        $transfer = $p['service_type'] === 'transfer' && !empty($p['service_date']);
+        $key = $transfer ? followup_transfer_key('safaricheck', $rid, 'booking', $p['service_date']) : followup_sc_key($rid, $p['key']);
+        if ($transfer && isset($cand[$key])) {
+            $c = &$cand[$key];
+            $c['service'] = mb_substr($c['service'] . ' + ' . $p['title'], 0, 255);
+            $c['doc_status_text'] = mb_substr($c['doc_status_text'] . ' | ' . $text, 0, 500);
+            $d = json_decode($c['details'], true);
+            $d['sc_keys'][] = $p['key'];
+            if ($p['status'] === 'red') $d['sc_status'] = 'red';
+            $c['details'] = json_encode($d, JSON_UNESCAPED_UNICODE);
+            unset($c);
+            continue;
+        }
+        if ($sales && !$sellerDone) { $seller = followup_seller_owner($db, $ckRow, $rid); $sellerDone = true; }
+        $cand[$key] = ['type' => 'safaricheck', 'audience' => $sales ? 'sales' : 'booking', 'dedupe_key' => $key, 'request_id' => $rid,
                        'folder' => $ckRow['folder_name'], 'start_date' => $ckRow['start_date'], 'end_date' => $ckRow['end_date'],
                        'service_date' => $p['service_date'], 'supplier' => $p['supplier'] ? mb_substr($p['supplier'], 0, 150) : null,
                        'supplier_ref' => null, 'service' => mb_substr($p['title'], 0, 255), 'source_file' => null, 'issue' => $p['issue'],
-                       'doc_status_text' => mb_substr(trim(preg_replace('/\s+/', ' ', $p['detail'] !== '' ? $p['detail'] : $p['title'])), 0, 500),
+                       'doc_status_text' => $text,
                        'expiry_date' => null, 'booked_by' => null, 'service_type' => $p['service_type'],
-                       'details' => json_encode(['sc_key' => $p['key'], 'sc_status' => $p['status'], 'section' => $p['section'],
-                                                 'check_id' => !empty($ckRow['last_check_id']) ? (int)$ckRow['last_check_id'] : null], JSON_UNESCAPED_UNICODE)];
+                       'details' => json_encode(['sc_key' => $p['key'], 'sc_keys' => [$p['key']], 'sc_status' => $p['status'], 'section' => $p['section'],
+                                                 'check_id' => !empty($ckRow['last_check_id']) ? (int)$ckRow['last_check_id'] : null], JSON_UNESCAPED_UNICODE)]
+                     + ($sales ? ['owner_user_id' => $seller] : []);
     }
     return followup_apply($db, 'safaricheck', $cand, ['requests' => [$rid], 'only' => [$rid]], $confirm, 'agent', $today ?? date('Y-m-d'));
+}
+
+/** dedupe_key of a transfer line of a check: one per request, day (and audience for the Claude check). */
+function followup_transfer_key(string $type, int $requestId, string $audience, string $date): string {
+    return $type === 'ck' ? followup_key_fit('CK|' . $requestId . '|' . ($audience ?: 'booking') . '|transfer|' . $date)
+                          : followup_key_fit('SC|' . $requestId . '|transfer|' . $date);
+}
+
+/** Program language of a request for the seller split: 'it', or 'en' for any other language; no ITI program → 'it'. */
+function followup_request_lang(PDO $db, int $requestId): string {
+    try {
+        $st = $db->prepare("SELECT display_language FROM iti_programs WHERE lead_request_id = ? ORDER BY (stage = 'final') DESC, id DESC LIMIT 1");
+        $st->execute([$requestId]);
+        $l = $st->fetchColumn();
+        if ($l !== false && $l !== null && $l !== '') return $l === 'it' ? 'it' : 'en';
+    } catch (Throwable $e) {}   // ITI tables missing: default
+    return 'it';
+}
+
+/**
+ * Owner of a "Word ≠ Excel" line: the seller in the folder tag (ck_seller_names(), last first; "-Roberto" → Roberto),
+ * with the sellers who left split by the client's language (FU_SELLER_BY_LANG) and FU_SELLER_ASK left without owner.
+ * No seller in the tag → the CK owner of the folder. → user id or null.
+ */
+function followup_seller_owner(PDO $db, array $ckRow, int $requestId): ?int {
+    foreach (ck_seller_names((string)($ckRow['folder_name'] ?? '')) as $n) {
+        $k = strtolower($n);
+        if (in_array($k, FU_SELLER_ASK, true)) return null;
+        if (isset(FU_SELLER_BY_LANG[$k])) {
+            $map = FU_SELLER_BY_LANG[$k];
+            $u = ck_seller_user($db, $map[followup_request_lang($db, $requestId)] ?? $map['it']);
+            return $u ? (int)$u['id'] : null;
+        }
+        if ($u = ck_seller_user($db, $n)) return (int)$u['id'];
+    }
+    $o = ck_owners_resolve($db, $ckRow);
+    return $o['ck_owner'] ? (int)$o['ck_owner']['user_id'] : null;
 }
 
 /**
@@ -1749,7 +2038,18 @@ function followup_safaricheck_confirmed(PDO $db, array $ckRow, string $scKey, st
     $n = 0;
     foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $l) {
         $src = followup_sources($l);
-        if (($src['safaricheck']['key'] ?? null) !== $key) continue;
+        if (($src['safaricheck']['key'] ?? null) !== $key) {
+            // A transfer line holds every SafariCheck point of its day (details.sc_keys): it leaves when the last one is ticked.
+            $d = json_decode((string)($l['details'] ?? ''), true) ?: [];
+            if (!isset($src['safaricheck']) || !in_array($scKey, (array)($d['sc_keys'] ?? []), true)) continue;
+            $d['sc_keys'] = array_values(array_diff((array)$d['sc_keys'], [$scKey]));
+            if ($d['sc_keys']) {
+                $db->prepare("UPDATE booking_followups SET details = ? WHERE id = ?")->execute([json_encode($d, JSON_UNESCAPED_UNICODE), (int)$l['id']]);
+                followup_event($db, (int)$l['id'], null, 'source', null, 'one SafariCheck point confirmed by ' . $by . ' — ' . count($d['sc_keys']) . ' still open');
+                $n++;
+                continue;
+            }
+        }
         unset($src['safaricheck']);
         if ($src) {
             $db->prepare("UPDATE booking_followups SET sources = ? WHERE id = ?")->execute([followup_sources_json($src), (int)$l['id']]);
@@ -1893,6 +2193,8 @@ function followup_rows(PDO $db, array $f = [], ?string $today = null): array {
         if (!empty($f['due_before']) && (!$r['due_date'] || $r['due_date'] > $f['due_before'])) continue;
         $out[] = $r;
     }
+    followup_mark_waiting_flight($db, $out);
+    if (!empty($f['priority'])) $out = array_values(array_filter($out, fn($r) => $r['priority'] === $f['priority'] || substr($r['priority'], 0, 1) === (string)$f['priority']));
     // The booking-check report (sent with the ck lines) on every line of the booking.
     $rep = [];
     foreach ($out as $r) if ($r['report_url'] && $r['request_id'] && !isset($rep[$r['request_id']])) $rep[$r['request_id']] = [$r['report_url'], $r['report_open_url']];
@@ -1900,6 +2202,38 @@ function followup_rows(PDO $db, array $f = [], ?string $today = null): array {
     unset($r);
     usort($out, 'followup_sort');
     return $out;
+}
+
+/**
+ * Transfers without the client's flight (handoff §5): a transfer can't be booked before the flight time is known. An open
+ * transfer line of a booking with an open "client flights missing" line (Claude check, owner the CK owner) on the same
+ * day — or, when that line has no date, on the first / last day of the trip — is shown as waiting for the flight:
+ * no deadline, normal priority (not a booking-team delay), text and `waiting_flight` pointing at that line.
+ */
+function followup_mark_waiting_flight(PDO $db, array &$out): void {
+    $miss = [];
+    foreach ($db->query("SELECT b.id, b.request_id, b.service_date, u.full_name, u.username FROM booking_followups b
+                         LEFT JOIN users u ON u.id = b.owner_user_id
+                         WHERE b.closed_at IS NULL AND b.issue = 'client_flights_missing' AND b.request_id IS NOT NULL")->fetchAll(PDO::FETCH_ASSOC) as $m) {
+        $miss[(int)$m['request_id']][] = $m;
+    }
+    if (!$miss) return;
+    foreach ($out as &$r) {
+        if ($r['closed_at'] !== null || $r['service_type'] !== 'transfer' || !$r['request_id'] || !isset($miss[$r['request_id']])) continue;
+        $day = $r['service_date'];
+        foreach ($miss[$r['request_id']] as $m) {
+            $hit = $m['service_date'] ? $m['service_date'] === $day : ($day && in_array($day, [$r['start_date'], $r['end_date']], true));
+            if (!$hit) continue;
+            $who = $m['full_name'] ?: $m['username'];
+            $r['waiting_flight'] = ['line_id' => (int)$m['id'], 'owner' => $who];
+            $r['priority'] = '3-NORMAL';
+            $r['due_date'] = null; $r['due_days'] = null;
+            $r['due_reason'] = 'waiting for the client flight (line #' . $m['id'] . ')';
+            $r['doc_status_text'] = 'Waiting for the client\'s flight (line #' . $m['id'] . ($who ? ', ' . $who : '') . ') — ' . (string)$r['doc_status_text'];
+            break;
+        }
+    }
+    unset($r);
 }
 
 /**

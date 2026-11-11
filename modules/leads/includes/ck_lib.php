@@ -350,6 +350,28 @@ function ck_record_rename(PDO $db, string $oldName, string $newName, ?int $userI
  * missing). The CK tracker page and the Agent API (ck_status) filter this list.
  * Needs dropbox_helper.php (dropbox_folder_stem).
  */
+const CK_REQ_CLOSED = ['Cancelled', 'Lost'];
+
+/** A request that still counts (not Cancelled / Lost). Rows without a status count. */
+function ck_req_active(array $q): bool {
+    return !in_array((string)($q['status'] ?? ''), CK_REQ_CLOSED, true);
+}
+
+/**
+ * The requests of a folder, the one owning its lines first: active before Cancelled / Lost, then the lowest id
+ * (GRP0101, 11 Nov 2026: a cancelled duplicate still linked to the folder must not own the group lines).
+ */
+function ck_reqs_sorted(array $reqs): array {
+    usort($reqs, fn($a, $b) => [!ck_req_active($a), (int)$a['id']] <=> [!ck_req_active($b), (int)$b['id']]);
+    return $reqs;
+}
+
+/** True when another active request shares the folder of a Cancelled / Lost one. */
+function ck_reqs_has_active(array $reqs): bool {
+    foreach ($reqs as $q) if (ck_req_active($q)) return true;
+    return false;
+}
+
 function ck_tracker_rows(PDO $db): array {
     ck_ensure_schema($db);
     $folders = $db->query("SELECT f.*, u.full_name AS ck_by_name, gu.full_name AS group_closed_by_name,
@@ -371,7 +393,7 @@ function ck_tracker_rows(PDO $db): array {
 
     // Requests per folder: a private safari by practice_code, a GRP by group_folder.
     $byPc = []; $byGrp = [];
-    $rq = $db->query("SELECT r.id, r.customer_name, r.practice_code, r.group_folder, r.dropbox_url, r.pax, r.agent_id, a.name AS agent_name
+    $rq = $db->query("SELECT r.id, r.customer_name, r.practice_code, r.group_folder, r.dropbox_url, r.pax, r.agent_id, r.status, a.name AS agent_name
                       FROM requests r LEFT JOIN agents a ON a.id = r.agent_id
                       WHERE (r.group_folder IS NOT NULL AND r.group_folder <> '')
                          OR r.dropbox_url LIKE '%001_Safari%'");
@@ -391,7 +413,7 @@ function ck_tracker_rows(PDO $db): array {
     $rows = [];
     foreach ($folders as $f) {
         $key  = mb_strtolower($f['folder_name']);
-        $reqs = $byGrp[$key] ?? $byPc[$key] ?? $byStem[dropbox_folder_stem($f['folder_name'])] ?? [];
+        $reqs = ck_reqs_sorted($byGrp[$key] ?? $byPc[$key] ?? $byStem[dropbox_folder_stem($f['folder_name'])] ?? []);
         // Sales person: the request's agent when all matched requests agree, else the folder's (…) tag.
         $reqAgents = array_values(array_unique(array_filter(array_map(fn($q) => (string)($q['agent_name'] ?? ''), $reqs))));
         $agent = count($reqAgents) === 1 ? $reqAgents[0] : ck_agent_from_name($f['folder_name']);
@@ -823,8 +845,7 @@ function ck_owners_refresh_auto(PDO $db, array &$rows, float $budget): int {
         if ($r['other'] || !$r['reqs'] || ($r['to_arrival'] !== null && $r['to_arrival'] < 0)) continue;
         if ($r['booking_owner_auto_at'] !== null && $r['booking_owner_auto_at'] > $stale) continue;
         if (microtime(true) > $deadline) break;
-        $req = $r['reqs'][0];
-        foreach ($r['reqs'] as $q) if ((int)$q['id'] < (int)$req['id']) $req = $q;
+        $req = $r['reqs'][0];                                   // ck_reqs_sorted(): active first, lowest id
         $c = ops_calc_safe($db, $req);
         if ($c['status'] === 'error') continue;                 // Dropbox: try again next time
         $g = $c['status'] === 'ok' ? ck_booking_owner_from_calc($db, $c['days']) : ['user' => null, 'text' => ''];

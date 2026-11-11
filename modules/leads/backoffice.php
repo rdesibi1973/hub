@@ -621,6 +621,21 @@ if ($rows) {
     } catch (Throwable $e) { $existingGrps = []; }
 }
 
+// Two requests on the same booking folder (GRP0101, 11 Nov 2026: a cancelled duplicate kept the folder and owned the
+// group's follow-up lines). Confirmed folders only; an imported group (practice_code = group_folder) is one folder by design.
+$sameFolder = [];
+try {
+    $sameFolder = $db->query(
+        "SELECT MIN(practice_code) AS folder, MIN(group_folder) AS grp,
+                GROUP_CONCAT(CONCAT(id, '|', COALESCE(status, ''), '|', COALESCE(customer_name, '')) ORDER BY id SEPARATOR '\n') AS reqs
+         FROM requests
+         WHERE practice_code IS NOT NULL AND TRIM(practice_code) <> '' AND dropbox_url LIKE '%001_Safari%'
+           AND (group_folder IS NULL OR TRIM(group_folder) <> TRIM(practice_code))
+         GROUP BY LOWER(TRIM(practice_code)), LOWER(TRIM(COALESCE(group_folder, '')))
+         HAVING COUNT(*) > 1 AND SUM(COALESCE(status, '') NOT IN ('Cancelled', 'Lost')) >= 1"
+    )->fetchAll(PDO::FETCH_ASSOC);
+} catch (Throwable $e) { $sameFolder = []; }   // the warning is optional
+
 $extra_css = '
 .bo-note{background:#EAF1F8;border-left:4px solid #1a3a5c;padding:12px 16px;border-radius:8px;font-size:.85rem;color:#1a3a5c;margin-bottom:18px}
 .bo-table{width:100%;border-collapse:collapse}
@@ -658,6 +673,22 @@ include 'includes/header.php';
     <a href="request_add.php" class="btn btn-red btn-sm" title="Create a new request">＋ New Request</a>
   </div>
 </div>
+
+<?php if ($sameFolder): ?>
+<div class="bo-note" style="background:#fcf3e3;border-left-color:#c77c02;color:#6b4a0b">
+  <b>⚠ Two requests on the same folder</b> — keep the folder on the right request only (a cancelled duplicate should not
+  keep it: the Booking follow-up and the CK would use the wrong request).
+  <ul style="margin:6px 0 0 18px;padding:0">
+  <?php foreach ($sameFolder as $sf): ?>
+    <li><span class="bo-folder"><?= h(($sf['grp'] ? $sf['grp'] . '/' : '') . $sf['folder']) ?></span> —
+      <?php foreach (explode("\n", (string)$sf['reqs']) as $i => $rq): [$rid, $rst, $rname] = array_pad(explode('|', $rq, 3), 3, ''); ?>
+        <?= $i ? ', ' : '' ?><a href="request_view.php?id=<?= (int)$rid ?>" target="_blank">#<?= (int)$rid ?> <?= h($rname) ?></a> (<?= h($rst ?: '—') ?>)
+      <?php endforeach; ?>
+    </li>
+  <?php endforeach; ?>
+  </ul>
+</div>
+<?php endif; ?>
 
 <form method="GET" class="filters">
   <div>
