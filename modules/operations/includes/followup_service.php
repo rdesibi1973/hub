@@ -635,7 +635,11 @@ function followup_group_lines(string $name, string $kind, array $trip, ?array $c
                 'sold' => $sold, 'client_folders' => $members, 'blocks' => $blocks, 'provisional' => $open, 'names_tba' => $tba,
                 'documents' => count($docs), 'documents_not_read' => $unread];
     $k = followup_key_fit($key . '|finalize');
-    $lines[$k] = $base + ['dedupe_key' => $k, 'service' => 'Group to finalize',
+    // GRP closed with the RECAP already matching the client sheets (pax RECAP = sold): nothing left to finalize here —
+    // the provisional supplier documents have their own lines (Roberto, 11 Nov 2026).
+    $recapOk = $kind === 'grp' && $calc && $calc['recap'] && $calc['clients'] && $calc['pax_total'] !== null
+               && (int)$calc['pax_total'] === (int)array_sum(array_column($calc['clients'], 'pax'));
+    if (!$recapOk) $lines[$k] = $base + ['dedupe_key' => $k, 'service' => 'Group to finalize',
         'source_file' => $calc ? $calc['file'] : null, 'issue' => 'group_to_finalize', 'doc_status_text' => substr($summary, 0, 255),
         'expiry_date' => $exp, 'details' => json_encode($details, JSON_UNESCAPED_UNICODE)];
 
@@ -703,8 +707,18 @@ function followup_group_candidates(PDO $db, string $today, string $token, bool $
             $reqs[dropbox_folder_stem_safe($m[1])][] = $r;
         }
     }
-    $lines = []; $errors = []; $names = [];
+    // GRP folders not marked "group closed" on the CK tracker: the pax are not final yet, so no group line (Roberto,
+    // 11 Nov 2026); they still count as checked, so their open lines close (auto_resolved) and come back once closed.
+    $closed = [];
+    foreach ($db->query("SELECT folder_name, group_closed_at FROM ck_folders WHERE gone = 0")->fetchAll(PDO::FETCH_ASSOC) as $f) {
+        $closed[dropbox_folder_stem_safe((string)$f['folder_name'])] = $f['group_closed_at'] !== null;
+    }
+    $lines = []; $errors = []; $names = []; $waiting = [];
     foreach ($folders as $name => $g) {
+        if ($g['kind'] === 'grp' && empty($closed[dropbox_folder_stem_safe($name)])) {
+            if (!$requestId) { $names[] = $name; $waiting[] = $name; }
+            continue;
+        }
         $owner = ck_reqs_sorted($reqs[dropbox_folder_stem_safe($name)] ?? [])[0] ?? null;   // active first, then lowest id
         if ($requestId && (!$owner || !in_array($requestId, array_map(fn($r) => (int)$r['id'], $reqs[dropbox_folder_stem_safe($name)] ?? []), true))) continue;
         $dir = CK_BASE . '/' . $name;
@@ -720,7 +734,7 @@ function followup_group_candidates(PDO $db, string $today, string $token, bool $
             $errors[] = ['folder' => $name, 'error' => $e->getMessage()];
         }
     }
-    return ['lines' => $lines, 'groups' => $names, 'errors' => $errors, 'complete' => !$errors && !$requestId];
+    return ['lines' => $lines, 'groups' => $names, 'waiting' => $waiting, 'errors' => $errors, 'complete' => !$errors && !$requestId];
 }
 
 // ── One list: sources, same service, deadlines, default owners ───────────────
@@ -1587,7 +1601,10 @@ function followup_apply(PDO $db, string $type, array $cand, array $scope, bool $
         if (($old['end_date'] ?: $old['start_date']) && ($old['end_date'] ?: $old['start_date']) < $today) $reason = 'auto_trip_ended';
         elseif ($type === 'supplier' && isset($scope['confirmed'][$key])) $reason = 'auto_confirmed';
         elseif ($type === 'ticket' && isset($scope['ok'][$rid])) $reason = 'auto_ticket_saved';
-        elseif ($type === 'group' && !empty($scope['complete_type'])) $reason = 'auto_not_found';   // folder renamed / cancelled / moved
+        // A group folder still checked whose line is no longer due (not closed yet, RECAP = sold): resolved; else the
+        // folder was renamed / cancelled / moved.
+        elseif ($type === 'group' && isset($scope['groups_seen'][$old['folder']])) $reason = 'auto_resolved';
+        elseif ($type === 'group' && !empty($scope['complete_type'])) $reason = 'auto_not_found';
         elseif ($type === 'ck' || $type === 'safaricheck') { if (isset($done[$rid])) $reason = 'auto_resolved'; }   // the new check of the booking no longer reports it
         elseif ($type === 'manual') $reason = null;                                                     // staff close their own lines
         elseif (isset($done[$rid]) && ($type === 'supplier'
@@ -1735,9 +1752,10 @@ function followup_scan(PDO $db, array $o = []): array {
         $token = $token ?? cp_retry(fn() => dropbox_get_access_token());
         $g = followup_group_candidates($db, $today, $token, $reader !== null, microtime(true) + (float)($o['budget'] ?? FU_SCAN_BUDGET), $rid);
         $owners = array_values(array_unique(array_filter(array_map(fn($l) => $l['request_id'], $g['lines']))));
-        $sum = followup_apply($db, 'group', $g['lines'], ['complete_type' => $g['complete'], 'only' => $rid ? ($owners ?: [0]) : null],
+        $sum = followup_apply($db, 'group', $g['lines'], ['complete_type' => $g['complete'], 'only' => $rid ? ($owners ?: [0]) : null,
+                                                          'groups_seen' => array_flip($g['groups'])],
                               $confirm, 'server', $today);
-        $out['group'] = $sum + ['groups' => $g['groups'], 'window' => [$today, date('Y-m-d', strtotime($today . ' +' . FU_GROUP_DAYS . ' days'))],
+        $out['group'] = $sum + ['groups' => $g['groups'], 'waiting_group_closed' => $g['waiting'], 'window' => [$today, date('Y-m-d', strtotime($today . ' +' . FU_GROUP_DAYS . ' days'))],
                                 'errors' => $g['errors']];
         if ($confirm) followup_log_run($db, 'group', $source, $o['user_id'] ?? null, followup_counts($out['group']), !$g['complete'] && !$rid);
     }

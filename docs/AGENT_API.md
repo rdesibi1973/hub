@@ -1645,6 +1645,10 @@ logic `modules/operations/includes/followup_service.php`, documents read by `fol
   ARK-ZNZ in the Calc): seats on the flight invoices vs pax with the flight in their Calc sheet → "seats match", "N seat(s) to
   release", "N pax without a seat"; `expiry_date` = ticketing time limit. The full data is in `details`. A group line
   closed by staff is **not** re-opened by the next check; a group folder no longer found closes as `auto_not_found`.
+  **GRP (11 Nov 2026):** both lines appear only once the group is marked "group closed" on the CK tracker (final pax);
+  before that the scan lists the folder in `waiting_group_closed` and its open lines close as `auto_resolved` (they
+  come back when the group is closed). `group_to_finalize` of a GRP closes by itself (`auto_resolved`) when the RECAP
+  pax equal the sum of the client sheets. Il Diamante / private groups: unchanged.
   PDF facts come from the server reader or from the office PC scan (`followup_upsert` keeps every document sent, also for
   group folders without a confirmed request); the Excel is read on the server.
 - `type: ck` (Oct 2026, migration 073) — findings of the booking check before the CK, sent by `ck_findings_upsert` (see
