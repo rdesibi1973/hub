@@ -50,6 +50,9 @@ $flow = [
      [['Operations', '../operations/index.php']]],
 ];
 $fmtSize = function (int $b) { return $b >= 1048576 ? round($b / 1048576, 1) . ' MB' : max(1, round($b / 1024)) . ' KB'; };
+// Staff notice on company mailboxes (docs/STAFF_NOTICE_MAIL.md): shown only while the PDF is in Dropbox, never a broken link.
+$mailNotice = 'COMPANY EMAIL - WHAT THE OFFICE CHECKS.pdf';
+$hasMailNotice = $list && in_array($mailNotice, array_column($list['pdf'], 'name'), true);
 
 include 'includes/header.php';
 ?>
@@ -72,6 +75,16 @@ include 'includes/header.php';
 .pf-links{font-size:.78rem}
 .pf-links a{margin-right:12px}
 </style>
+
+<?php if ($hasMailNotice): ?>
+<div class="table-wrap" style="margin-bottom:20px;border-left:4px solid #C0211B">
+  <div style="padding:14px 20px">
+    <div style="font-weight:700;margin-bottom:3px">✉️ Company email: what the office checks</div>
+    <div class="pf-text">Please read this notice: what is checked in the company mailboxes, when a thread can be opened, how passports received by email are handled, and your rights.</div>
+    <div class="pf-links"><a href="<?= h(proc_url($mailNotice)) ?>" target="_blank" rel="noopener">Read the notice (PDF) →</a></div>
+  </div>
+</div>
+<?php endif; ?>
 
 <div class="table-wrap" style="margin-bottom:20px">
   <div style="padding:16px 20px 6px">

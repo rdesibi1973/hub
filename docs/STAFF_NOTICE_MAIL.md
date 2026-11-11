@@ -1,10 +1,11 @@
 # Company email: what the office checks
 
-*Draft for the Office Procedures (`/Operations/OfficeProcedures`). To be reviewed by a local lawyer, then given to each
-employee with a signed or written acknowledgement **before** `BOOKING_MAIL_LIVE` is switched on.*
+*Office procedure, Word + PDF (English and Italian) in `/Operations/OfficeProcedures` as "COMPANY EMAIL - WHAT THE OFFICE
+CHECKS" (11 Nov 2026). Give it to each employee with a signed acknowledgement **before** `BOOKING_MAIL_LIVE` is switched on;
+a local lawyer may review it. Change this text and the Word together.*
 
 **Savannah Explorers (Arusha, Tanzania) and Savannah Holidays Ltd (Mauritius)**
-Effective from: ____________ · Questions: ____________
+Effective from: 11 November 2026 · Questions: info@savannahexplorers.com
 
 ## Why
 Company mailboxes are work tools. The company checks them to make sure clients and suppliers are answered and bookings
@@ -36,11 +37,11 @@ private message found by accident is not used.
 
 ## How long
 Headers are kept for 12 months. The text of a thread is displayed when opened and not stored by the Hub. The access
-record is kept for ____ months.
+record is kept for 24 months.
 
 ## Your rights
 You can ask what has been recorded about you and which threads of your mailbox were opened, and you can ask for
-mistakes to be corrected, by writing to ____________.
+mistakes to be corrected, by writing to info@savannahexplorers.com.
 
 ---
 Name: ____________  Date: ____________  Signature: ____________
