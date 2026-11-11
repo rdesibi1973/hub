@@ -28,6 +28,7 @@
   ];
   var params = new URLSearchParams(location.search);
   var state = {tab: params.get('type') === 'ck' ? 'ck' : 'open', owner: '', aud: '', prio: '', supplier: '', month: '', source: params.get('source') || '', q: params.get('q') || '',
+               reason: params.get('close_reason') || '',
                request: params.get('request_id') ? parseInt(params.get('request_id'), 10) : null,
                group: params.get('folder') || '', open: {}};   // GRP member: the group's lines belong to the group's first request
   var $ = function (id) { return document.getElementById(id); };
@@ -73,6 +74,7 @@
     if (state.supplier && (r.supplier || '') !== state.supplier) return false;
     if (state.month && (r.start_date || '').substr(0, 7) !== state.month) return false;
     if (state.source && srcs(r).indexOf(state.source) < 0) return false;
+    if (state.reason && r.closed_at && r.close_reason !== state.reason) return false;   // "Closed as": closed lines only
     if (state.q) {
       var hay = [r.customer, r.folder, r.supplier, r.supplier_ref, r.service, r.notes, r.source_file, r.doc_status_text]
         .concat((r.sources || []).map(function (s) { return s.text; })).join(' ').toLowerCase();
@@ -126,7 +128,7 @@
     });
   }
   function setTab(t) { state.tab = t; }
-  function resetFilters() { state.owner = state.aud = state.prio = state.supplier = state.month = state.source = ''; }
+  function resetFilters() { state.owner = state.aud = state.prio = state.supplier = state.month = state.source = state.reason = ''; }
   function renderTabs() {
     var box = $('fu-tabs');
     box.innerHTML = '';
@@ -163,6 +165,9 @@
     var src = {};
     rows.forEach(function (r) { srcs(r).forEach(function (t) { src[t] = 1; }); });
     fillSelect('fu-f-src', [['', 'All']].concat(Object.keys(src).sort().map(function (k) { return [k, (D.source_labels || {})[k] || k]; })), state.source);
+    var rs = {};
+    rows.forEach(function (r) { if (r.closed_at && r.close_reason) rs[r.close_reason] = 1; });
+    fillSelect('fu-f-reason', [['', 'All']].concat(Object.keys(rs).sort().map(function (k) { return [k, (D.reason_labels || {})[k] || k]; })), state.reason);
     $('fu-f-prio').value = state.prio;
     $('fu-f-aud').value = state.aud;
     $('fu-f-q').value = state.q;
@@ -452,7 +457,8 @@
   });
 
   // Filters
-  [['fu-f-owner', 'owner'], ['fu-f-aud', 'aud'], ['fu-f-prio', 'prio'], ['fu-f-supplier', 'supplier'], ['fu-f-month', 'month'], ['fu-f-src', 'source']].forEach(function (p) {
+  [['fu-f-owner', 'owner'], ['fu-f-aud', 'aud'], ['fu-f-prio', 'prio'], ['fu-f-supplier', 'supplier'], ['fu-f-month', 'month'], ['fu-f-src', 'source'],
+   ['fu-f-reason', 'reason']].forEach(function (p) {
     $(p[0]).addEventListener('change', function () { state[p[1]] = this.value; render(); });
   });
   $('fu-f-q').addEventListener('input', function () { state.q = this.value.trim(); renderTabs(); renderTable(); });

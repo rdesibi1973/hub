@@ -166,6 +166,8 @@ function bo_do_rename(PDO $db, string $token, array $r, bool $isGrp,
             else                                              $upd->execute([$newFolder, $code, $subUrl, (int)$g['id']]);
             $n++;
         }
+        // Cancelled group: the Booking follow-up lines of the group and of its members close at once (auto_cancelled).
+        if (folder_is_cancelled($newFolder)) folder_followup_cancelled($db, null, $newFolder, 'group folder renamed ' . $newFolder);
         return ['ok' => true, 'msg' => '✔ Group "' . $newFolder . '": renamed (' . $n . ' booking(s) updated).',
                 'old_path' => $curPath, 'new_path' => $newPath];
     }
@@ -177,6 +179,10 @@ function bo_do_rename(PDO $db, string $token, array $r, bool $isGrp,
     } else {
         $db->prepare("UPDATE requests SET practice_code=?, dropbox_url=? WHERE id=?")
            ->execute([$newFolder, $newUrl, (int)$r['id']]);
+    }
+    // Cancelled trip: its Booking follow-up lines close at once (auto_cancelled).
+    if (folder_is_cancelled($newFolder) || ($setStatus && $newStatus === 'Cancelled')) {
+        folder_followup_cancelled($db, (int)$r['id'], $newFolder, 'folder renamed ' . $newFolder);
     }
     return ['ok' => true, 'msg' => '✔ ' . $r['customer_name'] . ': renamed to "' . $newFolder . '".',
             'old_path' => $curPath, 'new_path' => $newPath];

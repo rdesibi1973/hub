@@ -3215,13 +3215,14 @@ try {
         if (!empty($in['type']) && !in_array($in['type'], FU_TYPES, true)) agent_fail('type must be ' . implode(', ', FU_TYPES));
         if (!empty($in['audience']) && !in_array($in['audience'], FU_AUDIENCES, true)) agent_fail('audience must be ' . implode(', ', FU_AUDIENCES));
         if (!empty($in['source']) && !in_array($in['source'], FU_TYPE_SOURCE, true)) agent_fail('source must be ' . implode(', ', FU_TYPE_SOURCE));
+        if (!empty($in['close_reason']) && !in_array($in['close_reason'], FU_REASONS, true)) agent_fail('close_reason must be ' . implode(', ', FU_REASONS));
         $dueBefore = trim((string)($in['due_before'] ?? '')) !== '' ? agent_iso_date($in['due_before'], 'due_before') : null;
         if ((int)($in['request_id'] ?? 0) > 0) $agentReqId = agent_request($db, $in['request_id'])['id'];
         $rows = followup_rows($db, ['status' => $status, 'type' => $in['type'] ?? null, 'audience' => $in['audience'] ?? null, 'owner' => $in['owner'] ?? '',
                                     'priority' => $in['priority'] ?? null, 'request_id' => $in['request_id'] ?? null, 'q' => $in['q'] ?? null,
-                                    'source' => $in['source'] ?? null, 'due_before' => $dueBefore]);
+                                    'source' => $in['source'] ?? null, 'due_before' => $dueBefore, 'close_reason' => $in['close_reason'] ?? null]);
         $runs = followup_last_runs($db);
-        agent_out(['ok' => true, 'count' => count($rows), 'last_check_at' => ['supplier' => $runs['supplier']['at'] ?? null, 'ticket' => $runs['ticket']['at'] ?? null],
+        agent_out(['ok' => true, 'count' => count($rows), 'close_reasons' => FU_REASON_LABELS, 'last_check_at' => ['supplier' => $runs['supplier']['at'] ?? null, 'ticket' => $runs['ticket']['at'] ?? null],
                    'last_checks' => $runs, 'rows' => $rows]);
     }
 

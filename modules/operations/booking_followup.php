@@ -157,6 +157,7 @@ include __DIR__ . '/../../includes/layout_header.php';
     <div><label for="fu-f-supplier">Supplier</label><select id="fu-f-supplier"></select></div>
     <div><label for="fu-f-src">Found by</label><select id="fu-f-src"></select></div>
     <div><label for="fu-f-month">Trip month</label><select id="fu-f-month"></select></div>
+    <div><label for="fu-f-reason">Closed as</label><select id="fu-f-reason" title="Closed lines only (tab Closed)"></select></div>
     <div><label for="fu-f-q">Search</label><input type="search" id="fu-f-q" placeholder="Client, folder, ref…"></div>
     <span class="fu-chip" id="fu-f-req" hidden></span>
   </div>

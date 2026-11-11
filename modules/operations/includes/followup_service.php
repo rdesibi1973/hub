@@ -53,8 +53,8 @@ const FU_GROUP_DAYS       = 60;         // group check: arrivals in the next N d
 const FU_ISSUES  = ['provisional', 'provisional_expired', 'on_request', 'orangi_rooms_provisional', 'ticket_missing', 'unreadable',
                     'group_to_finalize', 'group_znz_flight'];
 const FU_STATUSES = ['open', 'in_progress', 'problem', 'resolved', 'not_relevant'];
-const FU_REASONS = ['auto_confirmed', 'auto_ticket_saved', 'auto_trip_ended', 'auto_not_found', 'auto_resolved', 'auto_request_cancelled', 'auto_merged', 'manual'];
-const FU_REASON_ENUM = "ENUM('auto_confirmed','auto_ticket_saved','auto_trip_ended','auto_not_found','auto_resolved','auto_request_cancelled','auto_merged','manual')";
+const FU_REASONS = ['auto_confirmed', 'auto_ticket_saved', 'auto_trip_ended', 'auto_not_found', 'auto_resolved', 'auto_request_cancelled', 'auto_merged', 'auto_cancelled', 'manual'];
+const FU_REASON_ENUM = "ENUM('auto_confirmed','auto_ticket_saved','auto_trip_ended','auto_not_found','auto_resolved','auto_request_cancelled','auto_merged','auto_cancelled','manual')";
 /**
  * Rules of 11 Nov 2026 (docs/HUB_FOLLOWUP_RULES_HANDOFF.md §3): SafariCheck "Word ≠ Excel" points go to the seller
  * (audience sales, owner = the seller in the folder tag), not to the booking team.
@@ -97,7 +97,8 @@ const FU_STATUS_LABELS = ['open' => 'Open', 'in_progress' => 'In progress', 'pro
 const FU_REASON_LABELS = ['auto_confirmed' => 'confirmed document saved', 'auto_ticket_saved' => 'ticket saved',
                           'auto_trip_ended' => 'trip ended', 'auto_not_found' => 'document no longer in invoices/',
                           'auto_resolved' => 'no longer reported by the check', 'auto_request_cancelled' => 'request cancelled / lost',
-                          'auto_merged' => 'merged into another line of the same service', 'manual' => 'closed by staff'];
+                          'auto_merged' => 'merged into another line of the same service', 'auto_cancelled' => 'Trip cancelled',
+                          'manual' => 'closed by staff'];
 const FU_EDIT_PERMISSION = 'booking_followup_edit';
 
 // ── Schema (same DDL as migrations 069, 070, 073, 074) ───────────────────────
@@ -182,14 +183,17 @@ function followup_schema(PDO $db): void {
     $done = true;
 }
 
-/** close_reason of an older table: + auto_request_cancelled, auto_merged (11 Nov 2026). Checked once, then marked in meta. */
+/**
+ * close_reason of an older table: + auto_request_cancelled, auto_merged, auto_cancelled (11 Nov 2026; migration 080).
+ * Checked once, then marked in meta.
+ */
 function followup_schema_reasons(PDO $db): void {
     try {
-        if (followup_meta_get($db, 'reasons_2') !== null) return;
+        if (followup_meta_get($db, 'reasons_3') !== null) return;
         $t = (string)$db->query("SELECT COLUMN_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE()
                                  AND TABLE_NAME = 'booking_followups' AND COLUMN_NAME = 'close_reason'")->fetchColumn();
-        if (strpos($t, 'auto_merged') === false) $db->exec("ALTER TABLE booking_followups MODIFY close_reason " . FU_REASON_ENUM . " NULL");
-        followup_meta_set($db, 'reasons_2', date('Y-m-d H:i:s'));
+        if (strpos($t, 'auto_cancelled') === false) $db->exec("ALTER TABLE booking_followups MODIFY close_reason " . FU_REASON_ENUM . " NULL");
+        followup_meta_set($db, 'reasons_3', date('Y-m-d H:i:s'));
     } catch (Throwable $e) {
         error_log('followup_schema_reasons: ' . $e->getMessage());
     }
@@ -274,6 +278,7 @@ function followup_units(PDO $db, ?int $requestId = null, ?string $today = null):
         if (($r['end_date'] ?: $r['start_date']) < $today) continue;
         $rel = folder_rel_path($r);
         if ($rel === '' || stripos($rel, '001_Safari/') !== 0) continue;   // confirmed bookings only
+        if (folder_path_is_cancelled($rel)) continue;                      // cancelled trip (own folder or its group): nothing to chase
         $own  = '/' . $rel;
         $segs = explode('/', $rel);
         $grp  = null;
@@ -468,6 +473,7 @@ function followup_ticket_candidates(PDO $db, string $today, ?int $requestId = nu
         $rid = (int)$r['request_id'];
         if ($requestId && $rid !== $requestId) continue;
         if (($r['end_date'] ?: $r['start_date']) < $today) continue;
+        if (folder_path_is_cancelled(($paths[$rid] ?? '') ?: (string)$r['folder'])) continue;   // cancelled trip
         $base = ['type' => 'ticket', 'request_id' => $rid, 'folder' => ($paths[$rid] ?? '') ?: $r['folder'],
                  'start_date' => $r['start_date'], 'end_date' => $r['end_date'], 'supplier_ref' => null, 'source_file' => null,
                  'expiry_date' => null, 'booked_by' => null];
@@ -689,8 +695,10 @@ function dropbox_folder_core_safe(string $name): string {
  */
 function followup_group_candidates(PDO $db, string $today, string $token, bool $canRead, float $deadline, ?int $requestId = null): array {
     $to = date('Y-m-d', strtotime($today . ' +' . FU_GROUP_DAYS . ' days'));
-    $folders = [];
+    $folders = []; $cancelled = [];
     foreach (cp_retry(fn() => dropbox_list_folder_entries($token, CK_BASE)) as $e) {
+        // Cancelled group: no lines; its open ones close as auto_cancelled (followup_apply(), followup_close_stale()).
+        if (folder_is_cancelled($e['name'])) { $cancelled[dropbox_folder_stem_safe($e['name'])] = $e['name']; continue; }
         $kind = followup_group_kind($e['name']);
         if (!$kind) continue;
         $d = parse_folder_dates($e['name']);
@@ -734,7 +742,8 @@ function followup_group_candidates(PDO $db, string $today, string $token, bool $
             $errors[] = ['folder' => $name, 'error' => $e->getMessage()];
         }
     }
-    return ['lines' => $lines, 'groups' => $names, 'waiting' => $waiting, 'errors' => $errors, 'complete' => !$errors && !$requestId];
+    return ['lines' => $lines, 'groups' => $names, 'waiting' => $waiting, 'cancelled' => $cancelled, 'errors' => $errors,
+            'complete' => !$errors && !$requestId];
 }
 
 // ── One list: sources, same service, deadlines, default owners ───────────────
@@ -1149,6 +1158,37 @@ function followup_move_line(PDO $db, array $l, int $to, string $why): int {
     return (int)$l['id'];
 }
 
+/** Does a line's folder (any booking folder of its path) carry the stem $stem (dropbox_folder_stem(): status tags off)? */
+function followup_folder_has_stem(?string $folder, string $stem): bool {
+    if ($stem === '' || $folder === null || $folder === '') return false;
+    foreach (preg_split('#/+#', followup_folder_norm($folder)) as $seg) {
+        if ($seg !== '' && folder_is_booking_leaf($seg) && dropbox_folder_stem_safe($seg) === $stem) return true;
+    }
+    return false;
+}
+
+/**
+ * A cancelled booking (folder renamed _CANCELLED, or request status Cancelled): every open line of the request and of
+ * the folder — its lines without a request ("S|F:<stem>|…"), the lines of a group's members under it — closes as
+ * auto_cancelled, with an event. Lines already closed are left alone. Safe inside a transaction (no DDL).
+ * → number of lines closed.
+ */
+function followup_close_cancelled(PDO $db, ?int $requestId, ?string $folder, string $why): int {
+    if (!$db->inTransaction()) followup_schema($db);   // close_reason ENUM with auto_cancelled (DDL: never inside a transaction)
+    $stem = $folder !== null && trim($folder) !== '' ? dropbox_folder_stem_safe(basename(str_replace('\\', '/', rtrim(trim($folder), '/\\')))) : '';
+    $prefix = $stem !== '' ? 'S|' . followup_folder_scope(followup_folder_norm((string)$folder)) . '|' : null;
+    $n = 0;
+    foreach ($db->query("SELECT * FROM booking_followups WHERE closed_at IS NULL")->fetchAll(PDO::FETCH_ASSOC) as $l) {
+        $hit = ($requestId && (int)$l['request_id'] === $requestId)
+            || ($prefix !== null && $l['request_id'] === null && strncmp((string)$l['dedupe_key'], $prefix, strlen($prefix)) === 0)
+            || followup_folder_has_stem($l['folder'], $stem);
+        if (!$hit) continue;
+        followup_close_line($db, $l, 'auto_cancelled', $why);
+        $n++;
+    }
+    return $n;
+}
+
 /**
  * Every page view / scan: close the open lines of a trip that is over (all types, SafariCheck included — no check runs
  * on them any more) and of a Cancelled / Lost request. A cancelled request whose folder an active request still uses
@@ -1156,10 +1196,23 @@ function followup_move_line(PDO $db, array $l, int $to, string $why): int {
  */
 function followup_close_stale(PDO $db, string $today): array {
     $out = ['closed' => 0, 'moved' => 0];
-    $rows = $db->query("SELECT b.*, r.status AS req_status FROM booking_followups b LEFT JOIN requests r ON r.id = b.request_id
+    $rows = $db->query("SELECT b.*, r.status AS req_status, r.practice_code AS req_practice_code, r.group_folder AS req_group_folder,
+                               r.dropbox_url AS req_dropbox_url
+                        FROM booking_followups b LEFT JOIN requests r ON r.id = b.request_id
                         WHERE b.closed_at IS NULL")->fetchAll(PDO::FETCH_ASSOC);
     $rowOf = null;
+    $live = null;
     foreach ($rows as $l) {
+        // Trip cancelled: the line's folder (as named now) or the request's current folder carries _CANCELLED.
+        $live = $live ?? followup_live_folders($db);
+        $reqFolder = $l['request_id'] !== null ? folder_rel_path(['practice_code' => $l['req_practice_code'], 'group_folder' => $l['req_group_folder'],
+                                                                   'dropbox_url' => $l['req_dropbox_url']]) : '';
+        $cur = followup_path_current((string)$l['folder'], $live);
+        if (folder_path_is_cancelled($cur) || ($reqFolder !== '' && folder_path_is_cancelled($reqFolder))) {
+            followup_close_line($db, $l, 'auto_cancelled', 'folder cancelled: ' . basename(folder_path_is_cancelled($cur) ? $cur : $reqFolder));
+            $out['closed']++;
+            continue;
+        }
         $end = ($l['end_date'] ?? null) ?: ($l['start_date'] ?? null);
         if ($end && $end < $today) {
             followup_close_line($db, $l, 'auto_trip_ended', 'trip ended ' . $end);
@@ -1179,7 +1232,9 @@ function followup_close_stale(PDO $db, string $today): array {
             $out['moved']++;
             continue;
         }
-        followup_close_line($db, $l, 'auto_request_cancelled', 'request ' . $l['request_id'] . ' is ' . $l['req_status']);
+        // Cancelled = the trip is cancelled (auto_cancelled); Lost = the request was never a trip (auto_request_cancelled).
+        followup_close_line($db, $l, $l['req_status'] === 'Cancelled' ? 'auto_cancelled' : 'auto_request_cancelled',
+                            'request ' . $l['request_id'] . ' is ' . $l['req_status']);
         $out['closed']++;
     }
     return $out;
@@ -1463,8 +1518,11 @@ function followup_apply(PDO $db, string $type, array $cand, array $scope, bool $
     $logged = ['issue', 'doc_status_text', 'expiry_date', 'source_file', 'service_date'];
     $srcLabel = fn(array $l) => $tag . ': ' . followup_issue_label((string)$l['issue']) . (!empty($l['doc_status_text']) ? ' — ' . mb_substr((string)$l['doc_status_text'], 0, 200) : '');
     // Not re-opened: not relevant (admin), trip ended, and a group the booking team closed (they finalise it).
-    $mayReopen = fn(array $old) => $old['closed_at'] !== null && $old['staff_status'] !== 'not_relevant'
+    // auto_cancelled: never re-opened while the folder keeps its _CANCELLED tag (a folder renamed back may re-open it).
+    $mayReopen = fn(array $old, array $new = []) => $old['closed_at'] !== null && $old['staff_status'] !== 'not_relevant'
                                    && !in_array($old['close_reason'], ['auto_trip_ended', 'auto_request_cancelled', 'auto_merged'], true)
+                                   && !($old['close_reason'] === 'auto_cancelled'
+                                        && folder_path_is_cancelled((string)(($new['folder'] ?? '') !== '' ? $new['folder'] : $old['folder'])))
                                    && !($old['type'] === 'group' && $old['close_reason'] === 'manual');
     $reopenSql = function (array $old, array &$set) {
         $set[] = 'closed_at = NULL'; $set[] = 'closed_by = NULL'; $set[] = 'close_reason = NULL';
@@ -1488,7 +1546,7 @@ function followup_apply(PDO $db, string $type, array $cand, array $scope, bool $
             $prev = $src[$tag] ?? null;
             $src[$tag] = ['since' => $prev['since'] ?? $now] + $entry;
             $changed = !$prev || $prev['issue'] !== $entry['issue'] || $prev['text'] !== $entry['text'];
-            $reopen = $mayReopen($old);
+            $reopen = $mayReopen($old, $l);
             if ($old['closed_at'] !== null && !$reopen) { $sum['unchanged']++; continue; }
             if ($confirm) {
                 $set = ['last_seen_at = ?', 'sources = ?']; $args = [$now, followup_sources_json($src)];
@@ -1563,7 +1621,7 @@ function followup_apply(PDO $db, string $type, array $cand, array $scope, bool $
                   'due_date' => $due['due_date'], 'due_reason' => $due['due_reason']] as $f => $v) {
             if ((string)$v !== (string)($old[$f] ?? '')) $meta[$f] = $v;
         }
-        $reopen = $mayReopen($old);
+        $reopen = $mayReopen($old, $l);
         if ($old['closed_at'] !== null && !$reopen) {                      // stays closed
             if ($confirm) $db->prepare("UPDATE booking_followups SET last_seen_at = ? WHERE id = ?")->execute([$now, $id]);
             $sum['unchanged']++;
@@ -1598,7 +1656,11 @@ function followup_apply(PDO $db, string $type, array $cand, array $scope, bool $
         if (!isset($src[$tag])) continue;                                  // already left by this check (kept open by another one)
         $rid = (int)$old['request_id'];
         $reason = null;
-        if (($old['end_date'] ?: $old['start_date']) && ($old['end_date'] ?: $old['start_date']) < $today) $reason = 'auto_trip_ended';
+        if (folder_path_is_cancelled((string)$old['folder'])
+            || (!empty($scope['cancelled_stems']) && isset($scope['cancelled_stems'][dropbox_folder_stem_safe(explode('/', followup_folder_norm((string)$old['folder']))[0])]))) {
+            $reason = 'auto_cancelled';                                     // the folder (or its group) was renamed _CANCELLED
+        }
+        elseif (($old['end_date'] ?: $old['start_date']) && ($old['end_date'] ?: $old['start_date']) < $today) $reason = 'auto_trip_ended';
         elseif ($type === 'supplier' && isset($scope['confirmed'][$key])) $reason = 'auto_confirmed';
         elseif ($type === 'ticket' && isset($scope['ok'][$rid])) $reason = 'auto_ticket_saved';
         // A group folder still checked whose line is no longer due (not closed yet, RECAP = sold): resolved; else the
@@ -1615,7 +1677,7 @@ function followup_apply(PDO $db, string $type, array $cand, array $scope, bool $
             foreach ($src as $t => $e) if (in_array($e['issue'] ?? '', FU_PROVISIONAL_ISSUES, true)) unset($src[$t]);
         }
         $extra = $reason === 'auto_confirmed' ? ['confirmed_in' => $scope['confirmed'][$key]] : [];
-        if ($src && $reason !== 'auto_trip_ended') {
+        if ($src && !in_array($reason, ['auto_trip_ended', 'auto_cancelled'], true)) {
             // Still reported by another check: the line stays open.
             $sum['cleared'][] = followup_brief($old) + ['source' => $tag, 'reason' => $reason, 'still' => array_keys($src)] + $extra;
             if ($confirm) {
@@ -1753,7 +1815,7 @@ function followup_scan(PDO $db, array $o = []): array {
         $g = followup_group_candidates($db, $today, $token, $reader !== null, microtime(true) + (float)($o['budget'] ?? FU_SCAN_BUDGET), $rid);
         $owners = array_values(array_unique(array_filter(array_map(fn($l) => $l['request_id'], $g['lines']))));
         $sum = followup_apply($db, 'group', $g['lines'], ['complete_type' => $g['complete'], 'only' => $rid ? ($owners ?: [0]) : null,
-                                                          'groups_seen' => array_flip($g['groups'])],
+                                                          'groups_seen' => array_flip($g['groups']), 'cancelled_stems' => $g['cancelled']],
                               $confirm, 'server', $today);
         $out['group'] = $sum + ['groups' => $g['groups'], 'waiting_group_closed' => $g['waiting'], 'window' => [$today, date('Y-m-d', strtotime($today . ' +' . FU_GROUP_DAYS . ' days'))],
                                 'errors' => $g['errors']];
@@ -1838,6 +1900,16 @@ function followup_upsert(PDO $db, array $rows, array $scanned, bool $confirm, st
     };
     // Outside /001_Safari: never matched by name (a confirmed copy of the group in /001_Safari has its own lines).
     $locate = fn($ref) => (is_string($ref) && strncmp(followup_folder_norm($ref), '/', 1) === 0) ? $folderUnit($ref) : ($find($ref) ?? $folderUnit($ref));
+    // A folder tagged _CANCELLED (or inside a cancelled group): its rows are ignored and its open lines close (auto_cancelled).
+    $cancelled = [];
+    foreach ($rows as $i => $r) {
+        if (!empty($r['folder']) && is_string($r['folder']) && folder_path_is_cancelled($r['folder'])) { $cancelled[$r['folder']] = true; unset($rows[$i]); }
+    }
+    foreach ($scanned as $i => $s) {
+        if (is_string($s) && !ctype_digit($s) && folder_path_is_cancelled($s)) { $cancelled[$s] = true; unset($scanned[$i]); }
+    }
+    $cancelledClosed = 0;
+    if ($confirm) foreach (array_keys($cancelled) as $f) $cancelledClosed += followup_close_cancelled($db, null, $f, 'folder cancelled: ' . basename($f));
     $docs = []; $unmatched = []; $cached = 0;
     foreach ($rows as $i => $r) {
         $ref = $r['request_id'] ?? $r['folder'] ?? null;
@@ -1899,7 +1971,8 @@ function followup_upsert(PDO $db, array $rows, array $scanned, bool $confirm, st
         $sum = followup_sum_add($sum, $s);
     }
     return $sum + ['matched' => count($rows) - count($unmatched), 'unmatched' => $unmatched, 'folders' => count($docs),
-                   'folders_without_booking' => count($folderDocs), 'documents_kept' => $cached];
+                   'folders_without_booking' => count($folderDocs), 'documents_kept' => $cached,
+                   'cancelled_folders' => array_keys($cancelled), 'cancelled_closed' => $cancelledClosed];
 }
 
 /**
@@ -2406,6 +2479,7 @@ function followup_rows(PDO $db, array $f = [], ?string $today = null): array {
     if ($status === 'open') $w[] = 'b.closed_at IS NULL';
     elseif ($status === 'closed') $w[] = 'b.closed_at IS NOT NULL';
     if (!empty($f['type']) && in_array($f['type'], FU_TYPES, true)) { $w[] = 'b.type = ?'; $a[] = $f['type']; }
+    if (!empty($f['close_reason']) && in_array($f['close_reason'], FU_REASONS, true)) { $w[] = 'b.close_reason = ?'; $a[] = $f['close_reason']; }
     if (!empty($f['audience']) && in_array($f['audience'], FU_AUDIENCES, true)) { $w[] = "COALESCE(b.audience, 'booking') = ?"; $a[] = $f['audience']; }
     if (!empty($f['ids'])) { $ids = array_map('intval', (array)$f['ids']); $w[] = 'b.id IN (' . implode(',', $ids ?: [0]) . ')'; }
     if (isset($f['owner']) && $f['owner'] !== '') {
@@ -2643,7 +2717,7 @@ function followup_page_data(PDO $db, array $user): array {
     $recent = array_filter($closed, fn($r) => $r['closed_at'] >= date('Y-m-d H:i:s', time() - 7 * 86400));
     return ['rows' => $open, 'closed' => $closed, 'stats' => followup_stats($open, $recent), 'runs' => followup_last_runs($db),
             'me' => ['id' => (int)$user['id'], 'can_edit' => followup_can_edit($user), 'is_admin' => followup_is_admin($user)],
-            'users' => followup_owner_users($db), 'source_labels' => FU_SOURCE_LABELS,
+            'users' => followup_owner_users($db), 'source_labels' => FU_SOURCE_LABELS, 'reason_labels' => FU_REASON_LABELS,
             'today' => date('Y-m-d')];
 }
 

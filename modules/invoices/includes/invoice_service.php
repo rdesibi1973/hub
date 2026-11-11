@@ -910,6 +910,9 @@ function inv_update_folder_status(PDO $db, int $invId, string $newLabel): array 
         $db->prepare("UPDATE requests SET practice_code=?, dropbox_url=? WHERE id=?")
            ->execute([$newName, $newUrl, (int)$req['id']]);
     }
+    // A cancelled folder (no such tag in FOLDER_TAG_OPTIONS today): its Booking follow-up lines close at once.
+    require_once __DIR__ . '/../../leads/includes/folder_parser.php';
+    if (folder_is_cancelled($newName)) folder_followup_cancelled($db, (int)$req['id'], $newName, 'folder status set on invoice ' . $invId);
 
     // GRP client: the parent folder's tag follows the client furthest
     // behind with payments (includes/grp_status.php).

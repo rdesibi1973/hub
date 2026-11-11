@@ -1620,6 +1620,17 @@ logic `modules/operations/includes/followup_service.php`, documents read by `fol
     program (.docx / .pdf at the top of the folder, not an invoice / CK report / payment slip) was saved after the check —
     daily scan. Other Claude-check lines not seen by a check for 14 days: `recheck` (date of that check) and the text
     starts "To re-check (Claude check of …)": run the booking check again on that booking.
+  - **Cancelled trips** — a folder tagged `_CANCELLED` / `_CANCELED` (also `…_CANCELLED_CK`; `folder_is_cancelled()` in
+    `folder_parser.php`) is skipped by every check: supplier / ticket / group scans on the server, the office PC scan
+    (`tools/followup_local_scan.php`: 001_Safari, 00_YYYY, the `--extra` Diamante folders and the members of a cancelled
+    group — no PDF read; the cancelled folders of trips not ended are sent in `scanned` only), and `followup_upsert` (rows
+    of a cancelled folder ignored; a cancelled folder in `rows` or `scanned` closes its lines → `cancelled_folders`,
+    `cancelled_closed`). Its open lines close as
+    **`auto_cancelled`** ("Trip cancelled"): at once when the folder is renamed (`rename_folder`, BackOffice Change status,
+    `update_folder_status`) or the request is set to `Cancelled` (`set_request_status` — not when an active request has
+    the same folder: its lines move there), and on every page view / scan (the line's folder as named now, or the
+    request's current folder). Lines of the request, of the folder stem without a request (`S|F:<stem>|…`) and of a
+    group's members. Never re-opened while the folder keeps the tag. Lost requests keep `auto_request_cancelled`.
   - **Lines of a folder with several requests** belong to the first **active** one (lowest id), never to a Cancelled / Lost
     duplicate (GRP0101: request 1144 unlinked once, its lines → 2263). BackOffice warns when two requests point at the same folder.
 - `type: manual` — added from the page by the booking team (`request_id`, audience, text, service?, service date?, deadline?,
@@ -1673,9 +1684,10 @@ logic `modules/operations/includes/followup_service.php`, documents read by `fol
   (event `notes`, `notes_log` in the rows); `notes` is the last one. `contacted_at` is still accepted but no longer shown. Lines are never
   deleted. They close with `close_reason`: `auto_confirmed` (the same reference in a document reading Confirmed without a
   provisional note), `auto_ticket_saved`, `auto_trip_ended`, `auto_not_found` (the file left `invoices/` and nothing else has
-  that reference — check it was not moved without a confirmed one), `auto_request_cancelled`, `auto_merged` (joined another
-  line of the same service), `manual` (staff: `resolved`; admin: `not_relevant`). `auto_trip_ended`, `auto_request_cancelled`
-  and `auto_merged` are never re-opened by a check.
+  that reference — check it was not moved without a confirmed one), `auto_request_cancelled` (request Lost),
+  `auto_cancelled` (trip cancelled), `auto_merged` (joined another line of the same service), `manual` (staff: `resolved`;
+  admin: `not_relevant`). `auto_trip_ended`, `auto_request_cancelled` and `auto_merged` are never re-opened by a check;
+  `auto_cancelled` only if the folder loses its `_CANCELLED` tag.
   A line still found provisional after a staff `resolved` (or an auto-close) is **re-opened**; `not_relevant` stays closed.
 - **PDFs on the server:** BlueHost has no `pdftotext` and no Composer today, so `followup_scan` type `supplier` only uses
   documents already read and returns `reader: "none"` + a `warning`. Two ways: (a) on the office PC run
@@ -1689,8 +1701,9 @@ logic `modules/operations/includes/followup_service.php`, documents read by `fol
 `status` (`open` default | `closed` | `all`), `owner` (username | user id | `none`),
 `priority` (`1-URGENT` | `2-HIGH` | `3-NORMAL`, or `1`/`2`/`3`), `request_id`, `q` (client / folder / supplier / ref / notes),
 `source` (a check in the line's sources: `supplier_scan` | `ticket_scan` | `group_scan` | `safaricheck` | `claude_check` | `manual`),
-`due_before` (YYYY-MM-DD: deadline on or before).
-→ `count`, `last_check_at` `{supplier, ticket}`, `last_checks`, `rows[]` `{id, type, audience, request_id, customer, folder, folder_url,
+`due_before` (YYYY-MM-DD: deadline on or before), `close_reason` (closed lines: `auto_cancelled`, `auto_trip_ended`, … — the
+labels are in `close_reasons`). The page has the same filter ("Closed as", tab Closed).
+→ `count`, `close_reasons` `{code: label}`, `last_check_at` `{supplier, ticket}`, `last_checks`, `rows[]` `{id, type, audience, request_id, customer, folder, folder_url,
 file_url, folder_open_url, file_open_url, start_date, end_date, service_date, days_left, supplier, supplier_ref, service, source_file, issue, issue_label,
 doc_status_text, report_url, report_open_url, expiry_date, expired, booked_by, owner, owner_name, contacted_at, staff_status, notes, notes_log[] {at, by, text} (newest first), priority,
 due_date, due_reason, due_days, service_type, service_key, sources[] {source, label, issue, issue_label, text, since}, ck_tracker_url,

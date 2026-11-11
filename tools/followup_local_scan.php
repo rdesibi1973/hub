@@ -47,9 +47,12 @@ if (!is_file($opt['pdftotext'])) { fwrite(STDERR, "pdftotext not found: {$opt['p
 // Key = the folder as the Hub stores it: path under 001_Safari, or "/<path under Dropbox>" for the
 // --extra folders (provisional groups kept outside 001_Safari until confirmed).
 $folders = [];   // key => ['trip' => [start, end], 'path' => local path]
-$consider = function (string $key, string $path) use (&$folders, $today) {
+$cancelled = []; // key => true: trips not ended whose folder is _CANCELLED (also _CANCELLED_CK)
+$consider = function (string $key, string $path) use (&$folders, &$cancelled, $today) {
     $d = parse_folder_dates(basename($path));
     if (!$d['end_date'] || $d['end_date'] < $today) return false;
+    // Cancelled: no PDF read, its members neither; sent as scanned so the Hub closes its lines (auto_cancelled).
+    if (folder_is_cancelled(basename($path))) { $cancelled[$key] = true; return false; }
     $folders[$key] = ['trip' => $d, 'path' => $path];
     return true;
 };
@@ -71,14 +74,16 @@ foreach ($opt['extra'] === '' ? [] : explode(';', $opt['extra']) as $pattern) {
 }
 foreach ($folders as $key => $f) {                          // GRP: members with their own invoices\
     foreach (scandir($f['path']) as $m) {
-        if ($m[0] !== '.' && is_dir("{$f['path']}/$m") && folder_is_booking_leaf($m) && is_dir("{$f['path']}/$m/invoices")) {
+        if ($m[0] !== '.' && is_dir("{$f['path']}/$m") && folder_is_booking_leaf($m) && !folder_is_cancelled($m) && is_dir("{$f['path']}/$m/invoices")) {
             $folders["$key/$m"] = ['trip' => $f['trip'], 'path' => "{$f['path']}/$m"];
         }
     }
 }
 if ($opt['folder'] !== '') $folders = array_filter($folders, fn($k) => stripos($k, $opt['folder']) !== false, ARRAY_FILTER_USE_KEY);
 ksort($folders);
-echo count($folders) . " booking folder(s) with trips not ended\n";
+if ($opt['folder'] !== '') $cancelled = array_filter($cancelled, fn($k) => stripos($k, $opt['folder']) !== false, ARRAY_FILTER_USE_KEY);
+echo count($folders) . " booking folder(s) with trips not ended" . ($cancelled ? ', ' . count($cancelled) . ' cancelled (not read, lines closed by the Hub)' : '') . "\n";
+foreach (array_keys($cancelled) as $c) echo '  cancelled: ' . ($c[0] === '/' ? basename($c) : $c) . "\n";
 
 /**
  * POST to the Agent API → [http code, body, curl error]. The office PHP has no CA list of its own: Git's
@@ -166,6 +171,7 @@ if (preg_match('/[A-Za-z0-9_\-]{20,}/', $key, $m)) $key = $m[0];   // api.txt ma
 if ($key === '') { fwrite(STDERR, "No agent key: set HUB_AGENT_KEY or --key-file\n"); exit(2); }
 if (!function_exists('curl_init')) { fwrite(STDERR, "PHP curl extension missing — run tools\\followup_local_scan.bat\n"); exit(2); }
 
+$scanned = array_merge($scanned, array_keys($cancelled));   // followup_upsert closes the lines of a _CANCELLED folder
 $byFolder = [];
 foreach ($rows as $r) $byFolder[$r['folder']][] = $r;
 $batches = []; $cur = ['rows' => [], 'scanned' => []];

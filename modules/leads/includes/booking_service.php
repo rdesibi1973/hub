@@ -1462,5 +1462,22 @@ function bs_set_request_status(PDO $db, int $id, string $status, string $reason,
         timeline_log($id, 'status_change', $chk['old_status'] . ' → ' . $status,
                      ['body' => $status === 'Lost' ? $reasons[$reason] . ($noteVal !== null ? ': ' . $noteVal : '') : null]);
     }
+    // Cancelled: the Booking follow-up lines of the request (and of its folder) close at once (auto_cancelled).
+    // Not when an active request uses the same folder (a cancelled duplicate, GRP0101): its lines move to that request
+    // at the next Booking follow-up view / scan instead (followup_close_stale()).
+    if ($status === 'Cancelled' && $chk['changed']) {
+        $pc = $db->prepare("SELECT practice_code, group_folder FROM requests WHERE id = ?");
+        $pc->execute([$id]);
+        $me = $pc->fetch(PDO::FETCH_ASSOC) ?: [];
+        $folder = trim((string)($me['practice_code'] ?? ''));
+        $twin = 0;
+        if ($folder !== '') {
+            $tw = $db->prepare("SELECT COUNT(*) FROM requests WHERE id <> ? AND practice_code = ? AND COALESCE(group_folder, '') = ?
+                                AND COALESCE(status, '') NOT IN ('Cancelled', 'Lost')");
+            $tw->execute([$id, $folder, (string)($me['group_folder'] ?? '')]);
+            $twin = (int)$tw->fetchColumn();
+        }
+        if (!$twin) folder_followup_cancelled($db, $id, $folder !== '' ? $folder : null, 'request ' . $id . ' set to Cancelled');
+    }
     return $chk;
 }

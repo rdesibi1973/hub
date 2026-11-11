@@ -280,6 +280,39 @@ function parse_import_folder(string $folder): array {
 }
 
 /**
+ * Is a booking folder cancelled: its status tag is _CANCELLED / _CANCELED, also when a _CK follows
+ * ("…_END09JAN2027_CANCELLED", "…_CANCELED_CK"). $name: a folder name or a path (its last segment is read).
+ */
+function folder_is_cancelled(string $name): bool {
+    $seg = basename(str_replace('\\', '/', rtrim(trim($name), '/\\')));
+    return (bool)preg_match('/_CANCELL?ED(?:[_-]+CK)*$/i', $seg);
+}
+
+/**
+ * Is any booking folder of a path cancelled — the booking's own folder or the group folder it sits in
+ * ("GRP…_CANCELLED/Member(…)"). Container folders (00_CANCELED, 00_2026 …) are not booking folders and don't count.
+ */
+function folder_path_is_cancelled(string $path): bool {
+    foreach (preg_split('#[/\\\\]+#', trim($path)) as $seg) {
+        if ($seg !== '' && folder_is_booking_leaf($seg) && folder_is_cancelled($seg)) return true;
+    }
+    return false;
+}
+
+/**
+ * The Booking follow-up lines of a booking whose folder was just cancelled (renamed _CANCELLED) or whose request
+ * became Cancelled: closed at once as auto_cancelled (followup_close_cancelled()). Never blocks the caller.
+ */
+function folder_followup_cancelled(PDO $db, ?int $requestId, ?string $folder, string $why): void {
+    try {
+        require_once __DIR__ . '/../../operations/includes/followup_service.php';
+        followup_close_cancelled($db, $requestId, $folder, $why);
+    } catch (Throwable $e) {
+        error_log('folder_followup_cancelled: ' . $e->getMessage());
+    }
+}
+
+/**
  * Does a single path segment look like an actual booking folder (a leaf), as
  * opposed to a container/parent folder?
  *
