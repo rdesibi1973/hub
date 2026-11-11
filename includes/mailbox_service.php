@@ -33,6 +33,21 @@ function mbx_use(string $box): void {
     $GLOBALS['MBX_BOX'] = $box;
 }
 
+/**
+ * Booking team mailboxes, used only by the Booking mail page (booking_mail_service.php) to reply in a thread.
+ * Kept out of MBX_BOXES on purpose: mbx_use(), and so the Agent API mail_* actions, cannot reach them.
+ * Passwords: the constants below, in the root includes/config.php.
+ */
+const MBX_STAFF_BOXES = [
+    'glady'      => ['user' => 'glady@savannahexplorers.com',      'pass' => 'BOOKING_MAIL_GLADY_PASS'],
+    'operations' => ['user' => 'operations@savannahexplorers.com', 'pass' => 'BOOKING_MAIL_OPERATIONS_PASS'],
+];
+
+function mbx_use_staff(string $box): void {
+    if (!isset(MBX_STAFF_BOXES[$box])) throw new InvalidArgumentException('Unknown staff mailbox "' . $box . '"');
+    $GLOBALS['MBX_BOX'] = $box;
+}
+
 /** The current mailbox ('info' by default). */
 function mbx_box(): string {
     return $GLOBALS['MBX_BOX'] ?? 'info';
@@ -41,6 +56,11 @@ function mbx_box(): string {
 /** Login, server and From of the current mailbox: [user, pass, imap, name, smtp]. */
 function mbx_account(): array {
     $c = function (string $n, string $def = ''): string { return defined($n) ? (string)constant($n) : $def; };
+    if (isset(MBX_STAFF_BOXES[mbx_box()])) {
+        $s = MBX_STAFF_BOXES[mbx_box()];
+        return ['user' => $s['user'], 'pass' => $c($s['pass']), 'imap' => $c('MAILBOX_IMAP', '{localhost:993/imap/ssl/novalidate-cert}'),
+                'name' => 'Savannah Explorers Booking Team', 'smtp' => null];
+    }
     if (mbx_box() === 'gmail') {
         return ['user' => $c('GMAIL_USER'), 'pass' => $c('GMAIL_APP_PASSWORD'), 'imap' => '{imap.gmail.com:993/imap/ssl}',
                 'name' => $c('GMAIL_NAME', 'Savannah Explorers'), 'smtp' => ['host' => 'smtp.gmail.com', 'port' => 587]];
@@ -52,6 +72,7 @@ function mbx_account(): array {
 
 /** Constants to define for the current mailbox (error messages). */
 function mbx_config_hint(): string {
+    if (isset(MBX_STAFF_BOXES[mbx_box()])) return MBX_STAFF_BOXES[mbx_box()]['pass'];
     return mbx_box() === 'gmail' ? 'GMAIL_USER / GMAIL_APP_PASSWORD' : 'MAILBOX_USER / MAILBOX_PASS';
 }
 

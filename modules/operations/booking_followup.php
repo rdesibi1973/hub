@@ -124,6 +124,7 @@ include __DIR__ . '/../../includes/layout_header.php';
       </select>
       <button type="button" class="btn btn-primary btn-sm" id="fu-run-btn">▶ Run check now</button>
       <button type="button" class="btn btn-outline btn-sm" id="fu-add-btn" title="A problem found outside the checks (by phone, by mail…)">＋ Add line</button>
+      <a class="btn btn-outline btn-sm" href="booking_mail.php" title="Mails crossed with these lines; passports into the Calc">✉ Booking mail</a>
     </div>
     <?php endif; ?>
   </div>

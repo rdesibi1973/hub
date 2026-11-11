@@ -21,6 +21,10 @@ outdated — this file wins where they disagree (PHP version, local lint).
 - `modules/operations/` — movements, Medivac, lunch boxes, **Booking follow-up** (`booking_followup.php`; logic
   `includes/followup_service.php` + `followup_classify.php`, shared with the Agent API `followup_*` and
   `tools/followup_local_scan.php`, which reads the supplier PDFs on the office PC because BlueHost cannot).
+- **Booking mail** (`modules/operations/booking_mail.php`, `booking_mail_cron.php` from cron-job.org; logic `includes/booking_mail_service.php`,
+  `includes/passport_service.php`): headers of glady@ / operations@ crossed with the follow-up (own table, Sales Response untouched); admin opens
+  one thread with a logged reason and replies from the same mailbox; passports → `passports/` + Calc after a person confirms. Off until
+  `BOOKING_MAIL_LIVE`, which goes on only after the staff notice (`docs/STAFF_NOTICE_MAIL.md`). Deliberately not in the Agent API.
 - `modules/security/` — mail security scan (`mail_scan.php`, CLI on cPanel cron, or `mail_scan_cron.php` from cron-job.org; logic
   `includes/mail_security_service.php`, shared with the Agent API `mail_security_status`).
 - **Sales Response** (`modules/leads/sales_response.php`, CLI `sales_response_scan.php` on cPanel cron or `sales_response_cron.php` from cron-job.org; logic
@@ -77,7 +81,9 @@ outdated — this file wins where they disagree (PHP version, local lint).
 - Deploy does not delete files on the server; removed files must be deleted by hand.
 
 ## Business rules that matter in code
-- **Never store or read passport numbers** (guests, CK).
+- **Passport numbers live only in the booking's `passports/` folder and in the Calc passport column**, written there by
+  the Passports flow (`modules/operations/includes/passport_service.php`) after a person confirms each row. Never in the
+  Hub DB, logs, memos, reports, chat, mail text or Agent API output; every other read of guests / CK still skips them.
 - Invoices `SE-YYYY-NNNN` = Savannah Explorers; `SH-YYYY-NNNN` = Savannah Holidays, paid on the
   **AfrAsia** account (Roberto checks it, not the accountant). Old Zoho invoices keep `INV-…`.
 - Dropbox: inquiries in `/2026/<Name>(<Agency>-<Agent>)`, confirmed bookings in `/001_Safari/`

@@ -39,6 +39,9 @@ function iti_ai_actions(): array {
                           'help'  => 'Writes the texts of the days the sample does not cover, for you to review.'],
         'check_rules' => ['label' => 'Check client rules', 'where' => 'program', 'state' => 'planned',
                           'help'  => 'Checks prices, names and wording against the rules for client documents. Reports only, changes nothing.'],
+        // Operations → Booking mail (passport_service.php); no button on the ITI pages.
+        'read_passport' => ['label' => 'Read passport', 'where' => 'booking', 'state' => 'live',
+                            'help'  => 'Reads name, date of birth, nationality and number from a passport, for a person to confirm.'],
     ];
 }
 
@@ -95,8 +98,8 @@ function iti_ai_usd(string $model, array $usage): float {
 }
 
 /** Rough cost before the call: about 3.5 bytes per token; the answer about 1.5 times the question, thinking included. */
-function iti_ai_estimate(string $model, int $bodyBytes, int $maxTokens, ?int $outputTokens = null): float {
-    $in = (int)ceil($bodyBytes / 3.5);
+function iti_ai_estimate(string $model, int $bodyBytes, int $maxTokens, ?int $outputTokens = null, ?int $inputTokens = null): float {
+    $in = $inputTokens ?? (int)ceil($bodyBytes / 3.5);   // images and PDFs: the caller says, their base64 size says nothing
     return iti_ai_usd($model, ['input_tokens' => $in, 'output_tokens' => min($maxTokens, $outputTokens ?? (int)ceil($in * 1.5))]);
 }
 
@@ -144,7 +147,8 @@ function iti_ai_record(PDO $db, string $action, string $model, array $usage, flo
 
 /**
  * One Messages API call under the limits. $body: the request; $action: key of iti_ai_actions();
- * $ctx: program_id, request_id, est_output_tokens (when the answer is much shorter or longer than the question).
+ * $ctx: program_id, request_id, est_output_tokens (when the answer is much shorter or longer than the question),
+ * est_input_tokens (when the request carries an image or a PDF).
  * Returns the decoded response; a response with usage is recorded also when its stop_reason is bad, as it is paid for.
  */
 function iti_ai_call(array $body, string $action, array $ctx = []): array {
@@ -156,7 +160,7 @@ function iti_ai_call(array $body, string $action, array $ctx = []): array {
 
     $db    = db();
     $model = (string)$body['model'];
-    $est   = iti_ai_estimate($model, strlen($payload), (int)($body['max_tokens'] ?? 16000), $ctx['est_output_tokens'] ?? null);
+    $est   = iti_ai_estimate($model, strlen($payload), (int)($body['max_tokens'] ?? 16000), $ctx['est_output_tokens'] ?? null, $ctx['est_input_tokens'] ?? null);
     $why   = iti_ai_limit_reason(iti_ai_status($db, current_user()['id'] ?? null), $est, iti_ai_run_spent());
     if ($why !== '') {
         iti_ai_record($db, $action, $model, [], 0.0, 'blocked', $ctx, $why);
