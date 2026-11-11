@@ -963,6 +963,7 @@ function followup_backfill(PDO $db): void {
     followup_schema($db);
     followup_backfill_keys($db);
     followup_rules_once($db);
+    followup_rules_once_b($db);
     try {
         followup_close_stale($db, date('Y-m-d'));   // every page view / scan: trips over, cancelled requests
     } catch (Throwable $e) {
@@ -1087,6 +1088,69 @@ function followup_rules_once(PDO $db): void {
         } catch (Throwable $e) {
             error_log($fn . ': ' . $e->getMessage());
         }
+    }
+}
+
+/**
+ * Once (meta rules_2026_11b): open SafariCheck transfer lines without a date get the date of their title read in the
+ * widest trip window (ck_sc_window(): Excel + Word), then an undated Excel note joins the booking's only dated transfer
+ * line, then same-day transfers merge again (followup_merge_transfers()).
+ */
+function followup_rules_once_b(PDO $db): void {
+    try {
+        if (followup_meta_get($db, 'rules_2026_11b') !== null) return;
+        followup_meta_set($db, 'rules_2026_11b', date('Y-m-d H:i:s'));
+    } catch (Throwable $e) {
+        error_log('followup_rules_once_b: ' . $e->getMessage());
+        return;
+    }
+    try {
+        $facts = $db->prepare("SELECT facts_json FROM ck_checks WHERE id = ?");
+        $taken = $db->prepare("SELECT id FROM booking_followups WHERE dedupe_key = ?");
+        $undated = [];
+        foreach ($db->query("SELECT * FROM booking_followups WHERE closed_at IS NULL AND type = 'safaricheck' AND issue = 'sc_transfer'
+                             AND service_date IS NULL AND request_id IS NOT NULL")->fetchAll(PDO::FETCH_ASSOC) as $l) {
+            $det = json_decode((string)$l['details'], true) ?: [];
+            $facts->execute([(int)($det['check_id'] ?? 0)]);
+            [$s, $e] = ck_sc_window(json_decode((string)$facts->fetchColumn(), true) ?: []);
+            $date = ck_sc_date((string)$l['service'], $s ?: $l['start_date'], $e ?: $l['end_date']);
+            if (!$date) { $undated[] = $l; continue; }
+            $key = followup_transfer_key('safaricheck', (int)$l['request_id'], 'booking', $date);
+            $taken->execute([$key]);
+            $newKey = $taken->fetchColumn() ? $l['dedupe_key'] : $key;
+            $src = followup_sources($l);
+            if (isset($src['safaricheck'])) $src['safaricheck']['key'] = $newKey;
+            $l['service_date'] = $date;
+            $db->prepare("UPDATE booking_followups SET service_date = ?, dedupe_key = ?, sources = ?, service_key = ? WHERE id = ?")
+               ->execute([$date, $newKey, followup_sources_json($src), followup_service_key($l), (int)$l['id']]);
+            followup_event($db, (int)$l['id'], null, 'service_date', null, $date);
+        }
+        // An undated Excel note joins the booking's only open dated transfer line.
+        foreach ($undated as $l) {
+            $st = $db->prepare("SELECT * FROM booking_followups WHERE closed_at IS NULL AND request_id = ? AND service_date IS NOT NULL AND service_key LIKE ?");
+            $st->execute([(int)$l['request_id'], 'R' . (int)$l['request_id'] . '|transfer|%']);
+            $t = $st->fetchAll(PDO::FETCH_ASSOC);
+            if (count($t) !== 1) continue;
+            $keep = $t[0];
+            $d = json_decode((string)$keep['details'], true) ?: [];
+            $mine = json_decode((string)$l['details'], true) ?: [];
+            $d['sc_keys'] = array_values(array_unique(array_merge($d['sc_keys'] ?? (isset($d['sc_key']) ? [$d['sc_key']] : []), (array)($mine['sc_keys'] ?? [$mine['sc_key'] ?? '']))));
+            $src = followup_sources($keep);
+            if (!isset($src['safaricheck'])) $src['safaricheck'] = followup_sources($l)['safaricheck'] ?? null;
+            if (isset($src['safaricheck'])) $src['safaricheck']['key'] = followup_transfer_key('safaricheck', (int)$keep['request_id'], 'booking', $keep['service_date']);
+            $src = array_filter($src);
+            $db->prepare("UPDATE booking_followups SET details = ?, sources = ?, doc_status_text = ? WHERE id = ?")
+               ->execute([json_encode($d, JSON_UNESCAPED_UNICODE), followup_sources_json($src),
+                          mb_substr($keep['doc_status_text'] . ' | ' . $l['doc_status_text'], 0, 500), (int)$keep['id']]);
+            if ($keep['owner_user_id'] === null && $l['owner_user_id'] !== null) {
+                $db->prepare("UPDATE booking_followups SET owner_user_id = ? WHERE id = ?")->execute([(int)$l['owner_user_id'], (int)$keep['id']]);
+            }
+            followup_close_line($db, $l, 'auto_merged', 'Excel note of the transfer of line #' . $keep['id']);
+            followup_event($db, (int)$keep['id'], null, 'source', null, 'merged line #' . $l['id'] . ' (Excel note of this transfer)');
+        }
+        followup_merge_transfers($db);
+    } catch (Throwable $e) {
+        error_log('followup_rules_once_b: ' . $e->getMessage());
     }
 }
 
@@ -1984,7 +2048,27 @@ function followup_safaricheck_sync(PDO $db, array $ckRow, array $checks, array $
                                                  'check_id' => !empty($ckRow['last_check_id']) ? (int)$ckRow['last_check_id'] : null], JSON_UNESCAPED_UNICODE)]
                      + ($sales ? ['owner_user_id' => $seller] : []);
     }
+    followup_sc_fold_undated($cand);
     return followup_apply($db, 'safaricheck', $cand, ['requests' => [$rid], 'only' => [$rid]], $confirm, 'agent', $today ?? date('Y-m-d'));
+}
+
+/**
+ * An undated transfer point ('Excel note: Transfer waiting for Iddi') joins the booking's transfer when it has exactly
+ * one dated transfer: one line per transfer. With several (or none) dated transfers it stays a line of its own.
+ */
+function followup_sc_fold_undated(array &$cand): void {
+    $dated = array_keys(array_filter($cand, fn($c) => $c['service_type'] === 'transfer' && !empty($c['service_date'])));
+    if (count($dated) !== 1) return;
+    $k0 = $dated[0];
+    foreach ($cand as $k => $c) {
+        if ($c['service_type'] !== 'transfer' || !empty($c['service_date'])) continue;
+        $cand[$k0]['service'] = mb_substr($cand[$k0]['service'] . ' + ' . $c['service'], 0, 255);
+        $cand[$k0]['doc_status_text'] = mb_substr($cand[$k0]['doc_status_text'] . ' | ' . $c['doc_status_text'], 0, 500);
+        $d = json_decode($cand[$k0]['details'], true);
+        $d['sc_keys'] = array_values(array_unique(array_merge($d['sc_keys'] ?? [], json_decode($c['details'], true)['sc_keys'] ?? [])));
+        $cand[$k0]['details'] = json_encode($d, JSON_UNESCAPED_UNICODE);
+        unset($cand[$k]);
+    }
 }
 
 /** dedupe_key of a transfer line of a check: one per request, day (and audience for the Claude check). */

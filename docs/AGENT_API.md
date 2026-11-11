@@ -1601,7 +1601,10 @@ logic `modules/operations/includes/followup_service.php`, documents read by `fol
   - **One line per transfer and day** — `service_key` of a dated transfer = `R<request>|transfer|<date>`; SafariCheck and the
     Claude check merge their transfer points of the same day into one candidate (keys `SC|<req>|transfer|<date>`,
     `CK|<req>|<audience>|transfer|<date>`), and a SafariCheck transfer joins the Claude check's line of that day (any
-    audience). Older duplicate lines were merged once (`auto_merged`).
+    audience). Older duplicate lines were merged once (`auto_merged`). The date in a SafariCheck transfer title is read in
+    the widest trip window (Excel + Word: a beach extension or a Zanzibar stay before the safari is only in the Word; a
+    Word date more than 60 days off is ignored). An undated `Excel note: …` transfer point joins the booking's transfer
+    when there is exactly one dated one.
   - **"Word ≠ Excel" to the seller** — `sc_pax`, `sc_dates`, `sc_basis_differs`, `sc_nights_differ`, `sc_checkin_differs`:
     `audience` `sales`, owner = the seller in the folder tag (`-Roberto` → Roberto; Micky / Sultan: English-speaking
     clients → Agustin, Italian → Anderson, by the ITI program language; Sara → no owner, Roberto assigns). Open lines

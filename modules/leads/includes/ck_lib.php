@@ -542,12 +542,25 @@ function ck_sc_date(string $dm, ?string $start, ?string $end): ?string {
 }
 
 /**
+ * The trip window a SafariCheck date is read in: the widest of the Excel and Word dates (11 Nov 2026 — the Excel end
+ * stops at the safari: a beach extension, or a Zanzibar stay before it, is only in the Word). → [start, end] (Y-m-d|null).
+ */
+function ck_sc_window(array $facts): array {
+    $xs = $facts['excel']['start'] ?? null; $xe = $facts['excel']['end'] ?? null;
+    $ws = $facts['word']['start'] ?? null;  $we = $facts['word']['end'] ?? null;
+    // A Word date far from the Excel one is a typo (wrong year), not an extension: ignored.
+    $near = fn($a, $b) => !$a || !$b || abs(strtotime($a) - strtotime($b)) <= 60 * 86400;
+    $s = array_filter([$xs, $near($ws, $xs) ? $ws : null]);
+    $e = array_filter([$xe, $near($we, $xe ?: $xs) ? $we : null]);
+    return [$s ? min($s) : null, $e ? max($e) : null];
+}
+
+/**
  * The booking points of a SafariCheck result: [{key, section, title, status, detail, issue, service_type, supplier,
  * service_date}]. $checks: checks_json; $facts: facts_json (Excel stays → the check-in date of a lodge point).
  */
 function ck_sc_booking_points(array $checks, array $facts): array {
-    $start = $facts['excel']['start'] ?? $facts['word']['start'] ?? null;
-    $end = $facts['excel']['end'] ?? $facts['word']['end'] ?? null;
+    [$start, $end] = ck_sc_window($facts);
     $stays = $facts['excel']['stays'] ?? [];
     $out = [];
     foreach ($checks as $c) {
