@@ -2,8 +2,8 @@
 
 *Office procedure, Word + PDF (English and Italian) in `/Operations/OfficeProcedures` as "COMPANY EMAIL - WHAT THE OFFICE
 CHECKS" (11 Nov 2026). Give it to each employee with a signed acknowledgement **before** `BOOKING_MAIL_LIVE` is switched on;
-a local lawyer may review it. Change this text and the Word together. **To do:** the section "What can be searched and
-read" (any company mailbox, Agent API `staff_mail_*`, 11 Nov 2026) is not yet in the Word / PDF.*
+a local lawyer may review it. Change this text and the Word together. Updated 11 Nov 2026 (Word + PDF too): section 3
+"What can be searched and read" (any company mailbox, Agent API `staff_mail_*`); the first version is in `old/`.*
 
 **Savannah Explorers (Arusha, Tanzania) and Savannah Holidays Ltd (Mauritius)**
 Effective from: 11 November 2026 · Questions: info@savannahexplorers.com
