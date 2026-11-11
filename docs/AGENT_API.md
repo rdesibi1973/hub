@@ -711,6 +711,11 @@ with `country`, only that country's rows and the `ALL` ones (a Kenya programme n
 `iti_update_inclusions`: `program_id`, `included[]` and / or `excluded[]` — items `{std_id}`, `{text_<lang>…}` or a
 plain string (program language). Each list given replaces that list in one transaction; an empty list is refused.
 
+#### `iti_update_standard_inclusion` (POST)
+`std_id`*, `text_<lang>` (at least one; only the languages given change, an empty text or one over 1000 characters is refused)
+→ `{std_id, item_type, changes {text_<lang>: {before, after}}, linked_rows, rows_with_own_text}`. Dry-run unless `"confirm": true`.
+Programme rows that keep their own copy of the text do not follow the standard row (their text wins): `rows_with_own_text` counts them.
+
 #### Master data: `iti_flight_routes`, `iti_activities`, `iti_transfer_routes` (GET) and `iti_create_…` (POST)
 - `iti_flight_routes` `q? from? to?` (airport name or code); `iti_create_flight_route` `fields`: `from_airport`*,
   `to_airport`*, `from_code`, `to_code`, `operator`, `flight_type` (`scheduled`|`charter`), `duration_min`, `notes_<lang>`.

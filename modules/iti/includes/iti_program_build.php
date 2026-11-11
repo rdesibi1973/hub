@@ -323,6 +323,43 @@ function iti_pb_standard_inclusions(PDO $db, string $country = ''): array {
     return $out;
 }
 
+/**
+ * Change the texts of a standard row (only the text_<lang> given). Programme rows with their own copy of the text
+ * do not follow it (their text wins): rows_with_own_text says how many.
+ */
+function iti_pb_update_standard_inclusion(PDO $db, int $stdId, array $in, bool $go): array {
+    if ($stdId <= 0) throw new InvalidArgumentException('std_id is required');
+    $st = $db->prepare('SELECT * FROM iti_standard_inclusions WHERE id = ?');
+    $st->execute([$stdId]);
+    $s = $st->fetch(PDO::FETCH_ASSOC);
+    if (!$s) throw new InvalidArgumentException('std_id ' . $stdId . ' not found (iti_inclusions)');
+    $given = 0; $changes = [];
+    foreach (ITI_PS_LANGS as $l) {
+        $k = 'text_' . $l;
+        if (!array_key_exists($k, $in)) continue;
+        $given++;
+        $v = trim((string)$in[$k]);
+        if ($v === '') throw new InvalidArgumentException($k . ' is empty — a standard row needs a text in every language');
+        if (mb_strlen($v) > 1000) throw new InvalidArgumentException($k . ' is longer than 1000 characters');
+        if ($v !== (string)$s[$k]) $changes[$k] = ['before' => $s[$k], 'after' => $v];
+    }
+    if (!$given) throw new InvalidArgumentException('Send at least one text_<lang>');
+    $own = [];
+    foreach (ITI_PS_LANGS as $l) $own[] = "NULLIF(TRIM(text_$l), '')";
+    $st = $db->prepare('SELECT COUNT(*) AS linked, COALESCE(SUM(COALESCE(' . implode(', ', $own) . ') IS NOT NULL), 0) AS own
+                          FROM iti_program_inclusions WHERE standard_inclusion_id = ?');
+    $st->execute([$stdId]);
+    $n = $st->fetch(PDO::FETCH_ASSOC);
+    $plan = ['std_id' => $stdId, 'item_type' => $s['item_type'], 'changes' => $changes,
+             'linked_rows' => (int)$n['linked'], 'rows_with_own_text' => (int)$n['own']];
+    if (!$go || !$changes) return $plan;
+    $set = []; $args = [];
+    foreach ($changes as $k => $c) { $set[] = "`$k` = ?"; $args[] = $c['after']; }
+    $args[] = $stdId;
+    $db->prepare('UPDATE iti_standard_inclusions SET ' . implode(', ', $set) . ' WHERE id = ?')->execute($args);
+    return $plan;
+}
+
 /** Replace the included and / or excluded list (only the keys given). Items: {std_id} | {text_<lang>…} | "text". */
 function iti_pb_update_inclusions(PDO $db, int $pid, array $in, bool $go): array {
     $p = iti_ps_personal($pid);

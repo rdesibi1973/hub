@@ -98,7 +98,7 @@ function agent_audit(PDO $db, string $action, $reqId, array $payload, string $re
                               'cancel_invoice_payment', 'update_folder_status', 'import_zoho_invoice', 'create_invoice', 'update_invoice', 'create_credit_note', 'apply_credit_note', 'send_invoice_email', 'mail_send', 'mail_move',
                               'iti_lodge_photos', 'iti_destination_photo', 'iti_update_lodge', 'iti_update_destination',
                               'iti_create_personal', 'iti_update_program', 'iti_update_day', 'iti_publish', 'iti_final_from_calc', 'iti_save_alias', 'iti_tag_sample',
-                              'iti_create_lodge', 'iti_set_days', 'iti_add_day', 'iti_delete_day', 'iti_update_inclusions',
+                              'iti_create_lodge', 'iti_set_days', 'iti_add_day', 'iti_delete_day', 'iti_update_inclusions', 'iti_update_standard_inclusion',
                               'iti_create_flight_route', 'iti_create_activity', 'iti_create_transfer_route', 'iti_update_transfer_route', 'iti_save_as_sample',
                               'create_request', 'add_flight_rates', 'timeline_update', 'summary_set', 'rename_folder',
                               'set_request_status', 'update_request', 'import_group_folder', 'move_group_folder', 'ck_request_check', 'memo_delete', 'create_agency', 'update_agency', 'save_agency_contact', 'delete_agency_contact',
@@ -1802,6 +1802,15 @@ try {
                         + iti_pb_standard_inclusions($db, (string)($in['country'] ?? ''))); }
         catch (InvalidArgumentException $e) { agent_fail($e->getMessage(), 400); }
 
+    case 'iti_update_standard_inclusion': {
+        agent_require_method('POST');
+        agent_iti_lib();
+        $go = !empty($in['confirm']);
+        try { $r = iti_pb_update_standard_inclusion($db, (int)($in['std_id'] ?? 0), $in, $go); }
+        catch (InvalidArgumentException $e) { agent_fail($e->getMessage(), 400); }
+        agent_out(array_merge(['ok' => true, 'dry_run' => !$go], $r, $go ? [] : ['message' => 'Dry run — nothing saved. Resend with "confirm": true.']));
+    }
+
     // ── ITI: new destinations, programmes imported from a partner's text, supplier names ──
     // includes/iti_import_service.php. Dry-run unless "confirm": true.
     case 'iti_create_destination':
@@ -3337,7 +3346,7 @@ try {
             'iti_lodges', 'iti_lodge', 'iti_destinations', 'iti_destination', 'iti_lodge_photos', 'iti_destination_photo',
             'iti_update_lodge', 'iti_update_destination', 'iti_create_lodge', 'iti_samples', 'iti_program', 'iti_document', 'iti_vouchers', 'iti_create_personal', 'iti_update_program',
             'iti_update_day', 'iti_publish', 'iti_calc_plan', 'iti_final_from_calc', 'iti_save_alias', 'iti_aliases', 'iti_tag_sample',
-            'iti_set_days', 'iti_add_day', 'iti_delete_day', 'iti_inclusions', 'iti_update_inclusions', 'iti_save_as_sample',
+            'iti_set_days', 'iti_add_day', 'iti_delete_day', 'iti_inclusions', 'iti_update_inclusions', 'iti_update_standard_inclusion', 'iti_save_as_sample',
             'iti_flight_routes', 'iti_create_flight_route', 'iti_activities', 'iti_activity', 'iti_update_activity', 'iti_create_activity',
             'iti_transfer_routes', 'iti_create_transfer_route', 'iti_update_transfer_route', 'iti_create_destination', 'iti_import_program', 'iti_supplier_blocklist', 'add_flight_rates',
             'find_invoices', 'get_invoice', 'add_invoice_payment', 'cancel_invoice_payment', 'list_credit_notes', 'create_credit_note', 'apply_credit_note', 'update_folder_status',
