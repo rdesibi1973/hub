@@ -827,6 +827,14 @@ the template's (not in the past; if not known yet, likely dates, then `dates_ind
 F10, filled by the seller with discounts and supplements; `warnings` reports when it differs from adults × F9 + teenagers and
 children at their prices + single supplement × singles. The price table shows the teen / child price with its discount in the label,
 and a single supplement row when the room types have singles (also for 1 pax). The Hub page asks to confirm pax, rooms, dates and prices first.
+**Quote** (request not Booked yet): no room types is a `review.warnings` line, not a blocking error; with several `price_sheets`
+the days get no room type.
+**Day rows (12 Nov 2026):** a row of the day table is a day when it has a date / formula in A **or** text in column B
+(PARK/OVERNIGHT): a day inserted by hand often leaves the departure row with no date. Such a row gets the previous day + 1 and a
+`calc.warnings` line "Row N has no date: used … Fix the Calc." A row with a hotel / activity / fees but no date and no column B is
+a `review.errors` line (blocking), never silently dropped. `calc.days` / `calc.nights` (nights = days − 1, the last row being the
+departure day), `price_options[].nights`, `nights[]` and the program's duration all come from that one day list; a last row with
+a hotel is warned ("no departure day"). The generation also refuses (nothing saved) if the program does not get one day per Calc row.
 **Group departure still filling up:** `group_open: 1` (Hub: the tick on the confirmation step) lifts the pax and room types requirement (`review.open_errors`);
 dates stay required. The program then has `pax_open` 1, safari type group, no participants, no room types and no total: only the price list per person (adult, teen and
 child with discount, single supplement). Regenerate without it when the group is final.
@@ -834,7 +842,7 @@ child with discount, single supplement). Regenerate without it when the group is
 **Seller:** the program goes under the request's seller (`seller` in the plan = username; pass `seller` for another active one), in `created_by`;
 who generates it stays in `generated_by`, so someone can finalise programs for other sellers.
 
-Plan: `calc` (file, files = every Calc of the folder, rev, pax, sheet, sheets = pickable sheets, warnings,
+Plan: `calc` (file, files = every Calc of the folder, rev, pax, sheet, sheets = pickable sheets, warnings, days, nights,
 price_options [{sheet, pax_total, pax, price_to_customer, nights, same_itinerary}], price_table = the rows the programme
 will get), `sample`, `nights[]` (date, label, hotel text → lodge, state, meal, activities,
 from_sample_day, flags), `unmapped` {lodge|activity|route: {norm: text}}, `blocking`, `existing_finals` (id, calc_file,

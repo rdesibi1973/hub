@@ -630,27 +630,35 @@ function sc_ref(string $col, int $row): string { return strtoupper($col) . $row;
 
 /**
  * Itinerary day rows of a calc sheet: rows between the DATE header and the
- * "Totals" row whose DATE cell holds a date or a formula (the A18+ cascade).
- * Each: ['row'=>int, 'date'=>Y-m-d|null (cached, else A17 + offset)].
+ * "Totals" row whose DATE cell holds a date or a formula (the A18+ cascade), or whose
+ * PARK/OVERNIGHT cell ($labelCol) is filled: a day added by hand often leaves the last
+ * row (the departure day) with no date in A, and it is still a day (11 Nov 2026).
+ * Each: ['row'=>int, 'date'=>Y-m-d|null (cached, else A17 + offset; no date nor formula:
+ * previous day + 1), 'dated'=>bool (A has a date or a formula)].
  */
-function sc_calc_day_rows(array $v, array $f): array {
+function sc_calc_day_rows(array $v, array $f, string $labelCol = 'B'): array {
     $hdr = 16;
     foreach ($v as $ref => $val) {
         if (strcasecmp(trim($val), 'DATE') === 0) { list($c, $r) = sc_ref_split($ref); if ($c === 'A') { $hdr = $r; break; } }
     }
     $rows = [];
     $first = null;
+    $prev = null;
     for ($r = $hdr + 1; $r < $hdr + 40; $r++) {
-        $a = sc_cell($v, 'A', $r);
+        $a = trim(sc_cell($v, 'A', $r));
         if ($a !== '' && stripos($a, 'total') === 0) break;
         $isFormula = isset($f[sc_ref('A', $r)]);
         $d = $a !== '' ? sc_parse_xlsx_date($a) : null;
-        if ($d === null && !$isFormula) continue;
+        $dated = $d !== null || $isFormula;
+        if (!$dated && trim(sc_cell($v, $labelCol, $r)) === '') continue;
         if ($first === null && $d !== null) $first = ['row' => $r, 'date' => $d];
-        if ($d === null && $first !== null) {
+        if ($d === null && $isFormula && $first !== null) {
             $d = date('Y-m-d', strtotime($first['date'] . ' +' . ($r - $first['row']) . ' days'));
+        } elseif ($d === null && !$isFormula && $prev !== null) {
+            $d = date('Y-m-d', strtotime($prev . ' +1 day'));
         }
-        $rows[] = ['row' => $r, 'date' => $d];
+        if ($d !== null) $prev = $d;
+        $rows[] = ['row' => $r, 'date' => $d, 'dated' => $dated];
     }
     return $rows;
 }

@@ -481,8 +481,20 @@ function iti_final_calc_review(array $calc): array {
     $open = !empty($calc['group_open']);   // group departure still filling up: participants and rooms not known yet
     $errors = array(); $warnings = array(); $openErrors = array();
 
+    // A quote (request not Booked yet, e.g. one pax sheet per group size): room types are not known yet.
+    $status = trim((string)($calc['request_status'] ?? ''));
+    $quote = $status !== '' && strcasecmp($status, 'Booked') !== 0;
     if (!$open && $a + $t + $c <= 0) $openErrors[] = 'Enter the number of adults, teenagers and children (B2:B4).';
-    if (!$open && $rooms === '' && !$isRecap) $openErrors[] = 'Enter the room types in the cell under ROOMS TYPE.';
+    if (!$open && $rooms === '' && !$isRecap) {
+        if ($quote) $warnings[] = 'No room types under ROOMS TYPE (quote, request not booked yet): the program goes without them.';
+        else        $openErrors[] = 'Enter the room types in the cell under ROOMS TYPE.';
+    }
+    // Rows of the day table with a hotel / activity but no date and no PARK/OVERNIGHT text (calc_read_file()):
+    // they would not become programme days.
+    foreach (($calc['skipped_rows'] ?? array()) as $sk) {
+        $errors[] = 'Row ' . (int)$sk['row'] . ' of the Calc has ' . $sk['text'] . ' but no date and no PARK/OVERNIGHT text (column B): '
+                  . 'it would not become a day of the program. Fill column B (or clear the row).';
+    }
     if (!$open && $rooms !== '' && iti_final_room_text($rooms, 'en') === null) {
         $warnings[] = 'Room types "' . $rooms . '" not recognised: they go on the program as written in the Calc, not translated. Check them in the program.';
     }
@@ -1034,6 +1046,7 @@ function iti_final_generate(PDO $db, int $requestId, array $calc, int $sampleId,
 
         $prevLodge = null; $prevCustom = null;
         $nDays = count($plan['days']);
+        $multiPrice = count($calc['price_options'] ?? array()) > 1;
         foreach ($plan['days'] as $i => $d) {
             $isNew = $d['sample_index'] === null;
             $vals = array(
@@ -1042,7 +1055,8 @@ function iti_final_generate(PDO $db, int $requestId, array $calc, int $sampleId,
                 'start_custom'   => $prevLodge ? null : $prevCustom,
                 'end_lodge_id'   => $d['lodge_id'],
                 'end_lodge_custom' => $d['lodge_id'] ? null : $d['lodge_custom'],
-                'room_type'      => !$groupOpen && ($d['lodge_id'] || $d['lodge_custom']) && $calc['room_config'] !== '' ? mb_substr(iti_final_room_text($calc['room_config'], $lang) ?? $calc['room_config'], 0, 100) : null,
+                // No room types on an open group or a quote with several pax sheets (rooms not known yet).
+                'room_type'      => !$groupOpen && !$multiPrice && ($d['lodge_id'] || $d['lodge_custom']) && $calc['room_config'] !== '' ? mb_substr(iti_final_room_text($calc['room_config'], $lang) ?? $calc['room_config'], 0, 100) : null,
                 'booked_status'  => $d['invoice'] !== '' ? mb_substr($d['invoice'], 0, 40) : null,
                 'booked_by'      => $d['checked'] !== '' ? mb_substr($d['checked'], 0, 60) : null,
                 'needs_review'   => ($isNew || $d['sample_lodge'] !== null) ? 1 : 0,
@@ -1128,6 +1142,13 @@ function iti_final_generate(PDO $db, int $requestId, array $calc, int $sampleId,
 
             $prevLodge = $d['lodge_id'];
             $prevCustom = $d['lodge_id'] ? null : $d['lodge_custom'];
+        }
+        // Safety net: one programme day per Calc day row, never a day silently lost.
+        $st = $db->prepare('SELECT COUNT(*) FROM iti_program_days WHERE program_id = ?');
+        $st->execute(array($newId));
+        $built = (int)$st->fetchColumn();
+        if ($built !== count($calc['days'])) {
+            throw new RuntimeException('The program got ' . $built . ' days but the Calc has ' . count($calc['days']) . ' day rows — nothing was saved.');
         }
 
         // Booking data + guests (no passport numbers).

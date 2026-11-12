@@ -216,28 +216,41 @@ function calc_read_file(string $path, string $wantSheet = ''): array {
     // Dates: a hard-typed date (A17, or a later row typed by hand after a gap) is
     // an anchor; a formula row (=SUM(A{n-1}+1) cascade) is anchor + row offset —
     // its saved value is only compared, never trusted.
-    $rows = sc_calc_day_rows($v, $f);
+    // A day row is found by its PARK/OVERNIGHT text too (sc_calc_day_rows): a row with no date
+    // and no formula in A (a day inserted by hand, the departure row left blank) gets the
+    // previous day + 1, with a warning, and becomes the anchor of the rows after it.
+    $rows = sc_calc_day_rows($v, $f, $cols['label']);
     $anchor = null;
     $days = [];
+    $prevDate = null;
     foreach ($rows as $i => $d) {
         $raw   = calc_rd_text($v, 'A', $d['row']);
         $saved = $raw !== '' ? sc_parse_xlsx_date($raw) : null;
-        if (!isset($f[sc_ref('A', $d['row'])]) && $saved !== null) {
+        $derived = false;
+        if (empty($d['dated']) && $prevDate !== null) {
+            $derived = date('Y-m-d', strtotime($prevDate . ' +1 day'));
+            $anchor = ['row' => $d['row'], 'date' => $derived];
+            $warnings[] = 'Row ' . $d['row'] . ' has no date: used ' . $derived . ' (previous day + 1). Fix the Calc.';
+        } elseif (!isset($f[sc_ref('A', $d['row'])]) && $saved !== null) {
             $anchor = ['row' => $d['row'], 'date' => $saved];
         } elseif ($anchor === null && $i === 0 && $saved !== null) {
             $anchor = ['row' => $d['row'], 'date' => $saved];
             $warnings[] = 'No hard-typed first date in the DATE column — used the saved value of A' . $d['row'] . '.';
         }
         $date = null;
-        if ($anchor !== null) {
+        if ($derived !== false) {
+            $date = $derived;
+        } elseif ($anchor !== null) {
             $date = date('Y-m-d', strtotime($anchor['date'] . ' ' . sprintf('%+d', $d['row'] - $anchor['row']) . ' days'));
             if ($saved !== null && $saved !== $date) {
                 $warnings[] = 'A' . $d['row'] . ' shows ' . $saved . ' but follows ' . $anchor['date'] . ' (row ' . $anchor['row'] . ') → used ' . $date . '.';
             }
         }
+        if ($date !== null) $prevDate = $date;
         $days[] = [
             'row'            => $d['row'],
             'date'           => $date,
+            'date_derived'   => $derived !== false,
             'label'          => $cell($cols['label'], $d['row']),
             'flight_cost'    => $cols['flight'] ? calc_rd_num($v, $cols['flight'], $d['row']) : null,
             'park_fees_desc' => $cell($cols['fees_desc'], $d['row']),
@@ -248,6 +261,32 @@ function calc_read_file(string $path, string $wantSheet = ''): array {
         ];
     }
     if (!$days) $warnings[] = 'No day rows found under the DATE header (row ' . $hdr . ').';
+
+    // Rows of the day table with content (hotel, activities, fees) that did not become a day
+    // (no date and no PARK/OVERNIGHT text): they would be dropped from the programme without a
+    // word, so iti_final_calc_review() blocks on them.
+    $isDay = [];
+    foreach ($rows as $d) $isDay[$d['row']] = true;
+    $skipped = [];
+    for ($r = $hdr + 1; $r < $hdr + 40; $r++) {
+        $a = calc_rd_text($v, 'A', $r);
+        if ($a !== '' && stripos($a, 'total') === 0) break;
+        if (isset($isDay[$r])) continue;
+        $what = [];
+        foreach (['hotel' => 'hotel', 'act_desc' => 'activity', 'fees_desc' => 'park fees'] as $k => $name) {
+            $t = $cell($cols[$k], $r);
+            if ($t !== '' && !is_numeric($t)) $what[] = $name . ' "' . $t . '"';
+        }
+        if ($what) $skipped[] = ['row' => $r, 'text' => implode(', ', $what)];
+    }
+
+    // One day list for everything: nights = days − 1 here, in price_options[].nights, in the
+    // plan and in the programme's duration (iti_doc_data: N days / N−1 nights). The last row
+    // is the departure day: if it has a hotel, a row is missing or was not read.
+    $nights = $days ? count($days) - 1 : 0;
+    if ($days && $days[count($days) - 1]['hotel_text'] !== '') {
+        $warnings[] = 'The last day row (' . $days[count($days) - 1]['row'] . ') has a hotel: the Calc has no departure day — add it, or check that no row was skipped.';
+    }
 
     // ── Booking details below the table ──────────────────────────────────────
     $below = function (string $label) use ($v) {
@@ -317,8 +356,9 @@ function calc_read_file(string $path, string $wantSheet = ''): array {
         'extra_details'     => $below('EXTRA DETAILS'),
         'start_date'        => $start,
         'end_date'          => $end,
-        'nights'            => $days ? count($days) - 1 : 0,
+        'nights'            => $nights,
         'days'              => $days,
+        'skipped_rows'      => $skipped,   // [{row, text}] day-table rows with content that are not days
         'guests'            => $guests,
         'guests_tba'        => $tba || !$guests,
         'arrival'           => $flights['arrival'],
@@ -517,5 +557,6 @@ function calc_read_request(PDO $db, int $requestId, string $file = '', string $s
         'sheets'      => calc_pickable_sheets($sheets),   // to switch sheet (quotes keep several pax sheets)
         'calc_path'   => $path,
         'calc_rev'    => $dl['rev'],
+        'request_status' => (string)($r['status'] ?? ''),   // not Booked = a quote: room types not required yet
     ], $data);
 }

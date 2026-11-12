@@ -511,6 +511,7 @@ function iti_ps_calc_plan(PDO $db, int $rid, array $in): array {
     }
     return ['calc' => ['file' => $calc['file'], 'files' => $calc['candidates'] ?? [], 'rev' => $calc['calc_rev'] ?? null, 'pax' => $calc['pax'] ?? null,
                        'sheet' => $calc['sheet'] ?? null, 'sheets' => $calc['sheets'] ?? [], 'warnings' => $calc['warnings'] ?? [],
+                       'days' => count($calc['days'] ?? []), 'nights' => (int)($calc['nights'] ?? 0),   // = the program's duration
                        'price_options' => $calc['price_options'] ?? [], 'price_table' => iti_final_price_table($calc, $lang)],
             'code' => $code, 'sample' => $sample ? ['id' => (int)$sample['id'], 'title' => iti_doc_pick($sample, 'title', $lang)] : null,
             'review' => iti_final_calc_review($calc),   // pax, rooms, dates required (errors); total vs prices and supplements (warnings)
