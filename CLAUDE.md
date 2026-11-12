@@ -78,12 +78,14 @@ outdated — this file wins where they disagree (PHP version, local lint).
 ## Git and deploy
 - Commit / push / deploy **only when Roberto asks**. Commit message ends with the Co-Authored-By line.
 - Push: `git push origin main` (needs sandbox disabled). Deploy: run
-  `C:\Dropbox\Exchange\Savannah-Hub\DeployHub.bat` with stdin from `/dev/null`.
+  `C:\Dropbox\Exchange\Savannah-Hub\DeployHub.bat` with stdin from `/dev/null` (needs sandbox disabled).
+  It POSTs the pushed commit to `deploy_hook.php` (HTTPS, no SSH / git on the server); deployed only if the
+  output ends with `DEPLOY OK <sha>`. Verify: `DeployHub.bat dry` → "0 file(s) would change".
+  Fallback if the hook is broken: `DeployHubSSH.bat` (old SSH + `deploy.sh`, may hit the 25-process limit;
+  then verify on the server with `git diff origin/main --stat -- modules migrations`).
   Don't run `bin\hub-push.bat` from a tool — it ends on `pause` and hangs.
-- Verify a deploy: `ssh -i ~/.ssh/bluehost_hub -p 2222 savannp5@box2233.bluehost.com` →
-  `cd public_html/hub && git diff origin/main --stat -- modules migrations` (empty = deployed).
-  BlueHost SSH often refuses repeated connections: wait and retry once.
-- Deploy does not delete files on the server; removed files must be deleted by hand.
+- BlueHost SSH often refuses repeated connections: wait and retry once.
+- Deploy does not delete files on the server; removed files must be deleted by hand (the hook lists them).
 
 ## Business rules that matter in code
 - **Passport numbers live only in the booking's `passports/` folder and in the Calc passport column**, written there by

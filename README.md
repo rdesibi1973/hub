@@ -194,15 +194,18 @@ include __DIR__ . '/includes/header.php';
 ## 5. Deploy workflow
 
 ```
-local edit → git push (Windows PC) → DeployHub.bat → SSH to server → deploy.sh
+local edit → git push (Windows PC) → DeployHub.bat → HTTPS POST deploy_hook.php → GitHub zip of that commit
 ```
 
-`deploy.sh` runs `git fetch` + `git checkout origin/main -- .` (preserves `config.php`). The server's own HEAD therefore stays on an old commit and `git status` there shows many staged files — that is normal. To verify a deploy, on the server: `git diff origin/main --stat -- modules migrations` (empty = deployed).
+Since Nov 2026 `DeployHub.bat` calls `deploy_hook.php` (logic `includes/deploy_service.php`): no SSH, no `git` on the
+server, so BlueHost's 25-process limit no longer breaks deploys. Success = last line `DEPLOY OK <sha>`;
+`DeployHub.bat dry` lists what would change (verify: "0 file(s) would change"). Details in `docs/INFRASTRUCTURE.md` §4.
+The old SSH route (`deploy.sh`: `git fetch` + `git checkout origin/main -- .`) is `DeployHubSSH.bat`, kept as fallback.
 `bin\hub-push.bat` = push + deploy in one go (ends with `pause`); `DeployHub.bat` = deploy only.
 
 - **Deploy is manual** — run `DeployHub.bat` after each push. Claude never auto-deploys.
-- **`DeployHub.bat` is additive** — deletions are NOT propagated; deleted files must be removed manually on the server via SSH (`rm`).
-- `deploy.sh` loses its executable bit after git checkout on Windows. Fix: `git update-index --chmod=+x deploy.sh`, commit, and use `bash deploy.sh` in the batch file.
+- **`DeployHub.bat` is additive** — deletions are NOT propagated; deleted files must be removed manually on the server via SSH (`rm`). The hook lists them.
+- (`DeployHubSSH.bat` only) `deploy.sh` loses its executable bit after git checkout on Windows. Fix: `git update-index --chmod=+x deploy.sh`, commit, and use `bash deploy.sh` in the batch file.
 - Java files require `git add -f` (`.gitignore` covers `NetBeansProjects/`).
 - Add `.claude/worktrees/` to `.gitignore`.
 - Commit identity: `git -c user.email="rdesibi@savannahexplorers.com" -c user.name="Roberto De Sibi" commit`

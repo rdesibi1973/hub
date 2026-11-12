@@ -26,12 +26,27 @@
 
 ## 4. Deploy workflow
 
-Two paths, both pull from `main`:
+Two paths, both deploy `main`:
 
-1. **`DeployHub.bat`** (Windows, on Roberto's PC, `C:\Dropbox\Exchange\Savannah-Hub\`) — the usual route; `bin\hub-push.bat` does push + deploy in one go. The scripts live on the local machine, **not** in the repo.
-2. **On the server** via SSH — direct alternative.
+1. **`DeployHub.bat`** (Windows, on Roberto's PC, `C:\Dropbox\Exchange\Savannah-Hub\`) — the usual route since Nov 2026;
+   `bin\hub-push.bat` does push + deploy in one go. The scripts live on the local machine, **not** in the repo.
+   It POSTs the local `origin/main` commit to `https://hub.savannahexplorers.com/deploy_hook.php` with header
+   `X-Deploy-Token` (token in `%USERPROFILE%\.ssh\hub_deploy_token` on the PC, `DEPLOY_HOOK_TOKEN` in the server's
+   `includes/config.php`). The hook (`includes/deploy_service.php`) runs in one web PHP process: it downloads the GitHub
+   zip of that exact commit, writes only the files whose CRC changed (temp file + rename, OPcache invalidated) and
+   never touches untracked server files (`includes/config.php`, `modules/leads/config.php`, `api.txt`, uploads).
+   No SSH and no `git` on the server, so the 25-process limit (`ulimit -u 25`) no longer breaks deploys.
+   The last line of the answer is `DEPLOY OK <sha>`; anything else = not deployed (the .bat says so and exits 1).
+   `DeployHub.bat dry` = list what would change, write nothing. State: `~/hub_deploy/state.json` (commit + file list)
+   and `~/hub_deploy/deploy.log`, outside the web root.
+2. **`DeployHubSSH.bat`** — the old route, kept as fallback: SSH + server `deploy.sh` (`git fetch` +
+   `git checkout origin/main -- .`). It can fail on the process limit ("fork: Resource temporarily unavailable")
+   and still print "Deploy done".
 
-The server's `deploy.sh` runs `git fetch` + `git checkout origin/main -- .`: the server HEAD stays on an old commit (normal), and files deleted in git are **not** deleted on the server. Verify with `git diff origin/main --stat -- modules migrations` on the server (empty = deployed). BlueHost SSH (port 2222) often refuses repeated connections — wait and retry.
+Files deleted in git are **not** deleted on the server by either path; the hook lists them ("Removed from the repo but
+still on the server") when they were in the previously deployed commit. Verify a deploy: `DeployHub.bat dry` says
+"0 file(s) would change". The server's git checkout is no longer updated by path 1, so `git diff origin/main` there is
+meaningful only after a `DeployHubSSH.bat`. BlueHost SSH (port 2222) often refuses repeated connections — wait and retry.
 
 Notes:
 - **MySQL changes take effect immediately** on page reload — no deploy needed for SQL-only fixes.
