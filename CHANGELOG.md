@@ -20,6 +20,20 @@ Running log of notable changes and current build state. Module-level "active / p
 
 ---
 
+## 2026-11-12 — Draft .eml out of mails/ into old/
+- Rule (Roberto): a booking folder's `mails/` holds real mails only; Cowork's draft copies (`.eml` with `X-Unsent: 1`) go to
+  `old/`. Draft = `.eml` + `X-Unsent: 1` in the header block (64 KB Range read, CRLF files included) — never by name.
+- `modules/leads/includes/drafts_service.php`: `drafts_cleanup()` (Agent API `drafts_cleanup`, BackOffice page
+  `drafts_cleanup.php` "✉ Drafts out of mails/", admin): dry run unless confirm; `/001_Safari` (+ `00_YYYY`, `00_CANCELED`, group
+  members) and `/<year>` inquiry folders; parallel Dropbox listing in chunks, ~100 s per call, `next_offset`; moves to `old/`
+  with "(2)" on a clash, never deletes; timeline note on the request; page runs also in `agent_audit_log`.
+- Readers skip drafts: "Set expiry" proof list, `expiry_override_proof` check (draft refused), and `followup_save_eml`
+  (`staff_mail_save_eml`, page upload, Booking mail "Save as proof") refuses to write a draft into `mails/`.
+- No Hub code writes draft `.eml` into booking folders (drafts are made by Cowork in `Exchange/Draft-mail`): nothing to change there.
+- Live dry run (read-only): REMCO1108 / request 2882 → 9 drafts, `2026-10-22_Uzuri_P247-P248 extension to 30-11.eml` kept;
+  `/001_Safari` = 1755 folders, ~96 per 40 s. Tests: `tools/tests/drafts_cleanup_test.php` (25 checks).
+- Not done yet (handoff §4, after Roberto's first run): weekly automatic move in the cron + count in the memo digest.
+
 ## 2026-11-12 — Booking mail: "Save as proof & set expiry" (handoff §5)
 - Thread view (admin, reason already given to open it): on each mail received from the supplier, "📅 Save as proof & set
   expiry" → date confirmed in the mail + optional name → Check (dry run: path, passport attachments removed) → Save. The mail

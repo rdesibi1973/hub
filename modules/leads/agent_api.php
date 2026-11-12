@@ -102,7 +102,7 @@ function agent_audit(PDO $db, string $action, $reqId, array $payload, string $re
                               'iti_create_flight_route', 'iti_create_activity', 'iti_create_transfer_route', 'iti_update_transfer_route', 'iti_save_as_sample',
                               'create_request', 'add_flight_rates', 'timeline_update', 'summary_set', 'rename_folder',
                               'set_request_status', 'update_request', 'import_group_folder', 'move_group_folder', 'ck_request_check', 'memo_delete', 'create_agency', 'update_agency', 'save_agency_contact', 'delete_agency_contact',
-                              'followup_scan', 'followup_update', 'followup_upsert', 'staff_mail_save_eml', 'iti_update_activity', 'sales_response_dismiss',
+                              'followup_scan', 'followup_update', 'followup_upsert', 'staff_mail_save_eml', 'drafts_cleanup', 'iti_update_activity', 'sales_response_dismiss',
                               'ck_set_owners', 'ck_set_group_closed', 'ck_findings_upsert', 'iti_create_destination', 'iti_import_program', 'iti_supplier_blocklist', 'predeparture_email'], true) && empty($payload['confirm']);
     // Mail: keep who/what in the log, not message bodies or attachment content.
     if (in_array($action, ['mail_get', 'mail_attachment', 'staff_mail_get', 'staff_mail_attachment', 'iti_document', 'iti_vouchers'], true) && $code === 200) {
@@ -3378,6 +3378,26 @@ try {
                   + (empty($in['confirm']) ? ['message' => 'Dry run — nothing saved. Resend with "confirm": true; then followup_update with expiry_override_proof = proof.'] : []));
     }
 
+    // Draft .eml (header X-Unsent: 1) out of the booking folders' mails/ into old/ (includes/drafts_service.php; page
+    // drafts_cleanup.php). Dry run unless confirm; batches with offset / next_offset; never deletes.
+    case 'drafts_cleanup': {
+        agent_require_method('POST');
+        require_once __DIR__ . '/includes/drafts_service.php';
+        $scope = (string)($in['scope'] ?? 'all');
+        if (!in_array($scope, ['safari', 'requests', 'all'], true)) agent_fail('scope must be safari, requests or all');
+        if ((int)($in['request_id'] ?? 0) > 0) $agentReqId = agent_request($db, $in['request_id'])['id'];
+        @set_time_limit(150);
+        try {
+            $res = drafts_cleanup($db, ['scope' => $scope, 'request_id' => $agentReqId ?: null, 'confirm' => !empty($in['confirm']),
+                                        'limit_folders' => (int)($in['limit_folders'] ?? 0), 'offset' => (int)($in['offset'] ?? 0),
+                                        'budget' => 100]);   // seconds of scanning, inside the 150 s limit
+        } catch (InvalidArgumentException $e) {
+            agent_fail($e->getMessage(), 404);
+        }
+        agent_out(['ok' => true] + $res + (empty($in['confirm'])
+            ? ['message' => 'Dry run — nothing moved. Check the totals and a sample, then resend with "confirm": true (same offset).'] : []));
+    }
+
     // ── Mail security scan (modules/security/mail_scan.php, cPanel cron). Read-only: no uapi from the web process.
     case 'mail_security_status': {
         require_once __DIR__ . '/../security/includes/mail_security_service.php';
@@ -3496,7 +3516,7 @@ try {
             'save_invoice_pdf', 'send_invoice_email', 'import_zoho_invoice', 'create_invoice', 'update_invoice', 'memo_list', 'memo_save', 'memo_set_status', 'memo_delete',
             'routine_status', 'routine_done',
             'mail_folders', 'mail_list', 'mail_get', 'mail_attachment', 'mail_flag', 'mail_move', 'mail_draft', 'mail_send',
-            'staff_mail_mailboxes', 'staff_mail_search', 'staff_mail_get', 'staff_mail_attachment', 'staff_mail_save_eml',
+            'staff_mail_mailboxes', 'staff_mail_search', 'staff_mail_get', 'staff_mail_attachment', 'staff_mail_save_eml', 'drafts_cleanup',
             'timeline_list', 'timeline_add', 'timeline_update', 'summary_set', 'request_resume', 'set_request_status',
             'payments_due', 'ck_status', 'ck_request_check', 'ck_set_owners', 'ck_set_group_closed', 'ck_findings_upsert', 'ck_findings_drafts', 'ops_movements', 'ops_lunch_boxes', 'ops_medivac', 'flight_tickets',
             'followup_list', 'followup_scan', 'followup_update', 'followup_upsert', 'mail_security_status',

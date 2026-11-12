@@ -38,6 +38,8 @@ outdated — this file wins where they disagree (PHP version, local lint).
 - **Dropbox conflicted copies** (`modules/leads/dropbox_conflicts.php`, nightly from `ck_cron.php` after its reply; logic
   `includes/dbx_conflict_service.php`, shared with the Agent API `dropbox_conflicts*`): copies in `/001_Safari` resolved when
   safe (trash / cell merge), else memo + mail to the CK owner. Analysis only until `DBX_CONFLICTS_LIVE`.
+- **Draft mails** (`includes/drafts_service.php` in `modules/leads/`, Agent API `drafts_cleanup`, page `drafts_cleanup.php`): a booking's
+  `mails/` = real mails only; `.eml` with `X-Unsent: 1` (Cowork's draft copies) move to `old/`. Readers of `mails/` skip drafts.
 - **Procedures** (`modules/leads/procedures.php`, proxy `procedure_file.php`; logic `includes/procedures_service.php`,
   "?" links map `includes/procedures_map.php`): office procedure PDFs read live from Dropbox `/Operations/OfficeProcedures`
   (one copy only, cached by `rev`); `orig/` Word sources for admins only, `old/` never.

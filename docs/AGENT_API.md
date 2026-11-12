@@ -31,7 +31,7 @@ without driving the web UI.
 | HTTPS only | Plain HTTP → 403. |
 | Rate limit | 60 calls/min → 429. |
 | Audit | Every call (including failures and dry-runs) → `agent_audit_log` (action, request_id, user, HTTP code, dry_run, payload, result, IP). |
-| Dry-run by default | `update_request`, `confirm_booking`, `send_booking_email`, `rollback_booking`, `rename_folder`, `import_group_folder`, `move_group_folder`, `set_request_status`, `cancel_invoice_payment`, `update_folder_status`, `import_zoho_invoice`, `create_invoice`, `update_invoice`, `send_invoice_email`, `memo_delete`, `create_agency`, `update_agency`, `save_agency_contact`, `delete_agency_contact`, `mail_send`, `mail_move`, `ck_request_check`, `ck_set_owners`, `ck_findings_upsert`, `followup_scan`, `followup_update`, `followup_upsert` and `staff_mail_save_eml` (among others) do nothing unless the body has `"confirm": true`. |
+| Dry-run by default | `update_request`, `confirm_booking`, `send_booking_email`, `rollback_booking`, `rename_folder`, `import_group_folder`, `move_group_folder`, `set_request_status`, `cancel_invoice_payment`, `update_folder_status`, `import_zoho_invoice`, `create_invoice`, `update_invoice`, `send_invoice_email`, `memo_delete`, `create_agency`, `update_agency`, `save_agency_contact`, `delete_agency_contact`, `mail_send`, `mail_move`, `ck_request_check`, `ck_set_owners`, `ck_findings_upsert`, `followup_scan`, `followup_update`, `followup_upsert`, `staff_mail_save_eml` and `drafts_cleanup` (among others) do nothing unless the body has `"confirm": true`. |
 | No deletes | No delete endpoint (mail included), except `memo_delete`, which is soft (`deleted_at`, the row stays). Undo a confirm with `rollback_booking` (or BackOffice → Rollback). |
 | Mailbox | The key also reads `info@` (`mail_*`): keep `api.txt` as private as the mailbox password. |
 
@@ -1784,7 +1784,7 @@ curl -sA "$UA" -H "$H" -X POST "$U?action=followup_scan" -d '{"type":"group"}'  
 curl -sA "$UA" -H "$H" -X POST "$U?action=followup_scan" -d '{"type":"all","confirm":true}'
 curl -sA "$UA" -H "$H" -X POST "$U?action=followup_update" -d '{"id":12,"staff_status":"problem","notes":"Lodge full on 1 Jan, alternatives asked"}'   # dry run
 # Supplier extended by mail: 1) save the mail as proof, 2) set the expiry (both dry run until "confirm": true)
-curl -sA "$UA" -H "$H" -X POST "$U?action=staff_mail_save_eml" -d '{"mailbox":"glady","folder":"INBOX","key":"1729581300.M5P7.box2233,S=48211","request_id":3108,"save_as":"2026-10-22_Uzuri_P247 extension to 30-11","reason":"Uzuri P247 hold extended to 30/11","confirm":true}'
+curl -sA "$UA" -H "$H" -X POST "$U?action=staff_mail_save_eml" -d '{"mailbox":"glady","folder":"INBOX","key":"1729581300.M5P7.box2233,S=48211","request_id":2882,"save_as":"2026-10-22_Uzuri_P247 extension to 30-11","reason":"Uzuri P247 hold extended to 30/11","confirm":true}'
 curl -sA "$UA" -H "$H" -X POST "$U?action=followup_update" -d '{"id":431,"expiry_override":"2026-11-30","expiry_override_proof":"mails/2026-10-22_Uzuri_P247 extension to 30-11.eml","confirm":true}'
 curl -sA "$UA" -H "$H" -X POST "$U?action=followup_upsert" -d '{"rows":[{"folder":"12_30DEC_ElenaManfroni(UnEmozionePerSempre-PS-Roberto)_START30DEC_MIDT04JAN_END08JAN2027_BALANCE","source_file":"invoices/Lion'"'"'s paw-INV.pdf","supplier":"Lion'"'"'s Paw","supplier_ref":"WB41803","service_date":"2027-01-01","issue":"provisional_expired","doc_status_text":"Provisional (expires 28 Sep 2026)","expiry_date":"2026-09-28","booked_by":"Lydia"}],"scanned":[]}'   # dry run
 ```
@@ -1952,6 +1952,30 @@ resolves what is safe (trash / merge), even before `DBX_CONFLICTS_LIVE`; memos a
 ```bash
 curl -sA "$UA" -H "$H" "$U?action=dropbox_conflicts"
 curl -sA "$UA" -H "$H" -X POST "$U?action=dropbox_conflicts_run" -d '{"budget":120}'
+```
+
+### `drafts_cleanup` (POST, dry-run unless `confirm`)
+Draft mails out of the booking folders' `mails/` into `old/` (Roberto, 12 Nov 2026: `mails/` = real mails only — received,
+sent, supplier proofs; Cowork's draft copies go to `old/`). Logic `modules/leads/includes/drafts_service.php`; same code as
+BackOffice → "✉ Drafts out of mails/" (`modules/leads/drafts_cleanup.php`, admin).
+A file is a **draft** only if it is `.eml` **and** its header block (before the first empty line, first 64 KB read with a
+Range request — bodies are never read) has `X-Unsent: 1` (case-insensitive, spaces tolerated). Never decided by the name;
+other files are never touched; nothing is deleted.
+Params: `scope` `safari` (`/001_Safari`, its `00_YYYY` / `00_CANCELED` containers included) | `requests` (`/<last year>`,
+`/<this year>`, `/<next year>`) | `all` (default); or `request_id` (that booking's folder only); `limit_folders` (default: as many
+as fit in ~100 s), `offset`. Group folders: their member sub-folders' `mails/` too.
+Dry run → `{folders_total, offset, next_offset (null = scope done — else call again with it), folders_scanned,
+folders_with_mails, drafts_found, folders_affected, results[] {folder, request_id, drafts[], kept[]}, errors[]}`.
+`confirm` → the drafts move to `<folder>/old/<same name>` (`old/` created if missing; a name already there gets "(2)", "(3)"…),
+`moved`, `results[].moves[] {from, to, result}`; a timeline note on the linked request ("N draft mails moved from mails/ to old/").
+Readers ignore drafts: the Booking follow-up "Set expiry" proof list hides them, `followup_update` refuses a draft as
+`expiry_override_proof`, and `staff_mail_save_eml` / "Save as proof" refuse to write a draft into `mails/`.
+Real case (12 Nov 2026): REMCO1108 (request 2882) — 9 drafts, `2026-10-22_Uzuri_P247-P248 extension to 30-11.eml` kept.
+
+```bash
+curl -sA "$UA" -H "$H" -X POST "$U?action=drafts_cleanup" -d '{"request_id":2882}'                    # dry run, one booking
+curl -sA "$UA" -H "$H" -X POST "$U?action=drafts_cleanup" -d '{"request_id":2882,"confirm":true}'
+curl -sA "$UA" -H "$H" -X POST "$U?action=drafts_cleanup" -d '{"scope":"all","offset":0}'            # dry run; repeat with next_offset
 ```
 
 ## Pre-departure travel info

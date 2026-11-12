@@ -3062,6 +3062,11 @@ function followup_override_change(array $row, array $ch, array $user, array $opt
     $exists = $opt['proof_exists'] ?? 'followup_proof_exists_dropbox';
     try {
         if (!$exists($dir . '/' . $rel)) return ['ok' => false, 'error' => 'Proof not found in Dropbox: ' . $dir . '/' . $rel, 'code' => 404];
+        // A draft (X-Unsent: 1 — our own unsent copy) proves nothing about the supplier.
+        require_once __DIR__ . '/../../leads/includes/drafts_service.php';
+        if (empty($opt['skip_draft_check']) && drafts_path_is_draft($dir . '/' . $rel, $opt['heads'] ?? null)) {
+            return ['ok' => false, 'error' => 'This file is a draft (X-Unsent: 1), not a mail from the supplier — it cannot be the proof', 'code' => 400];
+        }
     } catch (Throwable $e) {
         return ['ok' => false, 'error' => 'Could not check the proof in Dropbox: ' . $e->getMessage(), 'code' => 502];
     }
@@ -3113,6 +3118,10 @@ function followup_save_eml(string $dir, string $name, string $raw, bool $confirm
     if ($raw === '' || strlen($raw) > FU_PROOF_MAX) return ['ok' => false, 'error' => 'The mail must be between 1 byte and ' . (FU_PROOF_MAX >> 20) . ' MB', 'code' => 413];
     if (!preg_match('/^(?:From|Date|Subject|Message-ID|Received|Return-Path|MIME-Version|To):/mi', substr($raw, 0, 65536))) {
         return ['ok' => false, 'error' => 'This is not a mail file (.eml): no mail headers found', 'code' => 400];
+    }
+    require_once __DIR__ . '/../../leads/includes/drafts_service.php';
+    if (drafts_is_draft_head($raw)) {   // mails/ holds real mails only: a draft (X-Unsent: 1) belongs in old/
+        return ['ok' => false, 'error' => 'This is a draft (X-Unsent: 1), not a mail that was sent or received — mails/ holds real mails only', 'code' => 400];
     }
     $clean = eml_sanitize($raw);
     $proof = FU_PROOF_DIR . '/' . $name;
@@ -3168,6 +3177,14 @@ function followup_proof_files(PDO $db, int $id, array $user, array $opt = []): a
     } catch (Throwable $e) {
         return ['ok' => false, 'error' => 'Dropbox: ' . $e->getMessage(), 'code' => 502];
     }
+    // Drafts (X-Unsent: 1, Cowork's copies — they belong in old/) are not proofs: hidden (drafts_service.php).
+    require_once __DIR__ . '/../../leads/includes/drafts_service.php';
+    $entries = array_values(array_filter($entries, fn($f) => preg_match('/\.eml$/i', (string)$f['name'])));
+    try {
+        $entries = drafts_filter_real($dir . '/' . FU_PROOF_DIR, $entries, $opt['heads'] ?? null);
+    } catch (Throwable $e) {
+        error_log('followup_proof_files: drafts not checked: ' . $e->getMessage());
+    }
     $files = [];
     foreach ($entries as $f) {
         if (!preg_match('/\.eml$/i', (string)$f['name'])) continue;
@@ -3202,6 +3219,7 @@ function followup_set_expiry(PDO $db, int $id, array $in, array $user, bool $con
         if (!$saved['ok']) return $saved;
         $proof = $saved['proof'];
         $opt['proof_exists'] = fn() => true;   // just written (dry run: would be) — no second Dropbox call
+        $opt['skip_draft_check'] = true;       // followup_save_eml() already refused a draft
     }
     $res = followup_update($db, $id, ['expiry_override' => $date, 'expiry_override_proof' => $proof], $user, $confirm, $opt);
     return $saved ? $res + ['saved' => $saved] : $res;

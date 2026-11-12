@@ -674,6 +674,7 @@ include 'includes/header.php';
     <a href="ck_tracker.php" class="btn btn-outline btn-sm" title="Confirmed bookings missing the _CK, by days to arrival">✅ Missing CK</a>
     <?php if (($currentUser['role_name'] ?? '') === 'admin'): ?>
     <a href="relink_folders.php" class="btn btn-outline btn-sm" title="Refresh Dropbox links after moving folders to an archive">🔗 Re-link folders (bulk)</a>
+    <a href="drafts_cleanup.php" class="btn btn-outline btn-sm" title="Cowork's draft .eml copies (X-Unsent: 1) out of the booking folders' mails/ into old/">✉ Drafts out of mails/</a>
     <?php endif; ?>
     <a href="request_add.php" class="btn btn-red btn-sm" title="Create a new request">＋ New Request</a>
   </div>

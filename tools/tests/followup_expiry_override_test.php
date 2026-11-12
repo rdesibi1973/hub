@@ -53,7 +53,8 @@ $glady  = ['id' => 7, 'role_name' => 'booking', 'permissions' => [FU_EDIT_PERMIS
 $seller = ['id' => 9, 'role_name' => 'sales', 'permissions' => [], 'followup_admin' => false];
 $agent  = ['id' => 99, 'role_name' => 'admin', 'permissions' => [FU_EDIT_PERMISSION], 'followup_admin' => true];
 $files  = [$DIR . '/' . $PROOF => true];
-$opt    = ['today' => $TODAY, 'dir' => $DIR, 'proof_exists' => fn($p) => isset($files[$p])];
+$heads  = fn(array $ps) => [];   // Dropbox head reads (drafts check): nothing readable = no draft
+$opt    = ['today' => $TODAY, 'dir' => $DIR, 'proof_exists' => fn($p) => isset($files[$p]), 'heads' => $heads];
 
 $unit = ['request' => ['id' => 1108], 'folder' => $FOLDER, 'start_date' => '2026-11-25', 'end_date' => '2026-12-05'];
 $doc = fn(string $file, ?string $expiry, string $status = 'provisional') => ['status' => $status, 'issue' => $status === 'confirmed' ? null : 'provisional',
@@ -204,10 +205,10 @@ $r = followup_set_expiry($db, $id2, ['date' => '2026-12-10', 'proof' => ''], $gl
 $t('set expiry without proof refused', !$r['ok'] && $r['code'] === 400, $r);
 $r = followup_set_expiry($db, $id2, ['date' => '2026-12-10', 'upload' => ['content' => $mail]], $seller, true, $opt + $sopt);
 $t('set expiry by a seller refused', !$r['ok'] && $r['code'] === 403, $r);
-$r = followup_proof_files($db, $id2, $glady, ['dir' => $DIR, 'list' => fn($p) => [['name' => 'b.eml', 'size' => 1, 'modified' => '2026-10-22T07:00:00Z'],
+$r = followup_proof_files($db, $id2, $glady, ['dir' => $DIR, 'heads' => $heads, 'list' => fn($p) => [['name' => 'b.eml', 'size' => 1, 'modified' => '2026-10-22T07:00:00Z'],
                                                                                   ['name' => 'scan.pdf', 'size' => 1, 'modified' => '2026-10-23T07:00:00Z']]]);
 $t('mails/ listing: .eml only', $r['ok'] && count($r['files']) === 1 && $r['files'][0]['proof'] === 'mails/b.eml', $r);
-$r = followup_proof_files($db, $id2, $seller, ['dir' => $DIR, 'list' => fn($p) => []]);
+$r = followup_proof_files($db, $id2, $seller, ['dir' => $DIR, 'heads' => $heads, 'list' => fn($p) => []]);
 $t('mails/ listing refused to a seller', !$r['ok'] && $r['code'] === 403, $r);
 // (A "followup_default_owner: … ck_checks" line on stderr is expected: no CK tables in this database.)
 
