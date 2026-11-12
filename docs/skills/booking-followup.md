@@ -14,7 +14,7 @@ Hub access and fixed rules: as in the project instructions (dry run first, `"con
 
 | type | issue | meaning |
 |---|---|---|
-| supplier | `provisional` / `provisional_expired` | a lodge / camp document in `<booking>/invoices/` still provisional (expiry printed, past = expired) |
+| supplier | `provisional` / `provisional_expired` | a lodge / camp document in `<booking>/invoices/` still provisional (expiry printed, past = expired; an expiry extended by mail — `expiry_override` — counts instead) |
 | supplier | `on_request` | flight invoice with a flight still on request |
 | supplier | `orangi_rooms_provisional` | Orangi voucher Confirmed but its notes say "x rooms still provisional" |
 | supplier / ticket | `unreadable` | scanned PDF without text, or a Calc that cannot be read: a human looks at it |
@@ -64,6 +64,17 @@ Proposta: <a chi scrivere / cosa sollecitare>
   Leave out what Roberto already knows is fine (e.g. FamTrip Promoservice: the 2 ZNZ pax have their tickets).
 - Supplier (provisional expired close to the service, on-request flights, rooms to release for a group): only if Roberto asks — one draft per supplier with the references (WB…, booking ID) and the dates; the booking team normally does it.
 - Never change staff fields for them. If Roberto asks to reassign, mark not relevant or add a note: `followup_update` (dry run → his ok → `"confirm": true`).
+- **Supplier extended by mail** (the hold was extended by mail, no new pro-forma, so the line still says "Provisional expired"):
+  the booking team sets it on the page ("📅 Set expiry", proof required). If Roberto asks you to do it:
+  1. find the supplier's mail: `staff_mail_search` (`mailbox=glady,operations`, supplier / ref in `q`), read it with `staff_mail_get`
+     (reason) and check the new date is really confirmed there;
+  2. `staff_mail_save_eml` with `request_id` (or `folder_path`), `save_as` `YYYY-MM-DD_<Supplier>_<Ref> extension to DD-MM`, reason —
+     dry run, then `"confirm": true`; it goes into `<booking>/mails/` (never `bookings/`);
+  3. `followup_update` `{id, expiry_override: "YYYY-MM-DD", expiry_override_proof: "<proof from step 2>"}` — dry run → Roberto's ok →
+     `"confirm": true`.
+  In the list the line shows `expiry_override` (who / when / proof) and `doc_expiry_date`. A newer document with an expiry at or after
+  the override clears it by itself; when the override date passes, the line is expired / urgent again. Report such lines as
+  "prorogata via mail fino al <gg/mm>".
 
 ## 4. Memo
 
