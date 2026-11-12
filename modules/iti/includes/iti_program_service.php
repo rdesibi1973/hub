@@ -114,6 +114,71 @@ function iti_ps_document_name(array $p, string $format): ?string {
     return $ref . '.' . ($format === 'docx' || $format === 'word' ? 'docx' : 'pdf');
 }
 
+/** A programme file not saved to Dropbox: HTTP code and data for the API reply. */
+class ItiSaveException extends RuntimeException {
+    public $http = 400;
+    public $data = [];
+    public function __construct(string $msg, int $http = 400, array $data = []) { parent::__construct($msg); $this->http = $http; $this->data = $data; }
+}
+
+/**
+ * Upload a generated programme file ($f from iti_export_file() / voucher_render_file(): name, format, content)
+ * to Dropbox, by default into the folder of the programme's request. Shared by the Agent API
+ * (iti_document / iti_vouchers with save / request_id / folder_path) and program_edit.php ("Save PDF to Dropbox").
+ * $opt: folder_path (full Dropbox path), request_id (that request's folder), save_as (file name), overwrite.
+ * An existing file is kept unless overwrite (409); Dropbox keeps the replaced version in its history.
+ * Logged on the request timeline. Returns ['path', 'name', 'overwritten', 'request_id'].
+ */
+function iti_ps_save_file(PDO $db, int $pid, array $f, array $opt = array()): array {
+    require_once __DIR__ . '/../../leads/dropbox_helper.php';
+    require_once __DIR__ . '/../../leads/includes/booking_service.php';   // req_folder_path(), timeline_log()
+    $p   = iti_get_program($pid);
+    $dir = rtrim(trim((string)($opt['folder_path'] ?? '')), '/');
+    $rid = (int)($opt['request_id'] ?? 0);
+    if ($dir === '' && $rid <= 0) {
+        $rid = (int)($p['lead_request_id'] ?? 0);
+        if ($rid <= 0) throw new ItiSaveException('Program ' . $pid . ' has no linked Hub request — pass request_id or folder_path', 409);
+    }
+    $token = dropbox_get_access_token();
+    if ($dir !== '') {
+        if ($dir[0] !== '/') throw new ItiSaveException('folder_path must be a full Dropbox path starting with /');
+        if (!dropbox_path_exists($token, $dir)) throw new ItiSaveException('folder_path ' . $dir . ' not found in Dropbox', 404);
+    } else {
+        $st = $db->prepare('SELECT id, practice_code, group_folder, dropbox_url FROM requests WHERE id = ?');
+        $st->execute([$rid]);
+        $r = $st->fetch(PDO::FETCH_ASSOC);
+        if (!$r) throw new ItiSaveException('Request ' . $rid . ' not found', 404);
+        if (trim((string)$r['practice_code']) === '') throw new ItiSaveException('Request ' . $rid . ' has no folder — pass folder_path', 409);
+        $dir = req_folder_path($r);   // searched by folder name if it moved
+        if ($dir === '' || !dropbox_path_exists($token, $dir)) {
+            $dir = (string)dropbox_find_folder($token, $r['practice_code']);
+            if ($dir === '') throw new ItiSaveException('Folder ' . $r['practice_code'] . ' not found in Dropbox — pass folder_path', 404);
+        }
+    }
+    $name = trim((string)($opt['save_as'] ?? '')) ?: $f['name'];
+    $name = trim(str_replace(array('/', '\\', ':', '*', '?', '"', '<', '>', '|'), '_', $name));
+    if (!preg_match('/\.' . preg_quote($f['format'], '/') . '$/i', $name)) $name .= '.' . $f['format'];
+    $path      = $dir . '/' . $name;
+    $overwrite = !empty($opt['overwrite']);
+    $exists    = dropbox_path_exists($token, $path);
+    if ($exists && !$overwrite) {
+        throw new ItiSaveException('File already exists: ' . $path, 409,
+            array('path' => $path, 'hint' => 'Use save_as for another name, or "overwrite": true (Dropbox keeps the old version).'));
+    }
+    try {
+        $meta = dropbox_upload_text($token, $path, $f['content'], $overwrite ? 'overwrite' : 'add');
+    } catch (RuntimeException $e) {
+        throw new ItiSaveException($e->getMessage(), 502, array('path' => $path));
+    }
+    $saved = $meta['path_display'] ?? $path;
+    $tlRid = (int)($p['lead_request_id'] ?? 0) ?: $rid;
+    if ($tlRid > 0) {
+        timeline_log($tlRid, 'program_update', 'Program file saved: ' . $name,
+                     array('refs' => array('program_id' => $pid, 'dropbox_path' => $saved)));
+    }
+    return array('path' => $saved, 'name' => $name, 'overwritten' => $exists, 'request_id' => $tlRid ?: null);
+}
+
 /** Public / internal links of a programme ($lang = display language). */
 function iti_ps_links(array $p, string $lang = ''): array {
     $lang = $lang !== '' ? $lang : (string)($p['display_language'] ?? 'it');

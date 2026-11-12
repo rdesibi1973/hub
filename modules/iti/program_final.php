@@ -246,6 +246,14 @@ include __DIR__ . '/../../includes/layout_header.php';
         <td style="white-space:nowrap;">
           <a href="program_edit.php?id=<?= (int)$f['id'] ?>" class="btn btn-outline btn-sm">✏️ Edit</a>
           <a href="program_doc.php?id=<?= (int)$f['id'] ?>" target="_blank" class="btn btn-outline btn-sm">👁 Preview</a>
+          <?php if (!$f['superseded_by']): ?>
+          <form method="POST" action="program_edit.php?id=<?= (int)$f['id'] ?>" style="display:inline;"
+                onsubmit="return confirm('Save the PDF of program #<?= (int)$f['id'] ?> in the Dropbox folder of this request, named after its Ref. Number?\nA file with the same name is replaced (Dropbox keeps the old version).')">
+            <input type="hidden" name="_sub" value="save_pdf_dropbox">
+            <input type="hidden" name="back" value="final">
+            <button class="btn btn-outline btn-sm" title="The PDF into the request's Dropbox folder — check the texts first">💾 PDF → Dropbox</button>
+          </form>
+          <?php endif; ?>
         </td>
       </tr>
     <?php endforeach; ?>

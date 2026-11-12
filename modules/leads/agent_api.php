@@ -217,37 +217,14 @@ function agent_iti_file_out(PDO $db, array $in, int $pid, array $f, array $extra
     if ($dir === '' && $rid <= 0) {
         agent_out(['ok' => true, 'file' => $info + ['content_base64' => base64_encode($f['content'])]]);
     }
-    require_once __DIR__ . '/dropbox_helper.php';
-    $token = dropbox_get_access_token();
-    if ($dir !== '') {
-        if ($dir[0] !== '/') agent_fail('folder_path must be a full Dropbox path starting with /');
-        if (!dropbox_path_exists($token, $dir)) agent_fail('folder_path ' . $dir . ' not found in Dropbox', 404);
-    } else {
-        $r = agent_request($db, $rid);
-        if (!$r['practice_code']) agent_fail('Request ' . $r['id'] . ' has no folder — pass folder_path', 409);
-        $dir = agent_request_dropbox_dir($token, $r);
-    }
-    $name = trim((string)($in['save_as'] ?? '')) ?: $f['name'];
-    $name = trim(str_replace(['/', '\\', ':', '*', '?', '"', '<', '>', '|'], '_', $name));
-    if (!preg_match('/\.' . $f['format'] . '$/i', $name)) $name .= '.' . $f['format'];
-    $path = $dir . '/' . $name;
-    $overwrite = !empty($in['overwrite']);
-    $exists = dropbox_path_exists($token, $path);
-    if ($exists && !$overwrite) {
-        agent_fail('File already exists: ' . $path, 409, ['path' => $path, 'hint' => 'Use save_as for another name, or "overwrite": true (Dropbox keeps the old version).']);
-    }
+    if ($rid > 0) agent_request($db, $rid);   // 404 if unknown; sets the audit log's request
     try {
-        $meta = dropbox_upload_text($token, $path, $f['content'], $overwrite ? 'overwrite' : 'add');
-    } catch (RuntimeException $e) {
-        agent_fail($e->getMessage(), 502, ['path' => $path]);
+        $res = iti_ps_save_file($db, $pid, $f, ['folder_path' => $dir, 'request_id' => $rid,
+                                                'save_as' => $in['save_as'] ?? '', 'overwrite' => !empty($in['overwrite'])]);
+    } catch (ItiSaveException $e) {
+        agent_fail($e->getMessage(), $e->http, $e->data);
     }
-    $p = iti_get_program($pid);
-    $tlRid = (int)($p['lead_request_id'] ?? 0) ?: $rid;
-    if ($tlRid > 0) {
-        timeline_log($tlRid, 'program_update', 'Program file saved: ' . $name,
-                     ['refs' => ['program_id' => $pid, 'dropbox_path' => $meta['path_display'] ?? $path]]);
-    }
-    agent_out(['ok' => true, 'file' => $info, 'saved_to' => $meta['path_display'] ?? $path, 'overwritten' => $exists]);
+    agent_out(['ok' => true, 'file' => $info, 'saved_to' => $res['path'], 'overwritten' => $res['overwritten']]);
 }
 
 /** routes[] {route, origin, destination, airline?, cost, sale?, valid_from, valid_to?, notes?} → flight_routes rows (or 400). */
