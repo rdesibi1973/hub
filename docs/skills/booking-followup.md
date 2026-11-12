@@ -69,7 +69,8 @@ Proposta: <a chi scrivere / cosa sollecitare>
 - Supplier (provisional expired close to the service, on-request flights, rooms to release for a group): only if Roberto asks — one draft per supplier with the references (WB…, booking ID) and the dates; the booking team normally does it.
 - Never change staff fields for them. If Roberto asks to reassign, mark not relevant or add a note: `followup_update` (dry run → his ok → `"confirm": true`).
 - **Supplier extended by mail** (the hold was extended by mail, no new pro-forma, so the line still says "Provisional expired"):
-  the booking team sets it on the page ("📅 Set expiry", proof required). If Roberto asks you to do it:
+  the booking team sets it on the page ("📅 Set expiry", proof required), or Roberto from the Booking mail thread
+  ("📅 Save as proof & set expiry" on the supplier's mail). If Roberto asks you to do it:
   1. find the supplier's mail: `staff_mail_search` (`mailbox=glady,operations`, supplier / ref in `q`), read it with `staff_mail_get`
      (reason) and check the new date is really confirmed there;
   2. `staff_mail_save_eml` with `request_id` (or `folder_path`), `save_as` `YYYY-MM-DD_<Supplier>_<Ref> extension to DD-MM`, reason —

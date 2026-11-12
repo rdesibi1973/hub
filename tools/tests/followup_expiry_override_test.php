@@ -256,5 +256,46 @@ $dg = followup_digest_data($db, null, '2026-12-09');
 $t('digest: transfers only when ≤ 30 d', $ids($dg['transfers_soon']) === [$idd]
    && !array_filter(array_merge($dg['new'], $dg['untaken'], $dg['problem'], ...array_values($dg['urgent'])), fn($r) => $r['tab'] === 'transfers'), $ids($dg['transfers_soon']));
 
+// ── Booking mail: "Save as proof & set expiry" on a thread message (bm_save_proof()) ──
+define('BOOKING_MAIL_LIVE', true);
+$root = sys_get_temp_dir() . '/fu_proof_test_' . getmypid();   // (no ":2,S" flags in the name: Windows reads ":" as a data stream)
+define('SALES_RESPONSE_MAIL_ROOT', $root);
+require_once __DIR__ . '/../../modules/operations/includes/booking_mail_service.php';
+@mkdir($root . '/savannahexplorers.com/glady/cur', 0777, true);
+file_put_contents($root . '/savannahexplorers.com/glady/cur/1729581300.M5P7.box', $mail);
+$db->sqliteCreateFunction('NOW', fn() => date('Y-m-d H:i:s'), 0);
+$db->exec("CREATE TABLE booking_mail_index (id INTEGER PRIMARY KEY, mailbox TEXT, folder TEXT, file_key TEXT, msg_key TEXT, message_id TEXT, in_reply_to TEXT,
+           refs TEXT, date_utc TEXT, from_addr TEXT, to_addrs TEXT, subject TEXT, direction TEXT, indexed_at TEXT)");
+$db->exec("CREATE TABLE mail_access_log (id INTEGER PRIMARY KEY, at TEXT, user_id INT, username TEXT, action TEXT, mailbox TEXT, msg_key TEXT, request_id INT, reason TEXT)");
+$db->exec("INSERT INTO booking_mail_index (mailbox, folder, file_key, msg_key, date_utc, from_addr, subject, direction) VALUES
+           ('glady@savannahexplorers.com', 'INBOX', '1729581300.M5P7.box', 'k1', '2026-10-22 07:15:00', 'res@uzuri.example', 'RE: P247/P248 hold', 'client')");
+$id3 = $ins(['type' => 'supplier', 'supplier' => 'Ngorongoro Uzuri', 'supplier_ref' => 'P247/P248', 'issue' => 'provisional_expired', 'expiry_date' => '2026-10-30',
+             'service_date' => '2027-08-13', 'source_file' => 'invoices/Uzuri proforma 3.pdf']);
+$admin = ['id' => 1, 'username' => 'rdesibi', 'role_name' => 'admin', 'permissions' => []];
+$uploads = [];
+$bopt = $opt + $sopt;
+$bopt['exists'] = fn($p) => false;
+$r = bm_save_proof($db, $admin, 'k1', $id3, '2026-11-30', 'Uzuri P247 extension to 30-11', 'Uzuri hold extended to 30/11', false, $bopt);
+$t('booking mail proof: dry run writes nothing', !$uploads && $db->query("SELECT expiry_override FROM booking_followups WHERE id = $id3")->fetchColumn() === null
+   && (int)$db->query("SELECT COUNT(*) FROM mail_access_log")->fetchColumn() === 0 && ($r['saved']['removed_attachments'] ?? null) === ['Passport Rossi.pdf'], $r['saved'] ?? $r);
+$r = bm_save_proof($db, $admin, 'k1', $id3, '2026-11-30', 'Uzuri P247 extension to 30-11', 'Uzuri hold extended to 30/11', true, $bopt);
+$l3 = $db->query("SELECT * FROM booking_followups WHERE id = $id3")->fetch(PDO::FETCH_ASSOC);
+$t('booking mail proof: .eml saved in mails/, passports out', isset($uploads[$DIR . '/mails/Uzuri P247 extension to 30-11.eml'])
+   && strpos($uploads[$DIR . '/mails/Uzuri P247 extension to 30-11.eml'], 'JVBERi0xLjQK') === false, array_keys($uploads));
+$t('booking mail proof: expiry set with that proof', $l3['expiry_override'] === '2026-11-30' && $l3['expiry_override_proof'] === 'mails/Uzuri P247 extension to 30-11.eml'
+   && (int)$l3['expiry_override_by'] === 1, $l3);
+$log = $db->query("SELECT action, reason FROM mail_access_log")->fetchAll(PDO::FETCH_ASSOC);
+$t('booking mail proof: logged with the reason', count($log) === 1 && $log[0]['action'] === 'save_proof' && strpos($log[0]['reason'], 'Uzuri hold extended') === 0, $log);
+$e = null; try { bm_save_proof($db, $glady + ['username' => 'glady'], 'k1', $id3, '2026-12-01', '', 'Uzuri hold extended again', true, $bopt); } catch (Throwable $x) { $e = $x; }
+$t('booking mail proof: non-admin refused (thread reading is admin only)', $e instanceof RuntimeException && $e->getMessage() === 'Admins only.');
+$e = null; try { bm_save_proof($db, $admin, 'k1', $id3, '2026-12-01', '', 'short', true, $bopt); } catch (Throwable $x) { $e = $x; }
+$t('booking mail proof: reason required', $e instanceof InvalidArgumentException);
+$e = null; try { bm_save_proof($db, $admin, 'k1', $id3, '', '', 'Uzuri hold extended again', true, $bopt); } catch (Throwable $x) { $e = $x; }
+$t('booking mail proof: date required', $e instanceof InvalidArgumentException);
+$bopt['exists'] = fn($p) => true;
+$e = null; try { bm_save_proof($db, $admin, 'k1', $id3, '2026-12-01', 'Uzuri P247 extension to 30-11', 'Uzuri hold extended again', true, $bopt); } catch (Throwable $x) { $e = $x; }
+$t('booking mail proof: existing file → refusal (400), not overwritten', $e instanceof InvalidArgumentException && stripos($e->getMessage(), 'already exists') !== false, $e ? $e->getMessage() : null);
+@unlink($root . '/savannahexplorers.com/glady/cur/1729581300.M5P7.box');
+
 echo $fail ? "\n$fail FAILED\n" : "\nALL PASS\n";
 exit($fail ? 1 : 0);

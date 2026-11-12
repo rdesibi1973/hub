@@ -422,6 +422,33 @@ function bm_attachment(PDO $db, array $user, string $msgKey, string $part, strin
     throw new InvalidArgumentException('Attachment not found.');
 }
 
+/**
+ * "Save as proof & set expiry" (thread view): one message of the thread saved as .eml into the line's booking folder mails/
+ * (passport attachments replaced, numbers masked — eml_sanitize.php) and the line's expiry set to the date the supplier
+ * confirmed, with that file as proof: followup_set_expiry(), same rules as the follow-up page. Admin (thread reading),
+ * reason required (the thread's), logged. The mailbox is only read. $confirm false = what would be saved, nothing written.
+ * → followup_set_expiry() result (+ saved {path, proof, removed_attachments, masked}); errors as exceptions.
+ */
+function bm_save_proof(PDO $db, array $user, string $msgKey, int $lineId, string $date, string $saveAs, string $reason, bool $confirm, array $opt = []): array {
+    bm_require_live();
+    if (!bm_can_read($user)) throw new RuntimeException('Admins only.');
+    $reason = bm_check_reason($reason);
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) throw new InvalidArgumentException('Choose the new expiry date the supplier confirmed.');
+    $row = bm_index_row($db, $msgKey);
+    if (!$row) throw new InvalidArgumentException('Mail not found.');
+    $file = bm_mail_file($row['mailbox'], $row['folder'], $row['file_key']);
+    $raw = $file !== null ? bm_read_file($file) : null;
+    if ($raw === null || $raw === '') throw new RuntimeException('The mail can no longer be read.');
+    $res = followup_set_expiry($db, $lineId, ['date' => $date, 'upload' => ['name' => $saveAs, 'content' => $raw]], $user, $confirm, $opt);
+    if (!$res['ok']) {   // refusals (no right, closed line, file already there, not a mail…) → 400; Dropbox / server → 500
+        if (in_array((int)($res['code'] ?? 0), [400, 403, 404, 409, 413], true)) throw new InvalidArgumentException($res['error']);
+        throw new RuntimeException($res['error']);
+    }
+    if ($confirm) bm_log($db, $user, 'save_proof', $row['mailbox'], $msgKey, $res['row']['request_id'] ?? null,
+                         $reason . ' → line #' . $lineId . ' expiry ' . $date . ', ' . ($res['saved']['proof'] ?? ''));
+    return $res;
+}
+
 /** Who a reply to this message goes to: the sender (or Reply-To) of a received mail, the outside recipients of one we sent. */
 function bm_reply_recipients(array $row, array $headers): array {
     if ($row['direction'] === 'client') {

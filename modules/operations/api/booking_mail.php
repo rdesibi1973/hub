@@ -7,6 +7,8 @@
  *   POST ?action=scan                                      read new headers now (admin)
  *   POST ?action=thread   {key, reason}                    a thread with its text (admin, logged)
  *   POST ?action=reply    {key, body, reason, confirm}     reply from the same mailbox (admin, logged)
+ *   POST ?action=proof    {key, line_id, date, save_as?, reason, confirm}   save the message as .eml in the line's mails/ and set
+ *                                                          its expiry with it as proof (admin, logged; followup_set_expiry())
  *   POST ?action=passport_read  {request_id, src}          read one document (booking team)
  *   POST ?action=passport_apply {request_id, rows}         write confirmed rows (booking team)
  * Logic: includes/booking_mail_service.php, includes/passport_service.php. Not available through the Agent API.
@@ -69,6 +71,11 @@ try {
         bm_json(['ok' => true] + ['run' => bm_run($db)]);
     }
     if ($action === 'thread') bm_json(['ok' => true, 'messages' => bm_open_thread($db, $user, (string)($in['key'] ?? ''), (string)($in['reason'] ?? ''))]);
+    if ($action === 'proof') {    // "Save as proof & set expiry": dry run unless confirm
+        $res = bm_save_proof($db, $user, (string)($in['key'] ?? ''), (int)($in['line_id'] ?? 0), (string)($in['date'] ?? ''),
+                             (string)($in['save_as'] ?? ''), (string)($in['reason'] ?? ''), !empty($in['confirm']));
+        bm_json(['ok' => true, 'dry_run' => empty($in['confirm']), 'saved' => $res['saved'] ?? null, 'changes' => $res['changes'] ?? [], 'row' => $res['row'] ?? null]);
+    }
     if ($action === 'reply') bm_json(['ok' => true] + bm_reply($db, $user, (string)($in['key'] ?? ''), (string)($in['body'] ?? ''), (string)($in['reason'] ?? ''), !empty($in['confirm'])));
     if ($action === 'passport_read') {
         @set_time_limit(280);

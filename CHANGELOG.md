@@ -20,6 +20,13 @@ Running log of notable changes and current build state. Module-level "active / p
 
 ---
 
+## 2026-11-12 — Booking mail: "Save as proof & set expiry" (handoff §5)
+- Thread view (admin, reason already given to open it): on each mail received from the supplier, "📅 Save as proof & set
+  expiry" → date confirmed in the mail + optional name → Check (dry run: path, passport attachments removed) → Save. The mail
+  is saved as .eml into the line's booking `mails/` (eml_sanitize.php) and the line's expiry set with it as proof —
+  `bm_save_proof()` → `followup_set_expiry()`, same rules as the follow-up page; logged in `mail_access_log` (`save_proof`).
+  `api/booking_mail.php` action `proof`. Mailbox only read. Off until `BOOKING_MAIL_LIVE`, like the rest of Booking mail.
+
 ## 2026-11-12 — Booking follow-up: tabs — Provisional as default, Transfers apart
 - Hotels, flights and balloons fill up, transfers always have availability: transfer lines (e.g. REMCO1108's two Zanzibar
   transfers next to Uzuri) no longer hide the provisional bookings. One mapping, `followup_tab_of()` (page, counts,
@@ -51,7 +58,6 @@ Running log of notable changes and current build state. Module-level "active / p
   new `staff_mail_save_eml` (POST, dry run unless `confirm`; raw message → `<booking>/mails/`, mailbox untouched, passport
   attachments replaced and numbers masked by `modules/operations/includes/eml_sanitize.php`; reason required, `api_save_eml` log).
 - Test: `tools/tests/followup_expiry_override_test.php` (SQLite + stubs, 54 checks).
-- Not done (optional in the handoff): "Save as proof & set expiry" button in Booking mail.
 
 ## 2026-11-10 — Price levels RACK / STO / STOSPEC; sample clean-up follow-ups
 - `includes/price_level_service.php`: `agencies.price_level` (rack | sto default | stospec | custom) + `custom_markup` (lazy columns),

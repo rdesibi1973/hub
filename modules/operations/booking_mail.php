@@ -2,7 +2,8 @@
 /**
  * booking_mail.php — Operations → Booking mail.
  * Mail check (admin): open Booking follow-up lines crossed with the headers of glady@ / operations@; one thread can be
- * opened for a specific problem (reason required, logged) and answered from the same mailbox.
+ * opened for a specific problem (reason required, logged) and answered from the same mailbox; a supplier's mail in it can be
+ * saved as proof in the booking's mails/ and set the line's expiry ("Save as proof & set expiry", bm_save_proof()).
  * Passports (booking team, admin): read a booking's passports and write the confirmed rows in its Calc.
  * Off until BOOKING_MAIL_LIVE. Data: api/booking_mail.php.
  */
@@ -42,6 +43,8 @@ $extra_css = '
 .bm-src{display:flex;gap:10px;align-items:center;padding:7px 0;border-bottom:1px solid var(--grey-lt);font-size:.82rem}
 .bm-src span{flex:1;min-width:0;overflow-wrap:anywhere}
 .bm-actions{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
+.bm-proof{margin-top:8px;padding:10px 12px;border:1.5px dashed var(--grey-lt);border-radius:8px;background:var(--off-white);max-width:460px}
+.bm-proof[hidden]{display:none}
 [hidden]{display:none!important}
 @media(max-width:700px){.bm-pp{grid-template-columns:1fr}}
 ';

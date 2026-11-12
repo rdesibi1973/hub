@@ -92,7 +92,8 @@
         box.appendChild(el('div', { cls: 'bm-msg' }, [
           el('div', { cls: 'h', text: m.date_utc + ' UTC · ' + m.from + ' → ' + m.to + ' · in ' + m.mailbox }),
           el('pre', { text: m.readable ? m.body : '(this mail can no longer be read)' }),
-          atts.length ? el('div', { cls: 'h', style: 'margin:8px 0 0' }, atts) : null
+          atts.length ? el('div', { cls: 'h', style: 'margin:8px 0 0' }, atts) : null,
+          m.readable && m.direction === 'client' ? proofBox(m, reason) : null   // proof = a mail received from the supplier
         ]));
       });
       $('bm-reason-box').hidden = true;
@@ -101,6 +102,54 @@
       $('bm-preview-out').textContent = '';
       current.reason = reason;
     }).catch(fail);
+  }
+
+  /**
+   * "Save as proof & set expiry": the supplier confirmed a longer hold in this mail → it is saved as .eml in the booking's
+   * mails/ and the follow-up line's expiry is set to that date (api proof → followup_set_expiry(), same rules as the
+   * follow-up page). Check first (dry run: name, passport attachments removed), then Save.
+   */
+  function proofBox(m, reason) {
+    var line = current;   // the line whose thread was opened (another Thread click changes current)
+    var date = el('input', { type: 'date' });
+    var name = el('input', { type: 'text', maxLength: 150, placeholder: 'empty: AAAA-MM-GG_' + (line.supplier || 'Supplier') + '_' + (line.ref || 'Ref') + ' extension to DD-MM' });
+    var out = el('div', { cls: 'bm-sub', style: 'margin:8px 0 0;white-space:pre-wrap' });
+    var check = el('button', { type: 'button', cls: 'btn btn-outline btn-sm', text: 'Check' });
+    var save = el('button', { type: 'button', cls: 'btn btn-primary btn-sm', text: 'Save proof & set expiry', disabled: true });
+    var form = el('div', { cls: 'bm-form bm-proof', hidden: true }, [
+      el('div', { cls: 'bm-sub', style: 'margin:0', text: 'Line: ' + (line.supplier || '') + (line.ref ? ' · ' + line.ref : '') + ' — ' + (line.client || '') +
+                                                        '. The mail goes into the booking folder mails/ (passport attachments removed).' }),
+      el('label', { text: 'New expiry confirmed in this mail' }), date,
+      el('label', { text: 'Save as (mails/, .eml added)' }), name,
+      el('div', { cls: 'bm-actions' }, [check, save]), out
+    ]);
+    var open = el('button', { type: 'button', cls: 'btn btn-outline btn-sm', text: '📅 Save as proof & set expiry',
+                              title: 'The supplier extended the hold in this mail: keep it as proof and set the new expiry on the follow-up line',
+                              on: { click: function () { form.hidden = !form.hidden; } } });
+    var body = function (confirm) {
+      return { key: m.msg_key, line_id: line.id, date: date.value, save_as: name.value, reason: reason, confirm: confirm };
+    };
+    [date, name].forEach(function (i) { i.addEventListener('input', function () { save.disabled = true; out.textContent = ''; }); });
+    check.addEventListener('click', function () {
+      if (!date.value) return note('Choose the new expiry date the supplier confirmed.', true);
+      call('proof', body(false)).then(function (d) {
+        note('');
+        var s = d.saved || {};
+        out.textContent = 'Will save: ' + (s.path || '') + (s.removed_attachments && s.removed_attachments.length ? '\nPassport attachments removed: ' + s.removed_attachments.join(', ') : '') +
+                          '\nExpiry of the line: ' + date.value + ' (by mail).';
+        save.disabled = false;
+      }).catch(fail);
+    });
+    save.addEventListener('click', function () {
+      save.disabled = true;
+      call('proof', body(true)).then(function (d) {
+        var s = d.saved || {};
+        note('Saved ' + (s.proof || '') + ' and set the expiry of ' + (line.supplier || 'the line') + ' to ' + date.value + ' (by mail).');
+        out.textContent = '✓ Saved: ' + (s.saved_to || s.path || '');
+        open.disabled = true;
+      }).catch(function (e) { save.disabled = false; fail(e); });
+    });
+    return el('div', { style: 'margin-top:10px' }, [open, form]);
   }
 
   function reply(confirm) {
