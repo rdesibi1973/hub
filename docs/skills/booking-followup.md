@@ -36,6 +36,10 @@ Lines close by themselves when the confirmed document / ticket is saved in the f
 ## 2. Review
 
 Calls: `followup_list` with `owner=none`, `priority=1`, `type=group`, `status=closed` as needed (closed: last 7 days by `closed_at`).
+Tabs (as the page, `tab=`): the page opens on **Provisional** (hotels, flights, balloons — they fill up) and that is the core of the
+review: `tab=provisional`. Transfers always have availability: review them apart (`tab=transfers`), one short block at the end —
+except those not confirmed ≤ 30 days before the date (`transfer_alert: true`, "Transfer ≤ 30 d"), which are already in Provisional
+and go with the urgencies. Docs / Calc (`tab=docs`: Word ≠ Excel, rooms / dates differ, unreadable) after the tickets and groups.
 
 Report in this order (one line each: client · supplier/ref or flight · issue · service date (days) · expiry · owner · status/notes):
 1. **Problem** lines (with the staff note).

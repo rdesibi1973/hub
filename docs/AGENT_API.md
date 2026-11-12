@@ -1733,12 +1733,20 @@ logic `modules/operations/includes/followup_service.php`, documents read by `fol
 `source` (a check in the line's sources: `supplier_scan` | `ticket_scan` | `group_scan` | `safaricheck` | `claude_check` | `manual`),
 `due_before` (YYYY-MM-DD: deadline on or before), `close_reason` (closed lines: `auto_cancelled`, `auto_trip_ended`, … — the
 labels are in `close_reasons`). The page has the same filter ("Closed as", tab Closed).
+`tab` (12 Nov 2026) = the page tab: `provisional` | `transfers` | `tickets` | `groups` | `docs` | `problem` | `all` (default: no tab
+filter, as before) | `closed` — same lines as the page tab (`followup_tab_of()`; open lines, `closed` = closed lines). Each open line is in
+exactly one of provisional / transfers / tickets / groups / docs: service type transfer → `transfers` (whatever the issue); flight
+not paid / ticket missing → `tickets`; group lines and GRP unsold rooms → `groups`; still provisional (provisional, expired, on request,
+booking provisional, Orangi rooms) or a balloon → `provisional`; everything else (Word ≠ Excel, rooms / dates differ, unreadable, other)
+→ `docs`. A transfer still open with its service within `FOLLOWUP_TRANSFER_ALERT_DAYS` (30, `includes/config.php` may override) is
+listed in `provisional` too (`transfer_alert: true`, page mark "Transfer ≤ 30 d"); `problem` = `staff_status` problem, any tab.
 → `count`, `close_reasons` `{code: label}`, `last_check_at` `{supplier, ticket}`, `last_checks`, `rows[]` `{id, type, audience, request_id, customer, folder, folder_url,
 file_url, folder_open_url, file_open_url, start_date, end_date, service_date, days_left, supplier, supplier_ref, service, source_file, issue, issue_label,
 doc_status_text, report_url, report_open_url, expiry_date (effective: the mail override if set), doc_expiry_date (printed on the document),
 expiry_override (null or {date, by_user_id, by, at, proof (relative to the folder, "mails/….eml"), proof_path, proof_url, proof_open_url}),
 expired (on the effective expiry), booked_by, owner, owner_name, contacted_at, staff_status, notes, notes_log[] {at, by, text} (newest first), priority,
-due_date, due_reason, due_days, service_type, service_key, sources[] {source, label, issue, issue_label, text, since}, ck_tracker_url,
+due_date, due_reason, due_days, service_type, service_key, tab (its own tab), tabs[] (every tab listing it), transfer_alert,
+sources[] {source, label, issue, issue_label, text, since}, ck_tracker_url,
 first_seen_at, last_seen_at, closed_at, closed_by, close_reason, events_count}` — priority first (from the deadline), then the
 nearest deadline, not taken in charge, problems, service date.
 
@@ -1768,6 +1776,7 @@ A group folder without a confirmed booking, or a folder outside `/001_Safari`, g
 → the summary + `matched`, `unmatched[]`, `folders_without_booking`.
 
 ```bash
+curl -sA "$UA" -H "$H" "$U?action=followup_list&tab=provisional"                 # what the page opens on
 curl -sA "$UA" -H "$H" "$U?action=followup_list&owner=none&priority=1"
 curl -sA "$UA" -H "$H" "$U?action=followup_list&request_id=2958&status=all"
 curl -sA "$UA" -H "$H" -X POST "$U?action=followup_scan" -d '{"type":"ticket"}'                                   # dry run

@@ -100,6 +100,18 @@ const FU_REASON_LABELS = ['auto_confirmed' => 'confirmed document saved', 'auto_
                           'auto_merged' => 'merged into another line of the same service', 'auto_cancelled' => 'Trip cancelled',
                           'manual' => 'closed by staff'];
 const FU_EDIT_PERMISSION = 'booking_followup_edit';
+/**
+ * Page tabs (handoff 12 Nov 2026, part B), in order: hotels / flights / balloons fill up → Provisional first (default);
+ * transfers always have availability → their own tab. followup_tab_of() puts every open line in exactly one of
+ * provisional | transfers | tickets | groups | docs; problem / all / closed are views across them.
+ */
+const FU_TABS = ['provisional', 'transfers', 'tickets', 'groups', 'docs', 'problem', 'all', 'closed'];
+const FU_TAB_LABELS = ['provisional' => 'Provisional', 'transfers' => 'Transfers', 'tickets' => 'Tickets', 'groups' => 'Groups',
+                       'docs' => 'Docs / Calc', 'problem' => 'Problem', 'all' => 'All open', 'closed' => 'Closed'];
+const FU_TAB_TICKET_ISSUES = ['ticket_missing', 'flight_unpaid'];
+const FU_TAB_GROUP_ISSUES  = ['group_to_finalize', 'group_znz_flight', 'sc_grp_unsold', 'sc_grp_rooms_short', 'group_release'];
+// A transfer not confirmed this close to its date also shows in Provisional ("Transfer ≤ 30 d"); includes/config.php may override.
+if (!defined('FOLLOWUP_TRANSFER_ALERT_DAYS')) define('FOLLOWUP_TRANSFER_ALERT_DAYS', 30);
 
 // ── Schema (same DDL as migrations 069, 070, 073, 074) ───────────────────────
 
@@ -842,6 +854,44 @@ function followup_service_type(array $l): string {
     if (preg_match('/\b(?:lodge|camp|hotel|resort|tented|nights?|stay|room|check[\s-]?in)\b/i', $txt)) return 'stay';
     if (preg_match('/\b(?:balloon|walking|game drive|excursion|tour|visit|activity|park fees?)\b/i', $txt)) return 'activity';
     return 'other';
+}
+
+/**
+ * The one tab a line belongs to (FU_TABS): transfers (service type transfer, whatever the issue) → transfers; flight not
+ * paid / ticket missing → tickets; group lines, GRP unsold rooms → groups; still provisional (issue or any source:
+ * provisional, expired, on request, booking provisional, Orangi rooms) or a balloon → provisional; anything else (Word ≠
+ * Excel, rooms / dates differ, unreadable, other…) → docs, so no line is ever lost. Closed lines: closed.
+ */
+function followup_tab_of(array $l): string {
+    if (!empty($l['closed_at'])) return 'closed';
+    $svc = followup_service_type($l);
+    if ($svc === 'transfer') return 'transfers';
+    $issue = (string)($l['issue'] ?? '');
+    if (($l['type'] ?? '') === 'ticket' || in_array($issue, FU_TAB_TICKET_ISSUES, true)) return 'tickets';
+    if (($l['type'] ?? '') === 'group' || in_array($issue, FU_TAB_GROUP_ISSUES, true)) return 'groups';
+    $prov = in_array($issue, FU_PROVISIONAL_ISSUES, true);
+    foreach (followup_sources($l) as $e) if (in_array($e['issue'] ?? '', FU_PROVISIONAL_ISSUES, true)) $prov = true;
+    if ($prov) return 'provisional';
+    if (preg_match('/balloon/i', ($l['supplier'] ?? '') . ' ' . ($l['service'] ?? ''))) return 'provisional';   // balloons fill up
+    return 'docs';
+}
+
+/** A transfer line still open whose service is within FOLLOWUP_TRANSFER_ALERT_DAYS: shown in Provisional too. */
+function followup_transfer_alert(array $l, string $today): bool {
+    if (!empty($l['closed_at']) || followup_tab_of($l) !== 'transfers') return false;
+    $d = ($l['service_date'] ?? null) ?: null;
+    return $d !== null && $d <= date('Y-m-d', strtotime($today . ' +' . (int)FOLLOWUP_TRANSFER_ALERT_DAYS . ' days'));
+}
+
+/** Every tab that lists the line: its own, provisional for a transfer close to its date, problem, all (open lines). */
+function followup_tabs_of(array $l, string $today): array {
+    $t = followup_tab_of($l);
+    if ($t === 'closed') return ['closed'];
+    $out = [$t];
+    if (followup_transfer_alert($l, $today)) $out[] = 'provisional';
+    if (($l['staff_status'] ?? '') === 'problem') $out[] = 'problem';
+    $out[] = 'all';
+    return $out;
 }
 
 /** Name words of a supplier, without the generic ones ("Serengeti Classic View Camp" → serengeti, classic, view). */
@@ -2521,12 +2571,15 @@ function followup_dropbox_url(string $path, ?string $previewFile = null): string
  * Lines with owner / customer / priority. $f: type, audience (booking includes the lines without one),
  * status open (default) | closed | all, owner (user id, username or 'none'), priority, request_id (+ its GRP's lines), q, ids,
  * source (a check in `sources`: supplier_scan, ticket_scan, group_scan, safaricheck, claude_check, manual),
- * due_before (Y-m-d: deadline on or before).
+ * due_before (Y-m-d: deadline on or before), tab (FU_TABS: the page tab; 'all' / empty = no tab filter, 'closed' = closed lines,
+ * any other tab = open lines in it, transfers ≤ 30 d included in provisional).
  */
 function followup_rows(PDO $db, array $f = [], ?string $today = null): array {
     followup_schema($db);
     $today = $today ?? date('Y-m-d');
     $w = []; $a = [];
+    $tab = in_array($f['tab'] ?? '', FU_TABS, true) && $f['tab'] !== 'all' ? $f['tab'] : null;
+    if ($tab !== null) $f['status'] = $tab === 'closed' ? 'closed' : 'open';
     $status = $f['status'] ?? 'open';
     if ($status === 'open') $w[] = 'b.closed_at IS NULL';
     elseif ($status === 'closed') $w[] = 'b.closed_at IS NOT NULL';
@@ -2572,6 +2625,7 @@ function followup_rows(PDO $db, array $f = [], ?string $today = null): array {
         if (!empty($f['priority']) && $r['priority'] !== $f['priority'] && substr($r['priority'], 0, 1) !== (string)$f['priority']) continue;
         if (!empty($f['source']) && !in_array($f['source'], array_column($r['sources'], 'source'), true)) continue;
         if (!empty($f['due_before']) && (!$r['due_date'] || $r['due_date'] > $f['due_before'])) continue;
+        if ($tab !== null && !in_array($tab, $r['tabs'], true)) continue;
         $out[] = $r;
     }
     followup_mark_waiting_flight($db, $out);
@@ -2723,6 +2777,8 @@ function followup_out(array $r, string $today, array $live = []): array {
         'due_date' => $due['due_date'], 'due_reason' => $due['due_reason'],
         'due_days' => $due['due_date'] ? (int)round((strtotime($due['due_date']) - strtotime($today)) / 86400) : null,
         'service_type' => followup_service_type($r), 'service_key' => $r['service_key'] ?? null,
+        // Page tab (followup_tab_of()), every tab listing it, and "Transfer ≤ 30 d" (also in Provisional).
+        'tab' => followup_tab_of($r), 'tabs' => followup_tabs_of($r, $today), 'transfer_alert' => followup_transfer_alert($r, $today),
         // The checks reporting the line now (one line per service: supplier scan, SafariCheck, Claude check…).
         'sources' => $sources,
         // The booking's CK tracker row (search on the folder, status tags off).
@@ -2766,7 +2822,8 @@ function followup_stats(array $open, array $closedRecent): array {
         if ($r['owner_user_id'] === null) $s['untaken']++;
         if ($r['priority'] === '1-URGENT') $s['urgent']++;
         if ($r['staff_status'] === 'problem') $s['problem']++;
-        if ($r['expiry_date'] && !$r['expired'] && (strtotime($r['expiry_date']) - time()) / 86400 <= 7) $s['expiring']++;
+        // Provisional-tab lines only, on the effective expiry (extended by mail counts).
+        if (($r['tab'] ?? 'provisional') === 'provisional' && $r['expiry_date'] && !$r['expired'] && (strtotime($r['expiry_date']) - time()) / 86400 <= 7) $s['expiring']++;
         if ($r['issue'] === 'ticket_missing') $s['tickets']++;
         if ($r['issue'] === 'group_to_finalize') $s['groups']++;
         if (in_array($r['type'], ['ck', 'safaricheck'], true) || array_intersect(['claude_check', 'safaricheck'], array_column($r['sources'], 'source'))) $s['ck']++;
@@ -2785,6 +2842,7 @@ function followup_page_data(PDO $db, array $user): array {
     return ['rows' => $open, 'closed' => $closed, 'stats' => followup_stats($open, $recent), 'runs' => followup_last_runs($db),
             'me' => ['id' => (int)$user['id'], 'can_edit' => followup_can_edit($user), 'is_admin' => followup_is_admin($user)],
             'users' => followup_owner_users($db), 'source_labels' => FU_SOURCE_LABELS, 'reason_labels' => FU_REASON_LABELS,
+            'transfer_alert_days' => (int)FOLLOWUP_TRANSFER_ALERT_DAYS,
             'today' => date('Y-m-d')];
 }
 
@@ -3162,12 +3220,17 @@ function followup_digest_data(PDO $db, ?string $since, ?string $today = null): a
     $today = $today ?? date('Y-m-d');
     $open = followup_rows($db, ['status' => 'open'], $today);
     $d = ['new' => [], 'problem' => [], 'untaken' => [], 'expiring' => [], 'tickets' => [], 'ck_new' => [], 'ck_old' => [], 'ck_soon' => [],
-          'urgent' => []];
+          'urgent' => [], 'transfers_soon' => []];
     $in7 = date('Y-m-d', strtotime($today . ' +7 days'));
     $in60 = date('Y-m-d', strtotime($today . ' +60 days'));
     $old = date('Y-m-d H:i:s', time() - 2 * 86400);
     $old3 = date('Y-m-d H:i:s', time() - 3 * 86400);
     foreach ($open as $r) {
+        // Transfers always have availability: in the digest only when not confirmed ≤ FOLLOWUP_TRANSFER_ALERT_DAYS before the date.
+        if ($r['tab'] === 'transfers') {
+            if ($r['transfer_alert']) $d['transfers_soon'][] = $r;
+            continue;
+        }
         if ($r['priority'] === '1-URGENT') $d['urgent'][(string)$r['owner_name']][] = $r;
         if ($r['type'] === 'ck' || $r['type'] === 'safaricheck') {
             if ($since && $r['first_seen_at'] > $since) $d['ck_new'][] = $r;

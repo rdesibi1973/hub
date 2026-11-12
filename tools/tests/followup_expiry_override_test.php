@@ -211,5 +211,50 @@ $r = followup_proof_files($db, $id2, $seller, ['dir' => $DIR, 'list' => fn($p) =
 $t('mails/ listing refused to a seller', !$r['ok'] && $r['code'] === 403, $r);
 // (A "followup_default_owner: … ck_checks" line on stderr is expected: no CK tables in this database.)
 
+// ── Part B: tabs (Provisional default, Transfers apart) ──
+$ins = function (array $l) use ($db, $FOLDER) {
+    $l += ['type' => 'safaricheck', 'request_id' => 1108, 'folder' => $FOLDER, 'start_date' => '2027-08-10', 'end_date' => '2027-08-23',
+           'staff_status' => 'open', 'first_seen_at' => '2026-11-01', 'last_seen_at' => '2026-11-12', 'dedupe_key' => 'K|' . mt_rand()];
+    $db->prepare("INSERT INTO booking_followups (" . implode(',', array_keys($l)) . ") VALUES (" . implode(',', array_fill(0, count($l), '?')) . ")")->execute(array_values($l));
+    return (int)$db->lastInsertId();
+};
+$db->exec("UPDATE booking_followups SET closed_at = '2026-11-12 00:00:00'");   // a clean list for this part
+$uz  = $ins(['type' => 'supplier', 'supplier' => 'Ngorongoro Uzuri', 'supplier_ref' => 'P247/P248', 'issue' => 'provisional_expired', 'expiry_date' => '2026-10-30',
+             'service_date' => '2027-08-13', 'source_file' => 'invoices/Uzuri proforma.pdf']);
+$tr1 = $ins(['issue' => 'sc_transfer', 'service' => 'Transfer 17 Aug · Karatu-ARK-ZNZ', 'service_date' => '2027-08-17']);
+$tr2 = $ins(['issue' => 'sc_transfer', 'service' => 'Transfer 23 Aug · ZNZ-Home', 'service_date' => '2027-08-23']);
+$idd = $ins(['type' => 'ck', 'request_id' => 2001, 'folder' => '01_08JAN_CeciliaLaffranchi(X-Y)', 'issue' => 'transfer_missing', 'service' => 'Iddi transfer Arusha',
+             'service_date' => '2027-01-08', 'start_date' => '2027-01-08', 'end_date' => '2027-01-15']);
+$bal = $ins(['type' => 'ck', 'issue' => 'other', 'service' => 'Balloon Serengeti not booked', 'service_date' => '2027-08-15']);
+$tkt = $ins(['type' => 'ck', 'issue' => 'flight_unpaid', 'service' => 'Auric Air ARK-SEU', 'service_date' => '2027-08-12']);
+$grp = $ins(['issue' => 'sc_grp_unsold', 'service' => 'GRP rooms', 'service_date' => '2027-08-11']);
+$doc = $ins(['issue' => 'sc_rooms_differ', 'service' => 'Rooms Word ≠ Excel', 'service_date' => '2027-08-14', 'staff_status' => 'problem']);
+$tabOf = fn(int $i) => followup_tab_of($db->query("SELECT * FROM booking_followups WHERE id = $i")->fetch(PDO::FETCH_ASSOC));
+$t('tab: Uzuri → provisional', $tabOf($uz) === 'provisional');
+$t('tab: REMCO transfers → transfers', $tabOf($tr1) === 'transfers' && $tabOf($tr2) === 'transfers');
+$t('tab: balloon → provisional', $tabOf($bal) === 'provisional');
+$t('tab: flight not paid → tickets', $tabOf($tkt) === 'tickets');
+$t('tab: GRP unsold → groups', $tabOf($grp) === 'groups');
+$t('tab: Word ≠ Excel → docs', $tabOf($doc) === 'docs');
+$ids = fn(array $rows) => array_map(fn($r) => $r['id'], $rows);
+$prov = followup_rows($db, ['tab' => 'provisional'], '2026-11-12');
+$t('Provisional on 12/11: Uzuri + balloon, no transfers', $ids($prov) === [$uz, $bal] || $ids($prov) === [$bal, $uz], $ids($prov));
+$prov9 = followup_rows($db, ['tab' => 'provisional'], '2026-12-09');
+$hit = array_values(array_filter($prov9, fn($r) => $r['id'] === $idd));
+$t('Iddi transfer 8 Jan in Provisional from 9 Dec, marked', count($hit) === 1 && $hit[0]['transfer_alert'] === true && in_array('transfers', $hit[0]['tabs'], true), $ids($prov9));
+$t('… and still in Transfers', in_array($idd, $ids(followup_rows($db, ['tab' => 'transfers'], '2026-12-09')), true));
+$allOpen = followup_rows($db, ['tab' => 'all'], '2026-12-09');
+$sum = 0; foreach (['provisional', 'transfers', 'tickets', 'groups', 'docs'] as $tb) $sum += count(array_filter($allOpen, fn($r) => $r['tab'] === $tb));
+$t('tab counts add up to All open', $sum === count($allOpen) && count($allOpen) === 8, [$sum, count($allOpen)]);
+$t('Problem tab: across types', $ids(followup_rows($db, ['tab' => 'problem'], '2026-12-09')) === [$doc]);
+$t('closed tab = closed lines', count(followup_rows($db, ['tab' => 'closed'], '2026-12-09')) >= 1 && !array_filter(followup_rows($db, ['tab' => 'closed']), fn($r) => !$r['closed_at']));
+$soon = date('Y-m-d', time() + 3 * 86400);   // followup_stats() measures from now
+$db->exec("UPDATE booking_followups SET expiry_date = '$soon' WHERE id IN ($uz, $tr1)");
+$st = followup_stats(followup_rows($db, ['tab' => 'all']), []);
+$t('expiring card counts Provisional-tab lines only', $st['expiring'] === 1, $st);
+$dg = followup_digest_data($db, null, '2026-12-09');
+$t('digest: transfers only when ≤ 30 d', $ids($dg['transfers_soon']) === [$idd]
+   && !array_filter(array_merge($dg['new'], $dg['untaken'], $dg['problem'], ...array_values($dg['urgent'])), fn($r) => $r['tab'] === 'transfers'), $ids($dg['transfers_soon']));
+
 echo $fail ? "\n$fail FAILED\n" : "\nALL PASS\n";
 exit($fail ? 1 : 0);

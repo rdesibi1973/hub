@@ -17,17 +17,26 @@
   var SRC_ICON = {supplier_scan: '📄', ticket_scan: '🎫', group_scan: '👥', safaricheck: '✔', claude_check: '🤖', manual: '✋'};
   var AUD = {booking: 'Booking', sales: 'Sales', accounts: 'Accounts'};
   var STATUS = {open: 'Open', in_progress: 'In progress', problem: 'Problem', resolved: 'Resolved', not_relevant: 'Not relevant'};
+  /**
+   * Tabs (12 Nov 2026): Provisional first and the default — hotels, flights, balloons fill up; transfers always have
+   * availability, in their own tab. Each open line is in one of provisional / transfers / tickets / groups / docs
+   * (followup_tab_of(), sent as r.tab / r.tabs); a transfer ≤ 30 d before its date is in Provisional too.
+   */
   var TABS = [
-    {key: 'open', label: 'All open'},
     {key: 'provisional', label: 'Provisional'},
+    {key: 'transfers', label: 'Transfers'},
     {key: 'tickets', label: 'Tickets'},
     {key: 'groups', label: 'Groups'},
-    {key: 'ck', label: 'Checks'},
+    {key: 'docs', label: 'Docs / Calc'},
     {key: 'problem', label: 'Problem'},
+    {key: 'all', label: 'All open'},
     {key: 'closed', label: 'Closed'}
   ];
+  var TAB_KEYS = TABS.map(function (t) { return t.key; });
   var params = new URLSearchParams(location.search);
-  var state = {tab: params.get('type') === 'ck' ? 'ck' : 'open', owner: '', aud: '', prio: '', supplier: '', month: '', source: params.get('source') || '', q: params.get('q') || '',
+  var urlTab = TAB_KEYS.indexOf(params.get('tab')) >= 0 ? params.get('tab') : null;   // kept only in the URL (links, reload)
+  var state = {tab: urlTab || (params.get('type') === 'ck' ? 'all' : 'provisional'), owner: '', aud: '', prio: '',
+               supplier: '', month: '', source: params.get('source') || (params.get('type') === 'ck' && !urlTab ? 'claude_check' : ''), q: params.get('q') || '',
                reason: params.get('close_reason') || '',
                request: params.get('request_id') ? parseInt(params.get('request_id'), 10) : null,
                group: params.get('folder') || '', open: {},   // GRP member: the group's lines belong to the group's first request
@@ -59,12 +68,9 @@
   function inTab(r, tab) {
     if (tab === 'closed') return !!r.closed_at;
     if (r.closed_at) return false;
-    if (tab === 'provisional') return r.type === 'supplier' || isProv(r);
-    if (tab === 'tickets') return r.type === 'ticket';
-    if (tab === 'groups') return r.type === 'group';
-    if (tab === 'ck') return r.type === 'ck' || r.type === 'safaricheck' || srcs(r).some(function (s) { return s === 'claude_check' || s === 'safaricheck'; });
+    if (tab === 'all') return true;
     if (tab === 'problem') return r.staff_status === 'problem';
-    return true;
+    return (r.tabs || [r.tab || 'docs']).indexOf(tab) >= 0;
   }
   function passes(r) {
     if (state.request && r.request_id !== state.request && !(state.group && (r.folder || '').indexOf(state.group) >= 0)) return false;
@@ -109,13 +115,13 @@
   function renderStats() {
     var s = D.stats;
     var cards = [
-      ['untaken', 'Not taken in charge', 'amber', function () { setTab('open'); state.owner = 'none'; }],
-      ['urgent', 'Urgent', 'red', function () { setTab('open'); state.prio = '1-URGENT'; }],
+      ['untaken', 'Not taken in charge', 'amber', function () { setTab('all'); state.owner = 'none'; }],
+      ['urgent', 'Urgent', 'red', function () { setTab('all'); state.prio = '1-URGENT'; }],
       ['problem', 'Problem', 'red', function () { setTab('problem'); }],
       ['expiring', 'Expiring ≤ 7 days', 'amber', function () { setTab('provisional'); }],
       ['tickets', 'Tickets missing', 'navy', function () { setTab('tickets'); }],
       ['groups', 'Groups to finalize', 'navy', function () { setTab('groups'); }],
-      ['ck', 'Check findings open', 'navy', function () { setTab('ck'); }],
+      ['ck', 'Check findings open', 'navy', function () { setTab('all'); state.source = 'claude_check'; }],
       ['closed7', 'Closed last 7 days', 'green', function () { setTab('closed'); }]
     ];
     var box = $('fu-stats');
@@ -128,19 +134,31 @@
       box.appendChild(el);
     });
   }
-  function setTab(t) { state.tab = t; }
+  /** The tab lives in the URL only (?tab=, for links and reload); the plain page opens on Provisional. */
+  function setTab(t) {
+    state.tab = t;
+    try {
+      var u = new URL(location.href);
+      if (t === 'provisional') u.searchParams.delete('tab'); else u.searchParams.set('tab', t);
+      u.searchParams.delete('type');
+      history.replaceState(null, '', u.pathname + u.search + u.hash);
+    } catch (e) { /* old browser: the tab is just not in the URL */ }
+  }
   function resetFilters() { state.owner = state.aud = state.prio = state.supplier = state.month = state.source = state.reason = ''; }
   function renderTabs() {
     var box = $('fu-tabs');
     box.innerHTML = '';
     TABS.forEach(function (t) {
-      var n = all().filter(function (r) { return inTab(r, t.key) && passes(r); }).length;
+      var list = all().filter(function (r) { return inTab(r, t.key) && passes(r); });
+      var urgent = t.key === 'closed' ? 0 : list.filter(function (r) { return r.priority === '1-URGENT'; }).length;
       var b = document.createElement('button');
       b.type = 'button';
       b.setAttribute('role', 'tab');
+      b.setAttribute('aria-selected', state.tab === t.key ? 'true' : 'false');
       b.className = state.tab === t.key ? 'active' : '';
-      b.innerHTML = esc(t.label) + '<span class="n">' + n + '</span>';
-      b.addEventListener('click', function () { state.tab = t.key; render(); });
+      b.innerHTML = esc(t.label) + '<span class="n">' + list.length + '</span>' +
+        (urgent ? '<span class="fu-tab-urgent" title="' + urgent + ' urgent">' + urgent + '</span>' : '');
+      b.addEventListener('click', function () { setTab(t.key); render(); });
       box.appendChild(b);
     });
   }
@@ -348,6 +366,8 @@
         ((r.type === 'group' || (ck && r.supplier)) && r.service ? '<span class="fu-days">' + esc(r.service) + '</span>' : '') +
         (r.supplier_ref ? '<span class="fu-ref">' + esc(r.supplier_ref) + '</span>' : ''),
       '<span class="badge badge-issue' + issueCls + '">' + esc(ISSUE[r.issue] || r.issue_label || r.issue) + '</span>' +
+        (r.transfer_alert ? '<br><span class="badge badge-issue exp fu-tr30" title="Transfer not confirmed and the service is close: also listed in Provisional">Transfer ≤ ' +
+                            (D.transfer_alert_days || 30) + ' d</span>' : '') +
         (r.audience && r.audience !== 'booking' || r.type === 'ck' ? '<br><span class="badge badge-aud ' + esc(r.audience) + '" title="Routed to">' + esc(AUD[r.audience] || r.audience) + '</span>' : '') +
         sourceChips(r),
       esc(r.doc_status_text || '') + (r.booked_by ? '<span class="fu-days">booked by ' + esc(r.booked_by) + '</span>' : '') + expiryCell(r),
@@ -396,8 +416,8 @@
     });
     var list = sortRows(all().filter(function (r) { return inTab(r, state.tab) && passes(r); }));
     var head = ['Priority / deadline', state.tab === 'groups' ? 'Arrival' : 'Service', 'Client / folder',
-                state.tab === 'tickets' ? 'Flight' : state.tab === 'groups' ? 'Group' : state.tab === 'ck' ? 'Supplier / service' : 'Supplier',
-                'Issue / found by', state.tab === 'groups' ? 'What we found' : state.tab === 'ck' ? 'What to do' : 'Document status',
+                state.tab === 'tickets' ? 'Flight' : state.tab === 'groups' ? 'Group' : state.tab === 'provisional' ? 'Supplier' : 'Supplier / service',
+                'Issue / found by', state.tab === 'groups' ? 'What we found' : state.tab === 'docs' || state.tab === 'transfers' ? 'What to do' : 'Document status',
                 'File', 'Owner', 'Status', 'Notes', state.tab === 'closed' ? 'Closed' : 'Checked'];
     t.innerHTML = '<thead><tr>' + head.map(function (h) { return '<th>' + h + '</th>'; }).join('') + '</tr></thead>';
     var body = document.createElement('tbody');
@@ -637,8 +657,10 @@
     });
   }
 
-  if (state.request && !D.rows.some(function (r) { return r.request_id === state.request; })) {
-    if (D.closed.some(function (r) { return r.request_id === state.request; })) state.tab = 'closed';
+  // A link to one booking (request view, CK tracker) with nothing in Provisional: open the first tab that has its lines.
+  if (state.request && !urlTab && !all().some(function (r) { return inTab(r, state.tab) && passes(r); })) {
+    var hit = TAB_KEYS.filter(function (k) { return all().some(function (r) { return inTab(r, k) && passes(r); }); })[0];
+    if (hit) state.tab = hit;
   }
   syncFilters();
   render();

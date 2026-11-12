@@ -10,6 +10,8 @@
  * (owners: any active user; reassign / not relevant: admin or the current owner).
  * Data / changes: api/followup.php → includes/followup_service.php.
  * ?request_id=N, ?q=…, ?type=ck open the page filtered (links from the request view / CK tracker).
+ * Tabs (12 Nov 2026): Provisional (default) · Transfers · Tickets · Groups · Docs / Calc · Problem · All open · Closed —
+ * followup_tab_of(); ?tab=… keeps the tab across reloads / links (not remembered otherwise).
  */
 require_once __DIR__ . '/../../includes/db.php';
 require_once __DIR__ . '/../../includes/auth.php';
@@ -43,6 +45,8 @@ $extra_css = '
 .fu-tabs button{font-family:inherit;font-size:.78rem;font-weight:700;color:var(--grey-mid);background:none;border:none;border-bottom:3px solid transparent;padding:9px 14px;cursor:pointer;white-space:nowrap}
 .fu-tabs button.active{color:var(--red);border-bottom-color:var(--red)}
 .fu-tabs .n{font-weight:600;color:var(--grey-mid);margin-left:4px}
+.fu-tab-urgent{display:inline-block;margin-left:5px;min-width:18px;padding:0 5px;border-radius:9px;background:var(--red);color:var(--white);font-size:.66rem;line-height:18px;text-align:center}
+.fu-tr30{margin-top:3px;display:inline-block}
 .fu-chip{display:inline-flex;align-items:center;gap:6px;background:var(--navy-lt);color:var(--navy);border-radius:20px;padding:6px 12px;font-size:.78rem;font-weight:600;align-self:flex-end}
 .fu-chip[hidden]{display:none}
 .fu-chip button{border:none;background:none;color:inherit;cursor:pointer;font-size:.9rem}

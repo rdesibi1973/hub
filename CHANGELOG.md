@@ -20,6 +20,18 @@ Running log of notable changes and current build state. Module-level "active / p
 
 ---
 
+## 2026-11-12 — Booking follow-up: tabs — Provisional as default, Transfers apart
+- Hotels, flights and balloons fill up, transfers always have availability: transfer lines (e.g. REMCO1108's two Zanzibar
+  transfers next to Uzuri) no longer hide the provisional bookings. One mapping, `followup_tab_of()` (page, counts,
+  `followup_list`): Provisional (default) · Transfers · Tickets · Groups · Docs / Calc (everything else — no line lost) · Problem ·
+  All open · Closed. Live data on 12 Nov: 31 + 35 + 2 + 11 + 34 = 113 open.
+- A transfer still open ≤ `FOLLOWUP_TRANSFER_ALERT_DAYS` (30) before its date is in Provisional too ("Transfer ≤ 30 d");
+  the memo digest lists transfers only under that rule ("Transfer non confermati entro 30 giorni").
+- Each tab: count + red badge of its urgent lines. "Expiring ≤ 7 days" counts Provisional-tab lines only. The tab is kept only
+  in the URL (`?tab=`); the plain page opens on Provisional; a link to one booking opens the first tab that has its lines.
+  The old "Checks" tab is gone: the "Check findings open" card opens All open filtered on Claude check (`?type=ck` too).
+- Agent API `followup_list`: `tab` (default `all`), rows carry `tab`, `tabs[]`, `transfer_alert`.
+
 ## 2026-11-12 — Booking follow-up: manual expiry when the supplier extends by mail
 - Suppliers often extend a provisional hold by mail without a new pro-forma (real case REMCO1108, Ngorongoro Uzuri P247/P248:
   pro-forma of 19/10 expiring 30/10, hold confirmed by mail to glady@ on 22/10 until 30/11): the line stayed "Provisional

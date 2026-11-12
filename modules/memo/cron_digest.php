@@ -269,7 +269,8 @@ function memo_digest_render(array $d, $today) {
     if ($fu) {
         $fuUrl = $hub . 'operations/booking_followup.php';
         $groups = array('problem' => 'Problem', 'new' => 'Nuove dall\'ultimo digest', 'untaken' => 'Non prese in carico da più di 2 giorni',
-                        'expiring' => 'Provisional in scadenza entro 7 giorni', 'tickets' => 'Biglietti mancanti, volo entro 7 giorni');
+                        'expiring' => 'Provisional in scadenza entro 7 giorni', 'tickets' => 'Biglietti mancanti, volo entro 7 giorni',
+                        'transfers_soon' => 'Transfer non confermati entro ' . (defined('FOLLOWUP_TRANSFER_ALERT_DAYS') ? FOLLOWUP_TRANSFER_ALERT_DAYS : 30) . ' giorni');
         $h = array(); $t = array();
         foreach ($groups as $k => $label) {
             if (!$fu[$k]) continue;
