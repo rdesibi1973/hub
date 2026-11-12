@@ -126,8 +126,30 @@ function drafts_dbx_list_multi(string $token, array $paths, int $concurrency = 8
     return $out;
 }
 
-/** The first DRAFTS_HEAD_BYTES of many files at once (Range requests, parallel): [path => bytes | null]. */
-function drafts_dbx_heads(string $token, array $paths, int $concurrency = 6): array {
+/** The first DRAFTS_HEAD_BYTES of one file (Range request), retried on 429 / 5xx (Retry-After, max 3 tries): bytes | null. */
+function drafts_dbx_head_one(string $token, string $p): ?string {
+    for ($try = 0; $try < 3; $try++) {
+        $ch = curl_init('https://content.dropboxapi.com/2/files/download');
+        curl_setopt_array($ch, [CURLOPT_POST => true, CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 60, CURLOPT_POSTFIELDS => '', CURLOPT_HEADER => true,
+            CURLOPT_HTTPHEADER => ['Authorization: Bearer ' . $token, 'Dropbox-API-Arg: ' . json_encode(['path' => $p]),
+                                   'Range: bytes=0-' . (DRAFTS_HEAD_BYTES - 1), 'Content-Type: text/plain']]);
+        $res = (string)curl_exec($ch);
+        $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $hs = curl_getinfo($ch, CURLINFO_HEADER_SIZE);
+        curl_close($ch);
+        if ($code === 200 || $code === 206) return substr($res, $hs);
+        if ($code === 409) return null;                                   // gone / not a file
+        $wait = preg_match('/^Retry-After:\s*(\d+)/mi', substr($res, 0, $hs), $m) ? min(5, (int)$m[1]) : 1 + $try;
+        sleep(max(1, $wait));
+    }
+    return null;
+}
+
+/**
+ * The first DRAFTS_HEAD_BYTES of many files (Range requests, a few in parallel): [path => bytes | null]. Dropbox throttles
+ * parallel downloads (seen 12 Nov 2026: 4 of 10 refused in parallel, all fine one by one): failures are read again one by one.
+ */
+function drafts_dbx_heads(string $token, array $paths, int $concurrency = 3): array {
     $out = [];
     $queue = array_values(array_unique($paths));
     $mh = curl_multi_init();
@@ -155,6 +177,7 @@ function drafts_dbx_heads(string $token, array $paths, int $concurrency = 6): ar
         }
     } while ($live);
     curl_multi_close($mh);
+    foreach ($out as $p => $v) if ($v === null) $out[$p] = drafts_dbx_head_one($token, $p);   // throttled: one by one, with back-off
     return $out;
 }
 
