@@ -30,7 +30,8 @@
   var state = {tab: params.get('type') === 'ck' ? 'ck' : 'open', owner: '', aud: '', prio: '', supplier: '', month: '', source: params.get('source') || '', q: params.get('q') || '',
                reason: params.get('close_reason') || '',
                request: params.get('request_id') ? parseInt(params.get('request_id'), 10) : null,
-               group: params.get('folder') || '', open: {}};   // GRP member: the group's lines belong to the group's first request
+               group: params.get('folder') || '', open: {},   // GRP member: the group's lines belong to the group's first request
+               exp: {}};   // "Set expiry" forms open: {id: {date, proof, name, file, files, err, busy}}
   var $ = function (id) { return document.getElementById(id); };
 
   function esc(s) {
@@ -230,6 +231,95 @@
       return '<option value="' + s + '"' + (s === r.staff_status ? ' selected' : '') + (s === 'not_relevant' && !nr ? ' disabled' : '') + '>' + STATUS[s] + '</option>';
     }).join('') + '</select>';
   }
+  // ── Expiry extended by mail (expiry_override + proof .eml in mails/) ────
+  function dShort(iso) {
+    return iso ? new Date(iso.substr(0, 10) + 'T00:00:00').toLocaleDateString('en-GB', {day: 'numeric', month: 'short'}) : '';
+  }
+  /** Same rule as followup_override_refusal(): the booking team / admin, open lines of a provisional booking. */
+  function canSetExpiry(r) { return D.me.can_edit && !r.closed_at && (isProv(r) || !!r.expiry_date); }
+  /**
+   * The expiry: the effective one ("30 Nov 2026 (by mail)", who / when / proof on hover), the document's struck through
+   * below ("pro-forma: 30 Oct"); "Set expiry" for the booking team.
+   */
+  function expiryCell(r) {
+    var o = r.expiry_override, h = '';
+    if (r.expiry_date) {
+      var lbl = (r.expired ? 'expired ' : 'expires ') + dmy(r.expiry_date);
+      if (!o) {
+        h = '<span class="fu-days' + (r.expired ? ' fu-late' : '') + '" style="white-space:nowrap">' + lbl + '</span>';
+      } else {
+        var name = o.proof ? o.proof.replace(/^.*\//, '') : '';
+        h = '<span class="fu-ovr" tabindex="0"><span class="fu-days' + (r.expired ? ' fu-late' : '') + '" style="white-space:nowrap">' + lbl + ' <b>(by mail)</b></span>' +
+            '<span class="fu-pop" role="tooltip">Extended by mail — set by ' + esc(o.by || '?') + ', ' + esc(dmyhm(o.at)) +
+            (o.proof ? '<br>Proof: <a href="' + esc(o.proof_url) + '" target="_blank" rel="noopener" title="Open in Dropbox (web)">☁</a> ' +
+                       '<a href="' + esc(o.proof_open_url) + '" title="Open on this PC — ' + esc(o.proof) + '">✉ ' + esc(name) + '</a>' : '') + '</span></span>' +
+            (r.doc_expiry_date ? '<span class="fu-days fu-struck" title="Expiry printed on the document">' +
+              (/pro.?forma/i.test(r.source_file || '') ? 'pro-forma' : 'document') + ': ' + dShort(r.doc_expiry_date) + '</span>' : '');
+      }
+    }
+    if (!canSetExpiry(r)) return h;
+    var f = state.exp[r.id];
+    if (!f) return h + '<button type="button" class="fu-hbtn fu-setexp" data-exp="1" title="The supplier extended the hold by mail: set the new expiry, with the mail as proof">📅 ' +
+                       (o ? 'Change expiry' : 'Set expiry') + '</button>';
+    var opts = f.files === undefined ? '<option value="">Loading mails/ …</option>'
+             : '<option value="">' + (f.files.length ? '— choose a mail in mails/ —' : '— no .eml in mails/ yet —') + '</option>' +
+               f.files.map(function (m) {
+                 return '<option value="' + esc(m.proof) + '"' + (m.proof === f.proof ? ' selected' : '') + '>' + esc(m.name) + '</option>';
+               }).join('');
+    return h + '<div class="fu-exp" data-expform="1">' +
+      '<label>New expiry (confirmed by mail)<input type="date" data-x="date" value="' + esc(f.date || '') + '"></label>' +
+      '<label>Proof: a mail already in mails/<select data-x="proof"' + (f.file ? ' disabled' : '') + '>' + opts + '</select></label>' +
+      '<label>… or upload the mail (.eml)<input type="file" data-x="file" accept=".eml,message/rfc822"></label>' +
+      (f.file ? '<span class="fu-days">📎 ' + esc(f.file.name) + ' <button type="button" class="fu-hbtn" data-xfile-clear="1">×</button></span>' +
+                '<label>Save as (mails/)<input type="text" data-x="name" value="' + esc(f.name || '') + '" placeholder="empty: ' + esc(suggestName(r, f)) + '"></label>' : '') +
+      '<div class="fu-save"><button type="button" class="btn btn-primary btn-sm" data-xsave="1"' + (f.busy ? ' disabled' : '') + '>' + (f.busy ? 'Saving…' : 'Save expiry') + '</button>' +
+      '<button type="button" class="btn btn-outline btn-sm" data-xcancel="1">Cancel</button></div>' +
+      (o ? '<button type="button" class="fu-hbtn" data-xclear="1" title="Back to the expiry printed on the document">✕ Remove the mail expiry</button>' : '') +
+      (f.err ? '<span class="fu-err">' + esc(f.err) + '</span>' : '') + '</div>';
+  }
+  /** Suggested name (the server builds it the same way from the mail's Date header): AAAA-MM-GG_<Supplier>_<Ref> extension to DD-MM.eml */
+  function suggestName(r, f) {
+    var ext = f.date ? ' extension to ' + f.date.substr(8, 2) + '-' + f.date.substr(5, 2) : ' mail';
+    return ['YYYY-MM-DD', r.supplier || '', r.supplier_ref || ''].filter(Boolean).join('_').replace(/[\/\\:*?"<>|]/g, '_') + ext + '.eml';
+  }
+  function openExpiry(r) {
+    var f = state.exp[r.id] = {date: r.expiry_override ? r.expiry_override.date : '', proof: '', name: '', file: null, files: undefined, err: ''};
+    renderTable();
+    fetch(API + '?action=mails&id=' + r.id, {credentials: 'same-origin'}).then(function (x) { return x.json(); }).then(function (d) {
+      if (state.exp[r.id] !== f) return;
+      f.files = d.ok ? d.files : [];
+      if (!d.ok) f.err = d.error || 'mails/ not listed';
+      renderTable();
+    }).catch(function (e) { f.files = []; f.err = e.message; renderTable(); });
+  }
+  function readBase64(file) {
+    return new Promise(function (ok, ko) {
+      var rd = new FileReader();
+      rd.onload = function () { ok(String(rd.result).replace(/^data:[^,]*,/, '')); };
+      rd.onerror = function () { ko(new Error('The file could not be read')); };
+      rd.readAsDataURL(file);
+    });
+  }
+  function saveExpiry(r, clear) {
+    var f = state.exp[r.id] || {};
+    var body = {id: r.id, date: clear ? '' : (f.date || '')};
+    if (!clear) {
+      if (!body.date) { f.err = 'Choose the new expiry date'; renderTable(); return; }
+      if (!f.file && !f.proof) { f.err = 'A proof is required: choose the supplier\'s mail in mails/ or upload it (.eml)'; renderTable(); return; }
+      if (f.file && !/\.eml$/i.test(f.file.name)) { f.err = 'Upload the mail as .eml (in Outlook / Thunderbird: Save as → .eml)'; renderTable(); return; }
+    }
+    f.busy = true; f.err = ''; renderTable();
+    var go = !clear && f.file ? readBase64(f.file).then(function (b64) { body.upload = {name: f.name || '', content_base64: b64}; })
+                              : Promise.resolve(body.proof = clear ? '' : f.proof);
+    go.then(function () { return post('set_expiry', body); }).then(function (d) {
+      f.busy = false;
+      if (!d.ok) { f.err = d.error || 'Not saved'; renderTable(); return; }
+      delete state.exp[r.id];
+      if (d.row) replaceRow(d.row);
+      renderTabs(); renderTable();
+    }).catch(function (e) { f.busy = false; f.err = e.message; renderTable(); });
+  }
+
   /** Notes written so far, newest first, with date and author (a note older than the log: no date). */
   function notesLog(r) {
     var log = (r.notes_log || []).slice();
@@ -260,8 +350,7 @@
       '<span class="badge badge-issue' + issueCls + '">' + esc(ISSUE[r.issue] || r.issue_label || r.issue) + '</span>' +
         (r.audience && r.audience !== 'booking' || r.type === 'ck' ? '<br><span class="badge badge-aud ' + esc(r.audience) + '" title="Routed to">' + esc(AUD[r.audience] || r.audience) + '</span>' : '') +
         sourceChips(r),
-      esc(r.doc_status_text || '') + (r.booked_by ? '<span class="fu-days">booked by ' + esc(r.booked_by) + '</span>' : '') +
-        (r.expiry_date ? '<span class="fu-days' + (r.expired ? ' fu-late' : '') + '" style="white-space:nowrap">' + (r.expired ? 'expired ' : 'expires ') + dmy(r.expiry_date) + '</span>' : ''),
+      esc(r.doc_status_text || '') + (r.booked_by ? '<span class="fu-days">booked by ' + esc(r.booked_by) + '</span>' : '') + expiryCell(r),
       (r.file_open_url ? '<span class="fu-folder fu-file"><a href="' + esc(r.file_url) + '" target="_blank" rel="noopener" title="Open in Dropbox (web)">☁</a> ' +
         '<a href="' + esc(r.file_open_url) + '" title="Open on this PC — ' + esc(r.source_file) + '">📄 ' + esc(r.source_file.replace(/^invoices\//, '')) + '</a></span>'
       : r.file_url ? '<a href="' + esc(r.file_url) + '" target="_blank" rel="noopener" title="' + esc(r.source_file) + '">📄 ' + esc(r.source_file.replace(/^invoices\//, '')) + '</a>' : '') +
@@ -415,6 +504,14 @@
     var tr = b.closest('tr[data-id]');
     if (!tr) return;
     var id = parseInt(tr.dataset.id, 10);
+    if (b.dataset.exp) { openExpiry(rowOf(tr)); return; }
+    if (b.dataset.xcancel) { delete state.exp[id]; renderTable(); return; }
+    if (b.dataset.xsave) { saveExpiry(rowOf(tr), false); return; }
+    if (b.dataset.xclear) {
+      if (window.confirm('Remove the expiry confirmed by mail? The expiry printed on the document counts again.')) saveExpiry(rowOf(tr), true);
+      return;
+    }
+    if (b.dataset.xfileClear) { if (state.exp[id]) { state.exp[id].file = null; state.exp[id].name = ''; } renderTable(); return; }
     if (b.dataset.take) save(tr, {take: true}, b.parentNode);
     else if (b.dataset.release) save(tr, {owner: null}, b.parentNode);
     else if (b.dataset.save) {
@@ -444,6 +541,24 @@
     }
   });
   // Owner, status and a new note are only marked as changed here; the row's Save button sends them together.
+  // "Set expiry" form fields: kept in state.exp (the table is redrawn after each save of another row).
+  ['change', 'input'].forEach(function (type) {
+    $('fu-table').addEventListener(type, function (ev) {
+      var x = ev.target.dataset.x, tr = x && ev.target.closest('tr[data-id]');
+      var f = tr && state.exp[parseInt(tr.dataset.id, 10)];
+      if (!f) return;
+      if (x === 'file') {
+        if (type !== 'change') return;
+        f.file = ev.target.files && ev.target.files[0] || null;
+        f.err = '';
+        renderTable();
+        return;
+      }
+      f[x] = ev.target.value;
+      var nm = x === 'date' && tr.querySelector('input[data-x="name"]');   // suggested name follows the date (no redraw: focus kept)
+      if (nm) nm.placeholder = 'empty: ' + suggestName(rowOf(tr), f);
+    });
+  });
   ['change', 'input'].forEach(function (type) {
     $('fu-table').addEventListener(type, function (ev) {
       var tr = ev.target.dataset.f && ev.target.closest('tr[data-id]');

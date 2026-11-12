@@ -82,7 +82,9 @@ function ck_pipeline_block(PDO $db, array $row, ?string $token = null, ?array $r
         if (!ck_pipeline_is_provisional($l)) continue;
         $issue = in_array($l['issue'], FU_PROVISIONAL_ISSUES, true) ? $l['issue']
                : (array_values(array_filter(array_column($l['_src'], 'issue'), fn($i) => in_array($i, FU_PROVISIONAL_ISSUES, true)))[0] ?? 'provisional');
-        $by[] = ck_pipeline_block_text($l['supplier'] ?: $l['service'], $l['service_date'], $issue, $l['expiry_date'], $today);
+        // Effective expiry: extended by mail (expiry_override) when staff set it.
+        $by[] = ck_pipeline_block_text($l['supplier'] ?: $l['service'], $l['service_date'], $issue, followup_effective_expiry($l), $today)
+              . (!empty($l['expiry_override']) ? ' (by mail)' : '');
         $ids[] = (int)$l['id'];
         if ($l['source_file']) $seenFiles[strtolower(basename($l['source_file']))] = true;
     }

@@ -123,6 +123,10 @@ function followup_schema(PDO $db): void {
         issue           VARCHAR(40) NOT NULL,
         doc_status_text VARCHAR(500) NULL,
         expiry_date     DATE NULL,
+        expiry_override DATE NULL,
+        expiry_override_by INT NULL,
+        expiry_override_at DATETIME NULL,
+        expiry_override_proof VARCHAR(500) NULL,
         booked_by       VARCHAR(80) NULL,
         owner_user_id   INT NULL,
         contacted_at    DATE NULL,
@@ -180,7 +184,40 @@ function followup_schema(PDO $db): void {
         KEY idx_followup_run_at (at)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
     followup_schema_reasons($db);
+    followup_schema_override($db);
     $done = true;
+}
+
+/**
+ * Manual expiry confirmed by mail (12 Nov 2026; migration 081): expiry_override, _by, _at, _proof.
+ * Checked once in INFORMATION_SCHEMA, then marked in meta.
+ */
+function followup_schema_override(PDO $db): void {
+    try {
+        if (followup_meta_get($db, 'expiry_override') !== null) return;
+        $n = (int)$db->query("SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE()
+                              AND TABLE_NAME = 'booking_followups' AND COLUMN_NAME = 'expiry_override'")->fetchColumn();
+        if ($n === 0) {
+            $db->exec("ALTER TABLE booking_followups ADD COLUMN expiry_override DATE NULL AFTER expiry_date,
+                       ADD COLUMN expiry_override_by INT NULL AFTER expiry_override, ADD COLUMN expiry_override_at DATETIME NULL AFTER expiry_override_by,
+                       ADD COLUMN expiry_override_proof VARCHAR(500) NULL AFTER expiry_override_at");
+        }
+        followup_meta_set($db, 'expiry_override', date('Y-m-d H:i:s'));
+    } catch (Throwable $e) {
+        error_log('followup_schema_override: ' . $e->getMessage());
+    }
+}
+
+/** The expiry that counts: the one confirmed by mail (expiry_override) if set, else the document's (expiry_date). */
+function followup_effective_expiry(array $l): ?string {
+    $o = $l['expiry_override'] ?? null;
+    return ($o !== null && $o !== '') ? (string)$o : (($l['expiry_date'] ?? null) ?: null);
+}
+
+/** provisional / provisional_expired from the effective expiry (expired is relative to today); other issues unchanged. */
+function followup_issue_for_expiry(string $issue, ?string $expiry, string $today): string {
+    if (!in_array($issue, ['provisional', 'provisional_expired'], true)) return $issue;
+    return ($expiry && $expiry < $today) ? 'provisional_expired' : 'provisional';
 }
 
 /**
@@ -892,8 +929,9 @@ function followup_due(array $l): array {
     if (($l['type'] ?? '') === 'manual' && !empty($det['due_date'])) return ['due_date' => $det['due_date'], 'due_reason' => 'set by hand'];
     $minus = fn(string $d, int $n) => date('Y-m-d', strtotime($d . ' -' . $n . ' days'));
     $c = [];
-    if (!empty($l['expiry_date'])) {
-        $c[] = [$l['expiry_date'], ($l['issue'] ?? '') === 'group_znz_flight' ? 'ticketing time limit' : 'provisional expiry'];
+    if ($exp = followup_effective_expiry($l)) {   // extended by mail: the expiry_override counts (migration 081)
+        $c[] = [$exp, ($l['issue'] ?? '') === 'group_znz_flight' ? 'ticketing time limit'
+                      : (!empty($l['expiry_override']) ? 'provisional expiry (extended by mail)' : 'provisional expiry')];
     }
     $svc = ($l['service_date'] ?? null) ?: ($l['start_date'] ?? null);
     $st = followup_service_type($l);
@@ -1604,6 +1642,15 @@ function followup_apply(PDO $db, string $type, array $cand, array $scope, bool $
 
         // This check's own line.
         $id = (int)$old['id'];
+        // Expiry extended by mail (expiry_override, set by staff): the check keeps writing expiry_date from the document
+        // and never the override, except that a document with an expiry >= the override supersedes it (cleared, logged).
+        // While it stands, provisional / expired is judged on it (an expired override is expired / urgent again).
+        $ovr = $old['expiry_override'] ?? null;
+        $ovrClear = false;
+        if ($ovr) {
+            if (!empty($l['expiry_date']) && $l['expiry_date'] >= $ovr) $ovrClear = true;
+            else $l['issue'] = followup_issue_for_expiry((string)$l['issue'], $ovr, $today);
+        }
         $diff = [];
         foreach ($docFields as $f) {
             $nv = $l[$f] ?? null; $ov = $old[$f];
@@ -1614,6 +1661,7 @@ function followup_apply(PDO $db, string $type, array $cand, array $scope, bool $
         $src[$tag] = ['since' => $prev['since'] ?? $now] + $entry;
         $merged = $l;
         foreach ($docFields as $f) if (!isset($diff[$f])) $merged[$f] = $old[$f];   // the line as it will be
+        $merged['expiry_override'] = $ovrClear ? null : $ovr;
         $due = followup_due($merged);
         // Kept up to date with the line, not counted as a change.
         $meta = [];
@@ -1631,10 +1679,13 @@ function followup_apply(PDO $db, string $type, array $cand, array $scope, bool $
             $set = ['last_seen_at = ?']; $args = [$now];
             foreach ($diff as $f => $v) { $set[] = "$f = ?"; $args[] = $v[1]; }
             foreach ($meta as $f => $v) { $set[] = "$f = ?"; $args[] = $v; }
+            if ($ovrClear) array_push($set, 'expiry_override = NULL', 'expiry_override_by = NULL', 'expiry_override_at = NULL', 'expiry_override_proof = NULL');
             if ($reopen) $reopenSql($old, $set);
             $args[] = $id;
             $db->prepare("UPDATE booking_followups SET " . implode(', ', $set) . " WHERE id = ?")->execute($args);
             foreach ($diff as $f => $v) if (in_array($f, $logged, true)) followup_event($db, $id, null, $f, $v[0], $v[1]);
+            if ($ovrClear) followup_event($db, $id, null, 'expiry_override', $ovr, 'override superseded by ' . ($l['source_file'] ?: 'the document')
+                                                                                 . ' (expires ' . $l['expiry_date'] . ')');
             if (!$prev && $old['sources'] !== null) followup_event($db, $id, null, 'source', null, $srcLabel($l));   // reported again by its own check
             if ($reopen) {
                 $what = $type === 'ticket' ? 'ticket still missing' : ($type === 'group' ? 'group still to finalize'
@@ -1643,6 +1694,7 @@ function followup_apply(PDO $db, string $type, array $cand, array $scope, bool $
                 $reopenEvents($id, $old, $what);
             }
         }
+        if ($ovrClear) $diff['expiry_override'] = [$ovr, null];   // summary only (written above)
         if ($reopen)    $sum['reopened'][] = followup_brief(['id' => $id] + $l) + ['was' => $old['close_reason'] . ($old['staff_status'] === 'resolved' ? ' / resolved' : '')];
         elseif ($diff)  $sum['updated'][]  = followup_brief(['id' => $id] + $l) + ['changed' => array_keys($diff)];
         else            $sum['unchanged']++;
@@ -2501,11 +2553,12 @@ function followup_rows(PDO $db, array $f = [], ?string $today = null): array {
         array_push($a, $q, $q, $q, $q, $q, $q);
     }
     $sql = "SELECT b.*, r.customer_name, r.dropbox_url, o.username AS owner_username, o.full_name AS owner_name,
-                   cu.full_name AS closed_by_name,
+                   cu.full_name AS closed_by_name, COALESCE(NULLIF(xu.full_name, ''), xu.username) AS expiry_override_by_name,
                    (SELECT COUNT(*) FROM booking_followup_events e WHERE e.followup_id = b.id) AS events_count
             FROM booking_followups b
             LEFT JOIN requests r ON r.id = b.request_id
             LEFT JOIN users o ON o.id = b.owner_user_id
+            LEFT JOIN users xu ON xu.id = b.expiry_override_by
             LEFT JOIN users cu ON b.closed_by REGEXP '^[0-9]+$' AND cu.id = b.closed_by"
          . ($w ? ' WHERE ' . implode(' AND ', $w) : '') . " ORDER BY b.closed_at IS NULL DESC, b.service_date ASC, b.id ASC";
     $st = $db->prepare($sql);
@@ -2624,6 +2677,19 @@ function followup_out(array $r, string $today, array $live = []): array {
     }
     $due = followup_due($r);
     $top = explode('/', ltrim((string)$r['folder'], '/'))[0];
+    // Expiry extended by mail (migration 081): expiry_date below is the effective one; doc_expiry_date the document's.
+    $exp = followup_effective_expiry($r);
+    $ovr = null;
+    if (!empty($r['expiry_override'])) {
+        $proof = (string)($r['expiry_override_proof'] ?? '');
+        $proofPath = $proof !== '' ? $dir . '/' . ltrim($proof, '/') : null;
+        $ovr = ['date' => $r['expiry_override'], 'by_user_id' => $r['expiry_override_by'] !== null ? (int)$r['expiry_override_by'] : null,
+                'by' => ($r['expiry_override_by_name'] ?? null) ?: ($r['expiry_override_by'] !== null ? 'user #' . $r['expiry_override_by'] : null),
+                'at' => $r['expiry_override_at'], 'proof' => $proof ?: null, 'proof_path' => $proofPath,
+                'proof_url' => $proofPath ? followup_dropbox_url(dirname($proofPath), basename($proofPath)) : null,
+                'proof_open_url' => $proofPath ? $open($proofPath) . '&open=file' : null];
+    }
+    if ($r['closed_at'] === null && $exp) $r['issue'] = followup_issue_for_expiry((string)$r['issue'], $exp, $today);   // expired is relative to today
     $sources = [];
     foreach ($r['closed_at'] === null || !empty($r['sources']) ? followup_sources($r) : [] as $t => $e) {
         $sources[] = ['source' => $t, 'label' => FU_SOURCE_LABELS[$t] ?? $t, 'issue' => $e['issue'] ?? null,
@@ -2646,8 +2712,9 @@ function followup_out(array $r, string $today, array $live = []): array {
         'source_file' => $r['source_file'], 'issue' => $r['issue'], 'issue_label' => followup_issue_label((string)$r['issue']),
         'report_url' => $report ? followup_dropbox_url(dirname($report), basename($report)) : null,
         'report_open_url' => $report ? $open($report) . '&open=file' : null,
-        'doc_status_text' => $r['doc_status_text'], 'expiry_date' => $r['expiry_date'],
-        'expired' => $r['expiry_date'] !== null && $r['expiry_date'] < $today,
+        'doc_status_text' => $r['doc_status_text'], 'expiry_date' => $exp, 'doc_expiry_date' => $r['expiry_date'],
+        'expiry_override' => $ovr,
+        'expired' => $exp !== null && $exp < $today,
         'booked_by' => $r['booked_by'],
         'owner_user_id' => $r['owner_user_id'] !== null ? (int)$r['owner_user_id'] : null,
         'owner' => $r['owner_username'] ?? null, 'owner_name' => ($r['owner_name'] ?? null) ?: ($r['owner_username'] ?? null),
@@ -2737,9 +2804,14 @@ function followup_owner_users(PDO $db): array {
  * current owner; reassign → admin or the current owner (a line nobody owns: also the booking team);
  * not_relevant → admin or the current owner.
  * resolved / not_relevant close the line (manual); another status on a closed line re-opens it.
+ * Expiry extended by mail (migration 081): expiry_override (Y-m-d, or null / '' to clear) with expiry_override_proof
+ * (a file in the line's booking folder, relative "mails/….eml" or a full Dropbox path inside it; required to set a date,
+ * must exist). Booking team (module) or admin only; open lines with a provisional issue. Sets _by / _at, re-judges
+ * provisional / expired and the deadline on the new expiry; logged as event expiry_override.
+ * $opt['proof_exists']: callable(string $dropboxPath): bool (default: Dropbox get_metadata; tests pass their own).
  * → ['ok', 'changes' => [field => [old, new]], 'row'] or ['ok' => false, 'error']. Dry run: nothing written.
  */
-function followup_update(PDO $db, int $id, array $ch, array $user, bool $confirm = true): array {
+function followup_update(PDO $db, int $id, array $ch, array $user, bool $confirm = true, array $opt = []): array {
     followup_schema($db);
     $st = $db->prepare("SELECT * FROM booking_followups WHERE id = ?");
     $st->execute([$id]);
@@ -2802,6 +2874,12 @@ function followup_update(PDO $db, int $id, array $ch, array $user, bool $confirm
         }
         $new['staff_status'] = $s;
     }
+    if (array_key_exists('expiry_override', $ch) || array_key_exists('expiry_override_proof', $ch)) {
+        if (!isset($opt['dir']) && $row['folder']) $opt['dir'] = followup_line_dir($db, $row);   // folder renamed since the last check
+        $r = followup_override_change($row, $ch, $user, $opt);
+        if (!$r['ok']) return $r;
+        $new += $r['new'];
+    }
     $finalStatus = $new['staff_status'] ?? $row['staff_status'];
     $finalNotes  = array_key_exists('notes', $new) ? $new['notes'] : $row['notes'];
     if ($finalStatus === 'problem' && $row['staff_status'] !== 'problem' && trim((string)$finalNotes) === '') {
@@ -2809,7 +2887,11 @@ function followup_update(PDO $db, int $id, array $ch, array $user, bool $confirm
     }
 
     $changes = [];
-    foreach ($new as $f => $v) if ((string)$v !== (string)$row[$f]) $changes[$f] = [$row[$f], $v];
+    foreach ($new as $f => $v) if ((string)$v !== (string)($row[$f] ?? '')) $changes[$f] = [$row[$f] ?? null, $v];
+    // Who / when of an override: only when the date or the proof really changes.
+    if (!isset($changes['expiry_override']) && !isset($changes['expiry_override_proof'])) {
+        unset($changes['expiry_override_by'], $changes['expiry_override_at'], $changes['issue'], $changes['due_date'], $changes['due_reason']);
+    }
     $close = isset($changes['staff_status']) && in_array($finalStatus, ['resolved', 'not_relevant'], true) && $row['closed_at'] === null;
     // A status that is not a closing one, on a closed line (auto-closed lines keep their status): re-open.
     $reopen = array_key_exists('staff_status', $ch) && !in_array($finalStatus, ['resolved', 'not_relevant'], true) && $row['closed_at'] !== null;
@@ -2824,13 +2906,247 @@ function followup_update(PDO $db, int $id, array $ch, array $user, bool $confirm
     $args[] = $id;
     $db->prepare("UPDATE booking_followups SET " . implode(', ', $set) . " WHERE id = ?")->execute($args);
     foreach ($changes as $f => $v) {
-        if (in_array($f, ['details', 'due_reason'], true)) continue;   // the deadline is logged as due_date
+        if (in_array($f, ['details', 'due_reason', 'expiry_override_by', 'expiry_override_at', 'expiry_override_proof'], true)) continue;   // the deadline is logged as due_date
+        if ($f === 'expiry_override') {   // one event: date + proof
+            $proof = $changes['expiry_override_proof'][1] ?? $row['expiry_override_proof'];
+            followup_event($db, $id, $uid, 'expiry_override', $v[0], $v[1] === null ? 'cleared (document expiry ' . ($row['expiry_date'] ?: '—') . ')'
+                                                                     : $v[1] . ' (by mail) — proof: ' . $proof);
+            continue;
+        }
         followup_event($db, $id, $uid, $f === 'owner_user_id' ? 'owner' : $f, $v[0], $v[1]);
+    }
+    if (isset($changes['expiry_override_proof']) && !isset($changes['expiry_override'])) {
+        followup_event($db, $id, $uid, 'expiry_override', $changes['expiry_override_proof'][0], 'proof: ' . $changes['expiry_override_proof'][1]);
     }
     if ($close)  followup_event($db, $id, $uid, 'closed', null, 'manual — ' . $finalStatus);
     if ($reopen) followup_event($db, $id, $uid, 'reopened', $row['close_reason'], $finalStatus);
     return ['ok' => true, 'dry_run' => false, 'changes' => $changes, 'closed' => $close, 'reopened' => $reopen,
             'row' => followup_rows($db, ['ids' => [$id], 'status' => 'all'])[0] ?? null];
+}
+
+// ── Expiry extended by mail (manual override + proof .eml in mails/) ─────────
+
+const FU_PROOF_DIR = 'mails';                 // proof mails live in <booking>/mails/ (booking-check reads bookings/, not this)
+const FU_PROOF_MAX = 15 * 1024 * 1024;        // an uploaded / saved .eml
+
+/** Dropbox path of a line's booking folder, with the folder's current name when the CK scan knows it. */
+function followup_line_dir(PDO $db, array $row): string {
+    $folder = followup_folder_norm((string)$row['folder']);
+    try { $folder = followup_path_current($folder, followup_live_folders($db)); } catch (Throwable $e) { /* no ck_folders: keep the stored name */ }
+    return followup_folder_dir($folder);
+}
+
+/**
+ * The proof as stored (relative to the booking folder) from "mails/x.eml" or a full Dropbox path inside $dir (a
+ * status-tag rename of a folder on the way is accepted: same stem). null if outside the folder / not a file path.
+ */
+function followup_proof_rel(string $dir, string $proof): ?string {
+    $p = trim(str_replace('\\', '/', $proof));
+    if ($p === '' || preg_match('#(^|/)\.\.?(/|$)#', $p)) return null;
+    if ($p[0] !== '/') return trim($p, '/') ?: null;
+    $ds = explode('/', trim($dir, '/'));
+    $ps = explode('/', trim($p, '/'));
+    if (count($ps) <= count($ds)) return null;
+    foreach ($ds as $i => $s) {
+        if (strcasecmp($s, $ps[$i]) !== 0 && dropbox_folder_stem_safe($s) !== dropbox_folder_stem_safe($ps[$i])) return null;
+    }
+    return implode('/', array_slice($ps, count($ds)));
+}
+
+/** Default check that a proof exists (Dropbox get_metadata). */
+function followup_proof_exists_dropbox(string $path): bool {
+    require_once __DIR__ . '/../../leads/dropbox_helper.php';
+    return dropbox_path_exists(cp_retry_safe(fn() => dropbox_get_access_token()), $path);
+}
+
+/** cp_retry() when calc_payments.php is loaded, else the call once. */
+function cp_retry_safe(callable $fn) {
+    return function_exists('cp_retry') ? cp_retry($fn) : $fn();
+}
+
+/** May set / clear the expiry of this line? → null, or [error, code]. */
+function followup_override_refusal(array $row, array $user): ?array {
+    if (!followup_can_edit($user)) return ['Only the booking team (module ' . FU_EDIT_PERMISSION . ') or an admin can set the expiry', 403];
+    if ($row['closed_at'] !== null) return ['Line ' . $row['id'] . ' is closed', 409];
+    $prov = in_array($row['issue'], FU_PROVISIONAL_ISSUES, true) || !empty($row['expiry_date']) || !empty($row['expiry_override']);
+    foreach (followup_sources($row) as $e) if (in_array($e['issue'] ?? '', FU_PROVISIONAL_ISSUES, true)) $prov = true;
+    if (!$prov) return ['The expiry can be set only on a provisional booking (this line: ' . followup_issue_label((string)$row['issue']) . ')', 400];
+    return null;
+}
+
+/**
+ * The columns an expiry_override / expiry_override_proof change writes (followup_update()).
+ * → ['ok' => true, 'new' => [col => value]] or ['ok' => false, 'error', 'code'].
+ */
+function followup_override_change(array $row, array $ch, array $user, array $opt = []): array {
+    if ($no = followup_override_refusal($row, $user)) return ['ok' => false, 'error' => $no[0], 'code' => $no[1]];
+    $today = (string)($opt['today'] ?? date('Y-m-d'));
+    $hasDate = array_key_exists('expiry_override', $ch);
+    $date = $hasDate ? trim((string)($ch['expiry_override'] ?? '')) : (string)($row['expiry_override'] ?? '');
+    $proof = trim((string)($ch['expiry_override_proof'] ?? ''));
+    if ($date === '') {
+        if (!$hasDate) return ['ok' => false, 'error' => 'expiry_override_proof goes with expiry_override (the date confirmed by mail)', 'code' => 400];
+        // Cleared: the document's expiry counts again.
+        $l = ['expiry_override' => null] + $row;
+        $due = followup_due($l);
+        return ['ok' => true, 'new' => ['expiry_override' => null, 'expiry_override_by' => null, 'expiry_override_at' => null, 'expiry_override_proof' => null,
+                                        'issue' => followup_issue_for_expiry((string)$row['issue'], $row['expiry_date'] ?: null, $today),
+                                        'due_date' => $due['due_date'], 'due_reason' => $due['due_reason']]];
+    }
+    $dt = DateTime::createFromFormat('!Y-m-d', $date);
+    if (!$dt || $dt->format('Y-m-d') !== $date) return ['ok' => false, 'error' => 'expiry_override must be a date YYYY-MM-DD (or null to clear)', 'code' => 400];
+    if ($proof === '') return ['ok' => false, 'error' => 'A proof is required: the supplier\'s mail saved as .eml in the booking folder (' . FU_PROOF_DIR . '/…)', 'code' => 400];
+    $dir = (string)($opt['dir'] ?? followup_folder_dir(followup_folder_norm((string)$row['folder'])));
+    if ($row['folder'] === null || $row['folder'] === '') return ['ok' => false, 'error' => 'This line has no booking folder to keep the proof in', 'code' => 409];
+    $rel = followup_proof_rel($dir, $proof);
+    if ($rel === null) return ['ok' => false, 'error' => 'The proof must be a file inside the booking folder ' . $dir . ' (e.g. ' . FU_PROOF_DIR . '/….eml)', 'code' => 400];
+    if (mb_strlen($rel) > 500) return ['ok' => false, 'error' => 'Proof path too long', 'code' => 400];
+    $exists = $opt['proof_exists'] ?? 'followup_proof_exists_dropbox';
+    try {
+        if (!$exists($dir . '/' . $rel)) return ['ok' => false, 'error' => 'Proof not found in Dropbox: ' . $dir . '/' . $rel, 'code' => 404];
+    } catch (Throwable $e) {
+        return ['ok' => false, 'error' => 'Could not check the proof in Dropbox: ' . $e->getMessage(), 'code' => 502];
+    }
+    $l = ['expiry_override' => $date] + $row;
+    $due = followup_due($l);
+    return ['ok' => true, 'new' => ['expiry_override' => $date, 'expiry_override_by' => (int)$user['id'], 'expiry_override_at' => date('Y-m-d H:i:s'),
+                                    'expiry_override_proof' => $rel, 'issue' => followup_issue_for_expiry((string)$row['issue'], $date, $today),
+                                    'due_date' => $due['due_date'], 'due_reason' => $due['due_reason']]];
+}
+
+/** A file name Dropbox and Windows accept ("/ \ : * ? \" < > |" → "_", spaces collapsed), at most 150 characters. */
+function followup_safe_name(string $s): string {
+    $s = trim((string)preg_replace('/\s+/', ' ', str_replace(['/', '\\', ':', '*', '?', '"', '<', '>', '|', "\0"], '_', $s)), ' .');
+    return mb_substr($s, 0, 150);
+}
+
+/**
+ * Name of a proof mail: the given one (".eml" added), else "YYYY-MM-DD_<Supplier>_<Ref> extension to DD-MM.eml"
+ * (date of the mail; without a new expiry "… mail.eml").
+ */
+function followup_eml_name(?string $given, ?string $supplier, ?string $ref, ?string $extDate, ?int $mailTs): string {
+    $given = trim((string)$given);
+    if ($given !== '') {
+        $n = followup_safe_name(preg_replace('/\.eml$/i', '', $given));
+        return ($n !== '' ? $n : 'mail') . '.eml';
+    }
+    $parts = array_filter([date('Y-m-d', $mailTs ?: time()), followup_safe_name((string)$supplier), followup_safe_name((string)$ref)], 'strlen');
+    return followup_safe_name(implode('_', $parts) . ($extDate ? ' extension to ' . date('d-m', strtotime($extDate)) : ' mail')) . '.eml';
+}
+
+/** Date header of a raw mail → timestamp, or null. */
+function followup_eml_date(string $raw): ?int {
+    $head = substr($raw, 0, 65536);
+    if (preg_match('/^Date:[ \t]*(.+(?:\r?\n[ \t].+)*)/mi', $head, $m)) {
+        $t = strtotime(trim(preg_replace('/\s+/', ' ', $m[1])));
+        if ($t) return $t;
+    }
+    return null;
+}
+
+/**
+ * Write a mail (raw RFC 822) as .eml into <$dir>/mails/: attachments named passport / passaporto … replaced by a note,
+ * passport numbers masked in the texts (eml_sanitize()). Never overwrites unless $overwrite. Dry run: nothing written.
+ * $opt['upload']: callable(string $path, string $content, bool $overwrite): array (tests); $opt['exists']: callable(string $path): bool.
+ * → ['ok', 'dry_run', 'path', 'proof' (relative "mails/…"), 'size', 'removed_attachments', 'masked', 'exists'] or ['ok' => false, 'error', 'code'].
+ */
+function followup_save_eml(string $dir, string $name, string $raw, bool $confirm, bool $overwrite = false, array $opt = []): array {
+    require_once __DIR__ . '/eml_sanitize.php';
+    if ($raw === '' || strlen($raw) > FU_PROOF_MAX) return ['ok' => false, 'error' => 'The mail must be between 1 byte and ' . (FU_PROOF_MAX >> 20) . ' MB', 'code' => 413];
+    if (!preg_match('/^(?:From|Date|Subject|Message-ID|Received|Return-Path|MIME-Version|To):/mi', substr($raw, 0, 65536))) {
+        return ['ok' => false, 'error' => 'This is not a mail file (.eml): no mail headers found', 'code' => 400];
+    }
+    $clean = eml_sanitize($raw);
+    $proof = FU_PROOF_DIR . '/' . $name;
+    $path = rtrim($dir, '/') . '/' . $proof;
+    $existsFn = $opt['exists'] ?? function (string $p) {
+        require_once __DIR__ . '/../../leads/dropbox_helper.php';
+        return dropbox_path_exists(cp_retry_safe(fn() => dropbox_get_access_token()), $p);
+    };
+    try {
+        $exists = (bool)$existsFn($path);
+    } catch (Throwable $e) {
+        return ['ok' => false, 'error' => 'Dropbox: ' . $e->getMessage(), 'code' => 502];
+    }
+    $out = ['ok' => true, 'dry_run' => !$confirm, 'path' => $path, 'proof' => $proof, 'size' => strlen($clean['raw']),
+            'removed_attachments' => $clean['removed'], 'masked' => $clean['masked'], 'exists' => $exists];
+    if ($exists && !$overwrite) {
+        if (!$confirm) return $out + ['warning' => 'A file with this name is already there: choose another name (save_as) or "overwrite": true'];
+        return ['ok' => false, 'error' => 'File already exists: ' . $path, 'code' => 409, 'path' => $path, 'proof' => $proof];
+    }
+    if (!$confirm) return $out;
+    $upload = $opt['upload'] ?? function (string $p, string $c, bool $ow) {
+        require_once __DIR__ . '/../../leads/dropbox_helper.php';
+        return dropbox_upload_text(cp_retry_safe(fn() => dropbox_get_access_token()), $p, $c, $ow ? 'overwrite' : 'add');
+    };
+    try {
+        $meta = $upload($path, $clean['raw'], $overwrite);
+    } catch (Throwable $e) {
+        return ['ok' => false, 'error' => 'Dropbox upload failed: ' . $e->getMessage(), 'code' => 502];
+    }
+    return ['saved_to' => $meta['path_display'] ?? $path] + $out;
+}
+
+/**
+ * The proof mails a line can use: the .eml files in its booking folder's mails/ (newest first).
+ * → ['ok', 'dir', 'folder' (mails/ path), 'files' => [{name, proof, size, modified}]] or ['ok' => false, 'error', 'code'].
+ * $opt['list']: callable(string $path): ?array of {name, size, modified} (tests).
+ */
+function followup_proof_files(PDO $db, int $id, array $user, array $opt = []): array {
+    followup_schema($db);
+    $st = $db->prepare("SELECT * FROM booking_followups WHERE id = ?");
+    $st->execute([$id]);
+    $row = $st->fetch(PDO::FETCH_ASSOC);
+    if (!$row) return ['ok' => false, 'error' => 'Line ' . $id . ' not found', 'code' => 404];
+    if ($no = followup_override_refusal($row, $user)) return ['ok' => false, 'error' => $no[0], 'code' => $no[1]];
+    if (!$row['folder']) return ['ok' => false, 'error' => 'This line has no booking folder', 'code' => 409];
+    $dir = $opt['dir'] ?? followup_line_dir($db, $row);
+    $list = $opt['list'] ?? function (string $p) {
+        require_once __DIR__ . '/../../leads/dropbox_helper.php';
+        return dropbox_list_file_entries(cp_retry_safe(fn() => dropbox_get_access_token()), $p);
+    };
+    try {
+        $entries = $list($dir . '/' . FU_PROOF_DIR) ?? [];
+    } catch (Throwable $e) {
+        return ['ok' => false, 'error' => 'Dropbox: ' . $e->getMessage(), 'code' => 502];
+    }
+    $files = [];
+    foreach ($entries as $f) {
+        if (!preg_match('/\.eml$/i', (string)$f['name'])) continue;
+        $files[] = ['name' => $f['name'], 'proof' => FU_PROOF_DIR . '/' . $f['name'], 'size' => $f['size'] ?? null, 'modified' => $f['modified'] ?? null];
+    }
+    usort($files, fn($a, $b) => strcmp((string)$b['modified'], (string)$a['modified']) ?: strcmp($a['name'], $b['name']));
+    return ['ok' => true, 'dir' => $dir, 'folder' => $dir . '/' . FU_PROOF_DIR, 'files' => $files];
+}
+
+/**
+ * "Set expiry" of the page: optional upload of the proof mail into mails/ (name: given, else built from the mail's date,
+ * supplier, ref and new expiry), then followup_update() with expiry_override + expiry_override_proof. Clearing: date ''.
+ * $in: {date, proof?: "mails/…eml", upload?: {name?, content (raw mail)}}. → followup_update() result (+ saved).
+ */
+function followup_set_expiry(PDO $db, int $id, array $in, array $user, bool $confirm = true, array $opt = []): array {
+    followup_schema($db);
+    $st = $db->prepare("SELECT * FROM booking_followups WHERE id = ?");
+    $st->execute([$id]);
+    $row = $st->fetch(PDO::FETCH_ASSOC);
+    if (!$row) return ['ok' => false, 'error' => 'Line ' . $id . ' not found', 'code' => 404];
+    if ($no = followup_override_refusal($row, $user)) return ['ok' => false, 'error' => $no[0], 'code' => $no[1]];
+    $date = trim((string)($in['date'] ?? ''));
+    if ($date === '') return followup_update($db, $id, ['expiry_override' => null], $user, $confirm, $opt);
+    $dir = $opt['dir'] = $opt['dir'] ?? followup_line_dir($db, $row);
+    $saved = null;
+    $proof = trim((string)($in['proof'] ?? ''));
+    if (!empty($in['upload']['content'])) {
+        $raw = (string)$in['upload']['content'];
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) return ['ok' => false, 'error' => 'date must be YYYY-MM-DD', 'code' => 400];
+        $name = followup_eml_name($in['upload']['name'] ?? null, $row['supplier'], $row['supplier_ref'], $date, followup_eml_date($raw));
+        $saved = followup_save_eml($dir, $name, $raw, $confirm, false, $opt);
+        if (!$saved['ok']) return $saved;
+        $proof = $saved['proof'];
+        $opt['proof_exists'] = fn() => true;   // just written (dry run: would be) — no second Dropbox call
+    }
+    $res = followup_update($db, $id, ['expiry_override' => $date, 'expiry_override_proof' => $proof], $user, $confirm, $opt);
+    return $saved ? $res + ['saved' => $saved] : $res;
 }
 
 // ── Memo digest ──────────────────────────────────────────────────────────────

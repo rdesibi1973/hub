@@ -892,7 +892,7 @@ include 'includes/header.php';
             <?php if ($fuCheck && $fu['doc_status_text']): ?><span class="text-muted"><?= h(mb_strimwidth($fu['doc_status_text'], 0, 110, '…')) ?></span><?php endif; ?>
             <?= $fu['supplier_ref'] ? h($fu['supplier_ref']) : '' ?>
             <span class="text-muted">· <?= h($fu['service_date'] ? date('d M', strtotime($fu['service_date'])) : '') ?>
-              <?= $fu['expiry_date'] ? '· expiry ' . h(date('d M', strtotime($fu['expiry_date']))) : '' ?>
+              <?= $fu['expiry_date'] ? '· expiry ' . h(date('d M', strtotime($fu['expiry_date']))) . (!empty($fu['expiry_override']) ? ' (by mail)' : '') : '' ?>
               · <?= h($fu['owner_name'] ?: 'not taken in charge') ?> · <?= h(FU_STATUS_LABELS[$fu['staff_status']] ?? $fu['staff_status']) ?></span>
           </div>
         <?php endforeach; ?>

@@ -20,6 +20,27 @@ Running log of notable changes and current build state. Module-level "active / p
 
 ---
 
+## 2026-11-12 — Booking follow-up: manual expiry when the supplier extends by mail
+- Suppliers often extend a provisional hold by mail without a new pro-forma (real case REMCO1108, Ngorongoro Uzuri P247/P248:
+  pro-forma of 19/10 expiring 30/10, hold confirmed by mail to glady@ on 22/10 until 30/11): the line stayed "Provisional
+  expired / URGENT". Migration `081_followup_expiry_override.sql` (also lazy, `followup_schema_override()`): `booking_followups`
+  + `expiry_override`, `expiry_override_by`, `expiry_override_at`, `expiry_override_proof` (relative to the booking folder).
+- Effective expiry `COALESCE(expiry_override, expiry_date)` (`followup_effective_expiry()`): provisional / expired, deadline and
+  priority (`followup_due()`), "URGENT / d late", stat card "Expiring ≤ 7 days", memo digest ("proroga via mail"), request view,
+  CK tracker `_CK` block text (`ck_pipeline.php`), `followup_list` (`expiry_date` effective + `doc_expiry_date`, `expiry_override {…}`).
+- Scan (`followup_apply()`): keeps writing `expiry_date`, never the override; a document with expiry ≥ the override clears it
+  (event "override superseded by <file>"); Confirmed → `auto_confirmed` as before; a past override is expired / urgent again.
+- Page: expiry cell "30 Nov 2026 (by mail)" with who / when / proof link on hover, document expiry struck through
+  ("pro-forma: 30 Oct"); "📅 Set expiry" (module `booking_followup_edit` or admin): date + proof required — a `.eml` already in
+  the booking's `mails/` (listed) or uploaded and saved there (`AAAA-MM-GG_<Supplier>_<Ref> extension to DD-MM.eml` from the
+  mail's Date header). `api/followup.php` `mails`, `set_expiry`; logic `followup_set_expiry()`, `followup_proof_files()`,
+  `followup_save_eml()` (shared with the Agent API).
+- Agent API: `followup_update` + `expiry_override` / `expiry_override_proof` (dry run unless `confirm`, proof must exist);
+  new `staff_mail_save_eml` (POST, dry run unless `confirm`; raw message → `<booking>/mails/`, mailbox untouched, passport
+  attachments replaced and numbers masked by `modules/operations/includes/eml_sanitize.php`; reason required, `api_save_eml` log).
+- Test: `tools/tests/followup_expiry_override_test.php` (SQLite + stubs, 54 checks).
+- Not done (optional in the handoff): "Save as proof & set expiry" button in Booking mail.
+
 ## 2026-11-10 — Price levels RACK / STO / STOSPEC; sample clean-up follow-ups
 - `includes/price_level_service.php`: `agencies.price_level` (rack | sto default | stospec | custom) + `custom_markup` (lazy columns),
   12 % floor, GRP STOSPEC 16 %. Hub Agencies (column + edit), request page "Price level" (direct client → RACK), Agent API

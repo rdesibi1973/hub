@@ -88,6 +88,18 @@ table.fu-table tr.dirty td{background:#FFF8E1}
 .fu-det .w{color:var(--grey-mid);font-size:.68rem}
 .fu-due{display:block;font-size:.7rem;color:var(--grey-dk);white-space:nowrap;margin-top:3px}
 .fu-due.fu-late{color:var(--red-dk);font-weight:700}
+.fu-struck{text-decoration:line-through;color:var(--grey-mid)}
+/* Opens in the cell (not floating): the list frame scrolls and would cut a floating box on the last row. */
+.fu-ovr{display:inline-block;cursor:help;outline:none}
+.fu-ovr b{font-weight:700;color:var(--navy)}
+.fu-pop{display:none;margin-top:3px;width:230px;box-sizing:border-box;background:var(--white);color:var(--black);border:1px solid var(--grey-lt);border-radius:8px;box-shadow:0 4px 14px rgba(0,0,0,.15);padding:8px 10px;font-size:.72rem;line-height:1.45;white-space:normal}
+.fu-pop a{color:var(--navy)}
+.fu-ovr:hover .fu-pop,.fu-ovr:focus-within .fu-pop{display:block}
+.fu-setexp{display:block;margin-top:4px;color:var(--navy);font-weight:600}
+.fu-exp{margin-top:6px;padding:8px;border:1.5px dashed var(--grey-lt);border-radius:8px;background:var(--off-white);width:230px;display:flex;flex-direction:column;gap:6px}
+.fu-exp label{display:flex;flex-direction:column;gap:2px;font-size:.68rem;font-weight:700;color:var(--grey-dk)}
+.fu-exp select,.fu-exp input[type=text],.fu-exp input[type=date]{width:100%;box-sizing:border-box}
+.fu-exp input[type=file]{font-size:.68rem;max-width:100%}
 .fu-srcs{display:flex;flex-wrap:wrap;gap:3px;margin-top:4px}
 .fu-src{font-size:.64rem;background:var(--off-white);color:var(--grey-dk);border-radius:8px;padding:1px 6px;white-space:nowrap;cursor:help}
 .fu-add{background:var(--white);border-radius:10px;box-shadow:0 1px 8px rgba(0,0,0,.08);padding:14px 16px;margin-bottom:16px;display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px;align-items:end}

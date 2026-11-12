@@ -31,7 +31,7 @@ without driving the web UI.
 | HTTPS only | Plain HTTP → 403. |
 | Rate limit | 60 calls/min → 429. |
 | Audit | Every call (including failures and dry-runs) → `agent_audit_log` (action, request_id, user, HTTP code, dry_run, payload, result, IP). |
-| Dry-run by default | `update_request`, `confirm_booking`, `send_booking_email`, `rollback_booking`, `rename_folder`, `import_group_folder`, `move_group_folder`, `set_request_status`, `cancel_invoice_payment`, `update_folder_status`, `import_zoho_invoice`, `create_invoice`, `update_invoice`, `send_invoice_email`, `memo_delete`, `create_agency`, `update_agency`, `save_agency_contact`, `delete_agency_contact`, `mail_send`, `mail_move`, `ck_request_check`, `ck_set_owners`, `ck_findings_upsert`, `followup_scan`, `followup_update` and `followup_upsert` (among others) do nothing unless the body has `"confirm": true`. |
+| Dry-run by default | `update_request`, `confirm_booking`, `send_booking_email`, `rollback_booking`, `rename_folder`, `import_group_folder`, `move_group_folder`, `set_request_status`, `cancel_invoice_payment`, `update_folder_status`, `import_zoho_invoice`, `create_invoice`, `update_invoice`, `send_invoice_email`, `memo_delete`, `create_agency`, `update_agency`, `save_agency_contact`, `delete_agency_contact`, `mail_send`, `mail_move`, `ck_request_check`, `ck_set_owners`, `ck_findings_upsert`, `followup_scan`, `followup_update`, `followup_upsert` and `staff_mail_save_eml` (among others) do nothing unless the body has `"confirm": true`. |
 | No deletes | No delete endpoint (mail included), except `memo_delete`, which is soft (`deleted_at`, the row stays). Undo a confirm with `rollback_booking` (or BackOffice → Rollback). |
 | Mailbox | The key also reads `info@` (`mail_*`): keep `api.txt` as private as the mailbox password. |
 
@@ -1342,8 +1342,8 @@ reasons, with the reason recorded.
   lines). Attachments whose name says passport / passaporto / pasaporte / passeport / reisepass are listed as
   `withheld: true` (name hidden) and never returned or saved. A passport scan with a generic name (`IMG_1234.jpg`)
   is not recognised: don't save attachments of passport mails — passports go through the Hub Passports flow.
-- **Log**: `staff_mail_get` / `staff_mail_attachment` need `reason` (≥ 10 characters) → `mail_access_log` (the
-  Booking mail access record: who, mailbox, Message-ID hash, request, reason; actions `api_get`, `api_attachment`)
+- **Log**: `staff_mail_get` / `staff_mail_attachment` / `staff_mail_save_eml` need `reason` (≥ 10 characters) → `mail_access_log` (the
+  Booking mail access record: who, mailbox, Message-ID hash, request, reason; actions `api_get`, `api_attachment`, `api_save_eml`)
   and `agent_audit_log` (without body or file). A search with `q` (reads bodies) is recorded as `api_search` with the query.
 - Off when `define('STAFF_MAIL_API', false);` is in the server-only `includes/config.php` (→ 503).
 - A message is addressed by `mailbox` (`glady` or `glady@savannahexplorers.com`) + `folder` + `key` (the Maildir
@@ -1375,6 +1375,19 @@ passport numbers masked), body_truncated, has_html, attachments[] {part, name, m
 `mailbox`*, `folder`*, `key`*, `part`* (from `staff_mail_get`), `reason`*. → `attachment {mailbox, folder, key, part, name,
 mime, size, content_base64}` (≤ 10 MB, else 413). With `request_id` (booking folder) or `folder_path` the file is **saved
 to Dropbox** instead → `saved_to` (`save_as`, `overwrite` as `mail_attachment`). A passport file → 403.
+
+### `staff_mail_save_eml` (POST)
+The whole message saved as `.eml` into a booking folder's **`mails/`** (proof of a supplier's extension for
+`followup_update` `expiry_override_proof`; `mails/`, not `bookings/` — booking-check reads `bookings/`). **Dry run unless
+`"confirm": true`.** `mailbox`*, `folder`*, `key`* (`uid` accepted as an alias), `reason`* (as `staff_mail_get`), and the
+booking: `request_id` or `folder_path` (full Dropbox path of the booking folder); optional `save_as` (".eml" added; default
+`YYYY-MM-DD_<subject>.eml` with the mail's date — suggested for proofs: `YYYY-MM-DD_<Supplier>_<Ref> extension to DD-MM.eml`),
+`overwrite` (default false → 409 if the file is there). The mailbox stays read-only (the Maildir file is only read).
+Attachments named passport / passaporto / pasaporte / passeport / reisepass are **replaced** by a short text part, and
+passport numbers are masked in the text parts and the subject (`modules/operations/includes/eml_sanitize.php`); other
+attachments and the headers are kept as they are. → `path` (full Dropbox path), `proof` (`mails/<name>`, to pass to
+`followup_update`), `size`, `removed_attachments[]`, `masked` (parts masked), `exists`, `saved_to` (confirmed), `mail {mailbox,
+folder, key, subject, from, date}`. Logged in `mail_access_log` (`api_save_eml`, with the reason and the path) and `agent_audit_log`.
 
 ```bash
 curl -sH "$H" "$U?action=staff_mail_mailboxes"
@@ -1697,6 +1710,15 @@ logic `modules/operations/includes/followup_service.php`, documents read by `fol
   admin: `not_relevant`). `auto_trip_ended`, `auto_request_cancelled` and `auto_merged` are never re-opened by a check;
   `auto_cancelled` only if the folder loses its `_CANCELLED` tag.
   A line still found provisional after a staff `resolved` (or an auto-close) is **re-opened**; `not_relevant` stays closed.
+- **Expiry extended by mail (12 Nov 2026, migration 081):** suppliers often confirm a longer hold by mail without a new
+  pro-forma. Staff (page "📅 Set expiry", module `booking_followup_edit` or admin) or `followup_update` set
+  `expiry_override` with a **mandatory proof**: the supplier's mail saved as `.eml` in the booking's `mails/` folder (not
+  `bookings/`, which booking-check reads; `staff_mail_save_eml` saves it from glady@ / operations@). Effective expiry =
+  `COALESCE(expiry_override, expiry_date)`: it drives provisional / expired, the deadline and priority, the stat card
+  "Expiring ≤ 7 days", the memo digest and the CK tracker (`_CK` block text). The scan keeps writing `expiry_date` from
+  the document and never touches the override, except: a document of the same reference with an expiry **≥ the
+  override** clears it (event `expiry_override` "override superseded by <file>"); a Confirmed document closes the line
+  (`auto_confirmed`) as usual; once the override is past the line is expired / urgent again. Every change is an event.
 - **PDFs on the server:** BlueHost has no `pdftotext` and no Composer today, so `followup_scan` type `supplier` only uses
   documents already read and returns `reader: "none"` + a `warning`. Two ways: (a) on the office PC run
   `tools\followup_local_scan.bat [--confirm]` (reads `C:\Dropbox\001_Safari` and the Diamante `20*-Groups` folders (`--extra`),
@@ -1713,7 +1735,9 @@ logic `modules/operations/includes/followup_service.php`, documents read by `fol
 labels are in `close_reasons`). The page has the same filter ("Closed as", tab Closed).
 → `count`, `close_reasons` `{code: label}`, `last_check_at` `{supplier, ticket}`, `last_checks`, `rows[]` `{id, type, audience, request_id, customer, folder, folder_url,
 file_url, folder_open_url, file_open_url, start_date, end_date, service_date, days_left, supplier, supplier_ref, service, source_file, issue, issue_label,
-doc_status_text, report_url, report_open_url, expiry_date, expired, booked_by, owner, owner_name, contacted_at, staff_status, notes, notes_log[] {at, by, text} (newest first), priority,
+doc_status_text, report_url, report_open_url, expiry_date (effective: the mail override if set), doc_expiry_date (printed on the document),
+expiry_override (null or {date, by_user_id, by, at, proof (relative to the folder, "mails/….eml"), proof_path, proof_url, proof_open_url}),
+expired (on the effective expiry), booked_by, owner, owner_name, contacted_at, staff_status, notes, notes_log[] {at, by, text} (newest first), priority,
 due_date, due_reason, due_days, service_type, service_key, sources[] {source, label, issue, issue_label, text, since}, ck_tracker_url,
 first_seen_at, last_seen_at, closed_at, closed_by, close_reason, events_count}` — priority first (from the deadline), then the
 nearest deadline, not taken in charge, problems, service date.
@@ -1726,7 +1750,12 @@ run again, each PDF is read once per Dropbox revision), `errors[]`.
 
 #### `followup_update` (POST)
 `id` + any of `owner` (username / id of any active Hub user, or `null`), `contacted_at` (YYYY-MM-DD or `""`), `staff_status` (`open`, `in_progress`,
-`problem` — needs a note —, `resolved`, `not_relevant`), `notes`, `due_date` (lines `type: manual` only). Dry run unless `"confirm": true`. Acts as `AGENT_API_USER`
+`problem` — needs a note —, `resolved`, `not_relevant`), `notes`, `due_date` (lines `type: manual` only),
+`expiry_override` (YYYY-MM-DD confirmed by the supplier by mail, or `null` to clear — the document's expiry counts again) with
+`expiry_override_proof` (**required to set a date**: a file in the line's booking folder, `"mails/2026-10-22_Uzuri_P247 extension to 30-11.eml"`
+or its full Dropbox path; it must exist — 404 otherwise). Override: open lines of a provisional booking only (409 closed, 400 otherwise);
+stored with `expiry_override_by` = the API user (`claude_agent`) and `_at`; issue / deadline re-judged on the new expiry.
+Dry run unless `"confirm": true` (the dry run checks the proof too, writes nothing). Acts as `AGENT_API_USER`
 with the follow-up admin rights (not relevant); every change is an event (who / when). → `changes {field: [old, new]}`, `row`.
 
 #### `followup_upsert` (POST)
@@ -1745,6 +1774,9 @@ curl -sA "$UA" -H "$H" -X POST "$U?action=followup_scan" -d '{"type":"ticket"}' 
 curl -sA "$UA" -H "$H" -X POST "$U?action=followup_scan" -d '{"type":"group"}'                                    # dry run: groups arriving within 60 days
 curl -sA "$UA" -H "$H" -X POST "$U?action=followup_scan" -d '{"type":"all","confirm":true}'
 curl -sA "$UA" -H "$H" -X POST "$U?action=followup_update" -d '{"id":12,"staff_status":"problem","notes":"Lodge full on 1 Jan, alternatives asked"}'   # dry run
+# Supplier extended by mail: 1) save the mail as proof, 2) set the expiry (both dry run until "confirm": true)
+curl -sA "$UA" -H "$H" -X POST "$U?action=staff_mail_save_eml" -d '{"mailbox":"glady","folder":"INBOX","key":"1729581300.M5P7.box2233,S=48211","request_id":3108,"save_as":"2026-10-22_Uzuri_P247 extension to 30-11","reason":"Uzuri P247 hold extended to 30/11","confirm":true}'
+curl -sA "$UA" -H "$H" -X POST "$U?action=followup_update" -d '{"id":431,"expiry_override":"2026-11-30","expiry_override_proof":"mails/2026-10-22_Uzuri_P247 extension to 30-11.eml","confirm":true}'
 curl -sA "$UA" -H "$H" -X POST "$U?action=followup_upsert" -d '{"rows":[{"folder":"12_30DEC_ElenaManfroni(UnEmozionePerSempre-PS-Roberto)_START30DEC_MIDT04JAN_END08JAN2027_BALANCE","source_file":"invoices/Lion'"'"'s paw-INV.pdf","supplier":"Lion'"'"'s Paw","supplier_ref":"WB41803","service_date":"2027-01-01","issue":"provisional_expired","doc_status_text":"Provisional (expires 28 Sep 2026)","expiry_date":"2026-09-28","booked_by":"Lydia"}],"scanned":[]}'   # dry run
 ```
 Checks are run by hand for now (page → Run check now → All; office PC scan for the PDFs). Optional cron (cron-job.org, not set up): `modules/operations/followup_cron.php?token=…&type=ticket` daily 05:30, `&type=group` daily 05:40, `&type=supplier` Monday 05:30

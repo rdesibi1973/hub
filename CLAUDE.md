@@ -26,7 +26,7 @@ outdated — this file wins where they disagree (PHP version, local lint).
   one thread with a logged reason and replies from the same mailbox; passports → `passports/` + Calc after a person confirms. Off until
   `BOOKING_MAIL_LIVE`, which goes on only after the staff notice (`docs/STAFF_NOTICE_MAIL.md`). From the Agent API, mails are read
   with the `staff_mail_*` actions below (the Booking mail page actions themselves are not exposed).
-- **Staff mail** (Agent API `staff_mail_mailboxes` / `_search` / `_get` / `_attachment`; logic `includes/staff_mail_service.php`, reusing the
+- **Staff mail** (Agent API `staff_mail_mailboxes` / `_search` / `_get` / `_attachment` / `_save_eml` (→ booking `mails/`); logic `includes/staff_mail_service.php`, reusing the
   MIME parsing of `booking_mail_service.php`): any mailbox @savannahexplorers.com, straight from the Maildir, **read-only** (files never
   renamed or moved: mails stay unread; no move / delete / send). `_get` / `_attachment` need a `reason`, logged in `mail_access_log` +
   `agent_audit_log` (no bodies). Passport numbers masked, passport-named attachments withheld. Off with `STAFF_MAIL_API` false.

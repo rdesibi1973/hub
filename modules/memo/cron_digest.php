@@ -152,7 +152,7 @@ function memo_digest_followup_item($r) {
     $what = $r['type'] === 'ticket' ? ($r['service'] ? $r['service'] : 'volo') : trim($r['supplier'] . ' ' . $r['supplier_ref']);
     $s = ($r['customer'] ? $r['customer'] : $r['folder_name']) . ' — ' . $what . ' · ' . $r['issue_label'];
     if ($r['service_date']) $s .= ' · servizio ' . date('d/m', strtotime($r['service_date']));
-    if ($r['expiry_date'])  $s .= ' · scade ' . date('d/m', strtotime($r['expiry_date']));
+    if ($r['expiry_date'])  $s .= ' · scade ' . date('d/m', strtotime($r['expiry_date'])) . (!empty($r['expiry_override']) ? ' (proroga via mail)' : '');
     $s .= ' · ' . ($r['owner_name'] ? $r['owner_name'] : 'nessuno');
     if ($r['staff_status'] === 'problem' && $r['notes']) $s .= ' — ' . $r['notes'];
     return $s;

@@ -13,7 +13,9 @@
  *   Bodies are never stored.
  * - Passports: numbers masked in subjects and texts (sm_mask()); attachments named passport / passaporto / … are listed
  *   as withheld and never returned or saved.
- * - Logged: staff_mail_get / staff_mail_attachment (reason required) and text searches in mail_access_log (Booking mail),
+ * - Save as .eml (staff_mail_save_eml, 12 Nov 2026): the raw message copied into a booking's mails/ folder (proof of a
+ *   supplier's extension, Booking follow-up); passport attachments replaced, numbers masked (eml_sanitize.php).
+ * - Logged: staff_mail_get / staff_mail_attachment / staff_mail_save_eml (reason required) and text searches in mail_access_log (Booking mail),
  *   every call in agent_audit_log (without bodies or files).
  * Off when STAFF_MAIL_API is defined false in includes/config.php.
  */
@@ -246,6 +248,24 @@ function sm_get(string $mailbox, string $folder, string $key): ?array {
             'message_id' => $r['message_id'], 'in_reply_to' => $r['in_reply_to'], 'references' => $r['refs'],
             'body' => mb_substr($text, 0, MBX_MAX_BODY_CHARS), 'body_truncated' => mb_strlen($text) > MBX_MAX_BODY_CHARS,
             'has_html' => trim($parsed['html']) !== '', 'attachments' => $atts];
+}
+
+/**
+ * The whole message as it is in the Maildir (read-only: the file is not renamed, the mail stays unread), for saving as
+ * .eml (staff_mail_save_eml). Sanitizing (passport attachments, numbers) is done by the caller (followup_save_eml()).
+ * → [raw, message_id, subject (masked), date_ts, from] or null.
+ */
+function sm_raw(string $mailbox, string $folder, string $key): ?array {
+    $file = sm_file($mailbox, $folder, $key);
+    if ($file === null) return null;
+    $raw = sm_read($file, BM_MAX_FILE);
+    if ($raw === null) throw new RuntimeException('The mail can no longer be read.');
+    $p = preg_match('/\r?\n\r?\n/', $raw, $m, PREG_OFFSET_CAPTURE) ? $m[0][1] : strlen($raw);
+    $head = substr($raw, 0, $p);
+    $h = sr_parse_headers($head);
+    $r = sr_header_row($head, sm_name_time(basename($file), $file));
+    return ['raw' => $raw, 'message_id' => $r['message_id'], 'subject' => sm_mask($r['subject']), 'date_ts' => (int)$r['ts'],
+            'from' => sm_decode_header($h['from'] ?? '')];
 }
 
 /** One attachment → [name, mime, size, content, message_id]. Passport files refused. */

@@ -102,7 +102,7 @@ function agent_audit(PDO $db, string $action, $reqId, array $payload, string $re
                               'iti_create_flight_route', 'iti_create_activity', 'iti_create_transfer_route', 'iti_update_transfer_route', 'iti_save_as_sample',
                               'create_request', 'add_flight_rates', 'timeline_update', 'summary_set', 'rename_folder',
                               'set_request_status', 'update_request', 'import_group_folder', 'move_group_folder', 'ck_request_check', 'memo_delete', 'create_agency', 'update_agency', 'save_agency_contact', 'delete_agency_contact',
-                              'followup_scan', 'followup_update', 'followup_upsert', 'iti_update_activity', 'sales_response_dismiss',
+                              'followup_scan', 'followup_update', 'followup_upsert', 'staff_mail_save_eml', 'iti_update_activity', 'sales_response_dismiss',
                               'ck_set_owners', 'ck_set_group_closed', 'ck_findings_upsert', 'iti_create_destination', 'iti_import_program', 'iti_supplier_blocklist', 'predeparture_email'], true) && empty($payload['confirm']);
     // Mail: keep who/what in the log, not message bodies or attachment content.
     if (in_array($action, ['mail_get', 'mail_attachment', 'staff_mail_get', 'staff_mail_attachment', 'iti_document', 'iti_vouchers'], true) && $code === 200) {
@@ -3242,8 +3242,11 @@ try {
     case 'followup_update': {
         agent_require_method('POST');
         require_once __DIR__ . '/../operations/includes/followup_service.php';
-        $ch = array_intersect_key($in, array_flip(['owner', 'contacted_at', 'staff_status', 'notes']));
-        if (!$ch) agent_fail('Nothing to change — send owner, contacted_at, staff_status and / or notes');
+        $ch = array_intersect_key($in, array_flip(['owner', 'contacted_at', 'staff_status', 'notes', 'expiry_override', 'expiry_override_proof']));
+        if (!$ch) agent_fail('Nothing to change — send owner, contacted_at, staff_status, notes and / or expiry_override (+ expiry_override_proof)');
+        if (array_key_exists('expiry_override', $ch) && $ch['expiry_override'] !== null && trim((string)$ch['expiry_override']) !== '') {
+            $ch['expiry_override'] = agent_iso_date($ch['expiry_override'], 'expiry_override');
+        }
         // The key acts as AGENT_API_USER with the follow-up admin rights (reassign, not_relevant); dry run + audit log.
         $res = followup_update($db, (int)($in['id'] ?? 0), $ch, ['id' => (int)$agentUser['id'], 'role_name' => $agentUser['role_name'],
                                                                 'permissions' => [FU_EDIT_PERMISSION], 'followup_admin' => true],
@@ -3333,6 +3336,44 @@ try {
         bm_log($db, $agentUser, 'api_attachment', $box, sm_log_key($box, $folder, $key, $att['message_id']), $agentReqId, $reason);
         agent_attachment_out($db, $in, ['mailbox' => $box, 'folder' => $folder, 'key' => $key, 'part' => $part,
                                         'name' => $att['name'], 'mime' => $att['mime'], 'size' => $att['size']], $att['content']);
+    }
+
+    // The raw message saved as .eml into <booking>/mails/ (proof of a supplier's extension: then followup_update
+    // expiry_override + expiry_override_proof). Mailbox untouched; passport attachments replaced, numbers masked.
+    case 'staff_mail_save_eml': {
+        agent_require_method('POST');
+        agent_staff_mail_lib();
+        require_once __DIR__ . '/../operations/includes/followup_service.php';
+        if (!isset($in['key']) && isset($in['uid'])) $in['key'] = $in['uid'];   // uid accepted as an alias of key
+        [$box, $folder, $key] = agent_staff_mail_ref($in);
+        $reason = agent_staff_mail_reason($in);
+        $msg = sm_raw($box, $folder, $key);
+        if (!$msg) agent_fail('Mail not found: ' . $box . ' / ' . $folder . ' / ' . $key, 404);
+        require_once __DIR__ . '/dropbox_helper.php';
+        $token = dropbox_get_access_token();
+        $dir = rtrim(trim((string)($in['folder_path'] ?? '')), '/');
+        if ($dir !== '') {
+            if ($dir[0] !== '/') agent_fail('folder_path must be the booking folder, a full Dropbox path starting with /');
+            if (!dropbox_path_exists($token, $dir)) agent_fail('folder_path ' . $dir . ' not found in Dropbox', 404);
+        } elseif ((int)($in['request_id'] ?? 0) > 0) {
+            $r = agent_request($db, $in['request_id']);
+            $agentReqId = (int)$r['id'];
+            if (!$r['practice_code']) agent_fail('Request ' . $r['id'] . ' has no folder — pass folder_path', 409);
+            $dir = agent_request_dropbox_dir($token, $r);
+        } else {
+            agent_fail('request_id or folder_path (the booking folder) is required');
+        }
+        // save_as, else "YYYY-MM-DD_<subject>.eml" (date of the mail)
+        $name = followup_eml_name(trim((string)($in['save_as'] ?? '')) ?: date('Y-m-d', $msg['date_ts'] ?: time()) . '_' . mb_substr($msg['subject'], 0, 80),
+                                  null, null, null, null);
+        $res = followup_save_eml($dir, $name, $msg['raw'], !empty($in['confirm']), !empty($in['overwrite']),
+                                 ['exists' => fn($p) => dropbox_path_exists($token, $p),
+                                  'upload' => fn($p, $c, $ow) => dropbox_upload_text($token, $p, $c, $ow ? 'overwrite' : 'add')]);
+        if (!$res['ok']) agent_fail($res['error'], $res['code'] ?? 400, array_intersect_key($res, array_flip(['path', 'proof'])));
+        if (!empty($in['confirm'])) bm_log($db, $agentUser, 'api_save_eml', $box, sm_log_key($box, $folder, $key, $msg['message_id']), $agentReqId, $reason . ' → ' . $res['path']);
+        agent_out($res + ['mail' => ['mailbox' => $box, 'folder' => $folder, 'key' => $key, 'subject' => $msg['subject'], 'from' => $msg['from'],
+                                     'date' => $msg['date_ts'] ? date('c', $msg['date_ts']) : null]]
+                  + (empty($in['confirm']) ? ['message' => 'Dry run — nothing saved. Resend with "confirm": true; then followup_update with expiry_override_proof = proof.'] : []));
     }
 
     // ── Mail security scan (modules/security/mail_scan.php, cPanel cron). Read-only: no uapi from the web process.
@@ -3453,7 +3494,7 @@ try {
             'save_invoice_pdf', 'send_invoice_email', 'import_zoho_invoice', 'create_invoice', 'update_invoice', 'memo_list', 'memo_save', 'memo_set_status', 'memo_delete',
             'routine_status', 'routine_done',
             'mail_folders', 'mail_list', 'mail_get', 'mail_attachment', 'mail_flag', 'mail_move', 'mail_draft', 'mail_send',
-            'staff_mail_mailboxes', 'staff_mail_search', 'staff_mail_get', 'staff_mail_attachment',
+            'staff_mail_mailboxes', 'staff_mail_search', 'staff_mail_get', 'staff_mail_attachment', 'staff_mail_save_eml',
             'timeline_list', 'timeline_add', 'timeline_update', 'summary_set', 'request_resume', 'set_request_status',
             'payments_due', 'ck_status', 'ck_request_check', 'ck_set_owners', 'ck_set_group_closed', 'ck_findings_upsert', 'ck_findings_drafts', 'ops_movements', 'ops_lunch_boxes', 'ops_medivac', 'flight_tickets',
             'followup_list', 'followup_scan', 'followup_update', 'followup_upsert', 'mail_security_status',

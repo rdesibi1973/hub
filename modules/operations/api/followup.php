@@ -6,6 +6,9 @@
  *   POST ?action=update  {id, take?, owner?, contacted_at?, staff_status?, notes?}
  *   POST ?action=scan    {type: supplier|ticket|all}       ("Run check now")
  *   POST ?action=add     {request_id, audience, text, service?, service_date?, due_date?, owner?}   ("Add line", the module)
+ *   GET  ?action=mails&id=N                      .eml files in the line's booking folder mails/ ("Set expiry" proof)
+ *   POST ?action=set_expiry {id, date ('' = clear), proof?: "mails/….eml", upload?: {name?, content_base64}}
+ *                                                expiry confirmed by mail (module or admin; proof required, saved into mails/)
  * Viewing: any logged-in Hub user. Changes: module booking_followup_edit, admin, or the line's current
  * owner (followup_update() checks; reassign / not_relevant: admin or the current owner). Run check: the module.
  * Logic: includes/followup_service.php.
@@ -31,6 +34,10 @@ $action = (string)($_GET['action'] ?? 'list');
 try {
     if ($_SERVER['REQUEST_METHOD'] === 'GET') {
         if ($action === 'events') fu_json(['ok' => true, 'events' => followup_events($db, (int)($_GET['id'] ?? 0))]);
+        if ($action === 'mails') {
+            $res = followup_proof_files($db, (int)($_GET['id'] ?? 0), $user);
+            fu_json($res, $res['ok'] ? 200 : ($res['code'] ?? 400));
+        }
         if ($action !== 'list') fu_json(['ok' => false, 'error' => 'Unknown action'], 400);
         fu_json(['ok' => true] + followup_page_data($db, $user));
     }
@@ -45,6 +52,16 @@ try {
         $res = followup_update($db, (int)($in['id'] ?? 0), $ch, $user);
         if (!$res['ok']) fu_json($res, $res['code'] ?? 400);
         fu_json($res);
+    }
+    if ($action === 'set_expiry') {   // followup_set_expiry() checks the module / admin and the proof
+        $up = null;
+        if (!empty($in['upload']['content_base64'])) {
+            $content = base64_decode((string)$in['upload']['content_base64'], true);
+            if ($content === false) fu_json(['ok' => false, 'error' => 'The uploaded file could not be read'], 400);
+            $up = ['name' => (string)($in['upload']['name'] ?? ''), 'content' => $content];
+        }
+        $res = followup_set_expiry($db, (int)($in['id'] ?? 0), ['date' => (string)($in['date'] ?? ''), 'proof' => (string)($in['proof'] ?? ''), 'upload' => $up], $user);
+        fu_json($res, $res['ok'] ? 200 : ($res['code'] ?? 400));
     }
     if ($action === 'add') {      // a line by hand: followup_manual_add() checks the module
         $res = followup_manual_add($db, $user, $in);
