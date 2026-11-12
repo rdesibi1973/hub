@@ -94,7 +94,16 @@ Our own credit notes `CN-YYYY-NNNN`, always issued on an invoice. A supplier's c
 - To undo an application: Cancel on the credit note page, or `cancel_invoice_payment` on the `Credit note` payment (the credit comes back).
 - Afterwards, as for a payment (§6): folder status from what is still due, offer `save_invoice_pdf` with `overwrite: true`. Applying a credit is not money on the account: nothing to check on the bank statement.
 
-## 8. Report (Italian, plain text, no emoji)
+## 8. Cancel an invoice
+
+When a booking is cancelled, or an invoice was issued by mistake / is being re-issued.
+1. `cancel_invoice` dry run with `invoice_number` (or `invoice_id`) and a `reason` (short, English, e.g. "Group cancelled by the agency, nothing paid").
+2. Show Roberto: invoice, total, paid, `request_value_before` → `request_value_after`, every `warnings[]` line (request still Booked, another active invoice, credit note still holding credit, payment memo that will be closed). Confirm only after his ok.
+3. 409 with `payments[]`: money was received. Never work around it (no cancelling payments on your own, no "fix" through the invoice page): ask Roberto — refund / penalty via credit note, or cancel the payments with `cancel_invoice_payment` if they were wrong. Same for a 409 on credit notes applied to other invoices.
+4. After confirm: report `memo_closed` (SH `pay-…` memo). Don't `save_invoice_pdf`: the PDF template doesn't show the status, so a new PDF would look like a valid invoice. The folder isn't touched: if the booking is cancelled, `rename_folder` to `_CANCELLED` is a separate step (dry run, his ok).
+5. Undo: `restore_invoice` dry run (shows `final_status`: New, or Partially / Fully Paid with active payments) → confirm after ok.
+
+## 9. Report (Italian, plain text, no emoji)
 
 ```
 Fattura <SE/SH>-… (prova) – <cartella pratica>

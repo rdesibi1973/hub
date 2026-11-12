@@ -24,6 +24,16 @@ Memo: at the start create one `doing` memo (clear title, linked request, stable 
 
 ## 2. Prices — decided case by case with Roberto
 
+### Pricing rule 2027 (agreed with Lorenzo, Il Diamante, 12 Nov 2026)
+
+- **1 jeep, no tour leader** (catalogue set departures): SET DEPARTURE **2-7 pax** tariff — price per person in double room, jeep included (no jeep line).
+- **2+ jeeps with Davide or another tour leader**: **group** tariff — jeep price + price per person of the month the safari starts.
+- Extras on both: balloon 500 pp, bush dinner 15 pp, Masai boma 60 per jeep, extra transfer 80 per car.
+- Teen in the third bed: both reductions add up — third bed -15% (accommodation) and teen -300 (park fees; applies also in double or single).
+- Festive period: January rate when only the arrival day falls in 16/12–05/01.
+- End of season 2027: a joint report with Lorenzo (departures, pax, jeeps), for information only, to plan 2028. No end-of-season adjustment or margin sharing (Roberto, 12 Nov 2026).
+- Calc: F9 = price pp + extras pp; F10 = F9 × pax + per-jeep extras (+ jeep only for group tariff) − reductions; note the tariff in G10.
+
 - Which of the two Excels applies, and which price inside it, depends on the group and the period. Never decide it alone and never use price figures from memory.
 - For each group: open both Excels, tell Roberto which file and which line/price you think applies and why (group type, pax, period), and wait for his ok before using it in the Calc or the invoice.
 - If Roberto is unsure, prepare a short mail to Lorenzo (Il Diamante) asking to confirm the price (Italian, "tu"; draft as in `agency-email` §2; send only after his ok).
@@ -62,6 +72,8 @@ Memo: at the start create one `doing` memo (clear title, linked request, stable 
 ## 6. Invoice
 
 `invoice-workflow`: one SE invoice to IL DIAMANTE BLU SRL, one line per item, matching the breakdown sent to Diamante, at the prices agreed in §2; due 30 days before arrival.
+
+**Departures tracker** `Diamante/2027/Diamante_2027_Partenze.xlsx` (one row per departure, for the end-of-season report with Lorenzo): every time a Diamante invoice is created or changed, or a group is booked, cancelled or changes pax/jeeps, update its row — status (BOOKED / PROVISIONAL / BLOCCO / CANCELLED), tariff (2-7 pax / Gruppi), adults/teen/child, jeeps, tour leader, invoice number, total (invoice, or Calc F10 if not invoiced yet), cost (Calc B7); PromoService 5% of the total and the net margin are formulas. The tracker is INTERNAL and is never sent as it is: for Lorenzo build a separate file with only the shared columns (departure, dates, status, tariff, pax, jeeps, tour leader, invoice, total) and no legend/notes. Never mention PromoService, its commission, our costs or margins to Il Diamante (Roberto, 12 Nov 2026). Cancelled groups stay in the list without amounts.
 
 ## 7. Programme
 

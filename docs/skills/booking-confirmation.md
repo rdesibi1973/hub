@@ -64,6 +64,10 @@ Hand off to `invoice-workflow`.
 6. Before creating a flight or transfer route (`iti_create_flight_route` / `iti_create_transfer_route`), look for it with `iti_flight_routes&q=<airport>` / the full `iti_transfer_routes` list: the `from=` / `to=` filter can hide an existing route (ZNZ → ARK 279 was there, a duplicate 301 was created and had to be deactivated). Domestic flight already booked: `flights: [{flight_route_id, airline}]` with the airline actually booked (e.g. 279 + "Flightlink"), not a new route per airline (10 Nov 2026, EneaMeco).
 7. Safari starting with a domestic flight (e.g. beach first, then Zanzibar → Arusha) on a sample whose day 1 is the Kilimanjaro arrival: the final takes the sample day ("Aeroporto del Kilimanjaro – Arusha"). Fix it after generating with `iti_update_day`: title, narrative, `flights` (route + airline), `transfers` (hotel → Zanzibar airport 99, Arusha airport → Arusha 5). Beach nights "<hotel> - own arrangement" before the safari: no meals (`meal_*` 0) and a short text ("Giornata libera al mare."); arrival day with the transfer Zanzibar airport → hotel (route 105) (10 Nov 2026, EneaMeco).
 
+## 5b. Booking cancelled
+
+After `rename_folder` to `_CANCELLED` (dry run, his ok): `find_invoices` with `request_id`. Open invoice with nothing paid → propose `cancel_invoice` (`invoice-workflow` §8). Something paid → don't cancel: ask Roberto about penalties / refund (credit note).
+
 ## 6. Reminders (only if relevant)
 
 - Savannah needs passport copies (park permits) and a copy of the travel insurance: ask the agency/client.
