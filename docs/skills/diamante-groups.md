@@ -73,6 +73,12 @@ Memo: at the start create one `doing` memo (clear title, linked request, stable 
 
 `invoice-workflow`: one SE invoice to IL DIAMANTE BLU SRL, one line per item, matching the breakdown sent to Diamante, at the prices agreed in §2; due 30 days before arrival.
 
+**Sending the invoice** (Lorenzo, 12 Nov 2026): a new mail (not a reply in other threads) from savannah.explorers@gmail.com
+to **reservation.africa@ildiamante.com** (they check it and archive it), Cc **fornitori@ildiamante.com** (they add it to the
+payment schedule) and Lorenzo (lorenzo.rettore@ildiamante.com). Subject "Fattura <number> - <group> <dates>"; body: group, dates,
+pax with rooms and REF, total and due date; PDF attached. An updated invoice says which one it replaces. Draft `.eml` first,
+send only after Roberto's ok. Send each invoice when its group is closed (sold pax final), not before.
+
 **Departures tracker** `Diamante/2027/Diamante_2027_Partenze.xlsx` (one row per departure, for the end-of-season report with Lorenzo): every time a Diamante invoice is created or changed, or a group is booked, cancelled or changes pax/jeeps, update its row — status (BOOKED / PROVISIONAL / BLOCCO / CANCELLED), tariff (2-7 pax / Gruppi), adults/teen/child, jeeps, tour leader, invoice number, total (invoice, or Calc F10 if not invoiced yet), cost (Calc B7); PromoService 5% of the total and the net margin are formulas. The tracker is INTERNAL and is never sent as it is: for Lorenzo build a separate file with only the shared columns (departure, dates, status, tariff, pax, jeeps, tour leader, invoice, total) and no legend/notes. Never mention PromoService, its commission, our costs or margins to Il Diamante (Roberto, 12 Nov 2026). Cancelled groups stay in the list without amounts.
 
 ## 7. Programme
