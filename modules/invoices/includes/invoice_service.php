@@ -536,6 +536,108 @@ function inv_cancel_payment(PDO $db, int $paymentId, int $invId, string $reason)
     return $ok;
 }
 
+// ── Cancel / restore an invoice (invoice_view.php + Agent API) ───────────────
+/** Current requests.value_usd of the invoice's request, null when none is linked. */
+function inv_request_value_now(PDO $db, int $invId): ?float {
+    $s = $db->prepare("SELECT r.value_usd FROM invoices i JOIN requests r ON r.id = i.request_id WHERE i.id = ?");
+    $s->execute([$invId]);
+    $v = $s->fetchColumn();
+    return $v === false ? null : round((float)$v, 2);
+}
+
+/**
+ * What sync_request_value() would write for $requestId if invoice $asCancelledId were
+ * Cancelled (same formula; 0 = as it is now). Used by the cancel_invoice dry run.
+ */
+function inv_request_value_if_cancelled(PDO $db, int $requestId, int $asCancelledId): float {
+    $s = $db->prepare(
+        "SELECT (SELECT COALESCE(SUM(total), 0) FROM invoices
+                  WHERE request_id = ? AND status != 'Cancelled' AND id <> ?)
+              - (SELECT COALESCE(SUM(total), 0) FROM credit_notes
+                  WHERE request_id = ? AND status != 'Cancelled')
+              + (SELECT COALESCE(SUM(a.amount_cn), 0)
+                   FROM credit_note_allocations a
+                   JOIN credit_notes c ON c.id = a.credit_note_id
+                   JOIN invoices i ON i.id = a.invoice_id
+                  WHERE c.request_id = ? AND c.status != 'Cancelled' AND a.cancelled_at IS NULL
+                    AND i.request_id = ? AND i.status != 'Cancelled' AND i.id <> ?)"
+    );
+    $s->execute([$requestId, $asCancelledId, $requestId, $requestId, $requestId, $asCancelledId]);
+    return round((float)$s->fetchColumn(), 2);
+}
+
+/**
+ * Set an invoice Cancelled: balance and amount paid to 0 (payment rows are kept for
+ * history), request value resynced, timeline event (with the reason, if any).
+ * The page allows it with payments; the Agent API refuses that before calling this.
+ * Returns ['request_value_before' => ?float, 'request_value_after' => ?float].
+ */
+function inv_cancel_invoice(PDO $db, int $id, string $reason = ''): array {
+    $reason = trim($reason);
+    $before = inv_request_value_now($db, $id);
+    // Zero out the balance so a cancelled invoice never appears in the
+    // payment follow-up list (existing payment rows are kept for history).
+    $db->prepare("UPDATE invoices SET status='Cancelled', balance_due=0, amount_paid=0, updated_at=NOW() WHERE id=?")->execute([$id]);
+    sync_request_value($db, $id);
+    // invoices has no internal notes column (`notes` is printed on the PDF): the reason lives in the timeline.
+    tl_log_invoice($db, $id, $reason !== '' ? 'cancelled: ' . $reason : 'cancelled', $reason !== '' ? ['reason' => $reason] : []);
+    return ['request_value_before' => $before, 'request_value_after' => inv_request_value_now($db, $id)];
+}
+
+/**
+ * Back from Cancelled to New, then recalculated: with active payments the status
+ * becomes Partially / Fully Paid (warning says so). Nothing happens if not Cancelled.
+ * Returns ['final_status' => string, 'warning' => ?string].
+ */
+function inv_restore_invoice(PDO $db, int $id): array {
+    $db->prepare("UPDATE invoices SET status='New', updated_at=NOW() WHERE id=? AND status='Cancelled'")->execute([$id]);
+    recalculate_invoice($db, $id);
+    sync_request_value($db, $id);
+    tl_log_invoice($db, $id, 'restored');
+    $s = $db->prepare("SELECT status FROM invoices WHERE id=?");
+    $s->execute([$id]);
+    $finalStatus = (string)$s->fetchColumn();
+    $warning = $finalStatus !== 'New'
+        ? "Invoice has recorded payments — status has been set to \"$finalStatus\" instead of New. To revert to New, cancel all payments first."
+        : null;
+    return ['final_status' => $finalStatus, 'warning' => $warning];
+}
+
+/**
+ * Open Memo Board follow-ups waiting on this invoice's payment: ext_key pay-<number>
+ * (SH invoices) or auto_close = 'payment' on the invoice. [{id, title, ext_key, user_id}].
+ */
+function inv_open_payment_memos(PDO $db, array $inv): array {
+    try {
+        require_once __DIR__ . '/../../memo/memo_lib.php';
+        memo_schema($db);
+        $s = $db->prepare("SELECT id, title, ext_key, user_id FROM memos
+                           WHERE deleted_at IS NULL AND status IN ('open','doing','waiting')
+                             AND (ext_key = ? OR (invoice_id = ? AND auto_close = 'payment'))
+                           ORDER BY id");
+        $s->execute(['pay-' . $inv['invoice_number'], (int)$inv['id']]);
+        return array_map(function ($m) {
+            return ['id' => (int)$m['id'], 'title' => $m['title'], 'ext_key' => $m['ext_key'], 'user_id' => (int)$m['user_id']];
+        }, $s->fetchAll(PDO::FETCH_ASSOC));
+    } catch (\Throwable $e) {
+        error_log('inv_open_payment_memos(' . $inv['id'] . '): ' . $e->getMessage());
+        return [];
+    }
+}
+
+/** Close those memos (done, note "invoice cancelled"); returns the ones closed. Never throws. */
+function inv_close_payment_memos(PDO $db, array $inv): array {
+    $closed = [];
+    foreach (inv_open_payment_memos($db, $inv) as $m) {
+        try {
+            $closed[] = $m + ['opened_next' => memo_close($db, $m['id'], 'Invoice ' . $inv['invoice_number'] . ' cancelled — closed automatically.')];
+        } catch (\Throwable $e) {
+            error_log('inv_close_payment_memos(' . $inv['id'] . ', memo ' . $m['id'] . '): ' . $e->getMessage());
+        }
+    }
+    return $closed;
+}
+
 // ── Create / edit (invoice_add.php, invoice_edit.php, Agent API) ─────────────
 /**
  * Invoice header + lines from input $in, ready for inv_create() / inv_update().

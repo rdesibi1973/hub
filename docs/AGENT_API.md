@@ -31,7 +31,7 @@ without driving the web UI.
 | HTTPS only | Plain HTTP → 403. |
 | Rate limit | 60 calls/min → 429. |
 | Audit | Every call (including failures and dry-runs) → `agent_audit_log` (action, request_id, user, HTTP code, dry_run, payload, result, IP). |
-| Dry-run by default | `update_request`, `confirm_booking`, `send_booking_email`, `rollback_booking`, `rename_folder`, `import_group_folder`, `move_group_folder`, `set_request_status`, `cancel_invoice_payment`, `update_folder_status`, `import_zoho_invoice`, `create_invoice`, `update_invoice`, `send_invoice_email`, `memo_delete`, `create_agency`, `update_agency`, `save_agency_contact`, `delete_agency_contact`, `mail_send`, `mail_move`, `ck_request_check`, `ck_set_owners`, `ck_findings_upsert`, `followup_scan`, `followup_update`, `followup_upsert`, `staff_mail_save_eml` and `drafts_cleanup` (among others) do nothing unless the body has `"confirm": true`. |
+| Dry-run by default | `update_request`, `confirm_booking`, `send_booking_email`, `rollback_booking`, `rename_folder`, `import_group_folder`, `move_group_folder`, `set_request_status`, `cancel_invoice_payment`, `cancel_invoice`, `restore_invoice`, `update_folder_status`, `import_zoho_invoice`, `create_invoice`, `update_invoice`, `send_invoice_email`, `memo_delete`, `create_agency`, `update_agency`, `save_agency_contact`, `delete_agency_contact`, `mail_send`, `mail_move`, `ck_request_check`, `ck_set_owners`, `ck_findings_upsert`, `followup_scan`, `followup_update`, `followup_upsert`, `staff_mail_save_eml` and `drafts_cleanup` (among others) do nothing unless the body has `"confirm": true`. |
 | No deletes | No delete endpoint (mail included), except `memo_delete`, which is soft (`deleted_at`, the row stays). Undo a confirm with `rollback_booking` (or BackOffice → Rollback). |
 | Mailbox | The key also reads `info@` (`mail_*`): keep `api.txt` as private as the mailbox password. |
 
@@ -1017,6 +1017,36 @@ The folder is **not** renamed automatically.
 A payment made by `apply_credit_note` gives the credit back to the credit note (remaining and status updated).
 Without `"confirm": true` → returns the payment and `balance_after` only.
 
+### `cancel_invoice` (POST)
+`invoice_id`* (or `invoice_number`), `reason`* (≤ 255 chars). Same effect as Cancel on the invoice page
+(`inv_cancel_invoice`): status `Cancelled`, `balance_due` and `amount_paid` 0, request value resynced
+(`sync_request_value`), timeline event "Invoice <number> — cancelled: <reason>". The reason is not written on
+the invoice (its `notes` are printed on the PDF). Refused, nothing changed:
+- **400** `reason` missing.
+- **409** already `Cancelled`.
+- **409** active payments (> 0, `Credit note` applications included) → `payments[]` `{id, date, amount, method, reference}`:
+  cancel them first with `cancel_invoice_payment`, or issue a credit note. Stricter than the page on purpose:
+  money received must never disappear from `amount_paid` silently.
+- **409** credit notes issued on this invoice, not Cancelled, applied to **other** invoices → `credit_notes[]`
+  `{id, number, total, applied_to[]}`.
+
+Dry run → `invoice`, `folder`, `reason`, `request_value_before` (now) / `request_value_after` (what
+`sync_request_value` would set), `memos_to_close[]`, `warnings[]`:
+- linked request not `Cancelled` / `Lost` ("Request #N is still Booked");
+- another active invoice on the same request (normal when an invoice is re-issued);
+- a credit note on this invoice still holding credit (cancel it too if no credit is owed);
+- an open memo waiting for this invoice's payment (ext_key `pay-<number>`, or `auto_close` = payment on it).
+
+With `"confirm": true` → `cancelled: true`, the same fields with `invoice` re-read, and `memo_closed[]`
+`{id, title, ext_key, user_id, opened_next}`: those memos are marked done ("Invoice … cancelled — closed
+automatically", next steps opened). The folder is not renamed (use `rename_folder` for `_CANCELLED`).
+
+### `restore_invoice` (POST)
+`invoice_id`* (or `invoice_number`). Same as Restore on the invoice page (`inv_restore_invoice`): back to `New`,
+then recalculated — with active payments the status becomes Partially / Fully Paid. **409** if not Cancelled.
+Dry run → `invoice`, `folder`, predicted `final_status`, `active_payments_total`. Confirm → `restored: true`,
+`invoice`, `folder`, `final_status`, `warning` (set when payments made it other than New).
+
 ### `list_credit_notes` (GET)
 Filters, all optional: `invoice_id` (the invoice the credit note was issued on), `request_id`, `agency_id` (the
 request's agency), `status` (`Issued`|`Partially applied`|`Applied`|`Cancelled`), `limit` ≤ 200 (default 100).
@@ -1140,6 +1170,9 @@ curl -sH "$H" -X POST "$U?action=send_invoice_email" -d '{"invoice_number":"SE-2
 curl -sH "$H" -X POST "$U?action=create_invoice" -d '{"request_id":873,"agency_id":12,"issuer":"SE","items":[{"description":"Rossi 4 pax trip in Tanzania from 10 Feb until 16 Feb 2027","quantity":4,"unit_price":2450}]}'   # dry run
 curl -sH "$H" -X POST "$U?action=update_invoice" -d '{"invoice_number":"SE-2026-0012","due_date":"2026-12-01","confirm":true}'
 curl -sH "$H" -X POST "$U?action=cancel_invoice_payment" -d '{"invoice_id":412,"payment_id":901,"reason":"Recorded twice","confirm":true}'
+curl -sH "$H" -X POST "$U?action=cancel_invoice" -d '{"invoice_number":"SE-2026-0595","reason":"Group cancelled by the agency, nothing paid"}'   # dry run
+curl -sH "$H" -X POST "$U?action=cancel_invoice" -d '{"invoice_number":"SE-2026-0595","reason":"Group cancelled by the agency, nothing paid","confirm":true}'
+curl -sH "$H" -X POST "$U?action=restore_invoice" -d '{"invoice_number":"SE-2026-0595"}'                      # dry run: predicted final_status
 ```
 
 ## Memo Board (follow-ups)
@@ -2046,7 +2079,7 @@ same request + type + title within 60 s is logged once; a logging error never fa
 | `rollback_booking` / Rollback | `status_change` "Confirmation rolled back" |
 | `send_booking_email` / BackOffice booking email | `mail_sent` |
 | `send_invoice_email` / invoice page Send by email | `mail_sent` "Invoice <number> sent by email" (`refs.invoice_id`) |
-| `create_invoice`, `update_invoice`, `import_zoho_invoice`, invoice cancelled / restored (request invoices) | `invoice` |
+| `create_invoice`, `update_invoice`, `import_zoho_invoice`, `cancel_invoice` / `restore_invoice` and the invoice page Cancel / Restore (request invoices) | `invoice` ("Invoice <number> — cancelled: <reason>", `refs.reason`) |
 | `add_invoice_payment`, `cancel_invoice_payment` (and the invoice page) | `payment` |
 | `update_folder_status` / Update Folder, BackOffice status change, request status change | `status_change` |
 | `update_request` with a new `start_date` | `status_change` "Start date changed: <from> → <to>" |

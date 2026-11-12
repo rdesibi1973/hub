@@ -95,7 +95,7 @@ function agent_audit(PDO $db, string $action, $reqId, array $payload, string $re
     global $agentUser;
     agent_ensure_schema($db);
     $dry = in_array($action, ['confirm_booking', 'send_booking_email', 'rollback_booking', 'fill_calc', 'iti_save_texts', 'update_rate', 'replace_flight_rates',
-                              'cancel_invoice_payment', 'update_folder_status', 'import_zoho_invoice', 'create_invoice', 'update_invoice', 'create_credit_note', 'apply_credit_note', 'send_invoice_email', 'mail_send', 'mail_move',
+                              'cancel_invoice_payment', 'cancel_invoice', 'restore_invoice', 'update_folder_status', 'import_zoho_invoice', 'create_invoice', 'update_invoice', 'create_credit_note', 'apply_credit_note', 'send_invoice_email', 'mail_send', 'mail_move',
                               'iti_lodge_photos', 'iti_destination_photo', 'iti_update_lodge', 'iti_update_destination',
                               'iti_create_personal', 'iti_update_program', 'iti_update_day', 'iti_publish', 'iti_final_from_calc', 'iti_save_alias', 'iti_tag_sample',
                               'iti_create_lodge', 'iti_set_days', 'iti_add_day', 'iti_delete_day', 'iti_update_inclusions', 'iti_update_standard_inclusion',
@@ -2191,6 +2191,102 @@ try {
                    'invoice' => agent_invoice_out(inv_get($db, $id)), 'folder' => agent_invoice_folder($db, $id)]);
     }
 
+    // ── cancel_invoice ───────────────────────────────────────────────────────
+    // Same as "Cancel" on the invoice page (inv_cancel_invoice), but stricter: refused
+    // while the invoice has active payments (money received must never vanish from
+    // amount_paid) or credit notes applied elsewhere. Dry-run unless "confirm": true.
+    case 'cancel_invoice': {
+        agent_require_method('POST');
+        $inv    = agent_invoice($db, $in);
+        $id     = (int)$inv['id'];
+        $num    = $inv['invoice_number'];
+        $reason = mb_substr(trim((string)($in['reason'] ?? '')), 0, 255);
+        if ($reason === '') agent_fail('reason is required');
+        if ($inv['status'] === 'Cancelled') agent_fail('Invoice ' . $num . ' is already Cancelled', 409, ['invoice' => agent_invoice_out($inv)]);
+
+        // Positive active payments (credit-note applications included). Negative rows are
+        // credit-note refunds: checked with the credit notes below.
+        $paid = [];
+        foreach (inv_payments($db, $id, true) as $p) {
+            if ((float)$p['amount'] <= 0.005) continue;
+            $paid[] = ['id' => (int)$p['id'], 'date' => $p['payment_date'], 'amount' => (float)$p['amount'],
+                       'method' => $p['method'], 'reference' => $p['reference']];
+        }
+        if ($paid) {
+            agent_fail('Invoice ' . $num . ' has ' . count($paid) . ' active payment(s) — cancel them first with cancel_invoice_payment, or issue a credit note', 409,
+                       ['invoice' => agent_invoice_out($inv), 'payments' => $paid,
+                        'hint' => 'Do not work around this: ask Roberto (refund via credit note, or cancel the payments).']);
+        }
+        $warnings = [];
+        $cnApplied = [];
+        foreach (inv_credit_notes($db, $id) as $c) {
+            if ($c['status'] === 'Cancelled') continue;
+            $out = agent_credit_note_out($db, $c);
+            $elsewhere = array_values(array_filter($out['applied_to'], function ($a) use ($id) { return $a['invoice_id'] !== $id; }));
+            if ($elsewhere) {
+                $cnApplied[] = ['id' => $out['id'], 'number' => $out['number'], 'total' => $out['total'], 'applied_to' => $elsewhere];
+            } elseif ($out['remaining'] > 0.005) {
+                $warnings[] = 'Credit note ' . $out['number'] . ' is still ' . $out['status'] . ' with ' . fmt_money($out['remaining'], $out['currency'])
+                            . ' of credit: cancel it too if no credit is owed.';
+            }
+        }
+        if ($cnApplied) {
+            agent_fail('Invoice ' . $num . ' has credit notes applied to other invoices — cancel those applications first', 409,
+                       ['invoice' => agent_invoice_out($inv), 'credit_notes' => $cnApplied]);
+        }
+
+        $reqId  = (int)($inv['request_id'] ?? 0);
+        $before = inv_request_value_now($db, $id);
+        $after  = $reqId ? inv_request_value_if_cancelled($db, $reqId, $id) : null;
+        if ($reqId) {
+            $rs = $db->prepare("SELECT status FROM requests WHERE id = ?");
+            $rs->execute([$reqId]);
+            $rStatus = (string)$rs->fetchColumn();
+            if (!in_array($rStatus, ['Cancelled', 'Lost'], true)) $warnings[] = 'Request #' . $reqId . ' is still ' . ($rStatus !== '' ? $rStatus : '(no status)') . '.';
+            $os = $db->prepare("SELECT invoice_number, total, currency, status FROM invoices WHERE request_id = ? AND id <> ? AND status <> 'Cancelled' ORDER BY id");
+            $os->execute([$reqId, $id]);
+            foreach ($os->fetchAll(PDO::FETCH_ASSOC) as $o) {
+                $warnings[] = 'Request #' . $reqId . ' has another active invoice: ' . $o['invoice_number'] . ' ' . fmt_money((float)$o['total'], $o['currency'])
+                            . ' (' . $o['status'] . ') — normal if the invoice was re-issued.';
+            }
+        }
+        $memos = inv_open_payment_memos($db, $inv);
+        $base = ['folder' => agent_invoice_folder($db, $id), 'reason' => $reason,
+                 'request_value_before' => $before, 'request_value_after' => $after];
+        if (empty($in['confirm'])) {
+            foreach ($memos as $m) $warnings[] = 'Memo ' . $m['id'] . ' "' . $m['title'] . '"' . ($m['ext_key'] ? ' (' . $m['ext_key'] . ')' : '') . ' is still open: it will be closed on confirm.';
+            agent_out(array_merge(['ok' => true, 'dry_run' => true, 'invoice' => agent_invoice_out($inv)], $base,
+                ['memos_to_close' => $memos, 'warnings' => $warnings,
+                 'message' => 'Dry run — nothing cancelled. Resend with "confirm": true to cancel invoice ' . $num . '.']));
+        }
+        $res = inv_cancel_invoice($db, $id, $reason);
+        $closed = inv_close_payment_memos($db, $inv);
+        agent_out(array_merge(['ok' => true, 'dry_run' => false, 'cancelled' => true, 'invoice' => agent_invoice_out(inv_get($db, $id))], $base,
+            ['request_value_before' => $res['request_value_before'], 'request_value_after' => $res['request_value_after'],
+             'memo_closed' => $closed, 'warnings' => $warnings]));
+    }
+
+    // ── restore_invoice ──────────────────────────────────────────────────────
+    // Same as "Restore" on the invoice page (inv_restore_invoice). Dry-run unless "confirm": true.
+    case 'restore_invoice': {
+        agent_require_method('POST');
+        $inv = agent_invoice($db, $in);
+        $id  = (int)$inv['id'];
+        if ($inv['status'] !== 'Cancelled') agent_fail('Invoice ' . $inv['invoice_number'] . ' is not Cancelled (status ' . $inv['status'] . ')', 409, ['invoice' => agent_invoice_out($inv)]);
+        if (empty($in['confirm'])) {
+            $sum = 0.0;
+            foreach (inv_payments($db, $id, true) as $p) $sum += (float)$p['amount'];
+            $sum = round($sum, 2);
+            $predicted = inv_status_for('New', $sum, round((float)$inv['total'] - $sum, 2));
+            agent_out(['ok' => true, 'dry_run' => true, 'invoice' => agent_invoice_out($inv), 'folder' => agent_invoice_folder($db, $id),
+                       'final_status' => $predicted, 'active_payments_total' => $sum,
+                       'message' => 'Dry run — nothing restored. Resend with "confirm": true to restore invoice ' . $inv['invoice_number'] . '.']);
+        }
+        $res = inv_restore_invoice($db, $id);
+        agent_out(['ok' => true, 'dry_run' => false, 'restored' => true, 'invoice' => agent_invoice_out(inv_get($db, $id)),
+                   'folder' => agent_invoice_folder($db, $id), 'final_status' => $res['final_status'], 'warning' => $res['warning']]);
+    }
+
     // ── list_credit_notes ────────────────────────────────────────────────────
     case 'list_credit_notes': {
         agent_invoice_lib();
@@ -3512,7 +3608,7 @@ try {
             'iti_set_days', 'iti_add_day', 'iti_delete_day', 'iti_inclusions', 'iti_update_inclusions', 'iti_update_standard_inclusion', 'iti_save_as_sample',
             'iti_flight_routes', 'iti_create_flight_route', 'iti_activities', 'iti_activity', 'iti_update_activity', 'iti_create_activity',
             'iti_transfer_routes', 'iti_create_transfer_route', 'iti_update_transfer_route', 'iti_create_destination', 'iti_import_program', 'iti_supplier_blocklist', 'add_flight_rates',
-            'find_invoices', 'get_invoice', 'add_invoice_payment', 'cancel_invoice_payment', 'list_credit_notes', 'create_credit_note', 'apply_credit_note', 'update_folder_status',
+            'find_invoices', 'get_invoice', 'add_invoice_payment', 'cancel_invoice_payment', 'cancel_invoice', 'restore_invoice', 'list_credit_notes', 'create_credit_note', 'apply_credit_note', 'update_folder_status',
             'save_invoice_pdf', 'send_invoice_email', 'import_zoho_invoice', 'create_invoice', 'update_invoice', 'memo_list', 'memo_save', 'memo_set_status', 'memo_delete',
             'routine_status', 'routine_done',
             'mail_folders', 'mail_list', 'mail_get', 'mail_attachment', 'mail_flag', 'mail_move', 'mail_draft', 'mail_send',

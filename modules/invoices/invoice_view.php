@@ -32,11 +32,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
     if ($action === 'cancel_invoice') {
         $invId = (int)($_POST['invoice_id'] ?? 0);
-        // Zero out the balance so a cancelled invoice never appears in the
-        // payment follow-up list (existing payment rows are kept for history).
-        $db->prepare("UPDATE invoices SET status='Cancelled', balance_due=0, amount_paid=0, updated_at=NOW() WHERE id=?")->execute([$invId]);
-        sync_request_value($db, $invId);
-        tl_log_invoice($db, $invId, 'cancelled');
+        inv_cancel_invoice($db, $invId, mb_substr(trim($_POST['reason'] ?? ''), 0, 255));
         ob_end_clean(); echo json_encode(['ok'=>true]); exit;
     }
 
@@ -54,15 +50,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
     if ($action === 'restore_invoice') {
         $invId = (int)($_POST['invoice_id'] ?? 0);
-        $db->prepare("UPDATE invoices SET status='New', updated_at=NOW() WHERE id=? AND status='Cancelled'")->execute([$invId]);
-        recalculate_invoice($db, $invId);
-        sync_request_value($db, $invId);
-        tl_log_invoice($db, $invId, 'restored');
-        $finalStatus =$db->query("SELECT status FROM invoices WHERE id=$invId")->fetchColumn();
-        $warning = $finalStatus !== 'New'
-            ? "Invoice has recorded payments — status has been set to \"$finalStatus\" instead of New. To revert to New, cancel all payments first."
-            : null;
-        ob_end_clean(); echo json_encode(['ok'=>true, 'warning'=>$warning]); exit;
+        $res = inv_restore_invoice($db, $invId);
+        ob_end_clean(); echo json_encode(['ok'=>true, 'warning'=>$res['warning']]); exit;
     }
 
     if ($action === 'set_status') {
