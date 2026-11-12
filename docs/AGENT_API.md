@@ -1965,7 +1965,9 @@ Params: `scope` `safari` (`/001_Safari`, its `00_YYYY` / `00_CANCELED` container
 `/<this year>`, `/<next year>`) | `all` (default); or `request_id` (that booking's folder only); `limit_folders` (default: as many
 as fit in ~100 s), `offset`. Group folders: their member sub-folders' `mails/` too.
 Dry run → `{folders_total, offset, next_offset (null = scope done — else call again with it), folders_scanned,
-folders_with_mails, drafts_found, folders_affected, results[] {folder, request_id, drafts[], kept[]}, errors[]}`.
+folders_with_mails, drafts_found, folders_affected, unreadable, results[] {folder, request_id, drafts[], kept[], unreadable[]?}, errors[]}`.
+A header that cannot be read (Dropbox busy) is read again once; still not → `unreadable` (left in `mails/`, never counted as kept
+or moved): run the same offset again later.
 `confirm` → the drafts move to `<folder>/old/<same name>` (`old/` created if missing; a name already there gets "(2)", "(3)"…),
 `moved`, `results[].moves[] {from, to, result}`; a timeline note on the linked request ("N draft mails moved from mails/ to old/").
 Readers ignore drafts: the Booking follow-up "Set expiry" proof list hides them, `followup_update` refuses a draft as

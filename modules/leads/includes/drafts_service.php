@@ -293,7 +293,7 @@ function drafts_cleanup(PDO $db, array $o = []): array {
     $limit = (int)($o['limit_folders'] ?? 0);
     $slice = array_slice($folders, $offset, $limit > 0 ? $limit : null);
     $out = ['dry_run' => !$confirm, 'scope' => $scope, 'folders_total' => $total, 'offset' => $offset, 'next_offset' => null,
-            'folders_scanned' => 0, 'folders_with_mails' => 0, 'drafts_found' => 0, 'folders_affected' => 0, 'moved' => 0,
+            'folders_scanned' => 0, 'folders_with_mails' => 0, 'drafts_found' => 0, 'folders_affected' => 0, 'moved' => 0, 'unreadable' => 0,
             'results' => [], 'errors' => []];
     // Chunks of folders, each step in one parallel round: the folders, their group members, their mails/, the headers.
     $multi = $dbx['list_multi'] ?? function (array $ps) use ($dbx) { $o = []; foreach ($ps as $p) $o[$p] = $dbx['list']($p); return $o; };
@@ -330,11 +330,12 @@ function drafts_cleanup(PDO $db, array $o = []): array {
                     continue;
                 }
                 $out['drafts_found'] += count($r['drafts']);
+                $out['unreadable'] += count($r['unreadable'] ?? []);
                 if ($r['drafts']) {
                     $out['folders_affected']++;
                     $out['moved'] += count(array_filter($r['moves'] ?? [], fn($m) => $m['result'] === 'moved'));
-                    $out['results'][] = $r;
                 }
+                if ($r['drafts'] || !empty($r['unreadable'])) $out['results'][] = $r;   // unreadable: run again later
             }
         } catch (Throwable $e) {
             $out['errors'][] = ['folder' => $chunk[0] . ' … (' . count($chunk) . ' folders)', 'error' => $e->getMessage()];
@@ -369,12 +370,17 @@ function drafts_folder(array $dbx, string $folder, array $listing, bool $confirm
     $ml = $ml ?? ($dbx['list']($mails) ?? ['folders' => [], 'files' => []]);   // given by drafts_cleanup() (parallel), else read here
     $eml = array_values(array_filter($ml['files'], fn($f) => drafts_is_eml($f['name'])));
     if ($heads === null) $heads = $eml ? $dbx['heads'](array_map(fn($f) => $mails . '/' . $f['name'], $eml)) : [];
-    $drafts = []; $kept = [];
+    // A header not read (Dropbox rate limit, timeout): read again once; still nothing → "unreadable" (left in mails/, reported).
+    $miss = array_values(array_filter(array_map(fn($f) => $mails . '/' . $f['name'], $eml), fn($p) => !isset($heads[$p])));
+    if ($miss) $heads = $dbx['heads']($miss) + $heads;
+    $drafts = []; $kept = []; $unreadable = [];
     foreach ($eml as $f) {
         $h = $heads[$mails . '/' . $f['name']] ?? null;
-        if ($h !== null && drafts_is_draft_head($h)) $drafts[] = $f['name']; else $kept[] = $f['name'];
+        if ($h === null) $unreadable[] = $f['name'];
+        elseif (drafts_is_draft_head($h)) $drafts[] = $f['name'];
+        else $kept[] = $f['name'];
     }
-    $r = ['folder' => $folder, 'request_id' => drafts_request_of($folder, $map), 'drafts' => $drafts, 'kept' => $kept];
+    $r = ['folder' => $folder, 'request_id' => drafts_request_of($folder, $map), 'drafts' => $drafts, 'kept' => $kept] + ($unreadable ? ['unreadable' => $unreadable] : []);
     if (!$confirm || !$drafts) return $r;
     $oldName = DRAFTS_TO;
     foreach ($listing['folders'] as $f) if (strtolower($f) === DRAFTS_TO) { $oldName = $f; break; }

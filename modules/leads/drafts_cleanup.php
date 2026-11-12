@@ -75,6 +75,7 @@ include 'includes/header.php';
   <b><?= $res['dry_run'] ? 'Dry run — nothing moved.' : 'Moved.' ?></b>
   Folders <?= (int)$res['offset'] ?>–<?= (int)$res['offset'] + (int)$res['folders_scanned'] ?> of <?= (int)$res['folders_total'] ?> scanned
   (<?= (int)$res['folders_with_mails'] ?> with mails/): <b><?= (int)$res['drafts_found'] ?></b> draft(s) in <?= (int)$res['folders_affected'] ?> folder(s)<?= $res['dry_run'] ? '' : ', ' . (int)$res['moved'] . ' moved' ?>.
+  <?php if (!empty($res['unreadable'])): ?><br><span style="color:#A01A14">⚠ <?= (int)$res['unreadable'] ?> file(s) whose header could not be read (Dropbox busy): left in mails/ — run the same offset again.</span><?php endif; ?>
   <?php if ($res['next_offset'] !== null): ?><br>Not finished: run again from offset <b><?= (int)$res['next_offset'] ?></b> (already filled in above).<?php else: ?><br>Scope done.<?php endif; ?>
   <?php foreach ($res['errors'] as $e): ?><br><span style="color:#A01A14">⚠ <?= h($e['folder'] . ': ' . $e['error']) ?></span><?php endforeach; ?>
 </div>
@@ -87,7 +88,7 @@ include 'includes/header.php';
     <td class="dr-file"><?php if (!empty($r['moves'])): foreach ($r['moves'] as $m): ?><?= h($m['from'] . ' → ' . $m['to'] . ($m['result'] !== 'moved' ? ' (' . $m['result'] . ')' : '')) ?><br><?php endforeach;
           else: foreach ($r['drafts'] as $d): ?><?= h($d) ?><br><?php endforeach; endif; ?>
         <?php foreach ($r['errors'] ?? [] as $e): ?><span style="color:#A01A14">⚠ <?= h($e['file'] . ': ' . $e['error']) ?></span><br><?php endforeach; ?></td>
-    <td class="dr-file"><?= h(implode(', ', $r['kept'])) ?: '—' ?></td>
+    <td class="dr-file"><?= h(implode(', ', $r['kept'])) ?: '—' ?><?php if (!empty($r['unreadable'])): ?><br><span style="color:#A01A14">not read: <?= h(implode(', ', $r['unreadable'])) ?></span><?php endif; ?></td>
   </tr>
   <?php endforeach; ?>
 </table></div></div>

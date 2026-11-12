@@ -141,5 +141,17 @@ $t('scope requests: /2025–/2027 (missing years skipped)', $r['drafts_found'] =
 $r = drafts_cleanup($db, $o + ['scope' => 'all', 'budget' => 0, 'chunk' => 1]);
 $t('time budget: stops after the first chunk with next_offset', $r['next_offset'] === 1 && $r['folders_scanned'] === 1, $r['next_offset']);
 
+// A header read that fails (Dropbox 429): read again once; still failing → "unreadable", never "kept", never moved.
+$N = '/2026/Neri(ABC-Roberto)/mails/';
+$failOnce = $dbx; $calls = 0;
+$failOnce['heads'] = function (array $ps) use ($dbx, &$calls) { $calls++; $o = $dbx['heads']($ps); if ($calls === 1) foreach ($o as $k => $v) $o[$k] = null; return $o; };
+$r = drafts_cleanup($db, ['dbx' => $failOnce] + $o + ['scope' => 'requests']);
+$t('header read fails once → retried, classified', ($r['results'][0]['drafts'] ?? null) === ['d.eml'] && $r['unreadable'] === 0, $r['results']);
+$failAll = $dbx;
+$failAll['heads'] = fn(array $ps) => array_fill_keys($ps, null);
+$snap = $fs;
+$r = drafts_cleanup($db, ['dbx' => $failAll] + $o + ['scope' => 'requests', 'confirm' => true]);
+$t('header never read → unreadable, reported, not moved', $r['unreadable'] === 2 && ($r['results'][0]['unreadable'] ?? []) && !($r['results'][0]['kept'] ?? [1]) && $fs === $snap, $r['results']);
+
 echo $fail ? "\n$fail FAILED\n" : "\nALL PASS\n";
 exit($fail ? 1 : 0);
