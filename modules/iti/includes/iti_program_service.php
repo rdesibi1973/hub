@@ -179,6 +179,31 @@ function iti_ps_save_file(PDO $db, int $pid, array $f, array $opt = array()): ar
     return array('path' => $saved, 'name' => $name, 'overwritten' => $exists, 'request_id' => $tlRid ?: null);
 }
 
+/**
+ * The client document of a personal programme into its request's Dropbox folder, as <Ref. Number>.pdf for a
+ * direct client (folder "(…-Drct)") or <Ref. Number>.docx for an agency (the editable copy). Replaces a file
+ * of the same name (Dropbox keeps the old version). Called by program_final.php after Generate / Regenerate.
+ * Throws on a missing request / Ref. Number, supplier names in an imported programme, or Dropbox errors.
+ * Returns iti_ps_save_file()'s array + 'format' (pdf / docx) and 'variant' (direct / agency).
+ */
+function iti_ps_save_client_document(PDO $db, int $pid): array {
+    require_once __DIR__ . '/iti_terms.php';
+    require_once __DIR__ . '/iti_import_service.php';   // supplier guard on imported programmes
+    require_once __DIR__ . '/iti_export.php';
+    $p = iti_get_program($pid);
+    if (!$p) throw new InvalidArgumentException('Program ' . $pid . ' not found');
+    $rid = (int)($p['lead_request_id'] ?? 0);
+    if ($rid <= 0) throw new ItiSaveException('Program ' . $pid . ' is not linked to a Hub request', 409);
+    $variant = iti_terms_variant_for_request($db, $rid) === 'direct' ? 'direct' : 'agency';
+    $format  = $variant === 'direct' ? 'pdf' : 'docx';
+    $name    = iti_ps_document_name($p, $format);
+    if ($name === null) throw new ItiSaveException('Program ' . $pid . ' has no Ref. Number (the file name) — set it in Program Details', 409);
+    iti_im_guard_document($db, $pid, '');
+    $f = iti_export_file($pid, '', $format);
+    $f['name'] = $name;
+    return iti_ps_save_file($db, $pid, $f, array('overwrite' => true)) + array('format' => $format, 'variant' => $variant);
+}
+
 /** Public / internal links of a programme ($lang = display language). */
 function iti_ps_links(array $p, string $lang = ''): array {
     $lang = $lang !== '' ? $lang : (string)($p['display_language'] ?? 'it');

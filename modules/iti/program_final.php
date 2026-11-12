@@ -103,8 +103,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit) {
             if (!$dataOk) throw new RuntimeException('Confirm the data read from the Calc first.');
             if (!$sample) throw new RuntimeException('Choose the sample program first.');
             $res = iti_final_generate($db, $rid, $calc, (int)$sample['id'], $lang, ['id' => $_cu['id'] ?? null, 'username' => $user, 'seller' => $sellerReq]);
-            iti_flash_set('success', 'Itinerary program #' . $res['program_id'] . ' generated'
-                . ($res['superseded'] ? ' — it replaces #' . implode(', #', $res['superseded']) : '') . '. Review the flagged days.');
+            $msg = 'Itinerary program #' . $res['program_id'] . ' generated'
+                 . ($res['superseded'] ? ' — it replaces #' . implode(', #', $res['superseded']) : '') . '. Review the flagged days.';
+            // The client document into the request folder: PDF for a direct client, Word for an agency.
+            try {
+                require_once __DIR__ . '/includes/iti_program_service.php';
+                $sv = iti_ps_save_client_document($db, (int)$res['program_id']);
+                iti_flash_set('success', $msg . ' ' . ($sv['format'] === 'docx' ? 'Word' : 'PDF') . ' saved in Dropbox: ' . $sv['path']
+                    . ($sv['overwritten'] ? ' (replaced the previous file; Dropbox keeps the old version)' : '') . '.');
+            } catch (Throwable $e) {
+                iti_flash_set('error', $msg . ' But the document was NOT saved in Dropbox: ' . $e->getMessage());
+            }
         } elseif ($action === 'ai_map_texts') {
             if (!iti_ai_can_see()) throw new RuntimeException('The AI buttons are not enabled for your user.');
             if (!$calc) throw new RuntimeException('The Calc could not be read: ' . $calcErr);
@@ -245,16 +254,7 @@ include __DIR__ . '/../../includes/layout_header.php';
         <td><?= $f['superseded_by'] ? '<span class="badge">superseded by #' . (int)$f['superseded_by'] . '</span>' : '<span class="badge status-booked">active</span>' ?></td>
         <td style="white-space:nowrap;">
           <a href="program_edit.php?id=<?= (int)$f['id'] ?>" class="btn btn-outline btn-sm">✏️ Edit</a>
-          <a href="program_doc.php?id=<?= (int)$f['id'] ?>" target="_blank" class="btn btn-outline btn-sm">👁 Preview</a>
-          <?php if (!$f['superseded_by']): ?>
-          <form method="POST" action="program_edit.php?id=<?= (int)$f['id'] ?>" style="display:inline;"
-                onsubmit="return confirm('Save the PDF of program #<?= (int)$f['id'] ?> in the Dropbox folder of this request, named after its Ref. Number?\nA file with the same name is replaced (Dropbox keeps the old version).')">
-            <input type="hidden" name="_sub" value="save_pdf_dropbox">
-            <input type="hidden" name="back" value="final">
-            <button class="btn btn-outline btn-sm" title="The PDF into the request's Dropbox folder — check the texts first">💾 PDF → Dropbox</button>
-          </form>
-          <?php endif; ?>
-        </td>
+          <a href="program_doc.php?id=<?= (int)$f['id'] ?>" target="_blank" class="btn btn-outline btn-sm">👁 Preview</a>        </td>
       </tr>
     <?php endforeach; ?>
     </tbody>
@@ -471,7 +471,7 @@ include __DIR__ . '/../../includes/layout_header.php';
     </label>
     <?php $blocked = !$sample || $plan['blocking']; ?>
     <button type="submit" class="btn btn-red" <?= $blocked ? 'disabled title="Choose the sample and map every text first"' : '' ?>
-            onclick="return confirm('<?= $active ? 'Generate a new version? The current one is kept, marked superseded.' : 'Generate the program from the Calc?' ?>')">
+            onclick="return confirm('<?= $active ? 'Generate a new version? The current one is kept, marked superseded. The program in the Dropbox folder (PDF for a direct client, Word for an agency) is replaced.' : 'Generate the program from the Calc? It is also saved in the Dropbox folder: PDF for a direct client, Word for an agency.' ?>')">
       <?= $active ? '↻ Regenerate from Calc' : '⚙ Generate program' ?></button>
     <?php if ($blocked): ?><span style="font-size:.8rem;color:var(--red);"><?= !$sample ? 'Choose the sample first.' : count($plan['blocking']) . ' text(s) to map above.' ?></span><?php endif; ?>
   </form>

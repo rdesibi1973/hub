@@ -39,29 +39,6 @@ iti_ensure_doc_columns();   // iti_day_flights.flight_no, room_type…
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $sub = $_POST['_sub'] ?? '';
 
-    // ── PDF of a personal program into its request's Dropbox folder as <Ref. Number>.pdf (same as Agent API iti_document save) ──
-    if ($sub === 'save_pdf_dropbox') {
-        $back = (($_POST['back'] ?? '') === 'final' && !empty($program['lead_request_id']))
-              ? 'program_final.php?request_id=' . (int)$program['lead_request_id'] : "program_edit.php?id={$id}";
-        try {
-            if (($program['program_type'] ?? '') !== 'personal') throw new RuntimeException('Only personal programs are saved to a request folder.');
-            if (empty($program['lead_request_id'])) throw new RuntimeException('The program is not linked to a Hub request: link it in Program Details first.');
-            $fname = iti_ps_document_name($program, 'pdf');
-            if ($fname === null) throw new RuntimeException('The program has no Ref. Number (the file name): set it in Program Details first.');
-            require_once __DIR__ . '/../leads/dropbox_constants.php';
-            require_once __DIR__ . '/includes/iti_import_service.php';   // supplier guard on imported programs
-            require_once __DIR__ . '/includes/iti_export.php';
-            iti_im_guard_document($db, $id, '');
-            $f = iti_export_file($id, '', 'pdf');
-            $f['name'] = $fname;
-            $res = iti_ps_save_file($db, $id, $f, ['overwrite' => true]);
-            iti_flash_set('success', 'PDF saved in Dropbox: ' . $res['path'] . ($res['overwritten'] ? ' (replaced the previous file; Dropbox keeps the old version)' : '') . '.');
-        } catch (Throwable $e) {
-            iti_flash_set('error', 'PDF not saved to Dropbox: ' . $e->getMessage());
-        }
-        iti_redirect($back);
-    }
-
     // ── Salva header programma ──
     if ($sub === 'header') {
         $paxLabels = [];
@@ -850,16 +827,6 @@ include __DIR__ . '/../../includes/layout_header.php';
     <?php endif; ?>
     <a href="export_mag_word.php?id=<?= $id ?>" class="btn btn-outline btn-sm">⬇ Word</a>
     <a href="export_mag_word.php?id=<?= $id ?>&format=pdf" class="btn btn-outline btn-sm">📕 PDF</a>
-    <?php if (($program['program_type'] ?? '') === 'personal' && !empty($program['lead_request_id'])):
-        $dbxName = iti_ps_document_name($program, 'pdf'); ?>
-    <form method="POST" action="program_edit.php?id=<?= $id ?>" style="display:inline;"
-          onsubmit="<?= $dbxName !== null
-              ? 'return confirm(' . h(json_encode('Save the PDF as "' . $dbxName . '" in the Dropbox folder of request #' . (int)$program['lead_request_id'] . '?' . "\n" . 'A file with the same name is replaced (Dropbox keeps the old version).')) . ')'
-              : 'alert(' . h(json_encode('The program has no Ref. Number (the file name): set it in Program Details first.')) . ');return false' ?>">
-      <input type="hidden" name="_sub" value="save_pdf_dropbox">
-      <button class="btn btn-outline btn-sm" title="The PDF (with the link to the digital itinerary) into the request's Dropbox folder, named after the Ref. Number">💾 PDF → Dropbox</button>
-    </form>
-    <?php endif; ?>
     <?php if (($program['program_type'] ?? '') === 'personal'): ?>
     <a href="export_mag_word.php?id=<?= $id ?>&format=guide_docx" class="btn btn-outline btn-sm" title="Word for the safari guide, editable: safari days only (no Zanzibar / beach), arrival flight, transfers and accommodation, no photos / intro / prices">🧭 Guide Word</a>
     <a href="vouchers.php?program_id=<?= $id ?>" class="btn btn-outline btn-sm" title="Accommodation, flight and transfer vouchers of this program (PDF, English) — needs the start date">🎟 Vouchers</a>
