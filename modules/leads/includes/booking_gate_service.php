@@ -24,7 +24,7 @@ require_once __DIR__ . '/booking_check.php';                          // bc_requ
 require_once __DIR__ . '/ck_lib.php';                                 // ck_tracker_row_for, ck_owners_resolve, ck_set_owners
 require_once __DIR__ . '/../../operations/includes/followup_service.php';   // followup_gate_upsert, supplier matching
 
-const BG_EXTRACT_VERSION   = 1;          // bump when the extraction request changes: cached documents are read again
+const BG_EXTRACT_VERSION   = 2;          // bump when the extraction request changes: cached documents are read again (2: room lines, total pax)
 const BG_TOLERANCE         = 5.0;        // USD per invoice over the Calc cost still OK
 const BG_OVERRIDE_USER     = 'rdesibi';  // Roberto De Sibi (not "roberto" = Roberto Capri)
 const BG_TICK_SECONDS      = 45;         // a worker tick starts no new document after this
@@ -43,7 +43,7 @@ const BG_ISSUES = [
     'activity_missing'       => [true,  'booking', 'Activity: no document in invoices/'],
     'stay_dates'             => [true,  'booking', 'Stay dates / nights differ'],
     'stay_pax'               => [true,  'booking', 'Stay pax differ'],
-    'stay_rooms'             => [true,  'booking', 'Rooms differ from the Calc'],
+    'stay_rooms'             => [true,  'booking', 'Rooms do not hold the pax'],
     'stay_meal_plan'         => [true,  'booking', 'Meal plan lower than the Calc'],
     'doc_inconsistent'       => [true,  'booking', 'Document inconsistent with itself'],
     'booked_differs'         => [true,  'booking', 'Booked ≠ Calc: update the Calc'],
@@ -60,6 +60,7 @@ const BG_ISSUES = [
     'client_flights_missing' => [false, 'sales',   'Client flights missing'],
     'booking_provisional'    => [false, 'booking', 'Booking provisional'],
     'meal_plan_note'         => [false, 'booking', 'Meal plan differs'],
+    'rooms_note'             => [false, 'booking', 'Room types differ from the Calc'],
     'lodge_name_unsure'      => [false, 'booking', 'Check the lodge name'],
     'doc_unreadable'         => [false, 'booking', 'Document could not be read'],
 ];
@@ -184,6 +185,13 @@ function bg_transition_gated(string $oldName, string $newName): bool {
     if ($to === 'PROGRESS' && !bg_has_ck($newName)) return false;   // toward PROGRESS: always free, from any status (Roberto, 13 Nov 2026)
     if (in_array($to, $pay, true) && !in_array($from, $pay, true)) return true;
     return $from === 'PROVISIONAL' && ($to !== 'PROVISIONAL' || (bg_has_ck($newName) && !bg_has_ck($oldName)));
+}
+
+const BG_CANCELLED_MSG = 'A cancelled folder can only go back to PROGRESS.';
+
+/** _CANCELLED → anything but PROGRESS (or still cancelled): refused by rule (Roberto, 13 Nov 2026; provisional handoff rule 4). */
+function bg_cancelled_move_refused(string $oldName, string $newName): bool {
+    return bg_tag($oldName) === 'CANCELLED' && !in_array(bg_tag($newName), ['CANCELLED', 'PROGRESS'], true);
 }
 
 /** Group folders are out of scope v1: GRP member / group parent, Il Diamante / Panorama, GRUPPO. */
@@ -619,8 +627,11 @@ function bg_extract_system(): string {
          . 'Your job is extraction only: copy what the document says into the schema, one object per service (one per stay / night block, '
          . 'per flight booking, per transfer, per activity). Do not judge, compare or correct anything. Unknown or not printed → empty '
          . 'string for texts, null for numbers, empty array for lists. Dates as YYYY-MM-DD (the trip year is near the document date). nights_header = nights stated in the '
-         . 'header / summary; nights_billed = quantity of nights on the price lines. rooms: type as printed (e.g. "Double", "Twin", "Single", '
-         . '"Family") with the number of rooms. adults / children = guests the document counts (children = anyone billed or listed as a child). '
+         . 'header / summary; nights_billed = quantity of nights on the price lines. rooms: one entry per room line; type = the room name exactly as '
+         . 'printed, bed layout included (e.g. "Jambo (1Dbl & 2Sngl)", "Executive Family Room", "Tusker Villa", "Twin"); count = the number of '
+         . 'rooms on that line (Rm / quantity column). A bed layout such as "1Dbl & 2Sngl" describes ONE room: never split it into several rooms. '
+         . 'adults / children = the TOTAL guests of that service, all its rooms together (e.g. Rm 2 with Ad 2 per room = 4 adults); children = '
+         . 'anyone billed or listed as a child. '
          . 'Flights: every leg with origin and destination airport as printed and STD / STA times. amount_total = total of that service as '
          . 'printed; commission = commission amount if a commission line is shown; net_amount = amount after commission. status: confirmed, '
          . 'provisional (also "on request", "tentative", "option"), cancelled, noted (a reply that only acknowledges, e.g. "noted", "well received"), '
@@ -789,16 +800,25 @@ function bg_calc_route(string $route, string $details = ''): array {
     return ['dest' => $dest, 'origins' => $origins, 'origin' => $origin, 'airports' => $codes];
 }
 
-/** Room type of a text: dbl | twn | sgl | tpl | fam | dbl_twn (either) | ''. */
+/**
+ * Room type of a room name / Calc text: fam | tpl | twn | dbl | sgl | dbl_twn (either) | ''. Family = "Family", "FAM", "Villa",
+ * "Quad", or a bed layout of one room with a double and singles ("Jambo (1Dbl & 2Sngl)" — Orangi room names, Rivolta 13 Nov 2026).
+ */
 function bg_room_type(string $s): string {
     $s = strtolower($s);
     if (preg_match('/double\s*\/\s*twin|twin\s*\/\s*double|dbl\s*\/\s*twn|twn\s*\/\s*dbl/', $s)) return 'dbl_twn';
-    if (preg_match('/\b(fam|family)/', $s)) return 'fam';
+    if (preg_match('/\b(fam|family|villa|quad|quadruple)/', $s)) return 'fam';
+    if (preg_match('/(dbl|double)/', $s) && preg_match('/(sngl|sgl|single|twin|twn)/', $s)) return 'fam';   // one room, double + singles
     if (preg_match('/\b(tpl|trpl|triple)/', $s)) return 'tpl';
     if (preg_match('/\b(twn|twin)/', $s)) return 'twn';
-    if (preg_match('/\b(dbl|double|king|queen|matrimonial)/', $s)) return 'dbl';
-    if (preg_match('/\b(sgl|single)/', $s)) return 'sgl';
+    if (preg_match('/(dbl|double|king|queen|matrimonial)/', $s)) return 'dbl';
+    if (preg_match('/(sgl|sngl|single)/', $s)) return 'sgl';
     return '';
+}
+
+/** Guests a room type holds: family / villa 4, triple 3, double / twin 2, single 1, unknown 2. */
+function bg_room_capacity(string $type): int {
+    return ['fam' => 4, 'tpl' => 3, 'dbl' => 2, 'twn' => 2, 'dbl_twn' => 2, 'sgl' => 1][$type] ?? 2;
 }
 
 /** "1 DBL + 2 TWN", "2 double, 1 single", "DBL" → ['total' => n, 'types' => [type => n]] ('total' 0 = not readable). */
@@ -815,14 +835,40 @@ function bg_rooms_parse(string $s): array {
 }
 
 function bg_rooms_doc(array $rooms): array {
-    $types = []; $total = 0;
+    $types = []; $total = 0; $cap = 0;
     foreach ($rooms as $r) {
         $n = max(1, (int)($r['count'] ?? 1));
         $t = bg_room_type((string)($r['type'] ?? ''));
         $total += $n;
+        $cap += $n * bg_room_capacity($t);
         if ($t !== '') $types[$t] = ($types[$t] ?? 0) + $n;
     }
-    return ['total' => $total, 'types' => $types];
+    return ['total' => $total, 'types' => $types, 'capacity' => $cap];
+}
+
+/**
+ * Several objects of one document for the same stay (one per room line, "2 × Executive Family Room" as two objects) →
+ * one item per document + property + check-in + check-out: pax and amounts summed, rooms listed together, the worst status.
+ */
+function bg_merge_stay_items(array $items): array {
+    $out = []; $at = [];
+    $rank = ['cancelled' => 4, 'provisional' => 3, 'unknown' => 2, 'noted' => 1, 'confirmed' => 0];
+    foreach ($items as $it) {
+        $ds = $it['ds'];
+        if (($ds['type'] ?? '') !== 'stay' || !bg_date($ds['check_in'] ?? null) || !bg_date($ds['check_out'] ?? null)) { $out[] = $it; continue; }
+        $who = bc_key((string)(($ds['property'] ?? '') ?: ($ds['supplier'] ?? '')));
+        $k = $it['doc'] . '|' . $who . '|' . $ds['check_in'] . '|' . $ds['check_out'];
+        if (!isset($at[$k])) { $at[$k] = count($out); $out[] = $it; continue; }
+        $m = &$out[$at[$k]]['ds'];
+        foreach (['adults', 'children', 'amount_total', 'commission', 'net_amount'] as $f) {
+            if (isset($ds[$f]) && $ds[$f] !== null) $m[$f] = (isset($m[$f]) && $m[$f] !== null ? $m[$f] : 0) + $ds[$f];
+        }
+        $m['rooms'] = array_merge($m['rooms'] ?? [], $ds['rooms'] ?? []);
+        if (($rank[$ds['status'] ?? 'unknown'] ?? 2) > ($rank[$m['status'] ?? 'unknown'] ?? 2)) $m['status'] = $ds['status'];
+        if (empty($m['reference']) && !empty($ds['reference'])) $m['reference'] = $ds['reference'];
+        unset($m);
+    }
+    return $out;
 }
 
 /** Same room types? dbl_twn matches dbl or twn; a type the reader could not name matches nothing (no check). */
@@ -902,7 +948,8 @@ function bg_evaluate(array $snap, array $docs, ?callable $alias = null): array {
                               'service_date' => $svc['check_in'] ?? $svc['date'] ?? null,
                               'service' => $svc ? ($svc['name'] ?? $svc['text'] ?? $svc['route'] ?? '') : '',
                               'service_type' => ['accommodation' => 'stay', 'flight' => 'flight', 'transfer' => 'transfer', 'activity' => 'activity'][$svc['type'] ?? ''] ?? null,
-                              'svc_idx' => $svc['_i'] ?? null] + $extra;
+                              'svc_idx' => $svc['_i'] ?? null];
+        $res['findings'][count($res['findings']) - 1] = array_merge(end($res['findings']), $extra);   // extra may set the audience
     };
     if (!empty($snap['calc_error'])) {
         $add('calc_not_clean', 'The Calc cannot be checked: ' . $snap['calc_error'] . ' Keep one Calc, CONF on the sheet in use only (or a single sheet), no conflicted copy.');
@@ -911,7 +958,7 @@ function bg_evaluate(array $snap, array $docs, ?callable $alias = null): array {
     $calc = $snap['calc'];
     $pax = $calc['pax'] ?? ['adults' => 0, 'teen' => 0, 'child' => 0];
     $totalPax = (int)$pax['adults'] + (int)$pax['teen'] + (int)$pax['child'];
-    $calcKids = (int)$pax['teen'] + (int)$pax['child'];
+    $calcKids = (int)$pax['child'];   // teens count as adults at the lodges (Rivolta handoff, 13 Nov 2026)
     $calcRooms = bg_rooms_parse((string)($calc['room_config'] ?? ''));
     $hasSingle = !empty($calcRooms['types']['sgl']);
     $singleLeft = $hasSingle && !empty($calc['single_supp']) ? (float)$calc['single_supp'] : 0.0;
@@ -935,6 +982,7 @@ function bg_evaluate(array $snap, array $docs, ?callable $alias = null): array {
                         'clients' => $d['data']['client_names'] ?? [], 'kind' => $d['data']['document_kind'] ?? ''];
         }
     }
+    $items = bg_merge_stay_items($items);
     foreach ($snap['evidence'] ?? [] as $e) if (!empty($e['old'])) $res['ignored'][] = $e['path'];
 
     $svcs = $snap['services'];
@@ -1245,17 +1293,36 @@ function bg_eval_stay(array &$svcs, int $i, array $named, array &$items, callabl
             $add('doc_inconsistent', $items[$k]['file'] . ': ' . bg_dm($di) . '–' . bg_dm($do) . ' = ' . $n . ' nights, ' . ($h !== null ? 'header ' . $h . ' nights' : '')
                  . ($h !== null && $b !== null ? ', ' : '') . ($b !== null ? 'billed ' . $b . ' nights' : '') . ': ask the supplier for a corrected document.', $s, ['source_file' => $items[$k]['file']]);
         }
+        $dr = !empty($ds['rooms']) ? bg_rooms_doc($ds['rooms']) : null;
+        // Pax printed per room ("Rm 2, Ad 2" = 4 adults): rooms × pax when that gives the Calc's pax.
+        if ($dr && $dr['total'] > 1 && $paxOf($ds) !== null && $paxOf($ds) !== $totalPax && $paxOf($ds) * $dr['total'] === $totalPax) {
+            $ds['adults'] = (int)$ds['adults'] * $dr['total'];
+            if (isset($ds['children']) && $ds['children'] !== null) $ds['children'] = (int)$ds['children'] * $dr['total'];
+        }
         $p = $paxOf($ds);
+        $docKids = (int)($ds['children'] ?? 0);
+        $roomsTxt = $dr ? implode(' + ', array_map(fn($r) => ($r['count'] ?? 1) . ' × ' . ($r['type'] ?? ''), $ds['rooms'])) : '';
         if ($p !== null && $p !== $totalPax) {
             $add('stay_pax', $s['name'] . ': ' . $p . ' pax on the document, the Calc has ' . $totalPax . '.', $s, ['source_file' => $items[$k]['file']]);
-        } elseif ($p !== null && !$s['own'] && $calcKids > 0 && (int)($ds['children'] ?? 0) === 0 && (int)$ds['adults'] === $totalPax) {
-            $add('child_as_adult', $s['name'] . ': ' . $calcKids . ' child(ren) / teen(s) billed as adults — ask for the child rate (the client got a child discount).', $s, ['source_file' => $items[$k]['file']]);
+        } elseif ($p !== null && $docKids !== $calcKids && $docKids > 0) {
+            // Same total, children booked where the Calc has adults (or more children): ask the seller which is right.
+            $add('stay_pax', $s['name'] . ' (' . basename($items[$k]['file']) . '): ' . (int)$ds['adults'] . ' adults + ' . $docKids . ' children, Calc: '
+                 . ($totalPax - $calcKids) . ' adults' . ($calcKids ? ' + ' . $calcKids . ' children' : '') . ': check the ages with the seller, then fix the booking or the Calc.',
+                 $s, ['source_file' => $items[$k]['file'], 'audience' => 'sales']);
+        } elseif ($p !== null && !$s['own'] && $calcKids > 0 && $docKids === 0) {
+            $add('child_as_adult', $s['name'] . ': ' . $calcKids . ' child(ren) billed as adults — ask for the child rate (the client got a child discount).', $s, ['source_file' => $items[$k]['file']]);
         }
-        if (!empty($ds['rooms']) && $calcRooms['total'] > 0) {
-            $dr = bg_rooms_doc($ds['rooms']);
-            if ($dr['total'] !== $calcRooms['total'] || !bg_rooms_same_types($calcRooms['types'], $dr['types'])) {
-                $add('stay_rooms', $s['name'] . ': ' . implode(' + ', array_map(fn($r) => ($r['count'] ?? 1) . ' ' . ($r['type'] ?? ''), $ds['rooms']))
-                     . ' booked, the Calc has ' . bg_rooms_text($calcRooms) . '.', $s, ['source_file' => $items[$k]['file']]);
+        // Rooms (Rivolta, 13 Nov 2026): with a final room list double / twin / single / triple differences do not block; the rooms
+        // must hold the pax, and a family room the Calc asks for should be there (a missing one is a warning).
+        if ($dr && $calcRooms['total'] > 0) {
+            if ($dr['capacity'] < $totalPax) {
+                $add('stay_rooms', $s['name'] . ': ' . $roomsTxt . ' booked hold about ' . $dr['capacity'] . ' guests, the Calc has ' . $totalPax
+                     . ' pax (' . bg_rooms_text($calcRooms) . ').', $s, ['source_file' => $items[$k]['file']]);
+            } elseif (!empty($calcRooms['types']['fam']) && empty($dr['types']['fam']) && array_sum($dr['types']) === $dr['total']) {   // every room type known
+                $add('rooms_note', $s['name'] . ': ' . $roomsTxt . ' booked, the Calc has ' . bg_rooms_text($calcRooms) . ' (no family room): check the family is fine with it.',
+                     $s, ['source_file' => $items[$k]['file']]);
+            } elseif (empty($calcRooms['types']['fam']) && !bg_rooms_same_types($calcRooms['types'], $dr['types'])) {
+                $add('rooms_note', $s['name'] . ': ' . $roomsTxt . ' booked, the Calc has ' . bg_rooms_text($calcRooms) . '.', $s, ['source_file' => $items[$k]['file']]);
             }
         }
         $cm = bg_calc_meal($s['name']); $dm = bg_meal_rank($ds['meal_plan'] ?? null);
@@ -1310,6 +1377,18 @@ function bg_rooms_text(array $r): string {
 function bg_meal_label(int $r): string { return ['RO', 'BB', 'HB', 'FB', 'AI'][$r] ?? '?'; }
 
 function bg_eval_close(array $res): array {
+    // One finding per service and issue (several documents / objects of the same stay): texts joined.
+    $seen = []; $out = [];
+    foreach ($res['findings'] as $f) {
+        if ($f['svc_idx'] === null) { $out[] = $f; continue; }
+        $k = $f['svc_idx'] . '|' . $f['issue'];
+        if (!isset($seen[$k])) { $seen[$k] = count($out); $out[] = $f; continue; }
+        $o = &$out[$seen[$k]];
+        if (strpos($o['text'], $f['text']) === false) $o['text'] .= ' | ' . $f['text'];
+        if ($f['audience'] === 'sales') $o['audience'] = 'sales';
+        unset($o);
+    }
+    $res['findings'] = $out;
     foreach ($res['findings'] as $f) $f['blocking'] ? $res['blocking']++ : $res['warnings']++;
     $res['passed'] = $res['blocking'] === 0;
     return $res;
@@ -1547,6 +1626,13 @@ function bg_reason(array $st): string {
  */
 function booking_gate_check(PDO $db, int $rid, string $oldName, string $newName, ?int $userId, string $via = 'status_change', bool $dry = false): array {
     $out = ['gated' => false, 'allowed' => true, 'enforced' => bg_enforce(), 'refused' => false, 'reason' => '', 'state' => null, 'run_id' => null, 'blocking' => [], 'queued' => false];
+    // A cancelled private folder can only go back to PROGRESS (rule, not check: refused even with a passed run, in any mode).
+    if (bg_cancelled_move_refused($oldName, $newName)) {
+        $r = bg_request($db, $rid);
+        if ($r && !bg_is_group($r)) {
+            return ['gated' => true, 'allowed' => false, 'refused' => true, 'state' => 'cancelled_rule', 'reason' => BG_CANCELLED_MSG] + $out;
+        }
+    }
     if (!bg_transition_gated($oldName, $newName)) return $out;
     try {
         bg_schema($db);
@@ -1591,6 +1677,7 @@ class BookingGateRefused extends RuntimeException {
 
 /** The refusal text of a rename path ("⛔ …"). */
 function booking_gate_message(array $g): string {
+    if (($g['state'] ?? '') === 'cancelled_rule') return '⛔ ' . $g['reason'];
     return '⛔ Booking check: ' . $g['reason'];
 }
 

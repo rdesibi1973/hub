@@ -153,7 +153,7 @@ $t('provisional → passed + booking_provisional', $res['passed'] && in_array('b
 $res = bg_evaluate($snap($base), [$tt(['adults' => 3]), $okFlight]);
 $t('3 pax vs 2 → stay_pax', in_array('stay_pax!', $issues($res), true), $issues($res));
 $res = bg_evaluate($snap($base), [$tt(['rooms' => [['type' => 'Twin', 'count' => 1]]]), $okFlight]);
-$t('Twin vs DBL → stay_rooms', in_array('stay_rooms!', $issues($res), true), $issues($res));
+$t('Twin vs DBL → warning only (final room list)', $res['passed'] && in_array('rooms_note', $issues($res), true), $issues($res));
 $res = bg_evaluate($snap($base, ['pax' => ['adults' => 2, 'teen' => 0, 'child' => 1]]), [$tt(['adults' => 3]), $okFlight]);
 $t('child billed as adult', in_array('child_as_adult!', $issues($res), true), $issues($res));
 $res = bg_evaluate($snap($base), [$tt(['nights_header' => 2, 'nights_billed' => 1]), $okFlight]);
@@ -184,6 +184,47 @@ $t('own JRO transfer → IN-HOUSE, nothing reported', $res['passed'] && !$res['f
 // Report renders, no passport.
 $html = bg_report_html(['customer_name' => 'Cavalli'], $snap($cavServices), bg_evaluate($snap($cavServices), [$sv]), ['finished_at' => '2026-11-13 10:00:00']);
 $t('report renders', strpos($html, '<title>Booking check') !== false && strpos($html, 'MISSING') !== false);
+
+// ── Rivolta (request 3091, run 8): rooms from room names, family equivalents, pax per room, adults vs children ──
+$t('room names: bed layout = one family room', bg_room_type('Jambo (1Dbl & 2Sngl)') === 'fam' && bg_room_type('Bwana 1Dbl & 2Sngl)') === 'fam'
+   && bg_room_type('Tusker Villa 1') === 'fam' && bg_room_type('Executive Family Room') === 'fam' && bg_room_type('Swala (1Dbl)') === 'dbl'
+   && bg_room_type('Fisi (Dbl)') === 'dbl' && bg_room_type('Executive Room') === '');
+$rvSnap = $snap([], ['pax' => ['adults' => 4, 'teen' => 0, 'child' => 0], 'room_config' => '1 FAM + 1 TWN', 'start_date' => '2027-08-18', 'end_date' => '2027-08-29']);
+$rvSvc = fn($name, $in, $out, $n, $own = false) => $stay($name, $in, $out, $n, null, $own);
+$rvSnap['services'] = [
+    $rvSvc('Arusha Explorers', '2027-08-18', '2027-08-19', 1, true),
+    $rvSvc('Marera', '2027-08-20', '2027-08-21', 1, true),
+    $rvSvc('Orangi River', '2027-08-22', '2027-08-24', 2, true),
+    $rvSvc('Elephant Springs', '2027-08-19', '2027-08-20', 1),
+    $rvSvc('Lions Paw', '2027-08-21', '2027-08-22', 1),
+    $rvSvc('River Camp', '2027-08-24', '2027-08-25', 1),
+];
+$rm = fn($type, $n = 1) => ['type' => $type, 'count' => $n];
+$orangi = $doc('invoices/The Orangi Collection -sv.pdf', [
+    $dsStay('Arusha Explorers', '2027-08-18', '2027-08-19', ['adults' => 2, 'children' => 2, 'rooms' => [$rm('Jambo (1Dbl & 2Sngl)')], 'status' => 'provisional']),
+    $dsStay('Marera', '2027-08-20', '2027-08-21', ['adults' => 2, 'children' => 2, 'rooms' => [$rm('Kilimanjaro (1Dbl & 2Sngl)')], 'status' => 'provisional']),
+    $dsStay('Orangi River Luxury', '2027-08-22', '2027-08-24', ['adults' => 2, 'children' => 0, 'rooms' => [$rm('Swala (1Dbl)')], 'status' => 'provisional']),
+    $dsStay('Orangi River Luxury', '2027-08-22', '2027-08-24', ['adults' => 2, 'children' => 0, 'rooms' => [$rm('Fisi (Dbl)')], 'status' => 'provisional']),
+]);
+$karibu = $doc('invoices/karibu camp -inv.pdf', [
+    $dsStay('Elephant Springs', '2027-08-19', '2027-08-20', ['adults' => 4, 'rooms' => [$rm('Tusker Villa 1')], 'status' => 'provisional']),
+    $dsStay('Lions Paw', '2027-08-21', '2027-08-22', ['adults' => 2, 'rooms' => [$rm('Executive Family Room')], 'status' => 'provisional']),
+    $dsStay('Lions Paw', '2027-08-21', '2027-08-22', ['adults' => 2, 'rooms' => [$rm('Executive Family Room')], 'status' => 'provisional']),
+    $dsStay('River Camp', '2027-08-24', '2027-08-25', ['adults' => 2, 'rooms' => [$rm('Executive Room', 2)], 'amount_total' => 1980, 'status' => 'provisional']),
+]);
+$res = bg_evaluate($rvSnap, [$orangi, $karibu]);
+$blk = array_values(array_filter($res['findings'], fn($f) => $f['blocking']));
+$t('Rivolta: only blocking = 2A/2C vs 4 adults on Arusha Explorers + Marera, audience sales',
+   count($blk) === 2 && $blk[0]['issue'] === 'stay_pax' && $blk[0]['audience'] === 'sales' && strpos($blk[0]['text'], '2 adults + 2 children') !== false
+   && $blk[1]['service'] === 'Marera', array_map(fn($f) => [$f['issue'], $f['service'], $f['audience'], $f['text']], $blk));
+$t('Rivolta: no room block, Orangi 2 × Double = warning only, no duplicate line per service',
+   !array_filter($res['findings'], fn($f) => $f['issue'] === 'stay_rooms')
+   && count(array_filter($res['findings'], fn($f) => $f['issue'] === 'rooms_note' && $f['service'] === 'Orangi River')) === 1
+   && count(array_filter($res['findings'], fn($f) => $f['service'] === 'River Camp' && $f['issue'] !== 'booking_provisional')) === 0, $issues($res));
+// CANCELLED: only back to PROGRESS (rule, refused even with a passed run)
+$t('CANCELLED → PROVISIONAL / DEPOSIT / PAID refused by rule; → PROGRESS allowed', bg_cancelled_move_refused($rv . 'CANCELLED', $rv . 'PROVISIONAL')
+   && bg_cancelled_move_refused($rv . 'CANCELLED', $rv . 'DEPOSIT') && bg_cancelled_move_refused($rv . 'CANCELLED', $rv . 'PAID')
+   && !bg_cancelled_move_refused($rv . 'CANCELLED', $rv . 'PROGRESS') && !bg_cancelled_move_refused($rv . 'PROVISIONAL', $rv . 'DEPOSIT'));
 
 // ── Undated Calc rows: one rule (calc_skipped_kind) for booking_check, the gate and the ITI final program ──
 $row21 = ['row' => 21, 'text' => 'activity "MEDIVAC"', 'hotel' => '', 'invoice' => '', 'checked' => '', 'dated' => false, 'has_cost' => true, 'stay_cost' => null];

@@ -20,6 +20,16 @@ Running log of notable changes and current build state. Module-level "active / p
 
 ---
 
+## 2026-11-13 — Booking gate: room / pax fixes (Rivolta), cancelled folders only back to PROGRESS
+
+- Extraction v2 (cached documents read again once): one room entry per room line with the room name as printed, never a bed
+  layout split into rooms; adults / children = total of the service. Same-stay objects of one document merged.
+- Rooms: blocking only when the rooms do not hold the pax; type differences / no family room = warning `rooms_note`;
+  "(1Dbl & 2Sngl)", Villa, Family, Quad = family. Pax printed per room × rooms. One finding per service and issue.
+- Adults vs children compared separately: children booked where the Calc has adults → blocking `stay_pax`, audience sales.
+  Teens count as adults at the lodges.
+- `_CANCELLED` → anything but `_PROGRESS` refused by rule (private folders), even with a passed check.
+
 ## 2026-11-13 — Groups only when named; booking gate: toward PROGRESS always free
 
 - `ck_is_group_folder()` / `followup_group_kind()`: a group is a GRPnnnn / Il Diamante / Panorama / GRUPPO folder or one Hub

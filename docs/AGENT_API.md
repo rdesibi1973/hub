@@ -357,7 +357,8 @@ to that user. Documents already read (same Dropbox `content_hash`) are never sen
   `_BALANCE-CASH` / `_PAID`) — from `_PROGRESS`, and also from `_PROVISIONAL` or no tag, so there is no way round — **or a
   private folder leaving `_PROVISIONAL` for any other status** (a payment tag, no tag, `_CK` added — also from the CK tracker)
   except `_CANCELLED`; **toward `_PROGRESS` is always free, from any status** (Roberto, 13 Nov 2026) → **409 also on the dry run** (`booking_gate` in the body) unless the latest run is `passed` and not
-  out of date (Calc or evidence changed since) or `overridden`. Same refusal on every Hub path (BackOffice Rename / Change status,
+  out of date (Calc or evidence changed since) or `overridden`. **A `_CANCELLED` private folder can only go back to `_PROGRESS`**:
+  any other move is refused by rule (409, "A cancelled folder can only go back to PROGRESS."), even with a passed check. Same refusal on every Hub path (BackOffice Rename / Change status,
   invoice "Update Folder", request edit form). The Java BackOffice endpoints (`api_rename_folder.php`, `api_update_status.php`)
   rename on disk first: they cannot refuse — timeline + memo to Roberto + a run started (`booking_gate_warning`).
   A refused attempt with no usable run starts one. Later moves (DEPOSIT → BALANCE → PAID) are not gated. Groups are not gated (v1).
@@ -371,8 +372,10 @@ to that user. Documents already read (same Dropbox `content_hash`) are never sen
 | `calc_not_clean` | yes | sales | no Calc, Calc only as conflicted copy, several CONF sheets / old quotes |
 | `stay_missing` / `flight_missing` / `activity_missing` | yes | booking | no document (own lodges: no Orangi Collection SV) |
 | `stay_dates` | yes | booking | check-in / check-out / nights differ (split documents or one invoice for two blocks of the same lodge are fine) |
-| `stay_pax` / `flight_pax` / `activity_pax` | yes | booking | adults + children ≠ Calc pax |
-| `stay_rooms` | yes | booking | rooms (count / type) ≠ `room_config` |
+| `stay_pax` / `flight_pax` / `activity_pax` | yes | booking | adults + children ≠ Calc pax (pax printed per room × rooms when that gives the Calc pax) |
+| `stay_pax` | yes | **sales** | same total, but children booked where the Calc has adults (teens count as adults): check ages with the seller |
+| `stay_rooms` | yes | booking | the rooms booked do not hold the pax (family / villa 4, triple 3, double / twin 2, single 1); room names give the type ("Jambo (1Dbl & 2Sngl)" = one family room) |
+| `rooms_note` | no | booking | room types differ from `room_config` (final room list), or no family room although the Calc asks for one |
 | `stay_meal_plan` | yes | booking | BB / RO booked, or two levels below the Calc's FB / HB (`meal_plan_note`, warning: FB vs HB) |
 | `doc_inconsistent` | yes | booking | header nights ≠ arrival → departure ≠ nights billed |
 | `booked_differs` | yes | booking | another lodge on the same dates (names compared, AI asked only when the words differ): update the Calc |
