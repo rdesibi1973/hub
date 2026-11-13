@@ -109,10 +109,12 @@ try {
         $f = ck_api_folder($db, (int)($_GET['id'] ?? 0));
         require_once __DIR__ . '/../iti/includes/iti_ck_export.php';
         $res = iti_ck_programs($db, $f['folder_name']);
-        foreach ($res['programs'] as &$p) {
-            $p['hash'] = sha1(json_encode($p, JSON_UNESCAPED_UNICODE));   // in the runner's fingerprint
+        foreach (['programs', 'documents'] as $k) {
+            foreach ($res[$k] as &$p) {
+                $p['hash'] = sha1(json_encode($p, JSON_UNESCAPED_UNICODE));   // in the runner's fingerprint
+            }
+            unset($p);
         }
-        unset($p);
         ck_api_out(['ok' => true] + $res);
     }
 

@@ -20,6 +20,16 @@ Running log of notable changes and current build state. Module-level "active / p
 
 ---
 
+## 2026-11-13 — CK tracker: SafariCheck reads the ITI programme from its PDF in the folder
+- A direct client gets the ITI programme as `<Ref. Number>.pdf`, not a Word: a booking whose programme was a
+  proposal not marked Confirmed (e.g. NicolaMarta, #123) got "Word file not found" although the PDF sent to the
+  client was in the folder.
+- `iti_ck_export.php`: `?action=iti` also returns `documents` — the skipped programmes with a start date, with full
+  data; `doc_names` now lists the `.pdf` names too (`<ref_number>.pdf`, `<Title>_<LANG>.pdf`). Hashed in the fingerprint.
+- safariagent `iti_program.choose()`: after final / Confirmed / final from another Calc, a `documents` programme whose
+  own file is at the top of the folder (GRP: client sub-folder, PDFs there now staged as placeholders) is used,
+  noted "proposal, not marked Confirmed; its file … is in the folder". "Word file not found" says to save the PDF too.
+
 ## 2026-11-12 — Draft .eml out of mails/ into old/
 - Rule (Roberto): a booking folder's `mails/` holds real mails only; Cowork's draft copies (`.eml` with `X-Unsent: 1`) go to
   `old/`. Draft = `.eml` + `X-Unsent: 1` in the header block (64 KB Range read, CRLF files included) — never by name.

@@ -14,6 +14,9 @@
  *   - 'confirmed': marked Confirmed by hand in ITI (programmes not built from the Calc).
  * The others are returned as 'skipped' with the reason, for the report. The runner picks
  * among them by the Calc it checks (safariagent iti_program.choose()).
+ * 'documents': the skipped ones with a start date, with their full data — the runner uses one
+ * only when its own file (doc_names: <ref_number>.pdf / .docx saved by ITI, PDF for a direct
+ * client) is in the booking folder, i.e. it is the document sent to the client.
  * GRP folder: per client request, with that client's sub-folder (requests.practice_code).
  *
  * Night of day N = its end lodge (the last day has no night). Meal basis of the night
@@ -36,7 +39,7 @@ function iti_ck_programs(PDO $db, string $folder): array {
         $sub = trim((string)$r['practice_code']);
         $reqs[(int)$r['id']] = (string)$r['group_folder'] !== '' && $sub !== $folder ? $sub : '';
     }
-    $out = ['programs' => [], 'skipped' => []];
+    $out = ['programs' => [], 'skipped' => [], 'documents' => []];
     if (!$reqs) return $out;
 
     $in = implode(',', array_fill(0, count($reqs), '?'));
@@ -62,6 +65,9 @@ function iti_ck_programs(PDO $db, string $folder): array {
                                  'title' => iti_ck_pick($p, 'title_', (string)($p['display_language'] ?? 'it')),
                                  'stage' => $p['stage'] ?? 'proposal', 'status' => $p['status'] ?? '', 'reason' => $reason,
                                  'link' => ITI_MODULE_URL . '/program_edit.php?id=' . (int)$p['id']];
+            if ($reason !== 'no start date') {
+                $out['documents'][] = iti_ck_program_data($db, $p, $rid, $reqs[$rid]) + ['chosen_by' => 'document', 'reason' => $reason];
+            }
             continue;
         }
         $out['programs'][] = iti_ck_program_data($db, $p, $rid, $reqs[$rid]) + ['chosen_by' => $fromBooking ? 'final' : 'confirmed'];
@@ -171,12 +177,15 @@ function iti_ck_program_data(PDO $db, array $p, int $requestId, string $clientFo
     }
     if ($adultTotal !== null) $adult = $adultTotal;
 
-    // File names of this programme's Word: saved by the API (<ref_number>.docx) or downloaded (<Title>_<LANG>.docx).
+    // File names of this programme's document: saved to Dropbox by ITI / the API (<ref_number>.docx / .pdf,
+    // iti_ps_document_name()) or downloaded (<Title>_<LANG>.docx / .pdf, iti_export_file()).
     $names = [];
-    if (trim((string)($p['ref_number'] ?? '')) !== '') $names[] = trim((string)$p['ref_number']) . '.docx';
-    foreach (ITI_LANGUAGES as $l) {
-        $t = trim((string)($p['title_' . $l] ?? ''));
-        if ($t !== '') $names[] = (trim(preg_replace('/[^A-Za-z0-9]+/', '_', $t), '_') ?: 'Program') . '_' . strtoupper($l) . '.docx';
+    foreach (['docx', 'pdf'] as $ext) {
+        if (trim((string)($p['ref_number'] ?? '')) !== '') $names[] = trim((string)$p['ref_number']) . '.' . $ext;
+        foreach (ITI_LANGUAGES as $l) {
+            $t = trim((string)($p['title_' . $l] ?? ''));
+            if ($t !== '') $names[] = (trim(preg_replace('/[^A-Za-z0-9]+/', '_', $t), '_') ?: 'Program') . '_' . strtoupper($l) . '.' . $ext;
+        }
     }
 
     $end = $n ? $date($days[$n - 1]) : $p['start_date'];
