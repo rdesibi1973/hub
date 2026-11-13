@@ -64,12 +64,12 @@ const FU_SALES_SC_ISSUES = ['sc_pax', 'sc_dates', 'sc_basis_differs', 'sc_nights
 const FU_SELLER_BY_LANG = ['micky' => ['en' => 'Agustin', 'it' => 'Anderson'], 'sultan' => ['en' => 'Agustin', 'it' => 'Anderson']];
 /** Sellers who left with no successor yet: the line stays without owner (Roberto assigns it). */
 const FU_SELLER_ASK = ['sara'];
-const FU_TYPES   = ['supplier', 'ticket', 'group', 'ck', 'safaricheck', 'manual'];
+const FU_TYPES   = ['supplier', 'ticket', 'group', 'ck', 'safaricheck', 'manual', 'gate'];
 /** The check behind each line type, as `sources` names it. */
 const FU_TYPE_SOURCE = ['supplier' => 'supplier_scan', 'ticket' => 'ticket_scan', 'group' => 'group_scan', 'ck' => 'claude_check',
-                        'safaricheck' => 'safaricheck', 'manual' => 'manual'];
+                        'safaricheck' => 'safaricheck', 'manual' => 'manual', 'gate' => 'gate_check'];
 const FU_SOURCE_LABELS = ['supplier_scan' => 'Supplier scan', 'ticket_scan' => 'Ticket scan', 'group_scan' => 'Group check',
-                          'safaricheck' => 'SafariCheck', 'claude_check' => 'Claude check', 'manual' => 'Manual'];
+                          'safaricheck' => 'SafariCheck', 'claude_check' => 'Claude check', 'manual' => 'Manual', 'gate_check' => 'Booking gate'];
 /** Issues meaning "a booking is still provisional": they block the _CK (ck_pipeline_block()) and close on a confirmed document. */
 const FU_PROVISIONAL_ISSUES = ['provisional', 'provisional_expired', 'on_request', 'orangi_rooms_provisional', 'booking_provisional'];
 const FU_SERVICE_TYPES = ['stay', 'flight', 'transfer', 'activity', 'payment', 'invoice', 'client_info', 'dates', 'group', 'other'];
@@ -120,7 +120,7 @@ function followup_schema(PDO $db): void {
     if ($done) return;
     $db->exec("CREATE TABLE IF NOT EXISTS booking_followups (
         id              INT AUTO_INCREMENT PRIMARY KEY,
-        type            ENUM('supplier','ticket','group','ck','safaricheck','manual') NOT NULL,
+        type            ENUM('supplier','ticket','group','ck','safaricheck','manual','gate') NOT NULL,
         audience        ENUM('booking','sales','accounts') NULL,
         dedupe_key      VARCHAR(190) NOT NULL,
         request_id      INT NULL,
@@ -197,6 +197,7 @@ function followup_schema(PDO $db): void {
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
     followup_schema_reasons($db);
     followup_schema_override($db);
+    followup_schema_gate($db);
     $done = true;
 }
 
@@ -217,6 +218,24 @@ function followup_schema_override(PDO $db): void {
         followup_meta_set($db, 'expiry_override', date('Y-m-d H:i:s'));
     } catch (Throwable $e) {
         error_log('followup_schema_override: ' . $e->getMessage());
+    }
+}
+
+/**
+ * Line type 'gate' (booking gate, 13 Nov 2026; migration 083): added to the type ENUM of an older table.
+ * Checked once in INFORMATION_SCHEMA, then marked in meta.
+ */
+function followup_schema_gate(PDO $db): void {
+    try {
+        if (followup_meta_get($db, 'type_gate') !== null) return;
+        $t = (string)$db->query("SELECT COLUMN_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE()
+                                 AND TABLE_NAME = 'booking_followups' AND COLUMN_NAME = 'type'")->fetchColumn();
+        if ($t !== '' && strpos($t, "'gate'") === false) {
+            $db->exec("ALTER TABLE booking_followups MODIFY type ENUM('supplier','ticket','group','ck','safaricheck','manual','gate') NOT NULL");
+        }
+        followup_meta_set($db, 'type_gate', date('Y-m-d H:i:s'));
+    } catch (Throwable $e) {
+        error_log('followup_schema_gate: ' . $e->getMessage());
     }
 }
 
@@ -262,7 +281,7 @@ function followup_schema_upgrade(PDO $db): void {
     } catch (Throwable $e) {
         return;   // no INFORMATION_SCHEMA (tests)
     }
-    $sql = ["ALTER TABLE booking_followups MODIFY type ENUM('supplier','ticket','group','ck','safaricheck','manual') NOT NULL"];
+    $sql = ["ALTER TABLE booking_followups MODIFY type ENUM('supplier','ticket','group','ck','safaricheck','manual','gate') NOT NULL"];
     if (!in_array('audience', $have, true)) {
         array_push($sql, "ALTER TABLE booking_followups MODIFY issue VARCHAR(40) NOT NULL",
                    "ALTER TABLE booking_followups MODIFY doc_status_text VARCHAR(500) NULL",
@@ -1739,8 +1758,8 @@ function followup_apply(PDO $db, string $type, array $cand, array $scope, bool $
             if (!$prev && $old['sources'] !== null) followup_event($db, $id, null, 'source', null, $srcLabel($l));   // reported again by its own check
             if ($reopen) {
                 $what = $type === 'ticket' ? 'ticket still missing' : ($type === 'group' ? 'group still to finalize'
-                      : ($type === 'ck' ? 'still reported by CK check' : ($type === 'safaricheck' ? 'still reported by SafariCheck'
-                      : 'still ' . strtolower(followup_issue_label((string)$l['issue'])) . (!empty($l['source_file']) ? ' in ' . $l['source_file'] : ''))));
+                      : ($type === 'ck' ? 'still reported by CK check' : ($type === 'gate' ? 'still reported by the booking gate' : ($type === 'safaricheck' ? 'still reported by SafariCheck'
+                      : 'still ' . strtolower(followup_issue_label((string)$l['issue'])) . (!empty($l['source_file']) ? ' in ' . $l['source_file'] : '')))));
                 $reopenEvents($id, $old, $what);
             }
         }
@@ -1769,7 +1788,7 @@ function followup_apply(PDO $db, string $type, array $cand, array $scope, bool $
         // folder was renamed / cancelled / moved.
         elseif ($type === 'group' && isset($scope['groups_seen'][$old['folder']])) $reason = 'auto_resolved';
         elseif ($type === 'group' && !empty($scope['complete_type'])) $reason = 'auto_not_found';
-        elseif ($type === 'ck' || $type === 'safaricheck') { if (isset($done[$rid])) $reason = 'auto_resolved'; }   // the new check of the booking no longer reports it
+        elseif ($type === 'ck' || $type === 'safaricheck' || $type === 'gate') { if (isset($done[$rid])) $reason = 'auto_resolved'; }   // the new check of the booking no longer reports it
         elseif ($type === 'manual') $reason = null;                                                     // staff close their own lines
         elseif (isset($done[$rid]) && ($type === 'supplier'
                 || $old['service_date'] >= $today && $old['service_date'] <= ($scope['to'] ?? '9999-12-31'))) $reason = 'auto_not_found';
@@ -2229,6 +2248,59 @@ function followup_ck_upsert(PDO $db, int $requestId, array $ckRow, array $findin
 }
 
 /**
+ * The findings of one booking-gate run (booking_gate_service.php) replace that booking's open gate lines, the same
+ * way as a Claude check (followup_ck_upsert(): add / merge into the same service's line of another check / update /
+ * close as auto_resolved; `findings: []` closes them all). Each line keeps `blocking` and the run in `details`.
+ * Owners (13 Nov 2026): booking lines → $meta['booking_owner_id'] (the user who tried the status change or ran the
+ * check), else the CK booking owner; sales → CK owner; accounts → Roberto.
+ * $findings[] {audience, issue, blocking, service_date?, service, service_type?, supplier?, text, source_file?}.
+ * Always written (no dry run: the gate itself is the check). → followup_apply() summary + 'errors'.
+ */
+function followup_gate_upsert(PDO $db, int $requestId, array $ckRow, array $findings, array $meta, ?string $today = null): array {
+    followup_schema($db);
+    ck_ensure_schema($db);
+    $today = $today ?? date('Y-m-d');
+    $owners = ck_owners_resolve($db, $ckRow);
+    $acc = ck_user_find($db, FU_ACCOUNTS_OWNER);
+    $bookingOwner = !empty($meta['booking_owner_id']) ? (int)$meta['booking_owner_id'] : ($owners['booking_owner']['user_id'] ?? null);
+    $ownerOf = ['booking' => $bookingOwner, 'sales' => $owners['ck_owner']['user_id'] ?? null, 'accounts' => $acc ? (int)$acc['id'] : null];
+    $date = fn($v) => ($v && preg_match('/^\d{4}-\d{2}-\d{2}$/', (string)$v)) ? (string)$v : null;
+    $cand = []; $errors = [];
+    foreach ($findings as $i => $f) {
+        $aud = in_array($f['audience'] ?? '', FU_AUDIENCES, true) ? $f['audience'] : 'booking';
+        $issue = preg_match('/^[a-z0-9_]{2,40}$/', (string)($f['issue'] ?? '')) ? $f['issue'] : 'other';
+        $text = trim(followup_strip_passport((string)($f['text'] ?? '')));
+        if ($text === '') { $errors[] = ['finding' => $i, 'error' => 'no text']; continue; }
+        $stype = in_array($f['service_type'] ?? '', FU_SERVICE_TYPES, true) ? $f['service_type'] : '';
+        $svc = mb_substr(trim(followup_strip_passport((string)($f['service'] ?? ''))), 0, 255);
+        $sd = $date($f['service_date'] ?? null);
+        $blocking = !empty($f['blocking']);
+        $isTransfer = $sd && $stype === 'transfer';
+        $key = $isTransfer ? followup_transfer_key('gate', $requestId, $aud, $sd)
+                           : followup_key_fit('GT|' . $requestId . '|' . $aud . '|' . $issue . '|' . ($sd ?? '') . '|' . substr(followup_norm($svc), 0, 80));
+        if (isset($cand[$key])) {
+            $cand[$key]['doc_status_text'] = mb_substr($cand[$key]['doc_status_text'] . ' | ' . $text, 0, 500);
+            $d = json_decode($cand[$key]['details'], true);
+            if ($blocking) { $d['blocking'] = true; $cand[$key]['details'] = json_encode($d, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES); }
+            continue;
+        }
+        $details = ['blocking' => $blocking, 'gate_run_id' => isset($meta['run_id']) ? (int)$meta['run_id'] : null];
+        if (!empty($meta['report_path'])) $details['report_path'] = (string)$meta['report_path'];
+        $cand[$key] = ['type' => 'gate', 'audience' => $aud, 'dedupe_key' => $key, 'request_id' => $requestId,
+                       'folder' => $ckRow['folder_name'], 'start_date' => $ckRow['start_date'], 'end_date' => $ckRow['end_date'],
+                       'service_date' => $sd, 'supplier' => mb_substr(trim((string)($f['supplier'] ?? '')), 0, 150) ?: null,
+                       'supplier_ref' => null, 'service' => $svc !== '' ? $svc : null,
+                       'source_file' => mb_substr(trim((string)($f['source_file'] ?? '')), 0, 500) ?: null,
+                       'issue' => $issue, 'doc_status_text' => mb_substr(($blocking ? 'BLOCKING — ' : '') . $text, 0, 500),
+                       'expiry_date' => $date($f['expiry_date'] ?? null), 'booked_by' => null,
+                       'details' => json_encode($details, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                       'owner_user_id' => $ownerOf[$aud]] + ($stype !== '' ? ['service_type' => $stype] : []);
+    }
+    $sum = followup_apply($db, 'gate', $cand, ['requests' => [$requestId], 'only' => [$requestId]], true, 'gate', $today);
+    return $sum + ['errors' => $errors];
+}
+
+/**
  * Open lines per request: [request_id => ['ck' => n, 'supplier' => n, 'ticket' => n, 'group' => n, 'safaricheck' => n,
  * 'manual' => n, 'total' => n, 'audience' => {booking, sales, accounts} (all types), 'ck_audience' => {…} (ck lines)]].
  */
@@ -2418,6 +2490,7 @@ function followup_sc_fold_undated(array &$cand, array $facts = []): void {
 
 /** dedupe_key of a transfer line of a check: one per request, day (and audience for the Claude check). */
 function followup_transfer_key(string $type, int $requestId, string $audience, string $date): string {
+    if ($type === 'gate') return followup_key_fit('GT|' . $requestId . '|' . ($audience ?: 'booking') . '|transfer|' . $date);
     return $type === 'ck' ? followup_key_fit('CK|' . $requestId . '|' . ($audience ?: 'booking') . '|transfer|' . $date)
                           : followup_key_fit('SC|' . $requestId . '|transfer|' . $date);
 }
@@ -2723,7 +2796,7 @@ function followup_out(array $r, string $today, array $live = []): array {
     $details = !empty($r['details']) ? json_decode((string)$r['details'], true) : null;
     // ck lines: the folder's booking-check.html (path under the folder, or a full Dropbox / local path).
     $report = null;
-    if ($r['type'] === 'ck' && !empty($details['report_path'])) {
+    if (($r['type'] === 'ck' || $r['type'] === 'gate') && !empty($details['report_path'])) {
         $rp = str_replace('\\', '/', (string)$details['report_path']);
         if (preg_match('#(?:^|/)(001_Safari/.+)$#i', $rp, $m)) $rp = '/' . $m[1];
         elseif ($rp[0] !== '/') $rp = $dir . '/' . ltrim($rp, '/');
@@ -2826,7 +2899,7 @@ function followup_stats(array $open, array $closedRecent): array {
         if (($r['tab'] ?? 'provisional') === 'provisional' && $r['expiry_date'] && !$r['expired'] && (strtotime($r['expiry_date']) - time()) / 86400 <= 7) $s['expiring']++;
         if ($r['issue'] === 'ticket_missing') $s['tickets']++;
         if ($r['issue'] === 'group_to_finalize') $s['groups']++;
-        if (in_array($r['type'], ['ck', 'safaricheck'], true) || array_intersect(['claude_check', 'safaricheck'], array_column($r['sources'], 'source'))) $s['ck']++;
+        if (in_array($r['type'], ['ck', 'safaricheck', 'gate'], true) || array_intersect(['claude_check', 'safaricheck', 'gate_check'], array_column($r['sources'], 'source'))) $s['ck']++;
         if (count($r['sources']) > 1) $s['merged']++;
     }
     return $s;
@@ -3250,7 +3323,7 @@ function followup_digest_data(PDO $db, ?string $since, ?string $today = null): a
             continue;
         }
         if ($r['priority'] === '1-URGENT') $d['urgent'][(string)$r['owner_name']][] = $r;
-        if ($r['type'] === 'ck' || $r['type'] === 'safaricheck') {
+        if ($r['type'] === 'ck' || $r['type'] === 'safaricheck' || $r['type'] === 'gate') {
             if ($since && $r['first_seen_at'] > $since) $d['ck_new'][] = $r;
             elseif ($r['first_seen_at'] < $old3) $d['ck_old'][] = $r;
             if ($r['start_date'] && $r['start_date'] >= $today && $r['start_date'] < $in60) $d['ck_soon'][$r['folder']][] = $r;

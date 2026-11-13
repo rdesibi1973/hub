@@ -20,6 +20,25 @@ Running log of notable changes and current build state. Module-level "active / p
 
 ---
 
+## 2026-11-13 — Booking gate: AI booking check before a folder leaves PROGRESS
+
+- `modules/leads/includes/booking_gate_service.php` (handoff "Booking gate", 12–13 Nov): run = collect (Calc services +
+  `invoices/` / `bookings/` files) → AI extraction per document (`iti_ai_call()` action `booking_gate`, cached by Dropbox
+  `content_hash`, passports / DOB never kept) → deterministic evaluation (`BG_ISSUES` table: blocking vs warning; transfers
+  never block) → `booking-check.html` in the folder → Booking follow-up lines type `gate` (source `gate_check`) → memo to the
+  booking person. Tables `booking_gate_runs` / `_docs` / `_cache` (migration 083, also lazy `bg_schema()`).
+- The gate (`booking_gate_check()`): PROGRESS → DEPOSIT / BALANCE / BALANCE-CASH / PAID refused while the latest run is not
+  passed / overridden or is out of date — BackOffice Rename + Change status, invoice "Update Folder", request edit form, Agent
+  API `rename_folder` / `update_folder_status` (409, also dry run). Java endpoints: after the fact (timeline + memo + run).
+  `BOOKING_GATE_ENFORCE` false = shadow mode (warns only). Force unlock: rdesibi only, reason, timeline + agent_audit_log.
+- UI: "Booking check" panel on the request page and on Booking follow-up filtered on a request (`assets/booking_gate.js`,
+  endpoint `booking_gate.php`, which is also the admin cost page); badge in the CK tracker Pipeline column.
+- Worker `cron_booking_gate.php` (cron-job.org every minute, `CK_CRON_TOKEN` / `MEMO_CRON_TOKEN`).
+- Agent API: `gate_status`, `gate_run`. `booking_check`: services carry `cost`, evidence `hash`; Calc annotation rows (Cavalli
+  row 22) are attached to the service they name with an info note. Calc reader: `stay_cost` / `act_cost` per day.
+- Route rule (Cavalli, 13 Nov): last airport of the Calc row = destination, compared with the document's last STA airport;
+  the amount is checked only after date, route and pax match. Test: `tools/tests/booking_gate_test.php`.
+
 ## 2026-11-13 — Stable Dropbox folder link (folder id), self-healing path, orphan check
 
 - `requests.dropbox_id` (migration 082, also lazy `fl_schema()`): the Dropbox folder id, unchanged by move / rename.

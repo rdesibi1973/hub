@@ -105,7 +105,7 @@ function agent_audit(PDO $db, string $action, $reqId, array $payload, string $re
                               'set_request_status', 'update_request', 'import_group_folder', 'move_group_folder', 'ck_request_check', 'memo_delete', 'create_agency', 'update_agency', 'save_agency_contact', 'delete_agency_contact',
                               'followup_scan', 'followup_update', 'followup_upsert', 'staff_mail_save_eml', 'staff_mail_reply', 'drafts_cleanup', 'iti_update_activity', 'sales_response_dismiss',
                               'ck_set_owners', 'ck_set_group_closed', 'ck_findings_upsert', 'iti_create_destination', 'iti_import_program', 'iti_supplier_blocklist', 'predeparture_email',
-                              'folder_ids_backfill', 'folders_orphans', 'archive_cancelled'], true) && empty($payload['confirm']);
+                              'folder_ids_backfill', 'folders_orphans', 'archive_cancelled', 'gate_run'], true) && empty($payload['confirm']);
     // Mail: keep who/what in the log, not message bodies or attachment content.
     if (in_array($action, ['mail_get', 'mail_attachment', 'staff_mail_get', 'staff_mail_attachment', 'iti_document', 'iti_vouchers'], true) && $code === 200) {
         $res = json_decode($resultJson, true);
@@ -1625,6 +1625,41 @@ try {
         agent_out(array_merge(['ok' => true], $res));
     }
 
+    // ── Booking gate (includes/booking_gate_service.php) ─────────────────────
+    // gate_status: latest run, state (none|queued|running|passed|stale|blocked|error|overridden), blocking[], warnings[].
+    case 'gate_status': {
+        $r = agent_request($db, $in['request_id'] ?? 0);
+        require_once __DIR__ . '/dropbox_helper.php';
+        require_once __DIR__ . '/includes/booking_gate_service.php';
+        $res = bg_status_out($db, (int)$r['id'], ['agent_api' => true] + $agentUser, !isset($in['stale']) || !empty($in['stale']));
+        unset($res['can_override']);   // the force unlock is not available through the API
+        agent_out($res);
+    }
+
+    // gate_run: queue a booking check (documents read by the cron worker). Dry-run unless "confirm": true.
+    case 'gate_run': {
+        agent_require_method('POST');
+        $r = agent_request($db, $in['request_id'] ?? 0);
+        require_once __DIR__ . '/dropbox_helper.php';
+        require_once __DIR__ . '/includes/booking_gate_service.php';
+        if (bg_is_group($r)) agent_fail('Group folders are not checked by the booking gate (v1).', 409);
+        $cur = bg_status_out($db, (int)$r['id'], [], false);
+        if (empty($in['confirm'])) {
+            agent_out(['ok' => true, 'dry_run' => true, 'request_id' => (int)$r['id'], 'folder' => $cur['folder'], 'current' => $cur['run'],
+                       'message' => 'Dry run — nothing queued. Resend with "confirm": true to start the booking check.']);
+        }
+        try {
+            $run = bg_start_run($db, (int)$r['id'], (int)$agentUser['id'], 'api', null);
+        } catch (InvalidArgumentException $e) {
+            agent_fail($e->getMessage(), 422);
+        } catch (RuntimeException $e) {
+            agent_fail($e->getMessage(), 502);
+        }
+        agent_out(['ok' => true, 'dry_run' => false, 'request_id' => (int)$r['id'], 'run_id' => (int)$run['id'], 'state' => $run['state'],
+                   'existing' => !empty($run['existing']), 'docs_total' => (int)$run['docs_total'], 'docs_done' => (int)$run['docs_done'],
+                   'hint' => 'Poll gate_status: the documents are read by the cron worker (cron_booking_gate.php).']);
+    }
+
     // ── ITI programmes: list / texts to translate / save translations ────────
     case 'iti_programs': {
         $q = trim((string)($in['q'] ?? ''));
@@ -2035,6 +2070,14 @@ try {
                 if ($rowCk && $rowCk['findings_checked_at'] === null) $out['warnings'][] = 'Setting _CK but no booking check was sent for this booking (ck_findings_upsert).';
             } catch (Throwable $e) { error_log('rename_folder CK warning: ' . $e->getMessage()); }
         }
+        // Out of _PROGRESS: the booking check must have passed (booking_gate_service.php) — 409 also on the dry run, like _CK.
+        if (!$v['is_group'] && !$go) {   // the confirmed rename is checked again inside folder_rename()
+            require_once __DIR__ . '/includes/booking_gate_service.php';
+            $gate = booking_gate_check($db, (int)$r['id'], (string)$v['folder'], $v['new_name'], null, 'api', true);
+            if ($gate['gated']) $out['booking_gate'] = $gate;
+            if ($gate['refused']) agent_fail(booking_gate_message($gate), 409, $out);
+            if ($gate['gated'] && !in_array($gate['state'], ['passed', 'overridden'], true)) $out['warnings'][] = $gate['reason'];
+        }
         if (!$go) $out['calc_dates'] = $pv['calc_dates'];
         if (!$go && $withFiles) $out['file_renames'] = $pv['file_renames'];
         if ($pv['candidates']) $out['candidates'] = $pv['candidates'];
@@ -2045,7 +2088,7 @@ try {
                            . ($v['relink'] ? 're-link' : 'rename') . ' the folder.'], $out));
         }
         $res = folder_rename($db, (int)$r['id'], $v['new_name'], (int)$agentUser['id'],
-                             ['current_path' => $curIn, 'rename_files' => $withFiles]);
+                             ['current_path' => $curIn, 'rename_files' => $withFiles, 'gate_via' => 'api']);
         if (!$res['ok']) {
             if (!empty($res['candidates'])) $out['candidates'] = $res['candidates'];
             agent_fail($res['msg'], $res['code'], $out);
@@ -2408,12 +2451,22 @@ try {
             agent_out(array_merge(['ok' => true, 'dry_run' => empty($in['confirm']), 'unchanged' => true,
                                    'message' => 'Folder already has the ' . $preview['new_tag'] . ' tag — nothing to do.'], $preview));
         }
+        // Out of _PROGRESS: the booking check must have passed (booking_gate_service.php) — 409 also on the dry run.
+        $linked = inv_linked_request($db, $id);
+        if ($linked && trim((string)($linked['group_folder'] ?? '')) === '' && empty($in['confirm'])) {   // confirmed: checked in inv_update_folder_status()
+            require_once __DIR__ . '/includes/booking_gate_service.php';
+            $gate = booking_gate_check($db, (int)$linked['id'], $preview['current'], $preview['new_name'], null, 'api', true);
+            if ($gate['gated']) $preview['booking_gate'] = $gate;
+            if ($gate['refused']) { $agentReqId = (int)$linked['id']; agent_fail(booking_gate_message($gate), 409, $preview); }
+        }
         if (empty($in['confirm'])) {
             agent_out(array_merge(['ok' => true, 'dry_run' => true,
                                    'message' => 'Dry run — nothing renamed. Resend with "confirm": true to rename the folder.'], $preview));
         }
         try {
-            $res = inv_update_folder_status($db, $id, $label);
+            $res = inv_update_folder_status($db, $id, $label, null, 'api');
+        } catch (BookingGateRefused $e) {
+            agent_fail($e->getMessage(), 409, $preview + ['booking_gate' => $e->gate]);
         } catch (Throwable $e) {
             agent_fail($e->getMessage(), 502, $preview);
         }
@@ -3677,7 +3730,7 @@ try {
     default:
         agent_fail('Unknown action "' . $agentAction . '"', 400, ['actions' => [
             'find_requests', 'list_agencies', 'create_agency', 'update_agency', 'save_agency_contact', 'delete_agency_contact', 'create_request', 'update_request', 'import_group_folder', 'move_group_folder', 'list_standard_programs',
-            'copy_program', 'get_rates', 'fill_calc', 'read_calc', 'booking_check', 'confirm_preview', 'confirm_booking', 'send_booking_email',
+            'copy_program', 'get_rates', 'fill_calc', 'read_calc', 'booking_check', 'gate_status', 'gate_run', 'confirm_preview', 'confirm_booking', 'send_booking_email',
             'rollback_booking', 'iti_programs', 'iti_texts', 'iti_save_texts', 'update_rate', 'replace_flight_rates',
             'iti_lodges', 'iti_lodge', 'iti_destinations', 'iti_destination', 'iti_lodge_photos', 'iti_destination_photo',
             'iti_update_lodge', 'iti_update_destination', 'iti_create_lodge', 'iti_samples', 'iti_program', 'iti_document', 'iti_vouchers', 'iti_create_personal', 'iti_update_program',

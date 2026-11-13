@@ -589,6 +589,13 @@ function folder_rename(PDO $db, int $requestId, string $newName, ?int $userId, a
             return ['ok' => false, 'code' => 409, 'msg' => '⛔ No _CK yet — ' . ck_pipeline_block_message($block) . '.',
                     'ck_blocked_by' => $block['by']];
         }
+        // Out of _PROGRESS (→ DEPOSIT / BALANCE / BALANCE-CASH / PAID): the booking check must have passed (booking_gate_service.php).
+        $gate = null;
+        if (!$isGrp) {
+            require_once __DIR__ . '/booking_gate_service.php';
+            $gate = booking_gate_check($db, (int)$v['r']['id'], $folder, $newFolder, $userId, (string)($opt['gate_via'] ?? 'status_change'));
+            if ($gate['refused']) return ['ok' => false, 'code' => 409, 'msg' => booking_gate_message($gate), 'booking_gate' => $gate];
+        }
         if ($v['relink']) {
             $rl = fs_relink_resolve($token, $v['current_path']);
             if (isset($rl['error'])) return ['ok' => false, 'msg' => $rl['error'], 'code' => $rl['code']];
@@ -638,7 +645,8 @@ function folder_rename(PDO $db, int $requestId, string $newName, ?int $userId, a
         if ($files['failed']) $msg .= ' ⚠ ' . count($files['failed']) . ' file(s) not renamed.';
     }
 
-    return ['ok' => true, 'msg' => $msg, 'is_group' => $isGrp, 'old_name' => $folder, 'new_name' => $newFolder,
+    if (!empty($gate['gated']) && $gate['reason'] !== '' && !in_array($gate['state'], ['passed', 'overridden'], true)) $msg .= ' ⚠ ' . $gate['reason'];
+    return ['ok' => true, 'msg' => $msg, 'is_group' => $isGrp, 'old_name' => $folder, 'new_name' => $newFolder, 'booking_gate' => $gate,
             'dropbox_path_old' => $res['old_path'], 'dropbox_path_new' => $res['new_path'], 'relink' => $v['relink'],
             'files_renamed' => $files['done'], 'files_failed' => $files['failed']];
 }

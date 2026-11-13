@@ -325,6 +325,59 @@ Read-only, for the Cowork skill `booking-check` (verify a booked safari). `reque
 - `summary`: services per type, `evidence_files`, `stays_without_invoice_or_checked`.
 The INVOICE amount sits on the first row of a block, and one invoice may cover several services
 ("ARUSHA, MARERA & KIFARU - SV", one transfer mail for all transfers): match by content, not by name.
+Since 13 Nov 2026 services also carry `cost` (stays: column J summed over the block; activities: column H of the row,
+on its first supplier activity) and evidence files their Dropbox `hash`. **Calc annotation rows**: a row under the day
+rows with text in the HOTEL column and INVOICE / CHECKED marks but no date and no cost (Cavalli row 22 "Flight link |
+Invoice$290 | Glady") is not a service: its marks go to the service it names (flight words → the nearest flight above;
+else a service sharing a word; else the nearest one above) in `calc_invoice` / `calc_checked`, the service gets
+`annotations[] {row, text, invoice, checked}`, and `calc.warnings` says "move INVOICE / CHECKED to the service row".
+
+### Booking gate — `gate_status` (GET), `gate_run` (POST)
+The AI booking check the booking team runs from the Hub before a folder leaves `_PROGRESS` (handoff 12–13 Nov 2026;
+`includes/booking_gate_service.php`, panel on the request page, CK tracker badge, Booking follow-up filtered on a request,
+admin page `booking_gate.php`). Same rules as the skill `booking-check`; the documents are read by the AI (extraction only:
+dates, pax, rooms, meal plan, legs, amounts — never passport numbers or dates of birth, stripped again in PHP) and judged by PHP.
+A run: collect (Calc services + `invoices/` / `bookings/` files) → documents read by `cron_booking_gate.php` (cron-job.org every
+minute, token as `ck_cron.php`) or by the open panel → evaluation → `booking-check.html` in the folder (overwritten) → Booking
+follow-up lines type `gate` (source `gate_check`, `details.blocking`), booking lines owned by the user who tried the status
+change / ran the check (the CK booking owner is set to that user when empty), sales → CK owner, accounts → Roberto → a memo
+to that user. Documents already read (same Dropbox `content_hash`) are never sent again; tokens and cost per run.
+- `gate_status` — `request_id`; optional `stale=0` (skip the Dropbox comparison). Returns `state`
+  (`none|queued|running|passed|stale|blocked|error|overridden`), `allowed`, `reason`, `run {id, docs_total, docs_done,
+  blocking_count, warning_count, tokens_in, tokens_out, cost_usd, model, …}`, `blocking[]`, `warnings[]` `{issue, label, text,
+  audience, service_date}`, `report_path`, `enforced`, `in_scope` (false for groups).
+- `gate_run` — `request_id`; dry-run unless `"confirm": true`. Queues a run (an active one is returned, `existing: true`);
+  no Calc / several CONF / old quotes → the run ends at once, blocked `calc_not_clean`. Groups → 409.
+- **The gate**: `rename_folder` and `update_folder_status` moving a private folder from `_PROGRESS` to `_DEPOSIT` / `_BALANCE` /
+  `_BALANCE-CASH` / `_PAID` → **409 also on the dry run** (`booking_gate` in the body) unless the latest run is `passed` and not
+  out of date (Calc or evidence changed since) or `overridden`. Same refusal on every Hub path (BackOffice Rename / Change status,
+  invoice "Update Folder", request edit form). The Java BackOffice endpoints (`api_rename_folder.php`, `api_update_status.php`)
+  rename on disk first: they cannot refuse — timeline + memo to Roberto + a run started (`booking_gate_warning`).
+  A refused attempt with no usable run starts one. Later moves (DEPOSIT → BALANCE → PAID) are not gated. Groups are not gated (v1).
+- **Shadow mode**: `BOOKING_GATE_ENFORCE` (includes/config.php, default false) — runs, reports and lines work, the status change is
+  allowed with a warning. **Force unlock**: Roberto (`rdesibi`) only, on the request page, reason required; not through the API.
+- Config: `ANTHROPIC_API_KEY`, optional `ANTHROPIC_MODEL_EXTRACT` (default the ITI model). Calls go through `iti_ai_call()`
+  (action `booking_gate`): the Hub's monthly AI limit applies (ITI → Settings → AI), not the person's own limit.
+
+| issue | blocks | audience | when |
+|---|---|---|---|
+| `calc_not_clean` | yes | sales | no Calc, Calc only as conflicted copy, several CONF sheets / old quotes |
+| `stay_missing` / `flight_missing` / `activity_missing` | yes | booking | no document (own lodges: no Orangi Collection SV) |
+| `stay_dates` | yes | booking | check-in / check-out / nights differ (split documents or one invoice for two blocks of the same lodge are fine) |
+| `stay_pax` / `flight_pax` / `activity_pax` | yes | booking | adults + children ≠ Calc pax |
+| `stay_rooms` | yes | booking | rooms (count / type) ≠ `room_config` |
+| `stay_meal_plan` | yes | booking | BB / RO booked, or two levels below the Calc's FB / HB (`meal_plan_note`, warning: FB vs HB) |
+| `doc_inconsistent` | yes | booking | header nights ≠ arrival → departure ≠ nights billed |
+| `booked_differs` | yes | booking | another lodge on the same dates (names compared, AI asked only when the words differ): update the Calc |
+| `flight_date` / `flight_route` | yes | booking | route rule: last airport of the Calc row = destination, origin among the airports before it (or the one a Calc details line names); compared with the first STD / last STA airport; a lower price never makes it right |
+| `invoice_mismatch` | yes | booking | net (after commission) > Calc cost + 5 USD, per supplier (single supplement allowance used once per trip); NCA tented camp invoice without the concession fee |
+| `child_as_adult` | yes | booking | Calc has children / teens, the stay bills everyone as adults |
+| `wrong_document` | yes | booking | a document dated outside the trip |
+| `booking_cancelled` | yes | booking | the document says cancelled |
+| `transfer_missing` / `transfer_unconfirmed` | no | booking | external transfers (own JRO / ARK pick-ups: in-house, nothing reported) |
+| `client_flights_missing` | no | sales | ARRIVAL / DEPARTURE details empty |
+| `booking_provisional` | no | booking | correct but provisional (still blocks `_CK`) |
+| `lodge_name_unsure` / `doc_unreadable` / `meal_plan_note` | no | booking | as named |
 
 ### Calc checks (also in Confirm preview, UI + API)
 `error`: more than one pax sheet · a beach night (≥ MIDT) without hotel · formula cells with no saved
@@ -395,6 +448,8 @@ Free rename of the booking folder — the same as BackOffice → **Rename…** (
 `includes/folder_service.php`, `folder_rename()`). For a group the **group parent** (`group_folder`) is
 renamed and every request of the group is updated. No email is sent (unlike Reschedule).
 `request_id`*, `new_name`*, `current_path`, `rename_files`, `confirm`.
+A private folder from `_PROGRESS` to `_DEPOSIT` / `_BALANCE` / `_BALANCE-CASH` / `_PAID` goes through the booking gate
+(§ Booking gate): 409 with `booking_gate` while the check has not passed, also on the dry run.
 
 - **`current_path` (re-link)** — the folder's real Dropbox path when it was moved or renamed **outside the
   Hub** (the stored path no longer exists and its name is not found by search), e.g.
@@ -1161,6 +1216,8 @@ curl -sH "$H" -X POST "$U?action=apply_credit_note" -d '{"credit_note_number":"C
 Renames the booking's Dropbox folder tag (`_CK` stays last), sets `requests.payment_status`
 (DEPOSIT → Deposit, BALANCE → Balance, BALANCE-CASH → Balance-Cash, PAID → Paid), and re-tags the GRP
 parent folder. Without `"confirm": true` → `current` and `new_name` only. Same tag already → `unchanged`.
+Out of `_PROGRESS` on a private folder: the booking gate (§ Booking gate) → 409 with `booking_gate` while the check has not passed,
+also on the dry run.
 
 ### `save_invoice_pdf` (POST)
 Renders the PDF server-side (Dompdf) with the same layout as the invoice page's Print / Save as PDF, the

@@ -14,7 +14,7 @@
                sc_flight: 'Flight', sc_dates: 'Dates', sc_pax: 'PAX', manual: 'Added by hand'};
   /** Issues meaning "still provisional" (FU_PROVISIONAL_ISSUES): Provisional tab, they block the _CK. */
   var PROV = ['provisional', 'provisional_expired', 'on_request', 'orangi_rooms_provisional', 'booking_provisional'];
-  var SRC_ICON = {supplier_scan: '📄', ticket_scan: '🎫', group_scan: '👥', safaricheck: '✔', claude_check: '🤖', manual: '✋'};
+  var SRC_ICON = {supplier_scan: '📄', ticket_scan: '🎫', group_scan: '👥', safaricheck: '✔', claude_check: '🤖', manual: '✋', gate_check: '🚦'};
   var AUD = {booking: 'Booking', sales: 'Sales', accounts: 'Accounts'};
   var STATUS = {open: 'Open', in_progress: 'In progress', problem: 'Problem', resolved: 'Resolved', not_relevant: 'Not relevant'};
   /**
@@ -354,7 +354,7 @@
     var svc = r.service_date || r.start_date;
     var issueCls = r.issue === 'provisional_expired' ? ' exp' : '';
     var edit = canWork(r);
-    var ck = r.type === 'ck' || r.type === 'safaricheck' || r.type === 'manual';
+    var ck = r.type === 'ck' || r.type === 'safaricheck' || r.type === 'manual' || r.type === 'gate';
     var cells = [
       prioCell(r, edit),
       '<span style="white-space:nowrap">' + dmy(svc) + '</span><span class="fu-days' + (r.days_left !== null && r.days_left <= 7 ? ' fu-late' : '') + '">' + days(r.days_left) + '</span>',

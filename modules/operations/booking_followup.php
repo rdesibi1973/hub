@@ -145,6 +145,14 @@ include __DIR__ . '/../../includes/layout_header.php';
     <?php endif; ?>
   </div>
   <div class="fu-msg" id="fu-msg"></div>
+  <?php if ((int)($_GET['request_id'] ?? 0) > 0): ?>
+  <!-- Booking gate of the request this page is filtered on (leads/includes/booking_gate_service.php) -->
+  <div class="card" style="padding:10px 14px;margin-bottom:12px">
+    <div style="font-size:.72rem;font-weight:700;color:var(--grey-dk);margin-bottom:4px">BOOKING CHECK — request #<?= (int)$_GET['request_id'] ?></div>
+    <div class="bg-panel" data-rid="<?= (int)$_GET['request_id'] ?>" data-endpoint="../leads/booking_gate.php" data-csrf="<?= htmlspecialchars(csrf_token(), ENT_QUOTES, 'UTF-8') ?>"><span class="text-muted">loading…</span></div>
+  </div>
+  <script src="../leads/assets/booking_gate.js?v=<?= (int)@filemtime(__DIR__ . '/../leads/assets/booking_gate.js') ?>"></script>
+  <?php endif; ?>
   <?php if ($fuData['me']['can_edit']): ?>
   <div class="fu-add" id="fu-add" hidden>
     <div><label for="fu-add-req">Request #</label><input type="number" id="fu-add-req" min="1" placeholder="2073"></div>

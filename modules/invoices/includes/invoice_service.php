@@ -912,7 +912,7 @@ function inv_send_email(PDO $db, array $inv, $to, $cc, string $subject, string $
  * key), update practice_code / dropbox_url / payment_status, and re-tag the GRP
  * parent. Returns [new_name, new_tag, new_url, group_msg]; RuntimeException on error.
  */
-function inv_update_folder_status(PDO $db, int $invId, string $newLabel): array {
+function inv_update_folder_status(PDO $db, int $invId, string $newLabel, ?int $userId = null, string $gateVia = 'status_change'): array {
     if (!array_key_exists($newLabel, FOLDER_TAG_OPTIONS)) throw new InvalidArgumentException('Invalid status selected.');
     $dbTag = FOLDER_TAG_OPTIONS[$newLabel];
     $req   = inv_linked_request($db, $invId);
@@ -923,6 +923,10 @@ function inv_update_folder_status(PDO $db, int $invId, string $newLabel): array 
     if ($newName === $oldName) {
         return ['new_name' => $newName, 'new_tag' => $dbTag, 'new_url' => (string)($req['dropbox_url'] ?? ''), 'group_msg' => '', 'unchanged' => true];
     }
+    // Out of _PROGRESS: the booking check must have passed (leads/includes/booking_gate_service.php).
+    require_once __DIR__ . '/../../leads/includes/booking_gate_service.php';
+    $gate = booking_gate_check($db, (int)$req['id'], $oldName, $newName, $userId, $gateVia);
+    if ($gate['refused']) throw new BookingGateRefused(booking_gate_message($gate), $gate);
 
     // ── Rename folder in Dropbox ───────────────────────────────────
     $dropboxPrefix = 'https://www.dropbox.com/home';
@@ -1037,7 +1041,8 @@ function inv_update_folder_status(PDO $db, int $invId, string $newLabel): array 
 
     timeline_log((int)$req['id'], 'status_change', 'Folder status → ' . $newLabel,
                  ['body' => $oldName . "\n→ " . $newName, 'refs' => ['invoice_id' => $invId]]);
-    return ['new_name' => $newName, 'new_tag' => $dbTag, 'new_url' => $newUrl, 'group_msg' => $groupMsg, 'unchanged' => false];
+    if ($gate['gated'] && !in_array($gate['state'], ['passed', 'overridden'], true)) $groupMsg = trim($groupMsg . ' ⚠ ' . $gate['reason']);   // shadow mode
+    return ['new_name' => $newName, 'new_tag' => $dbTag, 'new_url' => $newUrl, 'group_msg' => $groupMsg, 'unchanged' => false, 'booking_gate' => $gate];
 }
 
 // ── PDF (Dompdf, same layout as the emailed / zipped invoices) ───────────────

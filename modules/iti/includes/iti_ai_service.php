@@ -42,6 +42,9 @@ function iti_ai_actions(): array {
         // Operations → Booking mail (passport_service.php); no button on the ITI pages.
         'read_passport' => ['label' => 'Read passport', 'where' => 'booking', 'state' => 'live',
                             'help'  => 'Reads name, date of birth, nationality and number from a passport, for a person to confirm.'],
+        // Booking gate (leads/includes/booking_gate_service.php): reads the supplier documents before a folder leaves _PROGRESS.
+        'booking_gate'  => ['label' => 'Booking check', 'where' => 'gate', 'state' => 'live',
+                            'help'  => 'Reads the supplier invoices and confirmations of a booking (dates, pax, rooms, amounts) for the booking check.'],
     ];
 }
 
@@ -132,7 +135,7 @@ function iti_ai_limit_reason(array $st, float $est, float $runSpent = 0.0): stri
 
 function iti_ai_record(PDO $db, string $action, string $model, array $usage, float $cost, string $status, array $ctx, string $note = ''): void {
     try {
-        $cu = current_user();
+        $cu = $ctx['user'] ?? current_user();   // background jobs pass their own user (no session)
         $db->prepare('INSERT INTO iti_ai_usage (created_at, user_id, username, action, program_id, request_id, model,
                              input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, status, note)
                       VALUES (NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
@@ -148,7 +151,10 @@ function iti_ai_record(PDO $db, string $action, string $model, array $usage, flo
 /**
  * One Messages API call under the limits. $body: the request; $action: key of iti_ai_actions();
  * $ctx: program_id, request_id, est_output_tokens (when the answer is much shorter or longer than the question),
- * est_input_tokens (when the request carries an image or a PDF).
+ * est_input_tokens (when the request carries an image or a PDF),
+ * hub_limit_only (true: a background job such as the booking gate — only the monthly Hub limit and the per-click limit
+ * for this one call apply, not the person's own monthly limit nor what earlier calls of the same page load spent),
+ * user (['id', 'username'] recorded in iti_ai_usage instead of the session user).
  * Returns the decoded response; a response with usage is recorded also when its stop_reason is bad, as it is paid for.
  */
 function iti_ai_call(array $body, string $action, array $ctx = []): array {
@@ -161,7 +167,10 @@ function iti_ai_call(array $body, string $action, array $ctx = []): array {
     $db    = db();
     $model = (string)$body['model'];
     $est   = iti_ai_estimate($model, strlen($payload), (int)($body['max_tokens'] ?? 16000), $ctx['est_output_tokens'] ?? null, $ctx['est_input_tokens'] ?? null);
-    $why   = iti_ai_limit_reason(iti_ai_status($db, current_user()['id'] ?? null), $est, iti_ai_run_spent());
+    $st    = iti_ai_status($db, isset($ctx['user']) ? ($ctx['user']['id'] ?? null) : (current_user()['id'] ?? null));
+    $bg    = !empty($ctx['hub_limit_only']);
+    if ($bg) $st['user'] = PHP_FLOAT_MAX;
+    $why   = iti_ai_limit_reason($st, $est, $bg ? 0.0 : iti_ai_run_spent());
     if ($why !== '') {
         iti_ai_record($db, $action, $model, [], 0.0, 'blocked', $ctx, $why);
         throw new RuntimeException($why);

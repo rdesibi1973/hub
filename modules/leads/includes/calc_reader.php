@@ -204,7 +204,15 @@ function calc_read_file(string $path, string $wantSheet = ''): array {
         'hotel'     => $colFor(['HOTEL', 'LODGE', 'CAMPSITE']),
         'invoice'   => $colFor(['INVOICE']),
         'checked'   => $colFor(['CHECKED']),
+        'stay_cost' => $colFor(['ACCOMM']),
+        'act_cost'  => null,
     ];
+    // Activities cost (H): the header with ACTIVIT that is not the ACTIVITY DESC column.
+    foreach ($headers as $col => $h) {
+        if (strpos($h, 'ACTIVIT') !== false && strpos($h, 'DESC') === false && $col !== $cols['act_desc']) { $cols['act_cost'] = $col; break; }
+    }
+    if ($cols['stay_cost'] === null) $cols['stay_cost'] = 'J';   // booking check amount rules: stays → J, activities → H
+    if ($cols['act_cost'] === null)  $cols['act_cost']  = 'H';
     foreach (['label' => 'B', 'hotel' => 'K'] as $k => $def) {
         if ($cols[$k] === null) {
             $cols[$k] = $def;
@@ -258,6 +266,8 @@ function calc_read_file(string $path, string $wantSheet = ''): array {
             'hotel_text'     => $cell($cols['hotel'], $d['row']),
             'invoice'        => $cell($cols['invoice'], $d['row']),
             'checked'        => $cell($cols['checked'], $d['row']),
+            'stay_cost'      => calc_rd_num($v, $cols['stay_cost'], $d['row']),
+            'act_cost'       => calc_rd_num($v, $cols['act_cost'], $d['row']),
         ];
     }
     if (!$days) $warnings[] = 'No day rows found under the DATE header (row ' . $hdr . ').';
@@ -277,7 +287,17 @@ function calc_read_file(string $path, string $wantSheet = ''): array {
             $t = $cell($cols[$k], $r);
             if ($t !== '' && !is_numeric($t)) $what[] = $name . ' "' . $t . '"';
         }
-        if ($what) $skipped[] = ['row' => $r, 'text' => implode(', ', $what)];
+        if (!$what) continue;
+        // What the booking check needs to tell a Calc annotation row (supplier + INVOICE / CHECKED marks under the
+        // day rows, no date, no cost — Cavalli row 22 "Flight link | Invoice$290 | Glady") from a lost day.
+        $hasCost = false;
+        foreach (array_unique(array_filter([$cols['flight'], 'D', $cols['act_cost'], $cols['stay_cost']])) as $cc) {
+            $n = calc_rd_num($v, $cc, $r);
+            if ($n !== null && $n != 0) $hasCost = true;
+        }
+        $skipped[] = ['row' => $r, 'text' => implode(', ', $what), 'hotel' => $cell($cols['hotel'], $r),
+                      'invoice' => $cell($cols['invoice'], $r), 'checked' => $cell($cols['checked'], $r),
+                      'dated' => calc_rd_text($v, 'A', $r) !== '', 'has_cost' => $hasCost];
     }
 
     // One day list for everything: nights = days − 1 here, in price_options[].nights, in the

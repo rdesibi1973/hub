@@ -111,8 +111,17 @@ if ($updateStatus) {
     $msg = "Folder updated";
 }
 
+// Booking gate (after the fact, see api_rename_folder.php): timeline + memo + a check started.
+$gateWarn = null;
+try {
+    require_once 'includes/booking_gate_service.php';
+    $g = booking_gate_after_external($db, (int)$req['id'], $oldFolder, $newFolder);
+    if ($g['gated'] && !in_array($g['state'], ['passed', 'overridden'], true)) $gateWarn = $g['reason'];
+} catch (Throwable $e) { error_log('api_update_status gate: ' . $e->getMessage()); }
+
 echo json_encode([
     'success'    => true,
+    'booking_gate_warning' => $gateWarn,
     'message'    => $msg,
     'request_id' => (int)$req['id'],
     'customer'   => $req['customer_name'],

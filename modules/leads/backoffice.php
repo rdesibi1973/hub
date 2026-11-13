@@ -241,6 +241,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array($act, ['change_status', 'r
             flash('The new name is identical — nothing to change.', 'error'); $ok = false;
         }
 
+        // Out of _PROGRESS: the booking check must have passed (includes/booking_gate_service.php).
+        $gate = null;
+        if ($ok && !$isGrp) {
+            require_once 'includes/booking_gate_service.php';
+            $gate = booking_gate_check($db, (int)$r['id'], $folder, $newFolder, (int)($currentUser['id'] ?? 0) ?: null);
+            if ($gate['refused']) { flash(booking_gate_message($gate), 'error'); $ok = false; }
+        }
+
         if ($ok) {
             require_once 'dropbox_helper.php';
             try {
@@ -249,6 +257,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array($act, ['change_status', 'r
                 if ($res['ok']) {
                     fs_rename_record($db, (int)$r['id'], $isGrp, $folder, $newFolder,
                                      $setStatus ? $newStatus : null, (int)($currentUser['id'] ?? 0) ?: null);
+                    if (!empty($gate['gated']) && !in_array($gate['state'], ['passed', 'overridden'], true)) $res['msg'] .= ' ⚠ ' . $gate['reason'];
                 }
                 flash($res['msg'], $res['ok'] ? 'info' : 'error');
             } catch (Throwable $e) {

@@ -148,7 +148,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $oldFolder = trim($req['practice_code'] ?? '');
         $newFolder = trim($v['practice_code']  ?? '');
 
-        if ($oldFolder !== '' && $newFolder !== '' && $oldFolder !== $newFolder) {
+        // Out of _PROGRESS: the booking check must have passed (includes/booking_gate_service.php).
+        if ($oldFolder !== '' && $newFolder !== '' && $oldFolder !== $newFolder && trim($req['group_folder'] ?? '') === '') {
+            require_once 'includes/booking_gate_service.php';
+            $gate = booking_gate_check(db(), (int)$req['id'], $oldFolder, $newFolder, (int)(current_user()['id'] ?? 0) ?: null);
+            if ($gate['refused']) { $errors[] = booking_gate_message($gate); $newFolder = $oldFolder; }
+        }
+
+        if (!$errors && $oldFolder !== '' && $newFolder !== '' && $oldFolder !== $newFolder) {
             // Derive the full Dropbox API paths from the stored dropbox_url.
             // URL format: https://www.dropbox.com/home/2026/FolderName
             //              → API path: /2026/FolderName

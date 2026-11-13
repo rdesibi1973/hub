@@ -80,7 +80,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             ob_end_clean(); echo json_encode(['ok'=>false,'error'=>'Invalid status selected.']); exit;
         }
         try {
-            $res = inv_update_folder_status($db, $invId, $newLabel);
+            $res = inv_update_folder_status($db, $invId, $newLabel, (int)(current_user()['id'] ?? 0) ?: null);   // booking gate: refused out of _PROGRESS until the check passed
             ob_end_clean(); echo json_encode(['ok'=>true,'new_name'=>$res['new_name'],'new_tag'=>$res['new_tag'],'new_url'=>$res['new_url'],'group_msg'=>$res['group_msg']]); exit;
         } catch (\Throwable $e) {
             ob_end_clean(); echo json_encode(['ok'=>false,'error'=>$e->getMessage()]); exit;

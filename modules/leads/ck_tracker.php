@@ -267,6 +267,15 @@ try {
     foreach ($rows as &$r) $r['pl'] = null;
     unset($r);
 }
+// Booking gate: latest run per booking (state only — "out of date" is computed on the request page).
+$gateRuns = [];
+try {
+    require_once __DIR__ . '/includes/booking_gate_service.php';
+    $gateRuns = bg_latest_runs($db, array_merge(...array_map(fn($r) => array_map(fn($q) => (int)$q['id'], $r['reqs']), $rows ?: [['reqs' => []]])));
+} catch (Throwable $e) { error_log('ck_tracker gate: ' . $e->getMessage()); }
+$GATE_STYLE = ['queued' => ['#1a3a5c', '#E3EEFB', '⏳ check queued'], 'running' => ['#1a3a5c', '#E3EEFB', '⏳ check running'],
+               'passed' => ['#1A6B3A', '#E6F4EA', '🚦 check passed'], 'blocked' => ['#a33', '#F7DEDE', '🚦 check blocked'],
+               'error' => ['#a33', '#F7DEDE', '🚦 check error'], 'overridden' => ['#6B4FA0', '#EEE8F7', '🔓 check unlocked']];
 $activeUsers = ck_active_users($db);
 $ownerF = trim((string)($_GET['owner'] ?? ''));   // '' all | me | none (no booking owner) | nock (no CK owner) | user id (CK or booking owner)
 
@@ -604,6 +613,15 @@ include 'includes/header.php';
             $plSt = $PL_STYLE[$pl['stage']];
             $fuUrl = $r['reqs'] ? '../operations/booking_followup.php?' . http_build_query(['request_id' => (int)$r['reqs'][0]['id']]) : ''; ?>
           <span class="ck-tag" style="color:<?= $plSt[0] ?>;background:<?= $plSt[1] ?>"><?= h($pl['stage_label']) ?></span>
+          <?php $gr = $r['reqs'] ? ($gateRuns[(int)$r['reqs'][0]['id']] ?? null) : null;
+                if ($r['reqs'] && !$r['is_group'] && ($gr || stripos($r['folder_name'], '_PROGRESS') !== false)):
+                    $gs = $gr ? ($GATE_STYLE[$gr['state']] ?? null) : ['#555', '#F0F0F0', '🚦 check not run']; ?>
+            <div><a class="ck-tag" href="request_view.php?id=<?= (int)$r['reqs'][0]['id'] ?>#rv-gate" target="_blank" style="text-decoration:none;color:<?= $gs[0] ?>;background:<?= $gs[1] ?>"
+                    title="Booking gate (before leaving PROGRESS)<?= $gr && $gr['finished_at'] ? ' — ' . h(date('d M H:i', strtotime($gr['finished_at']))) : '' ?>"><?= $gs[2] ?><?php
+                if ($gr && $gr['state'] === 'blocked') echo ' (' . (int)$gr['blocking_count'] . ')';
+                elseif ($gr && in_array($gr['state'], ['queued', 'running'], true)) echo ' ' . (int)$gr['docs_done'] . '/' . (int)$gr['docs_total'];
+                elseif ($gr && $gr['state'] === 'passed' && $gr['warning_count']) echo ' · ' . (int)$gr['warning_count'] . ' warn'; ?></a></div>
+          <?php endif; ?>
           <?php if ($pl['open'] && $fuUrl):
               $oa = $pl['open_by_audience'];
               $srcTxt = implode(', ', array_map(fn($t, $n) => (FU_SOURCE_LABELS[$t] ?? $t) . ' ' . $n, array_keys($pl['open_by_source']), $pl['open_by_source'])); ?>

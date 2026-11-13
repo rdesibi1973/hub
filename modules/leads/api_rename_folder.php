@@ -278,8 +278,20 @@ if ($matchedViaGroupFolder) {
     }
 }
 
+// Booking gate: the Java BackOffice has already renamed the folder on disk, so a move out of _PROGRESS without a
+// passed booking check cannot be refused here — it is written in the timeline, a memo goes to Roberto and a check starts.
+$gateWarn = null;
+if (!$matchedViaGroupFolder) {
+    try {
+        require_once 'includes/booking_gate_service.php';
+        $g = booking_gate_after_external($db, (int)$row['id'], (string)$row['practice_code'], $newFolderName);
+        if ($g['gated'] && !in_array($g['state'], ['passed', 'overridden'], true)) $gateWarn = $g['reason'];
+    } catch (Throwable $e) { error_log('api_rename_folder gate: ' . $e->getMessage()); }
+}
+
 echo json_encode([
     'success'           => true,
+    'booking_gate_warning' => $gateWarn,
     'request_id'        => (int)$row['id'],
     'customer_name'     => $row['customer_name'],
     'old_folder'        => $oldFolderName,
