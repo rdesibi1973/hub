@@ -46,7 +46,9 @@
     if (d.report_url && ['passed', 'blocked', 'stale', 'overridden'].indexOf(d.state) >= 0) {
       h += ' <a href="' + esc(d.report_url) + '" target="_blank" rel="noopener" style="margin-left:8px;font-size:.8rem;text-decoration:none">📄 booking-check.html</a>';
     }
-    if (run.finished_at) h += '<span style="font-size:.75rem;color:var(--grey-mid,#888);margin-left:6px">' + esc(dt(run.finished_at)) + '</span>';
+    if (run.finished_at) h += '<span style="font-size:.75rem;color:var(--grey-mid,#888);margin-left:6px" title="' + esc((run.docs_total || 0) + ' document(s), '
+       + (run.docs_cached || 0) + ' already read before (no AI cost), ' + ((run.tokens_in || 0) + (run.tokens_out || 0)) + ' tokens this run') + '">' + esc(dt(run.finished_at))
+       + (run.docs_total ? ' · ' + run.docs_total + ' doc' + (run.docs_cached ? ', ' + run.docs_cached + ' cached' : '') : '') + '</span>';
     if (d.can_run && d.state !== 'running' && d.state !== 'queued') {
       h += ' <button type="button" class="btn btn-outline btn-sm bg-run" style="margin-left:10px;padding:2px 9px;font-size:.75rem">'
          + (d.state === 'none' ? '▶ Bookings done — run check' : '↻ Re-run check') + '</button>';

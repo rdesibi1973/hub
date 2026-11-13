@@ -1624,6 +1624,13 @@ function bg_override(PDO $db, int $rid, array $user, string $reason): array {
     return ['ok' => true, 'run_id' => $id];
 }
 
+/** Documents of a run that came from the cache (same Dropbox content already read): they cost no tokens. */
+function bg_docs_cached(PDO $db, int $runId): int {
+    $st = $db->prepare("SELECT COUNT(*) FROM booking_gate_docs WHERE run_id = ? AND cached = 1");
+    $st->execute([$runId]);
+    return (int)$st->fetchColumn();
+}
+
 /** Public shape of the gate state (page JSON, Agent API gate_status). */
 function bg_status_out(PDO $db, int $rid, array $user = [], bool $checkStale = true): array {
     $r = bg_request($db, $rid);
@@ -1632,7 +1639,9 @@ function bg_status_out(PDO $db, int $rid, array $user = [], bool $checkStale = t
     $st = bg_state($db, $rid, $checkStale);
     $run = $st['run'];
     $folder = (string)($r['practice_code'] ?? '');
+    // The report sits in the booking folder, whose name changes with every status tag: today's path, not the stored one.
     $rp = $run['report_path'] ?? null;
+    if ($rp && ($cur = req_folder_path($r)) !== '') $rp = rtrim($cur, '/') . '/booking-check.html';
     return [
         'ok' => true, 'request_id' => $rid, 'folder' => $folder, 'tag' => bg_tag($folder), 'group' => $group,
         'in_scope' => !$group && bg_tag($folder) !== '', 'enforced' => bg_enforce(),
@@ -1641,6 +1650,7 @@ function bg_status_out(PDO $db, int $rid, array $user = [], bool $checkStale = t
         'run' => $run ? ['id' => (int)$run['id'], 'state' => $run['state'], 'trigger' => $run['trigger_src'], 'started_at' => $run['started_at'],
                          'finished_at' => $run['finished_at'], 'docs_total' => (int)$run['docs_total'], 'docs_done' => (int)$run['docs_done'],
                          'blocking_count' => (int)$run['blocking_count'], 'warning_count' => (int)$run['warning_count'], 'error' => $run['error'],
+                         'docs_cached' => bg_docs_cached($db, (int)$run['id']),   // read before (same content): no tokens spent on them
                          'tokens_in' => (int)$run['tokens_in'], 'tokens_out' => (int)$run['tokens_out'], 'cost_usd' => (float)$run['cost_usd'], 'model' => $run['model'],
                          'override_reason' => $run['override_reason'], 'override_at' => $run['override_at']] : null,
         'blocking' => $st['blocking'], 'warnings' => $st['warnings'],

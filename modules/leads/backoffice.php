@@ -604,6 +604,15 @@ if ($rows) {
     } catch (Throwable $e) { $ckByReq = []; }   // the CK links are optional
 }
 
+// Booking gate of each row (latest run, one query): "Bookings done — run check" at the start of the links line.
+$gateByReq = [];
+if ($rows) {
+    try {
+        require_once 'includes/booking_gate_service.php';
+        $gateByReq = bg_latest_runs($db, array_map(fn($r) => (int)$r['id'], $rows));
+    } catch (Throwable $e) { $gateByReq = []; }   // optional, like the CK links
+}
+
 // Invoices of each row (not for restricted staff): one → the invoice, several → the list.
 $invByReq = [];
 if ($rows && !isLeadsRestricted()) {
@@ -837,6 +846,19 @@ include 'includes/header.php';
           <?php endforeach; ?>
           <?php $sPath = savannah_local_path($r); $sUrl = savannah_open_url($r); ?>
           <div style="margin-top:3px;font-family:'Open Sans',sans-serif">
+            <?php if (($r['status'] ?? '') === 'Booked' && !$isGrp && $folder !== '' && function_exists('bg_is_group') && !bg_is_group($r)):
+                $gr = $gateByReq[(int)$r['id']] ?? null;
+                $gSt = ['queued' => ['#1a3a5c', '⏳ Check running'], 'running' => ['#1a3a5c', '⏳ Check running'], 'passed' => ['#1A6B3A', '🟢 Check passed'],
+                        'blocked' => ['#a33', '🔴 Check blocked'], 'error' => ['#a33', '⚠ Check error'], 'overridden' => ['#6B4FA0', '🔓 Check unlocked']][$gr['state'] ?? ''] ?? null; ?>
+            <span class="bo-gate" data-rid="<?= (int)$r['id'] ?>" style="font-size:.68rem;margin-right:8px">
+              <?php if ($gSt): ?><a href="request_view.php?id=<?= (int)$r['id'] ?>#rv-gate" target="_blank" class="bo-gate-st" title="Booking check — details on the request page"
+                   style="text-decoration:none;font-weight:700;color:<?= $gSt[0] ?>"><?= $gSt[1] ?><?= ($gr['state'] === 'blocked') ? ' (' . (int)$gr['blocking_count'] . ')' : '' ?></a><?php endif; ?>
+              <?php if (!in_array($gr['state'] ?? '', ['queued', 'running'], true)): ?>
+              <a href="#" class="bo-gate-run" onclick="boGateRun(this);return false" title="Run the AI booking check: the folder cannot get DEPOSIT / BALANCE / PAID until it passes"
+                 style="text-decoration:none;font-weight:700;color:var(--red,#C0211B);<?= $gSt ? 'margin-left:6px' : '' ?>"><?= $gr ? '↻ Re-run check' : '▶ Bookings done — run check' ?></a>
+              <?php endif; ?>
+            </span>
+            <?php endif; ?>
             <a href="request_view.php?id=<?= (int)$r['id'] ?>" target="_blank" title="Open the booking request in the Hub" style="font-size:.68rem;text-decoration:none">🔗 Open Request</a>
             <?php if ($iv = $invByReq[(int)$r['id']] ?? null): ?>
               <?php if ((int)$iv['n'] === 1): ?>
@@ -1251,6 +1273,30 @@ include 'includes/header.php';
 <?php endif; ?>
 
 <script>
+// Booking gate from a row: start the check, then read the documents one by one (nudge) until the result.
+var BO_GATE_CSRF = <?= json_encode(csrf_token()) ?>;
+function boGateRun(a) {
+  var box = a.closest('.bo-gate'), rid = box.dataset.rid;
+  var post = function (action) {
+    var fd = new FormData(); fd.append('action', action); fd.append('request_id', rid); fd.append('csrf', BO_GATE_CSRF);
+    return fetch('booking_gate.php', {method: 'POST', body: fd, credentials: 'same-origin'}).then(function (r) { return r.json(); });
+  };
+  var show = function (html) { box.innerHTML = html; };
+  var link = function (txt, col) { return '<a href="request_view.php?id=' + rid + '#rv-gate" target="_blank" style="text-decoration:none;font-weight:700;color:' + col + '">' + txt + '</a>'; };
+  var done = function (d) {
+    if (d.ok === false) { show(link('⚠ ' + (d.error || 'error'), '#a33')); return; }
+    if (d.state === 'running' || d.state === 'queued') {
+      show(link('⏳ Check running ' + ((d.run || {}).docs_done || 0) + '/' + ((d.run || {}).docs_total || 0), '#1a3a5c'));
+      post('nudge').then(done).catch(function () { show(link('⏳ Check running — result on the request page', '#1a3a5c')); });
+      return;
+    }
+    var st = {passed: ['🟢 Check passed', '#1A6B3A'], blocked: ['🔴 Check blocked (' + (d.blocking || []).length + ')', '#a33'],
+              error: ['⚠ Check error', '#a33'], overridden: ['🔓 Check unlocked', '#6B4FA0'], stale: ['🟡 Check out of date', '#8a6d00']}[d.state] || ['Check: ' + d.state, '#555'];
+    show(link(st[0], st[1]) + ' <span style="color:var(--grey-mid)">— details on the request page</span>');
+  };
+  show('<span style="color:#1a3a5c">⏳ collecting documents…</span>');
+  post('run').then(done).catch(function (e) { show(link('⚠ ' + e.message, '#a33')); });
+}
 // Confirm Safari: the confirm button is enabled only when every non-green check is accepted
 // (and, for a duplicate GRP, "Proceed anyway" is ticked). The server re-checks on submit.
 function csAccCheck(rid) {
