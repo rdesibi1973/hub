@@ -20,6 +20,13 @@ Running log of notable changes and current build state. Module-level "active / p
 
 ---
 
+## 2026-11-13 — Booking gate: also when a folder leaves PROVISIONAL
+
+- `bg_transition_gated()`: a private folder leaving `_PROVISIONAL` for any status but `_CANCELLED` (PROGRESS, payment tag, no
+  tag, `_CK` added) needs a passed check, on every path, the CK tracker `_CK` marker included (`ck_set_marker()`).
+- `bg_tag()` reads `PROVISIONAL` and `CANCELLED`; `gate_status.in_scope` true for every private folder (Rivolta, request 3091,
+  showed `tag: ""`, `in_scope: false`). Panel, BackOffice link and CK tracker badge also on Provisional bookings.
+
 ## 2026-11-13 — Undated Calc rows: one rule for booking_check, the gate and the ITI final program
 
 - `calc_skipped_kind()` (calc_reader.php) classifies each undated row under the day rows: `lost_day` (lodge + cost in J: the

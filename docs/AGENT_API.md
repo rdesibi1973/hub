@@ -349,11 +349,14 @@ to that user. Documents already read (same Dropbox `content_hash`) are never sen
 - `gate_status` — `request_id`; optional `stale=0` (skip the Dropbox comparison). Returns `state`
   (`none|queued|running|passed|stale|blocked|error|overridden`), `allowed`, `reason`, `run {id, docs_total, docs_done,
   blocking_count, warning_count, tokens_in, tokens_out, cost_usd, model, …}`, `blocking[]`, `warnings[]` `{issue, label, text,
-  audience, service_date}`, `report_path`, `enforced`, `in_scope` (false for groups).
+  audience, service_date}`, `report_path`, `enforced`, `tag` (`PROVISIONAL` / `PROGRESS` / `DEPOSIT` / `BALANCE` / `BALANCE-CASH` / `PAID` / `CANCELLED` / `''`), `in_scope` (every private
+  folder; false for groups only).
 - `gate_run` — `request_id`; dry-run unless `"confirm": true`. Queues a run (an active one is returned, `existing: true`);
   no Calc / several CONF / old quotes → the run ends at once, blocked `calc_not_clean`. Groups → 409.
 - **The gate**: `rename_folder` and `update_folder_status` giving a private folder its first payment tag (`_DEPOSIT` / `_BALANCE` /
-  `_BALANCE-CASH` / `_PAID`) — from `_PROGRESS`, and also from `_PROVISIONAL` or no tag, so there is no way round → **409 also on the dry run** (`booking_gate` in the body) unless the latest run is `passed` and not
+  `_BALANCE-CASH` / `_PAID`) — from `_PROGRESS`, and also from `_PROVISIONAL` or no tag, so there is no way round — **or a
+  private folder leaving `_PROVISIONAL` for any other status** (`_PROGRESS`, a payment tag, no tag, `_CK` added — also from the
+  CK tracker) except `_CANCELLED` (Roberto, 13 Nov 2026) → **409 also on the dry run** (`booking_gate` in the body) unless the latest run is `passed` and not
   out of date (Calc or evidence changed since) or `overridden`. Same refusal on every Hub path (BackOffice Rename / Change status,
   invoice "Update Folder", request edit form). The Java BackOffice endpoints (`api_rename_folder.php`, `api_update_status.php`)
   rename on disk first: they cannot refuse — timeline + memo to Roberto + a run started (`booking_gate_warning`).

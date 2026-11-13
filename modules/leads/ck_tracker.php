@@ -614,10 +614,10 @@ include 'includes/header.php';
             $fuUrl = $r['reqs'] ? '../operations/booking_followup.php?' . http_build_query(['request_id' => (int)$r['reqs'][0]['id']]) : ''; ?>
           <span class="ck-tag" style="color:<?= $plSt[0] ?>;background:<?= $plSt[1] ?>"><?= h($pl['stage_label']) ?></span>
           <?php $gr = $r['reqs'] ? ($gateRuns[(int)$r['reqs'][0]['id']] ?? null) : null;
-                if ($r['reqs'] && !$r['is_group'] && ($gr || stripos($r['folder_name'], '_PROGRESS') !== false)):
+                if ($r['reqs'] && !$r['is_group'] && ($gr || stripos($r['folder_name'], '_PROGRESS') !== false || stripos($r['folder_name'], '_PROVISIONAL') !== false)):
                     $gs = $gr ? ($GATE_STYLE[$gr['state']] ?? null) : ['#555', '#F0F0F0', '🚦 check not run']; ?>
             <div><a class="ck-tag" href="request_view.php?id=<?= (int)$r['reqs'][0]['id'] ?>#rv-gate" target="_blank" style="text-decoration:none;color:<?= $gs[0] ?>;background:<?= $gs[1] ?>"
-                    title="Booking gate (before leaving PROGRESS)<?= $gr && $gr['finished_at'] ? ' — ' . h(date('d M H:i', strtotime($gr['finished_at']))) : '' ?>"><?= $gs[2] ?><?php
+                    title="Booking gate (before leaving PROGRESS / PROVISIONAL)<?= $gr && $gr['finished_at'] ? ' — ' . h(date('d M H:i', strtotime($gr['finished_at']))) : '' ?>"><?= $gs[2] ?><?php
                 if ($gr && $gr['state'] === 'blocked') echo ' (' . (int)$gr['blocking_count'] . ')';
                 elseif ($gr && in_array($gr['state'], ['queued', 'running'], true)) echo ' ' . (int)$gr['docs_done'] . '/' . (int)$gr['docs_total'];
                 elseif ($gr && $gr['state'] === 'passed' && $gr['warning_count']) echo ' · ' . (int)$gr['warning_count'] . ' warn'; ?></a></div>

@@ -149,24 +149,39 @@ function bg_schema(PDO $db): void {
 
 // ── Which folders / transitions are gated ────────────────────────────────────
 
-/** Status tag of a folder name for the gate: PROGRESS / DEPOSIT / BALANCE / BALANCE-CASH / PAID / '' (other). */
+/**
+ * Status tag of a folder name for the gate: CANCELLED / PROVISIONAL / PROGRESS / DEPOSIT / BALANCE / BALANCE-CASH / PAID,
+ * '' when none. CANCELLED first (a cancelled folder may keep its old tag before it).
+ */
 function bg_tag(string $name): string {
     $u = strtoupper($name);
+    if (strpos($u, '_CANCELLED') !== false) return 'CANCELLED';
     if (strpos($u, '_BALANCE-CASH') !== false || strpos($u, '_BALANCE_CASH') !== false) return 'BALANCE-CASH';
-    foreach (['_BALANCE' => 'BALANCE', '_DEPOSIT' => 'DEPOSIT', '_PAID' => 'PAID', '_PROGRESS' => 'PROGRESS'] as $t => $l) {
+    foreach (['_BALANCE' => 'BALANCE', '_DEPOSIT' => 'DEPOSIT', '_PAID' => 'PAID', '_PROGRESS' => 'PROGRESS', '_PROVISIONAL' => 'PROVISIONAL'] as $t => $l) {
         if (strpos($u, $t) !== false) return $l;
     }
     return '';
 }
 
+/** A folder name with the _CK marker (last tag). */
+function bg_has_ck(string $name): bool {
+    return (bool)preg_match('/_CK$/i', trim($name));
+}
+
 /**
- * Gated: a folder that has no payment tag yet (PROGRESS, or PROVISIONAL / no tag / anything else) getting DEPOSIT /
- * BALANCE / BALANCE-CASH / PAID — what tells the seller to send the confirmation. So PROGRESS → PROVISIONAL (or tag
- * removed) → DEPOSIT is no way round. Moves between payment tags (DEPOSIT → BALANCE → PAID) and to CANCELLED are free.
+ * Gated moves (the booking check must have passed):
+ *  - a folder without a payment tag (PROGRESS, no tag, …) getting DEPOSIT / BALANCE / BALANCE-CASH / PAID — what tells the
+ *    seller to send the confirmation (Roberto, 13 Nov 2026: no way round through another tag);
+ *  - a folder leaving PROVISIONAL for any other status — PROGRESS, a payment tag, no tag, or _CK added — except CANCELLED
+ *    (Roberto, 13 Nov 2026; Rivolta, request 3091).
+ * Free: between payment tags (DEPOSIT → BALANCE → PAID), to CANCELLED, renames that keep the tag.
  */
 function bg_transition_gated(string $oldName, string $newName): bool {
     $pay = ['DEPOSIT', 'BALANCE', 'BALANCE-CASH', 'PAID'];
-    return in_array(bg_tag($newName), $pay, true) && !in_array(bg_tag($oldName), $pay, true);
+    $from = bg_tag($oldName); $to = bg_tag($newName);
+    if ($to === 'CANCELLED') return false;
+    if (in_array($to, $pay, true) && !in_array($from, $pay, true)) return true;
+    return $from === 'PROVISIONAL' && ($to !== 'PROVISIONAL' || (bg_has_ck($newName) && !bg_has_ck($oldName)));
 }
 
 /** Group folders are out of scope v1: GRP member / group parent, Il Diamante / Panorama, GRUPPO. */
@@ -1644,7 +1659,7 @@ function bg_status_out(PDO $db, int $rid, array $user = [], bool $checkStale = t
     if ($rp && ($cur = req_folder_path($r)) !== '') $rp = rtrim($cur, '/') . '/booking-check.html';
     return [
         'ok' => true, 'request_id' => $rid, 'folder' => $folder, 'tag' => bg_tag($folder), 'group' => $group,
-        'in_scope' => !$group && bg_tag($folder) !== '', 'enforced' => bg_enforce(),
+        'in_scope' => !$group, 'enforced' => bg_enforce(),   // every private folder; groups only are out of scope (v1)
         'state' => $st['state'] === 'passed' && $st['stale'] ? 'stale' : $st['state'],
         'allowed' => $group ? true : $st['allowed'], 'stale' => $st['stale'], 'stale_reason' => $st['stale_reason'], 'reason' => $st['reason'],
         'run' => $run ? ['id' => (int)$run['id'], 'state' => $run['state'], 'trigger' => $run['trigger_src'], 'started_at' => $run['started_at'],

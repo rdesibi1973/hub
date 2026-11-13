@@ -61,7 +61,7 @@
     else if (d.state === 'stale') line = '⚠ ' + d.reason;
     else if (d.state === 'error') line = '⚠ ' + d.reason;
     else if (d.state === 'blocked' && d.stale) line = '⚠ Files changed since this check (' + d.stale_reason + '): press Re-run check.';
-    else if (d.state === 'none') line = d.tag === 'PROGRESS' ? 'Run it when the bookings are finished: the folder cannot leave PROGRESS before it passes'
+    else if (d.state === 'none') line = (d.tag === 'PROGRESS' || d.tag === 'PROVISIONAL') ? 'Run it when the bookings are finished: the folder cannot leave ' + d.tag + ' before it passes'
                                                                + (d.enforced ? '.' : ' (shadow mode: today it only warns).') : '';
     else if (d.state === 'overridden') line = 'Reason: ' + (run.override_reason || '');
     h += '<div class="bg-line" style="font-size:.75rem;color:' + (d.state === 'stale' || d.state === 'error' || d.state === 'blocked' ? '#a33' : '#1a3a5c') + ';margin-top:3px">' + esc(line) + '</div>';

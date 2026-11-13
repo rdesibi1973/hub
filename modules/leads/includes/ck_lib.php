@@ -643,6 +643,13 @@ function ck_set_marker(PDO $db, string $token, int $folderId, bool $on, ?int $us
         if ($block['blocked']) {
             return ['ok' => false, 'msg' => '⛔ No CK yet — ' . ck_pipeline_block_message($block) . '.', 'blocked_by' => $block['by']];
         }
+        // _CK on a private _PROVISIONAL folder: the booking check must have passed (booking_gate_service.php, 13 Nov 2026).
+        $rq = $tr && !empty($tr['reqs']) && empty($tr['is_group']) ? (int)$tr['reqs'][0]['id'] : 0;
+        if ($rq) {
+            require_once __DIR__ . '/booking_gate_service.php';
+            $gate = booking_gate_check($db, $rq, $old, ck_name_with_marker($old, true), $userId);
+            if ($gate['refused']) return ['ok' => false, 'msg' => booking_gate_message($gate), 'booking_gate' => $gate];
+        }
     }
     $new = ck_name_with_marker($old, $on);
     try {

@@ -26,6 +26,17 @@ $t('PROGRESS → PROVISIONAL not gated', !bg_transition_gated($p . 'PROGRESS', $
 $t('no way round: PROVISIONAL / no tag → DEPOSIT gated', bg_transition_gated($p . 'PROVISIONAL', $p . 'DEPOSIT') && bg_transition_gated(rtrim($p, '_'), $p . 'DEPOSIT'));
 $t('BALANCE → PAID, DEPOSIT_CK → BALANCE_CK not gated', !bg_transition_gated($p . 'BALANCE', $p . 'PAID') && !bg_transition_gated($p . 'DEPOSIT_CK', $p . 'BALANCE_CK'));
 $t('enforced by default (no constant)', bg_enforce());
+// Leaving PROVISIONAL (Roberto, 13 Nov 2026; Rivolta, request 3091)
+$rv = '08_18AUG_AlessandroRivolta(Nuru-Drct)_START18AUG_END29AUG2027_';
+$t('PROVISIONAL / CANCELLED are tags', bg_tag($rv . 'PROVISIONAL') === 'PROVISIONAL' && bg_tag($rv . 'CANCELLED') === 'CANCELLED' && bg_tag($rv . 'DEPOSIT_CANCELLED') === 'CANCELLED');
+$t('PROVISIONAL → PROGRESS gated', bg_transition_gated($rv . 'PROVISIONAL', $rv . 'PROGRESS'));
+$t('PROVISIONAL → DEPOSIT gated', bg_transition_gated($rv . 'PROVISIONAL', $rv . 'DEPOSIT'));
+$t('PROVISIONAL → _CK added gated', bg_transition_gated($rv . 'PROVISIONAL', $rv . 'PROVISIONAL_CK'));
+$t('PROVISIONAL → tag removed gated', bg_transition_gated($rv . 'PROVISIONAL', rtrim($rv, '_')));
+$t('PROVISIONAL → CANCELLED free', !bg_transition_gated($rv . 'PROVISIONAL', $rv . 'CANCELLED'));
+$t('PROVISIONAL rename keeping the tag free', !bg_transition_gated($rv . 'PROVISIONAL', str_replace('29AUG', '30AUG', $rv) . 'PROVISIONAL'));
+$t('PROGRESS → CANCELLED free, PROGRESS → DEPOSIT still gated', !bg_transition_gated($p . 'PROGRESS', $p . 'CANCELLED') && bg_transition_gated($p . 'PROGRESS', $p . 'DEPOSIT'));
+$t('Rivolta is a private folder (in scope)', !bg_is_group(['practice_code' => $rv . 'PROVISIONAL', 'group_folder' => '']));
 $t('group member not gated', bg_is_group(['group_folder' => 'GRP0101_x', 'practice_code' => 'a']) && bg_is_group(['practice_code' => '05_GRUPPO Diamante_PROGRESS'])
                              && !bg_is_group(['practice_code' => $p . 'PROGRESS']));
 

@@ -846,7 +846,7 @@ include 'includes/header.php';
           <?php endforeach; ?>
           <?php $sPath = savannah_local_path($r); $sUrl = savannah_open_url($r); ?>
           <div style="margin-top:3px;font-family:'Open Sans',sans-serif">
-            <?php if (($r['status'] ?? '') === 'Booked' && !$isGrp && $folder !== '' && function_exists('bg_is_group') && !bg_is_group($r)):
+            <?php if (in_array($r['status'] ?? '', ['Booked', 'Provisional'], true) && !$isGrp && $folder !== '' && function_exists('bg_is_group') && !bg_is_group($r)):
                 $gr = $gateByReq[(int)$r['id']] ?? null;
                 $gSt = ['queued' => ['#1a3a5c', '⏳ Check running'], 'running' => ['#1a3a5c', '⏳ Check running'], 'passed' => ['#1A6B3A', '🟢 Check passed'],
                         'blocked' => ['#a33', '🔴 Check blocked'], 'error' => ['#a33', '⚠ Check error'], 'overridden' => ['#6B4FA0', '🔓 Check unlocked']][$gr['state'] ?? ''] ?? null; ?>

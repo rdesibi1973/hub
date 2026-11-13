@@ -826,7 +826,7 @@ include 'includes/header.php';
         if ($ckRow && ck_is_other_destination($ckRow['folder_name'])) { $ckRow = null; $ckOther = true; }   // no CK outside Tanzania
     } catch (Throwable $e) { $ckRow = null; }
     ?>
-    <?php if (($r['status'] ?? '') === 'Booked' && trim((string)($r['practice_code'] ?? '')) !== ''): ?>
+    <?php if (in_array($r['status'] ?? '', ['Booked', 'Provisional'], true) && trim((string)($r['practice_code'] ?? '')) !== ''): ?>
     <!-- Booking gate: the AI booking check before the folder leaves PROGRESS (includes/booking_gate_service.php) -->
     <div class="detail-label">Booking check<?php require_once __DIR__ . '/includes/procedures_service.php'; echo proc_help_link('ck_followup'); ?></div>
     <div class="detail-value">
