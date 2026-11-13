@@ -100,6 +100,27 @@ function calc_rd_col_shift(string $col, int $n): string {
     return chr(ord($col) + $n);
 }
 
+/**
+ * What an undated row under the day rows is (handoff 13 Nov 2026, Cavalli rows 21 / 22) — one rule for the booking
+ * check, the booking gate and the ITI final program, so the Calc is read the same way everywhere:
+ *   'lost_day'   a hotel / lodge with a cost in J: a real night with no date → the only error
+ *   'annotation' supplier text in the HOTEL column + INVOICE / CHECKED marks, no cost ("Flight link | Invoice$290 |
+ *                Glady"): a note on the service it names (booking_check attaches the marks to it)
+ *   'trip_item'  no hotel text: an activity / fee / cost of the whole trip, not of a day (MEDIVAC, emergency,
+ *                insurance, bank costs…)
+ *   'note'       hotel text with no J cost and no marks: kept as a warning
+ * $sk: a calc_read_file() skipped_rows entry (hotel, invoice, checked, has_cost, stay_cost).
+ */
+function calc_skipped_kind(array $sk) {
+    $hotel = trim((string)($sk['hotel'] ?? ''));
+    $stay = isset($sk['stay_cost']) && $sk['stay_cost'] !== null ? (float)$sk['stay_cost'] : 0.0;
+    if ($hotel !== '' && $stay != 0) return 'lost_day';
+    $marks = trim((string)($sk['invoice'] ?? '')) !== '' || trim((string)($sk['checked'] ?? '')) !== '';
+    if ($hotel !== '' && $marks && empty($sk['has_cost'])) return 'annotation';
+    if ($hotel === '') return 'trip_item';
+    return 'note';
+}
+
 /** The client sheets of a group calc (every sheet but RECAP). */
 function calc_group_client_sheets(array $sheets): array {
     $out = [];
@@ -291,13 +312,16 @@ function calc_read_file(string $path, string $wantSheet = ''): array {
         // What the booking check needs to tell a Calc annotation row (supplier + INVOICE / CHECKED marks under the
         // day rows, no date, no cost — Cavalli row 22 "Flight link | Invoice$290 | Glady") from a lost day.
         $hasCost = false;
-        foreach (array_unique(array_filter([$cols['flight'], 'D', $cols['act_cost'], $cols['stay_cost']])) as $cc) {
+        foreach (array_unique(array_filter([$cols['flight'], 'D', 'E', 'F', $cols['act_cost'], $cols['stay_cost']])) as $cc) {
             $n = calc_rd_num($v, $cc, $r);
             if ($n !== null && $n != 0) $hasCost = true;
         }
-        $skipped[] = ['row' => $r, 'text' => implode(', ', $what), 'hotel' => $cell($cols['hotel'], $r),
-                      'invoice' => $cell($cols['invoice'], $r), 'checked' => $cell($cols['checked'], $r),
-                      'dated' => calc_rd_text($v, 'A', $r) !== '', 'has_cost' => $hasCost];
+        $sk = ['row' => $r, 'text' => implode(', ', $what), 'hotel' => $cell($cols['hotel'], $r),
+               'invoice' => $cell($cols['invoice'], $r), 'checked' => $cell($cols['checked'], $r),
+               'dated' => calc_rd_text($v, 'A', $r) !== '', 'has_cost' => $hasCost,
+               'stay_cost' => calc_rd_num($v, $cols['stay_cost'], $r)];
+        $sk['kind'] = calc_skipped_kind($sk);
+        $skipped[] = $sk;
     }
 
     // One day list for everything: nights = days − 1 here, in price_options[].nights, in the

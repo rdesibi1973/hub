@@ -489,11 +489,21 @@ function iti_final_calc_review(array $calc): array {
         if ($quote) $warnings[] = 'No room types under ROOMS TYPE (quote, request not booked yet): the program goes without them.';
         else        $openErrors[] = 'Enter the room types in the cell under ROOMS TYPE.';
     }
-    // Rows of the day table with a hotel / activity but no date and no PARK/OVERNIGHT text (calc_read_file()):
-    // they would not become programme days.
+    // Rows of the day table with content but no date and no PARK/OVERNIGHT text (calc_read_file()), read with the rule
+    // shared with booking_check and the booking gate (calc_skipped_kind(), 13 Nov 2026): only a lodge with a cost in J
+    // (a real night with no date) stops the program; a trip-wide item (MEDIVAC, insurance…) is not a day and needs
+    // nothing; a booking-team annotation (supplier + INVOICE / CHECKED marks) and other texts are warnings.
     foreach (($calc['skipped_rows'] ?? array()) as $sk) {
-        $errors[] = 'Row ' . (int)$sk['row'] . ' of the Calc has ' . $sk['text'] . ' but no date and no PARK/OVERNIGHT text (column B): '
-                  . 'it would not become a day of the program. Fill column B (or clear the row).';
+        $kind = isset($sk['kind']) ? $sk['kind'] : (function_exists('calc_skipped_kind') ? calc_skipped_kind($sk) : 'lost_day');
+        if ($kind === 'lost_day') {
+            $errors[] = 'Row ' . (int)$sk['row'] . ' of the Calc has ' . $sk['text'] . ' with an accommodation cost but no date and no PARK/OVERNIGHT text (column B): '
+                      . 'it would not become a day of the program. Fill column B (or clear the row).';
+        } elseif ($kind === 'annotation') {
+            $warnings[] = 'Row ' . (int)$sk['row'] . ' of the Calc ("' . trim($sk['hotel'] . ' | ' . $sk['invoice'] . ' | ' . $sk['checked'], ' |')
+                        . '") is a booking note, not a day: move INVOICE / CHECKED to the service row.';
+        } elseif ($kind === 'note') {
+            $warnings[] = 'Row ' . (int)$sk['row'] . ' of the Calc has ' . $sk['text'] . ' but no date and no cost: not a day of the program. Check it is not a night left without a date.';
+        }   // trip_item: a cost of the whole trip, never a day
     }
     if (!$open && $rooms !== '' && iti_final_room_text($rooms, 'en') === null) {
         $warnings[] = 'Room types "' . $rooms . '" not recognised: they go on the program as written in the Calc, not translated. Check them in the program.';

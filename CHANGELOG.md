@@ -20,6 +20,13 @@ Running log of notable changes and current build state. Module-level "active / p
 
 ---
 
+## 2026-11-13 — Undated Calc rows: one rule for booking_check, the gate and the ITI final program
+
+- `calc_skipped_kind()` (calc_reader.php) classifies each undated row under the day rows: `lost_day` (lodge + cost in J: the
+  only error), `annotation` (supplier + INVOICE / CHECKED marks, no cost: attached to the service it names), `trip_item`
+  (no hotel text: MEDIVAC, insurance… — never a day), `note` (warning). `iti_final_calc_review()` no longer refuses the
+  program for Cavalli rows 21 (MEDIVAC) / 22 (Flight link marks). Tests in `tools/tests/booking_gate_test.php`.
+
 ## 2026-11-13 — Booking gate: AI booking check before a folder leaves PROGRESS
 
 - `modules/leads/includes/booking_gate_service.php` (handoff "Booking gate", 12–13 Nov): run = collect (Calc services +

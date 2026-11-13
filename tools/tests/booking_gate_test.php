@@ -166,6 +166,30 @@ $t('own JRO transfer → IN-HOUSE, nothing reported', $res['passed'] && !$res['f
 $html = bg_report_html(['customer_name' => 'Cavalli'], $snap($cavServices), bg_evaluate($snap($cavServices), [$sv]), ['finished_at' => '2026-11-13 10:00:00']);
 $t('report renders', strpos($html, '<title>Booking check') !== false && strpos($html, 'MISSING') !== false);
 
+// ── Undated Calc rows: one rule (calc_skipped_kind) for booking_check, the gate and the ITI final program ──
+$row21 = ['row' => 21, 'text' => 'activity "MEDIVAC"', 'hotel' => '', 'invoice' => '', 'checked' => '', 'dated' => false, 'has_cost' => true, 'stay_cost' => null];
+$row22 = ['row' => 22, 'text' => 'hotel "Flight link"', 'hotel' => 'Flight link', 'invoice' => 'Invoice$290', 'checked' => 'Glady', 'dated' => false, 'has_cost' => false, 'stay_cost' => null];
+$lost  = ['row' => 23, 'text' => 'hotel "Gibbs Farm"', 'hotel' => 'Gibbs Farm', 'invoice' => '', 'checked' => '', 'dated' => false, 'has_cost' => true, 'stay_cost' => 420.0];
+$t('MEDIVAC row 21 → trip item', calc_skipped_kind($row21) === 'trip_item');
+$t('Flight link row 22 → annotation', calc_skipped_kind($row22) === 'annotation');
+$t('lodge + cost in J, no date → lost day', calc_skipped_kind($lost) === 'lost_day');
+$cav = $calc; $cav['skipped_rows'] = [$row21, $row22];
+$svCav = bc_services($cav);
+$t('booking_check: MEDIVAC no service, marks on the flight', count($svCav) === 4
+   && (array_values(array_filter($svCav, fn($s) => $s['type'] === 'flight'))[0]['annotations'][0]['row'] ?? 0) === 22);
+// ITI review (iti_final.php needs the server config only to connect: DB_HOST set, nothing is queried here).
+if (!defined('DB_HOST')) define('DB_HOST', 'test');
+if (!defined('BASE_URL')) define('BASE_URL', 'https://test');
+require_once __DIR__ . '/../../modules/iti/includes/iti_final.php';
+$rv = iti_final_calc_review(['pax' => ['adults' => 2, 'teen' => 0, 'child' => 0], 'room_config' => '1 DBL', 'request_status' => 'Booked', 'sheet' => '2PAX',
+                             'start_date' => '2027-01-15', 'days' => [['date' => '2027-01-15']], 'skipped_rows' => [$row21, $row22]]);
+$rowErr = array_filter($rv['errors'], fn($e) => preg_match('/^Row 2[12]\b/', $e));
+$t('ITI review: no errors for rows 21 / 22, a warning for the annotation', !$rowErr
+   && count(array_filter($rv['warnings'], fn($w) => strpos($w, 'Row 22') === 0)) === 1, $rv['errors']);
+$rv = iti_final_calc_review(['pax' => ['adults' => 2, 'teen' => 0, 'child' => 0], 'room_config' => '1 DBL', 'request_status' => 'Booked', 'sheet' => '2PAX',
+                             'start_date' => '2027-01-15', 'days' => [['date' => '2027-01-15']], 'skipped_rows' => [$lost]]);
+$t('ITI review: lodge + J cost with no date → still an error', (bool)array_filter($rv['errors'], fn($e) => strpos($e, 'Row 23') === 0), $rv['errors']);
+
 // ── Extraction schema: the API accepts at most 16 union-typed (nullable) parameters ──
 $unions = 0;
 $walk = function ($n) use (&$walk, &$unions) {

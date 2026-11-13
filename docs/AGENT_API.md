@@ -331,6 +331,10 @@ rows with text in the HOTEL column and INVOICE / CHECKED marks but no date and n
 Invoice$290 | Glady") is not a service: its marks go to the service it names (flight words → the nearest flight above;
 else a service sharing a word; else the nearest one above) in `calc_invoice` / `calc_checked`, the service gets
 `annotations[] {row, text, invoice, checked}`, and `calc.warnings` says "move INVOICE / CHECKED to the service row".
+**Undated rows, one rule everywhere** (`calc_skipped_kind()` in `calc_reader.php`; `calc.skipped_rows[].kind` in `read_calc`): `lost_day` = a
+lodge with a cost in J and no date (the only error, also in `iti_calc_plan` / `iti_final_from_calc` `review.errors`), `annotation` = as above
+(warning), `trip_item` = no hotel text, a cost of the whole trip such as MEDIVAC row 21 (never a day, nothing reported), `note` = hotel text with
+no cost and no marks (warning).
 
 ### Booking gate — `gate_status` (GET), `gate_run` (POST)
 The AI booking check the booking team runs from the Hub before a folder leaves `_PROGRESS` (handoff 12–13 Nov 2026;

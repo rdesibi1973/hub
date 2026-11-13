@@ -124,7 +124,8 @@ function bc_attach_annotations(array &$services, array $skipped): void {
     foreach ($skipped as $sk) {
         $hotel = trim((string)($sk['hotel'] ?? ''));
         $inv = trim((string)($sk['invoice'] ?? '')); $chk = trim((string)($sk['checked'] ?? ''));
-        if ($hotel === '' || ($inv === '' && $chk === '') || !empty($sk['dated']) || !empty($sk['has_cost'])) continue;
+        // calc_skipped_kind(): the shared rule (calc_reader.php) — trip-wide items (MEDIVAC…) are not services either.
+        if (($sk['kind'] ?? calc_skipped_kind($sk)) !== 'annotation' || !empty($sk['dated'])) continue;
         $row = (int)$sk['row'];
         $best = null; $bestDist = PHP_INT_MAX;
         $isFlight = (bool)preg_match(BC_FLIGHT_WORDS, $hotel);
