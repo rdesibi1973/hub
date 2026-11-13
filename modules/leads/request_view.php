@@ -97,7 +97,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             if ($prognum === '') {
                 echo json_encode(['ok'=>false,'msg'=>'Enter a valid ProgNumber (no \ / : * ? " < > |).']); exit;
             }
-            $res = bs_copy_programs($db, (int)($_POST['request_id'] ?? 0), $prognum, $programs);
+            $cpId = (int)($_POST['request_id'] ?? 0);
+            // Same rule as the Edit button: admin/manager, accountant, or the seller's own request.
+            if (isLeadsRestricted() && !in_array($cu['role_name'] ?? '', ['accountant'], true)) {
+                $own = $db->prepare("SELECT agent_id FROM requests WHERE id=?");
+                $own->execute([$cpId]);
+                if ((int)$own->fetchColumn() !== getStaffAgentId()) {
+                    echo json_encode(['ok'=>false,'msg'=>'Only the seller of this request can copy programs.']); exit;
+                }
+            }
+            $res = bs_copy_programs($db, $cpId, $prognum, $programs);
             echo json_encode($res);
         } catch (Throwable $e) {
             echo json_encode(['ok'=>false,'msg'=>'Error: '.$e->getMessage()]);
@@ -523,12 +532,11 @@ include 'includes/header.php';
         <a href="../invoices/invoices.php?request_id=<?= $r['id'] ?>" class="btn btn-outline">🧾 <?= $invCount ?> Invoices</a>
       <?php endif; ?>
     <?php endif; ?>
-    <?php if ($r['dropbox_url']): ?>
-      <?php
-        preg_match('#dropbox\.com/home(/.*)?$#i', $r['dropbox_url'], $m);
-        $hdrDbxPath = urldecode($m[1] ?? '');
-      ?>
-      <a href="dropbox_open.php?path=<?= rawurlencode($hdrDbxPath) ?>" target="_blank" class="btn btn-outline">
+    <?php $hdrDbxPath = req_folder_path($r); ?>
+    <?php if ($hdrDbxPath): ?>
+      <?php // Opens the folder on this PC (Windows Explorer) via the savannah:// handler, not the Dropbox website. ?>
+      <a href="<?= h('savannah://open?path=' . implode('/', array_map('rawurlencode', explode('/', ltrim($hdrDbxPath, '/'))))) ?>"
+         class="btn btn-outline" title="Open the folder in Windows Explorer">
         📁 Open Dropbox Folder
       </a>
     <?php endif; ?>
@@ -959,7 +967,7 @@ include 'includes/header.php';
 <?php endif; ?>
 
 <!-- STANDARD PROGRAMS (Copy Programs) -->
-<?php if (!isLeadsRestricted() && $dbxPath): ?>
+<?php if ($canEdit && $dbxPath): ?>
 <?php $stdPrograms = bs_std_programs(); $stdDisabled = bs_std_programs_disabled(); ?>
 <?php require_once __DIR__ . '/includes/procedures_service.php'; ?>
 <div class="section-label">Standard Programs<?= proc_help_link('quotation') ?></div>
