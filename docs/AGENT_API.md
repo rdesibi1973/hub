@@ -348,14 +348,14 @@ to that user. Documents already read (same Dropbox `content_hash`) are never sen
   audience, service_date}`, `report_path`, `enforced`, `in_scope` (false for groups).
 - `gate_run` — `request_id`; dry-run unless `"confirm": true`. Queues a run (an active one is returned, `existing: true`);
   no Calc / several CONF / old quotes → the run ends at once, blocked `calc_not_clean`. Groups → 409.
-- **The gate**: `rename_folder` and `update_folder_status` moving a private folder from `_PROGRESS` to `_DEPOSIT` / `_BALANCE` /
-  `_BALANCE-CASH` / `_PAID` → **409 also on the dry run** (`booking_gate` in the body) unless the latest run is `passed` and not
+- **The gate**: `rename_folder` and `update_folder_status` giving a private folder its first payment tag (`_DEPOSIT` / `_BALANCE` /
+  `_BALANCE-CASH` / `_PAID`) — from `_PROGRESS`, and also from `_PROVISIONAL` or no tag, so there is no way round → **409 also on the dry run** (`booking_gate` in the body) unless the latest run is `passed` and not
   out of date (Calc or evidence changed since) or `overridden`. Same refusal on every Hub path (BackOffice Rename / Change status,
   invoice "Update Folder", request edit form). The Java BackOffice endpoints (`api_rename_folder.php`, `api_update_status.php`)
   rename on disk first: they cannot refuse — timeline + memo to Roberto + a run started (`booking_gate_warning`).
   A refused attempt with no usable run starts one. Later moves (DEPOSIT → BALANCE → PAID) are not gated. Groups are not gated (v1).
-- **Shadow mode**: `BOOKING_GATE_ENFORCE` (includes/config.php, default false) — runs, reports and lines work, the status change is
-  allowed with a warning. **Force unlock**: Roberto (`rdesibi`) only, on the request page, reason required; not through the API.
+- **Enforced** since 13 Nov 2026 (Roberto: block from day one). `define('BOOKING_GATE_ENFORCE', false)` in includes/config.php
+  = shadow mode: runs, reports and lines work, the status change is allowed with a warning. **Force unlock**: Roberto (`rdesibi`) only, on the request page, reason required; not through the API.
 - Config: `ANTHROPIC_API_KEY`, optional `ANTHROPIC_MODEL_EXTRACT` (default the ITI model). Calls go through `iti_ai_call()`
   (action `booking_gate`): the Hub's monthly AI limit applies (ITI → Settings → AI), not the person's own limit.
 

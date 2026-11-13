@@ -30,7 +30,10 @@ Running log of notable changes and current build state. Module-level "active / p
 - The gate (`booking_gate_check()`): PROGRESS → DEPOSIT / BALANCE / BALANCE-CASH / PAID refused while the latest run is not
   passed / overridden or is out of date — BackOffice Rename + Change status, invoice "Update Folder", request edit form, Agent
   API `rename_folder` / `update_folder_status` (409, also dry run). Java endpoints: after the fact (timeline + memo + run).
-  `BOOKING_GATE_ENFORCE` false = shadow mode (warns only). Force unlock: rdesibi only, reason, timeline + agent_audit_log.
+  Enforced by default (Roberto, 13 Nov: a real test needs the block); `BOOKING_GATE_ENFORCE` false in config = shadow mode.
+  Gated = a folder without a payment tag getting its first one (PROGRESS / PROVISIONAL / no tag → DEPOSIT…): no way round.
+  Force unlock: rdesibi only, reason, timeline + agent_audit_log.
+- api_update_status.php: the lookup + update + JSON reply ran twice (duplicated block since the first commit) — removed.
 - UI: "Booking check" panel on the request page and on Booking follow-up filtered on a request (`assets/booking_gate.js`,
   endpoint `booking_gate.php`, which is also the admin cost page); badge in the CK tracker Pipeline column.
 - Worker `cron_booking_gate.php` (cron-job.org every minute, `CK_CRON_TOKEN` / `MEMO_CRON_TOKEN`).

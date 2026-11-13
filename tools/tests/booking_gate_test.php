@@ -23,6 +23,9 @@ $t('PROGRESS → PAID gated', bg_transition_gated($p . 'PROGRESS', $p . 'PAID'))
 $t('DEPOSIT → BALANCE not gated', !bg_transition_gated($p . 'DEPOSIT', $p . 'BALANCE'));
 $t('PROGRESS → CANCELLED not gated', !bg_transition_gated($p . 'PROGRESS', $p . 'CANCELLED'));
 $t('PROGRESS → PROVISIONAL not gated', !bg_transition_gated($p . 'PROGRESS', $p . 'PROVISIONAL'));
+$t('no way round: PROVISIONAL / no tag → DEPOSIT gated', bg_transition_gated($p . 'PROVISIONAL', $p . 'DEPOSIT') && bg_transition_gated(rtrim($p, '_'), $p . 'DEPOSIT'));
+$t('BALANCE → PAID, DEPOSIT_CK → BALANCE_CK not gated', !bg_transition_gated($p . 'BALANCE', $p . 'PAID') && !bg_transition_gated($p . 'DEPOSIT_CK', $p . 'BALANCE_CK'));
+$t('enforced by default (no constant)', bg_enforce());
 $t('group member not gated', bg_is_group(['group_folder' => 'GRP0101_x', 'practice_code' => 'a']) && bg_is_group(['practice_code' => '05_GRUPPO Diamante_PROGRESS'])
                              && !bg_is_group(['practice_code' => $p . 'PROGRESS']));
 

@@ -47,7 +47,7 @@ outdated — this file wins where they disagree (PHP version, local lint).
 - **Booking gate** (logic `modules/leads/includes/booking_gate_service.php`, panel `assets/booking_gate.js` + endpoint
   `booking_gate.php`, worker `cron_booking_gate.php`, Agent API `gate_status` / `gate_run`): AI booking check before a folder
   leaves `_PROGRESS`. A new path that renames a private folder out of `_PROGRESS` calls `booking_gate_check()` first and refuses
-  on `refused`. Issue → blocking table `BG_ISSUES` (also in `docs/AGENT_API.md`). Off (shadow) until `BOOKING_GATE_ENFORCE`.
+  on `refused`. Issue → blocking table `BG_ISSUES` (also in `docs/AGENT_API.md`). Enforced since 13 Nov 2026; `define('BOOKING_GATE_ENFORCE', false)` in includes/config.php = shadow mode (warns only).
 - **Travel info** (Booked "✈ Travel info"; logic `includes/predeparture_service.php`, shared with the Agent API
   `predeparture_*`): pre-departure mail per language / country — Jambo, visa, NIC / ZIC, Ebola form.
 - **Folder link by Dropbox id** (`requests.dropbox_id`, migration 082; logic `modules/leads/includes/folder_link_service.php`,

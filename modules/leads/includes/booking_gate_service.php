@@ -15,7 +15,7 @@
  *                                   the latest run is not passed / overridden, or is out of date
  *   Override  bg_override()         Roberto (rdesibi) only, reason required, logged; not through the Agent API
  *
- * BOOKING_GATE_ENFORCE (includes/config.php, default false = shadow mode): runs, reports and lines work, the status
+ * BOOKING_GATE_ENFORCE (includes/config.php; not defined = enforced, false = shadow mode): runs, reports and lines work, the status
  * change only warns. Group folders (GRP, Il Diamante / Panorama, GRUPPO) are not gated in v1.
  * Passport numbers and dates of birth: never asked from the AI, stripped again in PHP before anything is stored.
  */
@@ -103,9 +103,10 @@ function bg_config(): void {
     }
 }
 
+/** Enforced unless includes/config.php says define('BOOKING_GATE_ENFORCE', false) (Roberto, 13 Nov 2026: block from day one). */
 function bg_enforce(): bool {
     bg_config();
-    return defined('BOOKING_GATE_ENFORCE') && BOOKING_GATE_ENFORCE;
+    return !defined('BOOKING_GATE_ENFORCE') || (bool)BOOKING_GATE_ENFORCE;
 }
 
 function bg_model(): string {
@@ -158,9 +159,14 @@ function bg_tag(string $name): string {
     return '';
 }
 
-/** PROGRESS → DEPOSIT / BALANCE / BALANCE-CASH / PAID (what tells the seller to send the confirmation). Later moves are free. */
+/**
+ * Gated: a folder that has no payment tag yet (PROGRESS, or PROVISIONAL / no tag / anything else) getting DEPOSIT /
+ * BALANCE / BALANCE-CASH / PAID — what tells the seller to send the confirmation. So PROGRESS → PROVISIONAL (or tag
+ * removed) → DEPOSIT is no way round. Moves between payment tags (DEPOSIT → BALANCE → PAID) and to CANCELLED are free.
+ */
 function bg_transition_gated(string $oldName, string $newName): bool {
-    return bg_tag($oldName) === 'PROGRESS' && in_array(bg_tag($newName), ['DEPOSIT', 'BALANCE', 'BALANCE-CASH', 'PAID'], true);
+    $pay = ['DEPOSIT', 'BALANCE', 'BALANCE-CASH', 'PAID'];
+    return in_array(bg_tag($newName), $pay, true) && !in_array(bg_tag($oldName), $pay, true);
 }
 
 /** Group folders are out of scope v1: GRP member / group parent, Il Diamante / Panorama, GRUPPO. */
