@@ -141,6 +141,22 @@ $t('scope requests: /2025–/2027 (missing years skipped)', $r['drafts_found'] =
 $r = drafts_cleanup($db, $o + ['scope' => 'all', 'budget' => 0, 'chunk' => 1]);
 $t('time budget: stops after the first chunk with next_offset', $r['next_offset'] === 1 && $r['folders_scanned'] === 1, $r['next_offset']);
 
+// A Dropbox error on a chunk (13 Nov 2026: "HTTP 0" on 527 chunks were skipped and the run claimed to be done): the run stops
+// at that chunk with next_offset; the next run resumes there; nothing is skipped.
+$flaky = $dbx; $broken = true;
+$flaky['list'] = function (string $p) use ($dbx, &$broken) {
+    if ($broken && strpos($p, 'GRP_10OCT_Panorama') !== false) throw new RuntimeException('Dropbox list_folder failed (HTTP 0, Connection reset)');
+    return $dbx['list']($p);
+};
+$r = drafts_cleanup($db, ['dbx' => $flaky] + $o + ['scope' => 'safari', 'chunk' => 1]);
+$tot = $r['folders_total'];
+$t('error → stops at that chunk, next_offset set, not "done"', $r['next_offset'] !== null && !empty($r['stopped']) && count($r['errors']) === 1
+   && $r['folders_scanned'] === $r['next_offset'] && $r['next_offset'] < $tot, [$r['next_offset'], $r['folders_scanned'], $tot]);
+$broken = false;
+$r2 = drafts_cleanup($db, ['dbx' => $flaky] + $o + ['scope' => 'safari', 'chunk' => 1, 'offset' => $r['next_offset']]);
+$t('resumed run covers the rest (group member found)', $r2['next_offset'] === null && !$r2['errors']
+   && in_array('/001_Safari/GRP_10OCT_Panorama/11_10OCT_Bianchi(X-Y)', array_column($r2['results'], 'folder'), true), array_column($r2['results'], 'folder'));
+
 // A header read that fails (Dropbox 429): read again once; still failing → "unreadable", never "kept", never moved.
 $N = '/2026/Neri(ABC-Roberto)/mails/';
 $failOnce = $dbx; $calls = 0;

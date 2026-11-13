@@ -56,17 +56,28 @@ function drafts_free_name(string $name, array $taken): string {
 function drafts_dbx_list(string $token, string $path): ?array {
     $out = ['folders' => [], 'files' => []];
     $cursor = null;
-    do {
+    $tries = 0;
+    while (true) {   // not do/while: a retry (continue) must not end the loop
         $ch = curl_init('https://api.dropboxapi.com/2/files/list_folder' . ($cursor ? '/continue' : ''));
-        curl_setopt_array($ch, [CURLOPT_POST => true, CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 60,
+        curl_setopt_array($ch, [CURLOPT_POST => true, CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 60, CURLOPT_CONNECTTIMEOUT => 20,
+            CURLOPT_HEADER => true,
             CURLOPT_HTTPHEADER => ['Authorization: Bearer ' . $token, 'Content-Type: application/json'],
             CURLOPT_POSTFIELDS => json_encode($cursor ? ['cursor' => $cursor] : ['path' => $path, 'recursive' => false, 'limit' => 2000])]);
-        $body = (string)curl_exec($ch);
+        $res = (string)curl_exec($ch);
         $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $hs = curl_getinfo($ch, CURLINFO_HEADER_SIZE);
+        $cerr = curl_error($ch);
         curl_close($ch);
+        $body = substr($res, $hs);
         if ($code === 409 && stripos($body, 'not_found') !== false) return null;
-        if ($code === 429) { sleep(2); continue; }
-        if ($code !== 200) throw new RuntimeException("Dropbox list_folder $path failed (HTTP $code): " . substr($body, 0, 300));
+        // Connection error (HTTP 0), rate limit, Dropbox 5xx: wait (Retry-After, else 1-2-4-8 s) and try again, 5 times at most.
+        if (($code === 0 || $code === 429 || $code >= 500) && ++$tries < 5) {
+            $wait = preg_match('/^Retry-After:\s*(\d+)/mi', substr($res, 0, $hs), $m) ? min(10, (int)$m[1]) : 1 << ($tries - 1);
+            sleep(max(1, $wait));
+            continue;
+        }
+        if ($code !== 200) throw new RuntimeException("Dropbox list_folder $path failed (HTTP $code" . ($cerr !== '' ? ', ' . $cerr : '') . '): ' . substr($body, 0, 300));
+        $tries = 0;
         $d = json_decode($body, true) ?: [];
         foreach ($d['entries'] ?? [] as $e) {
             if (($e['.tag'] ?? '') === 'folder') $out['folders'][] = (string)$e['name'];
@@ -74,7 +85,8 @@ function drafts_dbx_list(string $token, string $path): ?array {
                                                                       'modified' => (string)($e['server_modified'] ?? '')];
         }
         $cursor = !empty($d['has_more']) ? ($d['cursor'] ?? null) : null;
-    } while ($cursor);
+        if (!$cursor) break;
+    }
     return $out;
 }
 
@@ -82,7 +94,7 @@ function drafts_dbx_list(string $token, string $path): ?array {
  * drafts_dbx_list() of many folders at once (parallel list_folder): [path => listing | null]. A paged answer (has_more),
  * a rate limit (429) or any other error falls back to drafts_dbx_list() for that folder.
  */
-function drafts_dbx_list_multi(string $token, array $paths, int $concurrency = 8): array {
+function drafts_dbx_list_multi(string $token, array $paths, int $concurrency = 3): array {   // BlueHost thread limit (getaddrinfo thread failed)
     $out = [];
     $queue = array_values(array_unique($paths));
     $mh = curl_multi_init();
@@ -149,7 +161,7 @@ function drafts_dbx_head_one(string $token, string $p): ?string {
  * The first DRAFTS_HEAD_BYTES of many files (Range requests, a few in parallel): [path => bytes | null]. Dropbox throttles
  * parallel downloads (seen 12 Nov 2026: 4 of 10 refused in parallel, all fine one by one): failures are read again one by one.
  */
-function drafts_dbx_heads(string $token, array $paths, int $concurrency = 3): array {
+function drafts_dbx_heads(string $token, array $paths, int $concurrency = 2): array {
     $out = [];
     $queue = array_values(array_unique($paths));
     $mh = curl_multi_init();
@@ -361,7 +373,12 @@ function drafts_cleanup(PDO $db, array $o = []): array {
                 if ($r['drafts'] || !empty($r['unreadable'])) $out['results'][] = $r;   // unreadable: run again later
             }
         } catch (Throwable $e) {
+            // Never skip folders: stop here, the next run starts again from this chunk (its counts are not added).
             $out['errors'][] = ['folder' => $chunk[0] . ' … (' . count($chunk) . ' folders)', 'error' => $e->getMessage()];
+            $out['folders_scanned'] = $i;
+            $out['next_offset'] = $offset + $i;
+            $out['stopped'] = 'Dropbox error — run again from next_offset (nothing was skipped)';
+            break;
         }
     }
     if ($out['next_offset'] === null && $limit > 0 && $offset + $limit < $total) $out['next_offset'] = $offset + $limit;
