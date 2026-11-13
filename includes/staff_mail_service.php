@@ -275,7 +275,8 @@ function sm_raw(string $mailbox, string $folder, string $key): ?array {
  * password is in includes/config.php), in its thread — Agent API staff_mail_reply (13 Nov 2026). Same rules as the
  * Booking mail page reply (bm_reply()): BOOKING_MAIL_LIVE, reason, logged in mail_access_log, copy in that mailbox's Sent.
  * To = the sender (Reply-To) of a received mail, the outside recipients of one we sent. The Maildir file is not touched.
- * $in: body (plain text; "Booking Team" signature added if missing) and/or body_html (complete, signature included),
+ * $in: body (plain text) and/or body_html (complete, signature included). "Booking Team" signature added to body only
+ *      when there is no body_html and the text lacks it; with body_html nothing is added to either part.
  *      cc (string or list), attachments [{name, content_base64}]. $confirm false = preview only.
  * → ['sent' => bool, 'email' => summary, 'sent_folder' => ?, 'warning' => ?, 'message_id' => original Message-ID]
  */
@@ -304,7 +305,8 @@ function sm_reply(PDO $db, array $user, string $mailbox, string $folder, string 
     mbx_use_staff($short);
     try {
         $composed = mbx_compose(['to' => $to, 'cc' => $in['cc'] ?? [], 'subject' => $subject,
-                                 'body' => trim($text) !== '' ? bm_signed($text) : '', 'body_html' => $html,
+                                 // body_html given → the caller's signature is final in both parts (Roberto, 13 Nov 2026)
+                                 'body' => trim($text) === '' ? '' : (trim($html) !== '' ? $text : bm_signed($text)), 'body_html' => $html,
                                  'in_reply_to' => '<' . $r['message_id'] . '>', 'references' => implode(' ', $refs),
                                  'attachments' => $in['attachments'] ?? []]);
         if (!$confirm) return ['sent' => false, 'email' => $composed['summary'], 'message_id' => $r['message_id']];

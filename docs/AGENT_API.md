@@ -1494,8 +1494,9 @@ password, `BOOKING_MAIL_GLADY_PASS` / `BOOKING_MAIL_OPERATIONS_PASS`, is in the 
 other mailbox → 403. Same logic as the reply on the Booking mail page (`sm_reply()` in `staff_mail_service.php`, recipients
 from `bm_reply_recipients()`), so it also needs `BOOKING_MAIL_LIVE` (else 409 "Not active yet"). **Dry run unless
 `"confirm": true`.** `mailbox`*, `folder`*, `key`* (from `staff_mail_search`; `uid` accepted), `reason`* (≥ 10 characters),
-`body` (plain text; "Booking Team / Savannah Explorers" added if the text has no "Booking Team") and/or `body_html` (complete,
-with its own signature; then `body` is the text part), optional `cc`, `attachments [{name, content_base64}]` (≤ 10 MB each),
+`body` (plain text) and/or `body_html` (complete, with its own signature; then `body` is the text part). The line
+"Booking Team / Savannah Explorers" is added only when `body_html` is absent and `body` has no "Booking Team"; with
+`body_html` nothing is added to either part (the caller's signature is final, 13 Nov 2026). Optional `cc`, `attachments [{name, content_base64}]` (≤ 10 MB each),
 `request_id` (a confirmed reply is logged in its timeline, `mail_sent`).
 - Fixed by the original, not by the call: **To** = the sender (Reply-To) of a received mail, or the outside recipients of
   a mail we sent; **Subject** "Re: …"; `In-Reply-To` / `References` from the original. No outside recipient or no

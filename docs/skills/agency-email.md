@@ -44,9 +44,12 @@ come from that mailbox, the Hub can send it (13 Nov 2026):
 - Find the mail with `staff_mail_search` (`mailbox=glady` or `operations`, supplier / ref in `q`), read it with
   `staff_mail_get` (`reason` = why, e.g. "Rossi: Ndutu dates for the lodge"). Keep `mailbox`, `folder`, `key`.
 - Draft as usual (§2): `.eml` in Draft-mail with `From` = that mailbox, `To` = the sender, "Re: …", `In-Reply-To` /
-  `References` from `staff_mail_get`. English, short, signed "Booking Team / Savannah Explorers" (not Roberto's signature).
-- After his ok on THAT text: `staff_mail_reply` with the same `mailbox` / `folder` / `key`, `reason`, `body` (or
-  `body_html` + `body`), `request_id` → dry run, check from / to / subject, then `"confirm": true`. To, subject and
+  `References` from `staff_mail_get`. English, short. Signature = the one Roberto chooses (e.g. "Kind regards, Savannah
+  Explorers Team" + office details), not his personal one.
+- After his ok on THAT text: `staff_mail_reply` with the same `mailbox` / `folder` / `key`, `reason`, `body_html` + `body`
+  (same text and signature in both parts), `request_id` → dry run, check from / to / subject and that `email.body` ends
+  exactly as written, then `"confirm": true`. With `body_html` the Hub adds nothing; only a plain `body` alone gets the
+  line "Booking Team / Savannah Explorers" appended (13 Nov 2026). To, subject and
   threading come from the original mail and can't be changed; extra people only in `cc`.
 - Check: `staff_mail_search` on that mailbox with `message_id` = the original's Message-ID shows the reply in its Sent
   folder. Then delete the draft from Draft-mail (as §2).

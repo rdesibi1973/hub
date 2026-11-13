@@ -153,7 +153,7 @@ Prima di iniziare un lavoro leggi quella giusta con il connettore Dropbox e segu
 - gruppi e safari privati Yeadimtravel (Israele, Golan) → yeadim-groups
 - controllo pagamenti fornitori → supplier-payments-review
 - commissioni dei venditori → staff-compensations
-- mail ad agenzie, clienti, staff → agency-email
+- mail ad agenzie, clienti, staff, risposte ai fornitori da glady@ / operations@ → agency-email
 - post Facebook / Instagram → social-post
 `rules-client-documents.md`, nella stessa cartella, non è uno skill: sono le regole su ciò che vedono agenzie e clienti
 (prezzi, link, nomi da non mostrare, diciture, esclusioni). sales-agent, agency-email e booking-confirmation lo richiamano.
