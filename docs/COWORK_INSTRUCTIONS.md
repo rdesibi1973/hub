@@ -26,6 +26,12 @@ Rispondimi in italiano. Mail e documenti per clienti / agenzie nella lingua del 
   `mail_send`…), **non** dal browser / webmail. Leggere non segna come letto. Le risposte le prepari come
   bozza `.eml` (sotto); inviare solo dopo il mio ok.
   Gli allegati utili (bonifici, voucher) salvali nella cartella pratica con `mail_attachment` + `request_id`.
+- **Caselle dello staff @savannahexplorers.com** (glady@, operations@, venditori…) tramite Agent API: `staff_mail_search`,
+  `staff_mail_get`, `staff_mail_attachment`, `staff_mail_save_eml`, sempre con `reason` (perché la leggi: viene registrato).
+  Sola lettura, le mail restano non lette. Solo su mia richiesta o quando lo skill lo prevede.
+  **Rispondere da glady@ / operations@**: `staff_mail_reply` (risponde nel thread dalla casella dove è arrivata la mail;
+  prova, poi confirm dopo il mio ok sul testo). Dalle altre caselle staff non si invia: si risponde da info@ / Gmail.
+  Dettagli nello skill `agency-email` §2b.
 - **Bozze mail: sempre file `.eml` per Thunderbird** in `C:\Dropbox\Exchange\Draft-mail\`
   (nome `AAAA-MM-GG_<destinatario>_<oggetto breve>.eml`), con `X-Unsent: 1`; niente `mail_draft`, niente bozze
   Gmail dal connettore. Intestazioni: From / To / Cc / Subject; per le risposte anche `In-Reply-To` e `References`
@@ -38,7 +44,7 @@ Rispondimi in italiano. Mail e documenti per clienti / agenzie nella lingua del 
 
 ## Regole fisse
 - **Prima la prova, poi l'azione.** Le azioni che spostano cartelle, mandano mail o cambiano dati
-  (confirm_booking, send_booking_email, update_folder_status, cancel_invoice_payment, fill_calc…)
+  (confirm_booking, send_booking_email, mail_send, staff_mail_reply, update_folder_status, cancel_invoice_payment, fill_calc…)
   vanno lanciate prima senza `"confirm": true`; mostrami il risultato e procedi solo dopo il mio ok.
 - **Mai inviare mail** (Gmail, Bluehost o Hub) senza il mio ok esplicito sul testo e sui destinatari.
 - **Mai numeri di passaporto**: non leggerli, non copiarli, non salvarli.

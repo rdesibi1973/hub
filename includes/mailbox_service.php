@@ -34,8 +34,9 @@ function mbx_use(string $box): void {
 }
 
 /**
- * Booking team mailboxes, used only by the Booking mail page (booking_mail_service.php) to reply in a thread.
- * Kept out of MBX_BOXES on purpose: mbx_use(), and so the Agent API mail_* actions, cannot reach them.
+ * Booking team mailboxes, used only to reply in a thread: the Booking mail page (bm_reply()) and the Agent API
+ * staff_mail_reply (sm_reply() in staff_mail_service.php). Kept out of MBX_BOXES on purpose: mbx_use(), and so the
+ * generic Agent API mail_* actions, cannot reach them.
  * Passwords: the constants below, in the root includes/config.php.
  */
 const MBX_STAFF_BOXES = [

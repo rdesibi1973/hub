@@ -31,7 +31,7 @@ without driving the web UI.
 | HTTPS only | Plain HTTP → 403. |
 | Rate limit | 60 calls/min → 429. |
 | Audit | Every call (including failures and dry-runs) → `agent_audit_log` (action, request_id, user, HTTP code, dry_run, payload, result, IP). |
-| Dry-run by default | `update_request`, `confirm_booking`, `send_booking_email`, `rollback_booking`, `rename_folder`, `import_group_folder`, `move_group_folder`, `set_request_status`, `cancel_invoice_payment`, `cancel_invoice`, `restore_invoice`, `update_folder_status`, `import_zoho_invoice`, `create_invoice`, `update_invoice`, `send_invoice_email`, `memo_delete`, `create_agency`, `update_agency`, `save_agency_contact`, `delete_agency_contact`, `mail_send`, `mail_move`, `ck_request_check`, `ck_set_owners`, `ck_findings_upsert`, `followup_scan`, `followup_update`, `followup_upsert`, `staff_mail_save_eml` and `drafts_cleanup` (among others) do nothing unless the body has `"confirm": true`. |
+| Dry-run by default | `update_request`, `confirm_booking`, `send_booking_email`, `rollback_booking`, `rename_folder`, `import_group_folder`, `move_group_folder`, `set_request_status`, `cancel_invoice_payment`, `cancel_invoice`, `restore_invoice`, `update_folder_status`, `import_zoho_invoice`, `create_invoice`, `update_invoice`, `send_invoice_email`, `memo_delete`, `create_agency`, `update_agency`, `save_agency_contact`, `delete_agency_contact`, `mail_send`, `mail_move`, `ck_request_check`, `ck_set_owners`, `ck_findings_upsert`, `followup_scan`, `followup_update`, `followup_upsert`, `staff_mail_save_eml`, `staff_mail_reply` and `drafts_cleanup` (among others) do nothing unless the body has `"confirm": true`. |
 | No deletes | No delete endpoint (mail included), except `memo_delete`, which is soft (`deleted_at`, the row stays). Undo a confirm with `rollback_booking` (or BackOffice → Rollback). |
 | Mailbox | The key also reads `info@` (`mail_*`): keep `api.txt` as private as the mailbox password. |
 
@@ -1363,7 +1363,7 @@ curl -sH "$H" -X POST "$U?action=mail_draft" -d '{"from":"gmail","to":"agent@age
 curl -sH "$H" -X POST "$U?action=mail_send"  -d '{"from":"gmail","to":"staff@savannahexplorers.com","subject":"Lunch boxes 14 Oct","body":"…"}'   # dry-run
 ```
 
-## Staff mailboxes (read-only)
+## Staff mailboxes (read-only; replies from glady@ / operations@)
 
 Search and read **any mailbox @savannahexplorers.com** — booking (glady@, operations@), sellers, shared boxes — for
 Cowork, without passwords: the files are read straight from the server Maildir (`~/mail/savannahexplorers.com/<user>/`).
@@ -1372,7 +1372,8 @@ Logic: root `includes/staff_mail_service.php` (MIME parsing shared with `booking
 reasons, with the reason recorded.
 
 - **Read-only**: Maildir files are opened for reading only, never renamed or moved — flags do not change, unread
-  mails stay unread for their owner. No move, delete, flag or send (to answer, use `mail_draft` / `mail_send`).
+  mails stay unread for their owner. No move, delete or flag. Sending: only `staff_mail_reply`, from glady@ / operations@
+  (below); a mail in any other staff mailbox is answered from info@ / Gmail with `mail_send`.
 - **Mailboxes** = every directory with `cur/` under the domain: a new employee appears by themselves. **Folders** =
   `INBOX` + sub-folders (`Sent`, `Archive`, personal ones); trash, junk / spam and drafts are never read.
 - **Passports**: numbers are masked as `[removed]` in subjects and texts ("passport no. …" and machine-readable MRZ
@@ -1426,6 +1427,22 @@ attachments and the headers are kept as they are. → `path` (full Dropbox path)
 `followup_update`), `size`, `removed_attachments[]`, `masked` (parts masked), `exists`, `saved_to` (confirmed), `mail {mailbox,
 folder, key, subject, from, date}`. Logged in `mail_access_log` (`api_save_eml`, with the reason and the path) and `agent_audit_log`.
 
+### `staff_mail_reply` (POST)
+Reply in the thread **from the booking mailbox holding the mail** — `glady` or `operations` only (the mailboxes whose
+password, `BOOKING_MAIL_GLADY_PASS` / `BOOKING_MAIL_OPERATIONS_PASS`, is in the server-only `includes/config.php`); any
+other mailbox → 403. Same logic as the reply on the Booking mail page (`sm_reply()` in `staff_mail_service.php`, recipients
+from `bm_reply_recipients()`), so it also needs `BOOKING_MAIL_LIVE` (else 409 "Not active yet"). **Dry run unless
+`"confirm": true`.** `mailbox`*, `folder`*, `key`* (from `staff_mail_search`; `uid` accepted), `reason`* (≥ 10 characters),
+`body` (plain text; "Booking Team / Savannah Explorers" added if the text has no "Booking Team") and/or `body_html` (complete,
+with its own signature; then `body` is the text part), optional `cc`, `attachments [{name, content_base64}]` (≤ 10 MB each),
+`request_id` (a confirmed reply is logged in its timeline, `mail_sent`).
+- Fixed by the original, not by the call: **To** = the sender (Reply-To) of a received mail, or the outside recipients of
+  a mail we sent; **Subject** "Re: …"; `In-Reply-To` / `References` from the original. No outside recipient or no
+  Message-ID → 409. From = the mailbox ("Savannah Explorers Booking Team"), sent with the server mail(), copy in that
+  mailbox's **Sent** over IMAP (a failed copy → `warning`, the mail is still sent). The original Maildir file is not touched.
+- → `email {from, mailbox, to, cc, bcc, subject, in_reply_to, references, body, attachments}`; confirmed: `sent_folder`,
+  `warning`, `timeline_event_id`. Logged in `mail_access_log` (`api_reply`, with the reason) and `agent_audit_log` (body omitted).
+
 ```bash
 curl -sH "$H" "$U?action=staff_mail_mailboxes"
 curl -sH "$H" "$U?action=staff_mail_search&mailbox=glady,operations&q=Rossi%20Ndutu&since=2026-10-01"
@@ -1433,6 +1450,7 @@ curl -sH "$H" "$U?action=staff_mail_search&mailbox=nuru&from=client@gmail.com"
 curl -sH "$H" "$U?action=staff_mail_search&mailbox=all&message_id=CAF12ab@mail.gmail.com"      # the whole thread
 curl -sH "$H" "$U?action=staff_mail_get&mailbox=glady&folder=INBOX&key=1731312000.M12P34.box2233,S=5120&reason=Rossi%20booking%20check"
 curl -sH "$H" "$U?action=staff_mail_attachment&mailbox=glady&folder=INBOX&key=1731312000.M12P34.box2233,S=5120&part=2&reason=Lodge%20voucher&request_id=2958"
+curl -sH "$H" -X POST "$U?action=staff_mail_reply" -d '{"mailbox":"glady","folder":"INBOX","key":"1731312000.M12P34.box2233,S=5120","reason":"Rossi: confirm the Ndutu dates","body":"Dear Anna,\nplease confirm …","request_id":2958}'   # dry-run
 ```
 
 ## Back office (read-only)

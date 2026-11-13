@@ -15,6 +15,8 @@
  *   as withheld and never returned or saved.
  * - Save as .eml (staff_mail_save_eml, 12 Nov 2026): the raw message copied into a booking's mails/ folder (proof of a
  *   supplier's extension, Booking follow-up); passport attachments replaced, numbers masked (eml_sanitize.php).
+ * - Reply (staff_mail_reply, 13 Nov 2026): only from glady@ / operations@ (sm_reply(), same rules as the Booking mail page
+ *   reply); the only action here that sends. Every other mailbox stays read-only.
  * - Logged: staff_mail_get / staff_mail_attachment / staff_mail_save_eml (reason required) and text searches in mail_access_log (Booking mail),
  *   every call in agent_audit_log (without bodies or files).
  * Off when STAFF_MAIL_API is defined false in includes/config.php.
@@ -266,6 +268,54 @@ function sm_raw(string $mailbox, string $folder, string $key): ?array {
     $r = sr_header_row($head, sm_name_time(basename($file), $file));
     return ['raw' => $raw, 'message_id' => $r['message_id'], 'subject' => sm_mask($r['subject']), 'date_ts' => (int)$r['ts'],
             'from' => sm_decode_header($h['from'] ?? '')];
+}
+
+/**
+ * Reply to one message from the booking mailbox holding it (glady@ / operations@ only: BM_BOXES, the mailboxes whose
+ * password is in includes/config.php), in its thread — Agent API staff_mail_reply (13 Nov 2026). Same rules as the
+ * Booking mail page reply (bm_reply()): BOOKING_MAIL_LIVE, reason, logged in mail_access_log, copy in that mailbox's Sent.
+ * To = the sender (Reply-To) of a received mail, the outside recipients of one we sent. The Maildir file is not touched.
+ * $in: body (plain text; "Booking Team" signature added if missing) and/or body_html (complete, signature included),
+ *      cc (string or list), attachments [{name, content_base64}]. $confirm false = preview only.
+ * → ['sent' => bool, 'email' => summary, 'sent_folder' => ?, 'warning' => ?, 'message_id' => original Message-ID]
+ */
+function sm_reply(PDO $db, array $user, string $mailbox, string $folder, string $key, array $in, string $reason, bool $confirm): array {
+    bm_require_live();
+    $box = sm_box($mailbox);
+    $short = $box !== null ? array_search($box, BM_BOXES, true) : false;
+    if ($short === false) throw new DomainException('Replies are possible only from ' . implode(' / ', BM_BOXES) . '.');
+    $reason = bm_check_reason($reason);
+    $file = sm_file($box, $folder, $key);
+    if ($file === null) throw new OutOfBoundsException('Mail not found: ' . $box . ' / ' . $folder . ' / ' . $key);
+    $head = sr_read_header($file);
+    if ($head === null || $head === '') throw new RuntimeException('The mail can no longer be read.');
+    $h = sr_parse_headers($head);
+    $r = sr_header_row($head, sm_name_time(basename($file), $file));
+    if (!$r['message_id']) throw new RuntimeException('This mail has no Message-ID: it cannot be answered in its thread.');
+    $to = bm_reply_recipients(['direction' => $r['direction'], 'from_addr' => $r['from'], 'to_addrs' => $r['to']], $h);
+    if (!$to) throw new RuntimeException('No outside recipient found for this mail.');
+    $subject = sm_mask($r['subject']);
+    if (!preg_match('/^\s*re:/i', $subject)) $subject = 'Re: ' . $subject;
+    $text = (string)($in['body'] ?? '');
+    $html = (string)($in['body_html'] ?? '');
+    if (trim($text) === '' && trim($html) === '') throw new InvalidArgumentException('body (or body_html) is required');
+    $refs = array_map(fn($x) => '<' . $x . '>', array_filter(explode(' ', (string)$r['refs'])));
+    $prev = $GLOBALS['MBX_BOX'] ?? null;
+    mbx_use_staff($short);
+    try {
+        $composed = mbx_compose(['to' => $to, 'cc' => $in['cc'] ?? [], 'subject' => $subject,
+                                 'body' => trim($text) !== '' ? bm_signed($text) : '', 'body_html' => $html,
+                                 'in_reply_to' => '<' . $r['message_id'] . '>', 'references' => implode(' ', $refs),
+                                 'attachments' => $in['attachments'] ?? []]);
+        if (!$confirm) return ['sent' => false, 'email' => $composed['summary'], 'message_id' => $r['message_id']];
+        $res = mbx_send($composed);
+    } finally {
+        $GLOBALS['MBX_BOX'] = $prev;
+    }
+    bm_log($db, $user, 'api_reply', $box, sm_log_key($box, $folder, $key, $r['message_id']),
+           (int)($in['request_id'] ?? 0) > 0 ? (int)$in['request_id'] : null, $reason);
+    return ['sent' => true, 'email' => $composed['summary'], 'sent_folder' => $res['sent_folder'], 'warning' => $res['warning'],
+            'message_id' => $r['message_id']];
 }
 
 /** One attachment → [name, mime, size, content, message_id]. Passport files refused. */

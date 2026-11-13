@@ -13,7 +13,7 @@ Content rules for agencies and clients (prices shown, programme link, names neve
 
 ## 1. Read first
 
-- Read the whole thread Roberto points to (Gmail, or info@ via `mail_get`) and note the address it arrived on.
+- Read the whole thread Roberto points to (Gmail, or info@ via `mail_get`; booking / staff mailboxes such as glady@, operations@ via `staff_mail_search` + `staff_mail_get` with a `reason`) and note the address it arrived on.
 - Find the request/booking (`find_requests`) for the folder name and the facts (dates, pax, lodges, payments). Never invent facts: if something is unknown, ask Roberto or leave a clear [DA COMPLETARE].
 - Before asking the client/agency for anything (international flights, passports, insurance, other data), check what we already have: the Calc in the booking folder (arrival/departure details with flight, airport, time, airline) as well as the folder's subfolders. Empty subfolders don't mean the data is missing (29 Oct 2026).
 - If Roberto gives exact wording, use it verbatim.
@@ -36,6 +36,23 @@ Content rules for agencies and clients (prices shown, programme link, names neve
 - After writing, list `Exchange/Draft-mail` again and check the file is there before telling Roberto it is saved (drafts there have disappeared within a minute; 17 Oct 2026). If it is gone, say so and copy it back from the booking folder's `old/`.
 - After sending: when Roberto okays sending ("ok, manda"), Claude sends the mail itself (Hub `mail_send`, or the Gmail connector for staff mails), checks it is in Sent, then deletes the draft from `Exchange/Draft-mail` straight away; the copy in the booking folder's `old/` stays. This way nobody sends it again from Thunderbird (3 Nov 2026: the booking and Iddi mails went out twice, once from the Hub and once from Thunderbird). When Roberto sends the draft from Thunderbird himself, Claude doesn't send it: it only checks Sent and deletes the draft.
 - Booking confirmations to agencies: content and attachments as in `booking-confirmation` §7.
+
+## 2b. Replies from the booking mailboxes (glady@, operations@)
+
+When the thread is in glady@ or operations@ (a supplier, a lodge, a transfer company) and Roberto wants the answer to
+come from that mailbox, the Hub can send it (13 Nov 2026):
+- Find the mail with `staff_mail_search` (`mailbox=glady` or `operations`, supplier / ref in `q`), read it with
+  `staff_mail_get` (`reason` = why, e.g. "Rossi: Ndutu dates for the lodge"). Keep `mailbox`, `folder`, `key`.
+- Draft as usual (§2): `.eml` in Draft-mail with `From` = that mailbox, `To` = the sender, "Re: …", `In-Reply-To` /
+  `References` from `staff_mail_get`. English, short, signed "Booking Team / Savannah Explorers" (not Roberto's signature).
+- After his ok on THAT text: `staff_mail_reply` with the same `mailbox` / `folder` / `key`, `reason`, `body` (or
+  `body_html` + `body`), `request_id` → dry run, check from / to / subject, then `"confirm": true`. To, subject and
+  threading come from the original mail and can't be changed; extra people only in `cc`.
+- Check: `staff_mail_search` on that mailbox with `message_id` = the original's Message-ID shows the reply in its Sent
+  folder. Then delete the draft from Draft-mail (as §2).
+- Only glady@ and operations@ can send. A mail in another staff mailbox (sellers, nuru@…) is answered from info@ or
+  Gmail with `mail_send`. If the Hub answers "Not active yet" (BOOKING_MAIL_LIVE off) or a password error, stop and tell
+  Roberto; leave the `.eml` for Thunderbird.
 
 ## 3. Subject
 

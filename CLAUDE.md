@@ -25,10 +25,11 @@ outdated — this file wins where they disagree (PHP version, local lint).
   `includes/passport_service.php`): headers of glady@ / operations@ crossed with the follow-up (own table, Sales Response untouched); admin opens
   one thread with a logged reason and replies from the same mailbox; passports → `passports/` + Calc after a person confirms. Off until
   `BOOKING_MAIL_LIVE`, which goes on only after the staff notice (`docs/STAFF_NOTICE_MAIL.md`). From the Agent API, mails are read
-  with the `staff_mail_*` actions below (the Booking mail page actions themselves are not exposed).
-- **Staff mail** (Agent API `staff_mail_mailboxes` / `_search` / `_get` / `_attachment` / `_save_eml` (→ booking `mails/`); logic `includes/staff_mail_service.php`, reusing the
+  with the `staff_mail_*` actions below (the Booking mail page actions themselves are not exposed; the reply is, as `staff_mail_reply`).
+- **Staff mail** (Agent API `staff_mail_mailboxes` / `_search` / `_get` / `_attachment` / `_save_eml` (→ booking `mails/`) / `_reply`; logic `includes/staff_mail_service.php`, reusing the
   MIME parsing of `booking_mail_service.php`): any mailbox @savannahexplorers.com, straight from the Maildir, **read-only** (files never
-  renamed or moved: mails stay unread; no move / delete / send). `_get` / `_attachment` need a `reason`, logged in `mail_access_log` +
+  renamed or moved: mails stay unread; no move / delete). Only send: `staff_mail_reply` (`sm_reply()`), in the thread, from glady@ /
+  operations@ only (their passwords in config.php), needs `BOOKING_MAIL_LIVE`, dry-run unless confirm. `_get` / `_attachment` need a `reason`, logged in `mail_access_log` +
   `agent_audit_log` (no bodies). Passport numbers masked, passport-named attachments withheld. Off with `STAFF_MAIL_API` false.
 - `modules/security/` — mail security scan (`mail_scan.php`, CLI on cPanel cron, or `mail_scan_cron.php` from cron-job.org; logic
   `includes/mail_security_service.php`, shared with the Agent API `mail_security_status`).

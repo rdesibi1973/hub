@@ -102,7 +102,7 @@ function agent_audit(PDO $db, string $action, $reqId, array $payload, string $re
                               'iti_create_flight_route', 'iti_create_activity', 'iti_create_transfer_route', 'iti_update_transfer_route', 'iti_save_as_sample',
                               'create_request', 'add_flight_rates', 'timeline_update', 'summary_set', 'rename_folder',
                               'set_request_status', 'update_request', 'import_group_folder', 'move_group_folder', 'ck_request_check', 'memo_delete', 'create_agency', 'update_agency', 'save_agency_contact', 'delete_agency_contact',
-                              'followup_scan', 'followup_update', 'followup_upsert', 'staff_mail_save_eml', 'drafts_cleanup', 'iti_update_activity', 'sales_response_dismiss',
+                              'followup_scan', 'followup_update', 'followup_upsert', 'staff_mail_save_eml', 'staff_mail_reply', 'drafts_cleanup', 'iti_update_activity', 'sales_response_dismiss',
                               'ck_set_owners', 'ck_set_group_closed', 'ck_findings_upsert', 'iti_create_destination', 'iti_import_program', 'iti_supplier_blocklist', 'predeparture_email'], true) && empty($payload['confirm']);
     // Mail: keep who/what in the log, not message bodies or attachment content.
     if (in_array($action, ['mail_get', 'mail_attachment', 'staff_mail_get', 'staff_mail_attachment', 'iti_document', 'iti_vouchers'], true) && $code === 200) {
@@ -112,6 +112,11 @@ function agent_audit(PDO $db, string $action, $reqId, array $payload, string $re
                                    'mailbox' => $m['mailbox'] ?? null, 'key' => $m['key'] ?? null,
                                    'subject' => $m['subject'] ?? null, 'name' => $m['name'] ?? null,
                                    'saved_to' => $res['saved_to'] ?? null], JSON_UNESCAPED_UNICODE);
+    }
+    if ($action === 'staff_mail_reply' && $code === 200) {   // staff mailboxes: who / what, never the body
+        $res = json_decode($resultJson, true);
+        if (isset($res['email']['body'])) $res['email']['body'] = '(omitted)';
+        $resultJson = json_encode($res, JSON_UNESCAPED_UNICODE);
     }
     if (!empty($payload['uploads']) && is_array($payload['uploads'])) {      // ITI photos sent as files
         foreach ($payload['uploads'] as &$u) {
@@ -3348,7 +3353,7 @@ try {
     }
 
     // ── Staff mailboxes @savannahexplorers.com (Maildir on the server, read-only; includes/staff_mail_service.php).
-    // Files are never renamed or moved: mails stay unread for their owner. No move / delete / send.
+    // Files are never renamed or moved: mails stay unread for their owner. No move / delete; sending only staff_mail_reply (glady@ / operations@).
     case 'staff_mail_mailboxes': {
         agent_staff_mail_lib();
         agent_out(['ok' => true, 'mailboxes' => sm_mailbox_list()]);
@@ -3449,6 +3454,44 @@ try {
         agent_out($res + ['mail' => ['mailbox' => $box, 'folder' => $folder, 'key' => $key, 'subject' => $msg['subject'], 'from' => $msg['from'],
                                      'date' => $msg['date_ts'] ? date('c', $msg['date_ts']) : null]]
                   + (empty($in['confirm']) ? ['message' => 'Dry run — nothing saved. Resend with "confirm": true; then followup_update with expiry_override_proof = proof.'] : []));
+    }
+
+    // Reply in the thread from glady@ / operations@ (the mailbox holding the mail; includes/staff_mail_service.php sm_reply(),
+    // same rules as the Booking mail page). Dry-run unless confirm. Optional request_id → logged in its timeline.
+    case 'staff_mail_reply': {
+        agent_require_method('POST');
+        agent_staff_mail_lib();
+        if (!isset($in['key']) && isset($in['uid'])) $in['key'] = $in['uid'];
+        [$box, $folder, $key] = agent_staff_mail_ref($in);
+        $reason = agent_staff_mail_reason($in);
+        $mailReq = (int)($in['request_id'] ?? 0) > 0 ? agent_request($db, $in['request_id']) : null;
+        if ($mailReq) { $agentReqId = (int)$mailReq['id']; $in['request_id'] = $agentReqId; }
+        $confirm = !empty($in['confirm']);
+        try {
+            $res = sm_reply($db, $agentUser, $box, $folder, $key, $in, $reason, $confirm);
+        } catch (OutOfBoundsException $e) {
+            agent_fail($e->getMessage(), 404);
+        } catch (DomainException $e) {
+            agent_fail($e->getMessage(), 403);
+        } catch (InvalidArgumentException $e) {
+            agent_fail($e->getMessage());
+        } catch (RuntimeException $e) {
+            agent_fail($e->getMessage(), 409);
+        }
+        $email = $res['email'];
+        if (!$confirm) {
+            agent_out(['ok' => true, 'dry_run' => true, 'email' => $email, 'request_id' => $mailReq ? (int)$mailReq['id'] : null,
+                       'message' => 'Dry run — not sent. Resend with "confirm": true to send from ' . $email['from'] . '.']);
+        }
+        $logged = null;
+        if ($mailReq) {
+            $logged = agent_tl_log_mail($db, (int)$mailReq['id'], 'mail_sent', (string)$email['subject'], '',
+                'From: ' . $email['from'] . "\nTo: " . agent_tl_addr($email['to'] ?? []) . (!empty($email['cc']) ? "\nCc: " . agent_tl_addr($email['cc']) : '') . "\n\n"
+                . tl_cut((string)$email['body'], 1500),
+                ['mail_box' => $email['mailbox'], 'in_reply_to' => $email['in_reply_to'] ?? null]);
+        }
+        agent_out(['ok' => true, 'dry_run' => false, 'message' => 'Sent', 'sent_folder' => $res['sent_folder'],
+                   'warning' => $res['warning'], 'email' => $email] + ($logged !== null ? ['timeline_event_id' => $logged] : []));
     }
 
     // Draft .eml (header X-Unsent: 1) out of the booking folders' mails/ into old/ (includes/drafts_service.php; page
@@ -3589,7 +3632,7 @@ try {
             'save_invoice_pdf', 'send_invoice_email', 'import_zoho_invoice', 'create_invoice', 'update_invoice', 'memo_list', 'memo_save', 'memo_set_status', 'memo_delete',
             'routine_status', 'routine_done',
             'mail_folders', 'mail_list', 'mail_get', 'mail_attachment', 'mail_flag', 'mail_move', 'mail_draft', 'mail_send',
-            'staff_mail_mailboxes', 'staff_mail_search', 'staff_mail_get', 'staff_mail_attachment', 'staff_mail_save_eml', 'drafts_cleanup',
+            'staff_mail_mailboxes', 'staff_mail_search', 'staff_mail_get', 'staff_mail_attachment', 'staff_mail_save_eml', 'staff_mail_reply', 'drafts_cleanup',
             'timeline_list', 'timeline_add', 'timeline_update', 'summary_set', 'request_resume', 'set_request_status',
             'payments_due', 'ck_status', 'ck_request_check', 'ck_set_owners', 'ck_set_group_closed', 'ck_findings_upsert', 'ck_findings_drafts', 'ops_movements', 'ops_lunch_boxes', 'ops_medivac', 'flight_tickets',
             'followup_list', 'followup_scan', 'followup_update', 'followup_upsert', 'mail_security_status',
