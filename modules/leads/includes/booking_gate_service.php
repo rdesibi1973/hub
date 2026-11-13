@@ -1314,7 +1314,15 @@ function bg_finish_run(PDO $db, int $id): void {
         try {
             require_once __DIR__ . '/../dropbox_helper.php';
             $html = bg_report_html($r, $snap, $res, $run + ['finished_at' => bg_now()]);
-            $reportPath = rtrim($snap['folder'], '/') . '/booking-check.html';
+            // Where the folder is now (renamed while the documents were read → never recreate the old path).
+            $token = dropbox_get_access_token();
+            $dir = $snap['folder'];
+            try {
+                require_once __DIR__ . '/folder_link_service.php';
+                if ($r) { $cur = req_folder_path(folder_heal($db, $token, $r)); if ($cur !== '') $dir = $cur; }
+            } catch (Throwable $e) { /* keep the collect-time path */ }
+            if (!dropbox_path_exists($token, $dir)) throw new RuntimeException('folder not found at ' . $dir);
+            $reportPath = rtrim($dir, '/') . '/booking-check.html';
             dropbox_upload_text(dropbox_get_access_token(), $reportPath, $html, 'overwrite');
         } catch (Throwable $e) {
             $res['notes'][] = 'booking-check.html not written: ' . $e->getMessage();
@@ -1470,7 +1478,16 @@ function bg_state(PDO $db, int $rid, bool $checkStale = true): array {
     if (in_array($run['state'], ['passed', 'blocked'], true) && $checkStale && $run['folder'] && $run['evidence_fingerprint']) {
         try {
             require_once __DIR__ . '/../dropbox_helper.php';
-            $fs = bg_folder_state(dropbox_get_access_token(), $run['folder'], (string)$run['calc_file']);
+            // The folder where the booking is NOW: its name changes with every status tag (PROGRESS → DEPOSIT…) and it may
+            // have moved since the run, so the run's stored path is only the fallback. The fingerprint is relative to it.
+            $token = dropbox_get_access_token();
+            $dir = (string)$run['folder'];
+            try {
+                require_once __DIR__ . '/folder_link_service.php';
+                $rq = bg_request($db, $rid);
+                if ($rq) { $cur = req_folder_path(folder_heal($db, $token, $rq)); if ($cur !== '') $dir = $cur; }
+            } catch (Throwable $e) { /* keep the stored path */ }
+            $fs = bg_folder_state($token, $dir, (string)$run['calc_file']);
             if ($run['calc_hash'] && $fs['calc_hash'] !== $run['calc_hash']) $out['stale_reason'] = 'the Calc changed after the check';
             elseif ($fs['fingerprint'] !== $run['evidence_fingerprint']) $out['stale_reason'] = 'new or changed files in invoices/ or bookings/ since the check';
         } catch (Throwable $e) {
