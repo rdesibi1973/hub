@@ -60,6 +60,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'scan'
         $batch = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
         require_once 'dropbox_helper.php';
+        require_once 'includes/booking_service.php';
+        require_once 'includes/folder_link_service.php';
         $token = dropbox_get_access_token();
 
         $okCount = 0; $noFolder = 0; $relinked = []; $missing = []; $ambiguous = [];
@@ -68,14 +70,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'scan'
             $path = rlf_path($r);
             if ($name === '' && $path === '') { $noFolder++; continue; }
 
-            // Already correct? cheap check first.
-            if ($path !== '' && dropbox_path_exists($token, $path)) { $okCount++; continue; }
+            // Stored path, else its Dropbox folder id (exact after a move / rename outside the Hub). Saves the id too.
+            $h = folder_heal($db, $token, $r);
+            $f = $h['_folder'];
+            if ($f['state'] === 'ok' && $f['path']) { $okCount++; continue; }
+            if ($f['state'] === 'relinked') { $relinked[] = ['name' => $name, 'path' => $f['path'], 'by' => 'id']; continue; }
+            if ($f['state'] === 'deleted') {
+                $missing[] = ['id' => (int)$r['id'], 'name' => $name, 'customer' => $r['customer_name'] ?? '', 'status' => ($r['status'] ?? '') . ' — folder deleted'];
+                continue;
+            }
 
-            // Moved or missing → locate by name (tolerant of status-suffix drift).
+            // No id stored yet → locate by name (tolerant of status-suffix drift).
             $res = dropbox_relink_find($token, $name);
             if (in_array($res['result'], ['exact','stem','core'], true)) {
                 $newUrl = 'https://www.dropbox.com/home/' . implode('/', array_map('rawurlencode', explode('/', ltrim($res['path'], '/'))));
                 $db->prepare("UPDATE requests SET dropbox_url=? WHERE id=?")->execute([$newUrl, (int)$r['id']]);
+                $m = dropbox_get_metadata($token, $res['path']);
+                if ($m) folder_id_save($db, (int)$r['id'], $m['id']);
                 $relinked[] = ['name' => $name, 'path' => $res['path']];
             } elseif ($res['result'] === 'ambiguous') {
                 $ambiguous[] = ['id' => (int)$r['id'], 'name' => $name, 'customer' => $r['customer_name'] ?? '',
@@ -98,6 +109,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'scan'
             'missing'    => $missing,
             'ambiguous'  => $ambiguous,
         ]);
+    } catch (Throwable $e) {
+        echo json_encode(['ok' => false, 'msg' => $e->getMessage()]);
+    }
+    exit;
+}
+
+// ── AJAX: folder ids (backfill batch) / archive cancelled / orphan check — logic in includes/folder_link_service.php ──
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array($_POST['action'] ?? '', ['backfill', 'archive', 'orphans'], true)) {
+    ob_end_clean();
+    header('Content-Type: application/json');
+    try {
+        require_once 'dropbox_helper.php';
+        require_once 'includes/booking_service.php';
+        require_once 'includes/folder_link_service.php';
+        @set_time_limit(120);
+        $token   = dropbox_get_access_token();
+        $confirm = ($_POST['confirm'] ?? '') === '1';
+        if ($_POST['action'] === 'backfill') {
+            $res = folder_ids_backfill($db, $token, ['after_id' => (int)($_POST['after_id'] ?? 0), 'limit' => 60, 'budget' => 40, 'confirm' => $confirm]);
+        } elseif ($_POST['action'] === 'archive') {
+            $res = folder_archive_cancelled($db, $token, ['confirm' => $confirm]);
+        } else {
+            $res = folder_orphans_run($db, $token, ['memo' => $confirm, 'budget' => 90]);
+        }
+        echo json_encode(['ok' => empty($res['error']), 'msg' => $res['error'] ?? null] + $res);
     } catch (Throwable $e) {
         echo json_encode(['ok' => false, 'msg' => $e->getMessage()]);
     }
@@ -137,7 +173,76 @@ include 'includes/header.php';
   </div>
 </div>
 
+<div class="table-wrap" style="max-width:900px;margin-bottom:20px">
+  <div style="padding:18px 22px">
+    <h3 style="margin:0 0 6px;font-size:1rem">🆔 Folder ids — stable links</h3>
+    <p style="font-size:.85rem;color:var(--grey-dk);line-height:1.6;margin:0 0 10px">
+      Each request keeps its Dropbox folder id, which does not change when the folder is moved or renamed outside the Hub;
+      the Hub then finds the folder by its id and fixes the link itself. <b>Backfill</b> stores the id of requests created before
+      (dry run first: it counts what it would save and lists the links already broken). <b>Archive cancelled</b> moves the
+      <code>_CANCELLED</code> folders of <code>/001_Safari</code> into <code>/001_Safari/00_CANCELED/00_&lt;trip year&gt;</code>.
+      <b>Orphan check</b> = the nightly check (unresolved requests, folders no request knows); with save it writes the memo.
+    </p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button type="button" class="btn btn-outline btn-sm" onclick="fidBackfill(false)">Backfill — dry run</button>
+      <button type="button" class="btn btn-red btn-sm" onclick="if(confirm('Save the folder ids?'))fidBackfill(true)">Backfill — save ids</button>
+      <button type="button" class="btn btn-outline btn-sm" onclick="fidSimple('archive',false)">Archive cancelled — dry run</button>
+      <button type="button" class="btn btn-red btn-sm" onclick="if(confirm('Move the cancelled folders into 00_CANCELED?'))fidSimple('archive',true)">Archive cancelled — move</button>
+      <button type="button" class="btn btn-outline btn-sm" onclick="fidSimple('orphans',false)">Orphan check</button>
+      <button type="button" class="btn btn-outline btn-sm" onclick="fidSimple('orphans',true)">Orphan check + memo</button>
+    </div>
+    <div id="fid-out" style="font-size:.8rem;margin-top:12px"></div>
+  </div>
+</div>
+
 <script>
+function fidEsc(s){ return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;'); }
+function fidPost(data) {
+  var fd = new FormData();
+  Object.keys(data).forEach(function(k){ fd.append(k, data[k]); });
+  return fetch('relink_folders.php', { method:'POST', body:fd }).then(function(r){ return r.json(); });
+}
+function fidReqLink(x){ return '<a href="request_view.php?id=' + x.id + '" target="_blank">' + fidEsc(x.customer_name || x.folder) + '</a>'; }
+function fidBackfill(save) {
+  var out = document.getElementById('fid-out'), tot = { checked:0, found:0, saved:0, nf:[] , err:[] };
+  out.innerHTML = 'Working…';
+  (function step(after) {
+    fidPost({ action:'backfill', after_id:after, confirm: save ? '1' : '0' }).then(function(d) {
+      if (!d.ok) { out.innerHTML = 'Error: ' + fidEsc(d.msg); return; }
+      tot.checked += d.checked; tot.found += d.found; tot.saved += d.saved;
+      tot.nf = tot.nf.concat(d.not_found); tot.err = tot.err.concat(d.errors);
+      out.innerHTML = '<b>' + (save ? 'Saving' : 'Dry run') + '</b> — checked ' + tot.checked + ', found ' + tot.found
+        + (save ? ', saved ' + tot.saved : '') + ', not found ' + tot.nf.length + ', remaining ' + d.remaining + (d.done ? ' — done.' : '…')
+        + (tot.nf.length ? '<div style="margin-top:6px"><b style="color:#C0211B">Not at their stored path (re-link them):</b><ul style="margin:4px 0 0 18px">'
+           + tot.nf.slice(-300).map(function(x){ return '<li>' + fidReqLink(x) + ' <span style="color:#888">' + fidEsc(x.status) + ' — ' + fidEsc(x.path) + '</span></li>'; }).join('') + '</ul></div>' : '')
+        + (tot.err.length ? '<div style="color:#C0211B;margin-top:6px">' + tot.err.map(fidEsc).join('<br>') + '</div>' : '');
+      if (!d.done && d.checked > 0) step(d.next_after_id);
+    }).catch(function(e){ out.innerHTML = 'Error: ' + fidEsc(e); });
+  })(0);
+}
+function fidSimple(action, save) {
+  var out = document.getElementById('fid-out');
+  out.innerHTML = 'Working…';
+  fidPost({ action:action, confirm: save ? '1' : '0' }).then(function(d) {
+    if (!d.ok) { out.innerHTML = 'Error: ' + fidEsc(d.msg); return; }
+    var h = '';
+    if (action === 'archive') {
+      h = '<b>' + (d.dry_run ? 'Dry run — would move ' : 'Moved ') + d.moves.length + ' folder(s)</b><ul style="margin:4px 0 0 18px">'
+        + d.moves.map(function(m){ return '<li style="font-family:monospace">' + fidEsc(m.from) + ' → ' + fidEsc(m.to)
+          + ' <span style="color:#888">(requests ' + (m.requests.join(', ') || 'none') + (m.status_set.length ? '; status → Cancelled: ' + m.status_set.join(', ') : '') + ')</span></li>'; }).join('') + '</ul>';
+      if (d.skipped.length) h += '<div style="color:#92400e">Skipped: ' + d.skipped.map(fidEsc).join('<br>') + '</div>';
+    } else {
+      h = '<b>Unresolved requests: ' + d.unresolved.length + ' · orphan folders: ' + d.orphans.length + ' · healed: ' + d.healed.length
+        + (d.unchecked ? ' · not checked (time): ' + d.unchecked : '') + (d.memo ? ' · memo ' + fidEsc(d.memo) : '') + '</b>';
+      if (d.unresolved.length) h += '<ul style="margin:4px 0 0 18px">' + d.unresolved.map(function(x){ return '<li>' + fidReqLink(x) + ' <span style="color:#888">' + fidEsc(x.why) + '</span></li>'; }).join('') + '</ul>';
+      if (d.orphans.length) h += '<ul style="margin:4px 0 0 18px">' + d.orphans.map(function(x){ return '<li style="font-family:monospace">' + fidEsc(x.path) + '</li>'; }).join('') + '</ul>';
+      if (d.healed.length) h += '<ul style="margin:4px 0 0 18px">' + d.healed.map(function(x){ return '<li>' + fidReqLink(x) + ': ' + fidEsc(x.from) + ' → ' + fidEsc(x.to) + '</li>'; }).join('') + '</ul>';
+    }
+    if (d.errors && d.errors.length) h += '<div style="color:#C0211B;margin-top:6px">' + d.errors.map(fidEsc).join('<br>') + '</div>';
+    out.innerHTML = h;
+  }).catch(function(e){ out.innerHTML = 'Error: ' + fidEsc(e); });
+}
+
 var rlfRun = false, rlfTotals = { ok:0, relinked:0, missing:0, ambiguous:0, no_folder:0 };
 var rlfRelinked = [], rlfMissing = [], rlfAmbiguous = [];
 

@@ -948,9 +948,16 @@ function inv_update_folder_status(PDO $db, int $invId, string $newLabel): array 
     require_once __DIR__ . '/../../leads/dropbox_helper.php';
     $token = dropbox_get_access_token();
 
-    // Resolve the real Dropbox path by searching for the folder name,
-    // because the stored dropbox_url may have wrong case or subfolder.
-    $realFromPath = dropbox_find_folder($token, $oldName);
+    // Resolve the real Dropbox path: by its Dropbox folder id (stable when the folder was moved / renamed
+    // outside the Hub), else by searching for the folder name (the stored dropbox_url may have wrong case or subfolder).
+    $realFromPath = null;
+    if (!empty($req['dropbox_id'])) {
+        try {
+            $m = dropbox_get_metadata($token, (string)$req['dropbox_id']);
+            if ($m && $m['tag'] === 'folder' && strcasecmp($m['name'], $oldName) === 0) $realFromPath = $m['path'];
+        } catch (\Throwable $ignored) {}
+    }
+    if ($realFromPath === null) $realFromPath = dropbox_find_folder($token, $oldName);
     if ($realFromPath !== null) {
         // Derive toPath from real parent
         $realParent = substr($realFromPath, 0, strrpos($realFromPath, '/'));

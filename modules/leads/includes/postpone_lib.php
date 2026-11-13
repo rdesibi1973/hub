@@ -75,11 +75,12 @@ function pp_supplier_files(string $token, string $path): array {
     return $out;
 }
 
-/** Current Dropbox path of the request's folder (stored URL first, then search). */
+/** Current Dropbox path of the request's folder (stored URL first, then its Dropbox folder id, then search). */
 function pp_current_path(string $token, array $r): ?string {
     $p = bo_path_from_url((string)($r['dropbox_url'] ?? ''));
     if ($p !== '' && dropbox_path_exists($token, $p)) return $p;
-    return dropbox_find_folder($token, (string)$r['practice_code']);
+    require_once __DIR__ . '/folder_link_service.php';
+    return folder_locate($token, fl_row(db(), $r)) ?? dropbox_find_folder($token, (string)$r['practice_code']);
 }
 
 /** Booking-team email (same recipients as the confirmation email). */

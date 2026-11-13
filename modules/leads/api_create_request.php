@@ -120,8 +120,8 @@ $dropboxErrors = [];
 try {
     $token = dropbox_get_access_token();
 
-    // Main folder
-    dropbox_create_folder($token, $dropboxPath);
+    // Main folder (its id = the stable link, saved after the INSERT)
+    $folderMeta = dropbox_create_folder($token, $dropboxPath);
 
     // Subfolders — one by one (reliable)
     foreach (['bookings','complain','flights','guestcomments','insurance',
@@ -175,6 +175,8 @@ try {
                 ($channel === 'agency' && $agencyId) ? $agencyId : null,
                 $agentId, $destination ?: null, $initialRequest ?: null, $pax, $folderName, $dropboxWebUrl]);
     $requestId = (int)$db->lastInsertId();
+    require_once 'includes/folder_link_service.php';
+    folder_id_store($db, $requestId, $folderMeta);
     assign_touch($db, $requestId);
 } catch (\Throwable $e) {
     // The Dropbox folder was already created above, but the DB INSERT failed.

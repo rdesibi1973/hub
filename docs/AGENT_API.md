@@ -31,7 +31,7 @@ without driving the web UI.
 | HTTPS only | Plain HTTP → 403. |
 | Rate limit | 60 calls/min → 429. |
 | Audit | Every call (including failures and dry-runs) → `agent_audit_log` (action, request_id, user, HTTP code, dry_run, payload, result, IP). |
-| Dry-run by default | `update_request`, `confirm_booking`, `send_booking_email`, `rollback_booking`, `rename_folder`, `import_group_folder`, `move_group_folder`, `set_request_status`, `cancel_invoice_payment`, `cancel_invoice`, `restore_invoice`, `update_folder_status`, `import_zoho_invoice`, `create_invoice`, `update_invoice`, `send_invoice_email`, `memo_delete`, `create_agency`, `update_agency`, `save_agency_contact`, `delete_agency_contact`, `mail_send`, `mail_move`, `ck_request_check`, `ck_set_owners`, `ck_findings_upsert`, `followup_scan`, `followup_update`, `followup_upsert`, `staff_mail_save_eml`, `staff_mail_reply` and `drafts_cleanup` (among others) do nothing unless the body has `"confirm": true`. |
+| Dry-run by default | `update_request`, `confirm_booking`, `send_booking_email`, `rollback_booking`, `rename_folder`, `import_group_folder`, `move_group_folder`, `set_request_status`, `cancel_invoice_payment`, `cancel_invoice`, `restore_invoice`, `update_folder_status`, `import_zoho_invoice`, `create_invoice`, `update_invoice`, `send_invoice_email`, `memo_delete`, `create_agency`, `update_agency`, `save_agency_contact`, `delete_agency_contact`, `mail_send`, `mail_move`, `ck_request_check`, `ck_set_owners`, `ck_findings_upsert`, `followup_scan`, `followup_update`, `followup_upsert`, `staff_mail_save_eml`, `staff_mail_reply`, `drafts_cleanup`, `folder_ids_backfill`, `folders_orphans` (memo) and `archive_cancelled` (among others) do nothing unless the body has `"confirm": true`. |
 | No deletes | No delete endpoint (mail included), except `memo_delete`, which is soft (`deleted_at`, the row stays). Undo a confirm with `rollback_booking` (or BackOffice → Rollback). |
 | Mailbox | The key also reads `info@` (`mail_*`): keep `api.txt` as private as the mailbox password. |
 
@@ -59,7 +59,9 @@ or the username), `channel` (`agency`|`direct`|`sb`|`other`), `year` (received).
 Use it as the duplicate check before `create_request`.
 
 Each row also has `channel`, `agency_id`, `agency_name`, `last_activity_at` (latest timeline event,
-summary or note) and `has_summary` — see [Request timeline](#request-timeline).
+summary or note) and `has_summary` — see [Request timeline](#request-timeline). Every request shape (`request`
+in other answers too) carries `dropbox_path` and `dropbox_id` (the folder's Dropbox id, see
+[Folder link by Dropbox id](#folder-link-by-dropbox-id); `null` until stored).
 `channel` / `agency_id` are stored since Oct 2026 (migration 067); older rows were filled from the
 folder name only where it is conclusive (`-Drct`, `-SB`, or a known agency short name), so on the
 rest they are `null` and a `channel` filter does not match them.
@@ -446,6 +448,65 @@ curl -sA "Mozilla/5.0 (compatible; SavannahHubAgent/1.0)" -H "$H" -X POST "$U?ac
 ```
 BackOffice → **Rename…**: when the folder is not found, the form reopens with a **Current Dropbox path** field
 (and the candidates); "Folder moved outside the Hub?" opens it directly. Checkbox = `rename_files`.
+Since 13 Nov 2026 the folder is first looked up by its Dropbox id (below), so `current_path` is only needed for
+requests whose id is not stored yet.
+
+### Folder link by Dropbox id
+`requests.dropbox_id` (migration 082) = the folder's Dropbox id (`id:…`), which **never changes on move or rename**.
+It is saved when the Hub creates the folder (`create_request`, New Request, the Java GUI endpoint), on Confirm Safari
+(the member's new sub-folder for CREATE GRP), Rollback and a re-link (`rename_folder` `current_path`, request page
+🔗 Re-link / ✎ Pick manually); older requests get it from the backfill. Logic: `includes/folder_link_service.php`.
+
+**Self-heal (every folder reader):** stored path (`dropbox_url`) exists → used (its id saved / refreshed: the path
+wins when the Hub re-created the folder). Gone → the folder is fetched **by its id** and the link is rewritten at
+once: `dropbox_url`, `practice_code` (new basename) and, when a group folder was moved / renamed, `group_folder`
+and the URL of **every member**. Timeline `folder_relinked` "Folder auto-relinked" (`auto-relinked: <old> → <new>`)
+on each request changed. The status is **never** changed by the suffix: when the new name says something else than
+the Hub (`_CANCELLED` while Booked, `_DEPOSIT` while payment empty …) → `warnings[]` + a memo for Roberto
+(`ext_key folder-status:<request_id>`). Id unknown to Dropbox (deleted) → clear error "Folder deleted or not
+reachable", never a guess by name. No id stored and path gone → the old fallback (search by name). One resolution
+per request per call. Readers wired: Calc read / fill (`read_calc`, `fill_calc`, `booking_check`), passports,
+`iti_document` / `iti_vouchers` save and the ref number, `mail_attachment` / `staff_mail_attachment` save,
+`copy_program`, `confirm_*` (current path), `rename_folder`, payment-tag renames, invoice Update Folder, postpone,
+`request_resume`, the request page Re-link and the bulk Re-link Folders page. Folders moved into
+`/001_Safari/00_CANCELED/<year>/` are valid targets (under the `/001_Safari` root of `rename_folder`).
+
+#### `folder_resolve` (GET)
+`request_id`*. The folder now, healed if it moved (as above — automatic, like any reader, no confirm).
+→ `request` (fresh `dropbox_path`, `dropbox_id`, `folder`, `group_folder`), `folder` `{state: ok | relinked |
+no_folder | missing | deleted | error, path, id, relinked_from, warnings[], error}`.
+
+#### `folder_ids_backfill` (GET dry run / POST confirm)
+Requests with a folder and no `dropbox_id`: `get_metadata(stored path)` → id. `after_id` (cursor, default 0),
+`limit` (≤ 300, default 100; ~50 s budget). Dry run → `checked`, `found`, `not_found[] {id, customer_name, folder,
+path, status}` (= the links already broken: re-link them), `next_after_id`, `remaining`, `done`. `"confirm": true`
+→ also `saved`. Resend with `after_id` until `done`. Same on the Re-link Folders page (admin) → **Folder ids**.
+
+#### `folders_orphans` (GET report / POST confirm)
+The nightly check, now: (1) live requests (not Lost / Cancelled; trip not ended > 30 days, or an inquiry received
+< 400 days ago) whose folder cannot be resolved; folders found by id are healed on the way (`healed[]`);
+(2) folders **directly** under `/2026`, `/2027`, `/001_Safari` (the `rename_folder` roots) that no request knows (by id,
+path, folder or group name) — `00_*`, year folders, non-booking names and the skip list (config `FOLDER_ORPHAN_SKIP`,
+default `99_office`, `MEDIVAC_COVERAGE`, `WMA`, `Claude outputs`) are left out. `budget` (s, ≤ 150), `max_checks`
+(Dropbox lookups, ≤ 400). → `unresolved[]`, `orphans[] {path, id}`, `healed[]`, `unchecked`, `errors[]`.
+`"confirm": true` also writes the memo `folders-orphans` on Roberto's board (rewritten, never duplicated; closed when
+both lists are empty). The nightly run: `ck_cron.php`, once a day after 05:00 EAT, after its reply.
+
+#### `archive_cancelled` (GET dry run / POST confirm)
+Moves every `/001_Safari` folder ending in `_CANCELLED` (or, with `request_id`, that request's top folder — its
+group folder for a member; refused unless cancelled by name or Hub status) into
+`/001_Safari/00_CANCELED/00_<year of the trip END>/` (created if missing). Dry run → `moves[] {from, to, requests[],
+status_set[]}`, `skipped[]` (destination exists). Confirm → moves, rewrites the requests' paths, sets status
+**Cancelled** where it was not (closing their Booking follow-up lines), timeline `folder_relinked` "Folder archived
+(cancelled)". Convenience only: a folder moved by hand is healed anyway.
+
+```bash
+curl -sH "$H" "$U?action=folder_resolve&request_id=3012"
+curl -sH "$H" "$U?action=folder_ids_backfill&limit=200"                                   # dry run
+curl -sA "Mozilla/5.0 (compatible; SavannahHubAgent/1.0)" -H "$H" -X POST "$U?action=folder_ids_backfill" -d '{"limit":200,"confirm":true}'
+curl -sH "$H" "$U?action=folders_orphans"
+curl -sH "$H" "$U?action=archive_cancelled"                                               # dry run
+```
 
 ### Il Diamante set departures — `move_group_folder` + `import_group_folder`
 Confirming a Diamante group (Panorama01, 05, 07, 10, PanoramaDavide …) = two steps: move the provisional
@@ -2081,7 +2142,8 @@ up a practice that started weeks earlier in another chat. Staff see the same thi
   passaporto" gives a warning in `warnings[]` (not a block). Never write passport numbers.
 
 `event_type`: `note`, `client_request`, `quote_sent`, `program_update`, `calc_update`, `mail_sent`,
-`mail_received`, `call`, `confirmation`, `invoice`, `payment`, `supplier`, `status_change`, `issue`.
+`mail_received`, `call`, `confirmation`, `invoice`, `payment`, `supplier`, `status_change`, `folder_relinked`
+(system: folder moved outside the Hub and re-linked by its id), `issue`.
 
 `refs` (all optional, shown as links in the Hub): `program_id`, `program_version`, `calc_file`, `invoice_id`,
 `invoice_number`, `payment_id`, `mail_message_id`, `mail_box`, `memo_ext_key`, `price_total`, `currency`,
@@ -2105,6 +2167,7 @@ same request + type + title within 60 s is logged once; a logging error never fa
 | `add_invoice_payment`, `cancel_invoice_payment` (and the invoice page) | `payment` |
 | `update_folder_status` / Update Folder, BackOffice status change, request status change | `status_change` |
 | `update_request` with a new `start_date` | `status_change` "Start date changed: <from> → <to>" |
+| Any folder reader finding the folder moved / renamed outside the Hub (by its Dropbox id), `archive_cancelled` | `folder_relinked` "Folder auto-relinked" / "Folder archived (cancelled)" (`auto-relinked: <old> → <new>`, `refs.dropbox_path`) |
 
 ### `timeline_list` (GET)
 `request_id`*, `limit` (default 50, ≤ 500), `since` (`YYYY-MM-DD[ HH:MM]`), `types` (comma list),
@@ -2129,7 +2192,9 @@ Preview with `previous` and `new` unless `"confirm": true`; then → `summary`, 
 `request_id`, or `q` (name / folder / email, as `find_requests`; several matches → 409 with
 `candidates[]`). Everything needed to pick up a practice:
 `request` `{id, customer_name, email, agency, agent, status, payment_status, period, pax, value_usd,
-destination, folder, group_folder, dropbox_path, date_received, confirmation_date, start_date, initial_request}`,
+destination, folder, group_folder, dropbox_path, dropbox_id, folder_link, date_received, confirmation_date, start_date,
+initial_request}` — the folder is healed first if it moved outside the Hub; `folder_link` `{state, relinked_from,
+warnings[], error}` (null when Dropbox was not asked),
 `summary`, `events[]` (last 20, pinned first, Notes merged), `programs[]` `{program_id, title, type, stage,
 language, status, updated_at, public_link}`, `calc_files[]` (`*_Calc*.xlsx` in the folder; null without a
 folder), `invoices[]` `{invoice_number, total, amount_paid, balance_due, status, …}`, `memos[]`

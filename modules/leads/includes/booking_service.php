@@ -270,11 +270,12 @@ function bs_create_request(PDO $db, array $v, array $opt = []): array {
     }
 
     // ── Dropbox folder (unless "already exists" flag is set) ──────────────────
+    $folderMeta = null;   // create_folder answer: its id is the stable link (folder_link_service.php)
     if (!$dropboxSkip) {
         require_once __DIR__ . '/../dropbox_helper.php';
         try {
             $token = dropbox_get_access_token();
-            dropbox_create_folder($token, $dropboxPath, true); // throwOnConflict=true
+            $folderMeta = dropbox_create_folder($token, $dropboxPath, true); // throwOnConflict=true
 
             foreach (['bookings','complain','flights','guestcomments','insurance',
                       'IntFlights','invoices','mails','old','passports','vouchers'] as $sub) {
@@ -342,6 +343,10 @@ function bs_create_request(PDO $db, array $v, array $opt = []): array {
         $v['notes']           ?: null,
     ]);
     $out['request_id'] = (int)$db->lastInsertId();
+    if ($folderMeta) {
+        require_once __DIR__ . '/folder_link_service.php';
+        folder_id_store($db, $out['request_id'], $folderMeta);
+    }
     assign_touch($db, $out['request_id']);
     $out['ok'] = true;
     timeline_log($out['request_id'], 'client_request', $dropboxSkip ? 'Request imported from folder' : 'Request received',
@@ -457,7 +462,13 @@ function bs_copy_programs(PDO $db, int $reqId, string $prognum, array $programs)
     if (!$rr) return ['ok' => false, 'msg' => 'Request not found.'];
 
     // Destination = the request's real Dropbox folder — works whether the booking
-    // is still pre-confirmation (/YYYY/…) or already confirmed (/001_Safari/…).
+    // is still pre-confirmation (/YYYY/…) or already confirmed (/001_Safari/…);
+    // moved / renamed outside the Hub: re-linked by its Dropbox folder id first.
+    try {
+        require_once __DIR__ . '/../dropbox_helper.php';
+        require_once __DIR__ . '/folder_link_service.php';
+        $rr = folder_heal($db, dropbox_get_access_token(), $rr);
+    } catch (Throwable $e) { /* the copy reports a missing folder */ }
     $destDir    = req_folder_path($rr);
     $folderName = trim($rr['practice_code'] ?? '');
     if ($destDir === '' || $folderName === '') {
@@ -729,12 +740,13 @@ function bs_confirm_plan(PDO $db, int $reqId, array $in): array {
 
     require_once __DIR__ . '/../dropbox_helper.php';
 
-    // Resolve the folder's current Dropbox path (url first — no search lag).
+    // Resolve the folder's current Dropbox path (url first — no search lag; then its folder id; then by name).
     try {
         $plan['token']    = dropbox_get_access_token();
         $plan['cur_path'] = bo_path_from_url($r['dropbox_url'] ?? '');
         if ($plan['cur_path'] === '' || !dropbox_path_exists($plan['token'], $plan['cur_path'])) {
-            $plan['cur_path'] = dropbox_find_folder($plan['token'], $oldFolder);
+            require_once __DIR__ . '/folder_link_service.php';
+            $plan['cur_path'] = folder_locate($plan['token'], fl_row($db, $r)) ?? dropbox_find_folder($plan['token'], $oldFolder);
         }
     } catch (Throwable $e) { $plan['dbx_err'] = $e->getMessage(); }
 
@@ -987,7 +999,7 @@ function bs_confirm_commit_run(PDO $db, array $plan, bool $proceed): array {
             if (dropbox_path_exists($token, $destPath)) {
                 return $fail('"' . $memberName . '" already exists inside GRP "' . $grpMain . '" — nothing changed.');
             }
-            dropbox_move_folder($token, $curPath, $destPath);
+            $mv = dropbox_move_folder($token, $curPath, $destPath);
             $gpd = parse_folder_dates($grpMain);
             $db->prepare(
                 "UPDATE requests
@@ -997,6 +1009,8 @@ function bs_confirm_commit_run(PDO $db, array $plan, bool $proceed): array {
                      pre_confirm_json=?
                  WHERE id=?"
             )->execute([$memberName, $grpMain, bo_url_from_path($destPath), $gpd['start_date'], $destValue, $destValue, $preConfirm, $reqId]);
+            require_once __DIR__ . '/folder_link_service.php';
+            folder_id_store($db, $reqId, $mv);
             return ['ok' => true, 'msg' => '✔ ' . $cust . ' added to GRP "' . $grpMain . '" (status → Booked).',
                     'folder' => $memberName, 'group_folder' => $grpMain, 'dropbox_path' => $destPath];
         }
@@ -1007,13 +1021,14 @@ function bs_confirm_commit_run(PDO $db, array $plan, bool $proceed): array {
         if (dropbox_path_exists($token, $newPath)) {
             return $fail('A folder named "' . $newName . '" already exists in 001_Safari — nothing changed.');
         }
-        dropbox_move_folder($token, $curPath, $newPath);
+        $mv = dropbox_move_folder($token, $curPath, $newPath);
+        require_once __DIR__ . '/folder_link_service.php';
 
         if ($grpAction === 'CREATE') {
             // Create the member subfolder and move the loose docs (keep the group xlsx at GRP root).
             $subName = $plan['sub_name'];
             $subPath = $newPath . '/' . $subName;
-            dropbox_create_folder($token, $subPath, false);
+            $subMeta = dropbox_create_folder($token, $subPath, false);   // the member's own folder (new id)
             foreach (dropbox_list_files($token, $newPath) as $fn) {
                 if (preg_match('/\.xlsx?$/i', $fn)) continue;         // group calc stays at GRP root
                 try { dropbox_move_folder($token, $newPath . '/' . $fn, $subPath . '/' . $fn); }
@@ -1027,6 +1042,7 @@ function bs_confirm_commit_run(PDO $db, array $plan, bool $proceed): array {
                      pre_confirm_json=?
                  WHERE id=?"
             )->execute([$subName, $newName, bo_url_from_path($subPath), $plan['pd']['start_date'], $destValue, $destValue, $preConfirm, $reqId]);
+            folder_id_store($db, $reqId, $subMeta);
             return ['ok' => true, 'msg' => '✔ ' . $cust . ' — new GRP "' . $newName . '" created (status → Booked).',
                     'folder' => $subName, 'group_folder' => $newName, 'dropbox_path' => $subPath];
         }
@@ -1040,6 +1056,7 @@ function bs_confirm_commit_run(PDO $db, array $plan, bool $proceed): array {
                  pre_confirm_json=?
              WHERE id=?"
         )->execute([$newName, bo_url_from_path($newPath), $plan['pd']['start_date'], $destValue, $destValue, $preConfirm, $reqId]);
+        folder_id_store($db, $reqId, $mv);
         return ['ok' => true, 'msg' => '✔ ' . $cust . ' confirmed → "' . $newName . '" (status → Booked).',
                 'folder' => $newName, 'group_folder' => null, 'dropbox_path' => $newPath];
 
@@ -1154,8 +1171,10 @@ function bs_rollback_run(PDO $db, int $reqId, bool $commit): array {
                 catch (Throwable $ig) { /* best-effort per file */ }
             }
             try { dropbox_delete_folder($token, $subPath); } catch (Throwable $ig) { /* empty subfolder */ }
-            dropbox_move_folder($token, $curPath, $destPath);
+            $mv = dropbox_move_folder($token, $curPath, $destPath);
             bo_rollback_db($db, $reqId, $origName, $destPath, $pre);
+            require_once __DIR__ . '/folder_link_service.php';
+            folder_id_store($db, $reqId, $mv);   // the group folder is the request's own folder again
             return array_merge(['ok' => true, 'msg' => '↩ Rolled back "' . $cust . '" — single-member group undone, folder restored to ' . $destPath . '.'], $info);
         }
 

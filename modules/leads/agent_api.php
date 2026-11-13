@@ -24,6 +24,7 @@ require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/includes/booking_service.php';
 require_once __DIR__ . '/includes/agency_service.php';   // create_agency (shared with Agencies → Add)
 require_once __DIR__ . '/includes/folder_service.php';   // rename_folder (shared with BackOffice "Rename…")
+require_once __DIR__ . '/includes/folder_link_service.php';   // dropbox_id: folder_resolve, backfill, orphans, archive_cancelled
 require_once __DIR__ . '/includes/group_import_service.php';   // import_group_folder / move_group_folder (shared with import_folder.php)
 require_once __DIR__ . '/includes/postpone_lib.php';   // booking_cc_agent_email()
 require_once __DIR__ . '/includes/calc_service.php';   // get_rates, fill_calc
@@ -103,7 +104,8 @@ function agent_audit(PDO $db, string $action, $reqId, array $payload, string $re
                               'create_request', 'add_flight_rates', 'timeline_update', 'summary_set', 'rename_folder',
                               'set_request_status', 'update_request', 'import_group_folder', 'move_group_folder', 'ck_request_check', 'memo_delete', 'create_agency', 'update_agency', 'save_agency_contact', 'delete_agency_contact',
                               'followup_scan', 'followup_update', 'followup_upsert', 'staff_mail_save_eml', 'staff_mail_reply', 'drafts_cleanup', 'iti_update_activity', 'sales_response_dismiss',
-                              'ck_set_owners', 'ck_set_group_closed', 'ck_findings_upsert', 'iti_create_destination', 'iti_import_program', 'iti_supplier_blocklist', 'predeparture_email'], true) && empty($payload['confirm']);
+                              'ck_set_owners', 'ck_set_group_closed', 'ck_findings_upsert', 'iti_create_destination', 'iti_import_program', 'iti_supplier_blocklist', 'predeparture_email',
+                              'folder_ids_backfill', 'folders_orphans', 'archive_cancelled'], true) && empty($payload['confirm']);
     // Mail: keep who/what in the log, not message bodies or attachment content.
     if (in_array($action, ['mail_get', 'mail_attachment', 'staff_mail_get', 'staff_mail_attachment', 'iti_document', 'iti_vouchers'], true) && $code === 200) {
         $res = json_decode($resultJson, true);
@@ -280,6 +282,7 @@ function agent_request_out(array $r): array {
         'folder'        => $r['practice_code'],
         'group_folder'  => $r['group_folder'] ?? null,
         'dropbox_path'  => req_folder_path($r),
+        'dropbox_id'    => $r['dropbox_id'] ?? null,
         'date_received' => $r['date_received'] ?? null,
         'start_date'    => $r['start_date'] ?? null,
         'destination'   => $r['destination'] ?? null,
@@ -522,14 +525,26 @@ function agent_invoice_folder(PDO $db, int $invId): ?array {
     ];
 }
 
-/** A request's Dropbox folder (searched by folder name if it moved), or fail 404. */
+/**
+ * A request's Dropbox folder, or fail 404: the stored path, else its Dropbox folder id (moved / renamed outside the Hub:
+ * the link is healed, folder_heal()), else — no id stored yet — searched by folder name. Deleted folder: clear error.
+ */
 function agent_request_dropbox_dir(string $token, array $r): string {
-    $dir = req_folder_path($r);
-    if ($dir === '' || !dropbox_path_exists($token, $dir)) {
+    $h = folder_heal(db(), $token, $r);
+    $f = $h['_folder'];
+    if ($f['state'] === 'deleted') agent_fail($f['error'] . ' — pass folder_path', 404);
+    $dir = (string)($f['path'] ?? '');
+    if ($dir === '') {
         $dir = (string)dropbox_find_folder($token, $r['practice_code']);
         if ($dir === '') agent_fail('Folder ' . $r['practice_code'] . ' not found in Dropbox — pass folder_path', 404);
     }
     return $dir;
+}
+
+/** The _folder info of folder_heal() as API data. */
+function agent_folder_out(array $f): array {
+    return ['state' => $f['state'], 'path' => $f['path'], 'id' => $f['id'], 'relinked_from' => $f['old_path'],
+            'warnings' => $f['warnings'], 'error' => $f['error']];
 }
 
 // ── Mailboxes info@ / Gmail (logic in includes/mailbox_service.php) ─────────
@@ -3030,8 +3045,50 @@ try {
     // invoices, memos, other requests of the same client.
     case 'request_resume': {
         $r = agent_tl_resolve($db, $in);
-        require_once __DIR__ . '/dropbox_helper.php';   // Calc files in the folder
+        require_once __DIR__ . '/dropbox_helper.php';   // Calc files in the folder (tl_resume heals a moved folder first)
         agent_out(['ok' => true] + tl_resume($db, $r));
+    }
+
+    // ── Dropbox folder link by folder id (logic includes/folder_link_service.php) ──
+    // The request's folder now: stored path, else its Dropbox id (moved / renamed outside the Hub → the link is
+    // healed at once, as every folder reader does: dropbox_url / practice_code, timeline folder_relinked, warnings).
+    case 'folder_resolve': {
+        $r = agent_request($db, $in['request_id'] ?? 0);
+        $h = folder_heal($db, dropbox_get_access_token(), $r);
+        agent_out(['ok' => true, 'request' => agent_request_out(array_merge($r, $h)), 'folder' => agent_folder_out($h['_folder'])]);
+    }
+
+    // Requests with a folder and no dropbox_id: get_metadata(path) → id. Batches (after_id, limit ≤ 300).
+    // Dry run counts found / not found (not found = the broken links); "confirm": true saves the ids.
+    case 'folder_ids_backfill': {
+        if (!empty($in['confirm'])) agent_require_method('POST');
+        @set_time_limit(120);
+        $res = folder_ids_backfill($db, dropbox_get_access_token(), ['after_id' => (int)($in['after_id'] ?? 0),
+                    'limit' => (int)($in['limit'] ?? 100), 'budget' => 50, 'confirm' => !empty($in['confirm'])]);
+        agent_out(['ok' => true] + $res + (empty($in['confirm']) ? ['message' => 'Dry run — no id saved. Resend with "confirm": true.'
+                  . ($res['done'] ? '' : ' More rows: resend with after_id ' . $res['next_after_id'] . '.')] : []));
+    }
+
+    // Nightly orphan check now: requests whose folder cannot be resolved + folders under the roots no request knows.
+    // Folders found by id are healed on the way (as on any read). "confirm": true also writes / closes the memo folders-orphans.
+    case 'folders_orphans': {
+        if (!empty($in['confirm'])) agent_require_method('POST');
+        @set_time_limit(180);
+        $res = folder_orphans_run($db, dropbox_get_access_token(), ['memo' => !empty($in['confirm']),
+                    'budget' => max(10, min(150, (int)($in['budget'] ?? 90))), 'max_checks' => max(0, min(400, (int)($in['max_checks'] ?? 150)))]);
+        agent_out(['ok' => true] + $res + (empty($in['confirm']) ? ['message' => 'Report only — resend with "confirm": true to write the memo.'] : []));
+    }
+
+    // Move cancelled folders of /001_Safari into /001_Safari/00_CANCELED/00_<trip year>/ (all *_CANCELLED, or request_id's
+    // top folder), path + status Cancelled in the Hub. Dry run lists the moves; "confirm": true moves.
+    case 'archive_cancelled': {
+        if (!empty($in['confirm'])) agent_require_method('POST');
+        @set_time_limit(180);
+        if ((int)($in['request_id'] ?? 0) > 0) agent_request($db, $in['request_id']);
+        $res = folder_archive_cancelled($db, dropbox_get_access_token(), ['request_id' => (int)($in['request_id'] ?? 0),
+                    'confirm' => !empty($in['confirm'])]);
+        if (!empty($res['error'])) agent_fail($res['error'], 409, $res);
+        agent_out(['ok' => true] + $res + (empty($in['confirm']) ? ['message' => 'Dry run — nothing moved. Resend with "confirm": true.'] : []));
     }
 
     // ── Back office (read-only): logic in includes/payments_service.php, includes/ck_lib.php,
@@ -3634,6 +3691,7 @@ try {
             'mail_folders', 'mail_list', 'mail_get', 'mail_attachment', 'mail_flag', 'mail_move', 'mail_draft', 'mail_send',
             'staff_mail_mailboxes', 'staff_mail_search', 'staff_mail_get', 'staff_mail_attachment', 'staff_mail_save_eml', 'staff_mail_reply', 'drafts_cleanup',
             'timeline_list', 'timeline_add', 'timeline_update', 'summary_set', 'request_resume', 'set_request_status',
+            'folder_resolve', 'folder_ids_backfill', 'folders_orphans', 'archive_cancelled',
             'payments_due', 'ck_status', 'ck_request_check', 'ck_set_owners', 'ck_set_group_closed', 'ck_findings_upsert', 'ck_findings_drafts', 'ops_movements', 'ops_lunch_boxes', 'ops_medivac', 'flight_tickets',
             'followup_list', 'followup_scan', 'followup_update', 'followup_upsert', 'mail_security_status',
             'sales_response_status', 'sales_response_dismiss', 'dropbox_conflicts', 'dropbox_conflicts_run',

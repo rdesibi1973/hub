@@ -70,11 +70,17 @@ function iti_ps_ref_from_request(PDO $db, int $rid, string $calcFile = ''): arra
     $st = $db->prepare('SELECT id, practice_code, group_folder, dropbox_url FROM requests WHERE id = ?');
     $st->execute([$rid]);
     $r = $st->fetch(PDO::FETCH_ASSOC);
-    $folder = $r ? trim((string)$r['practice_code']) : '';
     $hint = 'Pass fields.ref_number, or calc_file (the Calc of the programme: same NN_ and programme as its Word).';
-    if ($folder === '') throw new ItiRefException('ref_number: request ' . $rid . ' has no folder — ' . $hint, ['request_id' => $rid, 'hint' => $hint]);
+    if (!$r || trim((string)$r['practice_code']) === '') throw new ItiRefException('ref_number: request ' . $rid . ' has no folder — ' . $hint, ['request_id' => $rid, 'hint' => $hint]);
+    $token = null;
+    try {
+        require_once __DIR__ . '/../../leads/includes/folder_link_service.php';
+        $token = dropbox_get_access_token();
+        $r = folder_heal($db, $token, $r);   // folder moved outside the Hub: re-linked by its Dropbox id
+    } catch (Throwable $e) { /* the listing below reports it */ }
+    $folder = trim((string)$r['practice_code']);
     $dir = req_folder_path($r);
-    try { $files = dropbox_list_files(dropbox_get_access_token(), $dir); }
+    try { $files = dropbox_list_files($token ?? dropbox_get_access_token(), $dir); }
     catch (Throwable $e) { throw new ItiRefException('ref_number: cannot read ' . $dir . ' (' . $e->getMessage() . ') — ' . $hint, ['request_id' => $rid, 'folder' => $dir, 'hint' => $hint]); }
 
     $progs = bs_copied_programs($files, $folder);
@@ -149,8 +155,13 @@ function iti_ps_save_file(PDO $db, int $pid, array $f, array $opt = array()): ar
         $r = $st->fetch(PDO::FETCH_ASSOC);
         if (!$r) throw new ItiSaveException('Request ' . $rid . ' not found', 404);
         if (trim((string)$r['practice_code']) === '') throw new ItiSaveException('Request ' . $rid . ' has no folder — pass folder_path', 409);
-        $dir = req_folder_path($r);   // searched by folder name if it moved
-        if ($dir === '' || !dropbox_path_exists($token, $dir)) {
+        // Moved outside the Hub: re-linked by its Dropbox id; no id stored yet: searched by folder name.
+        require_once __DIR__ . '/../../leads/includes/folder_link_service.php';
+        $r   = folder_heal($db, $token, $r);
+        $fl  = $r['_folder'];
+        if ($fl['state'] === 'deleted') throw new ItiSaveException($fl['error'] . ' — pass folder_path', 404);
+        $dir = (string)($fl['path'] ?? '');
+        if ($dir === '') {
             $dir = (string)dropbox_find_folder($token, $r['practice_code']);
             if ($dir === '') throw new ItiSaveException('Folder ' . $r['practice_code'] . ' not found in Dropbox — pass folder_path', 404);
         }

@@ -32,6 +32,7 @@ const TL_TYPES = [
     'payment'        => ['Payment',         '#FBF3DC', '#8A6A12', '#EEDCA6'],
     'supplier'       => ['Supplier',        '#F3EBE3', '#7A5233', '#E2D2C2'],
     'status_change'  => ['Status',          '#F0F0F0', '#555555', '#DDDDDD'],
+    'folder_relinked'=> ['Folder',          '#F0F0F0', '#555555', '#DDDDDD'],   // folder moved / renamed outside the Hub, re-linked by its id
     'issue'          => ['Issue',           '#FFFFFF', '#C0211B', '#C0211B'],
 ];
 const TL_WAITING_ON = ['client', 'agency', 'supplier', 'us'];
@@ -453,6 +454,15 @@ function tl_activity_map(PDO $db, array $ids): array {
  */
 function tl_resume(PDO $db, array $r): array {
     $rid = (int)$r['id'];
+    $folderInfo = null;
+    if (function_exists('dropbox_get_access_token') && !empty($r['practice_code'])) {
+        try {   // folder moved / renamed outside the Hub: re-linked by its Dropbox id before anything reads it
+            require_once __DIR__ . '/folder_link_service.php';
+            $r = folder_heal($db, dropbox_get_access_token(), $r);
+            $f = $r['_folder'];
+            $folderInfo = ['state' => $f['state'], 'relinked_from' => $f['old_path'], 'warnings' => $f['warnings'], 'error' => $f['error']];
+        } catch (Throwable $e) { /* the Calc listing below reports Dropbox errors */ }
+    }
     $out = [
         'request' => [
             'id' => $rid, 'customer_name' => $r['customer_name'], 'email' => $r['email'] ?? null,
@@ -462,6 +472,7 @@ function tl_resume(PDO $db, array $r): array {
             'destination' => $r['destination'] ?? null, 'folder' => $r['practice_code'] ?? null,
             'group_folder' => $r['group_folder'] ?? null,
             'dropbox_path' => function_exists('req_folder_path') ? req_folder_path($r) : null,
+            'dropbox_id' => $r['dropbox_id'] ?? null, 'folder_link' => $folderInfo,
             'date_received' => $r['date_received'] ?? null, 'confirmation_date' => $r['confirmation_date'] ?? null,
             'start_date' => $r['start_date'] ?? null,
             'initial_request' => isset($r['initial_request']) ? tl_cut((string)$r['initial_request'], 1500) : null,

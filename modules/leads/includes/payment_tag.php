@@ -49,12 +49,17 @@ function folder_with_payment_tag(string $name, string $ps): ?string {
 function payment_rename_folder(PDO $db, array $req, string $newName): array {
     $old = trim((string)($req['practice_code'] ?? ''));
     if ($old === '' || $old === $newName) return ['ok' => true, 'msg' => ''];
+    $token  = dropbox_get_access_token();
+    if (!empty($req['id'])) {   // folder moved outside the Hub: re-linked by its Dropbox id (same name → same rename)
+        require_once __DIR__ . '/folder_link_service.php';
+        $healed = folder_heal($db, $token, $req);
+        if (strcmp(trim((string)$healed['practice_code']), $old) === 0) $req = $healed;
+    }
     $prefix = 'https://www.dropbox.com/home';
     $url    = trim((string)($req['dropbox_url'] ?? ''));
     $parent = str_starts_with($url, $prefix)
         ? dirname(urldecode(substr($url, strlen($prefix))))
         : (($req['status'] ?? '') === 'Booked' ? '/001_Safari' : '/2026');
-    $token  = dropbox_get_access_token();
     $tries  = [$parent];
     if ($parent === '/2026') $tries[] = '/001_Safari';
     elseif ($parent === '/001_Safari') $tries[] = '/2026';

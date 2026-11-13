@@ -269,7 +269,8 @@ function dropbox_path_exists(string $token, string $path): bool {
 
 /**
  * Metadata of a Dropbox path (files/get_metadata): ['tag' => 'file'|'folder', 'name', 'path'
- * (path_display, real case)], or null if not_found. Other errors throw.
+ * (path_display, real case), 'id' ('id:…', stable across move / rename)], or null if not_found.
+ * $path may also be a folder id ('id:…'). Other errors throw.
  */
 function dropbox_get_metadata(string $token, string $path): ?array {
     if ($path === '' || $path === '/') return null;
@@ -287,7 +288,7 @@ function dropbox_get_metadata(string $token, string $path): ?array {
     $data = json_decode((string)$body, true) ?? [];
     if ($code === 200) {
         return ['tag' => (string)($data['.tag'] ?? ''), 'name' => (string)($data['name'] ?? ''),
-                'path' => (string)($data['path_display'] ?? $path)];
+                'path' => (string)($data['path_display'] ?? $path), 'id' => (string)($data['id'] ?? '')];
     }
     if ($code === 409 && stripos((string)($data['error_summary'] ?? ''), 'not_found') !== false) return null;
     throw new RuntimeException("Dropbox get_metadata failed (HTTP $code): $body");

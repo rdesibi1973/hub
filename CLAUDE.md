@@ -46,6 +46,12 @@ outdated — this file wins where they disagree (PHP version, local lint).
   (one copy only, cached by `rev`); `orig/` Word sources for admins only, `old/` never.
 - **Travel info** (Booked "✈ Travel info"; logic `includes/predeparture_service.php`, shared with the Agent API
   `predeparture_*`): pre-departure mail per language / country — Jambo, visa, NIC / ZIC, Ebola form.
+- **Folder link by Dropbox id** (`requests.dropbox_id`, migration 082; logic `modules/leads/includes/folder_link_service.php`,
+  Agent API `folder_resolve` / `folder_ids_backfill` / `folders_orphans` / `archive_cancelled`, admin page `relink_folders.php`):
+  a folder moved / renamed outside the Hub is found by its id and the link heals itself (`folder_heal()`; status never
+  changed — warning + memo). A new reader of a request's folder calls `folder_heal($db, $token, $r)` before
+  `req_folder_path($r)`; a new writer that creates a request folder saves the id (`folder_id_store()`). Nightly orphan
+  memo `folders-orphans` from `ck_cron.php`.
 - `migrations/NNN_name.sql` — not applied by deploy. `docs/` — AGENT_API, FOLDER_NAMING,
   INFRASTRUCTURE, KB_Quotazioni_Safari.
 

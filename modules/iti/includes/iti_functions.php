@@ -1009,10 +1009,12 @@ function iti_lead_ref_number(int $lead_id, string $file = '') {
     if ($file !== '' && preg_match('/^(\d{1,3})_/', basename($file), $m)) $num = $m[1];
     if ($num === '' && function_exists('dropbox_list_files') && function_exists('req_folder_path') && defined('DROPBOX_REFRESH_TOKEN')) {
         try {
+            $tok = dropbox_get_access_token();
+            if (function_exists('folder_heal')) $r = folder_heal(db(), $tok, $r);   // folder moved outside the Hub
             $dir = req_folder_path($r);
             if ($dir !== '') {
                 $max = 0;
-                foreach (dropbox_list_files(dropbox_get_access_token(), $dir) as $fn) {
+                foreach (dropbox_list_files($tok, $dir) as $fn) {
                     if (preg_match('/^(\d{1,3})_/', $fn, $m) && (int)$m[1] > $max) { $max = (int)$m[1]; $num = $m[1]; }
                 }
             }

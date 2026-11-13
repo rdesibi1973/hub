@@ -428,6 +428,8 @@ function calc_request_dirs(array $r): array {
  * @throws InvalidArgumentException (no folder / no Calc / "file" not found)
  */
 function calc_locate_request(string $token, array $r, string $file = ''): array {
+    require_once __DIR__ . '/folder_link_service.php';   // folder moved outside the Hub: re-linked by its Dropbox id
+    if (!empty($r['id'])) $r = folder_heal(db(), $token, $r);
     $dirs = calc_request_dirs($r);
     if (!$dirs) throw new InvalidArgumentException('This request has no Dropbox folder.');
     $err = null;
@@ -513,9 +515,11 @@ function calc_read_request(PDO $db, int $requestId, string $file = '', string $s
     $st->execute([$requestId]);
     $r = $st->fetch(PDO::FETCH_ASSOC);
     if (!$r) throw new InvalidArgumentException('Request ' . $requestId . ' not found.');
-    $own = req_folder_path($r);
 
     $token = dropbox_get_access_token();
+    require_once __DIR__ . '/folder_link_service.php';
+    $r     = folder_heal($db, $token, $r);   // folder moved outside the Hub: re-linked by its Dropbox id
+    $own   = req_folder_path($r);
     $loc   = calc_locate_request($token, $r, $file);
     $dir   = $loc['dir'];
     $pick  = $loc['pick'];

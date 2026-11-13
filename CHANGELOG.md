@@ -20,6 +20,19 @@ Running log of notable changes and current build state. Module-level "active / p
 
 ---
 
+## 2026-11-13 — Stable Dropbox folder link (folder id), self-healing path, orphan check
+
+- `requests.dropbox_id` (migration 082, also lazy `fl_schema()`): the Dropbox folder id, unchanged by move / rename.
+  Saved on create (Hub, Agent API, Java GUI endpoint), Confirm Safari, Rollback, re-link (rename_folder, request page).
+- `includes/folder_link_service.php`: `folder_heal()` — stored path, else the id → rewrites `dropbox_url` /
+  `practice_code` (a moved group: every member + `group_folder`), timeline `folder_relinked`; suffix ≠ Hub status →
+  warning + memo `folder-status:<id>`, status untouched; deleted id → clear error. Wired into the Calc reader / fill,
+  passports, ITI document save + ref number, attachment save, copy programs, confirm, rename, payment-tag rename,
+  invoice Update Folder, postpone, request_resume, request page Re-link, bulk Re-link Folders.
+- Backfill (`folder_ids_backfill`, Re-link Folders page), nightly orphan check (`ck_cron.php` after 05:00 →
+  memo `folders-orphans`; `folders_orphans`), `archive_cancelled` → `/001_Safari/00_CANCELED/00_<trip year>/`.
+- Test: `tools/tests/folder_link_test.php` (SQLite + Dropbox stub, the two cancelled 2027 folders of 13 Nov).
+
 ## 2026-11-13 — CK tracker: SafariCheck reads the ITI programme from its PDF in the folder
 - A direct client gets the ITI programme as `<Ref. Number>.pdf`, not a Word: a booking whose programme was a
   proposal not marked Confirmed (e.g. NicolaMarta, #123) got "Word file not found" although the PDF sent to the

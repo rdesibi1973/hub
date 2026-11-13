@@ -140,11 +140,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             if ($name === '') { echo json_encode(['ok'=>false,'msg'=>'This request has no folder name to search.']); exit; }
 
             require_once 'dropbox_helper.php';
+            require_once 'includes/folder_link_service.php';
             $token = dropbox_get_access_token();
-            $res   = dropbox_relink_find($token, $name);   // tolerant of name drift
+            // 1. Its Dropbox folder id: exact even after a move / rename outside the Hub (heals the link, timeline, warnings).
+            $h = folder_heal($db, $token, ['id' => $req_id] + $rr);
+            $f = $h['_folder'];
+            if (in_array($f['state'], ['ok', 'relinked'], true) && $f['path']) {
+                echo json_encode(['ok'=>true, 'path'=>$f['path'], 'relinked'=>$f['state'] === 'relinked', 'warnings'=>$f['warnings']]); exit;
+            }
+            if ($f['state'] === 'deleted') { echo json_encode(['ok'=>false,'msg'=>$f['error']]); exit; }
+            // 2. No id stored yet: search by name (tolerant of name drift).
+            $res   = dropbox_relink_find($token, $name);
             if (in_array($res['result'], ['exact','stem','core'], true)) {
                 $newUrl = 'https://www.dropbox.com/home/' . implode('/', array_map('rawurlencode', explode('/', ltrim($res['path'], '/'))));
                 $db->prepare("UPDATE requests SET dropbox_url=? WHERE id=?")->execute([$newUrl, $req_id]);
+                $m = dropbox_get_metadata($token, $res['path']);
+                if ($m) folder_id_save($db, $req_id, $m['id']);
                 echo json_encode(['ok'=>true, 'path'=>$res['path']]); exit;
             }
             if ($res['result'] === 'ambiguous') {
@@ -217,10 +228,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             if (!$chk->fetch()) { echo json_encode(['ok'=>false,'msg'=>'Request not found.']); exit; }
 
             require_once 'dropbox_helper.php';
+            require_once 'includes/folder_link_service.php';
             $token = dropbox_get_access_token();
-            if (!dropbox_path_exists($token, $path)) { echo json_encode(['ok'=>false,'msg'=>'That path does not exist in Dropbox.']); exit; }
+            $m = dropbox_get_metadata($token, $path);
+            if (!$m || $m['tag'] !== 'folder') { echo json_encode(['ok'=>false,'msg'=>'That path does not exist in Dropbox (or is not a folder).']); exit; }
+            $path   = $m['path'];
             $newUrl = 'https://www.dropbox.com/home/' . implode('/', array_map('rawurlencode', explode('/', ltrim($path, '/'))));
             $db->prepare("UPDATE requests SET dropbox_url=? WHERE id=?")->execute([$newUrl, $req_id]);
+            folder_id_save($db, $req_id, $m['id']);   // the stable link from now on
             echo json_encode(['ok'=>true, 'path'=>$path]);
         } catch (Throwable $e) {
             echo json_encode(['ok'=>false,'msg'=>'Error: '.$e->getMessage()]);
@@ -1370,7 +1385,7 @@ function deleteQuote(id, num) {
     <div class="tl-row">
       <div style="flex:0 0 190px"><label for="tl-type">Type</label>
         <select id="tl-type" name="tl_type">
-          <?php foreach (TL_TYPES as $k => $t): if (in_array($k, ['status_change'], true)) continue; ?>
+          <?php foreach (TL_TYPES as $k => $t): if (in_array($k, ['status_change', 'folder_relinked'], true)) continue; ?>
           <option value="<?= h($k) ?>"><?= h($t[0]) ?></option>
           <?php endforeach; ?>
         </select></div>

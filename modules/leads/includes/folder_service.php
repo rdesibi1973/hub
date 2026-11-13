@@ -56,7 +56,9 @@ function bo_status_from_name(string $name, ?array $tagStatus = null): array {
 /**
  * Current Dropbox path of the folder being renamed ($folder: the booking folder, or the
  * group parent). Tries the path in the stored dropbox_url first (exact, kept fresh by every
- * rename), then Dropbox search — which lags for a folder renamed minutes ago. Null if not found.
+ * rename), then the request's Dropbox folder id (stable across moves outside the Hub,
+ * folder_link_service.php), then Dropbox search — which lags for a folder renamed minutes ago.
+ * Null if not found.
  */
 function fs_locate_folder(string $token, array $r, string $folder): ?string {
     $p = bo_path_from_url((string)($r['dropbox_url'] ?? ''));
@@ -67,7 +69,9 @@ function fs_locate_folder(string $token, array $r, string $folder): ?string {
         }
         $p = rtrim(dirname($p), '/');   // group: the URL points to the client sub-folder
     }
-    return dropbox_find_folder($token, $folder);
+    require_once __DIR__ . '/folder_link_service.php';
+    $byId = folder_locate($token, fl_row(db(), $r), $folder);
+    return $byId ?? dropbox_find_folder($token, $folder);
 }
 
 /**
@@ -277,7 +281,7 @@ function fs_relink_resolve(string $token, string $path): array {
     $m = dropbox_get_metadata($token, $path);
     if ($m === null)            return ['error' => 'current_path "' . $path . '" does not exist in Dropbox.', 'code' => 404];
     if ($m['tag'] !== 'folder') return ['error' => 'current_path "' . $path . '" is a file, not a folder.', 'code' => 400];
-    return ['path' => $m['path']];
+    return ['path' => $m['path'], 'id' => $m['id'] ?? ''];
 }
 
 /**
@@ -599,6 +603,11 @@ function folder_rename(PDO $db, int $requestId, string $newName, ?int $userId, a
                 'not_found' => !empty($res['not_found']), 'candidates' => $res['candidates'] ?? []];
     }
     $curName = basename($res['old_path']);
+    // Re-link of a private folder: its Dropbox id is the stable link from now on (a group keeps each member's own id).
+    if ($v['relink'] && !$isGrp && !empty($rl['id'])) {
+        require_once __DIR__ . '/folder_link_service.php';
+        folder_id_save($db, (int)$v['r']['id'], $rl['id']);
+    }
 
     // Booked by a re-link (confirmed outside the Hub): what Confirm Safari would have set.
     if (fs_relink_books($v)) {

@@ -190,11 +190,15 @@ function ppt_file_name(string $fullName, string $ext, array $taken): string {
 
 // ── Sources ──────────────────────────────────────────────────────────────────
 
-function ppt_request(PDO $db, int $requestId): array {
+function ppt_request(PDO $db, int $requestId, ?string $token = null): array {
     $st = $db->prepare('SELECT * FROM requests WHERE id = ?');
     $st->execute([$requestId]);
     $r = $st->fetch(PDO::FETCH_ASSOC);
     if (!$r) throw new InvalidArgumentException('Request not found.');
+    if ($token !== null) {   // folder moved / renamed outside the Hub: re-linked by its Dropbox id
+        require_once __DIR__ . '/../../leads/includes/folder_link_service.php';
+        $r = folder_heal($db, $token, $r);
+    }
     return $r;
 }
 
@@ -219,7 +223,7 @@ function ppt_mime(string $name, string $mime): ?string {
  * (no mail text). Gmail rows are not on the server, so they are left out.
  */
 function ppt_sources(PDO $db, string $token, int $requestId): array {
-    $r = ppt_request($db, $requestId);
+    $r = ppt_request($db, $requestId, $token);
     $out = [];
     try {
         foreach (dropbox_list_files($token, ppt_dir($r) . '/passports') as $n) {
@@ -249,7 +253,7 @@ function ppt_sources(PDO $db, string $token, int $requestId): array {
 
 /** The bytes of a source, checked against the request. → [name, mime, bytes, in_folder]. */
 function ppt_fetch(PDO $db, string $token, int $requestId, array $src): array {
-    $r = ppt_request($db, $requestId);
+    $r = ppt_request($db, $requestId, $token);
     if (($src['t'] ?? '') === 'dbx') {
         $name = (string)($src['name'] ?? '');
         if ($name === '' || preg_match('#[/\\\\]|\.\.#', $name)) throw new InvalidArgumentException('Bad file name.');
@@ -343,7 +347,7 @@ function ppt_merge(array $ai, string $tripStart, string $tripEnd): array {
 
 /** The booking's Calc: its entry, cells, sheet and guest block, the read trip dates. */
 function ppt_calc(PDO $db, string $token, int $requestId): array {
-    $r = ppt_request($db, $requestId);
+    $r = ppt_request($db, $requestId, $token);
     $loc = calc_locate_request($token, $r);
     $path = $loc['dir'] . '/' . $loc['pick']['file'];
     $dl = calc_dbx_download($token, $path);

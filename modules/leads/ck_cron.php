@@ -59,4 +59,15 @@ try {
     $dbxMsg = 'failed: ' . $e->getMessage();
 }
 try { dbxc_meta_set(db(), 'last_cron', date('Y-m-d H:i:s') . ' (ck_cron) ' . mb_substr($dbxMsg, 0, 400)); } catch (Throwable $ignored) {}
+
+// Folder links (includes/folder_link_service.php): once a day after 05:00 EAT — requests whose folder cannot be
+// resolved + folders no request knows → one memo for Roberto (folders-orphans); folders moved outside the Hub are healed.
+try {
+    @set_time_limit(150);   // a fresh budget after the conflicted copies (orphan check ≤ 90 s)
+    require_once __DIR__ . '/includes/booking_service.php';
+    require_once __DIR__ . '/includes/folder_link_service.php';
+    error_log('ck_cron ' . folder_orphans_nightly(db()));
+} catch (Throwable $e) {
+    error_log('ck_cron folders: ' . $e->getMessage());
+}
 ob_end_clean();
