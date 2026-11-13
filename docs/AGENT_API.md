@@ -355,8 +355,8 @@ to that user. Documents already read (same Dropbox `content_hash`) are never sen
   no Calc / several CONF / old quotes → the run ends at once, blocked `calc_not_clean`. Groups → 409.
 - **The gate**: `rename_folder` and `update_folder_status` giving a private folder its first payment tag (`_DEPOSIT` / `_BALANCE` /
   `_BALANCE-CASH` / `_PAID`) — from `_PROGRESS`, and also from `_PROVISIONAL` or no tag, so there is no way round — **or a
-  private folder leaving `_PROVISIONAL` for any other status** (`_PROGRESS`, a payment tag, no tag, `_CK` added — also from the
-  CK tracker) except `_CANCELLED` (Roberto, 13 Nov 2026) → **409 also on the dry run** (`booking_gate` in the body) unless the latest run is `passed` and not
+  private folder leaving `_PROVISIONAL` for any other status** (a payment tag, no tag, `_CK` added — also from the CK tracker)
+  except `_CANCELLED`; **toward `_PROGRESS` is always free, from any status** (Roberto, 13 Nov 2026) → **409 also on the dry run** (`booking_gate` in the body) unless the latest run is `passed` and not
   out of date (Calc or evidence changed since) or `overridden`. Same refusal on every Hub path (BackOffice Rename / Change status,
   invoice "Update Folder", request edit form). The Java BackOffice endpoints (`api_rename_folder.php`, `api_update_status.php`)
   rename on disk first: they cannot refuse — timeline + memo to Roberto + a run started (`booking_gate_warning`).
@@ -1659,8 +1659,8 @@ provisional or a group is not closed**, a warning for other open lines).
   CK tracker "Set CK" button and the request edit form also refuse a document now in `invoices/` (not `old/`) that the last
   supplier scan read as provisional / on request. Other open lines (transfers, tickets, client info…) only warn.
 - **Groups: `_CK` only after "Group closed"** (Roberto, 25 Oct 2026; migration 075): `is_group` = a GRPnnnn folder, Il Diamante /
-  Panorama, a name with `GRUPPO`, a block tagged `_PROVISIONAL`, or a folder Hub requests use as `group_folder`
-  (`ck_is_group_folder()`). Until a person marks it closed (final pax and room list, unsold rooms / seats released) —
+  Panorama, a name with `GRUPPO`, or a folder Hub requests use as `group_folder` (`ck_is_group_folder()`). A `_PROVISIONAL`
+  tag alone is a private safari, not a group (Roberto, 13 Nov 2026). Until a person marks it closed (final pax and room list, unsold rooms / seats released) —
   CK tracker button "👥 Group closed" or `ck_set_group_closed` — `ck_blocked_by[]` includes "Group not closed: mark it closed in
   the CK tracker first". `group_closed_at` / `group_closed_by` = when / who; reopening clears them. Private files are not affected.
 - `ck_ready: true` = a booking check was sent (`ck_findings_upsert`), nothing provisional and no line of the booking open.
@@ -1851,7 +1851,8 @@ logic `modules/operations/includes/followup_service.php`, documents read by `fol
 - `type: ticket` — domestic flights in the next 14 days of bookings with no ticket file (the `flight_tickets` logic):
   `ticket_missing`; a Calc that cannot be read → `unreadable` with the reason.
 - `type: group` — group folders at the top of `/001_Safari` arriving within **60 days**: every `GRPnnnn` folder,
-  Il Diamante set departures (`(Diamante…)` / `Panorama…`) and private agency groups tagged `_PROVISIONAL`.
+  Il Diamante set departures (`(Diamante…)` / `Panorama…`) and private agency groups named `GRUPPO` (since 13 Nov 2026 a
+  `_PROVISIONAL` tag alone is a private safari, not a group).
   `group_to_finalize`: what the check could collect for the booking team, which checks and finalises (release /
   confirm services, room list, arrival / departure flights): client sub-folders (GRP: one per confirmed client), the Excel
   (`*_Calc.xlsx`, else the Panorama workbook: RECAP + client sheets, pax and rooms), supplier blocks ("block 3 double rooms
@@ -1879,7 +1880,7 @@ logic `modules/operations/includes/followup_service.php`, documents read by `fol
   tickets request + flight date + route. GRP: documents in the group folder belong to the group's first request (a
   member's `request_id` filter shows them too).
 - **Folders without a confirmed booking** (sent by `followup_upsert`): group folders in `/001_Safari` (GRP, Diamante /
-  Panorama, `_PROVISIONAL`) and folders outside it (Diamante provisional groups, `/itineraries/SafariClassic/it/Agenzia/Diamante/20xx-Groups`)
+  Panorama, GRUPPO) and folders outside it (Diamante provisional groups, `/itineraries/SafariClassic/it/Agenzia/Diamante/20xx-Groups`)
   get their own lines with `request_id` `null`, `folder` = path under `/001_Safari` or absolute Dropbox path, key
   `S|F:<folder stem>|…`. When the booking is confirmed (folder in `/001_Safari` with the same stem), the next upsert moves
   those lines to it, with owner, notes and history (event `booking`).

@@ -569,11 +569,14 @@ function followup_ticket_candidates(PDO $db, string $today, ?int $requestId = nu
 
 // ── Groups (60 days before arrival) ──────────────────────────────────────────
 
-/** 'grp' (any GRPnnnn folder), 'sic' (Il Diamante / Panorama set departures), 'private' (agency group tagged _PROVISIONAL), or null. */
+/**
+ * 'grp' (any GRPnnnn folder), 'sic' (Il Diamante / Panorama set departures), 'private' (an agency group named "GRUPPO"),
+ * or null. A _PROVISIONAL tag alone is a private safari, not a group (Roberto, 13 Nov 2026; same rule as ck_is_group_folder()).
+ */
 function followup_group_kind(string $name): ?string {
     if (preg_match('/GRP\d{4}/i', $name)) return 'grp';
     if (preg_match('/\(Diamante|Panorama/i', $name)) return 'sic';
-    if (preg_match('/[_-]PROVISIONAL$/i', preg_replace('/(?:[_-]+CK)+$/i', '', trim($name)))) return 'private';
+    if (preg_match('/GRUPPO/i', $name)) return 'private';
     return null;
 }
 
@@ -988,7 +991,7 @@ function followup_service_match(array $a, array $b): bool {
  *   provisional expiry printed on the document (expiry_date; the ticketing limit on a group ZNZ flight line),
  *   supplier payment of a stay: check-in − 30 days (Orangi Collection always; other lodges: the days read in the
  *   document's terms, details.payment_days),
- *   group block release: arrival − 60 days (GRP / Il Diamante / _PROVISIONAL groups),
+ *   group block release: arrival − 60 days (GRP / Il Diamante / GRUPPO groups),
  *   domestic flight: the ticketing time limit on the pro-forma (details.ticket_limit), else the flight − 7 days,
  *   and, when none of these applies, the service (or arrival) − 14 days. Manual lines: the date staff set.
  * → ['due_date' => Y-m-d|null, 'due_reason' => text|null]

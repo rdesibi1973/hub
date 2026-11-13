@@ -472,14 +472,13 @@ function ck_check_points(PDO $db, array $checkIds): array {
 const CK_GROUP_OPEN_MSG = 'Group not closed: mark it closed in the CK tracker first';
 
 /**
- * Is a top-level folder a group: GRPnnnn (GRP + DDMM), Il Diamante / Panorama set departures, "GRUPPO", a block tagged
- * _PROVISIONAL (same detection as the follow-up group scan, followup_group_kind()), or a folder Hub requests use as
- * their group_folder ($hasGroupRequests, rename_folder is_group).
+ * Is a top-level folder a group: GRPnnnn (GRP + DDMM), Il Diamante / Panorama set departures, "GRUPPO", or a folder Hub
+ * requests use as their group_folder ($hasGroupRequests, rename_folder is_group). A _PROVISIONAL tag alone is a private
+ * safari, not a group (Roberto, 13 Nov 2026 — Rivolta was asked to "close the group"); same rule as followup_group_kind().
  */
 function ck_is_group_folder(string $name, bool $hasGroupRequests = false): bool {
     if ($hasGroupRequests) return true;
-    if (preg_match('/GRP\d{4}|\(Diamante|Panorama|GRUPPO/i', $name)) return true;
-    return (bool)preg_match('/[_-]PROVISIONAL$/i', preg_replace('/(?:[_-]+CK)+$/i', '', trim($name)));
+    return (bool)preg_match('/GRP\d{4}|\(Diamante|Panorama|GRUPPO/i', $name);
 }
 
 /**

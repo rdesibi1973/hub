@@ -19,7 +19,7 @@ Hub access and fixed rules: as in the project instructions (dry run first, `"con
 | supplier | `orangi_rooms_provisional` | Orangi voucher Confirmed but its notes say "x rooms still provisional" |
 | supplier / ticket | `unreadable` | scanned PDF without text, or a Calc that cannot be read: a human looks at it |
 | ticket | `ticket_missing` | domestic flight in the next 14 days, no ticket file in the booking folder |
-| group | `group_to_finalize` | GRP / Il Diamante SIC / private `_PROVISIONAL` group arriving within 60 days: client folders, Excel pax & rooms, supplier blocks, names TBA — release unsold rooms, confirm, room list, flights |
+| group | `group_to_finalize` | GRP / Il Diamante SIC / agency group named GRUPPO (a `_PROVISIONAL` tag alone is a private safari, 13 Nov 2026) arriving within 60 days: client folders, Excel pax & rooms, supplier blocks, names TBA — release unsold rooms, confirm, room list, flights |
 | group | `group_znz_flight` | seats on the Zanzibar flight vs pax with ARK-ZNZ in the Calc ("N seat(s) to release" / "N pax without a seat"), expiry = ticketing time limit |
 
 Priority (computed): `1-URGENT` service ≤ 30 days, or expiry ≤ 7 days, or expired with service ≤ 90 days (tickets: ≤ 7 days); `2-HIGH` ≤ 90 days; `3-NORMAL` later.

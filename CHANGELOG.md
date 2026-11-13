@@ -20,6 +20,15 @@ Running log of notable changes and current build state. Module-level "active / p
 
 ---
 
+## 2026-11-13 — Groups only when named; booking gate: toward PROGRESS always free
+
+- `ck_is_group_folder()` / `followup_group_kind()`: a group is a GRPnnnn / Il Diamante / Panorama / GRUPPO folder or one Hub
+  group requests use; a `_PROVISIONAL` tag alone is a private safari (Roberto, 13 Nov 2026 — Rivolta, request 3091, was asked
+  to "close the group" before `_CK`). Open group lines of such folders close at the next group scan.
+
+- `bg_transition_gated()`: a move to `_PROGRESS` is never gated, from any status (PROVISIONAL / CANCELLED / a payment tag):
+  the bookings are still being made. PROVISIONAL → payment tag / no tag / `_CK` stays gated.
+
 ## 2026-11-13 — Booking gate: also when a folder leaves PROVISIONAL
 
 - `bg_transition_gated()`: a private folder leaving `_PROVISIONAL` for any status but `_CANCELLED` (PROGRESS, payment tag, no

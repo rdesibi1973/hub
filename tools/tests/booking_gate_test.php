@@ -29,7 +29,9 @@ $t('enforced by default (no constant)', bg_enforce());
 // Leaving PROVISIONAL (Roberto, 13 Nov 2026; Rivolta, request 3091)
 $rv = '08_18AUG_AlessandroRivolta(Nuru-Drct)_START18AUG_END29AUG2027_';
 $t('PROVISIONAL / CANCELLED are tags', bg_tag($rv . 'PROVISIONAL') === 'PROVISIONAL' && bg_tag($rv . 'CANCELLED') === 'CANCELLED' && bg_tag($rv . 'DEPOSIT_CANCELLED') === 'CANCELLED');
-$t('PROVISIONAL → PROGRESS gated', bg_transition_gated($rv . 'PROVISIONAL', $rv . 'PROGRESS'));
+$t('toward PROGRESS always free (from PROVISIONAL, CANCELLED, DEPOSIT)', !bg_transition_gated($rv . 'PROVISIONAL', $rv . 'PROGRESS')
+   && !bg_transition_gated($rv . 'CANCELLED', $rv . 'PROGRESS') && !bg_transition_gated($rv . 'DEPOSIT', $rv . 'PROGRESS'));
+$t('CANCELLED → DEPOSIT gated, CANCELLED → PROVISIONAL free', bg_transition_gated($rv . 'CANCELLED', $rv . 'DEPOSIT') && !bg_transition_gated($rv . 'CANCELLED', $rv . 'PROVISIONAL'));
 $t('PROVISIONAL → DEPOSIT gated', bg_transition_gated($rv . 'PROVISIONAL', $rv . 'DEPOSIT'));
 $t('PROVISIONAL → _CK added gated', bg_transition_gated($rv . 'PROVISIONAL', $rv . 'PROVISIONAL_CK'));
 $t('PROVISIONAL → tag removed gated', bg_transition_gated($rv . 'PROVISIONAL', rtrim($rv, '_')));
@@ -37,6 +39,12 @@ $t('PROVISIONAL → CANCELLED free', !bg_transition_gated($rv . 'PROVISIONAL', $
 $t('PROVISIONAL rename keeping the tag free', !bg_transition_gated($rv . 'PROVISIONAL', str_replace('29AUG', '30AUG', $rv) . 'PROVISIONAL'));
 $t('PROGRESS → CANCELLED free, PROGRESS → DEPOSIT still gated', !bg_transition_gated($p . 'PROGRESS', $p . 'CANCELLED') && bg_transition_gated($p . 'PROGRESS', $p . 'DEPOSIT'));
 $t('Rivolta is a private folder (in scope)', !bg_is_group(['practice_code' => $rv . 'PROVISIONAL', 'group_folder' => '']));
+// Groups only when named (Roberto, 13 Nov 2026): _PROVISIONAL alone is a private safari for the CK tracker and the group scan too.
+$t('CK tracker: Rivolta _PROVISIONAL not a group', !ck_is_group_folder($rv . 'PROVISIONAL') && !ck_is_group_folder($rv . 'PROVISIONAL_CK'));
+$t('CK tracker: GRP / Diamante / GRUPPO / group requests are groups', ck_is_group_folder('05_10MAY_GRP1005_PROVISIONAL') && ck_is_group_folder('x(Diamante-Roberto)')
+   && ck_is_group_folder('05_GRUPPO Rossi_PROVISIONAL') && ck_is_group_folder('anything', true));
+$t('follow-up group kind: _PROVISIONAL alone null, GRUPPO private', followup_group_kind($rv . 'PROVISIONAL') === null
+   && followup_group_kind('05_GRUPPO Rossi_PROVISIONAL') === 'private' && followup_group_kind('GRP1005') === 'grp');
 $t('group member not gated', bg_is_group(['group_folder' => 'GRP0101_x', 'practice_code' => 'a']) && bg_is_group(['practice_code' => '05_GRUPPO Diamante_PROGRESS'])
                              && !bg_is_group(['practice_code' => $p . 'PROGRESS']));
 
