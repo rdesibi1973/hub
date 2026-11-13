@@ -414,9 +414,12 @@ function folder_orphans_run(PDO $db, string $token, array $opt = []): array {
     $maxChecks = max(0, (int)($opt['max_checks'] ?? 150));
     $out = ['roots' => fl_roots(), 'unresolved' => [], 'healed' => [], 'orphans' => [], 'unchecked' => 0, 'errors' => [], 'memo' => null];
 
-    // Direct children of the roots: id → path.
+    // Direct children of every booking root (/2026, /2027, /001_Safari): the requests found there need no Dropbox call.
+    // Only the orphan roots ($out['roots']) are reported for unknown folders.
+    require_once __DIR__ . '/folder_service.php';
+    $listRoots = array_values(array_unique(array_merge(fs_allowed_roots(), $out['roots'])));
     $listed = []; $listedPath = [];
-    foreach ($out['roots'] as $root) {
+    foreach ($listRoots as $root) {
         try {
             foreach (dropbox_list_folder_entries($token, $root) as $e) {
                 $p = $root . '/' . $e['name'];
@@ -476,7 +479,9 @@ function folder_orphans_run(PDO $db, string $token, array $opt = []): array {
     // Folders no request knows.
     foreach ($listed as $id => $p) {
         $name = basename($p);
-        if (!fl_orphan_candidate($name)) continue;
+        $inRoot = false;
+        foreach ($out['roots'] as $root) { if (strcasecmp(dirname($p), $root) === 0) { $inRoot = true; break; } }
+        if (!$inRoot || !fl_orphan_candidate($name)) continue;
         if (isset($knownId[$id]) || isset($knownPath[fl_lc($p)]) || isset($knownName[fl_lc($name)])) continue;
         $out['orphans'][] = ['path' => $p, 'id' => $id];
     }
