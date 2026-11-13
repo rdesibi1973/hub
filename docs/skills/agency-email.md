@@ -35,6 +35,7 @@ Content rules for agencies and clients (prices shown, programme link, names neve
 - Write the file to his PC (device shell or `device_commit_files`); if the PC is not reachable, stop and tell him.
 - After writing, list `Exchange/Draft-mail` again and check the file is there before telling Roberto it is saved (drafts there have disappeared within a minute; 17 Oct 2026). If it is gone, say so and copy it back from the booking folder's `old/`.
 - After sending: when Roberto okays sending ("ok, manda"), Claude sends the mail itself (Hub `mail_send`, or the Gmail connector for staff mails), checks it is in Sent, then deletes the draft from `Exchange/Draft-mail` straight away; the copy in the booking folder's `old/` stays. This way nobody sends it again from Thunderbird (3 Nov 2026: the booking and Iddi mails went out twice, once from the Hub and once from Thunderbird). When Roberto sends the draft from Thunderbird himself, Claude doesn't send it: it only checks Sent and deletes the draft.
+- Hub `mail_send` (and `mail_draft`) with `body_html`: always POST the JSON with `-H "Content-Type: application/json"` (`--data-binary @file`). Without it the server answers an HTML 400 "Bad Request" and nothing is sent. After any non-JSON answer, check Sent and the original's `answered` flag before retrying, so the mail doesn't go out twice (13 Nov 2026, LauraBonfante).
 - Booking confirmations to agencies: content and attachments as in `booking-confirmation` §7.
 
 ## 2b. Replies from the booking mailboxes (glady@, operations@)
