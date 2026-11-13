@@ -197,7 +197,7 @@ function iti_pb_day_insert(PDO $db, int $pid, int $after, array $item): int {
 
 /** Replace all the days of a personal programme with $days (ordered list of day items). */
 function iti_pb_set_days(PDO $db, int $pid, array $days, bool $go): array {
-    iti_ps_personal($pid);
+    iti_ps_editable($pid);   // personal or sample
     if (!$days) throw new InvalidArgumentException('days[] is empty');
     $items = [];
     foreach (array_values($days) as $i => $d) {
@@ -223,7 +223,7 @@ function iti_pb_set_days(PDO $db, int $pid, array $days, bool $go): array {
 
 /** Add one day after day $after (0 = at the start). */
 function iti_pb_add_day(PDO $db, int $pid, int $after, array $fields, bool $go): array {
-    iti_ps_personal($pid);
+    iti_ps_editable($pid);
     $st = $db->prepare('SELECT COUNT(*) FROM iti_program_days WHERE program_id = ?'); $st->execute([$pid]);
     $n = (int)$st->fetchColumn();
     if ($after < 0 || $after > $n) throw new InvalidArgumentException('after_day must be 0..' . $n);
@@ -238,7 +238,7 @@ function iti_pb_add_day(PDO $db, int $pid, int $after, array $fields, bool $go):
 
 /** Delete day $day (and its transfers / activities / flights); the next days move up. */
 function iti_pb_delete_day(PDO $db, int $pid, int $day, bool $go): array {
-    iti_ps_personal($pid);
+    iti_ps_editable($pid);
     $st = $db->prepare('SELECT id, day_title_it, day_title_en FROM iti_program_days WHERE program_id = ? AND day_number = ?');
     $st->execute([$pid, $day]);
     $row = $st->fetch(PDO::FETCH_ASSOC);
@@ -362,7 +362,7 @@ function iti_pb_update_standard_inclusion(PDO $db, int $stdId, array $in, bool $
 
 /** Replace the included and / or excluded list (only the keys given). Items: {std_id} | {text_<lang>…} | "text". */
 function iti_pb_update_inclusions(PDO $db, int $pid, array $in, bool $go): array {
-    $p = iti_ps_personal($pid);
+    $p = iti_ps_editable($pid);
     $lang = $p['display_language'] ?: 'it';
     $lists = iti_pb_inclusion_rows($db, $in, $lang);
     $plan = ['program_id' => $pid];

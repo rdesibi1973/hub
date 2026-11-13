@@ -349,6 +349,26 @@ function iti_ps_personal(int $id): array {
 }
 
 /**
+ * A programme whose content the API may edit: personal, or a sample (templates for new
+ * programmes: texts, days, inclusions — no client data, see iti_ps_sample_client_fields()).
+ */
+function iti_ps_editable(int $id): array {
+    $p = iti_get_program($id);
+    if (!$p) throw new InvalidArgumentException('Program ' . $id . ' not found');
+    if (!in_array($p['program_type'], ['personal', 'sample'], true)) throw new InvalidArgumentException('Program ' . $id . ' is not a personal programme or a sample');
+    return $p;
+}
+
+/** Header fields that belong to a client trip: not set on a sample. */
+function iti_ps_sample_client_fields(array $keys): array {
+    return array_values(array_filter($keys, function ($k) {
+        return in_array($k, ['ref_number', 'start_date', 'dates_indicative', 'pax_open', 'pax_adults', 'pax_teens', 'pax_children',
+                             'price_table_json', 'price_notes', 'lead_request_id', 'terms_variant'], true)
+            || strpos($k, 'price_notes_') === 0 || strpos($k, 'pax_label_') === 0;
+    }));
+}
+
+/**
  * Proposal for a client: a copy of a sample, or a blank programme (no sample_id) for trips with
  * no matching sample. $in: sample_id?, lead_request_id?, calc_file?, fields? {ref_number, title_<lang>, subtitle_<lang>,
  * intro_<lang>, safari_type (private | group | beach; default from the sample / GRP tags), show_tip_note (0 | 1; default from the sample, else 1), start_date, pax_adults, pax_teens (under 16), pax_children (under 12), pax_open (0 | 1), pax_label_<lang>, display_language, display_currency,
@@ -469,7 +489,10 @@ function iti_ps_insert_blank(PDO $db, array $set, array $items, string $who): in
  * standard T&C version (not with a dedicated T&C override).
  */
 function iti_ps_update_program(PDO $db, int $id, array $fields, bool $go): array {
-    $p = iti_ps_personal($id);
+    $p = iti_ps_editable($id);
+    if ($p['program_type'] === 'sample' && ($bad = iti_ps_sample_client_fields(array_keys($fields)))) {
+        throw new InvalidArgumentException('Program ' . $id . ' is a sample — client fields not set on a sample: ' . implode(', ', $bad));
+    }
     $variant = null;
     if (array_key_exists('terms_variant', $fields)) {
         $variant = strtolower(trim((string)$fields['terms_variant']));
@@ -538,7 +561,7 @@ function iti_ps_terms_out(PDO $db, array $p): array {
  * lists (each one given replaces the day's list). Returns the column diff and the lists replaced.
  */
 function iti_ps_update_day(PDO $db, int $pid, int $dayNo, array $fields, bool $go): array {
-    iti_ps_personal($pid);
+    iti_ps_editable($pid);
     $st = $db->prepare('SELECT * FROM iti_program_days WHERE program_id = ? AND day_number = ?');
     $st->execute([$pid, $dayNo]);
     $day = $st->fetch(PDO::FETCH_ASSOC);

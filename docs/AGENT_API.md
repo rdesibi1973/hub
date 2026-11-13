@@ -527,8 +527,12 @@ so edited translations are kept). Dry-run unless `"confirm": true`. Lets Claude 
 (no Anthropic API billing). The Hub "Translate" button was removed from the program preview on 8 Nov 2026 (`iti_translate.php` is kept, unused).
 
 ### ITI personal programs (Cowork)
-Code: `modules/iti/includes/iti_program_service.php` (+ `iti_final.php` for the Calc). Only **personal**
-programs are changed; samples stay on the Hub pages. Every response with a program carries `links`:
+Code: `modules/iti/includes/iti_program_service.php` (+ `iti_final.php` for the Calc). **Personal** programs
+are changed; **samples** too (13 Nov 2026) for their content only — `iti_update_program` (texts, `safari_type`, `show_tip_note`,
+`country`, `display_language`, `display_currency`; client fields → 400: `ref_number`, dates, pax, `pax_label_<lang>`, prices,
+`price_notes*`, `lead_request_id`, `terms_variant`), `iti_update_day`, `iti_set_days`, `iti_add_day`, `iti_delete_day`,
+`iti_update_inclusions`. A sample edit changes the template of future programs, not the programs already made from it.
+`iti_publish`, `iti_document`'s guide and `iti_save_as_sample` stay personal-only. Every response with a program carries `links`:
 `preview` (internal, magazine), `edit`, `word` (editable .docx for agencies, Hub login), `public` (client link,
 magazine layout). A personal program's public link is always on — no publishing step; the token is made the
 first time it is needed — until the program is cancelled. The PDF and the Word carry it too.
