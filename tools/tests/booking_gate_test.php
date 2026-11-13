@@ -163,5 +163,23 @@ $t('own JRO transfer → IN-HOUSE, nothing reported', $res['passed'] && !$res['f
 $html = bg_report_html(['customer_name' => 'Cavalli'], $snap($cavServices), bg_evaluate($snap($cavServices), [$sv]), ['finished_at' => '2026-11-13 10:00:00']);
 $t('report renders', strpos($html, '<title>Booking check') !== false && strpos($html, 'MISSING') !== false);
 
+// ── Extraction schema: the API accepts at most 16 union-typed (nullable) parameters ──
+$unions = 0;
+$walk = function ($n) use (&$walk, &$unions) {
+    if (!is_array($n)) return;
+    if (isset($n['type']) && is_array($n['type'])) $unions++;
+    if (isset($n['anyOf'])) $unions++;
+    foreach ($n as $x) if (is_array($x)) $walk($x);
+};
+$walk(bg_extract_schema());
+$t('schema: ≤ 16 union-typed parameters', $unions <= 16, $unions);
+$b = bg_blank_to_null(['services' => [['supplier' => '', 'legs' => [['from_airport' => 'ARK', 'flight_no' => '']], 'adults' => 2]], 'client_names' => ['', 'Cavalli']]);
+$t('"" → null, empty list items dropped', $b['services'][0]['supplier'] === null && $b['services'][0]['legs'][0]['flight_no'] === null
+                                         && $b['services'][0]['adults'] === 2 && $b['client_names'] === ['Cavalli'], $b);
+$res = bg_evaluate($snap($base), [['rel_path' => 'invoices/Treetops.pdf', 'status' => 'error', 'error' => 'AI API error (HTTP 400): x', 'data' => []], $okFlight]);
+$miss = array_values(array_filter($res['findings'], fn($f) => $f['issue'] === 'stay_missing'))[0]['text'] ?? '';
+$unr = array_values(array_filter($res['findings'], fn($f) => $f['issue'] === 'doc_unreadable'))[0]['text'] ?? '';
+$t('missing says a document could not be read; Hub error says re-run', strpos($miss, 'could not be read') !== false && strpos($unr, 're-run the check') !== false, [$miss, $unr]);
+
 echo $fail ? "\n$fail FAILED\n" : "\nALL PASS\n";
 exit($fail ? 1 : 0);

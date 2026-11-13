@@ -561,7 +561,9 @@ function bg_eml_content(string $raw): array {
 
 /** JSON schema of one extraction: one object per service found in the document. Extraction only, no judgement. */
 function bg_extract_schema(): array {
-    $s = ['type' => ['string', 'null']]; $i = ['type' => ['integer', 'null']]; $n = ['type' => ['number', 'null']];
+    // Structured outputs accept at most 16 nullable (union-typed) parameters: texts are plain strings, "" = not printed
+    // (bg_blank_to_null() turns "" back into null); only numbers / the boolean stay nullable (8 unions).
+    $s = ['type' => 'string']; $i = ['type' => ['integer', 'null']]; $n = ['type' => ['number', 'null']];
     $leg = ['type' => 'object', 'additionalProperties' => false,
             'properties' => ['flight_no' => $s, 'date' => $s, 'from_airport' => $s, 'to_airport' => $s, 'std' => $s, 'sta' => $s],
             'required' => ['flight_no', 'date', 'from_airport', 'to_airport', 'std', 'sta']];
@@ -592,8 +594,8 @@ function bg_extract_system(): string {
     return 'You read supplier documents of a Tanzanian safari operator (Savannah Explorers): lodge and hotel invoices, pro-formas, '
          . 'service vouchers, reservation summaries, airline pro-formas and tickets, transfer and activity confirmations (also as e-mails). '
          . 'Your job is extraction only: copy what the document says into the schema, one object per service (one per stay / night block, '
-         . 'per flight booking, per transfer, per activity). Do not judge, compare or correct anything. Unknown or not printed → null '
-         . '(empty array for lists). Dates as YYYY-MM-DD (the trip year is near the document date). nights_header = nights stated in the '
+         . 'per flight booking, per transfer, per activity). Do not judge, compare or correct anything. Unknown or not printed → empty '
+         . 'string for texts, null for numbers, empty array for lists. Dates as YYYY-MM-DD (the trip year is near the document date). nights_header = nights stated in the '
          . 'header / summary; nights_billed = quantity of nights on the price lines. rooms: type as printed (e.g. "Double", "Twin", "Single", '
          . '"Family") with the number of rooms. adults / children = guests the document counts (children = anyone billed or listed as a child). '
          . 'Flights: every leg with origin and destination airport as printed and STD / STA times. amount_total = total of that service as '
@@ -623,12 +625,25 @@ function bg_ai_extract(array $content, string $fileName, int $requestId): array 
     foreach ($resp['content'] ?? [] as $b) if (($b['type'] ?? '') === 'text') { $json = $b['text']; break; }
     $data = json_decode($json, true);
     if (!is_array($data) || !is_array($data['services'] ?? null)) throw new RuntimeException('Unexpected AI response.');
-    $data = bg_scrub($data);
+    $data = bg_scrub(bg_blank_to_null($data));
     $u = $resp['usage'] ?? [];
     $served = (string)($resp['model'] ?? $model);
     $data['_usage'] = ['in' => (int)($u['input_tokens'] ?? 0) + (int)($u['cache_read_input_tokens'] ?? 0) + (int)($u['cache_creation_input_tokens'] ?? 0),
                        'out' => (int)($u['output_tokens'] ?? 0), 'cost' => iti_ai_usd($served, $u), 'model' => $served];
     return $data;
+}
+
+/** "" (the schema's "not printed" for texts) → null, in every nested object; list items "" dropped. */
+function bg_blank_to_null($v) {
+    if (!is_array($v)) return (is_string($v) && trim($v) === '') ? null : $v;
+    $list = array_keys($v) === range(0, count($v) - 1);
+    $out = [];
+    foreach ($v as $k => $x) {
+        $x = bg_blank_to_null($x);
+        if ($list && $x === null) continue;
+        $out[$k] = $x;
+    }
+    return $list ? array_values($out) : $out;
 }
 
 /**
@@ -854,8 +869,12 @@ function bg_money(?float $n): string { return $n === null ? '?' : number_format(
  */
 function bg_evaluate(array $snap, array $docs, ?callable $alias = null): array {
     $res = ['services' => [], 'findings' => [], 'notes' => [], 'unmatched' => [], 'ignored' => [], 'blocking' => 0, 'warnings' => 0, 'passed' => false];
-    $add = function (string $issue, string $text, array $svc = [], array $extra = []) use (&$res) {
+    $unreadable = 0;
+    $add = function (string $issue, string $text, array $svc = [], array $extra = []) use (&$res, &$unreadable) {
         $def = BG_ISSUES[$issue];
+        if ($unreadable && in_array($issue, ['stay_missing', 'flight_missing', 'activity_missing', 'transfer_missing'], true)) {
+            $text .= ' (' . $unreadable . ' document(s) could not be read — see the warnings: it may be one of them.)';
+        }
         $res['findings'][] = ['issue' => $issue, 'blocking' => $def[0], 'audience' => $def[1], 'label' => $def[2], 'text' => $text,
                               'service_date' => $svc['check_in'] ?? $svc['date'] ?? null,
                               'service' => $svc ? ($svc['name'] ?? $svc['text'] ?? $svc['route'] ?? '') : '',
@@ -880,8 +899,11 @@ function bg_evaluate(array $snap, array $docs, ?callable $alias = null): array {
     $items = [];
     foreach ($docs as $di => $d) {
         if (($d['status'] ?? '') === 'error') {
+            $unreadable++;
+            $hub = (bool)preg_match('/AI API error|AI request failed|Unexpected AI response|declined/i', (string)($d['error'] ?? ''));
             $res['findings'][] = ['issue' => 'doc_unreadable', 'blocking' => false, 'audience' => 'booking', 'label' => BG_ISSUES['doc_unreadable'][2],
-                                  'text' => $d['rel_path'] . ' could not be read (' . ($d['error'] ?? 'error') . '). Open it and save it as PDF in invoices/.',
+                                  'text' => $d['rel_path'] . ' could not be read (' . ($d['error'] ?? 'error') . ').'
+                                          . ($hub ? ' Hub-side reading error: re-run the check; if it fails again tell Roberto.' : ' Open it and save it as PDF in invoices/.'),
                                   'service_date' => null, 'service' => basename($d['rel_path']), 'service_type' => null, 'source_file' => $d['rel_path'], 'svc_idx' => null];
             continue;
         }
