@@ -378,10 +378,13 @@ function folder_ids_backfill(PDO $db, string $token, array $opt = []): array {
 
 // ── Orphan check ─────────────────────────────────────────────────────────────
 
-/** Roots checked for orphans: the booking roots of folder_rename (/2026, /2027, /001_Safari — one list). */
+/**
+ * Roots checked for orphans: /001_Safari only (config FOLDER_ORPHAN_ROOTS replaces it). The inquiry years (/2026 …) hold
+ * many folders made outside the Hub (Java GUI, old leads, group lists): listing them was noise (Roberto, 13 Nov 2026).
+ */
 function fl_roots(): array {
-    require_once __DIR__ . '/folder_service.php';
-    return fs_allowed_roots();
+    if (defined('FOLDER_ORPHAN_ROOTS') && is_array(FOLDER_ORPHAN_ROOTS) && FOLDER_ORPHAN_ROOTS) return array_values(FOLDER_ORPHAN_ROOTS);
+    return ['/001_Safari'];
 }
 
 /** Names never reported as orphans (config FOLDER_ORPHAN_SKIP, else FL_ORPHAN_SKIP_DEFAULT). */
@@ -421,7 +424,8 @@ function folder_orphans_run(PDO $db, string $token, array $opt = []): array {
                 $listedPath[fl_lc($p)] = $e['id'];
             }
         } catch (Throwable $e) {
-            $out['errors'][] = $root . ': ' . $e->getMessage();
+            // A root that does not exist yet (e.g. /2027 before its first inquiry) is skipped in silence.
+            if (stripos($e->getMessage(), 'not_found') === false) $out['errors'][] = $root . ': ' . $e->getMessage();
         }
     }
 

@@ -34,6 +34,7 @@ function dropbox_find_folder(string $token, string $name): ?string { return null
 function dropbox_get_access_token(): string { return 'tok'; }
 function dropbox_list_folder_entries(string $token, string $path): array {
     global $DBX; $out = []; $p = strtolower(rtrim($path, '/')) . '/';
+    if (!isset($DBX[rtrim($p, '/')])) throw new RuntimeException('Dropbox list_folder failed (HTTP 409): path/not_found/');
     foreach ($DBX as $k => $v) if (strpos($k, $p) === 0 && strpos(substr($k, strlen($p)), '/') === false) $out[] = ['id' => $v['id'], 'name' => basename($v['path'])];
     return $out;
 }
@@ -61,6 +62,7 @@ $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 function db() { global $db; return $db; }
 define('DROPBOX_BASE_PATH', '/2026');
 define('AGENT_MEMO_USER', 'roberto');
+define('FOLDER_ORPHAN_ROOTS', ['/001_Safari', '/2099']);   // /2099 does not exist: skipped in silence; /2026 not checked
 
 $db->exec("CREATE TABLE requests (id INTEGER PRIMARY KEY, customer_name TEXT, practice_code TEXT, group_folder TEXT, dropbox_url TEXT,
            dropbox_id TEXT, status TEXT, payment_status TEXT, start_date TEXT, date_received TEXT, agent_id INT)");
@@ -171,12 +173,13 @@ dbx_add('/2026/Stray(ABC-Lydia)', 'id:stray');
 $o = folder_orphans_run($db, 'tok', ['memo' => true]);
 $orph = array_column($o['orphans'], 'path');
 sort($orph);
-$t('orphans: unknown booking folders listed, 99_office / 00_* / groups / known skipped',
-   $orph === ['/001_Safari/07_15JUL_Unknown(ABC-Lydia)_START15JUL_END25JUL2027_PROGRESS', '/2026/Stray(ABC-Lydia)'], $orph);
+$t('orphans: unknown booking folders of the roots listed, 99_office / 00_* / groups / known / /2026 skipped',
+   $orph === ['/001_Safari/07_15JUL_Unknown(ABC-Lydia)_START15JUL_END25JUL2027_PROGRESS'], $orph);
+$t('orphans: a missing root is no error', $o['errors'] === [], $o['errors']);
 $un = array_column($o['unresolved'], 'id'); sort($un);
 $t('orphans: unresolved live requests (deleted + missing)', $un === [301, 302], $o['unresolved']);
 $mm = $db->query("SELECT id, title FROM memos WHERE ext_key = 'folders-orphans' AND status = 'open'")->fetchAll(PDO::FETCH_ASSOC);
-$t('orphans: one memo folders-orphans', count($mm) === 1 && strpos($mm[0]['title'], '4') !== false, $mm);
+$t('orphans: one memo folders-orphans', count($mm) === 1 && strpos($mm[0]['title'], ': 3') !== false, $mm);
 folder_orphans_run($db, 'tok', ['memo' => true]);
 $t('orphans: memo rewritten, not duplicated', (int)$db->query("SELECT COUNT(*) FROM memos WHERE ext_key = 'folders-orphans'")->fetchColumn() === 1);
 $db->exec("UPDATE requests SET status = 'Lost' WHERE id IN (301, 302)");

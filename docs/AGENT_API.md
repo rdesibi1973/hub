@@ -547,8 +547,9 @@ path, status}` (= the links already broken: re-link them), `next_after_id`, `rem
 #### `folders_orphans` (GET report / POST confirm)
 The nightly check, now: (1) live requests (not Lost / Cancelled; trip not ended > 30 days, or an inquiry received
 < 400 days ago) whose folder cannot be resolved; folders found by id are healed on the way (`healed[]`);
-(2) folders **directly** under `/2026`, `/2027`, `/001_Safari` (the `rename_folder` roots) that no request knows (by id,
-path, folder or group name) — `00_*`, year folders, non-booking names and the skip list (config `FOLDER_ORPHAN_SKIP`,
+(2) folders **directly** under `/001_Safari` (config `FOLDER_ORPHAN_ROOTS` to change it; the inquiry years are left out:
+many folders there were made outside the Hub) that no request knows (by id, path, folder or group name); a root that
+does not exist is skipped in silence — `00_*`, year folders, non-booking names and the skip list (config `FOLDER_ORPHAN_SKIP`,
 default `99_office`, `MEDIVAC_COVERAGE`, `WMA`, `Claude outputs`) are left out. `budget` (s, ≤ 150), `max_checks`
 (Dropbox lookups, ≤ 400). → `unresolved[]`, `orphans[] {path, id}`, `healed[]`, `unchecked`, `errors[]`.
 `"confirm": true` also writes the memo `folders-orphans` on Roberto's board (rewritten, never duplicated; closed when
