@@ -17,6 +17,8 @@ Memo: at the start create one `doing` memo (clear title, linked request, stable 
 ## 1. Identify the booking
 
 `find_requests` → `request_id`, folder in `/2026/`, agency, agent. If there are several Calcs (`01_`, `02_`…), ask which one is confirmed.
+- **Client name in the folder:** if the request still has a placeholder name (e.g. `SposiJun27`, "Famiglia…", a code), before `confirm_preview` rename it to the lead passenger's FirstLast (e.g. `SimonePalese`): `update_request` (`customer_name`, and `start_date` if empty) and `rename_folder` with `rename_files: true` — dry run, then confirm (13 Nov 2026).
+- **Only the confirmed Calc at the top before the preview:** `confirm_preview` / `confirm_booking` have no file parameter and read the highest-numbered Calc. Move the non-confirmed Calcs (and their Words) into `old/` BEFORE `confirm_preview`, otherwise the checks come from the wrong Calc (13 Nov 2026, SimonePalese read 02 Simba instead of 01 Pumba).
 
 ## 2. Check the Calc before confirming (`read_calc`)
 
@@ -36,13 +38,14 @@ Anything missing: list it and ask, don't fix silently. Calc not open in Excel on
 
 ## 3. Confirm
 
-1. `confirm_preview` with start, mid / mid2 (or NA), end, destination, grp (NONE unless a real gruppo a raccolta). Show the new folder name, every check/warning AND the booking email it returns (`email`: To / Cc / subject / body; template To: accountant@, glady@, operations@, nuru@; Cc configurable — ask whether to keep info@). Kenya in the folder name if the trip includes Kenya; fam trips = agency + "FamTrip". Destination: leave it empty (Tanzania) for a safari, also with a Zanzibar/beach extension; `ZNZ` (or another suffix) only when the whole trip is in that destination, because it ends up in the folder name (13 Oct 2026).
+1. `confirm_preview` with start, mid / mid2 (or NA), end, destination, grp (NONE unless a real gruppo a raccolta). Show the new folder name, every check/warning AND the booking email it returns (`email`: To / Cc / subject / body).
+   Kenya in the folder name if the trip includes Kenya; fam trips = agency + "FamTrip". Destination: leave it empty (Tanzania) for a safari, also with a Zanzibar/beach extension; `ZNZ` (or another suffix) only when the whole trip is in that destination, because it ends up in the folder name (13 Oct 2026).
 2. Changes to the email go in an `email` object (`to_add`/`to_remove`/`cc_add`/`cc_remove`, `to`/`cc` to replace, `subject`, `body` for a full rewrite, `body_extra`, `no_invoice`): rerun the preview with it and show the result until Roberto is happy.
    - `body` replaces the template text; the closing ("Thanks / Best Regards, <name>") is added automatically, unless the text already contains "regards" or `keep_closing: false`. To add only a few lines, prefer `body_extra`, which keeps the template.
-   - **Roberto's own bookings (agent "Roberto" / folders `-Roberto`):** remove accountant@ (Esther) and nuru@ from the booking email (`to_remove`) and add `no_invoice: true`. Roberto does the invoice and the final programme himself, so the email doesn't ask Esther or Nuru for them (13 Nov 2026, BandiniQuercioli).
+   - **Roberto's own bookings (agent "Roberto" / folders `-Roberto`):** remove accountant@ (Esther) and nuru@ from the booking email (`to_remove`) and add `no_invoice: true`. Roberto does the invoice and the final programme himself, so the email doesn't ask Esther or Nuru for them (13 Nov 2026, BandiniQuercioli). Also drop the "Nuru - prepare the final program" line (`body` = template text without it, booking notes at the end). Cc as the template (savannah.explorers@gmail.com, saruni@): don't add info@, don't remove saruni@ (13 Nov 2026, SimonePalese).
    - Signed by the request agent by default. When Roberto handles the file, use `sign_as: "rdesibi"` (Roberto De Sibi: name, HTML signature, Reply-To info@; agent "Roberto" / folders `-Roberto` already sign as rdesibi without `sign_as`; never `sign_as: "roberto"` — Roberto Capri left, his user is inactive and the call returns 404, 6 Nov 2026; `sender_name` changes only the name in the closing). Recipients stay the agent's: remove the seller with `cc_remove` if needed (2 Nov 2026, Chinnapong).
 3. After his ok on folder AND email → `confirm_booking` with `confirm: true` and the same `email` + `"send": true`: folder to `/001_Safari/`, status Booked, email sent in one call. Check `email_sent`; if false, say so and retry with `send_booking_email` (same edits). If he wants to confirm now and mail later, omit `send` and use `send_booking_email` afterwards.
-4. After the confirm, move the Calcs that were not confirmed (the other `NN_…_Calc.xlsx` versions) into the booking folder's `old/` subfolder: only the confirmed Calc stays at the top (13 Oct 2026).
+4. Check that only the confirmed Calc is at the top of the booking folder (the others were moved to `old/` before the preview, §1).
 
 ## 3b. Date change on a booked file (2 Nov 2026, Chinnapong)
 
