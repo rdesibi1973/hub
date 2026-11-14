@@ -255,7 +255,11 @@ $t('TL from the pax text', $tlc('8PAX', 8, '9 adults (8 paying + 1 TL)') === 1 &
 $t('TL from H4 TL costs + guest list', $tlc('4PAX', 4, '4 adults', '', 5, 500.0) === 1 && $tlc('4PAX', 4, '', '', 4, 500.0) === 1);
 $t('no TL', $tlc('2PAX CONF', 2, '2 adults', 'honeymoon', 2, null) === 0 && $tlc('4PAX', 4, '1 TWIN + 1 TRIPLE (3 beds)') === 0
    && $tlc('4PAX', 4, '', '', 4, 0.0) === 0 && $tlc('3PAX', 3, '3 adults', 'Total 12 PAX in the group') === 0);
-$t('guide rooms', bg_guide_room('Driver/Guide Room') && bg_guide_room('Guide (FB)') && bg_guide_room('Driver accommodation') && !bg_guide_room('Deluxe Double'));
+$t('room names: beds counted, TRP = triple (run 30)', bg_room_type('Kiboko (3 Queen size beds)') === 'tpl' && bg_room_type('Twiga (2 Queen)') === 'twn'
+   && bg_room_type('Nyani (1Dbl)') === 'dbl' && bg_room_type('Standard Room (FB, TRP)') === 'tpl' && bg_room_type('Standard Room (FB, TWN)') === 'twn'
+   && bg_room_type('King Room') === 'dbl' && bg_room_type('Jambo (1Dbl & 2Sngl)') === 'fam'
+   && bg_rooms_doc([$rm('Kiboko (3 Queen size beds)'), $rm('Twiga (2 Queen)'), $rm('Ndege (2 Queen)'), $rm('Nyani (1Dbl)')])['capacity'] === 9);
+$t('guide rooms',bg_guide_room('Driver/Guide Room') && bg_guide_room('Guide (FB)') && bg_guide_room('Driver accommodation') && !bg_guide_room('Deluxe Double'));
 $bfSnap = $snap([], ['sheet' => '8PAX+1TL(9PAX)', 'pax' => ['adults' => 8, 'teen' => 0, 'child' => 0, 'tl' => 1, 'total_guests' => 9], 'jeeps' => 2,
                      'room_config' => '1 DOUBLE + 2 TWIN + 1 TRIPLE (3 separate beds)', 'start_date' => '2027-07-12', 'end_date' => '2027-07-24']);
 $bfRooms = [$rm('Double'), $rm('Twin', 2), $rm('Triple')];

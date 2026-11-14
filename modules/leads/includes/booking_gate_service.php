@@ -862,7 +862,9 @@ function bg_room_type(string $s): string {
     if (preg_match('/double\s*\/\s*twin|twin\s*\/\s*double|dbl\s*\/\s*twn|twn\s*\/\s*dbl/', $s)) return 'dbl_twn';
     if (preg_match('/\b(fam|family|villa|quad|quadruple)/', $s)) return 'fam';
     if (preg_match('/(dbl|double)/', $s) && preg_match('/(sngl|sgl|single|twin|twn)/', $s)) return 'fam';   // one room, double + singles
-    if (preg_match('/\b(tpl|trpl|triple)/', $s)) return 'tpl';
+    // Beds counted in the room name (Orangi, Bonfante 14 Nov 2026): "Kiboko (3 Queen size beds)" = triple, "Twiga (2 Queen)" = twin.
+    if (preg_match('/\b([2-9])\s*(?:x\s*)?(queen|king|beds?\b|singles?\b)/', $s, $m)) return ['2' => 'twn', '3' => 'tpl'][$m[1]] ?? 'fam';
+    if (preg_match('/\b(tpl|trpl|trp|triple)/', $s)) return 'tpl';
     if (preg_match('/\b(twn|twin)/', $s)) return 'twn';
     if (preg_match('/(dbl|double|king|queen|matrimonial)/', $s)) return 'dbl';
     if (preg_match('/(sgl|sngl|single)/', $s)) return 'sgl';
