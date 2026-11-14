@@ -61,6 +61,7 @@ const BG_ISSUES = [
     'booking_provisional'    => [false, 'booking', 'Booking provisional'],
     'meal_plan_note'         => [false, 'booking', 'Meal plan differs'],
     'rooms_note'             => [false, 'booking', 'Room types differ from the Calc'],
+    'guide_rooms'            => [false, 'booking', 'More guide / driver rooms than jeeps'],
     'lodge_name_unsure'      => [false, 'booking', 'Check the lodge name'],
     'doc_unreadable'         => [false, 'booking', 'Document could not be read'],
 ];
@@ -319,7 +320,7 @@ function bg_start_run(PDO $db, int $rid, ?int $userId, string $trigger = 'manual
     $calc = $bc['calc'];
     $snap = [
         'customer' => $bc['customer'], 'folder' => $bc['folder'], 'local_folder' => $bc['local_folder'],
-        'calc' => ['file' => $calc['file'], 'sheet' => $calc['sheet'], 'pax' => $calc['pax'], 'room_config' => $calc['room_config'],
+        'calc' => ['file' => $calc['file'], 'sheet' => $calc['sheet'], 'pax' => $calc['pax'], 'jeeps' => $calc['jeeps'] ?? null, 'room_config' => $calc['room_config'],
                    'arrival' => $calc['arrival'], 'departure' => $calc['departure'], 'start_date' => $calc['start_date'],
                    'end_date' => $calc['end_date'], 'nights' => $calc['nights'], 'single_supp' => $calc['single_supp'] ?? null,
                    'discount_teen' => $calc['discount_teen'] ?? null, 'discount_child' => $calc['discount_child'] ?? null,
@@ -950,6 +951,35 @@ function bg_usd(array $ds): bool {
 
 function bg_money(?float $n): string { return $n === null ? '?' : number_format($n, ($n == floor($n)) ? 0 : 2); }
 
+/**
+ * Free Tour Leader (TL handoff, 14 Nov 2026). $pp = ['paying', 'tl', 'guests', 'jeeps'] from the Calc (pax.tl of calc_read_file()).
+ * A document is right with the paying pax or with paying + TL (some suppliers do not bill the TL).
+ */
+function bg_pax_ok(int $p, array $pp): bool {
+    return $p === (int)$pp['paying'] || ((int)$pp['tl'] > 0 && $p === (int)$pp['guests']);
+}
+
+function bg_pax_text(array $pp): string {
+    return (int)$pp['tl'] > 0 ? $pp['paying'] . ' paying + ' . $pp['tl'] . ' TL' : (string)$pp['paying'];
+}
+
+/** A room line for the safari guide / driver, not for guests ("Driver/Guide Room", "Guide (FB)", "Driver accommodation"). */
+function bg_guide_room(string $type): bool {
+    return (bool)preg_match('/\b(driver|guide|chauffeur|ranger)s?\b|\bstaff\b/i', $type);
+}
+
+/**
+ * Calc cost to compare an invoice with → [comparison cost, tolerance, text]. The Calc costs (J, C, H) are for the paying
+ * pax; with a TL his share is in H4: average per-person cost × TL, tolerance max(5 USD, 1 %) (he may sleep in a dearer room).
+ */
+function bg_tl_cost(float $cost, array $pp): array {
+    $tl = (int)($pp['tl'] ?? 0); $paying = (int)($pp['paying'] ?? 0);
+    if ($tl <= 0 || $paying <= 0 || $cost <= 0) return [$cost, BG_TOLERANCE, bg_money($cost)];
+    $share = round($cost / $paying * $tl, 2);
+    $cmp = $cost + $share;
+    return [$cmp, max(BG_TOLERANCE, round($cmp * 0.01, 2)), bg_money($cost) . ' + TL share ' . bg_money($share) . ' = ' . bg_money($cmp)];
+}
+
 // ── Evaluation (deterministic) ───────────────────────────────────────────────
 
 /**
@@ -979,7 +1009,9 @@ function bg_evaluate(array $snap, array $docs, ?callable $alias = null): array {
     }
     $calc = $snap['calc'];
     $pax = $calc['pax'] ?? ['adults' => 0, 'teen' => 0, 'child' => 0];
-    $totalPax = (int)$pax['adults'] + (int)$pax['teen'] + (int)$pax['child'];
+    $totalPax = (int)$pax['adults'] + (int)$pax['teen'] + (int)$pax['child'];   // paying pax (B1)
+    // Free Tour Leader (TL handoff, 14 Nov 2026): a document may count paying pax or paying + TL; jeeps = guide rooms allowed.
+    $pp = ['paying' => $totalPax, 'tl' => (int)($pax['tl'] ?? 0), 'guests' => $totalPax + (int)($pax['tl'] ?? 0), 'jeeps' => (int)($calc['jeeps'] ?? 0)];
     $calcKids = (int)$pax['child'];   // teens count as adults at the lodges (Rivolta handoff, 13 Nov 2026)
     $calcRooms = bg_rooms_parse((string)($calc['room_config'] ?? ''));
     $hasSingle = !empty($calcRooms['types']['sgl']);
@@ -1071,7 +1103,7 @@ function bg_evaluate(array $snap, array $docs, ?callable $alias = null): array {
             $aliasWho[] = [$i, $over];
             continue;   // decided after the alias answers
         }
-        bg_eval_stay($svcs, $i, $named, $items, $useItem, $add, $status, $paxOf, $totalPax, $calcKids, $calcRooms, $stayGroups, $svcs);
+        bg_eval_stay($svcs, $i, $named, $items, $useItem, $add, $status, $paxOf, $pp, $calcKids, $calcRooms, $stayGroups, $svcs);
     }
     if ($aliasPairs) {
         $verdicts = $alias ? $alias($aliasPairs) : array_fill(0, count($aliasPairs), 'unsure');
@@ -1087,7 +1119,7 @@ function bg_evaluate(array $snap, array $docs, ?callable $alias = null): array {
             }
             if ($v === 'unsure') $add('lodge_name_unsure', 'Calc says ' . $s['name'] . ', the document says ' . $docName . ' for the same dates: same property? If not, update the Calc.', $s,
                                       ['supplier' => $docName, 'source_file' => $items[$over[0]]['file']]);
-            bg_eval_stay($svcs, $i, [$over[0]], $items, $useItem, $add, $status, $paxOf, $totalPax, $calcKids, $calcRooms, $stayGroups, $svcs);
+            bg_eval_stay($svcs, $i, [$over[0]], $items, $useItem, $add, $status, $paxOf, $pp, $calcKids, $calcRooms, $stayGroups, $svcs);
         }
     }
     // Amounts per supplier (one invoice may cover several Calc blocks): net ≤ Calc cost + 5 USD.
@@ -1117,15 +1149,18 @@ function bg_evaluate(array $snap, array $docs, ?callable $alias = null): array {
             $add('invoice_mismatch', 'Ngorongoro (NCA) tented camp invoice without the concession fee: ask ' . $g['name'] . ' to put it on the invoice.', $first, ['supplier' => $g['name']]);
             continue;
         }
-        $diff = $net - $cost;
-        if ($diff > BG_TOLERANCE && $singleLeft > 0 && $diff - BG_TOLERANCE <= $singleLeft) {
-            $singleLeft -= ($diff - BG_TOLERANCE);
-            $svcs[$first['_i']]['notes'][] = 'Invoice ' . bg_money($net) . ' vs Calc ' . bg_money($cost) . ': over by ' . bg_money($diff) . ', inside the single supplement of the Calc.';
-        } elseif ($diff > BG_TOLERANCE) {
-            $add('invoice_mismatch', 'Invoice ' . bg_money($net) . ' vs quoted ' . bg_money($cost) . ' (+' . bg_money($diff) . '): check the rate, the supplements '
+        [$cmp, $tol, $quoted] = bg_tl_cost($cost, $pp);
+        $diff = $net - $cmp;
+        if ($diff > $tol && $singleLeft > 0 && $diff - $tol <= $singleLeft) {
+            $singleLeft -= ($diff - $tol);
+            $svcs[$first['_i']]['notes'][] = 'Invoice ' . bg_money($net) . ' vs Calc ' . $quoted . ': over by ' . bg_money($diff) . ', inside the single supplement of the Calc.';
+        } elseif ($diff > $tol) {
+            $add('invoice_mismatch', 'Invoice ' . bg_money($net) . ' vs quoted ' . $quoted . ' (+' . bg_money($diff) . '): check the rate, the supplements '
                  . '(August / festive), child rates, or ask the seller to update the Calc.', $first, ['supplier' => $g['name']]);
-        } elseif ($diff < -BG_TOLERANCE) {
-            $svcs[$first['_i']]['notes'][] = 'Invoice ' . bg_money($net) . ' vs Calc ' . bg_money($cost) . ' (saving ' . bg_money(-$diff) . ').';
+        } elseif ($diff < -$tol) {
+            $svcs[$first['_i']]['notes'][] = 'Invoice ' . bg_money($net) . ' vs Calc ' . $quoted . ' (saving ' . bg_money(-$diff) . ').';
+        } elseif ($pp['tl'] > 0 && $net > $cost + BG_TOLERANCE) {
+            $svcs[$first['_i']]['notes'][] = 'Invoice ' . bg_money($net) . ' vs Calc ' . $quoted . ': the TL\'s share is in H4 (TL costs) — OK.';
         }
     }
 
@@ -1187,7 +1222,7 @@ function bg_evaluate(array $snap, array $docs, ?callable $alias = null): array {
         foreach ($cand as $k) {
             $ds = $items[$k]['ds'] + ['_file' => $items[$k]['file']];
             $p = $paxOf($ds);
-            if ($p !== null && $p !== $totalPax) { $ok = false; $add('flight_pax', 'Flight booked for ' . $p . ' pax, the Calc has ' . $totalPax . '.', $s, ['source_file' => $items[$k]['file']]); }
+            if ($p !== null && !bg_pax_ok($p, $pp)) { $ok = false; $add('flight_pax', 'Flight booked for ' . $p . ' pax, the Calc has ' . bg_pax_text($pp) . '.', $s, ['source_file' => $items[$k]['file']]); }
             if (($ds['status'] ?? '') === 'cancelled') $ok = false;
             $status($ds, $s);
         }
@@ -1206,9 +1241,10 @@ function bg_evaluate(array $snap, array $docs, ?callable $alias = null): array {
         foreach (array_keys($g['svcs']) as $si) $cost += (float)($svcs[$si]['cost'] ?? 0);
         $first = $svcs[array_key_first($g['svcs'])];
         if (!$known || !$usd || $cost <= 0) { $svcs[$first['_i']]['notes'][] = 'Flight amount not checked (' . (!$known ? 'no amount on the document' : (!$usd ? 'not in USD' : 'no flight cost in the Calc')) . ').'; continue; }
-        $diff = $net - $cost;
-        if ($diff > BG_TOLERANCE) $add('invoice_mismatch', 'Flight invoice ' . bg_money($net) . ' vs quoted ' . bg_money($cost) . ' (+' . bg_money($diff) . ').', $first);
-        elseif ($diff < -BG_TOLERANCE) $svcs[$first['_i']]['notes'][] = 'Flight ' . bg_money($net) . ' vs Calc ' . bg_money($cost) . ' (saving ' . bg_money(-$diff) . ').';
+        [$cmp, $tol, $quoted] = bg_tl_cost($cost, $pp);
+        $diff = $net - $cmp;
+        if ($diff > $tol) $add('invoice_mismatch', 'Flight invoice ' . bg_money($net) . ' vs quoted ' . $quoted . ' (+' . bg_money($diff) . ').', $first);
+        elseif ($diff < -$tol) $svcs[$first['_i']]['notes'][] = 'Flight ' . bg_money($net) . ' vs Calc ' . $quoted . ' (saving ' . bg_money(-$diff) . ').';
     }
 
     // ── Activities / transfers ──
@@ -1227,12 +1263,13 @@ function bg_evaluate(array $snap, array $docs, ?callable $alias = null): array {
                 $useItem($k, $i);
                 $ds = $items[$k]['ds'] + ['_file' => $items[$k]['file']];
                 $p = $paxOf($ds);
-                if ($p !== null && $p !== $totalPax) { $ok = false; $add('activity_pax', $s['text'] . ' booked for ' . $p . ' pax, the Calc has ' . $totalPax . '.', $s, ['source_file' => $items[$k]['file']]); }
+                if ($p !== null && !bg_pax_ok($p, $pp)) { $ok = false; $add('activity_pax', $s['text'] . ' booked for ' . $p . ' pax, the Calc has ' . bg_pax_text($pp) . '.', $s, ['source_file' => $items[$k]['file']]); }
                 $status($ds, $s);
                 $n = bg_net($ds); if ($n === null || !bg_usd($ds)) $known = false; else $net += $n;
             }
-            if ($ok && $known && !empty($s['cost']) && $net - (float)$s['cost'] > BG_TOLERANCE) {
-                $add('invoice_mismatch', $s['text'] . ': invoice ' . bg_money($net) . ' vs quoted ' . bg_money((float)$s['cost']) . ' (+' . bg_money($net - (float)$s['cost']) . ').', $s);
+            [$cmp, $tol, $quoted] = bg_tl_cost((float)($s['cost'] ?? 0), $pp);
+            if ($ok && $known && !empty($s['cost']) && $net - $cmp > $tol) {
+                $add('invoice_mismatch', $s['text'] . ': invoice ' . bg_money($net) . ' vs quoted ' . $quoted . ' (+' . bg_money($net - $cmp) . ').', $s);
             }
         } elseif ($s['type'] === 'transfer') {
             if (bg_own_transfer($s)) { $svcs[$i]['status'] = 'IN-HOUSE'; $svcs[$i]['notes'][] = 'Savannah\'s own airport transfer (operations, Arrivals / Departures).'; continue; }
@@ -1289,8 +1326,9 @@ function bg_evaluate(array $snap, array $docs, ?callable $alias = null): array {
 
 /** One stay against its matching document items: dates, self-consistency, pax, rooms, meal plan, status. */
 function bg_eval_stay(array &$svcs, int $i, array $named, array &$items, callable $useItem, callable $add, callable $status, callable $paxOf,
-                      int $totalPax, int $calcKids, array $calcRooms, array &$stayGroups, array $all): void {
+                      array $pp, int $calcKids, array $calcRooms, array &$stayGroups, array $all): void {
     $s = $svcs[$i];
+    $totalPax = $pp['paying'];
     if (!$named) {
         // Same lodge on other dates?
         foreach ($items as $k => $it) {
@@ -1320,17 +1358,35 @@ function bg_eval_stay(array &$svcs, int $i, array $named, array &$items, callabl
             $add('doc_inconsistent', $items[$k]['file'] . ': ' . bg_dm($di) . '–' . bg_dm($do) . ' = ' . $n . ' nights, ' . ($h !== null ? 'header ' . $h . ' nights' : '')
                  . ($h !== null && $b !== null ? ', ' : '') . ($b !== null ? 'billed ' . $b . ' nights' : '') . ': ask the supplier for a corrected document.', $s, ['source_file' => $items[$k]['file']]);
         }
+        // Guide / driver rooms (TL handoff, 14 Nov 2026): not guests, out of the pax and room comparison; one per jeep is normal.
+        $guideN = 0; $guest = [];
+        foreach ($ds['rooms'] ?? [] as $r) {
+            if (bg_guide_room((string)($r['type'] ?? ''))) $guideN += max(1, (int)($r['count'] ?? 1)); else $guest[] = $r;
+        }
+        if ($guideN) {
+            $ds['rooms'] = $guest;
+            $gp = $paxOf($ds);
+            if ($gp !== null && !bg_pax_ok($gp, $pp) && bg_pax_ok($gp - $guideN, $pp)) $ds['adults'] = max(0, (int)$ds['adults'] - $guideN);
+            $gTxt = $guideN . ' guide / driver room' . ($guideN > 1 ? 's' : '');
+            if ($pp['jeeps'] > 0 && $guideN > $pp['jeeps']) {
+                $add('guide_rooms', $s['name'] . ': ' . $gTxt . ' booked, the Calc has ' . $pp['jeeps'] . ' jeep' . ($pp['jeeps'] > 1 ? 's' : '') . ': check with the supplier.',
+                     $s, ['source_file' => $items[$k]['file']]);
+            } else {
+                $svcs[$i]['notes'][] = $gTxt . ' on the document — not counted as guests' . ($pp['jeeps'] ? ' (' . $pp['jeeps'] . ' jeep' . ($pp['jeeps'] > 1 ? 's' : '') . ')' : '') . '.';
+            }
+        }
         $dr = !empty($ds['rooms']) ? bg_rooms_doc($ds['rooms']) : null;
         // Pax printed per room ("Rm 2, Ad 2" = 4 adults): rooms × pax when that gives the Calc's pax.
-        if ($dr && $dr['total'] > 1 && $paxOf($ds) !== null && $paxOf($ds) !== $totalPax && $paxOf($ds) * $dr['total'] === $totalPax) {
+        if ($dr && $dr['total'] > 1 && $paxOf($ds) !== null && !bg_pax_ok($paxOf($ds), $pp) && bg_pax_ok($paxOf($ds) * $dr['total'], $pp)) {
             $ds['adults'] = (int)$ds['adults'] * $dr['total'];
             if (isset($ds['children']) && $ds['children'] !== null) $ds['children'] = (int)$ds['children'] * $dr['total'];
         }
         $p = $paxOf($ds);
         $docKids = (int)($ds['children'] ?? 0);
         $roomsTxt = $dr ? implode(' + ', array_map(fn($r) => ($r['count'] ?? 1) . ' × ' . ($r['type'] ?? ''), $ds['rooms'])) : '';
-        if ($p !== null && $p !== $totalPax) {
-            $add('stay_pax', $s['name'] . ': ' . $p . ' pax on the document, the Calc has ' . $totalPax . '.', $s, ['source_file' => $items[$k]['file']]);
+        $need = ($p !== null && bg_pax_ok($p, $pp)) ? $p : $totalPax;   // beds for whom the document books (with or without the TL)
+        if ($p !== null && !bg_pax_ok($p, $pp)) {
+            $add('stay_pax', $s['name'] . ': ' . $p . ' pax on the document, the Calc has ' . bg_pax_text($pp) . '.', $s, ['source_file' => $items[$k]['file']]);
         } elseif ($p !== null && $docKids !== $calcKids && $docKids > 0) {
             // Same total, children booked where the Calc has adults (or more children): ask the seller which is right.
             $add('stay_pax', $s['name'] . ' (' . basename($items[$k]['file']) . '): ' . (int)$ds['adults'] . ' adults + ' . $docKids . ' children, Calc: '
@@ -1342,8 +1398,8 @@ function bg_eval_stay(array &$svcs, int $i, array $named, array &$items, callabl
         // Rooms (Rivolta, 13 Nov 2026): with a final room list double / twin / single / triple differences do not block; the rooms
         // must hold the pax, and a family room the Calc asks for should be there (a missing one is a warning).
         if ($dr && $calcRooms['total'] > 0) {
-            if ($dr['capacity'] < $totalPax) {
-                $add('stay_rooms', $s['name'] . ': ' . $roomsTxt . ' booked hold about ' . $dr['capacity'] . ' guests, the Calc has ' . $totalPax
+            if ($dr['capacity'] < $need) {
+                $add('stay_rooms', $s['name'] . ': ' . $roomsTxt . ' booked hold about ' . $dr['capacity'] . ' guests, the Calc has ' . bg_pax_text($pp)
                      . ' pax (' . bg_rooms_text($calcRooms) . ').', $s, ['source_file' => $items[$k]['file']]);
             } elseif (!empty($calcRooms['types']['fam']) && empty($dr['types']['fam']) && array_sum($dr['types']) === $dr['total']) {   // every room type known
                 $add('rooms_note', $s['name'] . ': ' . $roomsTxt . ' booked, the Calc has ' . bg_rooms_text($calcRooms) . ' (no family room): check the family is fine with it.',
@@ -1534,7 +1590,8 @@ function bg_report_html(array $r, array $snap, array $res, array $run): string {
     foreach ($res['services'] as $s) if (isset($cnt[$s['status']])) $cnt[$s['status']]++;
     $badge = ['OK' => ['#1A6B3A', '#E6F4EA'], 'CHECK' => ['#8a6d00', '#FFF4D6'], 'MISSING' => ['#a33', '#F7DEDE'], 'IN-HOUSE' => ['#555', '#EEE']];
     $pax = $calc['pax'] ?? [];
-    $paxTxt = ($pax ? (int)$pax['adults'] . ' adults' . ((int)$pax['teen'] ? ', ' . (int)$pax['teen'] . ' teen' : '') . ((int)$pax['child'] ? ', ' . (int)$pax['child'] . ' child' : '') : '');
+    $paxTxt = ($pax ? (int)$pax['adults'] . ' adults' . ((int)$pax['teen'] ? ', ' . (int)$pax['teen'] . ' teen' : '') . ((int)$pax['child'] ? ', ' . (int)$pax['child'] . ' child' : '')
+               . (!empty($pax['tl']) ? ' + ' . (int)$pax['tl'] . ' TL (free)' : '') : '');
     $sentence = $res['passed'] ? ($res['warnings'] ? 'No blocking item — ' . $res['warnings'] . ' warning(s) to follow.' : 'All services confirmed.')
                                : $res['blocking'] . ' blocking item(s): the folder cannot leave PROGRESS until they are fixed and the check is re-run.';
     $h = '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'

@@ -246,6 +246,51 @@ $t('Rivolta: no room block, Orangi 2 × Double = warning only, no duplicate line
    !array_filter($res['findings'], fn($f) => $f['issue'] === 'stay_rooms')
    && count(array_filter($res['findings'], fn($f) => $f['issue'] === 'rooms_note' && $f['service'] === 'Orangi River')) === 1
    && count(array_filter($res['findings'], fn($f) => $f['service'] === 'River Camp' && $f['issue'] !== 'booking_provisional')) === 0, $issues($res));
+// ── Free Tour Leader and guide rooms (TL handoff, 14 Nov 2026; Bonfante, request 1061) ──
+$tlc = fn($sheet, $paying, $text = '', $extra = '', $guests = 0, $cost = null) => calc_tl_count($sheet, $paying, $text, $extra, $guests, $cost)['tl'];
+$t('TL from the sheet name', $tlc('8PAX+1TL(9PAX)', 8) === 1 && $tlc('10 PAX+2 TL free', 10) === 2 && $tlc('6PAX + TL', 6) === 1 && $tlc('8PAX (9PAX)', 8) === 1
+   && $tlc('6pax+1TLFREE(2)CONF', 6) === 1 && $tlc('15 PAX +  TL FREE  CONF', 15) === 1 && $tlc('3PAX + 2 TL', 3) === 2);
+$t('TL from the pax text', $tlc('8PAX', 8, '9 adults (8 paying + 1 TL)') === 1 && $tlc('6PAX', 6, 'base 6 pax + 1 TL') === 1
+   && $tlc('10PAX', 10, '10 PAX + 1 TOUR LEADER FREE') === 1 && $tlc('6PAX', 6, '6 adults + TL') === 1);
+$t('TL from H4 TL costs + guest list', $tlc('4PAX', 4, '4 adults', '', 5, 500.0) === 1 && $tlc('4PAX', 4, '', '', 4, 500.0) === 1);
+$t('no TL', $tlc('2PAX CONF', 2, '2 adults', 'honeymoon', 2, null) === 0 && $tlc('4PAX', 4, '1 TWIN + 1 TRIPLE (3 beds)') === 0
+   && $tlc('4PAX', 4, '', '', 4, 0.0) === 0 && $tlc('3PAX', 3, '3 adults', 'Total 12 PAX in the group') === 0);
+$t('guide rooms', bg_guide_room('Driver/Guide Room') && bg_guide_room('Guide (FB)') && bg_guide_room('Driver accommodation') && !bg_guide_room('Deluxe Double'));
+$bfSnap = $snap([], ['sheet' => '8PAX+1TL(9PAX)', 'pax' => ['adults' => 8, 'teen' => 0, 'child' => 0, 'tl' => 1, 'total_guests' => 9], 'jeeps' => 2,
+                     'room_config' => '1 DOUBLE + 2 TWIN + 1 TRIPLE (3 separate beds)', 'start_date' => '2027-07-12', 'end_date' => '2027-07-24']);
+$bfRooms = [$rm('Double'), $rm('Twin', 2), $rm('Triple')];
+$bfSnap['services'] = [
+    $stay('Tarangire Sopa', '2027-07-13', '2027-07-14', 1, 1200.0),
+    $stay('Baobab Mara', '2027-07-16', '2027-07-18', 2, 3000.0),
+    $stay('Mvuvi Lodge', '2027-07-20', '2027-07-24', 4, 4210.0),
+    ['type' => 'flight', 'date' => '2027-07-20', 'route' => 'Seronera-Zanzibar', 'cost' => 1760.0, 'rows' => [25]],
+];
+$bfDocs = fn($mvuvi = 4750, $mara = null) => [
+    $doc('invoices/Sopa.pdf', [$dsStay('Tarangire Sopa', '2027-07-13', '2027-07-14', ['adults' => 9, 'rooms' => $bfRooms, 'net_amount' => 1300])], ['Bonfante']),
+    $doc('invoices/Baobab Mara.pdf', [$dsStay('Baobab Mara', '2027-07-16', '2027-07-18', ['adults' => 11, 'rooms' => $mara ?? array_merge($bfRooms, [$rm('Driver/Guide Room', 2)]), 'net_amount' => 3300])], ['Bonfante']),
+    $doc('invoices/Mvuvi.pdf', [$dsStay('Mvuvi Lodge', '2027-07-20', '2027-07-24', ['adults' => 9, 'rooms' => $bfRooms, 'net_amount' => $mvuvi])], ['Bonfante']),
+    $doc('invoices/Flightlink.pdf', [['adults' => 9, 'legs' => [['flight_no' => 'FL1', 'date' => '2027-07-20', 'from_airport' => 'SEU', 'to_airport' => 'ZNZ', 'std' => '', 'sta' => '']],
+                                      'net_amount' => 1854] + $dsFlight('SEU', 'ZNZ', 1854, 'confirmed')], ['Bonfante']),
+];
+$res = bg_evaluate($bfSnap, $bfDocs());
+$t('Bonfante: 8 paying + 1 TL, 2 guide rooms, Mvuvi with TL share → passed, no blocking', $res['passed'] && !array_filter($res['findings'], fn($f) => $f['blocking']),
+   array_map(fn($f) => [$f['issue'], $f['text']], $res['findings']));
+$t('Bonfante: guide rooms noted, TL share noted', strpos(implode(' ', $res['services'][1]['notes']), '2 guide / driver rooms') !== false
+   && strpos(implode(' ', $res['services'][2]['notes']), 'TL share') !== false, [$res['services'][1]['notes'], $res['services'][2]['notes']]);
+$res = bg_evaluate($bfSnap, $bfDocs(4800));
+$t('Bonfante: Mvuvi 4,800 (> 4,736 + 1 %) → invoice_mismatch', in_array('invoice_mismatch!', $issues($res), true)
+   && strpos(implode(' ', array_column($res['findings'], 'text')), 'TL share 526.25') !== false, $issues($res));
+$res = bg_evaluate($bfSnap, $bfDocs(4750, array_merge($bfRooms, [$rm('Driver room', 3)])));
+$t('3 guide rooms, 2 jeeps → guide_rooms warning, not blocking', in_array('guide_rooms', $issues($res), true) && !in_array('stay_pax!', $issues($res), true), $issues($res));
+$bfNoTl = $bfSnap; $bfNoTl['calc']['pax'] = ['adults' => 8, 'teen' => 0, 'child' => 0];
+$res = bg_evaluate($bfNoTl, $bfDocs());
+$t('same documents without a TL in the Calc → stay_pax and flight_pax block', in_array('stay_pax!', $issues($res), true) && in_array('flight_pax!', $issues($res), true), $issues($res));
+$res = bg_evaluate($bfSnap, [$doc('invoices/Sopa.pdf', [$dsStay('Tarangire Sopa', '2027-07-13', '2027-07-14', ['adults' => 10, 'rooms' => $bfRooms])], ['Bonfante'])]);
+$t('TL Calc, 10 on the document → stay_pax "8 paying + 1 TL"', in_array('stay_pax!', $issues($res), true)
+   && strpos(implode(' ', array_column($res['findings'], 'text')), '8 paying + 1 TL') !== false, $issues($res));
+$res = bg_evaluate($bfSnap, [$doc('invoices/Sopa.pdf', [$dsStay('Tarangire Sopa', '2027-07-13', '2027-07-14', ['adults' => 8, 'rooms' => $bfRooms])], ['Bonfante'])]);
+$t('TL not billed by the supplier (8) → no stay_pax', !in_array('stay_pax!', $issues($res), true), $issues($res));
+
 // CANCELLED: only back to PROGRESS (rule, refused even with a passed run)
 $t('CANCELLED → PROVISIONAL / DEPOSIT / PAID refused by rule; → PROGRESS allowed', bg_cancelled_move_refused($rv . 'CANCELLED', $rv . 'PROVISIONAL')
    && bg_cancelled_move_refused($rv . 'CANCELLED', $rv . 'DEPOSIT') && bg_cancelled_move_refused($rv . 'CANCELLED', $rv . 'PAID')

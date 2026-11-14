@@ -289,7 +289,9 @@ fill_calc adds two checks: `error` a night with a hotel in K but J empty or 0 (e
 Read-only. `request_id`, optional `file` (which Calc if the folder has several), `sheet` (pax sheet
 name). Reads the booking's Calc (no PhpSpreadsheet needed) and returns:
 `file`, `calc_path`, `calc_rev` (Dropbox rev — compare later to spot changes), `sheet`,
-`pax` `{adults, teen, child}`, `pax_text` ("3 adults"), `room_config` (A37), `extra_details`,
+`pax` `{adults, teen, child, tl, total_guests, tl_source?}` (adults / teen / child = paying pax, B2–B4; `tl` = free Tour
+Leaders, found in the sheet name "8PAX+1TL(9PAX)", the pax text "8 paying + 1 TL", or H4 "TL costs" + the guest list;
+`total_guests` = paying + TL), `jeeps` (B5), `pax_text` ("3 adults"), `room_config` (A37), `extra_details`,
 `start_date`, `end_date`, `nights`,
 `days[]` `{row, date, label, flight_cost, park_fees_desc, activity_desc, hotel_text, invoice, checked}`,
 `guests[]` `{name, title, dob, country, tba}` (no passport numbers), `guests_tba`, `arrival`, `departure`,
@@ -373,15 +375,16 @@ to that user. Documents already read (same Dropbox `content_hash`) are never sen
 | `calc_not_clean` | yes | sales | no Calc, Calc only as conflicted copy, several CONF sheets / old quotes |
 | `stay_missing` / `flight_missing` / `activity_missing` | yes | booking | no document (own lodges: no Orangi Collection SV) |
 | `stay_dates` | yes | booking | check-in / check-out / nights differ (split documents or one invoice for two blocks of the same lodge are fine) |
-| `stay_pax` / `flight_pax` / `activity_pax` | yes | booking | adults + children ≠ Calc pax (pax printed per room × rooms when that gives the Calc pax) |
+| `stay_pax` / `flight_pax` / `activity_pax` | yes | booking | adults + children ≠ Calc pax (pax printed per room × rooms when that gives the Calc pax); with a free TL (`pax.tl`) paying pax **or** paying + TL are right; guide / driver rooms ("Driver/Guide Room", "Guide (FB)") are not guests |
 | `stay_pax` | yes | **sales** | same total, but children booked where the Calc has adults (teens count as adults): check ages with the seller |
 | `stay_rooms` | yes | booking | the rooms booked do not hold the pax (family / villa 4, triple 3, double / twin 2, single 1); room names give the type ("Jambo (1Dbl & 2Sngl)" = one family room) |
 | `rooms_note` | no | booking | room types differ from `room_config` (final room list), or no family room although the Calc asks for one |
+| `guide_rooms` | no | booking | more guide / driver rooms than jeeps (Calc B5); up to one per jeep is only a note on the service |
 | `stay_meal_plan` | yes | booking | BB / RO booked, or two levels below the Calc's FB / HB (`meal_plan_note`, warning: FB vs HB) |
 | `doc_inconsistent` | yes | booking | header nights ≠ arrival → departure ≠ nights billed |
 | `booked_differs` | yes | booking | another lodge on the same dates (names compared, AI asked only when the words differ): update the Calc |
 | `flight_date` / `flight_route` | yes | booking | route rule: last airport of the Calc row = destination, origin among the airports before it (or the one a Calc details line names); compared with the first STD / last STA airport; a lower price never makes it right |
-| `invoice_mismatch` | yes | booking | net (after commission) > Calc cost + 5 USD, per supplier (single supplement allowance used once per trip); NCA tented camp invoice without the concession fee |
+| `invoice_mismatch` | yes | booking | net (after commission) > Calc cost + 5 USD, per supplier (single supplement allowance used once per trip); NCA tented camp invoice without the concession fee. With a TL: Calc cost + TL share (cost ÷ paying pax × TL; the TL's real costs are in H4), tolerance max(5 USD, 1 %) — stays, flights, activities |
 | `child_as_adult` | yes | booking | Calc has children / teens, the stay bills everyone as adults |
 | `wrong_document` | yes | booking | a document dated outside the trip |
 | `booking_cancelled` | yes | booking | the document says cancelled |

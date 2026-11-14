@@ -121,6 +121,30 @@ function calc_skipped_kind(array $sk) {
     return 'note';
 }
 
+/**
+ * Free Tour Leaders of a Calc (B2 = paying pax only; the TL's own costs in H4 "TL costs", spread on F9). In order:
+ *   sheet name   "8PAX+1TL(9PAX)", "10 PAX+2 TL free", "6PAX + TL"; "(9PAX)" = guests, minus the paying pax
+ *   pax text     A35 "9 adults (8 paying + 1 TL)", "+ 1 TL", "1 TOUR LEADER FREE", "2 TL free"
+ *   guest list   more names than paying pax, when H4 "TL costs" > 0 or EXTRA DETAILS names a tour leader (else 1)
+ * @return array{tl:int, source:string}  tl 0 = no tour leader
+ */
+function calc_tl_count(string $sheet, int $paying, string $paxText, string $extra, int $guestCount, ?float $tlCost): array {
+    $num = '(\d+)\s*(?:x\s*)?(?:free\s+)?(?:T\.?\s?L\.?|tour\s*leaders?|team\s*leaders?|accompagnator[ei])(?:\s*free)?(?![a-z])';
+    if (preg_match('/\+\s*' . $num . '/i', $sheet, $m) && (int)$m[1] > 0) return array('tl' => (int)$m[1], 'source' => 'sheet name');
+    if (preg_match('/\+\s*(?:free\s+)?T\.?L(?:\s*free)?(?![a-z])/i', $sheet)) return array('tl' => 1, 'source' => 'sheet name');
+    if ($paying > 0 && preg_match('/\(\s*(\d+)\s*PAX\s*\)/i', $sheet, $m) && (int)$m[1] > $paying && (int)$m[1] - $paying <= 5) {
+        return array('tl' => (int)$m[1] - $paying, 'source' => 'sheet name');
+    }
+    if (preg_match('/' . $num . '/i', $paxText, $m) && (int)$m[1] > 0) return array('tl' => (int)$m[1], 'source' => 'pax text');
+    if (preg_match('/(?:\+|\band\b|&)\s*(?:a\s+|one\s+)?(?:free\s+)?(?:T\.?L\.?|tour\s*leader)(?![a-z])/i', $paxText)) return array('tl' => 1, 'source' => 'pax text');
+    $signal = ($tlCost !== null && $tlCost > 0) || preg_match('/tour\s*leader|\bT\.?L\.?\b\s*(?:\(?free|gratis)/i', $extra);
+    if ($signal) {
+        $d = $guestCount - $paying;
+        return array('tl' => ($d >= 1 && $d <= 5) ? $d : 1, 'source' => ($d >= 1 && $d <= 5) ? 'guest list' : 'TL costs');
+    }
+    return array('tl' => 0, 'source' => '');
+}
+
 /** The client sheets of a group calc (every sheet but RECAP). */
 function calc_group_client_sheets(array $sheets): array {
     $out = [];
@@ -389,12 +413,23 @@ function calc_read_file(string $path, string $wantSheet = ''): array {
     foreach ($f as $ref => $ftxt) { if (!isset($v[$ref])) $noVal++; }
     if ($noVal) $warnings[] = $noVal . ' formula cell(s) have no saved value — amounts may be missing; dates are computed from the first date.';
 
+    // Free Tour Leader (booking gate TL handoff, 14 Nov 2026): not in B2 (paying pax), but a guest of every booking.
+    $tlCost = $priceLeft('TL costs');
+    if ($tlCost === null) $tlCost = $priceLeft('TL cost');
+    $paying = $paxOut['adults'] + $paxOut['teen'] + $paxOut['child'];
+    $tl = calc_tl_count((string)$sheet, $paying, $paxText, $below('EXTRA DETAILS'), count($guests), $tlCost);
+    $paxOut['tl'] = $tl['tl'];
+    $paxOut['total_guests'] = $paying + $tl['tl'];
+    if ($tl['tl'] > 0) $paxOut['tl_source'] = $tl['source'];
+
     $flights = sc_flight_blocks($v);
     $start = $days ? $days[0]['date'] : null;
     $end   = $days ? $days[count($days) - 1]['date'] : null;
+    $jeeps = $paxNum('jeep');
     return [
         'sheet'             => trim($sheet),
         'pax'               => $paxOut,
+        'jeeps'             => $jeeps > 0 ? $jeeps : null,   // B5 "Number of Jeeps"
         'pax_text'          => $paxText,
         'room_config'       => $below('ROOMS TYPE'),
         'extra_details'     => $below('EXTRA DETAILS'),
