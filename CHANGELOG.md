@@ -20,6 +20,19 @@ Running log of notable changes and current build state. Module-level "active / p
 
 ---
 
+## 2026-11-14 — Booking gate: old Excel (.xls) supplier invoices read
+
+- Butiama Beach (Mafia) sends its pro-forma as a binary `.xls` (BIFF8, Mac Excel): the gate said "no document" and blocked
+  (BandiniQuercioli, request 3343). New `modules/leads/includes/xls_reader.php` (pure PHP, no library: BlueHost has no
+  PhpSpreadsheet / Composer): OLE2 + BIFF8 shared strings, labels, numbers, RK / MULRK, formula results; date-formatted cells
+  as `YYYY-MM-DD` (46411 → 2027-01-24), percentages as `20%`. The AI gets the cell text row by row, as for `.xlsx`; the text
+  goes through `bg_scrub()` (passport numbers / DOB) first. `.xlsm` read as `.xlsx`; an `.xlsx` renamed `.xls` too. `.ods` not read.
+- A document that cannot be read (damaged / password-protected / Excel 95 `.xls`, `.msg` …): report section
+  **Documents not read** (file, reason, save-as-PDF hint) above Blocking; a "missing" service now names that file
+  ("Not read: BUATIAMA - INV.xls — it may be the document for this service …"). `bg_evaluate()` returns `not_read[]`.
+- Agent API `booking_check`: `.xls` evidence (not in old/) carries `text` (what the gate reads) or `read_error`.
+- Tests: `tools/tests/booking_gate_test.php [path to a .xls]` (the Butiama file is client data: not in git).
+
 ## 2026-11-13 — Booking gate: room / pax fixes (Rivolta), cancelled folders only back to PROGRESS
 
 - Extraction v2 (cached documents read again once): one room entry per room line with the room name as printed, never a bed

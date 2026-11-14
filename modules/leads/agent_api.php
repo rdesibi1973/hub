@@ -1622,6 +1622,10 @@ try {
         } catch (RuntimeException $e) {
             agent_fail($e->getMessage(), 502);
         }
+        if (array_filter($res['evidence'], fn($e) => $e['ext'] === 'xls' && !$e['old'])) {   // old .xls: cell text from the gate's reader
+            require_once __DIR__ . '/includes/booking_gate_service.php';
+            bg_evidence_xls_text($res);
+        }
         agent_out(array_merge(['ok' => true], $res));
     }
 

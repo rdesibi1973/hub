@@ -3,7 +3,7 @@
  * Booking gate (handoff 12–13 Nov 2026; modules/leads/includes/booking_gate_service.php): the deterministic parts —
  * transitions, airports / route rule, rooms, Calc annotation rows, the evaluation against the handoff's acceptance
  * cases (Cavalli included) and the passport / DOB scrub. No Dropbox, no AI, no DB.
- *   C:/Utility/PHP/php.exe -d extension_dir=C:/Utility/PHP/ext -d extension=mbstring tools/tests/booking_gate_test.php
+ *   C:/Utility/PHP/php.exe -d extension_dir=C:/Utility/PHP/ext -d extension=mbstring tools/tests/booking_gate_test.php [butiama.xls]
  */
 if (PHP_SAPI !== 'cli') { http_response_code(404); exit; }
 require_once __DIR__ . '/../../modules/leads/includes/booking_gate_service.php';
@@ -336,7 +336,26 @@ $t('"" → null, empty list items dropped', $b['services'][0]['supplier'] === nu
 $res = bg_evaluate($snap($base), [['rel_path' => 'invoices/Treetops.pdf', 'status' => 'error', 'error' => 'AI API error (HTTP 400): x', 'data' => []], $okFlight]);
 $miss = array_values(array_filter($res['findings'], fn($f) => $f['issue'] === 'stay_missing'))[0]['text'] ?? '';
 $unr = array_values(array_filter($res['findings'], fn($f) => $f['issue'] === 'doc_unreadable'))[0]['text'] ?? '';
-$t('missing says a document could not be read; Hub error says re-run', strpos($miss, 'could not be read') !== false && strpos($unr, 're-run the check') !== false, [$miss, $unr]);
+$t('missing names the document not read; Hub error says re-run', strpos($miss, 'Not read: Treetops.pdf') !== false && strpos($unr, 're-run the check') !== false
+    && ($res['not_read'][0]['file'] ?? '') === 'invoices/Treetops.pdf', [$miss, $unr]);
+// Old binary Excel (Butiama Beach .xls, 14 Nov 2026): read by xls_reader.php; an unreadable one → "Documents not read" + PDF hint.
+$xls = $argv[1] ?? '';   // optional: path to the Butiama pro-forma (client data: not kept in git)
+if ($xls !== '' && is_file($xls)) {
+    $c = bg_doc_content('BUATIAMA - INV.xls', file_get_contents($xls));
+    $txt = $c['blocks'][0]['text'];
+    $t('.xls → cell text, date serials as dates', $c['kind'] === 'xls' && strpos($txt, 'B: 2027-01-24') !== false && strpos($txt, 'B: 2027-01-28') !== false
+        && strpos($txt, 'F: 1088') !== false && strpos($txt, 'Number of Nights: | B: 4') !== false, $txt);
+} else {
+    echo "skip .xls file test (pass the Butiama BUATIAMA - INV.xls path as argument)\n";
+}
+$err = '';
+try { bg_doc_content('broken.xls', str_repeat("\0", 4096)); } catch (RuntimeException $x) { $err = $x->getMessage(); }
+$t('broken .xls → save-as-PDF message', strpos($err, 'Excel .xls could not be read') === 0 && strpos($err, 'save it as PDF and re-run') !== false, $err);
+$res = bg_evaluate($snap($base), [['rel_path' => 'invoices/BUATIAMA - INV.xls', 'status' => 'error', 'error' => $err, 'data' => []], $okFlight]);
+$miss = array_values(array_filter($res['findings'], fn($f) => $f['issue'] === 'stay_missing'))[0]['text'] ?? '';
+$html = bg_report_html(['id' => 1], $snap($base), $res, ['finished_at' => '2026-11-14 10:00:00']);
+$t('unreadable .xls → Documents not read (before Blocking), missing text names it', strpos($html, '<h2>Documents not read</h2>') !== false
+    && strpos($html, '<h2>Documents not read</h2>') < strpos($html, '<h2>Blocking') && strpos($miss, 'BUATIAMA - INV.xls') !== false, [$miss]);
 
 echo $fail ? "\n$fail FAILED\n" : "\nALL PASS\n";
 exit($fail ? 1 : 0);

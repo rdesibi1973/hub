@@ -487,7 +487,7 @@ function bg_deposit_paid(array $ds): bool {
 // ── Document → AI content blocks ─────────────────────────────────────────────
 
 /**
- * Content blocks for one evidence file. PDF / images as document / image blocks; .docx, .xlsx, .eml (+ its PDF /
+ * Content blocks for one evidence file. PDF / images as document / image blocks; .docx, .xlsx / .xlsm / .xls, .eml (+ its PDF /
  * image attachments, passport-named ones skipped), .txt / .html as text; .msg best effort.
  * → ['blocks' => [...], 'kind' => ext, 'est_tokens' => n]. @throws RuntimeException (unsupported / unreadable)
  */
@@ -503,9 +503,11 @@ function bg_doc_content(string $name, string $bytes): array {
         $text = bg_docx_text($bytes);
         return ['blocks' => [['type' => 'text', 'text' => $text]], 'kind' => 'docx', 'est_tokens' => (int)ceil(strlen($text) / 3.5)];
     }
-    if ($ext === 'xlsx') {
-        $text = bg_xlsx_text($bytes);
-        return ['blocks' => [['type' => 'text', 'text' => $text]], 'kind' => 'xlsx', 'est_tokens' => (int)ceil(strlen($text) / 3.5)];
+    if (in_array($ext, ['xlsx', 'xlsm', 'xls'], true)) {
+        // .xls that is really a zip (an .xlsx renamed) is read as .xlsx; the binary .xls (BIFF8: Butiama Beach) by xls_reader.php.
+        $zip = substr($bytes, 0, 2) === 'PK';
+        $text = ($ext !== 'xls' || $zip) ? bg_xlsx_text($bytes) : bg_xls_text($bytes);
+        return ['blocks' => [['type' => 'text', 'text' => $text]], 'kind' => $ext, 'est_tokens' => (int)ceil(strlen($text) / 3.5)];
     }
     if (in_array($ext, ['txt', 'csv', 'htm', 'html'], true)) {
         $text = mb_substr(bg_plain($bytes, $ext !== 'txt' && $ext !== 'csv'), 0, 60000);
@@ -579,6 +581,34 @@ function bg_xlsx_text(string $bytes): string {
     $text = implode("\n", $out);
     if (trim($text) === '') throw new RuntimeException('Excel file is empty or unreadable: save it as PDF.');
     return mb_substr($text, 0, 60000);
+}
+
+/** Old binary Excel (.xls): cell text row by row, date cells as YYYY-MM-DD; passport numbers / DOB stripped before the AI. */
+function bg_xls_text(string $bytes): string {
+    require_once __DIR__ . '/xls_reader.php';
+    return bg_scrub(xls_text($bytes));
+}
+
+/**
+ * booking_check (Agent API): the old binary .xls evidence files (not in old/) get `text` = what the gate's AI reads
+ * (bg_doc_content: same reader, same stripping), or `read_error` with the save-as-PDF hint. Cowork cannot open .xls.
+ */
+function bg_evidence_xls_text(array &$res): void {
+    $token = null;
+    foreach ($res['evidence'] as &$e) {
+        if ($e['ext'] !== 'xls' || $e['old']) continue;
+        $base = $e['scope'] === 'group' ? $res['group_folder'] : $res['folder'];
+        try {
+            if ((int)$e['size'] > BG_MAX_DOC_BYTES) throw new RuntimeException('file larger than ' . (BG_MAX_DOC_BYTES >> 20) . ' MB');
+            $token = $token ?? dropbox_get_access_token();
+            $dl = calc_dbx_download($token, rtrim($base, '/') . '/' . $e['path']);
+            if ($dl === null) throw new RuntimeException('file no longer in Dropbox');
+            $e['text'] = bg_doc_content($e['name'], $dl['bytes'])['blocks'][0]['text'];
+        } catch (Throwable $x) {
+            $e['read_error'] = $x->getMessage();
+        }
+    }
+    unset($e);
 }
 
 /** .eml: headers + body text (quoted thread included) and up to 5 PDF / image attachments as blocks. */
@@ -989,12 +1019,14 @@ function bg_tl_cost(float $cost, array $pp): array {
  *    'notes' => [..], 'unmatched' => [..], 'ignored' => [..], 'blocking' => n, 'warnings' => n, 'passed' => bool]
  */
 function bg_evaluate(array $snap, array $docs, ?callable $alias = null): array {
-    $res = ['services' => [], 'findings' => [], 'notes' => [], 'unmatched' => [], 'ignored' => [], 'blocking' => 0, 'warnings' => 0, 'passed' => false];
+    $res = ['services' => [], 'findings' => [], 'notes' => [], 'unmatched' => [], 'ignored' => [], 'not_read' => [], 'blocking' => 0, 'warnings' => 0, 'passed' => false];
     $unreadable = 0;
     $add = function (string $issue, string $text, array $svc = [], array $extra = []) use (&$res, &$unreadable) {
         $def = BG_ISSUES[$issue];
         if ($unreadable && in_array($issue, ['stay_missing', 'flight_missing', 'activity_missing', 'transfer_missing'], true)) {
-            $text .= ' (' . $unreadable . ' document(s) could not be read — see the warnings: it may be one of them.)';
+            // The real cause first: the document may be there but not read (Butiama .xls, 14 Nov 2026).
+            $names = implode(', ', array_map(fn($n) => basename($n['file']), $res['not_read']));
+            $text .= ' Not read: ' . $names . ' — it may be the document for this service: see "Documents not read", fix it and re-run.';
         }
         $res['findings'][] = ['issue' => $issue, 'blocking' => $def[0], 'audience' => $def[1], 'label' => $def[2], 'text' => $text,
                               'service_date' => $svc['check_in'] ?? $svc['date'] ?? null,
@@ -1024,10 +1056,13 @@ function bg_evaluate(array $snap, array $docs, ?callable $alias = null): array {
     foreach ($docs as $di => $d) {
         if (($d['status'] ?? '') === 'error') {
             $unreadable++;
-            $hub = (bool)preg_match('/AI API error|AI request failed|Unexpected AI response|declined/i', (string)($d['error'] ?? ''));
+            $err = (string)($d['error'] ?? 'error');
+            $hub = (bool)preg_match('/AI API error|AI request failed|Unexpected AI response|declined/i', $err);
+            $hint = $hub ? 'Hub-side reading error: re-run the check; if it fails again tell Roberto.'
+                         : (stripos($err, 'save it as PDF') !== false ? 'Put the PDF in invoices/ (the original in old/).' : 'Open it and save it as PDF in invoices/, then re-run.');
+            $res['not_read'][] = ['file' => $d['rel_path'], 'why' => $err, 'hint' => $hint];
             $res['findings'][] = ['issue' => 'doc_unreadable', 'blocking' => false, 'audience' => 'booking', 'label' => BG_ISSUES['doc_unreadable'][2],
-                                  'text' => $d['rel_path'] . ' could not be read (' . ($d['error'] ?? 'error') . ').'
-                                          . ($hub ? ' Hub-side reading error: re-run the check; if it fails again tell Roberto.' : ' Open it and save it as PDF in invoices/.'),
+                                  'text' => $d['rel_path'] . ' could not be read (' . $err . '). ' . $hint,
                                   'service_date' => null, 'service' => basename($d['rel_path']), 'service_type' => null, 'source_file' => $d['rel_path'], 'svc_idx' => null];
             continue;
         }
@@ -1608,6 +1643,11 @@ function bg_report_html(array $r, array $snap, array $res, array $run): string {
     $h .= '<div class="boxes">';
     foreach ($cnt as $k => $n) $h .= '<span class="box" style="color:' . $badge[$k][0] . ';background:' . $badge[$k][1] . '">' . $k . ' ' . $n . '</span>';
     $h .= '</div><p><b>' . $e($sentence) . '</b></p>';
+    if (!empty($res['not_read'])) {   // first: a service may be "missing" only because its document was not read
+        $h .= '<h2>Documents not read</h2><ul>';
+        foreach ($res['not_read'] as $n) $h .= '<li><b>' . $e($n['file']) . '</b> — ' . $e($n['why']) . ' ' . $e($n['hint']) . '</li>';
+        $h .= '</ul>';
+    }
     $bl = array_values(array_filter($res['findings'], fn($f) => $f['blocking']));
     if ($bl) {
         $h .= '<h2>Blocking — what to do</h2><ul>';

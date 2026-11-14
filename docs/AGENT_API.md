@@ -324,7 +324,9 @@ Read-only, for the Cowork skill `booking-check` (verify a booked safari). `reque
   activities organised by the safari guide — town / city tour, Iraqw and Maasai bomas, Mto wa Mbu, Materuni, Lake Eyasi
   (Hadzabe, Datoga), Lake Natron, Napuro, Lake Duluti walk / canoe (not transfers) — skipped; `activity.own` = run by our lodges, e.g. "Natural Walk" at Marera);
 - `evidence[]` `{scope own|group, path, name, ext, size, old}`: every file in `invoices/` and `bookings/`
-  (any format; `old` = inside an "old…" sub-folder);
+  (any format; `old` = inside an "old…" sub-folder). Old binary Excel `.xls` (not in old/; Butiama Beach pro-formas) also
+  carry `text` — the cell text the booking gate reads ("Row N | A: … | B: …", date cells as YYYY-MM-DD, passport / DOB
+  stripped) — or `read_error` ("Excel .xls could not be read (…) — save it as PDF and re-run.");
 - `summary`: services per type, `evidence_files`, `stays_without_invoice_or_checked`.
 The INVOICE amount sits on the first row of a block, and one invoice may cover several services
 ("ARUSHA, MARERA & KIFARU - SV", one transfer mail for all transfers): match by content, not by name.
@@ -367,6 +369,11 @@ to that user. Documents already read (same Dropbox `content_hash`) are never sen
   A refused attempt with no usable run starts one. Later moves (DEPOSIT → BALANCE → PAID) are not gated. Groups are not gated (v1).
 - **Enforced** since 13 Nov 2026 (Roberto: block from day one). `define('BOOKING_GATE_ENFORCE', false)` in includes/config.php
   = shadow mode: runs, reports and lines work, the status change is allowed with a warning. **Force unlock**: Roberto (`rdesibi`) only, on the request page, reason required; not through the API.
+- **Formats read**: PDF, images (jpg / png / gif / webp), Word `.docx`, Excel `.xlsx` / `.xlsm` / `.xls` (old binary Excel
+  97–2019, `xls_reader.php`: cell text, date cells as YYYY-MM-DD), `.eml` (+ up to 5 PDF / image attachments), `.txt` / `.csv` /
+  `.html`, Outlook `.msg` best effort. Anything else, or a file that cannot be read (damaged, password-protected, Excel 95 …):
+  status `error`, warning `doc_unreadable` and the report section **Documents not read** (file, reason, "save it as PDF" hint);
+  a service with no other document stays `*_missing` (blocking) and its text names the file not read.
 - Config: `ANTHROPIC_API_KEY`, optional `ANTHROPIC_MODEL_EXTRACT` (default the ITI model). Calls go through `iti_ai_call()`
   (action `booking_gate`): the Hub's monthly AI limit applies (ITI → Settings → AI), not the person's own limit.
 
