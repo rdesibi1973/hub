@@ -113,7 +113,7 @@ function iti_ck_program_data(PDO $db, array $p, int $requestId, string $clientFo
         $lodge = trim((string)($d['end_lodge_name'] ?? '')) ?: trim((string)($d['end_lodge_custom'] ?? ''));
         if ($lodge === '') continue;
         $night = $date($d);
-        $room  = trim((string)($d['room_type'] ?? ''));
+        $room  = iti_room_label($d['room_category'] ?? '', $d['room_type'] ?? '');   // "Junior Suite (1 DBL)"
         $basis = iti_ck_basis($d, $days[$i + 1]);
         $k = count($stays) - 1;
         if ($k >= 0 && $stays[$k]['lodge'] === $lodge && $stays[$k]['room'] === $room && $stays[$k]['end'] === $night) {

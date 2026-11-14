@@ -9,6 +9,7 @@
  */
 require_once __DIR__ . '/iti_photos.php';
 require_once __DIR__ . '/iti_terms.php';   // iti_placeholder_sql(): the website blurb counts as a missing description
+require_once __DIR__ . '/iti_rooms.php';   // a lodge's room categories (room_categories)
 
 const ITI_CS_LANGS = ['en', 'it', 'fr', 'es', 'de'];
 const ITI_CS_LODGE_MAX_PHOTOS = 12;
@@ -86,6 +87,7 @@ function iti_cs_lodge_out(array $r, bool $full = false): array {
         'latitude' => $r['latitude'] !== null ? (float)$r['latitude'] : null,
         'longitude' => $r['longitude'] !== null ? (float)$r['longitude'] : null,
         'photos' => iti_photos_decode($r['photos'] ?? null),
+        'room_categories' => iti_room_categories_list($r['room_categories'] ?? ''),   // beach hotels, Meliá…: suggested on the days
         'description_langs' => [], 'active' => (bool)$r['is_active'],
         'needs_completion' => !empty($r['needs_completion']),   // stub made by iti_import_program
     ];
@@ -281,10 +283,14 @@ function iti_cs_create_lodge(PDO $db, array $f, bool $go): array {
     foreach (ITI_CS_LANGS as $l) $row['description_' . $l] = '';
     $extra = array_diff_key($f, array_flip(['name', 'destination_id', 'category', 'lodge_type']));
     if ($extra) {
-        $allowed = array_merge(iti_cs_editable('lodge'), ['latitude', 'longitude']);
+        $allowed = array_merge(iti_cs_editable('lodge'), ['latitude', 'longitude', 'room_categories']);
         $bad = array_values(array_diff(array_keys($extra), $allowed));
         if ($bad) throw new InvalidArgumentException('Not settable: ' . implode(', ', $bad));
-        foreach ($extra as $k => $v) $row[$k] = ($k === 'latitude' || $k === 'longitude') ? ($v === '' || $v === null ? null : round((float)$v, 6)) : trim((string)$v);
+        if (array_key_exists('room_categories', $extra)) iti_rooms_schema($db);
+        foreach ($extra as $k => $v) {
+            if ($k === 'room_categories') { $row[$k] = iti_room_categories_text($v); continue; }   // list or one per line
+            $row[$k] = ($k === 'latitude' || $k === 'longitude') ? ($v === '' || $v === null ? null : round((float)$v, 6)) : trim((string)$v);
+        }
     }
     $cols = iti_table_columns_cs($db, 'iti_lodges');
     $row = array_intersect_key($row, array_flip($cols));
@@ -311,10 +317,11 @@ function iti_table_columns_cs(PDO $db, string $table): array {
 function iti_cs_update(PDO $db, string $kind, int $id, array $fields, bool $go): array {
     $isLodge = $kind === 'lodge';
     $isAct = $kind === 'activity';
+    if ($isLodge && array_key_exists('room_categories', $fields)) iti_rooms_schema($db);   // column added once (DDL, before any write)
     $row = $isLodge ? iti_cs_lodge_row($db, $id) : ($isAct ? iti_cs_activity_row($db, $id) : iti_cs_destination_row($db, $id));
     if (!$row) throw new InvalidArgumentException(($isLodge ? 'Lodge ' : ($isAct ? 'Activity ' : 'Destination ')) . $id . ' not found');
     $allowed = $isAct ? iti_cs_editable($kind)
-             : array_merge(iti_cs_editable($kind), ['latitude', 'longitude'], $isLodge ? ['destination_id', 'category', 'lodge_type'] : []);
+             : array_merge(iti_cs_editable($kind), ['latitude', 'longitude'], $isLodge ? ['destination_id', 'category', 'lodge_type', 'room_categories'] : []);
     // A stub made by iti_import_program: 0 once photos / texts are done (only where the column exists).
     if (!$isAct && array_key_exists('needs_completion', $row)) $allowed[] = 'needs_completion';
     $unknown = array_values(array_diff(array_keys($fields), $allowed));
@@ -344,6 +351,9 @@ function iti_cs_update(PDO $db, string $kind, int $id, array $fields, bool $go):
             $ok = $k === 'category' ? ['budget', 'mid', 'luxury', 'ultra_luxury'] : ['lodge', 'tented_camp', 'hotel', 'mobile_camp', 'house'];
             if (!in_array($v, $ok, true)) throw new InvalidArgumentException($k . ': ' . implode('|', $ok));
             $cur = (string)($row[$k] ?? '');
+        } elseif ($k === 'room_categories') {   // the whole list: array or one per line; [] / "" clears
+            $v = iti_room_categories_text($v);
+            $cur = iti_room_categories_text($row[$k] ?? '');
         } elseif ($k === 'needs_completion') {
             $v = empty($v) ? 0 : 1;
             $cur = (int)$row[$k];

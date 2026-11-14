@@ -233,6 +233,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $db->prepare('UPDATE iti_program_days SET room_type=? WHERE id=?')
                        ->execute([($end_id !== null || $end_txt !== null) && $room !== '' ? $room : null, $day_id]);
                 }
+                // Room category of the night ("Junior Suite Sea View", column from iti_rooms_schema()); only with an overnight.
+                if (isset($_POST['room_category'])) {
+                    $rcat = mb_substr(trim(preg_replace('/\s+/u', ' ', $_POST['room_category'])), 0, ITI_ROOM_CATEGORY_MAX);
+                    $db->prepare('UPDATE iti_program_days SET room_category=? WHERE id=?')
+                       ->execute([($end_id !== null || $end_txt !== null) && $rcat !== '' ? $rcat : null, $day_id]);
+                }
 
                 // ── Transfers: re-insert from array (unchanged free texts keep their translations) ──
                 // transfer_route_id[] (same rows): "<route>" / "<route>:g" = from the transfer list, '' = free text.
@@ -732,6 +738,9 @@ $_rooms = [
     'de' => ['Doppelzimmer', 'Zweibettzimmer', 'Einzelzimmer', 'Dreibettzimmer', 'Familienzimmer', 'Suite'],
 ];
 $room_suggestions = array_values(array_unique(array_merge($room_suggestions, $_rooms[$program['display_language'] ?? 'en'] ?? $_rooms['en'])));
+// Room categories of each lodge (Lodges page), offered in the day's Room category for the chosen lodge.
+$room_cat_map = [];
+foreach ($lodges_grouped as $_ls) foreach ($_ls as $_l) if ($_rc = iti_room_categories_list($_l['room_categories'] ?? '')) $room_cat_map[(int)$_l['id']] = $_rc;
 // A personal programme is for one client in one language: only that language is shown
 // (the other languages are posted back unchanged in hidden fields).
 $one_lang   = $program['program_type'] === 'personal' && in_array($program['display_language'] ?? '', ITI_LANGS, true) ? $program['display_language'] : null;
@@ -1497,6 +1506,18 @@ include __DIR__ . '/../../includes/layout_header.php';
           <datalist id="room-type-list">
             <?php foreach ($room_suggestions as $_r): ?><option value="<?= h($_r) ?>"><?php endforeach; ?>
           </datalist>
+        </div>
+        <div style="margin-top:10px;max-width:480px;">
+          <label style="font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--grey-dk);display:block;margin-bottom:4px;">Room category</label>
+          <?php $_rcl = 'room-cat-list-' . (int)$current_day_data['id']; ?>
+          <input type="text" name="room_category" class="room-cat-input" maxlength="<?= ITI_ROOM_CATEGORY_MAX ?>" list="<?= $_rcl ?>" autocomplete="off"
+                 value="<?= h($current_day_data['room_category'] ?? '') ?>"
+                 placeholder="e.g. Junior Suite Sea View — beach hotels, Meliá…; empty = not shown"
+                 style="width:100%;padding:7px 10px;border:1.5px solid var(--grey-lt);border-radius:6px;font-size:.85rem;">
+          <datalist id="<?= $_rcl ?>">
+            <?php foreach ($room_cat_map[(int)($current_day_data['end_lodge_id'] ?? 0)] ?? [] as $_r): ?><option value="<?= h($_r) ?>"><?php endforeach; ?>
+          </datalist>
+          <div style="font-size:.72rem;color:var(--grey-mid);margin-top:3px;">Printed as written, before the room: "Junior Suite Sea View (1 Double Room)". The list comes from the lodge (Lodges page).</div>
         </div>
         </div>
       </div>
@@ -2344,6 +2365,22 @@ document.addEventListener('keydown', function(e) {
         });
     };
     document.head.appendChild(script);
+})();
+</script>
+<script>
+// Room category: the suggestions follow the lodge chosen in the same day form (it may change without a reload).
+(function () {
+    var cats = <?= json_encode((object)$room_cat_map, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_UNESCAPED_UNICODE) ?>;
+    document.querySelectorAll('.room-cat-input').forEach(function (inp) {
+        inp.addEventListener('focus', function () {
+            var form = inp.form, list = document.getElementById(inp.getAttribute('list'));
+            if (!form || !list) return;
+            var lid = form.querySelector('input[name="end_lodge_id"]');
+            var opts = cats[lid ? lid.value : ''] || [];
+            list.innerHTML = '';
+            opts.forEach(function (c) { var o = document.createElement('option'); o.value = c; list.appendChild(o); });
+        });
+    });
 })();
 </script>
 <style>

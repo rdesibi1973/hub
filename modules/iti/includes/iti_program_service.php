@@ -243,7 +243,7 @@ function iti_ps_program_out(PDO $db, int $id, string $lang = ''): array {
     $days = [];
     foreach ($D['days'] as $d) {
         $days[] = ['day' => $d['n'], 'date' => $d['date'] ?? null, 'title' => $d['title'], 'destination' => $d['dest'], 'lodge' => $d['lodge'], 'room' => $d['room'],
-                   'meals' => $d['meals'], 'flights' => $d['flights'] ?? [], 'transfers' => $d['transfers'], 'activities' => $d['activities'],
+                   'room_category' => $d['room_category'] ?? '', 'meals' => $d['meals'], 'flights' => $d['flights'] ?? [], 'transfers' => $d['transfers'], 'activities' => $d['activities'],
                    'narrative' => $d['narrative'], 'lodge_photos' => count($d['lodge_photos']), 'dest_photo' => $d['dest_photo'] !== ''];
     }
     return [
@@ -629,7 +629,7 @@ function iti_ps_calc_plan(PDO $db, int $rid, array $in): array {
     foreach ($plan['days'] as $d) {
         $nights[] = ['date' => $d['date'] ?? null, 'label' => $d['label'] ?? '', 'hotel' => $d['hotel_text'] ?? '',
                      'lodge' => $d['lodge_name'] ?? ($d['lodge_custom'] ?? null), 'lodge_state' => $d['lodge_state'] ?? null,
-                     'meal' => $d['meal'] ?? null,
+                     'meal' => $d['meal'] ?? null, 'room_category' => $d['room_category'] ?? null,
                      'activities' => array_map(function ($a) { return $a['text'] . ' [' . $a['state'] . ']'; }, $d['acts'] ?? []),
                      'from_sample_day' => $d['sample_index'] !== null ? $d['sample_index'] + 1 : null, 'flags' => $d['flags'] ?? []];
     }

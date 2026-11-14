@@ -108,7 +108,7 @@ function voucher_model_from_program(PDO $db, int $pid): array
         $custom = trim((string)($d['end_lodge_custom'] ?? ''));
         $own = !empty($d['own_arrangement']) || strcasecmp($custom, 'Own Arrangement') === 0;
         $key = !empty($d['end_lodge_id']) ? 'L' . (int)$d['end_lodge_id'] : ($custom !== '' && !$own ? 'C' . strtolower($custom) : null);
-        $room = voucher_room_label(trim((string)($d['room_type'] ?? '')) ?: trim((string)($booking['room_config'] ?? '')));
+        $room = voucher_room_label(iti_room_label($d['room_category'] ?? '', trim((string)($d['room_type'] ?? '')) ?: trim((string)($booking['room_config'] ?? ''))));
         $n = count($accommodations) - 1;
         if ($key === null || $own) { $prevKey = null; continue; }
         if ($key === $prevKey && $accommodations[$n]['room'] === $room) {

@@ -799,12 +799,15 @@ its own dedicated T&C (edit those in the Hub).
 
 #### `iti_update_day` (POST)
 `program_id`, `day` (number), `fields`: `day_title_<lang>`, `narrative_<lang>`, `end_lodge_id` **or** `end_lodge`
-(name, must match one lodge), `end_lodge_custom`, `room_type`, `destination_id`, `destination_custom`, `meal_breakfast` /
+(name, must match one lodge), `end_lodge_custom`, `room_type`, `room_category`, `destination_id`, `destination_custom`, `meal_breakfast` /
 `meal_lunch` / `meal_dinner` (0/1) → `changes`. Dry-run unless confirm.
 
 #### Day items (used by `iti_create_personal` `days[]`, `iti_set_days`, `iti_add_day`, `iti_update_day`)
 Every key optional: `day_title_<lang>`, `narrative_<lang>`, `end_lodge_id` | `end_lodge` (name), `end_lodge_custom`,
-`room_type` (free text in the program language, e.g. "1 camera matrimoniale + 1 tripla"; shown next to the lodge, ignored with no overnight), `destination_id` | `destination` (name or code), `destination_custom`, `start_lodge_id`, `start_destination_id`,
+`room_type` (free text in the program language, e.g. "1 camera matrimoniale + 1 tripla"; shown next to the lodge, ignored with no overnight),
+`room_category` (Nov 2026: the hotel's room category as the hotel names it, e.g. "Junior Suite Sea View" — beach hotels, Meliá…;
+pick from the lodge's `room_categories` when it has them; printed as written in every language, before the room type:
+"Junior Suite Sea View (1 camera matrimoniale)"; ignored with no overnight; not kept by `iti_save_as_sample`), `destination_id` | `destination` (name or code), `destination_custom`, `start_lodge_id`, `start_destination_id`,
 `start_custom`, `transfer_route_id`, `transfer_custom`, `meal_breakfast` / `meal_lunch` / `meal_dinner` /
 `meal_all_inclusive` (0/1), and three lists — each one given **replaces** the day's list (`[]` = none):
 - `transfers`: **preferred** `[{transfer_route_id, game_drive?: 0|1}]` — a road transfer from the catalogue (`iti_transfer_routes`),
@@ -976,7 +979,7 @@ who generates it stays in `generated_by`, so someone can finalise programs for o
 
 Plan: `calc` (file, files = every Calc of the folder, rev, pax, sheet, sheets = pickable sheets, warnings, days, nights,
 price_options [{sheet, pax_total, pax, price_to_customer, nights, same_itinerary}], price_table = the rows the programme
-will get), `sample`, `nights[]` (date, label, hotel text → lodge, state, meal, activities,
+will get), `sample`, `nights[]` (date, label, hotel text → lodge, state, meal, room_category, activities,
 from_sample_day, flags), `unmapped` {lodge|activity|route: {norm: text}}, `blocking`, `existing_finals` (id, calc_file,
 superseded_by). Several Calc files (e.g. the same safari with other lodges) → pass `file`; each file has its own final.
 GRP member: the Calc is found in the group folder when the client folder has none, read on the client's sheet (see `read_calc`).
@@ -1001,6 +1004,11 @@ from Excel Calc"):
   December–March, a camp that moves itself all but April, May, November. A night in a month the camp is closed goes to
   its twin when the twin is open: "Pure Migration" mapped once → Mara Pure Migration Camp in July, Ndutu Pure Migration
   Camp in January, with a "Season rule" flag; otherwise the night is flagged "closed in <month>". The lodge suggestion for an unmapped hotel text follows the same rule.
+- **Room category** (Nov 2026): the words after the hotel name in the Calc hotel text (meal suffix removed) — "Melia Zanzibar
+  Junior Suite Sea View (AI)" → "Junior Suite Sea View". Matched to the lodge's `room_categories` (exact, or close to exactly
+  one: "Garden View" → "Garden View Room"); words that name a room but match none of them are kept as typed and the night is
+  flagged "Room category … not in the lodge's list: check it". No room word left = no category. Never taken from the sample
+  day, nor for a migration camp swapped to its twin.
 - **Activities:** a Calc activity of the same kind as one already on the sample day (a common word of 6+ letters, e.g.
   "camminata"; game drives excluded) replaces it instead of being added next to it.
 - **Prices:** the price table is the price to the customer from the Calc, per person for each pax type of the Calc —
@@ -1040,7 +1048,8 @@ day header and program cover (destination).
 #### `iti_lodges` (GET)
 `q?` (lodge / destination name), `destination?` (id, name or code), `active?` (`1` default, `0`, `all`),
 `missing?` (`photos` | `coords` | `website` | `description_<lang>` | `placeholder` | `stub` = made by `iti_import_program`, to complete), `limit?` ≤ 300 →
-`lodges[]` `{id, name, destination_id, destination, category, lodge_type, type, website, latitude, longitude, photos[], description_langs[], active, needs_completion}`.
+`lodges[]` `{id, name, destination_id, destination, category, lodge_type, type, website, latitude, longitude, photos[], room_categories[], description_langs[], active, needs_completion}`.
+`room_categories` = the room categories the hotel sells (beach hotels, Meliá…; `[]` for most lodges), offered as the day's `room_category`.
 `lodge_type` is the name used by `iti_create_lodge` / `iti_update_lodge`; `type` is the same value, kept for older callers.
 
 #### `iti_lodge` (GET)
@@ -1079,7 +1088,8 @@ Photos afterwards with `iti_lodge_photos`.
 #### `iti_update_lodge` / `iti_update_destination` (POST)
 `lodge_id` / `destination_id`, `fields` `{…}`. Lodge: `website, phone, emergency_phone, email, address,
 description_<lang>, latitude, longitude, destination_id, category` (`budget|mid|luxury|ultra_luxury`), `lodge_type`
-(`lodge|tented_camp|hotel|mobile_camp|house`). Destination: `name_<lang>, description_<lang>, region, latitude, longitude`.
+(`lodge|tented_camp|hotel|mobile_camp|house`), `room_categories` (the whole list: an array or one per line, ≤ 30 of
+≤ 100 characters, duplicates dropped; `[]` clears — also accepted by `iti_create_lodge`). Destination: `name_<lang>, description_<lang>, region, latitude, longitude`.
 Both: `needs_completion` (0 once an imported stub has its photos and texts).
 Returns `changes` `{field: {from, to}}` (only what differs). Dry-run unless `"confirm": true`.
 A lodge's name stays on the Lodges page — and so does its **season twin** (`season_twin_id`, "Same camp in the other

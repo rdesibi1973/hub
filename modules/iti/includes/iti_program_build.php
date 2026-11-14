@@ -9,6 +9,7 @@
  * Day item (iti_set_days / iti_add_day / iti_update_day), every key optional:
  *   day_title_<lang>, narrative_<lang>,
  *   end_lodge_id | end_lodge (name), end_lodge_custom, room_type ("1 Double + 1 Twin", shown with the lodge),
+ *   room_category ("Junior Suite Sea View", printed before room_type; see the lodge's room_categories),
  *   destination_id | destination (name or code), destination_custom,
  *   start_lodge_id, start_destination_id, start_custom, transfer_route_id, transfer_custom,
  *   meal_breakfast / meal_lunch / meal_dinner / meal_all_inclusive (0/1),
@@ -22,7 +23,7 @@
 /** Day columns an agent may set (limited to the live table). */
 function iti_pb_day_columns(): array {
     iti_ps_schema();   // room_type and the day-transfer columns, before the column list is cached (and before any transaction)
-    $c = ['end_lodge_id', 'end_lodge_custom', 'room_type', 'destination_id', 'destination_custom', 'start_lodge_id', 'start_destination_id',
+    $c = ['end_lodge_id', 'end_lodge_custom', 'room_type', 'room_category', 'destination_id', 'destination_custom', 'start_lodge_id', 'start_destination_id',
           'start_custom', 'transfer_route_id', 'transfer_custom', 'meal_breakfast', 'meal_lunch', 'meal_dinner', 'meal_all_inclusive'];
     foreach (ITI_PS_LANGS as $l) { $c[] = 'day_title_' . $l; $c[] = 'narrative_' . $l; }
     return array_values(array_intersect($c, iti_table_columns('iti_program_days')));
@@ -75,8 +76,8 @@ function iti_pb_day_item(PDO $db, array $f): array {
             $cols[$k] = empty($v) ? 0 : 1;
         } else {
             $v = trim((string)$v);
-            if ($k === 'room_type') $v = mb_substr($v, 0, 100);
-            $cols[$k] = ($v === '' && in_array($k, ['end_lodge_custom', 'room_type', 'destination_custom', 'start_custom', 'transfer_custom'], true)) ? null : $v;
+            if ($k === 'room_type' || $k === 'room_category') $v = mb_substr(preg_replace('/\s+/u', ' ', $v), 0, 100);
+            $cols[$k] = ($v === '' && in_array($k, ['end_lodge_custom', 'room_type', 'room_category', 'destination_custom', 'start_custom', 'transfer_custom'], true)) ? null : $v;
         }
     }
     if ($children['transfers'] !== null) {
@@ -567,8 +568,9 @@ function iti_pb_save_as_sample(PDO $db, int $pid, array $in, string $who, bool $
     $set = array_intersect_key($set, array_flip($cols));
     if (!$go) return ['from_program' => $pid, 'would_set' => $set];
     $id = iti_duplicate_program($pid, 'sample', $who, $set);
-    if (in_array('room_type', iti_table_columns('iti_program_days'), true)) {   // the client's rooms are not part of a sample
-        $db->prepare('UPDATE iti_program_days SET room_type = NULL WHERE program_id = ?')->execute([$id]);
+    // The client's rooms (configuration and category) are not part of a sample.
+    foreach (array_intersect(['room_type', 'room_category'], iti_table_columns('iti_program_days')) as $rc) {
+        $db->prepare('UPDATE iti_program_days SET `' . $rc . '` = NULL WHERE program_id = ?')->execute([$id]);
     }
     return ['from_program' => $pid, 'sample_id' => $id];
 }

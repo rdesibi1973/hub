@@ -446,7 +446,7 @@ include __DIR__ . '/../../includes/layout_header.php';
         <td style="font-size:.8rem;">
           <?php if ($d['hotel_text'] !== ''): ?>
             <code><?= h($d['hotel_text']) ?></code> <?= $badge($d['lodge_state']) ?>
-            <?php if ($d['lodge_name']): ?><br>→ <strong><?= h($d['lodge_name']) ?></strong><?= $d['meal'] ? ' · ' . h($d['meal']) : '' ?><?php endif; ?>
+            <?php if ($d['lodge_name']): ?><br>→ <strong><?= h($d['lodge_name']) ?></strong><?= $d['meal'] ? ' · ' . h($d['meal']) : '' ?><?= !empty($d['room_category']) ? ' · ' . h($d['room_category']) : '' ?><?php endif; ?>
           <?php else: ?><span style="color:var(--grey-mid);"><?= $d['last'] ? 'departure' : '—' ?></span><?php endif; ?>
         </td>
         <td style="font-size:.8rem;">

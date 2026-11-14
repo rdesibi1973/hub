@@ -45,6 +45,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit) {
     $seasonMonths = array_values(array_unique(array_filter(array_map('intval', (array)($_POST['season_months'] ?? [])),
                                                             fn($m) => $m >= 1 && $m <= 12)));
     $seasonMonths = $seasonMonths ? implode(',', $seasonMonths) : null;
+    // Room categories sold by the hotel (one per line): suggested on the program days, matched to the Calc text.
+    $roomCats = iti_room_categories_text($_POST['room_categories'] ?? '');
 
     if ($fields['name'] === '' || !$fields['destination_id']) {
         iti_flash_set('error', 'Name and Destination are required.');
@@ -81,6 +83,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit) {
         $newLodge = (int)$db->lastInsertId();
         iti_set_season_twin($newLodge, (int)($_POST['season_twin_id'] ?? 0));
         $db->prepare('UPDATE iti_lodges SET season_months = ? WHERE id = ?')->execute([$seasonMonths, $newLodge]);
+        $db->prepare('UPDATE iti_lodges SET room_categories = ? WHERE id = ?')->execute([$roomCats, $newLodge]);
         iti_flash_set($photo_errors ? 'error' : 'success', '"' . $fields['name'] . '" created.' . ($photo_errors ? ' Photos: ' . implode(' ', $photo_errors) : ''));
         iti_redirect('lodges.php');
 
@@ -99,6 +102,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit) {
         ]);
         iti_set_season_twin($id, (int)($_POST['season_twin_id'] ?? 0));
         $db->prepare('UPDATE iti_lodges SET season_months = ? WHERE id = ?')->execute([$seasonMonths, $id]);
+        $db->prepare('UPDATE iti_lodges SET room_categories = ? WHERE id = ?')->execute([$roomCats, $id]);
         if ($photo_errors) {
             iti_flash_set('error', 'Lodge saved, but some photos were not: ' . implode(' ', $photo_errors));
             iti_redirect("lodges.php?action=edit&id={$id}");
@@ -217,6 +221,11 @@ include __DIR__ . '/../../includes/layout_header.php';
             <input type="checkbox" name="season_months[]" value="<?= $mn ?>" <?= in_array($mn, $openM, true) ? 'checked' : '' ?>> <?= $ml ?></label>
         <?php endforeach; ?>
       </div>
+    </div>
+    <div class="form-group full">
+      <label>Room categories <span style="font-weight:400;text-transform:none;color:var(--grey-mid)">one per line, as the hotel names them — beach hotels, Meliá… leave empty if the lodge has one room type</span></label>
+      <textarea name="room_categories" rows="4" style="max-width:520px;" placeholder="Garden View Room&#10;Junior Suite Sea View&#10;Beach Villa"><?= h(implode("\n", iti_room_categories_list($row['room_categories'] ?? ''))) ?></textarea>
+      <div style="font-size:.75rem;color:var(--grey-mid);margin-top:3px;">Suggested in the Room category of the program days; the program from Calc matches the hotel text to them ("Melia Zanzibar Garden View" → Garden View Room). Printed as written, in every language.</div>
     </div>
   </div>
 
@@ -390,6 +399,9 @@ include __DIR__ . '/../../includes/layout_header.php';
           <?php endif; ?>
           <?php if (!empty($l['season_months'])): ?>
             <div style="font-size:.7rem;color:var(--grey-mid);" title="Open months">open: <?= h(implode(' ', array_map(fn($m) => date('M', mktime(0, 0, 0, (int)$m, 1)), explode(',', $l['season_months'])))) ?></div>
+          <?php endif; ?>
+          <?php if ($_rc = iti_room_categories_list($l['room_categories'] ?? '')): ?>
+            <div style="font-size:.7rem;color:var(--grey-mid);" title="<?= h(implode("\n", $_rc)) ?>">rooms: <?= count($_rc) ?> categor<?= count($_rc) === 1 ? 'y' : 'ies' ?></div>
           <?php endif; ?></td>
         <td><span class="badge <?= $l['is_active']?'status-booked':'status-cancelled' ?>"><?= $l['is_active']?'Active':'Inactive' ?></span></td>
         <td>

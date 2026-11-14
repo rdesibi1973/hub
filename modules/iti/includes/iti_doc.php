@@ -346,7 +346,7 @@ function iti_doc_tip_note(PDO $db, array $p, array $days, string $lang): array {
  */
 function iti_doc_data(int $id, string $lang): ?array {
     $db = db();
-    iti_ensure_doc_columns();   // room_type, pax_teens, is_beach_stay (also from the public page)
+    iti_ensure_doc_columns();   // room_type, room_category, pax_teens, is_beach_stay (also from the public page)
     $p = iti_get_program($id);
     if (!$p) return null;
     $T = iti_doc_labels($lang);   // + the cover kicker, once the destinations give the country (below)
@@ -493,7 +493,9 @@ function iti_doc_data(int $id, string $lang): ?array {
             'lodge_desc' => $lodgeDesc,
             'lodge_photos' => $lodgePhotos,
             'lodge_url'  => $lodgeUrl,
-            'room'       => $lodgeName !== '' ? trim((string)($d['room_type'] ?? '')) : '',   // "1 Double + 1 Twin", free text
+            // "Junior Suite Sea View (1 Double + 1 Twin)": category and configuration, both free text (iti_rooms.php)
+            'room'       => $lodgeName !== '' ? iti_room_label($d['room_category'] ?? '', $d['room_type'] ?? '') : '',
+            'room_category' => $lodgeName !== '' ? trim((string)($d['room_category'] ?? '')) : '',
             'beach'      => $beach,
             'activities' => $acts,
             'tip_note'   => '',            // set below on the last safari day

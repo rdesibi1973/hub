@@ -162,11 +162,11 @@ function iti_final_suggest_sample(PDO $db, array $samples, string $code, array $
     return array('id' => $ids[0], 'why' => implode(', ', $best[1]));
 }
 
-/** A lodge with its destination and coordinates (cached), or null. */
+/** A lodge with its destination, coordinates and room categories (cached), or null. */
 function iti_final_lodge_info(PDO $db, int $id) {
     static $cache = array();
     if (!isset($cache[$id])) {
-        $st = $db->prepare('SELECT l.id, l.name, l.destination_id, l.latitude, l.longitude, d.name_en AS dest_name FROM iti_lodges l
+        $st = $db->prepare('SELECT l.*, d.name_en AS dest_name FROM iti_lodges l
                              LEFT JOIN iti_destinations d ON d.id = l.destination_id WHERE l.id = ?');
         $st->execute(array($id));
         $cache[$id] = $st->fetch(PDO::FETCH_ASSOC) ?: null;
@@ -796,7 +796,7 @@ function iti_final_plan(PDO $db, array $calc, int $sampleId): array {
         $d = array('i' => $i, 'date' => $cd['date'], 'label' => $cd['label'], 'hotel_text' => $cd['hotel_text'],
                    'invoice' => $cd['invoice'], 'checked' => $cd['checked'], 'flight_cost' => $cd['flight_cost'],
                    'last' => $last, 'lodge_id' => null, 'lodge_name' => '', 'lodge_custom' => null, 'dest_id' => null,
-                   'meal' => null, 'lodge_state' => 'none', 'acts' => array(), 'route' => null,
+                   'meal' => null, 'room_category' => null, 'lodge_state' => 'none', 'acts' => array(), 'route' => null,
                    'sample_index' => null, 'sample_lodge' => null, 'flags' => array());
 
         // Lodge (every night; the departure day normally has none).
@@ -822,6 +822,13 @@ function iti_final_plan(PDO $db, array $calc, int $sampleId): array {
                 if ($li) {
                     $d['lodge_id'] = (int)$li['id']; $d['lodge_name'] = $li['name'];
                     $d['dest_id'] = $li['destination_id'] ? (int)$li['destination_id'] : null;
+                    // Room category after the hotel name ("Melia Zanzibar Junior Suite Sea View"): the lodge's listed
+                    // one, else the words as typed, flagged. Not for a migration camp swapped by season (other hotel).
+                    if ((int)$li['id'] === (int)$a['lodge_id']
+                        && ($rc = iti_room_category_from_text($base, $li['name'], iti_room_categories_list($li['room_categories'] ?? ''))) !== null) {
+                        $d['room_category'] = $rc['category'];
+                        if (!$rc['listed']) $d['flags'][] = 'Room category "' . $rc['category'] . '" read from the Calc hotel text, not in the lodge\'s list: check it.';
+                    }
                 }
                 $d['meal'] = $mealSfx ?: ($a['meal_basis'] ?: null);
             }
@@ -1067,6 +1074,8 @@ function iti_final_generate(PDO $db, int $requestId, array $calc, int $sampleId,
                 'end_lodge_custom' => $d['lodge_id'] ? null : $d['lodge_custom'],
                 // No room types on an open group or a quote with several pax sheets (rooms not known yet).
                 'room_type'      => !$groupOpen && !$multiPrice && ($d['lodge_id'] || $d['lodge_custom']) && $calc['room_config'] !== '' ? mb_substr(iti_final_room_text($calc['room_config'], $lang) ?? $calc['room_config'], 0, 100) : null,
+                // From the Calc hotel text (iti_final_plan); a sample day's category is never kept (other lodge / client).
+                'room_category'  => $d['lodge_id'] ? ($d['room_category'] ?? null) : null,
                 'booked_status'  => $d['invoice'] !== '' ? mb_substr($d['invoice'], 0, 40) : null,
                 'booked_by'      => $d['checked'] !== '' ? mb_substr($d['checked'], 0, 60) : null,
                 'needs_review'   => ($isNew || $d['sample_lodge'] !== null) ? 1 : 0,

@@ -15,6 +15,7 @@ require_once dirname(__FILE__, 4) . '/includes/timezone.php';
 static $_iti_pdo = null;
 
 require_once __DIR__ . '/iti_texts.php';   // translatable texts, day transfers (iti_transfers_replace)
+require_once __DIR__ . '/iti_rooms.php';   // room category of a night + a lodge's category list
 
 // The Agent API loads this file next to the leads config, which already has db().
 if (!function_exists('db')) {
@@ -1070,6 +1071,7 @@ function iti_ensure_doc_columns(): void {
     try {
         iti_add_column('iti_programs', 'pax_teens', 'TINYINT NOT NULL DEFAULT 0');
         iti_add_column('iti_program_days', 'room_type', 'VARCHAR(100) NULL DEFAULT NULL');
+        iti_rooms_schema(db());   // room_category of a night + room_categories of a lodge (iti_rooms.php)
         iti_add_column('iti_day_flights', 'flight_no', 'VARCHAR(20) NULL DEFAULT NULL');   // "UI 403": vouchers, guide, client docs
         if (iti_add_column('iti_destinations', 'is_beach_stay', 'TINYINT(1) NOT NULL DEFAULT 0')) {
             // First run: the coast and islands (not Stone Town, a sightseeing stop, nor the airports).
