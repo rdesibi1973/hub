@@ -427,7 +427,7 @@ function bg_extract_doc(PDO $db, array $run, array $doc, string $token): string 
         $db->prepare("UPDATE booking_gate_docs SET " . implode(', ', array_map(fn($k) => "$k = ?", array_keys($f))) . " WHERE id = ?")
            ->execute(array_merge(array_values($f), [(int)$doc['id']]));
     };
-    if (!empty($doc['content_hash']) && ($c = bg_cache_get($db, 'D:' . $doc['content_hash'])) !== null) {
+    if (!empty($doc['content_hash']) && ($c = bg_cache_get($db, 'D:' . $doc['content_hash'])) !== null && !bg_cache_stale($c)) {
         $set(['status' => 'done', 'cached' => 1, 'extracted_json' => json_encode($c, JSON_UNESCAPED_UNICODE)]);
         return 'done';
     }
@@ -460,6 +460,27 @@ function bg_extract_doc(PDO $db, array $run, array $doc, string $token): string 
     $db->prepare("UPDATE booking_gate_runs SET tokens_in = tokens_in + ?, tokens_out = tokens_out + ?, cost_usd = cost_usd + ?, model = ? WHERE id = ?")
        ->execute([$u['in'], $u['out'], $u['cost'], $u['model'], (int)$run['id']]);
     return 'done';
+}
+
+/**
+ * A cached extraction older than a schema field the evaluation needs: flights read before amount_due (14 Nov 2026)
+ * are read again once (deposit paid → the payment time limit no longer applies); every other document stays cached.
+ */
+function bg_cache_stale(array $c): bool {
+    foreach (($c['services'] ?? []) as $ds) {
+        if (is_array($ds) && ($ds['type'] ?? '') === 'flight' && !array_key_exists('amount_due', $ds)) return true;
+    }
+    return false;
+}
+
+/**
+ * Airline pro-forma partly paid: the amount due printed is below the total (Flightlink "Total: $290.40" /
+ * "DUE AMOUNT: $250.40" = deposit paid). The seats are held: no expiry, no payment time limit (Roberto, 14 Nov 2026).
+ */
+function bg_deposit_paid(array $ds): bool {
+    if (($ds['type'] ?? '') !== 'flight') return false;
+    $due = $ds['amount_due'] ?? null; $tot = $ds['amount_total'] ?? null;
+    return is_numeric($due) && is_numeric($tot) && (float)$due >= 0 && (float)$due < (float)$tot - 0.5;
 }
 
 // ── Document → AI content blocks ─────────────────────────────────────────────
@@ -609,7 +630,7 @@ function bg_extract_schema(): array {
         'adults' => $i, 'children' => $i, 'child_ages' => ['type' => 'array', 'items' => ['type' => 'integer']],
         'service_date' => $s, 'legs' => ['type' => 'array', 'items' => $leg],
         'transfer_from' => $s, 'transfer_to' => $s, 'transfer_flight' => $s, 'description' => $s,
-        'amount_total' => $n, 'commission' => $n, 'net_amount' => $n, 'currency' => $s, 'concession_fee_on_invoice' => ['type' => ['boolean', 'null']],
+        'amount_total' => $n, 'commission' => $n, 'net_amount' => $n, 'amount_due' => $n, 'currency' => $s, 'concession_fee_on_invoice' => ['type' => ['boolean', 'null']],
         'reference' => $s, 'expiry_date' => $s, 'payment_terms' => $s, 'payment_time_limit' => $s,
     ]];
     $svc['required'] = array_keys($svc['properties']);
@@ -633,7 +654,8 @@ function bg_extract_system(): string {
          . 'adults / children = the TOTAL guests of that service, all its rooms together (e.g. Rm 2 with Ad 2 per room = 4 adults); children = '
          . 'anyone billed or listed as a child. '
          . 'Flights: every leg with origin and destination airport as printed and STD / STA times. amount_total = total of that service as '
-         . 'printed; commission = commission amount if a commission line is shown; net_amount = amount after commission. status: confirmed, '
+         . 'printed; commission = commission amount if a commission line is shown; net_amount = amount after commission; amount_due = the amount '
+         . 'still to pay as printed ("DUE AMOUNT", "Amount due", "Balance due"), null if not printed. status: confirmed, '
          . 'provisional (also "on request", "tentative", "option"), cancelled, noted (a reply that only acknowledges, e.g. "noted", "well received"), '
          . 'else unknown. expiry_date = date a provisional booking or option expires; payment_time_limit = airline payment / ticketing time limit. '
          . 'client_names = booking / lead guest names only. Never return passport numbers, ID numbers or dates of birth, anywhere, even in '
@@ -978,7 +1000,11 @@ function bg_evaluate(array $snap, array $docs, ?callable $alias = null): array {
             continue;
         }
         foreach (($d['data']['services'] ?? []) as $ds) {
-            $items[] = ['doc' => $di, 'file' => $d['rel_path'], 'ds' => $ds, 'used' => false,
+            if (bg_deposit_paid($ds)) {   // pro-forma partly paid: held, the time limit / expiry no longer applies
+                if (($ds['status'] ?? '') === 'provisional') $ds['status'] = 'confirmed';
+                $ds['expiry_date'] = null; $ds['payment_time_limit'] = null; $ds['_deposit_paid'] = true;
+            }
+            $items[] =['doc' => $di, 'file' => $d['rel_path'], 'ds' => $ds, 'used' => false,
                         'clients' => $d['data']['client_names'] ?? [], 'kind' => $d['data']['document_kind'] ?? ''];
         }
     }
@@ -999,6 +1025,7 @@ function bg_evaluate(array $snap, array $docs, ?callable $alias = null): array {
         if (!empty($ds['rooms'])) $p[] = implode(' + ', array_map(fn($r) => ($r['count'] ?? 1) . ' ' . ($r['type'] ?? ''), $ds['rooms']));
         if (!empty($ds['meal_plan'])) $p[] = $ds['meal_plan'];
         if (!empty($ds['status'])) $p[] = $ds['status'];
+        if (!empty($ds['_deposit_paid'])) $p[] = 'deposit paid (due ' . bg_money((float)$ds['amount_due']) . ')';
         $net = bg_net($ds);
         if ($net !== null) $p[] = trim(($ds['currency'] ?? '') . ' ' . bg_money($net));
         if (!empty($ds['reference'])) $p[] = 'ref ' . $ds['reference'];

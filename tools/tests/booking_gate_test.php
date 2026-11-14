@@ -131,6 +131,19 @@ $t('Cavalli: the route text says ZNZ ≠ DAR', strpos($res['findings'][0]['text'
 $res = bg_evaluate($snap($cavServices), [$sv, $doc('invoices/Flightlink proforma.pdf', [$dsFlight('ARK', 'ZNZ', 450)])]);
 $t('Cavalli fixed: passed (provisional warning)', $res['passed'] && $issues($res) === ['booking_provisional'], $issues($res));
 
+// Flightlink pro-forma with the deposit paid (Roberto, 14 Nov 2026; Beardo): Total 290.40, DUE AMOUNT 250.40 → held, no expiry.
+$dep = $dsFlight('ARK', 'ZNZ', 450);
+$dep = ['amount_total' => 290.40, 'amount_due' => 250.40, 'expiry_date' => '2026-08-04', 'payment_time_limit' => '2026-08-04'] + $dep;
+$t('deposit paid detected', bg_deposit_paid($dep) && !bg_deposit_paid(['amount_due' => 290.40] + $dep) && !bg_deposit_paid(['amount_due' => null] + $dep)
+                            && !bg_deposit_paid(['type' => 'stay'] + $dep));
+$res = bg_evaluate($snap($cavServices), [$sv, $doc('invoices/FLIGHT LINK - INV.pdf', [$dep])]);
+$t('deposit paid: no provisional warning', $res['passed'] && $issues($res) === [], $issues($res));
+$t('deposit paid shown in "document says"', strpos(implode(' ', $res['services'][2]['says']), 'deposit paid (due 250.40)') !== false, $res['services'][2]['says']);
+$res = bg_evaluate($snap($cavServices), [$sv, $doc('invoices/FLIGHT LINK - INV.pdf', [['amount_due' => 290.40] + $dep])]);
+$t('nothing paid: still provisional', $issues($res) === ['booking_provisional'], $issues($res));
+$t('cache: flight without amount_due re-read, others kept', bg_cache_stale(['services' => [['type' => 'flight']]])
+   && !bg_cache_stale(['services' => [['type' => 'flight', 'amount_due' => null]]]) && !bg_cache_stale(['services' => [['type' => 'stay']]]));
+
 // Plain booking: stays + flight right, one Zanzibar transfer missing → passed with 1 warning.
 $base = [$stay('Tarangire Treetops', '2027-01-15', '2027-01-17', 2, 1000.0), $flightSvc,
          ['type' => 'transfer', 'date' => '2027-01-18', 'text' => 'Transfer ZNZ airport - Nungwi', 'route' => 'ZNZ', 'rows' => [20]]];

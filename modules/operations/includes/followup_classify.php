@@ -139,7 +139,18 @@ function followup_group_facts(array &$out, string $flat, string $one, bool $isFl
         $out['flight_znz'] = (bool)$znz;
         $out['flight_text'] = $znz[0] ?? $rows[0] ?? null;
         if (preg_match('/Ticketing Time Limit\s*:?\s*(' . FU_DATE_RE . ')/i', $one, $m)) $out['ticket_limit'] = followup_parse_date($m[1]);
+        // Deposit paid: "DUE AMOUNT" below the "Total" (Flightlink 290.40 / due 250.40) → held, the time limit no longer applies.
+        if (followup_flight_deposit_paid($one)) $out['ticket_limit'] = null;
     }
+}
+
+/** Airline pro-forma partly paid: the printed amount due is below the invoice total (Roberto, 14 Nov 2026). */
+function followup_flight_deposit_paid(string $one): bool {
+    $num = fn($s) => (float)str_replace(',', '', $s);
+    if (!preg_match('/\b(?:DUE AMOUNT|Amount Due|Balance Due)\s*:?\s*(?:USD|US\$|\$)?\s*([\d,]+\.\d{2})/i', $one, $d)) return false;
+    if (!preg_match_all('/(?<![\w-])Total\s*:?\s*(?:USD|US\$|\$)?\s*([\d,]+\.\d{2})/i', $one, $t)) return false;
+    $due = $num($d[1]); $tot = $num(end($t[1]));
+    return $tot > 0 && $due < $tot - 0.5;
 }
 
 /**
