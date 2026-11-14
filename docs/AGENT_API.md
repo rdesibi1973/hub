@@ -320,7 +320,7 @@ Read-only, for the Cowork skill `booking-check` (verify a booked safari). `reque
   is the "SV" file), `flight` `{date, route, cost, rows}`, `transfer` / `activity` `{date, text, route, rows}`
   (one per ACTIVITY DESC item; in-house items — emergency, medivac, lunch boxes, hot lunch, Olduvai, church visit, and the
   activities organised by the safari guide — town / city tour, Iraqw and Maasai bomas, Mto wa Mbu, Materuni, Lake Eyasi
-  (Hadzabe, Datoga), Lake Natron, Napuro (not transfers) — skipped; `activity.own` = run by our lodges, e.g. "Natural Walk" at Marera);
+  (Hadzabe, Datoga), Lake Natron, Napuro, Lake Duluti walk / canoe (not transfers) — skipped; `activity.own` = run by our lodges, e.g. "Natural Walk" at Marera);
 - `evidence[]` `{scope own|group, path, name, ext, size, old}`: every file in `invoices/` and `bookings/`
   (any format; `old` = inside an "old…" sub-folder);
 - `summary`: services per type, `evidence_files`, `stays_without_invoice_or_checked`.

@@ -92,7 +92,8 @@ $calc3 = ['days' => [
     $day(31, '2027-07-02', 'Natron', 'Lake Natron Camp', ['activity_desc' => 'Napuro waterfalls + Lake Natron activities + Masai boma']),
     $day(32, '2027-07-03', 'Mto wa Mbu', 'Marera -FB', ['activity_desc' => 'Mto wa Mbu village walk + Visit Materuni waterfalls']),
     $day(33, '2027-07-04', 'Eyasi', 'Kisima Ngeda', ['activity_desc' => 'Lake Eyasi activities + Hadzabe & Datoga + Iraqw boma + Balloon safari']),
-    $day(34, '2027-07-05', 'Arusha', ''),
+    $day(34, '2027-07-05', 'Arusha', 'Arusha Explorers', ['activity_desc' => 'Lake Duluti walk + Canoeing on Lake Duluti']),
+    $day(35, '2027-07-06', 'Arusha', ''),
 ], 'skipped_rows' => []];
 $acts3 = array_map(fn($s) => $s['type'] . ':' . $s['text'], array_values(array_filter(bc_services($calc3), fn($s) => in_array($s['type'], ['activity', 'transfer'], true))));
 $t('guide activities skipped, transfers and balloon kept', $acts3 === ['transfer:Transfer to Lake Natron', 'activity:Balloon safari'], $acts3);
