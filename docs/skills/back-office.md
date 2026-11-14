@@ -75,7 +75,9 @@ Once a week (Monday, or the first round of the week — see `daily-check`): `fli
   In the review: travellers, rooms and meal basis per lodge, transfers; fill flight number and time on the arrival and departure transfers (from the Calc A51 / A56). The PDF goes in the booking's `vouchers/` sub-folder.
 - New flight plan or client phone numbers from the agency: arrival / departure in the Calc (A51 / A56); client phones as a note in the Calc next to the guest names (column G), not in the Hub (5 Nov 2026).
 - Rooming lists to lodges: rooms exactly as per the request (room type and pax), names as in the Calc; propose the mail to the lodge.
-- ResRequest (Orangi Collection lodges): check that our confirmations still match what is booked (dates, rooms, pax), as in the ResRequest plan; flag differences. Read-only.
+- ResRequest (Orangi Collection lodges): check that our confirmations still match what is booked (dates, rooms, pax), as in the ResRequest plan; flag differences.
+- Booking in ResRequest when Roberto asks (14 Nov 2026, GRP1001 Belli), in his Chrome (Claude in Chrome): ResRequest opens pop-up windows Claude can't see (agent search, documents) and the page freezes. So Roberto picks agent and rate (Savannah Explorers Ltd, Complimentary) and selects the rooms in the Availability Calendar. Claude checks the selection (rooms, dates, 2A per room), then Create Itinerary → Make Booking → Details (reservation name "<Client> <GRP code>", voucher ref, notes: block, meal plan per night, special needs, names), status as Roberto says → Guest details → summary. Then open the reservation and check it shows the right status.
+- Voucher after every booking Claude makes: Documents → Itinerary Summary, saved as PDF in the folder's `invoices/` (Roberto saves it: pop-up), renamed by Claude `The Orangi collection sv <WB number>.pdf` and read back (status, rooms, dates). Then tell the booking team the Orangi part is already booked (WB number, voucher in invoices/).
 
 ## 8. Travel info before departure (Jambo, visa, NIC / ZIC, Ebola form)
 
