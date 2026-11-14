@@ -27,6 +27,14 @@ const BC_OWN_LODGES = '/\b(orangi|marera|kifaru|arusha explorers?)\b/i';
  */
 const BC_INTERNAL = '/^(emergency|medi ?vac|amref|lunch ?box|hot lunch|picnic|gates?\b|paid\b|maa?sai|olduvai|oldupai|napuro|(lake )?eyasi|(cathedral )?church visit|(short )?city tour|ok$|-+$)/i';
 
+/**
+ * Cultural / local activities organised by the safari guide on the spot (Roberto, 14 Nov 2026):
+ * town / city tour, Iraqw and Maasai bomas, Mto wa Mbu, Materuni, Lake Eyasi (Hadzabe, Datoga),
+ * Lake Natron, Napuro. Matched anywhere in the item ("Visit Iraqw boma", "Materuni waterfalls &
+ * coffee"), transfers excepted: no supplier booking, so no document expected in invoices/.
+ */
+const BC_GUIDE_ACTIVITY = '/\b(town tour|city tour|iraq[wk]|maa?sai|mto ?wa ?mbu|materuni|eyasi|hadza(be)?|datoga|natron|napuro)\b/i';
+
 /** Activities run by our own lodges ("Natural Walk" = Marera Walking and Iraqw families): no supplier booking. */
 const BC_OWN_ACTIVITY = '/\b(orangi|marera|kifaru|arusha explorers?)\b|natural walk/i';
 
@@ -88,6 +96,7 @@ function bc_services(array $calc): array {
             $item = trim($item);
             if ($item === '' || preg_match(BC_INTERNAL, $item)) continue;
             $isTransfer = (bool)preg_match('/transfer/i', $item);
+            if (!$isTransfer && preg_match(BC_GUIDE_ACTIVITY, $item)) continue;
             $svc = ['type' => $isTransfer ? 'transfer' : 'activity', 'date' => $d['date'],
                     'text' => $item, 'route' => $d['label'], 'rows' => [$d['row']]];
             if (!$isTransfer) {

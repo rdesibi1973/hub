@@ -86,8 +86,19 @@ $calc2 = $calc;
 $calc2['skipped_rows'][0]['has_cost'] = true;
 $t('a row with a cost is not an annotation', empty(array_values(array_filter(bc_services($calc2), fn($s) => $s['type'] === 'flight'))[0]['annotations']));
 
+// Activities organised by the safari guide (Roberto, 14 Nov 2026; GranSafariLuglio2027): no booking expected
+$calc3 = ['days' => [
+    $day(30, '2027-07-01', 'Arusha', 'Arusha Explorers', ['activity_desc' => 'Town tour + Transfer to Lake Natron']),
+    $day(31, '2027-07-02', 'Natron', 'Lake Natron Camp', ['activity_desc' => 'Napuro waterfalls + Lake Natron activities + Masai boma']),
+    $day(32, '2027-07-03', 'Mto wa Mbu', 'Marera -FB', ['activity_desc' => 'Mto wa Mbu village walk + Visit Materuni waterfalls']),
+    $day(33, '2027-07-04', 'Eyasi', 'Kisima Ngeda', ['activity_desc' => 'Lake Eyasi activities + Hadzabe & Datoga + Iraqw boma + Balloon safari']),
+    $day(34, '2027-07-05', 'Arusha', ''),
+], 'skipped_rows' => []];
+$acts3 = array_map(fn($s) => $s['type'] . ':' . $s['text'], array_values(array_filter(bc_services($calc3), fn($s) => in_array($s['type'], ['activity', 'transfer'], true))));
+$t('guide activities skipped, transfers and balloon kept', $acts3 === ['transfer:Transfer to Lake Natron', 'activity:Balloon safari'], $acts3);
+
 // ── Evaluation ──
-$snap = fn(array $services, array $calcOver = []) => ['customer' => 'ArturoCavalli(VolaEVa-Roberto)', 'folder' => '/001_Safari/x',
+$snap =fn(array $services, array $calcOver = []) => ['customer' => 'ArturoCavalli(VolaEVa-Roberto)', 'folder' => '/001_Safari/x',
     'calc' => $calcOver + ['file' => '01_Calc.xlsx', 'sheet' => '2PAX', 'pax' => ['adults' => 2, 'teen' => 0, 'child' => 0], 'room_config' => '1 DBL',
                            'arrival' => 'KL569 15JAN AMSJRO 1000 2010', 'departure' => 'own arrangement', 'start_date' => '2027-01-15', 'end_date' => '2027-01-18',
                            'single_supp' => null, 'warnings' => []],
