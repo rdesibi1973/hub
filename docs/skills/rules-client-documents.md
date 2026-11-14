@@ -29,6 +29,7 @@ When a rule changes, change it here (with the date) and not in a skill.
 - English emails and programme texts: "program", never "programme" (Roberto's preference, 19 Oct 2026).
 - **Group programmes** (STO / Gruppi Word, ITI programmes of GRP folders): never "Safari privato" or "jeep ad uso esclusivo". Group wording: "Safari di gruppo" and "jeep … condivisa con gli altri partecipanti del gruppo". ITI programmes with `safari_type` group get the right cover; the jeep line lives in the inclusions (`iti_update_inclusions`) (26 Oct 2026).
 - **Private safaris:** no sample text that contradicts it (e.g. "transfer condiviso con altri viaggiatori").
+- **Services not quoted** (e.g. a Zanzibar extension still to be priced): never list them as programme days ("Day 12–13: relax on the beach…"), because it looks as if they are included. The day-by-day list stops at the last quoted service ("transfer to Arusha airport – end of our services"); the part not quoted goes in one separate line after the programme ("Zanzibar beach extension: not included in this quotation, we will quote it…") and in the exclusions (14 Nov 2026, MartaDelCastillo).
 - **Italian programmes:** no shared-transfer disclaimer on Day 1; "Pranzo pic-nic nel cratere"; "under 12"; guide "in lingua italiana"; savannahexplorers.com; "NIC o ZIC" as mandatory insurance in the exclusions (§5); meal plan stated for beach and Arusha stays.
 
 ## 5. Costs outside the quote (exclusions)
