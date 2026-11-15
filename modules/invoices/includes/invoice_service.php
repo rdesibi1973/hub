@@ -729,11 +729,13 @@ function cn_migrate_legacy_payments(PDO $db, bool $confirm): array {
             'credit_to_client_after' => $f['credit_to_client'], 'cn_available_after' => max(0.0, $f['cn_available']),
         ];
     }
-    // Credit notes applied to their own source invoice: now counted twice (credit + payment).
+    // Credit notes applied to their own source invoice: the balance is unchanged (C and U cancel out) but
+    // "paid" shows the application as a payment. Real case SE-2026-0313 / CN-2026-0003: a deposit parked during a
+    // date change and re-applied — not a reduction, so the whole CN was cancelled.
     foreach ($db->query("SELECT a.id, c.cn_number, i.invoice_number FROM credit_note_allocations a
                            JOIN credit_notes c ON c.id = a.credit_note_id JOIN invoices i ON i.id = a.invoice_id
                           WHERE a.cancelled_at IS NULL AND c.status <> 'Cancelled' AND a.invoice_id = c.invoice_id")->fetchAll(PDO::FETCH_ASSOC) as $a) {
-        $warnings[] = 'Credit note ' . $a['cn_number'] . ' is applied to its own invoice ' . $a['invoice_number'] . ' (allocation ' . $a['id'] . '): the credit now counts twice there — cancel that application.';
+        $warnings[] = 'Credit note ' . $a['cn_number'] . ' is applied to its own invoice ' . $a['invoice_number'] . ' (allocation ' . $a['id'] . '): its amount paid is inflated by the application. If the CN was a real reduction, cancel the application; if it only parked money (no reduction), cancel the whole credit note — before migrating.';
     }
     $migrated = 0;
     if ($confirm) {
