@@ -37,7 +37,8 @@ if (!$years) $years = [date('Y')];
 // ── Summary stats (current filter) ───────────────────────────────────────
 $totalAmt = array_sum(array_column($rows, 'total'));
 $paidAmt  = array_sum(array_column($rows, 'amount_paid'));
-$balAmt   = array_sum(array_column($rows, 'balance_due'));
+// balance_due < 0 = credit to client (invoice_service.php recalculate_invoice()): not money to collect.
+$balAmt   = array_sum(array_map(fn($r) => $r['status'] === 'Cancelled' ? 0.0 : max(0.0, (float)$r['balance_due']), $rows));
 $sym = ($fcurr === 'EUR') ? '€' : '$';
 
 include 'includes/header.php';
@@ -229,7 +230,9 @@ $pendingFu = $db->query(
           <td class="text-right" style="font-weight:600"><?= fmt_money((float)$r['total'], $r['currency']) ?></td>
           <td class="text-right text-green"><?= $r['amount_paid'] > 0 ? fmt_money((float)$r['amount_paid'], $r['currency']) : '<span class="text-muted">—</span>' ?></td>
           <td class="text-right <?= (float)$r['balance_due'] > 0 ? 'text-amber' : 'text-green' ?>">
-            <?= fmt_money((float)$r['balance_due'], $r['currency']) ?>
+            <?= (float)$r['balance_due'] < -0.001
+                ? '<span title="Credit to client">credit ' . fmt_money(-(float)$r['balance_due'], $r['currency']) . '</span>'
+                : fmt_money(max(0.0, (float)$r['balance_due']), $r['currency']) ?>
           </td>
           <td><?php $sc = INV_STATUSES[$r['status']] ?? ''; ?>
             <span class="badge <?= $sc ?>" <?= !$sc ? 'style="background:var(--grey-lt);color:var(--grey-dk)"' : '' ?>><?= $r['status'] ? h($r['status']) : '—' ?></span></td>

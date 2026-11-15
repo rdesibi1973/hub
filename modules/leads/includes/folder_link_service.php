@@ -563,10 +563,24 @@ function folder_archive_cancelled(PDO $db, string $token, array $opt = []): arra
         $r = folder_heal($db, $token, $r);
         $p = (string)($r['_folder']['path'] ?? '');
         if ($p === '') return $out + ['error' => 'Folder of request ' . $rid . ' not found: ' . ($r['_folder']['error'] ?? '')];
+        // Already archived as cancelled: nothing to move; only the Hub status is brought to Cancelled.
+        if (fl_under($p, '/001_Safari/' . FL_CANCELED_DIR)) {
+            $res = $out + ['unchanged' => true, 'path' => $p, 'status_set' => $r['status'] !== 'Cancelled' ? [$rid] : [],
+                           'message' => 'Folder already archived in /001_Safari/' . FL_CANCELED_DIR . ' — not moved.'];
+            if ($confirm && $res['status_set']) {
+                $db->prepare("UPDATE requests SET status = 'Cancelled' WHERE id = ?")->execute([$rid]);
+                folder_followup_cancelled($db, $rid, basename($p), 'request cancelled, folder already archived ' . $p);
+                timeline_log($rid, 'status_change', 'Status → Cancelled (folder already archived as cancelled)', ['body' => $p, 'refs' => ['dropbox_path' => $p]]);
+            }
+            return $res;
+        }
         $top = $p;   // the folder directly under /001_Safari (a member's group folder)
         while (strcasecmp(dirname($top), '/001_Safari') !== 0 && dirname($top) !== '/' && dirname($top) !== $top) $top = dirname($top);
         if (strcasecmp(dirname($top), '/001_Safari') !== 0) {
             return $out + ['error' => 'The folder is not directly in /001_Safari (' . $p . ') — nothing to archive.'];
+        }
+        if (preg_match('/^00_/', basename($top))) {   // 00_CANCELED, 00_POSTPONED, 00_2026, 00_CreditNotes …
+            return $out + ['error' => basename($top) . ' is an archive / system folder (' . $p . ') — nothing to archive.'];
         }
         if (!folder_is_cancelled(basename($top)) && $r['status'] !== 'Cancelled') {
             return $out + ['error' => basename($top) . ' is not cancelled (no _CANCELLED suffix, Hub status ' . $r['status'] . ').'];

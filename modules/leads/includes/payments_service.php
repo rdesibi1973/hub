@@ -185,7 +185,7 @@ function pay_due_report(PDO $db, array $opt = []): array {
         foreach ($invs as $i) {
             $total   += (float)$i['total'];
             $paid    += (float)$i['amount_paid'];
-            $balance += (float)$i['balance_due'];
+            $balance += max(0.0, (float)$i['balance_due']);   // < 0 = credit to client (invoice_service.php), not to collect
             if ($i['last_payment_date'] && $i['last_payment_date'] > (string)$lastPay) $lastPay = $i['last_payment_date'];
             $act = max((string)$i['updated_at'], (string)$i['issue_date']);
             if ($act > (string)$lastInvAct) $lastInvAct = $act;

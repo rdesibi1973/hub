@@ -96,7 +96,7 @@ function agent_audit(PDO $db, string $action, $reqId, array $payload, string $re
     global $agentUser;
     agent_ensure_schema($db);
     $dry = in_array($action, ['confirm_booking', 'send_booking_email', 'rollback_booking', 'fill_calc', 'iti_save_texts', 'update_rate', 'replace_flight_rates',
-                              'cancel_invoice_payment', 'cancel_invoice', 'restore_invoice', 'update_folder_status', 'import_zoho_invoice', 'create_invoice', 'update_invoice', 'create_credit_note', 'apply_credit_note', 'send_invoice_email', 'mail_send', 'mail_move',
+                              'cancel_invoice_payment', 'cancel_invoice', 'restore_invoice', 'update_folder_status', 'import_zoho_invoice', 'create_invoice', 'update_invoice', 'create_credit_note', 'apply_credit_note', 'refund_credit_note', 'cn_migrate_legacy', 'update_credit_note', 'send_invoice_email', 'mail_send', 'mail_move',
                               'iti_lodge_photos', 'iti_destination_photo', 'iti_update_lodge', 'iti_update_destination',
                               'iti_create_personal', 'iti_update_program', 'iti_update_day', 'iti_publish', 'iti_final_from_calc', 'iti_save_alias', 'iti_tag_sample',
                               'iti_create_lodge', 'iti_set_days', 'iti_add_day', 'iti_delete_day', 'iti_update_inclusions', 'iti_update_standard_inclusion',
@@ -473,7 +473,9 @@ function agent_invoice_out(array $i): array {
         'due_date'   => $i['due_date'] ?? null,
         'total'      => round((float)$i['total'], 2),
         'paid'       => round((float)$i['amount_paid'], 2),
-        'balance'    => round((float)$i['balance_due'], 2),
+        // balance_due is stored signed (T − C − P + U): < 0 is credit owed to the client, never "due".
+        'balance'    => max(0.0, round((float)$i['balance_due'], 2)),
+        'credit_to_client' => max(0.0, round(-(float)$i['balance_due'], 2)),
         'status'     => $i['status'],
         'request_id' => !empty($i['request_id']) ? (int)$i['request_id'] : null,
         'follow_up'  => !empty($i['follow_up']),
@@ -494,19 +496,27 @@ function agent_credit_note(PDO $db, array $in): array {
 /** A credit note row as data: applied, remaining and the invoices it was applied to. */
 function agent_credit_note_out(PDO $db, array $c): array {
     $id = (int)$c['id'];
-    $appliedTo = [];
+    $appliedTo = []; $refunds = [];
     foreach (cn_allocations($db, $id) as $a) {
         if (!empty($a['cancelled_at'])) continue;
+        if (($a['kind'] ?? 'invoice') === 'refund') {
+            $refunds[] = ['allocation_id' => (int)$a['id'], 'amount' => (float)$a['amount_cn'], 'date' => $a['alloc_date'],
+                          'reference' => $a['reference'] ?? null, 'notes' => $a['notes']];
+            continue;
+        }
         $appliedTo[] = ['allocation_id' => (int)$a['id'], 'invoice_id' => (int)$a['invoice_id'], 'invoice_number' => $a['invoice_number'],
                         'amount' => (float)$a['amount_cn'], 'amount_invoice' => (float)$a['amount_invoice'], 'currency' => $a['invoice_currency'],
                         'date' => $a['alloc_date'], 'payment_id' => (int)$a['payment_id']];
     }
     return [
         'id' => $id, 'number' => $c['cn_number'], 'date' => $c['issue_date'], 'currency' => $c['currency'],
+        // remaining = cn_available: only what the client paid above net_due can be given back (to_give_back),
+        // minus what was already applied / refunded.
         'total' => (float)$c['total'], 'applied' => cn_allocated_amount($db, $id),
+        'to_give_back' => cn_availability($db, $id)['cap'],
         'remaining' => $c['status'] === 'Cancelled' ? 0.0 : cn_remaining_credit($db, $id),
         'status' => $c['status'], 'reason' => $c['reason'],
-        'applied_to' => $appliedTo,
+        'applied_to' => $appliedTo, 'refunds' => $refunds,
     ];
 }
 
@@ -2153,8 +2163,11 @@ try {
         foreach (inv_credit_notes($db, $id) as $c) {
             $cns[] = agent_credit_note_out($db, $c);
         }
+        $fig = inv_figures($db, $id);
         agent_out(['ok' => true,
             'invoice' => array_merge(agent_invoice_out($inv), [
+                // T, P, C, U: net_due = T − C; balance = net_due − P + U (< 0 → credit_to_client)
+                'credited' => $fig['credited'], 'credit_used' => $fig['used'], 'net_due' => $fig['net_due'],
                 'bill_to_address' => $inv['bill_to_address'], 'terms' => $inv['terms'], 'notes' => $inv['notes'],
                 'terms_conditions' => $inv['terms_conditions'], 'follow_up_note' => $inv['follow_up_note'] ?? null,
                 'created_by' => $inv['created_by_name'], 'created_at' => $inv['created_at'], 'updated_at' => $inv['updated_at'],
@@ -2321,7 +2334,8 @@ try {
             $sum = 0.0;
             foreach (inv_payments($db, $id, true) as $p) $sum += (float)$p['amount'];
             $sum = round($sum, 2);
-            $predicted = inv_status_for('New', $sum, round((float)$inv['total'] - $sum, 2));
+            $credited  = inv_credited_total($db, $id);
+            $predicted = inv_status_for('New', $sum, inv_balance_for((float)$inv['total'], $sum, $credited, inv_cn_used_total($db, $id)), $credited);
             agent_out(['ok' => true, 'dry_run' => true, 'invoice' => agent_invoice_out($inv), 'folder' => agent_invoice_folder($db, $id),
                        'final_status' => $predicted, 'active_payments_total' => $sum,
                        'message' => 'Dry run — nothing restored. Resend with "confirm": true to restore invoice ' . $inv['invoice_number'] . '.']);
@@ -2352,8 +2366,9 @@ try {
     }
 
     // ── create_credit_note ───────────────────────────────────────────────────
-    // Same as "+ Credit Note" on the invoice page, with one credit line: the refund
-    // goes on the invoice as a negative payment. Dry-run unless "confirm": true.
+    // Same as "+ Credit Note" on the invoice page, with one credit line. Never a negative
+    // payment: on an unpaid invoice it lowers the balance (cn_available 0); on a paid one the
+    // part above the unpaid amount is credit to client (cn_available). Dry-run unless "confirm": true.
     case 'create_credit_note': {
         agent_require_method('POST');
         $inv = agent_invoice($db, $in);
@@ -2364,12 +2379,13 @@ try {
         if ($reason === '') agent_fail('reason is required');
         $date  = isset($in['date']) && $in['date'] !== '' ? agent_iso_date($in['date'], 'date') : date('Y-m-d');
         $items = [['description' => $reason, 'quantity' => 1, 'unit_price' => $amount, 'line_total' => $amount]];
-        if ($errors = cn_new_errors($inv, $items, $date)) agent_fail(implode(' ', $errors), 409, ['invoice' => agent_invoice_out($inv)]);
+        if ($errors = cn_new_errors($inv, $items, $date, inv_credited_total($db, $id))) agent_fail(implode(' ', $errors), 409, ['invoice' => agent_invoice_out($inv)]);
 
-        $paid = round((float)$inv['amount_paid'], 2);
+        $after = cn_create_preview($db, $inv, $amount);
         $warnings = [];
-        if ($amount > $paid + 0.005) {
-            $warnings[] = 'The credit is more than the amount paid (' . fmt_money($paid, $inv['currency']) . '): the invoice will show a negative net paid.';
+        if ($after['credit_to_client_after'] > 0.005) {
+            $warnings[] = 'The client will have ' . fmt_money($after['credit_to_client_after'], $inv['currency'])
+                        . ' of credit on this invoice: apply it to a future booking (apply_credit_note) or record a refund (refund_credit_note).';
         }
         foreach (inv_credit_notes($db, $id) as $c) {
             if ($c['status'] !== 'Cancelled' && abs((float)$c['total'] - $amount) < 0.005) {
@@ -2377,7 +2393,8 @@ try {
             }
         }
         $preview = ['amount' => $amount, 'currency' => $inv['currency'], 'date' => $date, 'reason' => $reason,
-                    'balance_after' => round((float)$inv['balance_due'] + $amount, 2),
+                    'balance_after' => $after['balance_after'], 'invoice_status_after' => $after['status_after'],
+                    'credit_to_client_after' => $after['credit_to_client_after'], 'cn_available' => $after['cn_available'],
                     'request_value_change' => -$amount, 'warnings' => $warnings];
         if (empty($in['confirm'])) {
             agent_out(array_merge(['ok' => true, 'dry_run' => true, 'next_number' => generate_cn_number($db), 'invoice' => agent_invoice_out($inv),
@@ -2408,10 +2425,7 @@ try {
         } catch (RuntimeException $e) {
             agent_fail($e->getMessage(), 409, $context);
         }
-        $warnings = [];
-        if ((int)$cn['invoice_id'] === $id) {
-            $warnings[] = 'This is the credit note\'s own source invoice: the refund is taken back on the invoice and the request value goes back up by the amount applied.';
-        }
+        $warnings = [];   // (its own source invoice is refused by cn_apply_plan: the credit is already deducted there)
         if (empty($in['confirm'])) {
             agent_out(array_merge(['ok' => true, 'dry_run' => true, 'date' => $date, 'warnings' => $warnings,
                                    'message' => 'Dry run — nothing applied. Resend with "confirm": true to apply the credit.'], $plan, $context));
@@ -2435,6 +2449,121 @@ try {
                    'balance_after' => $invAfter['balance'], 'invoice_status_after' => $invAfter['status'],
                    'credit_note' => $cnOut, 'invoice' => $invAfter, 'memos_closed' => $closedMemos,
                    'folder' => agent_invoice_folder($db, $id)]));
+    }
+
+    // ── refund_credit_note ───────────────────────────────────────────────────
+    // Same as "Record Refund" on the credit note page: credit paid back to the client
+    // (bank transfer). The CN remaining goes down; the source invoice is not touched.
+    // Dry-run unless "confirm": true.
+    case 'refund_credit_note': {
+        agent_require_method('POST');
+        $cn = agent_credit_note($db, $in);
+        $remaining = $cn['status'] === 'Cancelled' ? 0.0 : cn_remaining_credit($db, (int)$cn['id']);
+        if (isset($in['amount']) && $in['amount'] !== '' && (!is_numeric($in['amount']) || (float)$in['amount'] <= 0)) agent_fail('amount must be a number > 0');
+        $amount = isset($in['amount']) && $in['amount'] !== '' ? round((float)$in['amount'], 2) : $remaining;
+        $date   = isset($in['date']) && $in['date'] !== '' ? agent_iso_date($in['date'], 'date') : date('Y-m-d');
+        $ref    = mb_substr(trim((string)($in['reference'] ?? '')), 0, 100);
+        $notes  = mb_substr(trim((string)($in['notes'] ?? '')), 0, 255);
+        $context = ['credit_note' => agent_credit_note_out($db, $cn)];
+        if ($cn['status'] === 'Cancelled') agent_fail('Credit note ' . $cn['cn_number'] . ' is cancelled', 409, $context);
+        if ($amount <= 0.005) agent_fail('Credit note ' . $cn['cn_number'] . ' has no credit left', 409, $context);
+        if ($amount > $remaining + 0.001) agent_fail('Amount exceeds remaining credit (' . fmt_money($remaining, $cn['currency']) . ')', 409, $context);
+        $preview = ['amount' => $amount, 'currency' => $cn['currency'], 'date' => $date, 'reference' => $ref,
+                    'cn_remaining_after' => round($remaining - $amount, 2),
+                    'cn_status_after' => cn_status_for(cn_availability($db, (int)$cn['id'])['cap'], cn_allocated_amount($db, (int)$cn['id']) + $amount)];
+        if (empty($in['confirm'])) {
+            agent_out(array_merge(['ok' => true, 'dry_run' => true,
+                                   'message' => 'Dry run — nothing recorded. Resend with "confirm": true only once the refund was actually paid.'], $preview, $context));
+        }
+        try {
+            $allocId = cn_record_refund($db, (int)$cn['id'], $amount, $date, $ref, $notes ?: null, (int)$agentUser['id']);
+        } catch (PDOException $e) {
+            throw $e;
+        } catch (RuntimeException $e) {
+            agent_fail($e->getMessage(), 409, $context);
+        }
+        $after = cn_find($db, ['id' => (int)$cn['id']], 1);
+        agent_out(array_merge(['ok' => true, 'dry_run' => false, 'allocation_id' => $allocId], $preview,
+                              ['credit_note' => agent_credit_note_out($db, $after[0])]));
+    }
+
+    // ── update_credit_note ───────────────────────────────────────────────────
+    // Same as "Edit notes" on the credit note page (notes are printed on the CN PDF).
+    // "notes": the new text, or "remove_through": cut the notes from the start up to and
+    // including that text (and the blank lines after it). Dry-run (before / after) unless "confirm": true.
+    case 'update_credit_note': {
+        agent_require_method('POST');
+        $cn  = agent_credit_note($db, $in);
+        $old = str_replace("\r\n", "\n", (string)($cn['notes'] ?? ''));
+        if (array_key_exists('notes', $in)) {
+            $new = (string)$in['notes'];
+        } elseif (trim((string)($in['remove_through'] ?? '')) !== '') {
+            $marker = str_replace("\r\n", "\n", (string)$in['remove_through']);
+            $pos = mb_strpos($old, $marker);
+            if ($pos === false) agent_fail('remove_through text not found in the notes of ' . $cn['cn_number'], 409, ['notes' => $old]);
+            $new = ltrim(mb_substr($old, $pos + mb_strlen($marker)), "\n \t");
+        } else {
+            agent_fail('Give "notes" (new text) or "remove_through"');
+        }
+        $new = trim(str_replace("\r\n", "\n", $new));
+        if (mb_strlen($new) > 5000) agent_fail('notes longer than 5000 characters');
+        $out = ['credit_note' => ['id' => (int)$cn['id'], 'number' => $cn['cn_number']], 'notes_before' => $old, 'notes_after' => $new,
+                'changed' => $old !== $new];
+        if (empty($in['confirm'])) {
+            agent_out(['ok' => true, 'dry_run' => true] + $out + ['message' => 'Dry run — nothing saved. Resend with "confirm": true; then save_credit_note_pdf to refresh the PDF.']);
+        }
+        cn_update_notes($db, (int)$cn['id'], $new);
+        agent_out(['ok' => true, 'dry_run' => false] + $out);
+    }
+
+    // ── save_credit_note_pdf ─────────────────────────────────────────────────
+    // Like save_invoice_pdf: "Credit Note <number>.pdf" into the booking folder (or folder_path).
+    // An existing file is kept unless "overwrite": true.
+    case 'save_credit_note_pdf': {
+        agent_require_method('POST');
+        $cnRow = agent_credit_note($db, $in);
+        $cn    = cn_get($db, (int)$cnRow['id']);
+        require_once __DIR__ . '/dropbox_helper.php';
+        $token = dropbox_get_access_token();
+        $dir = rtrim(trim((string)($in['folder_path'] ?? '')), '/');
+        if ($dir !== '') {
+            if ($dir[0] !== '/') agent_fail('folder_path must be a full Dropbox path starting with /');
+            if (!dropbox_path_exists($token, $dir)) agent_fail('folder_path ' . $dir . ' not found in Dropbox', 404);
+        } else {
+            $r = inv_linked_request($db, (int)$cn['invoice_id']);
+            if (!$r || !$r['practice_code']) agent_fail('Credit note ' . $cn['cn_number'] . ' has no linked request / folder — pass folder_path', 409);
+            $dir = agent_request_dropbox_dir($token, $r);
+        }
+        $path      = $dir . '/' . cn_pdf_dropbox_name($cn);
+        $overwrite = !empty($in['overwrite']);
+        $exists    = dropbox_path_exists($token, $path);
+        if ($exists && !$overwrite) {
+            agent_fail('File already exists: ' . $path, 409, ['path' => $path, 'hint' => 'Resend with "overwrite": true to replace it (Dropbox keeps the old version).']);
+        }
+        try {
+            $pdf = cn_pdf($cn, cn_items($db, (int)$cn['id']));
+        } catch (RuntimeException $e) {
+            agent_fail($e->getMessage(), 500);
+        }
+        try {
+            $meta = dropbox_upload_text($token, $path, $pdf, $overwrite ? 'overwrite' : 'add');
+        } catch (RuntimeException $e) {
+            agent_fail($e->getMessage(), stripos($e->getMessage(), 'conflict') !== false ? 409 : 502, ['path' => $path]);
+        }
+        agent_out(['ok' => true, 'path' => $meta['path_display'] ?? $path, 'size' => $meta['size'] ?? strlen($pdf),
+                   'rev' => $meta['rev'] ?? null, 'overwritten' => $exists, 'credit_note' => agent_credit_note_out($db, $cnRow)]);
+    }
+
+    // ── cn_migrate_legacy ────────────────────────────────────────────────────
+    // One-off (15 Nov 2026): credit notes created before then were recorded as a NEGATIVE
+    // payment on their invoice, reopening its balance. Cancels those payments and
+    // recalculates the invoices. Dry-run (before → after per invoice) unless "confirm": true.
+    case 'cn_migrate_legacy': {
+        agent_invoice_lib();
+        if (!empty($in['confirm'])) agent_require_method('POST');
+        $res = cn_migrate_legacy_payments($db, !empty($in['confirm']));
+        agent_out(['ok' => true, 'count' => count($res['rows'])] + $res
+                  + (empty($in['confirm']) ? ['message' => 'Dry run — nothing changed. Resend with "confirm": true to cancel these payments and recalculate.'] : []));
     }
 
     // ── update_folder_status ─────────────────────────────────────────────────
@@ -2506,7 +2635,7 @@ try {
             agent_fail('File already exists: ' . $path, 409, ['path' => $path, 'hint' => 'Resend with "overwrite": true to replace it (Dropbox keeps the old version).']);
         }
         try {
-            $pdf = inv_pdf($inv, inv_items($db, $id), inv_payments($db, $id, true));
+            $pdf = inv_pdf($inv, inv_items($db, $id), inv_payments($db, $id, true), inv_credit_notes($db, $id));
         } catch (RuntimeException $e) {
             agent_fail($e->getMessage(), 500);
         }
@@ -3742,7 +3871,7 @@ try {
             'iti_set_days', 'iti_add_day', 'iti_delete_day', 'iti_inclusions', 'iti_update_inclusions', 'iti_update_standard_inclusion', 'iti_save_as_sample',
             'iti_flight_routes', 'iti_create_flight_route', 'iti_activities', 'iti_activity', 'iti_update_activity', 'iti_create_activity',
             'iti_transfer_routes', 'iti_create_transfer_route', 'iti_update_transfer_route', 'iti_create_destination', 'iti_import_program', 'iti_supplier_blocklist', 'add_flight_rates',
-            'find_invoices', 'get_invoice', 'add_invoice_payment', 'cancel_invoice_payment', 'cancel_invoice', 'restore_invoice', 'list_credit_notes', 'create_credit_note', 'apply_credit_note', 'update_folder_status',
+            'find_invoices', 'get_invoice', 'add_invoice_payment', 'cancel_invoice_payment', 'cancel_invoice', 'restore_invoice', 'list_credit_notes', 'create_credit_note', 'apply_credit_note', 'refund_credit_note', 'cn_migrate_legacy', 'update_credit_note', 'save_credit_note_pdf', 'update_folder_status',
             'save_invoice_pdf', 'send_invoice_email', 'import_zoho_invoice', 'create_invoice', 'update_invoice', 'memo_list', 'memo_save', 'memo_set_status', 'memo_delete',
             'routine_status', 'routine_done',
             'mail_folders', 'mail_list', 'mail_get', 'mail_attachment', 'mail_flag', 'mail_move', 'mail_draft', 'mail_send',

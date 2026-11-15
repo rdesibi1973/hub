@@ -99,7 +99,7 @@ foreach ($rows as $inv) {
         $payments = $payStmt->fetchAll(PDO::FETCH_ASSOC);
 
         $dompdf = new \Dompdf\Dompdf($options);
-        $dompdf->loadHtml(buildInvoiceHtml($inv, $items, $payments));
+        $dompdf->loadHtml(buildInvoiceHtml($inv, $items, $payments, inv_credit_notes($db, (int)$inv['id'])));
         $dompdf->setPaper('A4', 'portrait');
         $dompdf->render();
         $pdfData = $dompdf->output();

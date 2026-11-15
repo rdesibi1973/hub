@@ -52,8 +52,38 @@ function inv_doc_qty($q): string {
     return rtrim(rtrim(number_format((float)$q, 2), '0'), '.');
 }
 
+/**
+ * Totals of an invoice: Sub Total, Total, Payment Made (when something is paid), one line per active
+ * credit note issued on it (and, when part of its credit was used on another invoice / refunded, a
+ * "(+)" line for that), then Balance Due — or "Credit to client" when the stored balance is negative
+ * (balance = T − C − P + U, recalculate_invoice()). $creditNotes: rows of inv_credit_notes().
+ * Returns ['rows' => [[label, amount text, css class]], 'label' => …, 'amount' => float].
+ */
+function inv_doc_totals(array $inv, array $creditNotes): array {
+    $sym  = $inv['currency'] === 'EUR' ? '€' : '$';
+    $rows = [['Sub Total', number_format((float)$inv['subtotal'], 2), ''],
+             ['Total', $sym . number_format((float)$inv['total'], 2), 'total']];
+    if ((float)$inv['amount_paid'] > 0) $rows[] = ['Payment Made', '(-) ' . number_format((float)$inv['amount_paid'], 2), 'payment'];
+    foreach ($creditNotes as $c) {
+        if (($c['status'] ?? '') === 'Cancelled') continue;
+        $rows[] = ['Credit note ' . $c['cn_number'], '(-) ' . number_format((float)$c['total'], 2), 'payment'];
+        if ((float)($c['used'] ?? 0) > 0.001) {
+            $on = (string)($c['used_on'] ?? '');
+            $rows[] = [($on === 'refund' ? 'Refunded' : 'Credit used') . ($on !== '' && $on !== 'refund' ? ' on ' . $on : ''),
+                       '(+) ' . number_format((float)$c['used'], 2), ''];
+        }
+    }
+    $balance = round((float)$inv['balance_due'], 2);
+    if ($balance < -0.001) {
+        $rows[] = ['Credit to client', $sym . number_format(-$balance, 2), 'balance'];
+        return ['rows' => $rows, 'label' => 'Credit to client', 'amount' => -$balance];
+    }
+    $rows[] = ['Balance Due', $sym . number_format(max(0.0, $balance), 2), 'balance'];
+    return ['rows' => $rows, 'label' => 'Balance Due', 'amount' => max(0.0, $balance)];
+}
+
 /** Invoice → document. Payment Made only when something is paid; Terms / Due Date only when set. */
-function inv_doc_from_invoice(array $inv, array $items): array {
+function inv_doc_from_invoice(array $inv, array $items, array $creditNotes = []): array {
     $sym   = $inv['currency'] === 'EUR' ? '€' : '$';
     $dates = [['Invoice Date :', date('d M Y', strtotime($inv['issue_date']))]];
     if (!empty($inv['terms']))    $dates[] = ['Terms :', $inv['terms']];
@@ -65,18 +95,15 @@ function inv_doc_from_invoice(array $inv, array $items): array {
                    'rate' => number_format((float)$it['unit_price'], 2),
                    'amount' => number_format((float)$it['line_total'], 2), 'red' => (float)$it['line_total'] < 0];
     }
-    $totals = [['Sub Total', number_format((float)$inv['subtotal'], 2), ''],
-               ['Total', $sym . number_format((float)$inv['total'], 2), 'total']];
-    if ((float)$inv['amount_paid'] > 0) $totals[] = ['Payment Made', '(-) ' . number_format((float)$inv['amount_paid'], 2), 'payment'];
-    $totals[] = ['Balance Due', $sym . number_format((float)$inv['balance_due'], 2), 'balance'];
+    $tot = inv_doc_totals($inv, $creditNotes);
 
     return [
         'kind'         => 'invoice',
         'title'        => 'Invoice',
         'number'       => $inv['invoice_number'],
         'ref_line'     => '',
-        'amount_label' => 'Balance Due',
-        'amount'       => $sym . number_format((float)$inv['balance_due'], 2),
+        'amount_label' => $tot['label'],
+        'amount'       => $sym . number_format($tot['amount'], 2),
         'issuer'       => inv_doc_issuer((string)$inv['issuer'], (string)$inv['currency']),
         'bill_label'   => 'Bill To',
         'bill_name'    => $inv['bill_to_name'],
@@ -84,7 +111,7 @@ function inv_doc_from_invoice(array $inv, array $items): array {
         'dates'        => $dates,
         'cols'         => ['Qty', 'Rate', 'Amount'],
         'items'        => $rows,
-        'totals'       => $totals,
+        'totals'       => $tot['rows'],
         'notes'        => (string)($inv['notes'] ?? ''),
         'terms_conditions' => (string)($inv['terms_conditions'] ?? ''),
         'show_bank'    => true,
@@ -271,8 +298,8 @@ function inv_doc_logo_data_uri(array $d): string {
 }
 
 /** Full HTML for Dompdf: the same body as the page, A4 with Chrome's print margins. */
-function buildInvoiceHtml(array $inv, array $items, array $payments): string {
-    $d = inv_doc_from_invoice($inv, $items);
+function buildInvoiceHtml(array $inv, array $items, array $payments, array $creditNotes = []): string {
+    $d = inv_doc_from_invoice($inv, $items, $creditNotes);
     return inv_doc_dompdf_html($d, 'Invoice ' . $inv['invoice_number']);
 }
 

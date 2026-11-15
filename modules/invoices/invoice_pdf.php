@@ -14,7 +14,7 @@ if (!$inv) { die('Invoice not found.'); }
 $items = $db->prepare("SELECT * FROM invoice_items WHERE invoice_id=? ORDER BY sort_order,id");
 $items->execute([$id]); $items = $items->fetchAll();
 
-$doc = inv_doc_from_invoice($inv, $items);
+$doc = inv_doc_from_invoice($inv, $items, inv_credit_notes($db, $id));
 ?>
 <!DOCTYPE html>
 <html lang="en">

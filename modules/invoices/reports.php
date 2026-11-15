@@ -23,7 +23,7 @@ $stats = $db->query("
         COUNT(*) AS inv_count,
         COALESCE(SUM(total),0) AS total_invoiced,
         COALESCE(SUM(amount_paid),0) AS total_paid,
-        COALESCE(SUM(balance_due),0) AS total_outstanding,
+        COALESCE(SUM(GREATEST(balance_due,0)),0) AS total_outstanding,
         SUM(status='Paid') AS fully_paid,
         SUM(status='Partially Paid') AS partially_paid,
         SUM(status IN ('New','Partially Paid')) AS open_count
@@ -39,7 +39,7 @@ $monthly = $db->query("
         COUNT(*) AS cnt,
         COALESCE(SUM(total),0) AS invoiced,
         COALESCE(SUM(amount_paid),0) AS paid,
-        COALESCE(SUM(balance_due),0) AS outstanding
+        COALESCE(SUM(GREATEST(balance_due,0)),0) AS outstanding
     FROM invoices
     WHERE $baseWhere
     GROUP BY MONTH(issue_date), MONTHNAME(issue_date)
@@ -64,7 +64,7 @@ $byAgent = $db->query("
         COUNT(i.id) AS cnt,
         COALESCE(SUM(i.total),0) AS invoiced,
         COALESCE(SUM(i.amount_paid),0) AS paid,
-        COALESCE(SUM(i.balance_due),0) AS outstanding
+        COALESCE(SUM(GREATEST(i.balance_due,0)),0) AS outstanding
     FROM invoices i
     LEFT JOIN requests r ON r.id = i.request_id
     LEFT JOIN agents   a ON a.id = r.agent_id

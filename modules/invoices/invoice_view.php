@@ -157,7 +157,7 @@ try {
     <div class="sub">
       <a href="invoices.php" style="text-decoration:none;color:var(--grey-mid)">← Invoices</a>
       &nbsp;·&nbsp;
-      <span class="badge <?= INV_STATUSES[$inv['status']] ?? '' ?>"><?= h($inv['status']) ?></span>
+      <span class="badge <?= INV_STATUSES[$inv['status']] ?? '' ?>"><?= h($inv['status']) ?><?= (float)$inv['balance_due'] < -0.001 && $inv['status'] !== 'Cancelled' ? ' — credit to client ' . h(fmt_money(-(float)$inv['balance_due'], $inv['currency'])) : '' ?></span>
       &nbsp;·&nbsp; <?= date('d M Y', strtotime($inv['issue_date'])) ?>
       <?php if ($inv['request_id']): ?>
         &nbsp;·&nbsp; <a href="../leads/request_view.php?id=<?= $inv['request_id'] ?>" style="color:var(--blue)">Req #<?= $inv['request_id'] ?></a>
@@ -284,15 +284,17 @@ try {
 <!-- ── TOTALS ─────────────────────────────────────────────────────────── -->
 <div style="display:flex;justify-content:flex-end;max-width:860px;margin-bottom:28px;">
   <div class="totals-box">
-    <div class="totals-row"><span>Sub Total</span><span><?= fmt_money((float)$inv['subtotal'], $inv['currency']) ?></span></div>
-    <div class="totals-row total"><span>Total</span><span><?= fmt_money((float)$inv['total'], $inv['currency']) ?></span></div>
-    <?php if ($inv['amount_paid'] > 0): ?>
-    <div class="totals-row paid"><span>Payment Made</span><span>(-) <?= fmt_money((float)$inv['amount_paid'], $inv['currency']) ?></span></div>
-    <?php endif; ?>
+    <?php // Same lines as the PDF (includes/invoice_html.php): payments, then each active credit note, then Balance Due / Credit to client.
+    require_once __DIR__ . '/includes/invoice_html.php';
+    $tot = inv_doc_totals($inv, $creditNotes);
+    foreach ($tot['rows'] as $tr):
+        if ($tr[2] === 'balance') continue; ?>
+    <div class="totals-row <?= $tr[2] === 'payment' ? 'paid' : $tr[2] ?>"><span><?= h($tr[0]) ?></span><span><?= h($tr[1]) ?></span></div>
+    <?php endforeach; ?>
     <div class="totals-row balance">
-      <span>Balance Due</span>
-      <span style="<?= (float)$inv['balance_due'] <= 0 ? 'color:var(--green)' : 'color:var(--black)' ?>">
-        <?= fmt_money((float)$inv['balance_due'], $inv['currency']) ?>
+      <span><?= h($tot['label']) ?></span>
+      <span style="<?= $tot['label'] !== 'Balance Due' ? 'color:var(--blue)' : ((float)$inv['balance_due'] <= 0 ? 'color:var(--green)' : 'color:var(--black)') ?>">
+        <?= fmt_money($tot['amount'], $inv['currency']) ?>
       </span>
     </div>
   </div>
@@ -370,6 +372,7 @@ try {
         <th>Date</th>
         <th>Reason</th>
         <th class="text-right">Credit</th>
+        <th class="text-right">Remaining</th>
         <th>Status</th>
       </tr>
     </thead>
@@ -380,6 +383,8 @@ try {
         <td style="white-space:nowrap"><?= date('d M Y', strtotime($c['issue_date'])) ?></td>
         <td class="text-muted"><?= h($c['reason'] ?: '—') ?></td>
         <td class="text-right" style="font-weight:600;color:var(--red)"><?= fmt_money((float)$c['total'], $inv['currency']) ?></td>
+        <td class="text-right"><?= $c['status'] === 'Cancelled' ? '—' : fmt_money(cn_remaining_credit($db, (int)$c['id']), $inv['currency'])
+                                    . ((float)$c['used'] > 0.001 ? '<div style="font-size:.72rem;color:var(--grey-mid)">used ' . h(fmt_money((float)$c['used'], $inv['currency']) . ' — ' . $c['used_on']) . '</div>' : '') ?></td>
         <td><span class="badge <?= CN_STATUSES[$c['status']] ?? '' ?>"><?= h($c['status']) ?></span></td>
       </tr>
       <?php endforeach; ?>
@@ -400,7 +405,7 @@ try {
     <div class="form-group" style="gap:4px">
       <label style="font-size:.7rem">Amount (<?= h($inv['currency']) ?>)</label>
       <input type="number" name="amount" step="0.01" min="0.01"
-             placeholder="<?= $inv['balance_due'] > 0 ? number_format($inv['balance_due'],2) : '0.00' ?>"
+             placeholder="<?= $inv['balance_due'] > 0 ? number_format((float)$inv['balance_due'],2) : '0.00' ?>"
              style="padding:7px 10px;border:1.5px solid var(--grey-lt);border-radius:6px;font-family:inherit;font-size:.83rem;width:130px">
     </div>
     <div class="form-group" style="gap:4px">

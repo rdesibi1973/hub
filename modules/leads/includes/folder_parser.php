@@ -285,6 +285,8 @@ function parse_import_folder(string $folder): array {
  */
 function folder_is_cancelled(string $name): bool {
     $seg = basename(str_replace('\\', '/', rtrim(trim($name), '/\\')));
+    // 00_CANCELED, 00_2026, 00_POSTPONED … are archive / system containers, never a booking.
+    if (preg_match('/^00_/', $seg)) return false;
     return (bool)preg_match('/_CANCELL?ED(?:[_-]+CK)*$/i', $seg);
 }
 

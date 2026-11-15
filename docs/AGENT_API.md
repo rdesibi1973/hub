@@ -576,6 +576,10 @@ group folder for a member; refused unless cancelled by name or Hub status) into
 status_set[]}`, `skipped[]` (destination exists). Confirm → moves, rewrites the requests' paths, sets status
 **Cancelled** where it was not (closing their Booking follow-up lines), timeline `folder_relinked` "Folder archived
 (cancelled)". Convenience only: a folder moved by hand is healed anyway.
+Archive / system folders are never moved: anything starting with `00_` (`00_CANCELED`, `00_POSTPONED`, `00_2026`,
+`00_CreditNotes` …) is not a cancelled booking (`folder_is_cancelled()` is false for them). With `request_id` and the
+folder already under `/001_Safari/00_CANCELED/` → `unchanged: true`, `path`, `moves: []` and `status_set` (the request
+when its Hub status is not Cancelled yet; confirm sets it, closes its Booking follow-up lines and logs `status_change`).
 
 ```bash
 curl -sH "$H" "$U?action=folder_resolve&request_id=3012"
@@ -1140,18 +1144,29 @@ Same logic as the invoice page (`modules/invoices/invoice_view.php`), shared thr
 `modules/invoices/includes/invoice_service.php`. Every invoice action takes `invoice_id`
 **or** `invoice_number` (e.g. `SE-2026-0012`); the audit row carries the invoice's `request_id`.
 
+**Balance and credit notes (since 15 Nov 2026).** A credit note is its own document, **never a negative payment**.
+Per invoice: T = total, P = active payments, C = active credit notes issued on it, U = part of those credit notes
+already used (applied to other invoices + refunds paid). `net_due = T − C` (also the revenue), `balance = net_due − P + U`:
+> 0 still to collect, = 0 `Fully Paid`, < 0 **credit to client** of −balance (status `Fully Paid`). In every invoice
+shape `balance` is never below 0 and `credit_to_client` carries the credit. A credit note can give back at most
+`min(C, max(0, P − net_due))` (spread over the invoice's CNs in date order), so its `remaining` (= `cn_available`)
+is that minus what was already used: a CN on an unpaid invoice just wipes the unpaid part (`remaining` 0).
+
 ### `find_invoices` (GET)
 `q` (invoice number / bill-to / customer / folder substring), `request_id`, `status`
-(`New`|`Partially Paid`|`Fully Paid`|`Cancelled`), `unpaid=1` (balance > 0, not cancelled), `limit` ≤ 100.
+(`New`|`Partially Paid`|`Fully Paid`|`Cancelled`), `unpaid=1` (balance > 0, not cancelled — credits to client are not
+unpaid), `limit` ≤ 100.
 At least one filter. → `invoices[]` `{id, number, issuer, bill_to, currency, issue_date, due_date,
-total, paid, balance, status, request_id, folder, follow_up}`.
+total, paid, balance, credit_to_client, status, request_id, folder, follow_up}`.
 
 ### `get_invoice` (GET)
-→ `invoice` (+ address, terms, notes, T&C, created/updated), `items[]`, `payments[]`
+→ `invoice` (+ `credited` C, `credit_used` U, `net_due`, address, terms, notes, T&C, created/updated), `items[]`, `payments[]`
 (`{id, date, amount, method, reference, notes, cancelled, cancelled_at, cancellation_reason}`, cancelled
 ones included), `credit_notes[]` (those issued on this invoice: `{id, number, date, currency, total, applied,
-remaining, status, reason, applied_to[]}`, see `list_credit_notes`), `folder` (`{request_id, folder, current_tag,
+to_give_back, remaining, status, reason, applied_to[], refunds[]}`, see `list_credit_notes`), `folder` (`{request_id, folder, current_tag,
 payment_status, group_folder, dropbox_path}` or null), `pdf_name`, `methods`, `folder_statuses`.
+The PDF shows each active credit note under "Payment Made" (`Credit note CN-… (-) amount`, then `Credit used on …
+(+) amount` for its used part), then `Balance Due` or `Credit to client`.
 
 ### `add_invoice_payment` (POST)
 `date` (YYYY-MM-DD, default today), `amount`* (> 0), `method` (`Bank Transfer`|`Credit Card`|`Cash`|`Other`,
@@ -1202,20 +1217,23 @@ Dry run → `invoice`, `folder`, predicted `final_status`, `active_payments_tota
 ### `list_credit_notes` (GET)
 Filters, all optional: `invoice_id` (the invoice the credit note was issued on), `request_id`, `agency_id` (the
 request's agency), `status` (`Issued`|`Partially applied`|`Applied`|`Cancelled`), `limit` ≤ 200 (default 100).
-→ `credit_notes[]` `{id, number, date, currency, total, applied, remaining, status, reason, invoice_id,
-invoice_number, request_id, agency_id, bill_to, applied_to[]}`. `applied_to[]` lists the active applications:
-`{allocation_id, invoice_id, invoice_number, amount, amount_invoice, currency, date, payment_id}`.
-`remaining` is 0 on a Cancelled credit note.
+→ `credit_notes[]` `{id, number, date, currency, total, applied, to_give_back, remaining, status, reason, invoice_id,
+invoice_number, request_id, agency_id, bill_to, applied_to[], refunds[]}`. `applied_to[]` lists the active applications:
+`{allocation_id, invoice_id, invoice_number, amount, amount_invoice, currency, date, payment_id}`; `refunds[]` the refunds
+paid `{allocation_id, amount, date, reference, notes}`. `to_give_back` = what the CN can give back at most (see above),
+`remaining` = `to_give_back` − applied − refunded; 0 on a Cancelled credit note.
 
 ### `create_credit_note` (POST)
 `invoice_id`* (or `invoice_number`), `amount`* (> 0), `reason`*, `date` (YYYY-MM-DD, default today). Same logic as
-"+ Credit Note" on the invoice page (`cn_create`), with one credit line: number `CN-YYYY-NNNN`, the refund is
-recorded on the invoice as a **negative payment** (method `Other`, reference = CN number), so its balance goes
-**up** by the amount, and the request value goes down by it. Event in the request timeline.
-- **409** when the amount is above the invoice total, or on a Cancelled invoice.
-- `warnings[]`: credit above the amount paid; a credit note of the same amount already on the invoice. Neither blocks.
-Dry-run unless `"confirm": true` → `next_number`, `invoice`, `amount`, `balance_after`, `request_value_change`,
-`warnings`. Confirmed → `credit_note`, `invoice`, `folder`. No PDF is saved and the folder is not renamed.
+"+ Credit Note" on the invoice page (`cn_create`), with one credit line: number `CN-YYYY-NNNN`. Never a payment: the
+invoice balance goes **down** by the amount (a fully paid invoice shows a credit to client = amount and the CN
+`remaining` = amount; on an unpaid invoice it just lowers the balance, `remaining` 0). The request value goes down by
+the amount. Event in the request timeline.
+- **409** when the credit notes of the invoice (this one included) would exceed its total, or on a Cancelled invoice.
+- `warnings[]`: the client will have a credit; a credit note of the same amount already on the invoice. Neither blocks.
+Dry-run unless `"confirm": true` → `next_number`, `invoice`, `amount`, `balance_after` (signed: < 0 = credit to client),
+`invoice_status_after`, `credit_to_client_after`, `cn_available`, `request_value_change`, `warnings`. Confirmed →
+`credit_note`, `invoice`, `folder`. No PDF is saved (`save_credit_note_pdf`) and the folder is not renamed.
 
 ### `apply_credit_note` (POST)
 `credit_note_id`* or `credit_note_number`*, `invoice_id`* (or `invoice_number`) of the invoice to pay,
@@ -1229,8 +1247,10 @@ Refused with **409**:
 - amount above the invoice balance, unless `"allow_overpaid": true`;
 - credit note and invoice in different currencies (the credit note page takes an FX rate for these);
 - Cancelled credit note or Cancelled invoice;
-- the credit note already applied to that invoice (an active application: cancel it on the credit note page first).
-The credit note's own source invoice is accepted, with a `warnings[]` line. Request value (`sync_request_value`):
+- the credit note already applied to that invoice (an active application: cancel it on the credit note page first);
+- the credit note's own source invoice (its credit is already deducted there).
+The application raises U on the source invoice (its credit to client goes down) and is a payment on the target.
+Request value (`sync_request_value`):
 credit applied to an invoice of the same request is no longer subtracted, so the value goes back up by that amount;
 credit not applied, or applied to another request, stays subtracted.
 Dry-run unless `"confirm": true` → `amount_cn`, `amount_invoice`, `fx_rate`, `cn_remaining_after`, `cn_status_after`,
@@ -1238,9 +1258,39 @@ Dry-run unless `"confirm": true` → `amount_cn`, `amount_invoice`, `fx_rate`, `
 fields (from the saved data) + `allocation_id`, `payment_id`, `amount`, `memos_closed`, `folder`. The folder is **not** renamed automatically.
 Needs `migrations/076_credit_note_applied.sql` (new payment method).
 
+### `refund_credit_note` (POST)
+`credit_note_id`* or `credit_note_number`*, `amount` (default: all the remaining credit), `date` (default today),
+`reference`, `notes`. Same as "Record Refund" on the credit note page (`cn_record_refund`): the credit was **actually
+paid back** to the client. Recorded as an allocation of kind `refund` (no target invoice): CN `remaining` down, U of
+the source invoice up (its credit to client down). **409** Cancelled CN, no credit left, amount above the remaining.
+Dry-run unless `"confirm": true` → `amount`, `cn_remaining_after`, `cn_status_after`, `credit_note`. Confirmed →
+the same + `allocation_id`. Cancel it on the credit note page (Cancel on the usage line).
+
+### `update_credit_note` (POST)
+`credit_note_id`* or `credit_note_number`*, and `notes` (new text, `""` = none) **or** `remove_through` (cuts the
+notes from the start up to and including that text, and the blank lines after it; **409** when not found). Same as
+"Edit notes" on the credit note page (`cn_update_notes`); the notes are printed on the CN PDF. Dry-run unless
+`"confirm": true` → `notes_before`, `notes_after`, `changed`. Then `save_credit_note_pdf` with `"overwrite": true`.
+
+### `save_credit_note_pdf` (POST)
+Like `save_invoice_pdf`: renders `Credit Note <number>.pdf` (Dompdf, same layout as `cn_pdf.php`) into the booking
+folder of the source invoice's request, or `folder_path`. **409** when the file exists unless `"overwrite": true`
+(Dropbox keeps the old version). → `path`, `size`, `rev`, `overwritten`, `credit_note`.
+
+### `cn_migrate_legacy` (GET dry run / POST confirm) — one-off, 15 Nov 2026
+Credit notes created before then were recorded as a negative payment (method `Other`, reference `CN-YYYY-NNNN`, not
+an application) on their invoice. Dry run → `rows[]` per invoice `{invoice, credit_notes[] {payment_id, cn, amount,
+cn_status}, total, paid_before / paid_after, credited, credit_used, balance_before / balance_after, status_before /
+status_after, credit_to_client_after, cn_available_after}` (also invoices with active credit notes whose stored balance
+changes with the new formula), `warnings[]` (CN not found, Cancelled CN with an active payment, CN applied to its own
+invoice). Confirm → those payments cancelled ("Migrated: credit notes no longer recorded as negative payments"),
+invoices recalculated + `sync_request_value`, `migrated` = payments cancelled. A second run finds nothing.
+
 ```bash
 curl -sH "$H" "$U?action=list_credit_notes&invoice_id=331"
 curl -sH "$H" -X POST "$U?action=apply_credit_note" -d '{"credit_note_number":"CN-2026-0003","invoice_id":331}'
+curl -sH "$H" -X POST "$U?action=refund_credit_note" -d '{"credit_note_number":"CN-2026-0005","date":"2026-10-20","reference":"Refunded by Roberto (personal account)"}'   # dry run
+curl -sH "$H" "$U?action=cn_migrate_legacy"                                                # dry run
 ```
 
 ### `update_folder_status` (POST)

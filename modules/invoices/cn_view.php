@@ -11,25 +11,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
     if ($action === 'cancel_cn') {
         try {
-            // Cancel any outstanding allocations first (frees target invoices).
-            $outstanding = $db->prepare("SELECT id FROM credit_note_allocations WHERE credit_note_id=? AND cancelled_at IS NULL");
-            $outstanding->execute([$cnId]);
-            foreach ($outstanding->fetchAll(PDO::FETCH_COLUMN) as $aId) {
-                cn_cancel_allocation($db, (int)$aId);
-            }
-            $db->prepare("UPDATE credit_notes SET status='Cancelled', updated_at=NOW() WHERE id=? AND status<>'Cancelled'")
-               ->execute([$cnId]);
-            sync_cn_invoice_payment($db, $cnId); // cancels the linked refund + resyncs
+            cn_cancel($db, $cnId);    // applications / refunds cancelled, source invoice back to total − payments
             echo json_encode(['ok'=>true]); exit;
         } catch (\Throwable $e) { echo json_encode(['ok'=>false,'error'=>$e->getMessage()]); exit; }
     }
 
     if ($action === 'restore_cn') {
         try {
-            $db->prepare("UPDATE credit_notes SET status='Issued', updated_at=NOW() WHERE id=? AND status='Cancelled'")
-               ->execute([$cnId]);
-            sync_cn_invoice_payment($db, $cnId); // re-applies the refund + resyncs
+            cn_restore($db, $cnId);   // credit deducted from the source invoice again
             echo json_encode(['ok'=>true]); exit;
+        } catch (\Throwable $e) { echo json_encode(['ok'=>false,'error'=>$e->getMessage()]); exit; }
+    }
+
+    if ($action === 'update_notes') {
+        try {
+            cn_update_notes($db, $cnId, (string)($_POST['notes'] ?? ''));
+            echo json_encode(['ok'=>true]); exit;
+        } catch (\Throwable $e) { echo json_encode(['ok'=>false,'error'=>$e->getMessage()]); exit; }
+    }
+
+    if ($action === 'record_refund') {
+        try {
+            $allocId = cn_record_refund($db, $cnId, (float)($_POST['amount'] ?? 0), (string)($_POST['refund_date'] ?? ''),
+                                        trim((string)($_POST['reference'] ?? '')), trim((string)($_POST['note'] ?? '')) ?: null,
+                                        (int)(current_user()['id'] ?? 0));
+            echo json_encode(['ok'=>true, 'alloc_id'=>$allocId]); exit;
         } catch (\Throwable $e) { echo json_encode(['ok'=>false,'error'=>$e->getMessage()]); exit; }
     }
 
@@ -96,7 +102,9 @@ $items->execute([$id]); $items = $items->fetchAll();
 // Allocations (credit used to pay other invoices)
 $allocs = cn_allocations($db, $id);
 
-$remainingCredit = cn_remaining_credit($db, $id);
+// Only what the client paid above net_due can be given back (invoice_service.php inv_cn_availability()).
+$avail           = cn_availability($db, $id);
+$remainingCredit = $avail['remaining'];
 
 $pageTitle = $cn['cn_number'];
 include 'includes/header.php';
@@ -131,13 +139,17 @@ $sym = $cn['currency'] === 'EUR' ? '€' : '$';
 
 <?php if ($cn['status'] === 'Cancelled'): ?>
 <div class="flash" style="background:#FAE8E7;color:#A01A14;border-left:4px solid #C0211B;max-width:860px;">
-  This credit note is cancelled — the refund has been removed from <?= h($cn['invoice_number']) ?>.
+  This credit note is cancelled — <?= h($cn['invoice_number']) ?> is back to its total minus the payments received.
 </div>
 <?php else: ?>
 <div class="flash" style="background:#E8F5E9;color:#1A6B3A;border-left:4px solid #2E7D32;max-width:860px;">
   A credit of <strong><?= fmt_money((float)$cn['total'], $cn['currency']) ?></strong>
-  has been applied to invoice <strong><?= h($cn['invoice_number']) ?></strong>.
-  Any remaining credit can be used to pay other invoices below.
+  is deducted from invoice <strong><?= h($cn['invoice_number']) ?></strong> (it is never collected again).
+  <?php if ($avail['cap'] > 0.001): ?>
+  The part the client already paid (<?= fmt_money($avail['cap'], $cn['currency']) ?>) is a credit to the client: it can pay another invoice below, or be recorded as a refund paid out.
+  <?php else: ?>
+  The invoice was not paid beyond its net amount: the credit just cancels the unpaid part, nothing is given back.
+  <?php endif; ?>
 </div>
 <?php endif; ?>
 
@@ -209,7 +221,11 @@ $sym = $cn['currency'] === 'EUR' ? '€' : '$';
 <div style="display:flex;justify-content:flex-end;max-width:860px;margin-bottom:16px;">
   <div class="totals-box">
     <div class="totals-row"><span>Total Credit</span><span><?= fmt_money((float)$cn['total'], $cn['currency']) ?></span></div>
-    <div class="totals-row"><span>Used</span><span><?= fmt_money((float)$cn['total'] - $remainingCredit, $cn['currency']) ?></span></div>
+    <?php if ($avail['cap'] < (float)$cn['total'] - 0.001): ?>
+    <div class="totals-row" title="Only what the client paid above the invoice total minus its credit notes can be given back; the rest just cancelled the unpaid part of <?= h($cn['invoice_number']) ?>.">
+      <span>To give back</span><span><?= fmt_money($avail['cap'], $cn['currency']) ?></span></div>
+    <?php endif; ?>
+    <div class="totals-row"><span>Used</span><span><?= fmt_money($avail['used'], $cn['currency']) ?></span></div>
     <div class="totals-row total">
       <span>Remaining Credit</span>
       <span style="<?= $remainingCredit <= 0.001 ? 'color:var(--grey-mid)' : 'color:var(--green)' ?>">
@@ -234,14 +250,19 @@ $sym = $cn['currency'] === 'EUR' ? '€' : '$';
     </thead>
     <tbody>
       <?php if ($allocs): ?>
-        <?php foreach ($allocs as $a): ?>
+        <?php foreach ($allocs as $a): $isRefund = ($a['kind'] ?? 'invoice') === 'refund'; ?>
         <tr class="<?= $a['cancelled_at'] ? 'payment-cancelled' : '' ?>" style="<?= $a['cancelled_at'] ? 'opacity:.5' : '' ?>">
           <td style="white-space:nowrap"><?= date('d M Y', strtotime($a['alloc_date'])) ?></td>
+          <?php if ($isRefund): ?>
+          <td><strong>Refund paid</strong>
+              <span style="font-size:.75rem;color:var(--grey-mid)"><?= h(trim(($a['reference'] ?? '') . ($a['notes'] ? ' — ' . $a['notes'] : ''), ' —')) ?></span></td>
+          <?php else: ?>
           <td><a href="invoice_view.php?id=<?= (int)$a['invoice_id'] ?>" style="color:var(--blue)"><?= h($a['invoice_number']) ?></a>
               <span style="font-size:.75rem;color:var(--grey-mid)"><?= h($a['bill_to_name']) ?></span></td>
+          <?php endif; ?>
           <td class="text-right" style="font-weight:600"><?= fmt_money((float)$a['amount_cn'], $cn['currency']) ?></td>
-          <td class="text-right"><?= rtrim(rtrim(number_format((float)$a['fx_rate'], 6, '.', ''), '0'), '.') ?></td>
-          <td class="text-right"><?= fmt_money((float)$a['amount_invoice'], $a['invoice_currency']) ?></td>
+          <td class="text-right"><?= $isRefund ? '—' : rtrim(rtrim(number_format((float)$a['fx_rate'], 6, '.', ''), '0'), '.') ?></td>
+          <td class="text-right"><?= $isRefund ? fmt_money((float)$a['amount_cn'], $cn['currency']) . ' <span style="font-size:.72rem;color:var(--grey-mid)">to client</span>' : fmt_money((float)$a['amount_invoice'], $a['invoice_currency']) ?></td>
           <td>
             <?php if (!$a['cancelled_at']): ?>
               <button class="btn btn-danger btn-sm" onclick="cancelAlloc(<?= (int)$a['id'] ?>)">Cancel</button>
@@ -306,19 +327,58 @@ $sym = $cn['currency'] === 'EUR' ? '€' : '$';
   </div>
   <span id="applyMsg" style="font-size:.8rem;display:none;margin-top:8px;"></span>
 </div>
+
+<!-- Refund paid out -->
+<div class="table-wrap" style="max-width:860px;padding:20px 24px;margin-top:16px;">
+  <div style="font-size:.8rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--grey-dk);margin-bottom:6px;">Refund Paid</div>
+  <div style="font-size:.75rem;color:var(--grey-mid);margin-bottom:14px;">
+    Only when the money was actually sent back to the client (bank transfer). The credit is used up; invoice <?= h($cn['invoice_number']) ?> does not change.
+  </div>
+  <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;">
+    <div class="form-group" style="gap:4px">
+      <label style="font-size:.7rem">Date</label>
+      <input type="date" id="refundDate" value="<?= date('Y-m-d') ?>" style="padding:7px 10px;border:1.5px solid var(--grey-lt);border-radius:6px;font-family:inherit;font-size:.83rem">
+    </div>
+    <div class="form-group" style="gap:4px">
+      <label style="font-size:.7rem">Amount (<?= h($cn['currency']) ?>)</label>
+      <input type="number" id="refundAmount" step="0.01" min="0.01" max="<?= number_format($remainingCredit,2,'.','') ?>"
+             value="<?= number_format($remainingCredit,2,'.','') ?>"
+             style="padding:7px 10px;border:1.5px solid var(--grey-lt);border-radius:6px;font-family:inherit;font-size:.83rem;width:130px">
+    </div>
+    <div class="form-group" style="gap:4px">
+      <label style="font-size:.7rem">Reference</label>
+      <input type="text" id="refundRef" maxlength="100" placeholder="Transfer ref" style="padding:7px 10px;border:1.5px solid var(--grey-lt);border-radius:6px;font-family:inherit;font-size:.83rem;width:160px">
+    </div>
+    <div class="form-group" style="gap:4px;flex:1;min-width:160px">
+      <label style="font-size:.7rem">Note (optional)</label>
+      <input type="text" id="refundNote" maxlength="255" style="padding:7px 10px;border:1.5px solid var(--grey-lt);border-radius:6px;font-family:inherit;font-size:.83rem;width:100%">
+    </div>
+    <button class="btn btn-outline" type="button" onclick="recordRefund()">Record Refund</button>
+  </div>
+  <span id="refundMsg" style="font-size:.8rem;display:none;margin-top:8px;"></span>
+</div>
 <?php endif; ?>
 <?php endif; // not cancelled ?>
 
-<?php if ($cn['notes']): ?>
 <div style="max-width:860px;margin-bottom:28px;">
-  <div style="font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--grey-mid);margin-bottom:6px;">Notes</div>
-  <div style="font-size:.83rem;color:var(--grey-dk);line-height:1.6"><?= nl2br(h($cn['notes'])) ?></div>
+  <div style="font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--grey-mid);margin-bottom:6px;">
+    Notes <span style="text-transform:none;letter-spacing:0;font-weight:400">(printed on the PDF)</span>
+    <a href="#" onclick="editNotes(true);return false;" id="notesEditLink" style="margin-left:8px;color:var(--blue);text-transform:none;letter-spacing:0;font-weight:600">✎ Edit notes</a>
+  </div>
+  <div id="notesView" style="font-size:.83rem;color:var(--grey-dk);line-height:1.6"><?= $cn['notes'] ? nl2br(h($cn['notes'])) : '<span style="color:var(--grey-mid)">—</span>' ?></div>
+  <div id="notesEdit" style="display:none">
+    <textarea id="notesText" rows="8" style="width:100%;padding:8px 10px;border:1.5px solid var(--grey-lt);border-radius:6px;font-family:inherit;font-size:.83rem;box-sizing:border-box;resize:vertical;"><?= h($cn['notes'] ?? '') ?></textarea>
+    <div style="margin-top:8px;display:flex;gap:8px;align-items:center">
+      <button class="btn btn-green btn-sm" type="button" onclick="saveNotes()">Save notes</button>
+      <button class="btn btn-outline btn-sm" type="button" onclick="editNotes(false)">Cancel</button>
+      <span id="notesMsg" style="font-size:.78rem;display:none"></span>
+    </div>
+  </div>
 </div>
-<?php endif; ?>
 
 <script>
 async function cancelCn() {
-  if (!confirm('Cancel credit note <?= h($cn['cn_number']) ?>?\n\nThe refund will be removed from <?= h($cn['invoice_number']) ?> and the request value restored.')) return;
+  if (!confirm('Cancel credit note <?= h($cn['cn_number']) ?>?\n\nIts credit is no longer deducted from <?= h($cn['invoice_number']) ?> (balance back to total − payments), any use of the credit is cancelled and the request value restored.')) return;
   var fd = new FormData();
   fd.append('action','cancel_cn'); fd.append('cn_id','<?= $id ?>');
   var r = await fetch('', {method:'POST', body:fd});
@@ -326,7 +386,7 @@ async function cancelCn() {
   if (d.ok) location.reload(); else alert(d.error || 'Error');
 }
 async function restoreCn() {
-  if (!confirm('Restore credit note <?= h($cn['cn_number']) ?>?\n\nThe refund will be re-applied to <?= h($cn['invoice_number']) ?>.')) return;
+  if (!confirm('Restore credit note <?= h($cn['cn_number']) ?>?\n\nIts credit will be deducted from <?= h($cn['invoice_number']) ?> again.')) return;
   var fd = new FormData();
   fd.append('action','restore_cn'); fd.append('cn_id','<?= $id ?>');
   var r = await fetch('', {method:'POST', body:fd});
@@ -435,8 +495,43 @@ function showApplyMsg(txt, ok) {
   el.style.color = ok === false ? 'var(--red)' : (ok === null ? 'var(--grey-mid)' : 'var(--green)');
 }
 
+function editNotes(on) {
+  document.getElementById('notesView').style.display = on ? 'none' : '';
+  document.getElementById('notesEdit').style.display = on ? '' : 'none';
+  document.getElementById('notesEditLink').style.display = on ? 'none' : '';
+}
+async function saveNotes() {
+  var el = document.getElementById('notesMsg');
+  var fd = new FormData();
+  fd.append('action','update_notes'); fd.append('cn_id','<?= $id ?>');
+  fd.append('notes', document.getElementById('notesText').value);
+  el.style.display = 'inline'; el.style.color = 'var(--grey-mid)'; el.textContent = 'Saving…';
+  var r = await fetch('', {method:'POST', body:fd});
+  var d = await r.json();
+  if (d.ok) location.reload(); else { el.style.color = 'var(--red)'; el.textContent = d.error || 'Error'; }
+}
+
+async function recordRefund() {
+  var amount = parseFloat(document.getElementById('refundAmount').value) || 0;
+  var date   = document.getElementById('refundDate').value;
+  var ref    = document.getElementById('refundRef').value.trim();
+  var el     = document.getElementById('refundMsg');
+  var say = function (t, c) { el.style.display = 'inline'; el.textContent = t; el.style.color = c; };
+  if (amount <= 0) { say('Enter the amount paid back.', 'var(--red)'); return; }
+  if (!date)       { say('Enter the date.', 'var(--red)'); return; }
+  if (!confirm('Record a refund of ' + amount.toFixed(2) + ' <?= h($cn['currency']) ?> paid to the client?\n\nThe credit is used up; invoice <?= h($cn['invoice_number']) ?> does not change.')) return;
+  var fd = new FormData();
+  fd.append('action','record_refund'); fd.append('cn_id','<?= $id ?>');
+  fd.append('amount', amount); fd.append('refund_date', date); fd.append('reference', ref);
+  fd.append('note', document.getElementById('refundNote').value.trim());
+  say('Saving…', 'var(--grey-mid)');
+  var r = await fetch('', {method:'POST', body:fd});
+  var d = await r.json();
+  if (d.ok) location.reload(); else say(d.error || 'Error', 'var(--red)');
+}
+
 async function cancelAlloc(allocId) {
-  if (!confirm('Cancel this credit usage?\n\nThe payment will be removed from the target invoice and the credit freed.')) return;
+  if (!confirm('Cancel this credit usage?\n\nA payment made with it is removed from the target invoice (a refund is only un-recorded) and the credit freed.')) return;
   var fd = new FormData();
   fd.append('action','cancel_allocation'); fd.append('cn_id','<?= $id ?>'); fd.append('alloc_id', allocId);
   var r = await fetch('', {method:'POST', body:fd});

@@ -206,5 +206,23 @@ $t('archive confirm: moved, path updated, timeline', !dropbox_path_exists('tok',
 $a = folder_archive_cancelled($db, 'tok', ['request_id' => 103]);
 $t('archive request_id: not cancelled → refused', !empty($a['error']) && strpos($a['error'], 'not cancelled') !== false, $a);
 
+// ── 8. archive_cancelled on a request already archived (real case 15 Nov 2026, request 435) ─
+// Its folder is in 00_CANCELED/00_2027: the old code climbed to "00_CANCELED" (ends with CANCELED) and
+// proposed moving the whole archive into itself.
+$t('00_CANCELED / 00_2026 are not cancelled bookings', !folder_is_cancelled('00_CANCELED') && !folder_is_cancelled('/001_Safari/00_CANCELED')
+   && !folder_is_cancelled('00_2026') && folder_is_cancelled($F5));
+$a = folder_archive_cancelled($db, 'tok', ['request_id' => 101]);
+$t('archive request_id already archived + Cancelled: unchanged, no move', empty($a['error']) && !empty($a['unchanged']) && $a['moves'] === []
+   && $a['status_set'] === [] && dropbox_path_exists('tok', '/001_Safari/00_CANCELED/00_2027/' . $F1), $a);
+$a = folder_archive_cancelled($db, 'tok', ['request_id' => 101, 'confirm' => true]);
+$t('archive request_id already archived, confirm: still nothing moved', !empty($a['unchanged']) && $a['moves'] === []
+   && dropbox_path_exists('tok', '/001_Safari/00_CANCELED') && dropbox_path_exists('tok', '/001_Safari/00_CANCELED/00_2027/' . $F1), $a);
+$a = folder_archive_cancelled($db, 'tok', ['request_id' => 102]);
+$t('archive request_id already archived but Booked: unchanged, status → Cancelled proposed', !empty($a['unchanged']) && $a['moves'] === []
+   && $a['status_set'] === [102] && $row(102)['status'] === 'Booked', $a);
+// (confirm with the status change closes the Booking follow-up lines: real Dropbox helper, not loadable here — see 7.)
+$a = folder_archive_cancelled($db, 'tok', []);
+$t('archive scan: 00_CANCELED never listed as a move', !array_filter($a['moves'], fn($m) => stripos($m['from'], '00_CANCELED') !== false), $a);
+
 echo $fail ? "\n$fail FAILED\n" : "\nALL PASS\n";
 exit($fail ? 1 : 0);

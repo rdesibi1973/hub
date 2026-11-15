@@ -20,6 +20,28 @@ Running log of notable changes and current build state. Module-level "active / p
 
 ---
 
+## 2026-11-15 — Credit notes no longer reopen the invoice balance; archive_cancelled skips 00_ folders
+
+- A credit note was recorded on its invoice as a **negative payment**: a fully paid invoice went back to Partially Paid
+  with the credit as "due" (SE-2026-0004, -0332, -0493, -0280), and a credit applied elsewhere counted twice. Now the CN is
+  its own document. Per invoice T / P / C / U (credit notes issued on it, part already used): `net_due = T − C`,
+  `balance = net_due − P + U`; < 0 = **credit to client** (status Fully Paid). `balance_due` is stored signed; lists that add
+  up what is to collect (invoices list, reports, Payments page, CK follow-up) take `GREATEST(balance_due, 0)`.
+  A CN can give back at most `min(C, max(0, P − net_due))` (date order): its `remaining`; on an unpaid invoice 0.
+  Applying a CN to its own source invoice is refused (already deducted there).
+- Invoice page / PDF: one line per credit note under Payment Made (`Credit note CN-… (-)`, `Credit used on … (+)`), then
+  Balance Due or **Credit to client**; badge "Fully Paid — credit to client".
+- Credit note page: **Refund paid** (date, amount, reference: allocation of kind `refund`, lazy schema `cn_alloc_schema()`
+  adds `credit_note_allocations.kind` / `reference` and makes `invoice_id` nullable), **Edit notes**, "To give back" line.
+- Agent API: invoice shape `credit_to_client` (`balance` ≥ 0), `get_invoice` `credited` / `credit_used` / `net_due`;
+  `create_credit_note` dry run `balance_after`, `cn_available`; credit notes `to_give_back`, `refunds[]`; new
+  `refund_credit_note`, `update_credit_note` (notes / `remove_through`), `save_credit_note_pdf`, `cn_migrate_legacy`
+  (one-off: cancels the old negative payments, recalculates; dry run first).
+- `archive_cancelled`: with `request_id` on a request already archived, it climbed to `00_CANCELED` (ends with
+  "CANCELED") and proposed moving the whole archive into itself (request 435, not confirmed). `folder_is_cancelled()` is now
+  false for `00_*`; a request already under `00_CANCELED/` → `unchanged` (+ status Cancelled on confirm when needed).
+- Tests: `tools/tests/credit_note_balance_test.php` (new), `tools/tests/folder_link_test.php` §8.
+
 ## 2026-11-14 — Booking gate: old Excel (.xls) supplier invoices read
 
 - Butiama Beach (Mafia) sends its pro-forma as a binary `.xls` (BIFF8, Mac Excel): the gate said "no document" and blocked

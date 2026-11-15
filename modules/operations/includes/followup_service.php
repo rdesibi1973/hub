@@ -1161,8 +1161,8 @@ function followup_ck_close_paid(PDO $db): int {
     $lines = $db->query("SELECT b.*, r.payment_status, f.stage FROM booking_followups b
                          LEFT JOIN requests r ON r.id = b.request_id LEFT JOIN ck_folders f ON f.folder_name = b.folder AND f.gone = 0
                          WHERE b.closed_at IS NULL AND b.type = 'ck' AND b.request_id IS NOT NULL")->fetchAll(PDO::FETCH_ASSOC);
-    $inv = $db->prepare("SELECT COUNT(*) n, COALESCE(SUM(amount_paid), 0) paid, COALESCE(SUM(balance_due), 0) due, GROUP_CONCAT(invoice_number) nos
-                         FROM invoices WHERE request_id = ? AND status <> 'Void'");
+    $inv = $db->prepare("SELECT COUNT(*) n, COALESCE(SUM(amount_paid), 0) paid, COALESCE(SUM(GREATEST(balance_due, 0)), 0) due, GROUP_CONCAT(invoice_number) nos
+                         FROM invoices WHERE request_id = ? AND status <> 'Void'");   // balance_due < 0 = credit to client
     foreach ($lines as $l) {
         $txt = ($l['service'] ?? '') . ' ' . ($l['doc_status_text'] ?? '');
         if (!preg_match(FU_CK_NOT_PAID_RE, $txt)) continue;

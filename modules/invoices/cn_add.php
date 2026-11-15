@@ -36,8 +36,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $qty  = (float)($item['quantity'] ?? 1);
         if ($qty == (int)$qty) $qty = (int)$qty;
         $price = (float)($item['unit_price'] ?? 0);
-        // Store credit amounts as positive values; the refund is applied as a
-        // negative payment on the invoice. Skip empty / zero lines.
+        // Store credit amounts as positive values (deducted from the invoice
+        // balance by recalculate_invoice()). Skip empty / zero lines.
         if ($desc && $price != 0) {
             $items[] = [
                 'description' => $desc,
@@ -47,14 +47,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             ];
         }
     }
-    $errors = cn_new_errors($inv, $items, $issueDate);
+    $errors = cn_new_errors($inv, $items, $issueDate, inv_credited_total($db, (int)$inv['id']));
 
     if (!$errors) {
         $new   = cn_create($db, $inv, $items, $issueDate, $reason, $notes, current_user()['id']);
         $cnNum = $new['cn_number'];
         $cnId  = $new['credit_note_id'];
 
-        flash("Credit note {$cnNum} created. Refund applied to {$inv['invoice_number']}.");
+        flash("Credit note {$cnNum} created and deducted from {$inv['invoice_number']}. Its credit stays available for another invoice (or a refund).");
         header("Location: cn_view.php?id=$cnId"); exit;
     }
 }
@@ -78,10 +78,11 @@ include 'includes/header.php';
 <?php endif; ?>
 
 <div class="flash" style="background:#FFF8E1;color:#8A6D00;border-left:4px solid #E0A800;max-width:860px;">
-  This credit note will record a refund of its total against invoice
+  The total of this credit note is deducted from invoice
   <strong><?= h($inv['invoice_number']) ?></strong> (current total
-  <strong><?= fmt_money((float)$inv['total'], $inv['currency']) ?></strong>),
-  reducing both the invoice balance and the linked request value.
+  <strong><?= fmt_money((float)$inv['total'], $inv['currency']) ?></strong>) and from the linked request value.
+  It is never collected again: a fully paid invoice stays Fully Paid. The credit stays on the credit note
+  until it pays another invoice of the client or is recorded as a refund paid out.
 </div>
 
 <form method="POST" id="cnForm">
