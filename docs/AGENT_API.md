@@ -181,7 +181,7 @@ curl -sA "$UA" -H "$H" -X POST "$U?action=update_request" -d '{"request_id":2923
 - `request_id` **or** `request_ids` (array, max 50)
 - `status`: `Inquiry` | `Quoted` | `Hot-Quoted` | `Lost` | `Cancelled`
 - `lost_reason` — **required for Lost**: `insufficient_budget` | `trip_postponed` | `no_more_replies` |
-  `agent_request` | `other` (same list as the "Mark as Lost" modal: `includes/lost_reasons.php`);
+  `booked_elsewhere` | `agent_request` | `other` (same list as the "Mark as Lost" modal: `includes/lost_reasons.php`);
   `lost_note` optional. Lost writes `lost_reason` / `lost_note` and adds a request note
   "Marked Lost — <reason>: <note>".
 
@@ -192,6 +192,10 @@ Rules:
   are **cleared**; the "Marked Lost" request note and the `status_change` timeline event stay as history.
 - A real change logs a `status_change` event in the request timeline (author: `claude_agent`).
   A request already in that status is left alone and reported `unchanged: true`.
+- **Change the Lost reason**: `Lost` on a request already Lost with a different `lost_reason` or `lost_note`
+  rewrites only those two fields (status untouched), adds the request note "Lost reason changed: <old> → <new>: <note>"
+  and a `status_change` timeline event; the result carries `lost_reason_was`. Same reason and note → `unchanged: true`.
+  (Hub: "change" link next to the Lost reason on the request page.)
 - Each request is handled on its own (a failure does not stop the others). All ok → 200; some failed → **422**;
   a single id that fails → its own code (404 not found, 409 Booked, 400 bad input).
 

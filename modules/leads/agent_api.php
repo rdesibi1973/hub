@@ -1284,7 +1284,8 @@ try {
                     'folder' => $r['practice_code'] ?? null, 'current_status' => $r['status'] ?? null,
                     'new_status' => $status, 'lost_reason' => $status === 'Lost' ? $reason : null];
             $c = bs_status_check($db, $rid, $status, $reason, $opt);
-            if ($c['ok'] && !$dry && $c['changed']) {
+            $reChange = $c['ok'] && bs_lost_reason_changes($c, $status, $reason, $note);   // Lost → Lost, new reason / note
+            if ($c['ok'] && !$dry && ($c['changed'] || $reChange)) {
                 $db->beginTransaction();
                 try {
                     $c = bs_set_request_status($db, $rid, $status, $reason, $note, (int)$agentUser['id'], $opt);
@@ -1300,7 +1301,8 @@ try {
                 continue;
             }
             $row['ok'] = true;
-            if (!$c['changed']) { $results[] = $row + ['unchanged' => true]; continue; }
+            if (!$c['changed'] && !$reChange) { $results[] = $row + ['unchanged' => true]; continue; }
+            if ($reChange) $row['lost_reason_was'] = ($r['lost_reason'] ?? '') !== '' ? $r['lost_reason'] : null;
             $fx = bs_status_effects($r, $status, $reason, $note);
             if ($fx['reopen'] !== null) {
                 $row['reopen']              = $fx['reopen'];
@@ -1317,7 +1319,7 @@ try {
         agent_out(['ok' => !$nFail, 'dry_run' => $dry, 'status' => $status,
                    $dry ? 'to_change' : 'changed' => $nChange, 'unchanged' => $nSame, 'failed' => $nFail,
                    'results' => $results,
-                   'reopen_rule' => 'Leaving Lost clears lost_reason and lost_note (as the Hub status menu); the "Marked Lost" request note and the status_change timeline event stay as history.']
+                   'reopen_rule' => 'Leaving Lost clears lost_reason and lost_note (as the Hub status menu); the "Marked Lost" request note and the status_change timeline event stay as history. Lost on a request already Lost changes only lost_reason / lost_note (request note + timeline event).']
                   + ($dry ? ['message' => 'Dry run — nothing changed. Resend with "confirm": true.'] : []), $httpCode);
     }
 

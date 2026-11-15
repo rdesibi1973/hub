@@ -272,7 +272,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['quick_status'])) {
     } else {
         if ($isXhr) { header('Content-Type: application/json');
                       echo json_encode(['ok'=>true]); exit; }
-        flash('Status updated to ' . $newStatus . '.');
+        flash(isset($res['reason_changed']) ? ($res['reason_changed'] ? 'Lost reason updated.' : 'Lost reason unchanged.')
+                                            : 'Status updated to ' . $newStatus . '.');
     }
     if (!$isXhr) { header('Location: request_view.php?id=' . $id); exit; }
 }
@@ -677,12 +678,15 @@ include 'includes/header.php';
       <?php else: ?>
         <span class="badge <?= STATUSES[$r['status']] ?? '' ?>"><?= h($r['status']) ?></span>
       <?php endif; ?>
-      <?php if ($r['status'] === 'Lost' && !empty($r['lost_reason'])): ?>
+      <?php if ($r['status'] === 'Lost' && (!empty($r['lost_reason']) || $canEdit)): ?>
         <div style="margin-top:6px;font-size:.8rem;color:var(--grey-mid);">
           <strong>Lost reason:</strong>
-          <?= h($LOST_REASONS[$r['lost_reason']] ?? $r['lost_reason']) ?>
+          <?= !empty($r['lost_reason']) ? h($LOST_REASONS[$r['lost_reason']] ?? $r['lost_reason']) : '<span class="text-muted">none</span>' ?>
           <?php if (!empty($r['lost_note'])): ?>
             — <?= h($r['lost_note']) ?>
+          <?php endif; ?>
+          <?php if ($canEdit): ?>
+            · <a href="#" onclick="changeLostReason(<?= h(json_encode((string)$r['lost_reason'])) ?>, <?= h(json_encode((string)($r['lost_note'] ?? ''))) ?>); return false;">change</a>
           <?php endif; ?>
         </div>
       <?php endif; ?>
@@ -1833,7 +1837,7 @@ include 'includes/send_modal.php';
      background:rgba(0,0,0,.45);align-items:center;justify-content:center;">
   <div style="background:#fff;border-radius:10px;max-width:420px;width:calc(100% - 40px);
        padding:22px 24px;box-shadow:0 12px 40px rgba(0,0,0,.25);">
-    <h3 style="margin:0 0 4px;font-family:'Merriweather',serif;font-size:1.05rem;color:var(--red-dk);">
+    <h3 id="lost-title" style="margin:0 0 4px;font-family:'Merriweather',serif;font-size:1.05rem;color:var(--red-dk);">
       Mark as Lost
     </h3>
     <p style="margin:0 0 14px;font-size:.82rem;color:var(--grey-mid);">
@@ -1861,17 +1865,27 @@ include 'includes/send_modal.php';
       <button type="button" class="btn btn-outline" style="font-size:.82rem;"
               onclick="cancelLost()">Cancel</button>
       <button type="button" class="btn" style="font-size:.82rem;background:var(--red);color:#fff;"
-              onclick="confirmLost()">Confirm Lost</button>
+              onclick="confirmLost()" id="lost-confirm-btn">Confirm Lost</button>
     </div>
   </div>
 </div>
 <script>
+function openLostModal(reason, note, isChange) {
+  document.getElementById('lost-error').style.display = 'none';
+  document.querySelectorAll('input[name="lost_reason_choice"]').forEach(r => r.checked = (r.value === reason));
+  document.getElementById('lost-note-input').value = note || '';
+  document.getElementById('lost-title').textContent       = isChange ? 'Change Lost reason' : 'Mark as Lost';
+  document.getElementById('lost-confirm-btn').textContent = isChange ? 'Save reason' : 'Confirm Lost';
+  document.getElementById('lost-modal').style.display = 'flex';
+}
+// Request already Lost: same modal, prefilled; submits Lost again with the new reason / note.
+function changeLostReason(reason, note) {
+  document.getElementById('quick-status').value = 'Lost';
+  openLostModal(reason, note, true);
+}
 function onStatusChange(sel) {
   if (sel.value === 'Lost') {
-    document.getElementById('lost-error').style.display = 'none';
-    document.querySelectorAll('input[name="lost_reason_choice"]').forEach(r => r.checked = false);
-    document.getElementById('lost-note-input').value = '';
-    document.getElementById('lost-modal').style.display = 'flex';
+    openLostModal('', '', false);
   } else {
     sel.form.submit();
   }

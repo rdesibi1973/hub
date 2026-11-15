@@ -1412,13 +1412,16 @@ function bs_status_check(PDO $db, int $id, string $status, string $reason, array
         return array_merge($res, ['error' => 'Please choose a reason.', 'error_code' => 'lost_reason']);
     }
     $restrict = (int)($opt['restrict_agent_id'] ?? 0);   // -1 = restricted user without an agent: nothing matches
-    $st = $db->prepare("SELECT status FROM requests WHERE id = ?" . ($restrict !== 0 ? " AND agent_id = ?" : ""));
+    $st = $db->prepare("SELECT status, lost_reason, lost_note FROM requests WHERE id = ?" . ($restrict !== 0 ? " AND agent_id = ?" : ""));
     $st->execute($restrict !== 0 ? [$id, $restrict] : [$id]);
-    $old = $st->fetchColumn();
-    if ($old === false) {
+    $oldRow = $st->fetch(PDO::FETCH_ASSOC);
+    if ($oldRow === false) {
         return array_merge($res, ['error' => 'Request ' . $id . ' not found', 'error_code' => 'not_found']);
     }
-    $res['old_status'] = (string)$old;
+    $old = (string)$oldRow['status'];
+    $res['old_status']      = $old;
+    $res['old_lost_reason'] = (string)($oldRow['lost_reason'] ?? '');
+    $res['old_lost_note']   = (string)($oldRow['lost_note'] ?? '');
     if ($old === 'Booked' && isset($opt['from_booked']) && is_array($opt['from_booked'])
         && $status !== 'Booked' && !in_array($status, $opt['from_booked'], true)) {
         return array_merge($res, ['error' => 'Request ' . $id . ' is Booked — '
@@ -1426,8 +1429,21 @@ function bs_status_check(PDO $db, int $id, string $status, string $reason, array
                                            . 'use rollback_booking / BackOffice to change it', 'error_code' => 'booked']);
     }
     $res['ok']      = true;
-    $res['changed'] = ((string)$old !== $status);
+    $res['changed'] = ($old !== $status);
     return $res;
+}
+
+/**
+ * True when a request that is already Lost gets Lost again with a different reason or note
+ * (e.g. "no reply" → "booked with another operator" once the client finally answers).
+ * $row = requests row or bs_status_check() result (status/old_status, lost_reason/old_lost_reason, lost_note/old_lost_note).
+ */
+function bs_lost_reason_changes(array $row, string $status, string $reason, string $note): bool {
+    $old = (string)($row['old_status'] ?? $row['status'] ?? '');
+    if ($old !== 'Lost' || $status !== 'Lost') return false;
+    $oldReason = (string)($row['old_lost_reason'] ?? $row['lost_reason'] ?? '');
+    $oldNote   = trim((string)($row['old_lost_note'] ?? $row['lost_note'] ?? ''));
+    return $oldReason !== $reason || $oldNote !== trim($note);
 }
 
 /**
@@ -1440,6 +1456,15 @@ function bs_status_effects(array $row, string $status, string $reason, string $n
     $old     = (string)($row['status'] ?? '');
     $note    = trim($note);
     $out = ['reopen' => null, 'lost_reason_removed' => null, 'lost_note_removed' => null, 'effects' => []];
+    if (bs_lost_reason_changes($row, $status, $reason, $note)) {
+        $oldReason = (string)($row['lost_reason'] ?? '');
+        $oldLabel  = $oldReason !== '' ? ($reasons[$oldReason] ?? $oldReason) : '(none)';
+        $label     = $reasons[$reason] ?? $reason;
+        $out['effects'][] = 'requests.lost_reason = ' . $reason . ($note !== '' ? ', lost_note = "' . $note . '"' : ', lost_note empty') . ' (status stays Lost)';
+        $out['effects'][] = 'request note: "Lost reason changed: ' . $oldLabel . ' → ' . $label . ($note !== '' ? ': ' . $note : '') . '"';
+        $out['effects'][] = 'timeline event status_change "Lost reason: ' . $oldLabel . ' → ' . $label . '"';
+        return $out;
+    }
     if ($old === $status) return $out;
     $out['effects'][] = 'requests.status: ' . ($old !== '' ? $old : '(empty)') . ' → ' . $status;
     if ($status === 'Lost') {
@@ -1469,6 +1494,20 @@ function bs_set_request_status(PDO $db, int $id, string $status, string $reason,
     $reasons   = bs_lost_reasons();
     $reasonVal = ($status === 'Lost') ? $reason : null;
     $noteVal   = ($status === 'Lost' && trim($note) !== '') ? trim($note) : null;
+
+    // Already Lost: only the reason / note can change (status, pipeline and follow-up untouched).
+    if ($chk['old_status'] === 'Lost' && $status === 'Lost') {
+        $chk['reason_changed'] = bs_lost_reason_changes($chk, $status, $reason, $note);
+        if (!$chk['reason_changed']) return $chk;
+        $oldLabel = $chk['old_lost_reason'] !== '' ? ($reasons[$chk['old_lost_reason']] ?? $chk['old_lost_reason']) : '(none)';
+        $db->prepare("UPDATE requests SET lost_reason=?, lost_note=? WHERE id=?")->execute([$reasonVal, $noteVal, $id]);
+        $db->prepare("INSERT INTO request_notes (request_id, user_id, note) VALUES (?,?,?)")
+           ->execute([$id, $userId, 'Lost reason changed: ' . $oldLabel . ' → ' . $reasons[$reason] . ($noteVal !== null ? ': ' . $noteVal : '')]);
+        timeline_log($id, 'status_change', 'Lost reason: ' . $oldLabel . ' → ' . $reasons[$reason],
+                     ['body' => $noteVal]);
+        return $chk;
+    }
+
     $db->prepare("UPDATE requests SET status=?, pipeline_column=IF(?='Booked',NULL,pipeline_column), lost_reason=?, lost_note=? WHERE id=?")
        ->execute([$status, $status, $reasonVal, $noteVal, $id]);
 
