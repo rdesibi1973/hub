@@ -68,6 +68,8 @@ Every mail about a request/booking carries the Dropbox folder name: `Re: <origin
 - English / French / Spanish: same warm, professional trade tone and structure (greeting with the name, short closing, "Roberto"). English: "program" (`rules-client-documents` §4).
 - Agencies: never the programme link (`rules-client-documents` §2); the Word attachment only when Roberto asks for it (§2 of this skill).
 - Payment reminders / short follow-ups to agencies: speak for the company to the agency team ("ve lo confermiamo", "quando fate il bonifico"), keep "mandami"; say plainly what is missing ("non mi risulta ancora arrivato in contabilità e non abbiamo la contabile"); "per favore"; only the figures needed (invoice number and amount, no balance or due date unless asked); no lists for 1–2 items (26 Oct 2026).
+- No reply deadlines to agencies, clients or partners ("please reply by…", "entro venerdì"): Roberto finds them aggressive, especially with partners who usually answer. Dates only when the subject really has one (an option expiring, a payment due date when asked). The follow-up date lives in the Memo (`waiting`, `due_date`), not in the mail. Staff mails (§7) keep "by when" (Roberto, 15 Nov 2026).
+- Complaints to suppliers on behalf of an agency's guests: don't name the agency in the body ("the agency", "our partner") (Roberto, 15 Nov 2026, Osupuko).
 - Official/legal letters: minimal, direct, formal.
 - Complaints: diplomatic, non-confrontational — acknowledge the feedback without admitting fault, de-escalate, propose a next step.
 - Short paragraphs; when there are several items, lists under short heading lines ("Programma:", "Prezzi:", "La quota include:", "Non include:").

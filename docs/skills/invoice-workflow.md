@@ -62,6 +62,10 @@ Savannah Holidays Ltd (SH invoices): AfrAsia account — details from Roberto (n
 ## 4. Change an invoice
 
 - `update_invoice` with only the fields that change. `items` REPLACES all lines: always send the full list.
+- **One booking = one valid invoice.** When the booking changes (group grows or shrinks, pax or price change, dates moved to another year, trip re-quoted), change the existing invoice with `update_invoice`. If a new invoice is really needed (other issuer or bill-to), in the same session: move the payments of the old one to the new one (`cancel_invoice_payment` on the old, `add_invoice_payment` on the new, same dates and references) and cancel the old one (§8), so no payment is counted twice and no old invoice stays open (15 Nov 2026: Boserman SE-2026-0477 → 0449, Fiore 0248 vs 0256-0259, Mattei, Giordano, LisbiValdez, Finauri, Maldifassi, Kanaloa, Chutima, BTM, Pini).
+- Group invoiced per family / per sub-group: cancel the single group invoice, or never create it.
+- A trip moved to new dates with the money already paid: don't park the payment as a credit note on the same invoice — keep the payment on the (updated) invoice. Only for a different booking or a voucher for a future trip use a credit note (§7).
+- Cancelled trip with money retained as penalty: bring the invoice down to the amount actually retained (one line "cancellation penalty", fully paid); nothing paid → cancel the invoice (§8). Never leave the full amount open: it inflates revenue and open balances (15 Nov 2026).
 - Dry run → show from/to and new total → confirm after ok → offer `save_invoice_pdf` with `overwrite: true`.
 - SH invoice: if total or due date changed, propose updating its payment memo.
 
@@ -77,7 +81,8 @@ A transfer the client/agency says was sent, or a payment advice (e.g. "Comunicaz
 ## 6. Payment received
 
 Money actually on the account (bank statement / AfrAsia) or cash collected by Saruni.
-1. `add_invoice_payment` dry run: date, amount, method, reference. It refuses duplicates (same amount + reference): never force `allow_duplicate` without asking. Confirm after ok.
+1. `add_invoice_payment`: date, amount, method (`Bank Transfer` | `Credit Card` | `Cash` | `Other`), reference, notes (where the proof is: POP file, Calc note). It has NO dry run — it saves at once: show Roberto date, amount and method and call it only after his ok. It refuses duplicates (same amount + reference): never force `allow_duplicate` without asking.
+   Proof of payment, in this order: POP in the folder, Calc note ("PAID dd MMM-SARUNI", "CASH COLLECTED…", "RECEIVED…"), the old Zoho invoice PDF in the folder (`INV-…` with "Balance Due $0.00" = paid in Zoho: register its payments on the Hub invoice with the Calc dates and the Zoho number as reference). No proof → ask Saruni (who collects payments and cash), don't register.
 2. Calc: amount in F11 (deposit) or F12 (balance), "RECEIVED dd/mm/yyyy" in G11/G12, the bank-statement line as a cell comment. NEVER in columns N "DEPOSIT PD" / O "BALANCE PD" (those are payments to suppliers). Calc not open in Excel on his PC; wait for Dropbox sync before the next Hub action. Write it as in §5 (no openpyxl re-save).
 3. Folder status = what is still due: deposit received → `BALANCE`, or `BALANCE-CASH` when the balance will be paid in cash (ask if unclear); everything received → `PAID` (= fully paid). `DEPOSIT` only while the deposit is still due. `update_folder_status` dry run → confirm after ok.
 4. Offer the updated `save_invoice_pdf` (`overwrite: true`).
@@ -87,7 +92,8 @@ Money actually on the account (bank statement / AfrAsia) or cash collected by Sa
 
 Our own credit notes `CN-YYYY-NNNN`, always issued on an invoice. A supplier's credit note is not this: it is a memo (`waiting`).
 - Check first: `list_credit_notes` (`invoice_id`, `request_id`, `agency_id` or `status`) → total, applied, remaining, source invoice, where it was applied. `get_invoice` shows the same under `credit_notes[]`.
-- Issue: `create_credit_note` with `invoice_id`, `amount`, `reason`, `date` if not today. It records the refund as a negative payment, so the balance of that invoice goes UP by the amount and the request value goes down. Show Roberto `next_number`, `balance_after` and any `warnings`; confirm after his ok.
+- Issue: `create_credit_note` with `invoice_id`, `amount`, `reason`, `date` if not today. Since 15 Nov 2026 a credit note reduces what the client owes on its invoice (`net_due = total − credit notes`; revenue goes down by the same amount); it is no longer a negative payment. If the client had already paid more than `net_due`, the difference is a **credit to the client** (`credit_to_client`, CN `remaining`) until it is applied to another invoice or recorded as "Refund paid" on the credit note page (money actually sent back). Show Roberto `next_number`, `balance_after`, `cn_available` and any `warnings`; confirm after his ok.
+- Notes printed on the CN PDF can be changed afterwards ("Edit notes" on the credit note page / `update_credit_note`): check them before sending — no drafts or leftover text.
 - Use the credit on an invoice: `apply_credit_note` with `credit_note_number` (or `credit_note_id`), `invoice_id`, `amount` only for a partial use (default: all the remaining). Show Roberto `amount_invoice`, `balance_after`, `invoice_status_after`, `cn_remaining_after`, `cn_status_after` and any `warnings`; confirm after his ok.
 - Never `allow_overpaid` without asking. Refused (409), report it and don't work around it: over the remaining credit, over the invoice balance, another currency (only the credit note page takes an FX rate), cancelled credit note or invoice, credit note already applied to that invoice.
 - A credit note applied to its own source invoice, or to another invoice of the same request, is accepted: the request value goes back up by the amount applied (`request_value_change`). Tell Roberto.
@@ -95,6 +101,9 @@ Our own credit notes `CN-YYYY-NNNN`, always issued on an invoice. A supplier's c
 - Afterwards, as for a payment (§6): folder status from what is still due, offer `save_invoice_pdf` with `overwrite: true`. Applying a credit is not money on the account: nothing to check on the bank statement.
 
 ## 8. Cancel an invoice
+
+Periodic check (Roberto, 15 Nov 2026): open invoices (`find_invoices&unpaid=1`, split the search with `q` = `SE-2026-00`, `SE-2026-01`… because of the 100 limit) whose trip is over, or whose booking is cancelled — Hub status Cancelled/Lost **or** a folder name with CANCELLED / CANCELED / CANCEL / typos (also in `/001_Safari/00_CANCELED/00_<year>/`), plus active (also fully paid) invoices on cancelled trips. For each: cancelled → cancel or bring to the penalty; past trip → find the proof of payment (§6) or the duplicate; real credit → follow up.
+
 
 When a booking is cancelled, or an invoice was issued by mistake / is being re-issued.
 1. `cancel_invoice` dry run with `invoice_number` (or `invoice_id`) and a `reason` (short, English, e.g. "Group cancelled by the agency, nothing paid").
