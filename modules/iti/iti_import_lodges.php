@@ -7,6 +7,7 @@
 require_once __DIR__ . '/../../includes/auth.php';
 require_login();
 require_once __DIR__ . '/includes/iti_functions.php';
+iti_sh_guard_post('iti_import_lodges.php');   // imports write shared data: admin only (16 Nov 2026)
 
 $db = db();
 

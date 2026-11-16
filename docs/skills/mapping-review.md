@@ -17,6 +17,9 @@ Why it matters: an alias is used for every future program with that Calc text, a
 2. `iti_aliases`: all of them on the first review or when Roberto asks; otherwise with `since` = the date of the last review. Note `counts`.
 3. To judge a target, read the master data: `iti_lodges` (with `active=all`), `iti_activities`, `iti_transfer_routes`, `iti_flight_routes`.
 4. Leave out the aliases already accepted, unless `changed_at` is later than the review that accepted them.
+5. `iti_alias_proposals` (pending): the staff's mappings for their own booking, waiting for Roberto's approval (since
+   16 Nov 2026 only he saves aliases for everyone). Check them first, with the same table below: each one approved
+   becomes an alias for every program.
 
 ## 2. What is suspicious
 
@@ -42,6 +45,7 @@ Look first at the aliases saved by staff during the AI trial and the most recent
 
 ```
 Revisione mapping – <data> (<N> controllati su <totale>, dal <data ultima revisione | tutti>)
+In attesa di approvazione: <N> (<ok> da approvare, <N> da correggere / rifiutare)
 Da correggere: <N>   Da verificare: <N>
 
 <tipo> "<testo>" → <destinazione attuale | nessuna> (<changed_by>, <data>)
@@ -54,7 +58,11 @@ Nothing suspicious → say so in one line, with how many you checked.
 ## 4. Apply — only after Roberto's ok, alias by alias
 
 - Correct: `iti_save_alias` with `type`, `text` = the alias as listed, and the right `lodge_id` (+ `meal_basis` if it had one) | `activity_id` | `transfer_route_id` / `flight_route_id`. Dry run, then `"confirm": true`.
-- Remove: no API action. Roberto or the staff delete it in ITI → Aliases; the text is then asked again at the next Calc.
+- Remove: no API action. Roberto deletes it in ITI → Aliases; the text is then asked again at the next Calc.
+- Staff proposals: `iti_alias_decide` with `proposal_id`, `decision` `approve` (with the right ids to correct it) or
+  `reject`, and a short `note` for the seller. Dry run, then `"confirm": true`, one by one after his ok. The seller gets a
+  memo when it is rejected or corrected; `programs_to_check` = that booking's programs to regenerate.
+- A wrong change to a lodge, route or alias can be put back by Roberto in ITI → History (`iti_change_log` shows it).
 - `iti_aliases` with `q` afterwards: check the new target, and tell Roberto alias by alias what changed.
 
 **Programs already generated are not repaired by correcting an alias.** For each alias confirmed wrong, check the programs: `iti_programs` with `type=personal` (latest 100), then `iti_program` on the ones updated after the alias's `changed_at`, starting from the most recent, at most 20; look at the day's `lodge` / `activities` / `transfers`. List those that carry the error and say that any older ones were not checked. To fix them, regenerate from the Calc only after his ok on each: `booking-confirmation` §5 or `sales-agent` §3.

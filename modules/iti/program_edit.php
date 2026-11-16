@@ -18,6 +18,13 @@ if (!$id) { iti_flash_set('error','No program specified.'); iti_redirect('progra
 
 $program = iti_get_program($id);
 if (!$program) { iti_flash_set('error','Program not found.'); iti_redirect('programs.php'); }
+// A sample is the base of every client program built from it: only an admin changes it (16 Nov 2026).
+// The staff open it read-only and work on their personal copy.
+$sampleLocked = $program['program_type'] === 'sample' && !iti_can_edit_shared();
+if ($sampleLocked && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    iti_flash_set('error', 'Samples are changed by Roberto only: every client program is built from them. Nothing was saved — ask him, or work on your personal copy.');
+    iti_redirect("program_edit.php?id={$id}");
+}
 
 // ── AJAX: search Hub leads requests by id / customer name ──
 if (($_GET['ajax'] ?? '') === 'lead_search') {
@@ -795,6 +802,12 @@ include __DIR__ . '/../../includes/layout_header.php';
     ['label' => ($program['program_type']==='sample'?'Samples':'Personal'), 'url' => ITI_MODULE_URL.'/programs.php?type='.$program['program_type']],
 ]); ?>
 <?php iti_flash_render(); ?>
+<?php if ($sampleLocked): ?>
+<div class="form-card" style="border-left:4px solid #f0ad00;margin-bottom:16px;font-size:.85rem;">
+  🔒 Sample — read only: every client program is built from it, so only Roberto changes it. Saving here does nothing.
+  To change one trip, use “Duplicate as Personal” in Programs or build it from the booking's Calc.
+</div>
+<?php endif; ?>
 
 <!-- Page header -->
 <div class="page-header" style="margin-bottom:16px;">

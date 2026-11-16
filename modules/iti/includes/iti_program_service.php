@@ -623,6 +623,7 @@ function iti_ps_calc_plan(PDO $db, int $rid, array $in): array {
     $calc = calc_read_request($db, $rid, (string)($in['file'] ?? ''), (string)($in['sheet'] ?? ''), $ps);
     $calc['dates_indicative'] = in_array($in['dates_indicative'] ?? 0, [1, true, '1'], true);   // the Calc does not say: asked, as on the Hub page
     $calc['group_open'] = in_array($in['group_open'] ?? 0, [1, true, '1'], true);               // group departure: participants and rooms not final yet
+    $calc['request_id'] = $rid;   // the staff's pending mappings for this booking count as mapped (iti_alias_lookup())
     $lang = in_array($in['lang'] ?? '', ITI_PS_LANGS, true) ? $in['lang'] : 'it';
     $code = iti_final_code_from_calc($calc['file']);
     // The sample is chosen from the Calc content (iti_final_pick_sample(), as on the Hub page); sample_id = this booking only.
@@ -653,6 +654,7 @@ function iti_ps_calc_plan(PDO $db, int $rid, array $in): array {
             'review' => iti_final_calc_review($calc),   // pax, rooms, dates required (errors); total vs prices and supplements (warnings)
             'seller' => iti_final_request_seller($db, $rid),   // default owner of the program (pass "seller" for another one)
             'nights' => $nights, 'unmapped' => $plan['unmapped'], 'blocking' => $plan['blocking'], 'flags' => $plan['flags'],
+            'mapped_for_this_booking_only' => $plan['local'],   // staff mappings waiting for approval (iti_alias_proposals)
             'existing_finals' => array_map(function ($f) { return ['id' => (int)$f['id'], 'calc_file' => $f['source_calc_path'] ? basename($f['source_calc_path']) : null,
                                                                    'superseded_by' => $f['superseded_by'] ? (int)$f['superseded_by'] : null]; }, iti_final_list($db, $rid)),
             '_calc' => $calc, '_sample_id' => $sample ? (int)$sample['id'] : 0, '_auto' => (bool)$auto, '_ranking' => $pick['ranking'], '_rid' => $rid, '_lang' => $lang, '_dates_given' => array_key_exists('dates_indicative', $in), '_seller' => trim((string)($in['seller'] ?? ''))];
@@ -708,6 +710,73 @@ function iti_ps_save_alias(array $in, string $who): array {
     if ($meal !== null && !in_array($meal, ['BB', 'HB', 'FB', 'AI'], true)) throw new InvalidArgumentException('meal_basis: BB|HB|FB|AI');
     iti_alias_save($type, $text, $ids, $meal, $who);
     return ['alias' => iti_alias_norm($text), 'type' => $type, 'ids' => array_filter($ids), 'meal_basis' => $meal];
+}
+
+/** Staff mappings for one booking (iti_alias_proposals). $in: status (pending default | approved | rejected | all), request_id, user, limit. */
+function iti_ps_alias_proposals(PDO $db, array $in): array {
+    $status = (string)($in['status'] ?? 'pending');
+    if (!in_array($status, ['pending', 'approved', 'rejected', 'all'], true)) throw new InvalidArgumentException('status: pending | approved | rejected | all');
+    $rows = iti_sh_proposals($db, ['status' => $status, 'request_id' => (int)($in['request_id'] ?? 0), 'user' => (string)($in['user'] ?? ''),
+                                   'limit' => (int)($in['limit'] ?? 100)]);
+    $out = [];
+    foreach ($rows as $r) {
+        $out[] = ['id' => (int)$r['id'], 'type' => $r['type'], 'text' => $r['alias'], 'target' => $r['target'],
+                  'lodge_id' => $r['lodge_id'] ? (int)$r['lodge_id'] : null, 'meal_basis' => $r['meal_basis'],
+                  'activity_id' => $r['activity_id'] ? (int)$r['activity_id'] : null,
+                  'transfer_route_id' => $r['transfer_route_id'] ? (int)$r['transfer_route_id'] : null,
+                  'flight_route_id' => $r['flight_route_id'] ? (int)$r['flight_route_id'] : null,
+                  'request_id' => (int)$r['request_id'], 'customer' => $r['customer_name'], 'status' => $r['status'],
+                  'proposed_by' => $r['proposed_by'], 'proposed_at' => $r['proposed_at'],
+                  'decided_by' => $r['decided_by'], 'decided_at' => $r['decided_at'], 'decision_note' => $r['decision_note'],
+                  'alias_for_everyone_now' => $r['global'] ? ['created_by' => $r['global']['created_by'], 'created_at' => $r['global']['created_at']] : null];
+    }
+    return ['count' => count($out), 'proposals' => $out];
+}
+
+/**
+ * Approve (as the alias for every program, optionally corrected) or reject one staff mapping — Roberto's decision.
+ * $in: proposal_id, decision (approve|reject), note?, and to correct: lodge_id (+ meal_basis) | activity_id | transfer_route_id / flight_route_id.
+ */
+function iti_ps_alias_decide(PDO $db, array $in, bool $go): array {
+    $id = (int)($in['proposal_id'] ?? 0);
+    $decision = (string)($in['decision'] ?? '');
+    if (!$id || !in_array($decision, ['approve', 'reject'], true)) throw new InvalidArgumentException('proposal_id and decision (approve | reject) are required');
+    $st = $db->prepare('SELECT * FROM iti_alias_proposals WHERE id = ?');
+    $st->execute([$id]);
+    $p = $st->fetch(PDO::FETCH_ASSOC);
+    if (!$p) throw new InvalidArgumentException('Proposal ' . $id . ' not found');
+    if ($p['status'] !== 'pending') throw new InvalidArgumentException('Proposal ' . $id . ' was already ' . $p['status']);
+    $correct = false;
+    foreach (ITI_SH_TARGET_COLS[$p['type']] as $c) if (array_key_exists($c, $in)) $correct = true;
+    if (array_key_exists('meal_basis', $in)) $correct = true;
+    $targets = null;
+    if ($decision === 'approve' && $correct) {
+        $merged = array_merge($p, $in);
+        $meal = isset($merged['meal_basis']) && $merged['meal_basis'] !== '' ? strtoupper((string)$merged['meal_basis']) : null;
+        $targets = iti_sh_targets($p['type'], $merged, $meal);
+        iti_sh_check_targets($db, $targets);
+    }
+    if (!$go) {
+        return ['would' => $decision, 'proposal' => iti_ps_alias_proposals($db, ['status' => 'pending', 'request_id' => (int)$p['request_id']])['proposals'],
+                'targets' => $targets ?? iti_sh_targets($p['type'], $p, $p['meal_basis']),
+                'note' => $decision === 'approve' ? 'Saved as the alias for every program.' : 'The text is asked again for booking #' . (int)$p['request_id'] . '.'];
+    }
+    return iti_sh_decide($db, $id, $decision, $targets, trim((string)($in['note'] ?? '')), 'iti_alias_save');
+}
+
+/** History of the shared ITI data. $in: entity, entity_id, user, q, since (YYYY-MM-DD), limit. Changed fields only. */
+function iti_ps_change_log(PDO $db, array $in): array {
+    $out = [];
+    foreach (iti_sh_log_rows($db, $in) as $r) {
+        $b = $r['before_json'] !== null ? json_decode($r['before_json'], true) : null;
+        $a = $r['after_json'] !== null ? json_decode($r['after_json'], true) : null;
+        $diff = [];
+        foreach (iti_sh_diff($b, $a) as $k => $v) $diff[$k] = ['from' => is_string($v[0]) ? mb_substr($v[0], 0, 300) : $v[0], 'to' => is_string($v[1]) ? mb_substr($v[1], 0, 300) : $v[1]];
+        $out[] = ['id' => (int)$r['id'], 'entity' => $r['entity'], 'entity_id' => $r['entity_id'] ? (int)$r['entity_id'] : null, 'label' => $r['label'],
+                  'action' => $r['action'], 'changed_by' => $r['changed_by'], 'changed_at' => $r['changed_at'], 'source' => $r['source'], 'note' => $r['note'],
+                  'restored' => $r['restored_at'] ? ['by' => $r['restored_by'], 'at' => $r['restored_at']] : null, 'changes' => $diff];
+    }
+    return ['count' => count($out), 'changes' => $out];
 }
 
 /** Read only, for the review of the mappings. $in: type (lodge|activity|route, default all), since (YYYY-MM-DD), q. */

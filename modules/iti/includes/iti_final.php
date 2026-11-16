@@ -984,13 +984,17 @@ function iti_final_plan(PDO $db, array $calc, int $sampleId): array {
     $hints = array('lodge_meal' => array(), 'lodge_date' => array());   // unmapped hotel text => meal from its suffix / first night
     $n = count($calc['days']);
     $lodgeInfo = function ($id) use ($db) { return iti_final_lodge_info($db, (int)$id); };
+    // The booking: a text without an alias for everyone may have the staff's mapping for THIS booking only
+    // (pending the admin's approval, iti_sh_propose()); listed in 'local' and flagged on the day.
+    $rid = (int)($calc['request_id'] ?? 0);
+    $local = array('lodge' => array(), 'activity' => array(), 'route' => array());
 
     foreach ($calc['days'] as $i => $cd) {
         $last = ($i === $n - 1);
         $d = array('i' => $i, 'date' => $cd['date'], 'label' => $cd['label'], 'hotel_text' => $cd['hotel_text'],
                    'invoice' => $cd['invoice'], 'checked' => $cd['checked'], 'flight_cost' => $cd['flight_cost'],
                    'last' => $last, 'lodge_id' => null, 'lodge_name' => '', 'lodge_custom' => null, 'dest_id' => null,
-                   'meal' => null, 'room_category' => null, 'lodge_state' => 'none', 'acts' => array(), 'route' => null,
+                   'meal' => null, 'room_category' => null, 'lodge_state' => 'none', 'lodge_local' => false, 'acts' => array(), 'route' => null,
                    'sample_index' => null, 'sample_lodge' => null, 'flags' => array());
 
         // Lodge (every night; the departure day normally has none).
@@ -998,8 +1002,9 @@ function iti_final_plan(PDO $db, array $calc, int $sampleId): array {
             // "Orangi River Luxury (FB)": the alias is the hotel without the meal suffix
             // (an older alias saved with the suffix still wins); the suffix sets the meal.
             list($base, $mealSfx) = iti_alias_split_meal($cd['hotel_text']);
-            $a = iti_alias_lookup('lodge', $cd['hotel_text']);
-            if ($a === null && $base !== $cd['hotel_text']) $a = iti_alias_lookup('lodge', $base);
+            $a = iti_alias_lookup('lodge', $cd['hotel_text'], $rid);
+            if ($a === null && $base !== $cd['hotel_text']) $a = iti_alias_lookup('lodge', $base, $rid);
+            if ($a !== null && !empty($a['local'])) { $d['lodge_local'] = true; $local['lodge'][$a['alias']] = $a['alias']; }
             if ($a === null) {
                 $d['lodge_state'] = 'unmapped';
                 $unmapped['lodge'][iti_alias_norm($base)] = $base;
@@ -1037,20 +1042,22 @@ function iti_final_plan(PDO $db, array $calc, int $sampleId): array {
                 $d['acts'][] = array('text' => $part, 'state' => 'nothing', 'activity_id' => null);
                 continue;
             }
-            $a = iti_alias_lookup('activity', $part);
+            $a = iti_alias_lookup('activity', $part, $rid);
             if ($a === null) {
                 $unmapped['activity'][$part] = $part;
-                $d['acts'][] = array('text' => $part, 'state' => 'unmapped', 'activity_id' => null);
+                $d['acts'][] = array('text' => $part, 'state' => 'unmapped', 'activity_id' => null, 'local' => false);
             } else {
+                if (!empty($a['local'])) $local['activity'][$a['alias']] = $a['alias'];
                 $d['acts'][] = array('text' => $part, 'state' => $a['activity_id'] ? 'ok' : 'nothing',
-                                     'activity_id' => $a['activity_id'] ? (int)$a['activity_id'] : null);
+                                     'activity_id' => $a['activity_id'] ? (int)$a['activity_id'] : null, 'local' => !empty($a['local']));
             }
         }
 
         // Route (PARK/OVERNIGHT label) — required only for days the sample does not cover (below).
         if ($cd['label'] !== '') {
-            $a = iti_alias_lookup('route', $cd['label']);
-            $d['route'] = array('text' => $cd['label'], 'state' => $a === null ? 'unmapped' : 'ok',
+            $a = iti_alias_lookup('route', $cd['label'], $rid);
+            if ($a !== null && !empty($a['local'])) $local['route'][$a['alias']] = $a['alias'];
+            $d['route'] = array('text' => $cd['label'], 'state' => $a === null ? 'unmapped' : 'ok', 'local' => $a !== null && !empty($a['local']),
                                 'transfer_route_id' => $a && $a['transfer_route_id'] ? (int)$a['transfer_route_id'] : null,
                                 'flight_route_id' => $a && $a['flight_route_id'] ? (int)$a['flight_route_id'] : null);
         }
@@ -1124,8 +1131,13 @@ function iti_final_plan(PDO $db, array $calc, int $sampleId): array {
     if (!empty($calc['dates_indicative'])) {
         $flags[] ='Dates confirmed as indicative: the documents show the period with "indicative dates" and no date day by day.';
     }
+    $nLocal = count($local['lodge']) + count($local['activity']) + count($local['route']);
+    if ($nLocal) {
+        $flags[] = $nLocal . ' Calc text' . ($nLocal === 1 ? ' is' : 's are') . ' mapped for this booking only, waiting for Roberto\'s approval: '
+                 . 'if he corrects one, regenerate the program.';
+    }
     return array('days' => $days, 'blocking' => $blocking, 'unmapped' => $unmapped, 'hints' => $hints, 'flags' => $flags,
-                 'sample_days' => count($sampleDays));
+                 'sample_days' => count($sampleDays), 'local' => $local);
 }
 
 /**
@@ -1167,6 +1179,7 @@ function iti_final_generate(PDO $db, int $requestId, array $calc, int $sampleId,
     if (!in_array($lang, ITI_LANGUAGES, true)) $lang = 'it';
     $review = iti_final_calc_review($calc);
     if ($review['errors'] || $review['open_errors']) throw new RuntimeException('Complete the Calc first: ' . implode(' ', array_merge($review['errors'], $review['open_errors'])));
+    $calc['request_id'] = $requestId;   // the staff's mappings for this booking (iti_alias_lookup())
     $plan = iti_final_plan($db, $calc, $sampleId);
     if (!$sampleId) throw new RuntimeException('Choose the sample program first.');
     if ($plan['blocking']) throw new RuntimeException('Map these Calc texts first: ' . implode(' ', $plan['blocking']));

@@ -9,7 +9,8 @@ require_once __DIR__ . '/includes/iti_functions.php';
 
 $db       = db();
 $_cu      = current_user();
-$can_edit = true;   // all staff since 7 Oct 2026 (was admin/manager)
+$can_edit = iti_can_edit_shared();   // imports write shared data: admin only (16 Nov 2026; all staff 7 Oct – 16 Nov)
+iti_sh_guard_post('iti_import_activities.php');
 
 // ── Destination map ───────────────────────────────────────────────────────────
 $dest_rows    = iti_get_destinations(false);

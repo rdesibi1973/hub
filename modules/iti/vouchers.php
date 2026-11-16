@@ -153,7 +153,8 @@ if ($step === 'generate' && !$error) {
 
     if (!$error && !$confirm_required) {
         // Optionally remember filled-in GPS/contacts in the lodge directory.
-        if (!empty($_POST['save_directory'])) {
+        // The directory is shared by every voucher: admin only (16 Nov 2026).
+        if (!empty($_POST['save_directory']) && iti_can_edit_shared()) {
             voucher_save_directory($db, $model);
         }
 
@@ -692,7 +693,7 @@ include __DIR__ . '/../../includes/layout_header.php';
           <input type="checkbox" name="confirm_mismatch" value="1" id="confirm_mismatch"> Ho verificato alloggi, notti e date e voglio procedere comunque
         </label>
       <?php endif; ?>
-      <?php if ($missingGps): ?>
+      <?php if ($missingGps && iti_can_edit_shared()): ?>
         <label style="font-size:.85rem;display:flex;gap:6px;align-items:center;">
           <input type="checkbox" name="save_directory" value="1"> Save filled GPS/contacts to the lodge directory
         </label>

@@ -1050,7 +1050,34 @@ the programme Word copied next to that Calc, else the Calc's name without `_Calc
 #### `iti_save_alias` (POST)
 `type` (`lodge`|`activity`|`route`), `text` (the Calc text), `lodge_id` (+ `meal_basis` BB|HB|FB|AI) |
 `activity_id` | `transfer_route_id` / `flight_route_id`. A lodge alias without `lodge_id` = own arrangement
-(shown as free text). Dry-run unless confirm.
+(shown as free text). Dry-run unless confirm. The alias applies to **every** future Calc with that text, so only after
+Roberto's ok on that alias. Logged in `iti_change_log` (see `iti_change_log`).
+
+**Shared ITI data (16 Nov 2026).** Aliases, lodges, activities, destinations, routes, airlines and samples are changed on
+the Hub by an admin only (`modules/iti/includes/iti_shared_service.php`); the API acts as Roberto's agent. The staff map
+an unknown Calc text **for their booking only**: a mapping proposal, used at once for that booking and for the others only
+after Roberto approves it (Hub ITI → Aliases → "Awaiting approval", or `iti_alias_decide`). `iti_calc_plan` counts a
+booking's pending proposals as mapped and lists them in `mapped_for_this_booking_only` {lodge, activity, route}.
+
+#### `iti_alias_proposals` (GET)
+Staff mappings. Optional `status` (`pending` default | `approved` | `rejected` | `all`), `request_id`, `user`, `limit`.
+Returns `proposals[]`: `id`, `type`, `text`, `target` (readable), the target ids, `meal_basis`, `request_id`, `customer`,
+`status`, `proposed_by` / `_at`, `decided_by` / `_at`, `decision_note`, `alias_for_everyone_now` (an alias saved for that
+text in the meantime: approving replaces it).
+
+#### `iti_alias_decide` (POST)
+`proposal_id`, `decision` (`approve` | `reject`), `note?`; to correct before approving, the right `lodge_id` (+ `meal_basis`) |
+`activity_id` | `transfer_route_id` / `flight_route_id`. Approve = saved as the alias for every program (pending proposals
+of other bookings with the same text and target are approved with it). Reject = the text is asked again for that booking.
+Rejected or corrected → memo to whoever proposed it; `programs_to_check[]` lists that booking's programs generated since
+(regenerate them). Dry-run unless confirm — only after Roberto's ok on that proposal.
+
+#### `iti_change_log` (GET)
+History of the shared ITI data, newest first. Optional `entity` (`lodge_alias`, `activity_alias`, `route_alias`, `lodge`,
+`activity`, `destination`, `transfer_route`, `flight_route`, `airline`, `proposal`), `entity_id`, `user`, `q` (name),
+`since` (`YYYY-MM-DD`), `limit` (≤ 500). Returns `changes[]`: `id`, `entity`, `entity_id`, `label`, `action` (create |
+update | delete | approve | reject | restore), `changed_by`, `changed_at`, `source` (hub | agent_api), `note`, `restored`,
+`changes` {field: {from, to}}. A change is put back by an admin on the Hub page ITI → History (no API action).
 
 #### `iti_aliases` (GET)
 Read only, for the review of the Calc mappings. Optional `type` (`lodge`|`activity`|`route`, default all), `since`

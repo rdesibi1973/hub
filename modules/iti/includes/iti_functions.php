@@ -16,6 +16,7 @@ static $_iti_pdo = null;
 
 require_once __DIR__ . '/iti_texts.php';   // translatable texts, day transfers (iti_transfers_replace)
 require_once __DIR__ . '/iti_rooms.php';   // room category of a night + a lodge's category list
+require_once __DIR__ . '/iti_shared_service.php';   // shared data: admin only, per-booking mappings, history (16 Nov 2026)
 
 // The Agent API loads this file next to the leads config, which already has db().
 if (!function_exists('db')) {
@@ -1558,18 +1559,27 @@ function iti_alias_suggest(string $text, array $options) {
 
 // The alias row for a Calc text, or null when the text is not mapped yet.
 // A row whose target columns are all NULL means "known, nothing to show".
-function iti_alias_lookup(string $type, string $text) {
+// $requestId: the booking being built — without an alias for everyone, the staff's pending mapping of
+// THAT booking is used (row with 'local' => true; iti_sh_propose(), 16 Nov 2026).
+function iti_alias_lookup(string $type, string $text, int $requestId = 0) {
     if (!array_key_exists($type, ITI_ALIAS_TYPES)) return null;
     $alias = iti_alias_norm($text);
     if ($alias === '') return null;
     $st = db()->prepare('SELECT * FROM `' . ITI_ALIAS_TYPES[$type]['table'] . '` WHERE alias = ?');
     $st->execute(array($alias));
     $row = $st->fetch(PDO::FETCH_ASSOC);
-    return $row ? $row : null;
+    if ($row) return $row;
+    return $requestId > 0 ? iti_sh_proposal_lookup(db(), $type, $alias, $requestId) : null;
 }
 
-// Insert or replace one alias. $targets: lodge_id | activity_id | transfer_route_id
-// + flight_route_id (null / 0 = nothing); $meal only for lodges.
+// A staff member's mapping of a Calc text for one booking (not an alias for everyone): see iti_shared_service.php.
+function iti_alias_propose(string $type, string $text, array $targets, ?string $meal, int $requestId): array {
+    if (!array_key_exists($type, ITI_ALIAS_TYPES)) throw new InvalidArgumentException('Unknown alias type: ' . $type);
+    return iti_sh_propose(db(), $type, iti_alias_norm($text), iti_sh_targets($type, $targets, $meal), $requestId);
+}
+
+// Insert or replace one alias (for EVERY program: admin / Agent API only). $targets: lodge_id | activity_id |
+// transfer_route_id + flight_route_id (null / 0 = nothing); $meal only for lodges. Logged in iti_change_log.
 function iti_alias_save(string $type, string $text, array $targets, ?string $meal, string $user): void {
     if (!array_key_exists($type, ITI_ALIAS_TYPES)) throw new InvalidArgumentException('Unknown alias type: ' . $type);
     $alias = iti_alias_norm($text);
@@ -1587,9 +1597,24 @@ function iti_alias_save(string $type, string $text, array $targets, ?string $mea
     $upd = array();
     foreach (array_keys($row) as $c) if ($c !== 'alias') $upd[] = '`' . $c . '` = VALUES(`' . $c . '`)';
     $upd[] = '`created_at` = NOW()';   // with created_by: who last changed it and when, so a review also sees changed aliases
+    $before = iti_alias_lookup($type, $alias);
     db()->prepare('INSERT INTO `' . ITI_ALIAS_TYPES[$type]['table'] . '` (`' . implode('`,`', array_keys($row)) . '`) VALUES ('
                   . implode(',', array_fill(0, count($row), '?')) . ') ON DUPLICATE KEY UPDATE ' . implode(', ', $upd))
         ->execute(array_values($row));
+    $after = iti_alias_lookup($type, $alias);
+    if ($after) {
+        iti_sh_log(db(), $type . '_alias', (int)$after['id'], $before ? 'update' : 'create', $before, $after);
+        iti_sh_after_alias_save(db(), $type, $alias, $after);
+    }
+}
+
+// Delete one alias (admin), logged so it can be put back from ITI → History.
+function iti_alias_delete(string $type, int $id): void {
+    if (!array_key_exists($type, ITI_ALIAS_TYPES)) throw new InvalidArgumentException('Unknown alias type: ' . $type);
+    $before = iti_sh_row(db(), $type . '_alias', $id);
+    if (!$before) return;
+    db()->prepare('DELETE FROM `' . ITI_ALIAS_TYPES[$type]['table'] . '` WHERE id = ?')->execute(array($id));
+    iti_sh_log(db(), $type . '_alias', $id, 'delete', $before, null);
 }
 
 // Aliases of one type with the name of what they point to (page ITI → Aliases, Agent API iti_aliases).
@@ -1865,16 +1890,21 @@ function iti_nav(string $current = '', array $breadcrumbs = []): void {
         'Airlines'     => ITI_MODULE_URL . '/airlines.php',
         'Aliases'      => ITI_MODULE_URL . '/aliases.php',
         'Vouchers'     => ITI_MODULE_URL . '/vouchers.php',
+        'History'      => ITI_MODULE_URL . '/change_log.php',
         'Settings'     => ITI_MODULE_URL . '/settings.php',
     ];
+    // Mappings of the staff waiting for the admin's approval: count next to Aliases (admin only).
+    $pending = iti_can_edit_shared() ? iti_sh_pending_count(db()) : 0;
     echo '<nav class="iti-nav" style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:20px;border-bottom:1px solid var(--grey-lt);padding-bottom:8px;">';
     foreach ($links as $label => $url) {
         $active = ($label === $current)
             ? 'background:var(--red);color:#fff;'
             : 'background:transparent;color:var(--grey-dk);';
-        echo '<a href="' . $url . '" style="' . $active
+        $badge = ($label === 'Aliases' && $pending)
+            ? ' <span title="Mappings waiting for your approval" style="background:#f0ad00;color:#fff;border-radius:9px;padding:0 6px;font-size:.7rem;">' . $pending . '</span>' : '';
+        echo '<a href="' . $url . ($badge ? '#proposals' : '') . '" style="' . $active
            . 'padding:5px 12px;border-radius:6px;text-decoration:none;font-size:.8rem;font-weight:500;">'
-           . h($label) . '</a>';
+           . h($label) . $badge . '</a>';
     }
     echo '</nav>';
     // Breadcrumbs

@@ -98,7 +98,7 @@ function agent_audit(PDO $db, string $action, $reqId, array $payload, string $re
     $dry = in_array($action, ['confirm_booking', 'send_booking_email', 'rollback_booking', 'fill_calc', 'iti_save_texts', 'update_rate', 'replace_flight_rates',
                               'cancel_invoice_payment', 'cancel_invoice', 'restore_invoice', 'update_folder_status', 'import_zoho_invoice', 'create_invoice', 'update_invoice', 'create_credit_note', 'apply_credit_note', 'refund_credit_note', 'cn_migrate_legacy', 'update_credit_note', 'send_invoice_email', 'mail_send', 'mail_move',
                               'iti_lodge_photos', 'iti_destination_photo', 'iti_update_lodge', 'iti_update_destination',
-                              'iti_create_personal', 'iti_update_program', 'iti_update_day', 'iti_publish', 'iti_final_from_calc', 'iti_save_alias', 'iti_tag_sample',
+                              'iti_create_personal', 'iti_update_program', 'iti_update_day', 'iti_publish', 'iti_final_from_calc', 'iti_save_alias', 'iti_tag_sample', 'iti_alias_decide',
                               'iti_create_lodge', 'iti_set_days', 'iti_add_day', 'iti_delete_day', 'iti_update_inclusions', 'iti_update_standard_inclusion',
                               'iti_create_flight_route', 'iti_create_activity', 'iti_create_transfer_route', 'iti_update_transfer_route', 'iti_save_as_sample',
                               'create_request', 'add_flight_rates', 'timeline_update', 'summary_set', 'rename_folder',
@@ -171,6 +171,9 @@ $agentUser = $us->fetch(PDO::FETCH_ASSOC);
 if (!$agentUser) agent_fail('API user "' . $agentUsername . '" not found or inactive — create it in Hub (see docs/AGENT_API.md)', 500);
 // System timeline events written during this call record the API user (timeline_service.php).
 $GLOBALS['TL_ACTOR'] = ['user_id' => (int)$agentUser['id'], 'source' => 'api'];
+// Shared ITI data changed in this call (aliases, lodges, routes…) is logged under the API user: iti_change_log.
+require_once __DIR__ . '/../iti/includes/iti_shared_service.php';
+iti_sh_set_actor((string)$agentUser['username'], 'agent_api');
 
 // ── Input ────────────────────────────────────────────────────────────────────
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
@@ -1793,6 +1796,25 @@ try {
         agent_iti_lib();
         try { agent_out(['ok' => true] + iti_ps_aliases($db, $in)); }
         catch (InvalidArgumentException $e) { agent_fail($e->getMessage(), 400); }
+
+    // Staff mappings for one booking, waiting for Roberto's approval (iti_shared_service.php).
+    case 'iti_alias_proposals':
+        agent_iti_lib();
+        try { agent_out(['ok' => true] + iti_ps_alias_proposals($db, $in)); }
+        catch (InvalidArgumentException $e) { agent_fail($e->getMessage(), 400); }
+
+    case 'iti_alias_decide': {
+        agent_require_method('POST');
+        agent_iti_lib();
+        $go = !empty($in['confirm']);
+        try { $r = iti_ps_alias_decide($db, $in, $go); }
+        catch (InvalidArgumentException $e) { agent_fail($e->getMessage(), 400); }
+        agent_out(array_merge(['ok' => true, 'dry_run' => !$go], $r, $go ? [] : ['message' => 'Dry run — nothing saved. Resend with "confirm": true after Roberto\'s ok.']));
+    }
+
+    case 'iti_change_log':   // read only: history of the shared ITI data
+        agent_iti_lib();
+        agent_out(['ok' => true] + iti_ps_change_log($db, $in));
 
     case 'iti_samples':
         agent_iti_lib();
@@ -3871,6 +3893,7 @@ try {
             'iti_lodges', 'iti_lodge', 'iti_destinations', 'iti_destination', 'iti_lodge_photos', 'iti_destination_photo',
             'iti_update_lodge', 'iti_update_destination', 'iti_create_lodge', 'iti_samples', 'iti_program', 'iti_document', 'iti_vouchers', 'iti_create_personal', 'iti_update_program',
             'iti_update_day', 'iti_publish', 'iti_calc_plan', 'iti_final_from_calc', 'iti_save_alias', 'iti_aliases', 'iti_tag_sample',
+            'iti_alias_proposals', 'iti_alias_decide', 'iti_change_log',
             'iti_set_days', 'iti_add_day', 'iti_delete_day', 'iti_inclusions', 'iti_update_inclusions', 'iti_update_standard_inclusion', 'iti_save_as_sample',
             'iti_flight_routes', 'iti_create_flight_route', 'iti_activities', 'iti_activity', 'iti_update_activity', 'iti_create_activity',
             'iti_transfer_routes', 'iti_create_transfer_route', 'iti_update_transfer_route', 'iti_create_destination', 'iti_import_program', 'iti_supplier_blocklist', 'add_flight_rates',

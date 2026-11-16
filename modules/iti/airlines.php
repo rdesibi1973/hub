@@ -8,9 +8,10 @@ require_once __DIR__ . '/includes/iti_functions.php';
 
 $db       = db();
 $_cu      = current_user();
-$can_edit = true;   // all staff since 7 Oct 2026 (was admin/manager)
+$can_edit = iti_can_edit_shared();   // shared by every program: admin only (16 Nov 2026; all staff 7 Oct – 16 Nov)
 $action   = $_GET['action'] ?? '';
 $id       = (int)($_GET['id'] ?? 0);
+iti_sh_guard_post('airlines.php');
 
 // ── Check table ───────────────────────────────────────────────────────────────
 $table_ok = false;
@@ -29,16 +30,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit && $table_ok) {
     if ($f['name']) {
         if ($_POST['_action'] === 'add') {
             $db->prepare('INSERT INTO iti_airlines (name,iata_code,type,country,website,is_active) VALUES (?,?,?,?,?,?)')->execute(array_values($f));
+            iti_sh_log_row($db, 'airline', (int)$db->lastInsertId(), 'create', null);
             iti_flash_set('success', '"'.$f['name'].'" added.');
         } elseif ($_POST['_action'] === 'edit' && $id) {
+            $before = iti_sh_row($db, 'airline', $id);
             $db->prepare('UPDATE iti_airlines SET name=?,iata_code=?,type=?,country=?,website=?,is_active=? WHERE id=?')->execute([...(array_values($f)), $id]);
+            iti_sh_log_row($db, 'airline', $id, 'update', $before);
             iti_flash_set('success', 'Airline updated.');
         }
     }
     iti_redirect('airlines.php');
 }
 if ($action === 'delete' && $id && $can_edit && $table_ok) {
+    $before = iti_sh_row($db, 'airline', $id);
     $db->prepare('UPDATE iti_airlines SET is_active=0 WHERE id=?')->execute([$id]);
+    iti_sh_log_row($db, 'airline', $id, 'update', $before, 'deactivated');
     iti_flash_set('success', 'Airline deactivated.');
     iti_redirect('airlines.php');
 }
@@ -88,6 +94,7 @@ include __DIR__ . '/../../includes/layout_header.php';
   <div><h2><?= $action==='add' ? 'New Airline' : 'Edit: '.h($row['name']) ?></h2></div>
   <a href="airlines.php" class="btn btn-outline btn-sm">← Cancel</a>
 </div>
+<?= iti_sh_readonly_note('Airline data') ?>
 <form method="POST" action="airlines.php<?= $id ? "?id={$id}" : '' ?>">
   <input type="hidden" name="_action" value="<?= $action==='add'?'add':'edit' ?>">
   <div class="form-card">
@@ -126,9 +133,11 @@ include __DIR__ . '/../../includes/layout_header.php';
         Active
       </label>
     </div>
+    <?php if ($can_edit): ?>
     <div style="margin-top:16px;">
       <button type="submit" class="btn btn-red">💾 Save</button>
     </div>
+    <?php endif; ?>
   </div>
 </form>
 
@@ -143,6 +152,7 @@ include __DIR__ . '/../../includes/layout_header.php';
     <?php if ($can_edit): ?><a href="airlines.php?action=add" class="btn btn-red">+ New Airline</a><?php endif; ?>
   </div>
 </div>
+<?= iti_sh_readonly_note('Airline data') ?>
 
 <div class="form-card" style="padding:0;overflow:hidden;">
   <table class="airline-table">

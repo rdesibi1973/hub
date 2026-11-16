@@ -197,7 +197,13 @@ function iti_texts_save(PDO $db, int $id, string $to, array $texts, bool $overwr
         if (!preg_match('/^[a-z_]+$/', $table) || !preg_match('/^[a-z_]+$/', $col)) { $res['unknown'][] = $key; continue; }
         $cur = $c['items'][$key]['target'];
         if (!$overwrite && $cur !== '') { $res['skipped'][] = $key; continue; }
+        // Lodge / destination descriptions are shared by every program: a non-admin only fills a missing
+        // translation, never replaces one; the change is logged (iti_shared_service.php, 16 Nov 2026).
+        $shared = ['iti_lodges' => 'lodge', 'iti_destinations' => 'destination'][$table] ?? null;
+        if ($shared && $cur !== '' && !iti_can_edit_shared()) { $res['skipped'][] = $key; continue; }
+        $before = $shared ? iti_sh_row($db, $shared, $rowId) : null;
         $db->prepare("UPDATE {$table} SET {$col} = ? WHERE id = ?")->execute([$txt, $rowId]);
+        if ($shared) iti_sh_log_row($db, $shared, $rowId, 'update', $before, 'translation (' . $to . ') from program #' . $id);
         $res['written']++;
     }
     return $res;

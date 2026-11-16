@@ -10,12 +10,13 @@
 require_once __DIR__ . '/../../includes/auth.php';
 require_login();
 require_once __DIR__ . '/includes/iti_functions.php';
+iti_sh_guard_post('iti_import_sto.php');   // imports write shared data: admin only (16 Nov 2026)
 require_once __DIR__ . '/includes/sto_import.php';
 require_once __DIR__ . '/../leads/dropbox_constants.php';
 require_once __DIR__ . '/../leads/dropbox_helper.php';
 
 $db  = db();
-$_cu = current_user();   // open to all staff since 7 Oct 2026 (was admin/manager)
+$_cu = current_user();   // POST (import) admin only since 16 Nov 2026: it writes samples, lodge / destination texts
 @set_time_limit(300);
 
 $folder = trim($_REQUEST['folder'] ?? '/itineraries/SafariClassic/it/Agenzia/2026-27/STO');

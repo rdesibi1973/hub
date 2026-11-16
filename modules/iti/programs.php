@@ -9,15 +9,29 @@ require_once __DIR__ . '/includes/iti_functions.php';
 
 $db       = db();
 $_cu      = current_user();
-$can_edit = true;   // all staff since 7 Oct 2026 (was admin/manager)
+$can_edit = true;   // personal programs: all staff since 7 Oct 2026 (was admin/manager)
 $can_purge = in_array($_cu['role_name'], ['admin', 'manager']);   // permanent delete stays admin/manager
+// Samples are the base of every client program: created, duplicated into, cancelled only by an admin (16 Nov 2026).
+$can_sample = iti_can_edit_shared();
 
 $tab    = in_array($_GET['type'] ?? '', ['sample','personal']) ? $_GET['type'] : 'personal';
 $action = $_REQUEST['action'] ?? '';
 $id     = (int)($_REQUEST['id'] ?? 0);
+// Type of the program acted on (delete / duplicate / hard delete): a sample needs $can_sample.
+$actType = '';
+if ($id && in_array($action, ['delete', 'hard_delete', 'duplicate'], true)) {
+    $st = $db->prepare('SELECT program_type FROM iti_programs WHERE id = ?');
+    $st->execute([$id]);
+    $actType = (string)$st->fetchColumn();
+    $toSample = $action === 'duplicate' && ($_GET['dest_type'] ?? $tab) === 'sample' && empty($_GET['lead_request_id']);
+    if (!$can_sample && (($action !== 'duplicate' && $actType === 'sample') || $toSample)) {
+        iti_flash_set('error', ITI_SH_ADMIN_ONLY);
+        iti_redirect("programs.php?type={$tab}");
+    }
+}
 
 // ── POST: crea nuovo SAMPLE ──────────────────────────────────
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'add' && $can_edit) {
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'add' && $can_sample) {
     $title_en         = trim($_POST['title_en'] ?? '');
     $ref_number       = trim($_POST['ref_number'] ?? '');
     $display_language = $_POST['display_language'] ?? 'en';
@@ -167,7 +181,7 @@ include __DIR__ . '/../../includes/layout_header.php';
 <?php iti_nav('Programs'); ?>
 <?php iti_flash_render(); ?>
 
-<?php if ($action === 'add' && $tab === 'sample' && $can_edit): ?>
+<?php if ($action === 'add' && $tab === 'sample' && $can_sample): ?>
 <!-- ── FORM NUOVO SAMPLE ── -->
 <div class="page-header">
   <div><h2>New Sample Program</h2><div class="sub">Itinerary Builder › Programs</div></div>
@@ -230,7 +244,7 @@ include __DIR__ . '/../../includes/layout_header.php';
       <?php endif; ?>
     </div>
   </div>
-  <?php if ($tab==='sample' && $can_edit): ?>
+  <?php if ($tab==='sample' && $can_sample): ?>
   <div style="display:flex;gap:6px">
     <a href="iti_import_sto.php" class="btn btn-outline btn-sm" title="Create Sample programs from the STO Word files in Dropbox">⬇ Import STO</a>
     <a href="programs.php?type=sample&action=add" class="btn btn-red btn-sm">+ New Sample</a>
@@ -338,22 +352,25 @@ include __DIR__ . '/../../includes/layout_header.php';
         <td style="font-size:.75rem;color:var(--grey-mid);white-space:nowrap;"><?= date('d M Y', strtotime($p['updated_at'])) ?></td>
         <td>
           <div class="gap-8" style="white-space:nowrap;">
-            <a href="program_edit.php?id=<?= $p['id'] ?>" class="btn btn-outline btn-sm">✏️ Edit</a>
+            <a href="program_edit.php?id=<?= $p['id'] ?>" class="btn btn-outline btn-sm"><?= $tab === 'sample' && !$can_sample ? '👁 Open' : '✏️ Edit' ?></a>
             <a href="program_doc.php?id=<?= $p['id'] ?>" class="btn btn-outline btn-sm" target="_blank">👁 Preview</a>
             <?php if ($can_edit): ?>
+            <?php if ($tab !== 'sample' || $can_sample): ?>
             <a href="programs.php?type=<?= $tab ?>&action=duplicate&id=<?= $p['id'] ?>&dest_type=<?= $tab ?>"
                class="btn btn-outline btn-sm"
                onclick="return confirm('Duplicate «<?= h(addslashes($p['title_en'])) ?>»?')">⧉ Duplicate</a>
+            <?php endif; ?>
             <?php if ($tab === 'sample'): ?>
             <a href="programs.php?type=sample&action=duplicate&id=<?= $p['id'] ?>&dest_type=personal"
                class="btn btn-outline btn-sm"
                onclick="return confirm('Duplicate «<?= h(addslashes($p['title_en'])) ?>» as Personal?')">⧉ Duplicate as Personal</a>
-            <?php else: ?>
+            <?php elseif ($can_sample): ?>
             <a href="programs.php?type=personal&action=duplicate&id=<?= $p['id'] ?>&dest_type=sample"
                class="btn btn-outline btn-sm"
                onclick="return confirm('Duplicate «<?= h(addslashes($p['title_en'])) ?>» as Sample?')">⧉ Duplicate as Sample</a>
             <?php endif; ?>
-            <?php if ($p['status'] !== 'cancelled'): ?>
+            <?php if ($tab === 'sample' && !$can_sample): ?>
+            <?php elseif ($p['status'] !== 'cancelled'): ?>
             <a href="programs.php?type=<?= $tab ?>&action=delete&id=<?= $p['id'] ?>"
                class="btn btn-danger btn-sm"
                onclick="return confirm('Delete «<?= h(addslashes($p['title_en'])) ?>»?')">🗑 Delete</a>
@@ -373,7 +390,7 @@ include __DIR__ . '/../../includes/layout_header.php';
         <div class="empty-state">
           <div class="icon"><?= $tab==='sample' ? '📋' : '👤' ?></div>
           <p>No <?= $tab ?> programs found<?= $has_filters ? ' matching the selected filters.' : ' yet.' ?></p>
-          <?php if ($tab==='sample' && $can_edit && !$has_filters): ?>
+          <?php if ($tab==='sample' && $can_sample && !$has_filters): ?>
           <p style="margin-top:12px;"><a href="programs.php?type=sample&action=add" class="btn btn-red btn-sm">+ Create first sample</a></p>
           <?php endif; ?>
         </div>

@@ -7,6 +7,7 @@
 require_once __DIR__ . '/../../includes/auth.php';
 require_login();
 require_once __DIR__ . '/includes/iti_functions.php';
+if (!iti_can_edit_shared()) { http_response_code(403); exit('Admins only: this tool rewrites the shared destinations.'); }   // 16 Nov 2026
 
 $db = db();
 

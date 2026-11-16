@@ -442,7 +442,9 @@ function iti_pb_create_flight_route(PDO $db, array $f, bool $go): array {
     if ($id = $st->fetchColumn()) throw new InvalidArgumentException('Flight route already exists: #' . $id);
     if (!$go) return ['would_create' => $row];
     $db->prepare('INSERT INTO iti_flight_routes (`' . implode('`,`', array_keys($row)) . '`) VALUES (' . implode(',', array_fill(0, count($row), '?')) . ')')->execute(array_values($row));
-    return ['created' => ['id' => (int)$db->lastInsertId()] + $row];
+    $newId = (int)$db->lastInsertId();
+    iti_sh_log_row($db, 'flight_route', $newId, 'create', null);
+    return ['created' => ['id' => $newId] + $row];
 }
 
 function iti_pb_create_activity(PDO $db, array $f, bool $go): array {
@@ -468,7 +470,9 @@ function iti_pb_create_activity(PDO $db, array $f, bool $go): array {
     if ($id = $st->fetchColumn()) throw new InvalidArgumentException('Activity already exists: #' . $id);
     if (!$go) return ['would_create' => $row];
     $db->prepare('INSERT INTO iti_activities (`' . implode('`,`', array_keys($row)) . '`) VALUES (' . implode(',', array_fill(0, count($row), '?')) . ')')->execute(array_values($row));
-    return ['created' => ['id' => (int)$db->lastInsertId()] + $row];
+    $newId = (int)$db->lastInsertId();
+    iti_sh_log_row($db, 'activity', $newId, 'create', null);
+    return ['created' => ['id' => $newId] + $row];
 }
 
 /** Active routes (from? / to?: name or code), each with its label in the 5 languages (iti_tr_routes_list()). */
@@ -520,6 +524,7 @@ function iti_pb_create_transfer_route(PDO $db, array $f, bool $go): array {
     if (!$go) return ['would_create' => $row, 'labels' => $labels];
     $db->prepare('INSERT INTO iti_transfer_routes (`' . implode('`,`', array_keys($row)) . '`) VALUES (' . implode(',', array_fill(0, count($row), '?')) . ')')->execute(array_values($row));
     $id = (int)$db->lastInsertId();
+    iti_sh_log_row($db, 'transfer_route', $id, 'create', null);
     iti_tr_routes($db, true);
     return ['created' => ['id' => $id] + $row, 'labels' => $labels];
 }
@@ -541,7 +546,9 @@ function iti_pb_update_transfer_route(PDO $db, int $id, array $f, bool $go): arr
     $sets = []; $args = [];
     foreach ($set as $k => $v) { $sets[] = '`' . $k . '` = ?'; $args[] = $v; }
     $args[] = $id;
+    $shBefore = iti_sh_row($db, 'transfer_route', $id);
     $db->prepare('UPDATE iti_transfer_routes SET ' . implode(', ', $sets) . ' WHERE id = ?')->execute($args);
+    iti_sh_log_row($db, 'transfer_route', $id, 'update', $shBefore);
     iti_tr_routes($db, true);
     return $plan;
 }

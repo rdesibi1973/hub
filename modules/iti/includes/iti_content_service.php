@@ -10,6 +10,7 @@
 require_once __DIR__ . '/iti_photos.php';
 require_once __DIR__ . '/iti_terms.php';   // iti_placeholder_sql(): the website blurb counts as a missing description
 require_once __DIR__ . '/iti_rooms.php';   // a lodge's room categories (room_categories)
+require_once __DIR__ . '/iti_shared_service.php';   // every write logged in iti_change_log (16 Nov 2026)
 
 const ITI_CS_LANGS = ['en', 'it', 'fr', 'es', 'de'];
 const ITI_CS_LODGE_MAX_PHOTOS = 12;
@@ -235,6 +236,7 @@ function iti_cs_set_photos(PDO $db, string $kind, int $id, array $in, bool $go):
     if (!$go) return $res;
 
     $final = []; $errors = [];
+    $shBefore = iti_sh_row($db, $isLodge ? 'lodge' : 'destination', $id);
     if (function_exists('set_time_limit')) @set_time_limit(300);
     foreach ($plan as $p) {
         $err = null;
@@ -258,6 +260,7 @@ function iti_cs_set_photos(PDO $db, string $kind, int $id, array $in, bool $go):
            ->execute([$final ? json_encode($final, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) : null, $final ? $final[0] : '', $id]);
     }
     foreach ($removed as $u) iti_photo_unlink($u, $sub);
+    iti_sh_log_row($db, $isLodge ? 'lodge' : 'destination', $id, 'update', $shBefore, 'photos');
     return array_merge($res, ['photos' => $final, 'errors' => $errors]);
 }
 
@@ -298,6 +301,7 @@ function iti_cs_create_lodge(PDO $db, array $f, bool $go): array {
     $db->prepare('INSERT INTO iti_lodges (`' . implode('`,`', array_keys($row)) . '`) VALUES (' . implode(',', array_fill(0, count($row), '?')) . ')')
        ->execute(array_values($row));
     $id = (int)$db->lastInsertId();
+    iti_sh_log_row($db, 'lodge', $id, 'create', null);
     return ['created' => iti_cs_lodge_out(iti_cs_lodge_row($db, $id), true)];
 }
 
@@ -378,7 +382,10 @@ function iti_cs_update(PDO $db, string $kind, int $id, array $fields, bool $go):
     foreach ($changes as $k => $c) { $set[] = '`' . $k . '` = ?'; $args[] = $c['to']; }
     $args[] = $id;
     $table = $isLodge ? 'iti_lodges' : ($isAct ? 'iti_activities' : 'iti_destinations');
+    $shEnt = $isLodge ? 'lodge' : ($isAct ? 'activity' : 'destination');
+    $shBefore = iti_sh_row($db, $shEnt, $id);
     $db->prepare('UPDATE ' . $table . ' SET ' . implode(', ', $set) . ' WHERE id = ?')->execute($args);
+    iti_sh_log_row($db, $shEnt, $id, 'update', $shBefore);
     if ($isAct) $res['activity'] = iti_cs_activity_out(iti_cs_activity_row($db, $id));
     return $res;
 }

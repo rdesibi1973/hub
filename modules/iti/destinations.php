@@ -11,19 +11,23 @@ iti_ensure_doc_columns();   // is_beach_stay
 
 $db       = db();
 $_cu      = current_user();
-$can_edit = true;   // all staff since 7 Oct 2026 (was admin/manager)
+$can_edit = iti_can_edit_shared();   // shared by every program: admin only (16 Nov 2026; all staff 7 Oct – 16 Nov)
 
 $action = $_REQUEST['action'] ?? '';
 $id     = (int)($_REQUEST['id'] ?? 0);
+iti_sh_guard_post('destinations.php' . ($id ? '?action=edit&id=' . $id : ''));
 
 // ── POST ────────────────────────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit && $action === 'delete' && $id) {
+    $before = iti_sh_row($db, 'destination', $id);
     $db->prepare('UPDATE iti_destinations SET is_active=0 WHERE id=?')->execute([$id]);
+    iti_sh_log_row($db, 'destination', $id, 'update', $before, 'deactivated');
     iti_flash_set('success', 'Destination deactivated.');
     iti_redirect('destinations.php');
 }
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit) {
     iti_photos_schema();
+    $before = $id ? iti_sh_row($db, 'destination', $id) : null;
     $fields = [];
     // Ordine DEVE corrispondere esattamente alle colonne nelle query INSERT/UPDATE
     $fields['code']        = strtoupper(trim($_POST['code']       ?? ''));
@@ -71,6 +75,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit) {
         if (isset($gallery)) $db->prepare('UPDATE iti_destinations SET photos = ? WHERE id = ?')
                                 ->execute([$gallery ? json_encode($gallery, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) : null, $new_id]);
         $db->prepare('UPDATE iti_destinations SET is_beach_stay = ? WHERE id = ?')->execute([isset($_POST['is_beach_stay']) ? 1 : 0, $new_id]);
+        iti_sh_log_row($db, 'destination', $new_id, 'create', null);
         iti_flash_set($photo_errors ? 'error' : 'success', 'Destination "' . $fields['name_en'] . '" created.' . ($photo_errors ? ' Photo: ' . implode(' ', $photo_errors) : ''));
         iti_redirect('destinations.php');
 
@@ -85,6 +90,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit) {
         $db->prepare('UPDATE iti_destinations SET is_beach_stay = ? WHERE id = ?')->execute([isset($_POST['is_beach_stay']) ? 1 : 0, $id]);
         if (isset($gallery)) $db->prepare('UPDATE iti_destinations SET photos = ? WHERE id = ?')
                                 ->execute([$gallery ? json_encode($gallery, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) : null, $id]);
+        iti_sh_log_row($db, 'destination', $id, 'update', $before);
         if ($photo_errors) {
             iti_flash_set('error', 'Destination saved, but the photo was not: ' . implode(' ', $photo_errors));
             iti_redirect("destinations.php?action=edit&id={$id}");
@@ -141,6 +147,8 @@ include __DIR__ . '/../../includes/layout_header.php';
   </div>
   <a href="destinations.php" class="btn btn-outline btn-sm">← Back</a>
 </div>
+<?= iti_sh_readonly_note('Destination data') ?>
+<?= $action === 'edit' && $can_edit ? iti_sh_usage_box(iti_sh_usage($db, 'destination', $id), 'This destination') : '' ?>
 
 <div class="form-card">
 <form method="POST" action="destinations.php?action=<?= h($action) ?><?= $id ? "&id={$id}" : '' ?>" enctype="multipart/form-data">
@@ -221,8 +229,8 @@ include __DIR__ . '/../../includes/layout_header.php';
   </div>
 
   <div class="form-actions">
-    <button type="submit" class="btn btn-red"><?= $action==='add' ? '+ Create' : '💾 Save' ?></button>
-    <a href="destinations.php" class="btn btn-outline">Cancel</a>
+    <?php if ($can_edit): ?><button type="submit" class="btn btn-red"><?= $action==='add' ? '+ Create' : '💾 Save' ?></button><?php endif; ?>
+    <a href="destinations.php" class="btn btn-outline"><?= $can_edit ? 'Cancel' : '← Back' ?></a>
     <?php if ($action==='edit' && $can_edit): ?>
     <div style="margin-left:auto;">
       <button type="submit" form="deactivate-form" class="btn btn-danger btn-sm" onclick="return confirm('Deactivate this destination?')">Deactivate</button>
@@ -246,6 +254,7 @@ include __DIR__ . '/../../includes/layout_header.php';
   <a href="destinations.php?action=add" class="btn btn-red">+ New Destination</a>
   <?php endif; ?>
 </div>
+<?= iti_sh_readonly_note('Destination data') ?>
 
 <form method="GET" action="destinations.php" class="filters">
   <div class="filter-search"><label>Search</label><input type="text" name="q" placeholder="Name, code, region…" value="<?= h($search) ?>"></div>
@@ -298,7 +307,7 @@ include __DIR__ . '/../../includes/layout_header.php';
         <td><span class="badge <?= $d['is_active']?'status-booked':'status-cancelled' ?>"><?= $d['is_active']?'Active':'Inactive' ?></span></td>
         <td>
           <div class="gap-8">
-            <?php if ($can_edit): ?><a href="destinations.php?action=edit&id=<?= $d['id'] ?>" class="btn btn-outline btn-sm">Edit</a><?php endif; ?>
+            <a href="destinations.php?action=edit&id=<?= $d['id'] ?>" class="btn btn-outline btn-sm"><?= $can_edit ? 'Edit' : 'View' ?></a>
             <a href="lodges.php?destination_id=<?= $d['id'] ?>" class="btn btn-outline btn-sm">Lodges</a>
           </div>
         </td>

@@ -9,13 +9,22 @@ require_once __DIR__ . '/includes/iti_functions.php';
 
 $db       = db();
 $_cu      = current_user();
-$can_edit = true;   // all staff since 7 Oct 2026 (was admin/manager)
+$can_edit = iti_can_edit_shared();   // shared by every program: admin only (16 Nov 2026; all staff 7 Oct – 16 Nov)
 
 $action = $_REQUEST['action'] ?? '';
 $id     = (int)($_REQUEST['id'] ?? 0);
+iti_sh_guard_post('activities.php' . ($id ? '?action=edit&id=' . $id : ''));
 
 // ── POST ────────────────────────────────────────────────────
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit && $action === 'delete' && $id) {
+    $before = iti_sh_row($db, 'activity', $id);
+    $db->prepare('UPDATE iti_activities SET is_active=0 WHERE id=?')->execute([$id]);
+    iti_sh_log_row($db, 'activity', $id, 'update', $before, 'deactivated');
+    iti_flash_set('success', 'Activity deactivated.');
+    iti_redirect('activities.php');
+}
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit) {
+    $before = $id ? iti_sh_row($db, 'activity', $id) : null;
     $f = [
         'destination_id'  => ($_POST['destination_id'] !== '' ? (int)$_POST['destination_id'] : null),
         'activity_type'   => $_POST['activity_type']   ?? 'other',
@@ -45,6 +54,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit) {
             $f['description_en'],$f['description_it'],$f['description_fr'],$f['description_es'],$f['description_de'],
             $f['duration_hours'], $f['is_active'],
         ]);
+        iti_sh_log_row($db, 'activity', (int)$db->lastInsertId(), 'create', null);
         iti_flash_set('success', '"'.$f['name_en'].'" created.');
         iti_redirect('activities.php');
 
@@ -60,12 +70,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit) {
             $f['description_en'],$f['description_it'],$f['description_fr'],$f['description_es'],$f['description_de'],
             $f['duration_hours'], $f['is_active'], $id,
         ]);
+        iti_sh_log_row($db, 'activity', $id, 'update', $before);
         iti_flash_set('success', 'Activity updated.');
-        iti_redirect('activities.php');
-
-    } elseif ($action === 'delete' && $id) {
-        $db->prepare('UPDATE iti_activities SET is_active=0 WHERE id=?')->execute([$id]);
-        iti_flash_set('success', 'Activity deactivated.');
         iti_redirect('activities.php');
     }
 }
@@ -118,6 +124,8 @@ include __DIR__ . '/../../includes/layout_header.php';
   </div>
   <a href="activities.php" class="btn btn-outline btn-sm">← Back</a>
 </div>
+<?= iti_sh_readonly_note('Activity data') ?>
+<?= $action === 'edit' && $can_edit ? iti_sh_usage_box(iti_sh_usage($db, 'activity', $id), 'This activity') : '' ?>
 
 <div class="form-card">
 <form method="POST" action="activities.php?action=<?= h($action) ?><?= $id?"&id={$id}":'' ?>">
@@ -172,17 +180,18 @@ include __DIR__ . '/../../includes/layout_header.php';
   <?php endforeach; ?>
 
   <div class="form-actions">
-    <button type="submit" class="btn btn-red"><?= $action==='add'?'+ Create Activity':'💾 Save' ?></button>
-    <a href="activities.php" class="btn btn-outline">Cancel</a>
+    <?php if ($can_edit): ?><button type="submit" class="btn btn-red"><?= $action==='add'?'+ Create Activity':'💾 Save' ?></button><?php endif; ?>
+    <a href="activities.php" class="btn btn-outline"><?= $can_edit ? 'Cancel' : '← Back' ?></a>
     <?php if ($action==='edit' && $can_edit): ?>
     <div style="margin-left:auto;">
-      <form method="POST" action="activities.php?action=delete&id=<?= $id ?>" style="display:inline;">
-        <button class="btn btn-danger btn-sm" onclick="return confirm('Deactivate this activity?')">Deactivate</button>
-      </form>
+      <button type="submit" form="deactivate-form" class="btn btn-danger btn-sm" onclick="return confirm('Deactivate this activity?')">Deactivate</button>
     </div>
     <?php endif; ?>
   </div>
 </form>
+<?php if ($action==='edit' && $can_edit): ?>
+<form id="deactivate-form" method="POST" action="activities.php?action=delete&id=<?= $id ?>"></form>
+<?php endif; ?>
 </div>
 
 <?php else: ?>
@@ -196,6 +205,7 @@ include __DIR__ . '/../../includes/layout_header.php';
   </div>
   <?php endif; ?>
 </div>
+<?= iti_sh_readonly_note('Activity data') ?>
 
 <form method="GET" action="activities.php" class="filters">
   <div class="filter-search"><label>Search</label><input type="text" name="q" placeholder="Activity name…" value="<?= h($search) ?>"></div>
@@ -242,7 +252,7 @@ include __DIR__ . '/../../includes/layout_header.php';
         <td><span class="badge status-inquiry"><?= ITI_ACTIVITY_TYPES[$a['activity_type']] ?? h($a['activity_type']) ?></span></td>
         <td class="text-muted"><?= $a['duration_hours'] ? $a['duration_hours'].' h' : '—' ?></td>
         <td><span class="badge <?= $a['is_active']?'status-booked':'status-cancelled' ?>"><?= $a['is_active']?'Active':'Inactive' ?></span></td>
-        <td><?php if ($can_edit): ?><a href="activities.php?action=edit&id=<?= $a['id'] ?>" class="btn btn-outline btn-sm">Edit</a><?php endif; ?></td>
+        <td><a href="activities.php?action=edit&id=<?= $a['id'] ?>" class="btn btn-outline btn-sm"><?= $can_edit ? 'Edit' : 'View' ?></a></td>
       </tr>
       <?php endforeach; ?>
     <?php else: ?>

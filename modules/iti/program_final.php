@@ -57,6 +57,8 @@ try {
 } catch (Throwable $e) {
     $calcErr = $e->getMessage();
 }
+if ($calc) $calc['request_id'] = $rid;   // the staff's mappings for this booking count as mapped (iti_alias_lookup())
+$isAdmin = is_admin();                   // maps for every program; the staff map for this booking only (16 Nov 2026)
 $code   = $calc ? iti_final_code_from_calc($calc['file']) : '';
 // The sample is chosen from the Calc CONTENT (its nights / lodges against each sample's days), not from the file
 // name: a Calc saved as 02 from 01 keeps the name but may be another trip (iti_final_pick_sample(), 16 Nov 2026).
@@ -121,13 +123,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit) {
             }
         } elseif ($action === 'map') {
             $type = $_POST['type'] ?? '';
-            iti_alias_save($type, (string)($_POST['alias'] ?? ''), [
+            $targets = [
                 'lodge_id'          => (int)($_POST['lodge_id'] ?? 0),
                 'activity_id'       => (int)($_POST['activity_id'] ?? 0),
                 'transfer_route_id' => (int)($_POST['transfer_route_id'] ?? 0),
                 'flight_route_id'   => (int)($_POST['flight_route_id'] ?? 0),
-            ], ($_POST['meal_basis'] ?? '') !== '' ? $_POST['meal_basis'] : null, $user);
-            iti_flash_set('success', 'Alias "' . iti_alias_norm((string)$_POST['alias']) . '" saved.');
+            ];
+            $meal = ($_POST['meal_basis'] ?? '') !== '' ? $_POST['meal_basis'] : null;
+            $text = iti_alias_norm((string)($_POST['alias'] ?? ''));
+            if ($isAdmin) {
+                // An alias applies to every future Calc with this text: only an admin saves it.
+                iti_alias_save($type, $text, $targets, $meal, $user);
+                iti_flash_set('success', 'Alias "' . $text . '" saved for every program.');
+            } else {
+                iti_alias_propose($type, $text, $targets, $meal, $rid);
+                iti_flash_set('success', '"' . $text . '" mapped for this booking only. Roberto approves it before other programs use it.');
+            }
         } elseif ($action === 'generate') {
             if (!$calc) throw new RuntimeException('The Calc could not be read: ' . $calcErr);
             if (!$dataOk) throw new RuntimeException('Confirm the data read from the Calc first.');
@@ -220,10 +231,12 @@ if ($calc && (!$sample || $changeSample)) {
     $samples = $all;
     $suggestedSample = $sample ? (int)$sample['id'] : (int)($pick['ranking'][0]['id'] ?? 0);
 }
-// Pickers for inline mapping (only when something is unmapped).
+// Texts the staff mapped for this booking only, waiting for the admin's approval (can still be changed here).
+$localRows = $plan && array_filter($plan['local']) ? iti_sh_proposals($db, ['status' => 'pending', 'request_id' => $rid]) : [];
+// Pickers for inline mapping (only when something is unmapped or mapped for this booking only).
 $opt = ['lodge' => [], 'activity' => [], 'transfer' => [], 'flight' => []];
 $optName = ['lodge' => []];   // lodge names without the destination, for the preselected suggestion
-if ($plan && $plan['blocking']) {
+if ($plan && ($plan['blocking'] || $localRows)) {
     foreach (iti_get_lodges() as $l) { $opt['lodge'][$l['id']] = $l['name'] . ' — ' . $l['dest_name_en']; $optName['lodge'][$l['id']] = $l['name']; }
     foreach (iti_get_activities() as $a) $opt['activity'][$a['id']] = $a['name_en'] . ($a['name_it'] && $a['name_it'] !== $a['name_en'] ? ' / ' . $a['name_it'] : '');
     foreach (iti_get_transfer_routes() as $r) $opt['transfer'][$r['id']] = $r['from_name'] . ' → ' . $r['to_name'];
@@ -232,7 +245,8 @@ if ($plan && $plan['blocking']) {
 $fmtD = function ($ymd) { return $ymd ? date('D d M Y', strtotime($ymd)) : '—'; };
 $badge = function (string $state): string {
     $map = ['ok' => ['#e8f5e9', '#2e7d32', 'mapped'], 'nothing' => ['#eee', '#555', 'not shown'],
-            'unmapped' => ['#ffebee', '#c62828', 'NOT MAPPED'], 'none' => ['#eee', '#888', '—']];
+            'unmapped' => ['#ffebee', '#c62828', 'NOT MAPPED'], 'none' => ['#eee', '#888', '—'],
+            'local' => ['#fff8e1', '#8a6d00', 'this booking only']];
     $m = $map[$state] ?? $map['none'];
     return '<span class="badge" style="background:' . $m[0] . ';color:' . $m[1] . ';">' . $m[2] . '</span>';
 };
@@ -429,7 +443,6 @@ include __DIR__ . '/../../includes/layout_header.php';
       </div>
     </div>
   <?php elseif ($can_edit): ?>
-    <?php $isAdmin = is_admin(); ?>
     <form method="POST" action="<?= h($self) ?>&amp;lang=<?= h($lang) ?>" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
       <input type="hidden" name="action" value="set_sample">
       <?php if ($sample): ?>
@@ -460,11 +473,11 @@ include __DIR__ . '/../../includes/layout_header.php';
 <?php $aiMap = $_SESSION[$aiMapKey] ?? [];
       iti_ai_panel('calc', ['post_to' => $self . '&lang=' . $lang,
                             'idle' => ['map_texts' => array_filter($plan['unmapped']) ? '' : 'Every Calc text is already mapped.']]); ?>
-<?php if ($plan['blocking'] && $can_edit): ?>
-<div class="form-card" style="margin-bottom:18px;border-left:4px solid var(--red);">
-  <div class="form-section-title">To map before generating (saved as aliases — asked only once)</div>
-  <?php foreach (['lodge' => 'Hotel', 'activity' => 'Activity', 'route' => 'Route'] as $type => $lbl): ?>
-    <?php foreach ($plan['unmapped'][$type] as $text): $ai = $aiMap[$type][$text] ?? null; ?>
+<?php
+// One mapping line: $pre = preselected targets (lodge_id, meal_basis, activity_id, transfer_route_id, flight_route_id).
+$mapRow = function (string $type, string $text, array $pre, string $extra = '') use ($self, $lang, $opt) {
+    $lbl = ['lodge' => 'Hotel', 'activity' => 'Activity', 'route' => 'Route'][$type];
+    ob_start(); ?>
     <form method="POST" action="<?= h($self) ?>&amp;lang=<?= h($lang) ?>" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:6px 0;border-bottom:1px solid var(--grey-lt);">
       <input type="hidden" name="action" value="map">
       <input type="hidden" name="type" value="<?= $type ?>">
@@ -472,19 +485,48 @@ include __DIR__ . '/../../includes/layout_header.php';
       <span style="min-width:90px;font-size:.75rem;color:var(--grey-mid);"><?= $lbl ?></span>
       <code style="min-width:220px;"><?= h($text) ?></code>
       <?php if ($type === 'lodge'): ?>
-        <select name="lodge_id" style="max-width:340px;"><?= iti_options($opt['lodge'], ($ai['lodge_id'] ?? 0) ?: iti_final_suggest_lodge($text, $optName['lodge'], $plan['hints']['lodge_date'][$text] ?? null), '— nothing (own arrangement / not a lodge) —') ?></select>
-        <select name="meal_basis"><?= iti_options(ITI_MEAL_BASIS, $plan['hints']['lodge_meal'][$text] ?? null, '— meal: lodge default —') ?></select>
+        <select name="lodge_id" style="max-width:340px;"><?= iti_options($opt['lodge'], $pre['lodge_id'] ?? null, '— nothing (own arrangement / not a lodge) —') ?></select>
+        <select name="meal_basis"><?= iti_options(ITI_MEAL_BASIS, $pre['meal_basis'] ?? null, '— meal: lodge default —') ?></select>
       <?php elseif ($type === 'activity'): ?>
-        <select name="activity_id" style="max-width:380px;"><?= iti_options($opt['activity'], ($ai['activity_id'] ?? 0) ?: iti_alias_suggest($text, $opt['activity']), '— nothing (not an activity) —') ?></select>
+        <select name="activity_id" style="max-width:380px;"><?= iti_options($opt['activity'], $pre['activity_id'] ?? null, '— nothing (not an activity) —') ?></select>
       <?php else: ?>
-        <select name="transfer_route_id" style="max-width:260px;"><?= iti_options($opt['transfer'], ($ai['transfer_route_id'] ?? 0) ?: null, '— no transfer —') ?></select>
-        <select name="flight_route_id" style="max-width:260px;"><?= iti_options($opt['flight'], ($ai['flight_route_id'] ?? 0) ?: null, '— no flight —') ?></select>
+        <select name="transfer_route_id" style="max-width:260px;"><?= iti_options($opt['transfer'], $pre['transfer_route_id'] ?? null, '— no transfer —') ?></select>
+        <select name="flight_route_id" style="max-width:260px;"><?= iti_options($opt['flight'], $pre['flight_route_id'] ?? null, '— no flight —') ?></select>
       <?php endif; ?>
-      <button type="submit" class="btn btn-outline btn-sm">💾 Map</button>
-      <?= iti_ai_map_note($ai) ?>
+      <button type="submit" class="btn btn-outline btn-sm">💾 <?= $extra === '' ? 'Map' : 'Change' ?></button>
+      <?= $extra ?>
     </form>
-    <?php endforeach; ?>
+<?php return ob_get_clean();
+};
+?>
+<?php if ($plan['blocking'] && $can_edit): ?>
+<div class="form-card" style="margin-bottom:18px;border-left:4px solid var(--red);">
+  <div class="form-section-title">To map before generating
+    <?php if ($isAdmin): ?>(saved as aliases for every program — asked only once)
+    <?php else: ?><span style="font-weight:400;font-size:.8rem;">— your mapping is used for <strong>this booking only</strong>; Roberto approves it before other programs use it</span><?php endif; ?>
+  </div>
+  <?php foreach (['lodge', 'activity', 'route'] as $type): ?>
+    <?php foreach ($plan['unmapped'][$type] as $text): $ai = $aiMap[$type][$text] ?? null;
+      $pre = $type === 'lodge'
+           ? ['lodge_id' => ($ai['lodge_id'] ?? 0) ?: iti_final_suggest_lodge($text, $optName['lodge'], $plan['hints']['lodge_date'][$text] ?? null), 'meal_basis' => $plan['hints']['lodge_meal'][$text] ?? null]
+           : ($type === 'activity' ? ['activity_id' => ($ai['activity_id'] ?? 0) ?: iti_alias_suggest($text, $opt['activity'])]
+                                   : ['transfer_route_id' => ($ai['transfer_route_id'] ?? 0) ?: null, 'flight_route_id' => ($ai['flight_route_id'] ?? 0) ?: null]);
+      echo $mapRow($type, $text, $pre);
+      echo iti_ai_map_note($ai) !== '' ? '<div style="margin:-4px 0 4px 98px;">' . iti_ai_map_note($ai) . '</div>' : '';
+    endforeach; ?>
   <?php endforeach; ?>
+</div>
+<?php endif; ?>
+
+<?php if ($localRows && $can_edit): ?>
+<div class="form-card" style="margin-bottom:18px;border-left:4px solid #f0ad00;">
+  <div class="form-section-title">Mapped for this booking only — waiting for Roberto's approval
+    <?php if ($isAdmin): ?><a href="aliases.php#proposals" style="font-weight:400;font-size:.8rem;margin-left:8px;">approve in Aliases →</a><?php endif; ?>
+  </div>
+  <div style="font-size:.8rem;color:var(--grey-mid);margin-bottom:6px;">Used for this program already. Other programs keep asking until Roberto approves it.<?= $isAdmin ? ' Pressing Change here saves it for every program.' : ' Wrong? Change it here.' ?></div>
+  <?php foreach ($localRows as $lr):
+    echo $mapRow($lr['type'], $lr['alias'], $lr, '<span style="font-size:.75rem;color:var(--grey-mid);">now: ' . h($lr['target']) . ' · ' . h($lr['proposed_by']) . ' ' . h(substr((string)$lr['proposed_at'], 0, 10)) . '</span>');
+  endforeach; ?>
 </div>
 <?php endif; ?>
 
@@ -497,15 +539,15 @@ include __DIR__ . '/../../includes/layout_header.php';
       <tr>
         <td style="white-space:nowrap;font-size:.8rem;"><?= $fmtD($d['date']) ?></td>
         <td style="font-size:.8rem;"><?= h($d['label']) ?>
-          <?php if ($d['route'] && $d['sample_index'] === null): ?><br><?= $badge($d['route']['state']) ?><?php endif; ?></td>
+          <?php if ($d['route'] && $d['sample_index'] === null): ?><br><?= $badge($d['route']['state']) ?><?= !empty($d['route']['local']) ? ' ' . $badge('local') : '' ?><?php endif; ?></td>
         <td style="font-size:.8rem;">
           <?php if ($d['hotel_text'] !== ''): ?>
-            <code><?= h($d['hotel_text']) ?></code> <?= $badge($d['lodge_state']) ?>
+            <code><?= h($d['hotel_text']) ?></code> <?= $badge($d['lodge_state']) ?><?= !empty($d['lodge_local']) ? ' ' . $badge('local') : '' ?>
             <?php if ($d['lodge_name']): ?><br>→ <strong><?= h($d['lodge_name']) ?></strong><?= $d['meal'] ? ' · ' . h($d['meal']) : '' ?><?= !empty($d['room_category']) ? ' · ' . h($d['room_category']) : '' ?><?php endif; ?>
           <?php else: ?><span style="color:var(--grey-mid);"><?= $d['last'] ? 'departure' : '—' ?></span><?php endif; ?>
         </td>
         <td style="font-size:.8rem;">
-          <?php foreach ($d['acts'] as $a): ?><div><code><?= h($a['text']) ?></code> <?= $badge($a['state']) ?></div><?php endforeach; ?>
+          <?php foreach ($d['acts'] as $a): ?><div><code><?= h($a['text']) ?></code> <?= $badge($a['state']) ?><?= !empty($a['local']) ? ' ' . $badge('local') : '' ?></div><?php endforeach; ?>
         </td>
         <td style="font-size:.8rem;"><?= $d['sample_index'] !== null ? 'Day ' . ($d['sample_index'] + 1) : ($sample ? '<span class="badge" style="background:#fff8e1;color:#8a6d00;">new</span>' : '—') ?></td>
         <td style="font-size:.75rem;color:var(--grey-mid);"><?= h(trim($d['invoice'] . ' ' . $d['checked'])) ?></td>

@@ -11,19 +11,23 @@ require_once __DIR__ . '/includes/iti_functions.php';
 $db       = db();
 iti_tr_schema($db);   // via_destination, label_<lang> (iti_transfer_service.php)
 $_cu      = current_user();
-$can_edit = true;   // all staff since 7 Oct 2026 (was admin/manager)
+$can_edit = iti_can_edit_shared();   // shared by every program: admin only (16 Nov 2026; all staff 7 Oct – 16 Nov)
 
 $tab    = $_GET['tab']    ?? 'road';   // 'road' | 'flight'
 $action = $_REQUEST['action'] ?? '';
 $id     = (int)($_REQUEST['id'] ?? 0);
+$shEnt  = $tab === 'road' ? 'transfer_route' : 'flight_route';   // iti_change_log entity
+iti_sh_guard_post('transfers.php?tab=' . ($tab === 'road' ? 'road' : 'flight') . ($id ? '&action=edit&id=' . $id : ''));
 
 // ── POST ────────────────────────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit) {
 
     // Deactivate first: its form posts no route fields, so it must not reach the From/To checks below
+    $before = $id ? iti_sh_row($db, $shEnt, $id) : null;
     if ($action === 'delete' && $id) {
         $tbl = $tab === 'road' ? 'iti_transfer_routes' : 'iti_flight_routes';
         $db->prepare("UPDATE {$tbl} SET is_active=0 WHERE id=?")->execute([$id]);
+        iti_sh_log_row($db, $shEnt, $id, 'update', $before, 'deactivated');
         iti_flash_set('success', 'Route deactivated.');
         iti_redirect('transfers.php?tab=' . ($tab === 'road' ? 'road' : 'flight'));
     }
@@ -59,6 +63,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit) {
             $tr_new_id = (int)$db->lastInsertId();
             $db->prepare('UPDATE iti_transfer_routes SET `' . implode('` = ?, `', array_keys($tr_extra)) . '` = ? WHERE id = ?')
                ->execute(array_merge(array_values($tr_extra), [$tr_new_id]));
+            iti_sh_log_row($db, 'transfer_route', $tr_new_id, 'create', null);
             $msg = 'Transfer route created.';
 
             // Optional: also create the reverse route (to → from)
@@ -84,6 +89,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit) {
                         $f['to_destination'], $f['from_destination'], $f['duration_min'], $f['distance_km'], $f['road_type'],
                         $revNotes['en'], $revNotes['it'], $revNotes['fr'], $revNotes['es'], $revNotes['de'], $f['is_active'],
                     ]);
+                    iti_sh_log_row($db, 'transfer_route', (int)$db->lastInsertId(), 'create', null, 'reverse route');
                     $msg .= ' Reverse route also created.';
                 }
             }
@@ -96,6 +102,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit) {
             )->execute([$f['from_destination'],$f['to_destination'],$f['duration_min'],$f['distance_km'],$f['road_type'],$f['notes_en'],$f['notes_it'],$f['notes_fr'],$f['notes_es'],$f['notes_de'],$f['is_active'],$id]);
             $db->prepare('UPDATE iti_transfer_routes SET `' . implode('` = ?, `', array_keys($tr_extra)) . '` = ? WHERE id = ?')
                ->execute(array_merge(array_values($tr_extra), [$id]));
+            iti_sh_log_row($db, 'transfer_route', $id, 'update', $before);
             iti_flash_set('success', 'Transfer route updated. Programmes linked to it print the new label.');
         }
         } catch (\PDOException $e) {
@@ -130,6 +137,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit) {
                   notes_en,notes_it,notes_fr,notes_es,notes_de,is_active)
                  VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)'
             )->execute([$f['from_airport'],$f['from_code'],$f['to_airport'],$f['to_code'],$f['operator'],$f['flight_type'],$f['duration_min'],$f['notes_en'],$f['notes_it'],$f['notes_fr'],$f['notes_es'],$f['notes_de'],$f['is_active']]);
+            iti_sh_log_row($db, 'flight_route', (int)$db->lastInsertId(), 'create', null);
             iti_flash_set('success', 'Flight route created.');
         } elseif ($action === 'edit' && $id) {
             $db->prepare(
@@ -137,6 +145,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit) {
                  from_airport=?,from_code=?,to_airport=?,to_code=?,operator=?,flight_type=?,duration_min=?,
                  notes_en=?,notes_it=?,notes_fr=?,notes_es=?,notes_de=?,is_active=? WHERE id=?'
             )->execute([$f['from_airport'],$f['from_code'],$f['to_airport'],$f['to_code'],$f['operator'],$f['flight_type'],$f['duration_min'],$f['notes_en'],$f['notes_it'],$f['notes_fr'],$f['notes_es'],$f['notes_de'],$f['is_active'],$id]);
+            iti_sh_log_row($db, 'flight_route', $id, 'update', $before);
             iti_flash_set('success', 'Flight route updated.');
         }
         iti_redirect('transfers.php?tab=flight');
@@ -184,6 +193,8 @@ include __DIR__ . '/../../includes/layout_header.php';
   </div>
   <a href="transfers.php?tab=<?= h($tab) ?>" class="btn btn-outline btn-sm">← Back</a>
 </div>
+<?= iti_sh_readonly_note('Route data') ?>
+<?= $action === 'edit' && $can_edit ? iti_sh_usage_box(iti_sh_usage($db, $shEnt, $id), 'This route') : '' ?>
 
 <div class="form-card">
 <form method="POST" action="transfers.php?tab=<?= h($tab) ?>&action=<?= h($action) ?><?= $id?"&id={$id}":'' ?>">
@@ -413,8 +424,8 @@ include __DIR__ . '/../../includes/layout_header.php';
 <?php endif; ?>
 
   <div class="form-actions">
-    <button type="submit" class="btn btn-red"><?= $action==='add'?'+ Create':'💾 Save' ?></button>
-    <a href="transfers.php?tab=<?= h($tab) ?>" class="btn btn-outline">Cancel</a>
+    <?php if ($can_edit): ?><button type="submit" class="btn btn-red"><?= $action==='add'?'+ Create':'💾 Save' ?></button><?php endif; ?>
+    <a href="transfers.php?tab=<?= h($tab) ?>" class="btn btn-outline"><?= $can_edit ? 'Cancel' : '← Back' ?></a>
   </div>
 </form>
 <?php if ($action==='edit' && $can_edit): ?>
@@ -448,6 +459,7 @@ include __DIR__ . '/../../includes/layout_header.php';
   <div><h2>Road Transfers</h2><div class="sub"><?= count($road_routes) ?> routes<?= $has_road_filters ? ' found' : ' total' ?></div></div>
   <?php if ($can_edit): ?><a href="transfers.php?tab=road&action=add" class="btn btn-red">+ New Route</a><?php endif; ?>
 </div>
+<?= iti_sh_readonly_note('Route data') ?>
 
 <form method="GET" action="transfers.php" class="filters">
   <input type="hidden" name="tab" value="road">
@@ -490,7 +502,7 @@ include __DIR__ . '/../../includes/layout_header.php';
         <td class="text-muted"><?= $r['distance_km'] ? $r['distance_km'].' km' : '—' ?></td>
         <td><span class="badge status-inquiry"><?= ITI_ROAD_TYPES[$r['road_type']] ?? h($r['road_type']) ?></span></td>
         <td><span class="badge <?= $r['is_active']?'status-booked':'status-cancelled' ?>"><?= $r['is_active']?'Active':'Inactive' ?></span></td>
-        <td><?php if($can_edit): ?><a href="transfers.php?tab=road&action=edit&id=<?= $r['id'] ?>" class="btn btn-outline btn-sm">Edit</a><?php endif; ?></td>
+        <td><a href="transfers.php?tab=road&action=edit&id=<?= $r['id'] ?>" class="btn btn-outline btn-sm"><?= $can_edit ? 'Edit' : 'View' ?></a></td>
       </tr>
       <?php endforeach; ?>
     <?php else: ?>
@@ -560,7 +572,7 @@ include __DIR__ . '/../../includes/layout_header.php';
         <td><span class="badge status-inquiry"><?= ITI_FLIGHT_TYPES[$r['flight_type']] ?? h($r['flight_type']) ?></span></td>
         <td><?= $r['duration_min'] ? $r['duration_min'].' min' : '—' ?></td>
         <td><span class="badge <?= $r['is_active']?'status-booked':'status-cancelled' ?>"><?= $r['is_active']?'Active':'Inactive' ?></span></td>
-        <td><?php if($can_edit): ?><a href="transfers.php?tab=flight&action=edit&id=<?= $r['id'] ?>" class="btn btn-outline btn-sm">Edit</a><?php endif; ?></td>
+        <td><a href="transfers.php?tab=flight&action=edit&id=<?= $r['id'] ?>" class="btn btn-outline btn-sm"><?= $can_edit ? 'Edit' : 'View' ?></a></td>
       </tr>
       <?php endforeach; ?>
     <?php else: ?>

@@ -18,6 +18,11 @@ outdated — this file wins where they disagree (PHP version, local lint).
 - **AI buttons of ITI** (logic `modules/iti/includes/iti_ai_service.php`, limits in ITI → Settings → AI): every new AI button calls
   `iti_ai_call()`, which checks the spending limits and records the real cost in `iti_ai_usage`; never a separate connection.
 - `modules/iti/` — itinerary builder. `includes/` (root) — config (server-only), auth, db, mail.
+  **Shared ITI data** (logic `modules/iti/includes/iti_shared_service.php`, since 16 Nov 2026): aliases, lodges, activities,
+  destinations, routes, airlines, imports and samples are changed on the Hub by an admin only (`iti_can_edit_shared()`,
+  `iti_sh_guard_post()`); the Agent API acts as Roberto's agent. The staff map a Calc text for their booking only
+  (`iti_alias_propose()` → `iti_alias_proposals`, approved in ITI → Aliases or `iti_alias_decide`). Every write to shared
+  data is logged with `iti_sh_log()` / `iti_sh_log_row()` (`iti_change_log`, restore in ITI → History): a new writer does the same.
   **Sample of a final program** (`includes/iti_final.php` `iti_final_pick_sample()`): chosen from the Calc CONTENT (nights /
   lodges vs each sample's days), not the file name; the Calc code tag (`hub_program_code` + extra codes in `iti_sample_codes`,
   one code → one sample, set by an admin only) is a tie-break and the prices source. Sellers / Agent API override for one

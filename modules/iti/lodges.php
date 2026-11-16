@@ -11,18 +11,22 @@ iti_ensure_final_schema();   // phone / email / address / emergency_phone
 
 $db       = db();
 $_cu      = current_user();
-$can_edit = true;   // all staff since 7 Oct 2026 (was admin/manager)
+$can_edit = iti_can_edit_shared();   // shared by every program: admin only (16 Nov 2026; all staff 7 Oct – 16 Nov)
 
 $action = $_REQUEST['action'] ?? '';
 $id     = (int)($_REQUEST['id'] ?? 0);
+iti_sh_guard_post('lodges.php' . ($id ? '?action=edit&id=' . $id : ''));
 
 // ── POST ────────────────────────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit && $action === 'delete' && $id) {
+    $before = iti_sh_row($db, 'lodge', $id);
     $db->prepare('UPDATE iti_lodges SET is_active=0 WHERE id=?')->execute([$id]);
+    iti_sh_log_row($db, 'lodge', $id, 'update', $before, 'deactivated');
     iti_flash_set('success', 'Lodge deactivated.');
     iti_redirect('lodges.php');
 }
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit) {
+    $before = $id ? iti_sh_row($db, 'lodge', $id) : null;
     iti_photos_schema();
     $fields = [
         'destination_id' => (int)($_POST['destination_id'] ?? 0),
@@ -84,6 +88,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit) {
         iti_set_season_twin($newLodge, (int)($_POST['season_twin_id'] ?? 0));
         $db->prepare('UPDATE iti_lodges SET season_months = ? WHERE id = ?')->execute([$seasonMonths, $newLodge]);
         $db->prepare('UPDATE iti_lodges SET room_categories = ? WHERE id = ?')->execute([$roomCats, $newLodge]);
+        iti_sh_log_row($db, 'lodge', $newLodge, 'create', null);
         iti_flash_set($photo_errors ? 'error' : 'success', '"' . $fields['name'] . '" created.' . ($photo_errors ? ' Photos: ' . implode(' ', $photo_errors) : ''));
         iti_redirect('lodges.php');
 
@@ -103,6 +108,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit) {
         iti_set_season_twin($id, (int)($_POST['season_twin_id'] ?? 0));
         $db->prepare('UPDATE iti_lodges SET season_months = ? WHERE id = ?')->execute([$seasonMonths, $id]);
         $db->prepare('UPDATE iti_lodges SET room_categories = ? WHERE id = ?')->execute([$roomCats, $id]);
+        iti_sh_log_row($db, 'lodge', $id, 'update', $before);
         if ($photo_errors) {
             iti_flash_set('error', 'Lodge saved, but some photos were not: ' . implode(' ', $photo_errors));
             iti_redirect("lodges.php?action=edit&id={$id}");
@@ -171,6 +177,8 @@ include __DIR__ . '/../../includes/layout_header.php';
   </div>
   <a href="lodges.php" class="btn btn-outline btn-sm">← Back</a>
 </div>
+<?= iti_sh_readonly_note('Lodge data') ?>
+<?= $action === 'edit' && $can_edit ? iti_sh_usage_box(iti_sh_usage($db, 'lodge', $id), 'This lodge') : '' ?>
 
 <div class="form-card">
 <form method="POST" action="lodges.php?action=<?= h($action) ?><?= $id?"&id={$id}":'' ?>" enctype="multipart/form-data">
@@ -313,8 +321,8 @@ include __DIR__ . '/../../includes/layout_header.php';
   </div>
 
   <div class="form-actions">
-    <button type="submit" class="btn btn-red"><?= $action==='add'?'+ Create Lodge':'💾 Save' ?></button>
-    <a href="lodges.php" class="btn btn-outline">Cancel</a>
+    <?php if ($can_edit): ?><button type="submit" class="btn btn-red"><?= $action==='add'?'+ Create Lodge':'💾 Save' ?></button><?php endif; ?>
+    <a href="lodges.php" class="btn btn-outline"><?= $can_edit ? 'Cancel' : '← Back' ?></a>
     <?php if ($action==='edit' && $can_edit): ?>
     <div style="margin-left:auto;">
       <button type="submit" form="deactivate-form" class="btn btn-danger btn-sm" onclick="return confirm('Deactivate this lodge?')">Deactivate</button>
@@ -340,6 +348,7 @@ include __DIR__ . '/../../includes/layout_header.php';
   </div>
   <?php endif; ?>
 </div>
+<?= iti_sh_readonly_note('Lodge data') ?>
 
 <form method="GET" action="lodges.php" class="filters">
   <div class="filter-search"><label>Search</label><input type="text" name="q" placeholder="Lodge or destination…" value="<?= h($search) ?>"></div>
@@ -405,9 +414,7 @@ include __DIR__ . '/../../includes/layout_header.php';
           <?php endif; ?></td>
         <td><span class="badge <?= $l['is_active']?'status-booked':'status-cancelled' ?>"><?= $l['is_active']?'Active':'Inactive' ?></span></td>
         <td>
-          <?php if ($can_edit): ?>
-          <a href="lodges.php?action=edit&id=<?= $l['id'] ?>" class="btn btn-outline btn-sm">Edit</a>
-          <?php endif; ?>
+          <a href="lodges.php?action=edit&id=<?= $l['id'] ?>" class="btn btn-outline btn-sm"><?= $can_edit ? 'Edit' : 'View' ?></a>
         </td>
       </tr>
       <?php endforeach; ?>
