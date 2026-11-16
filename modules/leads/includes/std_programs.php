@@ -11,6 +11,8 @@
  *   src : full Dropbox path of the template file (group templates live in a stable
  *         season folder under Agenzia/2026-27/Gruppi, so they don't depend on a year).
  *   dst : destination filename suffix (what follows {ProgNumber}_{FolderName}_).
+ *   old : (optional) earlier dst names, still recognised in request folders copied before a
+ *         rename (bs_program_dst_names); new copies always use dst.
  *
  * Program labels are unique across all groups (the copy handler flattens by label).
  * Keep this file in sync with the cp*.bat scripts if the templates change.
@@ -32,7 +34,7 @@ return [
         'Tembo'             => [['src'=>$IT.'SavannahExplorers_TemboSafari.docx','dst'=>'TemboSafari.docx'], ['src'=>$IT.'Tembo_Calc.xlsx','dst'=>'Tembo_Calc.xlsx']],
         'Nyani'             => [['src'=>$IT.'SavannahExplorers_NyaniSafari.docx','dst'=>'NyaniSafari.docx'], ['src'=>$IT.'Nyani_Calc.xlsx','dst'=>'Nyani_Calc.xlsx']],
         'Chui'              => [['src'=>$IT.'SavannahExplorers_ChuiSafari.docx','dst'=>'ChuiSafari.docx'], ['src'=>$IT.'ChuiSafari_Calc.xlsx','dst'=>'ChuiSafari_Calc.xlsx']],
-        'Faru'              => [['src'=>$IT.'SavannahExplorers_FaruSafari.docx','dst'=>'FaruSafari.docx'], ['src'=>$IT.'FaruSafari_Calc.xlsx','dst'=>'Faru_Calc.xlsx']],
+        'Faru'              => [['src'=>$IT.'SavannahExplorers_FaruSafari.docx','dst'=>'FaruSafari.docx'], ['src'=>$IT.'FaruSafari_Calc.xlsx','dst'=>'FaruSafari_Calc.xlsx','old'=>['Faru_Calc.xlsx']]],
         'Mbogo'             => [['src'=>$IT.'SavannahExplorers_MbogoSafari.docx','dst'=>'MbogoSafari.docx'], ['src'=>$IT.'MbogoSafari_Calc.xlsx','dst'=>'Mbogo_Calc.xlsx']],
         'GranSafari'        => [['src'=>$IT.'SavannahExplorers_GranSafariTanzania.docx','dst'=>'GranSafariTanzania.docx'], ['src'=>$IT.'GranSafariTanzania_Calc.xlsx','dst'=>'GranSafariTanzania_Calc.xlsx']],
         'MigrationWinter'   => [['src'=>$IT.'SavannahExplorers_SafariGrandeMigrazioneInverno.docx','dst'=>'SafariGrandeMigrazione.docx'], ['src'=>$IT.'MigrazioneInverno_Calc.xlsx','dst'=>'MigrazioneInverno_Calc.xlsx']],

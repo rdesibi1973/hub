@@ -132,7 +132,8 @@ function calc_price_template_candidates(string $program): array {
     if ($src === null) {
         foreach (bs_std_programs() as $progs) foreach ($progs as $files) foreach ($files as $f) {
             if (!preg_match('/\.xlsx?$/i', $f['dst'])) continue;
-            $codes = [preg_replace('/_Calc\.xlsx?$/i', '', $f['dst']), preg_replace('/_Calc\.xlsx?$/i', '', basename($f['src']))];
+            $codes = [preg_replace('/_Calc\.xlsx?$/i', '', basename($f['src']))];
+            foreach (bs_program_dst_names($f) as $d) $codes[] = preg_replace('/_Calc\.xlsx?$/i', '', $d);   // incl. earlier names (Faru_Calc → "Faru")
             foreach ($codes as $c) if (strcasecmp($c, $p) === 0) { $src = $f['src']; break 4; }
         }
     }

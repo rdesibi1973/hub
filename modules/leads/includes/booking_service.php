@@ -408,10 +408,15 @@ function bs_program_file_name(string $prognum, string $folderName, string $dst):
     return $prognum . '_' . $folderName . '_' . $dst;
 }
 
+/** Every name a template file may carry in a request folder: dst first, then its earlier names ('old'). */
+function bs_program_dst_names(array $f): array {
+    return array_values(array_unique(array_merge([$f['dst']], (array)($f['old'] ?? []))));
+}
+
 /**
  * Programmes copy_program left in a request folder, recognised from the folder's file
- * names ($files) by bs_program_file_name() + the std_programs.php map. One entry per
- * (program, NN) found by its Word or its Calc:
+ * names ($files) by bs_program_file_name() + the std_programs.php map (dst or an 'old'
+ * name). One entry per (program, NN) found by its Word or its Calc:
  *   ['label', 'prognum', 'word' (expected name), 'word_present', 'calc', 'calc_present'].
  */
 function bs_copied_programs(array $files, string $folderName): array {
@@ -419,24 +424,31 @@ function bs_copied_programs(array $files, string $folderName): array {
     foreach ($files as $fn) $have[strtolower($fn)] = $fn;
     $nums = [];
     foreach ($files as $fn) if (preg_match('/^(\d{1,3})_/', $fn, $m)) $nums[$m[1]] = true;
+    // First name present among the candidates, else the current one (expected name).
+    $pick = function (string $nn, ?array $dsts) use ($have, $folderName): array {
+        if ($dsts === null) return [null, false];
+        foreach ($dsts as $d) {
+            $fn = bs_program_file_name($nn, $folderName, $d);
+            if (isset($have[strtolower($fn)])) return [$have[strtolower($fn)], true];
+        }
+        return [bs_program_file_name($nn, $folderName, $dsts[0]), false];
+    };
     $out = [];
     foreach (bs_std_programs() as $progs) {
         foreach ($progs as $label => $tpl) {
             $wordDst = $calcDst = null;
             foreach ($tpl as $f) {
-                if (preg_match('/\.docx?$/i', $f['dst'])) $wordDst = $f['dst'];
-                elseif (preg_match('/\.xlsx$/i', $f['dst'])) $calcDst = $f['dst'];
+                if (preg_match('/\.docx?$/i', $f['dst'])) $wordDst = bs_program_dst_names($f);
+                elseif (preg_match('/\.xlsx$/i', $f['dst'])) $calcDst = bs_program_dst_names($f);
             }
             foreach (array_keys($nums) as $nn) {
-                $nn   = (string)$nn;
-                $word = $wordDst !== null ? bs_program_file_name($nn, $folderName, $wordDst) : null;
-                $calc = $calcDst !== null ? bs_program_file_name($nn, $folderName, $calcDst) : null;
-                $wp = $word !== null && isset($have[strtolower($word)]);
-                $cp = $calc !== null && isset($have[strtolower($calc)]);
+                $nn = (string)$nn;
+                list($word, $wp) = $pick($nn, $wordDst);
+                list($calc, $cp) = $pick($nn, $calcDst);
                 if (!$wp && !$cp) continue;
                 $out[] = ['label' => $label, 'prognum' => $nn,
-                          'word' => $wp ? $have[strtolower($word)] : $word, 'word_present' => $wp,
-                          'calc' => $cp ? $have[strtolower($calc)] : $calc, 'calc_present' => $cp];
+                          'word' => $word, 'word_present' => $wp,
+                          'calc' => $calc, 'calc_present' => $cp];
             }
         }
     }
