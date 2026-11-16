@@ -282,9 +282,9 @@ function fl_status_check(PDO $db, array $ids, int $rid, string $newPath): array 
 
 /**
  * Create or rewrite one open memo on Roberto's board (AGENT_MEMO_USER) by ext_key. Returns the memo id, or 0 when
- * there is no memo owner. Never throws.
+ * there is no memo owner. Never throws. $source: memos.source of a new memo (VARCHAR 20).
  */
-function fl_memo_upsert(PDO $db, string $key, string $title, string $html, ?int $requestId = null, string $priority = 'normal'): int {
+function fl_memo_upsert(PDO $db, string $key, string $title, string $html, ?int $requestId = null, string $priority = 'normal', string $source = 'dropbox'): int {
     try {
         require_once __DIR__ . '/../../memo/memo_lib.php';
         memo_schema($db);
@@ -303,8 +303,8 @@ function fl_memo_upsert(PDO $db, string $key, string $title, string $html, ?int 
         }
         $db->prepare("INSERT INTO memos (user_id, title, body, type, status, priority, pinned, color, due_date, reminder_at, reminder_emails,
                           reminder_sent, recur_rule, sort_order, request_id, source, ext_key, created_at, updated_at)
-                      VALUES (?, ?, ?, 'todo', 'open', ?, 0, NULL, ?, NULL, NULL, 0, 'none', 0, ?, 'dropbox', ?, ?, ?)")
-           ->execute([$owner['id'], $title, $html, $priority, date('Y-m-d'), $requestId, $key, $now, $now]);
+                      VALUES (?, ?, ?, 'todo', 'open', ?, 0, NULL, ?, NULL, NULL, 0, 'none', 0, ?, ?, ?, ?, ?)")
+           ->execute([$owner['id'], $title, $html, $priority, date('Y-m-d'), $requestId, mb_substr($source, 0, 20), $key, $now, $now]);
         return (int)$db->lastInsertId();
     } catch (Throwable $e) {
         error_log('fl_memo_upsert: ' . $e->getMessage());

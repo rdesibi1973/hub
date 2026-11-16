@@ -1868,10 +1868,11 @@ try {
                 case 'iti_update_program':  $r = iti_ps_update_program($db, (int)($in['program_id'] ?? 0), (array)($in['fields'] ?? []), $go); break;
                 case 'iti_update_day':      $r = iti_ps_update_day($db, (int)($in['program_id'] ?? 0), (int)($in['day'] ?? 0), (array)($in['fields'] ?? []), $go); break;
                 case 'iti_publish':         $r = iti_ps_publish($db, (int)($in['program_id'] ?? 0), !array_key_exists('publish', $in) || !empty($in['publish']), $go); break;
-                case 'iti_tag_sample':      $r = iti_ps_tag_sample($db, $in, $go); break;
+                case 'iti_tag_sample':      $r = iti_ps_tag_sample($db, $in, $go, $who); break;
                 default:                   $r = $go ? iti_ps_save_alias($in, $who) : ['would_save' => ['type' => $in['type'] ?? null, 'text' => $in['text'] ?? null]];
             }
         } catch (ItiRefException $e) { agent_fail($e->getMessage(), 409, $e->data); }   // ref_number not derivable: candidates
+        catch (ItiForbiddenException $e) { agent_fail($e->getMessage(), 403); }        // iti_tag_sample: admin only, on the Hub
         catch (ItiImportException $e) { agent_fail($e->getMessage(), $e->http, $e->data); }
         catch (InvalidArgumentException $e) { agent_fail($e->getMessage(), 400); }
         catch (RuntimeException $e) { if ($agentAction !== 'iti_tag_sample') throw $e; agent_fail($e->getMessage(), 409); }   // Calc not readable

@@ -23,54 +23,123 @@ require_once __DIR__ . '/iti_functions.php';
 /** "01_TouristTrophy(GoWorld-Roberto)_GranSafariTanzania_Calc.xlsx" → "GranSafariTanzania". */
 function iti_final_code_from_calc(string $file): string {
     $base = preg_replace('/_calc\.xlsx$/i', '', basename($file));
+    // Duma-GRP template "…_GRUPPI-Giove(Roberto)_Calc.xlsx": nothing after the last ")" → drop that "(…)" first.
+    if (preg_match('/\)\s*_?\s*$/', $base) && substr_count($base, '(') >= 2) $base = preg_replace('/\([^()]*\)\s*_?\s*$/', '', $base);
     $p = strrpos($base, ')');
     if ($p !== false) return trim(substr($base, $p + 1), '_ ');
     $parts = explode('_', $base, 3);          // no "(agency)": NN_Name_Code
     return count($parts) === 3 ? $parts[2] : $base;
 }
 
-/** The sample tagged with this Calc code (prefer the display language), or null. */
+/**
+ * Calc codes of the samples. A sample has one main code (iti_programs.hub_program_code: the Calc template its
+ * prices come from) and any number of extra codes here (other Calcs built on the same programme, e.g. a Classic
+ * version). One code → one sample. Lazy DDL, outside any transaction.
+ */
+function iti_sample_codes_schema(PDO $db) {
+    static $done = false;
+    if ($done) return;
+    $done = true;
+    $db->exec("CREATE TABLE IF NOT EXISTS iti_sample_codes (
+                 code       VARCHAR(80) NOT NULL PRIMARY KEY,
+                 sample_id  INT NOT NULL,
+                 created_by VARCHAR(50) NULL,
+                 created_at DATETIME NOT NULL,
+                 KEY idx_sc_sample (sample_id)
+               ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+}
+
+/** Extra Calc codes of a sample (the main one is hub_program_code). */
+function iti_final_sample_extra_codes(PDO $db, int $sampleId): array {
+    iti_sample_codes_schema($db);
+    $st = $db->prepare('SELECT code FROM iti_sample_codes WHERE sample_id = ? ORDER BY code');
+    $st->execute(array($sampleId));
+    return $st->fetchAll(PDO::FETCH_COLUMN);
+}
+
+/** The sample with this Calc code, main or extra (prefer the main code, then the display language), or null. */
 function iti_final_find_sample(PDO $db, string $code, string $lang) {
     if ($code === '') return null;
+    iti_sample_codes_schema($db);
     $st = $db->prepare("SELECT id, program_type, title_en, title_it, display_language, duration_days FROM iti_programs
-                         WHERE program_type = 'sample' AND status <> 'cancelled' AND hub_program_code = ?
-                         ORDER BY (display_language = ?) DESC, id DESC LIMIT 1");
-    $st->execute(array($code, $lang));
+                         WHERE program_type = 'sample' AND status <> 'cancelled'
+                           AND (hub_program_code = ? OR id IN (SELECT sample_id FROM iti_sample_codes WHERE code = ?))
+                         ORDER BY (hub_program_code = ?) DESC, (display_language = ?) DESC, id DESC LIMIT 1");
+    $st->execute(array($code, $code, $code, $lang));
     $r = $st->fetch(PDO::FETCH_ASSOC);
     return $r ? $r : null;
 }
 
 /**
- * Tag a sample with a Calc code (hub_program_code), moving the code off every other
- * sample that has it, so one code = one sample. $go false = only what would change.
- * Returns ['code', 'sample' => {id, title}, 'previous_code' (the sample's own code it loses, or null),
- * 'removed_from' => [{id, title}], 'changed' => bool].
+ * Tag a sample with a Calc code. Since 16 Nov 2026 a sample never loses its own code: the new code becomes its
+ * main code when it has none, else an extra code. A code already on ANOTHER sample is moved only with $move
+ * (an admin, Hub page); without it → InvalidArgumentException naming that sample. $go false = only what would change.
+ * Returns ['code', 'sample' => {id, title}, 'as' => 'main'|'extra', 'previous_code' => null (kept for callers:
+ * no code is lost any more), 'removed_from' => [{id, title}], 'changed' => bool].
  */
-function iti_final_tag_sample(PDO $db, string $code, int $sampleId, bool $go): array {
+function iti_final_tag_sample(PDO $db, string $code, int $sampleId, bool $go, bool $move = false, string $who = ''): array {
     $code = trim($code);
     if ($code === '' || mb_strlen($code) > 80) throw new InvalidArgumentException('code: the Calc code, 1–80 characters');
+    iti_sample_codes_schema($db);
     $st = $db->prepare('SELECT id, program_type, status, title_it, title_en, hub_program_code FROM iti_programs WHERE id = ?');
     $st->execute(array($sampleId));
     $s = $st->fetch(PDO::FETCH_ASSOC);
     if (!$s || $s['program_type'] !== 'sample') throw new InvalidArgumentException('Program #' . $sampleId . ' is not a sample');
     if ($s['status'] === 'cancelled') throw new InvalidArgumentException('Sample #' . $sampleId . ' is cancelled');
-    $st = $db->prepare("SELECT id, title_it, title_en FROM iti_programs WHERE program_type = 'sample' AND hub_program_code = ? AND id <> ? ORDER BY id");
-    $st->execute(array($code, $sampleId));
+    // Other samples holding the code (main or extra).
+    $st = $db->prepare("SELECT id, title_it, title_en FROM iti_programs WHERE program_type = 'sample' AND id <> ?
+                          AND (hub_program_code = ? OR id IN (SELECT sample_id FROM iti_sample_codes WHERE code = ?)) ORDER BY id");
+    $st->execute(array($sampleId, $code, $code));
     $removed = array();
     foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $o) $removed[] = array('id' => (int)$o['id'], 'title' => $o['title_it'] ?: $o['title_en']);
-    $prev = (string)$s['hub_program_code'] !== '' && $s['hub_program_code'] !== $code ? $s['hub_program_code'] : null;
-    $changed = $removed || $s['hub_program_code'] !== $code;
+    if ($removed && !$move) {
+        throw new InvalidArgumentException('Calc code "' . $code . '" is already used by sample #' . $removed[0]['id'] . ' ' . $removed[0]['title']
+            . ' — only an admin can move it to another sample.');
+    }
+    $main  = (string)$s['hub_program_code'];
+    $extra = iti_final_sample_extra_codes($db, $sampleId);
+    $as = ($main === '' || strcasecmp($main, $code) === 0) ? 'main' : 'extra';
+    $has = strcasecmp($main, $code) === 0 || in_array(strtolower($code), array_map('strtolower', $extra), true);
+    $changed = $removed || !$has;
     if ($go && $changed) {
         $db->beginTransaction();
         try {
             $db->prepare("UPDATE iti_programs SET hub_program_code = NULL WHERE program_type = 'sample' AND hub_program_code = ? AND id <> ?")
                ->execute(array($code, $sampleId));
-            $db->prepare('UPDATE iti_programs SET hub_program_code = ? WHERE id = ?')->execute(array($code, $sampleId));
+            $db->prepare('DELETE FROM iti_sample_codes WHERE code = ? AND sample_id <> ?')->execute(array($code, $sampleId));
+            if (!$has) {
+                if ($as === 'main') $db->prepare('UPDATE iti_programs SET hub_program_code = ? WHERE id = ?')->execute(array($code, $sampleId));
+                else $db->prepare('INSERT INTO iti_sample_codes (code, sample_id, created_by, created_at) VALUES (?, ?, ?, ?)')
+                        ->execute(array($code, $sampleId, $who !== '' ? mb_substr($who, 0, 50) : null, date('Y-m-d H:i:s')));
+            }
             $db->commit();
         } catch (Throwable $e) { $db->rollBack(); throw $e; }
     }
-    return array('code' => $code, 'sample' => array('id' => (int)$s['id'], 'title' => $s['title_it'] ?: $s['title_en']),
-                 'previous_code' => $prev, 'removed_from' => $removed, 'changed' => (bool)$changed);
+    return array('code' => $code, 'sample' => array('id' => (int)$s['id'], 'title' => $s['title_it'] ?: $s['title_en']), 'as' => $as,
+                 'previous_code' => null, 'removed_from' => $removed, 'changed' => (bool)$changed);
+}
+
+/**
+ * A Calc code has no sample and someone used sample $sampleId for one booking only (or asked to tag it): one memo on
+ * Roberto's board per code, so an admin decides whether that sample is right for every Calc with this code.
+ * Never throws.
+ */
+function iti_final_sample_code_memo(PDO $db, string $code, int $sampleId, ?int $requestId, string $who, string $how): void {
+    try {
+        require_once __DIR__ . '/../../leads/includes/folder_link_service.php';   // fl_memo_upsert()
+        $st = $db->prepare('SELECT title_it, title_en FROM iti_programs WHERE id = ?');
+        $st->execute(array($sampleId));
+        $s = $st->fetch(PDO::FETCH_ASSOC);
+        $title = $s ? ($s['title_it'] ?: $s['title_en']) : '?';
+        $e = function ($x) { return htmlspecialchars((string)$x, ENT_QUOTES, 'UTF-8'); };
+        $html = '<p>No ITI sample has the Calc code <b>' . $e($code) . '</b>. ' . $e($who) . ' ' . $e($how) . ' sample <b>#' . $sampleId . ' ' . $e($title) . '</b>'
+              . ($requestId ? ' for request #' . (int)$requestId : '') . '.</p>'
+              . '<p>If that sample is right for every “' . $e($code) . '” Calc, tag it (admin: ITI program page of the request → “Use this sample” with '
+              . '“for every Calc” ticked). If not, create a proper sample for “' . $e($code) . '”.</p>';
+        fl_memo_upsert($db, 'iti-sample-code:' . mb_strtolower($code), 'ITI: no sample for Calc code "' . $code . '"', $html, $requestId, 'normal', 'iti');
+    } catch (Throwable $e) {
+        error_log('iti_final_sample_code_memo: ' . $e->getMessage());
+    }
 }
 
 /**

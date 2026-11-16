@@ -1051,12 +1051,19 @@ and `aliases[]`: `type`, `alias`, `target`, `target_detail` (lodge: destination;
 `ids`, `meal_basis`, `maps_to_nothing` (true = known text with no target: on purpose for "medivac" or an own-arrangement hotel,
 to check otherwise), `changed_by`, `changed_at`. Corrections go through `iti_save_alias` after Roberto's ok.
 
-#### `iti_tag_sample` (POST)
+#### `iti_tag_sample` (POST) — dry run only
 `sample_id`, and `code` (the Calc code, e.g. `BeachSimba`) **or** `request_id` (+ `file?`: the code is read from that
-request's Calc name). Tags the sample with the code and moves the code off any other sample that had it (one code =
-one sample) → `code`, `sample` {id, title}, `previous_code` (the sample's own old code it loses, or null),
-`removed_from[]` {id, title}, `changed`. Dry-run unless confirm. Same as the Hub page "Create Itinerary Program from
-Excel Calc" → Sample program → **change** (23 Oct 2026; before, a tagged code could not be moved in the Hub).
+request's Calc name) → what tagging would do: `code`, `sample` {id, title}, `as` (`main` when the sample has no code yet,
+else `extra`: a sample never loses its own code), `removed_from[]` {id, title} (other samples holding the code),
+`changed`, `note`. **With `"confirm": true` → 403** and a memo for Roberto (`iti-sample-code:<code>`): since 16 Nov 2026
+the code → sample link applies to every booking, so only an admin sets it, on the Hub page "Create Itinerary Program
+from Excel Calc" → Sample program ("for every Calc" ticked). For one booking pass `sample_id` to `iti_calc_plan` /
+`iti_final_from_calc`: `sample.for` says `this booking only` or `every Calc with this code`, and generating with a
+code that has no sample also leaves that memo.
+
+Codes: one code → one sample; a sample has one **main** code (`hub_program_code`, the Calc template of its prices) and
+any number of **extra** codes (table `iti_sample_codes`, e.g. a Classic Calc on the same programme).
+`iti_final_find_sample()` looks at both.
 
 ### ITI master data — lodges and destinations
 Code: `modules/iti/includes/iti_content_service.php` (+ `iti_photos.php`, shared with the Lodges / Destinations pages).

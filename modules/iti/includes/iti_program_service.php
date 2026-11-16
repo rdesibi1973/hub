@@ -22,6 +22,9 @@ class ItiRefException extends InvalidArgumentException {
     public function __construct(string $msg, array $data = []) { parent::__construct($msg); $this->data = $data; }
 }
 
+/** An action reserved to an admin on the Hub (Agent API → 403). */
+class ItiForbiddenException extends InvalidArgumentException {}
+
 /** Max length of iti_programs.ref_number (read once from the column, 60 if unknown). */
 function iti_ps_ref_max(): int {
     static $max = null;
@@ -622,7 +625,8 @@ function iti_ps_calc_plan(PDO $db, int $rid, array $in): array {
     $calc['group_open'] = in_array($in['group_open'] ?? 0, [1, true, '1'], true);               // group departure: participants and rooms not final yet
     $lang = in_array($in['lang'] ?? '', ITI_PS_LANGS, true) ? $in['lang'] : 'it';
     $code = iti_final_code_from_calc($calc['file']);
-    $sample = !empty($in['sample_id']) ? iti_get_program((int)$in['sample_id']) : iti_final_find_sample($db, $code, $lang);
+    $tagged = iti_final_find_sample($db, $code, $lang);   // the sample of this Calc code for every booking
+    $sample = !empty($in['sample_id']) ? iti_get_program((int)$in['sample_id']) : $tagged;
     if ($sample && $sample['program_type'] !== 'sample') throw new InvalidArgumentException('sample_id is not a sample');
     $plan = iti_final_plan($db, $calc, $sample ? (int)$sample['id'] : 0);
     $nights = [];
@@ -637,20 +641,23 @@ function iti_ps_calc_plan(PDO $db, int $rid, array $in): array {
                        'sheet' => $calc['sheet'] ?? null, 'sheets' => $calc['sheets'] ?? [], 'warnings' => $calc['warnings'] ?? [],
                        'days' => count($calc['days'] ?? []), 'nights' => (int)($calc['nights'] ?? 0),   // = the program's duration
                        'price_options' => $calc['price_options'] ?? [], 'price_table' => iti_final_price_table($calc, $lang)],
-            'code' => $code, 'sample' => $sample ? ['id' => (int)$sample['id'], 'title' => iti_doc_pick($sample, 'title', $lang)] : null,
+            'code' => $code, 'sample' => $sample ? ['id' => (int)$sample['id'], 'title' => iti_doc_pick($sample, 'title', $lang),
+                                                    'for' => $tagged && (int)$tagged['id'] === (int)$sample['id'] ? 'every Calc with this code' : 'this booking only'] : null,
             'review' => iti_final_calc_review($calc),   // pax, rooms, dates required (errors); total vs prices and supplements (warnings)
             'seller' => iti_final_request_seller($db, $rid),   // default owner of the program (pass "seller" for another one)
             'nights' => $nights, 'unmapped' => $plan['unmapped'], 'blocking' => $plan['blocking'], 'flags' => $plan['flags'],
             'existing_finals' => array_map(function ($f) { return ['id' => (int)$f['id'], 'calc_file' => $f['source_calc_path'] ? basename($f['source_calc_path']) : null,
                                                                    'superseded_by' => $f['superseded_by'] ? (int)$f['superseded_by'] : null]; }, iti_final_list($db, $rid)),
-            '_calc' => $calc, '_sample_id' => $sample ? (int)$sample['id'] : 0, '_lang' => $lang, '_dates_given' => array_key_exists('dates_indicative', $in), '_seller' => trim((string)($in['seller'] ?? ''))];
+            '_calc' => $calc, '_sample_id' => $sample ? (int)$sample['id'] : 0, '_tagged' => (bool)$tagged, '_rid' => $rid, '_lang' => $lang, '_dates_given' => array_key_exists('dates_indicative', $in), '_seller' => trim((string)($in['seller'] ?? ''))];
 }
 
 /**
- * Tag a sample with a Calc code (iti_final_tag_sample(): the code moves off the sample that had it).
+ * Tag a sample with a Calc code — from the Agent API a dry run only (what would change). Since 16 Nov 2026 the tag
+ * is set by an admin on the Hub page, because it applies to every booking: with confirm the call is refused (403)
+ * and Roberto gets a memo. For one booking pass sample_id to iti_final_from_calc instead.
  * The code is given, or read from the Calc of request_id (file? for one of several Calc files).
  */
-function iti_ps_tag_sample(PDO $db, array $in, bool $go): array {
+function iti_ps_tag_sample(PDO $db, array $in, bool $go, string $who = ''): array {
     iti_ensure_final_schema();
     $sid = (int)($in['sample_id'] ?? 0);
     if (!$sid) throw new InvalidArgumentException('sample_id is required');
@@ -660,7 +667,13 @@ function iti_ps_tag_sample(PDO $db, array $in, bool $go): array {
         $code = iti_final_code_from_calc($calc['file']);
     }
     if ($code === '') throw new InvalidArgumentException('code or request_id is required');
-    return iti_final_tag_sample($db, $code, $sid, $go);
+    if ($go) {
+        iti_final_sample_code_memo($db, $code, $sid, !empty($in['request_id']) ? (int)$in['request_id'] : null, $who ?: 'The agent', 'asked (Agent API) to tag');
+        throw new ItiForbiddenException('Tagging a sample with a Calc code applies to every booking: only an admin does it, on the Hub ITI program page. '
+            . 'Roberto has a memo. For this booking, pass "sample_id": ' . $sid . ' to iti_final_from_calc.');
+    }
+    $plan = iti_final_tag_sample($db, $code, $sid, false, true);
+    return $plan + ['note' => 'Dry run only: an admin tags samples on the Hub ITI program page.'];
 }
 
 /** Generate the final programme (replaces an older final built from the same Calc file). */
@@ -669,6 +682,9 @@ function iti_ps_calc_generate(PDO $db, int $rid, array $plan, array $who): array
     if (!$plan['_sample_id']) throw new InvalidArgumentException('No sample for Calc code "' . $plan['code'] . '" — pass sample_id');
     if ($plan['blocking']) throw new InvalidArgumentException('Map these Calc texts first (iti_save_alias): ' . implode(' ', $plan['blocking']));
     $res = iti_final_generate($db, $rid, $plan['_calc'], $plan['_sample_id'], $plan['_lang'], $who + ['seller' => $plan['_seller'] ?? '']);
+    if (empty($plan['_tagged'])) {   // no sample has this Calc code: an admin decides whether this one is right for every booking
+        iti_final_sample_code_memo($db, (string)$plan['code'], (int)$plan['_sample_id'], $rid, (string)($who['username'] ?? 'The agent'), 'used, for one booking only (Agent API),');
+    }
     return ['program_id' => (int)$res['program_id'], 'superseded' => $res['superseded'],
             'program' => iti_ps_program_out($db, (int)$res['program_id'], $plan['_lang'])];
 }
