@@ -383,7 +383,6 @@ function bs_std_programs(): array {
  */
 function bs_std_programs_disabled(): array {
     return [
-        'Chui'            => 'Template ChuiSafari_Calc.xlsx missing (not in it/ nor Agenzia/2026-27)',
         'Baobab'          => 'Template BaobabDeluxe2025_Calc.xlsx missing (not in it/ nor Agenzia/2026-27)',
         'Lux Duma'        => 'Template LUXDuma_Calc.xlsx missing (not in it/ nor Agenzia/2026-27)',
         'Lux Pumba'       => 'Template LUXPumba_Calc.xlsx missing (not in it/ nor Agenzia/2026-27)',
