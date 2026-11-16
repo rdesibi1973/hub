@@ -958,7 +958,9 @@ Also editable in the Hub: ITI → Settings → Partner names.
 #### `iti_save_as_sample` (POST)
 `program_id` (a finished personal program), `title` or `title_<lang>` (required), `code?` (Calc code) → a new sample:
 same days / lists, client data removed (dates, pax, prices, request, publication). The personal program is not changed.
-Dry-run unless confirm.
+Dry-run unless confirm. `code` must be free (no sample has it, main or extra) → else **400**; with a code Roberto gets a
+memo to check the new sample (the code applies to every booking). The code is what the Calc file name gives, e.g.
+`…_ChuiSafari_Calc.xlsx` → `ChuiSafari`.
 
 #### `iti_publish` (POST)
 `program_id`, `publish?` (default true; false = unpublish) → `links.public`. Dry-run unless confirm.

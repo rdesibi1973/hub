@@ -566,8 +566,19 @@ function iti_pb_save_as_sample(PDO $db, int $pid, array $in, string $who, bool $
     }
     if (!isset($set['title_' . ($p['display_language'] ?: 'it')])) throw new InvalidArgumentException('title (or title_<lang>) is required: a sample has no client name');
     $set = array_intersect_key($set, array_flip($cols));
+    // A Calc code applies to every booking: a new sample may take a free code (Roberto gets a memo to check it),
+    // never one another sample has — moving a code is for an admin on the Hub page (iti_final_tag_sample).
+    $code = (string)($set['hub_program_code'] ?? '');
+    if ($code !== '') {
+        require_once __DIR__ . '/iti_final.php';
+        if ($holder = iti_final_find_sample($db, $code, '')) {
+            throw new InvalidArgumentException('Calc code "' . $code . '" is already used by sample #' . $holder['id'] . ' '
+                . ($holder['title_it'] ?: $holder['title_en']) . ' — save the sample without "code"; only an admin can move a code.');
+        }
+    }
     if (!$go) return ['from_program' => $pid, 'would_set' => $set];
     $id = iti_duplicate_program($pid, 'sample', $who, $set);
+    if ($code !== '') iti_final_sample_code_memo($db, $code, $id, null, $who, 'created, from program #' . $pid . ', the new', true);
     // The client's rooms (configuration and category) are not part of a sample.
     foreach (array_intersect(['room_type', 'room_category'], iti_table_columns('iti_program_days')) as $rc) {
         $db->prepare('UPDATE iti_program_days SET `' . $rc . '` = NULL WHERE program_id = ?')->execute([$id]);

@@ -124,7 +124,7 @@ function iti_final_tag_sample(PDO $db, string $code, int $sampleId, bool $go, bo
  * Roberto's board per code, so an admin decides whether that sample is right for every Calc with this code.
  * Never throws.
  */
-function iti_final_sample_code_memo(PDO $db, string $code, int $sampleId, ?int $requestId, string $who, string $how): void {
+function iti_final_sample_code_memo(PDO $db, string $code, int $sampleId, ?int $requestId, string $who, string $how, bool $tagged = false): void {
     try {
         require_once __DIR__ . '/../../leads/includes/folder_link_service.php';   // fl_memo_upsert()
         $st = $db->prepare('SELECT title_it, title_en FROM iti_programs WHERE id = ?');
@@ -132,11 +132,19 @@ function iti_final_sample_code_memo(PDO $db, string $code, int $sampleId, ?int $
         $s = $st->fetch(PDO::FETCH_ASSOC);
         $title = $s ? ($s['title_it'] ?: $s['title_en']) : '?';
         $e = function ($x) { return htmlspecialchars((string)$x, ENT_QUOTES, 'UTF-8'); };
-        $html = '<p>No ITI sample has the Calc code <b>' . $e($code) . '</b>. ' . $e($who) . ' ' . $e($how) . ' sample <b>#' . $sampleId . ' ' . $e($title) . '</b>'
-              . ($requestId ? ' for request #' . (int)$requestId : '') . '.</p>'
-              . '<p>If that sample is right for every “' . $e($code) . '” Calc, tag it (admin: ITI program page of the request → “Use this sample” with '
-              . '“for every Calc” ticked). If not, create a proper sample for “' . $e($code) . '”.</p>';
-        fl_memo_upsert($db, 'iti-sample-code:' . mb_strtolower($code), 'ITI: no sample for Calc code "' . $code . '"', $html, $requestId, 'normal', 'iti');
+        if ($tagged) {
+            $html = '<p>' . $e($who) . ' ' . $e($how) . ' sample <b>#' . $sampleId . ' ' . $e($title) . '</b> with the Calc code <b>' . $e($code) . '</b>: '
+                  . 'every “' . $e($code) . '” Calc of any booking now starts from it.</p><p>Check its days and texts in ITI. If it is wrong, '
+                  . 'fix the sample, or (admin) move the code to the right sample from the ITI program page of a request.</p>';
+            $memoTitle = 'ITI: new sample for Calc code "' . $code . '" to check';
+        } else {
+            $html = '<p>No ITI sample has the Calc code <b>' . $e($code) . '</b>. ' . $e($who) . ' ' . $e($how) . ' sample <b>#' . $sampleId . ' ' . $e($title) . '</b>'
+                  . ($requestId ? ' for request #' . (int)$requestId : '') . '.</p>'
+                  . '<p>If that sample is right for every “' . $e($code) . '” Calc, tag it (admin: ITI program page of the request → “Use this sample” with '
+                  . '“for every Calc” ticked). If not, create a proper sample for “' . $e($code) . '”.</p>';
+            $memoTitle = 'ITI: no sample for Calc code "' . $code . '"';
+        }
+        fl_memo_upsert($db, 'iti-sample-code:' . mb_strtolower($code), $memoTitle, $html, $requestId, 'normal', 'iti');
     } catch (Throwable $e) {
         error_log('iti_final_sample_code_memo: ' . $e->getMessage());
     }
