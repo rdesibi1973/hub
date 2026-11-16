@@ -483,7 +483,10 @@ $CONTRACTS_ROOT = '/000_Contracts';
 $q       = trim($_GET['q'] ?? '');
 $root    = $_GET['root'] ?? '2026';
 $inFiles = !empty($_GET['in_files']);   // search file names inside the folders (Dropbox)
-if ($root !== 'All' && $root !== 'Contracts' && !isset($ROOT_MAP[$root])) $root = '2026';
+// root=Progress is the "Booking in PROGRESS" list (button in the header), not a folder filter. As a root
+// value it is kept by every form / redirect of this page, so after a status change the list comes back.
+if ($root !== 'All' && $root !== 'Contracts' && $root !== 'Progress' && !isset($ROOT_MAP[$root])) $root = '2026';
+$isProgress = ($root === 'Progress');
 
 $rows          = [];   // booking rows (from requests table)
 $contractRows  = [];   // contract folders (from Dropbox search)
@@ -492,7 +495,33 @@ $orphanFiles   = [];   // matched files not inside any known booking folder
 $searchError   = '';
 $isContracts   = ($root === 'Contracts');
 
-if ($q !== '' && $inFiles) {
+if ($isProgress) {
+    // ── Booking in PROGRESS: confirmed folders in 001_Safari whose own folder (the GRP folder for a group)
+    //    still carries _PROGRESS, i.e. no payment tag yet. Trips not ended first (by start date), then ended
+    //    ones (still _PROGRESS after the trip: to fix), then undated.
+    $stmt = $db->prepare(
+        "SELECT r.id, r.customer_name, r.email, r.practice_code, r.group_folder, r.status, r.lost_reason, r.payment_status,
+                r.dropbox_url, r.pre_confirm_json, r.postpone_until, a.name AS agent_name
+         FROM requests r LEFT JOIN agents a ON a.id = r.agent_id
+         WHERE LOCATE(?, r.dropbox_url) > 0
+           AND COALESCE(r.status, '') NOT IN ('Cancelled', 'Lost')
+           AND LOCATE('_PROGRESS', UPPER(IF(TRIM(COALESCE(r.group_folder, '')) <> '', r.group_folder, r.practice_code))) > 0");
+    $stmt->execute([$ROOT_MAP['001_Safari']]);
+    $today = date('Y-m-d');
+    $rows  = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    foreach ($rows as &$pr) {
+        $d = parse_folder_dates(get_date_folder($pr));
+        $pr['_start'] = $d['start_date'] ?: ($d['end_date'] ?: '');
+        $pr['_group'] = !$pr['_start'] ? 2 : (($d['end_date'] ?: $pr['_start']) < $today ? 1 : 0);
+    }
+    unset($pr);
+    usort($rows, function ($a, $b) {
+        if ($a['_group'] !== $b['_group']) return $a['_group'] <=> $b['_group'];
+        $c = strcmp($a['_start'], $b['_start']);                 // ended trips: most recent first
+        return ($a['_group'] === 1 ? -$c : $c) ?: ((int)$a['id'] <=> (int)$b['id']);
+    });
+    $progressEnded = count(array_filter($rows, fn($r) => $r['_group'] === 1));
+} elseif ($q !== '' && $inFiles) {
     // ── File-name search: find files in Dropbox, then map each to the booking
     //    whose folder (practice_code / group_folder) appears in the file's path.
     //    The status/root DB filters are NOT applied: the folder was found directly.
@@ -689,6 +718,7 @@ include 'includes/header.php';
   <div style="display:flex;gap:8px;flex-wrap:wrap">
     <a href="postponed.php" class="btn btn-outline btn-sm" title="Postponed safaris waiting for new dates, with their deadline">⏸ Postponed</a>
     <a href="grp_groups.php" class="btn btn-outline btn-sm" title="All GRP group folders in 001_Safari by month, with their confirmed bookings and pax">👥 List GRP groups</a>
+    <a href="backoffice.php?root=Progress" class="btn <?= $isProgress ? 'btn-red' : 'btn-outline' ?> btn-sm" title="Confirmed bookings in 001_Safari still _PROGRESS (no payment tag yet), by arrival date">⏳ Booking in PROGRESS</a>
     <a href="ck_tracker.php" class="btn btn-outline btn-sm" title="Confirmed bookings missing the _CK, by days to arrival">✅ Missing CK</a>
     <?php if (($currentUser['role_name'] ?? '') === 'admin'): ?>
     <a href="relink_folders.php" class="btn btn-outline btn-sm" title="Refresh Dropbox links after moving folders to an archive">🔗 Re-link folders (bulk)</a>
@@ -743,7 +773,15 @@ include 'includes/header.php';
   </div>
 </form>
 
-<?php if ($q !== ''): ?>
+<?php if ($isProgress): ?>
+  <div class="bo-note">
+    <b>⏳ Booking in PROGRESS</b> — <?= count($rows) ?> confirmed booking<?= count($rows) === 1 ? '' : 's' ?> in 001_Safari
+    with the folder still <span class="bo-folder">_PROGRESS</span> (no payment tag yet), by arrival date.
+    <?php if ($progressEnded): ?><br><span style="color:#a33">⚠ <?= $progressEnded ?> trip<?= $progressEnded === 1 ? '' : 's' ?> already ended but still _PROGRESS: listed after the upcoming ones.</span><?php endif; ?>
+  </div>
+<?php endif; ?>
+
+<?php if ($q !== '' || $isProgress): ?>
   <?php if ($searchError): ?>
     <div class="bo-note" style="background:#fbeaea;border-left-color:#a33;color:#a33"><?= h($searchError) ?></div>
   <?php endif; ?>
@@ -782,7 +820,7 @@ include 'includes/header.php';
     <?php if (!$searchError && !$orphanFiles): ?>
     <p style="color:var(--grey-mid);padding:20px"><?= $inFiles
         ? 'No file named like this in Dropbox' . ($isContracts ? ' under ' . h($CONTRACTS_ROOT) : ($root !== 'All' ? ' under ' . h($root) : '')) . ' (files added in the last hour may not be indexed yet).'
-        : 'No matching bookings.' ?></p>
+        : ($isProgress ? 'No booking in PROGRESS.' : 'No matching bookings.') ?></p>
     <?php endif; ?>
   <?php else: ?>
   <datalist id="bo-grp-names">
