@@ -625,9 +625,13 @@ function iti_ps_calc_plan(PDO $db, int $rid, array $in): array {
     $calc['group_open'] = in_array($in['group_open'] ?? 0, [1, true, '1'], true);               // group departure: participants and rooms not final yet
     $lang = in_array($in['lang'] ?? '', ITI_PS_LANGS, true) ? $in['lang'] : 'it';
     $code = iti_final_code_from_calc($calc['file']);
-    $tagged = iti_final_find_sample($db, $code, $lang);   // the sample of this Calc code for every booking
-    $sample = !empty($in['sample_id']) ? iti_get_program((int)$in['sample_id']) : $tagged;
+    // The sample is chosen from the Calc content (iti_final_pick_sample(), as on the Hub page); sample_id = this booking only.
+    $req = $db->prepare('SELECT group_folder FROM requests WHERE id = ?'); $req->execute([$rid]);
+    $pick = iti_final_pick_sample($db, $calc, iti_final_plan($db, $calc, 0)['days'], $code, $lang, trim((string)$req->fetchColumn()) !== '');
+    $auto = $pick['sample'];
+    $sample = !empty($in['sample_id']) ? iti_get_program((int)$in['sample_id']) : $auto;
     if ($sample && $sample['program_type'] !== 'sample') throw new InvalidArgumentException('sample_id is not a sample');
+    $byHand = $sample && (!$auto || (int)$auto['id'] !== (int)$sample['id']);
     $plan = iti_final_plan($db, $calc, $sample ? (int)$sample['id'] : 0);
     $nights = [];
     foreach ($plan['days'] as $d) {
@@ -642,13 +646,16 @@ function iti_ps_calc_plan(PDO $db, int $rid, array $in): array {
                        'days' => count($calc['days'] ?? []), 'nights' => (int)($calc['nights'] ?? 0),   // = the program's duration
                        'price_options' => $calc['price_options'] ?? [], 'price_table' => iti_final_price_table($calc, $lang)],
             'code' => $code, 'sample' => $sample ? ['id' => (int)$sample['id'], 'title' => iti_doc_pick($sample, 'title', $lang),
-                                                    'for' => $tagged && (int)$tagged['id'] === (int)$sample['id'] ? 'every Calc with this code' : 'this booking only'] : null,
+                                                    'chosen' => $byHand ? 'by hand (sample_id, this booking only)' : ($pick['how'] === 'code' ? 'Calc name (content not decisive)' : 'Calc content'),
+                                                    'why' => $byHand ? null : $pick['why']] : null,
+            'sample_choice' => ['auto' => $auto ? (int)$auto['id'] : null, 'how' => $pick['how'], 'why' => $pick['why'], 'reliable' => $pick['reliable'],
+                                'hotels_mapped' => $pick['mapped'] . '/' . $pick['nights'], 'ranking' => $pick['ranking']],
             'review' => iti_final_calc_review($calc),   // pax, rooms, dates required (errors); total vs prices and supplements (warnings)
             'seller' => iti_final_request_seller($db, $rid),   // default owner of the program (pass "seller" for another one)
             'nights' => $nights, 'unmapped' => $plan['unmapped'], 'blocking' => $plan['blocking'], 'flags' => $plan['flags'],
             'existing_finals' => array_map(function ($f) { return ['id' => (int)$f['id'], 'calc_file' => $f['source_calc_path'] ? basename($f['source_calc_path']) : null,
                                                                    'superseded_by' => $f['superseded_by'] ? (int)$f['superseded_by'] : null]; }, iti_final_list($db, $rid)),
-            '_calc' => $calc, '_sample_id' => $sample ? (int)$sample['id'] : 0, '_tagged' => (bool)$tagged, '_rid' => $rid, '_lang' => $lang, '_dates_given' => array_key_exists('dates_indicative', $in), '_seller' => trim((string)($in['seller'] ?? ''))];
+            '_calc' => $calc, '_sample_id' => $sample ? (int)$sample['id'] : 0, '_auto' => (bool)$auto, '_ranking' => $pick['ranking'], '_rid' => $rid, '_lang' => $lang, '_dates_given' => array_key_exists('dates_indicative', $in), '_seller' => trim((string)($in['seller'] ?? ''))];
 }
 
 /**
@@ -679,11 +686,11 @@ function iti_ps_tag_sample(PDO $db, array $in, bool $go, string $who = ''): arra
 /** Generate the final programme (replaces an older final built from the same Calc file). */
 function iti_ps_calc_generate(PDO $db, int $rid, array $plan, array $who): array {
     if (empty($plan['_dates_given'])) throw new InvalidArgumentException('dates_indicative is required: 0 = the Calc dates are exact, 1 = only indicative');
-    if (!$plan['_sample_id']) throw new InvalidArgumentException('No sample for Calc code "' . $plan['code'] . '" — pass sample_id');
+    if (!$plan['_sample_id']) throw new InvalidArgumentException('No sample is close enough to this Calc (see sample_choice.ranking) — pass sample_id for this booking');
     if ($plan['blocking']) throw new InvalidArgumentException('Map these Calc texts first (iti_save_alias): ' . implode(' ', $plan['blocking']));
     $res = iti_final_generate($db, $rid, $plan['_calc'], $plan['_sample_id'], $plan['_lang'], $who + ['seller' => $plan['_seller'] ?? '']);
-    if (empty($plan['_tagged'])) {   // no sample has this Calc code: an admin decides whether this one is right for every booking
-        iti_final_sample_code_memo($db, (string)$plan['code'], (int)$plan['_sample_id'], $rid, (string)($who['username'] ?? 'The agent'), 'used, for one booking only (Agent API),');
+    if (empty($plan['_auto'])) {   // no sample close enough to the Calc: probably a sample is missing
+        iti_final_nofit_memo($db, (string)$plan['_calc']['file'], (int)$plan['_sample_id'], $rid, (string)($who['username'] ?? 'The agent'), $plan['_ranking'] ?? []);
     }
     return ['program_id' => (int)$res['program_id'], 'superseded' => $res['superseded'],
             'program' => iti_ps_program_out($db, (int)$res['program_id'], $plan['_lang'])];

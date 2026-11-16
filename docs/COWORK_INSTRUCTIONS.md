@@ -88,9 +88,10 @@ mostrami il risultato, poi confirm dopo il mio ok.
   Modifiche richieste dal cliente → `iti_update_day` (testi, lodge con `end_lodge`, pasti) / `iti_update_program`.
 - **Finale (dopo la conferma):** `iti_calc_plan` con `request_id` → se `blocking` non è vuoto, proponimi per ogni
   testo il lodge / attività giusti (`iti_lodges`, …) e salvali con `iti_save_alias` dopo il mio ok →
-  `iti_final_from_calc` (prova, poi confirm). Se manca il sample per il codice del Calc, dimmelo: non inventarlo.
-  Se il venditore vuole comunque partire da un sample simile, passa `sample_id` solo per questa pratica. Legare un codice
-  Calc a un sample vale per tutte le pratiche: lo faccio io dalla pagina dell'Hub (`iti_tag_sample` fa solo la prova).
+  `iti_final_from_calc` (prova, poi confirm). Il sample lo sceglie l'Hub dal contenuto del Calc (`sample_choice`: perché e
+  i più vicini con la %): dimmi quale ha scelto. Se `sample` è null nessun sample è abbastanza simile: dimmelo, non
+  inventarlo; se il venditore vuole comunque partire da uno dei più vicini, passa `sample_id` (solo per questa pratica).
+  Le etichette dei sample (codice Calc) le metto io dalla pagina dell'Hub (`iti_tag_sample` fa solo la prova).
 - **Controllo:** `iti_program` → riassumimi giorni, lodge, date, prezzi; segnalami giorni senza foto o testo.
   Anteprima interna: `links.preview`.
 - **File PDF / Word:** `iti_document` con `program_id`, `format` = `docx` per le agenzie (sempre Word), `pdf` per i

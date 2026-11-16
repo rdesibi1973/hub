@@ -967,8 +967,16 @@ memo to check the new sample (the code applies to every booking). The code is wh
 Only needed for samples: a personal program's link is on without it (unpublish does not turn it off; cancel does).
 
 #### `iti_calc_plan` (GET) / `iti_final_from_calc` (POST)
-`request_id`, `sample_id?` (default: the sample whose Calc code matches the file name), `lang?`, `file?`, `sheet?`,
+`request_id`, `sample_id?` (this booking only; default: the sample chosen from the Calc content, below), `lang?`, `file?`, `sheet?`,
 `price_sheets?` (list or `"10PAX,11PAX,12PAX"`).
+- **Sample chosen from the Calc content (16 Nov 2026)**, not from the file name (a Calc saved as 02 from 01 keeps the name
+  but may be another trip): every sample is scored on the share of Calc nights it matches (same lodge, same destination or a
+  lodge within 30 km), season of its title (+2 / −10), private vs group (−15), the sample tagged with the file's code (+3,
+  tie-break), language. Chosen when the best matches ≥ 70% and is 5 points ahead; else the code's sample when within 10
+  points of the best; else none (→ pass `sample_id`; generating then leaves Roberto a memo `iti-sample-nofit:<code>`).
+  With fewer than half the hotels mapped the content says little: the code's sample is used for now. Plan: `sample`
+  {id, title, `chosen` (Calc content | Calc name (content not decisive) | by hand), `why`} and `sample_choice`
+  {auto, how, why, reliable, hotels_mapped "n/m", ranking[] {id, title, fit %, days, why} (best 5)}.
 - **`sheet`**: the pax sheet the programme is built from. A quote Calc often has several pax sheets and none marked CONF:
   without `sheet` → 400, and the message lists the sheets.
 - **`price_sheets`** (quote for several group sizes): the price table gets one row per sheet, "Quota per persona, base N pax",
@@ -1007,10 +1015,8 @@ GRP member: the Calc is found in the group folder when the client folder has non
 file is superseded) → `program_id`, `program`. 409 when the Calc cannot be read.
 How the plan and the final are built (`modules/iti/includes/iti_final.php`, same on the Hub page "Create Itinerary Program
 from Excel Calc"):
-- **Sample proposal** (no sample tagged with the Calc code yet): each sample is scored on its itinerary (Calc nights aligned
-  with the sample's days: same lodge, same destination or a lodge within 30 km), the code words in the title
-  ("MigrazioneEstate" → migrazione), the season in the title ("LUG-SET" fits a July start, "DIC-MAR" does not), days and
-  language. The Hub shows the reason next to the ★.
+- **Sample choice**: from the Calc content (`iti_final_pick_sample()`, see above). The Hub shows the reason and the next
+  closest samples with their %, and the picker lists the closest first.
 - **Sample lodges kept only as text** ("Mara Pure Migration (Jul - Oct)") are read through the lodge aliases, else the closest
   lodge name, so the day still matches; the plan flags them ("link the lodge in the sample").
 - **Places check** (23 Oct 2026): the Calc label ("Znz-Home", "Karatu-Ark-ZNZ") and the sample day (titles + destination)
@@ -1057,11 +1063,10 @@ to check otherwise), `changed_by`, `changed_at`. Corrections go through `iti_sav
 `sample_id`, and `code` (the Calc code, e.g. `BeachSimba`) **or** `request_id` (+ `file?`: the code is read from that
 request's Calc name) → what tagging would do: `code`, `sample` {id, title}, `as` (`main` when the sample has no code yet,
 else `extra`: a sample never loses its own code), `removed_from[]` {id, title} (other samples holding the code),
-`changed`, `note`. **With `"confirm": true` → 403** and a memo for Roberto (`iti-sample-code:<code>`): since 16 Nov 2026
-the code → sample link applies to every booking, so only an admin sets it, on the Hub page "Create Itinerary Program
-from Excel Calc" → Sample program ("for every Calc" ticked). For one booking pass `sample_id` to `iti_calc_plan` /
-`iti_final_from_calc`: `sample.for` says `this booking only` or `every Calc with this code`, and generating with a
-code that has no sample also leaves that memo.
+`changed`, `note`. **With `"confirm": true` → 403** and a memo for Roberto (`iti-sample-code:<code>`): the tag is shared
+by every booking, so only an admin sets it, on the Hub page "Create Itinerary Program from Excel Calc" → Sample program
+("also tag it" ticked). Since 16 Nov 2026 the tag only breaks ties when the Calc content is not decisive and gives the
+prices of proposals made from the sample; for one booking pass `sample_id` to `iti_calc_plan` / `iti_final_from_calc`.
 
 Codes: one code → one sample; a sample has one **main** code (`hub_program_code`, the Calc template of its prices) and
 any number of **extra** codes (table `iti_sample_codes`, e.g. a Classic Calc on the same programme).

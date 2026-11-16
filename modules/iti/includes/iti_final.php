@@ -239,6 +239,123 @@ function iti_final_suggest_sample(PDO $db, array $samples, string $code, array $
     return array('id' => $ids[0], 'why' => implode(', ', $best[1]));
 }
 
+/**
+ * Content choice thresholds (tested on 12 real Calcs, 16 Nov 2026: the samples share many lodges, so scores are close).
+ * The content decides alone when the best sample matches ≥ ITI_FINAL_PICK_MIN_FIT of the itinerary and is
+ * ITI_FINAL_PICK_MARGIN points ahead of the next; otherwise the sample of the file's code wins when it is within
+ * ITI_FINAL_PICK_CODE_GAP points of the best; otherwise nothing is chosen (the user picks, Roberto gets a memo).
+ */
+if (!defined('ITI_FINAL_PICK_MIN_FIT'))  define('ITI_FINAL_PICK_MIN_FIT', 0.7);
+if (!defined('ITI_FINAL_PICK_MARGIN'))   define('ITI_FINAL_PICK_MARGIN', 5);
+if (!defined('ITI_FINAL_PICK_CODE_GAP')) define('ITI_FINAL_PICK_CODE_GAP', 10);
+
+/**
+ * The sample of a Calc, chosen from the Calc's CONTENT (16 Nov 2026), not from its file name: a Calc saved as 02
+ * from 01 keeps the name but may be another trip. Every active sample is scored on how many Calc nights it matches
+ * (iti_final_match_sample(): same lodge, same destination or a lodge within ITI_FINAL_NEAR_KM), then:
+ *   season of the title vs the Calc start month (fits +2 points, outside −10), private vs group (other type −15),
+ *   the sample tagged with the file's code (+3: a tie-break only), the language (+0.5); points out of 100 = % alike.
+ * Chosen when the best matches ≥ ITI_FINAL_PICK_MIN_FIT of the itinerary. When fewer than half the Calc nights have a
+ * mapped lodge the content says little: the code's sample (if any) is used for now, 'reliable' false — the choice is
+ * made again once the hotels are mapped.
+ * $planDays = iti_final_plan($db, $calc, 0)['days']; $isGroup = a GRP departure.
+ * Returns ['sample' => row (id, title_it, title_en, duration_days, display_language) | null, 'fit' => 0–100,
+ *          'why' => text, 'how' => 'content'|'code'|'none', 'reliable' => bool, 'mapped' => n, 'nights' => n,
+ *          'ranking' => [{id, title, fit, days, why}] (best 5)].
+ */
+function iti_final_pick_sample(PDO $db, array $calc, array $planDays, string $code, string $lang, bool $isGroup = false): array {
+    $nights = 0; $mapped = 0;
+    foreach ($planDays as $d) {
+        if ($d['last'] && $d['hotel_text'] === '') continue;   // departure day
+        $nights++;
+        if ($d['lodge_id']) $mapped++;
+    }
+    $reliable = $nights > 0 && $mapped / $nights >= 0.5;
+    $tagged = $code !== '' ? iti_final_find_sample($db, $code, $lang) : null;
+    $startMonth = !empty($calc['start_date']) ? (int)date('n', strtotime($calc['start_date'])) : 0;
+    $cols = iti_table_columns('iti_programs');
+    $typeCol = in_array('safari_type', $cols, true) ? ', safari_type' : '';
+    $samples = $db->query("SELECT id, title_it, title_en, duration_days, display_language, hub_program_code$typeCol FROM iti_programs
+                            WHERE program_type = 'sample' AND status <> 'cancelled' ORDER BY id")->fetchAll(PDO::FETCH_ASSOC);
+    $rank = array();
+    foreach ($samples as $s) {
+        $m = iti_final_match_sample($db, $planDays, iti_final_sample_days($db, (int)$s['id']));
+        $fit = $m['max'] ? $m['score'] / $m['max'] : 0;
+        $pts = 100 * $fit; $why = array(round(100 * $fit) . '% of the itinerary alike');
+        $months = iti_final_title_months($s['title_it'] . ' ' . $s['title_en']);
+        if ($months && $startMonth) {
+            if (in_array($startMonth, $months, true)) { $pts += 2; $why[] = 'season fits'; }
+            else { $pts -= 10; $why[] = 'other season'; }
+        }
+        if ($typeCol !== '' && in_array($s['safari_type'], array('group', 'private'), true) && ($s['safari_type'] === 'group') !== $isGroup) {
+            $pts -= 15; $why[] = $s['safari_type'] === 'group' ? 'group sample' : 'private sample';
+        }
+        if ($tagged && (int)$tagged['id'] === (int)$s['id']) { $pts += 3; $why[] = 'Calc named “' . $code . '”'; }
+        if ($s['display_language'] === $lang) $pts += 0.5;
+        $rank[] = array('row' => $s, 'pts' => $pts, 'fit' => (int)round(100 * $fit), 'why' => implode(', ', $why));
+    }
+    usort($rank, function ($a, $b) { return $b['pts'] <=> $a['pts'] ?: $a['row']['id'] <=> $b['row']['id']; });
+    $ranking = array();
+    foreach (array_slice($rank, 0, 5) as $r) {
+        $ranking[] = array('id' => (int)$r['row']['id'], 'title' => $r['row']['title_it'] ?: $r['row']['title_en'], 'fit' => $r['fit'],
+                           'days' => (int)$r['row']['duration_days'], 'why' => $r['why']);
+    }
+    $out = array('sample' => null, 'fit' => 0, 'why' => '', 'how' => 'none', 'reliable' => $reliable,
+                 'mapped' => $mapped, 'nights' => $nights, 'ranking' => $ranking);
+    $pick = function ($row) {
+        return array('id' => (int)$row['id'], 'program_type' => 'sample', 'title_it' => $row['title_it'], 'title_en' => $row['title_en'],
+                     'duration_days' => $row['duration_days'], 'display_language' => $row['display_language']);
+    };
+    if (!$reliable) {
+        if ($tagged) {
+            $out['sample'] = $tagged; $out['how'] = 'code';
+            $out['why'] = 'only ' . $mapped . ' of ' . $nights . ' Calc hotels mapped: Calc named “' . $code . '” for now';
+        }
+        return $out;
+    }
+    if (!$rank) return $out;
+    $best = $rank[0];
+    $tagRank = null;
+    foreach ($rank as $r) if ($tagged && (int)$r['row']['id'] === (int)$tagged['id']) { $tagRank = $r; break; }
+    $bestIsTagged = $tagRank && $tagRank === $best;
+    $ahead = !isset($rank[1]) || $best['pts'] - $rank[1]['pts'] >= ITI_FINAL_PICK_MARGIN;
+    if ($best['fit'] >= 100 * ITI_FINAL_PICK_MIN_FIT && ($ahead || $bestIsTagged)) {
+        $out['sample'] = $pick($best['row']); $out['fit'] = $best['fit']; $out['why'] = $best['why']; $out['how'] = 'content';
+    } elseif ($tagRank && $tagRank['pts'] >= $best['pts'] - ITI_FINAL_PICK_CODE_GAP) {
+        $out['sample'] = $pick($tagRank['row']); $out['fit'] = $tagRank['fit']; $out['how'] = 'code';
+        $out['why'] = $tagRank['why'] . ($bestIsTagged ? '' : ' — the content alone is not decisive (best #' . (int)$best['row']['id'] . ' ' . $best['fit'] . '%)');
+    } elseif ($best['fit'] >= 100 * ITI_FINAL_PICK_MIN_FIT) {
+        $out['sample'] = $pick($best['row']); $out['fit'] = $best['fit']; $out['how'] = 'content';
+        $out['why'] = $best['why'] . ' — close to #' . (int)$rank[1]['row']['id'] . ' (' . $rank[1]['fit'] . '%)';
+    }
+    return $out;
+}
+
+/**
+ * No sample matches a Calc well enough and someone used sample $sampleId for that booking: one memo per Calc code on
+ * Roberto's board (probably a sample is missing). Never throws.
+ */
+function iti_final_nofit_memo(PDO $db, string $calcFile, int $sampleId, ?int $requestId, string $who, array $ranking): void {
+    try {
+        require_once __DIR__ . '/../../leads/includes/folder_link_service.php';   // fl_memo_upsert()
+        $e = function ($x) { return htmlspecialchars((string)$x, ENT_QUOTES, 'UTF-8'); };
+        $code = iti_final_code_from_calc($calcFile);
+        $st = $db->prepare('SELECT title_it, title_en FROM iti_programs WHERE id = ?');
+        $st->execute(array($sampleId));
+        $s = $st->fetch(PDO::FETCH_ASSOC);
+        $best = array();
+        foreach (array_slice($ranking, 0, 3) as $r) $best[] = '#' . (int)$r['id'] . ' ' . $e($r['title']) . ' (' . (int)$r['fit'] . '%)';
+        $html = '<p>No ITI sample matches the Calc <b>' . $e($calcFile) . '</b>' . ($requestId ? ' of request #' . (int)$requestId : '')
+              . ' well enough (at least ' . (int)round(100 * ITI_FINAL_PICK_MIN_FIT) . '% of its nights). Closest: ' . implode(', ', $best) . '.</p>'
+              . '<p>' . $e($who) . ' used sample <b>#' . $sampleId . ' ' . $e($s ? ($s['title_it'] ?: $s['title_en']) : '?') . '</b> for this booking. '
+              . 'If trips like this come back, create a sample for them in ITI.</p>';
+        fl_memo_upsert($db, 'iti-sample-nofit:' . mb_strtolower($code !== '' ? $code : $calcFile), 'ITI: no sample close to the Calc "' . $calcFile . '"',
+                       $html, $requestId, 'normal', 'iti');
+    } catch (Throwable $ex) {
+        error_log('iti_final_nofit_memo: ' . $ex->getMessage());
+    }
+}
+
 /** A lodge with its destination, coordinates and room categories (cached), or null. */
 function iti_final_lodge_info(PDO $db, int $id) {
     static $cache = array();

@@ -18,9 +18,10 @@ outdated — this file wins where they disagree (PHP version, local lint).
 - **AI buttons of ITI** (logic `modules/iti/includes/iti_ai_service.php`, limits in ITI → Settings → AI): every new AI button calls
   `iti_ai_call()`, which checks the spending limits and records the real cost in `iti_ai_usage`; never a separate connection.
 - `modules/iti/` — itinerary builder. `includes/` (root) — config (server-only), auth, db, mail.
-  **Sample ↔ Calc code** (`includes/iti_final.php`): one code → one sample; a sample has a main code (`hub_program_code`)
-  plus extra codes (`iti_sample_codes`) and never loses its own. The link applies to every booking, so only an admin sets
-  it (Hub program page); sellers / Agent API pick a sample for one booking only (`sample_id`) → memo to Roberto.
+  **Sample of a final program** (`includes/iti_final.php` `iti_final_pick_sample()`): chosen from the Calc CONTENT (nights /
+  lodges vs each sample's days), not the file name; the Calc code tag (`hub_program_code` + extra codes in `iti_sample_codes`,
+  one code → one sample, set by an admin only) is a tie-break and the prices source. Sellers / Agent API override for one
+  booking only (`sample_id`); no sample close enough → memo to Roberto.
 - `modules/operations/` — movements, Medivac, lunch boxes, **Booking follow-up** (`booking_followup.php`; logic
   `includes/followup_service.php` + `followup_classify.php`, shared with the Agent API `followup_*` and
   `tools/followup_local_scan.php`, which reads the supplier PDFs on the office PC because BlueHost cannot).

@@ -58,10 +58,17 @@ try {
     $calcErr = $e->getMessage();
 }
 $code   = $calc ? iti_final_code_from_calc($calc['file']) : '';
-$sampleTagged = $calc ? iti_final_find_sample($db, $code, $lang) : null;   // the sample of this Calc code, for every booking
-$sample = $sampleTagged;
-$sampleOneOff = false;
-if ($calc && $sampleReq && (!$sampleTagged || (int)$sampleTagged['id'] !== $sampleReq)) {
+// The sample is chosen from the Calc CONTENT (its nights / lodges against each sample's days), not from the file
+// name: a Calc saved as 02 from 01 keeps the name but may be another trip (iti_final_pick_sample(), 16 Nov 2026).
+$pick = null;
+if ($calc) {
+    $pick = iti_final_pick_sample($db, $calc, iti_final_plan($db, $calc, 0)['days'], $code, $lang,
+                                  trim((string)($req['group_folder'] ?? '')) !== '');
+}
+$sampleAuto = $pick ? $pick['sample'] : null;
+$sample = $sampleAuto;
+$sampleOneOff = false;   // picked by the user for this booking only
+if ($calc && $sampleReq && (!$sampleAuto || (int)$sampleAuto['id'] !== $sampleReq)) {
     $st = $db->prepare("SELECT id, program_type, title_en, title_it, display_language, duration_days FROM iti_programs
                          WHERE id = ? AND program_type = 'sample' AND status <> 'cancelled'");
     $st->execute([$sampleReq]);
@@ -95,22 +102,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit) {
     try {
         if ($action === 'set_sample') {
             $sid = (int)($_POST['sample_id'] ?? 0);
-            if (!$sid || $code === '') throw new RuntimeException('Choose a sample.');
+            if (!$sid) throw new RuntimeException('Choose a sample.');
             $back = preg_replace('/&sample_id=\d+/', '', $back);
-            if (is_admin() && !empty($_POST['for_all'])) {
-                // Admin: the sample of this code for every booking (a code on another sample moves; the sample keeps its own code).
+            $st = $db->prepare("SELECT id FROM iti_programs WHERE id = ? AND program_type = 'sample' AND status <> 'cancelled'");
+            $st->execute([$sid]);
+            if (!$st->fetchColumn()) throw new RuntimeException('Sample #' . $sid . ' not found.');
+            if (!$sampleAuto || (int)$sampleAuto['id'] !== $sid) $back .= '&sample_id=' . $sid;   // this booking only
+            if (is_admin() && !empty($_POST['for_all']) && $code !== '') {
+                // Admin: also tag the sample with the file's code (tie-break when the content is not decisive; prices of proposals).
                 $t = iti_final_tag_sample($db, $code, $sid, true, true, $user);
-                iti_flash_set('success', 'Sample #' . $sid . ' is now used for every Calc "' . $code . '"'
+                iti_flash_set('success', 'Sample #' . $sid . ' used, and tagged "' . $code . '"'
                     . ($t['as'] === 'extra' ? ' (extra code: it keeps its own)' : '')
                     . ($t['removed_from'] ? ' — removed from #' . implode(', #', array_column($t['removed_from'], 'id')) : '') . '.');
             } else {
-                $st = $db->prepare("SELECT id FROM iti_programs WHERE id = ? AND program_type = 'sample' AND status <> 'cancelled'");
-                $st->execute([$sid]);
-                if (!$st->fetchColumn()) throw new RuntimeException('Sample #' . $sid . ' not found.');
-                if (!$sampleTagged) iti_final_sample_code_memo($db, $code, $sid, $rid, $user, 'used, for one booking only,');
-                if (!$sampleTagged || (int)$sampleTagged['id'] !== $sid) $back .= '&sample_id=' . $sid;
+                if (!$sampleAuto) iti_final_nofit_memo($db, $calc['file'], $sid, $rid, $user, $pick['ranking'] ?? []);
                 iti_flash_set('success', 'Sample #' . $sid . ' used for this booking only'
-                    . (!$sampleTagged ? ' — no sample is tagged "' . $code . '" yet: Roberto gets a memo to decide for every "' . $code . '" Calc.' : '.'));
+                    . (!$sampleAuto ? ' — no sample is close enough to this Calc: Roberto gets a memo.' : '.'));
             }
         } elseif ($action === 'map') {
             $type = $_POST['type'] ?? '';
@@ -200,13 +207,18 @@ if ($multiCalc) {   // the file picker replaces the reader's "several Calc files
 }
 $calcChanged = $active && $calc && $active['source_calc_rev'] && $active['source_calc_rev'] !== $calc['calc_rev'];
 
-$changeSample = $sample && $can_edit && !empty($_GET['change_sample']);   // "change": the picker again, with a sample tagged
-$samples = []; $suggestedSample = 0; $suggestedWhy = '';
+$changeSample = $sample && $can_edit && !empty($_GET['change_sample']);   // "change": the picker again
+// Picker: the closest samples to this Calc first (with their % alike), then the others by title.
+$samples = []; $fitOf = []; $suggestedSample = 0;
 if ($calc && (!$sample || $changeSample)) {
-    $samples = $db->query("SELECT id, title_en, title_it, display_language, duration_days, hub_program_code FROM iti_programs
-                            WHERE program_type = 'sample' AND status <> 'cancelled' ORDER BY title_en")->fetchAll();
-    $sug = iti_final_suggest_sample($db, $samples, $code, $calc, $plan['days'], $lang);
-    $suggestedSample = $sug['id']; $suggestedWhy = $sug['why'];
+    foreach ($pick['ranking'] as $r) $fitOf[$r['id']] = $r['fit'];
+    $all = $db->query("SELECT id, title_en, title_it, display_language, duration_days, hub_program_code FROM iti_programs
+                        WHERE program_type = 'sample' AND status <> 'cancelled' ORDER BY title_en")->fetchAll();
+    usort($all, function ($a, $b) use ($fitOf) {
+        return ($fitOf[$b['id']] ?? -1) <=> ($fitOf[$a['id']] ?? -1);   // stable for the rest: title order kept
+    });
+    $samples = $all;
+    $suggestedSample = $sample ? (int)$sample['id'] : (int)($pick['ranking'][0]['id'] ?? 0);
 }
 // Pickers for inline mapping (only when something is unmapped).
 $opt = ['lodge' => [], 'activity' => [], 'transfer' => [], 'flight' => []];
@@ -396,40 +408,50 @@ include __DIR__ . '/../../includes/layout_header.php';
 
 <?php if ($dataOk): ?>
 <div class="form-card" style="margin-bottom:18px;">
-  <div class="form-section-title">Sample program <span style="font-weight:400;font-size:.8rem;color:var(--grey-mid)">Calc code “<?= h($code) ?>”</span></div>
+  <div class="form-section-title">Sample program <span style="font-weight:400;font-size:.8rem;color:var(--grey-mid)">chosen from the Calc content</span></div>
   <?php if ($sample && !$changeSample): ?>
     <div style="font-size:.85rem;">
       #<?= (int)$sample['id'] ?> <strong><?= h($sample['title_it'] ?: $sample['title_en']) ?></strong> (<?= (int)$sample['duration_days'] ?> days, <?= h($sample['display_language']) ?>)
       <?php if ($sampleOneOff): ?><span class="badge" style="background:#fff8e1;color:#8a6d00;margin-left:6px;">this booking only</span><?php endif; ?>
       <a href="program_edit.php?id=<?= (int)$sample['id'] ?>" style="margin-left:8px;">open</a>
       <?php if ($can_edit): ?><a href="<?= h($self) ?>&amp;lang=<?= h($lang) ?>&amp;change_sample=1" style="margin-left:8px;">change</a><?php endif; ?>
-      <?php if ($sampleOneOff && !$sampleTagged): ?><div style="font-size:.78rem;color:var(--grey-mid);margin-top:4px;">No sample is tagged “<?= h($code) ?>”: Roberto decides whether this one is right for every “<?= h($code) ?>” Calc.</div><?php endif; ?>
+      <div style="font-size:.78rem;color:var(--grey-mid);margin-top:4px;">
+        <?php if ($sampleOneOff): ?>
+          Chosen by hand<?= $sampleAuto ? ' (from the content: #' . (int)$sampleAuto['id'] . ' ' . h($pick['why']) . ')' : ' — no sample is close enough to this Calc: Roberto gets a memo' ?>.
+        <?php else: ?>
+          <?= h($pick['why']) ?>.
+        <?php endif; ?>
+        <?php if ($pick && !$pick['reliable']): ?>
+          <span style="color:#8a6d00;">Only <?= (int)$pick['mapped'] ?> of <?= (int)$pick['nights'] ?> Calc hotels are mapped: map them below and the sample is checked again.</span>
+        <?php endif; ?>
+        <?php $others = array_values(array_filter($pick['ranking'] ?? [], function ($r) use ($sample) { return $r['id'] !== (int)$sample['id']; })); ?>
+        <?php if ($others): ?><br>Next closest: <?= implode(' · ', array_map(function ($r) { return '#' . $r['id'] . ' ' . h($r['title']) . ' ' . $r['fit'] . '%'; }, array_slice($others, 0, 3))) ?><?php endif; ?>
+      </div>
     </div>
   <?php elseif ($can_edit): ?>
     <?php $isAdmin = is_admin(); ?>
     <form method="POST" action="<?= h($self) ?>&amp;lang=<?= h($lang) ?>" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
       <input type="hidden" name="action" value="set_sample">
       <?php if ($sample): ?>
-        <span style="font-size:.85rem;">Now #<?= (int)$sample['id'] ?> — choose another sample<?= $isAdmin ? '' : ' for this booking' ?>:</span>
-      <?php elseif ($isAdmin): ?>
-        <span style="font-size:.85rem;">No sample is tagged “<?= h($code) ?>” yet — choose it:</span>
+        <span style="font-size:.85rem;">Now #<?= (int)$sample['id'] ?> — choose another sample for this booking:</span>
+      <?php elseif ($pick && !$pick['reliable']): ?>
+        <span style="font-size:.85rem;">Only <?= (int)$pick['mapped'] ?> of <?= (int)$pick['nights'] ?> Calc hotels are mapped, so the content cannot choose yet — map them below, or choose a sample for this booking:</span>
       <?php else: ?>
-        <span style="font-size:.85rem;">No sample is tagged “<?= h($code) ?>” yet — choose one for this booking (Roberto decides for the other “<?= h($code) ?>” Calcs):</span>
+        <span style="font-size:.85rem;">No sample is close enough to this Calc (at least <?= (int)round(100 * ITI_FINAL_PICK_MIN_FIT) ?>% of its nights) — choose one for this booking (Roberto gets a memo):</span>
       <?php endif; ?>
       <select name="sample_id" style="min-width:320px;">
         <option value="">— select —</option>
-        <?php foreach ($samples as $s): $sug = (int)$s['id'] === $suggestedSample; ?>
-          <option value="<?= (int)$s['id'] ?>"<?= $sug ? ' selected' : '' ?>><?= $sug ? '★ ' : '' ?>#<?= (int)$s['id'] ?> <?= h($s['title_it'] ?: $s['title_en']) ?> (<?= (int)$s['duration_days'] ?>d, <?= h($s['display_language']) ?>)<?= $s['hub_program_code'] ? ' — now “' . h($s['hub_program_code']) . '”' : '' ?></option>
+        <?php foreach ($samples as $s): $sug = (int)$s['id'] === $suggestedSample; $f = $fitOf[(int)$s['id']] ?? null; ?>
+          <option value="<?= (int)$s['id'] ?>"<?= $sug ? ' selected' : '' ?>><?= $f !== null ? $f . '% · ' : '' ?>#<?= (int)$s['id'] ?> <?= h($s['title_it'] ?: $s['title_en']) ?> (<?= (int)$s['duration_days'] ?>d, <?= h($s['display_language']) ?>)</option>
         <?php endforeach; ?>
       </select>
-      <?php if ($isAdmin): ?>
-        <label style="font-size:.82rem;display:flex;gap:4px;align-items:center;" title="Saved: every Calc “<?= h($code) ?>” of any booking will start from this sample. The sample keeps its own code.">
-          <input type="checkbox" name="for_all" value="1" <?= $sampleTagged ? '' : 'checked' ?>> for every “<?= h($code) ?>” Calc<?= $sampleTagged ? ' (moves the code from #' . (int)$sampleTagged['id'] . ')' : '' ?>
+      <?php if ($isAdmin && $code !== ''): ?>
+        <label style="font-size:.82rem;display:flex;gap:4px;align-items:center;" title="The Calc file name only breaks ties when the content is not decisive, and gives the prices of proposals made from the sample.">
+          <input type="checkbox" name="for_all" value="1"> also tag it “<?= h($code) ?>”
         </label>
       <?php endif; ?>
       <button type="submit" class="btn btn-red btn-sm">Use this sample</button>
       <?php if ($sample): ?><a href="<?= h($self) ?>&amp;lang=<?= h($lang) ?>" class="btn btn-outline btn-sm">Cancel</a><?php endif; ?>
-      <?php if ($suggestedSample): ?><span style="font-size:.78rem;color:var(--grey-mid);">★ proposed: <?= h($suggestedWhy) ?> — check it</span><?php endif; ?>
     </form>
   <?php endif; ?>
 </div>
