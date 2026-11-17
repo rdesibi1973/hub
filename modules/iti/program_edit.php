@@ -1568,8 +1568,8 @@ include __DIR__ . '/../../includes/layout_header.php';
         <div class="iti-combo" style="max-width:none;">
           <div class="iti-combo-inner">
             <input type="text" class="iti-combo-text" autocomplete="off"
-                   value="<?= h(!empty($a['activity_id']) ? ($a['name_en'] ?? '') : ($a['activity_custom'] ?? '')) ?>"
-                   placeholder="Type or choose activity…">
+                   value="<?= h(!empty($a['activity_id']) ? ($a['name_en'] ?? '') : (($a['name_' . $tr_lang] ?? '') ?: ($a['activity_custom'] ?? ''))) ?>"
+                   placeholder="Type or choose activity…"><?php /* free text: shown in the program language (custom_note_<lang>); the hidden activity_custom keeps the stored text, so the save still matches the row and keeps its translations */ ?>
             <button type="button" class="iti-combo-arrow" tabindex="-1">▾</button>
           </div>
           <input type="hidden" name="activity_id[]"     value="<?= h($a['activity_id'] ?? '') ?>">
