@@ -405,8 +405,10 @@ function iti_doc_data(int $id, string $lang): ?array {
             $route = $f['flight_route_id'] ? trim($f['from_airport'] . ' → ' . $f['to_airport']) : trim((string)$f['flight_custom']);
             if ($route === '') continue;
             $parts = [$route];
-            $air = trim((string)($f['airline_company'] ?: ($f['operator'] ?? '')));
-            if (!empty($f['flight_no'])) $air = trim($air . ' ' . $f['flight_no']);   // "Auric Air UI 403"
+            // Own arrangement: the clients choose the airline, so none is printed (the route's operator, or the
+            // one copied from it by the API / editor, would read as booked by us).
+            $air = !empty($f['own_arrangement']) ? '' : trim((string)($f['airline_company'] ?: ($f['operator'] ?? '')));
+            if (!empty($f['flight_no']) && empty($f['own_arrangement'])) $air = trim($air . ' ' . $f['flight_no']);   // "Auric Air UI 403"
             if ($air !== '') $parts[] = $air;
             $t = trim(substr((string)$f['departure_time'], 0, 5) . ($f['arrival_time'] ? '–' . substr((string)$f['arrival_time'], 0, 5) : ''), '–');
             if ($t !== '') $parts[] = $t;

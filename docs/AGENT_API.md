@@ -884,7 +884,7 @@ Flights are shown on the day (magazine, Word) as "✈ Dar Es Salaam → Ruaha ·
 **Own arrangement (17 Nov 2026):** `own_arrangement: 1` on a transfer (`{transfer_route_id, own_arrangement}` or
 `{description, own_arrangement}`) or a flight = booked by the clients. Every document (web, PDF, Word, guide sheet) prints the
 route followed by "own arrangement, not included — our services resume on arrival" (5 languages, `iti_oa_text()`; on the
-program's last day only "own arrangement, not included"); such a
+program's last day only "own arrangement, not included"; an own-arrangement flight shows no airline or flight number); such a
 transfer gives no transfer time to the day, and vouchers leave the row out. `structure[]` returns the flag (a free-text
 transfer with it comes back as `{description, own_arrangement: 1}`). Hub editor: the "Own arr." box on each transfer / flight row.
 
