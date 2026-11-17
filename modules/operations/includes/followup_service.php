@@ -991,7 +991,8 @@ function followup_service_match(array $a, array $b): bool {
  *   provisional expiry printed on the document (expiry_date; the ticketing limit on a group ZNZ flight line),
  *   supplier payment of a stay: check-in − 30 days (Orangi Collection always; other lodges: the days read in the
  *   document's terms, details.payment_days),
- *   group block release: arrival − 60 days (GRP / Il Diamante / GRUPPO groups),
+ *   group block release: arrival − 60 days (GRP / Il Diamante / GRUPPO groups; not the group ZNZ flight line, whose
+ *   deadline is its ticketing limit, else arrival − FU_TICKET_DUE_DAYS),
  *   domestic flight: the ticketing time limit on the pro-forma (details.ticket_limit), else the flight − 7 days,
  *   and, when none of these applies, the service (or arrival) − 14 days. Manual lines: the date staff set.
  * → ['due_date' => Y-m-d|null, 'due_reason' => text|null]
@@ -1014,7 +1015,13 @@ function followup_due(array $l): array {
         $c[] = [$minus($svc, $n), 'supplier payment (' . $n . ' d before check-in' . ($orangi ? ', Orangi' : '') . ')'];
     }
     $top = explode('/', ltrim((string)($l['folder'] ?? ''), '/'))[0];
-    if ((($l['type'] ?? '') === 'group' || ($top !== '' && followup_group_kind($top))) && !empty($l['start_date'])) {
+    // Group ZNZ flight line: its deadline is the ticketing limit, not the block release of the rooms (Roberto,
+    // 17 Nov 2026); no limit on the invoice → ticketing days before the arrival (the flight is later in the trip).
+    $znz = ($l['issue'] ?? '') === 'group_znz_flight';
+    if ($znz && !$c && !empty($l['start_date'])) {
+        $c[] = [$minus($l['start_date'], FU_TICKET_DUE_DAYS), 'ticketing (' . FU_TICKET_DUE_DAYS . ' d before arrival)'];
+    }
+    if (!$znz && (($l['type'] ?? '') === 'group' || ($top !== '' && followup_group_kind($top))) && !empty($l['start_date'])) {
         $c[] = [$minus($l['start_date'], FU_GROUP_RELEASE_DAYS), 'group release (' . FU_GROUP_RELEASE_DAYS . ' d before arrival)'];
     }
     if ($st === 'flight' && $svc) {
