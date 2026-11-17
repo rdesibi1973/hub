@@ -300,6 +300,31 @@ $t('CANCELLED → PROVISIONAL / DEPOSIT / PAID refused by rule; → PROGRESS all
    && bg_cancelled_move_refused($rv . 'CANCELLED', $rv . 'DEPOSIT') && bg_cancelled_move_refused($rv . 'CANCELLED', $rv . 'PAID')
    && !bg_cancelled_move_refused($rv . 'CANCELLED', $rv . 'PROGRESS') && !bg_cancelled_move_refused($rv . 'PROVISIONAL', $rv . 'DEPOSIT'));
 
+// Reopen as a quote (Roberto, 17 Nov 2026; Spagnoletto, request 2837): CANCELLED → inquiry name under /2026 or /2027
+if (!defined('DROPBOX_BASE_PATH')) define('DROPBOX_BASE_PATH', '/2026');
+$gs   = '09_28SEP_GaiaSpagnoletto(Anderson-Drct)_START28SEP_END02OCT2026_CANCELLED';
+$inq  = 'GaiaSpagnoletto(Anderson-Drct)';
+$rq   = ['status' => 'Quoted', 'practice_code' => $gs, 'group_folder' => null];
+$t('inquiry form: plain name yes; prefix / dates / tag / _CK / no parentheses no', bg_is_inquiry_name($inq) && bg_is_inquiry_name('Mario Rossi(BTG-Roberto)')
+   && !bg_is_inquiry_name('09_28SEP_' . $inq) && !bg_is_inquiry_name($inq . '_START28SEP_END02OCT2026') && !bg_is_inquiry_name($inq . '_PROGRESS')
+   && !bg_is_inquiry_name($inq . '_CK') && !bg_is_inquiry_name('GaiaSpagnoletto') && !bg_is_inquiry_name($inq . '_extra'));
+$t('inquiry roots /2026 + /2027, never /001_Safari', bg_inquiry_roots() === ['/2026', '/2027']);
+$t('#2837 re-link to /2026/<inquiry name>, status Quoted → allowed', !bg_cancelled_move_refused($gs, $inq, $rq, '/2026/' . $inq));
+$t('… also Cancelled / Hot-Quoted / Inquiry, and /2027', !bg_cancelled_move_refused($gs, $inq, ['status' => 'Cancelled'] + $rq, '/2027/' . $inq)
+   && !bg_cancelled_move_refused($gs, $inq, ['status' => 'Hot-Quoted'] + $rq, '/2026/' . $inq) && !bg_cancelled_move_refused($gs, $inq, ['status' => 'Inquiry'] + $rq, '/2026/' . $inq));
+$t('no context (names only) → still refused', bg_cancelled_move_refused($gs, $inq));
+$t('inside /001_Safari (no tag) → refused', bg_cancelled_move_refused($gs, $inq, $rq, '/001_Safari/' . $inq)
+   && bg_cancelled_move_refused($gs, $inq, $rq, '/001_Safari/00_CANCELED/00_2026/' . $inq));
+$t('CANCELLED → DEPOSIT / PAID with a /2026 destination → still refused', bg_cancelled_move_refused($gs, str_replace('_CANCELLED', '_DEPOSIT', $gs), $rq, '/2026/x')
+   && bg_cancelled_move_refused($gs, str_replace('_CANCELLED', '_PAID', $gs), $rq, '/2026/' . str_replace('_CANCELLED', '_PAID', $gs)));
+$t('CANCELLED → PROGRESS still allowed', !bg_cancelled_move_refused($gs, str_replace('_CANCELLED', '_PROGRESS', $gs), $rq, '/001_Safari/x'));
+$t('Booked / Lost request → refused', bg_cancelled_move_refused($gs, $inq, ['status' => 'Booked'] + $rq, '/2026/' . $inq)
+   && bg_cancelled_move_refused($gs, $inq, ['status' => 'Lost'] + $rq, '/2026/' . $inq));
+$t('GRP member → not a reopen', !bg_reopen_quote_ok(['group_folder' => 'GRP0206_X(Y-Z)'] + $rq, $inq, '/2026/' . $inq)
+   && !bg_reopen_quote_ok(['practice_code' => 'GRP0206_' . $inq] + $rq, $inq, '/2026/' . $inq));
+$t('destination not ending in the new name / outside the roots → refused', bg_cancelled_move_refused($gs, $inq, $rq, '/2026/Other(A-B)')
+   && bg_cancelled_move_refused($gs, $inq, $rq, '/2025/' . $inq) && bg_cancelled_move_refused($gs, $inq, $rq, '/20260/' . $inq) && bg_cancelled_move_refused($gs, $inq, $rq, ''));
+
 // ── Undated Calc rows: one rule (calc_skipped_kind) for booking_check, the gate and the ITI final program ──
 $row21 = ['row' => 21, 'text' => 'activity "MEDIVAC"', 'hotel' => '', 'invoice' => '', 'checked' => '', 'dated' => false, 'has_cost' => true, 'stay_cost' => null];
 $row22 = ['row' => 22, 'text' => 'hotel "Flight link"', 'hotel' => 'Flight link', 'invoice' => 'Invoice$290', 'checked' => 'Glady', 'dated' => false, 'has_cost' => false, 'stay_cost' => null];

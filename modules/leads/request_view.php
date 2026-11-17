@@ -178,6 +178,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         exit;
     }
 
+    // ── Reopen a cancelled booking as a quote (includes/folder_service.php folder_reopen_quote) ──
+    // Dry run unless confirm=1. Admin / manager, or the seller of the request.
+    if ($action === 'reopen_quote') {
+        try {
+            $req_id = (int)($_POST['request_id'] ?? 0);
+            if (isLeadsRestricted()) {
+                $own = $db->prepare("SELECT agent_id FROM requests WHERE id=?");
+                $own->execute([$req_id]);
+                if ((int)$own->fetchColumn() !== getStaffAgentId()) {
+                    echo json_encode(['ok'=>false,'msg'=>'Only the seller of this request can reopen it.']); exit;
+                }
+            }
+            require_once 'dropbox_helper.php';
+            require_once 'includes/folder_service.php';
+            $go  = ($_POST['confirm'] ?? '') === '1';
+            $res = folder_reopen_quote($db, $req_id, ['status' => (string)($_POST['status'] ?? 'Quoted')], $go, (int)($cu['id'] ?? 0) ?: null);
+            if (!$res['ok']) $res['msg'] = $res['error'];
+            echo json_encode($res);
+        } catch (Throwable $e) {
+            echo json_encode(['ok'=>false,'msg'=>'Error: '.$e->getMessage()]);
+        }
+        exit;
+    }
+
     // ── Re-link candidates: folders in Dropbox that might be this booking ───────
     if ($action === 'relink_candidates') {
         try {
@@ -727,6 +751,15 @@ include 'includes/header.php';
         <a href="#" onclick="relinkFolder();return false" title="Find the folder in Dropbox and refresh the link (after moving it to an archive)" style="margin-left:12px;font-size:.8rem;text-decoration:none">🔗 Re-link</a>
         <a href="#" onclick="relinkPicker();return false" title="Choose the folder manually" style="margin-left:10px;font-size:.8rem;text-decoration:none">✎ Pick manually</a>
         <span id="relink-status" style="font-size:.78rem;color:var(--grey-mid);margin-left:6px"></span>
+        <?php if (($r['status'] ?? '') === 'Cancelled' && trim((string)($r['group_folder'] ?? '')) === ''): ?>
+          <div style="margin-top:6px;font-size:.8rem">
+            <button type="button" class="btn btn-outline btn-sm" onclick="reopenQuote()" title="The client asks again: folder back to /<year>/Customer(Agency-Agent), status Quoted. Invoices are not touched.">↩ Reopen as quote</button>
+            <select id="reopen-status" style="font-size:.78rem;padding:3px 4px;margin-left:4px">
+              <option>Quoted</option><option>Hot-Quoted</option><option>Inquiry</option>
+            </select>
+            <span id="reopen-msg" style="font-size:.78rem;color:var(--grey-mid);margin-left:6px"></span>
+          </div>
+        <?php endif; ?>
         <div id="relink-picker" style="display:none;margin-top:8px;padding:10px;background:#f6f6f4;border-radius:6px;max-width:720px">
           <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
             <input type="text" id="relink-search" placeholder="Search Dropbox folders (customer, GRP code, part of the name…)" spellcheck="false"
@@ -755,6 +788,28 @@ include 'includes/header.php';
         if (d.ok) { st.textContent = '✔ Re-linked — reloading…'; setTimeout(function(){ location.reload(); }, 700); }
         else      { st.textContent = (d.msg || 'Not found automatically') + ' — pick manually below.'; relinkPicker(); }
       }).catch(e => { st.textContent = 'Error: ' + e; });
+    }
+
+    // Reopen a cancelled booking as a quote: dry run first (paths, invoices, warnings), then confirm — folder_reopen_quote().
+    function reopenQuote() {
+      var st = document.getElementById('reopen-msg');
+      var status = document.getElementById('reopen-status').value;
+      st.textContent = 'Checking…';
+      var fd = new FormData(); fd.append('action','reopen_quote'); fd.append('request_id', RVID); fd.append('status', status);
+      relinkPost(fd).then(function (d) {
+        if (!d.ok) { st.textContent = '⛔ ' + (d.msg || 'Refused.'); return; }
+        st.textContent = '';
+        var txt = 'Reopen as a quote?\n\n' + (d.moved ? d.from + '\n→ ' + d.to : 'Folder already at ' + d.to)
+                + '\nStatus ' + d.status_from + ' → ' + d.status_to
+                + (d.warnings && d.warnings.length ? '\n\n⚠ ' + d.warnings.join('\n⚠ ') : '');
+        if (!confirm(txt)) return;
+        st.textContent = 'Moving the folder…';
+        var fd2 = new FormData(); fd2.append('action','reopen_quote'); fd2.append('request_id', RVID); fd2.append('status', status); fd2.append('confirm', '1');
+        return relinkPost(fd2).then(function (d2) {
+          if (d2.ok) { st.textContent = d2.msg + ' Reloading…'; setTimeout(function(){ location.reload(); }, 900); }
+          else       { st.textContent = '⛔ ' + (d2.msg || 'Failed.'); }
+        });
+      }).catch(function (e) { st.textContent = 'Error: ' + e; });
     }
 
     function relinkRender(cands, emptyMsg) {

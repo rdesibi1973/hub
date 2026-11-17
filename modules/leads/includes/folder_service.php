@@ -243,21 +243,7 @@ function fs_rename_validate(PDO $db, int $requestId, string $newName, string $cu
                 return ['ok' => false, 'code' => 400, 'error' => 'current_path is not a valid Dropbox path.'];
             }
         }
-        // Another request already pointing to that folder (or inside it). Members of this
-        // group live inside the group parent: not a clash.
-        $base = basename($cur);
-        $q = $db->prepare("SELECT id, practice_code, group_folder, dropbox_url FROM requests
-                           WHERE id <> ? AND (practice_code = ? OR group_folder = ? OR dropbox_url LIKE ?)");
-        $q->execute([(int)$r['id'], $base, $base, '%' . rawurlencode($base) . '%']);
-        $clash = [];
-        foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $o) {
-            if ($isGrp && trim($o['group_folder'] ?? '') === $folder) continue;
-            $op = bo_path_from_url((string)($o['dropbox_url'] ?? ''));
-            if (($op !== '' && (strcasecmp($op, $cur) === 0 || stripos($op, $cur . '/') === 0))
-                || ($op === '' && (strcasecmp((string)$o['practice_code'], $base) === 0 || strcasecmp((string)$o['group_folder'], $base) === 0))) {
-                $clash[] = (int)$o['id'];
-            }
-        }
+        $clash = fs_path_clash($db, (int)$r['id'], $cur, $isGrp ? $folder : '');
         if ($clash) {
             return ['ok' => false, 'code' => 409, 'error' => 'Request(s) ' . implode(', ', array_slice($clash, 0, 5))
                   . ' already point to ' . $cur . ' — re-link refused.'];
@@ -271,6 +257,37 @@ function fs_rename_validate(PDO $db, int $requestId, string $newName, string $cu
     return ['ok' => true, 'r' => $r, 'is_group' => $isGrp, 'folder' => $folder, 'new_name' => $newName,
             'set_status' => $d['matched'], 'status' => $d['status'], 'ps' => $d['ps'],
             'relink' => $cur !== '', 'current_path' => $cur !== '' ? $cur : null, 'stored_path' => $stored];
+}
+
+/**
+ * Other requests already pointing to the folder at $cur (or inside it) → [request id, …]. $groupFolder: members of
+ * this group live inside the group parent — not a clash.
+ */
+function fs_path_clash(PDO $db, int $requestId, string $cur, string $groupFolder = ''): array {
+    $base = basename($cur);
+    $q = $db->prepare("SELECT id, practice_code, group_folder, dropbox_url FROM requests
+                       WHERE id <> ? AND (practice_code = ? OR group_folder = ? OR dropbox_url LIKE ?)");
+    $q->execute([$requestId, $base, $base, '%' . rawurlencode($base) . '%']);
+    $clash = [];
+    foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $o) {
+        if ($groupFolder !== '' && trim($o['group_folder'] ?? '') === $groupFolder) continue;
+        $op = bo_path_from_url((string)($o['dropbox_url'] ?? ''));
+        if (($op !== '' && (strcasecmp($op, $cur) === 0 || stripos($op, $cur . '/') === 0))
+            || ($op === '' && (strcasecmp((string)$o['practice_code'], $base) === 0 || strcasecmp((string)$o['group_folder'], $base) === 0))) {
+            $clash[] = (int)$o['id'];
+        }
+    }
+    return $clash;
+}
+
+/**
+ * Dropbox path of the folder after a validated rename ($v from fs_rename_validate): the parent of current_path (re-link)
+ * or of the stored path, plus the new name ('' when neither is known). For the booking gate (reopen as a quote).
+ */
+function fs_dest_path(array $v): string {
+    $from = !empty($v['current_path']) ? (string)$v['current_path'] : (string)($v['stored_path'] ?? '');
+    if ($from === '' || $from === '/') return '';
+    return rtrim(dirname($from), '/') . '/' . $v['new_name'];
 }
 
 /**
@@ -593,7 +610,8 @@ function folder_rename(PDO $db, int $requestId, string $newName, ?int $userId, a
         $gate = null;
         if (!$isGrp) {
             require_once __DIR__ . '/booking_gate_service.php';
-            $gate = booking_gate_check($db, (int)$v['r']['id'], $folder, $newFolder, $userId, (string)($opt['gate_via'] ?? 'status_change'));
+            $gate = booking_gate_check($db, (int)$v['r']['id'], $folder, $newFolder, $userId, (string)($opt['gate_via'] ?? 'status_change'),
+                                       false, ['dest_path' => fs_dest_path($v)]);
             if ($gate['refused']) return ['ok' => false, 'code' => 409, 'msg' => booking_gate_message($gate), 'booking_gate' => $gate];
         }
         if ($v['relink']) {
@@ -649,4 +667,214 @@ function folder_rename(PDO $db, int $requestId, string $newName, ?int $userId, a
     return ['ok' => true, 'msg' => $msg, 'is_group' => $isGrp, 'old_name' => $folder, 'new_name' => $newFolder, 'booking_gate' => $gate,
             'dropbox_path_old' => $res['old_path'], 'dropbox_path_new' => $res['new_path'], 'relink' => $v['relink'],
             'files_renamed' => $files['done'], 'files_failed' => $files['failed']];
+}
+
+// ── Reopen a cancelled booking as a quote ────────────────────────────────────
+
+/** Hub statuses a reopened booking may get. */
+const FS_REOPEN_TO = ['Quoted', 'Hot-Quoted', 'Inquiry'];
+
+/**
+ * Inquiry form of a booking folder name: "09_28SEP_GaiaSpagnoletto(Anderson-Drct)_START28SEP_END02OCT2026_CANCELLED"
+ * → "GaiaSpagnoletto(Anderson-Drct)" (drops MM_DDMON_, START / END, status tag, _CK). '' when there is no (Agency-Agent).
+ */
+function fs_inquiry_name(string $name): string {
+    $s = preg_replace('/^\d{1,2}_\d{1,2}[A-Za-z]{3}_/', '', trim($name));
+    return preg_match('/^([^()\/]+\([^()\/]*\))/', (string)$s, $m) ? trim($m[1]) : '';
+}
+
+/** Active CK tracker rows of a folder (by its Dropbox id or one of its names). → [['id', 'folder_name'], …]. Never throws. */
+function fs_ck_rows_for_folder(PDO $db, string $dbxId, array $names): array {
+    try {
+        ck_ensure_schema($db);
+        $names = array_values(array_filter(array_unique($names), 'strlen'));
+        if ($dbxId === '' && !$names) return [];
+        $w = []; $a = [];
+        if ($dbxId !== '') { $w[] = 'dropbox_id = ?'; $a[] = $dbxId; }
+        if ($names) { $w[] = 'folder_name IN (' . implode(',', array_fill(0, count($names), '?')) . ')'; $a = array_merge($a, $names); }
+        $st = $db->prepare("SELECT id, folder_name FROM ck_folders WHERE gone = 0 AND (" . implode(' OR ', $w) . ")");
+        $st->execute($a);
+        return $st->fetchAll(PDO::FETCH_ASSOC);
+    } catch (Throwable $e) {
+        error_log('fs_ck_rows_for_folder: ' . $e->getMessage());
+        return [];
+    }
+}
+
+/**
+ * Reopen a cancelled private booking as a quote (Agent API reopen_cancelled, request page "Reopen as quote", Roberto
+ * 17 Nov 2026): its folder goes back from /001_Safari (usually 00_CANCELED/00_<year>/) to /<year>/<Customer>(<Agency>-<Agent>)
+ * and the request becomes Quoted (or Hot-Quoted / Inquiry). The booking gate allows it (bg_reopen_quote_ok()).
+ *
+ * $opt: 'status' (Quoted default | Hot-Quoted | Inquiry), 'new_name' (default fs_inquiry_name() of the current name),
+ *       'year' (inquiry root; default the trip year when it is an inquiry root, else DROPBOX_BASE_PATH),
+ *       'current_path' (the folder's real path when it was already moved by hand, e.g. into /2026).
+ * Refused: request not found (404); bad status / new_name / year / current_path (400); Booked, group, other status
+ * than Cancelled / Quoted / Hot-Quoted / Inquiry, not cancelled (by name or status) without a current_path under the
+ * inquiry root, destination exists, folder not found (409).
+ * !$go = dry run: nothing written except the folder self-heal every reader does.
+ * $go: Dropbox move (the folder keeps its id), practice_code / dropbox_url / dropbox_id, payment_status and
+ * confirmation_date cleared (snapshot and history stay), status (bs_set_request_status), active CK tracker rows marked
+ * gone, timeline folder_relinked. Invoices and Booking follow-up lines are never touched (warnings only).
+ *
+ * → ['ok', 'code', 'error' | 'msg', 'request_id', 'from', 'stored_path', 'to', 'new_name', 'moved', 'status_from',
+ *    'status_to', 'payment_status_from', 'confirmation_date_from', 'invoices' [], 'followup_open', 'ck_rows' [],
+ *    'warnings' [], 'candidates' [] (folder not found)]. Throws only when Dropbox cannot be reached before any change.
+ * Requires dropbox_helper.php.
+ */
+function folder_reopen_quote(PDO $db, int $requestId, array $opt, bool $go, ?int $userId): array {
+    require_once __DIR__ . '/booking_gate_service.php';   // bg_* rules, followup_open_counts()
+    require_once __DIR__ . '/folder_link_service.php';
+    $fail = function (int $code, string $msg, array $extra = []) {
+        return ['ok' => false, 'code' => $code, 'error' => $msg] + $extra;
+    };
+
+    $r = bg_request($db, $requestId);
+    if (!$r) return $fail(404, 'Request not found.');
+    $statusTo = trim((string)($opt['status'] ?? ''));
+    if ($statusTo === '') $statusTo = 'Quoted';
+    if (!in_array($statusTo, FS_REOPEN_TO, true)) return $fail(400, 'status must be one of: ' . implode(', ', FS_REOPEN_TO) . '.');
+    $statusFrom = (string)($r['status'] ?? '');
+    if ($statusFrom === 'Booked') {
+        return $fail(409, 'Request ' . $requestId . ' is Booked — only a cancelled booking can be reopened as a quote.');
+    }
+    if (bg_is_group($r)) return $fail(409, 'Group bookings (GRP member / group parent) cannot be reopened as a quote.');
+    if (!in_array($statusFrom, BG_REOPEN_STATUSES, true)) {
+        return $fail(409, 'Request status is ' . ($statusFrom !== '' ? $statusFrom : 'empty') . ' — only a Cancelled (or Quoted / Hot-Quoted / Inquiry) request can be reopened as a quote.');
+    }
+    if (trim((string)($r['practice_code'] ?? '')) === '' && trim((string)($r['dropbox_url'] ?? '')) === '') {
+        return $fail(400, 'This request has no folder.');
+    }
+    $roots    = bg_inquiry_roots();
+    $inRoots  = function (string $p, array $rs): bool {
+        foreach ($rs as $root) { if (stripos($p, $root . '/') === 0 && strlen($p) > strlen($root) + 1) return true; }
+        return false;
+    };
+    $warnings = [];
+    $stored   = req_folder_path($r);
+    $token    = dropbox_get_access_token();
+
+    // Where the folder is now.
+    $curIn = fs_norm_path((string)($opt['current_path'] ?? ''));
+    $curPath = null; $curId = '';
+    if ($curIn !== '') {
+        if (!$inRoots($curIn, fs_allowed_roots())) return $fail(400, 'current_path must be a folder under ' . implode(', ', fs_allowed_roots()) . '.');
+        foreach (explode('/', ltrim($curIn, '/')) as $seg) {
+            if ($seg === '' || $seg === '.' || $seg === '..' || preg_match('#[:*?"<>|]#', $seg)) return $fail(400, 'current_path is not a valid Dropbox path.');
+        }
+        $rl = fs_relink_resolve($token, $curIn);
+        if (isset($rl['error'])) return $fail($rl['code'], $rl['error']);
+        $curPath = $rl['path']; $curId = (string)($rl['id'] ?? '');
+        if (strcasecmp($curPath, $stored) !== 0 && ($clash = fs_path_clash($db, $requestId, $curPath))) {
+            return $fail(409, 'Request(s) ' . implode(', ', array_slice($clash, 0, 5)) . ' already point to ' . $curPath . ' — reopen refused.');
+        }
+    } else {
+        $h = folder_heal($db, $token, $r);   // stored path → Dropbox id (heals the link)
+        $f = $h['_folder'];
+        unset($h['_folder']);
+        if (in_array($f['state'], ['ok', 'relinked'], true) && $f['path']) {
+            $r = $h; $curPath = $f['path']; $curId = (string)($f['id'] ?? '');
+            if ($f['state'] === 'relinked') $warnings[] = 'Folder link healed first: ' . $f['old_path'] . ' → ' . $f['path'] . '.';
+        } elseif (trim((string)($r['practice_code'] ?? '')) !== '') {
+            $found = dropbox_find_folder($token, trim((string)$r['practice_code']));   // no id stored: by name (also inside 00_CANCELED)
+            $m = $found ? dropbox_get_metadata($token, $found) : null;
+            if ($m && $m['tag'] === 'folder') { $curPath = $m['path']; $curId = (string)$m['id']; }
+        }
+        if ($curPath === null) {
+            $nf = fs_not_found($token, $r, trim((string)($r['practice_code'] ?? '')));
+            return $fail(409, $nf['msg'], ['candidates' => $nf['candidates']]);
+        }
+    }
+    $folder  = trim((string)($r['practice_code'] ?? ''));
+    $curName = basename($curPath);
+    $cancelled = $statusFrom === 'Cancelled' || bg_tag($folder) === 'CANCELLED' || bg_tag($curName) === 'CANCELLED'
+              || folder_path_is_cancelled($curPath);
+    if (!$cancelled && !($curIn !== '' && $inRoots($curPath, $roots))) {
+        return $fail(409, 'Not a cancelled booking (folder "' . $curName . '", status ' . $statusFrom . '). Give current_path when it was already moved by hand into ' . implode(' / ', $roots) . '.');
+    }
+
+    // Destination.
+    $newName = trim((string)($opt['new_name'] ?? ''));
+    if ($newName === '') $newName = fs_inquiry_name($curName) ?: fs_inquiry_name($folder);
+    if ($newName === '' || preg_match(FS_BAD_CHARS_RE, $newName) || !bg_is_inquiry_name($newName)) {
+        return $fail(400, 'new_name "' . $newName . '" is not the inquiry form <Customer>(<Agency>-<Agent>) — no MM_DDMON_ prefix, START / END, status tag or _CK.');
+    }
+    $year = (int)($opt['year'] ?? 0);
+    if ($year > 0) {
+        $root = '/' . $year;
+        if (!in_array($root, $roots, true)) return $fail(400, 'year must be one of: ' . implode(', ', array_map(function ($x) { return ltrim($x, '/'); }, $roots)) . '.');
+    } else {
+        $root = $roots[0];
+        $ty = (int)substr((string)($r['start_date'] ?? ''), 0, 4);
+        if ($ty > 0 && in_array('/' . $ty, $roots, true)) $root = '/' . $ty;
+    }
+    $dest  = $root . '/' . $newName;
+    $moved = strcmp($curPath, $dest) !== 0;
+    if ($moved && strcasecmp($curPath, $dest) !== 0 && dropbox_path_exists($token, $dest)) {
+        return $fail(409, 'A folder "' . $newName . '" already exists in ' . $root . ' — reopen refused.');
+    }
+    $st = $db->prepare("SELECT id FROM requests WHERE practice_code = ? AND id <> ? LIMIT 3");
+    $st->execute([$newName, $requestId]);
+    if ($ids = $st->fetchAll(PDO::FETCH_COLUMN)) $warnings[] = 'Request(s) ' . implode(', ', $ids) . ' already use the folder name ' . $newName . ' in Hub.';
+
+    // Same rule as every rename path (refuses anything but a reopen as a quote out of _CANCELLED).
+    $gate = booking_gate_check($db, $requestId, $folder !== '' ? $folder : $curName, $newName, $userId, 'reopen', true, ['dest_path' => $dest]);
+    if ($gate['refused']) return $fail(409, booking_gate_message($gate));
+
+    // What stays as it was: invoices, Booking follow-up lines, CK tracker.
+    $invoices = [];
+    try {
+        $iq = $db->prepare("SELECT invoice_number, status, currency, total, balance_due FROM invoices WHERE request_id = ? ORDER BY id");
+        $iq->execute([$requestId]);
+        foreach ($iq->fetchAll(PDO::FETCH_ASSOC) as $i) {
+            $invoices[] = ['number' => $i['invoice_number'], 'status' => $i['status'], 'currency' => $i['currency'],
+                           'total' => (float)$i['total'], 'balance_due' => (float)$i['balance_due']];
+            if ($i['status'] !== 'Cancelled') {
+                $warnings[] = 'Invoice ' . $i['invoice_number'] . ' is ' . $i['status'] . ' (balance ' . $i['currency'] . ' '
+                            . number_format((float)$i['balance_due'], 2) . ') — not touched: cancel or reuse it by hand.';
+            }
+        }
+    } catch (Throwable $e) { $warnings[] = 'Invoices not checked — ' . $e->getMessage(); }
+    $fuOpen = 0;
+    try { $fc = followup_open_counts($db); $fuOpen = (int)($fc[$requestId]['total'] ?? 0); }
+    catch (Throwable $e) { $warnings[] = 'Booking follow-up not checked — ' . $e->getMessage(); }
+    if ($fuOpen > 0) $warnings[] = $fuOpen . ' open Booking follow-up line(s) on this request — not touched: close them if they no longer apply.';
+    $ckRows = fs_ck_rows_for_folder($db, $curId, [$folder, $curName]);
+    if ($ckRows) $warnings[] = 'CK tracker row(s) still active for this folder (' . implode(', ', array_column($ckRows, 'folder_name')) . ') — marked gone on confirm.';
+    if ((string)($r['payment_status'] ?? '') !== '') $warnings[] = 'payment_status ' . $r['payment_status'] . ' will be cleared.';
+    if ((string)($r['confirmation_date'] ?? '') !== '') $warnings[] = 'confirmation_date ' . $r['confirmation_date'] . ' will be cleared (the confirm snapshot and the history stay).';
+
+    $out = ['ok' => true, 'request_id' => $requestId, 'from' => $curPath, 'stored_path' => $stored !== '' ? $stored : null,
+            'to' => $dest, 'new_name' => $newName, 'moved' => $moved,
+            'status_from' => $statusFrom, 'status_to' => $statusTo,
+            'payment_status_from' => $r['payment_status'] ?? null, 'confirmation_date_from' => $r['confirmation_date'] ?? null,
+            'invoices' => $invoices, 'followup_open' => $fuOpen, 'ck_rows' => $ckRows, 'warnings' => $warnings];
+    if (!$go) return $out + ['msg' => 'Dry run — nothing moved. ' . ($moved ? $curPath . ' → ' . $dest : 'Folder already at ' . $dest) . ', status ' . $statusFrom . ' → ' . $statusTo . '.'];
+
+    // Confirm.
+    try {
+        if ($moved) {
+            $res = dropbox_move_folder($token, $curPath, $dest);
+            $mid = folder_id_from_meta($res);
+            if ($mid !== '') $curId = $mid;
+        }
+        if ($curId === '') { $m = dropbox_get_metadata($token, $dest); if ($m) $curId = (string)$m['id']; }
+    } catch (Throwable $e) {
+        return $fail(502, 'Dropbox error — nothing was changed: ' . $e->getMessage(), $out);
+    }
+    $db->prepare("UPDATE requests SET practice_code = ?, dropbox_url = ?, payment_status = NULL, confirmation_date = NULL WHERE id = ?")
+       ->execute([$newName, bo_url_from_path($dest), $requestId]);
+    folder_id_save($db, $requestId, $curId);
+    $stRes = bs_set_request_status($db, $requestId, $statusTo, '', '', (int)$userId);
+    if (!$stRes['ok']) $out['warnings'][] = 'Status not set: ' . $stRes['error'];
+    foreach ($ckRows as $ck) {
+        try {
+            $db->prepare("UPDATE ck_folders SET gone = 1 WHERE id = ?")->execute([(int)$ck['id']]);
+            ck_log($db, (int)$ck['id'], 'gone', $ck['folder_name'], $newName, $userId, 'hub', ck_now());
+        } catch (Throwable $e) { error_log('folder_reopen_quote CK: ' . $e->getMessage()); }
+    }
+    timeline_log($requestId, 'folder_relinked', 'Reopened as quote: ' . $curName . ' → ' . $newName,
+                 ['body' => $curPath . "\n→ " . $dest . "\nstatus " . $statusFrom . ' → ' . $statusTo
+                          . ($invoices ? "\ninvoices untouched: " . implode(', ', array_column($invoices, 'number')) : '')]);
+    return $out + ['msg' => '✔ ' . $r['customer_name'] . ': reopened as a quote — ' . $dest . ', status ' . $statusTo . '.'];
 }

@@ -188,11 +188,57 @@ function bg_transition_gated(string $oldName, string $newName): bool {
     return $from === 'PROVISIONAL' && ($to !== 'PROVISIONAL' || (bg_has_ck($newName) && !bg_has_ck($oldName)));
 }
 
-const BG_CANCELLED_MSG = 'A cancelled folder can only go back to PROGRESS.';
+const BG_CANCELLED_MSG = 'A cancelled folder can only go back to PROGRESS, or to the inquiry root as a quote '
+                       . '(/<year>/<Customer>(<Agency>-<Agent>), request not Booked — reopen_cancelled / "Reopen as quote").';
 
-/** _CANCELLED → anything but PROGRESS (or still cancelled): refused by rule (Roberto, 13 Nov 2026; provisional handoff rule 4). */
-function bg_cancelled_move_refused(string $oldName, string $newName): bool {
-    return bg_tag($oldName) === 'CANCELLED' && !in_array(bg_tag($newName), ['CANCELLED', 'PROGRESS'], true);
+/**
+ * _CANCELLED → anything but PROGRESS (or still cancelled): refused by rule (Roberto, 13 Nov 2026; provisional handoff rule 4).
+ * Exception (Roberto, 17 Nov 2026; Spagnoletto, request 2837): a reopen as a quote — see bg_reopen_quote_ok(). Needs the
+ * request row $r and the destination path; without them (callers that only know names) the rule stays as it was.
+ */
+function bg_cancelled_move_refused(string $oldName, string $newName, ?array $r = null, string $destPath = ''): bool {
+    if (bg_tag($oldName) !== 'CANCELLED' || in_array(bg_tag($newName), ['CANCELLED', 'PROGRESS'], true)) return false;
+    return !($r !== null && bg_reopen_quote_ok($r, $newName, $destPath));
+}
+
+/** Hub statuses a cancelled booking may be reopened as a quote from / to (never Booked). */
+const BG_REOPEN_STATUSES = ['Cancelled', 'Quoted', 'Hot-Quoted', 'Inquiry'];
+
+/** Inquiry roots (DROPBOX_BASE_PATH and the next year): ['/2026', '/2027']. Never /001_Safari. */
+function bg_inquiry_roots(): array {
+    $base  = defined('DROPBOX_BASE_PATH') ? rtrim(DROPBOX_BASE_PATH, '/') : '/' . date('Y');
+    $roots = [$base];
+    if (preg_match('#^/(\d{4})$#', $base, $m)) $roots[] = '/' . ((int)$m[1] + 1);
+    return $roots;
+}
+
+/**
+ * The inquiry form of a folder name (FOLDER_NAMING.md): <CustomerPart>(<Agency>-<Agent>) — no MM_DDMON_ prefix, no
+ * START / END, no status tag, no _CK. E.g. "GaiaSpagnoletto(Anderson-Drct)".
+ */
+function bg_is_inquiry_name(string $name): bool {
+    $name = trim($name);
+    if (!preg_match('/^[^()\/]+\([^()\/]+-[^()\/]+\)$/', $name)) return false;
+    if (preg_match('/^\d{1,2}_\d{1,2}[A-Za-z]{3}_/', $name)) return false;
+    if (preg_match('/_(START|END|MIDT)\d/i', $name) || preg_match('/_(CK|CONFIRMED)(?=_|$)/i', $name)) return false;
+    return bg_tag($name) === '';
+}
+
+/**
+ * A cancelled private booking reopened as a quote: allowed out of _CANCELLED without a status tag when all hold —
+ *  1. the destination ($destPath, ending in $newName) is under an inquiry root (bg_inquiry_roots(), not /001_Safari);
+ *  2. $newName is the inquiry form (bg_is_inquiry_name());
+ *  3. the request is not a group and its Hub status is Cancelled / Quoted / Hot-Quoted / Inquiry (never Booked).
+ */
+function bg_reopen_quote_ok(array $r, string $newName, string $destPath): bool {
+    if (bg_is_group($r) || !in_array((string)($r['status'] ?? ''), BG_REOPEN_STATUSES, true)) return false;
+    if (!bg_is_inquiry_name($newName)) return false;
+    $dest = rtrim(str_replace('\\', '/', trim($destPath)), '/');
+    if ($dest === '' || strpos($dest, '/../') !== false || strcasecmp(basename($dest), trim($newName)) !== 0) return false;
+    foreach (bg_inquiry_roots() as $root) {
+        if (stripos($dest, $root . '/') === 0) return true;
+    }
+    return false;
 }
 
 /** Group folders are out of scope v1: GRP member / group parent, Il Diamante / Panorama, GRUPPO. */
@@ -1748,14 +1794,17 @@ function bg_reason(array $st): string {
  * Not a gated move (or a group): allowed. Gated and not allowed: refused when BOOKING_GATE_ENFORCE, else allowed with
  * a warning (shadow mode). Unless $dry, a refused attempt with no usable run starts one (its booking lines go to
  * $userId) and is written in the timeline.
+ * $opt['dest_path']: the folder's Dropbox path after the change (callers that can move it out of /001_Safari into an
+ * inquiry root: re-link, reopen_cancelled) — lets a cancelled booking reopen as a quote (bg_reopen_quote_ok()).
  * → ['gated', 'allowed', 'enforced', 'refused', 'reason', 'state', 'run_id', 'blocking' [], 'queued']
  */
-function booking_gate_check(PDO $db, int $rid, string $oldName, string $newName, ?int $userId, string $via = 'status_change', bool $dry = false): array {
+function booking_gate_check(PDO $db, int $rid, string $oldName, string $newName, ?int $userId, string $via = 'status_change', bool $dry = false, array $opt = []): array {
     $out = ['gated' => false, 'allowed' => true, 'enforced' => bg_enforce(), 'refused' => false, 'reason' => '', 'state' => null, 'run_id' => null, 'blocking' => [], 'queued' => false];
-    // A cancelled private folder can only go back to PROGRESS (rule, not check: refused even with a passed run, in any mode).
+    // A cancelled private folder can only go back to PROGRESS (rule, not check: refused even with a passed run, in any mode),
+    // or to the inquiry root as a quote.
     if (bg_cancelled_move_refused($oldName, $newName)) {
         $r = bg_request($db, $rid);
-        if ($r && !bg_is_group($r)) {
+        if ($r && !bg_is_group($r) && bg_cancelled_move_refused($oldName, $newName, $r, (string)($opt['dest_path'] ?? ''))) {
             return ['gated' => true, 'allowed' => false, 'refused' => true, 'state' => 'cancelled_rule', 'reason' => BG_CANCELLED_MSG] + $out;
         }
     }

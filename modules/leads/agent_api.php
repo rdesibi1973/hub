@@ -101,7 +101,7 @@ function agent_audit(PDO $db, string $action, $reqId, array $payload, string $re
                               'iti_create_personal', 'iti_update_program', 'iti_update_day', 'iti_publish', 'iti_final_from_calc', 'iti_save_alias', 'iti_tag_sample', 'iti_alias_decide',
                               'iti_create_lodge', 'iti_set_days', 'iti_add_day', 'iti_delete_day', 'iti_update_inclusions', 'iti_update_standard_inclusion',
                               'iti_create_flight_route', 'iti_create_activity', 'iti_create_transfer_route', 'iti_update_transfer_route', 'iti_save_as_sample',
-                              'create_request', 'add_flight_rates', 'timeline_update', 'summary_set', 'rename_folder',
+                              'create_request', 'add_flight_rates', 'timeline_update', 'summary_set', 'rename_folder', 'reopen_cancelled',
                               'set_request_status', 'update_request', 'import_group_folder', 'move_group_folder', 'ck_request_check', 'memo_delete', 'create_agency', 'update_agency', 'save_agency_contact', 'delete_agency_contact',
                               'followup_scan', 'followup_update', 'followup_upsert', 'staff_mail_save_eml', 'staff_mail_reply', 'drafts_cleanup', 'iti_update_activity', 'sales_response_dismiss',
                               'ck_set_owners', 'ck_set_group_closed', 'ck_findings_upsert', 'iti_create_destination', 'iti_import_program', 'iti_supplier_blocklist', 'predeparture_email',
@@ -2112,7 +2112,8 @@ try {
         // Out of _PROGRESS: the booking check must have passed (booking_gate_service.php) — 409 also on the dry run, like _CK.
         if (!$v['is_group'] && !$go) {   // the confirmed rename is checked again inside folder_rename()
             require_once __DIR__ . '/includes/booking_gate_service.php';
-            $gate = booking_gate_check($db, (int)$r['id'], (string)$v['folder'], $v['new_name'], null, 'api', true);
+            $gate = booking_gate_check($db, (int)$r['id'], (string)$v['folder'], $v['new_name'], null, 'api', true,
+                                       ['dest_path' => fs_dest_path($v)]);
             if ($gate['gated']) $out['booking_gate'] = $gate;
             if ($gate['refused']) agent_fail(booking_gate_message($gate), 409, $out);
             if ($gate['gated'] && !in_array($gate['state'], ['passed', 'overridden'], true)) $out['warnings'][] = $gate['reason'];
@@ -2137,6 +2138,34 @@ try {
         else              $out['dropbox_path_old'] = $res['dropbox_path_old'];
         if ($withFiles) { $out['files_renamed'] = $res['files_renamed']; $out['files_failed'] = $res['files_failed']; }
         agent_out(array_merge(['ok' => true, 'dry_run' => false, 'renamed' => true, 'message' => $res['msg']], $out));
+    }
+
+    // ── reopen_cancelled ─────────────────────────────────────────────────────
+    // A cancelled private booking comes back as a quote: folder /001_Safari/…_CANCELLED → /<year>/<Customer>(<Agency>-<Agent>),
+    // status Quoted (or Hot-Quoted / Inquiry), payment_status / confirmation_date cleared — folder_reopen_quote()
+    // (includes/folder_service.php, shared with the request page "Reopen as quote"). current_path: folder already moved by hand.
+    // Invoices / Booking follow-up never touched (warnings). Dry-run unless "confirm": true.
+    case 'reopen_cancelled': {
+        agent_require_method('POST');
+        $r  = agent_request($db, $in['request_id'] ?? 0);
+        $go = !empty($in['confirm']);
+        require_once __DIR__ . '/dropbox_helper.php';
+        try {
+            $res = folder_reopen_quote($db, (int)$r['id'], [
+                'status' => (string)($in['status'] ?? ''), 'new_name' => (string)($in['new_name'] ?? ''),
+                'year' => (int)($in['year'] ?? 0), 'current_path' => (string)($in['current_path'] ?? ''),
+            ], $go, (int)$agentUser['id']);
+        } catch (Throwable $e) {
+            agent_fail('Dropbox error — nothing was changed: ' . $e->getMessage(), 502);
+        }
+        if (!$res['ok']) {
+            $code = (int)$res['code']; $err = $res['error'];
+            unset($res['ok'], $res['code'], $res['error']);
+            agent_fail($err, $code, $res);
+        }
+        $msg = $res['msg']; unset($res['msg']);
+        if (!$go) $msg .= ' Resend with "confirm": true to reopen it.';
+        agent_out(array_merge(['ok' => true, 'dry_run' => !$go, 'message' => $msg], $res));
     }
 
     // ── find_invoices ────────────────────────────────────────────────────────
@@ -3889,7 +3918,7 @@ try {
         agent_fail('Unknown action "' . $agentAction . '"', 400, ['actions' => [
             'find_requests', 'list_agencies', 'create_agency', 'update_agency', 'save_agency_contact', 'delete_agency_contact', 'create_request', 'update_request', 'import_group_folder', 'move_group_folder', 'list_standard_programs',
             'copy_program', 'get_rates', 'fill_calc', 'read_calc', 'booking_check', 'gate_status', 'gate_run', 'confirm_preview', 'confirm_booking', 'send_booking_email',
-            'rollback_booking', 'iti_programs', 'iti_texts', 'iti_save_texts', 'update_rate', 'replace_flight_rates',
+            'rollback_booking', 'reopen_cancelled', 'iti_programs', 'iti_texts', 'iti_save_texts', 'update_rate', 'replace_flight_rates',
             'iti_lodges', 'iti_lodge', 'iti_destinations', 'iti_destination', 'iti_lodge_photos', 'iti_destination_photo',
             'iti_update_lodge', 'iti_update_destination', 'iti_create_lodge', 'iti_samples', 'iti_program', 'iti_document', 'iti_vouchers', 'iti_create_personal', 'iti_update_program',
             'iti_update_day', 'iti_publish', 'iti_calc_plan', 'iti_final_from_calc', 'iti_save_alias', 'iti_aliases', 'iti_tag_sample',

@@ -31,7 +31,7 @@ without driving the web UI.
 | HTTPS only | Plain HTTP → 403. |
 | Rate limit | 60 calls/min → 429. |
 | Audit | Every call (including failures and dry-runs) → `agent_audit_log` (action, request_id, user, HTTP code, dry_run, payload, result, IP). |
-| Dry-run by default | `update_request`, `confirm_booking`, `send_booking_email`, `rollback_booking`, `rename_folder`, `import_group_folder`, `move_group_folder`, `set_request_status`, `cancel_invoice_payment`, `cancel_invoice`, `restore_invoice`, `update_folder_status`, `import_zoho_invoice`, `create_invoice`, `update_invoice`, `send_invoice_email`, `memo_delete`, `create_agency`, `update_agency`, `save_agency_contact`, `delete_agency_contact`, `mail_send`, `mail_move`, `ck_request_check`, `ck_set_owners`, `ck_findings_upsert`, `followup_scan`, `followup_update`, `followup_upsert`, `staff_mail_save_eml`, `staff_mail_reply`, `drafts_cleanup`, `folder_ids_backfill`, `folders_orphans` (memo) and `archive_cancelled` (among others) do nothing unless the body has `"confirm": true`. |
+| Dry-run by default | `update_request`, `confirm_booking`, `send_booking_email`, `rollback_booking`, `rename_folder`, `reopen_cancelled`, `import_group_folder`, `move_group_folder`, `set_request_status`, `cancel_invoice_payment`, `cancel_invoice`, `restore_invoice`, `update_folder_status`, `import_zoho_invoice`, `create_invoice`, `update_invoice`, `send_invoice_email`, `memo_delete`, `create_agency`, `update_agency`, `save_agency_contact`, `delete_agency_contact`, `mail_send`, `mail_move`, `ck_request_check`, `ck_set_owners`, `ck_findings_upsert`, `followup_scan`, `followup_update`, `followup_upsert`, `staff_mail_save_eml`, `staff_mail_reply`, `drafts_cleanup`, `folder_ids_backfill`, `folders_orphans` (memo) and `archive_cancelled` (among others) do nothing unless the body has `"confirm": true`. |
 | No deletes | No delete endpoint (mail included), except `memo_delete`, which is soft (`deleted_at`, the row stays). Undo a confirm with `rollback_booking` (or BackOffice → Rollback). |
 | Mailbox | The key also reads `info@` (`mail_*`): keep `api.txt` as private as the mailbox password. |
 
@@ -367,8 +367,13 @@ to that user. Documents already read (same Dropbox `content_hash`) are never sen
   private folder leaving `_PROVISIONAL` for any other status** (a payment tag, no tag, `_CK` added — also from the CK tracker)
   except `_CANCELLED`; **toward `_PROGRESS` is always free, from any status** (Roberto, 13 Nov 2026) → **409 also on the dry run** (`booking_gate` in the body) unless the latest run is `passed` and not
   out of date (Calc or evidence changed since) or `overridden`. **A `_CANCELLED` private folder can only go back to `_PROGRESS`**:
-  any other move is refused by rule (409, "A cancelled folder can only go back to PROGRESS."), even with a passed check. Same refusal on every Hub path (BackOffice Rename / Change status,
-  invoice "Update Folder", request edit form). The Java BackOffice endpoints (`api_rename_folder.php`, `api_update_status.php`)
+  any other move is refused by rule (409, `state: cancelled_rule`, "A cancelled folder can only go back to PROGRESS, or to the inquiry root as a quote …"), even with a passed check. Same refusal on every Hub path (BackOffice Rename / Change status,
+  invoice "Update Folder", request edit form). **Exception — reopen as a quote** (Roberto, 17 Nov 2026; request 2837): `_CANCELLED` →
+  no status tag is allowed when all hold: (1) the destination is under an inquiry root (`DROPBOX_BASE_PATH` = `/2026`, or the next
+  year), not `/001_Safari`; (2) the new name is the inquiry form `<Customer>(<Agency>-<Agent>)` (no `MM_DDMON_` prefix, START / END,
+  status tag or `_CK`); (3) the request is not a group and its Hub status is `Cancelled`, `Quoted`, `Hot-Quoted` or `Inquiry` (never
+  `Booked`). Only the paths that know the destination apply it: `rename_folder` / BackOffice Rename with `current_path` (re-link of a
+  folder already moved into `/2026`) and `reopen_cancelled` / request page "Reopen as quote" (`bg_reopen_quote_ok()`). The Java BackOffice endpoints (`api_rename_folder.php`, `api_update_status.php`)
   rename on disk first: they cannot refuse — timeline + memo to Roberto + a run started (`booking_gate_warning`).
   A refused attempt with no usable run starts one. Later moves (DEPOSIT → BALANCE → PAID) are not gated. Groups are not gated (v1).
 - **Enforced** since 13 Nov 2026 (Roberto: block from day one). `define('BOOKING_GATE_ENFORCE', false)` in includes/config.php
@@ -485,6 +490,9 @@ A private folder from `_PROGRESS` to `_DEPOSIT` / `_BALANCE` / `_BALANCE-CASH` /
   A re-link whose suffix makes the request **Booked** (it was not) also sets `confirmation_date` = today (if empty)
   and `start_date` from the name — warning "Booked via re-link: no confirm snapshot, Rollback not available".
   The timeline event is "Folder re-linked" with `relinked from <stored path>`.
+  A cancelled booking already moved by hand into `/2026` re-links with `current_path` + `new_name` = its inquiry name
+  (e.g. `/2026/GaiaSpagnoletto(Anderson-Drct)`): allowed by the gate's reopen-as-quote exception (§ Booking gate) when the
+  request is not Booked; the status is untouched (no tag). `reopen_cancelled` does the whole thing in one step.
 - **`rename_files: true`** — also renames the files inside (recursive, e.g. `old/`) named `NN_<old>…`
   (`<old>` = the stored name, the folder's current name, or the customer part of either) to
   `NN_<customer part of new_name>…` — e.g. the `_Calc.xlsx` and Word copied by `copy_program`. The customer part
@@ -530,6 +538,35 @@ BackOffice → **Rename…**: when the folder is not found, the form reopens wit
 (and the candidates); "Folder moved outside the Hub?" opens it directly. Checkbox = `rename_files`.
 Since 13 Nov 2026 the folder is first looked up by its Dropbox id (below), so `current_path` is only needed for
 requests whose id is not stored yet.
+
+### `reopen_cancelled` (POST)
+A cancelled private booking comes back as a new quote (the client asks again): one step instead of move + re-link + status
+by hand (Roberto, 17 Nov 2026). Shared code: `includes/folder_service.php` `folder_reopen_quote()`, also the request page
+button **↩ Reopen as quote** (Cancelled requests, admin / manager or the seller).
+`request_id`*, `status` (`Quoted` default | `Hot-Quoted` | `Inquiry`), `new_name` (default: the inquiry form of the current
+name — `MM_DDMON_`, `_START…`, status tag and `_CK` dropped: `09_28SEP_GaiaSpagnoletto(Anderson-Drct)_START28SEP_END02OCT2026_CANCELLED`
+→ `GaiaSpagnoletto(Anderson-Drct)`), `year` (inquiry root; default the trip year when it is `/2026` or `/2027`, else
+`DROPBOX_BASE_PATH`), `current_path` (the folder's real path when it was already moved by hand), `confirm`.
+
+- The folder is found like every reader: stored path → Dropbox id (self-heal) → search by name (also inside
+  `/001_Safari/00_CANCELED/**`), or `current_path` (under `/2026`, `/2027` or `/001_Safari`, no other request on it).
+- **Refused (409, nothing changed):** request Booked; group (GRP member / group parent); status other than Cancelled / Quoted /
+  Hot-Quoted / Inquiry; not cancelled (by folder name or status) and no `current_path` under the inquiry root; destination
+  already exists; folder not found (`candidates[]`). 400: bad `status` / `year` / `current_path`, `new_name` not the inquiry form.
+- **Dry run** → `from`, `stored_path`, `to`, `new_name`, `moved`, `status_from` / `status_to`, `payment_status_from`,
+  `confirmation_date_from`, `invoices[{number, status, currency, total, balance_due}]`, `followup_open` (open Booking follow-up
+  lines), `ck_rows[]` (active CK tracker rows), `warnings[]` — every invoice not Cancelled is a warning (e.g. SE-2026-0578 for
+  request 2837): **invoices and follow-up lines are never touched**.
+- **`"confirm": true`** → Dropbox move (the folder keeps its id), `practice_code`, `dropbox_url`, `dropbox_id`; `payment_status`
+  and `confirmation_date` cleared (the confirm snapshot and the history stay); status set (`bs_set_request_status`, timeline
+  `status_change` when it changes); active CK tracker rows marked gone; timeline `folder_relinked` "Reopened as quote: <from> → <to>".
+
+```bash
+curl -sA "Mozilla/5.0 (compatible; SavannahHubAgent/1.0)" -H "$H" -X POST "$U?action=reopen_cancelled" -d '{"request_id":2837}'   # dry run
+# folder already moved by hand into /2026
+curl -sA "Mozilla/5.0 (compatible; SavannahHubAgent/1.0)" -H "$H" -X POST "$U?action=reopen_cancelled" \
+     -d '{"request_id":2837,"current_path":"/2026/GaiaSpagnoletto(Anderson-Drct)","confirm":true}'
+```
 
 ### Folder link by Dropbox id
 `requests.dropbox_id` (migration 082) = the folder's Dropbox id (`id:…`), which **never changes on move or rename**.

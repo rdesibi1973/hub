@@ -28,7 +28,10 @@ Channel suffixes: `Drct` (direct), `SB`, `LAM`, `PS`. When the last dash-separat
 
 Structural conventions:
 - GRP folders always live under `/001_Safari/`.
-- Unconfirmed bookings live under `/2026/`.
+- Unconfirmed bookings live under `/2026/` (inquiry form `<CustomerPart>(<Agency>-<Agent>)`: no `MM_DDMON_` prefix, no START / END, no status tag, no `_CK`).
+- Cancelled bookings carry `_CANCELLED` and are archived in `/001_Safari/00_CANCELED/00_<year>/`. A cancelled booking that comes back
+  as a new quote goes back to `/<year>/<CustomerPart>(<Agency>-<Agent>)` (Agent API `reopen_cancelled`, request page "Reopen as quote";
+  the booking gate allows `_CANCELLED` → no tag only in this form, under the inquiry root, for a request that is not Booked).
 
 ---
 
