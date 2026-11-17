@@ -13,11 +13,13 @@
  *   destination_id | destination (name or code), destination_custom,
  *   start_lodge_id, start_destination_id, start_custom, transfer_route_id, transfer_custom,
  *   meal_breakfast / meal_lunch / meal_dinner / meal_all_inclusive (0/1),
- *   transfers  [ {transfer_route_id, game_drive?} | "Dar airport – Serena Hotel, 40 min" | {description, text_<lang>?} … ]
+ *   transfers  [ {transfer_route_id, game_drive?, own_arrangement?} | "Dar airport – Serena Hotel, 40 min" | {description, text_<lang>?, own_arrangement?} … ]
  *              (replaces the day's list; a catalogue route prints its label in every language; an unchanged
  *              free text keeps its translations)
  *   activities [ {activity_id} | {activity: "<name>"} | {custom: "<text>", text_<lang>?: "<translation>"} … ]
- *   flights    [ {flight_route_id | custom, airline?, dep?: "07:40", arr?: "10:05", note_<lang>?} … ]
+ *   flights    [ {flight_route_id | custom, airline?, dep?: "07:40", arr?: "10:05", note_<lang>?, own_arrangement?} … ]
+ *              own_arrangement: 1 = booked by the clients (printed "own arrangement, not included — our services
+ *              resume on arrival", no voucher)
  */
 
 /** Day columns an agent may set (limited to the live table). */
@@ -88,12 +90,12 @@ function iti_pb_day_item(PDO $db, array $f): array {
             if (is_array($t) && !empty($t['transfer_route_id'])) {
                 $rid = (int)$t['transfer_route_id'];
                 if (!isset($routes[$rid]) || empty($routes[$rid]['is_active'])) throw new InvalidArgumentException('transfer_route_id ' . $rid . ' not found or inactive (iti_transfer_routes)');
-                $tr[] = ['route' => $rid, 'game_drive' => empty($t['game_drive']) ? 0 : 1];
+                $tr[] = ['route' => $rid, 'game_drive' => empty($t['game_drive']) ? 0 : 1, 'own_arrangement' => empty($t['own_arrangement']) ? 0 : 1];
                 continue;
             }
             $txt = trim(is_array($t) ? (string)($t['description'] ?? $t['text'] ?? '') : (string)$t);
             if ($txt === '') continue;
-            $row = ['description' => mb_substr($txt, 0, 255), 'tr' => []];
+            $row = ['description' => mb_substr($txt, 0, 255), 'tr' => [], 'own_arrangement' => is_array($t) && !empty($t['own_arrangement']) ? 1 : 0];
             // {"description": "…", "text_en": "…"}: translations given with the transfer
             if (is_array($t)) foreach (ITI_TEXT_LANGS as $l) if (trim((string)($t['text_' . $l] ?? '')) !== '') $row['tr'][$l] = mb_substr(trim((string)$t['text_' . $l]), 0, 500);
             $tr[] = $row;
@@ -143,6 +145,7 @@ function iti_pb_day_item(PDO $db, array $f): array {
                 $row[$col] = $t . ':00';
             }
             foreach (ITI_PS_LANGS as $l) if (isset($x['note_' . $l])) $row['note_' . $l] = trim((string)$x['note_' . $l]);
+            if (!empty($x['own_arrangement'])) $row['own_arrangement'] = 1;   // booked by the clients (iti_oa_text(); column from iti_ps_schema())
             $fl[] = $row;
         }
         $children['flights'] = $fl;
@@ -271,9 +274,11 @@ function iti_pb_days_raw(PDO $db, int $pid): array {
         $q = $db->prepare('SELECT * FROM iti_day_transfers WHERE program_day_id = ? ORDER BY sort_order, id'); $q->execute([$id]);
         $row['transfers'] = [];
         foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $t) {
-            $row['transfers'][] = !empty($t['transfer_route_id'])
+            $x = !empty($t['transfer_route_id'])
                 ? ['transfer_route_id' => (int)$t['transfer_route_id'], 'game_drive' => (int)($t['game_drive'] ?? 0), 'description' => $t['description']]
                 : $t['description'];
+            if (!empty($t['own_arrangement'])) $x = (is_array($x) ? $x : ['description' => $x]) + ['own_arrangement' => 1];
+            $row['transfers'][] = $x;
         }
         $q = $db->prepare('SELECT a.*, x.name_en AS activity_name FROM iti_day_activities a LEFT JOIN iti_activities x ON x.id = a.activity_id WHERE a.program_day_id = ? ORDER BY a.sort_order, a.id'); $q->execute([$id]);
         $row['activities'] = [];
@@ -290,6 +295,7 @@ function iti_pb_days_raw(PDO $db, int $pid): array {
             if (!empty($fl['flight_no'])) $x['flight_no'] = $fl['flight_no'];
             if ($fl['departure_time']) $x['dep'] = substr($fl['departure_time'], 0, 5);
             if ($fl['arrival_time']) $x['arr'] = substr($fl['arrival_time'], 0, 5);
+            if (!empty($fl['own_arrangement'])) $x['own_arrangement'] = 1;
             $row['flights'][] = $x;
         }
         $out[] = $row;

@@ -251,10 +251,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // transfer_route_id[] (same rows): "<route>" / "<route>:g" = from the transfer list, '' = free text.
                 $tr_items = [];
                 $tr_rids  = array_values((array)($_POST['transfer_route_id'] ?? []));
+                $tr_oa    = array_values((array)($_POST['transfer_oa'] ?? []));   // "Own arr." (0|1), same rows
                 foreach (array_values((array)($_POST['transfer_desc'] ?? [])) as $i => $txt) {
                     $rid = trim((string)($tr_rids[$i] ?? ''));
-                    if (preg_match('/^(\d+)(:g)?$/', $rid, $rm) && isset(iti_tr_routes($db)[(int)$rm[1]])) $tr_items[] = ['route' => (int)$rm[1], 'game_drive' => !empty($rm[2]) ? 1 : 0];
-                    else $tr_items[] = (string)$txt;
+                    $oa  = !empty($tr_oa[$i]) ? 1 : 0;
+                    if (preg_match('/^(\d+)(:g)?$/', $rid, $rm) && isset(iti_tr_routes($db)[(int)$rm[1]])) $tr_items[] = ['route' => (int)$rm[1], 'game_drive' => !empty($rm[2]) ? 1 : 0, 'own_arrangement' => $oa];
+                    else $tr_items[] = $oa ? ['description' => (string)$txt, 'own_arrangement' => 1] : (string)$txt;
                 }
                 iti_transfers_replace($db, $day_id, $tr_items);
 
@@ -307,6 +309,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $fl_dep_m   = $_POST['dep_m']            ?? [];
                 $fl_arr_h   = $_POST['arr_h']            ?? [];
                 $fl_arr_m   = $_POST['arr_m']            ?? [];
+                $fl_oa      = array_values((array)($_POST['flight_oa'] ?? []));   // "Own arr." (0|1); column from iti_tr_schema() (transfers above)
                 foreach (array_values($fl_routes) as $i => $fid) {
                     $fid  = (int)$fid;
                     $cust = trim($fl_customs[$i] ?? '');
@@ -323,12 +326,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             break;
                         }
                     }
-                    $cols = array_merge(['program_day_id','flight_route_id','flight_custom','airline_company','flight_no','departure_time','arrival_time','sort_order'], array_keys($notes));
+                    $cols = array_merge(['program_day_id','flight_route_id','flight_custom','airline_company','flight_no','departure_time','arrival_time','sort_order','own_arrangement'], array_keys($notes));
                     $db->prepare('INSERT INTO iti_day_flights (`' . implode('`,`', $cols) . '`) VALUES (' . implode(',', array_fill(0, count($cols), '?')) . ')')->execute(array_merge([
                         $day_id, $fid ?: null, $cust ?: null,
                         trim($fl_airline[$i] ?? '') ?: null,
                         mb_substr(strtoupper(trim($fl_no[$i] ?? '')), 0, 20) ?: null,
-                        $dep, $arr, $i+1,
+                        $dep, $arr, $i+1, !empty($fl_oa[$i]) ? 1 : 0,
                     ], array_values($notes)));
                 }
 
@@ -684,6 +687,14 @@ $transfer_map    = iti_transfer_routes_map();
 $flight_map      = iti_flight_routes_map();
 // Transfer list of the day editor: catalogue routes labelled in the programme language (iti_transfer_service.php).
 $tr_lang = in_array($program['display_language'] ?? '', ITI_LANGS, true) ? $program['display_language'] : 'it';
+
+/** "Own arr." box of a transfer / flight row: a hidden <name> (0|1) kept on the same row index as the other arrays. */
+function iti_oa_toggle(string $name, bool $on): string {
+    return '<label class="oa-tog" title="Own arrangement: booked by the clients. Printed as &quot;own arrangement, not included — our services resume on arrival&quot;; no voucher."'
+         . ' style="display:inline-flex;align-items:center;gap:4px;font-size:.72rem;color:var(--grey-dk);white-space:nowrap;cursor:pointer;">'
+         . '<input type="checkbox"' . ($on ? ' checked' : '') . ' onchange="this.nextElementSibling.value=this.checked?\'1\':\'0\'" style="accent-color:var(--red);">'
+         . '<input type="hidden" name="' . h($name) . '" value="' . ($on ? '1' : '0') . '">Own arr.</label>';
+}
 $tr_route_opts = [];
 foreach (iti_tr_routes_list($db) as $_r) {
     $_lab = $_r['labels'][$tr_lang] ?: ($_r['from_name'] . ' – ' . $_r['to_name']);
@@ -1385,6 +1396,7 @@ include __DIR__ . '/../../includes/layout_header.php';
             <div class="iti-combo-drop" data-opts='<?= $tr_opts_json ?>' data-no-clear="1"></div>
           </div>
           <span class="tr-kind" title="<?= $_rid !== '' ? 'From the transfer list: printed in every language' : 'Free text: needs a translation for each language' ?>" style="font-size:.7rem;color:var(--grey-mid);white-space:nowrap;"><?= $_rid !== '' ? '📋 list' : '✎ free text' ?></span>
+          <?= iti_oa_toggle('transfer_oa[]', !empty($tr['own_arrangement'])) ?>
           <button type="button" class="btn btn-danger btn-sm" onclick="this.closest('.array-row').remove()">✕</button>
         </div>
         <?php endforeach; ?>
@@ -1658,6 +1670,7 @@ include __DIR__ . '/../../includes/layout_header.php';
             <?php foreach ($mins as $m): ?><option value="<?= $m ?>" <?= $arr_m===$m?'selected':'' ?>><?= $m ?></option><?php endforeach; ?>
           </select>
         </div>
+        <?= iti_oa_toggle('flight_oa[]', !empty($fl['own_arrangement'])) ?>
       </div>
       <button type="button" class="btn btn-danger btn-sm" onclick="this.closest('.array-row').remove()">✕</button>
     </div>
@@ -2067,6 +2080,19 @@ function makeCombo(inputAttrs, hiddenName, hiddenVal, opts, noId, routeIdName) {
     return wrap;
 }
 
+// "Own arr." box of a new transfer / flight row (same markup as iti_oa_toggle() in PHP).
+function makeOaToggle(name) {
+    var lab = document.createElement('label');
+    lab.className = 'oa-tog';
+    lab.title = 'Own arrangement: booked by the clients. Printed as "own arrangement, not included — our services resume on arrival"; no voucher.';
+    lab.style.cssText = 'display:inline-flex;align-items:center;gap:4px;font-size:.72rem;color:var(--grey-dk);white-space:nowrap;cursor:pointer;';
+    var cb = document.createElement('input'); cb.type = 'checkbox'; cb.style.accentColor = 'var(--red)';
+    var hid = document.createElement('input'); hid.type = 'hidden'; hid.name = name; hid.value = '0';
+    cb.onchange = function(){ hid.value = cb.checked ? '1' : '0'; };
+    lab.appendChild(cb); lab.appendChild(hid); lab.appendChild(document.createTextNode('Own arr.'));
+    return lab;
+}
+
 function addTransferRow(dayId) {
     var row = document.createElement('div');
     row.className = 'array-row';
@@ -2079,7 +2105,7 @@ function addTransferRow(dayId) {
     var btn = document.createElement('button');
     btn.type = 'button'; btn.className = 'btn btn-danger btn-sm'; btn.textContent = '✕';
     btn.onclick = function(){ this.closest('.array-row').remove(); };
-    row.appendChild(combo); row.appendChild(kind); row.appendChild(btn);
+    row.appendChild(combo); row.appendChild(kind); row.appendChild(makeOaToggle('transfer_oa[]')); row.appendChild(btn);
     document.getElementById('transfer-rows-' + dayId).appendChild(row);
     row.querySelector('.iti-combo-text').focus();
 }
@@ -2155,6 +2181,7 @@ function addFlightRow(dayId) {
     var timeWrap = document.createElement('div'); timeWrap.style.cssText='display:flex;align-items:center;gap:3px;';
     timeWrap.appendChild(depWrap); timeWrap.appendChild(arrow); timeWrap.appendChild(arrWrap);
     info.appendChild(timeWrap);
+    info.appendChild(makeOaToggle('flight_oa[]'));
     var btn = document.createElement('button');
     btn.type='button'; btn.className='btn btn-danger btn-sm'; btn.textContent='✕';
     btn.onclick=function(){ this.closest('.array-row').remove(); };

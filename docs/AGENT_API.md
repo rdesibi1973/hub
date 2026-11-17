@@ -881,6 +881,11 @@ pick from the lodge's `room_categories` when it has them; printed as written in 
   `flight_no` and the times go on the flight voucher and on the transfer to / from the airport that day.
 `iti_program` returns `structure[]`: the stored days in this same shape (with ids), to edit and send back.
 Flights are shown on the day (magazine, Word) as "✈ Dar Es Salaam → Ruaha · Auric Air · 07:40–10:05".
+**Own arrangement (17 Nov 2026):** `own_arrangement: 1` on a transfer (`{transfer_route_id, own_arrangement}` or
+`{description, own_arrangement}`) or a flight = booked by the clients. Every document (web, PDF, Word, guide sheet) prints the
+route followed by "own arrangement, not included — our services resume on arrival" (5 languages, `iti_oa_text()`); such a
+transfer gives no transfer time to the day, and vouchers leave the row out. `structure[]` returns the flag (a free-text
+transfer with it comes back as `{description, own_arrangement: 1}`). Hub editor: the "Own arr." box on each transfer / flight row.
 
 #### `iti_create_personal` without a sample
 No `sample_id` = blank program for a trip with no matching sample: `fields.title_<display_language>` and `days[]`
@@ -1039,6 +1044,11 @@ a hotel is warned ("no departure day"). The generation also refuses (nothing sav
 dates stay required. The program then has `pax_open` 1, safari type group, no participants, no room types and no total: only the price list per person (adult, teen and
 child with discount, single supplement). Regenerate without it when the group is final.
 **Day trip:** a day added from the Calc in the same lodge as the night before keeps its route when the route starts where the lodge is (Karatu → Lake Eyasi, lodge in Karatu); the day text is then the description of the place reached.
+**Activity of the place (17 Nov 2026):** a day added from the Calc whose Calc activities include a catalogue activity tied to
+the day's destination (or to the place reached on a day trip) gets that activity's description as day text, not the
+destination's (which the documents already print in the destination box). The Calc "crater" fee maps to the activity
+"Ngorongoro Crater game drive" (destination NCA): a crater day added from the Calc then tells the descent into the crater. A
+game drive tied to a place also replaces the day's plain "Fotosafari" / "Game drive" line (a sample day keeps its text).
 **Seller:** the program goes under the request's seller (`seller` in the plan = username; pass `seller` for another active one), in `created_by`;
 who generates it stays in `generated_by`, so someone can finalise programs for other sellers.
 

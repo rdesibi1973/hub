@@ -289,7 +289,7 @@ include __DIR__ . '/../../includes/layout_header.php';
         <div class="label">🚌 Transfer</div>
         <div class="val">
           <?php foreach ($day_transfers as $tr): ?>
-          <div style="margin-bottom:4px;"><?= h($tr['description'] ?? '') ?></div>
+          <div style="margin-bottom:4px;"><?= h($tr['description'] ?? '') ?><?php if (!empty($tr['own_arrangement'])): ?> <span style="opacity:.7;">(Own Arrangement)</span><?php endif; ?></div>
           <?php endforeach; ?>
         </div>
       </div>

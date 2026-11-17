@@ -28,7 +28,9 @@ function iti_tr_schema(PDO $db): void {
     $done = true;
     $want = [
         'iti_transfer_routes' => ['via_destination' => 'INT UNSIGNED NULL DEFAULT NULL'],
-        'iti_day_transfers'   => ['transfer_route_id' => 'INT UNSIGNED NULL DEFAULT NULL', 'game_drive' => 'TINYINT(1) NOT NULL DEFAULT 0'],
+        'iti_day_transfers'   => ['transfer_route_id' => 'INT UNSIGNED NULL DEFAULT NULL', 'game_drive' => 'TINYINT(1) NOT NULL DEFAULT 0',
+                                  'own_arrangement' => 'TINYINT(1) NOT NULL DEFAULT 0'],
+        'iti_day_flights'     => ['own_arrangement' => 'TINYINT(1) NOT NULL DEFAULT 0'],   // iti_oa_text() (17 Nov 2026)
     ];
     foreach (ITI_TR_LANGS as $l) $want['iti_transfer_routes']['label_' . $l] = 'VARCHAR(255) NULL DEFAULT NULL';
     foreach ($want as $table => $cols) {
@@ -119,6 +121,20 @@ function iti_tr_game_drive_text(string $lang): string {
 }
 
 /**
+ * Own-arrangement flight / transfer (own_arrangement = 1 on the iti_day_flights / iti_day_transfers row,
+ * 17 Nov 2026): the clients book it themselves. The documents print the route followed by this text;
+ * vouchers leave the row out.
+ */
+function iti_oa_text(string $lang): string {
+    $t = ['it' => 'a cura dei clienti, non incluso — i nostri servizi riprendono all’arrivo',
+          'en' => 'own arrangement, not included — our services resume on arrival',
+          'fr' => 'à la charge des clients, non inclus — nos services reprennent à l’arrivée',
+          'es' => 'por cuenta de los clientes, no incluido — nuestros servicios se reanudan a la llegada',
+          'de' => 'in Eigenregie, nicht inbegriffen — unsere Leistungen beginnen wieder bei der Ankunft'];
+    return $t[$lang] ?? $t['en'];
+}
+
+/**
  * Label of route $route (row or id) in $lang → ['text', 'duration' (time phrase, '' with a game drive),
  * 'missing' => [destination ids without a name in $lang]]. label_<lang> wins when written; otherwise
  * the short place names (from – via – to) and the duration. Never another language: a place without
@@ -167,6 +183,13 @@ function iti_tr_labels(PDO $db, $route, bool $gameDrive = false): array {
  * programme language ($srcLang); a free text not translated into $lang prints nothing and is reported.
  */
 function iti_tr_row_text(PDO $db, array $t, string $lang, string $srcLang): array {
+    $r = iti_tr_row_text_base($db, $t, $lang, $srcLang);
+    // Own arrangement: "<route> · own arrangement, not included — …", no transfer time for the day.
+    if (!empty($t['own_arrangement']) && $r['text'] !== '') { $r['text'] .= ' · ' . iti_oa_text($lang); $r['duration'] = ''; }
+    return $r;
+}
+
+function iti_tr_row_text_base(PDO $db, array $t, string $lang, string $srcLang): array {
     $rid = (int)($t['transfer_route_id'] ?? 0);
     if ($rid && isset(iti_tr_routes($db)[$rid])) {
         $L = iti_tr_label($db, $rid, $lang, !empty($t['game_drive']));

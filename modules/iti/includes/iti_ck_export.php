@@ -144,7 +144,7 @@ function iti_ck_program_data(PDO $db, array $p, int $requestId, string $clientFo
             $to   = trim((string)($f['to_airport'] ?? ''));
             if ($from === '' && $to === '') continue;
             $flights[] = ['date' => $date($d), 'airline' => trim((string)($f['airline_company'] ?? '')) ?: trim((string)($f['operator'] ?? '')),
-                          'from' => $from, 'to' => $to];
+                          'from' => $from, 'to' => $to, 'own_arrangement' => !empty($f['own_arrangement'])];   // booked by the clients
         }
     }
 

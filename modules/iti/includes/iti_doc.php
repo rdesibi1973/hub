@@ -395,7 +395,7 @@ function iti_doc_data(int $id, string $lang): ?array {
                 if (!in_array($dn, $missing[$key]['days'], true)) $missing[$key]['days'][] = $dn;
             }
             if ($tr['text'] === '') continue;
-            if (!$transfers) $trDur = $tr['duration'] !== '' ? $tr['duration'] : iti_doc_duration($tr['text']);
+            if (!$transfers && empty($t['own_arrangement'])) $trDur = $tr['duration'] !== '' ? $tr['duration'] : iti_doc_duration($tr['text']);
             $transfers[] = $tr['text'];
         }
         $flights = [];
@@ -409,6 +409,7 @@ function iti_doc_data(int $id, string $lang): ?array {
             if ($air !== '') $parts[] = $air;
             $t = trim(substr((string)$f['departure_time'], 0, 5) . ($f['arrival_time'] ? '–' . substr((string)$f['arrival_time'], 0, 5) : ''), '–');
             if ($t !== '') $parts[] = $t;
+            if (!empty($f['own_arrangement'])) $parts[] = iti_oa_text($lang);   // booked by the clients (iti_transfer_service.php)
             $note = trim((string)($f['note_' . $lang] ?? ''));
             if ($note !== '') $parts[] = $note;
             $flights[] = implode(' · ', $parts);

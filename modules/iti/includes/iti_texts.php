@@ -52,6 +52,7 @@ function iti_transfers_schema(PDO $db): void {
  * Replace the transfers of a day. $items: "text" or ['description' => text, 'tr' => [lang => translation]]
  * or ['route' => transfer_route_id, 'game_drive' => 0|1] (catalogue transfer: `description` = its label
  * in the programme language, no translations — the documents print the route label of their language).
+ * Any array item may carry 'own_arrangement' => 1 (booked by the clients, iti_oa_text()).
  * A free-text transfer whose text is unchanged keeps its translations (the editor and the API rewrite the whole list).
  */
 function iti_transfers_replace(PDO $db, int $dayId, array $items): void {
@@ -86,6 +87,7 @@ function iti_transfers_replace(PDO $db, int $dayId, array $items): void {
         $desc = trim(is_array($it) ? (string)($it['description'] ?? '') : (string)$it);
         if ($desc === '') continue;
         $row = ['program_day_id' => $dayId, 'description' => mb_substr($desc, 0, 255), 'sort_order' => ++$n];
+        if (is_array($it) && !empty($it['own_arrangement'])) $row['own_arrangement'] = 1;   // booked by the clients (iti_oa_text())
         if (is_array($it) && !empty($it['route'])) {
             $row['transfer_route_id'] = (int)$it['route'];
             $row['game_drive'] = empty($it['game_drive']) ? 0 : 1;

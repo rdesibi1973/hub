@@ -556,6 +556,29 @@ function iti_final_same_kind(array $a, array $b): bool {
     return (bool)array_intersect_key($words($a), $words($b));
 }
 
+/** A plain game drive line with nothing else in it: "Fotosafari", "Game drive", "Safari photo", "Pirschfahrt". */
+function iti_final_plain_drive(string $text): bool {
+    return (bool)preg_match('/^\s*(foto ?safari|game ?drives?|safari ?photos?|safari fotogr[aá]fico|pirschfahrt(en)?)\s*\.?\s*$/iu', $text);
+}
+
+/**
+ * Text of a day added from the Calc (not in the sample) that has an activity of its own place: the
+ * description of the first Calc activity tied to the day's destination (e.g. "Ngorongoro Crater game
+ * drive" on a Ngorongoro day: the descent into the crater), '' when none — the caller then uses the
+ * destination's description. Activity descriptions are not printed elsewhere in the documents.
+ */
+function iti_final_activity_day_text(PDO $db, array $acts, $destId, string $lang): string {
+    if (!$destId || !in_array($lang, ITI_LANGUAGES, true)) return '';
+    $st = $db->prepare('SELECT description_' . $lang . ' FROM iti_activities WHERE id = ? AND destination_id = ?');
+    foreach ($acts as $a) {
+        if (empty($a['activity_id'])) continue;
+        $st->execute(array((int)$a['activity_id'], (int)$destId));
+        $t = trim((string)$st->fetchColumn());
+        if ($t !== '' && !(function_exists('iti_is_placeholder_text') && iti_is_placeholder_text($t))) return $t;   // iti_terms.php
+    }
+    return '';
+}
+
 /** Who a program can be put under: active Hub users tied to a seller, [username => full name]. */
 function iti_final_sellers(PDO $db): array {
     $st = $db->prepare('SELECT username, full_name FROM users WHERE agent_id IS NOT NULL AND is_active = 1 AND username <> ? ORDER BY full_name');
@@ -1307,8 +1330,11 @@ function iti_final_generate(PDO $db, int $requestId, array $calc, int $sampleId,
                 if ($d['dest_id']) $vals['destination_id'] = $d['dest_id'];
                 foreach (ITI_LANGUAGES as $l) { $vals['day_title_' . $l] = ''; $vals['narrative_' . $l] = ''; }
                 $vals['day_title_' . $lang] = mb_substr($d['label'], 0, 200);
-                $vals['narrative_' . $lang] = $excursion ? ($destDesc((int)$trip['to_id']) ?: iti_final_stay_text($lang, false))
-                                            : ($stay ? iti_final_stay_text($lang, $isBeach($d['dest_id'])) : $destDesc($d['dest_id']));
+                // A day with an activity of its own place (the crater game drive): that activity's text, not the area's.
+                $actText = iti_final_activity_day_text($db, $d['acts'], $excursion ? (int)$trip['to_id'] : $d['dest_id'], $lang);
+                $vals['narrative_' . $lang] = $actText !== '' ? $actText
+                                            : ($excursion ? ($destDesc((int)$trip['to_id']) ?: iti_final_stay_text($lang, false))
+                                            : ($stay ? iti_final_stay_text($lang, $isBeach($d['dest_id'])) : $destDesc($d['dest_id'])));
                 $vals['program_id'] = $newId;
                 $vals = array_intersect_key($vals, array_flip($dayCols));
                 $db->prepare('INSERT INTO iti_program_days (`' . implode('`,`', array_keys($vals)) . '`) VALUES ('
@@ -1340,17 +1366,22 @@ function iti_final_generate(PDO $db, int $requestId, array $calc, int $sampleId,
             $sort = count($have);
             foreach ($d['acts'] as $a) {
                 if (!$a['activity_id']) continue;
-                $an = $db->prepare('SELECT name_en, name_it FROM iti_activities WHERE id = ?');
+                $an = $db->prepare('SELECT name_en, name_it, activity_type, destination_id FROM iti_activities WHERE id = ?');
                 $an->execute(array($a['activity_id']));
-                $names = array_filter(array_map('mb_strtolower', array_values($an->fetch(PDO::FETCH_ASSOC) ?: array())));
+                $ar = $an->fetch(PDO::FETCH_ASSOC) ?: array();
+                $names = array_filter(array_map('mb_strtolower', array((string)($ar['name_en'] ?? ''), (string)($ar['name_it'] ?? ''))));
                 $names[] = $a['text'];
+                // A game drive tied to a place (the crater game drive, from the Calc "crater" fee) takes the place of the
+                // day's plain "Fotosafari" / "Game drive" line instead of being listed next to it.
+                $placeDrive = ($ar['activity_type'] ?? '') === 'game_drive' && !empty($ar['destination_id']);
                 $dup = false; $same = null;
                 foreach ($have as $k => $h) {
                     if ((int)$h['activity_id'] === $a['activity_id']) { $dup = true; break; }
                     $txt = mb_strtolower((string)$h['activity_custom']);
                     foreach ($names as $nm) { if ($nm !== '' && $txt !== '' && strpos($txt, $nm) !== false) { $dup = true; break 2; } }
                     if ($same === null && !empty($h['id'])
-                        && iti_final_same_kind($names, array($h['activity_custom'], $h['name_en'], $h['name_it']))) $same = $k;
+                        && (iti_final_same_kind($names, array($h['activity_custom'], $h['name_en'], $h['name_it']))
+                            || ($placeDrive && iti_final_plain_drive((string)($h['activity_id'] ? $h['name_en'] : $h['activity_custom']))))) $same = $k;
                 }
                 if ($dup) continue;
                 if ($same !== null) {   // the sample's texts of the old activity go too

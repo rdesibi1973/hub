@@ -157,6 +157,7 @@ function voucher_model_from_program(PDO $db, int $pid): array
         $day = $date((int)$d['day_number']);
         $fltSt->execute([(int)$d['id']]);
         foreach ($fltSt->fetchAll(PDO::FETCH_ASSOC) as $f) {
+            if (!empty($f['own_arrangement'])) continue;   // booked by the clients: no voucher
             $dep = voucher_prog_airport($f['from_airport'] ?? '', $f['from_code'] ?? '');
             $arr = voucher_prog_airport($f['to_airport'] ?? '', $f['to_code'] ?? '');
             if (!$f['flight_route_id']) { list($dep, $arr) = voucher_prog_split_transfer((string)$f['flight_custom']); }
@@ -169,7 +170,8 @@ function voucher_model_from_program(PDO $db, int $pid): array
         $dayFlights = array_values(array_filter($flights, function ($f) use ($day) { return $f['date'] === $day; }));
         $hasFlight = (bool)$dayFlights;
         foreach (iti_get_day_transfers((int)$d['id']) as $tr) {
-            $txt = trim((string)($tr['description_en'] ?? '')) ?: trim((string)$tr['description']);
+            if (!empty($tr['own_arrangement'])) continue;   // booked by the clients: no voucher
+            $txt =trim((string)($tr['description_en'] ?? '')) ?: trim((string)$tr['description']);
             if ($txt === '') continue;
             list($from, $to) = voucher_prog_split_transfer($txt);
             if ($to === '') $warn[] = voucher_fmt_date($day) . ': transfer "' . $txt . '" — pick-up and drop-off not separated (written "A – B").';
