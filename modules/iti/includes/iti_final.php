@@ -402,6 +402,7 @@ function iti_final_sample_days(PDO $db, int $sampleId): array {
         }
         $rows[$k]['title'] = $title;
         $rows[$k]['places'] = iti_final_places($text);
+        $rows[$k]['start_place'] = iti_final_first_place(iti_final_places($title));   // where the day leaves from (its title)
         $rows[$k]['lodge_text'] = null;
         $txt = trim((string)$r['end_lodge_custom']);
         if ($r['end_lodge_id'] || $txt === '') continue;
@@ -457,9 +458,15 @@ function iti_final_places(string $text): array {
         'Masai Mara'    => '/\bma+sai mara\b/u',
     );
     $t = mb_strtolower($text, 'UTF-8');
-    $out = array();
-    foreach ($areas as $area => $re) if (preg_match($re, $t)) $out[$area] = true;
-    return $out;
+    $out = array(); $at = array();
+    foreach ($areas as $area => $re) if (preg_match($re, $t, $m, PREG_OFFSET_CAPTURE)) { $out[$area] = true; $at[$area] = $m[0][1]; }
+    asort($at);   // in the order of the text: the first one is where the day starts (iti_final_first_place())
+    return array_intersect_key(array_replace($at, $out), $out);
+}
+
+/** Where a day starts: the first place named in its label / title ("Serengeti Kogatende-Arusha" → Serengeti), '' none. */
+function iti_final_first_place(array $places): string {
+    return $places ? (string)array_key_first($places) : '';
 }
 
 /** Two place sets (iti_final_places()) that both name places and share none. */
@@ -480,17 +487,21 @@ function iti_final_match_sample(PDO $db, array $planDays, array $sampleDays): ar
     foreach ($planDays as $d) {
         $li = $d['lodge_id'] ? iti_final_lodge_info($db, (int)$d['lodge_id']) : null;
         $ka[] = array('l' => $d['lodge_id'], 'd' => $d['dest_id'], 'end' => $d['last'] && $d['hotel_text'] === '',
-                      'geo' => $li ? iti_final_geo($li) : null, 'p' => iti_final_places((string)$d['label']));
+                      'geo' => $li ? iti_final_geo($li) : null, 'p' => iti_final_places((string)$d['label']),
+                      's' => iti_final_first_place(iti_final_places((string)$d['label'])));
     }
     $m = count($sampleDays);
     foreach ($sampleDays as $j => $s) {
         $kb[] = array('l' => $s['end_lodge_id'] ? (int)$s['end_lodge_id'] : null,
                       'd' => $s['destination_id'] ? (int)$s['destination_id'] : null,
                       'end' => !$s['end_lodge_id'] && $j === $m - 1,
-                      'geo' => iti_final_geo($s), 'p' => $s['places'] ?? array());
+                      'geo' => iti_final_geo($s), 'p' => $s['places'] ?? array(), 's' => $s['start_place'] ?? '');
     }
     $score = function ($x, $y) {
-        if ($x['end'] && $y['end']) return iti_final_places_clash($x['p'], $y['p']) ? 0 : 2;
+        // Departure days: they must leave from the same place ("Serengeti Kogatende-Arusha" never takes the
+        // sample's "Karatu-Arusha-Kilimanjaro", although both name Arusha).
+        if ($x['end'] && $y['end']) return iti_final_places_clash($x['p'], $y['p'])
+                                        || ($x['s'] !== '' && $y['s'] !== '' && $x['s'] !== $y['s']) ? 0 : 2;
         if ($x['l'] && $x['l'] === $y['l']) return 2;
         if ($x['d'] && $x['d'] === $y['d']) return 1;
         if ($x['geo'] && $y['geo'] && iti_haversine($x['geo'][0], $x['geo'][1], $y['geo'][0], $y['geo'][1]) <= ITI_FINAL_NEAR_KM) return 1;
@@ -1111,7 +1122,8 @@ function iti_final_plan(PDO $db, array $calc, int $sampleId): array {
         $lastS = $sampleDays ? $sampleDays[count($sampleDays) - 1] : null;
         $lastC = $days ? $days[count($days) - 1] : null;
         if ($lastS && $lastC && $lastC['sample_index'] === null && $lastC['hotel_text'] === '' && !$lastS['end_lodge_id']
-            && iti_final_places_clash(iti_final_places((string)$lastC['label']), $lastS['places'])) {
+            && (iti_final_places_clash(iti_final_places((string)$lastC['label']), $lastS['places'])
+                || (($cs = iti_final_first_place(iti_final_places((string)$lastC['label']))) !== '' && ($lastS['start_place'] ?? '') !== '' && $cs !== $lastS['start_place']))) {
             $days[count($days) - 1]['flags'][] = 'Departure not taken from the sample: its last day “' . $lastS['title'] . '” leaves from '
                 . implode(', ', array_keys($lastS['places'])) . ', the Calc “' . $lastC['label'] . '” from '
                 . implode(', ', array_keys(iti_final_places((string)$lastC['label']))) . '.';
@@ -1326,7 +1338,9 @@ function iti_final_generate(PDO $db, int $requestId, array $calc, int $sampleId,
                 // text is already shown in the day's destination block), unless it is a day trip.
                 $stay = $d['lodge_id'] && $d['lodge_id'] === $prevLodge;
                 $trip = ($d['route'] && $d['route']['transfer_route_id']) ? ($routeName($d['route']['transfer_route_id']) ?: null) : null;
-                $excursion = $stay && iti_final_is_day_trip($trip, (int)$d['dest_id']);
+                // The second night under the same Calc label ("Serengeti-Northern" twice) only repeats the arrival day's route.
+                $sameLabel = $i > 0 && iti_alias_norm((string)$plan['days'][$i - 1]['label']) === iti_alias_norm((string)$d['label']);
+                $excursion = $stay && !$sameLabel && iti_final_is_day_trip($trip, (int)$d['dest_id']);
                 if ($d['dest_id']) $vals['destination_id'] = $d['dest_id'];
                 foreach (ITI_LANGUAGES as $l) { $vals['day_title_' . $l] = ''; $vals['narrative_' . $l] = ''; }
                 $vals['day_title_' . $lang] = mb_substr($d['label'], 0, 200);
@@ -1348,8 +1362,14 @@ function iti_final_generate(PDO $db, int $requestId, array $calc, int $sampleId,
                     iti_transfers_replace($db, $dayId, array($tr));
                 }
                 if (!$stay && $d['route'] && $d['route']['flight_route_id']) {
-                    $db->prepare('INSERT INTO iti_day_flights (program_day_id, flight_route_id, sort_order) VALUES (?,?,1)')
-                       ->execute(array($dayId, $d['route']['flight_route_id']));
+                    // No flight cost in the Calc that day: the clients book it (own arrangement), flagged for review.
+                    $oaFlight = !($d['flight_cost'] !== null && $d['flight_cost'] > 0);
+                    $db->prepare('INSERT INTO iti_day_flights (program_day_id, flight_route_id, sort_order, own_arrangement) VALUES (?,?,1,?)')
+                       ->execute(array($dayId, $d['route']['flight_route_id'], $oaFlight ? 1 : 0));
+                    if ($oaFlight) {
+                        $db->prepare('UPDATE iti_program_days SET review_note = ? WHERE id = ?')
+                           ->execute(array('Added from the Calc (not in the sample): check title, text and meals. Flight set as own arrangement (no flight cost in the Calc).', $dayId));
+                    }
                 }
             } else {
                 $dayId = (int)$copied[$d['sample_index']]['id'];

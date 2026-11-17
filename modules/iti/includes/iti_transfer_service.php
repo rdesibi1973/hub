@@ -125,13 +125,15 @@ function iti_tr_game_drive_text(string $lang): string {
  * 17 Nov 2026): the clients book it themselves. The documents print the route followed by this text;
  * vouchers leave the row out.
  */
-function iti_oa_text(string $lang): string {
-    $t = ['it' => 'a cura dei clienti, non incluso — i nostri servizi riprendono all’arrivo',
-          'en' => 'own arrangement, not included — our services resume on arrival',
-          'fr' => 'à la charge des clients, non inclus — nos services reprennent à l’arrivée',
-          'es' => 'por cuenta de los clientes, no incluido — nuestros servicios se reanudan a la llegada',
-          'de' => 'in Eigenregie, nicht inbegriffen — unsere Leistungen beginnen wieder bei der Ankunft'];
-    return $t[$lang] ?? $t['en'];
+function iti_oa_text(string $lang, bool $resume = true): string {
+    $t = ['it' => ['a cura dei clienti, non incluso', 'i nostri servizi riprendono all’arrivo'],
+          'en' => ['own arrangement, not included', 'our services resume on arrival'],
+          'fr' => ['à la charge des clients, non inclus', 'nos services reprennent à l’arrivée'],
+          'es' => ['por cuenta de los clientes, no incluido', 'nuestros servicios se reanudan a la llegada'],
+          'de' => ['in Eigenregie, nicht inbegriffen', 'unsere Leistungen beginnen wieder bei der Ankunft']];
+    $x = $t[$lang] ?? $t['en'];
+    // The last day of the program: nothing resumes after it.
+    return $resume ? $x[0] . ' — ' . $x[1] : $x[0];
 }
 
 /**
@@ -182,10 +184,10 @@ function iti_tr_labels(PDO $db, $route, bool $gameDrive = false): array {
  * Linked → the route label; free text → description_<lang>, else `description` only when $lang is the
  * programme language ($srcLang); a free text not translated into $lang prints nothing and is reported.
  */
-function iti_tr_row_text(PDO $db, array $t, string $lang, string $srcLang): array {
+function iti_tr_row_text(PDO $db, array $t, string $lang, string $srcLang, bool $lastDay = false): array {
     $r = iti_tr_row_text_base($db, $t, $lang, $srcLang);
     // Own arrangement: "<route> · own arrangement, not included — …", no transfer time for the day.
-    if (!empty($t['own_arrangement']) && $r['text'] !== '') { $r['text'] .= ' · ' . iti_oa_text($lang); $r['duration'] = ''; }
+    if (!empty($t['own_arrangement']) && $r['text'] !== '') { $r['text'] .= ' · ' . iti_oa_text($lang, !$lastDay); $r['duration'] = ''; }
     return $r;
 }
 

@@ -387,8 +387,9 @@ function iti_doc_data(int $id, string $lang): ?array {
         // Catalogue transfer → the route label in $lang; free text → its translation in $lang, the text itself
         // only in the programme language. Missing → not printed, listed in missing_texts (iti_transfer_service.php).
         $transfers = []; $trDur = '';
+        $isLastDay = $dn === (int)($days[count($days) - 1]['day_number'] ?? 0);   // own arrangement on the last day: no "our services resume" (iti_oa_text())
         foreach (iti_get_day_transfers((int)$d['id']) as $t) {
-            $tr = iti_tr_row_text($db, $t, $lang, $srcLang);
+            $tr = iti_tr_row_text($db, $t, $lang, $srcLang, $isLastDay);
             foreach ($tr['missing'] as $m) {
                 $key = $m['type'] . '|' . $m['id'] . '|' . $m['field'];
                 if (!isset($missing[$key])) $missing[$key] = $m + ['days' => []];
@@ -409,7 +410,7 @@ function iti_doc_data(int $id, string $lang): ?array {
             if ($air !== '') $parts[] = $air;
             $t = trim(substr((string)$f['departure_time'], 0, 5) . ($f['arrival_time'] ? '–' . substr((string)$f['arrival_time'], 0, 5) : ''), '–');
             if ($t !== '') $parts[] = $t;
-            if (!empty($f['own_arrangement'])) $parts[] = iti_oa_text($lang);   // booked by the clients (iti_transfer_service.php)
+            if (!empty($f['own_arrangement'])) $parts[] = iti_oa_text($lang, !$isLastDay);   // booked by the clients (iti_transfer_service.php)
             $note = trim((string)($f['note_' . $lang] ?? ''));
             if ($note !== '') $parts[] = $note;
             $flights[] = implode(' · ', $parts);

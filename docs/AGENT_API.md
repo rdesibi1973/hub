@@ -883,7 +883,8 @@ pick from the lodge's `room_categories` when it has them; printed as written in 
 Flights are shown on the day (magazine, Word) as "✈ Dar Es Salaam → Ruaha · Auric Air · 07:40–10:05".
 **Own arrangement (17 Nov 2026):** `own_arrangement: 1` on a transfer (`{transfer_route_id, own_arrangement}` or
 `{description, own_arrangement}`) or a flight = booked by the clients. Every document (web, PDF, Word, guide sheet) prints the
-route followed by "own arrangement, not included — our services resume on arrival" (5 languages, `iti_oa_text()`); such a
+route followed by "own arrangement, not included — our services resume on arrival" (5 languages, `iti_oa_text()`; on the
+program's last day only "own arrangement, not included"); such a
 transfer gives no transfer time to the day, and vouchers leave the row out. `structure[]` returns the flag (a free-text
 transfer with it comes back as `{description, own_arrangement: 1}`). Hub editor: the "Own arr." box on each transfer / flight row.
 
@@ -1049,6 +1050,12 @@ the day's destination (or to the place reached on a day trip) gets that activity
 destination's (which the documents already print in the destination box). The Calc "crater" fee maps to the activity
 "Ngorongoro Crater game drive" (destination NCA): a crater day added from the Calc then tells the descent into the crater. A
 game drive tied to a place also replaces the day's plain "Fotosafari" / "Game drive" line (a sample day keeps its text).
+**Departure day (17 Nov 2026):** the Calc's last day takes the sample's departure day only when both leave from the same
+place — the first place of the Calc label vs the first place of the sample day's title ("Serengeti Kogatende-Arusha" never
+takes "Karatu-Arusha-Kilimanjaro", although both name Arusha); otherwise it is added from the Calc (its route alias needed).
+A flight added from a route alias on a day with no flight cost in the Calc is saved as **own arrangement** and the day is
+flagged for review. A second night under the same Calc label ("Serengeti-Northern" twice) is never a day trip: no transfer
+and no destination text that day.
 **Seller:** the program goes under the request's seller (`seller` in the plan = username; pass `seller` for another active one), in `created_by`;
 who generates it stays in `generated_by`, so someone can finalise programs for other sellers.
 
