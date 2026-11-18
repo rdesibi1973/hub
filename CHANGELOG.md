@@ -20,6 +20,19 @@ Running log of notable changes and current build state. Module-level "active / p
 
 ---
 
+## 2026-11-18 — rename_folder: GRP member re-link touches the member only
+
+- Bug: `rename_folder` with `current_path` on a GRP member treated the member sub-folder as the group parent — `group_folder`
+  set to the member name, member doubled in `dropbox_url`, every request of the old `group_folder` rewritten (#2799 ended on
+  #2844's folder). Five requests needed a data fix.
+- `folder_service.php`: `scope` (`member` default for a member / `group`), `fs_rename_plan()` computes every write once —
+  dry run `affected[]` = what the confirm writes; after the write each path is checked, else rolled back (409
+  `verify_failed`). A group-scope path inside a booking folder, or a member folder outside a group folder, is refused.
+  BackOffice → Rename… on a group row stays group-scoped.
+- `folder_link_service.php`: `fl_member_find()` — a GRP member without id whose parent was renamed is healed as real parent
+  + own name (nightly `folders_orphans` included); `fl_link_set()` keeps a member's `group_folder` on the request page /
+  bulk re-link. Test: `tools/tests/folder_rename_group_test.php`.
+
 ## 2026-11-15 — Credit notes no longer reopen the invoice balance; archive_cancelled skips 00_ folders
 
 - A credit note was recorded on its invoice as a **negative payment**: a fully paid invoice went back to Partially Paid

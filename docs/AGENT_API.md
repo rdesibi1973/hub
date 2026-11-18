@@ -475,9 +475,30 @@ other members.
 
 ### `rename_folder` (POST)
 Free rename of the booking folder — the same as BackOffice → **Rename…** (shared code:
-`includes/folder_service.php`, `folder_rename()`). For a group the **group parent** (`group_folder`) is
-renamed and every request of the group is updated. No email is sent (unlike Reschedule).
-`request_id`*, `new_name`*, `current_path`, `rename_files`, `confirm`.
+`includes/folder_service.php`, `folder_rename()`). No email is sent (unlike Reschedule).
+`request_id`*, `new_name`*, `current_path`, `scope`, `rename_files`, `confirm`.
+
+- **`scope` — GRP members** (request with `group_folder` and its own sub-folder, `practice_code` ≠ `group_folder`).
+  Since 18 Nov 2026 (a member re-link used to rename / rewrite the whole group):
+  - `"member"` — **the default for a member**: only that request's own sub-folder. `current_path` = the member
+    sub-folder (e.g. `/001_Safari/<group folder>/BrunoPizi_GRP2710(HTSViaggi-Daniela)_PAID`). Writes `practice_code` =
+    `new_name`, `group_folder` = the real parent's name (basename of the parent of `current_path`), `dropbox_url` =
+    parent/`new_name`, `dropbox_id`; renamed on disk only when `new_name` ≠ its basename. When the parent's real name
+    differs from the stored `group_folder` (renamed by hand), the **other members of that same stored group** follow
+    (`group_folder` + path) only when their own sub-folder is found inside that parent (by name, and their id when they
+    have one); the others are left as they are and listed in `skipped[]`. Refused (409) when the member folder is not
+    inside a group folder (e.g. directly in `/001_Safari`). Message: "Member … re-linked".
+  - `"group"` — the shared **group parent** (`group_folder`) is renamed and every request of the group is updated (status
+    only; each client keeps its payment status). `current_path` = the parent folder; a path inside another booking folder
+    (a member sub-folder) is refused (409). BackOffice → Rename… on a group row always works this way.
+  - Without `scope`, a member whose `new_name` starts with the group's `MM_DDMON_` prefix → 400 (it meant the group:
+    pass `"scope":"group"`). A private request takes no `scope` (400); an imported group / group parent request without
+    its own sub-folder is always `"group"`. The response carries the resolved `scope`.
+- **`affected[]`** (dry run and confirm, the same list — `fs_rename_plan()`): every request the confirm writes,
+  `{id, customer_name, folder_from, folder_to, group_folder_from, group_folder_to, dropbox_url_from, dropbox_url_to}`
+  (+ `status_from/_to`, `payment_status_from/_to` when the suffix sets them). `skipped[]` `{id, customer_name, folder, reason}`.
+- **Check after the write**: each touched request must store the planned path and names, and the renamed folder must exist
+  in Dropbox; otherwise the DB is put back (and a Dropbox rename undone) → 409 with `verify_failed[]` — no half-done re-link.
 A private folder from `_PROGRESS` to `_DEPOSIT` / `_BALANCE` / `_BALANCE-CASH` / `_PAID` goes through the booking gate
 (§ Booking gate): 409 with `booking_gate` while the check has not passed, also on the dry run.
 
@@ -581,7 +602,12 @@ and the URL of **every member**. Timeline `folder_relinked` "Folder auto-relinke
 on each request changed. The status is **never** changed by the suffix: when the new name says something else than
 the Hub (`_CANCELLED` while Booked, `_DEPOSIT` while payment empty …) → `warnings[]` + a memo for Roberto
 (`ext_key folder-status:<request_id>`). Id unknown to Dropbox (deleted) → clear error "Folder deleted or not
-reachable", never a guess by name. No id stored and path gone → the old fallback (search by name). One resolution
+reachable", never a guess by name. No id stored and path gone: a **GRP member** is looked for as `<real group
+parent>/<its own folder name>` — the parent found through another member of the same `group_folder` that has an id, else
+by the group code (`GRPddmm`) in a Dropbox search under `/001_Safari`; exactly one match, else nothing (the usual case:
+the parent renamed by hand, e.g. `_BALANCE` → `_PAID_CK`; the whole group then follows by path). Otherwise the old
+fallback (search by name). The request page Re-link / ✎ Pick manually and the bulk page set only that request: a GRP
+member picked inside a group folder also gets that folder's name as `group_folder` (`fl_link_set()`). One resolution
 per request per call. Readers wired: Calc read / fill (`read_calc`, `fill_calc`, `booking_check`), passports,
 `iti_document` / `iti_vouchers` save and the ref number, `mail_attachment` / `staff_mail_attachment` save,
 `copy_program`, `confirm_*` (current path), `rename_folder`, payment-tag renames, invoice Update Folder, postpone,

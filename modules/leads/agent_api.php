@@ -2057,12 +2057,15 @@ try {
     // Free rename of the booking folder, same as BackOffice "Rename…" (includes/folder_service.php):
     // Dropbox + Hub (name, URL, status from the suffix) + CK tracker + timeline. No email.
     // current_path: re-link a folder moved outside the Hub; rename_files: also the NN_<name>… files.
+    // scope (GRP member): 'member' (default: its own sub-folder, this request only) | 'group' (the parent + all members).
+    // affected[]: every request written, the same on the dry run and the confirm (fs_rename_plan()).
     // Dry-run (paths, status, warnings) unless "confirm": true.
     case 'rename_folder': {
         agent_require_method('POST');
         $r = agent_request($db, $in['request_id'] ?? 0);
         $curIn = trim((string)($in['current_path'] ?? ''));
-        $v = fs_rename_validate($db, (int)$r['id'], (string)($in['new_name'] ?? ''), $curIn);
+        $scopeIn = trim((string)($in['scope'] ?? ''));   // GRP member: 'member' (default, its own sub-folder) | 'group' (the parent)
+        $v = fs_rename_validate($db, (int)$r['id'], (string)($in['new_name'] ?? ''), $curIn, $scopeIn);
         if (!$v['ok']) agent_fail($v['error'], $v['code']);
         $go        = !empty($in['confirm']);
         $withFiles = !empty($in['rename_files']);
@@ -2078,6 +2081,7 @@ try {
             'current'          => $v['folder'],
             'new_name'         => $v['new_name'],
             'is_group'         => $v['is_group'],
+            'scope'            => $v['scope'],
             'relink'           => $v['relink'],
             'status_from_name' => ['matched' => $v['set_status'], 'status' => $v['status'],
                                    // a group tag sets the status only: each client keeps its payment_status
@@ -2086,8 +2090,10 @@ try {
             'dropbox_path_old' => $pv['dropbox_path_old'],
             'current_path'     => $pv['current_path'],
             'dropbox_path_new' => $pv['dropbox_path_new'],
+            'affected'         => $pv['affected'],   // every request the confirm writes (from → to)
             'warnings'         => $pv['warnings'],
         ];
+        if ($pv['skipped']) $out['skipped'] = $pv['skipped'];
         if ($curIn !== '' && !$v['relink']) $out['warnings'][] = 'current_path equals the stored path — plain rename.';
         // _CK while a booking is still provisional or a group is not closed: refused (409, also on the dry run; no override — ck_pipeline.php).
         // Other open points in Booking follow-up: a warning only.
@@ -2128,12 +2134,15 @@ try {
                            . ($v['relink'] ? 're-link' : 'rename') . ' the folder.'], $out));
         }
         $res = folder_rename($db, (int)$r['id'], $v['new_name'], (int)$agentUser['id'],
-                             ['current_path' => $curIn, 'rename_files' => $withFiles, 'gate_via' => 'api']);
+                             ['current_path' => $curIn, 'scope' => $scopeIn, 'rename_files' => $withFiles, 'gate_via' => 'api']);
         if (!$res['ok']) {
             if (!empty($res['candidates'])) $out['candidates'] = $res['candidates'];
+            if (!empty($res['verify_failed'])) $out['verify_failed'] = $res['verify_failed'];
             agent_fail($res['msg'], $res['code'], $out);
         }
         $out['dropbox_path_new'] = $res['dropbox_path_new'];
+        $out['affected'] = $res['affected'];
+        if ($res['skipped']) $out['skipped'] = $res['skipped']; else unset($out['skipped']);
         if ($v['relink']) $out['current_path'] = $res['dropbox_path_old'];
         else              $out['dropbox_path_old'] = $res['dropbox_path_old'];
         if ($withFiles) { $out['files_renamed'] = $res['files_renamed']; $out['files_failed'] = $res['files_failed']; }

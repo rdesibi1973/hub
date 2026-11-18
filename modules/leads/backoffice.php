@@ -198,8 +198,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array($act, ['change_status', 'r
 
     if ($act === 'rename') {
         // Free rename: validation, Dropbox + DB, CK tracker, timeline — includes/folder_service.php.
+        // The form renames the group parent for a group (prefilled with group_folder, "GROUP:" confirm) → scope group.
         $res = folder_rename($db, $reqId, (string)($_POST['new_name'] ?? ''), (int)($currentUser['id'] ?? 0) ?: null,
-                             ['current_path' => (string)($_POST['current_path'] ?? ''), 'rename_files' => !empty($_POST['rename_files'])]);
+                             ['current_path' => (string)($_POST['current_path'] ?? ''), 'rename_files' => !empty($_POST['rename_files']),
+                              'scope' => ($r && trim((string)($r['group_folder'] ?? '')) !== '') ? 'group' : '']);
         flash($res['msg'], $res['ok'] ? 'info' : 'error');
         // Folder moved outside the Hub: reopen the form with the "Current Dropbox path" field.
         if (!$res['ok'] && (!empty($res['not_found']) || trim((string)($_POST['current_path'] ?? '')) !== '')) {

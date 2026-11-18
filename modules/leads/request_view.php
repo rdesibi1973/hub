@@ -161,10 +161,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             // 2. No id stored yet: search by name (tolerant of name drift).
             $res   = dropbox_relink_find($token, $name);
             if (in_array($res['result'], ['exact','stem','core'], true)) {
-                $newUrl = 'https://www.dropbox.com/home/' . implode('/', array_map('rawurlencode', explode('/', ltrim($res['path'], '/'))));
-                $db->prepare("UPDATE requests SET dropbox_url=? WHERE id=?")->execute([$newUrl, $req_id]);
                 $m = dropbox_get_metadata($token, $res['path']);
-                if ($m) folder_id_save($db, $req_id, $m['id']);
+                fl_link_set($db, $req_id, $res['path'], $m ? (string)$m['id'] : '');   // a GRP member also gets its real group_folder
                 echo json_encode(['ok'=>true, 'path'=>$res['path']]); exit;
             }
             if ($res['result'] === 'ambiguous') {
@@ -266,9 +264,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             $m = dropbox_get_metadata($token, $path);
             if (!$m || $m['tag'] !== 'folder') { echo json_encode(['ok'=>false,'msg'=>'That path does not exist in Dropbox (or is not a folder).']); exit; }
             $path   = $m['path'];
-            $newUrl = 'https://www.dropbox.com/home/' . implode('/', array_map('rawurlencode', explode('/', ltrim($path, '/'))));
-            $db->prepare("UPDATE requests SET dropbox_url=? WHERE id=?")->execute([$newUrl, $req_id]);
-            folder_id_save($db, $req_id, $m['id']);   // the stable link from now on
+            // dropbox_url + its id (the stable link from now on); a GRP member also gets its real group_folder
+            fl_link_set($db, $req_id, $path, (string)$m['id']);
             echo json_encode(['ok'=>true, 'path'=>$path]);
         } catch (Throwable $e) {
             echo json_encode(['ok'=>false,'msg'=>'Error: '.$e->getMessage()]);

@@ -83,10 +83,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'scan'
             // No id stored yet → locate by name (tolerant of status-suffix drift).
             $res = dropbox_relink_find($token, $name);
             if (in_array($res['result'], ['exact','stem','core'], true)) {
-                $newUrl = 'https://www.dropbox.com/home/' . implode('/', array_map('rawurlencode', explode('/', ltrim($res['path'], '/'))));
-                $db->prepare("UPDATE requests SET dropbox_url=? WHERE id=?")->execute([$newUrl, (int)$r['id']]);
                 $m = dropbox_get_metadata($token, $res['path']);
-                if ($m) folder_id_save($db, (int)$r['id'], $m['id']);
+                fl_link_set($db, (int)$r['id'], $res['path'], $m ? (string)$m['id'] : '');   // a GRP member also gets its real group_folder
                 $relinked[] = ['name' => $name, 'path' => $res['path']];
             } elseif ($res['result'] === 'ambiguous') {
                 $ambiguous[] = ['id' => (int)$r['id'], 'name' => $name, 'customer' => $r['customer_name'] ?? '',

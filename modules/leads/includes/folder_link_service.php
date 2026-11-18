@@ -6,7 +6,8 @@
  * (Dropbox web, PC, Java GUI, Claude's Dropbox connector) leaves that path stale. Dropbox folder ids ("id:…") never
  * change on move or rename, so requests.dropbox_id (migration 082) is the anchor:
  *
- *   folder_heal()          every reader of the folder: stored path → else the id → rewrite dropbox_url / practice_code
+ *   folder_heal()          every reader of the folder: stored path → else the id (a GRP member without one: its group's
+ *                          real parent + its own name, fl_member_find()) → rewrite dropbox_url / practice_code
  *                          (and group_folder for the whole group) + timeline event folder_relinked; the suffix of the new
  *                          name never changes the Hub status: a mismatch is a warning + a memo for Roberto.
  *   folder_locate()        read-only variant (no DB write): current path of a request's folder, or null.
@@ -71,6 +72,31 @@ function folder_id_save(PDO $db, int $requestId, string $id): void {
 /** Writers: save the id carried by a create_folder / move answer. Never throws. */
 function folder_id_store(PDO $db, int $requestId, $dropboxRes): void {
     folder_id_save($db, $requestId, folder_id_from_meta($dropboxRes));
+}
+
+/**
+ * Manual / by-name re-link (request page 🔗 Re-link / ✎ Pick manually, bulk Re-link Folders): point request $rid at the
+ * folder at $path (real case) and save its id. A GRP member (group_folder set, its own sub-folder) whose new folder sits
+ * inside a booking folder also takes that parent's name as group_folder and its folder name as practice_code — only this
+ * request, never the rest of the group (group renames go through folder_rename()). Returns the fields written.
+ */
+function fl_link_set(PDO $db, int $rid, string $path, string $id = ''): array {
+    $st = $db->prepare("SELECT practice_code, group_folder FROM requests WHERE id = ?");
+    $st->execute([$rid]);
+    $r = $st->fetch(PDO::FETCH_ASSOC) ?: [];
+    $set = ['dropbox_url' => bo_url_from_path($path)];
+    $gf = trim((string)($r['group_folder'] ?? ''));
+    $pc = trim((string)($r['practice_code'] ?? ''));
+    $parent = rtrim(dirname($path), '/');
+    if ($gf !== '' && $pc !== '' && strcasecmp($pc, $gf) !== 0 && substr_count($parent, '/') >= 2
+        && folder_is_booking_leaf(basename($parent))) {
+        $set['group_folder']  = basename($parent);
+        $set['practice_code'] = basename($path);
+    }
+    $cols = implode(', ', array_map(function ($c) { return $c . ' = ?'; }, array_keys($set)));
+    $db->prepare("UPDATE requests SET $cols WHERE id = ?")->execute(array_merge(array_values($set), [$rid]));
+    if ($id !== '') folder_id_save($db, $rid, $id);
+    return $set;
 }
 
 /** The request row with dropbox_id (callers often select a few columns only). */
@@ -146,6 +172,21 @@ function folder_heal(PDO $db, string $token, array $r): array {
                     folder_id_save($db, $rid, $m['id']);
                     $info['id'] = $upd['dropbox_id'] = $m['id'];
                 }
+            } elseif ($id === '' && ($mf = fl_member_find($db, $token, $r)) !== null) {
+                // GRP member without an id whose group parent was renamed: found as <real parent>/<its own folder name>.
+                $rel = fl_relink($db, $token, $r, $stored, $mf['path']);
+                if ($mf['id'] !== '') { folder_id_save($db, $rid, $mf['id']); $rel['row']['dropbox_id'] = $mf['id']; }
+                $realGf = basename(dirname($mf['path']));
+                if (strcmp((string)($rel['row']['group_folder'] ?? ''), $realGf) !== 0) {   // stored path in another shape: this member at least
+                    $db->prepare("UPDATE requests SET group_folder = ? WHERE id = ?")->execute([$realGf, $rid]);
+                    $rel['row']['group_folder'] = $realGf;
+                }
+                $info['state'] = 'relinked';
+                $info['path'] = $mf['path'];
+                $info['id'] = $mf['id'] !== '' ? $mf['id'] : null;
+                $info['old_path'] = $stored;
+                $info['warnings'] = array_merge(['Found through its group folder ' . dirname($mf['path']) . ' (' . $mf['via'] . ').'], $rel['warnings']);
+                $upd = $rel['row'];
             } elseif ($id === '') {
                 $info['state'] = 'missing';
                 $info['error'] = 'Folder not found at ' . $stored . ' and no Dropbox folder id is stored for this request (run the folder id backfill, or re-link it).';
@@ -171,6 +212,55 @@ function folder_heal(PDO $db, string $token, array $r): array {
     $out = $upd + ['_folder' => $info];
     if ($rid > 0 && $info['state'] !== 'error') $cache[$rid] = $out;
     return array_merge($r, $out);
+}
+
+/**
+ * A GRP member (group_folder set, its own sub-folder practice_code) whose stored path is gone and that has no id: the
+ * most common reason is a group parent renamed by hand (status / dates). Its parent is found
+ *   1. through another member of the same group_folder with an id (its folder's parent, or the folder itself for the
+ *      group parent request), else
+ *   2. by the group code (GRPddmm) in a Dropbox search under CK_BASE,
+ * and the member is that parent + its own folder name. Exactly one match, else null (never a guess). Never throws.
+ * Returns ['path' => member path, 'id' => its folder id, 'via' => text] or null.
+ */
+function fl_member_find(PDO $db, string $token, array $r): ?array {
+    $gf = trim((string)($r['group_folder'] ?? ''));
+    $pc = trim((string)($r['practice_code'] ?? ''));
+    if ($gf === '' || $pc === '' || strcasecmp($pc, $gf) === 0) return null;
+    $try = function (string $parent) use ($token, $pc) {
+        try { $m = dropbox_get_metadata($token, rtrim($parent, '/') . '/' . $pc); } catch (Throwable $e) { return null; }
+        return ($m && $m['tag'] === 'folder') ? $m : null;
+    };
+    try {
+        // 1. A sibling with an id.
+        $st = $db->prepare("SELECT practice_code, dropbox_id FROM requests
+                            WHERE group_folder = ? AND id <> ? AND dropbox_id IS NOT NULL AND dropbox_id <> '' LIMIT 5");
+        $st->execute([$gf, (int)$r['id']]);
+        $parents = [];
+        foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $s) {
+            $ms = dropbox_get_metadata($token, (string)$s['dropbox_id']);
+            if (!$ms || $ms['tag'] !== 'folder') continue;
+            $isParent = strcasecmp(trim((string)$s['practice_code']), $gf) === 0;
+            $parents[fl_lc($isParent ? $ms['path'] : dirname($ms['path']))] = $isParent ? $ms['path'] : dirname($ms['path']);
+        }
+        $hits = [];
+        foreach ($parents as $p) { if ($m = $try($p)) $hits[fl_lc($m['path'])] = $m; }
+        if (count($hits) === 1) { $m = reset($hits); return ['path' => $m['path'], 'id' => (string)$m['id'], 'via' => 'another member\'s folder id']; }
+        if (count($hits) > 1) return null;
+
+        // 2. The group code in the parent's name.
+        if (!preg_match('/GRP\d{3,4}/i', $gf, $gm) || !function_exists('dropbox_search_folders')) return null;
+        $hits = [];
+        foreach (dropbox_search_folders($token, $gm[0], defined('CK_BASE') ? CK_BASE : '/001_Safari', 15) as $h) {
+            $p = (string)($h['path'] ?? '');
+            if ($p === '' || stripos(basename($p), $gm[0]) === false || strcasecmp(basename($p), $pc) === 0) continue;
+            if ($m = $try($p)) $hits[fl_lc($m['path'])] = $m;
+        }
+        if (count($hits) === 1) { $m = reset($hits); return ['path' => $m['path'], 'id' => (string)$m['id'], 'via' => 'group code ' . strtoupper($gm[0])]; }
+    } catch (Throwable $e) {
+        error_log('fl_member_find(' . (int)($r['id'] ?? 0) . '): ' . $e->getMessage());
+    }
+    return null;
 }
 
 /**

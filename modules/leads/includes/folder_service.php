@@ -11,7 +11,10 @@
  *               fs_rename_record()     CK tracker + timeline after a rename
  *
  * A group carries its name on the shared parent folder (group_folder): renaming a
- * group renames that parent and updates every request in it.
+ * group (scope "group") renames that parent and updates every request in it. A GRP member's
+ * own sub-folder is renamed / re-linked alone (scope "member", the default for a member).
+ * fs_rename_plan() computes every DB write once: the dry run shows it (affected[]), the
+ * confirm writes it, then checks it (rolled back on a mismatch).
  *
  * Re-link: a folder moved / renamed outside the Hub is no longer at the stored path nor
  * findable by its stored name. The caller then gives its real path (current_path): the
@@ -124,72 +127,228 @@ function fs_not_found(string $token, array $r, string $folder): array {
     return ['msg' => $msg, 'candidates' => $cands];
 }
 
+/** Is $p one of the booking roots (/2026, /2027, /001_Safari) or a container that is not a booking folder (00_2026 …)? */
+function fs_is_container(string $p): bool {
+    $p = rtrim($p, '/');
+    if ($p === '') return true;
+    foreach (fs_allowed_roots() as $root) { if (strcasecmp($p, $root) === 0) return true; }
+    return !folder_is_booking_leaf(basename($p));
+}
+
 /**
- * Rename a booking's Dropbox folder (private = its own folder; group = the shared
- * parent) and sync the DB. When $setStatus, also writes status/payment_status
- * (for a group: status only — each client keeps its own payment_status —
- * to every request in it, rebuilding each sub's dropbox_url).
- * Dropbox move happens first; the DB is only touched if it succeeds.
+ * Everything a rename / re-link writes, computed once and used by both the dry run (fs_rename_preview → affected[])
+ * and the confirm (bo_do_rename), so the dry run shows exactly what the confirm writes.
+ *
+ * $scope: 'private' (the request's own folder), 'group' (the shared parent group_folder: every request of the group
+ * follows), 'member' (a GRP member's own sub-folder: this request only — group_folder becomes the real parent's name; the
+ * other members of the old group_folder follow only when their own sub-folder is found inside that parent).
+ * $curPath: the folder's real current path (exact case). Dropbox is read only for scope 'member' (other members' folders).
+ *
+ * Returns ['ok', 'error', 'old_path', 'new_path', 'moved' (Dropbox rename needed), 'affected' => [
+ *            {id, customer_name, folder_from, folder_to, group_folder_from, group_folder_to, dropbox_url_from, dropbox_url_to,
+ *             path_to, status_from, status_to, payment_status_from, payment_status_to, status_set, payment_status_set}],
+ *          'skipped' => [{id, customer_name, folder, reason}], 'folder_id' => member folder id or ''].
+ * Requires dropbox_helper.php.
+ */
+function fs_rename_plan(PDO $db, string $token, array $r, string $scope, string $folder, string $newFolder,
+                        ?string $newStatus, $newPs, bool $setStatus, string $curPath): array {
+    $parentDir = rtrim(substr($curPath, 0, strrpos($curPath, '/')), '/');
+    $newPath   = $parentDir . '/' . $newFolder;
+    $out = ['ok' => true, 'error' => null, 'old_path' => $curPath, 'new_path' => $newPath,
+            'moved' => strcmp(basename($curPath), $newFolder) !== 0, 'affected' => [], 'skipped' => [], 'folder_id' => ''];
+    $item = function (array $g, string $pcTo, ?string $gfTo, string $pathTo, bool $stSet, ?string $stTo, bool $psSet, $psTo) {
+        return ['id' => (int)$g['id'], 'customer_name' => (string)($g['customer_name'] ?? ''),
+                'folder_from' => $g['practice_code'], 'folder_to' => $pcTo,
+                'group_folder_from' => $g['group_folder'], 'group_folder_to' => $gfTo,
+                'dropbox_url_from' => $g['dropbox_url'], 'dropbox_url_to' => bo_url_from_path($pathTo), 'path_to' => $pathTo,
+                'status_from' => $g['status'] ?? null, 'status_to' => $stSet ? $stTo : ($g['status'] ?? null),
+                'payment_status_from' => $g['payment_status'] ?? null, 'payment_status_to' => $psSet ? $psTo : ($g['payment_status'] ?? null),
+                'status_set' => $stSet, 'payment_status_set' => $psSet];
+    };
+
+    if ($scope === 'group') {
+        // The group parent sits in a root / archive container, never inside another booking folder (that is a member).
+        if (!fs_is_container($parentDir)) {
+            $out['ok'] = false;
+            $out['error'] = $curPath . ' is inside the booking folder "' . basename($parentDir) . '" — that is a member sub-folder, not the group folder. '
+                          . 'Give the group parent\'s path to rename the group, or use scope "member" (Agent API) to re-link only this member.';
+            return $out;
+        }
+        // Each client keeps its own payment_status (its invoice / sub-folder): the group tag only sets the booking
+        // status, and never revives a cancelled client unless the whole group is cancelled.
+        $subs = $db->prepare("SELECT id, customer_name, practice_code, group_folder, dropbox_url, status, payment_status
+                              FROM requests WHERE group_folder = ? ORDER BY id");
+        $subs->execute([$folder]);
+        foreach ($subs->fetchAll(PDO::FETCH_ASSOC) as $g) {
+            $sub  = trim($g['practice_code'] ?? '');
+            if ($sub === $folder) $sub = '';   // imported group (practice_code = group_folder): the folder itself
+            $code = $sub !== '' ? (string)$g['practice_code'] : ($g['practice_code'] === $folder ? $newFolder : (string)$g['practice_code']);
+            $keep = ($g['status'] ?? '') === 'Cancelled' && $newStatus !== 'Cancelled';
+            $out['affected'][] = $item($g, $code, $newFolder, $sub !== '' ? $newPath . '/' . $sub : $newPath,
+                                       $setStatus && $newStatus !== null && !$keep, $newStatus, false, null);
+        }
+        return $out;
+    }
+
+    $self = $r + ['payment_status' => null, 'status' => null, 'customer_name' => ''];
+    if ($scope === 'private') {
+        $out['affected'][] = $item($self, $newFolder, $r['group_folder'] ?? null, $newPath, $setStatus, $newStatus, $setStatus, $newPs);
+        return $out;
+    }
+
+    // ── member: this request's own sub-folder inside the real group parent ──
+    if (fs_is_container($parentDir)) {
+        $out['ok'] = false;
+        $out['error'] = 'The member folder ' . $curPath . ' is not inside a group folder (its parent is ' . ($parentDir !== '' ? $parentDir : '/')
+                      . ') — refused. Give the path of the member\'s own sub-folder inside the group folder, or use scope "group" to rename the group parent.';
+        return $out;
+    }
+    $oldGf = trim((string)($r['group_folder'] ?? ''));
+    $newGf = basename($parentDir);
+    $out['affected'][] = $item($self, $newFolder, $newGf, $newPath, $setStatus, $newStatus, $setStatus, $newPs);
+    if (strcmp($newGf, $oldGf) === 0) return $out;
+
+    // The parent's real name differs from the stored group_folder (renamed by hand): the other members of the same
+    // stored group follow only when their own sub-folder is inside this parent (by id when they have one, else by name).
+    require_once __DIR__ . '/folder_link_service.php';
+    fl_schema($db);
+    $o = $db->prepare("SELECT id, customer_name, practice_code, group_folder, dropbox_url, dropbox_id, status, payment_status
+                       FROM requests WHERE group_folder = ? AND id <> ? ORDER BY id");
+    $o->execute([$oldGf, (int)$r['id']]);
+    foreach ($o->fetchAll(PDO::FETCH_ASSOC) as $g) {
+        $sub = trim((string)$g['practice_code']);
+        $isParentRow = $sub === '' || strcasecmp($sub, $oldGf) === 0;   // imported group / group parent request: the parent itself
+        $cand = $isParentRow ? $parentDir : $parentDir . '/' . $sub;
+        $m = null;
+        try { $m = dropbox_get_metadata($token, $cand); } catch (Throwable $e) { /* reported as skipped */ }
+        $gid = (string)($g['dropbox_id'] ?? '');
+        if (!$m || $m['tag'] !== 'folder') {
+            $out['skipped'][] = ['id' => (int)$g['id'], 'customer_name' => $g['customer_name'], 'folder' => $sub,
+                                 'reason' => 'not found in ' . $parentDir . ' — left as it is (re-link it on its own)'];
+            continue;
+        }
+        if ($gid !== '' && ($m['id'] ?? '') !== '' && $m['id'] !== $gid) {
+            $out['skipped'][] = ['id' => (int)$g['id'], 'customer_name' => $g['customer_name'], 'folder' => $sub,
+                                 'reason' => $cand . ' has another Dropbox id than the one stored — left as it is'];
+            continue;
+        }
+        $out['affected'][] = $item($g, $isParentRow ? $newGf : (string)$g['practice_code'], $newGf, $m['path'], false, null, false, null);
+    }
+    return $out;
+}
+
+/** An affected[] row as shown to callers (dry run / confirm): without the internal *_set flags. */
+function fs_affected_public(array $a): array {
+    $x = ['id' => $a['id'], 'customer_name' => $a['customer_name'],
+          'folder_from' => $a['folder_from'], 'folder_to' => $a['folder_to'],
+          'group_folder_from' => $a['group_folder_from'], 'group_folder_to' => $a['group_folder_to'],
+          'dropbox_url_from' => $a['dropbox_url_from'], 'dropbox_url_to' => $a['dropbox_url_to']];
+    if ($a['status_set'])         { $x['status_from'] = $a['status_from']; $x['status_to'] = $a['status_to']; }
+    if ($a['payment_status_set']) { $x['payment_status_from'] = $a['payment_status_from']; $x['payment_status_to'] = $a['payment_status_to']; }
+    return $x;
+}
+
+/** Write a plan's affected[] rows (fs_rename_plan). $undo: write the *_from values back instead. */
+function fs_plan_write(PDO $db, array $affected, bool $undo = false): void {
+    $sfx = $undo ? '_from' : '_to';
+    foreach ($affected as $a) {
+        $set = ['practice_code = ?', 'group_folder = ?', 'dropbox_url = ?'];
+        $val = [$a['folder' . $sfx], $a['group_folder' . $sfx], $undo ? $a['dropbox_url_from'] : $a['dropbox_url_to']];
+        if ($a['status_set'])         { $set[] = 'status = ?';         $val[] = $a['status' . $sfx]; }
+        if ($a['payment_status_set']) { $set[] = 'payment_status = ?'; $val[] = $a['payment_status' . $sfx]; }
+        $val[] = (int)$a['id'];
+        $db->prepare("UPDATE requests SET " . implode(', ', $set) . " WHERE id = ?")->execute($val);
+    }
+}
+
+/**
+ * After the write: each touched request must now store the planned path (dropbox_url) and folder names, and the renamed
+ * folder must exist in Dropbox. Returns [problem text] (empty = fine) and sets $folderId to the renamed folder's id.
+ */
+function fs_plan_verify(PDO $db, string $token, array $plan, string &$folderId): array {
+    $bad = [];
+    $st  = $db->prepare("SELECT practice_code, group_folder, dropbox_url FROM requests WHERE id = ?");
+    foreach ($plan['affected'] as $a) {
+        $st->execute([(int)$a['id']]);
+        $row = $st->fetch(PDO::FETCH_ASSOC) ?: [];
+        $p = bo_path_from_url((string)($row['dropbox_url'] ?? ''));
+        if (strcasecmp($p, $a['path_to']) !== 0) {
+            $bad[] = 'Request ' . $a['id'] . ' would point to ' . ($p !== '' ? $p : '(nothing)') . ' instead of ' . $a['path_to'];
+        } elseif ((string)($row['practice_code'] ?? '') !== (string)$a['folder_to'] || (string)($row['group_folder'] ?? '') !== (string)$a['group_folder_to']) {
+            $bad[] = 'Request ' . $a['id'] . ': folder / group_folder not written as planned';
+        }
+    }
+    $m = null;
+    try { $m = dropbox_get_metadata($token, $plan['new_path']); } catch (Throwable $e) { $bad[] = 'Dropbox check failed: ' . $e->getMessage(); }
+    if ($m === null || ($m['tag'] ?? '') !== 'folder') { if (!$bad) $bad[] = $plan['new_path'] . ' not found in Dropbox after the change'; }
+    else $folderId = (string)($m['id'] ?? '');
+    return $bad;
+}
+
+/**
+ * Rename a booking's Dropbox folder and sync the DB.
+ * $scope (fs_rename_plan): 'private' | 'group' (the shared parent: every request in it, rebuilding each sub's
+ * dropbox_url; status only — each client keeps its own payment_status) | 'member' (a GRP member's own sub-folder,
+ * this request only). null = 'group' when $isGrp, else 'private'.
+ * When $setStatus, also writes status (and payment_status, not for a group).
+ * Dropbox move happens first; the DB is only touched if it succeeds. After the write every touched path is checked:
+ * on a mismatch the DB is put back (and the Dropbox move undone) → ok false, code 409, verify_failed[].
  * $curPath: the folder's real path when already known (re-link); null = locate it from
  * the stored URL / by name. A new name equal to its basename = no Dropbox move.
  * Requires dropbox_helper.php.
  */
 function bo_do_rename(PDO $db, string $token, array $r, bool $isGrp,
                       string $folder, string $newFolder,
-                      ?string $newStatus, $newPs, bool $setStatus, ?string $curPath = null): array {
+                      ?string $newStatus, $newPs, bool $setStatus, ?string $curPath = null, ?string $scope = null): array {
+    $scope = $scope ?? ($isGrp ? 'group' : 'private');
     if ($curPath === null) $curPath = fs_locate_folder($token, $r, $folder);
     if ($curPath === null) {
         $nf = fs_not_found($token, $r, $folder);
         return ['ok' => false, 'not_found' => true, 'msg' => $nf['msg'], 'candidates' => $nf['candidates']];
     }
-    $parentDir = rtrim(substr($curPath, 0, strrpos($curPath, '/')), '/');
-    $newPath   = $parentDir . '/' . $newFolder;
+    if (!array_key_exists('payment_status', $r) || !array_key_exists('customer_name', $r) || !array_key_exists('status', $r)) {
+        $q = $db->prepare("SELECT customer_name, status, payment_status FROM requests WHERE id = ?");
+        $q->execute([(int)$r['id']]);
+        $r = array_merge($q->fetch(PDO::FETCH_ASSOC) ?: [], $r);
+    }
+    $plan = fs_rename_plan($db, $token, $r, $scope, $folder, $newFolder, $newStatus, $newPs, $setStatus, $curPath);
+    if (!$plan['ok']) return ['ok' => false, 'code' => 409, 'msg' => $plan['error']];
+    $newPath = $plan['new_path'];
 
-    if (strcmp(basename($curPath), $newFolder) !== 0) {
-        dropbox_move_folder($token, $curPath, $newPath);   // subfolders move with the parent
+    if ($plan['moved']) dropbox_move_folder($token, $curPath, $newPath);   // subfolders move with the parent
+    fs_plan_write($db, $plan['affected']);
+
+    $folderId = '';
+    $bad = fs_plan_verify($db, $token, $plan, $folderId);
+    if ($bad) {
+        fs_plan_write($db, $plan['affected'], true);
+        $undo = '';
+        if ($plan['moved']) {
+            try { dropbox_move_folder($token, $newPath, $curPath); $undo = ' The Dropbox rename was undone.'; }
+            catch (Throwable $e) { $undo = ' ⚠ The Dropbox rename could NOT be undone (' . $e->getMessage() . '): the folder is now ' . $newPath . '.'; }
+        }
+        error_log('bo_do_rename verify failed, request ' . (int)$r['id'] . ': ' . implode(' · ', $bad));
+        return ['ok' => false, 'code' => 409, 'verify_failed' => $bad, 'affected' => $plan['affected'],
+                'msg' => 'Check after the change failed — the Hub was put back as it was.' . $undo . ' ' . implode(' · ', $bad)];
     }
 
-    if ($isGrp) {
-        // Each client keeps its own payment_status (its invoice / sub-folder):
-        // the group tag only sets the booking status, and never revives a
-        // cancelled client unless the whole group is cancelled.
-        $subs = $db->prepare("SELECT id, practice_code, status FROM requests WHERE group_folder = ?");
-        $subs->execute([$folder]);
-        $rowsG = $subs->fetchAll(PDO::FETCH_ASSOC);
-        $upd   = $db->prepare("UPDATE requests SET group_folder=?, practice_code=?, dropbox_url=? WHERE id=?");
-        $updSt = $db->prepare("UPDATE requests SET group_folder=?, practice_code=?, dropbox_url=?, status=? WHERE id=?");
-        $n = 0;
-        foreach ($rowsG as $g) {
-            $sub    = trim($g['practice_code'] ?? '');
-            // Imported group (practice_code = group_folder): the folder itself, no sub-folder.
-            if ($sub === $folder) $sub = '';
-            $subUrl = bo_url_from_path($sub !== '' ? $newPath . '/' . $sub : $newPath);
-            $code   = $sub !== '' ? $g['practice_code'] : ($g['practice_code'] === $folder ? $newFolder : $g['practice_code']);
-            $keep   = ($g['status'] ?? '') === 'Cancelled' && $newStatus !== 'Cancelled';
-            if ($setStatus && $newStatus !== null && !$keep) $updSt->execute([$newFolder, $code, $subUrl, $newStatus, (int)$g['id']]);
-            else                                              $upd->execute([$newFolder, $code, $subUrl, (int)$g['id']]);
-            $n++;
-        }
+    $base = ['ok' => true, 'old_path' => $curPath, 'new_path' => $newPath, 'scope' => $scope, 'folder_id' => $folderId,
+             'affected' => $plan['affected'], 'skipped' => $plan['skipped']];
+    if ($scope === 'group') {
         // Cancelled group: the Booking follow-up lines of the group and of its members close at once (auto_cancelled).
         if (folder_is_cancelled($newFolder)) folder_followup_cancelled($db, null, $newFolder, 'group folder renamed ' . $newFolder);
-        return ['ok' => true, 'msg' => '✔ Group "' . $newFolder . '": renamed (' . $n . ' booking(s) updated).',
-                'old_path' => $curPath, 'new_path' => $newPath];
-    }
-
-    $newUrl = bo_url_from_path($newPath);
-    if ($setStatus) {
-        $db->prepare("UPDATE requests SET practice_code=?, dropbox_url=?, status=?, payment_status=? WHERE id=?")
-           ->execute([$newFolder, $newUrl, $newStatus, $newPs, (int)$r['id']]);
-    } else {
-        $db->prepare("UPDATE requests SET practice_code=?, dropbox_url=? WHERE id=?")
-           ->execute([$newFolder, $newUrl, (int)$r['id']]);
+        return $base + ['msg' => '✔ Group "' . $newFolder . '": renamed (' . count($plan['affected']) . ' booking(s) updated).'];
     }
     // Cancelled trip: its Booking follow-up lines close at once (auto_cancelled).
     if (folder_is_cancelled($newFolder) || ($setStatus && $newStatus === 'Cancelled')) {
         folder_followup_cancelled($db, (int)$r['id'], $newFolder, 'folder renamed ' . $newFolder);
     }
-    return ['ok' => true, 'msg' => '✔ ' . $r['customer_name'] . ': renamed to "' . $newFolder . '".',
-            'old_path' => $curPath, 'new_path' => $newPath];
+    if ($scope === 'member') {
+        $others = count($plan['affected']) - 1;
+        return $base + ['msg' => '✔ Member "' . $newFolder . '" (' . $r['customer_name'] . '): renamed in group folder "' . basename(dirname($newPath)) . '"'
+                               . ($others > 0 ? ' (' . $others . ' other member(s) follow the group folder name)' : '') . '.'];
+    }
+    return $base + ['msg' => '✔ ' . $r['customer_name'] . ': renamed to "' . $newFolder . '".'];
 }
 
 /**
@@ -203,8 +362,15 @@ function bo_do_rename(PDO $db, string $token, array $r, bool $isGrp,
  * $currentPath (re-link): the folder's real Dropbox path when it was moved outside the
  * Hub. It must sit under fs_allowed_roots() and no other request may point to it. Equal
  * to the stored path = ignored (plain rename).
+ *
+ * $scope (GRP member = group_folder set and its own sub-folder, practice_code ≠ group_folder):
+ *   'member' — the member's own sub-folder, this request only (the default for a member: Roberto 18 Nov 2026, after a
+ *              member re-link renamed the whole group); current_path = the member sub-folder;
+ *   'group'  — the shared group parent and every request of the group; current_path = the parent folder.
+ * A request without group_folder is 'private'; a group request without its own sub-folder (imported group, group
+ * parent) is always 'group'. The returned 'scope' is the resolved one; 'is_group' = (scope === 'group').
  */
-function fs_rename_validate(PDO $db, int $requestId, string $newName, string $currentPath = ''): array {
+function fs_rename_validate(PDO $db, int $requestId, string $newName, string $currentPath = '', string $scope = ''): array {
     $st = $db->prepare("SELECT id, customer_name, practice_code, group_folder, dropbox_url, status, payment_status,
                                confirmation_date, start_date
                         FROM requests WHERE id = ?");
@@ -212,8 +378,25 @@ function fs_rename_validate(PDO $db, int $requestId, string $newName, string $cu
     $r = $st->fetch(PDO::FETCH_ASSOC);
     if (!$r) return ['ok' => false, 'code' => 404, 'error' => 'Request not found.'];
 
-    $isGrp  = trim($r['group_folder'] ?? '') !== '';
-    $folder = $isGrp ? trim($r['group_folder']) : trim($r['practice_code'] ?? '');
+    $gf = trim((string)($r['group_folder'] ?? ''));
+    $pc = trim((string)($r['practice_code'] ?? ''));
+    $scope = strtolower(trim($scope));
+    if (!in_array($scope, ['', 'member', 'group'], true)) {
+        return ['ok' => false, 'code' => 400, 'error' => 'scope must be "member" or "group".'];
+    }
+    $hasSub = $gf !== '' && $pc !== '' && strcasecmp($pc, $gf) !== 0;
+    $scopeAuto = $scope === '';
+    if ($gf === '') {
+        if ($scope !== '') return ['ok' => false, 'code' => 400, 'error' => 'This request is not part of a group — leave scope out.'];
+        $scope = 'private';
+    } elseif (!$hasSub) {
+        if ($scope === 'member') return ['ok' => false, 'code' => 400, 'error' => 'This group request has no member sub-folder of its own — only scope "group" applies.'];
+        $scope = 'group';
+    } elseif ($scope === '') {
+        $scope = 'member';
+    }
+    $isGrp  = $scope === 'group';
+    $folder = $isGrp ? $gf : $pc;
     if ($folder === '') return ['ok' => false, 'code' => 400, 'error' => 'This request has no folder to rename.'];
 
     $newName = trim($newName);
@@ -221,12 +404,21 @@ function fs_rename_validate(PDO $db, int $requestId, string $newName, string $cu
     if (preg_match(FS_BAD_CHARS_RE, $newName)) {
         return ['ok' => false, 'code' => 400, 'error' => 'Invalid characters in the new name (\\ / : * ? " < > | are not allowed).'];
     }
+    // A member's own folder never carries the group's MM_DDMON_ prefix: such a name meant the group parent.
+    if ($scope === 'member' && $scopeAuto && preg_match('/^\d{1,2}_\d{1,2}[A-Za-z]{3}_/', $newName)) {
+        return ['ok' => false, 'code' => 400, 'error' => 'Request ' . $requestId . ' is a member of group "' . $gf . '": "' . $newName
+              . '" looks like a group folder name. Pass scope "group" to rename the group parent (all its members), or give the member\'s own sub-folder name.'];
+    }
 
-    // Stored path of the renamed folder (group: the parent of the member's URL).
-    $stored = bo_path_from_url((string)($r['dropbox_url'] ?? ''));
-    $p = $stored;
-    while ($p !== '' && $p !== '/' && strcasecmp(basename($p), $folder) !== 0) $p = rtrim(dirname($p), '/');
-    if ($p !== '' && $p !== '/') $stored = $p;
+    // Stored path of the renamed folder (group: the parent of the member's URL; member: its own sub-folder).
+    if ($scope === 'member') {
+        $stored = req_folder_path($r);
+    } else {
+        $stored = bo_path_from_url((string)($r['dropbox_url'] ?? ''));
+        $p = $stored;
+        while ($p !== '' && $p !== '/' && strcasecmp(basename($p), $folder) !== 0) $p = rtrim(dirname($p), '/');
+        if ($p !== '' && $p !== '/') $stored = $p;
+    }
 
     $cur = fs_norm_path($currentPath);
     if ($cur !== '' && strcasecmp($cur, $stored) === 0) $cur = '';   // same as stored: plain rename
@@ -254,7 +446,7 @@ function fs_rename_validate(PDO $db, int $requestId, string $newName, string $cu
 
     // Keep the DB status in sync with the new name's suffix (if it has one).
     $d = bo_status_from_name($newName);
-    return ['ok' => true, 'r' => $r, 'is_group' => $isGrp, 'folder' => $folder, 'new_name' => $newName,
+    return ['ok' => true, 'r' => $r, 'is_group' => $isGrp, 'scope' => $scope, 'folder' => $folder, 'new_name' => $newName,
             'set_status' => $d['matched'], 'status' => $d['status'], 'ps' => $d['ps'],
             'relink' => $cur !== '', 'current_path' => $cur !== '' ? $cur : null, 'stored_path' => $stored];
 }
@@ -451,14 +643,15 @@ function fs_name_warnings(string $name, string $oldName = ''): array {
  * Excel dates vs the new name. Read-only. Requires dropbox_helper.php.
  *
  * Returns ['error'=>?string, 'code'=>int, 'dropbox_path_old', 'current_path', 'dropbox_path_new',
- *          'warnings'=>[], 'calc_dates'=>?array, 'candidates'=>[], 'file_renames'=>?array]
+ *          'warnings'=>[], 'calc_dates'=>?array, 'candidates'=>[], 'file_renames'=>?array,
+ *          'affected'=>[every request the confirm writes, fs_affected_public()], 'skipped'=>[]]
  * error set = the rename would fail (folder not found, destination exists).
  * Re-link ($v['relink']): dropbox_path_old = the stored path, current_path = the real one.
  * $withFiles: also list the "NN_<old name>…" files that rename_files would rename.
  */
 function fs_rename_preview(PDO $db, array $v, string $token, bool $withCalc = true, bool $withFiles = false): array {
     $out = ['error' => null, 'code' => 200, 'dropbox_path_old' => null, 'current_path' => null, 'dropbox_path_new' => null,
-            'warnings' => [], 'calc_dates' => null, 'candidates' => [], 'file_renames' => null];
+            'warnings' => [], 'calc_dates' => null, 'candidates' => [], 'file_renames' => null, 'affected' => [], 'skipped' => []];
 
     if (!empty($v['relink'])) {
         $rl = fs_relink_resolve($token, $v['current_path']);
@@ -489,6 +682,16 @@ function fs_rename_preview(PDO $db, array $v, string $token, bool $withCalc = tr
         $out['error'] = 'A folder "' . $v['new_name'] . '" already exists in ' . dirname($newPath) . '.';
         $out['code']  = 409;
         return $out;
+    }
+
+    // Exactly what the confirm writes (same plan as bo_do_rename).
+    $plan = fs_rename_plan($db, $token, $v['r'], (string)($v['scope'] ?? ($v['is_group'] ? 'group' : 'private')), $v['folder'], $v['new_name'],
+                           $v['status'], $v['ps'], $v['set_status'], $curPath);
+    $out['affected'] = array_map('fs_affected_public', $plan['affected']);
+    $out['skipped']  = $plan['skipped'];
+    if (!$plan['ok']) { $out['error'] = $plan['error']; $out['code'] = 409; return $out; }
+    foreach ($plan['skipped'] as $s) {
+        $out['warnings'][] = 'Request ' . $s['id'] . ' (' . $s['customer_name'] . ') keeps its stored folder: ' . $s['reason'] . '.';
     }
 
     if ($withFiles) {
@@ -583,20 +786,21 @@ function fs_ck_block(PDO $db, array $v, ?string $token): array {
  * status_change timeline event (every request of a group). Sends no email.
  *
  * $opt: 'current_path' (re-link a folder moved outside the Hub, see fs_rename_validate),
+ *       'scope' ('member' | 'group' for a GRP member, see fs_rename_validate; default member),
  *       'rename_files' (bool: also rename the "NN_<old name>…" files inside, e.g. the Calc).
  * A re-link that makes the request Booked also sets confirmation_date (if empty) and
  * start_date from the new name.
  *
- * Returns ['ok'=>bool, 'msg'=>string, 'code'=>int (on failure), 'not_found'=>bool, 'candidates'=>[],
- *          'is_group', 'old_name', 'new_name', 'dropbox_path_old', 'dropbox_path_new', 'relink',
- *          'files_renamed'=>[], 'files_failed'=>[]].
+ * Returns ['ok'=>bool, 'msg'=>string, 'code'=>int (on failure), 'not_found'=>bool, 'candidates'=>[], 'verify_failed'=>?[],
+ *          'is_group', 'scope', 'old_name', 'new_name', 'dropbox_path_old', 'dropbox_path_new', 'relink',
+ *          'affected'=>[every request written], 'skipped'=>[], 'files_renamed'=>[], 'files_failed'=>[]].
  */
 function folder_rename(PDO $db, int $requestId, string $newName, ?int $userId, array $opt = []): array {
-    $v = fs_rename_validate($db, $requestId, $newName, (string)($opt['current_path'] ?? ''));
+    $v = fs_rename_validate($db, $requestId, $newName, (string)($opt['current_path'] ?? ''), (string)($opt['scope'] ?? ''));
     if (!$v['ok']) return ['ok' => false, 'msg' => $v['error'], 'code' => $v['code']];
 
     require_once __DIR__ . '/../dropbox_helper.php';
-    $folder = $v['folder']; $newFolder = $v['new_name']; $isGrp = $v['is_group'];
+    $folder = $v['folder']; $newFolder = $v['new_name']; $isGrp = $v['is_group']; $scope = $v['scope'];
     $curPath = null;
     try {
         $token = dropbox_get_access_token();
@@ -619,19 +823,34 @@ function folder_rename(PDO $db, int $requestId, string $newName, ?int $userId, a
             if (isset($rl['error'])) return ['ok' => false, 'msg' => $rl['error'], 'code' => $rl['code']];
             $curPath = $rl['path'];
         }
-        $res = bo_do_rename($db, $token, $v['r'], $isGrp, $folder, $newFolder, $v['status'], $v['ps'], $v['set_status'], $curPath);
+        $res = bo_do_rename($db, $token, $v['r'], $isGrp, $folder, $newFolder, $v['status'], $v['ps'], $v['set_status'], $curPath, $scope);
     } catch (Throwable $e) {
         return ['ok' => false, 'msg' => 'Dropbox/DB error — nothing was changed: ' . $e->getMessage(), 'code' => 502];
     }
     if (!$res['ok']) {
-        return ['ok' => false, 'msg' => $res['msg'], 'code' => 409,
-                'not_found' => !empty($res['not_found']), 'candidates' => $res['candidates'] ?? []];
+        return ['ok' => false, 'msg' => $res['msg'], 'code' => (int)($res['code'] ?? 409),
+                'not_found' => !empty($res['not_found']), 'candidates' => $res['candidates'] ?? [],
+                'verify_failed' => $res['verify_failed'] ?? null];
     }
     $curName = basename($res['old_path']);
-    // Re-link of a private folder: its Dropbox id is the stable link from now on (a group keeps each member's own id).
-    if ($v['relink'] && !$isGrp && !empty($rl['id'])) {
-        require_once __DIR__ . '/folder_link_service.php';
-        folder_id_save($db, (int)$v['r']['id'], $rl['id']);
+    // Private folder / member sub-folder: its Dropbox id is the stable link from now on (a group keeps each member's own id).
+    if (!$isGrp) {
+        $fid = (string)($res['folder_id'] ?? '');
+        if ($fid === '' && !empty($rl['id'])) $fid = (string)$rl['id'];
+        if ($fid !== '') {
+            require_once __DIR__ . '/folder_link_service.php';
+            folder_id_save($db, (int)$v['r']['id'], $fid);
+        }
+    }
+    // Member re-link where the parent's real name differs: the other members that followed get their own timeline note.
+    if ($scope === 'member') {
+        foreach ($res['affected'] as $a) {
+            if ((int)$a['id'] === (int)$v['r']['id']) continue;
+            timeline_log((int)$a['id'], 'folder_relinked', 'Group folder name updated',
+                         ['body' => (string)$a['group_folder_from'] . "\n→ " . (string)$a['group_folder_to'] . "\n(while re-linking request "
+                                    . (int)$v['r']['id'] . ' ' . $v['r']['customer_name'] . ')',
+                          'refs' => ['dropbox_path' => bo_path_from_url((string)$a['dropbox_url_to'])]]);
+        }
     }
 
     // Booked by a re-link (confirmed outside the Hub): what Confirm Safari would have set.
@@ -647,8 +866,15 @@ function folder_rename(PDO $db, int $requestId, string $newName, ?int $userId, a
 
     $msg = $res['msg'];
     if ($v['relink']) {
-        $msg = '✔ ' . ($isGrp ? 'Group "' . $newFolder . '"' : $v['r']['customer_name']) . ': re-linked to ' . $res['new_path']
-             . ($curName !== $newFolder ? ' (renamed from "' . $curName . '")' : '') . '.';
+        $who = $isGrp ? 'Group "' . $newFolder . '"'
+             : ($scope === 'member' ? 'Member "' . $newFolder . '" (' . $v['r']['customer_name'] . ')' : $v['r']['customer_name']);
+        $others = $scope === 'member' ? count($res['affected']) - 1 : 0;
+        $msg = '✔ ' . $who . ': re-linked to ' . $res['new_path']
+             . ($curName !== $newFolder ? ' (renamed from "' . $curName . '")' : '')
+             . ($others > 0 ? ' — ' . $others . ' other member(s) follow the group folder name' : '') . '.';
+    }
+    foreach ($res['skipped'] ?? [] as $s) {
+        $msg .= ' ⚠ Request ' . $s['id'] . ' (' . $s['customer_name'] . ') keeps its stored folder: ' . $s['reason'] . '.';
     }
 
     $files = ['done' => [], 'failed' => []];
@@ -664,8 +890,9 @@ function folder_rename(PDO $db, int $requestId, string $newName, ?int $userId, a
     }
 
     if (!empty($gate['gated']) && $gate['reason'] !== '' && !in_array($gate['state'], ['passed', 'overridden'], true)) $msg .= ' ⚠ ' . $gate['reason'];
-    return ['ok' => true, 'msg' => $msg, 'is_group' => $isGrp, 'old_name' => $folder, 'new_name' => $newFolder, 'booking_gate' => $gate,
+    return ['ok' => true, 'msg' => $msg, 'is_group' => $isGrp, 'scope' => $scope, 'old_name' => $folder, 'new_name' => $newFolder, 'booking_gate' => $gate,
             'dropbox_path_old' => $res['old_path'], 'dropbox_path_new' => $res['new_path'], 'relink' => $v['relink'],
+            'affected' => array_map('fs_affected_public', $res['affected']), 'skipped' => $res['skipped'],
             'files_renamed' => $files['done'], 'files_failed' => $files['failed']];
 }
 
