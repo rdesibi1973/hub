@@ -825,7 +825,10 @@ included / excluded, contacts, terms). The stays summary shows the meals served 
 `docx` = editable Word for agencies; `guide` = PDF for the safari guide: transfer / flight and accommodation
 recap with check-in / check-out, then the day by day — no photos, intro, prices, lodge descriptions, terms or tip note,
 file `…_GUIDE_<LANG>.pdf`; `guide_docx` (or `guide_word`) = the same guide sheet as an editable Word, `…_GUIDE_<LANG>.docx`;
-**personal programs only**, a sample → 400), `lang?` (default: the program's language, the guide sheet included).
+**personal programs only**, a sample → 400), `lang?` (default: the program's language, the guide sheet included),
+`no_prices?` (`1` / `true`, 18 Nov 2026): `pdf` / `docx` without the "price per person" block (table + the language's price notes);
+inclusions / exclusions, tip note and terms stay, and they start at the top of their page. The program's data is not changed.
+Reply `file.no_prices: true`; with `guide` / `guide_docx` it is ignored (`file.note` "guide has no prices already").
 The guide sheet (21 Oct 2026) has only the safari part: Zanzibar / beach nights and the departure day after them are left
 out (the day the clients fly to the sea stays, without the beach hotel); day 1 shows the arrival flight
 (`iti_program_booking.arrival_details`, from the Calc — only programs generated from a Calc have it).
@@ -834,8 +837,10 @@ To put it in Dropbox instead: `save: true` (the program's `lead_request_id` fold
 `save_as?` (file name), `overwrite?` (an existing file is kept unless true; Dropbox keeps the old version)
 → `file` (no content), `saved_to`, `overwritten`. The audit log omits the file content.
 **File name** (`file.name` and the saved file) = the `ref_number`: `<ref>.docx` (docx), `<ref>.pdf` (pdf),
-`<ref>_Guida.pdf` (guide), `<ref>_Guida.docx` (guide_docx); `save_as` overrides it. A program without `ref_number` keeps the old name
-(`<Title>_<LANG>.docx`) and the reply has `file.warning` — set it with `iti_update_program` first.
+`<ref>_Guida.pdf` (guide), `<ref>_Guida.docx` (guide_docx), `<ref>_SenzaPrezzi.pdf` / `.docx` (`no_prices`, same Italian suffix
+in every language — the file with prices is never overwritten by it); `save_as` overrides it. A program without `ref_number` keeps the old name
+(`<Title>_<LANG>.docx`, `<Title>_<LANG>_SenzaPrezzi.pdf`) and the reply has `file.warning` — set it with `iti_update_program` first.
+On the Hub: program page → "📕 PDF senza prezzi" / "⬇ Word senza prezzi" (`export_mag_word.php?…&no_prices=1`). The public magazine page keeps the prices.
 The Word copied by `copy_program` has the same name as the `docx`: the first save → **409** (expected); ask Roberto
 before resending with `"overwrite": true`.
 Photos make files of a few MB; generating can take up to a minute.
@@ -843,6 +848,7 @@ Photos make files of a few MB; generating can take up to a minute.
 curl -sH "$H" "$U?action=iti_document&program_id=412&format=pdf" | jq -r .file.content_base64 | base64 -d > prog.pdf
 curl -sH "$H" "$U?action=iti_document&program_id=412&format=docx&lang=en&save=1"      # → booking folder, <ref_number>.docx
 curl -sH "$H" "$U?action=iti_document&program_id=412&format=guide&save=1"            # guide sheet → booking folder
+curl -sH "$H" "$U?action=iti_document&program_id=412&format=pdf&no_prices=1&save=1"  # → <ref>_SenzaPrezzi.pdf
 ```
 
 #### `iti_create_personal` (POST)

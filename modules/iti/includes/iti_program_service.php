@@ -113,14 +113,16 @@ function iti_ps_ref_from_request(PDO $db, int $rid, string $calcFile = ''): arra
 /**
  * File name of a programme document saved by the API: <ref_number>.docx / .pdf, guide sheet
  * <ref_number>_Guida.pdf / .docx. Null when the programme has no ref_number.
+ * $noPrices (iti_export_file() no_prices): <ref_number>_SenzaPrezzi.pdf / .docx — fixed Italian suffix in every
+ * language (internal folder name), so the file with prices is never overwritten. Ignored for the guide.
  */
-function iti_ps_document_name(array $p, string $format): ?string {
+function iti_ps_document_name(array $p, string $format, bool $noPrices = false): ?string {
     $ref = trim((string)($p['ref_number'] ?? ''));
     if ($ref === '') return null;
     $format = strtolower(trim($format));
     if ($format === 'guide') return $ref . '_Guida.pdf';
     if ($format === 'guide_docx' || $format === 'guide_word') return $ref . '_Guida.docx';
-    return $ref . '.' . ($format === 'docx' || $format === 'word' ? 'docx' : 'pdf');
+    return $ref . ($noPrices ? '_SenzaPrezzi' : '') . '.' . ($format === 'docx' || $format === 'word' ? 'docx' : 'pdf');
 }
 
 /** A programme file not saved to Dropbox: HTTP code and data for the API reply. */

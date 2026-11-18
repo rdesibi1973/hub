@@ -860,6 +860,8 @@ include __DIR__ . '/../../includes/layout_header.php';
     <?php endif; ?>
     <a href="export_mag_word.php?id=<?= $id ?>" class="btn btn-outline btn-sm">⬇ Word</a>
     <a href="export_mag_word.php?id=<?= $id ?>&format=pdf" class="btn btn-outline btn-sm">📕 PDF</a>
+    <a href="export_mag_word.php?id=<?= $id ?>&format=pdf&no_prices=1" class="btn btn-outline btn-sm" title="Same program without the price-per-person table (inclusions, exclusions and terms stay)">📕 PDF senza prezzi</a>
+    <a href="export_mag_word.php?id=<?= $id ?>&no_prices=1" class="btn btn-outline btn-sm" title="Same program as Word without the price-per-person table (inclusions, exclusions and terms stay)">⬇ Word senza prezzi</a>
     <?php if (($program['program_type'] ?? '') === 'personal'): ?>
     <a href="export_mag_word.php?id=<?= $id ?>&format=guide_docx" class="btn btn-outline btn-sm" title="Word for the safari guide, editable: safari days only (no Zanzibar / beach), arrival flight, transfers and accommodation, no photos / intro / prices">🧭 Guide Word</a>
     <a href="vouchers.php?program_id=<?= $id ?>" class="btn btn-outline btn-sm" title="Accommodation, flight and transfer vouchers of this program (PDF, English) — needs the start date">🎟 Vouchers</a>

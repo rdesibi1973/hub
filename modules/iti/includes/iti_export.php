@@ -22,8 +22,11 @@ const ITI_EXPORT_FORMATS = ['pdf', 'docx', 'guide', 'guide_docx'];
  * Build the document of programme $id in $lang ('' = the programme's language, also for 'guide').
  * Returns ['name', 'mime', 'content', 'lang', 'format', 'title'] — format is the file type (pdf / docx).
  * InvalidArgumentException: unknown programme / format; RuntimeException: library missing.
+ * $opt['no_prices']: pdf / docx without the "price per person" block (table + price notes of the language);
+ * inclusions / exclusions, tip note and terms stay, the programme's data is not touched. Name gets
+ * _SenzaPrezzi before the extension. Ignored by the guide formats (they have no prices already).
  */
-function iti_export_file(int $id, string $lang, string $format): array {
+function iti_export_file(int $id, string $lang, string $format, array $opt = array()): array {
     $format = strtolower(trim($format));
     if ($format === 'word') $format = 'docx';
     if ($format === 'guide_word') $format = 'guide_docx';
@@ -52,7 +55,14 @@ function iti_export_file(int $id, string $lang, string $format): array {
         return ['name' => $name . '_GUIDE_' . strtoupper($lang) . '.docx', 'mime' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
                 'content' => iti_guide_word_build(iti_guide_data($D)), 'lang' => $lang, 'format' => 'docx', 'title' => $D['title']];
     }
-    $name .= '_' . strtoupper($lang) . '.' . $format;
+    $noPrices = !empty($opt['no_prices']);
+    if ($noPrices) {
+        // The renderers skip the whole section when there are no prices; the page break before
+        // inclusions / exclusions stays, so they start at the top of the page.
+        $D['prices'] = array();
+        $D['price_notes'] = '';
+    }
+    $name .= '_' . strtoupper($lang) . ($noPrices ? '_SenzaPrezzi' : '') . '.' . $format;
 
     // Personal programme: only the PDF carries the link to the digital itinerary (public page). The Word is the
     // agencies' editable copy — they forgot to remove the link and it reached their end client, so it never has one.

@@ -1830,19 +1830,24 @@ try {
     // or with save / request_id / folder_path uploaded to the booking folder in Dropbox
     // (an existing file is kept unless "overwrite": true). File name = the ref_number
     // (<ref>.docx / <ref>.pdf / <ref>_Guida.pdf) unless save_as; no ref_number → old name + warning.
+    // no_prices: pdf / docx without the price table (+ price notes) → <ref>_SenzaPrezzi.pdf / .docx.
     case 'iti_document': {
         agent_iti_lib();
         require_once __DIR__ . '/../iti/includes/iti_export.php';
         $pid = (int)($in['program_id'] ?? 0);
         $fmt = (string)($in['format'] ?? 'pdf');
+        $noPrices = !empty($in['no_prices']) && !in_array(strtolower(trim((string)$in['no_prices'])), ['false', 'no', 'off'], true);
+        $isGuide  = in_array(strtolower(trim($fmt)), ['guide', 'guide_docx', 'guide_word'], true);
         try {
             iti_im_guard_document($db, $pid, (string)($in['lang'] ?? ''));   // imported programme: no supplier name in what is printed (422)
-            $f = iti_export_file($pid, (string)($in['lang'] ?? ''), $fmt);
+            $f = iti_export_file($pid, (string)($in['lang'] ?? ''), $fmt, ['no_prices' => $noPrices && !$isGuide]);
         } catch (ItiImportException $e) { agent_fail($e->getMessage(), $e->http, $e->data); }
         catch (InvalidArgumentException $e) { agent_fail($e->getMessage(), stripos($e->getMessage(), 'not found') !== false ? 404 : 400); }
         catch (Throwable $e) { agent_fail('Document not generated: ' . $e->getMessage(), 500); }
         $extra = ['format' => $f['format'], 'lang' => $f['lang']];
-        $refName = iti_ps_document_name((array)iti_get_program($pid), $fmt);
+        if ($noPrices && $isGuide) $extra['note'] = 'guide has no prices already';
+        elseif ($noPrices)         $extra['no_prices'] = true;
+        $refName = iti_ps_document_name((array)iti_get_program($pid), $fmt, $noPrices && !$isGuide);
         if ($refName !== null) {
             $f['name'] = $refName;
         } elseif ((!empty($in['save']) || (int)($in['request_id'] ?? 0) > 0 || trim((string)($in['folder_path'] ?? '')) !== '')
