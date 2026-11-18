@@ -31,6 +31,7 @@ function iti_tr_schema(PDO $db): void {
         'iti_day_transfers'   => ['transfer_route_id' => 'INT UNSIGNED NULL DEFAULT NULL', 'game_drive' => 'TINYINT(1) NOT NULL DEFAULT 0',
                                   'own_arrangement' => 'TINYINT(1) NOT NULL DEFAULT 0'],
         'iti_day_flights'     => ['own_arrangement' => 'TINYINT(1) NOT NULL DEFAULT 0'],   // iti_oa_text() (17 Nov 2026)
+        'iti_program_days'    => ['own_arrangement' => 'TINYINT(1) NOT NULL DEFAULT 0'],   // own-arrangement stay, iti_oa_day() (18 Nov 2026; already on the live DB)
     ];
     foreach (ITI_TR_LANGS as $l) $want['iti_transfer_routes']['label_' . $l] = 'VARCHAR(255) NULL DEFAULT NULL';
     foreach ($want as $table => $cols) {
@@ -134,6 +135,40 @@ function iti_oa_text(string $lang, bool $resume = true): string {
     $x = $t[$lang] ?? $t['en'];
     // The last day of the program: nothing resumes after it.
     return $resume ? $x[0] . ' — ' . $x[1] : $x[0];
+}
+
+/**
+ * Own-arrangement stay (18 Nov 2026): a hotel the agency / clients book themselves. Flag
+ * iti_program_days.own_arrangement = 1, set by the final from the Calc (alias without lodge, or a Calc
+ * text with "own arrangement"), the API and the Hub editor. The documents print the hotel name followed
+ * by iti_oa_stay_text(), with no meals and no room; vouchers leave the stay out.
+ */
+function iti_oa_stay_text(string $lang): string {
+    $t = ['it' => 'organizzazione personale, non incluso', 'en' => 'own arrangement, not included',
+          'fr' => 'à la charge des clients, non inclus', 'es' => 'por cuenta de los clientes, no incluido',
+          'de' => 'in Eigenregie, nicht inbegriffen'];
+    return $t[$lang] ?? $t['en'];
+}
+
+/** Does this hotel text say own arrangement? ("Riu Palace Nungwi - own arrangement", "… (organizzazione personale)") */
+function iti_oa_text_says(string $txt): bool {
+    return (bool)preg_match('/own[\s_-]*arrangements?|organizzazione\s+personale/iu', $txt);
+}
+
+/**
+ * Is this day's night an own-arrangement stay? The flag, else (programs made before 18 Nov 2026) the
+ * hotel text: exact "Own Arrangement" or a text naming it, with no lodge from the catalogue.
+ */
+function iti_oa_day(array $d): bool {
+    if (!empty($d['own_arrangement'])) return true;
+    if (!empty($d['end_lodge_id'])) return false;
+    return iti_oa_text_says(trim((string)($d['end_lodge_custom'] ?? '')));
+}
+
+/** The hotel name without the own-arrangement words: "SEACLUB … BEACH - own arrangement" → "SEACLUB … BEACH"; "Own Arrangement" → ''. */
+function iti_oa_hotel_name(string $txt): string {
+    $n = preg_replace('/\s*[-–—,:(\[]*\s*(own[\s_-]*arrangements?|organizzazione\s+personale)\s*[)\]]*\s*$/iu', '', trim($txt));
+    return trim((string)$n, " \t-–—,:");
 }
 
 /**

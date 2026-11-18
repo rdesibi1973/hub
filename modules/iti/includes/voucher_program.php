@@ -5,7 +5,7 @@
  * Vouchers of an ITI program (personal / built from the Calc), from the Hub data instead of
  * the WeTu files: one accommodation voucher per stay (consecutive nights in one lodge, own
  * arrangements left out), one per flight and one per transfer. Same model and renderers as
- * vouchers.php (voucher_lib.php). Used by the "Vouchers" button of the program editor and by
+ * vouchers.php (voucher_lib.php); own-arrangement stays (iti_oa_day()) get none. Used by the "Vouchers" button of the program editor and by
  * the Agent API (iti_vouchers).
  *
  * Vouchers are in English, like the WeTu ones.
@@ -106,7 +106,9 @@ function voucher_model_from_program(PDO $db, int $pid): array
     $accommodations = []; $prevKey = null; $mealCount = [];
     foreach ($days as $i => $d) {
         $custom = trim((string)($d['end_lodge_custom'] ?? ''));
-        $own = !empty($d['own_arrangement']) || strcasecmp($custom, 'Own Arrangement') === 0;
+        // Booked by the agency / clients: no voucher (and so no phone / GPS warning). The day flag, else the
+        // hotel text for programs made before it (iti_oa_day()). Transfers to / from that hotel stay (we do them).
+        $own = iti_oa_day($d);
         $key = !empty($d['end_lodge_id']) ? 'L' . (int)$d['end_lodge_id'] : ($custom !== '' && !$own ? 'C' . strtolower($custom) : null);
         $room = voucher_room_label(iti_room_label($d['room_category'] ?? '', trim((string)($d['room_type'] ?? '')) ?: trim((string)($booking['room_config'] ?? ''))));
         $n = count($accommodations) - 1;

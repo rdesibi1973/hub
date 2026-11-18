@@ -245,6 +245,7 @@ if ($plan && ($plan['blocking'] || $localRows)) {
 $fmtD = function ($ymd) { return $ymd ? date('D d M Y', strtotime($ymd)) : '—'; };
 $badge = function (string $state): string {
     $map = ['ok' => ['#e8f5e9', '#2e7d32', 'mapped'], 'nothing' => ['#eee', '#555', 'not shown'],
+            'own' => ['#eef3fb', '#2f5597', 'own arrangement'],   // booked by the agency / clients: no voucher, meals, room
             'unmapped' => ['#ffebee', '#c62828', 'NOT MAPPED'], 'none' => ['#eee', '#888', '—'],
             'local' => ['#fff8e1', '#8a6d00', 'this booking only']];
     $m = $map[$state] ?? $map['none'];
@@ -542,7 +543,8 @@ $mapRow = function (string $type, string $text, array $pre, string $extra = '') 
           <?php if ($d['route'] && $d['sample_index'] === null): ?><br><?= $badge($d['route']['state']) ?><?= !empty($d['route']['local']) ? ' ' . $badge('local') : '' ?><?php endif; ?></td>
         <td style="font-size:.8rem;">
           <?php if ($d['hotel_text'] !== ''): ?>
-            <code><?= h($d['hotel_text']) ?></code> <?= $badge($d['lodge_state']) ?><?= !empty($d['lodge_local']) ? ' ' . $badge('local') : '' ?>
+            <code><?= h($d['hotel_text']) ?></code> <?= $badge($d['lodge_state']) ?><?= !empty($d['lodge_local']) ? ' ' . $badge('local') : '' ?><?= !empty($d['own_arrangement']) && $d['lodge_state'] !== 'own' ? ' ' . $badge('own') : '' ?>
+            <?php if ($d['lodge_state'] === 'own' && $d['lodge_custom']): ?><br>→ <?= h($d['lodge_custom']) ?> <span style="color:var(--grey-mid);">(no voucher, meals, room)</span><?php endif; ?>
             <?php if ($d['lodge_name']): ?><br>→ <strong><?= h($d['lodge_name']) ?></strong><?= $d['meal'] ? ' · ' . h($d['meal']) : '' ?><?= !empty($d['room_category']) ? ' · ' . h($d['room_category']) : '' ?><?php endif; ?>
           <?php else: ?><span style="color:var(--grey-mid);"><?= $d['last'] ? 'departure' : '—' ?></span><?php endif; ?>
         </td>

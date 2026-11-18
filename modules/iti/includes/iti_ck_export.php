@@ -124,7 +124,8 @@ function iti_ck_program_data(PDO $db, array $p, int $requestId, string $clientFo
         }
         $stays[] = ['lodge' => $lodge, 'destination' => trim((string)($d['destination_name_en'] ?? '')),
                     'start' => $night, 'end' => date('Y-m-d', strtotime($night . ' +1 day')), 'nights' => 1,
-                    'room' => $room, 'night_bases' => [$basis]];
+                    'room' => $room, 'night_bases' => [$basis],
+                    'own_arrangement' => iti_oa_day($d)];   // booked by the agency / clients (no voucher, not ours to confirm)
     }
     foreach ($stays as &$s) {
         $s['basis'] = null;

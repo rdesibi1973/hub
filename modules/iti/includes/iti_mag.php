@@ -78,7 +78,7 @@ function iti_mag_stays(array $days, ?array $T = null): array {
             $stays[count($stays) - 1]['nights']++;
         } else {
             $stays[] = ['day' => $d['n'], 'lodge' => $d['lodge'], 'dest' => $d['lodge_area'] ?? '', 'nights' => 1, 'room' => $room,
-                        'meals' => $d['meals'], 'photo' => $d['lodge_photos'] ? $d['lodge_photos'][0] : ''];
+                        'meals' => !empty($d['own_arrangement']) ? '' : $d['meals'], 'photo' => $d['lodge_photos'] ? $d['lodge_photos'][0] : ''];
         }
         $prevKey = $key; $prevN = $d['n'];
     }
@@ -86,7 +86,8 @@ function iti_mag_stays(array $days, ?array $T = null): array {
         $byN = [];
         foreach ($days as $d) $byN[$d['n']] = $d;
         foreach ($stays as &$s) {
-            $s['meals'] = strpos($byN[$s['day']]['lodge_key'], 'C') === 0 ? '' : iti_doc_stay_meals($byN, $s['day'], $s['nights'], $T);
+            // Own arrangement (flag, iti_oa_day()) or a free-text hotel: booked by the agency, no meals shown.
+            $s['meals'] = !empty($byN[$s['day']]['own_arrangement']) || strpos($byN[$s['day']]['lodge_key'], 'C') === 0 ? '' : iti_doc_stay_meals($byN, $s['day'], $s['nights'], $T);
         }
         unset($s);
     }

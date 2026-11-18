@@ -13,6 +13,8 @@
  *   destination_id | destination (name or code), destination_custom,
  *   start_lodge_id, start_destination_id, start_custom, transfer_route_id, transfer_custom,
  *   meal_breakfast / meal_lunch / meal_dinner / meal_all_inclusive (0/1),
+ *   own_arrangement (0/1): the night's hotel is booked by the agency / clients (iti_oa_day(): no stay voucher,
+ *              documents print the name + iti_oa_stay_text(), no meals / room),
  *   transfers  [ {transfer_route_id, game_drive?, own_arrangement?} | "Dar airport – Serena Hotel, 40 min" | {description, text_<lang>?, own_arrangement?} … ]
  *              (replaces the day's list; a catalogue route prints its label in every language; an unchanged
  *              free text keeps its translations)
@@ -26,7 +28,7 @@
 function iti_pb_day_columns(): array {
     iti_ps_schema();   // room_type and the day-transfer columns, before the column list is cached (and before any transaction)
     $c = ['end_lodge_id', 'end_lodge_custom', 'room_type', 'room_category', 'destination_id', 'destination_custom', 'start_lodge_id', 'start_destination_id',
-          'start_custom', 'transfer_route_id', 'transfer_custom', 'meal_breakfast', 'meal_lunch', 'meal_dinner', 'meal_all_inclusive'];
+          'start_custom', 'transfer_route_id', 'transfer_custom', 'meal_breakfast', 'meal_lunch', 'meal_dinner', 'meal_all_inclusive', 'own_arrangement'];
     foreach (ITI_PS_LANGS as $l) { $c[] = 'day_title_' . $l; $c[] = 'narrative_' . $l; }
     return array_values(array_intersect($c, iti_table_columns('iti_program_days')));
 }
@@ -74,7 +76,7 @@ function iti_pb_day_item(PDO $db, array $f): array {
             if (isset($t[$k])) $v = iti_pb_lookup($db, $t[$k], (int)$v);
             else { $st = $db->prepare('SELECT id FROM iti_transfer_routes WHERE id = ?'); $st->execute([(int)$v]); if (!$st->fetchColumn()) throw new InvalidArgumentException('transfer_route_id ' . $v . ' not found (iti_transfer_routes)'); }
             $cols[$k] = (int)$v;
-        } elseif (strpos($k, 'meal_') === 0) {
+        } elseif (strpos($k, 'meal_') === 0 || $k === 'own_arrangement') {
             $cols[$k] = empty($v) ? 0 : 1;
         } else {
             $v = trim((string)$v);
@@ -267,7 +269,7 @@ function iti_pb_days_raw(PDO $db, int $pid): array {
             $v = $d[$c];
             if ($v === null || $v === '') continue;
             if (substr($c, -3) === '_id') { if (!(int)$v) continue; $v = (int)$v; }
-            elseif (strpos($c, 'meal_') === 0) $v = (int)$v;
+            elseif (strpos($c, 'meal_') === 0 || $c === 'own_arrangement') $v = (int)$v;
             $row[$c] = $v;
         }
         // Free text → the text; catalogue transfer → {transfer_route_id, game_drive, description} (same shape iti_set_days takes).

@@ -1028,7 +1028,7 @@ function iti_final_plan(PDO $db, array $calc, int $sampleId): array {
         $d = array('i' => $i, 'date' => $cd['date'], 'label' => $cd['label'], 'hotel_text' => $cd['hotel_text'],
                    'invoice' => $cd['invoice'], 'checked' => $cd['checked'], 'flight_cost' => $cd['flight_cost'],
                    'last' => $last, 'lodge_id' => null, 'lodge_name' => '', 'lodge_custom' => null, 'dest_id' => null,
-                   'meal' => null, 'room_category' => null, 'lodge_state' => 'none', 'lodge_local' => false, 'acts' => array(), 'route' => null,
+                   'meal' => null, 'room_category' => null, 'lodge_state' => 'none', 'own_arrangement' => false, 'lodge_local' => false, 'acts' => array(), 'route' => null,
                    'sample_index' => null, 'sample_lodge' => null, 'flags' => array());
 
         // Lodge (every night; the departure day normally has none).
@@ -1039,15 +1039,18 @@ function iti_final_plan(PDO $db, array $calc, int $sampleId): array {
             $a = iti_alias_lookup('lodge', $cd['hotel_text'], $rid);
             if ($a === null && $base !== $cd['hotel_text']) $a = iti_alias_lookup('lodge', $base, $rid);
             if ($a !== null && !empty($a['local'])) { $d['lodge_local'] = true; $local['lodge'][$a['alias']] = $a['alias']; }
-            if ($a === null) {
+            // Own arrangement (18 Nov 2026): a lodge alias without lodge_id, or a Calc text naming it
+            // ("Riu Palace Nungwi - own arrangement"): the agency / clients book it — no voucher, no meals, no room.
+            $d['own_arrangement'] = iti_oa_text_says($cd['hotel_text']) || ($a !== null && !$a['lodge_id']);
+            if ($d['own_arrangement'] && ($a === null || !$a['lodge_id'])) {
+                $d['lodge_state'] = 'own';
+                $d['lodge_custom'] = iti_oa_hotel_name($base) ?: 'Own Arrangement';   // "Riu Palace Nungwi"
+            } elseif ($a === null) {
                 $d['lodge_state'] = 'unmapped';
                 $unmapped['lodge'][iti_alias_norm($base)] = $base;
                 if ($mealSfx) $hints['lodge_meal'][$base] = $mealSfx;
                 if (!isset($hints['lodge_date'][$base])) $hints['lodge_date'][$base] = $cd['date'];   // first night: season of the suggestion
-            } elseif (!$a['lodge_id']) {
-                $d['lodge_state'] = 'nothing';
-                $d['lodge_custom'] = $cd['hotel_text'];        // e.g. "Riu Palace Nungwi - own arrangement"
-            } else {
+            } else {   // a lodge (an alias without lodge_id is an own arrangement, above)
                 $sea = iti_final_season_lodge((int)$a['lodge_id'], $cd['date']);   // migration camps: north / Ndutu by month
                 if ($sea['note']) $d['flags'][] = $sea['note'];
                 $li = $lodgeInfo($sea['id']);
@@ -1315,9 +1318,11 @@ function iti_final_generate(PDO $db, int $requestId, array $calc, int $sampleId,
                 'end_lodge_id'   => $d['lodge_id'],
                 'end_lodge_custom' => $d['lodge_id'] ? null : $d['lodge_custom'],
                 // No room types on an open group or a quote with several pax sheets (rooms not known yet).
-                'room_type'      => !$groupOpen && !$multiPrice && ($d['lodge_id'] || $d['lodge_custom']) && $calc['room_config'] !== '' ? mb_substr(iti_final_room_text($calc['room_config'], $lang) ?? $calc['room_config'], 0, 100) : null,
+                // Own arrangement: no room either (we do not book it).
+                'room_type'      => !$groupOpen && !$multiPrice && empty($d['own_arrangement']) && ($d['lodge_id'] || $d['lodge_custom']) && $calc['room_config'] !== '' ? mb_substr(iti_final_room_text($calc['room_config'], $lang) ?? $calc['room_config'], 0, 100) : null,
                 // From the Calc hotel text (iti_final_plan); a sample day's category is never kept (other lodge / client).
-                'room_category'  => $d['lodge_id'] ? ($d['room_category'] ?? null) : null,
+                'room_category'  => $d['lodge_id'] && empty($d['own_arrangement']) ? ($d['room_category'] ?? null) : null,
+                'own_arrangement' => empty($d['own_arrangement']) ? 0 : 1,   // column from iti_tr_schema() (iti_transfers_schema() above)
                 'booked_status'  => $d['invoice'] !== '' ? mb_substr($d['invoice'], 0, 40) : null,
                 'booked_by'      => $d['checked'] !== '' ? mb_substr($d['checked'], 0, 60) : null,
                 'needs_review'   => ($isNew || $d['sample_lodge'] !== null) ? 1 : 0,
@@ -1332,6 +1337,15 @@ function iti_final_generate(PDO $db, int $requestId, array $calc, int $sampleId,
                 $vals['meal_lunch']         = $meals[1];
                 $vals['meal_dinner']        = $i === $nDays - 1 ? 0 : $meals[2];
                 $vals['meal_all_inclusive'] = $meals[3];
+            }
+            // Own-arrangement night: no lunch / dinner there, and no breakfast the morning after (that hotel's);
+            // the morning's breakfast is the previous night's lodge (kept, unless that night was own too).
+            $prevOwn = $i > 0 && !empty($plan['days'][$i - 1]['own_arrangement']);
+            if (!empty($d['own_arrangement'])) {
+                $vals['meal_lunch'] = 0; $vals['meal_dinner'] = 0; $vals['meal_all_inclusive'] = 0;
+                if ($prevOwn) $vals['meal_breakfast'] = 0;
+            } elseif ($prevOwn) {
+                $vals['meal_breakfast'] = 0;
             }
             if ($isNew) {
                 // Another night in the same lodge: no transfer, a full day there (the destination

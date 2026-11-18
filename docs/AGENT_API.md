@@ -887,7 +887,7 @@ its own dedicated T&C (edit those in the Hub).
 #### `iti_update_day` (POST)
 `program_id`, `day` (number), `fields`: `day_title_<lang>`, `narrative_<lang>`, `end_lodge_id` **or** `end_lodge`
 (name, must match one lodge), `end_lodge_custom`, `room_type`, `room_category`, `destination_id`, `destination_custom`, `meal_breakfast` /
-`meal_lunch` / `meal_dinner` (0/1) → `changes`. Dry-run unless confirm.
+`meal_lunch` / `meal_dinner` (0/1), `own_arrangement` (0/1, own-arrangement stay — see Day items) → `changes`. Dry-run unless confirm.
 
 #### Day items (used by `iti_create_personal` `days[]`, `iti_set_days`, `iti_add_day`, `iti_update_day`)
 Every key optional: `day_title_<lang>`, `narrative_<lang>`, `end_lodge_id` | `end_lodge` (name), `end_lodge_custom`,
@@ -896,7 +896,7 @@ Every key optional: `day_title_<lang>`, `narrative_<lang>`, `end_lodge_id` | `en
 pick from the lodge's `room_categories` when it has them; printed as written in every language, before the room type:
 "Junior Suite Sea View (1 camera matrimoniale)"; ignored with no overnight; not kept by `iti_save_as_sample`), `destination_id` | `destination` (name or code), `destination_custom`, `start_lodge_id`, `start_destination_id`,
 `start_custom`, `transfer_route_id`, `transfer_custom`, `meal_breakfast` / `meal_lunch` / `meal_dinner` /
-`meal_all_inclusive` (0/1), and three lists — each one given **replaces** the day's list (`[]` = none):
+`meal_all_inclusive` (0/1), `own_arrangement` (0/1, below), and three lists — each one given **replaces** the day's list (`[]` = none):
 - `transfers`: **preferred** `[{transfer_route_id, game_drive?: 0|1}]` — a road transfer from the catalogue (`iti_transfer_routes`),
   printed in every document language with the route label ("Karatu – Ngorongoro – Serengeti, circa 3 ore" / "…, about 3 hours");
   `game_drive: 1` = "with a game drive on the way", no time. Free text only when no route fits:
@@ -919,6 +919,16 @@ route followed by "own arrangement, not included — our services resume on arri
 program's last day only "own arrangement, not included"; an own-arrangement flight shows no airline or flight number); such a
 transfer gives no transfer time to the day, and vouchers leave the row out. `structure[]` returns the flag (a free-text
 transfer with it comes back as `{description, own_arrangement: 1}`). Hub editor: the "Own arr." box on each transfer / flight row.
+**Own-arrangement stay (18 Nov 2026):** day field `own_arrangement: 1` = the night's hotel is booked by the agency / clients
+(`end_lodge_custom` = the hotel name, e.g. "Seaclub Style Sandies Nungwi Beach"; a catalogue `end_lodge_id` is allowed too).
+Every document prints the hotel name followed by "own arrangement, not included" (IT "organizzazione personale, non incluso";
+`iti_oa_stay_text()`, 5 languages), with **no room and no meals** for that night (lunch / dinner of the day and breakfast of
+the next morning are left out, the stays summary shows no meal plan); **`iti_vouchers` (and the Hub "Vouchers" button)
+issue no accommodation voucher** for it and give no "no phone, GPS" warning — the transfers to / from that hotel keep
+their vouchers (we do them). Programs made before the flag: a hotel text "Own Arrangement", or one containing "own
+arrangement" / "organizzazione personale", counts as the same. `structure[]` returns `own_arrangement` (0/1), `iti_save_as_sample`
+keeps it. Hub editor: the "🏨 Own Arrangement" tick in the day's Accommodation block (choosing "Own Arrangement" as the lodge sets it too).
+The final from the Calc sets it on its own (below).
 
 #### `iti_create_personal` without a sample
 No `sample_id` = blank program for a trip with no matching sample: `fields.title_<display_language>` and `days[]`
@@ -1086,14 +1096,19 @@ game drive tied to a place also replaces the day's plain "Fotosafari" / "Game dr
 place — the first place of the Calc label vs the first place of the sample day's title ("Serengeti Kogatende-Arusha" never
 takes "Karatu-Arusha-Kilimanjaro", although both name Arusha); otherwise it is added from the Calc (its route alias needed).
 A flight added from a route alias on a day with no flight cost in the Calc is saved as **own arrangement** and the day is
-flagged for review. A second night under the same Calc label ("Serengeti-Northern" twice) is never a day trip: no transfer
+flagged for review.
+**Own-arrangement hotel (18 Nov 2026):** a Calc night whose hotel is a lodge alias without `lodge_id`, or whose text contains
+"own arrangement" ("Riu Palace Nungwi - own arrangement", no alias needed, never blocking) → `nights[]` `own_arrangement: true`,
+`lodge_state` `'own'` (was `'nothing'`), `lodge` = the name without the suffix; the day gets `own_arrangement` 1, `end_lodge_custom`
+"Riu Palace Nungwi", no room type / category, no lunch / dinner that day and no breakfast the next morning (see Day items).
+A text with "own arrangement" whose alias points to a lodge keeps the lodge and is flagged the same way. A second night under the same Calc label ("Serengeti-Northern" twice) is never a day trip: no transfer
 and no destination text that day.
 **Seller:** the program goes under the request's seller (`seller` in the plan = username; pass `seller` for another active one), in `created_by`;
 who generates it stays in `generated_by`, so someone can finalise programs for other sellers.
 
 Plan: `calc` (file, files = every Calc of the folder, rev, pax, sheet, sheets = pickable sheets, warnings, days, nights,
 price_options [{sheet, pax_total, pax, price_to_customer, nights, same_itinerary}], price_table = the rows the programme
-will get), `sample`, `nights[]` (date, label, hotel text → lodge, state, meal, room_category, activities,
+will get), `sample`, `nights[]` (date, label, hotel text → lodge, state (`ok` | `unmapped` | `own` | `none`), own_arrangement, meal, room_category, activities,
 from_sample_day, flags), `unmapped` {lodge|activity|route: {norm: text}}, `blocking`, `existing_finals` (id, calc_file,
 superseded_by). Several Calc files (e.g. the same safari with other lodges) → pass `file`; each file has its own final.
 GRP member: the Calc is found in the group folder when the client folder has none, read on the client's sheet (see `read_calc`).
@@ -1136,7 +1151,7 @@ the programme Word copied next to that Calc, else the Calc's name without `_Calc
 #### `iti_save_alias` (POST)
 `type` (`lodge`|`activity`|`route`), `text` (the Calc text), `lodge_id` (+ `meal_basis` BB|HB|FB|AI) |
 `activity_id` | `transfer_route_id` / `flight_route_id`. A lodge alias without `lodge_id` = own arrangement
-(shown as free text). Dry-run unless confirm. The alias applies to **every** future Calc with that text, so only after
+(the night becomes an own-arrangement stay: hotel name + "own arrangement, not included", no voucher, meals or room). Dry-run unless confirm. The alias applies to **every** future Calc with that text, so only after
 Roberto's ok on that alias. Logged in `iti_change_log` (see `iti_change_log`).
 
 **Shared ITI data (16 Nov 2026).** Aliases, lodges, activities, destinations, routes, airlines and samples are changed on

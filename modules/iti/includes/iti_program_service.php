@@ -639,7 +639,8 @@ function iti_ps_calc_plan(PDO $db, int $rid, array $in): array {
     $nights = [];
     foreach ($plan['days'] as $d) {
         $nights[] = ['date' => $d['date'] ?? null, 'label' => $d['label'] ?? '', 'hotel' => $d['hotel_text'] ?? '',
-                     'lodge' => $d['lodge_name'] ?? ($d['lodge_custom'] ?? null), 'lodge_state' => $d['lodge_state'] ?? null,
+                     'lodge' => ($d['lodge_name'] ?? '') !== '' ? $d['lodge_name'] : ($d['lodge_custom'] ?? null), 'lodge_state' => $d['lodge_state'] ?? null,
+                     'own_arrangement' => !empty($d['own_arrangement']),   // booked by the agency / clients (lodge_state 'own'): no voucher, meals, room
                      'meal' => $d['meal'] ?? null, 'room_category' => $d['room_category'] ?? null,
                      'activities' => array_map(function ($a) { return $a['text'] . ' [' . $a['state'] . ']'; }, $d['acts'] ?? []),
                      'from_sample_day' => $d['sample_index'] !== null ? $d['sample_index'] + 1 : null, 'flags' => $d['flags'] ?? []];

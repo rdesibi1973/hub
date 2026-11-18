@@ -379,7 +379,7 @@ function iti_doc_data(int $id, string $lang): ?array {
                              FROM iti_day_activities da LEFT JOIN iti_activities a ON a.id = da.activity_id
                             WHERE da.program_day_id = ? ORDER BY da.sort_order, da.id');
 
-    $out = []; $seenLodge = []; $seenDest = []; $missing = [];
+    $out = []; $seenLodge = []; $seenDest = []; $missing = []; $prevOwn = false;
     $srcLang = in_array($p['display_language'] ?? '', ITI_LANGUAGES, true) ? $p['display_language'] : 'it';
     $isGroup = iti_safari_type($p) === 'group';
     foreach ($days as $d) {
@@ -445,6 +445,20 @@ function iti_doc_data(int $id, string $lang): ?array {
             $lodgeName = $d['end_lodge_custom'];
             $lodgeKey  = 'C' . strtolower(trim($lodgeName));
         }
+        // Own-arrangement stay (iti_oa_day(), 18 Nov 2026): "Riu Palace Nungwi · own arrangement, not included",
+        // no room, no meals that night (lunch / dinner of the day, breakfast of the next morning).
+        $own = $lodgeName !== '' && iti_oa_day($d);
+        $lodgePlain = $lodgeName;
+        if ($own) {
+            $lodgePlain = iti_oa_hotel_name($lodgeName);
+            $oaTxt = iti_oa_stay_text($lang);
+            $lodgeName = $lodgePlain !== '' ? $lodgePlain . ' · ' . $oaTxt : mb_strtoupper(mb_substr($oaTxt, 0, 1)) . mb_substr($oaTxt, 1);
+            if ($lodgeKey !== '' && $lodgeKey[0] === 'C') $lodgeKey = 'C' . strtolower($lodgePlain !== '' ? $lodgePlain : 'own');
+        }
+        $mealDay = $d;
+        if ($own) { $mealDay['meal_lunch'] = 0; $mealDay['meal_dinner'] = 0; $mealDay['meal_all_inclusive'] = 0; }
+        if ($prevOwn) $mealDay['meal_breakfast'] = 0;   // breakfast at the own-arrangement hotel of the night before
+        $prevOwn = $own;
         $destName = ''; $destDesc = '';
         if (!empty($d['destination_id']) && isset($dests[(int)$d['destination_id']])) {
             $dr = $dests[(int)$d['destination_id']];
@@ -467,7 +481,7 @@ function iti_doc_data(int $id, string $lang): ?array {
         $beach = $lodgeName !== '' && $beachDest && !empty($dests[$beachDest]['is_beach_stay']);
 
         $title = iti_doc_pick($d, 'day_title', $lang);
-        if ($title === '') $title = $destName !== '' ? $destName : ($lodgeName !== '' ? $lodgeName : '');
+        if ($title === '') $title = $destName !== '' ? $destName : ($lodgePlain !== '' ? $lodgePlain : $lodgeName);
         $date = null;   // real date when the programme has a start date (personal / final)
         if (!empty($p['start_date']) && preg_match('/^\d{4}-\d{2}-\d{2}$/', (string)$p['start_date'])) {
             $date = date('Y-m-d', strtotime($p['start_date'] . ' +' . ((int)$d['day_number'] - 1) . ' days'));
@@ -483,8 +497,8 @@ function iti_doc_data(int $id, string $lang): ?array {
             'transfers'  => $transfers,
             'flights'    => $flights,
             'duration'   => $trDur,
-            'meals'      => iti_doc_meals($d, $T),
-            'meal_flags' => array_intersect_key($d, array_flip(['meal_breakfast', 'meal_lunch', 'meal_dinner', 'meal_all_inclusive'])),   // for iti_doc_stay_meals()
+            'meals'      => iti_doc_meals($mealDay, $T),
+            'meal_flags' => array_intersect_key($mealDay, array_flip(['meal_breakfast', 'meal_lunch', 'meal_dinner', 'meal_all_inclusive'])),   // for iti_doc_stay_meals()
             // "The arrival transfer may be shared…": only on group safaris (Roberto, 10 Nov 2026).
             'narrative'  => $isGroup ? iti_doc_pick($d, 'narrative', $lang) : iti_tr_shared_strip(iti_doc_pick($d, 'narrative', $lang)),
             'dest'       => $destName,
@@ -498,8 +512,9 @@ function iti_doc_data(int $id, string $lang): ?array {
             'lodge_photos' => $lodgePhotos,
             'lodge_url'  => $lodgeUrl,
             // "Junior Suite Sea View (1 Double + 1 Twin)": category and configuration, both free text (iti_rooms.php)
-            'room'       => $lodgeName !== '' ? iti_room_label($d['room_category'] ?? '', $d['room_type'] ?? '') : '',
-            'room_category' => $lodgeName !== '' ? trim((string)($d['room_category'] ?? '')) : '',
+            'room'       => $lodgeName !== '' && !$own ? iti_room_label($d['room_category'] ?? '', $d['room_type'] ?? '') : '',
+            'room_category' => $lodgeName !== '' && !$own ? trim((string)($d['room_category'] ?? '')) : '',
+            'own_arrangement' => $own,   // the night's hotel is booked by the agency / clients (iti_oa_day())
             'beach'      => $beach,
             'activities' => $acts,
             'tip_note'   => '',            // set below on the last safari day

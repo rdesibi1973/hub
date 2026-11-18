@@ -194,7 +194,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
 
             try {
-                $own_arr        = isset($_POST['own_arrangement']) ? 1 : 0;
+                // Own-arrangement stay (iti_oa_day()): the tick, or "Own Arrangement" picked as the lodge.
+                $own_arr        = (isset($_POST['own_arrangement']) || $end_raw === 'own') ? 1 : 0;
                 $own_arr_nights = $own_arr ? max(1, (int)($_POST['own_arrangement_nights'] ?? 1)) : 0;
                 // When own_arrangement is on but no lodge selected, mark as Own Arrangement text
                 if ($own_arr && $end_id === null && empty($end_txt)) {
@@ -1478,6 +1479,7 @@ include __DIR__ . '/../../includes/layout_header.php';
                  style="width:16px;height:16px;accent-color:var(--red);"
                  onchange="toggleOA(this.checked)">
           <span style="font-size:.85rem;font-weight:600;">🏨 Own Arrangement</span>
+          <span style="font-size:.72rem;color:var(--grey-mid);">— hotel booked by the agency / clients: no voucher, no meals or room in the documents (type the hotel name below)</span>
         </label>
         <div id="oa-nights-wrap" style="margin-bottom:10px;<?= $is_oa ? '' : 'display:none;' ?>">
           <label style="font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--grey-dk);display:block;margin-bottom:4px;">Own Arrangement Nights</label>
