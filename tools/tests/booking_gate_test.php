@@ -259,6 +259,25 @@ $t('room names: beds counted, TRP = triple (run 30)', bg_room_type('Kiboko (3 Qu
    && bg_room_type('Nyani (1Dbl)') === 'dbl' && bg_room_type('Standard Room (FB, TRP)') === 'tpl' && bg_room_type('Standard Room (FB, TWN)') === 'twn'
    && bg_room_type('King Room') === 'dbl' && bg_room_type('Jambo (1Dbl & 2Sngl)') === 'fam'
    && bg_rooms_doc([$rm('Kiboko (3 Queen size beds)'), $rm('Twiga (2 Queen)'), $rm('Ndege (2 Queen)'), $rm('Nyani (1Dbl)')])['capacity'] === 9);
+// Colombo, request 2420 (gate run 40, 18 Nov 2026): bed layout ≠ extra room; Orangi "(2 Dbl)" = two double beds
+$rp = fn(string $s) => bg_rooms_parse($s);
+$t('rooms parse: "with … single bed" is the layout, not a room', $rp('1 triple with double and single bed') === ['total' => 1, 'types' => ['tpl' => 1]]
+   && $rp('1 TPL w/ double & single bed')['types'] === ['tpl' => 1] && $rp('1 triple (double + single bed)')['types'] === ['tpl' => 1]
+   && $rp('1 family (1 dbl & 2 sgl)')['types'] === ['fam' => 1] && $rp('1 TRIPLE (3 separate beds)')['types'] === ['tpl' => 1]
+   && $rp('2 DBL + 1 TWN') === ['total' => 3, 'types' => ['dbl' => 2, 'twn' => 1]] && $rp('1 DBL, 1 SGL') === ['total' => 2, 'types' => ['dbl' => 1, 'sgl' => 1]]
+   && $rp('2 double, 1 single')['total'] === 3, [$rp('1 triple with double and single bed'), $rp('1 triple (double + single bed)'), $rp('1 family (1 dbl & 2 sgl)')]);
+$t('room names: "(2 Dbl)" = two double beds → family; bare "2 Dbl" stays double', bg_room_type('Ngorongoro Marera Mountain View Lodge - Serengeti (2 Dbl)') === 'fam'
+   && bg_room_capacity(bg_room_type('Serengeti (2 Dbl)')) === 4 && bg_room_type('2 Double beds') === 'fam' && bg_room_type('2 Dbl') === 'dbl'
+   && bg_room_type('Swala (1Dbl)') === 'dbl' && bg_rooms_doc([$rm('Serengeti (2 Dbl)')])['capacity'] === 4);
+$coSnap = $snap([$stay('Arusha Explorers', '2027-01-15', '2027-01-16', 1), $stay('Marera', '2027-01-16', '2027-01-18', 2)],
+                 ['sheet' => '3PAX', 'pax' => ['adults' => 3, 'teen' => 0, 'child' => 0], 'room_config' => '1 triple with double and single bed']);
+$coDocs = [$doc('invoices/Orangi WB9013.pdf', [
+    $dsStay('Arusha Explorers', '2027-01-15', '2027-01-16', ['adults' => 3, 'rooms' => [$rm('Jambo (1Dbl & 2Sngl)')]]),
+    $dsStay('Marera', '2027-01-16', '2027-01-18', ['adults' => 3, 'rooms' => [$rm('Ngorongoro Marera Mountain View Lodge - Serengeti (2 Dbl)')]]),
+], ['Colombo'])];
+$res = bg_evaluate($coSnap, $coDocs);
+$t('Colombo #2420: 3A in 1 triple, Jambo / Serengeti (2 Dbl) → no stay_rooms, no rooms_note',
+   !array_intersect(['stay_rooms!', 'stay_rooms', 'rooms_note'], $issues($res)), array_map(fn($f) => [$f['issue'], $f['text']], $res['findings']));
 $t('guide rooms',bg_guide_room('Driver/Guide Room') && bg_guide_room('Guide (FB)') && bg_guide_room('Driver accommodation') && !bg_guide_room('Deluxe Double'));
 $bfSnap = $snap([], ['sheet' => '8PAX+1TL(9PAX)', 'pax' => ['adults' => 8, 'teen' => 0, 'child' => 0, 'tl' => 1, 'total_guests' => 9], 'jeeps' => 2,
                      'room_config' => '1 DOUBLE + 2 TWIN + 1 TRIPLE (3 separate beds)', 'start_date' => '2027-07-12', 'end_date' => '2027-07-24']);

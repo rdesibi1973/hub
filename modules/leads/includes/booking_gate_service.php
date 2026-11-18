@@ -910,6 +910,9 @@ function bg_room_type(string $s): string {
     if (preg_match('/(dbl|double)/', $s) && preg_match('/(sngl|sgl|single|twin|twn)/', $s)) return 'fam';   // one room, double + singles
     // Beds counted in the room name (Orangi, Bonfante 14 Nov 2026): "Kiboko (3 Queen size beds)" = triple, "Twiga (2 Queen)" = twin.
     if (preg_match('/\b([2-9])\s*(?:x\s*)?(queen|king|beds?\b|singles?\b)/', $s, $m)) return ['2' => 'twn', '3' => 'tpl'][$m[1]] ?? 'fam';
+    // Double beds counted: "Serengeti (2 Dbl)" (Marera, Colombo 18 Nov 2026) = two double beds in one room → family. Only in the
+    // bracketed bed layout of a room name, or with "beds": a bare "2 Dbl" on a voucher line means two double ROOMS.
+    if (preg_match('/\(\s*[2-9]\s*(?:x\s*)?(?:dbl|double)s?\b[^)]*\)|\b[2-9]\s*(?:x\s*)?(?:dbl|double)s?\s+beds?\b/', $s)) return 'fam';
     if (preg_match('/\b(tpl|trpl|trp|triple)/', $s)) return 'tpl';
     if (preg_match('/\b(twn|twin)/', $s)) return 'twn';
     if (preg_match('/(dbl|double|king|queen|matrimonial)/', $s)) return 'dbl';
@@ -922,10 +925,19 @@ function bg_room_capacity(string $type): int {
     return ['fam' => 4, 'tpl' => 3, 'dbl' => 2, 'twn' => 2, 'dbl_twn' => 2, 'sgl' => 1][$type] ?? 2;
 }
 
-/** "1 DBL + 2 TWN", "2 double, 1 single", "DBL" → ['total' => n, 'types' => [type => n]] ('total' 0 = not readable). */
+/**
+ * "1 DBL + 2 TWN", "2 double, 1 single", "DBL" → ['total' => n, 'types' => [type => n]] ('total' 0 = not readable).
+ * A bed layout describes the room, it is not another room (Colombo, request 2420, 18 Nov 2026): "1 triple with double and
+ * single bed" = 1 TPL — "with …" / "w/ …" clauses and parentheses that only list beds are dropped before splitting, and a part
+ * that names beds with no room count and no room word is not counted.
+ */
 function bg_rooms_parse(string $s): array {
     $types = []; $total = 0;
+    $s = preg_replace('/\s*(?:\bwith\b|\bw\/)\s*(?:[^,;+()]*?\bbeds?\b|[^,;+()]*)/i', '', $s);
+    $s = preg_replace('/\s*\((?:\s*(?:\d+|x|dbls?|doubles?|sgls?|sngls?|singles?|twin|queens?|kings?|size|separate|beds?|and|&|\+|,)\s*)+\)/i', '', $s);
     foreach (preg_split('/\s*(?:\+|,|&|\band\b|;)\s*/i', $s) as $part) {
+        if (preg_match('/\bbeds?\b/i', $part) && !preg_match('/^\s*\d/', $part)
+            && !preg_match('/\b(rooms?|tpl|trpl|trp|triple|twn|fam|family|villa|quad|quadruple|suite)\b/i', $part)) continue;
         $t = bg_room_type($part);
         if ($t === '') continue;
         $n = preg_match('/(\d+)\s*(?:x\s*)?[a-z]/i', $part, $m) ? (int)$m[1] : 1;
@@ -982,6 +994,15 @@ function bg_rooms_same_types(array $a, array $b): bool {
     $diff = 0;
     foreach (array_unique(array_merge(array_keys($a), array_keys($b))) as $k) $diff += abs(($a[$k] ?? 0) - ($b[$k] ?? 0));
     return $diff <= $fx;
+}
+
+/**
+ * A booked family room (a double + singles, "(2 Dbl)") gives a Calc triple's guests the same beds: compared as a triple
+ * (Colombo, request 2420, 18 Nov 2026 — Calc "1 triple", Orangi "Jambo (1Dbl & 2Sngl)" / Marera "Serengeti (2 Dbl)").
+ */
+function bg_rooms_fam_as_tpl(array $types): array {
+    if (!empty($types['fam'])) { $types['tpl'] = ($types['tpl'] ?? 0) + $types['fam']; unset($types['fam']); }
+    return $types;
 }
 
 /** Meal plan rank: RO 0, BB 1, HB 2, FB 3, AI 4; null = not stated. */
@@ -1487,7 +1508,7 @@ function bg_eval_stay(array &$svcs, int $i, array $named, array &$items, callabl
             } elseif (!empty($calcRooms['types']['fam']) && empty($dr['types']['fam']) && array_sum($dr['types']) === $dr['total']) {   // every room type known
                 $add('rooms_note', $s['name'] . ': ' . $roomsTxt . ' booked, the Calc has ' . bg_rooms_text($calcRooms) . ' (no family room): check the family is fine with it.',
                      $s, ['source_file' => $items[$k]['file']]);
-            } elseif (empty($calcRooms['types']['fam']) && !bg_rooms_same_types($calcRooms['types'], $dr['types'])) {
+            } elseif (empty($calcRooms['types']['fam']) && !bg_rooms_same_types($calcRooms['types'], bg_rooms_fam_as_tpl($dr['types']))) {
                 $add('rooms_note', $s['name'] . ': ' . $roomsTxt . ' booked, the Calc has ' . bg_rooms_text($calcRooms) . '.', $s, ['source_file' => $items[$k]['file']]);
             }
         }
