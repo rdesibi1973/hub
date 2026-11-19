@@ -20,12 +20,14 @@ Memo: at the start create one `doing` memo (clear title, linked request, stable 
 - **Client name in the folder:** if the request still has a placeholder name (e.g. `SposiJun27`, "Famiglia…", a code), before `confirm_preview` rename it to the lead passenger's FirstLast (e.g. `SimonePalese`): `update_request` (`customer_name`, and `start_date` if empty) and `rename_folder` with `rename_files: true` — dry run, then confirm (13 Nov 2026).
 - **Cancelled request confirmed again (new dates):** if `find_requests` shows status Cancelled (e.g. an earlier trip cancelled, the client comes back), before `confirm_preview`: `reopen_cancelled` (`current_path` when the folder is still in `/2026`) and `update_request` with the new `start_date` — dry run, then confirm. Check with `find_invoices` that the old invoice is Cancelled, and move the old trip's files (old Calcs/Words, old invoice PDF, supplier invoices in `invoices/`) into `old/` (18 Nov 2026, GianlucaBenni).
 - **Only the confirmed Calc at the top before the preview:** `confirm_preview` / `confirm_booking` have no file parameter and read the highest-numbered Calc. Move the non-confirmed Calcs (and their Words) into `old/` BEFORE `confirm_preview`, otherwise the checks come from the wrong Calc (13 Nov 2026, SimonePalese read 02 Simba instead of 01 Pumba).
+- **Booking confirmed straight away, no request in the Hub yet** (the agency sends "CONFERMA" with a standard programme we never quoted, e.g. Etnia): `find_requests` (name, passenger, agency) for duplicates → `create_request` as in `sales-agent` §1 → `copy_program` (two-digit `prognum`) → `fill_calc` (pax sheet, `start_date`, `price_components`, guests, room, arrival / departure, extra days such as a domestic flight on the last day) dry run, then confirm after his ok → continue with §2 (19 Nov 2026, GiuseppeMensa).
 
 ## 2. Check the Calc before confirming (`read_calc`)
 
 - only ONE PAX sheet (the confirmed pax count);
 - H6:I14 cleared when adults only; with teens the teen discount stays in H13/I13 (see `sales-agent` §2);
 - F9 as a formula of the per-person components (e.g. `=1625+255`): STO price for agencies, rack for direct clients — the same figure as programme and email; ZNZ/Pemba transfers per car in F10, not F9;
+- **STOSPEC agencies** (`list_agencies` → `price_level` stospec, e.g. Etnia, EKO): the safari price per person is the F9 of the STOSPEC Calc in `/itineraries/SafariClassic/it/Agenzia/2026-27/STOSPEC/<Prog>_Calc.xlsx` (pax sheet confirmed) — `get_rates` with `program` gives it as `stospec` (`stospec_source: stospec_calc`). Domestic flights at the pricelist sale price (`get_rates` `flights[].sale_pp`, e.g. Arusha → Zanzibar 255) as their own item in `price_components` (e.g. `=2830+255`); in col C the cost (`=235*$B$1`). `stospec-prices.docx` in that folder is out of date (no Migrazione Inverno): don't use it as the source. `copy_program` copies the STO template (D2 = 18 %): F9 is what counts; set D2 to 14 % in the sheet XML when the PC is reachable (19 Nov 2026, GiuseppeMensa);
 - a hotel on every night, beach nights included ("<hotel> - own arrangement" when the agency books it); meal plan stated for Zanzibar/Pemba/Mafia/Arusha;
 - rooms exactly as requested (man+woman couple = 1 DBL; families of 4 in quadruple at Orangi Collection lodges);
 - guests from row 43: "First Last", MR/MRS, country (Italian names + Italian agency → ITALY); arrival A51, departure A56;
@@ -104,3 +106,4 @@ Mail booking: A ... Cc ... – testo pronto
 Serve da te: ok per confermare / ok per inviare la mail
 Poi: fattura (deposito <importo>) e programma finale
 ```
+
