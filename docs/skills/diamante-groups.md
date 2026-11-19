@@ -31,6 +31,7 @@ Memo: at the start create one `doing` memo (clear title, linked request, stable 
 - Extras on both: balloon 500 pp, bush dinner 15 pp, Masai boma 60 per jeep, extra transfer 80 per car.
 - Teen in the third bed: both reductions add up — third bed -15% (accommodation) and teen -300 (park fees; applies also in double or single).
 - Festive period: January rate when only the arrival day falls in 16/12–05/01.
+- Karatu when the Marera View Lodge is full: Haradali Karatu is our usual alternative, no supplement. If Il Diamante asks for Acacia Farm Lodge instead: supplement **125 USD per person per night** (Roberto, 19 Nov 2026; Acacia 2027 FB high season 222 pp + levy vs Marera 125 pp in the Calc).
 - End of season 2027: a joint report with Lorenzo (departures, pax, jeeps), for information only, to plan 2028. No end-of-season adjustment or margin sharing (Roberto, 12 Nov 2026).
 - Calc: F9 = price pp + extras pp; F10 = F9 × pax + per-jeep extras (+ jeep only for group tariff) − reductions; note the tariff in G10.
 

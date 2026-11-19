@@ -18,6 +18,7 @@ Memo: at the start create one `doing` memo (clear title, linked request, stable 
 
 `find_requests` → `request_id`, folder in `/2026/`, agency, agent. If there are several Calcs (`01_`, `02_`…), ask which one is confirmed.
 - **Client name in the folder:** if the request still has a placeholder name (e.g. `SposiJun27`, "Famiglia…", a code), before `confirm_preview` rename it to the lead passenger's FirstLast (e.g. `SimonePalese`): `update_request` (`customer_name`, and `start_date` if empty) and `rename_folder` with `rename_files: true` — dry run, then confirm (13 Nov 2026).
+- **Cancelled request confirmed again (new dates):** if `find_requests` shows status Cancelled (e.g. an earlier trip cancelled, the client comes back), before `confirm_preview`: `reopen_cancelled` (`current_path` when the folder is still in `/2026`) and `update_request` with the new `start_date` — dry run, then confirm. Check with `find_invoices` that the old invoice is Cancelled, and move the old trip's files (old Calcs/Words, old invoice PDF, supplier invoices in `invoices/`) into `old/` (18 Nov 2026, GianlucaBenni).
 - **Only the confirmed Calc at the top before the preview:** `confirm_preview` / `confirm_booking` have no file parameter and read the highest-numbered Calc. Move the non-confirmed Calcs (and their Words) into `old/` BEFORE `confirm_preview`, otherwise the checks come from the wrong Calc (13 Nov 2026, SimonePalese read 02 Simba instead of 01 Pumba).
 
 ## 2. Check the Calc before confirming (`read_calc`)
