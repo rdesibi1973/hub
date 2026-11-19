@@ -33,8 +33,14 @@ original, `.xlsx` only, ≤ 40 cells, copy ≤ 30 days old, emptying no cell). E
 
 Reading the Excel files needs the PC (ask access to `C:\Dropbox` once): the connector cannot read cells reliably.
 Local path = `C:\Dropbox` + `path`. Read only; never open them in Excel (that locks them and can create a new copy).
-`cells[]` gives, for up to 40 cells, `base` (the version before both edits, when known), `original`, `copy` and
-`both` (changed in both files). Look at the row (column A label, the CHECKED / notes columns, dates) to understand it.
+`cells[]` gives `base` (the version before both edits, when known), `original`, `copy` and `side`: `copy` (only the
+copy changed it), `both` (changed in both, to different values), `original` (only the original changed it — kept; up to
+40 of each side). `n_cells` counts the copy side, `n_cells_original` the original side. **Always read both sides**: a
+copy that only empties a cell while the original also made changes (`hint` "Original is newer … → the copy is probably
+outdated") is usually an old version — keeping it would undo the original's changes. Dates come as `2026-12-22`;
+`text_date` / "⚠ date stored as text" = a date typed or pasted as text (it sorts and parses wrongly — e.g.
+"Thursday, December 22, 2026" on the 24th): propose to put back a real date (or the `=A17+1` formula), never copy the
+text into the original. Look at the row (column A label, the CHECKED / notes columns, dates) to understand it.
 
 | outcome / reason | what to check | usual proposal |
 |---|---|---|

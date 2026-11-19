@@ -20,6 +20,25 @@ Running log of notable changes and current build state. Module-level "active / p
 
 ---
 
+## 2026-11-19 — Dropbox conflicts: original-side changes, hint, readable dates
+
+- Case: conflict 303 (request 3195, Florio GRP2212). The Hub listed only K23 (copy empties it); the original also had
+  A17, A19:A22 back as real dates and a new payment note in G11 — not shown, so the copy looked as valid as the original.
+  Not a diff bug: on the base revision (14 Nov 13:53) those cells already had the copy's values.
+- `dbx_conflict_service.php`: `dbxc_decide()` also returns `original` (cells only the original changed); `conflict` rows
+  store them as `cells[]` with `side: original` after the copy's (`side: copy | both`), 40 per side; `n_cells` stays the
+  copy-side count (auto rules unchanged), new `n_cells_original`, `original_saved`. `hint` per row (page, API, memo, mail):
+  "Original is newer (saved 2h19 later) and also changed 6 cells → the copy is probably outdated", copy newer, text dates.
+- Dates: `dbxc_cells()` reads the number formats (values unchanged — same cells as the data-only read, checked on the
+  real pair); date cells shown as `2026-12-22`, never the serial; a date stored as text gets `text_date` and "⚠ date stored
+  as text". Files compared with `dbxc_same()` (sheets + cells).
+- Lead Tracker → Conflicts: "Copy changed N · Original changed M", muted group "Changed only in the original (kept)", hint
+  under the result. Test `tools/tests/dbx_conflict_test.php`.
+- Who wrote the text dates: Calc revision of 13 Nov 2026 10:46 EAT, saved by Microsoft Excel (lastModifiedBy "Harrison
+  Godson") — `A18:A22` formulas (`=A17+1`) replaced by values / text; no Hub writer ran on that file then. Hub writers
+  (`calc_fill`, `dbxc_merge` / passports) write serials and formulas, never formatted values. Scan of 173 active Calcs:
+  no other column-A text dates.
+
 ## 2026-11-18 — rename_folder: GRP member re-link touches the member only
 
 - Bug: `rename_folder` with `current_path` on a GRP member treated the member sub-folder as the group parent — `group_folder`

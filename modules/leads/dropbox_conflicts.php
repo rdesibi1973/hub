@@ -44,15 +44,34 @@ foreach (array_merge($rep['open'], $rep['closed']) as $r) if ($r['owner_user_id'
 asort($owners);
 $lastCron = dbxc_meta($db, 'last_cron');
 
+// Cells: the copy's changes (side copy / both), then — muted — the ones only the original made (kept as they are).
+// Dates come as 2026-12-22 from the analysis; a date stored as text is flagged ⚠.
 $cellTable = function (array $r) {
     if (!$r['cells']) return;
-    echo '<details class="dc-cells"><summary>' . (int)$r['n_cells'] . ' cell' . ((int)$r['n_cells'] === 1 ? '' : 's') . '</summary><table>'
+    $nC = (int)$r['n_cells'];
+    $nO = (int)($r['n_cells_original'] ?? 0);
+    $copy = array_values(array_filter($r['cells'], fn($c) => $c['side'] !== 'original'));
+    $orig = array_values(array_filter($r['cells'], fn($c) => $c['side'] === 'original'));
+    $cols = $r['base_saved'] ? 4 : 3;
+    $val = function (array $c, string $k) {
+        $s = h((string)$c[$k]);
+        if (in_array($k, $c['text_date'], true)) $s .= ' <span class="dc-td" title="date stored as text: Excel cannot sort or add it, and it may not match the weekday">⚠ date stored as text</span>';
+        return $s;
+    };
+    $row = function (array $c, string $cls = '', string $title = '') use ($r, $val) {
+        echo '<tr' . ($cls ? ' class="' . $cls . '"' : '') . ($title ? ' title="' . h($title) . '"' : '') . '><td>' . h($c['cell']) . '</td>'
+           . ($r['base_saved'] ? '<td>' . $val($c, 'base') . '</td>' : '') . '<td>' . $val($c, 'original') . '</td><td>' . $val($c, 'copy') . '</td></tr>';
+    };
+    $sum = $r['n_cells_original'] !== null ? 'Copy changed ' . $nC . ' · Original changed ' . $nO : $nC . ' cell' . ($nC === 1 ? '' : 's');
+    echo '<details class="dc-cells"><summary>' . h($sum) . '</summary><table>'
        . '<tr><th>Cell</th>' . ($r['base_saved'] ? '<th>Before (' . h($r['base_saved']) . ')</th>' : '') . '<th>Original</th><th>Copy</th></tr>';
-    foreach ($r['cells'] as $c) {
-        echo '<tr' . ($c['both'] ? ' class="dc-both" title="changed in both files"' : '') . '><td>' . h($c['cell']) . '</td>'
-           . ($r['base_saved'] ? '<td>' . h($c['base']) . '</td>' : '') . '<td>' . h($c['original']) . '</td><td>' . h($c['copy']) . '</td></tr>';
+    foreach ($copy as $c) $row($c, $c['side'] === 'both' ? 'dc-both' : '', $c['side'] === 'both' ? 'changed in both files' : '');
+    if ($nC > count($copy)) echo '<tr><td colspan="' . $cols . '">… ' . ($nC - count($copy)) . ' more</td></tr>';
+    if ($orig) {
+        echo '<tr class="dc-orig-h"><td colspan="' . $cols . '">Changed only in the original (kept)</td></tr>';
+        foreach ($orig as $c) $row($c, 'dc-orig');
+        if ($nO > count($orig)) echo '<tr class="dc-orig"><td colspan="' . $cols . '">… ' . ($nO - count($orig)) . ' more</td></tr>';
     }
-    if ($r['n_cells'] > count($r['cells'])) echo '<tr><td colspan="4">… ' . ($r['n_cells'] - count($r['cells'])) . ' more</td></tr>';
     echo '</table></details>';
 };
 
@@ -74,6 +93,10 @@ include 'includes/header.php';
 .dc-cells table{border-collapse:collapse;margin-top:4px;font-size:.78rem}
 .dc-cells th,.dc-cells td{border:1px solid #e5e5e5;padding:2px 6px;white-space:nowrap}
 .dc-cells tr.dc-both td{background:#fde2e1}
+.dc-cells tr.dc-orig td{color:#888;background:#fafafa}
+.dc-cells tr.dc-orig-h td{color:#777;font-style:italic;background:#f3f3f3;border-top:2px solid #ddd}
+.dc-td{color:#b26a00;font-size:.72rem;font-weight:600;white-space:nowrap}
+.dc-hint-row{display:block;margin-top:4px;font-size:.78rem;color:#7a5b00;background:#fff8e1;border-radius:4px;padding:2px 6px;min-width:220px}
 .dc-info{background:#fff;border-left:4px solid #3A6EA5;border-radius:6px;padding:12px 16px;margin-bottom:16px;font-size:.88rem;line-height:1.6}
 .dc-info p{margin:0 0 6px}.dc-info p:last-child{margin:0}
 .dc-bar{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:16px;font-size:.85rem}
@@ -147,7 +170,8 @@ foreach ($tables as [$title, $list, $isOpen]): ?>
         <td class="dc-nowrap"><?= h($r['saved_at'] ? substr($r['saved_at'], 0, 16) : '') ?></td>
         <td><?= h($r['owner'] ?? '—') ?></td>
         <td><span class="dc-tag <?= $tag[0] ?>"><?= h($tag[1]) ?></span>
-            <span class="dc-why"><?= h($r['outcome_label']) ?><?= $r['reason'] ? ': ' . h($r['reason']) : '' ?><?= $r['error'] ? ' — ' . h($r['error']) : '' ?></span></td>
+            <span class="dc-why"><?= h($r['outcome_label']) ?><?= $r['reason'] ? ': ' . h($r['reason']) : '' ?><?= $r['error'] ? ' — ' . h($r['error']) : '' ?></span>
+            <?php if (!empty($r['hint'])): ?><span class="dc-hint-row"><?= h($r['hint']) ?></span><?php endif; ?></td>
         <td><?php $cellTable($r); ?></td>
         <td><?= h(substr((string)($isOpen ? $r['first_seen_at'] : $r['resolved_at']), 0, 16)) ?></td>
       </tr>

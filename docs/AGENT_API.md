@@ -2343,9 +2343,16 @@ Params: `owner_user_id` (only that owner's), `days` (closed ones, default 30).
 → `live`, `last_run {at, live, conflicts, checked, left, gone, past, outcomes, errors[], notified}`, `last_done` (date),
 `open[]` and `closed[]` `{id, path, file, original, folder, request_id, owner, owner_user_id, trip_end, saved_at, outcome,
 outcome_label, auto (resolved by the Hub when live), status (open | resolved | gone = fixed by hand), action (trashed |
-merged), reason, error, base_saved, n_cells, cells[] {cell ("2pax!J20"), base, original, copy, both — passport numbers
-never stored: "(hidden)" below a PASSPORT header, "[hidden]" for a document-like token in other text}, first_seen_at,
-checked_at, resolved_at, mailed_at, dropbox_url}`.
+merged), reason, error, base_saved, original_saved (when the original was saved, EAT), n_cells (cells the copy changed
+that the original does not have — the count the automatic rules use), n_cells_original (`conflict` only: cells only the
+original changed, kept as they are; null on rows analysed before 19 Nov 2026), hint (rows for a person only, e.g.
+"Original is newer (saved 2h19 later) and also changed 6 cells → the copy is probably outdated"; "⚠ N cells with a date
+stored as text"), cells[] {cell ("2pax!J20"), side (copy | both = changed in both to different values | original = only
+the original changed it, kept), base, original, copy, both (= side both), text_date (files where the value is a date
+stored as text: "base" / "original" / "copy") — copy-side cells first, then original-side ones, at most 40 of each;
+cells with a date format shown as `2026-12-22`, never the Excel serial; passport numbers never stored: "(hidden)" below a
+PASSPORT header, "[hidden]" for a document-like token in other text}, first_seen_at, checked_at, resolved_at, mailed_at,
+dropbox_url}`.
 
 ### `dropbox_conflicts_run` (POST, dry-run unless `confirm`)
 Check now, `budget` seconds (default 120, max 240; `left` > 0 = call again). Dry run: analysis only. `confirm`: also

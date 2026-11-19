@@ -303,34 +303,84 @@ function dbxc_norm($v): ?string {
     return ($s[0] === '=' ? 'f:' : 's:') . $s;
 }
 
-/** A dbxc_norm() value as shown to people. */
-function dbxc_show(?string $v): string {
+/**
+ * A dbxc_norm() value as shown to people. $date: the cell has a date number format → a number is shown as 2026-12-22
+ * (never as the Excel serial).
+ */
+function dbxc_show(?string $v, bool $date = false): string {
     if ($v === null) return '(empty)';
     $s = substr($v, 2);
     if ($v[0] === 'b') $s = $s === '1' ? 'TRUE' : 'FALSE';
+    if ($v[0] === 'n' && $date && ($d = dbxc_serial_date((float)$s)) !== null) return $d;
     return mb_strlen($s) > 60 ? mb_substr($s, 0, 57) . '…' : $s;
 }
 
-/** An Excel file's content: ['sheets' => [titles], 'cells' => ['Sheet!B7' => norm]]. */
+/** Excel serial (1900 system) → 'Y-m-d' (+ ' H:i' when it has a time), null when out of the plausible range. */
+function dbxc_serial_date(float $n): ?string {
+    if ($n < 1 || $n >= 2958466) return null;
+    $ts = (int)round(($n - 25569) * 86400);
+    return gmdate(fmod($n, 1.0) > 0.0001 ? 'Y-m-d H:i' : 'Y-m-d', $ts);
+}
+
+/**
+ * Text that is only a date ("Thursday, December 22, 2026", "22-Dec-2026", "22/12/2026", "2026-12-22"): a date stored
+ * as text, which sorts, adds and parses wrongly (strtotime() of the first one is 22 December whatever the weekday).
+ * Whole cell only: a note that mentions a date is not one.
+ */
+function dbxc_text_date(?string $v): bool {
+    if ($v === null || $v[0] !== 's') return false;
+    $s = trim(substr($v, 2));
+    $mon = '(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec|gen|mag|giu|lug|ago|set|ott|dic)[a-z]*\.?';
+    $day = '(?:(?:mon|tue|wed|thu|fri|sat|sun|lun|mar|mer|gio|ven|sab|dom)[a-zì]*,?\s+)?';
+    return (bool)preg_match('/^' . $day . '(?:' . $mon . '\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4}'           // (Thursday,) December 22, 2026
+                           . '|\d{1,2}(?:st|nd|rd|th)?[\s\-\/.]+' . $mon . '[\s\-\/.,]+\d{2,4}'          // 22-Dec-2026, 22 dicembre 2026
+                           . '|\d{1,2}[\/.\-]\d{1,2}[\/.\-]\d{2,4}'                                        // 22/12/2026
+                           . '|\d{4}-\d{2}-\d{2})$/iu', $s);
+}
+
+/** Same content (sheets and cells; the date formats are display only). */
+function dbxc_same(array $a, array $b): bool {
+    return $a['sheets'] === $b['sheets'] && $a['cells'] === $b['cells'];
+}
+
+/**
+ * An Excel file's content: ['sheets' => [titles], 'cells' => ['Sheet!B7' => norm], 'dates' => ['Sheet!A17' => true]]
+ * ('dates' = numeric cells with a date number format, for display; compare files with dbxc_same()). Styles are read
+ * for the formats; a file whose styles PhpSpreadsheet cannot read is read data-only (no 'dates').
+ */
 function dbxc_cells(string $bytes, string $ext): array {
     calc_require_spreadsheet();
     $tmp = tempnam(sys_get_temp_dir(), 'dbxc');
     file_put_contents($tmp, $bytes);
     try {
         $reader = \PhpOffice\PhpSpreadsheet\IOFactory::createReader($ext === 'xls' ? 'Xls' : 'Xlsx');
-        $reader->setReadDataOnly(true);
-        $ss = $reader->load($tmp);
-        $out = ['sheets' => [], 'cells' => []];
+        $styles = true;
+        try {
+            $ss = $reader->load($tmp);
+        } catch (Throwable $e) {
+            $styles = false;
+            $reader = \PhpOffice\PhpSpreadsheet\IOFactory::createReader($ext === 'xls' ? 'Xls' : 'Xlsx');
+            $reader->setReadDataOnly(true);
+            $ss = $reader->load($tmp);
+        }
+        $out = ['sheets' => [], 'cells' => [], 'dates' => []];
         foreach ($ss->getWorksheetIterator() as $ws) {
             $title = $ws->getTitle();
             $out['sheets'][] = $title;
             foreach ($ws->getCellCollection()->getCoordinates() as $coord) {
-                $v = dbxc_norm($ws->getCell($coord)->getValue());
-                if ($v !== null) $out['cells'][$title . '!' . $coord] = $v;
+                $cell = $ws->getCell($coord);
+                $v = dbxc_norm($cell->getValue());
+                if ($v === null) continue;
+                $out['cells'][$title . '!' . $coord] = $v;
+                if ($styles && $v[0] === 'n') {
+                    try {
+                        if (\PhpOffice\PhpSpreadsheet\Shared\Date::isDateTime($cell)) $out['dates'][$title . '!' . $coord] = true;
+                    } catch (Throwable $e) { /* format not understood: shown as a number */ }
+                }
             }
         }
         $ss->disconnectWorksheets();
-        ksort($out['cells']);   // so two files compare with ===
+        ksort($out['cells']);   // so two files compare with dbxc_same()
         return $out;
     } finally {
         @unlink($tmp);
@@ -349,16 +399,24 @@ function dbxc_diff(array $a, array $b): array {
 /**
  * The decision once C's base A is known (dbxc_cells() shapes). → ['outcome' => already_in | merged | conflict,
  * 'reason' => DBXC_REASONS key|null, 'keys' => the cells to write into O (C's changes not yet in O), 'both' => the
- * cells O changed too, to another value]. Pure: no Dropbox, testable alone.
+ * cells O changed too, to another value, 'original' => the cells only O changed (C still has A's value): kept as
+ * they are, shown so a person sees what the copy would undo]. Pure: no Dropbox, testable alone.
  * Never merged: a copy that empties cells the original has (a wrong base would delete data), a copy older than
  * DBXC_MERGE_DAYS ($recent false: its changes are likely stale and its real base may be out of the history).
  */
 function dbxc_decide(array $a, array $o, array $c, string $ext, bool $recent = true): array {
     $missing = [];
-    foreach (dbxc_diff($a['cells'], $c['cells']) as $k) {
+    $cChanged = dbxc_diff($a['cells'], $c['cells']);
+    foreach ($cChanged as $k) {
         if (($o['cells'][$k] ?? null) !== ($c['cells'][$k] ?? null)) $missing[] = $k;
     }
-    $res = ['outcome' => 'already_in', 'reason' => null, 'keys' => $missing, 'both' => []];
+    $origOnly = [];
+    $cSet = array_flip($cChanged);
+    foreach (dbxc_diff($a['cells'], $o['cells']) as $k) {
+        if (!isset($cSet[$k])) $origOnly[] = $k;
+    }
+    sort($origOnly);
+    $res = ['outcome' => 'already_in', 'reason' => null, 'keys' => $missing, 'both' => [], 'original' => $origOnly];
     if (!$missing) return $res;
     foreach ($missing as $k) {
         if (($o['cells'][$k] ?? null) !== ($a['cells'][$k] ?? null)) $res['both'][] = $k;
@@ -440,14 +498,14 @@ function dbxc_merge(string $token, array $o, array $O, array $C, array $keys, bo
         @unlink($tmpIn); @unlink($tmpOut);
     }
     $built = dbxc_cells($out, 'xlsx');
-    if ($built !== $expect) {
+    if (!dbxc_same($built, $expect)) {
         return ['ok' => false, 'rev' => null, 'other' => $built['sheets'] !== $expect['sheets'] ? ['(sheets)'] : dbxc_diff($expect['cells'], $built['cells'])];
     }
     if (!$upload) return ['ok' => true, 'rev' => null, 'other' => []];
     $meta = calc_dbx_upload_update($token, $o['path'], $out, $o['rev']);
     $newRev = (string)($meta['rev'] ?? '');
     $back = dbxc_cells(dbxc_current($token, ['rev' => $newRev] + $o), 'xlsx');
-    if ($back !== $expect) {
+    if (!dbxc_same($back, $expect)) {
         throw new RuntimeException('Merged, but the original reads back different in ' . implode(', ', array_slice(dbxc_diff($expect['cells'], $back['cells']), 0, 10))
                                    . ' — check it (its previous version is in the Dropbox history).');
     }
@@ -473,25 +531,82 @@ function dbxc_passport_cols(array ...$files): array {
 /**
  * A dbxc_show() value without passport numbers: a cell below a passport header → "(hidden)"; in any other text, a
  * document-like token (6–10 letters and digits, at least one letter and five digits: "YA1234567") → "[hidden]".
+ * $date: date number format (dbxc_show()).
  */
-function dbxc_private(string $k, ?string $v, array $pcols): string {
+function dbxc_private(string $k, ?string $v, array $pcols, bool $date = false): string {
     if ($v !== null && preg_match('/^(.*)!([A-Z]+)(\d+)$/', $k, $m) && isset($pcols[$m[1] . '!' . $m[2]]) && (int)$m[3] > $pcols[$m[1] . '!' . $m[2]]) {
         return '(hidden)';
     }
     if ($v !== null && $v[0] === 's') $v = (string)preg_replace('/\b(?=[A-Z0-9]*[A-Z])(?=(?:[A-Z]*\d){5})[A-Z0-9]{6,10}\b/i', '[hidden]', $v);
-    return dbxc_show($v);
+    return dbxc_show($v, $date);
 }
 
-/** The cells to show for a copy: [{cell, base, original, copy, both}], passport numbers hidden (dbxc_private()). */
-function dbxc_cell_rows(array $keys, ?array $a, array $o, array $c, array $both): array {
+/**
+ * The cells to show for a copy: [{cell, side, base, original, copy, both, text_date}], passport numbers hidden
+ * (dbxc_private()), date cells as 2026-12-22. side: copy (only the copy changed it) | both (changed in both, to
+ * different values) | original (only the original changed it: kept). $keys = the copy-side cells (dbxc_decide() keys),
+ * $origKeys = the original-only ones; at most DBXC_MAX_MERGE of each. text_date: the files ('base', 'original', 'copy')
+ * where the cell is a date stored as text (dbxc_text_date()).
+ */
+function dbxc_cell_rows(array $keys, ?array $a, array $o, array $c, array $both, array $origKeys = []): array {
     $pcols = dbxc_passport_cols($o, $c, $a ?? []);
     $rows = [];
-    foreach (array_slice($keys, 0, DBXC_MAX_MERGE) as $k) {
-        $rows[] = ['cell' => $k, 'base' => $a ? dbxc_private($k, $a['cells'][$k] ?? null, $pcols) : null,
-                   'original' => dbxc_private($k, $o['cells'][$k] ?? null, $pcols), 'copy' => dbxc_private($k, $c['cells'][$k] ?? null, $pcols),
-                   'both' => in_array($k, $both, true)];
-    }
+    $one = function (string $k, string $side) use ($a, $o, $c, $pcols): array {
+        $files = ['base' => $a, 'original' => $o, 'copy' => $c];
+        $row = ['cell' => $k, 'side' => $side];
+        $td = [];
+        foreach ($files as $name => $f) {
+            if (!$f) { $row[$name] = null; continue; }
+            $v = $f['cells'][$k] ?? null;
+            $row[$name] = dbxc_private($k, $v, $pcols, isset($f['dates'][$k]));
+            if (dbxc_text_date($v)) $td[] = $name;
+        }
+        $row['both'] = $side === 'both';
+        $row['text_date'] = $td;
+        return $row;
+    };
+    foreach (array_slice($keys, 0, DBXC_MAX_MERGE) as $k) $rows[] = $one($k, in_array($k, $both, true) ? 'both' : 'copy');
+    foreach (array_slice($origKeys, 0, DBXC_MAX_MERGE) as $k) $rows[] = $one($k, 'original');
     return $rows;
+}
+
+/** "45 min", "2h19", "3 days": how much later one file was saved. */
+function dbxc_gap(int $seconds): string {
+    $m = (int)round(abs($seconds) / 60);
+    if ($m < 60) return $m . ' min';
+    if ($m < 48 * 60) return intdiv($m, 60) . 'h' . str_pad((string)($m % 60), 2, '0', STR_PAD_LEFT);
+    return (int)round($m / 1440) . ' days';
+}
+
+/**
+ * A hint for a person, from a row's detail and the copy's save time (Y-m-d H:i[:s], EAT), or null. Pure.
+ * E.g. "Original is newer (saved 2h19 later) and also changed 6 cells → the copy is probably outdated".
+ */
+function dbxc_hint(array $d, ?string $cSaved): ?string {
+    $parts = [];
+    $nO = (int)($d['n_cells_original'] ?? 0);
+    $copyRows = array_values(array_filter($d['cells'] ?? [], fn($x) => ($x['side'] ?? 'copy') !== 'original'));
+    $onlyClears = $copyRows && count($copyRows) === (int)($d['n_cells'] ?? -1)
+                  && !array_filter($copyRows, fn($x) => ($x['copy'] ?? '') !== '(empty)');
+    $oT = !empty($d['original_saved']) ? strtotime($d['original_saved']) : false;
+    $cT = $cSaved ? strtotime($cSaved) : false;
+    if ($oT && $cT && abs($oT - $cT) >= 60) {
+        $gap = dbxc_gap($oT - $cT);
+        $cells = $nO . ' cell' . ($nO === 1 ? '' : 's');
+        if ($oT > $cT && $nO && $onlyClears) {
+            $parts[] = "Original is newer (saved $gap later) and also changed $cells → the copy is probably outdated";
+        } elseif ($oT > $cT && $nO) {
+            $parts[] = "Original is newer (saved $gap later) and also changed $cells → check each change of the copy against it";
+        } elseif ($oT > $cT) {
+            $parts[] = "Original is newer (saved $gap later)";
+        } else {
+            $parts[] = "Copy is newer (saved $gap later)" . ($nO ? ", but the original also changed $cells" : '');
+        }
+    }
+    $td = 0;
+    foreach ($d['cells'] ?? [] as $x) if (!empty($x['text_date'])) $td++;
+    if ($td) $parts[] = '⚠ ' . $td . ' cell' . ($td === 1 ? '' : 's') . ' with a date stored as text';
+    return $parts ? implode('. ', $parts) : null;
 }
 
 /**
@@ -521,7 +636,7 @@ function dbxc_process(string $token, array $c, ?array $o, bool $live): array {
 
     $C = dbxc_cells(dbxc_current($token, $c), $ext);
     $O = dbxc_cells(dbxc_current($token, $o), $ext);
-    if ($C === $O) return $finish('identical');
+    if (dbxc_same($C, $O)) return $finish('identical');
 
     // C's base: of the revisions of O saved before C (a few minutes' margin, O itself included), the one closest to C.
     // Revisions Dropbox no longer serves are skipped.
@@ -538,21 +653,29 @@ function dbxc_process(string $token, array $c, ?array $o, bool $live): array {
             $R = dbxc_cells($bytes, $ext);
         }
         $n++;
-        if ($R === $C) return $finish('old_version', ['base_saved' => date('Y-m-d H:i', $rv['server'])]);
+        if (dbxc_same($R, $C)) return $finish('old_version', ['base_saved' => date('Y-m-d H:i', $rv['server'])]);
         $d = count(dbxc_diff($R['cells'], $C['cells']));
         if ($best === null || $d < $best['d']) $best = ['d' => $d, 'cells' => $R, 'saved' => $rv['server']];
     }
     if ($best === null) {
         $keys = dbxc_diff($O['cells'], $C['cells']);
-        return $finish('no_history', ['cells' => dbxc_cell_rows($keys, null, $O, $C, []), 'n_cells' => count($keys)]);
+        return $finish('no_history', ['cells' => dbxc_cell_rows($keys, null, $O, $C, []), 'n_cells' => count($keys),
+                                      'original_saved' => $o['saved'] ? date('Y-m-d H:i:s', $o['saved']) : null]);
     }
     $dec = dbxc_decide($best['cells'], $O, $C, $ext, $c['saved'] && $c['saved'] >= time() - DBXC_MERGE_DAYS * 86400);
-    $detail = ['base_saved' => date('Y-m-d H:i', $best['saved']), 'n_cells' => count($dec['keys']), 'reason' => $dec['reason'],
-               'cells' => dbxc_cell_rows($dec['keys'], $best['cells'], $O, $C, $dec['both'])];
+    // Original-side changes only for a person (conflict): what the copy would undo if it were kept.
+    $orig = $dec['outcome'] === 'conflict' ? $dec['original'] : [];
+    $detail = ['base_saved' => date('Y-m-d H:i', $best['saved']), 'original_saved' => $o['saved'] ? date('Y-m-d H:i:s', $o['saved']) : null,
+               'n_cells' => count($dec['keys']), 'n_cells_original' => count($orig), 'reason' => $dec['reason'],
+               'cells' => dbxc_cell_rows($dec['keys'], $best['cells'], $O, $C, $dec['both'], $orig)];
     if ($dec['outcome'] !== 'merged') return $finish($dec['outcome'], $detail);
     // Not live: the merge is still built and read back (not uploaded), so the page shows what will really happen.
     $m = dbxc_merge($token, $o, $O, $C, $dec['keys'], $live);
-    if (!$m['ok']) return $finish('conflict', ['reason' => 'rewrite', 'other_cells' => array_slice($m['other'], 0, 10)] + $detail);
+    if (!$m['ok']) {
+        $detail['n_cells_original'] = count($dec['original']);
+        $detail['cells'] = dbxc_cell_rows($dec['keys'], $best['cells'], $O, $C, $dec['both'], $dec['original']);
+        return $finish('conflict', ['reason' => 'rewrite', 'other_cells' => array_slice($m['other'], 0, 10)] + $detail);
+    }
     $r['outcome'] = 'merged';
     $r['detail'] = $detail;
     if ($live) {
@@ -745,10 +868,24 @@ function dbxc_explain(array $r): array {
     if ($r['outcome'] === 'conflict' && !empty($d['reason'])) $why .= ' (' . DBXC_REASONS[$d['reason']] . ')';
     if ($r['outcome'] === 'error' && !empty($d['error'])) $why .= ': ' . $d['error'];
     $cells = [];
+    $orig = [];
     foreach ($d['cells'] ?? [] as $x) {
-        $cells[] = $x['cell'] . ' — original: ' . $x['original'] . ' / copy: ' . $x['copy'] . ($x['both'] ? '  ← changed in both' : '');
+        $flag = !empty($x['text_date']) ? '  ⚠ date stored as text' : '';
+        if (($x['side'] ?? '') === 'original') {
+            $orig[] = $x['cell'] . ' — original: ' . $x['original'] . ' / copy: ' . $x['copy'] . $flag;
+            continue;
+        }
+        $cells[] = $x['cell'] . ' — original: ' . $x['original'] . ' / copy: ' . $x['copy'] . ($x['both'] ? '  ← changed in both' : '') . $flag;
     }
     if (($d['n_cells'] ?? 0) > count($cells)) $cells[] = '… ' . ($d['n_cells'] - count($cells)) . ' more cells';
+    if ($orig) {
+        $nO = (int)($d['n_cells_original'] ?? count($orig));
+        $cells[] = 'Changed only in the original (kept): ' . $nO . ' cell' . ($nO === 1 ? '' : 's');
+        foreach ($orig as $line) $cells[] = '  ' . $line;
+        if ($nO > count($orig)) $cells[] = '  … ' . ($nO - count($orig)) . ' more cells';
+    }
+    $hint = dbxc_hint($d, $r['c_saved_at'] ?? null);
+    if ($hint) $why .= '. ' . $hint;
     return ['why' => $why, 'cells' => $cells];
 }
 
@@ -877,7 +1014,10 @@ function dbxc_row_out(array $r, array $users): array {
         'trip_end' => $r['trip_end'], 'saved_at' => $r['c_saved_at'], 'outcome' => $r['outcome'], 'outcome_label' => DBXC_OUTCOMES[$r['outcome']][0] ?? $r['outcome'],
         'auto' => DBXC_OUTCOMES[$r['outcome']][1] ?? false, 'status' => $r['status'], 'action' => $r['action'],
         'reason' => isset($d['reason']) ? (DBXC_REASONS[$d['reason']] ?? $d['reason']) : null, 'error' => $d['error'] ?? null,
-        'base_saved' => $d['base_saved'] ?? null, 'n_cells' => $d['n_cells'] ?? null, 'cells' => $d['cells'] ?? [],
+        'base_saved' => $d['base_saved'] ?? null, 'original_saved' => $d['original_saved'] ?? null,
+        'n_cells' => $d['n_cells'] ?? null, 'n_cells_original' => $d['n_cells_original'] ?? null,
+        'cells' => array_map(fn($x) => $x + ['side' => !empty($x['both']) ? 'both' : 'copy', 'text_date' => []], $d['cells'] ?? []),
+        'hint' => (DBXC_OUTCOMES[$r['outcome']][1] ?? false) ? null : dbxc_hint($d, $r['c_saved_at']),   // only for a person's rows
         'first_seen_at' => $r['first_seen_at'], 'checked_at' => $r['checked_at'], 'resolved_at' => $r['resolved_at'], 'mailed_at' => $r['mailed_at'],
         'dropbox_url' => dbxc_dropbox_url(dirname($r['path'])),
     ];
