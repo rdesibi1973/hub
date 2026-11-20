@@ -1641,6 +1641,11 @@ function followup_apply(PDO $db, string $type, array $cand, array $scope, bool $
                                    && !($old['close_reason'] === 'auto_cancelled'
                                         && folder_path_is_cancelled((string)(($new['folder'] ?? '') !== '' ? $new['folder'] : $old['folder'])))
                                    && !($old['type'] === 'group' && $old['close_reason'] === 'manual');
+    // A check finding (CK check, SafariCheck, booking gate) closed by staff (Resolved, usually with a note: "flight own
+    // arrangement") is their judgement on that finding: the next run reporting the same thing must not re-open it
+    // (20 Nov 2026). It re-opens only when the finding itself changes (another issue or text).
+    $staffAccepted = fn(array $old, bool $findingChanged) => in_array($type, ['ck', 'safaricheck', 'gate'], true)
+                                   && $old['close_reason'] === 'manual' && !$findingChanged;
     $reopenSql = function (array $old, array &$set) {
         $set[] = 'closed_at = NULL'; $set[] = 'closed_by = NULL'; $set[] = 'close_reason = NULL';
         if ($old['staff_status'] === 'resolved') $set[] = "staff_status = 'open'";
@@ -1663,7 +1668,7 @@ function followup_apply(PDO $db, string $type, array $cand, array $scope, bool $
             $prev = $src[$tag] ?? null;
             $src[$tag] = ['since' => $prev['since'] ?? $now] + $entry;
             $changed = !$prev || $prev['issue'] !== $entry['issue'] || $prev['text'] !== $entry['text'];
-            $reopen = $mayReopen($old, $l);
+            $reopen = $mayReopen($old, $l) && !$staffAccepted($old, $changed);
             if ($old['closed_at'] !== null && !$reopen) { $sum['unchanged']++; continue; }
             if ($confirm) {
                 $set = ['last_seen_at = ?', 'sources = ?']; $args = [$now, followup_sources_json($src)];
@@ -1748,7 +1753,7 @@ function followup_apply(PDO $db, string $type, array $cand, array $scope, bool $
                   'due_date' => $due['due_date'], 'due_reason' => $due['due_reason']] as $f => $v) {
             if ((string)$v !== (string)($old[$f] ?? '')) $meta[$f] = $v;
         }
-        $reopen = $mayReopen($old, $l);
+        $reopen = $mayReopen($old, $l) && !$staffAccepted($old, isset($diff['issue']) || isset($diff['doc_status_text']));
         if ($old['closed_at'] !== null && !$reopen) {                      // stays closed
             if ($confirm) $db->prepare("UPDATE booking_followups SET last_seen_at = ? WHERE id = ?")->execute([$now, $id]);
             $sum['unchanged']++;
