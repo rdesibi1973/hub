@@ -1548,7 +1548,7 @@ function bs_status_effects(array $row, string $status, string $reason, string $n
     if ($status === PK_STATUS) {
         $out['effects'][] = 'requests.parked_at = now, parked_by = the user, parked_from = ' . ($old === 'Lost' || $old === '' ? 'Quoted' : $old)
                           . ' (status restored on wake-up)' . ($note !== '' ? '; request note "Parked: ' . $note . '"' : '');
-        $out['effects'][] = 'off the Pipeline board (shown only with "Mostra parcheggiate")';
+        $out['effects'][] = 'off the Pipeline board (shown only with "Show parked")';
     } elseif ($old === PK_STATUS) {
         $out['effects'][] = 'requests.parked_at / parked_by / parked_from cleared';
     }

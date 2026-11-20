@@ -19,7 +19,7 @@ require_once __DIR__ . '/folder_parser.php';      // parse_folder_dates()
 require_once __DIR__ . '/timeline_service.php';   // timeline_log()
 
 const PK_STATUS = 'Parked';
-const PK_LABEL  = 'Parked – in attesa agenzia';
+const PK_LABEL  = 'Parked – waiting for the agency';
 const PK_TIP    = 'Quote sent, waiting for the agency; off the pipeline';
 const PK_FROM   = ['Inquiry', 'Quoted', 'Hot-Quoted', 'Lost'];            // statuses a request can be parked from
 const PK_TO     = ['Inquiry', 'Quoted', 'Hot-Quoted', 'Lost', 'Booked'];  // statuses a Parked request can go to
@@ -55,7 +55,7 @@ function pk_schema(PDO $db): void {
     }
 }
 
-/** Status shown to people: "Parked – in attesa agenzia" for Parked, the value itself otherwise. */
+/** Status shown to people: "Parked – waiting for the agency" for Parked, the value itself otherwise. */
 function pk_status_label(string $status): string {
     return $status === PK_STATUS ? PK_LABEL : $status;
 }
@@ -103,7 +103,7 @@ function pk_sync_fields(PDO $db, int $id, string $old, string $new, int $userId)
 
 /**
  * Wake a Parked request up: status back to parked_from (default Quoted), parked fields cleared, one timeline event
- * "Riattivata: <why>", mail to the request's agent ("Richiesta riattivata: <folder>"). Nothing to do when the
+ * "Reactivated: <why>", mail to the request's agent ("Request reactivated: <folder>"). Nothing to do when the
  * request is not Parked. Never throws (a failure goes to error_log).
  * $opt: notify (default true), dry_run.
  * → ['woken' => bool, 'id', 'status_from', 'status_to', 'notify' => {sent, error} | null, 'error'?]
@@ -121,8 +121,8 @@ function pk_wake(PDO $db, int $id, string $why, array $opt = []): array {
         $out['status_from'] = PK_STATUS;
         $out['status_to']   = $to;
         if (!empty($opt['dry_run'])) return array_merge($out, ['woken' => true]);
-        $why = trim($why) !== '' ? trim($why) : 'attività sulla richiesta';
-        $res = bs_set_request_status($db, $id, $to, '', '', 0, ['tl_title' => 'Riattivata: ' . $why,
+        $why = trim($why) !== '' ? trim($why) : 'activity on the request';
+        $res = bs_set_request_status($db, $id, $to, '', '', 0, ['tl_title' => 'Reactivated: ' . $why,
                                                                 'tl_body'  => PK_STATUS . ' → ' . $to]);
         if (empty($res['ok'])) return array_merge($out, ['error' => $res['error'] ?? 'status change refused']);
         $out['woken'] = true;
@@ -134,7 +134,7 @@ function pk_wake(PDO $db, int $id, string $why, array $opt = []): array {
     return $out;
 }
 
-/** Mail to the request's agent: "Richiesta riattivata: <folder>". No mail to the agency / client. */
+/** Mail to the request's agent: "Request reactivated: <folder>". No mail to the agency / client. */
 function pk_notify_agent(PDO $db, array $r, string $why): array {
     if (empty($r['agent_id'])) return ['sent' => false, 'error' => null];
     require_once __DIR__ . '/../notifications.php';
@@ -143,12 +143,12 @@ function pk_notify_agent(PDO $db, array $r, string $why): array {
     $a = $st->fetch(PDO::FETCH_ASSOC);
     if (!$a || empty($a['email'])) return ['sent' => false, 'error' => 'Agent ' . ($a['name'] ?? $r['agent_id']) . ' has no email — wake-up notification not sent.'];
     $folder = trim((string)$r['practice_code']) !== '' ? (string)$r['practice_code'] : (string)$r['customer_name'];
-    $body = "Una richiesta parcheggiata è tornata attiva.\n\n"
-          . "Cliente:  " . $r['customer_name'] . "\n"
-          . "Cartella: " . $folder . "\n"
-          . "Motivo:   " . $why . "\n\n"
+    $body = "A parked request is active again.\n\n"
+          . "Client:   " . $r['customer_name'] . "\n"
+          . "Folder:   " . $folder . "\n"
+          . "Why:      " . $why . "\n\n"
           . "https://hub.savannahexplorers.com/modules/leads/request_view.php?id=" . (int)$r['id'] . "\n";
-    $ok = send_notification_mail($a['email'], 'Richiesta riattivata: ' . $folder, $body, 'parked wake-up #' . (int)$r['id']);
+    $ok = send_notification_mail($a['email'], 'Request reactivated: ' . $folder, $body, 'parked wake-up #' . (int)$r['id']);
     return ['sent' => $ok, 'error' => $ok ? null : 'mail() refused the wake-up notification for ' . $a['email']];
 }
 
@@ -177,8 +177,8 @@ function pk_wake_from_mail(PDO $db): array {
     $first = [];
     foreach ($rows as $m) if (!isset($first[(int)$m['id']])) $first[(int)$m['id']] = $m;   // the first mail after parking
     foreach ($first as $rid => $m) {
-        $subj = trim((string)$m['subject']) !== '' ? trim((string)$m['subject']) : '(senza oggetto)';
-        $res = pk_wake($db, $rid, 'mail da ' . $m['from_addr'] . ' – ' . mb_substr($subj, 0, 120));
+        $subj = trim((string)$m['subject']) !== '' ? trim((string)$m['subject']) : '(no subject)';
+        $res = pk_wake($db, $rid, 'mail from ' . $m['from_addr'] . ' – ' . mb_substr($subj, 0, 120));
         if ($res['woken']) {
             $out['woken'][] = ['id' => $rid, 'from' => $m['from_addr'], 'subject' => $subj,
                                'mail_at' => date('Y-m-d H:i', strtotime($m['date_utc'] . ' UTC')), 'status_to' => $res['status_to']];
@@ -188,7 +188,7 @@ function pk_wake_from_mail(PDO $db): array {
 }
 
 /**
- * Daily close: Parked requests whose trip is over → Lost, reason no_more_replies, note "Chiusa automaticamente: …",
+ * Daily close: Parked requests whose trip is over → Lost, reason no_more_replies, note "Closed automatically: …",
  * timeline event (author system). $live = false → report only (nothing written).
  * → ['live' => bool, 'checked' => n, 'closed' => [{id, customer_name, folder, agent, parked_at, trip_date, basis, done}]]
  */
@@ -204,8 +204,8 @@ function pk_autoclose(PDO $db, bool $live): array {
         $item = ['id' => (int)$r['id'], 'customer_name' => $r['customer_name'], 'folder' => $r['practice_code'],
                  'agent' => $r['agent'], 'parked_at' => $r['parked_at'], 'trip_date' => $t['trip_date'], 'basis' => $t['basis'], 'done' => false];
         if ($live) {
-            $note = 'Chiusa automaticamente: parcheggiata dal ' . ($r['parked_at'] ? date('d/m/Y', strtotime((string)$r['parked_at'])) : '?')
-                  . ($t['basis'] === 'parked_age' ? ', nessuna data viaggio, oltre ' . pk_stale_days() . ' giorni' : ', data viaggio passata');
+            $note = 'Closed automatically: parked since ' . ($r['parked_at'] ? date('d M Y', strtotime((string)$r['parked_at'])) : '?')
+                  . ($t['basis'] === 'parked_age' ? ', no trip date, over ' . pk_stale_days() . ' days' : ', trip date passed');
             try {
                 $res = bs_set_request_status($db, (int)$r['id'], 'Lost', 'no_more_replies', $note, 0,
                                              ['tl_title' => 'Parked auto-close: Parked → Lost']);
@@ -248,14 +248,14 @@ function pk_recent_events(PDO $db, int $limit = 30, int $days = 14): array {
     $st = $db->prepare("SELECT t.request_id, r.customer_name, r.status, t.event_at, t.title, t.body
                         FROM request_timeline t JOIN requests r ON r.id = t.request_id
                         WHERE t.event_type = 'status_change' AND t.hidden = 0 AND t.event_at >= ?
-                          AND (t.title LIKE 'Riattivata:%' OR t.title LIKE 'Parked auto-close%')
+                          AND (t.title LIKE 'Reactivated:%' OR t.title LIKE 'Parked auto-close%')
                         ORDER BY t.event_at DESC LIMIT " . max(1, min(200, $limit)));
     $st->execute([date('Y-m-d H:i:s', strtotime('-' . max(1, $days) . ' days'))]);
     $out = [];
     foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $e) {
         $out[] = ['request_id' => (int)$e['request_id'], 'customer_name' => $e['customer_name'], 'status_now' => $e['status'],
                   'event_at' => substr((string)$e['event_at'], 0, 16),
-                  'kind' => strpos($e['title'], 'Riattivata:') === 0 ? 'wakeup' : 'autoclose', 'title' => $e['title'], 'body' => $e['body']];
+                  'kind' => strpos($e['title'], 'Reactivated:') === 0 ? 'wakeup' : 'autoclose', 'title' => $e['title'], 'body' => $e['body']];
     }
     return $out;
 }

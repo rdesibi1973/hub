@@ -6,7 +6,7 @@
  *   Parked  when the trip is not over (parked_service.php pk_trip_over(): start_date, else the folder dates, else
  *           Lost less than PARKED_STALE_DAYS (180) days ago). parked_at = the Lost date, parked_from = Quoted.
  *           lost_reason / lost_note are cleared as on any reopen; the "Marked Lost" note and the old timeline events
- *           stay; timeline event "Migrata da Lost (agent_request) a Parked".
+ *           stay; timeline event "Migrated from Lost (agent_request) to Parked".
  *   leave   trip over, or no Lost date and no trip date: untouched (reason kept — Roberto decides).
  *
  * Dry run by default: prints the table (and --csv=<file>). Writes only with --confirm; --id=N (repeatable) limits
@@ -57,8 +57,8 @@ foreach ($rows as $r) {
         try {
             $db->beginTransaction();
             $res = bs_set_request_status($db, (int)$r['id'], PK_STATUS, '', '', 0,
-                                         ['tl_title' => 'Migrata da Lost (agent_request) a Parked',
-                                          'tl_body'  => 'Lost il ' . ($lost ? date('d/m/Y', strtotime((string)$lost)) : '?') . ' — ' . $why]);
+                                         ['tl_title' => 'Migrated from Lost (agent_request) to Parked',
+                                          'tl_body'  => 'Lost on ' . ($lost ? date('d M Y', strtotime((string)$lost)) : '?') . ' — ' . $why]);
             if (empty($res['ok'])) throw new RuntimeException($res['error'] ?? 'refused');
             $db->prepare("UPDATE requests SET parked_at = ?, parked_from = 'Quoted', parked_by = NULL WHERE id = ?")
                ->execute([$lost, (int)$r['id']]);

@@ -488,7 +488,7 @@ function bulkDelete() {
       </label>
       <?php endforeach; ?>
     </div>
-    <p style="margin:-6px 0 12px;font-size:.76rem;color:var(--grey-mid);">L'agenzia tornerà quando il cliente decide? Usa <strong><?= h(PK_LABEL) ?></strong> invece di Lost.</p>
+    <p style="margin:-6px 0 12px;font-size:.76rem;color:var(--grey-mid);">Will the agency come back when the client decides? Use <strong><?= h(PK_LABEL) ?></strong> instead of Lost.</p>
     <label style="display:block;font-size:.78rem;color:var(--grey-mid);margin-bottom:5px;">Note (optional)</label>
     <textarea id="st-lost-note" rows="3" style="width:100%;box-sizing:border-box;font-size:.85rem;padding:8px 10px;border:1.5px solid var(--grey-lt);border-radius:6px;resize:vertical;" placeholder="Add any detail…"></textarea>
     <div id="st-lost-err" style="display:none;color:var(--red-dk);font-size:.78rem;margin-top:8px;">Please choose a reason.</div>

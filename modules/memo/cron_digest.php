@@ -371,7 +371,7 @@ function memo_digest_render(array $d, $today) {
         $h = array(); $t = array();
         foreach ($pk['events'] as $ev) {
             $url = $hub . 'leads/request_view.php?id=' . (int)$ev['request_id'];
-            $detail = $ev['kind'] === 'wakeup' ? preg_replace('/^Riattivata:\s*/', '', $ev['title']) : 'Parked → Lost';
+            $detail = $ev['kind'] === 'wakeup' ? preg_replace('/^Reactivated:\s*/', '', $ev['title']) : 'Parked → Lost';
             $kind   = $ev['kind'] === 'wakeup' ? 'riattivata' : 'chiusa automaticamente';
             $h[] = '<a href="' . $url . '" style="color:#C0211B;">' . $e($ev['customer_name']) . '</a> — ' . $e($detail)
                  . ' <span style="color:#777;">(' . $kind . ')</span>';

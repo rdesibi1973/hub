@@ -10,7 +10,7 @@
  *   Quoted                               → QUOTED (HOT if moved there by hand)
  *   Inquiry                              → NEW    (WIP if moved there by hand)
  * So a status change made anywhere (request page, list, edit, API) moves the card.
- * Parked requests (parked_service.php) are off the board; with "Mostra parcheggiate" / include_parked they sit in an
+ * Parked requests (parked_service.php) are off the board; with "Show parked" / include_parked they sit in an
  * extra PARKED column at the end. Dropping a card on PARKED parks it; dragging it out unparks it to that column.
  *
  * Requires the leads config.php (db()). Keep PHP-7 compatible.

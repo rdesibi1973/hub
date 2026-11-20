@@ -254,11 +254,11 @@ function tl_parked_wake(PDO $db, int $requestId, array $f): void {
         $title = (string)($f['title'] ?? '');
         if ($type === 'mail_received') {
             $from = trim((string)($refs['from'] ?? $refs['mail_from'] ?? ''));
-            $why  = 'mail' . ($from !== '' ? ' da ' . $from : '') . ' – ' . preg_replace('/^Mail received:\s*/', '', $title);
+            $why  = 'mail' . ($from !== '' ? ' from ' . $from : '') . ' – ' . preg_replace('/^Mail received:\s*/', '', $title);
         } elseif ($type === 'client_request') {
-            $why = 'richiesta del cliente – ' . $title;
+            $why = 'client request – ' . $title;
         } else {
-            $why = ($type === 'call' ? 'chiamata' : 'nota') . ' – ' . $title;
+            $why = ($type === 'call' ? 'call' : 'note') . ' – ' . $title;
         }
         pk_wake($db, $requestId, tl_cut($why, 180));
     } catch (Throwable $e) {

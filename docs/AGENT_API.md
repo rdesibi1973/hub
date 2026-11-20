@@ -215,7 +215,7 @@ curl -sA "$UA" -H "$H" -X POST "$U?action=set_request_status" -d '{"request_id":
 
 ### Status Parked (waiting for the agency)
 Since 20 Nov 2026 (`includes/parked_service.php`). A quote sent to an agency that comes back if and when its client
-decides: **off the pipeline, not open, not Lost**. Hub label "Parked – in attesa agenzia". Use it instead of Lost
+decides: **off the pipeline, not open, not Lost**. Hub label "Parked – waiting for the agency". Use it instead of Lost
 `agent_request` (that reason is no longer offered in the Lost modals; it stays valid for history).
 
 - **To Parked** from `Inquiry`, `Quoted`, `Hot-Quoted`, `Lost` (reopen + park: lost reason / note cleared, history stays);
@@ -225,10 +225,10 @@ decides: **off the pipeline, not open, not Lost**. Hub label "Parked – in atte
   request); `Cancelled` → **409** (`park_to`). Leaving Parked clears the parked fields.
 - Every change logs a `status_change` timeline event ("Quoted → Parked" and back).
 - **Wake-up** (by itself, author system): an inbound mail linked to the request, or a manual timeline note
-  (`timeline_add`, request page) → status back to `parked_from`, event "Riattivata: <why>", mail to the request's agent
-  "Richiesta riattivata: <folder>" (nothing to the agency / client). A mail sent by us never wakes it.
+  (`timeline_add`, request page) → status back to `parked_from`, event "Reactivated: <why>", mail to the request's agent
+  "Request reactivated: <folder>" (nothing to the agency / client). A mail sent by us never wakes it.
 - **Auto-close** (daily, `ck_cron.php`): Parked + trip over (`start_date` past; else the folder dates; else parked more
-  than 180 days — `PARKED_STALE_DAYS`) → Lost `no_more_replies`, note "Chiusa automaticamente: …", event
+  than 180 days — `PARKED_STALE_DAYS`) → Lost `no_more_replies`, note "Closed automatically: …", event
   "Parked auto-close: Parked → Lost". **Report-only** until `define('PARKED_AUTOCLOSE_LIVE', true)` in includes/config.php.
 - `find_requests`: `status=Parked`; every row carries `parked_at`, `parked_from`.
 - `pipeline_list`: excluded unless `include_parked=1` (or `column=parked`): extra column `parked`, cards with

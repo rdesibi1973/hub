@@ -212,7 +212,7 @@ include 'includes/header.php';
     </select>
     <span style="font-size:.78rem;color:var(--grey-mid)"><?= count($rows) ?> requests</span>
     <a class="parked-toggle" id="parked-toggle" href="pipeline.php?<?= h($toggleQs) ?>"
-       title="<?= h(PK_TIP) ?>"><?= $showParked ? '🅿️ Nascondi parcheggiate' : '🅿️ Mostra parcheggiate' ?> (<span id="parked-n"><?= $nParked ?></span>)</a>
+       title="<?= h(PK_TIP) ?>"><?= $showParked ? '🅿️ Hide parked' : '🅿️ Show parked' ?> (<span id="parked-n"><?= $nParked ?></span>)</a>
     <?php if ($showParked): ?><input type="hidden" name="parked" value="1"><?php endif; ?>
     <button type="submit" class="btn btn-outline btn-sm" style="margin-left:auto;display:flex;align-items:center;gap:6px;">
       ↺ Refresh
@@ -255,7 +255,7 @@ include 'includes/header.php';
              ondragstart="onDragStart(event,this)"
              ondragend="onDragEnd(this)">
           <button type="button" class="card-park" title="<?= h(PK_TIP) ?>"
-                  onclick="event.preventDefault();event.stopPropagation();moveCard(this.parentNode.dataset.id, this.parentNode.dataset.col, 'parked')">🅿️ Parcheggia</button>
+                  onclick="event.preventDefault();event.stopPropagation();moveCard(this.parentNode.dataset.id, this.parentNode.dataset.col, 'parked')">🅿️ Park</button>
           <div class="card-name" title="<?= h($r['customer_name']) ?>">
             <?= h($r['customer_name']) ?>
           </div>
@@ -267,7 +267,7 @@ include 'includes/header.php';
             <span>📅 <?= $date ?></span>
           </div>
           <?php if ($st === PK_STATUS && !empty($r['parked_at'])): ?>
-          <div class="card-parked-at">🅿️ Parcheggiata il <?= date('d M Y', strtotime($r['parked_at'])) ?></div>
+          <div class="card-parked-at">🅿️ Parked on <?= date('d M Y', strtotime($r['parked_at'])) ?></div>
           <?php endif; ?>
           <div class="card-footer">
             <span class="card-status-badge"

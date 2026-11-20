@@ -308,7 +308,7 @@ $stmt->execute([$id]);
 $r = $stmt->fetch();
 if (!$r) { flash('Request not found.', 'error'); header('Location: requests.php'); exit; }
 
-// Parked (parked_service.php): "Parcheggiata il <data> da <utente>".
+// Parked (parked_service.php): "Parked on <date> by <user>".
 $parkedLine = '';
 if (($r['status'] ?? '') === PK_STATUS) {
     $pby = '';
@@ -317,8 +317,8 @@ if (($r['status'] ?? '') === PK_STATUS) {
         $pst->execute([(int)$r['parked_by']]);
         $pby = (string)($pst->fetchColumn() ?: '');
     }
-    $parkedLine = 'Parcheggiata' . (!empty($r['parked_at']) ? ' il ' . date('d/m/Y', strtotime($r['parked_at'])) : '')
-                . ($pby !== '' ? ' da ' . $pby : '');
+    $parkedLine = 'Parked' . (!empty($r['parked_at']) ? ' on ' . date('d M Y', strtotime($r['parked_at'])) : '')
+                . ($pby !== '' ? ' by ' . $pby : '');
 }
 
 $cu = current_user();
@@ -715,7 +715,7 @@ include 'includes/header.php';
       <?php endif; ?>
       <?php if ($r['status'] === PK_STATUS): ?>
         <div style="margin-top:6px;font-size:.8rem;color:var(--grey-mid);" title="<?= h(PK_TIP) ?>">
-          🅿️ <?= h($parkedLine) ?> — torna attiva da sola quando l'agenzia scrive di nuovo.
+          🅿️ <?= h($parkedLine) ?> — it becomes active again by itself when the agency writes.
         </div>
       <?php endif; ?>
       <?php if ($r['status'] === 'Lost' && (!empty($r['lost_reason']) || $canEdit)): ?>
@@ -1923,7 +1923,7 @@ include 'includes/send_modal.php';
       <?php endforeach; ?>
     </div>
     <p style="margin:-6px 0 12px;font-size:.76rem;color:var(--grey-mid);">
-      L'agenzia tornerà quando il cliente decide? Usa <strong><?= h(PK_LABEL) ?></strong> invece di Lost.
+      Will the agency come back when the client decides? Use <strong><?= h(PK_LABEL) ?></strong> instead of Lost.
     </p>
     <label style="display:block;font-size:.78rem;color:var(--grey-mid);margin-bottom:5px;">
       Note (optional)
