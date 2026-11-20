@@ -74,6 +74,10 @@ outdated — this file wins where they disagree (PHP version, local lint).
   in the subject, same thread, direct client's own address; the agency address alone never wakes, it goes to "Possibili
   risvegli" (`pk_wake_from_mail()` / `pk_possible_wakeups()`, `ck_cron.php` → `pk_cron()`); daily auto-close report-only until
   `PARKED_AUTOCLOSE_LIVE`. `'Parked'` must be in `STATUSES` (server config).
+- **GRP programme in group folder names** (logic `modules/leads/includes/grp_program_service.php`, since 20 Nov 2026): group
+  parent `…_GRP{DDMM}{Duma|Simba|Nyumbu}(Agency-Agent)_START…`, programme once right after the code (DumaShort is private, not
+  Duma). A new path that names / renames a group folder goes through `bo_grp_normalise()` / `bo_grp_insert()`; groups of
+  another programme on the same code are different groups (`bo_grp_split()`). Report `grp_names_report` / `grp_names.php`.
 - `migrations/NNN_name.sql` — not applied by deploy. `docs/` — AGENT_API, FOLDER_NAMING,
   INFRASTRUCTURE, KB_Quotazioni_Safari.
 

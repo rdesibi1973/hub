@@ -245,7 +245,8 @@ function bg_reopen_quote_ok(array $r, string $newName, string $destPath): bool {
 /** Group folders are out of scope v1: GRP member / group parent, Il Diamante / Panorama, GRUPPO. */
 function bg_is_group(array $r): bool {
     if (trim((string)($r['group_folder'] ?? '')) !== '') return true;
-    return (bool)preg_match('/(^|[^A-Z])GRP\d|GRUPPO|DIAMANTE|PANORAMA/i', (string)($r['practice_code'] ?? ''));
+    // Programme before the code ("NyumbuGRP0209", not yet normalised to GRP0209Nyumbu) is a group too.
+    return (bool)preg_match('/(^|[^A-Z]|DUMA|SIMBA|NYUMBU)GRP\d|GRUPPO|DIAMANTE|PANORAMA/i', (string)($r['practice_code'] ?? ''));
 }
 
 /** May start a run: admin / manager, the booking team (booking_followup_edit), Roberto, or the request's seller. */

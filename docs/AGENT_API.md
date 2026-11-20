@@ -562,7 +562,7 @@ rate table / not `=cost*$B$1` · other nights without hotel · guests / country 
 
 ### `confirm_preview` (POST)
 `request_id`, `start`, `end`, optional `mid`, `mid2`, `dest`, `grp` (`NONE`|`CREATE`|`ADD`),
-`grp_code` (DDMM), `grp_main`.
+`grp_code` (DDMM), `grp_main`, `grp_program` (`Duma`|`Simba`|`Nyumbu`).
 Dates: ISO `2027-01-19` or Hub format (`19JAN`; `end` = `28JAN2027`). `dest`: a label from
 `list_standard_programs.destinations`, or its suffix (`ZNZ`, `TREK`, `KENYA`…); empty = Tanzania safari.
 Returns `new_name`, `checks` (Excel dates vs folder dates, flights, GRP, destination) and `blocking`.
@@ -571,6 +571,26 @@ ITI lodges through their destination's country) must fit `dest` — e.g. Masai M
 safari, Serengeti with `KENYA`, mainland places with `ZNZ`, no route/hut with `TREK`, only Zanzibar
 places with a Tanzania safari. Nairobi / Dar / Kigali / Entebbe / JNB on the first or last day = transit.
 If you get this warning, ask the seller which destination is right before you confirm.
+
+**Group programme** (Roberto, 20 Nov 2026; logic `includes/grp_program_service.php`). A group parent is named
+`…_GRP{DDMM}{Programme}(Agency-Agent)_START…` (e.g. `09_02SEP_AdolfoPiazza_GRP0209Nyumbu(Elkebir-Roberto)_…`), the
+programme written once, right after the code; the member sub-folder keeps `Client(Agency-Agent)`; the Calc name is not touched.
+`DumaShort` is a private safari, never the Duma group programme.
+- Programme for `CREATE` / `ADD`, in this order: `grp_program` → the request folder name → the group Calc at the top of the
+  request folder (`…_DumaGRP_Calc.xlsx` / `_SimbaGRP_` / `_NyumbuGRP_`; a DumaShort Calc is not a group). The preview returns
+  `grp_program` and `grp_program_source` (`field`|`folder`|`calc`). A `grp_program` that disagrees with the folder / Calc wins,
+  with a `warn` check. Any other value than Duma / Simba / Nyumbu → 400.
+- **Blocking (no `force`):** `CREATE` with no programme found → "Choose the group programme (Duma / Simba / Nyumbu)";
+  sources that disagree (e.g. folder Simba, Calc Nyumbu) → "Programme unclear: … — choose one" (resend with `grp_program`).
+- **Normalisation** (also for `ADD`, `rename_folder` and `grp_names_report`): the programme found anywhere in the name, in any
+  case or spelling (`GRP0209_Nyumbu`, `GRP0209-nyumbu`, `NyumbuGRP0209`, `GRP-Nyumbu-0209`, `AdolfoPiazzaNyumbu_GRP0209`,
+  doubled) is removed from there and written once after the code — never added a second time. Whole words only (case-insensitive,
+  not inside other words); text inside `(…)` is never read. Own departures like `GRP2108Nyumbu_(Savannah-Roberto)` stay as they are.
+- **Existing groups:** a Simba and a Nyumbu group on the same day are two groups. `existing_grps` = groups of the code with the
+  same programme or none written (legacy); `other_programme_grps` = another programme (info check only). `CREATE` is blocked
+  only by `existing_grps` ("Proceed anyway" / `force`). `ADD` auto-selects the group of the same programme; if its name has the
+  programme missing or misplaced → `warn` check + `grp_rename` `{from, to, request_id}`: rename it with `rename_folder`
+  (`request_id`, `scope: "group"`, `new_name: to`) after the seller's ok (BackOffice: one-click button in the preview).
 
 ### `confirm_booking` (POST)
 Same input + `"confirm": true`. Without it → dry-run (= preview). With blocking issues → 409
@@ -639,6 +659,9 @@ Free rename of the booking folder — the same as BackOffice → **Rename…** (
   - Without `scope`, a member whose `new_name` starts with the group's `MM_DDMON_` prefix → 400 (it meant the group:
     pass `"scope":"group"`). A private request takes no `scope` (400); an imported group / group parent request without
     its own sub-folder is always `"group"`. The response carries the resolved `scope`.
+  - **Group programme** (20 Nov 2026): a group `new_name` not in the normalised form `…_GRP{DDMM}{Duma|Simba|Nyumbu}(…)`
+    (programme missing, misplaced, misspelt, doubled, two programmes) gets a `warnings[]` line with the suggested name — not
+    blocking (§ `confirm_preview`, Group programme).
 - **`affected[]`** (dry run and confirm, the same list — `fs_rename_plan()`): every request the confirm writes,
   `{id, customer_name, folder_from, folder_to, group_folder_from, group_folder_to, dropbox_url_from, dropbox_url_to}`
   (+ `status_from/_to`, `payment_status_from/_to` when the suffix sets them). `skipped[]` `{id, customer_name, folder, reason}`.
@@ -799,7 +822,16 @@ curl -sH "$H" "$U?action=folder_ids_backfill&limit=200"                         
 curl -sA "Mozilla/5.0 (compatible; SavannahHubAgent/1.0)" -H "$H" -X POST "$U?action=folder_ids_backfill" -d '{"limit":200,"confirm":true}'
 curl -sH "$H" "$U?action=folders_orphans"
 curl -sH "$H" "$U?action=archive_cancelled"                                               # dry run
+curl -sH "$H" "$U?action=grp_names_report"
 ```
+
+#### `grp_names_report` (GET, read-only)
+Every group folder at the top of `/001_Safari` (name with `GRP{DDMM}`) whose name is not in the normalised form
+`…_GRP{DDMM}{Duma|Simba|Nyumbu}(…)` (§ `confirm_preview`, Group programme). `groups[] {folder, code, program,
+program_source (name|calc), issue, suggested, request_id}`: programme from the name, else from the group Calc at the folder
+top (up to `calc_lookups`, default 80, listings); `suggested` = the normalised name (null when no programme is found or the
+name holds two); `request_id` = a member request for `rename_folder` (`scope: "group"`, `new_name: suggested`). Nothing is
+renamed: one by one, dry run then confirm, after Roberto's ok. Hub page: `grp_names.php` (admin, link in Re-link Folders).
 
 ### Il Diamante set departures — `move_group_folder` + `import_group_folder`
 Confirming a Diamante group (Panorama01, 05, 07, 10, PanoramaDavide …) = two steps: move the provisional

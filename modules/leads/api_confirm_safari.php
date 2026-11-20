@@ -173,8 +173,18 @@ if ($grpAction === 'CREATE' && $grpSubfolder !== '') {
     $responseFolder = $newFolderName;
 }
 
+// The Java tool names the group itself: a group folder without the programme right after the code
+// (…_GRP0209Nyumbu(…)) only gets a warning with the suggested name (grp_program_service.php).
+$warnings = [];
+if (in_array($grpAction, ['CREATE', 'ADD'], true)) {
+    require_once 'includes/grp_program_service.php';
+    $grpName = $grpAction === 'CREATE' ? $newFolderName : $grpMainFolder;
+    if ($grpName !== '' && ($w = bo_grp_rename_warning($grpName)) !== '') $warnings[] = $w . ' (rename the group from the Hub BackOffice).';
+}
+
 echo json_encode([
     'success'       => true,
+    'warnings'      => $warnings,
     'request_id'    => $id,
     'customer_name' => $row['customer_name'],
     'new_folder'    => $responseFolder,

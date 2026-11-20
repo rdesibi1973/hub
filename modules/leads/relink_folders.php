@@ -180,6 +180,7 @@ include 'includes/header.php';
       (dry run first: it counts what it would save and lists the links already broken). <b>Archive cancelled</b> moves the
       <code>_CANCELLED</code> folders of <code>/001_Safari</code> into <code>/001_Safari/00_CANCELED/00_&lt;trip year&gt;</code>.
       <b>Orphan check</b> = the nightly check (unresolved requests, folders no request knows); with save it writes the memo.
+      Group folders without their programme (Duma / Simba / Nyumbu) after the code: <a href="grp_names.php">GRP folder names</a>.
     </p>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
       <button type="button" class="btn btn-outline btn-sm" onclick="fidBackfill(false)">Backfill — dry run</button>

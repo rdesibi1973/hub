@@ -674,6 +674,8 @@ function fs_rename_preview(PDO $db, array $v, string $token, bool $withCalc = tr
     }
     $curName = basename($curPath);
     $out['warnings'] = array_merge(fs_name_warnings($v['new_name'], $curName), $out['warnings']);
+    // Group parent: the programme right after the code (…_GRP0209Nyumbu(…)) — a warning, not a block.
+    if (!empty($v['is_group']) && ($gw = bo_grp_rename_warning($v['new_name'])) !== '') $out['warnings'][] = $gw;
     $newPath = rtrim(substr($curPath, 0, strrpos($curPath, '/')), '/') . '/' . $v['new_name'];
     $out['dropbox_path_new'] = $newPath;
 
@@ -890,6 +892,7 @@ function folder_rename(PDO $db, int $requestId, string $newName, ?int $userId, a
     }
 
     if (!empty($gate['gated']) && $gate['reason'] !== '' && !in_array($gate['state'], ['passed', 'overridden'], true)) $msg .= ' ⚠ ' . $gate['reason'];
+    if ($isGrp && ($gw = bo_grp_rename_warning($newFolder)) !== '') $msg .= ' ⚠ ' . $gw;
     return ['ok' => true, 'msg' => $msg, 'is_group' => $isGrp, 'scope' => $scope, 'old_name' => $folder, 'new_name' => $newFolder, 'booking_gate' => $gate,
             'dropbox_path_old' => $res['old_path'], 'dropbox_path_new' => $res['new_path'], 'relink' => $v['relink'],
             'affected' => array_map('fs_affected_public', $res['affected']), 'skipped' => $res['skipped'],

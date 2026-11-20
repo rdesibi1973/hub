@@ -377,6 +377,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'
         'grp'     => $_POST['cs_grp']     ?? 'NONE',
         'grpcode' => $_POST['cs_grpcode'] ?? '',
         'grpmain' => $_POST['cs_grpmain'] ?? '',
+        'grp_program' => $_POST['cs_grpprog'] ?? '',
         'reopen_lost' => !empty($_POST['cs_reopen']),   // Lost request: the user agreed to reopen it (JS confirm)
     ]);
 
@@ -398,7 +399,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'
         $previewData = [
             'new_name' => bs_confirm_display_name($plan), 'errors' => [], 'checks' => $ckNow,
             'fields' => $plan['fields'], 'block' => $plan['block'], 'can_override' => $plan['can_override'],
-            'grps' => $plan['grps'], 'accepted' => (array)($_POST['cs_accept'] ?? []),
+            'grps' => $plan['grps'], 'grp_rename' => $plan['grp_rename'], 'accepted' => (array)($_POST['cs_accept'] ?? []),
             'accept_msg' => count($missingAcc) . ' check(s) not accepted — tick "Accept" on each one (or fix it), then confirm.',
         ];
     } elseif ($action === 'confirm_safari') {
@@ -422,6 +423,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'
             'block'        => $plan['block'],
             'can_override' => $plan['can_override'],
             'grps'         => $plan['grps'],
+            'grp_rename'   => $plan['grp_rename'],
         ];
     }
 }
@@ -1030,7 +1032,8 @@ include 'includes/header.php';
           <?php
             $isPreview = ($previewFor === (int)$r['id'] && $previewData !== null);
             $pv = $isPreview ? $previewData['fields']
-                             : ['fStart'=>'','fMid'=>'NA','fMid2'=>'NA','fEnd'=>'','fDestKey'=>'','grpAction'=>'NONE','grpCode'=>'','grpMain'=>''];
+                             : ['fStart'=>'','fMid'=>'NA','fMid2'=>'NA','fEnd'=>'','fDestKey'=>'','grpAction'=>'NONE','grpCode'=>'','grpMain'=>'','grpProgram'=>''];
+            $pv += ['grpProgram' => ''];
             $rid = (int)$r['id'];
           ?>
           <?php if ($canConfirm): ?>
@@ -1046,7 +1049,7 @@ include 'includes/header.php';
             <div style="font-size:.68rem;color:#1A6B3A;font-weight:600;margin-bottom:6px">✅ Confirm Safari — enter dates as in the Excel<?php require_once __DIR__ . '/includes/procedures_service.php'; echo proc_help_link('confirm_safari'); ?></div>
             <div style="display:flex;gap:8px;margin-bottom:6px;font-family:'Open Sans',sans-serif">
               <label style="font-size:.66rem;color:var(--grey-mid);flex:1">Booking type
-                <select name="cs_grp" onchange="document.getElementById('csgw<?= $rid ?>').style.display=this.value==='NONE'?'none':'block'" style="width:100%;font-size:.74rem;padding:4px 6px;border:1.5px solid var(--grey-lt);border-radius:5px">
+                <select name="cs_grp" onchange="document.getElementById('csgw<?= $rid ?>').style.display=document.getElementById('csgp<?= $rid ?>').style.display=this.value==='NONE'?'none':'block'" style="width:100%;font-size:.74rem;padding:4px 6px;border:1.5px solid var(--grey-lt);border-radius:5px">
                   <option value="NONE"   <?= $pv['grpAction']==='NONE'   ?'selected':'' ?>>Private (no group)</option>
                   <option value="CREATE" <?= $pv['grpAction']==='CREATE' ?'selected':'' ?>>Create new GRP</option>
                   <option value="ADD"    <?= $pv['grpAction']==='ADD'    ?'selected':'' ?>>Add to existing GRP</option>
@@ -1055,6 +1058,11 @@ include 'includes/header.php';
               <label id="csgw<?= $rid ?>" style="font-size:.66rem;color:var(--grey-mid);width:130px;display:<?= $pv['grpAction']==='NONE'?'none':'block' ?>">GRP code (DDMM)
                 <input type="text" name="cs_grpcode" value="<?= h($pv['grpCode']) ?>" placeholder="from Start" spellcheck="false"
                        style="width:100%;font-family:monospace;font-size:.74rem;padding:4px 6px;border:1.5px solid var(--grey-lt);border-radius:5px"></label>
+              <label id="csgp<?= $rid ?>" title="Group programme, written in the group folder name right after the code (GRP0209Nyumbu). Auto = from the request folder name, else the group Calc (…_NyumbuGRP_Calc.xlsx)." style="font-size:.66rem;color:var(--grey-mid);width:110px;display:<?= $pv['grpAction']==='NONE'?'none':'block' ?>">Programme
+                <select name="cs_grpprog" style="width:100%;font-size:.74rem;padding:4px 6px;border:1.5px solid var(--grey-lt);border-radius:5px">
+                  <option value="">Auto</option>
+                  <?php foreach (BO_GRP_PROGRAMS as $gp): ?><option value="<?= h($gp) ?>" <?= $pv['grpProgram'] === $gp ? 'selected' : '' ?>><?= h($gp) ?></option><?php endforeach; ?>
+                </select></label>
             </div>
             <?php
               // Vertical date rows: label | text field (type freely) | 📅 calendar
@@ -1116,6 +1124,7 @@ include 'includes/header.php';
                 <input type="hidden" name="cs_dest"  value="<?= h($pv['fDestKey']) ?>">
                 <input type="hidden" name="cs_grp"   value="<?= h($pv['grpAction']) ?>">
                 <input type="hidden" name="cs_grpcode" value="<?= h($pv['grpCode']) ?>">
+                <input type="hidden" name="cs_grpprog" value="<?= h($pv['grpProgram']) ?>">
                 <?php if (!empty($_POST['cs_reopen'])): ?><input type="hidden" name="cs_reopen" value="1"><?php endif; ?>
                 <input type="hidden" name="q" value="<?= h($q) ?>">
                 <input type="hidden" name="root" value="<?= h($root) ?>">
@@ -1155,6 +1164,19 @@ include 'includes/header.php';
                 <?php endif; ?>
               <?php endif; ?>
 
+              <?php $pvRen = $previewData['grp_rename'] ?? null; if ($pvRen && !empty($pvRen['request_id'])): ?>
+                <!-- ADD into a group whose name has the programme missing / misplaced: one-click rename (scope group). -->
+                <form method="POST" style="margin:0 0 8px 0" onsubmit="return confirm(<?= h(json_encode("Rename the group folder (all its members follow)?\n\n" . $pvRen['from'] . "\n→ " . $pvRen['to'])) ?>);">
+                  <input type="hidden" name="action" value="rename">
+                  <input type="hidden" name="request_id" value="<?= (int)$pvRen['request_id'] ?>">
+                  <input type="hidden" name="new_name" value="<?= h($pvRen['to']) ?>">
+                  <input type="hidden" name="q" value="<?= h($q) ?>">
+                  <input type="hidden" name="root" value="<?= h($root) ?>">
+                  <input type="hidden" name="in_files" value="<?= $inFiles ? '1' : '' ?>">
+                  <button type="submit" class="btn btn-outline btn-sm" title="<?= h($pvRen['to']) ?>">✏ Rename the group to the normalised name</button>
+                  <span style="font-size:.64rem;color:var(--grey-mid)">then re-check this confirmation</span>
+                </form>
+              <?php endif; ?>
               <?php if ($pvGrpMult): ?>
                 <!-- ADD, several matching GRPs: pick one, then re-preview. -->
                 <form method="POST" style="margin:0 0 4px 0">
@@ -1168,7 +1190,7 @@ include 'includes/header.php';
                 </form>
               <?php elseif ($pvBlock && !$pvOverride): ?>
                 <!-- Blocked, no override (e.g. ADD but no GRP exists): must fix the form above. -->
-                <div style="font-size:.7rem;color:#B26A00;font-weight:600">Cannot confirm yet — adjust the booking type / GRP code above and re-check.</div>
+                <div style="font-size:.7rem;color:#B26A00;font-weight:600">Cannot confirm yet — adjust the booking type / GRP code / programme above and re-check.</div>
               <?php else: ?>
                 <form method="POST" id="csform<?= $rid ?>" onsubmit="return confirm('<?= $pv['grpAction']==='ADD' ? 'Move the folder into the GRP and mark Booked?' : 'Move the Dropbox folder to 001_Safari and mark Booked?' ?>');" style="margin:0">
                   <input type="hidden" name="action" value="confirm_safari">

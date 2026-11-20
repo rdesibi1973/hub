@@ -24,6 +24,7 @@ require_once __DIR__ . '/safari_check.php';
 require_once __DIR__ . '/timeline_service.php';   // timeline_log(): system events of the request history
 require_once __DIR__ . '/assignment_service.php'; // assign_touch(): requests.assigned_at
 require_once __DIR__ . '/parked_service.php';     // status Parked: transitions, parked_* fields, wake-up
+require_once __DIR__ . '/grp_program_service.php'; // group programme (Duma / Simba / Nyumbu) in GRP folder names
 
 // ════════════════════════════════════════════════════════════════════════════
 //  Paths / URLs
@@ -662,13 +663,7 @@ function bo_confirmed_name(string $custname, string $start, string $mid, string 
     return $name;
 }
 
-/** Insert "_GRP{code}" before the first '(' of the customer folder (Java CREATE rule). */
-function bo_grp_insert(string $cust, string $code): string {
-    $paren = strpos($cust, '(');
-    return $paren !== false
-        ? substr($cust, 0, $paren) . '_GRP' . $code . substr($cust, $paren)
-        : $cust . '_GRP' . $code;
-}
+// bo_grp_insert() ("_GRP{code}{Programme}" before the first '(', normalised) lives in grp_program_service.php.
 
 /** Valid GRP code = 4 digits DDMM, day 1-31, month 1-12 (mirrors the Java check). */
 function bo_grp_code_valid(string $code): bool {
@@ -684,16 +679,26 @@ function bo_grp_code_from_ymd(?string $ymd): string {
     return $ts !== false ? date('dm', $ts) : '';
 }
 
-/** Existing GRP folder names under /001_Safari whose name contains "GRP{code}". */
-function bo_find_grps(string $token, string $code): array {
-    if ($code === '' || !function_exists('dropbox_list_folder')) return [];
+/**
+ * Existing GRP folders under /001_Safari for "GRP{code}" (the programme may sit anywhere in the
+ * name, bo_grp_split()): 'match' = same programme or none written, 'same', 'other' (another
+ * programme: a different group), 'info' = name => bo_grp_normalise(). $prog null = every group of the code.
+ */
+function bo_find_grps(string $token, string $code, ?string $prog = null): array {
+    $empty = ['match' => [], 'same' => [], 'other' => [], 'info' => []];
+    if ($code === '' || !function_exists('dropbox_list_folder')) return $empty;
     try { $all = dropbox_list_folder($token, '/001_Safari'); }
-    catch (Throwable $e) { return []; }
-    $needle = 'GRP' . $code;
-    $out = [];
-    foreach ($all as $name) { if (stripos($name, $needle) !== false) $out[] = $name; }
-    sort($out, SORT_NATURAL | SORT_FLAG_CASE);
-    return $out;
+    catch (Throwable $e) { return $empty; }
+    return bo_grp_split($all, $code, $prog);
+}
+
+/** A Hub request filed in group folder $group (for a rename_folder scope group), or 0. */
+function bo_grp_member_request(PDO $db, string $group): int {
+    try {
+        $st = $db->prepare("SELECT id FROM requests WHERE group_folder = ? ORDER BY id LIMIT 1");
+        $st->execute([$group]);
+        return (int)$st->fetchColumn();
+    } catch (Throwable $e) { return 0; }
 }
 
 /**
@@ -701,7 +706,9 @@ function bo_find_grps(string $token, string $code): array {
  * location, existing GRPs and whether the confirmation is blocked. Nothing is moved.
  *
  * $in keys: start, mid, mid2 (DDMMM), end (DDMMMYYYY), dest (destination label),
- *           grp (NONE|CREATE|ADD), grpcode (DDMM), grpmain (chosen existing GRP).
+ *           grp (NONE|CREATE|ADD), grpcode (DDMM), grpmain (chosen existing GRP),
+ *           grp_program (Duma|Simba|Nyumbu, optional: else the request folder name, else the group Calc —
+ *           grp_program_service.php; CREATE without one, or with sources that disagree, is blocked).
  *
  * Returns the plan array; 'found' = false (+ 'error') when the request/folder is
  * unusable, 'errs' = hard format errors (nothing else is resolved in that case).
@@ -723,9 +730,13 @@ function bs_confirm_plan(PDO $db, int $reqId, array $in): array {
     if (!in_array($grpAction, ['NONE', 'CREATE', 'ADD'], true)) $grpAction = 'NONE';
     $grpCode = preg_replace('/\D/', '', (string)($in['grpcode'] ?? ''));   // digits only (DDMM)
     $grpMain = trim((string)($in['grpmain'] ?? ''));                       // chosen existing GRP (ADD)
+    $progRaw = trim((string)($in['grp_program'] ?? ''));                   // Duma | Simba | Nyumbu (optional)
+    $progIn  = bo_grp_prog_canon($progRaw);
 
     $plan = ['found' => false, 'error' => '', 'request_id' => $reqId, 'r' => null, 'old_folder' => '',
              'grp_action' => $grpAction, 'grp_code' => $grpCode, 'grp_main' => $grpMain,
+             'grp_program' => null, 'grp_program_source' => '', 'prog_block' => '', 'prog_note' => '',
+             'grps_other' => [], 'grp_rename' => null,
              'dest_value' => $destValue, 'dest_suffix' => $destSuffix, 'errs' => [], 'new_name' => null, 'sub_name' => null,
              'member_name' => null, 'pd' => ['start_date' => null, 'end_date' => null],
              'token' => null, 'cur_path' => null, 'dbx_err' => '', 'grps' => [],
@@ -759,6 +770,12 @@ function bs_confirm_plan(PDO $db, int $reqId, array $in): array {
 
     // ── Build the target name(s) + validate per booking type ──────────────────
     $errs = [];
+    if ($progRaw !== '' && $progIn === null && $grpAction !== 'NONE') {
+        $errs[] = 'Group programme must be Duma, Simba or Nyumbu (DumaShort is a private safari, not a group).';
+    }
+    // Programme known before Dropbox (field, else the request folder name); the Calc is read below.
+    $folderProgs = $grpAction !== 'NONE' ? bo_grp_programs_in($oldFolder) : [];
+    $progPre = bo_grp_resolve_program($progIn, $folderProgs, []);
     if ($grpAction === 'ADD') {
         // No dates: the customer folder keeps its name and moves into the existing GRP.
         $plan['member_name'] = $oldFolder;
@@ -768,7 +785,7 @@ function bs_confirm_plan(PDO $db, int $reqId, array $in): array {
         $custForName = $oldFolder;
         if ($grpAction === 'CREATE') {
             if (!bo_grp_code_valid($grpCode)) $errs[] = 'GRP code must be 4 digits DDMM (e.g. 2306 = 23 Jun).';
-            else $custForName = bo_grp_insert($oldFolder, $grpCode);
+            else $custForName = bo_grp_insert($oldFolder, $grpCode, $progPre['program']);
         }
         $buildErr = [];
         $plan['new_name'] = bo_confirmed_name($custForName, $fStart, $fMid, $fMid2, $fEnd, $destSuffix, $months, $buildErr);
@@ -781,6 +798,7 @@ function bs_confirm_plan(PDO $db, int $reqId, array $in): array {
     $plan['fields']   = [
         'fStart'    => $fStart, 'fMid' => $fMid, 'fMid2' => $fMid2, 'fEnd' => $fEnd,
         'fDestKey'  => $fDestKey, 'grpAction' => $grpAction, 'grpCode' => $grpCode, 'grpMain' => $grpMain,
+        'grpProgram' => (string)$progIn,
     ];
     if ($errs) return $plan;
 
@@ -796,29 +814,72 @@ function bs_confirm_plan(PDO $db, int $reqId, array $in): array {
         }
     } catch (Throwable $e) { $plan['dbx_err'] = $e->getMessage(); }
 
-    // Existing GRP folders for this date/code.
-    $grps = ($grpAction !== 'NONE' && $plan['token']) ? bo_find_grps($plan['token'], $grpCode) : [];
-    $plan['grps'] = $grps;
+    // Group programme: field → request folder name → group Calc at the top of the request folder.
+    $prog = ['program' => null, 'source' => '', 'conflict' => '', 'note' => ''];
+    if ($grpAction !== 'NONE') {
+        $calcProgs = [];
+        if ($plan['token'] && $plan['cur_path']) {
+            try { $calcProgs = bo_grp_calc_programs(dropbox_list_files($plan['token'], $plan['cur_path']))['programs']; }
+            catch (Throwable $e) { /* no listing: no Calc programme */ }
+        }
+        $prog = bo_grp_resolve_program($progIn, $folderProgs, $calcProgs);
+        $plan['grp_program']        = $prog['program'];
+        $plan['grp_program_source'] = $prog['source'];
+        $plan['prog_note']          = $prog['note'];
+        if ($prog['conflict'] !== '') {
+            $plan['prog_block'] = $prog['conflict'] . ' (field "Group programme").';
+        } elseif ($grpAction === 'CREATE' && $prog['program'] === null) {
+            $plan['prog_block'] = 'Choose the group programme (Duma / Simba / Nyumbu).';
+        }
+        // CREATE: the name built before Dropbox did not know the Calc programme — rebuild it.
+        if ($grpAction === 'CREATE' && $prog['program'] !== $progPre['program'] && $prog['conflict'] === '') {
+            $buildErr = [];
+            $plan['new_name'] = bo_confirmed_name(bo_grp_insert($oldFolder, $grpCode, $prog['program']),
+                                                  $fStart, $fMid, $fMid2, $fEnd, $destSuffix, $months, $buildErr);
+            if ($plan['new_name'] !== null) $plan['pd'] = parse_folder_dates($plan['new_name']);
+        }
+    }
 
-    // ADD: auto-select the single match; resolve the group dates for the checks.
+    // Existing GRP folders for this code: a group of another programme is a different group.
+    $found = ($grpAction !== 'NONE' && $plan['token']) ? bo_find_grps($plan['token'], $grpCode, $prog['program'])
+                                                        : ['match' => [], 'same' => [], 'other' => [], 'info' => []];
+    $grps = $found['match'];
+    $plan['grps'] = $grps;
+    $plan['grps_other'] = $found['other'];
+
+    // ADD: auto-select the group of the same programme (else the single match); resolve its dates for the checks.
     if ($grpAction === 'ADD') {
-        if (count($grps) === 1) $grpMain = $grps[0];
+        if ($grpMain === '' || !in_array($grpMain, $grps, true)) {
+            if (count($found['same']) === 1)  $grpMain = $found['same'][0];
+            elseif (count($grps) === 1)       $grpMain = $grps[0];
+        }
         $plan['grp_main'] = $grpMain;
         $plan['fields']['grpMain'] = $grpMain;
         if ($grpMain !== '') {
             $gpd = parse_folder_dates($grpMain);
             $plan['pd'] = ['start_date' => $gpd['start_date'], 'end_date' => $gpd['end_date']];
+            // Group name with the programme missing / in the wrong place: suggest the normalised name.
+            $gi = bo_grp_normalise($grpMain, $grpCode, $prog['program'], false);
+            if ($gi['conflict'] === '' && $gi['program'] !== null && $gi['changed']) {
+                $plan['grp_rename'] = ['from' => $grpMain, 'to' => $gi['name'],
+                                       'request_id' => bo_grp_member_request($db, $grpMain) ?: null];
+            }
         }
     }
 
     // ── Decide whether the confirmation is blocked ────────────────────────────
-    if ($grpAction === 'CREATE' && $grps) {
+    if ($plan['prog_block'] !== '') {
+        $plan['block'] = true; $plan['can_override'] = false;
+        $plan['block_msg'] = $plan['prog_block'];
+    } elseif ($grpAction === 'CREATE' && $grps) {
         $plan['block'] = true; $plan['can_override'] = true;
-        $plan['block_msg'] = 'A GRP already exists for ' . $grpCode . ': ' . implode(', ', $grps)
+        $plan['block_msg'] = 'A ' . ($prog['program'] ? $prog['program'] . ' (or unnamed) ' : '') . 'GRP already exists for ' . $grpCode . ': ' . implode(', ', $grps)
                            . '. Add to it instead — or tick “Proceed anyway” to create a second GRP.';
     } elseif ($grpAction === 'ADD' && !$grps) {
         $plan['block'] = true;
-        $plan['block_msg'] = 'No existing GRP found for code ' . $grpCode . ' in 001_Safari. Use “Create new GRP” instead.';
+        $plan['block_msg'] = 'No existing ' . ($prog['program'] ? $prog['program'] . ' ' : '') . 'GRP found for code ' . $grpCode . ' in 001_Safari'
+                           . ($found['other'] ? ' (only another programme: ' . implode(', ', $found['other']) . ')' : '')
+                           . '. Use “Create new GRP” instead' . ($found['other'] ? ', or choose the right programme' : '') . '.';
     } elseif ($grpAction === 'ADD' && count($grps) > 1 && ($grpMain === '' || !in_array($grpMain, $grps, true))) {
         $plan['block'] = true;
         $plan['block_msg'] = 'Several GRP folders match ' . $grpCode . ' — choose one below.';
@@ -953,8 +1014,27 @@ function bs_confirm_checks(array $plan): array {
             'msg' => 'Folder "' . $plan['old_folder'] . '" not found in Dropbox search yet (new folders can lag ~1h). You can still confirm if you know it exists.']);
     }
 
-    // GRP existence check lines.
+    // Group programme + GRP existence check lines.
     $grps = $plan['grps'];
+    if ($plan['grp_action'] !== 'NONE') {
+        if ($plan['prog_block'] !== '') {
+            $checks[] = ['level' => 'error', 'msg' => $plan['prog_block']];
+            return $checks;   // nothing else about the group is reliable until the programme is chosen
+        }
+        if ($plan['grp_program']) {
+            $src = ['field' => 'chosen', 'folder' => 'from the request folder name', 'calc' => 'from the group Calc'];
+            $checks[] = ['level' => 'ok', 'msg' => 'Group programme: ' . $plan['grp_program'] . ' (' . ($src[$plan['grp_program_source']] ?? $plan['grp_program_source']) . ').'];
+        }
+        if ($plan['prog_note'] !== '') $checks[] = ['level' => 'warn', 'msg' => $plan['prog_note']];
+        if ($plan['grps_other']) {
+            $checks[] = ['level' => 'info', 'msg' => 'Other group(s) on ' . $plan['grp_code'] . ' with another programme (a different group, not touched): '
+                                                   . implode(', ', $plan['grps_other']) . '.'];
+        }
+        if (!empty($plan['grp_rename'])) {
+            $checks[] = ['level' => 'warn', 'msg' => 'Group name not normalised: rename the group to ' . $plan['grp_rename']['to']
+                                                   . ' (Rename the group / rename_folder scope group' . ($plan['grp_rename']['request_id'] ? ' on request ' . $plan['grp_rename']['request_id'] : '') . ').'];
+        }
+    }
     if ($plan['grp_action'] === 'CREATE') {
         $checks[] = $grps
             ? ['level' => 'warn', 'msg' => $plan['block_msg']]

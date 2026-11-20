@@ -20,6 +20,29 @@ Running log of notable changes and current build state. Module-level "active / p
 
 ---
 
+## 2026-11-20 — GRP folders carry the programme (Duma / Simba / Nyumbu)
+
+- Case: request 3406 (AdolfoPiazza, El Kebir): a group opened through Confirm Safari CREATE got only `GRP0209`, fixed by hand
+  to `…_GRP0209Nyumbu(Elkebir-Roberto)_…`. Rule (Roberto): group parent `…_GRP{DDMM}{Programme}(Agency-Agent)_START…`,
+  programme once, right after the code; member sub-folder and Calc name unchanged; DumaShort is not a group programme.
+- New `modules/leads/includes/grp_program_service.php`: `bo_grp_normalise()` (programme found anywhere / any spelling →
+  written once after the code; text inside `(…)` never read; two programmes → "Programme unclear … choose one"),
+  `bo_grp_insert()` (moved from booking_service.php, now normalising), `bo_grp_calc_programs()`, `bo_grp_resolve_program()`,
+  `bo_grp_split()`, `bo_grp_rename_warning()`, `bo_grp_names_report()`.
+- Confirm Safari (`bs_confirm_plan()`, BackOffice + Agent API `confirm_preview` / `confirm_booking`): field `grp_program`
+  (BackOffice: "Programme" select next to the GRP code, Auto by default), else request folder name, else the group Calc
+  (`…_NyumbuGRP_Calc.xlsx`); preview `grp_program`, `grp_program_source`. CREATE with no programme or with sources that
+  disagree → blocked (no override). `bo_find_grps()`: groups of another programme on the same code are different groups
+  (`other_programme_grps`, info only); CREATE blocked only by same-programme / legacy groups; ADD auto-selects the same
+  programme and, for a group named without / with a misplaced programme, suggests the normalised name (`grp_rename`,
+  BackOffice one-click rename, scope group).
+- `rename_folder` / BackOffice Rename on a group: warning (not blocking) with the suggested name when not normalised.
+  Java `api_confirm_safari.php`: `warnings[]` for a group named without the programme.
+- Report (no automatic rename): Agent API `grp_names_report`, admin page `grp_names.php` (link in Re-link Folders).
+- `bg_is_group()`: a programme before the code (`NyumbuGRP0209`) is a group too. Checked with both forms:
+  `parse_folder_dates()`, `get_date_folder()`, `folder_payment_status()`, `ck_is_group_folder()`, followup / ops / local scan
+  `GRP\d{4}`. Test `tools/tests/grp_program_test.php`.
+
 ## 2026-11-19 — Dropbox conflicts: original-side changes, hint, readable dates
 
 - Case: conflict 303 (request 3195, Florio GRP2212). The Hub listed only K23 (copy empties it); the original also had

@@ -338,6 +338,7 @@ function agent_confirm_input(array $in): array {
         'reopen_lost' => !empty($in['reopen_lost']),   // a Lost request: reopen it (Lost → Quoted) and confirm
         'grpcode' => $in['grp_code'] ?? '',
         'grpmain' => $in['grp_main'] ?? '',
+        'grp_program' => $in['grp_program'] ?? '',   // Duma | Simba | Nyumbu (else folder name, else group Calc)
     ];
 }
 
@@ -1522,14 +1523,19 @@ try {
         foreach ($checks as $c) {
             if (in_array(strtolower((string)$c['level']), ['error', 'fail', 'red'], true)) $blocking[] = $c['msg'];
         }
-        if ($plan['block']) $blocking[] = $plan['block_msg'];
+        if ($plan['block'] && !in_array($plan['block_msg'], $blocking, true)) $blocking[] = $plan['block_msg'];
         $preview = [
             'request_id'   => (int)$r['id'],
             'current'      => $plan['old_folder'],
             'new_name'     => bs_confirm_display_name($plan),
             'grp'          => $plan['grp_action'],
             'grp_code'     => $plan['grp_code'],
+            'grp_program'  => $plan['grp_program'],
+            'grp_program_source' => $plan['grp_program_source'] ?: null,   // field | folder | calc
             'existing_grps'=> $plan['grps'],
+            'other_programme_grps' => $plan['grps_other'],
+            'grp_rename'   => $plan['grp_rename'],   // ADD: {from, to, request_id} → rename_folder scope group
+            'grp_main'     => $plan['grp_main'],
             'destination'  => $plan['dest_value'],
             'start_date'   => $plan['pd']['start_date'],
             'end_date'     => $plan['pd']['end_date'],
@@ -3481,6 +3487,17 @@ try {
         agent_out(['ok' => true] + $res + (empty($in['confirm']) ? ['message' => 'Report only — resend with "confirm": true to write the memo.'] : []));
     }
 
+    // Group folders of /001_Safari whose name is not normalised (programme Duma / Simba / Nyumbu missing, misplaced,
+    // misspelt, doubled or unclear) with the programme found (name, else group Calc) and the suggested name.
+    // Read-only (grp_program_service.php): rename one by one with rename_folder scope group after Roberto's ok.
+    case 'grp_names_report': {
+        @set_time_limit(180);
+        require_once __DIR__ . '/dropbox_helper.php';
+        $rows = bo_grp_names_report($db, dropbox_get_access_token(), max(0, min(200, (int)($in['calc_lookups'] ?? 80))));
+        agent_out(['ok' => true, 'count' => count($rows), 'groups' => $rows,
+                   'hint' => 'Rename with rename_folder (request_id, scope "group", new_name = suggested) — dry run, then confirm after Roberto\'s ok.']);
+    }
+
     // Move cancelled folders of /001_Safari into /001_Safari/00_CANCELED/00_<trip year>/ (all *_CANCELLED, or request_id's
     // top folder), path + status Cancelled in the Hub. Dry run lists the moves; "confirm": true moves.
     case 'archive_cancelled': {
@@ -4095,7 +4112,7 @@ try {
             'staff_mail_mailboxes', 'staff_mail_search', 'staff_mail_get', 'staff_mail_attachment', 'staff_mail_save_eml', 'staff_mail_reply', 'drafts_cleanup',
             'timeline_list', 'timeline_add', 'timeline_update', 'summary_set', 'request_resume', 'set_request_status',
             'reassign_request', 'pipeline_list', 'pipeline_move', 'parked_wakeups',
-            'folder_resolve', 'folder_ids_backfill', 'folders_orphans', 'archive_cancelled',
+            'folder_resolve', 'folder_ids_backfill', 'folders_orphans', 'archive_cancelled', 'grp_names_report',
             'payments_due', 'ck_status', 'ck_request_check', 'ck_set_owners', 'ck_set_group_closed', 'ck_findings_upsert', 'ck_findings_drafts', 'ops_movements', 'ops_lunch_boxes', 'ops_medivac', 'flight_tickets',
             'followup_list', 'followup_scan', 'followup_update', 'followup_upsert', 'mail_security_status',
             'sales_response_status', 'sales_response_dismiss', 'dropbox_conflicts', 'dropbox_conflicts_run',
