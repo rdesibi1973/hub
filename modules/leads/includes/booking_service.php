@@ -142,6 +142,39 @@ function bs_request_folder_name(PDO $db, string $customerName, string $channel, 
 }
 
 /**
+ * $folder with its last "(…)" tag rebuilt as bs_request_folder_name() would build it, everything before
+ * and after the tag kept (booking folders: "09_28SEP_Name(Tag)_START…_BALANCE"):
+ *   agency → (Short-Agent), sb → (Agent-SB), other → (Agent), direct → (Agent-Drct).
+ * Direct: a custom direct tag (blog referral "Agent-EleonoraOngaro") is kept when the current tag starts
+ * with $oldAgent + "-". null when the folder has no tag, the agent name is empty, the channel is unknown
+ * or an agency tag has no agency short name. Used by bs_agency_tag_hint() and bs_reassign_request().
+ */
+function bs_folder_retag(string $folder, string $channel, $agencyShort, string $agentName, string $oldAgent = ''): ?string {
+    if (!preg_match_all('/\(([^()]*)\)/', $folder, $m, PREG_OFFSET_CAPTURE)) return null;
+    $last  = count($m[0]) - 1;
+    $tag   = $m[1][$last][0];
+    $agent = str_replace(' ', '', $agentName);
+    if ($agent === '') return null;
+    switch ($channel) {
+        case 'agency':
+            $short = preg_replace('/[^\w\-]/', '', (string)$agencyShort);
+            if ($short === '') return null;
+            $new = $short . '-' . $agent;
+            break;
+        case 'sb':    $new = $agent . '-SB'; break;
+        case 'other': $new = $agent;         break;
+        case 'direct':
+            $old  = str_replace(' ', '', $oldAgent);
+            $rest = 'Drct';
+            if ($old !== '' && stripos($tag, $old . '-') === 0 && strlen($tag) > strlen($old) + 1) $rest = substr($tag, strlen($old) + 1);
+            $new = $agent . '-' . $rest;
+            break;
+        default: return null;
+    }
+    return substr_replace($folder, '(' . $new . ')', $m[0][$last][1], strlen($m[0][$last][0]));
+}
+
+/**
  * Check a hand-edited request folder name: "Name(Tag)", exactly one "(…)" tag at the
  * end, no path separators. Returns '' when valid, else the error message.
  */
@@ -181,7 +214,8 @@ function bs_agency_tag_hint(PDO $db, array $r, $agencyId): ?array {
     $agent = str_replace(' ', '', (string)($st->fetchColumn() ?: ''));
     if ($agent === '') { $p = strrpos($tag, '-'); $agent = $p === false ? $tag : substr($tag, $p + 1); }
 
-    $suggested = substr_replace($folder, '(' . $short . '-' . $agent . ')', $m[0][$last][1], strlen($m[0][$last][0]));
+    $suggested = bs_folder_retag($folder, 'agency', $short, $agent);
+    if ($suggested === null) return null;
     return ['message' => 'The folder tag (' . $tag . ') does not name agency ' . $short . '. Suggested folder name: '
                        . $suggested . ' — rename it with rename_folder / BackOffice "Rename…".',
             'suggested_name' => $suggested];

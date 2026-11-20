@@ -364,18 +364,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $id,
             ]);
 
-            assign_touch($db, (int)$id);   // records assigned_at if agent_id changed
+            assign_touch($db, (int)$id);   // records assigned_at if agent_id changed (also when unassigned)
 
-            // ── Notify the newly assigned agent when the request is reassigned ──
+            // ── Reassigned: timeline event + mail to the new agent (includes/reassign_service.php, shared with the API) ──
             $oldAgentId = (int)($req['agent_id'] ?? 0);
             $newAgentId = (int)($v['agent_id'] ?: 0);
+            $reassignWarnings = [];
             if ($newAgentId !== $oldAgentId && $newAgentId > 0) {
-                $cu    = current_user();
-                $notif = notify_agent_reassigned(
-                    $db, $newAgentId, (int)($cu['id'] ?? 0), $id, $v['customer_name']
-                );
-                if ($notif['sent'])  $reassignFlash = '✉ Notification sent to newly assigned agent.';
-                if ($notif['error']) $reassignError = $notif['error'];
+                require_once 'includes/reassign_service.php';
+                $ra = bs_reassign_request($db, (int)$id, $newAgentId, [
+                    'from_agent_id' => $oldAgentId, 'notify' => true, 'retag_folder' => false, 'allow_booked' => true,
+                    'editor_user_id' => (int)(current_user()['id'] ?? 0),
+                ]);
+                if (!empty($ra['notify']['sent'])) $reassignFlash = '✉ Notification sent to newly assigned agent.';
+                if (!empty($ra['notify']['error'])) $reassignError = $ra['notify']['error'];
+                foreach ($ra['warnings'] ?? [] as $w) {
+                    if ($w !== ($ra['notify']['error'] ?? null)) $reassignWarnings[] = $w;
+                }
+                if (!$ra['ok']) $reassignWarnings[] = $ra['error'];
             }
         }
         $flashParts = ['Request updated successfully.'];
@@ -385,6 +391,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         flash(implode(' ', $flashParts));
         if (!empty($reassignError)) flash('⚠ ' . htmlspecialchars($reassignError), 'error');
         if (!empty($agencyHint)) flash('⚠ ' . htmlspecialchars($agencyHint['message']), 'error');
+        foreach ($reassignWarnings ?? [] as $w) flash('⚠ ' . htmlspecialchars($w), 'error');
         header("Location: request_view.php?id=" . $id);
         exit;
     }

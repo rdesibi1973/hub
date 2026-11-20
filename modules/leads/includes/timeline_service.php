@@ -427,7 +427,7 @@ function tl_summary_set(PDO $db, int $requestId, array $in, array $author): arra
 function tl_activity_map(PDO $db, array $ids): array {
     $ids = array_values(array_unique(array_filter(array_map('intval', $ids))));
     $out = [];
-    foreach ($ids as $id) $out[$id] = ['last_activity_at' => null, 'has_summary' => false, 'summary' => null];
+    foreach ($ids as $id) $out[$id] = ['last_activity_at' => null, 'has_summary' => false, 'summary' => null, 'next_step' => null, 'waiting_on' => null];
     if (!$ids) return $out;
     tl_schema($db);
     $in = implode(',', $ids);   // ints only
@@ -435,9 +435,11 @@ function tl_activity_map(PDO $db, array $ids): array {
         if ($ts && ($out[$id]['last_activity_at'] === null || $ts > $out[$id]['last_activity_at'])) $out[$id]['last_activity_at'] = substr($ts, 0, 16);
     };
     foreach ($db->query("SELECT request_id, MAX(event_at) m FROM request_timeline WHERE hidden = 0 AND request_id IN ($in) GROUP BY request_id") as $r) $bump((int)$r['request_id'], $r['m']);
-    foreach ($db->query("SELECT request_id, summary, updated_at FROM request_summary WHERE request_id IN ($in)") as $r) {
+    foreach ($db->query("SELECT request_id, summary, next_step, waiting_on, updated_at FROM request_summary WHERE request_id IN ($in)") as $r) {
         $out[(int)$r['request_id']]['has_summary'] = true;
         $out[(int)$r['request_id']]['summary'] = $r['summary'];
+        $out[(int)$r['request_id']]['next_step'] = $r['next_step'];
+        $out[(int)$r['request_id']]['waiting_on'] = $r['waiting_on'];
         $bump((int)$r['request_id'], $r['updated_at']);
     }
     try {

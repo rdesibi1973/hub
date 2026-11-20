@@ -105,7 +105,7 @@ function agent_audit(PDO $db, string $action, $reqId, array $payload, string $re
                               'set_request_status', 'update_request', 'import_group_folder', 'move_group_folder', 'ck_request_check', 'memo_delete', 'create_agency', 'update_agency', 'save_agency_contact', 'delete_agency_contact',
                               'followup_scan', 'followup_update', 'followup_upsert', 'staff_mail_save_eml', 'staff_mail_reply', 'drafts_cleanup', 'iti_update_activity', 'sales_response_dismiss',
                               'ck_set_owners', 'ck_set_group_closed', 'ck_findings_upsert', 'iti_create_destination', 'iti_import_program', 'iti_supplier_blocklist', 'predeparture_email',
-                              'folder_ids_backfill', 'folders_orphans', 'archive_cancelled', 'gate_run'], true) && empty($payload['confirm']);
+                              'folder_ids_backfill', 'folders_orphans', 'archive_cancelled', 'gate_run', 'reassign_request', 'pipeline_move'], true) && empty($payload['confirm']);
     // Mail: keep who/what in the log, not message bodies or attachment content.
     if (in_array($action, ['mail_get', 'mail_attachment', 'staff_mail_get', 'staff_mail_attachment', 'iti_document', 'iti_vouchers'], true) && $code === 200) {
         $res = json_decode($resultJson, true);
@@ -752,6 +752,21 @@ function agent_tl_resolve(PDO $db, array $in): array {
 }
 
 /** 'YYYY-MM-DD' or fail. */
+/** request_id or request_ids[] (≤ 50, duplicates dropped) → ids, or 400. */
+function agent_request_ids(array $in): array {
+    $ids = [];
+    if (isset($in['request_ids'])) {
+        if (!is_array($in['request_ids'])) agent_fail('request_ids must be an array of ids');
+        foreach ($in['request_ids'] as $v) { if ((int)$v > 0) $ids[(int)$v] = true; }
+        $ids = array_keys($ids);
+    } elseif ((int)($in['request_id'] ?? 0) > 0) {
+        $ids = [(int)$in['request_id']];
+    }
+    if (!$ids) agent_fail('request_id or request_ids is required');
+    if (count($ids) > 50) agent_fail('At most 50 request_ids per call');
+    return $ids;
+}
+
 function agent_iso_date($v, string $field): string {
     $v = trim((string)$v);
     if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $v) || !strtotime($v)) agent_fail($field . ' must be YYYY-MM-DD');
@@ -1060,6 +1075,10 @@ try {
         $allowed = ['customer_name','email','whatsapp','source','destination','period','start_date','pax',
                     'value_usd','commission_pct','date_paid','initial_request','notes','agency_id','channel'];
         $fields = isset($in['fields']) && is_array($in['fields']) ? $in['fields'] : $in;
+        // One way to change the seller: reassign_request (checks, timeline, folder tag).
+        if (array_key_exists('agent_id', $fields) || array_key_exists('agent', $fields)) {
+            agent_fail('The seller is not changed here — use reassign_request', 400);
+        }
         $new = [];
         foreach ($allowed as $f) {
             if (!array_key_exists($f, $fields)) continue;
@@ -1324,6 +1343,107 @@ try {
                    'results' => $results,
                    'reopen_rule' => 'Leaving Lost clears lost_reason and lost_note (as the Hub status menu); the "Marked Lost" request note and the status_change timeline event stay as history. Lost on a request already Lost changes only lost_reason / lost_note (request note + timeline event).']
                   + ($dry ? ['message' => 'Dry run — nothing changed. Resend with "confirm": true.'] : []), $httpCode);
+    }
+
+    // ── reassign_request ─────────────────────────────────────────────────────
+    // Change the seller (includes/reassign_service.php, shared with request_edit.php). Up to 50 ids,
+    // one result each; 422 if some fail. Dry-run unless "confirm": true.
+    case 'reassign_request': {
+        agent_require_method('POST');
+        require_once __DIR__ . '/includes/reassign_service.php';
+        $ids = agent_request_ids($in);
+        if (count($ids) === 1) $agentReqId = $ids[0];
+        $who = isset($in['agent_id']) && (string)$in['agent_id'] !== '' ? $in['agent_id'] : ($in['agent'] ?? '');
+        $ag  = ra_agent_resolve($db, $who);
+        if (!$ag['ok']) agent_fail($ag['error'], $ag['code'], $ag['candidates'] ? ['candidates' => $ag['candidates']] : []);
+        $dry = empty($in['confirm']);
+        $opt = ['dry_run' => $dry, 'notify' => !empty($in['notify']), 'retag_folder' => !empty($in['retag_folder']),
+                'allow_booked' => !empty($in['allow_booked']), 'note' => trim((string)($in['note'] ?? '')),
+                'editor_user_id' => (int)$agentUser['id']];
+        if (!$dry) tl_schema($db);
+        $results = []; $failCodes = [];
+        foreach ($ids as $rid) {
+            try {
+                $res = bs_reassign_request($db, $rid, (int)$ag['agent']['id'], $opt);
+            } catch (Throwable $e) {
+                $res = ['ok' => false, 'id' => $rid, 'code' => 500, 'error' => $e->getMessage()];
+            }
+            if (!$res['ok']) $failCodes[] = (int)($res['code'] ?? 422);
+            unset($res['code']);
+            if ($dry) unset($res['folder_rename'], $res['notify']);
+            $results[] = $res;
+        }
+        $nFail = count($failCodes);
+        $nSame = count(array_filter($results, fn($x) => !empty($x['unchanged'])));
+        agent_out(['ok' => !$nFail, 'dry_run' => $dry, 'agent_to' => $ag['agent'],
+                   $dry ? 'to_change' : 'changed' => count($results) - $nFail - $nSame, 'unchanged' => $nSame, 'failed' => $nFail,
+                   'results' => $results]
+                  + ($dry ? ['message' => 'Dry run — nothing changed. Resend with "confirm": true.'] : []),
+                  !$nFail ? 200 : (count($ids) === 1 ? $failCodes[0] : 422));
+    }
+
+    // ── pipeline_list ────────────────────────────────────────────────────────
+    // The Pipeline board as data (includes/pipeline_service.php, shared with pipeline.php).
+    case 'pipeline_list': {
+        require_once __DIR__ . '/includes/pipeline_service.php';
+        $f = ['limit' => max(1, min(200, (int)($in['limit'] ?? 200)))];
+        $agent = trim((string)($in['agent'] ?? ''));
+        if ($agent !== '' && $agent !== '0') {
+            require_once __DIR__ . '/includes/reassign_service.php';
+            $ag = ra_agent_resolve($db, $agent);
+            if (!$ag['ok']) agent_fail($ag['error'], $ag['code'], $ag['candidates'] ? ['candidates' => $ag['candidates']] : []);
+            $f['agent_id'] = (int)$ag['agent']['id'];
+        }
+        $channel = strtolower(trim((string)($in['channel'] ?? '')));
+        if ($channel !== '') {
+            if (!in_array($channel, ['agency', 'direct', 'sb', 'other'], true)) agent_fail('channel must be agency, direct, sb or other');
+            $f['channel'] = $channel;
+        }
+        if (isset($in['year']) && (string)$in['year'] !== '') {
+            if (!preg_match('/^\d{4}$/', (string)$in['year'])) agent_fail('year must be YYYY');
+            $f['year'] = (int)$in['year'];
+        }
+        $cols = array_values(array_filter(array_map('trim', explode(',', strtolower((string)($in['column'] ?? '')))), 'strlen'));
+        if ($cols) {
+            $bad = array_diff($cols, array_keys(pl_columns()));
+            if ($bad) agent_fail('column must be one of: ' . implode(', ', array_keys(pl_columns())), 400);
+            $f['columns'] = $cols;
+        }
+        if (isset($in['stale_days']) && (string)$in['stale_days'] !== '') {
+            if (!ctype_digit((string)$in['stale_days'])) agent_fail('stale_days must be a whole number of days');
+            $f['stale_days'] = (int)$in['stale_days'];
+        }
+        $res = pl_fetch($db, $f, true);
+        agent_out(['ok' => true, 'filters' => $f, 'columns' => $res['columns'], 'count' => count($res['cards']),
+                   'total' => $res['total'], 'cards' => $res['cards']]);
+    }
+
+    // ── pipeline_move ────────────────────────────────────────────────────────
+    // Same effects as a drag & drop on the board (pl_move). Up to 50 ids. Dry-run unless "confirm": true.
+    case 'pipeline_move': {
+        agent_require_method('POST');
+        require_once __DIR__ . '/includes/pipeline_service.php';
+        $ids = agent_request_ids($in);
+        if (count($ids) === 1) $agentReqId = $ids[0];
+        $col = strtolower(trim((string)($in['column'] ?? '')));
+        if (!isset(pl_columns()[$col])) agent_fail('column must be one of: ' . implode(', ', array_keys(pl_columns())), 400);
+        $dry = empty($in['confirm']);
+        if (!$dry) tl_schema($db);
+        $results = []; $failCodes = [];
+        foreach ($ids as $rid) {
+            $res = pl_move($db, $rid, $col, ['dry_run' => $dry, 'refuse_lost' => true]);
+            if (!$res['ok']) $failCodes[] = (int)($res['code'] ?? 422);
+            unset($res['code']);
+            $results[] = $res;
+        }
+        $nFail = count($failCodes);
+        $nSame = count(array_filter($results, fn($x) => !empty($x['unchanged'])));
+        agent_out(['ok' => !$nFail, 'dry_run' => $dry, 'column' => $col,
+                   $dry ? 'to_change' : 'changed' => count($results) - $nFail - $nSame, 'unchanged' => $nSame, 'failed' => $nFail,
+                   'results' => $results,
+                   'rule' => 'Status follows the column (new/wip → Inquiry, quoted → Quoted, hot → Hot-Quoted); booked (CONFIRMED) only moves the card and never books (confirm_booking). Booked / Cancelled keep their status; Lost is refused (reopen with set_request_status first).']
+                  + ($dry ? ['message' => 'Dry run — nothing changed. Resend with "confirm": true.'] : []),
+                  !$nFail ? 200 : (count($ids) === 1 ? $failCodes[0] : 422));
     }
 
     // ── list_standard_programs ───────────────────────────────────────────────
@@ -3946,6 +4066,7 @@ try {
             'mail_folders', 'mail_list', 'mail_get', 'mail_attachment', 'mail_flag', 'mail_move', 'mail_draft', 'mail_send',
             'staff_mail_mailboxes', 'staff_mail_search', 'staff_mail_get', 'staff_mail_attachment', 'staff_mail_save_eml', 'staff_mail_reply', 'drafts_cleanup',
             'timeline_list', 'timeline_add', 'timeline_update', 'summary_set', 'request_resume', 'set_request_status',
+            'reassign_request', 'pipeline_list', 'pipeline_move',
             'folder_resolve', 'folder_ids_backfill', 'folders_orphans', 'archive_cancelled',
             'payments_due', 'ck_status', 'ck_request_check', 'ck_set_owners', 'ck_set_group_closed', 'ck_findings_upsert', 'ck_findings_drafts', 'ops_movements', 'ops_lunch_boxes', 'ops_medivac', 'flight_tickets',
             'followup_list', 'followup_scan', 'followup_update', 'followup_upsert', 'mail_security_status',

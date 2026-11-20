@@ -1,7 +1,6 @@
 <?php
 require_once 'config.php';
-require_once 'includes/folder_parser.php';   // parse_folder_dates(): start of a Booked trip from its folder
-require_once 'includes/timeline_service.php'; // timeline_log(): status_change when a drop changes the status
+require_once 'includes/pipeline_service.php'; // pl_columns / pl_fetch / pl_move — shared with the Agent API (pipeline_list / pipeline_move)
 requireLogin();
 
 $isStaff      = isLeadsRestricted();
@@ -21,43 +20,15 @@ $canSeeAll    = in_array($myRole, ['admin','manager']);
 if ($_SERVER['REQUEST_METHOD'] === 'POST'
     && ($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '') === 'XMLHttpRequest') {
     header('Content-Type: application/json');
-    $id   = (int)($_POST['id']  ?? 0);
-    $col  = trim($_POST['col'] ?? '');
-    $from = trim($_POST['from'] ?? '');
-    $allowed = ['new','wip','quoted','hot','booked'];
-    if (!$id || !in_array($col, $allowed, true)) {
+    $id  = (int)($_POST['id']  ?? 0);
+    $col = trim($_POST['col'] ?? '');
+    if (!$id || !isset(pl_columns()[$col])) {
         echo json_encode(['ok'=>false,'message'=>'Invalid params']); exit;
     }
-    $colStatus = ['new' => 'Inquiry', 'wip' => 'Inquiry', 'quoted' => 'Quoted', 'hot' => 'Hot-Quoted'];
-    $newStatus = $colStatus[$col] ?? null;
-
-    if ($newStatus !== null) {
-        $sql  = "UPDATE requests SET pipeline_column=?,
-                        status = CASE WHEN status IN ('Booked','Lost','Cancelled')
-                                      THEN status ELSE ? END
-                 WHERE id=?";
-        $args = [$col, $newStatus, $id];
-    } else {
-        $sql  = "UPDATE requests SET pipeline_column=? WHERE id=?";
-        $args = [$col, $id];
-    }
     // Staff can only move their own requests
-    if ($isStaff && $staffAgentId) {
-        $sql .= " AND agent_id=?";
-        $args[] = $staffAgentId;
-    }
-    $st = $db->prepare("SELECT status FROM requests WHERE id=?");
-    $st->execute([$id]);
-    $oldStatus = (string)$st->fetchColumn();
-    $db->prepare($sql)->execute($args);
-    // Report the status actually stored (a closed status is left unchanged).
-    $st->execute([$id]);
-    $stored = (string)$st->fetchColumn();
-    // Same timeline event as the status menu (bs_set_request_status).
-    if ($oldStatus !== '' && $stored !== $oldStatus) {
-        timeline_log($id, 'status_change', $oldStatus . ' → ' . $stored);
-    }
-    echo json_encode(['ok'=>true, 'status'=>$newStatus !== null ? $stored : null]); exit;
+    $res = pl_move($db, $id, $col, ['restrict_agent_id' => ($isStaff && $staffAgentId) ? $staffAgentId : 0]);
+    if (!$res['ok']) { echo json_encode(['ok'=>false,'message'=>$res['error']]); exit; }
+    echo json_encode(['ok'=>true, 'status'=>pl_columns()[$col]['status'] !== null ? $res['status_to'] : null]); exit;
 }
 
 // ── Filters ────────────────────────────────────────────────────────────────
@@ -82,77 +53,12 @@ $years = $db->query(
     "SELECT DISTINCT YEAR(date_received) AS y FROM requests ORDER BY y DESC LIMIT 5"
 )->fetchAll(PDO::FETCH_COLUMN);
 
-// ── Column definitions (key = pipeline_column value stored in DB) ──────────
-// default_statuses: which status values map here when pipeline_column IS NULL
-$columns = [
-    'new'    => ['label'=>'NEW',      'icon'=>'📥', 'cls'=>'col-new',    'default_statuses'=>['Inquiry']],
-    'wip'    => ['label'=>'WIP',      'icon'=>'⚙️', 'cls'=>'col-wip',    'default_statuses'=>[]],
-    'quoted' => ['label'=>'QUOTED',   'icon'=>'💬', 'cls'=>'col-quoted', 'default_statuses'=>['Quoted']],
-    'hot'    => ['label'=>'HOT',      'icon'=>'🔥', 'cls'=>'col-hot',    'default_statuses'=>['Hot-Quoted','Hot']],
-    'booked' => ['label'=>'CONFIRMED','icon'=>'✅', 'cls'=>'col-booked', 'default_statuses'=>[]],
-];
-
-// ── Fetch all pipeline-visible requests ────────────────────────────────────
-// CONFIRMED also keeps every Booked request whose folder has no _CK marker yet (same token rule as
-// ck_has_marker()), until the CK is added — only trips not started yet, so old bookings never marked
-// CK do not pile up.
-$where  = ["(r.status IN ('Inquiry','Quoted','Hot','Hot-Quoted') OR r.pipeline_column = 'booked'
-            OR (r.status = 'Booked' AND COALESCE(r.practice_code, '') NOT REGEXP '_CK(_|$)'
-                AND (r.start_date IS NULL OR r.start_date >= CURDATE())))"];
-$params = [];
-
-if ($isStaff && $staffAgentId) {
-    $where[] = 'r.agent_id = ?'; $params[] = $staffAgentId;
-} elseif ($filterAgent) {
-    $where[] = 'r.agent_id = ?'; $params[] = $filterAgent;
-}
-if ($filterYear) {
-    $where[] = 'YEAR(r.date_received) = ?'; $params[] = $filterYear;
-}
-
-$stmt = $db->prepare(
-    "SELECT r.id, r.customer_name, r.status, r.pipeline_column, r.practice_code, r.start_date,
-            r.pax, r.destination, r.period, r.date_received, r.value_usd,
-            a.name AS agent_name
-     FROM requests r
-     LEFT JOIN agents a ON a.id = r.agent_id
-     WHERE " . implode(' AND ', $where) . "
-     ORDER BY r.date_received DESC"
-);
-$stmt->execute($params);
-$rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-// Build a map: status → default column key
-$statusToCol = [];
-foreach ($columns as $colKey => $colDef) {
-    foreach ($colDef['default_statuses'] as $s) $statusToCol[$s] = $colKey;
-}
-
-// Group cards into columns — the status decides; only HOT and WIP are manual:
-// - Booked without _CK in the folder  → CONFIRMED (leaves the board once the CK is added)
-// - pipeline_column 'booked'          → CONFIRMED (a Booked one only until its CK)
-// - Hot / Hot-Quoted                  → HOT
-// - Quoted                            → QUOTED (HOT if it was moved there by hand)
-// - Inquiry                           → NEW    (WIP if it was moved there by hand)
-// So a status change made anywhere (request page, list, edit, API) moves the card.
-$byCol = array_fill_keys(array_keys($columns), []);
-foreach ($rows as $r) {
-    $explicit = $r['pipeline_column'];
-    $status   = $r['status'];
-    $hasCk    = (bool)preg_match('/_CK(?=_|$)/i', (string)$r['practice_code']);   // as ck_has_marker()
-    if ($status === 'Booked' && !$hasCk && empty($r['start_date']) && $explicit !== 'booked') {
-        // No start_date stored: take it from the folder name (…_START16SEP_END19SEP2026); a trip already started leaves the board.
-        $fd = parse_folder_dates((string)$r['practice_code']);
-        if ($fd['start_date'] !== null && $fd['start_date'] < date('Y-m-d')) continue;
-    }
-    if ($status === 'Booked')                             $colKey = $hasCk ? null : 'booked';
-    elseif ($explicit === 'booked')                       $colKey = 'booked';
-    elseif (in_array($status, ['Hot', 'Hot-Quoted'], true)) $colKey = 'hot';
-    elseif ($status === 'Quoted')                          $colKey = ($explicit === 'hot') ? 'hot' : 'quoted';
-    elseif ($status === 'Inquiry')                         $colKey = ($explicit === 'wip') ? 'wip' : 'new';
-    else                                                   $colKey = $statusToCol[$status] ?? null;
-    if ($colKey) $byCol[$colKey][] = $r;
-}
+// ── Columns + cards (includes/pipeline_service.php: the grouping rules live there) ──
+$columns = pl_columns();
+$board   = pl_fetch($db, ['agent_id' => ($isStaff && $staffAgentId) ? $staffAgentId : $filterAgent,
+                          'year'     => $filterYear]);
+$rows    = $board['rows'];
+$byCol   = $board['by_col'];
 
 include 'includes/header.php';
 ?>

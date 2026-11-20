@@ -31,7 +31,7 @@ without driving the web UI.
 | HTTPS only | Plain HTTP → 403. |
 | Rate limit | 60 calls/min → 429. |
 | Audit | Every call (including failures and dry-runs) → `agent_audit_log` (action, request_id, user, HTTP code, dry_run, payload, result, IP). |
-| Dry-run by default | `update_request`, `confirm_booking`, `send_booking_email`, `rollback_booking`, `rename_folder`, `reopen_cancelled`, `import_group_folder`, `move_group_folder`, `set_request_status`, `cancel_invoice_payment`, `cancel_invoice`, `restore_invoice`, `update_folder_status`, `import_zoho_invoice`, `create_invoice`, `update_invoice`, `send_invoice_email`, `memo_delete`, `create_agency`, `update_agency`, `save_agency_contact`, `delete_agency_contact`, `mail_send`, `mail_move`, `ck_request_check`, `ck_set_owners`, `ck_findings_upsert`, `followup_scan`, `followup_update`, `followup_upsert`, `staff_mail_save_eml`, `staff_mail_reply`, `drafts_cleanup`, `folder_ids_backfill`, `folders_orphans` (memo) and `archive_cancelled` (among others) do nothing unless the body has `"confirm": true`. |
+| Dry-run by default | `update_request`, `confirm_booking`, `send_booking_email`, `rollback_booking`, `rename_folder`, `reopen_cancelled`, `import_group_folder`, `move_group_folder`, `set_request_status`, `reassign_request`, `pipeline_move`, `cancel_invoice_payment`, `cancel_invoice`, `restore_invoice`, `update_folder_status`, `import_zoho_invoice`, `create_invoice`, `update_invoice`, `send_invoice_email`, `memo_delete`, `create_agency`, `update_agency`, `save_agency_contact`, `delete_agency_contact`, `mail_send`, `mail_move`, `ck_request_check`, `ck_set_owners`, `ck_findings_upsert`, `followup_scan`, `followup_update`, `followup_upsert`, `staff_mail_save_eml`, `staff_mail_reply`, `drafts_cleanup`, `folder_ids_backfill`, `folders_orphans` (memo) and `archive_cancelled` (among others) do nothing unless the body has `"confirm": true`. |
 | No deletes | No delete endpoint (mail included), except `memo_delete`, which is soft (`deleted_at`, the row stays). Undo a confirm with `rollback_booking` (or BackOffice → Rollback). |
 | Mailbox | The key also reads `info@` (`mail_*`): keep `api.txt` as private as the mailbox password. |
 
@@ -153,6 +153,8 @@ approve, Edit Request and the Java `api_create_request.php`). The folder name ke
 commission_pct, date_paid, initial_request, notes, agency_id, channel` (top level or inside `fields`; `""` / `null` clears).
 `commission_usd` is recomputed when `value_usd` or `commission_pct` change. Status / folder are **not**
 editable here (use `set_request_status` below, `confirm_booking` / BackOffice, `rename_folder`).
+The seller is **not** changed here either: `agent_id` / `agent` → **400** "use reassign_request" (one way to do it,
+with its checks, timeline event and folder tag — see [`reassign_request`](#reassign_request-post)).
 
 - `agency_id` must exist (`list_agencies`) and sets `channel` = `agency` unless `channel` is given.
   `channel` is `agency|direct|sb|other`; `agency` needs an agency (given or already stored); another channel
@@ -209,6 +211,92 @@ curl -sA "$UA" -H "$H" -X POST "$U?action=set_request_status" -d '{"request_ids"
 curl -sA "$UA" -H "$H" -X POST "$U?action=set_request_status" -d '{"request_ids":[2410,2411],"status":"Lost","lost_reason":"no_more_replies","confirm":true}'
 curl -sA "$UA" -H "$H" -X POST "$U?action=set_request_status" -d '{"request_id":2451,"status":"Quoted"}'   # reopen, dry run
 ```
+
+### `reassign_request` (POST)
+**Dry-run unless `"confirm": true`.** Changes the seller of a request (since 20 Nov 2026) — same service as the
+agent select of Edit Request (`bs_reassign_request()` in `includes/reassign_service.php`).
+
+- `request_id` **or** `request_ids` (array, max 50 — e.g. to move a seller's leftovers in one go)
+- `agent_id` **or** `agent` (agent id, Hub username, or agent name — exact, else a unique substring). Two agents are
+  called Roberto: the name alone → **400** ambiguous with `candidates[]`; use `14` or `rdesibi`.
+- `notify` (default **false**): mail "Request reassigned to you" to the new seller (`notify_agent_reassigned()`; no mail
+  when the new seller is the API user's own agent).
+- `retag_folder` (default false): rename the folder tag `(…-<old agent>)` → `(…-<new agent>)` with `folder_rename()`
+  (same as `rename_folder`: booking gate, verify-after-write, CK tracker). Only the last `(…)` group changes; dates and
+  status tags of `/001_Safari` folders stay. Rules as `create_request`: agency → `(Short-Agent)`, direct → `(Agent-Drct)`
+  (a custom direct tag such as `(Agent-EleonoraOngaro)` is kept), SB → `(Agent-SB)`, other → `(Agent)`; old rows without
+  `channel` are read from the tag.
+- `allow_booked` (default false), `note` (timeline body).
+
+Rules:
+- Unknown request / agent → **404**; inactive agent → **400** (inactive agents only stay on their old requests).
+- **Booked** → **409** unless `"allow_booked": true` (the seller of a booking changes commissions: Roberto decides).
+  Lost / Cancelled are allowed, with a warning.
+- Same agent → `unchanged: true`, nothing written.
+- Writes `agent_id`, `assigned_at` (`assign_touch()`: sales responsiveness KPIs) and a `status_change` timeline event
+  "Reassigned: <old> → <new>" (body = `note`, author `claude_agent`). Edit Request logs the same event (author = the user).
+- Folder: without `retag_folder` → `warnings[]` + `suggested_folder`. **Group members** (`group_folder` set) are never
+  retagged — warning only (`rename_folder` scope member by hand). A rename that fails after the DB write keeps the new
+  seller: `ok: true`, `folder_rename {from, to, error}` and a warning — retry with `rename_folder`.
+- Open Booking follow-up lines with audience `sales` are **not** moved (this version): `warnings[]` gives their count.
+- Each request is handled on its own: all ok → 200; some failed → **422**; a single id that fails → its own code.
+
+Response: `{ok, dry_run, agent_to {id, name, active}, to_change|changed, unchanged, failed, results}`; each result is
+`{id, ok, customer_name, folder, status, agent_from {id, name}, agent_to, unchanged, suggested_folder, warnings[]}` plus
+`effects[]` (dry run) or `done[]`, `folder_rename` (`{from, to}` | `{from, to, error}` | `null`) and `notify`
+(`{sent, error}` | `null`) on confirm; a failure has `error`.
+
+```bash
+curl -sA "$UA" -H "$H" -X POST "$U?action=reassign_request" -d '{"request_id":3095,"agent":"rdesibi","retag_folder":true,"note":"Alessia left; client replied 19/11"}'   # dry run
+curl -sA "$UA" -H "$H" -X POST "$U?action=reassign_request" -d '{"request_id":3095,"agent":"rdesibi","retag_folder":true,"note":"Alessia left; client replied 19/11","confirm":true}'
+# → agent Alessia → Roberto, folder /2026/EnricoTonioli(Alessia-Drct) → /2026/EnricoTonioli(Roberto-Drct)
+```
+
+### `pipeline_list` (GET)
+The sales Pipeline board (Hub → Pipeline) as data — same rules as the page (`pl_fetch()` / `pl_column_for()` in
+`includes/pipeline_service.php`). Columns `new` (NEW), `wip` (WIP), `quoted` (QUOTED), `hot` (HOT), `booked`
+(CONFIRMED). The column comes from the status; only WIP and HOT are manual (`requests.pipeline_column`): Inquiry → NEW
+(WIP if moved there), Quoted → QUOTED (HOT if moved there), Hot / Hot-Quoted → HOT, Booked without `_CK` and trip not
+started → CONFIRMED, `_CK` → off the board.
+
+Filters: `agent` (id / username / name, as `reassign_request`; default all), `channel`, `year` (received), `column` (one
+or a comma list), `stale_days` (only cards whose last activity is at least N days old), `limit` ≤ 200 (cards returned;
+the column totals count every matching card).
+
+→ `{columns: [{key, label, count, value_usd}], count, total, cards: [{id, customer_name, column, status, pipeline_column,
+agent, agency, channel, folder, destination, period, pax, value_usd, date_received, start_date, assigned_at,
+last_activity_at, days_since_activity, summary_next_step, waiting_on, has_ck}]}`. `last_activity_at` as in
+`find_requests` (latest timeline event, summary or note); `days_since_activity` counts from it, else from `assigned_at`,
+else `date_received`. `summary_next_step` / `waiting_on` come from the request summary (`summary_set`).
+Sorted by column, then oldest activity first (the ones to chase on top).
+
+```bash
+curl -sA "$UA" -H "$H" "$U?action=pipeline_list&agent=rdesibi&year=2026"
+curl -sA "$UA" -H "$H" "$U?action=pipeline_list&column=quoted,hot&stale_days=7"
+```
+
+### `pipeline_move` (POST)
+**Dry-run unless `"confirm": true`.** Same effects as a drag & drop on the board (`pl_move()`).
+`request_id` **or** `request_ids` (max 50), `column` (`new` | `wip` | `quoted` | `hot` | `booked`).
+
+- Sets `pipeline_column` and the status of the column: `new` / `wip` → Inquiry, `quoted` → Quoted, `hot` → Hot-Quoted.
+  A status change logs a `status_change` timeline event.
+- `booked` (CONFIRMED) only moves the card — it **never books** anything (bookings: `confirm_booking`).
+- Booked / Cancelled keep their status (a Booked card stays CONFIRMED until `_CK`: reported `unchanged` + `note`).
+  **Lost → 409** "reopen with set_request_status first".
+- A card that would stay in the same column with the same status → `unchanged: true`, nothing written.
+
+Response: `{ok, dry_run, column, to_change|changed, unchanged, failed, results, rule}`; each result is
+`{id, ok, customer_name, column_from, column_to, status_from, status_to}` plus `unchanged`, `note` (the card does not end
+up in the requested column) or `error`. All ok → 200; some failed → 422; a single id that fails → its own code.
+
+```bash
+curl -sA "$UA" -H "$H" -X POST "$U?action=pipeline_move" -d '{"request_ids":[3101,3102],"column":"quoted"}'   # dry run
+curl -sA "$UA" -H "$H" -X POST "$U?action=pipeline_move" -d '{"request_ids":[3101,3102],"column":"quoted","confirm":true}'
+```
+
+Not built yet (ask Roberto first): a follow-up date per request (`next_followup_at`) and a "to chase" list (today in memos /
+`summary_set.next_step`), probability / weighted value per column.
 
 ### `list_standard_programs` (GET)
 Program codes by group (`DumaShort`, `BeachDumaShort`, …) and the Confirm Safari `destinations`.
