@@ -41,8 +41,15 @@ General flow (request, quote, confirmation, invoice): `sales-agent`, `booking-co
   - Winter Safari (`SafariWinter_Calc.xlsx`, tabs HIGH = Jan–Mar & Dec, LOW = Apr–Nov; `SafariWinter_Yeadimtravel_2027.docx`): Arusha Explorers – flight Arusha-Seronera, Orangi River 2 nights – Masek (Ndutu) 2 nights – Lion's Paw – Crater / Marera – Arusha (hot lunch), JRO.
   - A real group = copy of the right Calc tab into the request folder, with the real dates and pax; then check it against §2 and §3.
 - Internal rate sheet: `Yeadimtravel_2027_Rates_INTERNAL.pdf` in the same folder. Use it, not prices from memory; if a lodge contract has changed, tell Roberto before quoting.
-- Selling prices are net per person with 1 TL free, by group size (6 / 12 / 18 pax = 1 / 2 / 3 jeeps), plus single supplement. Markup 10%.
-- Payment terms 2027 for Yeadimtravel: deposit 20% at booking, balance 45 days before arrival (not the standard 30% / 60 days written in the program terms: check the program text matches).
+- Selling prices are net per person with 1 TL free, plus single supplement. Markup 10% (unless Roberto sets another).
+- Price for EVERY group size from 6 to 18 pax + TL — one Calc sheet per size (6PAX, 7PAX … 18PAX), not only 6 / 12 / 18: otherwise with e.g. 10 pax Golan claims the 12-pax price and we lose, because jeeps and TL are spread over fewer payers (Roberto, 20 Nov 2026, YoungAdults).
+  - Jeeps: max 7 people per jeep, TL included → 6 pax = 1 jeep, 7–13 pax = 2 jeeps, 14–18 pax = 3 jeeps.
+  - TL costs per day in col P, spread with `=ROUNDUP(H4/$B$1,-1)` added to F9 (`=<rounded D10>+ROUNDUP(H4/$B$1,-1)`). TL at the Orangi Collection lodges: 50 contribution under 12 pax, free from 12 pax (only the 71 concession inside the Serengeti); other lodges per contract (e.g. Pure: TL 100 per night under 15 paying, free from 15).
+  - In the mail to Golan always explain why the price per person goes up at 7 and 14 pax (a new jeep: jeeps and TL are fixed costs shared by the paying travellers) and why we give a price for every group size.
+  - Always state the single supplement (single cost difference per lodge in col R, `H7 =CEILING(R30*(1+$D$2),5)`); triple rooms at the same price per person.
+  - Arusha Explorers Lodge: maximum 9 rooms per group — larger groups need some triple rooms; say so in the program and the mail.
+- Payment terms 2027 for Yeadimtravel: deposit 20% at booking, balance 45 days before arrival.
+- Every Yeadimtravel program (proposal and final) must print Yeadimtravel's own T&C with the 20% deposit, never the standard AGENTS version (30%) — Roberto, 20 Nov 2026. The API cannot choose a dedicated T&C (`terms_variant` is only direct / agency / auto): after creating the program check `terms` in `iti_program`; if it is not the Yeadimtravel version, tell Roberto to set it in the Hub editor before the Word goes to Golan (or, if the Yeadimtravel T&C doesn't exist in the Hub yet, to create it).
 - Any price below the sheet, or any change to the markup: only with Roberto's explicit ok.
 
 ## 5. Checklist before sending a quote or confirming
