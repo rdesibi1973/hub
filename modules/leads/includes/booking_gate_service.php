@@ -985,6 +985,9 @@ function bg_room_type(string $s): string {
     // Double beds counted: "Serengeti (2 Dbl)" (Marera, Colombo 18 Nov 2026) = two double beds in one room → family. Only in the
     // bracketed bed layout of a room name, or with "beds": a bare "2 Dbl" on a voucher line means two double ROOMS.
     if (preg_match('/\(\s*[2-9]\s*(?:x\s*)?(?:dbl|double)s?\b[^)]*\)|\b[2-9]\s*(?:x\s*)?(?:dbl|double)s?\s+beds?\b/', $s)) return 'fam';
+    // Single beds counted in the bracketed bed layout: "Nyerere (3 Sngl)" (Marera, request 3472, 20 Nov 2026) = triple,
+    // "(2 Sngl)" = twin. Brackets only: a bare "3 Sngl" on a voucher / Calc line means three single ROOMS.
+    if (preg_match('/\(\s*([2-9])\s*(?:x\s*)?(?:sngl|sgl|single)s?\b[^)]*\)/', $s, $m)) return ['2' => 'twn', '3' => 'tpl'][$m[1]] ?? 'fam';
     if (preg_match('/\b(tpl|trpl|trp|triple)/', $s)) return 'tpl';
     if (preg_match('/\b(twn|twin)/', $s)) return 'twn';
     if (preg_match('/(dbl|double|king|queen|matrimonial)/', $s)) return 'dbl';
