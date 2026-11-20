@@ -75,6 +75,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     elseif ($v['customer_name'] !== (string)($req['customer_name'] ?? '')
             && ($ne = bs_customer_name_error($v['customer_name']))) $errors[] = $ne;
     if (!$isRestricted && !$v['date_received']) $errors[] = 'Date received is required.';
+    // Parked: same transitions as the status menu (includes/parked_service.php).
+    $oldSt = (string)($req['status'] ?? '');
+    if (($v['status'] ?? '') === PK_STATUS && $oldSt !== PK_STATUS && !in_array($oldSt, PK_FROM, true)) {
+        $errors[] = 'Only Inquiry, Quoted, Hot-Quoted or Lost requests can be parked (this one is ' . $oldSt . ').';
+    }
+    if ($oldSt === PK_STATUS && ($v['status'] ?? '') !== PK_STATUS && !in_array($v['status'] ?? '', PK_TO, true)) {
+        $errors[] = 'A Parked request can go to ' . implode(', ', PK_TO) . ' only.';
+    }
 
     // ── Channel / agency (admin/manager): an agency only on the Agency channel ──
     $agencyHint = null;
@@ -384,6 +392,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if (!$ra['ok']) $reassignWarnings[] = $ra['error'];
             }
         }
+        // Parked set / left from this form: parked fields + timeline (includes/parked_service.php).
+        pk_sync_fields($db, (int)$id, (string)($req['status'] ?? ''), (string)$v['status'], (int)(current_user()['id'] ?? 0));
         $flashParts = ['Request updated successfully.'];
         if ($dropboxRenamed)      $flashParts[] = 'Dropbox folder renamed.';
         if ($grpRenamed)          $flashParts[] = 'GRP folder renamed (all group members updated).';
@@ -512,7 +522,7 @@ include 'includes/header.php';
         <label>Status</label>
         <select name="status" id="status_select" onchange="togglePaymentStatus()">
           <?php foreach (STATUSES as $s => $_): ?>
-            <option value="<?= h($s) ?>" <?= $v['status']===$s?'selected':'' ?>><?= h($s) ?></option>
+            <option value="<?= h($s) ?>" <?= $v['status']===$s?'selected':'' ?>><?= h(pk_status_label($s)) ?></option>
           <?php endforeach; ?>
         </select>
       </div>

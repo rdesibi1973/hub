@@ -181,7 +181,7 @@ curl -sA "$UA" -H "$H" -X POST "$U?action=update_request" -d '{"request_id":2923
 (`bs_set_request_status()` in `includes/booking_service.php`).
 
 - `request_id` **or** `request_ids` (array, max 50)
-- `status`: `Inquiry` | `Quoted` | `Hot-Quoted` | `Lost` | `Cancelled`
+- `status`: `Inquiry` | `Quoted` | `Hot-Quoted` | `Lost` | `Cancelled` | `Parked` (see [Parked](#status-parked-waiting-for-the-agency); optional `note`)
 - `lost_reason` — **required for Lost**: `insufficient_budget` | `trip_postponed` | `no_more_replies` |
   `booked_elsewhere` | `agent_request` | `other` (same list as the "Mark as Lost" modal: `includes/lost_reasons.php`);
   `lost_note` optional. Lost writes `lost_reason` / `lost_note` and adds a request note
@@ -210,6 +210,38 @@ Response: `{ok, dry_run, status, to_change|changed, unchanged, failed, results, 
 curl -sA "$UA" -H "$H" -X POST "$U?action=set_request_status" -d '{"request_ids":[2410,2411],"status":"Lost","lost_reason":"no_more_replies","lost_note":"No reply after 3 follow-ups"}'
 curl -sA "$UA" -H "$H" -X POST "$U?action=set_request_status" -d '{"request_ids":[2410,2411],"status":"Lost","lost_reason":"no_more_replies","confirm":true}'
 curl -sA "$UA" -H "$H" -X POST "$U?action=set_request_status" -d '{"request_id":2451,"status":"Quoted"}'   # reopen, dry run
+curl -sA "$UA" -H "$H" -X POST "$U?action=set_request_status" -d '{"request_id":3120,"status":"Parked","note":"Quote sent to the agency"}'   # park, dry run
+```
+
+### Status Parked (waiting for the agency)
+Since 20 Nov 2026 (`includes/parked_service.php`). A quote sent to an agency that comes back if and when its client
+decides: **off the pipeline, not open, not Lost**. Hub label "Parked – in attesa agenzia". Use it instead of Lost
+`agent_request` (that reason is no longer offered in the Lost modals; it stays valid for history).
+
+- **To Parked** from `Inquiry`, `Quoted`, `Hot-Quoted`, `Lost` (reopen + park: lost reason / note cleared, history stays);
+  from `Booked` / `Cancelled` → **409** (`error_code` `park_from`). Writes `parked_at`, `parked_by`, `parked_from`
+  (the status to restore; `Quoted` when parked from Lost). A `note` becomes a request note "Parked: …".
+- **From Parked** to `Inquiry`, `Quoted`, `Hot-Quoted`, `Lost` (with reason), `Booked` (`confirm_booking`, like a Quoted
+  request); `Cancelled` → **409** (`park_to`). Leaving Parked clears the parked fields.
+- Every change logs a `status_change` timeline event ("Quoted → Parked" and back).
+- **Wake-up** (by itself, author system): an inbound mail linked to the request, or a manual timeline note
+  (`timeline_add`, request page) → status back to `parked_from`, event "Riattivata: <why>", mail to the request's agent
+  "Richiesta riattivata: <folder>" (nothing to the agency / client). A mail sent by us never wakes it.
+- **Auto-close** (daily, `ck_cron.php`): Parked + trip over (`start_date` past; else the folder dates; else parked more
+  than 180 days — `PARKED_STALE_DAYS`) → Lost `no_more_replies`, note "Chiusa automaticamente: …", event
+  "Parked auto-close: Parked → Lost". **Report-only** until `define('PARKED_AUTOCLOSE_LIVE', true)` in includes/config.php.
+- `find_requests`: `status=Parked`; every row carries `parked_at`, `parked_from`.
+- `pipeline_list`: excluded unless `include_parked=1` (or `column=parked`): extra column `parked`, cards with
+  `parked_at`, `days_parked`. `pipeline_move` `column=parked` parks, moving a Parked card to new / wip / quoted / hot
+  unparks it with that column's status (`booked` → 409).
+
+### `parked_wakeups` (GET)
+For the daily round. `limit` (30), `days` (14) → `{parked_now, autoclose_live, stale_days, events: [{request_id,
+customer_name, status_now, event_at, kind: wakeup|autoclose, title, body}], would_close: [{id, customer_name, folder,
+agent, parked_at, trip_date, basis}]}` — `would_close` = what the next auto-close run closes (report only, nothing written).
+
+```bash
+curl -sA "$UA" -H "$H" "$U?action=parked_wakeups&days=7"
 ```
 
 ### `reassign_request` (POST)
@@ -260,7 +292,7 @@ The sales Pipeline board (Hub → Pipeline) as data — same rules as the page (
 started → CONFIRMED, `_CK` → off the board.
 
 Filters: `agent` (id / username / name, as `reassign_request`; default all), `channel`, `year` (received), `column` (one
-or a comma list), `stale_days` (only cards whose last activity is at least N days old), `limit` ≤ 200 (cards returned;
+or a comma list), `include_parked` (Parked requests in an extra `parked` column, see [Parked](#status-parked-waiting-for-the-agency)), `stale_days` (only cards whose last activity is at least N days old), `limit` ≤ 200 (cards returned;
 the column totals count every matching card).
 
 → `{columns: [{key, label, count, value_usd}], count, total, cards: [{id, customer_name, column, status, pipeline_column,
@@ -277,7 +309,8 @@ curl -sA "$UA" -H "$H" "$U?action=pipeline_list&column=quoted,hot&stale_days=7"
 
 ### `pipeline_move` (POST)
 **Dry-run unless `"confirm": true`.** Same effects as a drag & drop on the board (`pl_move()`).
-`request_id` **or** `request_ids` (max 50), `column` (`new` | `wip` | `quoted` | `hot` | `booked`).
+`request_id` **or** `request_ids` (max 50), `column` (`new` | `wip` | `quoted` | `hot` | `booked` | `parked`).
+`parked` parks (Inquiry / Quoted / Hot-Quoted / Lost only); a Parked card moved to new / wip / quoted / hot leaves Parked.
 
 - Sets `pipeline_column` and the status of the column: `new` / `wip` → Inquiry, `quoted` → Quoted, `hot` → Hot-Quoted.
   A status change logs a `status_change` timeline event.

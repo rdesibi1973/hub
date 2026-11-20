@@ -66,6 +66,11 @@ outdated — this file wins where they disagree (PHP version, local lint).
   changed — warning + memo). A new reader of a request's folder calls `folder_heal($db, $token, $r)` before
   `req_folder_path($r)`; a new writer that creates a request folder saves the id (`folder_id_store()`). Nightly orphan
   memo `folders-orphans` from `ck_cron.php`.
+- **Status Parked** (waiting for the agency; logic `modules/leads/includes/parked_service.php`, since 20 Nov 2026): off the
+  pipeline, not open, not Lost. Transitions in `bs_status_check()`; `parked_at` / `parked_by` / `parked_from` set and cleared by
+  `bs_set_request_status()` (pages writing `status` directly call `pk_sync_fields()`). Wakes up by itself on a timeline
+  mail_received / client_request / user note (`tl_add()` hook) and on client mails linked by Sales Response (`ck_cron.php` →
+  `pk_cron()`); daily auto-close report-only until `PARKED_AUTOCLOSE_LIVE`. `'Parked'` must be in `STATUSES` (server config).
 - `migrations/NNN_name.sql` — not applied by deploy. `docs/` — AGENT_API, FOLDER_NAMING,
   INFRASTRUCTURE, KB_Quotazioni_Safari.
 

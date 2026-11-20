@@ -220,6 +220,7 @@ main {
 .status-booked    { background: var(--green-lt);  color: var(--green); }
 .status-cancelled { background: var(--red-lt);    color: var(--red-dk); }
 .status-lost      { background: var(--grey-lt);   color: var(--grey-dk); }
+.status-parked    { background: #EEF0F3;          color: #4B5563; border: 1px dashed #9CA3AF; }
 
 /* ── FILTERS BAR ── */
 .filters {

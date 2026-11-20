@@ -942,7 +942,9 @@ function sr_report(PDO $db, ?string $week = null, ?int $agentId = null, int $nPr
             $w = $bucketOf($m['ts']);
             $vol[$aid][$w][$m['dir'] === 'client' ? 0 : 1] = ($vol[$aid][$w][$m['dir'] === 'client' ? 0 : 1] ?? 0) + 1;
         }
-        $open = !$r['closed'] && ($r['status'] === 'Booked'
+        // Parked (waiting for the agency, parked_service.php): not waiting for a seller's reply. A client mail wakes it up
+        // (ck_cron.php → pk_wake_from_mail()), and from then on it is open again.
+        $open = !$r['closed'] && $r['status'] !== 'Parked' && ($r['status'] === 'Booked'
             ? ($r['start_date'] === null || $r['start_date'] >= $today)
             : ($r['recv_ts'] >= $scopeTs || $lastTs >= $scopeTs || ($r['updated_at'] && strtotime($r['updated_at']) >= $scopeTs)));
         $base = ['agent_id' => $aid, 'seller' => $byAgent[$aid]['name'], 'request_id' => $rid, 'folder' => $r['practice_code'], 'channel' => $r['kind'],

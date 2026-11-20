@@ -1,6 +1,7 @@
 <?php
 require_once 'config.php';
 require_once 'includes/timeline_service.php';   // Last activity column (request_timeline / request_summary)
+require_once 'includes/booking_service.php';    // bs_lost_reasons_offered(), Parked (parked_service.php)
 $pageTitle = 'Requests';
 $db = db();
 tl_schema($db);
@@ -100,7 +101,10 @@ if ($search) {
     $params[] = "%$search%";
     $params[] = "%$search%";
 }
-if ($status && array_key_exists($status, STATUSES)) {
+if ($status === '_open') {
+    // Open = still in play: not Parked (waiting for the agency), Lost, Booked or Cancelled.
+    $where[]  = "r.status IN ('Inquiry','Quoted','Hot-Quoted','Hot')";
+} elseif ($status && array_key_exists($status, STATUSES)) {
     $where[]  = 'r.status = ?';
     $params[] = $status;
 }
@@ -162,7 +166,17 @@ include 'includes/header.php';
     <a href="<?= defined('BASE_URL') ? BASE_URL.'/hub.php' : '../../hub.php' ?>" class="btn btn-outline btn-sm" style="font-size:.72rem;">&#8592; Hub</a>
     <div>
     <h2>Requests</h2>
-    <div class="sub"><?= count($rows) ?> result<?= count($rows)!==1?'s':'' ?><?php if ($no_folder): ?> &nbsp;<span style="background:#FAE8E7;color:#C0211B;font-size:.7rem;font-weight:700;padding:2px 8px;border-radius:10px;">No folder</span><?php endif; ?></div>
+    <?php
+      // Totals by bucket: Parked is neither open nor Lost.
+      $bk = ['Open' => 0, 'Parked' => 0, 'Lost' => 0, 'Booked' => 0];
+      foreach ($rows as $br) {
+          $bs = (string)$br['status'];
+          if (in_array($bs, ['Inquiry', 'Quoted', 'Hot-Quoted', 'Hot'], true)) $bk['Open']++;
+          elseif (isset($bk[$bs])) $bk[$bs]++;
+      }
+    ?>
+    <div class="sub"><?= count($rows) ?> result<?= count($rows)!==1?'s':'' ?>
+      <span style="font-size:.74rem;color:var(--grey-mid);margin-left:8px">Open <?= $bk['Open'] ?> · Parked <?= $bk['Parked'] ?> · Lost <?= $bk['Lost'] ?> · Booked <?= $bk['Booked'] ?></span><?php if ($no_folder): ?> &nbsp;<span style="background:#FAE8E7;color:#C0211B;font-size:.7rem;font-weight:700;padding:2px 8px;border-radius:10px;">No folder</span><?php endif; ?></div>
     </div>
   </div>
   <div style="display:flex;gap:8px;align-items:center;">
@@ -203,8 +217,9 @@ include 'includes/header.php';
     <label>Status</label>
     <select name="status">
       <option value="">All statuses</option>
+      <option value="_open" <?= $status==='_open'?'selected':'' ?>>Open (no Parked / Lost)</option>
       <?php foreach (STATUSES as $s => $cls): ?>
-        <option value="<?= h($s) ?>" <?= $status===$s?'selected':'' ?>><?= h($s) ?></option>
+        <option value="<?= h($s) ?>" <?= $status===$s?'selected':'' ?>><?= h(pk_status_label($s)) ?></option>
       <?php endforeach; ?>
     </select>
   </div>
@@ -461,7 +476,7 @@ function bulkDelete() {
 #st-menu button.cur{font-weight:700}
 </style>
 <div id="st-menu"></div>
-<?php $LOST_REASONS = require __DIR__ . '/includes/lost_reasons.php'; ?>
+<?php $LOST_REASONS = bs_lost_reasons_offered(); /* agent_request retired: use Parked */ ?>
 <div id="st-lost" style="display:none;position:fixed;inset:0;z-index:9998;background:rgba(0,0,0,.45);align-items:center;justify-content:center;">
   <div style="background:#fff;border-radius:10px;max-width:420px;width:calc(100% - 40px);padding:22px 24px;box-shadow:0 12px 40px rgba(0,0,0,.25);">
     <h3 style="margin:0 0 4px;font-family:'Merriweather',serif;font-size:1.05rem;color:var(--red-dk);">Mark as Lost</h3>
@@ -473,6 +488,7 @@ function bulkDelete() {
       </label>
       <?php endforeach; ?>
     </div>
+    <p style="margin:-6px 0 12px;font-size:.76rem;color:var(--grey-mid);">L'agenzia tornerà quando il cliente decide? Usa <strong><?= h(PK_LABEL) ?></strong> invece di Lost.</p>
     <label style="display:block;font-size:.78rem;color:var(--grey-mid);margin-bottom:5px;">Note (optional)</label>
     <textarea id="st-lost-note" rows="3" style="width:100%;box-sizing:border-box;font-size:.85rem;padding:8px 10px;border:1.5px solid var(--grey-lt);border-radius:6px;resize:vertical;" placeholder="Add any detail…"></textarea>
     <div id="st-lost-err" style="display:none;color:var(--red-dk);font-size:.78rem;margin-top:8px;">Please choose a reason.</div>
@@ -486,6 +502,7 @@ function bulkDelete() {
 // Click a status badge → pick a new status → saved through request_view.php
 // (same handler, permissions and Lost-reason rules as the request page).
 var ST_LIST = <?= json_encode(array_keys(STATUSES)) ?>;
+var ST_LABEL = <?= json_encode([PK_STATUS => PK_LABEL], JSON_UNESCAPED_UNICODE) ?>;
 var stBadge = null;
 function stOpen(badge) {
   stBadge = badge;
@@ -493,7 +510,7 @@ function stOpen(badge) {
   for (var i = 0; i < ST_LIST.length; i++) {
     var s = ST_LIST[i];
     html += '<button type="button" class="' + (s === badge.dataset.status ? 'cur' : '') + '" data-s="' + s.replace(/"/g, '&quot;') + '">'
-          + (s === badge.dataset.status ? '✓ ' : '') + s.replace(/</g, '&lt;') + '</button>';
+          + (s === badge.dataset.status ? '✓ ' : '') + (ST_LABEL[s] || s).replace(/</g, '&lt;') + '</button>';
   }
   menu.innerHTML = html;
   var r = badge.getBoundingClientRect();

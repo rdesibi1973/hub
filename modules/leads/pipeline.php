@@ -22,13 +22,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'
     header('Content-Type: application/json');
     $id  = (int)($_POST['id']  ?? 0);
     $col = trim($_POST['col'] ?? '');
-    if (!$id || !isset(pl_columns()[$col])) {
+    if (!$id || !isset(pl_columns(true)[$col])) {
         echo json_encode(['ok'=>false,'message'=>'Invalid params']); exit;
     }
-    // Staff can only move their own requests
-    $res = pl_move($db, $id, $col, ['restrict_agent_id' => ($isStaff && $staffAgentId) ? $staffAgentId : 0]);
+    // Staff can only move their own requests. PARKED = park (parked_service.php), out of PARKED = unpark.
+    $res = pl_move($db, $id, $col, ['restrict_agent_id' => ($isStaff && $staffAgentId) ? $staffAgentId : 0,
+                                    'user_id' => (int)($currentUser['id'] ?? 0)]);
     if (!$res['ok']) { echo json_encode(['ok'=>false,'message'=>$res['error']]); exit; }
-    echo json_encode(['ok'=>true, 'status'=>pl_columns()[$col]['status'] !== null ? $res['status_to'] : null]); exit;
+    echo json_encode(['ok'=>true, 'status'=>pl_columns(true)[$col]['status'] !== null ? $res['status_to'] : null]); exit;
 }
 
 // ── Filters ────────────────────────────────────────────────────────────────
@@ -54,11 +55,18 @@ $years = $db->query(
 )->fetchAll(PDO::FETCH_COLUMN);
 
 // ── Columns + cards (includes/pipeline_service.php: the grouping rules live there) ──
-$columns = pl_columns();
+// Parked requests are always fetched (for the toggle's count) but shown only with ?parked=1.
+$showParked = !empty($_GET['parked']);
 $board   = pl_fetch($db, ['agent_id' => ($isStaff && $staffAgentId) ? $staffAgentId : $filterAgent,
-                          'year'     => $filterYear]);
-$rows    = $board['rows'];
+                          'year'     => $filterYear, 'include_parked' => true]);
 $byCol   = $board['by_col'];
+$nParked = count($byCol['parked']);
+$columns = pl_columns($showParked);
+if (!$showParked) unset($byCol['parked']);
+$rows    = array_filter($board['rows'], function ($r) use ($showParked) { return $showParked || $r['status'] !== PK_STATUS; });
+$toggleQs = http_build_query(array_filter(['agent' => $canSeeAll && isset($_GET['agent']) ? (int)$_GET['agent'] : null,
+                                           'year' => $filterYear ?: null, 'parked' => $showParked ? null : 1],
+                                          function ($v) { return $v !== null; }));
 
 include 'includes/header.php';
 ?>
@@ -104,6 +112,22 @@ include 'includes/header.php';
 .col-quoted .col-header { background: var(--amber-lt); color: var(--amber);  border-color: var(--amber); }
 .col-hot    .col-header { background: #FFF0E0;          color: #C45000;       border-color: #E87722; }
 .col-booked .col-header { background: var(--green-lt); color: var(--green);  border-color: var(--green); }
+.col-parked .col-header { background: #EEF0F3;          color: #4B5563;       border-color: #9CA3AF; cursor: pointer; }
+.pipeline-col.col-parked.collapsed { flex: 0 0 150px; }
+.pipeline-col.col-parked.collapsed .col-body { display: none; }
+.pipeline-col.col-parked.collapsed.drag-over .col-header { background: var(--red-lt); }
+.parked-toggle { font-size: .78rem; color: var(--grey-dk); text-decoration: none; border: 1.5px solid var(--grey-lt);
+                 border-radius: 6px; padding: 4px 9px; background: var(--white); }
+.parked-toggle:hover { border-color: var(--red); }
+.card-park {
+  position: absolute; top: 6px; right: 6px; z-index: 2;
+  font-size: .64rem; font-weight: 700; color: #4B5563; background: #EEF0F3;
+  border: 1px solid #D1D5DB; border-radius: 4px; padding: 1px 5px; cursor: pointer; display: none;
+}
+.pipeline-card:hover .card-park { display: block; }
+.pipeline-card[data-col="parked"] .card-park,
+.pipeline-card[data-status="Booked"] .card-park { display: none !important; }
+.card-parked-at { font-size: .68rem; color: #4B5563; }
 
 .col-count {
   background: rgba(0,0,0,.1); border-radius: 10px;
@@ -187,6 +211,9 @@ include 'includes/header.php';
       <?php endforeach; ?>
     </select>
     <span style="font-size:.78rem;color:var(--grey-mid)"><?= count($rows) ?> requests</span>
+    <a class="parked-toggle" id="parked-toggle" href="pipeline.php?<?= h($toggleQs) ?>"
+       title="<?= h(PK_TIP) ?>"><?= $showParked ? '🅿️ Nascondi parcheggiate' : '🅿️ Mostra parcheggiate' ?> (<span id="parked-n"><?= $nParked ?></span>)</a>
+    <?php if ($showParked): ?><input type="hidden" name="parked" value="1"><?php endif; ?>
     <button type="submit" class="btn btn-outline btn-sm" style="margin-left:auto;display:flex;align-items:center;gap:6px;">
       ↺ Refresh
     </button>
@@ -194,12 +221,12 @@ include 'includes/header.php';
 
   <div class="pipeline-board" id="board">
     <?php foreach ($columns as $colKey => $col): ?>
-    <div class="pipeline-col <?= $col['cls'] ?>"
+    <div class="pipeline-col <?= $col['cls'] ?><?= $colKey === 'parked' ? ' collapsed' : '' ?>"
          data-col="<?= $colKey ?>"
          ondragover="onDragOver(event,this)"
          ondragleave="onDragLeave(this)"
          ondrop="onDrop(event,this)">
-      <div class="col-header">
+      <div class="col-header"<?= $colKey === 'parked' ? ' onclick="this.parentNode.classList.toggle(\'collapsed\')" title="' . h(PK_TIP) . ' — click to open / close"' : '' ?>>
         <span><?= $col['icon'] ?>&nbsp; <?= $col['label'] ?></span>
         <span class="col-count" id="cnt-<?= $colKey ?>"><?= count($byCol[$colKey]) ?></span>
       </div>
@@ -214,9 +241,9 @@ include 'includes/header.php';
           $date = date('d M', strtotime($r['date_received']));
           // Status badge colors inline (no dependency on CSS class names for WIP)
           $sbg  = ['Inquiry'=>'#E5F0FC','Quoted'=>'#FEF0E5','Hot'=>'#FFF0E0','Hot-Quoted'=>'#FFF0E0',
-                   'Booked' =>'#EBF5EE','Lost'  =>'#F0F0F0','Cancelled'=>'#FAE8E7'];
+                   'Booked' =>'#EBF5EE','Lost'  =>'#F0F0F0','Cancelled'=>'#FAE8E7','Parked'=>'#EEF0F3'];
           $sco  = ['Inquiry'=>'#0062B1','Quoted'=>'#E87722','Hot'=>'#C45000','Hot-Quoted'=>'#C45000',
-                   'Booked' =>'#1A6B3A','Lost'  =>'#888',   'Cancelled'=>'#C0211B'];
+                   'Booked' =>'#1A6B3A','Lost'  =>'#888',   'Cancelled'=>'#C0211B','Parked'=>'#4B5563'];
           $st      = $r['status'];
           $stLabel = ($st === 'Booked') ? 'Confirmed' : $st;
         ?>
@@ -224,8 +251,11 @@ include 'includes/header.php';
              draggable="true"
              data-id="<?= $r['id'] ?>"
              data-col="<?= $colKey ?>"
+             data-status="<?= h($st) ?>"
              ondragstart="onDragStart(event,this)"
              ondragend="onDragEnd(this)">
+          <button type="button" class="card-park" title="<?= h(PK_TIP) ?>"
+                  onclick="event.preventDefault();event.stopPropagation();moveCard(this.parentNode.dataset.id, this.parentNode.dataset.col, 'parked')">🅿️ Parcheggia</button>
           <div class="card-name" title="<?= h($r['customer_name']) ?>">
             <?= h($r['customer_name']) ?>
           </div>
@@ -236,6 +266,9 @@ include 'includes/header.php';
             <?php if ($val): ?><span>💵 <?= $val ?></span><?php endif; ?>
             <span>📅 <?= $date ?></span>
           </div>
+          <?php if ($st === PK_STATUS && !empty($r['parked_at'])): ?>
+          <div class="card-parked-at">🅿️ Parcheggiata il <?= date('d M Y', strtotime($r['parked_at'])) ?></div>
+          <?php endif; ?>
           <div class="card-footer">
             <span class="card-status-badge"
                   style="background:<?= $sbg[$st]??'#eee' ?>;color:<?= $sco[$st]??'#444' ?>">
@@ -285,11 +318,12 @@ async function moveCard(id, from, to) {
   const card     = document.querySelector(`.pipeline-card[data-id="${id}"]`);
   const fromBody = document.getElementById('col-' + from);
   const toBody   = document.getElementById('col-' + to);
-  if (!card || !toBody) return;
+  // Parking with the PARKED column hidden: the card leaves the board (no target column on the page).
+  if (!card || (!toBody && to !== 'parked')) return;
 
   // Optimistic move
   card.dataset.col = to;
-  toBody.appendChild(card);
+  if (toBody) toBody.appendChild(card); else card.style.display = 'none';
   updateCount(from, -1);
   updateCount(to,   +1);
   updateEmpty(from);
@@ -305,12 +339,17 @@ async function moveCard(id, from, to) {
     });
     const data = await res.json();
     if (!data.ok) throw new Error(data.message || 'Error');
-    if (data.status) setStatusBadge(card, data.status);
-    const labels = {new:'NEW', wip:'WIP', quoted:'QUOTED', hot:'HOT', booked:'CONFIRMED'};
+    if (data.status) { setStatusBadge(card, data.status); card.dataset.status = data.status; }
+    const pn = document.getElementById('parked-n');
+    if (pn && (to === 'parked') !== (from === 'parked')) pn.textContent = Math.max(0, (parseInt(pn.textContent)||0) + (to === 'parked' ? 1 : -1));
+    if (from === 'parked') { const pa = card.querySelector('.card-parked-at'); if (pa) pa.remove(); }
+    if (!toBody) card.remove();
+    const labels = {new:'NEW', wip:'WIP', quoted:'QUOTED', hot:'HOT', booked:'CONFIRMED', parked:'PARKED'};
     showToast('✓  ' + card.querySelector('.card-name').textContent.trim() + '  →  ' + (labels[to]||to.toUpperCase()));
   } catch (err) {
     // Roll back
     card.dataset.col = from;
+    card.style.display = '';
     fromBody.appendChild(card);
     updateCount(to,   -1);
     updateCount(from, +1);
@@ -324,8 +363,8 @@ async function moveCard(id, from, to) {
 function setStatusBadge(card, status) {
   const badge = card.querySelector('.card-status-badge');
   if (!badge) return;
-  const sbg = {Inquiry:'#E5F0FC',Quoted:'#FEF0E5',Hot:'#FFF0E0','Hot-Quoted':'#FFF0E0',Booked:'#EBF5EE',Lost:'#F0F0F0',Cancelled:'#FAE8E7'};
-  const sco = {Inquiry:'#0062B1',Quoted:'#E87722',Hot:'#C45000','Hot-Quoted':'#C45000',Booked:'#1A6B3A',Lost:'#888',Cancelled:'#C0211B'};
+  const sbg = {Inquiry:'#E5F0FC',Quoted:'#FEF0E5',Hot:'#FFF0E0','Hot-Quoted':'#FFF0E0',Booked:'#EBF5EE',Lost:'#F0F0F0',Cancelled:'#FAE8E7',Parked:'#EEF0F3'};
+  const sco = {Inquiry:'#0062B1',Quoted:'#E87722',Hot:'#C45000','Hot-Quoted':'#C45000',Booked:'#1A6B3A',Lost:'#888',Cancelled:'#C0211B',Parked:'#4B5563'};
   badge.textContent      = (status === 'Booked') ? 'Confirmed' : status;
   badge.style.background  = sbg[status] || '#eee';
   badge.style.color       = sco[status] || '#444';

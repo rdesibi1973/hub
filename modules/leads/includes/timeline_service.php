@@ -232,7 +232,38 @@ function tl_add(PDO $db, int $requestId, array $in, array $author): int {
                          'created_at' => date('Y-m-d H:i:s')];
     $db->prepare("INSERT INTO request_timeline (" . implode(', ', array_keys($f)) . ") VALUES (" . implode(',', array_fill(0, count($f), '?')) . ")")
        ->execute(array_values($f));
-    return (int)$db->lastInsertId();
+    $newId = (int)$db->lastInsertId();
+    tl_parked_wake($db, $requestId, $f);
+    return $newId;
+}
+
+/**
+ * A Parked request wakes up (parked_service.php pk_wake()) when someone writes again: a received mail or a client
+ * request (any author), or a note / call added by a person (not Claude's own notes). Sent mails never wake it.
+ */
+function tl_parked_wake(PDO $db, int $requestId, array $f): void {
+    if (!function_exists('pk_wake')) return;
+    $type = (string)($f['event_type'] ?? '');
+    $isUser = ($f['author_type'] ?? '') === 'user';
+    if (!in_array($type, ['mail_received', 'client_request'], true) && !($isUser && in_array($type, ['note', 'call'], true))) return;
+    try {
+        $st = $db->prepare("SELECT status FROM requests WHERE id = ?");
+        $st->execute([$requestId]);
+        if ($st->fetchColumn() !== 'Parked') return;
+        $refs  = is_string($f['refs'] ?? null) ? (json_decode($f['refs'], true) ?: []) : (array)($f['refs'] ?? []);
+        $title = (string)($f['title'] ?? '');
+        if ($type === 'mail_received') {
+            $from = trim((string)($refs['from'] ?? $refs['mail_from'] ?? ''));
+            $why  = 'mail' . ($from !== '' ? ' da ' . $from : '') . ' – ' . preg_replace('/^Mail received:\s*/', '', $title);
+        } elseif ($type === 'client_request') {
+            $why = 'richiesta del cliente – ' . $title;
+        } else {
+            $why = ($type === 'call' ? 'chiamata' : 'nota') . ' – ' . $title;
+        }
+        pk_wake($db, $requestId, tl_cut($why, 180));
+    } catch (Throwable $e) {
+        error_log('tl_parked_wake(' . $requestId . '): ' . $e->getMessage());
+    }
 }
 
 function tl_event(PDO $db, int $id): ?array {

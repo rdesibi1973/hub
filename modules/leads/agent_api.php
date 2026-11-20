@@ -814,6 +814,7 @@ try {
         }
         if (!$where) agent_fail('Give at least one filter: q, status, agent, channel or year');
         $limit = max(1, min(100, (int)($in['limit'] ?? 50)));
+        pk_schema($db);   // parked_at / parked_from in r.*
         $st = $db->prepare("SELECT r.*, a.name AS agent_name, ag.nome AS agency_name
                             FROM requests r LEFT JOIN agents a ON a.id = r.agent_id LEFT JOIN agencies ag ON ag.id = r.agency_id
                             WHERE " . implode(' AND ', $where) . " ORDER BY r.id DESC LIMIT " . $limit);
@@ -828,6 +829,7 @@ try {
                 'agency_id'        => !empty($r['agency_id']) ? (int)$r['agency_id'] : null,
                 'agency_name'      => $r['agency_name'] ?? null,
                 'last_activity_at' => $a['last_activity_at'], 'has_summary' => $a['has_summary'],
+                'parked_at'        => $r['parked_at'] ?? null, 'parked_from' => $r['parked_from'] ?? null,
             ];
         }
         agent_out(['ok' => true, 'count' => count($rows), 'requests' => $rows]);
@@ -1280,16 +1282,20 @@ try {
 
         $status = trim((string)($in['status'] ?? ''));
         if ($status === 'Booked') agent_fail('Booked is set by confirm_booking (folder + DB together), not here', 409);
-        $settable = ['Inquiry', 'Quoted', 'Hot-Quoted', 'Lost', 'Cancelled'];
+        $settable = ['Inquiry', 'Quoted', 'Hot-Quoted', 'Lost', 'Cancelled', PK_STATUS];
+        if ($status === PK_STATUS && !array_key_exists(PK_STATUS, STATUSES)) {
+            agent_fail('Parked is not in STATUSES yet (server-only modules/leads/config.php) — ask Roberto', 409);
+        }
         if (!in_array($status, $settable, true)) agent_fail('status must be one of: ' . implode(', ', $settable), 400, ['statuses' => $settable]);
         $reason = trim((string)($in['lost_reason'] ?? ''));
-        $note   = trim((string)($in['lost_note']   ?? ''));
+        // lost_note for Lost; note for Parked (a request note "Parked: …" + the timeline body)
+        $note   = trim((string)($in[$status === PK_STATUS ? 'note' : 'lost_note'] ?? ($in['lost_note'] ?? '')));
         if ($status === 'Lost' && !array_key_exists($reason, bs_lost_reasons())) {
-            agent_fail('lost_reason is required for Lost', 400, ['lost_reasons' => array_keys(bs_lost_reasons())]);
+            agent_fail('lost_reason is required for Lost', 400, ['lost_reasons' => array_keys(bs_lost_reasons_offered())]);
         }
         $opt     = ['allowed' => $settable, 'from_booked' => []];
         $dry     = empty($in['confirm']);
-        $codeMap = ['not_found' => 404, 'booked' => 409];
+        $codeMap = ['not_found' => 404, 'booked' => 409, 'park_from' => 409, 'park_to' => 409];
 
         $ph = implode(',', array_fill(0, count($ids), '?'));
         $st = $db->prepare("SELECT id, customer_name, practice_code, status, lost_reason, lost_note FROM requests WHERE id IN ($ph)");
@@ -1341,7 +1347,8 @@ try {
         agent_out(['ok' => !$nFail, 'dry_run' => $dry, 'status' => $status,
                    $dry ? 'to_change' : 'changed' => $nChange, 'unchanged' => $nSame, 'failed' => $nFail,
                    'results' => $results,
-                   'reopen_rule' => 'Leaving Lost clears lost_reason and lost_note (as the Hub status menu); the "Marked Lost" request note and the status_change timeline event stay as history. Lost on a request already Lost changes only lost_reason / lost_note (request note + timeline event).']
+                   'reopen_rule' => 'Leaving Lost clears lost_reason and lost_note (as the Hub status menu); the "Marked Lost" request note and the status_change timeline event stay as history. Lost on a request already Lost changes only lost_reason / lost_note (request note + timeline event).',
+                   'parked_rule' => 'Parked from Inquiry / Quoted / Hot-Quoted / Lost only; out of Parked to Inquiry / Quoted / Hot-Quoted / Lost (or Booked via confirm_booking). An inbound mail or a timeline note wakes it up by itself (back to parked_from).']
                   + ($dry ? ['message' => 'Dry run — nothing changed. Resend with "confirm": true.'] : []), $httpCode);
     }
 
@@ -1403,10 +1410,12 @@ try {
             if (!preg_match('/^\d{4}$/', (string)$in['year'])) agent_fail('year must be YYYY');
             $f['year'] = (int)$in['year'];
         }
+        // Parked: off the board unless include_parked=1 (or column=parked), then an extra "parked" column.
         $cols = array_values(array_filter(array_map('trim', explode(',', strtolower((string)($in['column'] ?? '')))), 'strlen'));
+        $f['include_parked'] = !empty($in['include_parked']) || in_array('parked', $cols, true);
         if ($cols) {
-            $bad = array_diff($cols, array_keys(pl_columns()));
-            if ($bad) agent_fail('column must be one of: ' . implode(', ', array_keys(pl_columns())), 400);
+            $bad = array_diff($cols, array_keys(pl_columns(true)));
+            if ($bad) agent_fail('column must be one of: ' . implode(', ', array_keys(pl_columns(true))), 400);
             $f['columns'] = $cols;
         }
         if (isset($in['stale_days']) && (string)$in['stale_days'] !== '') {
@@ -1426,12 +1435,15 @@ try {
         $ids = agent_request_ids($in);
         if (count($ids) === 1) $agentReqId = $ids[0];
         $col = strtolower(trim((string)($in['column'] ?? '')));
-        if (!isset(pl_columns()[$col])) agent_fail('column must be one of: ' . implode(', ', array_keys(pl_columns())), 400);
+        if (!isset(pl_columns(true)[$col])) agent_fail('column must be one of: ' . implode(', ', array_keys(pl_columns(true))), 400);
+        if ($col === 'parked' && !array_key_exists(PK_STATUS, STATUSES)) {
+            agent_fail('Parked is not in STATUSES yet (server-only modules/leads/config.php) — ask Roberto', 409);
+        }
         $dry = empty($in['confirm']);
         if (!$dry) tl_schema($db);
         $results = []; $failCodes = [];
         foreach ($ids as $rid) {
-            $res = pl_move($db, $rid, $col, ['dry_run' => $dry, 'refuse_lost' => true]);
+            $res = pl_move($db, $rid, $col, ['dry_run' => $dry, 'refuse_lost' => true, 'user_id' => (int)$agentUser['id']]);
             if (!$res['ok']) $failCodes[] = (int)($res['code'] ?? 422);
             unset($res['code']);
             $results[] = $res;
@@ -1441,9 +1453,20 @@ try {
         agent_out(['ok' => !$nFail, 'dry_run' => $dry, 'column' => $col,
                    $dry ? 'to_change' : 'changed' => count($results) - $nFail - $nSame, 'unchanged' => $nSame, 'failed' => $nFail,
                    'results' => $results,
-                   'rule' => 'Status follows the column (new/wip → Inquiry, quoted → Quoted, hot → Hot-Quoted); booked (CONFIRMED) only moves the card and never books (confirm_booking). Booked / Cancelled keep their status; Lost is refused (reopen with set_request_status first).']
+                   'rule' => 'Status follows the column (new/wip → Inquiry, quoted → Quoted, hot → Hot-Quoted, parked → Parked); booked (CONFIRMED) only moves the card and never books (confirm_booking). Booked / Cancelled keep their status (and cannot be parked); Lost is refused except column parked (reopen + park). Out of parked: the status of the target column.']
                   + ($dry ? ['message' => 'Dry run — nothing changed. Resend with "confirm": true.'] : []),
                   !$nFail ? 200 : (count($ids) === 1 ? $failCodes[0] : 422));
+    }
+
+    // ── parked_wakeups ───────────────────────────────────────────────────────
+    // Last automatic wake-ups / auto-closes of Parked requests + what the next auto-close would do (parked_service.php).
+    case 'parked_wakeups': {
+        $limit = max(1, min(200, (int)($in['limit'] ?? 30)));
+        $days  = max(1, min(90, (int)($in['days'] ?? 14)));
+        $plan  = pk_autoclose($db, false);   // report only: what the daily run would close now
+        $cnt   = (int)$db->query("SELECT COUNT(*) FROM requests WHERE status = 'Parked'")->fetchColumn();
+        agent_out(['ok' => true, 'parked_now' => $cnt, 'autoclose_live' => pk_autoclose_live(), 'stale_days' => pk_stale_days(),
+                   'events' => pk_recent_events($db, $limit, $days), 'would_close' => $plan['closed']]);
     }
 
     // ── list_standard_programs ───────────────────────────────────────────────
@@ -4066,7 +4089,7 @@ try {
             'mail_folders', 'mail_list', 'mail_get', 'mail_attachment', 'mail_flag', 'mail_move', 'mail_draft', 'mail_send',
             'staff_mail_mailboxes', 'staff_mail_search', 'staff_mail_get', 'staff_mail_attachment', 'staff_mail_save_eml', 'staff_mail_reply', 'drafts_cleanup',
             'timeline_list', 'timeline_add', 'timeline_update', 'summary_set', 'request_resume', 'set_request_status',
-            'reassign_request', 'pipeline_list', 'pipeline_move',
+            'reassign_request', 'pipeline_list', 'pipeline_move', 'parked_wakeups',
             'folder_resolve', 'folder_ids_backfill', 'folders_orphans', 'archive_cancelled',
             'payments_due', 'ck_status', 'ck_request_check', 'ck_set_owners', 'ck_set_group_closed', 'ck_findings_upsert', 'ck_findings_drafts', 'ops_movements', 'ops_lunch_boxes', 'ops_medivac', 'flight_tickets',
             'followup_list', 'followup_scan', 'followup_update', 'followup_upsert', 'mail_security_status',

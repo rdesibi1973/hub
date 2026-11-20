@@ -144,6 +144,16 @@ function memo_digest_build(PDO $pdo, $ownerId, $today) {
     } catch (Throwable $e) {
         error_log('memo digest: bookings pipeline skipped: ' . $e->getMessage());
     }
+    // Parked requests (leads/includes/parked_service.php): wake-ups / auto-closes of the last day, and while the
+    // auto-close is report-only (PARKED_AUTOCLOSE_LIVE off) what it would close.
+    $d['parked'] = null;
+    try {
+        require_once __DIR__ . '/../leads/includes/parked_service.php';
+        $plan = pk_autoclose_live() ? array('closed' => array()) : pk_autoclose($pdo, false);
+        $d['parked'] = array('events' => pk_recent_events($pdo, 40, 1), 'would_close' => $plan['closed'], 'live' => pk_autoclose_live());
+    } catch (Throwable $e) {
+        error_log('memo digest: parked skipped: ' . $e->getMessage());
+    }
     return $d;
 }
 
@@ -353,6 +363,35 @@ function memo_digest_render(array $d, $today) {
         $section('📋 Bookings pipeline', $h, $t);
         $counts .= '; ck_nuove=' . count($fu['ck_new']) . '; ck_vecchie=' . count($fu['ck_old']) . '; ck_pratiche60=' . count($fu['ck_soon'])
                  . '; urgenti=' . array_sum(array_map('count', $fu['urgent'])) . ($pl ? '; ck_bloccati=' . count($pl['blocked']) . '; gruppi_aperti=' . count(isset($pl['groups_open']) ? $pl['groups_open'] : array()) . '; primo_check=' . count($pl['first_check']) : '');
+    }
+
+    // 8. Parked requests: woken up / closed in the last day; auto-close report (nothing when all empty)
+    $pk = isset($d['parked']) ? $d['parked'] : null;
+    if ($pk) {
+        $h = array(); $t = array();
+        foreach ($pk['events'] as $ev) {
+            $url = $hub . 'leads/request_view.php?id=' . (int)$ev['request_id'];
+            $detail = $ev['kind'] === 'wakeup' ? preg_replace('/^Riattivata:\s*/', '', $ev['title']) : 'Parked → Lost';
+            $kind   = $ev['kind'] === 'wakeup' ? 'riattivata' : 'chiusa automaticamente';
+            $h[] = '<a href="' . $url . '" style="color:#C0211B;">' . $e($ev['customer_name']) . '</a> — ' . $e($detail)
+                 . ' <span style="color:#777;">(' . $kind . ')</span>';
+            $t[] = $ev['customer_name'] . ' — ' . $detail . ' (' . $kind . ')';
+        }
+        if ($pk['would_close']) {
+            $items = array();
+            foreach (array_slice($pk['would_close'], 0, 20) as $c) {
+                $items[] = $c['customer_name'] . ' — parcheggiata ' . ($c['parked_at'] ? date('d/m/Y', strtotime($c['parked_at'])) : '?')
+                         . ($c['trip_date'] ? ' · viaggio ' . date('d/m/Y', strtotime($c['trip_date'])) : ' · nessuna data viaggio');
+            }
+            $more = count($pk['would_close']) > 20 ? ' (+' . (count($pk['would_close']) - 20) . ')' : '';
+            $label = 'Chiusura automatica in prova — verrebbero chiuse come Lost (' . count($pk['would_close']) . ')';
+            $h[] = '<strong>' . $e($label) . '</strong>' . $e($more) . '<br><span style="color:#555;">' . implode('<br>', array_map($e, $items)) . '</span>';
+            $t[] = $label . $more . ":\n    " . implode("\n    ", $items);
+        }
+        $section('🅿️ Richieste parcheggiate', $h, $t);
+        $counts .= '; parked_riattivate=' . count(array_filter($pk['events'], function ($x) { return $x['kind'] === 'wakeup'; }))
+                 . '; parked_chiuse=' . count(array_filter($pk['events'], function ($x) { return $x['kind'] === 'autoclose'; }))
+                 . '; parked_da_chiudere=' . count($pk['would_close']);
     }
 
     if (!$d['overdue'] && !$d['today'] && !$d['week'] && !$d['doing']) {

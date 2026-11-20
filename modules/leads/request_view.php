@@ -308,6 +308,19 @@ $stmt->execute([$id]);
 $r = $stmt->fetch();
 if (!$r) { flash('Request not found.', 'error'); header('Location: requests.php'); exit; }
 
+// Parked (parked_service.php): "Parcheggiata il <data> da <utente>".
+$parkedLine = '';
+if (($r['status'] ?? '') === PK_STATUS) {
+    $pby = '';
+    if (!empty($r['parked_by'])) {
+        $pst = $db->prepare("SELECT COALESCE(NULLIF(full_name, ''), username) FROM users WHERE id = ?");
+        $pst->execute([(int)$r['parked_by']]);
+        $pby = (string)($pst->fetchColumn() ?: '');
+    }
+    $parkedLine = 'Parcheggiata' . (!empty($r['parked_at']) ? ' il ' . date('d/m/Y', strtotime($r['parked_at'])) : '')
+                . ($pby !== '' ? ' da ' . $pby : '');
+}
+
 $cu = current_user();
 
 // Fetch email from DB (not in session)
@@ -506,7 +519,8 @@ include 'includes/header.php';
     <div class="sub">
       <a href="requests.php" class="text-muted" style="text-decoration:none">← Requests</a>
       &nbsp;·&nbsp;
-      <span class="badge <?= STATUSES[$r['status']] ?? '' ?>"><?= h($r['status']) ?></span>
+      <span class="badge <?= STATUSES[$r['status']] ?? '' ?>"><?= h(pk_status_label((string)$r['status'])) ?></span>
+      <?php if ($r['status'] === PK_STATUS): ?>&nbsp;·&nbsp; <span title="<?= h(PK_TIP) ?>">🅿️ <?= h($parkedLine) ?></span><?php endif; ?>
       &nbsp;·&nbsp; Added <?= date('d M Y', strtotime($r['created_at'])) ?>
     </div>
   </div>
@@ -689,7 +703,7 @@ include 'includes/header.php';
                   data-prev="<?= h($r['status']) ?>" onchange="onStatusChange(this)"
                   style="font-size:.82rem;padding:3px 6px;border:1px solid var(--grey-lt);border-radius:5px;cursor:pointer;">
             <?php foreach (STATUSES as $s => $_): ?>
-              <option value="<?= h($s) ?>" <?= $r['status']===$s?'selected':'' ?>><?= h($s) ?></option>
+              <option value="<?= h($s) ?>" <?= $r['status']===$s?'selected':'' ?><?= $s === PK_STATUS ? ' title="' . h(PK_TIP) . '"' : '' ?>><?= h(pk_status_label($s)) ?></option>
             <?php endforeach; ?>
           </select>
           <input type="hidden" name="lost_reason" id="lost-reason-field" value="">
@@ -697,7 +711,12 @@ include 'includes/header.php';
           <noscript><button type="submit" class="btn btn-outline" style="font-size:.78rem;padding:3px 8px;">Update</button></noscript>
         </form>
       <?php else: ?>
-        <span class="badge <?= STATUSES[$r['status']] ?? '' ?>"><?= h($r['status']) ?></span>
+        <span class="badge <?= STATUSES[$r['status']] ?? '' ?>"><?= h(pk_status_label((string)$r['status'])) ?></span>
+      <?php endif; ?>
+      <?php if ($r['status'] === PK_STATUS): ?>
+        <div style="margin-top:6px;font-size:.8rem;color:var(--grey-mid);" title="<?= h(PK_TIP) ?>">
+          🅿️ <?= h($parkedLine) ?> — torna attiva da sola quando l'agenzia scrive di nuovo.
+        </div>
       <?php endif; ?>
       <?php if ($r['status'] === 'Lost' && (!empty($r['lost_reason']) || $canEdit)): ?>
         <div style="margin-top:6px;font-size:.8rem;color:var(--grey-mid);">
@@ -1896,13 +1915,16 @@ include 'includes/send_modal.php';
       Why was this request lost?
     </p>
     <div id="lost-reason-list" style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px;">
-      <?php foreach ($LOST_REASONS as $slug => $label): ?>
+      <?php foreach (bs_lost_reasons_offered() + (($r['lost_reason'] ?? '') === 'agent_request' ? ['agent_request' => $LOST_REASONS['agent_request']] : []) as $slug => $label): ?>
       <label style="display:flex;align-items:center;gap:9px;font-size:.86rem;color:var(--grey-dk);cursor:pointer;">
         <input type="radio" name="lost_reason_choice" value="<?= h($slug) ?>">
         <?= h($label) ?>
       </label>
       <?php endforeach; ?>
     </div>
+    <p style="margin:-6px 0 12px;font-size:.76rem;color:var(--grey-mid);">
+      L'agenzia tornerà quando il cliente decide? Usa <strong><?= h(PK_LABEL) ?></strong> invece di Lost.
+    </p>
     <label style="display:block;font-size:.78rem;color:var(--grey-mid);margin-bottom:5px;">
       Note (optional)
     </label>

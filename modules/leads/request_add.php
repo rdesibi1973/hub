@@ -315,7 +315,7 @@ include 'includes/header.php';
           <input type="text" value="Inquiry" disabled style="background:var(--grey-lt);color:var(--grey-mid)">
         <?php else: ?>
         <select id="status" name="status">
-          <?php foreach (STATUSES as $s => $_): ?>
+          <?php foreach (STATUSES as $s => $_): if ($s === 'Parked') continue; /* parked only after a quote */ ?>
             <option value="<?= h($s) ?>" <?= $v['status']===$s?'selected':'' ?>><?= h($s) ?></option>
           <?php endforeach; ?>
         </select>

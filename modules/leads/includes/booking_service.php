@@ -23,6 +23,7 @@ require_once __DIR__ . '/folder_parser.php';
 require_once __DIR__ . '/safari_check.php';
 require_once __DIR__ . '/timeline_service.php';   // timeline_log(): system events of the request history
 require_once __DIR__ . '/assignment_service.php'; // assign_touch(): requests.assigned_at
+require_once __DIR__ . '/parked_service.php';     // status Parked: transitions, parked_* fields, wake-up
 
 // ════════════════════════════════════════════════════════════════════════════
 //  Paths / URLs
@@ -990,6 +991,11 @@ function bs_confirm_commit(PDO $db, array $plan, bool $proceed): array {
         $res['reopened'] = true;
         $res['msg'] = 'Request reopened (Lost → Quoted). ' . $res['msg'] . ($res['ok'] ? '' : ' The request stays Quoted.');
     }
+    // Booked from Parked (accepted like Quoted): the request leaves Parked — parked fields cleared (parked_service.php).
+    if ($res['ok'] && !empty($plan['r']['id']) && ($plan['r']['status'] ?? '') === PK_STATUS) {
+        $db->prepare("UPDATE requests SET parked_at = NULL, parked_by = NULL, parked_from = NULL WHERE id = ?")->execute([(int)$plan['r']['id']]);
+        $res['msg'] .= ' (was Parked)';
+    }
     if ($res['ok'] && !empty($plan['r']['id'])) {
         timeline_log((int)$plan['r']['id'], 'confirmation', 'Booking confirmed — ' . $res['folder'],
                      ['body' => ($res['group_folder'] ? 'Group: ' . $res['group_folder'] . "\n" : '') . 'Previous folder: ' . $plan['old_folder'],
@@ -1127,6 +1133,12 @@ function bo_rollback_db(PDO $db, int $id, string $name, string $path, array $pre
              confirmation_date=NULL, pre_confirm_json=NULL
          WHERE id=?"
     )->execute([$name, ($group !== '' ? $group : null), bo_url_from_path($path), $status, ($pay !== '' ? $pay : null), $id]);
+    // Confirmed from Parked and rolled back: Parked again, parked from now (the old date was cleared at confirm).
+    if ($status === PK_STATUS) {
+        pk_schema($db);
+        $db->prepare("UPDATE requests SET parked_at = COALESCE(parked_at, ?), parked_from = COALESCE(parked_from, 'Quoted') WHERE id = ?")
+           ->execute([date('Y-m-d H:i:s'), $id]);
+    }
 }
 
 /**
@@ -1436,6 +1448,16 @@ function bs_lost_reasons(): array {
 }
 
 /**
+ * Reasons offered for a new Lost (the modals): all but the retired ones. 'agent_request' ("Agency request – no
+ * follow-up") is retired since Parked exists (20 Nov 2026): it stays valid for history, so bs_lost_reasons() keeps it.
+ */
+function bs_lost_reasons_offered(): array {
+    $r = bs_lost_reasons();
+    unset($r['agent_request']);
+    return $r;
+}
+
+/**
  * Check a status change without writing anything.
  * $opt: restrict_agent_id (int, non-zero = only that agent's requests — restricted Hub staff),
  *       allowed    (target statuses accepted; default all STATUSES),
@@ -1457,7 +1479,8 @@ function bs_status_check(PDO $db, int $id, string $status, string $reason, array
         return array_merge($res, ['error' => 'Please choose a reason.', 'error_code' => 'lost_reason']);
     }
     $restrict = (int)($opt['restrict_agent_id'] ?? 0);   // -1 = restricted user without an agent: nothing matches
-    $st = $db->prepare("SELECT status, lost_reason, lost_note FROM requests WHERE id = ?" . ($restrict !== 0 ? " AND agent_id = ?" : ""));
+    pk_schema($db);
+    $st = $db->prepare("SELECT status, lost_reason, lost_note, parked_from FROM requests WHERE id = ?" . ($restrict !== 0 ? " AND agent_id = ?" : ""));
     $st->execute($restrict !== 0 ? [$id, $restrict] : [$id]);
     $oldRow = $st->fetch(PDO::FETCH_ASSOC);
     if ($oldRow === false) {
@@ -1473,6 +1496,16 @@ function bs_status_check(PDO $db, int $id, string $status, string $reason, array
                                            . ($opt['from_booked'] ? 'only ' . implode('/', $opt['from_booked']) . ' is allowed; ' : '')
                                            . 'use rollback_booking / BackOffice to change it', 'error_code' => 'booked']);
     }
+    // Parked: only from Inquiry / Quoted / Hot-Quoted / Lost; out of Parked only to Inquiry / Quoted / Hot-Quoted / Lost / Booked.
+    if ($status === PK_STATUS && $old !== PK_STATUS && !in_array($old, PK_FROM, true)) {
+        return array_merge($res, ['error' => 'Request ' . $id . ' is ' . $old . ' — only Inquiry, Quoted, Hot-Quoted or Lost requests can be parked',
+                                  'error_code' => 'park_from']);
+    }
+    if ($old === PK_STATUS && $status !== PK_STATUS && !in_array($status, PK_TO, true)) {
+        return array_merge($res, ['error' => 'Request ' . $id . ' is Parked — it can go to ' . implode(', ', PK_TO) . ', not ' . $status,
+                                  'error_code' => 'park_to']);
+    }
+    $res['old_parked_from'] = $oldRow['parked_from'] ?? null;
     $res['ok']      = true;
     $res['changed'] = ($old !== $status);
     return $res;
@@ -1512,6 +1545,13 @@ function bs_status_effects(array $row, string $status, string $reason, string $n
     }
     if ($old === $status) return $out;
     $out['effects'][] = 'requests.status: ' . ($old !== '' ? $old : '(empty)') . ' → ' . $status;
+    if ($status === PK_STATUS) {
+        $out['effects'][] = 'requests.parked_at = now, parked_by = the user, parked_from = ' . ($old === 'Lost' || $old === '' ? 'Quoted' : $old)
+                          . ' (status restored on wake-up)' . ($note !== '' ? '; request note "Parked: ' . $note . '"' : '');
+        $out['effects'][] = 'off the Pipeline board (shown only with "Mostra parcheggiate")';
+    } elseif ($old === PK_STATUS) {
+        $out['effects'][] = 'requests.parked_at / parked_by / parked_from cleared';
+    }
     if ($status === 'Lost') {
         $label = $reasons[$reason] ?? $reason;
         $out['effects'][] = 'requests.lost_reason = ' . $reason . ($note !== '' ? ', lost_note = "' . $note . '"' : ', lost_note empty');
@@ -1529,7 +1569,9 @@ function bs_status_effects(array $row, string $status, string $reason, string $n
 /**
  * Set a request's status (same rules as the Hub status menu): reason/note are kept only
  * for Lost and cleared when leaving Lost; Lost adds a request note; a real change adds a
- * timeline event. Same $opt and result as bs_status_check(). Run tl_schema() before
+ * timeline event. Parked sets parked_at / parked_by / parked_from (a note becomes a request note "Parked: …"); leaving
+ * Parked clears them (parked_service.php). Same $opt and result as bs_status_check(), plus tl_title / tl_body (the
+ * timeline event's title / extra body, used by pk_wake() and pk_autoclose()). Run tl_schema() before
  * calling this inside a transaction (DDL would commit it).
  */
 function bs_set_request_status(PDO $db, int $id, string $status, string $reason, string $note, int $userId, array $opt = []): array {
@@ -1556,14 +1598,30 @@ function bs_set_request_status(PDO $db, int $id, string $status, string $reason,
     $db->prepare("UPDATE requests SET status=?, pipeline_column=IF(?='Booked',NULL,pipeline_column), lost_reason=?, lost_note=? WHERE id=?")
        ->execute([$status, $status, $reasonVal, $noteVal, $id]);
 
+    // Parked: when / who / the status to restore on wake-up; cleared when the request leaves Parked.
+    if ($status === PK_STATUS && $chk['changed']) {
+        $from = in_array($chk['old_status'], PK_RESTORE, true) ? $chk['old_status'] : 'Quoted';
+        $db->prepare("UPDATE requests SET parked_at=?, parked_by=?, parked_from=? WHERE id=?")
+           ->execute([date('Y-m-d H:i:s'), $userId ?: null, $from, $id]);
+        if (trim($note) !== '') {
+            $db->prepare("INSERT INTO request_notes (request_id, user_id, note) VALUES (?,?,?)")->execute([$id, $userId, 'Parked: ' . trim($note)]);
+        }
+    } elseif ($chk['old_status'] === PK_STATUS && $status !== PK_STATUS) {
+        $db->prepare("UPDATE requests SET parked_at=NULL, parked_by=NULL, parked_from=NULL WHERE id=?")->execute([$id]);
+    }
+
     // Request note so the reason is visible in the request history.
     if ($status === 'Lost') {
         $db->prepare("INSERT INTO request_notes (request_id, user_id, note) VALUES (?,?,?)")
            ->execute([$id, $userId, 'Marked Lost — ' . $reasons[$reason] . ($noteVal !== null ? ': ' . $noteVal : '')]);
     }
     if ($chk['changed'] && $chk['old_status'] !== '') {
-        timeline_log($id, 'status_change', $chk['old_status'] . ' → ' . $status,
-                     ['body' => $status === 'Lost' ? $reasons[$reason] . ($noteVal !== null ? ': ' . $noteVal : '') : null]);
+        // tl_title / tl_body: wake-up and auto-close of Parked requests (parked_service.php) name the event themselves.
+        $tlBody = $status === 'Lost' ? $reasons[$reason] . ($noteVal !== null ? ': ' . $noteVal : '')
+                : ($status === PK_STATUS && trim($note) !== '' ? trim($note) : null);
+        if (!empty($opt['tl_body'])) $tlBody = trim($opt['tl_body'] . ($tlBody !== null ? "\n" . $tlBody : ''));
+        timeline_log($id, 'status_change', !empty($opt['tl_title']) ? (string)$opt['tl_title'] : $chk['old_status'] . ' → ' . $status,
+                     ['body' => $tlBody]);
     }
     // Cancelled: the Booking follow-up lines of the request (and of its folder) close at once (auto_cancelled).
     // Not when an active request uses the same folder (a cancelled duplicate, GRP0101): its lines move to that request

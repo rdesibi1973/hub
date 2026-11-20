@@ -10,23 +10,33 @@
  *   Quoted                               → QUOTED (HOT if moved there by hand)
  *   Inquiry                              → NEW    (WIP if moved there by hand)
  * So a status change made anywhere (request page, list, edit, API) moves the card.
+ * Parked requests (parked_service.php) are off the board; with "Mostra parcheggiate" / include_parked they sit in an
+ * extra PARKED column at the end. Dropping a card on PARKED parks it; dragging it out unparks it to that column.
  *
  * Requires the leads config.php (db()). Keep PHP-7 compatible.
  */
 
+require_once __DIR__ . '/booking_service.php';    // bs_status_check() / bs_set_request_status() (park / unpark), parked_service.php
 require_once __DIR__ . '/folder_parser.php';      // parse_folder_dates(): start of a Booked trip from its folder
 require_once __DIR__ . '/timeline_service.php';   // timeline_log(), tl_activity_map()
 require_once __DIR__ . '/assignment_service.php'; // assign_schema(): requests.assigned_at
 
-/** Column definitions (key = requests.pipeline_column). status = what a drop on the column sets (null = card only). */
-function pl_columns(): array {
-    return [
+/**
+ * Column definitions (key = requests.pipeline_column). status = what a drop on the column sets (null = card only).
+ * $withParked adds the PARKED column (never stored in pipeline_column: the status says it).
+ */
+function pl_columns(bool $withParked = false): array {
+    $cols = [
         'new'    => ['label' => 'NEW',       'icon' => '📥', 'cls' => 'col-new',    'default_statuses' => ['Inquiry'],           'status' => 'Inquiry'],
         'wip'    => ['label' => 'WIP',       'icon' => '⚙️', 'cls' => 'col-wip',    'default_statuses' => [],                    'status' => 'Inquiry'],
         'quoted' => ['label' => 'QUOTED',    'icon' => '💬', 'cls' => 'col-quoted', 'default_statuses' => ['Quoted'],            'status' => 'Quoted'],
         'hot'    => ['label' => 'HOT',       'icon' => '🔥', 'cls' => 'col-hot',    'default_statuses' => ['Hot-Quoted', 'Hot'], 'status' => 'Hot-Quoted'],
         'booked' => ['label' => 'CONFIRMED', 'icon' => '✅', 'cls' => 'col-booked', 'default_statuses' => [],                    'status' => null],
     ];
+    if ($withParked) {
+        $cols['parked'] = ['label' => 'PARKED', 'icon' => '🅿️', 'cls' => 'col-parked', 'default_statuses' => [PK_STATUS], 'status' => PK_STATUS];
+    }
+    return $cols;
 }
 
 /** Folder carries the _CK marker (same token rule as ck_has_marker()). */
@@ -48,6 +58,7 @@ function pl_column_for(array $r): ?string {
         if ($fd['start_date'] !== null && $fd['start_date'] < date('Y-m-d')) return null;
     }
     if ($status === 'Booked')                               return $hasCk ? null : 'booked';
+    if ($status === PK_STATUS)                              return 'parked';   // shown only when the PARKED column is on
     if ($explicit === 'booked')                             return 'booked';
     if (in_array($status, ['Hot', 'Hot-Quoted'], true))     return 'hot';
     if ($status === 'Quoted')                               return $explicit === 'hot' ? 'hot' : 'quoted';
@@ -61,19 +72,24 @@ function pl_column_for(array $r): ?string {
 /**
  * Cards on the board.
  * $f: agent_id (0 = all), year (date_received), channel, columns [keys], stale_days (only cards whose last
- *     activity is older than N days), limit (cards returned; totals count every matching card).
- * $rich = false (board page): ['rows' fetched, 'by_col' [col => rows in date_received DESC order]].
+ *     activity is older than N days), limit (cards returned; totals count every matching card),
+ *     include_parked (bool: fetch Parked requests too — by_col['parked']; the API lists them only then).
+ * $rich = false (board page): ['rows' fetched (Parked included only with include_parked), 'by_col' [col => rows in
+ *     date_received DESC order]].
  * $rich = true (API) adds 'columns' [{key, label, count, value_usd}], 'total', 'cards' [] sorted by column, then
  *     oldest activity first (the ones to chase on top). Activity = last timeline / summary / note (tl_activity_map),
- *     else assigned_at, else date_received.
+ *     else assigned_at, else date_received. Parked cards also carry parked_at / days_parked.
  */
 function pl_fetch(PDO $db, array $f, bool $rich = false): array {
+    $withParked = !empty($f['include_parked']);
     // CONFIRMED also keeps every Booked request whose folder has no _CK marker yet (same token rule as
     // ck_has_marker()), until the CK is added — only trips not started yet, so old bookings never marked
     // CK do not pile up.
-    $where  = ["(r.status IN ('Inquiry','Quoted','Hot','Hot-Quoted') OR r.pipeline_column = 'booked'
+    $where  = ["(r.status IN ('Inquiry','Quoted','Hot','Hot-Quoted'" . ($withParked ? ",'Parked'" : "") . ") OR r.pipeline_column = 'booked'
                 OR (r.status = 'Booked' AND COALESCE(r.practice_code, '') NOT REGEXP '_CK(_|$)'
                     AND (r.start_date IS NULL OR r.start_date >= CURDATE())))"];
+    if (!$withParked) $where[] = "r.status <> 'Parked'";   // a Parked request pinned to CONFIRMED stays off the board too
+    pk_schema($db);
     $params = [];
     if (!empty($f['agent_id'])) { $where[] = 'r.agent_id = ?';             $params[] = (int)$f['agent_id']; }
     if (!empty($f['year']))     { $where[] = 'YEAR(r.date_received) = ?';  $params[] = (int)$f['year']; }
@@ -86,7 +102,7 @@ function pl_fetch(PDO $db, array $f, bool $rich = false): array {
     }
     $stmt = $db->prepare(
         "SELECT r.id, r.customer_name, r.status, r.pipeline_column, r.practice_code, r.start_date,
-                r.pax, r.destination, r.period, r.date_received, r.value_usd,
+                r.pax, r.destination, r.period, r.date_received, r.value_usd, r.parked_at,
                 a.name AS agent_name" . $extra . "
          FROM requests r
          LEFT JOIN agents a ON a.id = r.agent_id" . ($rich ? " LEFT JOIN agencies ag ON ag.id = r.agency_id" : "") . "
@@ -96,11 +112,11 @@ function pl_fetch(PDO $db, array $f, bool $rich = false): array {
     $stmt->execute($params);
     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-    $cols  = pl_columns();
+    $cols  = pl_columns($withParked);
     $byCol = array_fill_keys(array_keys($cols), []);
     foreach ($rows as $r) {
         $colKey = pl_column_for($r);
-        if ($colKey) $byCol[$colKey][] = $r;
+        if ($colKey && isset($byCol[$colKey])) $byCol[$colKey][] = $r;
     }
     $out = ['rows' => $rows, 'by_col' => $byCol];
     if (!$rich) return $out;
@@ -133,7 +149,8 @@ function pl_fetch(PDO $db, array $f, bool $rich = false): array {
                 'summary_next_step' => $a['next_step'] ?? null, 'waiting_on' => $a['waiting_on'] ?? null,
                 'has_ck' => pl_has_ck($r['practice_code']),
                 '_ref' => (string)$ref,
-            ];
+            ] + ($k === 'parked' ? ['parked_at' => $r['parked_at'] ? substr((string)$r['parked_at'], 0, 16) : null,
+                                    'days_parked' => $r['parked_at'] ? (int)floor(($now - strtotime((string)$r['parked_at'])) / 86400) : null] : []);
         }
         usort($list, function ($x, $y) { return strcmp($x['_ref'], $y['_ref']) ?: $x['id'] - $y['id']; });
         $columns[] = ['key' => $k, 'label' => $cols[$k]['label'], 'count' => count($list),
@@ -155,12 +172,14 @@ function pl_fetch(PDO $db, array $f, bool $rich = false): array {
  * (NEW/WIP → Inquiry, QUOTED → Quoted, HOT → Hot-Quoted). CONFIRMED only moves the card — it never books.
  * Booked / Lost / Cancelled keep their status. A status change logs a status_change timeline event.
  * $opt: dry_run (bool), restrict_agent_id (int: only that agent's requests — Hub staff), refuse_lost (bool: Lost → 409,
- *       reopen with set_request_status first).
+ *       reopen with set_request_status first), user_id (int: who parks — parked_by).
+ * PARKED: dropping a card there parks it (bs_set_request_status: Inquiry / Quoted / Hot-Quoted / Lost only, else 409);
+ * a Parked card dropped on NEW / WIP / QUOTED / HOT gets that column's status and leaves Parked; CONFIRMED refused (409).
  * Nothing is written when the card would stay where it is with the same status (unchanged).
  * → ['ok', 'code', 'error', 'id', 'customer_name', 'column_from', 'column_to', 'status_from', 'status_to', 'unchanged'?, 'note'?]
  */
 function pl_move(PDO $db, int $id, string $col, array $opt = []): array {
-    $cols = pl_columns();
+    $cols = pl_columns(true);
     $out  = ['ok' => false, 'id' => $id];
     if (!isset($cols[$col])) return $out + ['code' => 400, 'error' => 'Invalid column'];
     $st = $db->prepare("SELECT id, customer_name, agent_id, status, pipeline_column, practice_code, start_date FROM requests WHERE id = ?");
@@ -171,6 +190,7 @@ function pl_move(PDO $db, int $id, string $col, array $opt = []): array {
     $restrict = (int)($opt['restrict_agent_id'] ?? 0);
     if ($restrict && (int)$r['agent_id'] !== $restrict) return $out + ['code' => 403, 'error' => 'Not your request'];
     $old = (string)$r['status'];
+    if ($col === 'parked' || $old === PK_STATUS) return pl_move_parked($db, $r, $col, $opt, $out);
     if ($old === 'Lost' && !empty($opt['refuse_lost'])) {
         return $out + ['code' => 409, 'status_from' => $old, 'error' => 'Request ' . $id . ' is Lost — reopen it with set_request_status first'];
     }
@@ -202,5 +222,30 @@ function pl_move(PDO $db, int $id, string $col, array $opt = []): array {
     $out['status_to'] = $stored;
     // Same timeline event as the status menu (bs_set_request_status).
     if ($old !== '' && $stored !== $old) timeline_log($id, 'status_change', $old . ' → ' . $stored);
+    return array_merge($out, ['ok' => true]);
+}
+
+/** pl_move() into or out of PARKED: the status change goes through bs_set_request_status() (parked fields, rules, timeline). */
+function pl_move_parked(PDO $db, array $r, string $col, array $opt, array $out): array {
+    $id   = (int)$r['id'];
+    $old  = (string)$r['status'];
+    $cols = pl_columns(true);
+    $new  = $cols[$col]['status'];
+    $out += ['column_from' => pl_column_for($r), 'status_from' => $old];
+    if ($new === null) {
+        return $out + ['code' => 409, 'error' => 'Request ' . $id . ' is Parked — move it to NEW, WIP, QUOTED or HOT (bookings: confirm_booking)'];
+    }
+    $after = array_merge($r, ['status' => $new, 'pipeline_column' => $col === 'parked' ? $r['pipeline_column'] : $col]);
+    $out += ['column_to' => pl_column_for($after), 'status_to' => $new];
+    if ($old === $new && $out['column_from'] === $out['column_to']) return array_merge($out, ['ok' => true, 'unchanged' => true]);
+    $chk = bs_status_check($db, $id, $new, '', ['restrict_agent_id' => (int)($opt['restrict_agent_id'] ?? 0)]);
+    if (!$chk['ok']) return $out + ['code' => $chk['error_code'] === 'not_found' ? 404 : 409, 'error' => $chk['error']];
+    if (!empty($opt['dry_run'])) return array_merge($out, ['ok' => true]);
+    if ($old !== $new) {
+        $res = bs_set_request_status($db, $id, $new, '', '', (int)($opt['user_id'] ?? 0));
+        if (empty($res['ok'])) return $out + ['code' => 409, 'error' => $res['error'] ?? 'status change refused'];
+    }
+    // Out of PARKED into WIP / HOT: the manual column too (PARKED itself is never stored in pipeline_column).
+    if ($col !== 'parked') $db->prepare("UPDATE requests SET pipeline_column = ? WHERE id = ?")->execute([$col, $id]);
     return array_merge($out, ['ok' => true]);
 }

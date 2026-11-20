@@ -20,6 +20,7 @@ if (!defined('STATUSES')) {
         'Booked'     => 'status-booked',
         'Cancelled'  => 'status-cancelled',
         'Lost'       => 'status-lost',
+        'Parked'     => 'status-parked',   // waiting for the agency (leads parked_service.php)
     ]);
 }
 

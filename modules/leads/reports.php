@@ -395,6 +395,7 @@ const TEAM_LISTS = [
     'hot'       => '🔥 Hot',
     'confirmed' => '✅ Confirmed',
     'lost'      => 'Lost',
+    'parked'    => '🅿️ Parked',
     'today'     => 'Assigned today',
     '2d'        => 'Assigned today + yesterday',
     '7d'        => 'Assigned in the last 7 days',
@@ -440,6 +441,7 @@ if ($report_type === 'team') {
                 'hot'       => "(r.status IN ('Hot','Hot-Quoted') OR (r.status='Quoted' AND r.pipeline_column='hot'))",
                 'confirmed' => "r.status='Booked'",
                 'lost'      => "r.status='Lost'",
+                'parked'    => "r.status='Parked'",   // waiting for the agency: neither open nor Lost
             ][$team_list_key];
         }
         $q = $db->prepare("
@@ -471,7 +473,7 @@ if ($report_type === 'team') {
         $q->execute([$agent_filter, $ty]);
         $reqs = $q->fetchAll(PDO::FETCH_ASSOC);
 
-        $kpi   = ['assigned'=>0,'inquiry'=>0,'quoted'=>0,'hot'=>0,'booked'=>0,'lost'=>0,'sales'=>0.0];
+        $kpi   = ['assigned'=>0,'inquiry'=>0,'quoted'=>0,'hot'=>0,'booked'=>0,'lost'=>0,'parked'=>0,'sales'=>0.0];
         $weeks = [];   // isoWeek => aggregate + request list
         foreach ($reqs as $r) {
             $kpi['assigned']++;
@@ -480,6 +482,7 @@ if ($report_type === 'team') {
             if ($stage === 'confirmed') { $kpi['booked']++; $kpi['sales'] += (float)$r['value_usd']; }
             elseif ($stage !== null)    $kpi[$stage]++;
             if ($isLost) $kpi['lost']++;
+            if ($r['status'] === 'Parked') $kpi['parked']++;
 
             $wk = (int)date('W', strtotime($r['date_received']));
             if (!isset($weeks[$wk])) {
@@ -508,6 +511,7 @@ if ($report_type === 'team') {
                    SUM(status='Quoted' AND COALESCE(pipeline_column,'')<>'hot') AS quoted_cnt,
                    SUM(status IN ('Hot','Hot-Quoted') OR (status='Quoted' AND pipeline_column='hot')) AS hot_cnt,
                    SUM(status='Lost')                                  AS lost,
+                   SUM(status='Parked')                                AS parked,
                    SUM(CASE WHEN status='Booked' THEN value_usd ELSE 0 END) AS sales
             FROM requests
             WHERE YEAR(date_received) = ? AND $notStaff
@@ -542,7 +546,7 @@ if ($report_type === 'team') {
         }
 
         $rows = [];
-        $tot  = ['assigned'=>0,'inquiry'=>0,'quoted'=>0,'hot'=>0,'booked'=>0,'lost'=>0,'sales'=>0.0,'r_today'=>0,'r_2d'=>0,'r_7d'=>0];
+        $tot  = ['assigned'=>0,'inquiry'=>0,'quoted'=>0,'hot'=>0,'booked'=>0,'lost'=>0,'parked'=>0,'sales'=>0.0,'r_today'=>0,'r_2d'=>0,'r_7d'=>0];
         $push = function(int $aid, string $name, $d) use (&$rows, &$tot) {
             $row = [
                 'aid'=>$aid, 'name'=>$name,
@@ -552,13 +556,14 @@ if ($report_type === 'team') {
                 'hot'     =>(int)($d['hot_cnt']??0),
                 'booked'  =>(int)($d['booked']??0),
                 'lost'    =>(int)($d['lost']??0),
+                'parked'  =>(int)($d['parked']??0),
                 'sales'   =>(float)($d['sales']??0),
                 'r_today' =>(int)($d['r_today']??0),
                 'r_2d'    =>(int)($d['r_2d']??0),
                 'r_7d'    =>(int)($d['r_7d']??0),
             ];
             $rows[] = $row;
-            foreach (['assigned','inquiry','quoted','hot','booked','lost','sales','r_today','r_2d','r_7d'] as $k) $tot[$k] += $row[$k];
+            foreach (['assigned','inquiry','quoted','hot','booked','lost','parked','sales','r_today','r_2d','r_7d'] as $k) $tot[$k] += $row[$k];
         };
         foreach ($all_agents as $ag) $push((int)$ag['id'], $ag['name'], $by[(int)$ag['id']] ?? []);
         if (!empty($by[0])) $push(0, '— Unassigned —', $by[0]);   // requests with no agent
@@ -862,7 +867,7 @@ include 'includes/header.php';
           <th class="recent-col" title="Requests assigned in the last 7 days, today included">7 days</th>
           <th>Assigned</th>
           <th class="pipe-col">Inquiry</th><th class="pipe-col">Quoted</th><th class="pipe-col">🔥 Hot</th><th class="pipe-col">✅ Confirmed</th>
-          <th>Rate</th><th>Lost</th><th>Sales</th>
+          <th>Rate</th><th>Lost</th><th title="Parked – waiting for the agency: neither open nor Lost">🅿️ Parked</th><th>Sales</th>
         </tr>
       </thead>
       <tbody>
@@ -885,6 +890,7 @@ include 'includes/header.php';
           <td class="pipe-col"><?= team_num($r['booked'], 'confirmed', $w, $year) ?></td>
           <td style="font-weight:700"><?= $rate($r['booked'],$r['assigned']) ?>%</td>
           <td><?= team_num($r['lost'], 'lost', $w, $year) ?></td>
+          <td><?= team_num($r['parked'], 'parked', $w, $year) ?></td>
           <td><?= team_num($r['sales'] > 0, 'confirmed', $w, $year, '$'.number_format($r['sales'],0)) ?></td>
         </tr>
       <?php endforeach; ?>
@@ -902,6 +908,7 @@ include 'includes/header.php';
           <td class="pipe-col"><?= team_num($T['booked'], 'confirmed', 0, $year) ?></td>
           <td><?= $rate($T['booked'],$T['assigned']) ?>%</td>
           <td><?= team_num($T['lost'], 'lost', 0, $year) ?></td>
+          <td><?= team_num($T['parked'], 'parked', 0, $year) ?></td>
           <td><?= team_num($T['sales'] > 0, 'confirmed', 0, $year, '$'.number_format($T['sales'],0)) ?></td>
         </tr>
       </tfoot>
@@ -914,7 +921,8 @@ include 'includes/header.php';
     (<?= date('d M') ?>), whatever year is selected. A reassigned request counts for the new agent;
     requests assigned before 12 Oct 2026 use their date received.<br>
     <strong>Inquiry / Quoted / Hot / Confirmed</strong> = where those requests are now, as on the Pipeline
-    (Hot = Hot, Hot-Quoted, or Quoted moved to HOT; Confirmed = Booked). Click a number to see the requests.
+    (Hot = Hot, Hot-Quoted, or Quoted moved to HOT; Confirmed = Booked). Click a number to see the requests.<br>
+    <strong>Parked</strong> = quote sent, waiting for the agency: counted on its own, neither open nor Lost (closed as Lost later, it counts as Lost).
   </p>
 
 <?php elseif ($team_agent !== null): // ---- DRILL-DOWN: single agent ---- ?>
@@ -930,6 +938,7 @@ include 'includes/header.php';
         ['✅ Confirmed', $k['booked'],                           'var(--green)',   'confirmed', $k['booked']],
         ['Rate',         $rate($k['booked'],$k['assigned']).'%', 'var(--amber)',   '',          0],
         ['Lost',         $k['lost'],                             'var(--grey-mid)','lost',      $k['lost']],
+        ['🅿️ Parked',    $k['parked'],                           '#9CA3AF',        'parked',    $k['parked']],
         ['Sales',        '$'.number_format($k['sales'],0),       'var(--green)',   'confirmed', $k['booked']],
       ];
       foreach ($cards as $c):

@@ -70,4 +70,13 @@ try {
 } catch (Throwable $e) {
     error_log('ck_cron folders: ' . $e->getMessage());
 }
+
+// Parked requests (includes/parked_service.php): wake-ups from client mails linked by Sales Response (every run);
+// once a day after 05:00 the auto-close of trips that are over — report-only until PARKED_AUTOCLOSE_LIVE.
+try {
+    require_once __DIR__ . '/includes/booking_service.php';
+    error_log('ck_cron ' . pk_cron(db()));
+} catch (Throwable $e) {
+    error_log('ck_cron parked: ' . $e->getMessage());
+}
 ob_end_clean();
