@@ -1337,7 +1337,8 @@ function bg_evaluate(array $snap, array $docs, ?callable $alias = null, ?callabl
         $net = 0.0; $seen = []; $noAmt = false; $usd = true; $nca = false; $concession = null;
         foreach ($g['items'] as $k) {
             $ds = $items[$k]['ds'];
-            $sig = $items[$k]['doc'] . '|' . ($ds['reference'] ?? '') . '|' . ($ds['check_in'] ?? '');
+            $sig = $items[$k]['doc'] . '|' . ($ds['reference'] ?? '') . '|' . ($ds['check_in'] ?? '')
+                 . (($ds['type'] ?? '') === 'stay' ? '' : '|x|' . ($ds['service_date'] ?? '') . '|' . ($ds['description'] ?? ''));   // a meal extra is not a copy of the room line
             if (isset($seen[$sig])) continue;
             $seen[$sig] = true;
             $n = bg_net($ds);
@@ -1576,6 +1577,7 @@ function bg_eval_stay(array &$svcs, int $i, array $named, array &$items, callabl
     }
     $in = $s['check_in']; $out = $s['check_out'];
     $exact = false; $ranges = [];
+    $extraKeys = [];   // meals billed apart on the same document: part of the supplier's amount (Benni: 452 room + 112 dinner = 564)
     foreach ($named as $k) {
         $useItem($k, $i);
         $ds = $items[$k]['ds'] + ['_file' => $items[$k]['file']];
@@ -1644,7 +1646,7 @@ function bg_eval_stay(array &$svcs, int $i, array $named, array &$items, callabl
             // B&B rate + meals billed apart on the same document (Planet Lodges "Extras: Dinner", Benni 20 Nov 2026) = HB / FB.
             $xm = bg_meal_extras($items, $k, $di, $do);
             if ($xm['rank'] !== null && $xm['rank'] > $dm) {
-                foreach ($xm['keys'] as $xk) $useItem($xk, $i);
+                foreach ($xm['keys'] as $xk) { $useItem($xk, $i); $extraKeys[$xk] = $xk; }
                 $ds['meal_plan'] .= ' + ' . $xm['text'];
                 $dm = $xm['rank'];
             }
@@ -1688,6 +1690,7 @@ function bg_eval_stay(array &$svcs, int $i, array $named, array &$items, callabl
         $gk = substr(implode('', followup_supplier_tokens($nm)) ?: bc_key($nm), 0, 40);
         $stayGroups[$gk]['name'] = $nm;
         foreach ($named as $k) $stayGroups[$gk]['items'][$k] = $k;
+        foreach ($extraKeys as $k) $stayGroups[$gk]['items'][$k] = $k;
         $stayGroups[$gk]['svcs'][] = $i;
     }
 }
