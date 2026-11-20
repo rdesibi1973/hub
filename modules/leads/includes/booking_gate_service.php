@@ -24,7 +24,7 @@ require_once __DIR__ . '/booking_check.php';                          // bc_requ
 require_once __DIR__ . '/ck_lib.php';                                 // ck_tracker_row_for, ck_owners_resolve, ck_set_owners
 require_once __DIR__ . '/../../operations/includes/followup_service.php';   // followup_gate_upsert, supplier matching
 
-const BG_EXTRACT_VERSION   = 2;          // bump when the extraction request changes: cached documents are read again (2: room lines, total pax)
+const BG_EXTRACT_VERSION   = 3;          // bump when the extraction request changes: cached documents are read again (2: room lines, total pax; 3: meal extras)
 const BG_TOLERANCE         = 5.0;        // USD per invoice over the Calc cost still OK
 const BG_OVERRIDE_USER     = 'rdesibi';  // Roberto De Sibi (not "roberto" = Roberto Capri)
 const BG_TICK_SECONDS      = 45;         // a worker tick starts no new document after this
@@ -730,7 +730,9 @@ function bg_extract_system(): string {
          . 'printed, bed layout included (e.g. "Jambo (1Dbl & 2Sngl)", "Executive Family Room", "Tusker Villa", "Twin"); count = the number of '
          . 'rooms on that line (Rm / quantity column). A bed layout such as "1Dbl & 2Sngl" describes ONE room: never split it into several rooms. '
          . 'adults / children = the TOTAL guests of that service, all its rooms together (e.g. Rm 2 with Ad 2 per room = 4 adults); children = '
-         . 'anyone billed or listed as a child. '
+         . 'anyone billed or listed as a child. meal_plan of a stay = the board of the room rate as printed (rate type "PL STO B&B" → "B&B"). '
+         . 'Meals billed apart from the room (an "Extras" line "Dinner", "Lunch", "HB supplement", "Full board supplement"): one extra '
+         . 'service of type "other" each, property = the lodge, description = the line as printed, service_date, amount_total. '
          . 'Flights: every leg with origin and destination airport as printed and STD / STA times. amount_total = total of that service as '
          . 'printed; commission = commission amount if a commission line is shown; net_amount = amount after commission; amount_due = the amount '
          . 'still to pay as printed ("DUE AMOUNT", "Amount due", "Balance due"), null if not printed. status: confirmed, '
@@ -1626,6 +1628,15 @@ function bg_eval_stay(array &$svcs, int $i, array $named, array &$items, callabl
         }
         $cm = bg_calc_meal($s['name']); $dm = bg_meal_rank($ds['meal_plan'] ?? null);
         if ($cm !== null && $dm !== null && $dm < $cm) {
+            // B&B rate + meals billed apart on the same document (Planet Lodges "Extras: Dinner", Benni 20 Nov 2026) = HB / FB.
+            $xm = bg_meal_extras($items, $k, $di, $do);
+            if ($xm['rank'] !== null && $xm['rank'] > $dm) {
+                foreach ($xm['keys'] as $xk) $useItem($xk, $i);
+                $ds['meal_plan'] .= ' + ' . $xm['text'];
+                $dm = $xm['rank'];
+            }
+        }
+        if ($cm !== null && $dm !== null && $dm < $cm) {
             $low = $dm <= 1 || $cm - $dm >= 2;   // FB on the Calc with HB booked can be fine; BB / RO never
             $add($low ? 'stay_meal_plan' : 'meal_plan_note', $s['name'] . ': ' . $ds['meal_plan'] . ' booked, the Calc says ' . bg_meal_label($cm) . '.', $s, ['source_file' => $items[$k]['file']]);
         }
@@ -1674,6 +1685,36 @@ function bg_rooms_text(array $r): string {
 }
 
 function bg_meal_label(int $r): string { return ['RO', 'BB', 'HB', 'FB', 'AI'][$r] ?? '?'; }
+
+/**
+ * Meals billed apart from the room on the same document as stay item $k (extras / supplement lines, dated inside the stay
+ * or undated): dinner or HB supplement → HB, lunch + dinner or FB supplement → FB. ['rank' => ?int, 'keys' => item keys, 'text'].
+ * A stay item whose own meal_plan already says so is handled by the caller; here only other items of the same file.
+ */
+function bg_meal_extras(array $items, int $k, ?string $in, ?string $out): array {
+    $file = $items[$k]['file']; $lunch = $dinner = false; $rank = null; $keys = []; $txt = [];
+    foreach ($items as $j => $it) {
+        if ($j === $k || $it['file'] !== $file) continue;
+        $ds = $it['ds'];
+        if (($ds['type'] ?? '') === 'stay' && !empty($ds['rooms'])) continue;   // another room block, not an extra
+        $d = trim(($ds['description'] ?? '') . ' ' . ($ds['meal_plan'] ?? ''));
+        if ($d === '' || !preg_match('/dinner|lunch|half[\s-]*board|full[\s-]*board|\b(hb|fb)\b|supplement/i', $d)) continue;
+        $sd = bg_date($ds['service_date'] ?? null) ?? bg_date($ds['check_in'] ?? null);
+        if ($sd && $in && $out && ($sd < $in || $sd > $out)) continue;
+        $r = null;
+        if (preg_match('/full[\s-]*board|\bfb\b/i', $d)) $r = 3;
+        elseif (preg_match('/half[\s-]*board|\bhb\b/i', $d)) $r = 2;
+        else {
+            if (preg_match('/dinner/i', $d)) $dinner = true;
+            if (preg_match('/lunch/i', $d)) $lunch = true;
+            if (!preg_match('/dinner|lunch/i', $d)) continue;   // "supplement" of something else
+        }
+        if ($r !== null) $rank = max($rank ?? 0, $r);
+        $keys[] = $j; $txt[] = trim((string)($ds['description'] ?? '')) ?: bg_meal_label($r ?? 2);
+    }
+    if ($dinner) $rank = max($rank ?? 0, $lunch ? 3 : 2);
+    return ['rank' => $rank, 'keys' => $keys, 'text' => implode(', ', array_unique($txt))];
+}
 
 function bg_eval_close(array $res): array {
     // One finding per service and issue (several documents / objects of the same stay): texts joined.

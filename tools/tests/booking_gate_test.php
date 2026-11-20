@@ -188,6 +188,22 @@ $res = bg_evaluate($snap($bm), [$tt(['meal_plan' => 'Half Board']), $okFlight]);
 $t('FB Calc, HB booked → note only', $res['passed'] && in_array('meal_plan_note', $issues($res), true), $issues($res));
 $res = bg_evaluate($snap($bm), [$tt(['meal_plan' => 'Bed & Breakfast']), $okFlight]);
 $t('FB Calc, BB booked → blocking', in_array('stay_meal_plan!', $issues($res), true), $issues($res));
+// B&B rate + "Extras: Dinner" on the same document = HB (Planet Lodges, Benni 20 Nov 2026).
+$bh = $base; $bh[0]['name'] = 'Tarangire Treetops HB';
+$dinner = fn($date, $desc = 'Dinner') => $dsStay('Tarangire Treetops', null, null, ['type' => 'other', 'rooms' => [], 'adults' => null, 'service_date' => $date, 'description' => $desc]);
+$ttx = fn(array $extras, $over = []) => $doc('invoices/Treetops.pdf', array_merge([$dsStay('Tarangire Treetops', '2027-01-15', '2027-01-17', $over + ['net_amount' => 1000, 'meal_plan' => 'B&B'])], $extras));
+$res = bg_evaluate($snap($bh), [$ttx([$dinner('2027-01-15')]), $okFlight]);
+$t('HB Calc, B&B + Dinner extra → no meal issue', !array_intersect(['stay_meal_plan!', 'meal_plan_note', 'doc_unmatched'], $issues($res)), $issues($res));
+$res = bg_evaluate($snap($bh), [$ttx([$dinner('2027-01-15', 'HB supplement')]), $okFlight]);
+$t('HB Calc, B&B + HB supplement → no meal issue', !array_intersect(['stay_meal_plan!', 'meal_plan_note'], $issues($res)), $issues($res));
+$res = bg_evaluate($snap($bh), [$ttx([$dinner('2027-03-01')]), $okFlight]);
+$t('dinner extra outside the stay → still blocking', in_array('stay_meal_plan!', $issues($res), true), $issues($res));
+$res = bg_evaluate($snap($bm), [$ttx([$dinner('2027-01-15')]), $okFlight]);
+$t('FB Calc, B&B + Dinner → note only (= HB)', !in_array('stay_meal_plan!', $issues($res), true) && in_array('meal_plan_note', $issues($res), true), $issues($res));
+$res = bg_evaluate($snap($bm), [$ttx([$dinner('2027-01-15', 'Lunch'), $dinner('2027-01-15')]), $okFlight]);
+$t('FB Calc, B&B + Lunch + Dinner → no meal issue', !array_intersect(['stay_meal_plan!', 'meal_plan_note'], $issues($res)), $issues($res));
+$res = bg_evaluate($snap($bh), [$tt(['meal_plan' => 'B&B']), $okFlight, $doc('invoices/other.pdf', [$dinner('2027-01-15')])]);
+$t('dinner on another document → still blocking', in_array('stay_meal_plan!', $issues($res), true), $issues($res));
 // Missing stay, missing flight, wrong document, unreadable, client flights, Calc error.
 $res = bg_evaluate($snap($base), [$okFlight]);
 $t('no stay document → stay_missing', in_array('stay_missing!', $issues($res), true) && $res['services'][0]['status'] === 'MISSING', $issues($res));

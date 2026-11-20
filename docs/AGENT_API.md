@@ -517,7 +517,7 @@ to that user. Documents already read (same Dropbox `content_hash`) are never sen
 | `stay_rooms` | yes | booking | the rooms booked do not hold the pax (family / villa 4, triple 3, double / twin 2, single 1); room names give the type ("Jambo (1Dbl & 2Sngl)" = one family room) |
 | `rooms_note` | no | booking | room types differ from `room_config` (final room list), or no family room although the Calc asks for one |
 | `guide_rooms` | no | booking | more guide / driver rooms than jeeps (Calc B5); up to one per jeep is only a note on the service |
-| `stay_meal_plan` | yes | booking | BB / RO booked, or two levels below the Calc's FB / HB (`meal_plan_note`, warning: FB vs HB) |
+| `stay_meal_plan` | yes | booking | BB / RO booked, or two levels below the Calc's FB / HB (`meal_plan_note`, warning: FB vs HB). Meals billed apart on the same document count: B&B + "Dinner" / HB supplement = HB, + lunch and dinner = FB |
 | `doc_inconsistent` | yes | booking | header nights ≠ arrival → departure ≠ nights billed |
 | `booked_differs` | yes | booking | another lodge on the same dates: first by lodge identity (both texts mapped to an ITI lodge via `iti_lodge_aliases` / lodge names, or both naming an Orangi Collection lodge — one SV line per lodge is matched to its own lodge, never by date alone), then names compared, AI asked only when still unknown: fix the booking or update the Calc |
 | `flight_date` / `flight_route` | yes | booking | route rule: last airport of the Calc row = destination, origin among the airports before it (or the one a Calc details line names); compared with the first STD / last STA airport; a lower price never makes it right |
