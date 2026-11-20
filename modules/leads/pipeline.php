@@ -115,6 +115,8 @@ include 'includes/header.php';
 .col-parked .col-header { background: #EEF0F3;          color: #4B5563;       border-color: #9CA3AF; cursor: pointer; }
 .pipeline-col.col-parked.collapsed { flex: 0 0 150px; }
 .pipeline-col.col-parked.collapsed .col-body { display: none; }
+.col-parked .pk-arrow::before { content: '▾ '; }
+.col-parked.collapsed .pk-arrow::before { content: '▸ '; }
 .pipeline-col.col-parked.collapsed.drag-over .col-header { background: var(--red-lt); }
 .parked-toggle { font-size: .78rem; color: var(--grey-dk); text-decoration: none; border: 1.5px solid var(--grey-lt);
                  border-radius: 6px; padding: 4px 9px; background: var(--white); }
@@ -221,13 +223,14 @@ include 'includes/header.php';
 
   <div class="pipeline-board" id="board">
     <?php foreach ($columns as $colKey => $col): ?>
-    <div class="pipeline-col <?= $col['cls'] ?><?= $colKey === 'parked' ? ' collapsed' : '' ?>"
+    <?php // PARKED is open when shown ("Show parked"); its header closes / reopens it (▾ / ▸). ?>
+    <div class="pipeline-col <?= $col['cls'] ?>"
          data-col="<?= $colKey ?>"
          ondragover="onDragOver(event,this)"
          ondragleave="onDragLeave(this)"
          ondrop="onDrop(event,this)">
-      <div class="col-header"<?= $colKey === 'parked' ? ' onclick="this.parentNode.classList.toggle(\'collapsed\')" title="' . h(PK_TIP) . ' — click to open / close"' : '' ?>>
-        <span><?= $col['icon'] ?>&nbsp; <?= $col['label'] ?></span>
+      <div class="col-header"<?= $colKey === 'parked' ? ' onclick="this.parentNode.classList.toggle(\'collapsed\')" title="' . h(PK_TIP) . ' — click to close / open"' : '' ?>>
+        <span><?= $colKey === 'parked' ? '<span class="pk-arrow"></span>' : '' ?><?= $col['icon'] ?>&nbsp; <?= $col['label'] ?></span>
         <span class="col-count" id="cnt-<?= $colKey ?>"><?= count($byCol[$colKey]) ?></span>
       </div>
       <div class="col-body" id="col-<?= $colKey ?>">
