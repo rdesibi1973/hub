@@ -63,6 +63,7 @@ const BG_ISSUES = [
     'rooms_note'             => [false, 'booking', 'Room types differ from the Calc'],
     'guide_rooms'            => [false, 'booking', 'More guide / driver rooms than jeeps'],
     'lodge_name_unsure'      => [false, 'booking', 'Check the lodge name'],
+    'doc_unmatched'          => [false, 'booking', 'Booked service not in the Calc'],
     'doc_unreadable'         => [false, 'booking', 'Document could not be read'],
 ];
 
@@ -803,6 +804,74 @@ function bg_same_name(string $calc, string $doc): bool {
     return followup_supplier_same((string)$calc, $doc);
 }
 
+/** A lodge text without its meal basis / cost notes ("Arusha Explorers in HB" → "Arusha Explorers"), normalized. */
+function bg_lodge_norm(string $s): string {
+    $s = preg_replace('/[\s,\-–\/(]*(\bin\s+)?\b(FB|HB|BB|AI|RO|full ?board|half ?board|b&b|bed (and|&) breakfast)\b.*$/iu', '', $s);
+    $s = preg_replace('/[\s\x{00A0}]+/u', ' ', (string)$s);
+    return trim(mb_strtolower((string)$s, 'UTF-8'), " \t-–,/(");
+}
+
+/** The Orangi Collection lodge a text names (orangi | marera | kifaru | arusha explorers), or null; "The Orangi Collection" alone names none. */
+function bg_own_lodge(string $s): ?string {
+    $s = preg_replace('/\b(the\s+)?orangi\s+collection\b/i', ' ', $s);
+    if (!preg_match(BC_OWN_LODGES, (string)$s, $m)) return null;
+    $k = strtolower($m[1]);
+    return strpos($k, 'arusha') === 0 ? 'arusha explorers' : $k;
+}
+
+/**
+ * Same property? (GiuseppeMensa, request 3474, gate run 55: an Orangi voucher line of another lodge on the same date was
+ * taken as the stay.) Both texts mapped to an ITI lodge ($lodgeOf: text → lodge id | null, via iti_lodge_aliases / lodge
+ * names) → same / different by the id; else both naming an Orangi Collection lodge → by that lodge; else null (unknown:
+ * the caller falls back to the words / the AI alias).
+ */
+function bg_lodge_verdict(string $calc, string $doc, ?callable $lodgeOf): ?string {
+    if (trim($calc) === '' || trim($doc) === '') return null;
+    if ($lodgeOf) {
+        $a = $lodgeOf($calc); $b = $lodgeOf($doc);
+        if ($a && $b) return $a === $b ? 'same' : 'different';
+    }
+    $a = bg_own_lodge($calc); $b = bg_own_lodge($doc);
+    if ($a !== null && $b !== null) return $a === $b ? 'same' : 'different';
+    return null;
+}
+
+/**
+ * ITI lodge id of a Calc / document lodge text, or null: Calc alias (as written, then without the meal basis), then the
+ * exact lodge name, then a lodge name contained in the text or containing it (one lodge only, 8+ letters). Loaded once.
+ */
+function bg_lodge_id(PDO $db, string $text): ?int {
+    static $idx = null;
+    if ($idx === null) {
+        $idx = ['alias' => [], 'name' => []];
+        try {
+            foreach ($db->query("SELECT alias, lodge_id FROM iti_lodge_aliases WHERE lodge_id IS NOT NULL")->fetchAll(PDO::FETCH_ASSOC) as $r) {
+                $idx['alias'][trim(mb_strtolower(preg_replace('/[\s\x{00A0}]+/u', ' ', (string)$r['alias']), 'UTF-8'))] = (int)$r['lodge_id'];
+            }
+            foreach ($db->query("SELECT id, name FROM iti_lodges")->fetchAll(PDO::FETCH_ASSOC) as $r) {
+                $k = bg_lodge_norm((string)$r['name']);
+                if ($k === '') continue;
+                $idx['name'][$k] = (isset($idx['name'][$k]) && $idx['name'][$k] !== (int)$r['id']) ? 0 : (int)$r['id'];   // two lodges, one name: unknown
+            }
+        } catch (Throwable $e) {
+            error_log('bg_lodge_id: ' . $e->getMessage());
+            $idx = ['alias' => [], 'name' => []];
+        }
+    }
+    $raw = trim(mb_strtolower(preg_replace('/[\s\x{00A0}]+/u', ' ', $text), 'UTF-8'));
+    $t = bg_lodge_norm($text);
+    if ($t === '') return null;
+    foreach ([$idx['alias'][$raw] ?? null, $idx['alias'][$t] ?? null, $idx['name'][$t] ?? null] as $id) if ($id) return $id;
+    if (strlen($t) < 8) return null;
+    $hit = null;
+    foreach ($idx['name'] as $n => $id) {
+        if (!$id || strlen($n) < 8 || (strpos($t, $n) === false && strpos($n, $t) === false)) continue;
+        if ($hit !== null && $hit !== $id) return null;   // two lodges fit: unknown
+        $hit = $id;
+    }
+    return $hit;
+}
+
 /**
  * Alias answers for [calc name, document name] pairs on the same dates whose words differ ("Mara River" = Serengeti
  * River Camp): cached per pair; asked to the AI in one call. → [i => 'same'|'different'|'unsure'].
@@ -1087,7 +1156,7 @@ function bg_tl_cost(float $cost, array $pp): array {
  * → ['services' => [svc + status OK|CHECK|MISSING|IN-HOUSE, evidence[], says[], notes[]], 'findings' => [..],
  *    'notes' => [..], 'unmatched' => [..], 'ignored' => [..], 'blocking' => n, 'warnings' => n, 'passed' => bool]
  */
-function bg_evaluate(array $snap, array $docs, ?callable $alias = null): array {
+function bg_evaluate(array $snap, array $docs, ?callable $alias = null, ?callable $lodgeOf = null): array {
     $res = ['services' => [], 'findings' => [], 'notes' => [], 'unmatched' => [], 'ignored' => [], 'not_read' => [], 'blocking' => 0, 'warnings' => 0, 'passed' => false];
     $unreadable = 0;
     $add = function (string $issue, string $text, array $svc = [], array $extra = []) use (&$res, &$unreadable) {
@@ -1194,13 +1263,45 @@ function bg_evaluate(array $snap, array $docs, ?callable $alias = null): array {
             if ($di && $do && $di < $out && $do > $in) $over[] = $k;
         }
         $nameOf = fn($k) => (string)(($items[$k]['ds']['property'] ?? '') ?: ($items[$k]['ds']['supplier'] ?? ''));
-        $named = array_values(array_filter($over, fn($k) => bg_same_name($s['name'], $nameOf($k))));
+        // Lodge identity first (ITI aliases / Orangi lodge): a line of ANOTHER lodge on these dates is never this stay
+        // (GiuseppeMensa, request 3474, run 55). Orangi SV lines may carry the lodge in the description only.
+        $verdict = [];
+        foreach ($over as $k) {
+            $v = bg_lodge_verdict($s['name'], $nameOf($k), $lodgeOf);
+            if ($v === null) $v = bg_lodge_verdict($s['name'], (string)($items[$k]['ds']['description'] ?? ''), $lodgeOf);
+            $verdict[$k] = $v;
+        }
+        $named = array_values(array_filter($over, fn($k) => $verdict[$k] === 'same' || ($verdict[$k] === null && bg_same_name($s['name'], $nameOf($k)))));
+        $diff = array_values(array_filter($over, fn($k) => $verdict[$k] === 'different'));
         if ($s['own'] && !$named) {
-            // Orangi Collection SV: one line per night block, the lodge in the line text or "The Orangi Collection" as supplier.
-            $named = array_values(array_filter($over, function ($k) use ($items, $nameOf, $s) {
+            // Orangi Collection SV: one line per night block, "The Orangi Collection" as supplier — only lines naming no other lodge.
+            $named = array_values(array_filter($over, function ($k) use ($items, $nameOf, $s, $verdict) {
+                if ($verdict[$k] !== null) return false;
                 $txt = $nameOf($k) . ' ' . ($items[$k]['ds']['description'] ?? '') . ' ' . ($items[$k]['ds']['supplier'] ?? '') . ' ' . $items[$k]['file'];
                 return (bool)preg_match('/orangi/i', $txt) || bg_same_name($s['name'], $txt);
             }));
+        }
+        if ($diff) {
+            // Another lodge booked on these dates: blocking. Where the document has the Calc's lodge on other dates, say so.
+            foreach ($diff as $k) $useItem($k, $i);
+            $docNames = implode(' / ', array_unique(array_map(fn($k) => $nameOf($k) . ' ' . bg_dm(bg_date($items[$k]['ds']['check_in'] ?? null)) . '–'
+                                                                       . bg_dm(bg_date($items[$k]['ds']['check_out'] ?? null)), $diff)));
+            $elsewhere = [];
+            if (!$named) {
+                foreach ($items as $k => $it) {
+                    if (in_array($k, $over, true) || ($it['ds']['type'] ?? '') !== 'stay') continue;
+                    $v = bg_lodge_verdict($s['name'], $nameOf($k), $lodgeOf);
+                    if ($v === 'same' || ($v === null && bg_same_name($s['name'], $nameOf($k)))) {
+                        $elsewhere[] = bg_dm(bg_date($it['ds']['check_in'] ?? null)) . '–' . bg_dm(bg_date($it['ds']['check_out'] ?? null));
+                    }
+                }
+            }
+            $add('booked_differs', 'Calc ' . $s['name'] . ' ' . bg_dm($in) . '–' . bg_dm($out) . ' (' . $s['nights'] . ' n), the document ('
+                 . basename($items[$diff[0]]['file']) . ') has ' . $docNames . ' on these dates'
+                 . ($elsewhere ? ' and ' . $s['name'] . ' on ' . implode(', ', array_unique($elsewhere)) : '')
+                 . ': fix the booking, or update the Calc and tell the seller (the client confirmed ' . $s['name'] . ').', $s,
+                 ['supplier' => $nameOf($diff[0]), 'source_file' => $items[$diff[0]]['file']]);
+            if (!$named) continue;
         }
         if (!$named && $over && !$s['own']) {
             $aliasPairs[] = [$s['name'], $nameOf($over[0])];
@@ -1411,7 +1512,18 @@ function bg_evaluate(array $snap, array $docs, ?callable $alias = null): array {
                                           . (!$nameHit ? ', booking name ' . $names : '') . '. Remove it from the folder or fix the booking.',
                                   'service_date' => $dates ? min($dates) : null, 'service' => $what, 'service_type' => null, 'source_file' => $it['file'], 'svc_idx' => null];
         } else {
-            $res['unmatched'][] = ['file' => $it['file'], 'what' => $what, 'why' => !$nameHit ? 'booking name ' . $names . ' — another client?' : 'no Calc service of this type on these dates'];
+            $why = !$nameHit ? 'booking name ' . $names . ' — another client?' : 'no Calc service of this type on these dates';
+            $res['unmatched'][] = ['file' => $it['file'], 'what' => $what, 'why' => $why];
+            // A booked stay / flight / activity / transfer the Calc does not have (GiuseppeMensa: Marera 10 Jan): a warning, not just a
+            // note — paid for nothing, or the Calc is missing a night. Other lines (fees, extras) stay in "Documents not matched".
+            $type = $ds['type'] ?? '';
+            if (in_array($type, ['stay', 'flight', 'activity', 'transfer'], true)) {
+                $res['findings'][] = ['issue' => 'doc_unmatched', 'blocking' => false, 'audience' => 'booking', 'label' => BG_ISSUES['doc_unmatched'][2],
+                                      'text' => basename($it['file']) . ': ' . $what . ' — ' . $why . '. Cancel it with the supplier, or ask the seller to add it to the Calc.',
+                                      'service_date' => $dates ? min($dates) : null, 'service' => $what,
+                                      'service_type' => ['stay' => 'stay', 'flight' => 'flight', 'activity' => 'activity', 'transfer' => 'transfer'][$type],
+                                      'supplier' => ($ds['property'] ?? '') ?: ($ds['supplier'] ?? null), 'source_file' => $it['file'], 'svc_idx' => null];
+            }
         }
     }
     foreach ($calc['warnings'] ?? [] as $w) $res['notes'][] = $w;
@@ -1594,7 +1706,7 @@ function bg_finish_run(PDO $db, int $id): void {
     foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $d) {
         $docs[] = ['rel_path' => $d['rel_path'], 'status' => $d['status'], 'error' => $d['error'], 'data' => json_decode((string)$d['extracted_json'], true) ?: []];
     }
-    $res = bg_evaluate($snap, $docs, fn(array $pairs) => bg_alias_ai($db, $pairs, $rid));
+    $res = bg_evaluate($snap, $docs, fn(array $pairs) => bg_alias_ai($db, $pairs, $rid), fn(string $t) => bg_lodge_id($db, $t));
     $r = bg_request($db, $rid) ?: [];
 
     // Report in the folder (overwrite). A Dropbox failure does not stop the run.

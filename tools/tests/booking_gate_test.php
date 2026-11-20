@@ -314,6 +314,48 @@ $t('TL Calc, 10 on the document → stay_pax "8 paying + 1 TL"', in_array('stay_
 $res = bg_evaluate($bfSnap, [$doc('invoices/Sopa.pdf', [$dsStay('Tarangire Sopa', '2027-07-13', '2027-07-14', ['adults' => 8, 'rooms' => $bfRooms])], ['Bonfante'])]);
 $t('TL not billed by the supplier (8) → no stay_pax', !in_array('stay_pax!', $issues($res), true), $issues($res));
 
+// ── GiuseppeMensa (request 3474, gate run 55, 20 Nov 2026): Orangi voucher lines matched by date only ──
+$t('own lodge key', bg_own_lodge('Arusha Explorers HB') === 'arusha explorers' && bg_own_lodge('Serengeti Kifaru Tented Lodge') === 'kifaru'
+   && bg_own_lodge('The Orangi Collection') === null && bg_own_lodge('Orangi River Luxury') === 'orangi' && bg_own_lodge('Tarangire Treetops') === null);
+$t('lodge verdict: Orangi lodges', bg_lodge_verdict('Arusha Explorers HB', 'Serengeti Kifaru Tented Lodge', null) === 'different'
+   && bg_lodge_verdict('Marera View Lodge', 'Marera Valley Lodge', null) === 'same' && bg_lodge_verdict('Marera', 'The Orangi Collection', null) === null);
+$gmSnap = $snap([
+    $stay('Arusha Explorers HB', '2027-01-05', '2027-01-06', 1, null, true),
+    $stay('Marera View Lodge', '2027-01-06', '2027-01-07', 1, null, true),
+    $stay('Serengeti Kifaru', '2027-01-07', '2027-01-09', 2, null, true),
+    $stay('Marera View Lodge', '2027-01-09', '2027-01-10', 1, null, true),
+], ['start_date' => '2027-01-05', 'end_date' => '2027-01-11']);
+$gmLine = fn($prop, $in, $out) => $dsStay($prop, $in, $out, ['supplier' => 'The Orangi Collection', 'reference' => 'WB10133']);
+$gmDoc = fn(array $lines) => [$doc('invoices/Orangi WB10133.pdf', $lines, ['Mensa'])];
+$res = bg_evaluate($gmSnap, $gmDoc([
+    $gmLine('Serengeti Kifaru Tented Lodge', '2027-01-05', '2027-01-06'),
+    $gmLine('Arusha Explorers Lodge', '2027-01-06', '2027-01-07'),
+    $gmLine('Serengeti Kifaru Tented Lodge', '2027-01-07', '2027-01-09'),
+    $gmLine('Arusha Explorers Lodge', '2027-01-09', '2027-01-10'),
+    $gmLine('Marera Valley Lodge', '2027-01-10', '2027-01-11'),
+]));
+$st = array_column($res['services'], 'status');
+$bd = array_values(array_filter($res['findings'], fn($f) => $f['issue'] === 'booked_differs'));
+$t('#3474: other lodge on the same dates → booked_differs blocking on 5, 6, 9 Jan; Kifaru OK', !$res['passed'] && count($bd) === 3 && $bd[0]['blocking']
+   && $st === ['CHECK', 'CHECK', 'OK', 'CHECK'] && strpos($bd[0]['text'], 'Serengeti Kifaru Tented Lodge') !== false
+   && strpos($bd[0]['text'], 'Arusha Explorers HB on 6 Jan–7 Jan') !== false, [$st, array_column($bd, 'text')]);
+$um = array_values(array_filter($res['findings'], fn($f) => $f['issue'] === 'doc_unmatched'));
+$t('#3474: Marera 10 Jan with no Calc service → doc_unmatched warning', count($um) === 1 && !$um[0]['blocking'] && strpos($um[0]['text'], 'Marera Valley Lodge 10 Jan') !== false
+   && $um[0]['service_type'] === 'stay', array_map(fn($f) => [$f['issue'], $f['text']], $res['findings']));
+// The right voucher still passes; a generic "The Orangi Collection" line (no lodge named) still matches.
+$res = bg_evaluate($gmSnap, $gmDoc([
+    $gmLine('Arusha Explorers Lodge', '2027-01-05', '2027-01-06'), $gmLine('Marera Valley Lodge', '2027-01-06', '2027-01-07'),
+    $gmLine('The Orangi Collection', '2027-01-07', '2027-01-09'), $gmLine('Marera Valley Lodge', '2027-01-09', '2027-01-10'),
+]));
+$t('#3474 fixed voucher → passed, all OK', $res['passed'] && !$res['findings'] && array_unique(array_column($res['services'], 'status')) === ['OK'], $issues($res));
+// ITI aliases decide for any lodge: same id → OK without the AI, different id → blocking even when the words look alike.
+$iti = fn(string $x) => ['tarangire treetops' => 7, 'treetops' => 7, 'elewana tarangire treetops' => 7, 'kirurumu tarangire lodge' => 9][bg_lodge_norm($x)] ?? null;
+$noAi = function ($p) { throw new RuntimeException('AI asked'); };
+$res = bg_evaluate($snap($base), [$doc('invoices/Elewana.pdf', [$dsStay('Elewana Tarangire Treetops', '2027-01-15', '2027-01-17', ['net_amount' => 1000])]), $okFlight], $noAi, $iti);
+$t('ITI alias same lodge → OK, no AI call', $res['passed'] && $res['services'][0]['status'] === 'OK', $issues($res));
+$res = bg_evaluate($snap($base), [$other, $okFlight], $noAi, $iti);
+$t('ITI alias other lodge → booked_differs blocking, no AI call', !$res['passed'] && in_array('booked_differs!', $issues($res), true), $issues($res));
+
 // CANCELLED: only back to PROGRESS (rule, refused even with a passed run)
 $t('CANCELLED → PROVISIONAL / DEPOSIT / PAID refused by rule; → PROGRESS allowed', bg_cancelled_move_refused($rv . 'CANCELLED', $rv . 'PROVISIONAL')
    && bg_cancelled_move_refused($rv . 'CANCELLED', $rv . 'DEPOSIT') && bg_cancelled_move_refused($rv . 'CANCELLED', $rv . 'PAID')
