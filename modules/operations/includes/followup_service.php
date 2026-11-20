@@ -1593,6 +1593,8 @@ function followup_sum_add(array $sum, array $s): array {
  * that line's `sources` (summary `merged`, no new line); a line this source was merged into is updated by the key it
  * reported it with. Not reported any more → the source leaves `sources` (`cleared`); the line closes when none is
  * left (`closed`; trip ended: always). auto_confirmed also clears the other "provisional" sources.
+ * A finding whose key belongs to an auto_merged line re-opens that line (never a second INSERT of a UNIQUE key); a
+ * SafariCheck point staff closed on another line (same keys and text) stays closed.
  * Dry run ($confirm false): the same summary, nothing written.
  */
 function followup_apply(PDO $db, string $type, array $cand, array $scope, bool $confirm, string $source, string $today): array {
@@ -1611,8 +1613,28 @@ function followup_apply(PDO $db, string $type, array $cand, array $scope, bool $
         $st->execute([$type]);
     }
     $have = [];
+    $mergedOld = [];   // auto_merged lines by key: the key stays taken (UNIQUE), so a finding reported alone again revives the line
+    $scClosed = [];    // SafariCheck lines closed by staff: [['keys' => sc keys, 'text' => doc_status_text]]
     // A line merged into another one (auto_merged) answers through the line it joined (its sources), not itself.
-    foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) if ($r['close_reason'] !== 'auto_merged') $have[$r['dedupe_key']] = $r;
+    foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+        if ($r['close_reason'] === 'auto_merged') { $mergedOld[$r['dedupe_key']] = $r; continue; }
+        $have[$r['dedupe_key']] = $r;
+        if ($type === 'safaricheck' && $r['close_reason'] === 'manual') {
+            $d = json_decode((string)$r['details'], true) ?: [];
+            $scClosed[] = ['keys' => (array)($d['sc_keys'] ?? (isset($d['sc_key']) ? [$d['sc_key']] : [])), 'text' => (string)$r['doc_status_text']];
+        }
+    }
+    // A SafariCheck point staff already closed on another line (an Excel note folded into a transfer line resolved by
+    // staff, reported alone later under its own key): same keys, same text → their judgement stands (20 Nov 2026).
+    $scAccepted = function (array $l) use ($scClosed): bool {
+        $keys = (array)(json_decode((string)($l['details'] ?? ''), true)['sc_keys'] ?? []);
+        $text = trim((string)($l['doc_status_text'] ?? ''));
+        if (!$keys || $text === '') return false;
+        foreach ($scClosed as $c) {
+            if (!array_diff($keys, $c['keys']) && mb_stripos($c['text'], $text) !== false) return true;
+        }
+        return false;
+    };
     // Lines of other checks this source was merged into, by the key it reported them with.
     if (!isset($scope['only_folder'])) {
         $st = $db->prepare("SELECT * FROM booking_followups WHERE type <> ? AND sources LIKE ?" . $inOnly);
@@ -1686,6 +1708,7 @@ function followup_apply(PDO $db, string $type, array $cand, array $scope, bool $
         }
 
         if (!$old) {
+            if ($type === 'safaricheck' && $scAccepted($l)) { $sum['unchanged']++; continue; }
             // The same service already open from another check: this source joins that line.
             $target = null;
             foreach ($pool[(int)($l['request_id'] ?? 0)] ?? [] as $p) {
@@ -1703,6 +1726,27 @@ function followup_apply(PDO $db, string $type, array $cand, array $scope, bool $
                     $db->prepare("UPDATE booking_followups SET sources = ?, last_seen_at = ? WHERE id = ?")->execute([followup_sources_json($src), $now, $tid]);
                     followup_event($db, $tid, null, 'source', null, $srcLabel($l));
                 }
+                continue;
+            }
+            if (isset($mergedOld[$key])) {
+                // Its key belongs to a line merged into another one earlier, now reported on its own again: that line
+                // re-opens with the new finding (owner kept). An INSERT would hit the UNIQUE key and stop the whole run
+                // before the lines no longer reported are closed (Derek Chaput, 20 Nov 2026).
+                $m = $mergedOld[$key];
+                $id = (int)$m['id'];
+                $due = followup_due($l);
+                $sum['reopened'][] = followup_brief(['id' => $id] + $l) + ['was' => 'auto_merged'];
+                if ($confirm) {
+                    $set = ['closed_at = NULL', 'closed_by = NULL', 'close_reason = NULL', 'last_seen_at = ?', 'scan_source = ?',
+                            'sources = ?', 'service_key = ?', 'due_date = ?', 'due_reason = ?'];
+                    $args = [$now, $source, followup_sources_json([$tag => $entry]), followup_service_key($l), $due['due_date'], $due['due_reason']];
+                    foreach ($docFields as $f) { $set[] = "$f = ?"; $args[] = $l[$f] ?? null; }
+                    if ($m['staff_status'] === 'resolved') $set[] = "staff_status = 'open'";
+                    $args[] = $id;
+                    $db->prepare("UPDATE booking_followups SET " . implode(', ', $set) . " WHERE id = ?")->execute($args);
+                    followup_event($db, $id, null, 'reopened', 'auto_merged', 'reported on its own again by ' . $tag);
+                }
+                unset($mergedOld[$key]);
                 continue;
             }
             $owner = array_key_exists('owner_user_id', $l) ? $l['owner_user_id']
