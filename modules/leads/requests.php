@@ -207,6 +207,31 @@ include 'includes/header.php';
 </div>
 <?php endif; ?>
 
+<?php
+// Parked view: "Possible wake-ups" — the agency of Parked requests wrote in the last days, but naming none of them
+// (no folder name in the subject, not in their thread): nothing is woken by itself, Roberto decides (parked_service.php).
+$pkPossible = ($status === PK_STATUS && !$isStaff) ? pk_possible_wakeups($db) : [];
+if ($pkPossible): ?>
+<div style="background:#f3f0fa;border:1px solid #d6cdee;border-radius:6px;padding:10px 14px;margin-bottom:12px;font-size:.85rem;">
+  <strong>🅿️ Possible wake-ups (<?= count($pkPossible) ?>)</strong>
+  <span style="color:var(--grey-mid);font-size:.78rem;"> — mails from the agency of Parked requests, last <?= PK_WAKE_LOOKBACK_DAYS ?> days, without the folder name or the thread: not woken. Open the request and change its status if it is about it.</span>
+  <table style="width:100%;margin-top:6px;border-collapse:collapse;font-size:.8rem;">
+    <?php foreach ($pkPossible as $p): ?>
+    <tr style="border-top:1px solid #e4def3;vertical-align:top;">
+      <td style="padding:4px 6px;white-space:nowrap;color:var(--grey-mid);"><?= h(date('d M H:i', strtotime($p['mail_at']))) ?></td>
+      <td style="padding:4px 6px;"><?= h($p['from']) ?><br><span style="color:#555;"><?= h($p['subject'] !== '' ? $p['subject'] : '(no subject)') ?></span></td>
+      <td style="padding:4px 6px;">
+        <?php foreach ($p['candidates'] as $c): ?>
+          <a href="request_view.php?id=<?= (int)$c['id'] ?>" style="color:var(--red);"><?= h($c['folder']) ?></a>
+          <span style="color:var(--grey-mid);font-size:.72rem;">(<?= h($c['why']) ?>)</span><br>
+        <?php endforeach; ?>
+      </td>
+    </tr>
+    <?php endforeach; ?>
+  </table>
+</div>
+<?php endif; ?>
+
 <!-- FILTERS -->
 <form method="GET" class="filters">
   <div>

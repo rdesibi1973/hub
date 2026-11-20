@@ -830,6 +830,7 @@ try {
                 'agency_name'      => $r['agency_name'] ?? null,
                 'last_activity_at' => $a['last_activity_at'], 'has_summary' => $a['has_summary'],
                 'parked_at'        => $r['parked_at'] ?? null, 'parked_from' => $r['parked_from'] ?? null,
+                'parked_wake_after' => $r['parked_wake_after'] ?? null,
             ];
         }
         agent_out(['ok' => true, 'count' => count($rows), 'requests' => $rows]);
@@ -1348,7 +1349,7 @@ try {
                    $dry ? 'to_change' : 'changed' => $nChange, 'unchanged' => $nSame, 'failed' => $nFail,
                    'results' => $results,
                    'reopen_rule' => 'Leaving Lost clears lost_reason and lost_note (as the Hub status menu); the "Marked Lost" request note and the status_change timeline event stay as history. Lost on a request already Lost changes only lost_reason / lost_note (request note + timeline event).',
-                   'parked_rule' => 'Parked from Inquiry / Quoted / Hot-Quoted / Lost only; out of Parked to Inquiry / Quoted / Hot-Quoted / Lost (or Booked via confirm_booking). An inbound mail or a timeline note wakes it up by itself (back to parked_from).']
+                   'parked_rule' => 'Parked from Inquiry / Quoted / Hot-Quoted / Lost only; out of Parked to Inquiry / Quoted / Hot-Quoted / Lost (or Booked via confirm_booking). A client mail about that file (folder name in the subject, same thread, or a direct client\'s own address — never the agency address alone), dated after parked_wake_after, or a timeline note wakes it up by itself (back to parked_from).']
                   + ($dry ? ['message' => 'Dry run — nothing changed. Resend with "confirm": true.'] : []), $httpCode);
     }
 
@@ -1459,14 +1460,18 @@ try {
     }
 
     // ── parked_wakeups ───────────────────────────────────────────────────────
-    // Last automatic wake-ups / auto-closes of Parked requests + what the next auto-close would do (parked_service.php).
+    // Last automatic wake-ups / auto-closes of Parked requests + what the next auto-close would do + "Possibili risvegli"
+    // (agency mails naming no Parked file) + what the next mail wake-up run would do (dry run) (parked_service.php).
     case 'parked_wakeups': {
         $limit = max(1, min(200, (int)($in['limit'] ?? 30)));
         $days  = max(1, min(90, (int)($in['days'] ?? 14)));
         $plan  = pk_autoclose($db, false);   // report only: what the daily run would close now
         $cnt   = (int)$db->query("SELECT COUNT(*) FROM requests WHERE status = 'Parked'")->fetchColumn();
+        $ids   = array_values(array_filter(array_map('intval', is_array($in['ids'] ?? null) ? $in['ids'] : explode(',', (string)($in['ids'] ?? '')))));
+        $next  = pk_wake_from_mail($db, ['dry_run' => true, 'ids' => $ids]);   // nothing written
         agent_out(['ok' => true, 'parked_now' => $cnt, 'autoclose_live' => pk_autoclose_live(), 'stale_days' => pk_stale_days(),
-                   'events' => pk_recent_events($db, $limit, $days), 'would_close' => $plan['closed']]);
+                   'events' => pk_recent_events($db, $limit, $days), 'would_close' => $plan['closed'],
+                   'would_wake' => $next['woken'], 'possible_wakeups' => pk_possible_wakeups($db, min($days, PK_WAKE_LOOKBACK_DAYS))]);
     }
 
     // ── list_standard_programs ───────────────────────────────────────────────

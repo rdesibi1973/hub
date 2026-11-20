@@ -150,7 +150,8 @@ function memo_digest_build(PDO $pdo, $ownerId, $today) {
     try {
         require_once __DIR__ . '/../leads/includes/parked_service.php';
         $plan = pk_autoclose_live() ? array('closed' => array()) : pk_autoclose($pdo, false);
-        $d['parked'] = array('events' => pk_recent_events($pdo, 40, 1), 'would_close' => $plan['closed'], 'live' => pk_autoclose_live());
+        $d['parked'] = array('events' => pk_recent_events($pdo, 40, 1), 'would_close' => $plan['closed'], 'live' => pk_autoclose_live(),
+                             'possible' => pk_possible_wakeups($pdo, 1));
     } catch (Throwable $e) {
         error_log('memo digest: parked skipped: ' . $e->getMessage());
     }
@@ -388,7 +389,27 @@ function memo_digest_render(array $d, $today) {
             $h[] = '<strong>' . $e($label) . '</strong>' . $e($more) . '<br><span style="color:#555;">' . implode('<br>', array_map($e, $items)) . '</span>';
             $t[] = $label . $more . ":\n    " . implode("\n    ", $items);
         }
+        // Possibili risvegli: the agency of Parked requests wrote, but naming none of them (no folder name, no thread).
+        $pw = isset($pk['possible']) ? $pk['possible'] : array();
+        if ($pw) {
+            $hi = array(); $ti = array();
+            foreach (array_slice($pw, 0, 20) as $p) {
+                $links = array(); $names = array();
+                foreach ($p['candidates'] as $c) {
+                    $links[] = '<a href="' . $hub . 'leads/request_view.php?id=' . (int)$c['id'] . '" style="color:#C0211B;">' . $e($c['folder']) . '</a>';
+                    $names[] = $c['folder'] . ' (#' . (int)$c['id'] . ')';
+                }
+                $mail = $p['from'] . ' — "' . (mb_strlen($p['subject']) > 90 ? mb_substr($p['subject'], 0, 87) . '…' : $p['subject']) . '" · ' . date('d/m H:i', strtotime($p['mail_at']));
+                $hi[] = $e($mail) . '<br>&nbsp;&nbsp;→ ' . implode(', ', $links);
+                $ti[] = $mail . "\n      → " . implode(', ', $names);
+            }
+            $more = count($pw) > 20 ? ' (+' . (count($pw) - 20) . ')' : '';
+            $label = 'Possibili risvegli — mail dell\'agenzia senza nome cartella né thread: decidi tu (' . count($pw) . ')';
+            $h[] = '<strong>' . $e($label) . '</strong>' . $e($more) . '<br><span style="color:#555;">' . implode('<br>', $hi) . '</span>';
+            $t[] = $label . $more . ":\n    " . implode("\n    ", $ti);
+        }
         $section('🅿️ Richieste parcheggiate', $h, $t);
+        $counts .= '; parked_possibili=' . count($pw);
         $counts .= '; parked_riattivate=' . count(array_filter($pk['events'], function ($x) { return $x['kind'] === 'wakeup'; }))
                  . '; parked_chiuse=' . count(array_filter($pk['events'], function ($x) { return $x['kind'] === 'autoclose'; }))
                  . '; parked_da_chiudere=' . count($pk['would_close']);

@@ -220,28 +220,51 @@ decides: **off the pipeline, not open, not Lost**. Hub label "Parked – waiting
 
 - **To Parked** from `Inquiry`, `Quoted`, `Hot-Quoted`, `Lost` (reopen + park: lost reason / note cleared, history stays);
   from `Booked` / `Cancelled` → **409** (`error_code` `park_from`). Writes `parked_at`, `parked_by`, `parked_from`
-  (the status to restore; `Quoted` when parked from Lost). A `note` becomes a request note "Parked: …".
+  (the status to restore; `Quoted` when parked from Lost) and `parked_wake_after` = now (only mails after it can wake the
+  request; the Lost → Parked migration keeps `parked_at` = the Lost date but `parked_wake_after` = the migration time).
+  A `note` becomes a request note "Parked: …".
 - **From Parked** to `Inquiry`, `Quoted`, `Hot-Quoted`, `Lost` (with reason), `Booked` (`confirm_booking`, like a Quoted
   request); `Cancelled` → **409** (`park_to`). Leaving Parked clears the parked fields.
 - Every change logs a `status_change` timeline event ("Quoted → Parked" and back).
-- **Wake-up** (by itself, author system): an inbound mail linked to the request, or a manual timeline note
-  (`timeline_add`, request page) → status back to `parked_from`, event "Reactivated: <why>", mail to the request's agent
-  "Request reactivated: <folder>" (nothing to the agency / client). A mail sent by us never wakes it.
+- **Wake-up** (by itself, author system) → status back to `parked_from`, event "Reactivated: <why>", mail to the
+  request's agent "Request reactivated: <folder>" (nothing to the agency / client). A mail sent by us never wakes it.
+  - A manual timeline note / call, or a `mail_received` / `client_request` event (`timeline_add`, request page, `mail_get`
+    with `request_id`); a `mail_received` with `event_at` before `parked_wake_after` does not wake it.
+  - A client mail (Sales Response index, headers only; every 30 min from `ck_cron.php`), dated after `parked_wake_after`
+    and in the last 14 days, **about that file** (since 20 Nov 2026 — the agency's address alone woke every Parked request
+    of the agency, and old October mails woke migrated ones):
+    - `folder` — the folder name `Name(Agency-Agent)` in the subject (spaces / case ignored); `name` — the part before
+      `(` when distinctive (≥ 6 letters/digits, not a generic word such as Capodanno, Safari, Famiglia). Only from the
+      agency (address or company domain), the request e-mail or a personal mailbox (Gmail…); from another company (a
+      lodge answering an availability request) → possible wake-up only;
+    - `thread` — In-Reply-To / References hold a Message-ID tied to the request: logged in its timeline
+      (`refs.mail_message_id`), linked by Sales Response by folder name, a direct client's own mails, and the replies in
+      those threads (never a link made by the agency's address / domain);
+    - `client` — direct clients: sender = the client's e-mail stored on the request.
+    A mail naming several Parked folders wakes each. The event says why and when: "Reactivated: folder name in subject –
+    mail from x@y.it, 21 Nov 2026 09:00 – <subject>" / "same thread as <message-id>" / "client e-mail".
+  - **Possibili risvegli**: a mail from the agency of Parked requests that matches none of them (no folder name, no
+    thread) wakes nothing; it is listed for Roberto (requests page with status Parked, memo digest, `parked_wakeups`).
 - **Auto-close** (daily, `ck_cron.php`): Parked + trip over (`start_date` past; else the folder dates; else parked more
   than 180 days — `PARKED_STALE_DAYS`) → Lost `no_more_replies`, note "Closed automatically: …", event
   "Parked auto-close: Parked → Lost". **Report-only** until `define('PARKED_AUTOCLOSE_LIVE', true)` in includes/config.php.
-- `find_requests`: `status=Parked`; every row carries `parked_at`, `parked_from`.
+- `find_requests`: `status=Parked`; every row carries `parked_at`, `parked_from`, `parked_wake_after`.
 - `pipeline_list`: excluded unless `include_parked=1` (or `column=parked`): extra column `parked`, cards with
   `parked_at`, `days_parked`. `pipeline_move` `column=parked` parks, moving a Parked card to new / wip / quoted / hot
   unparks it with that column's status (`booked` → 409).
 
 ### `parked_wakeups` (GET)
-For the daily round. `limit` (30), `days` (14) → `{parked_now, autoclose_live, stale_days, events: [{request_id,
-customer_name, status_now, event_at, kind: wakeup|autoclose, title, body}], would_close: [{id, customer_name, folder,
-agent, parked_at, trip_date, basis}]}` — `would_close` = what the next auto-close run closes (report only, nothing written).
+For the daily round. `limit` (30), `days` (14), `ids` (optional, comma list: limit `would_wake` to those requests) →
+`{parked_now, autoclose_live, stale_days, events: [{request_id, customer_name, status_now, event_at, kind: wakeup|autoclose,
+title, body}], would_close: [{id, customer_name, folder, agent, parked_at, trip_date, basis}], would_wake: [{id, folder,
+rule: folder|name|thread|client, why, from, subject, mail_at, status_to}], possible_wakeups: [{from, subject, mail_at,
+mailbox, candidates: [{id, folder, customer_name, why}]}]}` — `would_close` / `would_wake` = what the next auto-close /
+mail wake-up run would do (dry run, nothing written); `possible_wakeups` = agency mails of the last `days` (≤ 14) that name
+no Parked file: wake one by hand with `set_request_status` if it is about it.
 
 ```bash
 curl -sA "$UA" -H "$H" "$U?action=parked_wakeups&days=7"
+curl -sA "$UA" -H "$H" "$U?action=parked_wakeups&ids=2936,2975,3019,3103"   # would_wake must be []
 ```
 
 ### `reassign_request` (POST)

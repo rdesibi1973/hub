@@ -4,7 +4,9 @@
  * agent_request ("Agency request – no follow-up") were not lost, only waiting for the agency → status Parked.
  *
  *   Parked  when the trip is not over (parked_service.php pk_trip_over(): start_date, else the folder dates, else
- *           Lost less than PARKED_STALE_DAYS (180) days ago). parked_at = the Lost date, parked_from = Quoted.
+ *           Lost less than PARKED_STALE_DAYS (180) days ago). parked_at = the Lost date (reporting / auto-close),
+ *           parked_wake_after = the migration time (set by bs_set_request_status(): only mails after it wake the
+ *           request up — fix of 20 Nov 2026, old mails from October woke 4 requests), parked_from = Quoted.
  *           lost_reason / lost_note are cleared as on any reopen; the "Marked Lost" note and the old timeline events
  *           stay; timeline event "Migrated from Lost (agent_request) to Parked".
  *   leave   trip over, or no Lost date and no trip date: untouched (reason kept — Roberto decides).

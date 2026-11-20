@@ -993,7 +993,8 @@ function bs_confirm_commit(PDO $db, array $plan, bool $proceed): array {
     }
     // Booked from Parked (accepted like Quoted): the request leaves Parked — parked fields cleared (parked_service.php).
     if ($res['ok'] && !empty($plan['r']['id']) && ($plan['r']['status'] ?? '') === PK_STATUS) {
-        $db->prepare("UPDATE requests SET parked_at = NULL, parked_by = NULL, parked_from = NULL WHERE id = ?")->execute([(int)$plan['r']['id']]);
+        pk_schema($db);
+        $db->prepare("UPDATE requests SET parked_at = NULL, parked_by = NULL, parked_from = NULL, parked_wake_after = NULL WHERE id = ?")->execute([(int)$plan['r']['id']]);
         $res['msg'] .= ' (was Parked)';
     }
     if ($res['ok'] && !empty($plan['r']['id'])) {
@@ -1136,8 +1137,9 @@ function bo_rollback_db(PDO $db, int $id, string $name, string $path, array $pre
     // Confirmed from Parked and rolled back: Parked again, parked from now (the old date was cleared at confirm).
     if ($status === PK_STATUS) {
         pk_schema($db);
-        $db->prepare("UPDATE requests SET parked_at = COALESCE(parked_at, ?), parked_from = COALESCE(parked_from, 'Quoted') WHERE id = ?")
-           ->execute([date('Y-m-d H:i:s'), $id]);
+        $db->prepare("UPDATE requests SET parked_at = COALESCE(parked_at, ?), parked_from = COALESCE(parked_from, 'Quoted'),
+                             parked_wake_after = ? WHERE id = ?")
+           ->execute([date('Y-m-d H:i:s'), date('Y-m-d H:i:s'), $id]);
     }
 }
 
@@ -1546,11 +1548,11 @@ function bs_status_effects(array $row, string $status, string $reason, string $n
     if ($old === $status) return $out;
     $out['effects'][] = 'requests.status: ' . ($old !== '' ? $old : '(empty)') . ' → ' . $status;
     if ($status === PK_STATUS) {
-        $out['effects'][] = 'requests.parked_at = now, parked_by = the user, parked_from = ' . ($old === 'Lost' || $old === '' ? 'Quoted' : $old)
-                          . ' (status restored on wake-up)' . ($note !== '' ? '; request note "Parked: ' . $note . '"' : '');
+        $out['effects'][] = 'requests.parked_at = parked_wake_after = now, parked_by = the user, parked_from = ' . ($old === 'Lost' || $old === '' ? 'Quoted' : $old)
+                          . ' (status restored on wake-up; only mails after now can wake it)' . ($note !== '' ? '; request note "Parked: ' . $note . '"' : '');
         $out['effects'][] = 'off the Pipeline board (shown only with "Show parked")';
     } elseif ($old === PK_STATUS) {
-        $out['effects'][] = 'requests.parked_at / parked_by / parked_from cleared';
+        $out['effects'][] = 'requests.parked_at / parked_by / parked_from / parked_wake_after cleared';
     }
     if ($status === 'Lost') {
         $label = $reasons[$reason] ?? $reason;
@@ -1601,13 +1603,15 @@ function bs_set_request_status(PDO $db, int $id, string $status, string $reason,
     // Parked: when / who / the status to restore on wake-up; cleared when the request leaves Parked.
     if ($status === PK_STATUS && $chk['changed']) {
         $from = in_array($chk['old_status'], PK_RESTORE, true) ? $chk['old_status'] : 'Quoted';
-        $db->prepare("UPDATE requests SET parked_at=?, parked_by=?, parked_from=? WHERE id=?")
-           ->execute([date('Y-m-d H:i:s'), $userId ?: null, $from, $id]);
+        // parked_wake_after: only mails after this moment can wake it up (pk_wake_from_mail); a migration may move
+        // parked_at back (to the Lost date), never this one.
+        $db->prepare("UPDATE requests SET parked_at=?, parked_by=?, parked_from=?, parked_wake_after=? WHERE id=?")
+           ->execute([date('Y-m-d H:i:s'), $userId ?: null, $from, date('Y-m-d H:i:s'), $id]);
         if (trim($note) !== '') {
             $db->prepare("INSERT INTO request_notes (request_id, user_id, note) VALUES (?,?,?)")->execute([$id, $userId, 'Parked: ' . trim($note)]);
         }
     } elseif ($chk['old_status'] === PK_STATUS && $status !== PK_STATUS) {
-        $db->prepare("UPDATE requests SET parked_at=NULL, parked_by=NULL, parked_from=NULL WHERE id=?")->execute([$id]);
+        $db->prepare("UPDATE requests SET parked_at=NULL, parked_by=NULL, parked_from=NULL, parked_wake_after=NULL WHERE id=?")->execute([$id]);
     }
 
     // Request note so the reason is visible in the request history.

@@ -247,9 +247,12 @@ function tl_parked_wake(PDO $db, int $requestId, array $f): void {
     $isUser = ($f['author_type'] ?? '') === 'user';
     if (!in_array($type, ['mail_received', 'client_request'], true) && !($isUser && in_array($type, ['note', 'call'], true))) return;
     try {
-        $st = $db->prepare("SELECT status FROM requests WHERE id = ?");
+        $st = $db->prepare("SELECT status, COALESCE(parked_wake_after, parked_at) AS wake_after FROM requests WHERE id = ?");
         $st->execute([$requestId]);
-        if ($st->fetchColumn() !== 'Parked') return;
+        $pr = $st->fetch(PDO::FETCH_ASSOC);
+        if (!$pr || $pr['status'] !== 'Parked') return;
+        // An old mail logged now (dated before the request was parked) is not news.
+        if ($type === 'mail_received' && !empty($f['event_at']) && !empty($pr['wake_after']) && (string)$f['event_at'] <= (string)$pr['wake_after']) return;
         $refs  = is_string($f['refs'] ?? null) ? (json_decode($f['refs'], true) ?: []) : (array)($f['refs'] ?? []);
         $title = (string)($f['title'] ?? '');
         if ($type === 'mail_received') {
