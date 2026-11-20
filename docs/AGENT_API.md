@@ -538,7 +538,7 @@ to that user. Documents already read (same Dropbox `content_hash`) are never sen
 | `stay_pax` / `flight_pax` / `activity_pax` | yes | booking | adults + children ≠ Calc pax (pax printed per room × rooms when that gives the Calc pax); with a free TL (`pax.tl`) paying pax **or** paying + TL are right; guide / driver rooms ("Driver/Guide Room", "Guide (FB)") are not guests |
 | `stay_pax` | yes | **sales** | same total, but children booked where the Calc has adults (teens count as adults): check ages with the seller |
 | `stay_rooms` | yes | booking | the rooms booked do not hold the pax (family / villa 4, triple 3, double / twin 2, single 1); room names give the type ("Jambo (1Dbl & 2Sngl)" = one family room) |
-| `rooms_note` | no | booking | room types differ from `room_config` (final room list), or no family room although the Calc asks for one |
+| `rooms_note` | no | booking | no family room although the Calc asks for one. Other type differences with the right pax and rooms that hold them (double vs twin, triple / family room for a couple, Orangi bed layouts such as "Kilimanjaro (1Dbl & 2Sngl)" for 1 DBL) are **not** a finding: only a note on the service in the report (Roberto, 20 Nov 2026 — the lodge assigns the beds) |
 | `guide_rooms` | no | booking | more guide / driver rooms than jeeps (Calc B5); up to one per jeep is only a note on the service |
 | `stay_meal_plan` | yes | booking | BB / RO booked, or two levels below the Calc's FB / HB (`meal_plan_note`, warning: FB vs HB). Meals billed apart on the same document count: B&B + "Dinner" / HB supplement = HB, + lunch and dinner = FB |
 | `doc_inconsistent` | yes | booking | header nights ≠ arrival → departure ≠ nights billed |

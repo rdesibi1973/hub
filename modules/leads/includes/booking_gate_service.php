@@ -1629,7 +1629,8 @@ function bg_eval_stay(array &$svcs, int $i, array $named, array &$items, callabl
             $add('child_as_adult', $s['name'] . ': ' . $calcKids . ' child(ren) billed as adults — ask for the child rate (the client got a child discount).', $s, ['source_file' => $items[$k]['file']]);
         }
         // Rooms (Rivolta, 13 Nov 2026): with a final room list double / twin / single / triple differences do not block; the rooms
-        // must hold the pax, and a family room the Calc asks for should be there (a missing one is a warning).
+        // must hold the pax, and a family room the Calc asks for should be there (a missing one is a warning). Any other type
+        // difference with the pax held = note on the service only (20 Nov 2026).
         if ($dr && $calcRooms['total'] > 0) {
             if ($dr['capacity'] < $need) {
                 $add('stay_rooms', $s['name'] . ': ' . $roomsTxt . ' booked hold about ' . $dr['capacity'] . ' guests, the Calc has ' . bg_pax_text($pp)
@@ -1638,7 +1639,10 @@ function bg_eval_stay(array &$svcs, int $i, array $named, array &$items, callabl
                 $add('rooms_note', $s['name'] . ': ' . $roomsTxt . ' booked, the Calc has ' . bg_rooms_text($calcRooms) . ' (no family room): check the family is fine with it.',
                      $s, ['source_file' => $items[$k]['file']]);
             } elseif (empty($calcRooms['types']['fam']) && !bg_rooms_same_types($calcRooms['types'], bg_rooms_fam_as_tpl($dr['types']))) {
-                $add('rooms_note', $s['name'] . ': ' . $roomsTxt . ' booked, the Calc has ' . bg_rooms_text($calcRooms) . '.', $s, ['source_file' => $items[$k]['file']]);
+                // Right pax, rooms that hold them, another type (double / twin, triple or family room for a couple, Orangi
+                // bed layouts): fine, the lodge assigns the beds (Roberto, 20 Nov 2026, Buršík #3315). Note on the report
+                // only, never a finding / Booking follow-up line.
+                $svcs[$i]['notes'][] = $roomsTxt . ' booked for ' . bg_rooms_text($calcRooms) . ' — fine, the lodge assigns the beds.';
             }
         }
         $cm = bg_calc_meal($s['name']); $dm = bg_meal_rank($ds['meal_plan'] ?? null);

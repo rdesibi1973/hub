@@ -178,7 +178,19 @@ $t('provisional → passed + booking_provisional', $res['passed'] && in_array('b
 $res = bg_evaluate($snap($base), [$tt(['adults' => 3]), $okFlight]);
 $t('3 pax vs 2 → stay_pax', in_array('stay_pax!', $issues($res), true), $issues($res));
 $res = bg_evaluate($snap($base), [$tt(['rooms' => [['type' => 'Twin', 'count' => 1]]]), $okFlight]);
-$t('Twin vs DBL → warning only (final room list)', $res['passed'] && in_array('rooms_note', $issues($res), true), $issues($res));
+$t('Twin vs DBL → note on the service only, no finding (20 Nov 2026)', $res['passed'] && !in_array('rooms_note', $issues($res), true)
+   && strpos(implode(' ', $res['services'][0]['notes']), 'lodge assigns the beds') !== false, [$issues($res), $res['services'][0]['notes']]);
+$res = bg_evaluate($snap($base), [$tt(['rooms' => [['type' => 'Triple', 'count' => 1]]]), $okFlight]);
+$t('Triple for a DBL couple → note only', !array_intersect(['rooms_note', 'stay_rooms', 'stay_rooms!'], $issues($res))
+   && strpos(implode(' ', $res['services'][0]['notes']), 'lodge assigns the beds') !== false, $issues($res));
+// Buršík, request 3315 (gate 20 Nov 2026, line #442): Calc 1 DBL 2A; Orangi SV Marera "Kilimanjaro (1Dbl & 2Sngl)" 1 unit 2A.
+$buSnap = $snap([$stay('Marera', '2027-02-05', '2027-02-06', 1, null, true)],
+                 ['pax' => ['adults' => 2, 'teen' => 0, 'child' => 0], 'room_config' => '1 Double', 'start_date' => '2027-01-31', 'end_date' => '2027-02-07']);
+$res = bg_evaluate($buSnap, [$doc('invoices/Orangi WB10101 -sv.pdf', [$dsStay('Marera View Lodge', '2027-02-05', '2027-02-06',
+                        ['adults' => 2, 'children' => 0, 'rooms' => [['type' => 'Kilimanjaro (1Dbl & 2Sngl)', 'count' => 1]]])], ['Buršík'])]);
+$t('Buršík #3315: family room for 1 DBL 2A → no rooms_note, no stay_rooms, note on the service',
+   !array_intersect(['rooms_note', 'stay_rooms', 'stay_rooms!'], $issues($res))
+   && strpos(implode(' ', $res['services'][0]['notes']), 'Kilimanjaro') !== false, [$issues($res), $res['services'][0]['notes'] ?? null]);
 $res = bg_evaluate($snap($base, ['pax' => ['adults' => 2, 'teen' => 0, 'child' => 1]]), [$tt(['adults' => 3]), $okFlight]);
 $t('child billed as adult', in_array('child_as_adult!', $issues($res), true), $issues($res));
 $res = bg_evaluate($snap($base), [$tt(['nights_header' => 2, 'nights_billed' => 1]), $okFlight]);
