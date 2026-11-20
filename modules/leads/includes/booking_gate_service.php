@@ -1457,7 +1457,20 @@ function bg_evaluate(array $snap, array $docs, ?callable $alias = null, ?callabl
     // ── Activities / transfers ──
     foreach ($svcs as $i => $s) {
         if ($s['type'] === 'activity') {
-            if (!empty($s['own'])) { $svcs[$i]['status'] = 'IN-HOUSE'; continue; }
+            if (!empty($s['own'])) {
+                $svcs[$i]['status'] = 'IN-HOUSE';
+                // Our own lodge's SV may carry the activity as a one-day line on that date (GianlucaBenni: "Natural walk at Marera"
+                // 9 Jan, read as "Marera 9 Jan"): it belongs to this Calc line, not to "Booked service not in the Calc".
+                foreach ($items as $k => $it) {
+                    if ($it['used']) continue;
+                    $ds = $it['ds'];
+                    if (!in_array($ds['type'] ?? '', ['activity', 'other', 'stay'], true)) continue;
+                    if (!preg_match(BC_OWN_ACTIVITY, ($ds['property'] ?? '') . ' ' . ($ds['supplier'] ?? '') . ' ' . ($ds['description'] ?? ''))) continue;
+                    $d = array_values(array_unique(array_filter([bg_date($ds['check_in'] ?? null), bg_date($ds['check_out'] ?? null), bg_date($ds['service_date'] ?? null)])));
+                    if ($d === [$s['date']]) $useItem($k, $i);
+                }
+                continue;
+            }
             $cand = [];
             foreach ($items as $k => $it) {
                 $ds = $it['ds'];
