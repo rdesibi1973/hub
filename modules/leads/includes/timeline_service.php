@@ -240,9 +240,10 @@ function tl_add(PDO $db, int $requestId, array $in, array $author): int {
 /**
  * A Parked request wakes up (parked_service.php pk_wake()) when someone writes again: a received mail or a client
  * request (any author), or a note / call added by a person (not Claude's own notes). Sent mails never wake it.
+ * Only with PARKED_AUTOWAKE_LIVE (pk_autowake_live()); off by default since 21 Nov 2026.
  */
 function tl_parked_wake(PDO $db, int $requestId, array $f): void {
-    if (!function_exists('pk_wake')) return;
+    if (!function_exists('pk_wake') || !function_exists('pk_autowake_live') || !pk_autowake_live()) return;
     $type = (string)($f['event_type'] ?? '');
     $isUser = ($f['author_type'] ?? '') === 'user';
     if (!in_array($type, ['mail_received', 'client_request'], true) && !($isUser && in_array($type, ['note', 'call'], true))) return;

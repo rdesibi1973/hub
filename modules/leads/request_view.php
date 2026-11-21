@@ -715,7 +715,7 @@ include 'includes/header.php';
       <?php endif; ?>
       <?php if ($r['status'] === PK_STATUS): ?>
         <div style="margin-top:6px;font-size:.8rem;color:var(--grey-mid);" title="<?= h(PK_TIP) ?>">
-          🅿️ <?= h($parkedLine) ?> — it becomes active again by itself when the agency writes.
+          🅿️ <?= h($parkedLine) ?><?= pk_autowake_live() ? ' — it becomes active again by itself when the agency writes.' : ' — change the status by hand when the agency comes back.' ?>
         </div>
       <?php endif; ?>
       <?php if ($r['status'] === 'Lost' && (!empty($r['lost_reason']) || $canEdit)): ?>

@@ -72,7 +72,9 @@ outdated — this file wins where they disagree (PHP version, local lint).
   call `pk_sync_fields()`; a new park path sets `parked_wake_after` too). Wakes up by itself on a timeline mail_received /
   client_request / user note (`tl_add()` hook) and on a client mail after `parked_wake_after` **about that file** — folder name
   in the subject, same thread, direct client's own address; the agency address alone never wakes, it goes to "Possibili
-  risvegli" (`pk_wake_from_mail()` / `pk_possible_wakeups()`, `ck_cron.php` → `pk_cron()`); daily auto-close report-only until
+  risvegli" (`pk_wake_from_mail()` / `pk_possible_wakeups()`, `ck_cron.php` → `pk_cron()`). **Auto-wake off since 21 Nov 2026**:
+  only with `PARKED_AUTOWAKE_LIVE` (`pk_autowake_live()`); off, no status change / "Request reactivated" mail, the matches go to
+  "Possibili risvegli" and Roberto wakes by hand. Daily auto-close report-only until
   `PARKED_AUTOCLOSE_LIVE`. `'Parked'` must be in `STATUSES` (server config).
 - **GRP programme in group folder names** (logic `modules/leads/includes/grp_program_service.php`, since 20 Nov 2026): group
   parent `…_GRP{DDMM}{Duma|Simba|Nyumbu}(Agency-Agent)_START…`, programme once right after the code (DumaShort is private, not

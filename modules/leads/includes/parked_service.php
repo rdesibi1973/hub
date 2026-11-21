@@ -2,7 +2,7 @@
 /**
  * parked_service.php — status "Parked" (Roberto, 20 Nov 2026): a quote sent to an agency that will come back
  * if and when its client decides. Off the pipeline, not open, not Lost. Woken up by itself when the agency writes
- * again; closed as Lost only when the trip is over.
+ * again only with PARKED_AUTOWAKE_LIVE (off since 21 Nov 2026: by hand); closed as Lost only when the trip is over.
  *
  *   requests.parked_at / parked_by / parked_from  — set when parked, cleared when the request leaves Parked
  *                                                   (bs_set_request_status() in booking_service.php)
@@ -36,6 +36,15 @@ function pk_stale_days(): int {
 /** Auto-close writes only when includes/config.php has define('PARKED_AUTOCLOSE_LIVE', true); otherwise report-only. */
 function pk_autoclose_live(): bool {
     return defined('PARKED_AUTOCLOSE_LIVE') && PARKED_AUTOCLOSE_LIVE;
+}
+
+/**
+ * Automatic wake-up (mail about the file, timeline mail / note) changes the status and mails the agent only when
+ * includes/config.php has define('PARKED_AUTOWAKE_LIVE', true). Off by default (Roberto, 21 Nov 2026): a Parked request
+ * leaves Parked only by hand; the mails that would have woken it are listed in "Possibili risvegli".
+ */
+function pk_autowake_live(): bool {
+    return defined('PARKED_AUTOWAKE_LIVE') && PARKED_AUTOWAKE_LIVE;
 }
 
 /**
@@ -440,14 +449,16 @@ function pk_mail_text(array $m): string {
 /**
  * Wake up the Parked requests a recent client mail is about (rules above). Called from ck_cron.php every 30 min (Sales
  * Response indexes hourly). The timeline event says why: "Reactivated: folder name in subject – mail from …, <date> – …".
- * $opt: dry_run (nothing written), ids (only those requests).
- * → ['checked' => n Parked, 'dry_run', 'woken' => [{id, folder, rule, why, from, subject, mail_at, status_to}], 'possible' => n]
+ * $opt: dry_run (nothing written), ids (only those requests). Without PARKED_AUTOWAKE_LIVE it is always a dry run
+ * ('woken' = what would wake; those mails are in pk_possible_wakeups()).
+ * → ['checked' => n Parked, 'dry_run', 'autowake_live', 'woken' => [{id, folder, rule, why, from, subject, mail_at, status_to}], 'possible' => n]
  */
 function pk_wake_from_mail(PDO $db, array $opt = []): array {
     pk_schema($db);
-    $dry = !empty($opt['dry_run']);
+    $live = pk_autowake_live();
+    $dry = !empty($opt['dry_run']) || !$live;
     $out = ['checked' => (int)$db->query("SELECT COUNT(*) FROM requests WHERE status = 'Parked'")->fetchColumn(), 'dry_run' => $dry,
-            'woken' => [], 'possible' => 0];
+            'autowake_live' => $live, 'woken' => [], 'possible' => 0];
     if (!$out['checked']) return $out;
     try {
         $scan = pk_wake_scan($db, (array)($opt['ids'] ?? []));
@@ -455,7 +466,7 @@ function pk_wake_from_mail(PDO $db, array $opt = []): array {
         error_log('pk_wake_from_mail: ' . $e->getMessage());
         return $out;
     }
-    $out['possible'] = count($scan['possible']);
+    $out['possible'] = count($scan['possible']) + ($live ? 0 : count($scan['wake']));
     foreach ($scan['wake'] as $rid => $w) {
         $m = $w['mail'];
         $res = pk_wake($db, $rid, $w['why'] . ' – ' . pk_mail_text($m), ['dry_run' => $dry]);
@@ -470,7 +481,8 @@ function pk_wake_from_mail(PDO $db, array $opt = []): array {
 
 /**
  * "Possibili risvegli": recent mails from the agency of Parked requests that name none of them (no folder name, no
- * thread) — Roberto decides by hand. Newest first. $days ≤ PK_WAKE_LOOKBACK_DAYS. Never throws ([] on error).
+ * thread) — Roberto decides by hand. Without PARKED_AUTOWAKE_LIVE also the mails about the file that would have woken
+ * a request (why ends "– auto-wake off"). Newest first. $days ≤ PK_WAKE_LOOKBACK_DAYS. Never throws ([] on error).
  * → [{from, subject, mail_at (EAT), mailbox, candidates: [{id, folder, customer_name, why}]}]
  */
 function pk_possible_wakeups(PDO $db, int $days = PK_WAKE_LOOKBACK_DAYS): array {
@@ -480,9 +492,20 @@ function pk_possible_wakeups(PDO $db, int $days = PK_WAKE_LOOKBACK_DAYS): array 
         error_log('pk_possible_wakeups: ' . $e->getMessage());
         return [];
     }
+    $list = $scan['possible'];
+    if (!pk_autowake_live() && $scan['wake']) {
+        $byMail = [];
+        foreach ($scan['wake'] as $rid => $w) {
+            $k = (string)($w['mail']['msg_key'] ?? $rid);
+            if (!isset($byMail[$k])) $byMail[$k] = ['mail' => $w['mail'], 'candidates' => []];
+            $byMail[$k]['candidates'][] = ['id' => $rid, 'why' => $w['why'] . ' – auto-wake off'];
+        }
+        $list = array_merge($list, array_values($byMail));
+        usort($list, function ($a, $b) { return strcmp((string)$a['mail']['date_utc'], (string)$b['mail']['date_utc']); });
+    }
     $floor = time() - max(1, min(PK_WAKE_LOOKBACK_DAYS, $days)) * 86400;
     $out = [];
-    foreach (array_reverse($scan['possible']) as $p) {
+    foreach (array_reverse($list) as $p) {
         $ts = strtotime($p['mail']['date_utc'] . ' UTC');
         if ($ts < $floor) continue;
         $c = [];
@@ -536,7 +559,7 @@ function pk_autoclose(PDO $db, bool $live): array {
  */
 function pk_cron(PDO $db): string {
     $w = pk_wake_from_mail($db);
-    $line = 'parked: ' . $w['checked'] . ' parked, ' . count($w['woken']) . ' woken by mail'
+    $line = 'parked: ' . $w['checked'] . ' parked, ' . count($w['woken']) . ($w['autowake_live'] ? ' woken by mail' : ' would wake (auto-wake off)')
           . ($w['woken'] ? ' (' . implode(', ', array_map(function ($x) { return $x['id'] . ' ' . $x['rule']; }, $w['woken'])) . ')' : '')
           . ', ' . $w['possible'] . ' possible';
     $db->exec("CREATE TABLE IF NOT EXISTS ck_meta (k VARCHAR(40) PRIMARY KEY, v VARCHAR(255) NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");

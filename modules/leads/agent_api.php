@@ -1350,7 +1350,7 @@ try {
                    $dry ? 'to_change' : 'changed' => $nChange, 'unchanged' => $nSame, 'failed' => $nFail,
                    'results' => $results,
                    'reopen_rule' => 'Leaving Lost clears lost_reason and lost_note (as the Hub status menu); the "Marked Lost" request note and the status_change timeline event stay as history. Lost on a request already Lost changes only lost_reason / lost_note (request note + timeline event).',
-                   'parked_rule' => 'Parked from Inquiry / Quoted / Hot-Quoted / Lost only; out of Parked to Inquiry / Quoted / Hot-Quoted / Lost (or Booked via confirm_booking). A client mail about that file (folder name in the subject, same thread, or a direct client\'s own address — never the agency address alone), dated after parked_wake_after, or a timeline note wakes it up by itself (back to parked_from).']
+                   'parked_rule' => 'Parked from Inquiry / Quoted / Hot-Quoted / Lost only; out of Parked to Inquiry / Quoted / Hot-Quoted / Lost (or Booked via confirm_booking). A client mail about that file (folder name in the subject, same thread, or a direct client\'s own address — never the agency address alone), dated after parked_wake_after, or a timeline note wakes it up by itself (back to parked_from) — only when PARKED_AUTOWAKE_LIVE is on (off since 21 Nov 2026: those mails are listed in parked_wakeups possible_wakeups, wake by hand).']
                   + ($dry ? ['message' => 'Dry run — nothing changed. Resend with "confirm": true.'] : []), $httpCode);
     }
 
@@ -1470,7 +1470,7 @@ try {
         $cnt   = (int)$db->query("SELECT COUNT(*) FROM requests WHERE status = 'Parked'")->fetchColumn();
         $ids   = array_values(array_filter(array_map('intval', is_array($in['ids'] ?? null) ? $in['ids'] : explode(',', (string)($in['ids'] ?? '')))));
         $next  = pk_wake_from_mail($db, ['dry_run' => true, 'ids' => $ids]);   // nothing written
-        agent_out(['ok' => true, 'parked_now' => $cnt, 'autoclose_live' => pk_autoclose_live(), 'stale_days' => pk_stale_days(),
+        agent_out(['ok' => true, 'parked_now' => $cnt, 'autoclose_live' => pk_autoclose_live(), 'autowake_live' => pk_autowake_live(), 'stale_days' => pk_stale_days(),
                    'events' => pk_recent_events($db, $limit, $days), 'would_close' => $plan['closed'],
                    'would_wake' => $next['woken'], 'possible_wakeups' => pk_possible_wakeups($db, min($days, PK_WAKE_LOOKBACK_DAYS))]);
     }

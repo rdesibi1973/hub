@@ -228,6 +228,9 @@ decides: **off the pipeline, not open, not Lost**. Hub label "Parked – waiting
 - Every change logs a `status_change` timeline event ("Quoted → Parked" and back).
 - **Wake-up** (by itself, author system) → status back to `parked_from`, event "Reactivated: <why>", mail to the
   request's agent "Request reactivated: <folder>" (nothing to the agency / client). A mail sent by us never wakes it.
+  **Off since 21 Nov 2026** (Roberto): only with `define('PARKED_AUTOWAKE_LIVE', true)` in includes/config.php. Off, nothing
+  below changes the status or sends mail; the mails that would wake a request are listed in **Possibili risvegli** (why
+  ends "– auto-wake off") and the request is woken by hand (`set_request_status`).
   - A manual timeline note / call, or a `mail_received` / `client_request` event (`timeline_add`, request page, `mail_get`
     with `request_id`); a `mail_received` with `event_at` before `parked_wake_after` does not wake it.
   - A client mail (Sales Response index, headers only; every 30 min from `ck_cron.php`), dated after `parked_wake_after`
@@ -255,7 +258,7 @@ decides: **off the pipeline, not open, not Lost**. Hub label "Parked – waiting
 
 ### `parked_wakeups` (GET)
 For the daily round. `limit` (30), `days` (14), `ids` (optional, comma list: limit `would_wake` to those requests) →
-`{parked_now, autoclose_live, stale_days, events: [{request_id, customer_name, status_now, event_at, kind: wakeup|autoclose,
+`{parked_now, autoclose_live, autowake_live, stale_days, events: [{request_id, customer_name, status_now, event_at, kind: wakeup|autoclose,
 title, body}], would_close: [{id, customer_name, folder, agent, parked_at, trip_date, basis}], would_wake: [{id, folder,
 rule: folder|name|thread|client, why, from, subject, mail_at, status_to}], possible_wakeups: [{from, subject, mail_at,
 mailbox, candidates: [{id, folder, customer_name, why}]}]}` — `would_close` / `would_wake` = what the next auto-close /
