@@ -12,10 +12,10 @@ require_once __DIR__ . '/iti_terms.php';   // T&C per channel (direct / agency),
 
 /**
  * Cover kicker + facts pill of a programme document by safari type (iti_programs.safari_type):
- * private safari, group departure (shared jeep) or beach stay. The only place these strings live, so
+ * private safari, group departure (shared jeep), beach stay or trek. The only place these strings live, so
  * the web page, PDF and Word stay in step. $country = the programme's country (iti_program_country():
  * "TZ", "KE", "TZ+KE") → "Safari privato in Kenya", "Safari privé en Tanzanie et au Kenya".
- * Returns ['kicker', 'safari_pill'], and for a beach stay 'brief' (the section title, no "safari").
+ * Returns ['kicker', 'safari_pill'], and for a beach stay / trek 'brief' (the section title, no "safari").
  */
 function iti_safari_labels(string $type, string $lang, string $country = 'TZ'): array {
     $L = [
@@ -40,6 +40,14 @@ function iti_safari_labels(string $type, string $lang, string $country = 'TZ'): 
             'es' => ['Estancia de playa', 'Estancia de playa', 'Tu viaje en breve'],
             'de' => ['Strandaufenthalt', 'Strandaufenthalt', 'Ihre Reise im Überblick'],
         ],
+        // Kilimanjaro / Meru climb (21 Nov 2026).
+        'trekking' => [
+            'it' => ['Trekking privato', 'Trekking privato con guida', 'Il trekking in breve'],
+            'en' => ['Private trek', 'Private guided trek', 'Your trek at a glance'],
+            'fr' => ['Trek privé', 'Trek privé avec guide', 'Votre trek en bref'],
+            'es' => ['Trekking privado', 'Trekking privado con guía', 'Tu trekking en breve'],
+            'de' => ['Privates Trekking', 'Privates Trekking mit Guide', 'Ihr Trekking im Überblick'],
+        ],
     ];
     // "in <country>" per language, the preposition included (French: en Tanzanie, au Kenya, à Madagascar).
     $in = [
@@ -62,6 +70,19 @@ function iti_safari_labels(string $type, string $lang, string $country = 'TZ'): 
     $last = array_pop($places);
     $where = $places ? implode(', ', $places) . $and[$l] . $last : $last;
     return ['kicker' => $t[$l][0] . ' ' . $where, 'safari_pill' => $t[$l][1]] + (isset($t[$l][2]) ? ['brief' => $t[$l][2]] : []);
+}
+
+/**
+ * Kind of night printed with a mountain hut / campsite (iti_lodges.lodge_type), which has no lodge
+ * category: "Rifugio", "Campo tendato in quota". '' for every other lodge type.
+ */
+function iti_doc_lodge_kind(string $type, string $lang): string {
+    $L = [
+        'hut'      => ['it' => 'Rifugio', 'en' => 'Mountain hut', 'fr' => 'Refuge', 'es' => 'Refugio', 'de' => 'Berghütte'],
+        'campsite' => ['it' => 'Campo tendato in quota', 'en' => 'Mountain campsite', 'fr' => "Camp d'altitude", 'es' => 'Campamento de altura', 'de' => 'Hochlager'],
+    ];
+    if (!isset($L[$type])) return '';
+    return $L[$type][$lang] ?? $L[$type]['en'];
 }
 
 /** UI strings per language. */
@@ -210,7 +231,9 @@ function iti_doc_scenic_dests(PDO $db): array {
             $isTown = stripos((string)$r['name_en'], 'town') !== false;
             if (mb_strlen($short) >= 4 && ($isTown || !in_array($short, $townWords, true))) $keys[$short] = true;
         }
-        $cache[(int)$r['id']] = ['photos' => $photos, 'keys' => array_keys($keys), 'park' => $r['region'] === 'National Parks'];
+        $town = stripos((string)$r['name_en'], 'town') !== false || stripos((string)$r['name_en'], 'city') !== false
+             || in_array(strtolower((string)($r['dest_type'] ?? '')), ['city', 'airport'], true);
+        $cache[(int)$r['id']] = ['photos' => $photos, 'keys' => array_keys($keys), 'park' => $r['region'] === 'National Parks', 'town' => $town];
     }
     return $cache;
 }
@@ -219,12 +242,23 @@ function iti_doc_scenic_dests(PDO $db): array {
  * Safari photos for the days and the cover. A day shows the place its drive goes to
  * (the destination named last in its title / transfers: "Arusha – Tarangire" → Tarangire),
  * else its destination, else its lodge's area; towns and airports never; no photo twice.
- * The cover is a photo of the park where most days are spent. Returns the cover URL.
+ * The cover is a photo of the park where most days are spent; with no park day (a Kilimanjaro trek), of the
+ * destination with the most nights — the night's destination or its lodge's area, towns last — never the
+ * photo a day happened to get (Marangu: the day down to "Arusha" got the town's giraffes). A cover
+ * chosen for the programme (iti_programs.cover_photo) wins in iti_mag_cover(). Returns the cover URL.
  */
 function iti_doc_day_photos(PDO $db, array &$days, array $p): string {
     $sc = iti_doc_scenic_dests($db);
-    $cands = []; $count = [];
+    $cands = []; $count = []; $nights = []; $townNights = [];
     foreach ($days as $i => $d) {
+        if ($d['lodge'] !== '') {   // a night: where it is spent (first scenic id of the day / lodge area)
+            foreach ($d['_photo_ids'] as $id) {
+                if (!isset($sc[$id])) continue;
+                if ($sc[$id]['town']) $townNights[$id] = ($townNights[$id] ?? 0) + 1;
+                else $nights[$id] = ($nights[$id] ?? 0) + 1;
+                break;
+            }
+        }
         $text = mb_strtolower($d['title'] . ' ' . implode(' ', $d['transfers']));
         $hits = [];
         foreach ($sc as $id => $s) {
@@ -241,7 +275,8 @@ function iti_doc_day_photos(PDO $db, array &$days, array $p): string {
         unset($days[$i]['_photo_ids']);
     }
     $used = []; $cover = '';
-    if ($count) {
+    if (!$count) $count = $nights ?: $townNights;   // no park day: most nights
+    if ($count && trim((string)($p['cover_photo'] ?? '')) === '') {   // a chosen cover: iti_mag_cover(), the days keep all their photos
         arsort($count);
         $cd = $sc[key($count)];
         $cover = $cd['photos'][0];
@@ -430,10 +465,11 @@ function iti_doc_data(int $id, string $lang): ?array {
             if ($name !== '') $acts[] = $name;
         }
 
-        $lodgeName = ''; $lodgeDesc = ''; $lodgePhotos = []; $lodgeUrl = ''; $lodgeKey = ''; $lodgeArea = '';
+        $lodgeName = ''; $lodgeDesc = ''; $lodgePhotos = []; $lodgeUrl = ''; $lodgeKey = ''; $lodgeArea = ''; $lodgeKind = '';
         if (!empty($d['end_lodge_id']) && isset($lodges[(int)$d['end_lodge_id']])) {
             $lr = $lodges[(int)$d['end_lodge_id']];
             $lodgeName = $lr['name'];
+            $lodgeKind = iti_doc_lodge_kind((string)($lr['lodge_type'] ?? ''), $lang);   // "Rifugio" for a hut night
             $lodgeKey  = 'L' . $lr['id'];
             if (!empty($lr['destination_id']) && isset($dests[(int)$lr['destination_id']])) {
                 $lodgeArea = iti_doc_own($dests[(int)$lr['destination_id']], 'name', $lang, 'destination', $missing, $dn);
@@ -512,7 +548,9 @@ function iti_doc_data(int $id, string $lang): ?array {
             'lodge_photos' => $lodgePhotos,
             'lodge_url'  => $lodgeUrl,
             // "Junior Suite Sea View (1 Double + 1 Twin)": category and configuration, both free text (iti_rooms.php)
-            'room'       => $lodgeName !== '' && !$own ? iti_room_label($d['room_category'] ?? '', $d['room_type'] ?? '') : '',
+            // A hut / campsite night: its kind first ("Rifugio"), shown wherever the room is (stays, day chips, guide sheet).
+            'room'       => $lodgeName !== '' && !$own ? implode(' · ', array_filter([$lodgeKind, iti_room_label($d['room_category'] ?? '', $d['room_type'] ?? '')], 'strlen')) : '',
+            'lodge_kind' => $lodgeKind,
             'room_category' => $lodgeName !== '' && !$own ? trim((string)($d['room_category'] ?? '')) : '',
             'own_arrangement' => $own,   // the night's hotel is booked by the agency / clients (iti_oa_day())
             'beach'      => $beach,

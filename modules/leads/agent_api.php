@@ -98,7 +98,7 @@ function agent_audit(PDO $db, string $action, $reqId, array $payload, string $re
     $dry = in_array($action, ['confirm_booking', 'send_booking_email', 'rollback_booking', 'fill_calc', 'iti_save_texts', 'update_rate', 'replace_flight_rates',
                               'cancel_invoice_payment', 'cancel_invoice', 'restore_invoice', 'update_folder_status', 'import_zoho_invoice', 'create_invoice', 'update_invoice', 'create_credit_note', 'apply_credit_note', 'refund_credit_note', 'cn_migrate_legacy', 'update_credit_note', 'send_invoice_email', 'mail_send', 'mail_move',
                               'iti_lodge_photos', 'iti_destination_photo', 'iti_update_lodge', 'iti_update_destination',
-                              'iti_create_personal', 'iti_update_program', 'iti_update_day', 'iti_publish', 'iti_final_from_calc', 'iti_save_alias', 'iti_tag_sample', 'iti_alias_decide',
+                              'iti_create_personal', 'iti_update_program', 'iti_update_day', 'iti_publish', 'iti_final_from_calc', 'iti_save_alias', 'iti_tag_sample', 'iti_alias_decide', 'iti_delete_draft',
                               'iti_create_lodge', 'iti_set_days', 'iti_add_day', 'iti_delete_day', 'iti_update_inclusions', 'iti_update_standard_inclusion',
                               'iti_create_flight_route', 'iti_create_activity', 'iti_create_transfer_route', 'iti_update_transfer_route', 'iti_save_as_sample',
                               'create_request', 'add_flight_rates', 'timeline_update', 'summary_set', 'rename_folder', 'reopen_cancelled',
@@ -2033,6 +2033,7 @@ try {
     case 'iti_update_program':
     case 'iti_update_day':
     case 'iti_publish':
+    case 'iti_delete_draft':   // leftover personal draft: no request, never published; dry run first
     case 'iti_tag_sample':
     case 'iti_save_alias': {
         agent_require_method('POST');
@@ -2049,6 +2050,7 @@ try {
                 case 'iti_update_program':  $r = iti_ps_update_program($db, (int)($in['program_id'] ?? 0), (array)($in['fields'] ?? []), $go); break;
                 case 'iti_update_day':      $r = iti_ps_update_day($db, (int)($in['program_id'] ?? 0), (int)($in['day'] ?? 0), (array)($in['fields'] ?? []), $go); break;
                 case 'iti_publish':         $r = iti_ps_publish($db, (int)($in['program_id'] ?? 0), !array_key_exists('publish', $in) || !empty($in['publish']), $go); break;
+                case 'iti_delete_draft':    $r = iti_ps_delete_draft($db, (int)($in['program_id'] ?? 0), $go); break;
                 case 'iti_tag_sample':      $r = iti_ps_tag_sample($db, $in, $go, $who); break;
                 default:                   $r = $go ? iti_ps_save_alias($in, $who) : ['would_save' => ['type' => $in['type'] ?? null, 'text' => $in['text'] ?? null]];
             }
@@ -2087,10 +2089,12 @@ try {
     }
 
     // Master data for the days: lists (GET) and new rows (POST, dry-run unless confirm).
-    case 'iti_inclusions':   // country? = KE | TZ | TZ+KE: that country's rows + the ALL ones
+    case 'iti_inclusions':   // country? = KE | TZ | TZ+KE: that country's rows + the ALL ones; kind? = safari | trekking: + the ALL ones
         agent_iti_lib();
-        try { agent_out(['ok' => true, 'country' => ($in['country'] ?? '') !== '' ? implode('+', iti_country_list($in['country'])) : null]
-                        + iti_pb_standard_inclusions($db, (string)($in['country'] ?? ''))); }
+        $kind = strtolower(trim((string)($in['kind'] ?? '')));
+        if ($kind !== '' && !in_array($kind, ['safari', 'trekking'], true)) agent_fail('kind: safari | trekking', 400);
+        try { agent_out(['ok' => true, 'country' => ($in['country'] ?? '') !== '' ? implode('+', iti_country_list($in['country'])) : null, 'kind' => $kind ?: null]
+                        + iti_pb_standard_inclusions($db, (string)($in['country'] ?? ''), $kind !== '' ? ['ALL', $kind] : [])); }
         catch (InvalidArgumentException $e) { agent_fail($e->getMessage(), 400); }
 
     case 'iti_update_standard_inclusion': {
@@ -4100,7 +4104,7 @@ try {
             'rollback_booking', 'reopen_cancelled', 'iti_programs', 'iti_texts', 'iti_save_texts', 'update_rate', 'replace_flight_rates',
             'iti_lodges', 'iti_lodge', 'iti_destinations', 'iti_destination', 'iti_lodge_photos', 'iti_destination_photo',
             'iti_update_lodge', 'iti_update_destination', 'iti_create_lodge', 'iti_samples', 'iti_program', 'iti_document', 'iti_vouchers', 'iti_create_personal', 'iti_update_program',
-            'iti_update_day', 'iti_publish', 'iti_calc_plan', 'iti_final_from_calc', 'iti_save_alias', 'iti_aliases', 'iti_tag_sample',
+            'iti_update_day', 'iti_publish', 'iti_delete_draft', 'iti_calc_plan', 'iti_final_from_calc', 'iti_save_alias', 'iti_aliases', 'iti_tag_sample',
             'iti_alias_proposals', 'iti_alias_decide', 'iti_change_log',
             'iti_set_days', 'iti_add_day', 'iti_delete_day', 'iti_inclusions', 'iti_update_inclusions', 'iti_update_standard_inclusion', 'iti_save_as_sample',
             'iti_flight_routes', 'iti_create_flight_route', 'iti_activities', 'iti_activity', 'iti_update_activity', 'iti_create_activity',

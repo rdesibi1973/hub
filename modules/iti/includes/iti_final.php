@@ -277,6 +277,18 @@ function iti_final_pick_sample(PDO $db, array $calc, array $planDays, string $co
     $typeCol = in_array('safari_type', $cols, true) ? ', safari_type' : '';
     $samples = $db->query("SELECT id, title_it, title_en, duration_days, display_language, hub_program_code$typeCol FROM iti_programs
                             WHERE program_type = 'sample' AND status <> 'cancelled' ORDER BY id")->fetchAll(PDO::FETCH_ASSOC);
+    // A climb: most nights in huts / campsites, or a route name in its code (Marangu, Machame…) — never a safari
+    // sample, and back (a climb + safari with fewer mountain nights counts as a safari, unless its code names the route).
+    $calcTrek = preg_match(ITI_TREK_RE, $code) === 1;
+    if (!$calcTrek && $nights > 0) {
+        $mtn = array();
+        try {
+            foreach ($db->query("SELECT id FROM iti_lodges WHERE lodge_type IN ('hut', 'campsite')")->fetchAll(PDO::FETCH_COLUMN) as $lid) $mtn[(int)$lid] = true;
+        } catch (PDOException $e) {}
+        $n = 0;
+        foreach ($planDays as $d) if (!empty($d['lodge_id']) && isset($mtn[(int)$d['lodge_id']])) $n++;
+        $calcTrek = $n * 2 > $nights;
+    }
     $rank = array();
     foreach ($samples as $s) {
         $m = iti_final_match_sample($db, $planDays, iti_final_sample_days($db, (int)$s['id']));
@@ -289,6 +301,9 @@ function iti_final_pick_sample(PDO $db, array $calc, array $planDays, string $co
         }
         if ($typeCol !== '' && in_array($s['safari_type'], array('group', 'private'), true) && ($s['safari_type'] === 'group') !== $isGroup) {
             $pts -= 15; $why[] = $s['safari_type'] === 'group' ? 'group sample' : 'private sample';
+        }
+        if ($typeCol !== '' && ($s['safari_type'] === 'trekking') !== $calcTrek) {
+            $pts -= 25; $why[] = $calcTrek ? 'not a trekking sample' : 'trekking sample';
         }
         if ($tagged && (int)$tagged['id'] === (int)$s['id']) { $pts += 3; $why[] = 'Calc named “' . $code . '”'; }
         if ($s['display_language'] === $lang) $pts += 0.5;

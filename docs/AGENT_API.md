@@ -984,8 +984,9 @@ once on the server) or has a `game_drive` / `walking_safari` activity — or a f
 Worked out when the document is made — nothing is written in the days, old programs get it too. The text is the one in
 ITI Settings → Tip note for the program language (none there → no note). Per program: `show_tip_note` (default 1; copied by
 `iti_create_personal`, `iti_save_as_sample` and `iti_final_from_calc` from the sample), set with `iti_update_program`.
-The standard "not included" items have a "Tips (as a guideline, 10 USD per adult per day for the guide)" line (country `ALL`)
-for new programs; add it to an existing personal program with `iti_update_inclusions` only when asked.
+The standard "not included" items have a "Tips (as a guideline, 10 USD per adult per day for the guide)" line (country `ALL`,
+kind `safari` — a trek gets the trekking crew's line instead, see **Trekking / cover photo**) for new programs; add it to an
+existing personal program with `iti_update_inclusions` only when asked.
 
 **Texts in the program language (15 Oct 2026).** In every document (magazine web page, PDF, Word, guide sheet) the name and
 description of an activity, lodge or destination are printed only in the program language — never English or another
@@ -1034,7 +1035,7 @@ curl -sH "$H" "$U?action=iti_document&program_id=412&format=pdf&no_prices=1&save
 #### `iti_create_personal` (POST)
 `sample_id`, `lead_request_id?` (Hub request), `calc_file?`, `fields?` — any of `ref_number`, `title_<lang>`, `subtitle_<lang>`, `intro_<lang>`,
 `start_date` (YYYY-MM-DD: dates appear on the cover and on each day), `pax_adults`, `pax_teens` (under 16), `pax_children` (under 12), `pax_open` (0 | 1) and `pax_label_<lang>` (see **Open participants**),
-`display_language`, `display_currency`, `safari_type` (`private` | `group` | `beach`), `show_tip_note` (0 | 1, see **Tip note**; default from the sample), `price_table_json` (`[{label, price, currency, bold?}]`; `bold: true` prints the row in bold — a row starting "Totale pratica" / "Total booking" is bold unless `bold: false`), `price_notes_<lang>`.
+`display_language`, `display_currency`, `safari_type` (`private` | `group` | `beach` | `trekking`), `show_tip_note` (0 | 1, see **Tip note**; default from the sample, 0 for a trek), `cover_photo` (see **Trekking / cover photo**), `price_table_json` (`[{label, price, currency, bold?}]`; `bold: true` prints the row in bold — a row starting "Totale pratica" / "Total booking" is bold unless `bold: false`), `price_notes_<lang>`.
 Copies the sample (days, activities, prices, inclusions) as a draft proposal, with the T&C of the request's client type
 (`fields.terms_variant` = `direct` | `agency` forces one). Dry-run unless `"confirm": true` (→ plan with `terms_variant`,
 `ref_number` and `ref_source`); confirmed → `program_id`, `links`, `terms` and the full `program`.
@@ -1054,10 +1055,36 @@ created, with `word_candidates`, `calc_files`, `folder` and `hint`: resend with 
 **safari_type:** `private` ("Safari privato in Tanzania" / "Safari privato con guida" on the cover and facts line of web,
 PDF and Word) or `group` ("Safari di gruppo in Tanzania" / "Safari di gruppo con guida"; 5 languages; the country follows the
 programme's `country` — see **Programmes outside Tanzania**) or `beach` (no safari: "Soggiorno al mare in Tanzania" / "Soggiorno al mare",
-section "Il viaggio in breve"; T&C unchanged). `fields.safari_type` wins;
-otherwise the sample's when it is a group safari or a beach stay, `group` when `GRP` is in the ref_number, the Calc file or the request folder
-(`_DumaGRP`, `_GRP0301`, `GRP1508Simba`), else `private`. `beach` is never set by itself: pass it. Same rule for `iti_final_from_calc` and the Hub's copy buttons;
-the plan shows it. `iti_program` returns `safari_type`; change it with `iti_update_program`.
+section "Il viaggio in breve"; T&C unchanged) or `trekking` (Kilimanjaro / Meru climb, 21 Nov 2026: "Trekking privato in Tanzania" /
+"Trekking privato con guida", section "Il trekking in breve"; EN "Private trek in Tanzania" / "Private guided trek", FR "Trek privé en
+Tanzanie", ES "Trekking privado en Tanzania", DE "Privates Trekking in Tansania"). `fields.safari_type` wins;
+otherwise the sample's when it is a group safari, a beach stay or a trek; `trekking` when a climb route is in the ref_number, the Calc
+file or the request folder (`Marangu`, `Machame`, `Lemosho`, `Rongai`, `Umbwe`, `Northern Circuit`, `MeruTrek`, `Meru` + a number —
+a bare "Kili" / "Meru" does not count: lodges and the airport carry them); `group` when `GRP` is there (`_DumaGRP`, `_GRP0301`,
+`GRP1508Simba`); else `private`. `beach` is never set by itself: pass it. Same rule for `iti_import_program`, `iti_final_from_calc`
+and the Hub's copy buttons; the plan shows it. `iti_program` returns `safari_type`; change it with `iti_update_program`.
+
+**Trekking / cover photo (21 Nov 2026).**
+- A trek has no safari-guide tip note (`show_tip_note` 0 by default) and, in "not included", the trekking crew's tips line
+  (standard row of kind `trekking`: IT "mance allo staff del trekking (indicativamente 150-200 USD per partecipante)", 5 languages)
+  instead of the safari guide's (kind `safari`, "Mance (indicativamente 10 USD per adulto al giorno per la guida)"). NIC / ZIC stays;
+  the catch-all line ("tutto quanto non espressamente incluso") stays last — new standard lines go before it.
+- Climb + safari (huts and parks in one program): keep `private` / `group`; it gets **both** tip lines and the tip note on the last
+  safari day. `trekking` is for climb-only programs.
+- Changing `safari_type` to or from `trekking` (`iti_update_program`, Hub editor) also switches `show_tip_note` (unless given in the
+  same call) and swaps the tip line; the dry run shows it as `changes.excluded_standard {removed[], added[]}`. A copy of a safari
+  sample made a trek by `iti_create_personal` does the same (plan `excluded_standard`). Items of kind `ALL` are never touched, and a
+  line typed by hand with the same text counts as present.
+- Huts / high camps are lodges with `lodge_type` `hut` / `campsite` and no category (see `iti_create_lodge`). The documents print
+  their kind with the night ("Rifugio" / "Campo tendato in quota"; EN "Mountain hut" / "Mountain campsite") where the room goes:
+  stays table, day chips, guide sheet. `iti_program` days carry `lodge_kind`.
+- **`cover_photo`** (any program, samples included; copied to the programs made from it): `"destination:21"` (that destination's
+  first photo; `"destination:21:3"` = its 3rd), `"lodge:154"`, an https URL, or null = automatic. Automatic = the park where most
+  days are spent; with no park day (a trek), the destination with the most nights (the night's destination or its lodge's area,
+  towns last). `iti_program` returns `cover_photo` (chosen, or null) and `cover` (the photo the documents use).
+- Trekking samples: `iti_samples` rows carry `safari_type`; the Kilimanjaro ones are `trekking` (first: #391 Marangu 8 giorni).
+  The Final-program sample picker never mixes trekking and safari samples (−25 points) when most Calc nights are in huts /
+  campsites or its code names the route.
 
 #### `iti_update_program` (POST)
 `program_id`, `fields` (same list — `ref_number`, `show_tip_note`, `pax_open` and `pax_label_<lang>` included, see the rules above; an empty `pax_label_<lang>` clears it — plus `terms_variant` = `direct` | `agency` | `auto` (from the linked request), and `lead_request_id` = the Hub request to link, null to unlink: a new link applies the request's T&C, unless `terms_variant` is given, and adds a timeline line) → `changes`
@@ -1123,9 +1150,11 @@ transaction; `duration_days` follows. Dry-run (counts, validation errors) unless
 Dry-run unless confirm.
 
 #### `iti_inclusions` (GET) / `iti_update_inclusions` (POST)
-`iti_inclusions` `country?` (`TZ` | `KE` | `TZ+KE`) → the standard rows `{std_id, country, text_<lang>}` by `included` / `excluded`;
-with `country`, only that country's rows and the `ALL` ones (a Kenya programme never gets NIC / the Tanzania visa; TZ+KE gets both).
+`iti_inclusions` `country?` (`TZ` | `KE` | `TZ+KE`), `kind?` (`safari` | `trekking`) → the standard rows `{std_id, country, program_kind, text_<lang>}` by `included` / `excluded`;
+with `country`, only that country's rows and the `ALL` ones (a Kenya programme never gets NIC / the Tanzania visa; TZ+KE gets both);
+with `kind`, only that kind's rows and the `ALL` ones (a trek: the crew's tips, not the guide's).
 `iti_standard_inclusions.country`: `TZ` (every row before Oct 2026), `KE` (eTA, health insurance USD 44 — seeded), `ALL` (set by hand for generic items).
+`iti_standard_inclusions.program_kind` (21 Nov 2026): `ALL` (default), `safari` (the guide's tips, std 4), `trekking` (the crew's tips — seeded).
 `iti_update_inclusions`: `program_id`, `included[]` and / or `excluded[]` — items `{std_id}`, `{text_<lang>…}` or a
 plain string (program language). Each list given replaces that list in one transaction; an empty list is refused.
 
@@ -1193,14 +1222,18 @@ The text (Word / PDF / email) is parsed by Claude (Cowork now; a Hub page with t
 - **Days:** the day items of `iti_set_days` (both languages stored: `_en` and `_<display_language>`) plus `destination` /
   `end_lodge` as text (or `destination_id` / `end_lodge_id` to force a row), `meals` (`"B,L,D"`, `"(B,L,D)"`, `BB`, `HB`, `FB`, `AI`;
   `meal_*` keys win). For new rows: `destination_type`, `destination_country` (required for a new destination of a mixed
-  programme), `destination_name_<lang>`, `end_lodge_type`, `end_lodge_category` (default from the name / `mid`).
+  programme), `destination_name_<lang>`, `end_lodge_type`, `end_lodge_category` (default from the name / `mid`; a name with
+  "Hut" / "Huts" → `hut`, a Kilimanjaro / Meru route camp — Shira, Barranco, Karanga, Barafu, Mweka… Camp — → `campsite`,
+  both without category).
 - **Name matching** (only rows of the programme's countries; airports never): exact 100 → same without the generic words
   (Camp / Lodge / Resort / Hotel / & / Spa; National Park / Reserve …) 95 → one contained in the other 85 → similarity %; ≥ 80 and
   not tied = matched. `matches[]` `{kind, text, matched_id, matched_name, score, candidates[]}`.
 - **Not found:** with `"create_missing": true` stubs are created (`needs_completion = 1`; a lodge's area = the day's
   destination; a name that exists in another country or inactive → `conflict`, pass the id). Without it, `to_create[]` lists them
   and a confirm stores them as free text on the day.
-- **Included / not included:** the lists given, plus the country's standard items not already there (`"standard": false` = only the given).
+- **Included / not included:** the lists given, plus the country's standard items not already there (`"standard": false` = only the given),
+  of the programme's kind (a trek: the crew's tips, not the guide's; a safari with a hut / campsite night: both), placed before the
+  catch-all line when the list has one. `safari_type` as `iti_create_personal` (a route name in the ref → `trekking`, tip note off).
 - **ref_number:** `fields.ref_number`; else the request folder's programme Word (as `iti_create_personal`); with none there
   `NN_<folder>_<ref_suffix or title before " – ">` (`01_Kenya2027(BramardiViaggi-Roberto)_KenyaClassic`). Several Words → 409.
 - **Supplier guard:** any text (all but `source`) containing a blocklisted term or `source.supplier` → **422** `supplier_hits[]`
@@ -1230,6 +1263,13 @@ memo to check the new sample (the code applies to every booking). The code is wh
 #### `iti_publish` (POST)
 `program_id`, `publish?` (default true; false = unpublish) → `links.public`. Dry-run unless confirm.
 Only needed for samples: a personal program's link is on without it (unpublish does not turn it off; cancel does).
+
+#### `iti_delete_draft` (POST, 21 Nov 2026)
+`program_id` → deletes a leftover personal draft for good (days, prices, inclusions with it). Refused (400) for a sample, a
+program linked to a request (`lead_request_id`), one ever published (`is_published`) or a final program. Dry run (default) →
+`program_id`, `title`, `status`, `ref_number`, `days`, `created_by`, `created_at`, `copies[]` (programs made from it: they keep
+their content, only their `sample_id` link is cleared); `"confirm": true` → the same + `deleted: true`. Case: program 390, the
+draft sample 391 was saved from. Ask Roberto before confirming.
 
 #### `iti_calc_plan` (GET) / `iti_final_from_calc` (POST)
 `request_id`, `sample_id?` (this booking only; default: the sample chosen from the Calc content, below), `lang?`, `file?`, `sheet?`,
@@ -1420,15 +1460,17 @@ Removed photos stored in `uploads/` are deleted. Only public http(s) hosts are f
 the new photo replaces the old cover.
 
 #### `iti_create_lodge` (POST)
-`fields`: `name`*, `destination_id`*, `category` (`budget`|`mid`|`luxury`|`ultra_luxury`), `lodge_type`
-(`lodge`|`tented_camp`|`hotel`|`mobile_camp`|`house`) + any field of `iti_update_lodge` except `needs_completion`. A name that already exists
+`fields`: `name`*, `destination_id`*, `category` (`budget`|`mid`|`luxury`|`ultra_luxury`; null / omitted for a hut or campsite),
+`lodge_type` (`lodge`|`tented_camp`|`hotel`|`mobile_camp`|`house`|`hut`|`campsite` — `hut` = mountain hut, "Rifugio";
+`campsite` = Kilimanjaro / Meru high camp in tents, "Campo tendato in quota"; 21 Nov 2026) + any field of `iti_update_lodge` except `needs_completion`. A name that already exists
 (exact or contained) → 400 with the existing lodge. Dry-run unless `"confirm": true`; then `created` (the lodge).
 Photos afterwards with `iti_lodge_photos`.
 
 #### `iti_update_lodge` / `iti_update_destination` (POST)
 `lodge_id` / `destination_id`, `fields` `{…}`. Lodge: `website, phone, emergency_phone, email, address,
-description_<lang>, latitude, longitude, destination_id, category` (`budget|mid|luxury|ultra_luxury`), `lodge_type`
-(`lodge|tented_camp|hotel|mobile_camp|house`), `room_categories` (the whole list: an array or one per line, ≤ 30 of
+description_<lang>, latitude, longitude, destination_id, category` (`budget|mid|luxury|ultra_luxury`; null only for a hut /
+campsite — send `lodge_type` in the same call when changing both), `lodge_type`
+(`lodge|tented_camp|hotel|mobile_camp|house|hut|campsite`), `room_categories` (the whole list: an array or one per line, ≤ 30 of
 ≤ 100 characters, duplicates dropped; `[]` clears — also accepted by `iti_create_lodge`). Destination: `name_<lang>, description_<lang>, region, latitude, longitude`.
 Both: `needs_completion` (0 once an imported stub has its photos and texts).
 Returns `changes` `{field: {from, to}}` (only what differs). Dry-run unless `"confirm": true`.

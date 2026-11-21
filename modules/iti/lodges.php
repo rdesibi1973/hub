@@ -7,7 +7,9 @@ require_once __DIR__ . '/../../includes/auth.php';
 require_login();
 require_once __DIR__ . '/includes/iti_functions.php';
 require_once __DIR__ . '/includes/iti_photos.php';
+require_once __DIR__ . '/includes/iti_content_service.php';   // iti_cs_lodge_schema(): hut / campsite, category optional
 iti_ensure_final_schema();   // phone / email / address / emergency_phone
+iti_cs_lodge_schema(db());
 
 $db       = db();
 $_cu      = current_user();
@@ -32,7 +34,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit) {
         'destination_id' => (int)($_POST['destination_id'] ?? 0),
         'name'           => trim($_POST['name']      ?? ''),
         'category'       => $_POST['category']       ?? 'mid',
-        'lodge_type'     => $_POST['lodge_type']     ?? 'lodge',
+        'lodge_type'     => array_key_exists($_POST['lodge_type'] ?? '', ITI_LODGE_TYPES) ? $_POST['lodge_type'] : 'lodge',
         'website'        => trim($_POST['website']   ?? ''),
         'latitude'       => ($_POST['latitude']  ?? '') !== '' ? (float)$_POST['latitude']  : null,
         'longitude'      => ($_POST['longitude'] ?? '') !== '' ? (float)$_POST['longitude'] : null,
@@ -52,6 +54,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit) {
     // Room categories sold by the hotel (one per line): suggested on the program days, matched to the Calc text.
     $roomCats = iti_room_categories_text($_POST['room_categories'] ?? '');
 
+    // Category: none only for a mountain hut / campsite (no budget / mid / luxury line for them).
+    if (!array_key_exists($fields['category'], ITI_LODGE_CATEGORIES)) $fields['category'] = null;
+    if ($fields['category'] === null && !in_array($fields['lodge_type'], ['hut', 'campsite'], true)) {
+        iti_flash_set('error', 'Category is required (none only for a mountain hut / campsite).');
+        iti_redirect('lodges.php' . ($id ? "?action=edit&id={$id}" : '?action=add'));
+    }
     if ($fields['name'] === '' || !$fields['destination_id']) {
         iti_flash_set('error', 'Name and Destination are required.');
         iti_redirect('lodges.php' . ($id ? "?action=edit&id={$id}" : '?action=add'));
@@ -198,7 +206,7 @@ include __DIR__ . '/../../includes/layout_header.php';
     <div class="form-group">
       <label>Category</label>
       <select name="category">
-        <?= iti_options(ITI_LODGE_CATEGORIES, $row['category'] ?? 'mid') ?>
+        <?= iti_options(ITI_LODGE_CATEGORIES, $row ? ($row['category'] ?? '') : 'mid', '— none (mountain hut / campsite)') ?>
       </select>
     </div>
     <div class="form-group">
@@ -401,7 +409,7 @@ include __DIR__ . '/../../includes/layout_header.php';
           <div style="font-size:.83rem;"><?= h($l['dest_name_en']) ?></div>
           <?php if ($l['region']): ?><div style="font-size:.7rem;color:var(--grey-mid);"><?= h($l['region']) ?></div><?php endif; ?>
         </td>
-        <td><span class="badge <?= match($l['category']){ 'budget'=>'status-inquiry','mid'=>'status-quoted','luxury'=>'status-hot','ultra_luxury'=>'status-booked',default=>'' } ?>"><?= ITI_LODGE_CATEGORIES[$l['category']] ?? h($l['category']) ?></span></td>
+        <td><span class="badge <?= match($l['category']){ 'budget'=>'status-inquiry','mid'=>'status-quoted','luxury'=>'status-hot','ultra_luxury'=>'status-booked',default=>'' } ?>"><?= $l['category'] === null ? '—' : (ITI_LODGE_CATEGORIES[$l['category']] ?? h($l['category'])) ?></span></td>
         <td style="font-size:.82rem;color:var(--grey-dk);"><?= ITI_LODGE_TYPES[$l['lodge_type']] ?? h($l['lodge_type']) ?>
           <?php if (!empty($l['season_twin_id']) && isset($lodgeNames[$l['season_twin_id']])): ?>
             <div style="font-size:.7rem;color:var(--grey-mid);" title="Same camp in the other season">⇄ <?= h($lodgeNames[$l['season_twin_id']]) ?></div>

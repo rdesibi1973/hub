@@ -328,6 +328,10 @@ function iti_im_looks_english(string $t): bool {
 
 /** Lodge type from the name (the stub is completed later on the Lodges page). */
 function iti_im_lodge_type(string $name): string {
+    if (preg_match('/\b(huts?|rifugio|refuge|refugio|hütte)\b/iu', $name)) return 'hut';   // Mandara Huts, Kibo Hut
+    // Kilimanjaro / Meru high camps (tents): the route's camp names, never a safari "camp".
+    if (preg_match('/\b(Shira|Barranco|Karanga|Barafu|Machame|Mweka|Millennium|Lava Tower|Moir|Kikelewa|Mawenzi Tarn|Third Cave|Saddle|Miriakamba|Mti Mkubwa)\s+Camps?\b/i', $name)
+        && !preg_match('/\b(tented|lodge|luxury|safari)\b/i', $name)) return 'campsite';
     if (preg_match('/\bmobile\b/i', $name)) return 'mobile_camp';
     if (preg_match('/\b(camps?|tented)\b/i', $name)) return 'tented_camp';
     if (preg_match('/\b(hotel|novotel|ibis|hilton|marriott|radisson|sheraton|inn|suites?)\b/i', $name)) return 'hotel';
@@ -417,6 +421,7 @@ function iti_im_import(PDO $db, array $in, string $who, bool $go): array {
     $ref = iti_im_ref($db, $set, $suffix, $lang);
     $set['ref_number'] = $ref['ref_number'];
     if (!isset($set['safari_type'])) $set['safari_type'] = iti_safari_type_auto($db, $set);
+    if ($set['safari_type'] === 'trekking' && !array_key_exists('show_tip_note', $set)) $set['show_tip_note'] = 0;   // no safari-guide tip note on a climb
 
     // 3. Days: names → catalogue rows (or stubs / free text), meals, the rest as a day item.
     $destC = iti_im_candidates($db, 'destination', $countries);
@@ -464,10 +469,12 @@ function iti_im_import(PDO $db, array $in, string $who, bool $go): array {
             } else {
                 $key = 'l|' . (iti_im_norm($txt, 'lodge') ?: mb_strtolower($txt));
                 if (!isset($newLodge[$key])) {
-                    $cat = (string)($d['end_lodge_category'] ?? 'mid');
                     $type = (string)($d['end_lodge_type'] ?? iti_im_lodge_type($txt));
-                    if (!in_array($cat, ['budget', 'mid', 'luxury', 'ultra_luxury'], true)) $errors[] = 'day ' . $n . ': end_lodge_category budget|mid|luxury|ultra_luxury';
-                    if (!in_array($type, ['lodge', 'tented_camp', 'hotel', 'mobile_camp', 'house'], true)) $errors[] = 'day ' . $n . ': end_lodge_type lodge|tented_camp|hotel|mobile_camp|house';
+                    $mountain = in_array($type, ITI_MOUNTAIN_LODGE_TYPES, true);   // huts / high camps: no category
+                    $cat = array_key_exists('end_lodge_category', $d) ? $d['end_lodge_category'] : ($mountain ? null : 'mid');
+                    if ($cat !== null && !in_array($cat, ['budget', 'mid', 'luxury', 'ultra_luxury'], true)) $errors[] = 'day ' . $n . ': end_lodge_category budget|mid|luxury|ultra_luxury' . ($mountain ? ' (or null for a hut / campsite)' : '');
+                    if ($cat === null && !$mountain) $errors[] = 'day ' . $n . ': end_lodge_category is required for a ' . $type;
+                    if (!in_array($type, ITI_CS_LODGE_TYPES, true)) $errors[] = 'day ' . $n . ': end_lodge_type ' . implode('|', ITI_CS_LODGE_TYPES);
                     // The lodge's area = this day's destination (an existing one or the new one).
                     $newLodge[$key] = ['name' => $txt, 'category' => $cat, 'lodge_type' => $type, 'days' => [],
                                        'destination_id' => $dest && $dest['state'] === 'matched' ? $dest['id'] : null,
@@ -542,14 +549,27 @@ function iti_im_import(PDO $db, array $in, string $who, bool $go): array {
     $conflicts = array_values(array_filter($toCreate, function ($x) { return isset($x['conflict']); }));
     if ($conflicts && $createMissing) foreach ($conflicts as $c) $warnings[] = ucfirst($c['kind']) . ' "' . $c['name'] . '": ' . $c['conflict'];
 
-    // 4. Included / not included: the lists given + the country's standard items (unless "standard": false).
-    $std = (!array_key_exists('standard', $in) || !empty($in['standard'])) ? iti_pb_standard_inclusions($db, $country) : ['included' => [], 'excluded' => []];
+    // 4. Included / not included: the lists given + the country's standard items (unless "standard": false), of the
+    //    programme's kind: a trek gets the crew's tips, not the safari guide's; a safari with hut nights gets both.
+    $mountain = false;
+    foreach ($newLodge as $nl) if (in_array($nl['lodge_type'], ITI_MOUNTAIN_LODGE_TYPES, true)) $mountain = true;
+    $matchedLodges = [];
+    foreach ($items as $x) if ($x['lodge'] && $x['lodge']['state'] === 'matched') $matchedLodges[(int)$x['lodge']['id']] = true;
+    if (!$mountain && $matchedLodges) {
+        $mountain = (bool)$db->query("SELECT COUNT(*) FROM iti_lodges WHERE lodge_type IN ('hut', 'campsite') AND id IN (" . implode(',', array_keys($matchedLodges)) . ')')->fetchColumn();
+    }
+    $std = (!array_key_exists('standard', $in) || !empty($in['standard'])) ? iti_pb_standard_inclusions($db, $country, iti_trek_kinds($set['safari_type'], $mountain)) : ['included' => [], 'excluded' => []];
     $incIn = [];
     foreach (['included', 'excluded'] as $k) {
         $list = isset($in[$k]) && is_array($in[$k]) ? array_values($in[$k]) : [];
         $have = [];
         foreach ($list as $x) $have[mb_strtolower(trim(is_array($x) ? (string)($x['text_' . $lang] ?? '') : (string)$x))] = true;
-        foreach ($std[$k] as $s) if (!isset($have[mb_strtolower(trim((string)$s['text_' . $lang]))])) $list[] = ['std_id' => $s['std_id']];
+        // Standard items before the catch-all line ("tutto quanto non espressamente incluso" stays last).
+        $at = count($list);
+        foreach ($list as $j => $x) if (iti_inclusion_is_catchall(is_array($x) ? (string)($x['text_' . $lang] ?? '') : (string)$x)) { $at = $j; break; }
+        $add = [];
+        foreach ($std[$k] as $s) if (!isset($have[mb_strtolower(trim((string)$s['text_' . $lang]))])) $add[] = ['std_id' => $s['std_id']];
+        array_splice($list, $at, 0, $add);
         if (!$list) throw new InvalidArgumentException($k . '[] is required (no standard ' . $k . ' items for ' . $country . ')');
         $incIn[$k] = $list;
     }

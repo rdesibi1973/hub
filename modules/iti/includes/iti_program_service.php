@@ -248,6 +248,7 @@ function iti_ps_program_out(PDO $db, int $id, string $lang = ''): array {
     $days = [];
     foreach ($D['days'] as $d) {
         $days[] = ['day' => $d['n'], 'date' => $d['date'] ?? null, 'title' => $d['title'], 'destination' => $d['dest'], 'lodge' => $d['lodge'], 'room' => $d['room'],
+                   'lodge_kind' => ($d['lodge_kind'] ?? '') !== '' ? $d['lodge_kind'] : null,   // "Rifugio" for a hut night
                    'room_category' => $d['room_category'] ?? '', 'meals' => $d['meals'], 'flights' => $d['flights'] ?? [], 'transfers' => $d['transfers'], 'activities' => $d['activities'],
                    'narrative' => $d['narrative'], 'lodge_photos' => count($d['lodge_photos']), 'dest_photo' => $d['dest_photo'] !== ''];
     }
@@ -255,6 +256,9 @@ function iti_ps_program_out(PDO $db, int $id, string $lang = ''): array {
         'id' => (int)$p['id'], 'type' => $p['program_type'], 'stage' => $p['stage'] ?? null, 'status' => $p['status'],
         'ref_number' => isset($p['ref_number']) && $p['ref_number'] !== '' ? $p['ref_number'] : null,
         'safari_type' => $D['safari_type'],
+        // Cover: the one chosen for the programme (null = automatic), and the photo the documents use.
+        'cover_photo' => !empty($p['cover_photo']) ? $p['cover_photo'] : null,
+        'cover' => !empty($p['cover_photo']) ? $p['cover_photo'] : ($D['cover'] !== '' ? $D['cover'] : null),
         // Tip note: switched on for the programme, and the day it lands on in this language (null = none) — check before iti_document.
         'show_tip_note' => (int)($p['show_tip_note'] ?? 1), 'tip_note_day' => $D['tip_note_day'],
         'country' => $D['country'],   // own column, else from the destinations
@@ -280,7 +284,8 @@ function iti_ps_program_out(PDO $db, int $id, string $lang = ''): array {
 
 /** Samples Cowork can start from: id, Calc code, titles, days, route. */
 function iti_ps_samples(PDO $db, string $q = ''): array {
-    $sql = "SELECT id, hub_program_code, title_it, title_en, subtitle_it, subtitle_en, display_language, duration_days
+    iti_ensure_doc_columns();   // safari_type
+    $sql = "SELECT id, hub_program_code, title_it, title_en, subtitle_it, subtitle_en, display_language, duration_days, safari_type
               FROM iti_programs WHERE program_type = 'sample' AND status <> 'cancelled'";
     $args = [];
     if ($q !== '') { $sql .= ' AND (title_it LIKE ? OR title_en LIKE ? OR hub_program_code LIKE ?)'; $l = "%$q%"; array_push($args, $l, $l, $l); }
@@ -289,7 +294,8 @@ function iti_ps_samples(PDO $db, string $q = ''): array {
     $out = [];
     foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
         $out[] = ['id' => (int)$r['id'], 'code' => $r['hub_program_code'], 'title' => $r['title_it'] ?: $r['title_en'],
-                  'route' => $r['subtitle_it'] ?: $r['subtitle_en'], 'language' => $r['display_language'], 'days' => (int)$r['duration_days']];
+                  'route' => $r['subtitle_it'] ?: $r['subtitle_en'], 'language' => $r['display_language'], 'days' => (int)$r['duration_days'],
+                  'safari_type' => iti_safari_type($r)];   // trekking = the Kilimanjaro / Meru climbs
     }
     return $out;
 }
@@ -313,7 +319,8 @@ function iti_ps_schema(): void {
 /** Header fields an agent may set, limited to the columns the live table really has. */
 function iti_ps_header_fields(): array {
     iti_ps_schema();
-    $f = ['ref_number', 'safari_type', 'show_tip_note', 'country', 'display_language', 'display_currency', 'start_date', 'dates_indicative', 'pax_open', 'pax_adults', 'pax_teens', 'pax_children', 'price_table_json', 'price_notes'];
+    iti_ensure_trek_schema();   // cover_photo
+    $f = ['ref_number', 'safari_type', 'show_tip_note', 'cover_photo', 'country', 'display_language', 'display_currency', 'start_date', 'dates_indicative', 'pax_open', 'pax_adults', 'pax_teens', 'pax_children', 'price_table_json', 'price_notes'];
     foreach (ITI_PS_LANGS as $l) foreach (['title', 'subtitle', 'intro', 'price_notes', 'pax_label'] as $k) $f[] = $k . '_' . $l;
     return array_values(array_intersect($f, iti_table_columns('iti_programs')));
 }
@@ -328,7 +335,8 @@ function iti_ps_header_values(array $fields): array {
     foreach ($fields as $k => $v) {
         if ($k === 'display_language' && !in_array($v, ITI_PS_LANGS, true)) throw new InvalidArgumentException('display_language: en|it|fr|es|de');
         if ($k === 'display_currency' && !in_array($v, ['USD', 'EUR'], true)) throw new InvalidArgumentException('display_currency: USD|EUR');
-        if ($k === 'safari_type' && !in_array($v, ITI_SAFARI_TYPES, true)) throw new InvalidArgumentException('safari_type: private | group | beach');
+        if ($k === 'safari_type' && !in_array($v, ITI_SAFARI_TYPES, true)) throw new InvalidArgumentException('safari_type: ' . implode(' | ', ITI_SAFARI_TYPES));
+        if ($k === 'cover_photo') { $out[$k] = iti_ps_cover_photo($v); continue; }
         if ($k === 'start_date') {
             if ($v !== null && $v !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', (string)$v)) throw new InvalidArgumentException('start_date: YYYY-MM-DD');
             $v = $v === '' ? null : $v;
@@ -354,6 +362,28 @@ function iti_ps_header_values(array $fields): array {
         $out[$k] = $v;
     }
     return $out;
+}
+
+/**
+ * Cover photo of a programme: null / "" = automatic (the park of most days, else the destination of most
+ * nights); "destination:21" / "lodge:154" = that row's first photo ("destination:21:3" = its 3rd); else an
+ * https URL. Returns the URL or null.
+ */
+function iti_ps_cover_photo($v): ?string {
+    $v = trim((string)($v ?? ''));
+    if ($v === '') return null;
+    if (preg_match('/^(destination|lodge):(\d+)(?::(\d+))?$/', $v, $m)) {
+        $st = db()->prepare($m[1] === 'lodge' ? 'SELECT * FROM iti_lodges WHERE id = ?' : 'SELECT * FROM iti_destinations WHERE id = ?');
+        $st->execute([(int)$m[2]]);
+        $r = $st->fetch(PDO::FETCH_ASSOC);
+        if (!$r) throw new InvalidArgumentException('cover_photo: ' . $m[1] . ' ' . $m[2] . ' not found');
+        $photos = $m[1] === 'lodge' ? iti_photos_decode($r['photos'] ?? null) : iti_dest_photos($r);
+        $n = max(1, (int)($m[3] ?? 1));
+        if (!isset($photos[$n - 1])) throw new InvalidArgumentException('cover_photo: ' . $m[1] . ' ' . $m[2] . ' has ' . count($photos) . ' photo(s)');
+        return $photos[$n - 1];
+    }
+    if (!preg_match('~^https://\S+$~i', $v) || mb_strlen($v) > 255) throw new InvalidArgumentException('cover_photo: an https URL (max 255), "destination:<id>[:<n>]", "lodge:<id>[:<n>]", or null for automatic');
+    return $v;
 }
 
 /** A personal programme row, or an error (samples are not changed through the API). */
@@ -387,7 +417,7 @@ function iti_ps_sample_client_fields(array $keys): array {
 /**
  * Proposal for a client: a copy of a sample, or a blank programme (no sample_id) for trips with
  * no matching sample. $in: sample_id?, lead_request_id?, calc_file?, fields? {ref_number, title_<lang>, subtitle_<lang>,
- * intro_<lang>, safari_type (private | group | beach; default from the sample / GRP tags), show_tip_note (0 | 1; default from the sample, else 1), start_date, pax_adults, pax_teens (under 16), pax_children (under 12), pax_open (0 | 1), pax_label_<lang>, display_language, display_currency,
+ * intro_<lang>, safari_type (private | group | beach | trekking; default from the sample / climb route / GRP tags), show_tip_note (0 | 1; default from the sample, else 0 for a trek, else 1), cover_photo, start_date, pax_adults, pax_teens (under 16), pax_children (under 12), pax_open (0 | 1), pax_label_<lang>, display_language, display_currency,
  * price_table_json, price_notes_<lang>}, days? [day items, see iti_program_build.php] (replace
  * the sample's days), price_level? (rack | sto | stospec | custom + custom_markup | none; default the request's level:
  * per-person prices 2–6 pax + notes from the sample's Calc template, iti_price_service.php).
@@ -439,8 +469,12 @@ function iti_ps_create_personal(PDO $db, array $in, string $who, bool $go): arra
     }
     if ($days !== null) $plan['days'] = count($items);
     $plan['ref_number'] = $ref['ref_number'];
-    // private | group | beach: given, else from the sample and the GRP tags (iti_duplicate_program() applies the same rule).
+    // private | group | beach | trekking: given, else from the sample, the climb routes and the GRP tags (iti_duplicate_program() applies the same rule).
     $plan['safari_type'] = $set['safari_type'] ?? iti_safari_type_auto($db, $set, $s);
+    // A trek: no safari-guide tip note (unless given); a copy of a safari sample swaps the tip line of "not included".
+    if ($plan['safari_type'] === 'trekking' && !array_key_exists('show_tip_note', $set)) $set['show_tip_note'] = 0;
+    $trekSwap = $s && (($plan['safari_type'] === 'trekking') !== (iti_safari_type($s) === 'trekking'));
+    if ($trekSwap) $plan['excluded_standard'] = iti_trek_sync_inclusions($db, $sid, false, $plan['safari_type']);   // what changes on the copy
     $plan['ref_source'] = $ref['source'] !== null ? $ref['source'] . (isset($ref['file']) ? ': ' . $ref['file'] : '') : null;
     // T&C of the linked request's channel: direct client (Drct) 60 days, agency 45 days.
     $plan['terms_variant'] = $tv !== 'auto' ? $tv : (isset($set['lead_request_id']) ? iti_terms_variant_for_request($db, $set['lead_request_id']) : null);
@@ -462,6 +496,7 @@ function iti_ps_create_personal(PDO $db, array $in, string $who, bool $go): arra
         if ($s) {                                            // iti_duplicate_program / iti_pb_set_days: own transactions
             $id = iti_duplicate_program($sid, 'personal', $who, $set);
             if ($days !== null) iti_pb_set_days($db, $id, $days, true);
+            if ($trekSwap) iti_trek_sync_inclusions($db, $id, true);   // the copy's tip line of "not included"
         } else {
             $db->beginTransaction();
             $id = iti_ps_insert_blank($db, $set, $items, $who);
@@ -543,11 +578,22 @@ function iti_ps_update_program(PDO $db, int $id, array $fields, bool $go): array
                                     'variant_from' => $from['variant'], 'variant_to' => $want, 'name' => $tr['name']];
         }
     }
+    // To / from a trek: the tip note follows (a trek has none; unless given), and the tip line of
+    // "not included" swaps — safari guide ↔ trekking crew (iti_trek_sync_inclusions(), shown in the dry run).
+    $trekSwap = isset($changes['safari_type']) && ($changes['safari_type']['to'] === 'trekking' || $changes['safari_type']['from'] === 'trekking');
+    if ($trekSwap && !array_key_exists('show_tip_note', $vals) && array_key_exists('show_tip_note', $p)) {
+        $tip = $changes['safari_type']['to'] === 'trekking' ? 0 : 1;
+        if ((int)$p['show_tip_note'] !== $tip) $changes['show_tip_note'] = ['from' => (int)$p['show_tip_note'], 'to' => $tip];
+    }
     if ($go && $changes) {
         $sets = []; $args = [];
         foreach ($changes as $k => $c) { $sets[] = '`' . $k . '` = ?'; $args[] = $c['to']; }
         $args[] = $id;
         $db->prepare('UPDATE iti_programs SET ' . implode(', ', $sets) . ' WHERE id = ?')->execute($args);
+    }
+    if ($trekSwap) {
+        $inc = iti_trek_sync_inclusions($db, $id, $go, $changes['safari_type']['to']);   // dry run: what it would do with the new type
+        if ($inc['removed'] || $inc['added']) $changes['excluded_standard'] = $inc;
     }
     $linked = $lead && isset($changes['lead_request_id']);
     if ($linked && $go) {   // same as the Hub editor: T&C of the request's channel, and a line in its timeline
@@ -561,6 +607,31 @@ function iti_ps_update_program(PDO $db, int $id, array $fields, bool $go): array
         return ['id' => $id, 'changes' => $changes, 'terms_variant_of_request' => iti_terms_variant_for_request($db, $lead)];
     }
     return ['id' => $id, 'changes' => $changes];
+}
+
+/**
+ * Delete a leftover draft (21 Nov 2026: programme 390, the source of sample 391): a personal programme with
+ * no linked request, never published (is_published), not a final programme. Refused for samples. The
+ * programmes copied from it keep everything (sample_program_id → NULL). Days, prices, inclusions… go with it.
+ */
+function iti_ps_delete_draft(PDO $db, int $id, bool $go): array {
+    $p = iti_get_program($id);
+    if (!$p) throw new InvalidArgumentException('Program ' . $id . ' not found');
+    if ($p['program_type'] !== 'personal') throw new InvalidArgumentException('Program ' . $id . ' is a ' . $p['program_type'] . ' — only a personal draft can be deleted (cancel a sample in the Hub)');
+    if (!empty($p['lead_request_id'])) throw new InvalidArgumentException('Program ' . $id . ' is linked to request #' . (int)$p['lead_request_id'] . ' — not deleted');
+    if (!empty($p['is_published'])) throw new InvalidArgumentException('Program ' . $id . ' was published — not deleted');
+    if (($p['stage'] ?? '') === 'final') throw new InvalidArgumentException('Program ' . $id . ' is a final program — not deleted');
+    $st = $db->prepare('SELECT id, program_type, title_it, title_en FROM iti_programs WHERE sample_program_id = ?');
+    $st->execute([$id]);
+    $copies = array_map(function ($r) { return ['id' => (int)$r['id'], 'type' => $r['program_type'], 'title' => $r['title_it'] ?: $r['title_en']]; }, $st->fetchAll(PDO::FETCH_ASSOC));
+    $st = $db->prepare('SELECT COUNT(*) FROM iti_program_days WHERE program_id = ?');
+    $st->execute([$id]);
+    $plan = ['program_id' => $id, 'title' => $p['title_it'] ?: $p['title_en'], 'status' => $p['status'], 'ref_number' => $p['ref_number'] ?? null,
+             'days' => (int)$st->fetchColumn(), 'created_by' => $p['created_by'] ?? null, 'created_at' => $p['created_at'] ?? null,
+             'copies' => $copies];   // keep their content; only their link to this one is cleared
+    if (!$go) return $plan;
+    $db->prepare('DELETE FROM iti_programs WHERE id = ? AND program_type = ? AND lead_request_id IS NULL')->execute([$id, 'personal']);
+    return $plan + ['deleted' => true];
 }
 
 /** Which T&C a programme prints: variant (direct | agency | custom), version id / name, and why (program | request | default). */

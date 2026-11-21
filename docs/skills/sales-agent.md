@@ -88,6 +88,19 @@ Memo: at the start create one `doing` memo (clear title with the folder name, li
    "Programma senza prezzi" (18 Nov 2026): after the same check of step 4, `iti_document` with `no_prices=1` → `<ref_number>_SenzaPrezzi.pdf/.docx` (price table and price notes removed; inclusions, exclusions and terms stay; the file with prices is untouched). Never delete the price box by hand in a PDF.
 6. `links.public` is the client link (always on for personal programmes; `iti_publish` is only for samples). Agencies never get it, direct clients do: `rules-client-documents` §2.
 
+**Kilimanjaro / Meru trekking proposals (21 Nov 2026).** Same steps 1–6, from a trekking sample (`iti_samples` rows with
+`safari_type: trekking`; first one: #391 "Kilimanjaro Trekking – Marangu 8 giorni"; no prices on these samples — pass
+`price_table_json` from the Calc). The copy keeps `trekking` by itself: cover "Trekking privato in Tanzania", facts line
+"Trekking privato con guida", no safari-guide tip note, and in "not included" the crew's tips (150–200 USD per participant)
+instead of the guide's 10 USD a day — check those in the `iti_create_personal` dry run (`safari_type`, `excluded_standard`).
+- No trekking sample for that route (Machame, Lemosho, Rongai…): `iti_import_program` from the WeTu Word in
+  `itineraries/Kili/<lang>/Trekking/`; a ref with the route name makes it `trekking`, huts ("… Hut(s)") and route camps
+  (Shira / Barranco / Barafu… Camp) are created as `hut` / `campsite` with no category. Tell Roberto before creating lodges.
+- Climb + safari in one programme: leave it `private` (or `group`) — it gets both tip lines and the tip note on the last safari day.
+- Cover: automatic = the destination of most nights (Mount Kilimanjaro on a climb). Another photo only when Roberto asks:
+  `iti_update_program` `cover_photo` (`"destination:21:2"`, `"lodge:155"` or a photo URL; null = automatic).
+- A leftover draft (no request, never published) can go with `iti_delete_draft` — dry run, then only on his ok.
+
 **Programme straight from the Calc (on trial since 7 Nov 2026; same path as the Hub page "Create Itinerary Program from Excel Calc").** Use it instead of steps 1–3 when Roberto asks, or when the Calc already holds the itinerary night by night:
 1. `iti_calc_plan` with `request_id`, `file` (the Calc when the folder holds several: ask Roberto which one) and `sheet` (the pax option the client gets, e.g. `"4PAX"`). A quote usually has several pax sheets and none marked CONF; without `sheet` the API answers 400 and lists the sheets in its message. Ask which sheet; never pick one yourself. Quote for several group sizes (10 / 11 / 12 pax sheets): also pass `price_sheets` with the sheets Roberto names. The price table then gets one row per sheet, "Quota per persona, base N pax". Check `calc.price_table` and the `same_itinerary` flags in the plan. Never do this for GRP group departures.
 2. Check `sample` (the proposed sample) and `blocking`. For each unknown Calc text, propose the lodge / activity / route (`iti_lodges`, `iti_activities`, …). Call `iti_save_alias` only after his ok on THAT alias. A lodge missing from the Hub is created as in step 4 (`iti_create_lodge`, dry run first), then mapped.

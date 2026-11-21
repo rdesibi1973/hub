@@ -27,6 +27,10 @@ outdated — this file wins where they disagree (PHP version, local lint).
   lodges vs each sample's days), not the file name; the Calc code tag (`hub_program_code` + extra codes in `iti_sample_codes`,
   one code → one sample, set by an admin only) is a tie-break and the prices source. Sellers / Agent API override for one
   booking only (`sample_id`); no sample close enough → memo to Roberto.
+  **Trekking** (since 21 Nov 2026): `safari_type` `trekking` (labels in `iti_safari_labels()`), standard rows by
+  `iti_standard_inclusions.program_kind` (`ALL` / `safari` / `trekking`, `iti_trek_kinds()`); a path that sets or changes a
+  programme's type to / from trekking calls `iti_trek_sync_inclusions()`. Lodge types `hut` / `campsite` have no category.
+  `iti_programs.cover_photo` overrides the automatic cover (`iti_doc_day_photos()` / `iti_mag_cover()`).
 - `modules/operations/` — movements, Medivac, lunch boxes, **Booking follow-up** (`booking_followup.php`; logic
   `includes/followup_service.php` + `followup_classify.php`, shared with the Agent API `followup_*` and
   `tools/followup_local_scan.php`, which reads the supplier PDFs on the office PC because BlueHost cannot).

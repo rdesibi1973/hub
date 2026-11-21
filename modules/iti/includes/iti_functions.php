@@ -1096,6 +1096,7 @@ function iti_ensure_doc_columns(): void {
         // Free wording that replaces the computed participants line (iti_mag_pax()).
         foreach (ITI_LANGUAGES as $l) iti_add_column('iti_programs', 'pax_label_' . $l, 'VARCHAR(200) NULL DEFAULT NULL');
         if (iti_setting('seed_ndutu_reserve') === '') iti_seed_ndutu_reserve();
+        iti_ensure_trek_schema();   // program_kind of the standard rows, cover_photo, hut / campsite lodges
         // ref_number = the programme Word's name ("01_LucaDeSanctis(LasciatiViaggiare-Daniela)_SafariGrandeMigrazioneEstate",
         // 72 characters): 60 was too short.
         $c = db()->query("SHOW COLUMNS FROM iti_programs LIKE 'ref_number'")->fetch(PDO::FETCH_ASSOC);
@@ -1107,17 +1108,22 @@ function iti_ensure_doc_columns(): void {
     }
 }
 
-const ITI_SAFARI_TYPES = array('private', 'group', 'beach');
+const ITI_SAFARI_TYPES = array('private', 'group', 'beach', 'trekking');
 
-/** Safari type of a programme row: 'group', 'beach' or 'private' (default, also when the column is missing). */
+// Kilimanjaro / Meru climb in a ref. number, Calc file or request folder ("_Marangu8", "MachameTrek", "Meru4"):
+// the route names only — a bare "Kili" / "Meru" is also a lodge or the airport (Roberto, 21 Nov 2026).
+const ITI_TREK_RE = '/Marangu|Machame|Lemosho|Rongai|Umbwe|Northern\s*Circuit|Meru\s*Trek|Meru\s*\d/i';
+
+/** Safari type of a programme row: 'group', 'beach', 'trekking' or 'private' (default, also when the column is missing). */
 function iti_safari_type(array $p): string {
     return in_array($p['safari_type'] ?? '', ITI_SAFARI_TYPES, true) ? $p['safari_type'] : 'private';
 }
 
 /**
  * Safari type for a new personal programme when none is given: the sample's when it is a group
- * safari or a beach stay; group when "GRP" is in the ref. number, the Calc file or the linked
- * request's folder (_DumaGRP, _GRP0301, GRP1508Simba); otherwise private.
+ * safari, a beach stay or a trek; trekking when a climb route (ITI_TREK_RE) is in the ref. number,
+ * the Calc file or the linked request's folder; group when "GRP" is there (_DumaGRP, _GRP0301,
+ * GRP1508Simba); otherwise private.
  */
 function iti_safari_type_auto(PDO $db, array $p, ?array $sample = null): string {
     if ($sample && iti_safari_type($sample) !== 'private') return iti_safari_type($sample);
@@ -1127,7 +1133,146 @@ function iti_safari_type_auto(PDO $db, array $p, ?array $sample = null): string 
         $st->execute(array((int)$p['lead_request_id']));
         $hay .= ' ' . (string)$st->fetchColumn();
     }
+    if (preg_match(ITI_TREK_RE, $hay)) return 'trekking';
     return strpos($hay, 'GRP') !== false ? 'group' : 'private';
+}
+
+// ── Trekking (Kilimanjaro / Meru, 21 Nov 2026) ───────────────────────────────
+// iti_standard_inclusions.program_kind: ALL | safari | trekking. A trek gets the ALL + trekking rows (crew tips,
+// not the safari guide's); a safari with a hut / campsite night (climb + safari) gets both tip lines; any other
+// programme ALL + safari. The rows are copied into the programme when it is created / its type changes
+// (iti_trek_sync_inclusions()), so an item removed by hand stays removed afterwards.
+
+const ITI_MOUNTAIN_LODGE_TYPES = array('hut', 'campsite');
+
+/** program_kind values a programme takes standard rows from. */
+function iti_trek_kinds(string $type, bool $mountainNights): array {
+    if ($type === 'trekking') return array('ALL', 'trekking');
+    return $mountainNights ? array('ALL', 'safari', 'trekking') : array('ALL', 'safari');
+}
+
+/** A night of the programme in a mountain hut or campsite (iti_lodges.lodge_type). */
+function iti_trek_has_mountain_nights(PDO $db, int $pid): bool {
+    try {
+        $st = $db->prepare("SELECT COUNT(*) FROM iti_program_days d JOIN iti_lodges l ON l.id = d.end_lodge_id
+                             WHERE d.program_id = ? AND l.lodge_type IN ('hut', 'campsite')");
+        $st->execute(array($pid));
+        return (int)$st->fetchColumn() > 0;
+    } catch (PDOException $e) { return false; }
+}
+
+/** "tutto quanto non espressamente incluso" / "anything not mentioned…": the catch-all line, always last. */
+function iti_inclusion_is_catchall(string $t): bool {
+    return (bool)preg_match('/tutto (quanto|ci[oò]) (che )?non|anything (else )?not|everything (else )?not|tout ce qui n|todo lo (que|no)|alles,? was nicht|alle nicht/iu', $t);
+}
+
+/**
+ * Bring a programme's kind-specific standard rows in line with its type: drop the safari / trekking
+ * rows it should not have, add the missing ones (in the programme's text) before the catch-all line.
+ * Rows with program_kind ALL are never touched. Returns ['removed' => [text], 'added' => [text]];
+ * with $go false nothing is written. $type: the safari type to sync for (default the programme's own;
+ * a dry run passes the new one). Call it outside a transaction or inside the caller's.
+ */
+function iti_trek_sync_inclusions(PDO $db, int $pid, bool $go = true, ?string $type = null): array {
+    iti_ensure_trek_schema();
+    $out = array('removed' => array(), 'added' => array());
+    $p = iti_get_program($pid);
+    if (!$p) return $out;
+    $lang = in_array($p['display_language'] ?? '', ITI_LANGUAGES, true) ? $p['display_language'] : 'it';
+    $want = iti_trek_kinds($type !== null ? $type : iti_safari_type($p), iti_trek_has_mountain_nights($db, $pid));
+    $country = iti_program_country($p);
+    $codes = array_merge(iti_country_list($country), array('ALL'));
+    $st = $db->prepare('SELECT * FROM iti_standard_inclusions WHERE is_active = 1 AND program_kind IN (\'safari\', \'trekking\')
+                         AND country IN (' . implode(',', array_fill(0, count($codes), '?')) . ') ORDER BY sort_order, id');
+    $st->execute($codes);
+    $std = $st->fetchAll(PDO::FETCH_ASSOC);
+    if (!$std) return $out;
+    $st = $db->prepare('SELECT * FROM iti_program_inclusions WHERE program_id = ? ORDER BY item_type, sort_order, id');
+    $st->execute(array($pid));
+    $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+    // A standard row is in the programme by its link, or as the programme's own copy of one of its texts (typed / imported).
+    $have = array(); $texts = array();
+    foreach ($rows as $r) {
+        if (!empty($r['standard_inclusion_id'])) $have[(int)$r['standard_inclusion_id']] = $r;
+        foreach (ITI_LANGUAGES as $l) if (trim((string)($r['text_' . $l] ?? '')) !== '') $texts[mb_strtolower(trim((string)$r['text_' . $l]))] = $r;
+    }
+    $pick = function ($r) use ($lang) {
+        foreach (array($lang, 'en', 'it') as $l) if (trim((string)($r['text_' . $l] ?? '')) !== '') return trim((string)$r['text_' . $l]);
+        return '';
+    };
+    $del = array(); $add = array();
+    foreach ($std as $s) {
+        $row = $have[(int)$s['id']] ?? null;
+        if (!$row) foreach (ITI_LANGUAGES as $l) {
+            $t = mb_strtolower(trim((string)($s['text_' . $l] ?? '')));
+            if ($t !== '' && isset($texts[$t])) { $row = $texts[$t]; break; }
+        }
+        $wanted = in_array($s['program_kind'], $want, true);
+        if ($row && !$wanted && !in_array((int)$row['id'], $del, true)) { $del[] = (int)$row['id']; $out['removed'][] = $pick($row) ?: $pick($s); }
+        if (!$row && $wanted) { $add[] = $s; $out['added'][] = $pick($s); }
+    }
+    if (!$go || (!$del && !$add)) return $out;
+    if ($del) $db->prepare('DELETE FROM iti_program_inclusions WHERE id IN (' . implode(',', $del) . ')')->execute();
+    if ($add) {
+        // Renumber each list with the new rows before the catch-all line (or at the end).
+        foreach (array('inclusion', 'exclusion') as $type) {
+            $new = array_values(array_filter($add, function ($s) use ($type) { return $s['item_type'] === $type; }));
+            if (!$new) continue;
+            $list = array();
+            foreach ($rows as $r) if ($r['item_type'] === $type && !in_array((int)$r['id'], $del, true)) $list[] = $r;
+            $at = count($list);
+            foreach ($list as $i => $r) if (iti_inclusion_is_catchall($pick($r))) { $at = $i; break; }
+            $ins = $db->prepare('INSERT INTO iti_program_inclusions (program_id, item_type, standard_inclusion_id, sort_order) VALUES (?, ?, ?, ?)');
+            $upd = $db->prepare('UPDATE iti_program_inclusions SET sort_order = ? WHERE id = ?');
+            $n = 0;
+            foreach ($list as $i => $r) {
+                if ($i === $at) foreach ($new as $s) $ins->execute(array($pid, $type, (int)$s['id'], ++$n));
+                $upd->execute(array(++$n, (int)$r['id']));
+            }
+            if ($at === count($list)) foreach ($new as $s) $ins->execute(array($pid, $type, (int)$s['id'], ++$n));
+        }
+    }
+    return $out;
+}
+
+/**
+ * Columns for treks, added once if missing: iti_standard_inclusions.program_kind (first run: the safari
+ * guide's tips row → safari, the trekking crew's tips row added) and iti_programs.cover_photo (a photo
+ * chosen for the cover, copied with the programme). The hut / campsite lodge types: iti_cs_lodge_schema()
+ * where lodges are written. Migration 086 does the same; whichever runs first. Outside transactions.
+ */
+function iti_ensure_trek_schema(): void {
+    static $done = false;
+    if ($done) return;
+    $done = true;
+    $db = db();
+    iti_ensure_country_schema();   // iti_standard_inclusions.country first
+    try {
+        if (iti_add_column('iti_standard_inclusions', 'program_kind', "VARCHAR(10) NOT NULL DEFAULT 'ALL'")) iti_seed_trek_inclusions();
+        iti_add_column('iti_programs', 'cover_photo', 'VARCHAR(255) NULL DEFAULT NULL');
+    } catch (PDOException $e) {
+        error_log('iti_ensure_trek_schema: ' . $e->getMessage());
+    }
+}
+
+/** First run of program_kind: the guide's tips row (text "Tips (…") → safari; the trekking crew's tips row (texts: Roberto, 21 Nov 2026). */
+function iti_seed_trek_inclusions(): void {
+    $db = db();
+    try {
+        $db->exec("UPDATE iti_standard_inclusions SET program_kind = 'safari' WHERE item_type = 'exclusion' AND text_en LIKE 'Tips (%'");
+        if ($db->query("SELECT id FROM iti_standard_inclusions WHERE program_kind = 'trekking'")->fetch()) return;
+        $db->prepare("INSERT INTO iti_standard_inclusions (item_type, country, program_kind, sort_order, text_en, text_it, text_fr, text_es, text_de, is_active)
+                      VALUES ('exclusion', 'ALL', 'trekking', 801, ?, ?, ?, ?, ?, 1)")
+           ->execute(array(
+               'tips for the trekking crew (around USD 150-200 per participant)',
+               'mance allo staff del trekking (indicativamente 150-200 USD per partecipante)',
+               "pourboires pour l'équipe de trekking (environ 150-200 USD par participant)",
+               'propinas para el equipo del trekking (unos 150-200 USD por participante)',
+               'Trinkgelder für das Trekking-Team (ca. 150-200 USD pro Teilnehmer)',
+           ));
+    } catch (PDOException $e) {
+        error_log('iti_seed_trek_inclusions: ' . $e->getMessage());
+    }
 }
 
 /**
@@ -1983,6 +2128,8 @@ if (!defined('ITI_LODGE_TYPES')) {
         'hotel'       => 'Hotel',
         'mobile_camp' => 'Mobile Camp',
         'house'       => 'House',
+        'hut'         => 'Mountain hut',        // no category (iti_cs_lodge_category())
+        'campsite'    => 'Mountain campsite',
     ]);
 }
 

@@ -310,10 +310,12 @@ function iti_pb_days_raw(PDO $db, int $pid): array {
 /**
  * Standard included / not included rows. $country ("KE", "TZ+KE", '' = all): only the rows of
  * those countries and the ones for every country (ALL) — a Kenya programme never gets the
- * Tanzania items (NIC, Tanzania visa), a TZ+KE programme gets both.
+ * Tanzania items (NIC, Tanzania visa), a TZ+KE programme gets both. $kinds (program_kind, see
+ * iti_trek_kinds(): ['ALL', 'trekking'] for a trek…; [] = every kind) — a trek never gets the safari guide's tips.
  */
-function iti_pb_standard_inclusions(PDO $db, string $country = ''): array {
+function iti_pb_standard_inclusions(PDO $db, string $country = '', array $kinds = []): array {
     iti_ensure_country_schema();
+    iti_ensure_trek_schema();
     $out = ['included' => [], 'excluded' => []];
     $sql = 'SELECT * FROM iti_standard_inclusions WHERE is_active = 1';
     $args = [];
@@ -322,10 +324,14 @@ function iti_pb_standard_inclusions(PDO $db, string $country = ''): array {
         $sql .= ' AND country IN (' . implode(',', array_fill(0, count($codes), '?')) . ')';
         $args = $codes;
     }
+    if ($kinds) {
+        $sql .= ' AND program_kind IN (' . implode(',', array_fill(0, count($kinds), '?')) . ')';
+        $args = array_merge($args, array_values($kinds));
+    }
     $st = $db->prepare($sql . ' ORDER BY item_type, sort_order, id');
     $st->execute($args);
     foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
-        $x = ['std_id' => (int)$r['id'], 'country' => $r['country'] ?? 'TZ'];
+        $x = ['std_id' => (int)$r['id'], 'country' => $r['country'] ?? 'TZ', 'program_kind' => $r['program_kind'] ?? 'ALL'];
         foreach (ITI_PS_LANGS as $l) $x['text_' . $l] = $r['text_' . $l];
         $out[$r['item_type'] === 'exclusion' ? 'excluded' : 'included'][] = $x;
     }

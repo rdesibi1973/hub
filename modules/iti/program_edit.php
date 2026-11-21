@@ -87,11 +87,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($paxLabels) {   // documents: wording instead of the number of participants
             $db->prepare('UPDATE iti_programs SET `' . implode('`=?, `', array_keys($paxLabels)) . '`=? WHERE id=?')->execute(array_merge(array_values($paxLabels), [$id]));
         }
+        $trekSwap = null;   // to / from a trek: tip note + the tip line of "not included" follow (iti_trek_sync_inclusions())
         if (isset($_POST['safari_type']) && in_array($_POST['safari_type'], ITI_SAFARI_TYPES, true)) {   // cover + facts of the documents
+            $oldType = iti_safari_type($program);
+            if (($oldType === 'trekking') !== ($_POST['safari_type'] === 'trekking')) $trekSwap = $_POST['safari_type'];
             $db->prepare('UPDATE iti_programs SET safari_type=? WHERE id=?')->execute([$_POST['safari_type'], $id]);
         }
-        if (isset($_POST['show_tip_note'])) {   // tip note on the last safari day (iti_doc_tip_note())
+        if ($trekSwap !== null && array_key_exists('show_tip_note', $program)) {   // the checkbox was set for the old type
+            $db->prepare('UPDATE iti_programs SET show_tip_note=? WHERE id=?')->execute([$trekSwap === 'trekking' ? 0 : 1, $id]);
+        } elseif (isset($_POST['show_tip_note'])) {   // tip note on the last safari day (iti_doc_tip_note())
             $db->prepare('UPDATE iti_programs SET show_tip_note=? WHERE id=?')->execute([$_POST['show_tip_note'] === '1' ? 1 : 0, $id]);
+        }
+        if ($trekSwap !== null) {
+            $inc = iti_trek_sync_inclusions($db, $id, true);
+            $msg = [];
+            if ($inc['removed']) $msg[] = 'removed "' . implode('", "', $inc['removed']) . '"';
+            if ($inc['added']) $msg[] = 'added "' . implode('", "', $inc['added']) . '"';
+            $trekNote = ($trekSwap === 'trekking' ? 'Trek: tip note off' : 'Tip note on') . ($msg ? '; not included: ' . implode(', ', $msg) : '') . '.';
+        }
+        if (array_key_exists('cover_photo', $_POST) && array_key_exists('cover_photo', $program)) {   // cover of the documents; "" = automatic
+            $cv = trim((string)$_POST['cover_photo']);
+            if ($cv === '' || preg_match('~^https://\S{1,250}$~i', $cv)) {
+                $db->prepare('UPDATE iti_programs SET cover_photo=? WHERE id=?')->execute([$cv === '' ? null : $cv, $id]);
+            }
         }
         if (isset($_POST['dates_indicative'])) {   // documents: period + "indicative dates", no date day by day
             $db->prepare('UPDATE iti_programs SET dates_indicative=? WHERE id=?')->execute([$_POST['dates_indicative'] === '1' ? 1 : 0, $id]);
@@ -125,7 +143,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
             }
         }
-        iti_flash_set('success','Program header saved.' . ($tMsg ?? ''));
+        iti_flash_set('success','Program header saved.' . ($tMsg ?? '') . (isset($trekNote) ? ' ' . $trekNote : ''));
         iti_redirect("program_edit.php?id={$id}&tab=info");
     }
 
@@ -975,8 +993,46 @@ include __DIR__ . '/../../includes/layout_header.php';
           <option value="private" <?= iti_safari_type($program)==='private'?'selected':'' ?>>Private safari</option>
           <option value="group" <?= iti_safari_type($program)==='group'?'selected':'' ?>>Group safari (shared jeep)</option>
           <option value="beach" <?= iti_safari_type($program)==='beach'?'selected':'' ?>>Beach stay (no safari)</option>
+          <option value="trekking" <?= iti_safari_type($program)==='trekking'?'selected':'' ?>>Trekking (Kilimanjaro / Meru)</option>
         </select>
-        <span class="form-hint">Cover and facts line of the programme: "Safari privato…" or "Safari di gruppo…"</span>
+        <span class="form-hint">Cover and facts line of the program: "Safari privato…", "Safari di gruppo…" or "Trekking privato…". To / from Trekking also switches the tip note and the tips line of "not included" (safari guide ↔ trekking crew).</span>
+      </div>
+      <?php endif; ?>
+      <?php if (array_key_exists('cover_photo', $program)):
+          // Photos of the program's destinations and lodges (days' destination, lodge, lodge area), in day order.
+          $coverOpts = []; $coverSeen = [];
+          $cvDays = iti_get_days($id);
+          $cvDest = []; $cvLodge = [];
+          foreach ($cvDays as $cd) {
+              if (!empty($cd['destination_id'])) $cvDest[(int)$cd['destination_id']] = true;
+              if (!empty($cd['end_lodge_id'])) $cvLodge[(int)$cd['end_lodge_id']] = true;
+          }
+          if ($cvLodge) {
+              foreach ($db->query('SELECT id, name, photos, destination_id FROM iti_lodges WHERE id IN (' . implode(',', array_keys($cvLodge)) . ')')->fetchAll() as $lr) {
+                  if (!empty($lr['destination_id'])) $cvDest[(int)$lr['destination_id']] = true;
+                  foreach (iti_photos_decode($lr['photos'] ?? null) as $k => $u) $coverOpts[] = [$u, $lr['name'] . ' · photo ' . ($k + 1)];
+              }
+          }
+          if ($cvDest) {
+              $destOpts = [];
+              foreach ($db->query('SELECT * FROM iti_destinations WHERE id IN (' . implode(',', array_keys($cvDest)) . ')')->fetchAll() as $dr) {
+                  foreach (iti_dest_photos($dr) as $k => $u) $destOpts[] = [$u, $dr['name_en'] . ' · photo ' . ($k + 1)];
+              }
+              $coverOpts = array_merge($destOpts, $coverOpts);   // destinations first
+          }
+          $curCover = (string)($program['cover_photo'] ?? '');
+      ?>
+      <div class="form-group">
+        <label>Cover photo</label>
+        <select name="cover_photo" id="cover-photo-sel" onchange="var i=document.getElementById('cover-photo-prev');if(this.value){i.src=this.value;i.style.display='block';}else{i.style.display='none';}">
+          <option value="">Automatic (park of most days, else place of most nights)</option>
+          <?php foreach ($coverOpts as $o): if (isset($coverSeen[$o[0]])) continue; $coverSeen[$o[0]] = true; ?>
+            <option value="<?= h($o[0]) ?>" <?= $curCover === $o[0] ? 'selected' : '' ?>><?= h($o[1]) ?></option>
+          <?php endforeach; ?>
+          <?php if ($curCover !== '' && !isset($coverSeen[$curCover])): ?><option value="<?= h($curCover) ?>" selected>Other: <?= h(basename(parse_url($curCover, PHP_URL_PATH) ?: $curCover)) ?></option><?php endif; ?>
+        </select>
+        <img id="cover-photo-prev" src="<?= h($curCover) ?>" alt="" style="<?= $curCover === '' ? 'display:none;' : '' ?>margin-top:6px;max-width:220px;max-height:120px;border-radius:4px;object-fit:cover;">
+        <span class="form-hint">Cover of the web page, PDF and Word. Copied to the programs made from this one.</span>
       </div>
       <?php endif; ?>
       <?php if (array_key_exists('show_tip_note', $program)):

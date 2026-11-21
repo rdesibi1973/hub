@@ -17,6 +17,41 @@ const ITI_CS_LODGE_MAX_PHOTOS = 12;
 
 const ITI_CS_ACTIVITY_TYPES = ['game_drive', 'walking_safari', 'cultural', 'boat', 'balloon', 'hiking', 'beach', 'other'];
 
+// hut / campsite (Kilimanjaro / Meru, 21 Nov 2026): no category (null), "Rifugio" / "Campo tendato in quota" on the documents.
+const ITI_CS_LODGE_TYPES = ['lodge', 'tented_camp', 'hotel', 'mobile_camp', 'house', 'hut', 'campsite'];
+const ITI_CS_LODGE_CATEGORIES = ['budget', 'mid', 'luxury', 'ultra_luxury'];
+
+/** lodge_type ENUM with hut / campsite and a nullable category, once (migration 086 does the same). DDL: outside transactions. */
+function iti_cs_lodge_schema(PDO $db): void {
+    static $done = false;
+    if ($done) return;
+    $done = true;
+    try {
+        $c = $db->query("SHOW COLUMNS FROM iti_lodges LIKE 'lodge_type'")->fetch(PDO::FETCH_ASSOC);
+        if ($c && stripos((string)$c['Type'], "'campsite'") === false) {
+            $db->exec("ALTER TABLE iti_lodges MODIFY lodge_type ENUM('" . implode("','", ITI_CS_LODGE_TYPES) . "') NOT NULL DEFAULT 'lodge'");
+        }
+        $c = $db->query("SHOW COLUMNS FROM iti_lodges LIKE 'category'")->fetch(PDO::FETCH_ASSOC);
+        if ($c && strtoupper((string)$c['Null']) === 'NO') {
+            $db->exec("ALTER TABLE iti_lodges MODIFY category ENUM('" . implode("','", ITI_CS_LODGE_CATEGORIES) . "') NULL DEFAULT 'mid'");
+        }
+    } catch (PDOException $e) {
+        error_log('iti_cs_lodge_schema: ' . $e->getMessage());
+    }
+}
+
+/** A lodge's category as given: one of ITI_CS_LODGE_CATEGORIES, or null / "" (only for a hut / campsite). */
+function iti_cs_lodge_category($v, string $type) {
+    $v = $v === null ? '' : trim((string)$v);
+    $mountain = in_array($type, ['hut', 'campsite'], true);
+    if ($v === '') {
+        if ($mountain) return null;
+        throw new InvalidArgumentException('category: ' . implode('|', ITI_CS_LODGE_CATEGORIES) . ' (null only for a hut / campsite)');
+    }
+    if (!in_array($v, ITI_CS_LODGE_CATEGORIES, true)) throw new InvalidArgumentException('category: ' . implode('|', ITI_CS_LODGE_CATEGORIES) . ($mountain ? ' or null' : ''));
+    return $v;
+}
+
 /** Text fields an agent may change (+ lat/lng, checked apart). */
 function iti_cs_editable(string $kind): array {
     $desc = [];
@@ -265,12 +300,13 @@ function iti_cs_set_photos(PDO $db, string $kind, int $id, array $in, bool $go):
 }
 
 /**
- * New lodge. $f: name*, destination_id*, category (budget|mid|luxury|ultra_luxury), lodge_type
- * (lodge|tented_camp|hotel|mobile_camp|house) + any editable field (website, contacts, lat/lng,
- * description_<lang>). Refuses a name that already exists. Returns the plan; with $go the new id.
+ * New lodge. $f: name*, destination_id*, category (budget|mid|luxury|ultra_luxury; null for a hut / campsite,
+ * its default there), lodge_type (lodge|tented_camp|hotel|mobile_camp|house|hut|campsite) + any editable field
+ * (website, contacts, lat/lng, description_<lang>). Refuses a name that already exists. Returns the plan; with $go the new id.
  */
 function iti_cs_create_lodge(PDO $db, array $f, bool $go): array {
     iti_photos_schema();
+    iti_cs_lodge_schema($db);
     $name = trim((string)($f['name'] ?? ''));
     $did = (int)($f['destination_id'] ?? 0);
     if ($name === '' || !$did) throw new InvalidArgumentException('name and destination_id are required');
@@ -278,10 +314,9 @@ function iti_cs_create_lodge(PDO $db, array $f, bool $go): array {
     $st = $db->prepare('SELECT id, name FROM iti_lodges WHERE name = ? OR name LIKE ?');
     $st->execute([$name, '%' . $name . '%']);
     if ($dup = $st->fetch(PDO::FETCH_ASSOC)) throw new InvalidArgumentException('Lodge already exists: #' . $dup['id'] . ' ' . $dup['name']);
-    $cat = (string)($f['category'] ?? 'mid');
     $type = (string)($f['lodge_type'] ?? 'lodge');
-    if (!in_array($cat, ['budget', 'mid', 'luxury', 'ultra_luxury'], true)) throw new InvalidArgumentException('category: budget|mid|luxury|ultra_luxury');
-    if (!in_array($type, ['lodge', 'tented_camp', 'hotel', 'mobile_camp', 'house'], true)) throw new InvalidArgumentException('lodge_type: lodge|tented_camp|hotel|mobile_camp|house');
+    if (!in_array($type, ITI_CS_LODGE_TYPES, true)) throw new InvalidArgumentException('lodge_type: ' . implode('|', ITI_CS_LODGE_TYPES));
+    $cat = iti_cs_lodge_category(array_key_exists('category', $f) ? $f['category'] : (in_array($type, ['hut', 'campsite'], true) ? null : 'mid'), $type);
     $row = ['destination_id' => $did, 'name' => $name, 'category' => $cat, 'lodge_type' => $type, 'is_active' => 1];
     foreach (ITI_CS_LANGS as $l) $row['description_' . $l] = '';
     $extra = array_diff_key($f, array_flip(['name', 'destination_id', 'category', 'lodge_type']));
@@ -322,6 +357,7 @@ function iti_cs_update(PDO $db, string $kind, int $id, array $fields, bool $go):
     $isLodge = $kind === 'lodge';
     $isAct = $kind === 'activity';
     if ($isLodge && array_key_exists('room_categories', $fields)) iti_rooms_schema($db);   // column added once (DDL, before any write)
+    if ($isLodge && (array_key_exists('lodge_type', $fields) || array_key_exists('category', $fields))) iti_cs_lodge_schema($db);   // hut / campsite, null category
     $row = $isLodge ? iti_cs_lodge_row($db, $id) : ($isAct ? iti_cs_activity_row($db, $id) : iti_cs_destination_row($db, $id));
     if (!$row) throw new InvalidArgumentException(($isLodge ? 'Lodge ' : ($isAct ? 'Activity ' : 'Destination ')) . $id . ' not found');
     $allowed = $isAct ? iti_cs_editable($kind)
@@ -350,11 +386,13 @@ function iti_cs_update(PDO $db, string $kind, int $id, array $fields, bool $go):
             $v = (int)$v;
             if (!$v || !iti_cs_destination_row($db, $v)) throw new InvalidArgumentException('destination_id ' . $v . ' not found');
             $cur = (int)$row[$k];
-        } elseif ($k === 'category' || $k === 'lodge_type') {
+        } elseif ($k === 'lodge_type') {
             $v = trim((string)$v);
-            $ok = $k === 'category' ? ['budget', 'mid', 'luxury', 'ultra_luxury'] : ['lodge', 'tented_camp', 'hotel', 'mobile_camp', 'house'];
-            if (!in_array($v, $ok, true)) throw new InvalidArgumentException($k . ': ' . implode('|', $ok));
+            if (!in_array($v, ITI_CS_LODGE_TYPES, true)) throw new InvalidArgumentException($k . ': ' . implode('|', ITI_CS_LODGE_TYPES));
             $cur = (string)($row[$k] ?? '');
+        } elseif ($k === 'category') {   // null only for a hut / campsite (the type sent in the same call, else the lodge's)
+            $v = iti_cs_lodge_category($v, (string)($fields['lodge_type'] ?? $row['lodge_type'] ?? ''));
+            $cur = $row[$k] ?? null;
         } elseif ($k === 'room_categories') {   // the whole list: array or one per line; [] / "" clears
             $v = iti_room_categories_text($v);
             $cur = iti_room_categories_text($row[$k] ?? '');
