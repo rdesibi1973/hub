@@ -267,14 +267,26 @@ function buildChannelBreakdown(PDO $db, string $from, string $to, array $agents,
     $where = "r.status = 'Booked' AND r.confirmation_date BETWEEN ? AND ?
               AND (r.practice_code NOT LIKE '%-STAFF%' OR r.practice_code IS NULL) AND $who";
 
-    $st = $db->prepare("SELECT COALESCE(r.channel, '') AS ch, COUNT(*) AS n, SUM(r.value_usd) AS sales, SUM(r.pax) AS pax
-                        FROM requests r WHERE $where GROUP BY ch");
+    // Network = agencies.type (savannah | promoservice | lamprati, the -PS / -LAM of the folder tag);
+    // direct clients, SB and agencies without a type belong to Savannah.
+    $st = $db->prepare("SELECT COALESCE(r.channel, '') AS ch, COALESCE(a.type, '') AS net,
+                               COUNT(*) AS n, SUM(r.value_usd) AS sales, SUM(r.pax) AS pax
+                        FROM requests r LEFT JOIN agencies a ON a.id = r.agency_id AND r.channel = 'agency'
+                        WHERE $where GROUP BY ch, net");
     $st->execute([$from, $to]);
     $blank = ['n' => 0, 'sales' => 0.0, 'pax' => 0];
-    $ch = ['agency' => $blank, 'direct' => $blank, 'sb' => $blank, '' => $blank];
+    $ch  = ['agency' => $blank, 'direct' => $blank, 'sb' => $blank, '' => $blank];
+    $net = ['savannah' => $blank, 'sav_direct' => $blank, 'sav_agency' => $blank, 'promoservice' => $blank, 'lamprati' => $blank];
+    $add = function (array &$t, array $r) { $t['n'] += (int)$r['n']; $t['sales'] += (float)$r['sales']; $t['pax'] += (int)$r['pax']; };
     foreach ($st->fetchAll() as $r) {
         $k = isset($ch[$r['ch']]) ? $r['ch'] : '';
-        $ch[$k]['n'] += (int)$r['n']; $ch[$k]['sales'] += (float)$r['sales']; $ch[$k]['pax'] += (int)$r['pax'];
+        $add($ch[$k], $r);
+        if ($r['ch'] === 'agency' && in_array($r['net'], ['promoservice', 'lamprati'], true)) {
+            $add($net[$r['net']], $r);
+        } else {
+            $add($net['savannah'], $r);
+            $add($net[$r['ch'] === 'agency' ? 'sav_agency' : 'sav_direct'], $r);
+        }
     }
     $direct = ['n'     => $ch['direct']['n'] + $ch['sb']['n'],
                'sales' => $ch['direct']['sales'] + $ch['sb']['sales'],
@@ -287,7 +299,7 @@ function buildChannelBreakdown(PDO $db, string $from, string $to, array $agents,
     $st->execute([$from, $to]);
     $agencies = $st->fetchAll();
 
-    return ['agency' => $ch['agency'], 'direct' => $direct, 'sb' => $ch['sb'], 'unknown' => $ch[''],
+    return ['agency' => $ch['agency'], 'direct' => $direct, 'sb' => $ch['sb'], 'unknown' => $ch[''], 'network' => $net,
             'total'  => array_sum(array_column($ch, 'sales')), 'agencies' => $agencies];
 }
 
@@ -1309,18 +1321,32 @@ include 'includes/header.php';
   ];
   if ($channels['unknown']['n'] > 0)
       $ch_rows[] = ['label' => 'Not classified', 'c' => $channels['unknown'], 'color' => 'var(--grey-mid)', 'sub' => false];
+  $nw = $channels['network'];
+  $net_rows = [
+      ['label' => 'Savannah',                'c' => $nw['savannah'],     'color' => 'var(--green)', 'sub' => false],
+      ['label' => 'direct clients (incl. SB)', 'c' => $nw['sav_direct'], 'color' => 'var(--green)', 'sub' => true],
+      ['label' => 'Savannah agencies',       'c' => $nw['sav_agency'],   'color' => 'var(--green)', 'sub' => true],
+      ['label' => 'Promoservice',            'c' => $nw['promoservice'], 'color' => '#e05c1a',      'sub' => false],
+      ['label' => 'Lamprati',                'c' => $nw['lamprati'],     'color' => '#1a6bb3',      'sub' => false],
+  ];
   $ag_rows = $channels['agencies'];
   $ag_top  = 15;
 ?>
-<!-- Sales by channel / agency -->
-<h3 style="font-family:'Merriweather',serif;font-size:1rem;margin:28px 0 4px">Sales by channel</h3>
+<!-- Sales by network / channel / agency -->
+<h3 style="font-family:'Merriweather',serif;font-size:1rem;margin:28px 0 4px">Sales by network</h3>
 <p style="font-size:.75rem;color:var(--grey-mid);margin:0 0 10px">
-  Same bookings as the Sales Amount above (Booked, by confirmation date). SB bookings count as direct clients.
+  Same bookings as the Sales Amount above (Booked, by confirmation date). Promoservice / Lamprati = the agency's type
+  in Agencies (-PS / -LAM); everything else, direct clients included, is Savannah.
 </p>
+<?php $ch_tables = [['rows' => $net_rows, 'first' => 'Network'], ['rows' => $ch_rows, 'first' => 'Channel']];
+foreach ($ch_tables as $ti => $tbl): if ($ti === 1): ?>
+<h3 style="font-family:'Merriweather',serif;font-size:1rem;margin:0 0 4px">Sales by channel</h3>
+<p style="font-size:.75rem;color:var(--grey-mid);margin:0 0 10px">SB bookings count as direct clients.</p>
+<?php endif; ?>
 <div class="table-wrap" style="margin-bottom:20px">
   <table>
     <thead><tr>
-      <th style="<?= $th ?>">Channel</th>
+      <th style="<?= $th ?>"><?= $tbl['first'] ?></th>
       <th style="<?= $th ?>;text-align:right">Bookings</th>
       <th style="<?= $th ?>;text-align:right">Sales Amount</th>
       <th style="<?= $th ?>;min-width:160px">Share</th>
@@ -1328,7 +1354,7 @@ include 'includes/header.php';
       <th style="<?= $th ?>;text-align:right">$ / PAX</th>
     </tr></thead>
     <tbody>
-    <?php foreach ($ch_rows as $cr): $c = $cr['c']; $p = $pct($c['sales']); ?>
+    <?php foreach ($tbl['rows'] as $cr): $c = $cr['c']; $p = $pct($c['sales']); ?>
       <tr<?= $cr['sub'] ? ' style="color:var(--grey-mid);font-size:.85em"' : '' ?>>
         <td style="<?= $cr['sub'] ? 'padding-left:26px' : 'font-weight:600' ?>"><?= $cr['sub'] ? '↳ ' : '' ?><?= h($cr['label']) ?></td>
         <td class="text-right"><?= $c['n'] ?: '—' ?></td>
@@ -1348,6 +1374,7 @@ include 'includes/header.php';
     </tbody>
   </table>
 </div>
+<?php endforeach; ?>
 
 <?php if ($ag_rows): ?>
 <h3 style="font-family:'Merriweather',serif;font-size:1rem;margin:0 0 4px">Sales by agency</h3>
