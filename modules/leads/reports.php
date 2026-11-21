@@ -255,6 +255,42 @@ function buildSummaryHistory(PDO $db, string $from, string $to, array $agents): 
     return ['rows' => $rows, 'totals' => $totals];
 }
 
+// ── Helper: sales by channel / agency (live table) ───────────────
+// Same rows as the Sales Amount KPI: Booked, confirmation_date in the period, not STAFF,
+// sellers = the agents of the table (active agents, or the one filtered) + unassigned.
+// requests.channel: agency | direct | sb (migration 067); SB counts as direct, shown as a sub-row.
+function buildChannelBreakdown(PDO $db, string $from, string $to, array $agents, int $agent_filter): array {
+    $ids = array_map(fn($a) => (int)$a['id'], $agents);
+    $who = $agent_filter > 0
+        ? 'r.agent_id = ' . $agent_filter
+        : '(r.agent_id IS NULL' . ($ids ? ' OR r.agent_id IN (' . implode(',', $ids) . ')' : '') . ')';
+    $where = "r.status = 'Booked' AND r.confirmation_date BETWEEN ? AND ?
+              AND (r.practice_code NOT LIKE '%-STAFF%' OR r.practice_code IS NULL) AND $who";
+
+    $st = $db->prepare("SELECT COALESCE(r.channel, '') AS ch, COUNT(*) AS n, SUM(r.value_usd) AS sales, SUM(r.pax) AS pax
+                        FROM requests r WHERE $where GROUP BY ch");
+    $st->execute([$from, $to]);
+    $blank = ['n' => 0, 'sales' => 0.0, 'pax' => 0];
+    $ch = ['agency' => $blank, 'direct' => $blank, 'sb' => $blank, '' => $blank];
+    foreach ($st->fetchAll() as $r) {
+        $k = isset($ch[$r['ch']]) ? $r['ch'] : '';
+        $ch[$k]['n'] += (int)$r['n']; $ch[$k]['sales'] += (float)$r['sales']; $ch[$k]['pax'] += (int)$r['pax'];
+    }
+    $direct = ['n'     => $ch['direct']['n'] + $ch['sb']['n'],
+               'sales' => $ch['direct']['sales'] + $ch['sb']['sales'],
+               'pax'   => $ch['direct']['pax'] + $ch['sb']['pax']];
+
+    $st = $db->prepare("SELECT r.agency_id, a.nome, COUNT(*) AS n, SUM(r.value_usd) AS sales, SUM(r.pax) AS pax
+                        FROM requests r LEFT JOIN agencies a ON a.id = r.agency_id
+                        WHERE $where AND r.channel = 'agency'
+                        GROUP BY r.agency_id, a.nome ORDER BY sales DESC");
+    $st->execute([$from, $to]);
+    $agencies = $st->fetchAll();
+
+    return ['agency' => $ch['agency'], 'direct' => $direct, 'sb' => $ch['sb'], 'unknown' => $ch[''],
+            'total'  => array_sum(array_column($ch, 'sales')), 'agencies' => $agencies];
+}
+
 // ── Build data ────────────────────────────────────────────────────
 $summary   = null;
 $title_str = '';
@@ -302,6 +338,9 @@ if ($report_type !== 'team' && $mode === 'monthly') {
     $title_str   = date('d M Y', strtotime($from)) . ' → ' . date('d M Y', strtotime($to));
     $report_from = $from; $report_to = $to;
 }
+$channels = ($report_type === 'sales' && !$is_history && $summary !== null && $summary['totals']['confirmed'] > 0)
+    ? buildChannelBreakdown($db, $report_from, $report_to, $agents, $agent_filter)
+    : null;
 
 // ── Travel Period report data (report_type=travel) ──
 $travel_summary = null;
@@ -1257,6 +1296,102 @@ include 'includes/header.php';
     </tbody>
   </table>
 </div>
+
+<?php if ($channels !== null && $channels['total'] > 0):
+  $ct  = $channels['total'];
+  $pct = fn($v) => number_format($ct > 0 ? $v / $ct * 100 : 0, 1, '.', '');
+  $ppx = fn($c) => $c['pax'] > 0 ? '$' . number_format($c['sales'] / $c['pax'], 0) : '—';
+  $th  = 'background:var(--green);color:white;font-size:.72rem';
+  $ch_rows = [
+      ['label' => 'Agencies',        'c' => $channels['agency'], 'color' => '#1a6bb3', 'sub' => false],
+      ['label' => 'Direct clients',  'c' => $channels['direct'], 'color' => 'var(--green)', 'sub' => false],
+      ['label' => 'of which SB',     'c' => $channels['sb'],     'color' => 'var(--green)', 'sub' => true],
+  ];
+  if ($channels['unknown']['n'] > 0)
+      $ch_rows[] = ['label' => 'Not classified', 'c' => $channels['unknown'], 'color' => 'var(--grey-mid)', 'sub' => false];
+  $ag_rows = $channels['agencies'];
+  $ag_top  = 15;
+?>
+<!-- Sales by channel / agency -->
+<h3 style="font-family:'Merriweather',serif;font-size:1rem;margin:28px 0 4px">Sales by channel</h3>
+<p style="font-size:.75rem;color:var(--grey-mid);margin:0 0 10px">
+  Same bookings as the Sales Amount above (Booked, by confirmation date). SB bookings count as direct clients.
+</p>
+<div class="table-wrap" style="margin-bottom:20px">
+  <table>
+    <thead><tr>
+      <th style="<?= $th ?>">Channel</th>
+      <th style="<?= $th ?>;text-align:right">Bookings</th>
+      <th style="<?= $th ?>;text-align:right">Sales Amount</th>
+      <th style="<?= $th ?>;min-width:160px">Share</th>
+      <th style="<?= $th ?>;text-align:right">PAX</th>
+      <th style="<?= $th ?>;text-align:right">$ / PAX</th>
+    </tr></thead>
+    <tbody>
+    <?php foreach ($ch_rows as $cr): $c = $cr['c']; $p = $pct($c['sales']); ?>
+      <tr<?= $cr['sub'] ? ' style="color:var(--grey-mid);font-size:.85em"' : '' ?>>
+        <td style="<?= $cr['sub'] ? 'padding-left:26px' : 'font-weight:600' ?>"><?= $cr['sub'] ? '↳ ' : '' ?><?= h($cr['label']) ?></td>
+        <td class="text-right"><?= $c['n'] ?: '—' ?></td>
+        <td class="text-right<?= $cr['sub'] ? '' : ' text-green' ?>"><?= $c['sales'] > 0 ? '$' . number_format($c['sales'], 0) : '—' ?></td>
+        <td>
+          <div style="display:flex;align-items:center;gap:8px">
+            <div style="flex:1;height:8px;background:var(--grey-lt);border-radius:4px;overflow:hidden">
+              <div style="width:<?= $p ?>%;height:100%;background:<?= $cr['color'] ?>;opacity:<?= $cr['sub'] ? '.5' : '1' ?>"></div>
+            </div>
+            <span style="min-width:42px;text-align:right;font-weight:<?= $cr['sub'] ? '400' : '700' ?>"><?= $p ?>%</span>
+          </div>
+        </td>
+        <td class="text-right text-muted"><?= $c['pax'] ?: '—' ?></td>
+        <td class="text-right text-muted"><?= $ppx($c) ?></td>
+      </tr>
+    <?php endforeach; ?>
+    </tbody>
+  </table>
+</div>
+
+<?php if ($ag_rows): ?>
+<h3 style="font-family:'Merriweather',serif;font-size:1rem;margin:0 0 4px">Sales by agency</h3>
+<p style="font-size:.75rem;color:var(--grey-mid);margin:0 0 10px">
+  <?= count($ag_rows) ?> agencies with bookings in the period<?php
+  $top10 = array_sum(array_column(array_slice($ag_rows, 0, 10), 'sales'));
+  if (count($ag_rows) > 10): ?> · top 10 = <?= $pct($top10) ?>% of all sales<?php endif; ?>.
+</p>
+<div class="table-wrap">
+  <table>
+    <thead><tr>
+      <th style="<?= $th ?>;text-align:right;width:36px">#</th>
+      <th style="<?= $th ?>;min-width:220px">Agency</th>
+      <th style="<?= $th ?>;text-align:right">Bookings</th>
+      <th style="<?= $th ?>;text-align:right">Sales Amount</th>
+      <th style="<?= $th ?>;text-align:right">% of all sales</th>
+      <th style="<?= $th ?>;text-align:right" title="Running total of the agencies down to this row">Cumulative</th>
+      <th style="<?= $th ?>;text-align:right">PAX</th>
+      <th style="<?= $th ?>;text-align:right">$ / PAX</th>
+    </tr></thead>
+    <tbody>
+    <?php $cum = 0; foreach ($ag_rows as $i => $a): $cum += (float)$a['sales']; ?>
+      <tr class="<?= $i >= $ag_top ? 'ag-more' : '' ?>"<?= $i >= $ag_top ? ' style="display:none"' : '' ?>>
+        <td class="text-right text-muted"><?= $i + 1 ?></td>
+        <td style="font-weight:600"><?= $a['agency_id'] ? h($a['nome'] ?? ('#' . $a['agency_id'])) : '<span class="text-muted">Agency not in the list</span>' ?></td>
+        <td class="text-right"><?= (int)$a['n'] ?></td>
+        <td class="text-right text-green">$<?= number_format((float)$a['sales'], 0) ?></td>
+        <td class="text-right" style="font-weight:700"><?= $pct((float)$a['sales']) ?>%</td>
+        <td class="text-right text-muted"><?= $pct($cum) ?>%</td>
+        <td class="text-right text-muted"><?= (int)$a['pax'] ?: '—' ?></td>
+        <td class="text-right text-muted"><?= $ppx(['sales' => (float)$a['sales'], 'pax' => (int)$a['pax']]) ?></td>
+      </tr>
+    <?php endforeach; ?>
+    </tbody>
+  </table>
+</div>
+<?php if (count($ag_rows) > $ag_top): ?>
+<button type="button" class="btn btn-outline btn-sm" style="margin-top:8px" id="agMoreBtn"
+        onclick="var s=this.dataset.open!=='1';document.querySelectorAll('tr.ag-more').forEach(function(t){t.style.display=s?'':'none'});this.dataset.open=s?'1':'0';this.textContent=s?'Show top <?= $ag_top ?> only':'Show all <?= count($ag_rows) ?> agencies'">
+  Show all <?= count($ag_rows) ?> agencies
+</button>
+<?php endif; ?>
+<?php endif; ?>
+<?php endif; ?>
 
 <?php endif; ?>
 <?php endif; ?>
