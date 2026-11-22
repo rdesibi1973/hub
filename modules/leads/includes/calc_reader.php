@@ -234,6 +234,12 @@ function calc_read_file(string $path, string $wantSheet = ''): array {
         if ($cr[1] === $hdr) $headers[$cr[0]] = strtoupper(trim($val));
     }
     ksort($headers);
+    // Price notes (fill_calc notes[]): text in column M above the day-table header.
+    $notes = [];
+    for ($nr = 1; $nr < $hdr; $nr++) {
+        $t = calc_rd_text($v, 'M', $nr);
+        if ($t !== '') $notes[] = $t;
+    }
     $colFor = function (array $needles) use ($headers) {
         foreach ($headers as $col => $h) {
             foreach ($needles as $n) { if (strpos($h, $n) !== false) return $col; }
@@ -450,6 +456,7 @@ function calc_read_file(string $path, string $wantSheet = ''): array {
         'single_supp'       => $singleSupp,
         'discount_teen'     => $discTeen,
         'discount_child'    => $discChild,
+        'notes'             => $notes,     // M1… above the day table (fill_calc notes[])
         'warnings'          => $warnings,
     ];
 }

@@ -502,14 +502,7 @@ function fs_relink_books(array $v): bool {
         && ($v['r']['status'] ?? '') !== 'Booked' && empty($v['r']['confirmation_date']);
 }
 
-/**
- * Customer part of a folder name, as copy_program put it in the file names before the
- * confirm: "07_27JUL_Rossi(BTG-Roberto)_START27JUL_…_PROGRESS" → "Rossi(BTG-Roberto)".
- */
-function fs_name_core(string $name): string {
-    $s = preg_replace('/^\d{1,2}_\d{1,2}[A-Za-z]{3}_/', '', trim($name));
-    return (string)preg_replace('/_START.*$/i', '', (string)$s);
-}
+// fs_name_core() (customer part of a folder name) lives in booking_service.php: copy_program uses it too.
 
 /**
  * Files inside $dir (recursive) named "NN_<old>…", <old> = one of $oldNames or its customer

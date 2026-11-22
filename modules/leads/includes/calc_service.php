@@ -330,6 +330,30 @@ function calc_num($v, string $what): float {
     return (float)$v;
 }
 
+/**
+ * One price_components item for F9: a number, or arithmetic on numbers only ("90/6", "258*5",
+ * "(250+71)/2"; a leading "=" is dropped). Returns ['text' => formula part, 'value' => float|null
+ * (null for an expression)].
+ */
+function calc_price_component($c): array {
+    if (is_int($c) || is_float($c) || (is_string($c) && is_numeric(trim($c)))) {
+        $n = (float)$c;
+        return ['text' => calc_fmt_num($n), 'value' => $n];
+    }
+    $s = is_string($c) ? str_replace(' ', '', ltrim(trim($c), '=')) : '';
+    $ok = $s !== '' && preg_match('/^[0-9.+\-*\/()]+$/', $s) && preg_match('/\d/', $s)
+       && !preg_match('/[+\-*\/]$|^[*\/]|[*\/][*\/+]|\(\)|\.\d*\./', $s);
+    $depth = 0;
+    if ($ok) foreach (str_split($s) as $ch) {
+        if ($ch === '(') $depth++;
+        elseif ($ch === ')' && --$depth < 0) break;
+    }
+    if (!$ok || $depth !== 0) {
+        throw new InvalidArgumentException('price_components item ' . json_encode($c) . ' must be a number or arithmetic on numbers, e.g. 124, "90/6", "258*5".');
+    }
+    return ['text' => $s, 'value' => null];
+}
+
 /** 1625.0 → "1625", 12.5 → "12.5" (for formulas). */
 function calc_fmt_num(float $n): string {
     return rtrim(rtrim(number_format($n, 2, '.', ''), '0'), '.');
@@ -373,10 +397,12 @@ function calc_is_beach_text(string $text): bool {
 /**
  * Fill a booking's Calc. $in (see docs/AGENT_API.md → fill_calc):
  *   request_id, file?, pax_sheet?, adults?, teens?, children?, start_date (Y-m-d),
- *   price_components[] (→ F9 "=a+b+c"), days[] {row_offset?, label?, flight? (route id/name),
- *   flight_cost_pp?, jeep? (D), drinks? (E), activity? {amount?|rate?, desc?}, park_fees? (F), park_fees_desc? (G),
- *   accommodation? (J), hotel? (K), repeat?}, no_jeep? (clears D and E on every row), total_price? (F10),
- *   total_price_note? (G10), guests[] {name,title,country?}, room_type?,
+ *   price_components[] (numbers or arithmetic on numbers → F9 "=a+b/6+c*5"), days[] {row_offset?, label?,
+ *   flight? (route id/name), flight_cost_pp?, jeep? (D), drinks? (E), activity? {amount?|rate?, desc?},
+ *   park_fees? (F), park_fees_desc? (G), accommodation? (J), hotel? (K), repeat?} — a field given as null
+ *   empties its cell(s), an absent field keeps the template —, keep_extra_rows? (else the template day
+ *   rows after the last day are emptied A–K: cleared_rows[]), no_jeep? (clears D and E on every row),
+ *   total_price? (F10), total_price_note? (G10), notes[]? (M1…), guests[] {name,title,country?}, room_type?,
  *   adults_teen_chd?, arrival?, departure?, mid_date? (first beach night), august_supplement?, confirm?
  * $commit false → everything is built and verified on a temp copy, nothing uploaded.
  * The result lists every day row (B–K, "formula → value") with the columns this call changed.
@@ -482,7 +508,11 @@ function calc_fill(PDO $db, array $in, bool $commit): array {
         $comps = isset($in['price_components']) && is_array($in['price_components']) ? $in['price_components'] : [];
         if (!$comps) throw new InvalidArgumentException('price_components is required, e.g. [1625, 255, 70] (see get_rates).');
         $parts = []; $compVals = [];
-        foreach ($comps as $c) { $n = calc_num($c, 'price_components item'); $compVals[] = $n; $parts[] = calc_fmt_num($n); }
+        foreach ($comps as $c) {
+            $p = calc_price_component($c);
+            $parts[] = $p['text'];
+            if ($p['value'] !== null) $compVals[] = $p['value'];   // plain numbers: August double-count check
+        }
 
         // ── 4) Dates + days ──────────────────────────────────────────────────
         $start = (string)($in['start_date'] ?? '');
@@ -519,18 +549,31 @@ function calc_fill(PDO $db, array $in, bool $commit): array {
         $flights = null; $acts = null;
         $cursor = $first;
         $lastRow = $lastTpl;
+        $lastDay = 0;   // last row written by days[] (0 = no days given)
         foreach ((isset($in['days']) && is_array($in['days']) ? $in['days'] : []) as $k => $d) {
             if (isset($d['row_offset'])) $cursor = $first + (int)$d['row_offset'];
             $rep = max(1, (int)($d['repeat'] ?? 1));
             // Cost cells are validated once per entry and copied to every repeated row.
+            // A key present with null = empty cell; a key absent = template left as is.
             $accom = array_key_exists('accommodation', $d) ? calc_cell_amount($d['accommodation'], 'days[' . $k . '].accommodation') : false;
             $fees  = array_key_exists('park_fees', $d)     ? calc_cell_amount($d['park_fees'], 'days[' . $k . '].park_fees') : false;
             $jeep  = array_key_exists('jeep', $d)          ? calc_cell_amount($d['jeep'], 'days[' . $k . '].jeep') : false;
             $drink = array_key_exists('drinks', $d)        ? calc_cell_amount($d['drinks'], 'days[' . $k . '].drinks') : false;
+            // Flight cleared: "flight": null (and no flight_cost_pp), or "flight_cost_pp": null / 0 (and no flight).
+            $flightClear = (array_key_exists('flight', $d) && ($d['flight'] === null || $d['flight'] === '') && !isset($d['flight_cost_pp']))
+                        || (array_key_exists('flight_cost_pp', $d) && ($d['flight_cost_pp'] === null || (is_numeric($d['flight_cost_pp']) && (float)$d['flight_cost_pp'] == 0.0)) && empty($d['flight']));
+            $actClear = array_key_exists('activity', $d) && ($d['activity'] === null || $d['activity'] === [] || $d['activity'] === '');
+            if (array_key_exists('activity', $d) && !$actClear && !is_array($d['activity'])) {
+                throw new InvalidArgumentException('days[' . $k . '].activity must be {amount|rate, desc} or null.');
+            }
             for ($j = 0; $j < $rep; $j++, $cursor++) {
                 $row = $cursor;
                 if ($row > $maxRow) throw new InvalidArgumentException('Too many days: row ' . $row . ' is past the itinerary table (last row ' . $maxRow . ').');
-                if (isset($d['label']) && $d['label'] !== '') $ws->setCellValue('B' . $row, (string)$d['label']);
+                if ($row > $lastDay) $lastDay = $row;
+                if (array_key_exists('label', $d)) {
+                    $lbl = $d['label'] === null ? '' : trim((string)$d['label']);
+                    $ws->setCellValue('B' . $row, $lbl === '' ? null : $lbl);
+                }
 
                 // Jeep (D), drinks (E).
                 if ($jeep !== false) $ws->setCellValue('D' . $row, $jeep);
@@ -542,7 +585,9 @@ function calc_fill(PDO $db, array $in, bool $commit): array {
                 if ($accom !== false) $ws->setCellValue('J' . $row, $accom);
 
                 // Flight: cost from the rate table (route) — never guessed.
-                if (!empty($d['flight']) || isset($d['flight_cost_pp'])) {
+                if ($flightClear) {
+                    $ws->setCellValue('C' . $row, null);
+                } elseif (!empty($d['flight']) || isset($d['flight_cost_pp'])) {
                     $cost = null;
                     if (!empty($d['flight'])) {
                         if ($flights === null) $flights = calc_flight_rates($db, '', date('Y-m-d', strtotime($start . ' +' . ($row - $first) . ' days')));
@@ -562,8 +607,11 @@ function calc_fill(PDO $db, array $in, bool $commit): array {
                     $ws->setCellValue('C' . $row, '=' . calc_fmt_num($cost) . '*$B$1');
                 }
 
-                // Activity / transfer: amount (cost) in H, description in I.
-                if (!empty($d['activity']) && is_array($d['activity'])) {
+                // Activity / transfer: amount (cost) in H, description in I. null → both empty.
+                if ($actClear) {
+                    $ws->setCellValue('H' . $row, null);
+                    $ws->setCellValue('I' . $row, null);
+                } elseif (!empty($d['activity']) && is_array($d['activity'])) {
                     $a = $d['activity'];
                     $amount = null; $desc = (string)($a['desc'] ?? '');
                     if (!empty($a['rate'])) {
@@ -577,7 +625,7 @@ function calc_fill(PDO $db, array $in, bool $commit): array {
                         if ($amount === null) throw new InvalidArgumentException('activity.amount must be a number or a formula like "=279" or "=(250+71)*$B$1".');
                     }
                     $ws->setCellValue('H' . $row, $amount);
-                    $ws->setCellValue('I' . $row, $desc);
+                    $ws->setCellValue('I' . $row, $desc === '' ? null : $desc);
                 }
 
                 if (array_key_exists('hotel', $d)) {
@@ -591,6 +639,23 @@ function calc_fill(PDO $db, array $in, bool $commit): array {
                 }
                 if ($row > $lastRow) $lastRow = $row;
             }
+        }
+
+        // Template day rows after the last day of days[] (up to the Totals row): A–K emptied
+        // (date cascade, label, costs, descriptions, hotel), formatting and Totals untouched —
+        // else the parser reads the trip on to the template's last day. keep_extra_rows: true keeps them.
+        $clearedRows = [];
+        if ($lastDay && empty($in['keep_extra_rows'])) {
+            for ($row = $lastDay + 1; $row <= $maxRow; $row++) {
+                $had = false;
+                foreach (array_merge(['A'], $dayCols) as $col) {
+                    $v = $ws->getCell($col . $row)->getValue();
+                    if ($v !== null && !(is_string($v) && trim($v) === '')) $had = true;
+                    if ($v !== null) $ws->setCellValue($col . $row, null);
+                }
+                if ($had) $clearedRows[] = $row;
+            }
+            $lastRow = $lastDay;
         }
 
         // Date cascade A{first+1}..A{lastRow}: =SUM(A{n-1}+1), same format as A{first+1}.
@@ -631,6 +696,8 @@ function calc_fill(PDO $db, array $in, bool $commit): array {
                         . count($augDates) . ' = ' . $augAmount . ') in price_components — pass "august_supplement": true (or false if it does not apply).'];
         }
         $ws->setCellValue('F9', '=' . implode('+', $parts));
+        try { $f9v = $ws->getCell('F9')->getCalculatedValue(); } catch (Throwable $e) { $f9v = null; }
+        if (!is_numeric($f9v)) throw new InvalidArgumentException('price_components give F9 = ' . '=' . implode('+', $parts) . ', which does not compute to a number.');
 
         // F10 / G10: per-car transfers added after the per-person total ("=F9*$B$1+100", "Inc Dar transfers").
         if (isset($in['total_price'])) {
@@ -638,6 +705,23 @@ function calc_fill(PDO $db, array $in, bool $commit): array {
         }
         if (array_key_exists('total_price_note', $in)) {
             $ws->setCellValue('G10', $in['total_price_note'] === null ? null : (string)$in['total_price_note']);
+        }
+
+        // Price notes (quotes given to the agency): column M from M1 down to the row above the
+        // day-table header — never EXTRA DETAILS (client data for the staff) nor L–O of the
+        // Totals row (they enter B7/B8). notes: [] empties that area; absent = left as is.
+        $notesOut = null;
+        if (array_key_exists('notes', $in)) {
+            $notes = $in['notes'] === null ? [] : (array)$in['notes'];
+            $notes = array_values(array_filter(array_map(function ($n) { return trim((string)$n); }, $notes), 'strlen'));
+            $room = $hdr - 1;
+            if (count($notes) > $room) throw new InvalidArgumentException('notes: at most ' . $room . ' lines (M1:M' . $room . ').');
+            for ($row = 1; $row <= $room; $row++) {
+                $cur = $ws->getCell('M' . $row)->getValue();
+                if (is_string($cur) && strpos($cur, '=') === 0) throw new InvalidArgumentException('notes: M' . $row . ' holds a formula (' . $cur . ') — not a notes area in this Calc.');
+                $ws->setCellValue('M' . $row, $notes[$row - 1] ?? null);
+            }
+            $notesOut = $notes;
         }
 
         // ── 5) Guests, room type, pax text, flights ──────────────────────────
@@ -721,8 +805,10 @@ function calc_fill(PDO $db, array $in, bool $commit): array {
             'august_supplement' => ['safari_nights' => $augDates, 'pp_per_night' => CALC_AUG_SUPPL_PPPN, 'amount_pp' => $augAmount,
                                     'added' => !empty($in['august_supplement']) && $augDates ? true : false],
             'rows'      => $rows,
+            'cleared_rows' => $clearedRows,
             'warnings'  => $warnings,
         ];
+        if ($notesOut !== null) $result['notes'] = $notesOut;
 
         if (!$commit) {
             $result['verify'] = calc_verify($tmpOut, $expect);

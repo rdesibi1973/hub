@@ -439,9 +439,28 @@ function bs_next_prognum(string $token, string $destDir): string {
     return str_pad((string)($max + 1), 2, '0', STR_PAD_LEFT);
 }
 
-/** Name copy_program gives a template in the request folder: {ProgNumber}_{FolderName}_{dst}. */
+/**
+ * Customer part of a folder name, as copy_program puts it in the file names (also after the
+ * confirm): "07_27JUL_Rossi(BTG-Roberto)_START27JUL_…_PROGRESS" → "Rossi(BTG-Roberto)".
+ * A pre-confirmation name "Rossi(BTG-Roberto)" is returned unchanged.
+ */
+function fs_name_core(string $name): string {
+    $s = preg_replace('/^\d{1,2}_\d{1,2}[A-Za-z]{3}_/', '', trim($name));
+    return (string)preg_replace('/_START.*$/i', '', (string)$s);
+}
+
+/** ProgNumber as written in file names: digits padded to 2 ("2" / 2 → "02"); anything else trimmed as is. */
+function bs_prognum_norm($prognum): string {
+    $p = trim((string)$prognum);
+    return ctype_digit($p) && strlen($p) < 2 ? str_pad($p, 2, '0', STR_PAD_LEFT) : $p;
+}
+
+/**
+ * Name copy_program gives a template in the request folder: {ProgNumber}_{Customer}_{dst},
+ * Customer = fs_name_core(folder name) — the same base before and after the confirm.
+ */
 function bs_program_file_name(string $prognum, string $folderName, string $dst): string {
-    return $prognum . '_' . $folderName . '_' . $dst;
+    return $prognum . '_' . fs_name_core($folderName) . '_' . $dst;
 }
 
 /** Every name a template file may carry in a request folder: dst first, then its earlier names ('old'). */
@@ -464,8 +483,11 @@ function bs_copied_programs(array $files, string $folderName): array {
     $pick = function (string $nn, ?array $dsts) use ($have, $folderName): array {
         if ($dsts === null) return [null, false];
         foreach ($dsts as $d) {
-            $fn = bs_program_file_name($nn, $folderName, $d);
-            if (isset($have[strtolower($fn)])) return [$have[strtolower($fn)], true];
+            // Customer-part name first; then the whole folder name (copies made in a confirmed
+            // folder before 22 Nov 2026 carried it).
+            foreach ([bs_program_file_name($nn, $folderName, $d), $nn . '_' . trim($folderName) . '_' . $d] as $fn) {
+                if (isset($have[strtolower($fn)])) return [$have[strtolower($fn)], true];
+            }
         }
         return [bs_program_file_name($nn, $folderName, $dsts[0]), false];
     };
@@ -493,11 +515,12 @@ function bs_copied_programs(array $files, string $folderName): array {
 
 /**
  * Copy standard program templates into a request's folder, renamed
- * {ProgNumber}_{FolderName}_{dst} (bs_program_file_name). $prognum '' = next free number.
+ * {ProgNumber}_{Customer}_{dst} (bs_program_file_name: customer part of the folder name, also
+ * in a confirmed /001_Safari folder). $prognum '' = next free number; "2" → "02".
  * Returns ['ok','msg','prognum','summary','copied','skipped','missing','unknown','disabled'].
  */
 function bs_copy_programs(PDO $db, int $reqId, string $prognum, array $programs): array {
-    $prognum = trim($prognum);
+    $prognum = bs_prognum_norm($prognum);
     if ($prognum !== '' && preg_match('#[\\\\/:*?"<>|]#', $prognum)) {
         return ['ok' => false, 'msg' => 'Enter a valid ProgNumber (no \\ / : * ? " < > |).'];
     }

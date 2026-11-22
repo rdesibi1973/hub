@@ -9,7 +9,7 @@ api_doc(){ awk -v a="\`$1\`" '/^##/{ if(p) exit; if(index($0,a)) p=1 } p' AGENT_
 api_doc fill_calc
 ```
 
-Il numero di riga `L…` è indicativo (versione del 21/11/2026): se il file cambia, cerca il titolo con `grep -n`.
+Il numero di riga `L…` è indicativo (versione del 22/11/2026): se il file cambia, cerca il titolo con `grep -n`.
 Quando aggiungi o cambi un'azione nell'API, aggiorna anche questo indice.
 
 ## Regole comuni
@@ -42,12 +42,12 @@ Quando aggiungi o cambi un'azione nell'API, aggiorna anche questo indice.
 | Azione | Metodo | Parametri principali | Note | Riga |
 |---|---|---|---|---|
 | list_standard_programs | GET | — | codici programma + destinations di Confirm | L360 |
-| copy_program | POST | `request_id`, `program` / `programs[]`, `prognum` | | L365 |
-| get_rates | GET | `program`, `q`, `route`, `activity`, `date` | prezzi dal template Calc | L369 |
-| update_rate / add_flight_rates / replace_flight_rates | POST D | `type`, `id`, `cost`, `sale` / `routes[]` | | L391 |
-| fill_calc | POST D | `request_id`, righe / pax / date (vedi sezione) | 409 se il Calc è cambiato (Excel aperto) | L405 |
-| read_calc | GET | `request_id`, `file`, `sheet` | pax, righe, totali, `calc_rev` | L439 |
-| booking_check | GET | `request_id`, `file`, `sheet` | per lo skill booking-check | L464 |
+| copy_program | POST | `request_id`, `program` / `programs[]`, `prognum` | file `NN_<cliente>(<agenzia>-<agente>)_…` anche in cartella confermata; `2` → `02` | L365 |
+| get_rates | GET | `program`, `q`, `route`, `activity`, `date` | prezzi dal template Calc | L372 |
+| update_rate / add_flight_rates / replace_flight_rates | POST D | `type`, `id`, `cost`, `sale` / `routes[]` | | L394 |
+| fill_calc | POST D | `request_id`, righe / pax / date (vedi sezione), `keep_extra_rows`, `notes[]` | `null` = cella vuota su ogni campo del giorno; righe del modello dopo l'ultimo giorno svuotate (`cleared_rows`); `price_components` accetta `"90/6"`; 409 se il Calc è cambiato | L408 |
+| read_calc | GET | `request_id`, `file`, `sheet` | pax, righe, totali, `notes[]`, `calc_rev` | L446 |
+| booking_check | GET | `request_id`, `file`, `sheet` | per lo skill booking-check | L471 |
 | gate_status / gate_run | GET / POST D | `request_id` | booking gate AI prima di uscire da _PROGRESS | L495 |
 
 ## Conferma, cartelle, gruppi

@@ -363,8 +363,11 @@ A program with a `disabled` reason (template missing in Dropbox) is not copied: 
 lists it under `disabled`. The switch-off list is `bs_std_programs_disabled()` in `booking_service.php`.
 
 ### `copy_program` (POST)
-`request_id`, `program` (or `programs: [...]`), optional `prognum` (default: next free number).
-Returns `copied`, `skipped` (already there), `missing` (template not found), `unknown`.
+`request_id`, `program` (or `programs: [...]`), optional `prognum` (int or string; default: next free number;
+`2` / `"2"` → `02`). Files are named `NN_<customer part>_<dst>`, customer part = `<customer>(<agency>-<agent>)`
+(`fs_name_core()`): the same base in a `/2026/` folder and in a confirmed `/001_Safari/…_START…` folder, e.g.
+`02_EU0210(EuphemiaLabTravel-PS-Roberto)_BeachDumaShort_Calc.xlsx` (since 22 Nov 2026; before, a copy into a confirmed
+folder carried the whole folder name). Returns `prognum`, `copied`, `skipped` (already there), `missing` (template not found), `unknown`.
 
 ### `get_rates` (GET)
 `program?` (e.g. `DumaShort`), `q?` (alias `search`: filters flights **and** activities), `route?` / `activity?`
@@ -413,11 +416,14 @@ changed meanwhile, e.g. saved from Excel), re-downloaded and re-verified.
 | `pax_sheet` (or `adults`/`teens`/`children`) | the other pax sheets deleted (names with trailing spaces handled); `RECAP` and non-pax sheets stay (GRP quotes). In a group calc only bare `NPAX` sheets go, client sheets like `1PAX Cacioli` stay. Kept-sheet formulas pointing at a deleted sheet → warning (#REF!) |
 | `keep_sheets` `["3PAX"]` | sheets kept even if they are pax sheets (422 if not in the Calc) |
 | — | H6:I14 cleared |
-| `price_components` `[1625,255,70]` | F9 = `=1625+255+70` (never a hardcoded total) |
+| `price_components` `[1625,255,70]` | F9 = `=1625+255+70` (never a hardcoded total). An item may be arithmetic on numbers only (`+ - * / ( )`, no cells), to show where a price comes from: `[124,"90/6",255,"140/6","258*5"]` → `=124+90/6+255+140/6+258*5`. Anything else → 422 |
 | `august_supplement` `true` | adds `35 × safari nights` between 1 and 25 August to F9 (beach nights excluded: from `mid_date`, else Zanzibar/coast names in B/K). `false` = does not apply (no warning) |
 | `start_date` | A17 = date; A18+ `=SUM(A{n-1}+1)` extended to the last day, same format |
 | `days[]` | from row 17 + `row_offset`; each: `label` (B), `flight` = route id/name → C `=<cost_pp>*$B$1` from the rate table (or `flight_cost_pp`, warned if not in the table), `park_fees` (F) + `park_fees_desc` (G), `activity` `{rate: name/id}` (cost from table) or `{amount, desc}` → H/I, `accommodation` (J), `hotel` → K, `repeat` n (every value copied to each repeated row) |
-| `days[].accommodation`, `days[].park_fees`, `days[].jeep` (D), `days[].drinks` (E) | a number (`279`) or a formula on numbers and cells (`"=279"`, `"=(250+71)*$B$1"`); `null` clears the cell. Changing `hotel` on a template row without `accommodation` → warning "hotel changed, J cost left from the template (Kifaru 1054)" |
+| `null` on any day field | **`null` = empty cell(s)**, a field left out = the template's value stays. Works for `label` (B; also `""`), `flight` / `flight_cost_pp` (C; `flight_cost_pp: 0` too, no warning), `jeep` (D), `drinks` (E), `park_fees` (F), `park_fees_desc` (G), `activity` (H and I), `accommodation` (J), `hotel` (K) — on every row of a `repeat` too: e.g. 4 beach nights `{"repeat":4,"label":"Znz","flight":null,"activity":null,"accommodation":"=218*$B$1","hotel":"Royal Zanzibar"}` |
+| `days[].accommodation`, `days[].park_fees`, `days[].jeep` (D), `days[].drinks` (E) | a number (`279`) or a formula on numbers and cells (`"=279"`, `"=(250+71)*$B$1"`). Changing `hotel` on a template row without `accommodation` → warning "hotel changed, J cost left from the template (Kifaru 1054)" |
+| `keep_extra_rows` | default `false`: the template day rows **after the last row written by `days[]`** up to the Totals row are emptied in A–K (date cascade, label, costs, descriptions, hotel; formatting, L–O and the Totals sums untouched) and listed in `cleared_rows[]` — a 7-day trip on an 11-row template no longer reads to the template's last day. `true` keeps them (rare). No `days[]` → nothing cleared |
+| `notes` `["Quote STO 3135 pp", …]` | price notes (quotes given to the agency) in column M from M1 down to the row above the day header (M1:M15 on the standard templates); `[]` / `null` empties that area, left out = unchanged. Never in EXTRA DETAILS (client data for the staff) nor L–O of the Totals row (they enter B7/B8). M cell with a formula → 422. `read_calc` returns them as `notes[]` |
 | `no_jeep` `true` | beach-only stay on a safari template: clears jeep (D) and drinks (E) on every day row; `days[].jeep` / `drinks` still win. Totals and the summary cells are recalculated |
 | `days[].activity.amount` | a number or a formula, as above (`"=50+(50+15)*$B$1"`) |
 | `total_price` (F10), `total_price_note` (G10) | when costs are added after the per-person total: `"=F9*$B$1+100"`, `"Inc Dar transfers"`. Not given = the template's F10 / G10 stay; `total_price_note: null` clears G10 |
@@ -430,7 +436,8 @@ changed meanwhile, e.g. saved from Excel), re-downloaded and re-verified.
 
 Returns `kept_sheets[]` / `removed_sheets[]`, `f9` (the formula written), `f10` (`"=F9*$B$1+100 → 3500"`), `august_supplement` `{safari_nights[], pp_per_night, amount_pp, added}`,
 `rows[]` `{row, date, cells {B…K}, changed[]}` — every day row as written (formulas as `"=215*$B$1 → 430"`)
-and the columns this call changed, to review before `confirm` — and `verify`: `passed`, `checks[]` (see below),
+and the columns this call changed, to review before `confirm` —, `cleared_rows[]` (template rows emptied after the last day,
+e.g. `[24,25,26,27]`), `notes[]` (when given) and `verify`: `passed`, `checks[]` (see below),
 `price_to_customer`, `total_price`, `total_costs`, `margin` (B10), `to_price_pp` (D10) — all read on the filled pax sheet,
 also when RECAP is kept. HTTP 422 if a check has level `error`.
 fill_calc adds two checks: `error` a night with a hotel in K but J empty or 0 (except "own arrangement");
@@ -446,7 +453,7 @@ Leaders, found in the sheet name "8PAX+1TL(9PAX)", the pax text "8 paying + 1 TL
 `start_date`, `end_date`, `nights`,
 `days[]` `{row, date, label, flight_cost, park_fees_desc, activity_desc, hotel_text, invoice, checked}`,
 `guests[]` `{name, title, dob, country, tba}` (no passport numbers), `guests_tba`, `arrival`, `departure`,
-`price_to_customer` (F9), `price_total`, `price_sto`, `warnings[]`.
+`price_to_customer` (F9), `price_total`, `price_sto`, `notes[]` (text in column M above the day header — `fill_calc` `notes`), `warnings[]`.
 - Day dates = the hard-typed date (A17, or a date typed later after a gap) + row offset; a formula's
   saved value is only compared (warning if different).
 - Several pax sheets: the one whose name contains **CONF** is read (warning); none or several
