@@ -368,7 +368,7 @@ function bg_start_run(PDO $db, int $rid, ?int $userId, string $trigger = 'manual
     $calc = $bc['calc'];
     $snap = [
         'customer' => $bc['customer'], 'folder' => $bc['folder'], 'local_folder' => $bc['local_folder'],
-        'calc' => ['file' => $calc['file'], 'sheet' => $calc['sheet'], 'pax' => $calc['pax'], 'jeeps' => $calc['jeeps'] ?? null, 'room_config' => $calc['room_config'],
+        'calc' => ['file' => $calc['file'], 'sheet' => $calc['sheet'], 'pax' => $calc['pax'], 'pax_text' => $calc['pax_text'] ?? '', 'jeeps' => $calc['jeeps'] ?? null, 'room_config' => $calc['room_config'],
                    'arrival' => $calc['arrival'], 'departure' => $calc['departure'], 'start_date' => $calc['start_date'],
                    'end_date' => $calc['end_date'], 'nights' => $calc['nights'], 'single_supp' => $calc['single_supp'] ?? null,
                    'discount_teen' => $calc['discount_teen'] ?? null, 'discount_child' => $calc['discount_child'] ?? null,
@@ -971,6 +971,22 @@ function bg_calc_route(string $route, string $details = ''): array {
     return ['dest' => $dest, 'origins' => $origins, 'origin' => $origin, 'airports' => $codes];
 }
 
+/** Park airstrips that are also reached by road: in a Calc route after the landing airport they are the drive. */
+const BG_PARK_STRIPS = ['LKY', 'SEU', 'KGT', 'NDU', 'GTZ', 'LOB', 'FIK', 'KRO', 'RUA', 'NYR'];
+
+/**
+ * Booked from → to is the flight part of a Calc route that goes on by road: $to is in the route after $from, and
+ * every airport token after $to is $to again (Arusha after ARK) or a park ("Zanzibar-ARK-Arusha-Tarangire", booked
+ * ZNZ → ARK). A city / island airport after $to (…-Arusha-ZNZ) means the flight should go there: false.
+ */
+function bg_route_drive_on(array $airports, ?string $from, string $to): bool {
+    $p = array_search($to, $airports, true);
+    if ($p === false || $p === 0) return false;
+    if ($from !== null && !in_array($from, array_slice($airports, 0, $p), true)) return false;
+    foreach (array_slice($airports, $p + 1) as $c) if ($c !== $to && !in_array($c, BG_PARK_STRIPS, true)) return false;
+    return true;
+}
+
 /**
  * Room type of a room name / Calc text: fam | tpl | twn | dbl | sgl | dbl_twn (either) | ''. Family = "Family", "FAM", "Villa",
  * "Quad", or a bed layout of one room with a double and singles ("Jambo (1Dbl & 2Sngl)" — Orangi room names, Rivolta 13 Nov 2026).
@@ -980,7 +996,15 @@ function bg_room_type(string $s): string {
     if (preg_match('/double\s*\/\s*twin|twin\s*\/\s*double|dbl\s*\/\s*twn|twn\s*\/\s*dbl/', $s)) return 'dbl_twn';
     if (preg_match('/\b(fam|family|villa|quad|quadruple)/', $s)) return 'fam';
     if (preg_match('/(dbl|double)/', $s) && preg_match('/(sngl|sgl|single|twin|twn)/', $s)) return 'fam';   // one room, double + singles
-    // Beds counted in the room name (Orangi, Bonfante 14 Nov 2026): "Kiboko (3 Queen size beds)" = triple, "Twiga (2 Queen)" = twin.
+    // Double-size beds in the bracketed bed layout (Orangi, Spagnoletto 22 Nov 2026): "Tembo (1Dbl&1Queen)" = two big beds = family,
+    // "Kiboko (3 Queen size beds)" = three big beds = family (holds 4; compared with a Calc triple as a triple, bg_rooms_fam_as_tpl()).
+    // "Twiga (2 Queen)" stays a twin (Bonfante 14 Nov 2026).
+    if (preg_match('/\(([^)]*)\)/', $s, $br) && preg_match_all('/(\d+)\s*(?:x\s*)?(dbl|double|queen|king)/', $br[1], $bm, PREG_SET_ORDER)) {
+        $big = 0; $kinds = [];
+        foreach ($bm as $x) { $big += (int)$x[1]; $kinds[$x[2] === 'double' ? 'dbl' : $x[2]] = true; }
+        if ($big >= 3 || ($big >= 2 && count($kinds) > 1)) return 'fam';
+    }
+    // Beds counted in the room name (Orangi, Bonfante 14 Nov 2026): "Twiga (2 Queen)" = twin, "(3 beds)" = triple.
     if (preg_match('/\b([2-9])\s*(?:x\s*)?(queen|king|beds?\b|singles?\b)/', $s, $m)) return ['2' => 'twn', '3' => 'tpl'][$m[1]] ?? 'fam';
     // Double beds counted: "Serengeti (2 Dbl)" (Marera, Colombo 18 Nov 2026) = two double beds in one room → family. Only in the
     // bracketed bed layout of a room name, or with "beds": a bare "2 Dbl" on a voucher line means two double ROOMS.
@@ -1133,6 +1157,29 @@ function bg_pax_ok(int $p, array $pp): bool {
     return $p === (int)$pp['paying'] || ((int)$pp['tl'] > 0 && $p === (int)$pp['guests']);
 }
 
+/**
+ * Calc pax for the check. B2–B4 (Adults / Teenagers / Children) are sometimes left as "8 / 0 / 0" while the ADULTS/TEEN/CHD
+ * line says "4 Adults + 2 teen + 2 child" (Spagnoletto, 22 Nov 2026): when that line has the same total and splits the
+ * teens / children the header lacks, the line wins. → [pax (adults, teen, child, tl…), note|null]
+ */
+function bg_calc_pax(array $calc): array {
+    $pax = ($calc['pax'] ?? []) + ['adults' => 0, 'teen' => 0, 'child' => 0];
+    $txt = strtolower((string)($calc['pax_text'] ?? ''));
+    if ($txt === '' || (int)$pax['teen'] + (int)$pax['child'] > 0) return [$pax, null];
+    $d = ['adults' => 0, 'teen' => 0, 'child' => 0]; $hit = false;
+    if (preg_match_all('/(\d+)\s*(adult\w*|adl\w*|ad\b|adt\w*|teen\w*|ragazz\w*|young\w*|chd\w*|child\w*|kids?\b|bambin\w*|bimb\w*|inf\w*)/', $txt, $m, PREG_SET_ORDER)) {
+        foreach ($m as $x) {
+            $k = preg_match('/^(teen|ragazz|young)/', $x[2]) ? 'teen' : (preg_match('/^(chd|child|kid|bambin|bimb|inf)/', $x[2]) ? 'child' : 'adults');
+            $d[$k] += (int)$x[1]; $hit = true;
+        }
+    }
+    $total = (int)$pax['adults'] + (int)$pax['teen'] + (int)$pax['child'];
+    if (!$hit || $d['teen'] + $d['child'] === 0 || array_sum($d) !== $total) return [$pax, null];
+    $note = 'Calc header B2–B4 says ' . $total . ' adults, the ADULTS/TEEN/CHD line says "' . trim((string)$calc['pax_text']) . '": checked with the line. '
+          . 'Put the split in B2–B4 too (park fees and drinks are computed from them).';
+    return [array_merge($pax, $d), $note];
+}
+
 function bg_pax_text(array $pp): string {
     return (int)$pp['tl'] > 0 ? $pp['paying'] . ' paying + ' . $pp['tl'] . ' TL' : (string)$pp['paying'];
 }
@@ -1184,7 +1231,8 @@ function bg_evaluate(array $snap, array $docs, ?callable $alias = null, ?callabl
         return bg_eval_close($res);
     }
     $calc = $snap['calc'];
-    $pax = $calc['pax'] ?? ['adults' => 0, 'teen' => 0, 'child' => 0];
+    [$pax, $paxNote] = bg_calc_pax($calc);
+    if ($paxNote !== null) $res['notes'][] = $paxNote;
     $totalPax = (int)$pax['adults'] + (int)$pax['teen'] + (int)$pax['child'];   // paying pax (B1)
     // Free Tour Leader (TL handoff, 14 Nov 2026): a document may count paying pax or paying + TL; jeeps = guide rooms allowed.
     $pp = ['paying' => $totalPax, 'tl' => (int)($pax['tl'] ?? 0), 'guests' => $totalPax + (int)($pax['tl'] ?? 0), 'jeeps' => (int)($calc['jeeps'] ?? 0)];
@@ -1420,6 +1468,9 @@ function bg_evaluate(array $snap, array $docs, ?callable $alias = null, ?callabl
         $flNo = $legs ? trim(implode(' / ', array_unique(array_filter(array_map(fn($l) => $l['flight_no'] ?? '', $legs))))) : '';
         if ($route['dest'] === null) {
             $svcs[$i]['notes'][] = 'Route "' . $s['route'] . '" names no known airport — route not checked (add it to BG_AIRPORTS).';
+        } elseif ($to !== null && $to !== $route['dest'] && bg_route_drive_on($route['airports'], $from, $to)) {
+            // "Zanzibar-ARK-Arusha-Tarangire" (Spagnoletto, 22 Nov 2026): the flight lands at ARK, Tarangire is the game drive.
+            $svcs[$i]['notes'][] = 'Flight ' . $bookedTxt . ' (' . $to . '); the rest of "' . $s['route'] . '" read as the drive (parks after ' . $to . ').';
         } elseif ($to !== null && $to !== $route['dest']) {
             $ok = false;
             $add('flight_route', 'Calc ' . $s['route'] . ' (to ' . $route['dest'] . '), booked ' . ($flNo !== '' ? $flNo . ' ' : '') . $bookedTxt
@@ -1438,15 +1489,18 @@ function bg_evaluate(array $snap, array $docs, ?callable $alias = null, ?callabl
             if (($ds['status'] ?? '') === 'cancelled') $ok = false;
             $status($ds, $s);
         }
-        if ($ok) {
-            foreach ($cand as $k) {
-                $key = $items[$k]['doc'] . '|' . ($items[$k]['ds']['reference'] ?? '');
-                $flightDocs[$key]['items'][$k] = true;
-                $flightDocs[$key]['svcs'][$i] = true;
-            }
+        // One invoice often covers several Calc flights (out and back): every flight it serves goes in its group, so the
+        // amount is compared with the sum of their costs. A group with a flight in error is not compared (Spagnoletto,
+        // 22 Nov 2026: 2,308 for both flights compared with the return flight's 1,760 only, the outbound one in error).
+        foreach ($cand as $k) {
+            $key = $items[$k]['doc'] . '|' . ($items[$k]['ds']['reference'] ?? '');
+            $flightDocs[$key]['items'][$k] = true;
+            $flightDocs[$key]['svcs'][$i] = true;
+            if (!$ok) $flightDocs[$key]['blocked'] = true;
         }
     }
     foreach ($flightDocs as $g) {
+        if (!empty($g['blocked'])) continue;   // the amount is checked only once route, pax and status are right
         $net = 0.0; $known = true; $usd = true;
         foreach (array_keys($g['items']) as $k) { $n = bg_net($items[$k]['ds']); if ($n === null) $known = false; else $net += $n; if (!bg_usd($items[$k]['ds'])) $usd = false; }
         $cost = 0.0;
@@ -1870,7 +1924,7 @@ function bg_report_html(array $r, array $snap, array $res, array $run): string {
     $cnt = ['OK' => 0, 'CHECK' => 0, 'MISSING' => 0, 'IN-HOUSE' => 0];
     foreach ($res['services'] as $s) if (isset($cnt[$s['status']])) $cnt[$s['status']]++;
     $badge = ['OK' => ['#1A6B3A', '#E6F4EA'], 'CHECK' => ['#8a6d00', '#FFF4D6'], 'MISSING' => ['#a33', '#F7DEDE'], 'IN-HOUSE' => ['#555', '#EEE']];
-    $pax = $calc['pax'] ?? [];
+    $pax = !empty($calc['pax']) ? bg_calc_pax($calc)[0] : [];
     $paxTxt = ($pax ? (int)$pax['adults'] . ' adults' . ((int)$pax['teen'] ? ', ' . (int)$pax['teen'] . ' teen' : '') . ((int)$pax['child'] ? ', ' . (int)$pax['child'] . ' child' : '')
                . (!empty($pax['tl']) ? ' + ' . (int)$pax['tl'] . ' TL (free)' : '') : '');
     $sentence = $res['passed'] ? ($res['warnings'] ? 'No blocking item — ' . $res['warnings'] . ' warning(s) to follow.' : 'All services confirmed.')
