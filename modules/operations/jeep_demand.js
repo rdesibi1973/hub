@@ -282,10 +282,68 @@
     $('jd-rebuild').hidden = !D.is_admin;
   }
 
+  // ── Custom period ──────────────────────────────────────────────────────
+  function preset(p) {
+    var t = D.today, y = +t.slice(0, 4);
+    if (p === 'last30') return [addDays(t, -30), addDays(t, -1)];
+    if (p === 'next90') return [t, addDays(t, 89)];
+    if (p === 'high') return [y + '-07-01', y + '-10-31'];
+    return [y + '-12-20', (y + 1) + '-01-06'];   // xmas
+  }
+  function periodLabel(r) { return sdate(r.from) + (r.from.slice(0, 4) !== r.to.slice(0, 4) ? ' ' + r.from.slice(0, 4) : '') + ' → ' + sdate(r.to) + ' ' + r.to.slice(0, 4); }
+
+  function runPeriod() {
+    var from = $('jd-p-from').value, to = $('jd-p-to').value, out = $('jd-p-out');
+    if (!from || !to || to < from) { out.innerHTML = '<div class="jd-empty">Choose a valid period.</div>'; return; }
+    out.innerHTML = '<div class="jd-empty">Calculating…</div>';
+    get({ action: 'period', from: from, to: to, prov: prov() }).then(function (r) {
+      if (!r.ok) { out.innerHTML = '<div class="jd-empty">' + esc(r.error) + '</div>'; return; }
+      var rows = r.rows.slice().reverse();   // newest first
+      var h = '<div class="jd-p-grid"><div class="jd-scroll"><table class="jd-table"><thead><tr><th>Period</th><th class="num">Average / day</th>'
+            + '<th class="num">Median</th><th class="num">90th</th><th class="num">Maximum</th><th class="num">Jeep-days</th><th class="num">Days ≥ 30</th></tr></thead><tbody>';
+      rows.forEach(function (x) {
+        var s = x.stats, yr = +x.from.slice(0, 4);
+        h += '<tr' + (x.selected ? ' class="sel"' : '') + '><td style="white-space:nowrap"><span class="sw" style="background:' + color(yr) + '"></span>' + periodLabel(x)
+           + (x.booked_days ? ' <span class="jd-badge prov" title="Days from today on: booked so far">' + (x.booked_days === s.days ? 'booked' : x.booked_days + ' d booked') + '</span>' : '') + '</td>'
+           + '<td class="num">' + fmt(s.avg) + '</td><td class="num">' + fmt(s.median) + '</td><td class="num">' + fmt(s.p90) + '</td>'
+           + '<td class="num">' + fmt(s.max) + (s.max_day ? ' <span style="color:var(--grey-mid)">(' + sdate(s.max_day) + ')</span>' : '') + '</td>'
+           + '<td class="num">' + fmt(s.jeep_days, 0) + '</td><td class="num">' + s.days_ge30 + '</td></tr>';
+      });
+      h += '</tbody></table><div style="margin-top:8px;font-size:.76rem">' + rows[0].stats.days + ' days per period · <a href="#" id="jd-p-daily">see the selected period day by day</a></div></div>'
+         + '<div><div class="jd-legend" id="jd-p-legend"></div><div class="jd-chart" id="jd-p-curve"></div>'
+         + '<div class="hint" style="margin-top:4px">Days of the period with at least N jeeps.</div></div></div>';
+      out.innerHTML = h;
+      var asc = r.rows;
+      lineChart($('jd-p-curve'), asc.map(function (x) { return { color: color(+x.from.slice(0, 4)), dashed: x.booked_days > 0, values: x.curve }; }),
+        45, function (i) { return String(i + 1); },
+        function (i) {
+          return '<b>At least ' + (i + 1) + ' jeeps</b>' + rows.map(function (x) {
+            return '<br><span style="color:' + color(+x.from.slice(0, 4)) + '">■</span> ' + periodLabel(x) + ': ' + x.curve[i] + ' days';
+          }).join('');
+        }, [0, 9, 19, 29, 39, 44]);
+      $('jd-p-legend').innerHTML = rows.map(function (x) {
+        return '<span><i class="line" style="background:' + color(+x.from.slice(0, 4)) + '"></i>' + x.from.slice(0, 4) + (x.from.slice(0, 4) !== x.to.slice(0, 4) ? '–' + x.to.slice(2, 4) : '') + '</span>';
+      }).join('');
+      $('jd-p-daily').addEventListener('click', function (e) {
+        e.preventDefault();
+        dayRange = [from, to];
+        document.querySelector('.jd-tabs button[data-tab=daily]').click();
+        $('jd-d-from').value = from; $('jd-d-to').value = to; renderDaily();
+      });
+    }).catch(function (e) { out.innerHTML = '<div class="jd-empty">Network error: ' + esc(e.message) + '</div>'; });
+  }
+
+  function initPeriod() {
+    if ($('jd-p-from').value) { runPeriod(); return; }   // keep the user's period when the data reloads
+    var p = preset('high');
+    $('jd-p-from').value = p[0]; $('jd-p-to').value = p[1];
+    runPeriod();
+  }
+
   function renderAll() {
     renderState();
     if (!D.years.length) return;
-    renderYears(); renderMonths(); renderWeeks(); renderCurve();
+    initPeriod(); renderYears(); renderMonths(); renderWeeks(); renderCurve();
     initDaily(); renderDaily(); renderGuides(); renderQuality();
   }
 
@@ -322,6 +380,10 @@
     ['jd-d-from', 'jd-d-to'].forEach(function (id) { $(id).addEventListener('change', function () { dayRange = [$('jd-d-from').value, $('jd-d-to').value]; renderDaily(); }); });
     $('jd-g-year').addEventListener('change', function () { guideYear = this.value; load(); });
     $('jd-q-status').addEventListener('change', renderQuality);
+    $('jd-p-go').addEventListener('click', runPeriod);
+    document.querySelectorAll('#jd-p-presets button').forEach(function (b) {
+      b.addEventListener('click', function () { if (!D) return; var p = preset(b.dataset.p); $('jd-p-from').value = p[0]; $('jd-p-to').value = p[1]; runPeriod(); });
+    });
     $('jd-refresh').addEventListener('click', function () { msg('Reading the Calcs that changed…'); runScan('incremental', this); });
     $('jd-rebuild').addEventListener('click', function () {
       if (!confirm('Re-read every Calc of every archive (2024 →)? It takes a few minutes; the page works in batches.')) return;

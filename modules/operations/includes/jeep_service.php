@@ -678,6 +678,45 @@ function jeep_periods(PDO $db, string $from, string $to, string $group = 'month'
     return $out;
 }
 
+/** $iso moved by $years whole years (29 Feb → 28 Feb in a non-leap year). */
+function jeep_shift_year(string $iso, int $years): string {
+    $y = (int)substr($iso, 0, 4) + $years;
+    $md = substr($iso, 5);
+    if ($md === '02-29' && !checkdate(2, 29, $y)) $md = '02-28';
+    return sprintf('%04d-%s', $y, $md);
+}
+
+/**
+ * A period chosen by the user ($from–$to, at most 3 years) and the same dates in every other year with data
+ * (2024 → next year): [{from, to, selected, stats (jeep_stats), booked_days (days from today on), curve (days with
+ * at least N jeeps, N = 1…45)}], oldest first. Every day counts, 0 included.
+ */
+function jeep_period_report(PDO $db, string $from, string $to, bool $withProv = true): array {
+    jeep_schema($db);
+    $today = date('Y-m-d');
+    $cy = (int)date('Y');
+    $mm = $db->query('SELECT MIN(day), MAX(day) FROM ops_jeep_days')->fetch(PDO::FETCH_NUM);
+    $y0 = $mm && $mm[0] ? max(JEEP_FIRST_ARCHIVE, (int)substr($mm[0], 0, 4)) : $cy;
+    $y1 = max($cy, $mm && $mm[1] ? min($cy + 1, (int)substr($mm[1], 0, 4)) : $cy);
+    $fy = (int)substr($from, 0, 4); $ty = (int)substr($to, 0, 4);
+    $out = [];
+    for ($k = $y0 - $fy; $k <= $y1 - $ty; $k++) {
+        $f = jeep_shift_year($from, $k); $t = jeep_shift_year($to, $k);
+        $rows = jeep_daily($db, $f, $t, $withProv);
+        $curve = [];
+        for ($n = 1; $n <= JEEP_CURVE_MAX; $n++) $curve[] = count(array_filter($rows, fn($r) => $r['j'] >= $n));
+        $out[] = ['from' => $f, 'to' => $t, 'selected' => $k === 0, 'stats' => jeep_stats($rows),
+                  'booked_days' => count(array_filter($rows, fn($r) => $r['d'] >= $today)), 'curve' => $curve];
+    }
+    if (!array_filter($out, fn($r) => $r['selected'])) {   // a period outside the data years: show it anyway
+        $rows = jeep_daily($db, $from, $to, $withProv);
+        $out[] = ['from' => $from, 'to' => $to, 'selected' => true, 'stats' => jeep_stats($rows),
+                  'booked_days' => count(array_filter($rows, fn($r) => $r['d'] >= $today)), 'curve' => array_fill(0, JEEP_CURVE_MAX, 0)];
+        usort($out, fn($a, $b) => strcmp($a['from'], $b['from']));
+    }
+    return $out;
+}
+
 /** The safaris on the road one day: [{folder, folder_path, url, request_id, jeeps, pax, guide, kind, stage, provisional, start_day, end_day}]. */
 function jeep_day_detail(PDO $db, string $date, bool $withProv = true): array {
     jeep_schema($db);

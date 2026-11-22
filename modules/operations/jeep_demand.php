@@ -59,6 +59,10 @@ table.jd-table .sw{display:inline-block;width:10px;height:10px;border-radius:2px
 .jd-empty{font-size:.8rem;color:var(--grey-mid);padding:14px 0}
 .jd-folder{font-size:.76rem;word-break:break-all;min-width:300px}
 .jd-scroll{overflow-x:auto}
+.jd-presets{display:flex;gap:6px;flex-wrap:wrap;margin-left:auto}
+table.jd-table tr.sel td{background:#FBF8F2;font-weight:600}
+.jd-p-grid{display:grid;grid-template-columns:3fr 2fr;gap:16px;align-items:start;margin-top:6px}
+@media(max-width:900px){.jd-p-grid{grid-template-columns:1fr}.jd-presets{margin-left:0}}
 @media(max-width:900px){.jd-grid{grid-template-columns:1fr}.jd-main{padding:16px}}
 ';
 include __DIR__ . '/../../includes/layout_header.php';
@@ -88,6 +92,22 @@ include __DIR__ . '/../../includes/layout_header.php';
 
   <!-- Summary -->
   <section class="jd-panel active" id="tab-summary">
+    <div class="jd-card">
+      <h3>Custom period</h3>
+      <div class="hint">Pick any period: the same figures, on those dates only, next to the same dates of the other years.</div>
+      <div class="jd-filters">
+        <div><label for="jd-p-from">From</label><input type="date" id="jd-p-from"></div>
+        <div><label for="jd-p-to">To</label><input type="date" id="jd-p-to"></div>
+        <div><button type="button" class="btn btn-primary btn-sm" id="jd-p-go">Calculate</button></div>
+        <div class="jd-presets" id="jd-p-presets">
+          <button type="button" class="btn btn-outline btn-sm" data-p="last30">Last 30 days</button>
+          <button type="button" class="btn btn-outline btn-sm" data-p="next90">Next 90 days</button>
+          <button type="button" class="btn btn-outline btn-sm" data-p="high">High season Jul–Oct</button>
+          <button type="button" class="btn btn-outline btn-sm" data-p="xmas">Christmas 20 Dec – 6 Jan</button>
+        </div>
+      </div>
+      <div id="jd-p-out"></div>
+    </div>
     <div class="jd-card">
       <h3>Summary by year</h3>
       <div class="hint">Current year: days up to yesterday only; what is booked from today to 31 Dec is shown apart. Future years: booked so far.</div>
@@ -162,5 +182,5 @@ include __DIR__ . '/../../includes/layout_header.php';
     </div>
   </section>
 </main>
-<script src="jeep_demand.js?v=2"></script>
+<script src="jeep_demand.js?v=3"></script>
 <?php include __DIR__ . '/../../includes/layout_footer.php'; ?>

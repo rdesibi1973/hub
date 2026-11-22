@@ -2235,6 +2235,8 @@ changed, each folder re-checked every 20 h). Not covered: transfers not in Calcs
 → `totals` `{days, avg, median, p90, max, max_day, jeep_days, days_ge30}` (every day of the range, 0 included),
 `rows[]` `{period, avg, median, p90, max, max_day, jeep_days, days}` (`day` rows add `provisional`, `safaris`),
 `scan` `{folders, by_status, queued, last_run, full_started, last_scanned_at}`.
+`compare=1` adds `same_period_other_years[]` `{from, to, booked_days, days, avg, median, p90, max, max_day, jeep_days,
+days_ge30}`: the same dates in every other year with data (2024 → next year; 29 Feb → 28 Feb), as the page's "Custom period".
 
 `jeep_demand_day` (GET) — `date`, `include_provisional`. → `jeeps` (total), `rows[]` `{folder, folder_path, url,
 request_id, jeeps (that day), jeeps_header (Calc B5), pax, guide (as written), kind (PVT|GRP), stage, provisional,
@@ -2247,6 +2249,7 @@ unchanged, failed, statuses, remaining, seconds, summary}`. Writes only the jeep
 
 ```bash
 curl -sH "$H" "$U?action=jeep_demand&from=2025-01-01&to=2025-12-31&group=month"
+curl -sH "$H" "$U?action=jeep_demand&from=2026-07-01&to=2026-10-31&compare=1"     # high season vs the other years
 curl -sH "$H" "$U?action=jeep_demand_day&date=2025-08-10"
 curl -sH "$H" -X POST "$U?action=jeep_demand_scan" -d '{"mode":"full","confirm":true}'
 curl -sH "$H" -X POST "$U?action=jeep_demand_scan" -d '{"mode":"continue","confirm":true}'

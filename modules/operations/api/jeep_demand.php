@@ -3,6 +3,7 @@
  * api/jeep_demand.php — JSON for Operations → Jeep demand (jeep_demand.php).
  *   GET  ?action=data[&prov=0|1][&guide_year=YYYY]   everything the page shows (jeep_page_data())
  *   GET  ?action=day&date=YYYY-MM-DD[&prov=0|1]      the safaris on the road that day
+ *   GET  ?action=period&from=…&to=…[&prov=0|1]       stats of a chosen period + the same dates in the other years
  *   GET  ?action=csv&what=daily|folders[&prov=0|1]   CSV download
  *   POST ?action=scan {mode: incremental|full|continue}
  *        incremental = "Refresh now" (also re-checks every /001_Safari folder); full / continue = full rebuild (admin),
@@ -34,6 +35,12 @@ try {
             $date = (string)($_GET['date'] ?? '');
             if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) jd_json(['ok' => false, 'error' => 'Invalid date'], 400);
             jd_json(['ok' => true, 'date' => $date, 'rows' => jeep_day_detail($db, $date, $prov)]);
+        }
+        if ($action === 'period') {
+            $from = (string)($_GET['from'] ?? ''); $to = (string)($_GET['to'] ?? '');
+            if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $from) || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $to) || $to < $from) jd_json(['ok' => false, 'error' => 'Invalid period'], 400);
+            if ((strtotime($to) - strtotime($from)) / 86400 > 1100) jd_json(['ok' => false, 'error' => 'At most 3 years'], 400);
+            jd_json(['ok' => true, 'from' => $from, 'to' => $to, 'rows' => jeep_period_report($db, $from, $to, $prov)]);
         }
         if ($action === 'csv') {
             $what = ($_GET['what'] ?? '') === 'folders' ? 'folders' : 'daily';

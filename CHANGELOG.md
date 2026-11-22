@@ -20,6 +20,14 @@ Running log of notable changes and current build state. Module-level "active / p
 
 ---
 
+## 2026-11-22 — Jeep demand: custom period
+
+- Summary tab → "Custom period": any from / to (presets: last 30 days, next 90 days, high season Jul–Oct, Christmas
+  20 Dec – 6 Jan) → average, median, 90th percentile, max + date, jeep-days, days ≥ 30 for that period, next to the same
+  dates of every other year with data, + "days with at least N jeeps" for each; link to the period day by day.
+  `jeep_period_report()` / `jeep_shift_year()` in `jeep_service.php`, endpoint `?action=period`, Agent API
+  `jeep_demand` `compare=1` → `same_period_other_years[]`.
+
 ## 2026-11-22 — Operations → Jeep demand (phase 1)
 
 - How many safari jeeps Savannah needs per day / week / month, read from each confirmed safari's Calc: JEEP cell ÷

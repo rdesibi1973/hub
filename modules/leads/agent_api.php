@@ -3776,9 +3776,16 @@ try {
         if (!in_array($group, ['day', 'week', 'month'], true)) agent_fail('group must be day, week or month');
         $prov = !isset($in['include_provisional']) || !in_array((string)$in['include_provisional'], ['0', 'false', ''], true);
         $daily = jeep_daily($db, $from, $to, $prov);
+        $other = [];
+        if (!empty($in['compare']) && (string)$in['compare'] !== '0') {   // the same dates in the other years
+            foreach (jeep_period_report($db, $from, $to, $prov) as $p) {
+                if (!$p['selected']) $other[] = ['from' => $p['from'], 'to' => $p['to'], 'booked_days' => $p['booked_days']] + $p['stats'];
+            }
+        }
         agent_out(['ok' => true, 'from' => $from, 'to' => $to, 'group' => $group, 'include_provisional' => $prov,
-                   'totals' => jeep_stats($daily), 'rows' => jeep_periods($db, $from, $to, $group, $prov),
-                   'scan' => jeep_scan_state($db)]);
+                   'totals' => jeep_stats($daily), 'rows' => jeep_periods($db, $from, $to, $group, $prov)]
+                  + (!empty($in['compare']) && (string)$in['compare'] !== '0' ? ['same_period_other_years' => $other] : [])
+                  + ['scan' => jeep_scan_state($db)]);
     }
 
     case 'jeep_demand_day': {
