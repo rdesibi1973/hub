@@ -63,6 +63,13 @@ table.jd-table .sw{display:inline-block;width:10px;height:10px;border-radius:2px
 table.jd-table tr.sel td{background:#FBF8F2;font-weight:600}
 .jd-p-grid{display:grid;grid-template-columns:3fr 2fr;gap:16px;align-items:start;margin-top:6px}
 @media(max-width:900px){.jd-p-grid{grid-template-columns:1fr}.jd-presets{margin-left:0}}
+.jd-p-days{margin-top:22px;border-top:1px solid var(--grey-lt);padding-top:14px}
+.jd-p-days h4{margin:0 0 4px;font-size:.78rem;text-transform:uppercase;letter-spacing:.06em}
+.jd-p-dtable{max-height:420px;overflow-y:auto;margin-top:12px}
+.jd-p-dtable tbody tr{cursor:pointer}
+.jd-p-dtable tbody tr:hover td{background:#FBF8F2}
+.jd-p-dtable tr.we td:first-child{color:var(--grey-mid)}
+.jd-p-dtable .mini{display:inline-block;height:8px;border-radius:2px;vertical-align:0}
 @media(max-width:900px){.jd-grid{grid-template-columns:1fr}.jd-main{padding:16px}}
 ';
 include __DIR__ . '/../../includes/layout_header.php';
@@ -107,6 +114,17 @@ include __DIR__ . '/../../includes/layout_header.php';
         </div>
       </div>
       <div id="jd-p-out"></div>
+      <div class="jd-p-days" id="jd-p-days" hidden>
+        <h4 id="jd-p-days-title">Day by day</h4>
+        <div class="hint">Jeeps needed each day of the selected period. Click a bar or a row to see the safaris on the road that day.</div>
+        <div class="jd-legend" id="jd-p-days-legend"></div>
+        <div class="jd-chart" id="jd-p-days-chart"></div>
+        <div class="jd-p-dtable"><table class="jd-table" id="jd-p-days-table"></table></div>
+      </div>
+    </div>
+    <div class="jd-card" id="jd-p-day-card" hidden>
+      <h3 id="jd-p-day-title"></h3>
+      <div class="jd-scroll"><table class="jd-table" id="jd-p-day"></table></div>
     </div>
     <div class="jd-card">
       <h3>Summary by year</h3>

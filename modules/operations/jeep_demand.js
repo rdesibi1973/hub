@@ -16,6 +16,36 @@
   function fmt(n, d) { if (n == null) return '—'; d = d == null ? 1 : d; return Number(n).toLocaleString('en-GB', { minimumFractionDigits: 0, maximumFractionDigits: d }); }
   function fdate(iso) { if (!iso) return '—'; var p = iso.split('-'); var dt = new Date(+p[0], +p[1] - 1, +p[2]); return DOW[dt.getDay()] + ' ' + (+p[2]) + ' ' + MONTHS[+p[1] - 1] + ' ' + p[0]; }
   function sdate(iso) { return iso ? (+iso.slice(8, 10)) + ' ' + MONTHS[+iso.slice(5, 7) - 1] : '—'; }
+  function ymd(dt) { return dt.toISOString().slice(0, 10); }
+  /** Last day of the month of iso, shifted by addMonths months. */
+  function monthEnd(iso, addMonths) { return ymd(new Date(Date.UTC(+iso.slice(0, 4), +iso.slice(5, 7) + (addMonths || 0), 0))); }
+  function daysBetween(a, b) { var x = a.split('-'), y = b.split('-'); return Math.round((Date.UTC(+y[0], +y[1] - 1, +y[2]) - Date.UTC(+x[0], +x[1] - 1, +x[2])) / 86400000); }
+  /** New end date when the start moves: whole months stay whole months, otherwise the length is kept. */
+  function alignedEnd(oldFrom, oldTo, newFrom) {
+    if (!newFrom) return oldTo;
+    if (!oldFrom || !oldTo || oldTo < oldFrom) return monthEnd(newFrom);
+    if (oldFrom.slice(8) === '01' && oldTo === monthEnd(oldTo) && newFrom.slice(8) === '01') {
+      var months = (+oldTo.slice(0, 4) - +oldFrom.slice(0, 4)) * 12 + (+oldTo.slice(5, 7) - +oldFrom.slice(5, 7));
+      return monthEnd(newFrom, months);
+    }
+    return addDays(newFrom, daysBetween(oldFrom, oldTo));
+  }
+  /** Wire a From/To pair: moving From moves To; To can't go before From. */
+  function linkDates(fromEl, toEl, onChange) {
+    var prev = [fromEl.value, toEl.value];
+    fromEl.addEventListener('focus', function () { prev = [fromEl.value, toEl.value]; });
+    fromEl.addEventListener('change', function () {
+      if (!fromEl.value || +fromEl.value.slice(0, 4) < 2000) return;   // half-typed year
+      toEl.value = alignedEnd(prev[0], prev[1], fromEl.value);
+      toEl.min = fromEl.value;
+      prev = [fromEl.value, toEl.value];
+      onChange();
+    });
+    toEl.addEventListener('change', function () {
+      prev = [fromEl.value, toEl.value];
+      if (toEl.value && fromEl.value && toEl.value >= fromEl.value && +toEl.value.slice(0, 4) >= 2000) onChange();
+    });
+  }
   function addDays(iso, n) { var p = iso.split('-'); var dt = new Date(Date.UTC(+p[0], +p[1] - 1, +p[2] + n)); return dt.toISOString().slice(0, 10); }
   function dayIndex(iso) { var a = D.daily.from.split('-'), b = iso.split('-'); return Math.round((Date.UTC(+b[0], +b[1] - 1, +b[2]) - Date.UTC(+a[0], +a[1] - 1, +a[2])) / 86400000); }
   function prov() { return $('jd-prov').checked ? '1' : '0'; }
@@ -188,10 +218,14 @@
   function setYearRange(y) { dayRange = [y + '-01-01', y + '-12-31']; $('jd-d-from').value = dayRange[0]; $('jd-d-to').value = dayRange[1]; }
 
   function renderDaily() {
-    var box = $('jd-daily'), from = $('jd-d-from').value, to = $('jd-d-to').value;
+    drawDays($('jd-daily'), $('jd-daily-legend'), $('jd-d-from').value, $('jd-d-to').value, function (iso) { loadDay(iso, 'jd-day'); });
+  }
+
+  /** Bars of jeeps per day between from and to (from D.daily); onDay(iso) on click. */
+  function drawDays(box, legendBox, from, to, onDay) {
     if (!from || !to || to < from) { box.innerHTML = '<div class="jd-empty">Choose a valid period.</div>'; return; }
     var i0 = Math.max(0, dayIndex(from)), i1 = Math.min(D.daily.j.length - 1, dayIndex(to));
-    if (i1 < i0) { box.innerHTML = '<div class="jd-empty">No data in this period.</div>'; return; }
+    if (i1 < i0) { box.innerHTML = '<div class="jd-empty">No data in this period.</div>'; legendBox.innerHTML = ''; return; }
     var n = i1 - i0 + 1, W = 980, H = 280, max = 0;
     for (var i = i0; i <= i1; i++) max = Math.max(max, D.daily.j[i]);
     var f = frame(box, W, H, max), slot = (f.x1 - f.x0) / n, gap = slot > 4 ? Math.min(2, slot * 0.2) : 0, bw = Math.max(0.5, slot - gap);
@@ -206,25 +240,27 @@
         showTip(box, '<b>' + fdate(iso) + '</b><br>' + fmt(j, 2) + ' jeeps · ' + D.daily.n[idx] + ' safaris' + (p > 0 ? '<br>of which provisional ' + fmt(p, 2) : '') + (future ? '<br>(booked)' : '') + '<br><i>click for the safaris</i>', e);
       });
       r.addEventListener('mouseleave', function () { hideTip(box); });
-      r.addEventListener('click', function () { loadDay(iso); });
+      r.addEventListener('click', function () { onDay(iso); });
       var dt = iso.slice(8);
       if ((n <= 62 && (k === 0 || dt === '01' || dt === '15' || n <= 31)) || (n > 62 && dt === '01')) {
         var t = el('text', { x: x + slot / 2, y: H - 8, 'text-anchor': 'middle' }, f.ax);
         t.textContent = n > 62 ? MONTHS[+iso.slice(5, 7) - 1] : (+dt) + (dt === '01' || k === 0 ? ' ' + MONTHS[+iso.slice(5, 7) - 1] : '');
       }
     })(k);
-    $('jd-daily-legend').innerHTML = '<span><i style="background:' + c + '"></i>confirmed</span>'
+    legendBox.innerHTML = '<span><i style="background:' + c + '"></i>confirmed</span>'
       + (prov() === '1' ? '<span><i style="background:' + c + ';opacity:.3"></i>provisional</span>' : '')
       + '<span><i style="background:' + c + ';opacity:.6"></i>future days (booked)</span>';
   }
 
-  function loadDay(iso) {
-    $('jd-day-card').hidden = false;
-    $('jd-day-title').textContent = 'Safaris on the road — ' + fdate(iso);
-    $('jd-day').innerHTML = '<tr><td class="jd-empty">Loading…</td></tr>';
+  /** Safaris on the road on one day, into the card `id` (+ id-card, id-title). */
+  function loadDay(iso, id) {
+    var tbl = $(id), card = $(id + '-card');
+    card.hidden = false;
+    $(id + '-title').textContent = 'Safaris on the road — ' + fdate(iso);
+    tbl.innerHTML = '<tr><td class="jd-empty">Loading…</td></tr>';
     get({ action: 'day', date: iso, prov: prov() }).then(function (r) {
-      if (!r.ok) { $('jd-day').innerHTML = '<tr><td>' + esc(r.error) + '</td></tr>'; return; }
-      if (!r.rows.length) { $('jd-day').innerHTML = '<tr><td class="jd-empty">No safari with jeeps on this day.</td></tr>'; return; }
+      if (!r.ok) { tbl.innerHTML = '<tr><td>' + esc(r.error) + '</td></tr>'; return; }
+      if (!r.rows.length) { tbl.innerHTML = '<tr><td class="jd-empty">No safari with jeeps on this day.</td></tr>'; return; }
       var tot = 0, h = '<thead><tr><th>Booking</th><th class="num">Jeeps that day</th><th class="num">Jeeps (Calc)</th><th class="num">Pax</th><th>Guide</th><th>Dates</th><th>Status</th></tr></thead><tbody>';
       r.rows.forEach(function (x) {
         tot += x.jeeps;
@@ -235,8 +271,8 @@
            + '<td>' + (x.provisional ? '<span class="jd-badge prov">' + esc(x.stage) + '</span>' : esc(x.stage || '')) + '</td></tr>';
       });
       h += '</tbody><tfoot><tr><td><b>' + r.rows.length + ' safaris</b></td><td class="num"><b>' + fmt(tot, 2) + '</b></td><td colspan="5"></td></tr></tfoot>';
-      $('jd-day').innerHTML = h;
-      $('jd-day-card').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      tbl.innerHTML = h;
+      card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     });
   }
 
@@ -309,7 +345,7 @@
            + '<td class="num">' + fmt(s.max) + (s.max_day ? ' <span style="color:var(--grey-mid)">(' + sdate(s.max_day) + ')</span>' : '') + '</td>'
            + '<td class="num">' + fmt(s.jeep_days, 0) + '</td><td class="num">' + s.days_ge30 + '</td></tr>';
       });
-      h += '</tbody></table><div style="margin-top:8px;font-size:.76rem">' + rows[0].stats.days + ' days per period · <a href="#" id="jd-p-daily">see the selected period day by day</a></div></div>'
+      h += '</tbody></table><div style="margin-top:8px;font-size:.76rem">' + rows[0].stats.days + ' days per period · <a href="#jd-p-days" id="jd-p-daily">jeeps day by day ↓</a></div></div>'
          + '<div><div class="jd-legend" id="jd-p-legend"></div><div class="jd-chart" id="jd-p-curve"></div>'
          + '<div class="hint" style="margin-top:4px">Days of the period with at least N jeeps.</div></div></div>';
       out.innerHTML = h;
@@ -326,11 +362,48 @@
       }).join('');
       $('jd-p-daily').addEventListener('click', function (e) {
         e.preventDefault();
-        dayRange = [from, to];
-        document.querySelector('.jd-tabs button[data-tab=daily]').click();
-        $('jd-d-from').value = from; $('jd-d-to').value = to; renderDaily();
+        $('jd-p-days').scrollIntoView({ behavior: 'smooth', block: 'start' });
       });
     }).catch(function (e) { out.innerHTML = '<div class="jd-empty">Network error: ' + esc(e.message) + '</div>'; });
+    renderPeriodDays(from, to);
+  }
+
+  /** Day-by-day block of the custom period: bars + one row per day (with the same date a year earlier). */
+  function renderPeriodDays(from, to) {
+    var sec = $('jd-p-days');
+    $('jd-p-day-card').hidden = true;
+    if (!D || !from || !to || to < from) { sec.hidden = true; return; }
+    sec.hidden = false;
+    var n = daysBetween(from, to) + 1;
+    $('jd-p-days-title').textContent = 'Day by day — ' + periodLabel({ from: from, to: to }) + ' (' + n + ' days)';
+    var pick = function (iso) { loadDay(iso, 'jd-p-day'); };
+    drawDays($('jd-p-days-chart'), $('jd-p-days-legend'), from, to, pick);
+    var last = D.daily.j.length - 1, max = 0, tot = 0, peak = null, rowsH = '';
+    var val = function (iso) { var i = dayIndex(iso); return i >= 0 && i <= last ? i : -1; };
+    for (var k = 0; k < n && k < 400; k++) {
+      var iso = addDays(from, k), i = val(iso), j = i < 0 ? 0 : D.daily.j[i];
+      if (j > max) { max = j; peak = iso; }
+      tot += j;
+    }
+    for (k = 0; k < n && k < 400; k++) {
+      iso = addDays(from, k); i = val(iso);
+      j = i < 0 ? 0 : D.daily.j[i];
+      var p = i < 0 ? 0 : D.daily.p[i], sf = i < 0 ? 0 : D.daily.n[i];
+      var ly = (+iso.slice(0, 4) - 1) + iso.slice(4), li = iso.slice(5) === '02-29' ? -1 : val(ly);
+      var dow = new Date(Date.UTC(+iso.slice(0, 4), +iso.slice(5, 7) - 1, +iso.slice(8))).getUTCDay();
+      var w = max ? Math.round(60 * j / max) : 0;
+      rowsH += '<tr data-d="' + iso + '"' + (dow === 0 || dow === 6 ? ' class="we"' : '') + '><td style="white-space:nowrap">' + fdate(iso) + '</td>'
+        + '<td class="num"><b>' + fmt(j, 1) + '</b></td>'
+        + '<td><span class="mini" style="width:' + w + 'px;background:' + color(+iso.slice(0, 4)) + (iso >= D.today ? ';opacity:.6' : '') + '"></span></td>'
+        + '<td class="num">' + (p > 0 ? fmt(p, 1) : '') + '</td><td class="num">' + sf + '</td>'
+        + '<td class="num" style="color:var(--grey-mid)">' + (li < 0 ? '—' : fmt(D.daily.j[li], 1)) + '</td></tr>';
+    }
+    $('jd-p-days-table').innerHTML = '<thead><tr><th>Day</th><th class="num">Jeeps</th><th></th>'
+      + (prov() === '1' ? '<th class="num">of which provisional</th>' : '<th></th>')
+      + '<th class="num">Safaris</th><th class="num">Same day last year</th></tr></thead><tbody>' + rowsH + '</tbody>'
+      + '<tfoot><tr><td><b>Peak ' + fmt(max, 1) + '</b>' + (peak ? ' <span style="color:var(--grey-mid)">(' + fdate(peak) + ')</span>' : '') + '</td>'
+      + '<td class="num"><b>' + fmt(tot / Math.min(n, 400), 1) + '</b></td><td colspan="4" style="color:var(--grey-mid)">average per day · ' + fmt(tot, 0) + ' jeep-days</td></tr></tfoot>';
+    $('jd-p-days-table').querySelectorAll('tbody tr').forEach(function (tr) { tr.addEventListener('click', function () { pick(tr.dataset.d); }); });
   }
 
   function initPeriod() {
@@ -377,7 +450,8 @@
     });
     $('jd-prov').addEventListener('change', load);
     $('jd-d-year').addEventListener('change', function () { setYearRange(this.value); renderDaily(); });
-    ['jd-d-from', 'jd-d-to'].forEach(function (id) { $(id).addEventListener('change', function () { dayRange = [$('jd-d-from').value, $('jd-d-to').value]; renderDaily(); }); });
+    linkDates($('jd-d-from'), $('jd-d-to'), function () { if (!D) return; dayRange = [$('jd-d-from').value, $('jd-d-to').value]; renderDaily(); });
+    linkDates($('jd-p-from'), $('jd-p-to'), function () { if (D) runPeriod(); });
     $('jd-g-year').addEventListener('change', function () { guideYear = this.value; load(); });
     $('jd-q-status').addEventListener('change', renderQuality);
     $('jd-p-go').addEventListener('click', runPeriod);
