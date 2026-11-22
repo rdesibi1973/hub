@@ -79,4 +79,16 @@ try {
 } catch (Throwable $e) {
     error_log('ck_cron parked: ' . $e->getMessage());
 }
+
+// Jeep demand (operations/includes/jeep_service.php, page Operations → Jeep demand): every run lists /001_Safari +
+// this year's archives, then re-checks the folders not checked for 20 h and re-reads the Calcs that changed (≤ 60 s,
+// resumes on the next run). Also works through a full rebuild started from the page.
+try {
+    @set_time_limit(120);
+    require_once __DIR__ . '/../operations/includes/jeep_service.php';
+    $jr = jeep_scan_run(db(), ['mode' => 'incremental', 'budget' => 60]);
+    if ($jr['read'] || $jr['failed'] || !empty($jr['discover']['dirs_failed'])) error_log('ck_cron jeeps ' . jeep_run_summary($jr));
+} catch (Throwable $e) {
+    error_log('ck_cron jeeps: ' . $e->getMessage());
+}
 ob_end_clean();

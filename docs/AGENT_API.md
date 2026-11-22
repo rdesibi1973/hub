@@ -2222,6 +2222,36 @@ curl -sH "$H" "$U?action=ops_medivac&from=2026-10-12&to=2026-11-12"
 curl -sH "$H" "$U?action=flight_tickets"
 ```
 
+### Jeep demand — `jeep_demand`, `jeep_demand_day`, `jeep_demand_scan`
+How many jeeps the confirmed safaris need, read from each folder's Calc (page Operations → Jeep demand,
+logic `modules/operations/includes/jeep_service.php`, tables `ops_jeep_scan` / `ops_jeep_days`, migration 087).
+Per day: JEEP cell ÷ "Cost per Jeep" (doubled day = 2, half arrival day = 0.5, beach = 0, 3-jeep safari = 3); group
+folders (RECAP) count once: RECAP days + client-sheet days not in RECAP. Folders of `/001_Safari` + `00_2024…` archives;
+not `00_CANCELED`, `-STAFF`, folders without `END`. Kept current by `ck_cron.php` (every run, ≤ 60 s: Calcs whose files
+changed, each folder re-checked every 20 h). Not covered: transfers not in Calcs, other operators' work, old `.xls`.
+
+`jeep_demand` (GET) — `from`, `to` (default this year), `group` = `day` | `week` | `month` (default month; week 1 =
+1–7 Jan, 52 = 23–31 Dec), `include_provisional` (default 1; `0` leaves out `_PROVISIONAL` / `_PROGRESS`). At most 3 years.
+→ `totals` `{days, avg, median, p90, max, max_day, jeep_days, days_ge30}` (every day of the range, 0 included),
+`rows[]` `{period, avg, median, p90, max, max_day, jeep_days, days}` (`day` rows add `provisional`, `safaris`),
+`scan` `{folders, by_status, queued, last_run, full_started, last_scanned_at}`.
+
+`jeep_demand_day` (GET) — `date`, `include_provisional`. → `jeeps` (total), `rows[]` `{folder, folder_path, url,
+request_id, jeeps (that day), jeeps_header (Calc B5), pax, guide (as written), kind (PVT|GRP), stage, provisional,
+start_day, end_day}`.
+
+`jeep_demand_scan` (POST D) — `mode` = `incremental` (also re-checks every `/001_Safari` folder now) | `full` (every
+archive, every folder queued again) | `continue` (works through the queue only). ~50 s per call, resumable: after `full`,
+repeat `continue` until `remaining` = 0. → `{discover {seen, new, moved, removed, dirs_failed}, checked, read,
+unchanged, failed, statuses, remaining, seconds, summary}`. Writes only the jeep tables.
+
+```bash
+curl -sH "$H" "$U?action=jeep_demand&from=2025-01-01&to=2025-12-31&group=month"
+curl -sH "$H" "$U?action=jeep_demand_day&date=2025-08-10"
+curl -sH "$H" -X POST "$U?action=jeep_demand_scan" -d '{"mode":"full","confirm":true}'
+curl -sH "$H" -X POST "$U?action=jeep_demand_scan" -d '{"mode":"continue","confirm":true}'
+```
+
 ### Booking follow-up — `followup_list`, `followup_scan`, `followup_update`, `followup_upsert`
 The open items the booking team chases (Hub: Operations → 📌 Booking follow-up, `modules/operations/booking_followup.php`;
 logic `modules/operations/includes/followup_service.php`, documents read by `followup_classify.php`; tables

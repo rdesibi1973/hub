@@ -34,6 +34,11 @@ outdated — this file wins where they disagree (PHP version, local lint).
 - `modules/operations/` — movements, Medivac, lunch boxes, **Booking follow-up** (`booking_followup.php`; logic
   `includes/followup_service.php` + `followup_classify.php`, shared with the Agent API `followup_*` and
   `tools/followup_local_scan.php`, which reads the supplier PDFs on the office PC because BlueHost cannot).
+- **Jeep demand** (`modules/operations/jeep_demand.php`, endpoint `api/jeep_demand.php`; logic `includes/jeep_service.php`, shared
+  with the Agent API `jeep_demand` / `jeep_demand_day` / `jeep_demand_scan`; since 22 Nov 2026): jeeps per day = Calc JEEP ÷ Cost per
+  Jeep, per `/001_Safari` folder (+ `00_YYYY` archives) in `ops_jeep_scan` / `ops_jeep_days` (keyed by Dropbox id; migration 087).
+  Kept current by `ck_cron.php` (≤ 60 s per run). Reading rules = the Cowork prototype (`/Exchange/JeepUtilization/`); a change to
+  them bumps `JEEP_READER_VERSION`. Phase 2 (fleet, guide assignment) not built.
 - **Booking mail** (`modules/operations/booking_mail.php`, `booking_mail_cron.php` from cron-job.org; logic `includes/booking_mail_service.php`,
   `includes/passport_service.php`): headers of glady@ / operations@ crossed with the follow-up (own table, Sales Response untouched); admin opens
   one thread with a logged reason and replies from the same mailbox; passports → `passports/` + Calc after a person confirms. Off until

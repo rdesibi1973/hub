@@ -3765,6 +3765,44 @@ try {
         agent_out(['ok' => true] + $res);
     }
 
+    // ── Jeep demand (modules/operations/includes/jeep_service.php, page jeep_demand.php) ──
+    case 'jeep_demand': {
+        require_once __DIR__ . '/../operations/includes/jeep_service.php';
+        $from = trim((string)($in['from'] ?? '')) !== '' ? agent_iso_date($in['from'], 'from') : date('Y') . '-01-01';
+        $to   = trim((string)($in['to'] ?? '')) !== '' ? agent_iso_date($in['to'], 'to') : date('Y') . '-12-31';
+        if ($to < $from) agent_fail('to is before from');
+        if ((strtotime($to) - strtotime($from)) / 86400 > 1100) agent_fail('At most 3 years per call');
+        $group = (string)($in['group'] ?? 'month');
+        if (!in_array($group, ['day', 'week', 'month'], true)) agent_fail('group must be day, week or month');
+        $prov = !isset($in['include_provisional']) || !in_array((string)$in['include_provisional'], ['0', 'false', ''], true);
+        $daily = jeep_daily($db, $from, $to, $prov);
+        agent_out(['ok' => true, 'from' => $from, 'to' => $to, 'group' => $group, 'include_provisional' => $prov,
+                   'totals' => jeep_stats($daily), 'rows' => jeep_periods($db, $from, $to, $group, $prov),
+                   'scan' => jeep_scan_state($db)]);
+    }
+
+    case 'jeep_demand_day': {
+        require_once __DIR__ . '/../operations/includes/jeep_service.php';
+        $date = agent_iso_date($in['date'] ?? '', 'date');
+        $prov = !isset($in['include_provisional']) || !in_array((string)$in['include_provisional'], ['0', 'false', ''], true);
+        $rows = jeep_day_detail($db, $date, $prov);
+        agent_out(['ok' => true, 'date' => $date, 'jeeps' => round(array_sum(array_column($rows, 'jeeps')), 2), 'count' => count($rows), 'rows' => $rows]);
+    }
+
+    case 'jeep_demand_scan': {
+        agent_require_method('POST');
+        require_once __DIR__ . '/../operations/includes/jeep_service.php';
+        $mode = (string)($in['mode'] ?? 'incremental');
+        if (!in_array($mode, ['incremental', 'full', 'continue'], true)) agent_fail('mode must be incremental, full or continue');
+        if (empty($in['confirm'])) {
+            agent_out(['ok' => true, 'dry_run' => true, 'mode' => $mode, 'scan' => jeep_scan_state($db),
+                       'message' => 'Dry run — nothing read. Resend with "confirm": true (each call works ~50 s; repeat "continue" until remaining = 0).']);
+        }
+        @set_time_limit(180);
+        $res = jeep_scan_run($db, ['mode' => $mode, 'budget' => 50, 'now' => $mode === 'incremental']);
+        agent_out(['ok' => true, 'dry_run' => false, 'summary' => jeep_run_summary($res)] + $res);
+    }
+
     // ── Booking follow-up (modules/operations/includes/followup_service.php, page booking_followup.php) ──
     case 'followup_list': {
         require_once __DIR__ . '/../operations/includes/followup_service.php';
@@ -4118,6 +4156,7 @@ try {
             'reassign_request', 'pipeline_list', 'pipeline_move', 'parked_wakeups',
             'folder_resolve', 'folder_ids_backfill', 'folders_orphans', 'archive_cancelled', 'grp_names_report',
             'payments_due', 'ck_status', 'ck_request_check', 'ck_set_owners', 'ck_set_group_closed', 'ck_findings_upsert', 'ck_findings_drafts', 'ops_movements', 'ops_lunch_boxes', 'ops_medivac', 'flight_tickets',
+            'jeep_demand', 'jeep_demand_day', 'jeep_demand_scan',
             'followup_list', 'followup_scan', 'followup_update', 'followup_upsert', 'mail_security_status',
             'sales_response_status', 'sales_response_dismiss', 'dropbox_conflicts', 'dropbox_conflicts_run',
             'predeparture_list', 'predeparture_email',

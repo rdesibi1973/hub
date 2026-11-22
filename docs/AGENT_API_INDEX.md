@@ -142,6 +142,7 @@ Quando aggiungi o cambi un'azione nell'API, aggiorna anche questo indice.
 | ck_findings_upsert / ck_findings_drafts | POST D / GET | risultati booking-check | | L2080 / L2109 |
 | ops_movements / ops_lunch_boxes / ops_medivac | GET | `from`, `to` | | L2121–L2141 |
 | flight_tickets | GET | `from`, `to` | biglietti voli interni mancanti | L2151 |
+| jeep_demand / jeep_demand_day / jeep_demand_scan | GET / GET / POST D | `from`, `to`, `group`, `include_provisional` / `date` / `mode` | jeep necessarie al giorno (dai Calc) | L2225 |
 | followup_list / followup_scan / followup_update / followup_upsert | GET / POST D | `type`, `audience`, `status`, `owner` / `id` + campi | intro L2176 | L2312–L2352 |
 | sales_response_status / sales_response_dismiss | GET / POST D | `week` | | L2456 / L2476 |
 | dropbox_conflicts / dropbox_conflicts_run | GET / POST D | `owner_user_id`, `days` | intro L2491 | L2521 / L2537 |

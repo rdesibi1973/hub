@@ -20,6 +20,29 @@ Running log of notable changes and current build state. Module-level "active / p
 
 ---
 
+## 2026-11-22 — Operations → Jeep demand (phase 1)
+
+- How many safari jeeps Savannah needs per day / week / month, read from each confirmed safari's Calc: JEEP cell ÷
+  Cost per Jeep (doubled day = 2, half arrival day = 0.5, beach = 0, multi-jeep safari = n). Same rules as the Cowork
+  prototype (Dropbox `/Exchange/JeepUtilization/scan2.py` + `agg.py`): Calc = Excel with the header (older ones without
+  `_Calc` in the name too), real names before copies, highest prefix; group Calc = RECAP + client-sheet days not in
+  RECAP (CANC sheets out); else the CONF sheet, the only sheet, or the sheet with most days (flagged).
+- New `modules/operations/includes/jeep_service.php` (scan, read, reports), tables `ops_jeep_scan` / `ops_jeep_days` /
+  `ops_jeep_meta` (migration `087_jeep_demand.sql`, also created lazily). Folders keyed by Dropbox id: status renames and
+  the move to `00_YYYY` keep one row; a folder moved to `00_CANCELED` loses its days. A Calc is downloaded again only
+  when the folder's Excel names / revs change; a Calc saved without formula values is calculated with PhpSpreadsheet
+  when present, else listed in Data quality.
+- Page `modules/operations/jeep_demand.php` (+ `jeep_demand.js`, `api/jeep_demand.php`), linked from the Operations tabs
+  ("🚙 Jeep demand", English UI): summary by year (average, median, 90th percentile, max + date, jeep-days, days ≥ 30;
+  current year up to yesterday + booked apart), monthly bars, weekly lines, "days with at least N jeeps" curve, daily
+  bars with click → safaris on the road that day, guides table, Data quality tab, CSV export, provisional on / off.
+  "Refresh now" (Operations module), "Rebuild all" (admin, batches of 25 s until done).
+- `ck_cron.php`: a jeep step after the parked step (≤ 60 s per run, resumable).
+- Agent API: `jeep_demand`, `jeep_demand_day` (GET), `jeep_demand_scan` (POST, dry-run unless confirm).
+- Checked locally on the office PC's Dropbox copy (1,364 folders, 10 s): identical to the prototype's `jeep_daily.csv`
+  (2025: average 11.24, median 9, 90th 28, max 44.3 on 10 Aug, 32 days ≥ 30; 2026 to 21 Nov: 9.24 / 7 / 19.7 / 35.95 on
+  11 Aug / 10) and 0 folders differing from `jeep_trips.csv`.
+
 ## 2026-11-20 — GRP folders carry the programme (Duma / Simba / Nyumbu)
 
 - Case: request 3406 (AdolfoPiazza, El Kebir): a group opened through Confirm Safari CREATE got only `GRP0209`, fixed by hand

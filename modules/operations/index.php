@@ -276,6 +276,7 @@ include __DIR__ . '/../../includes/layout_header.php';
   <?php if (!$_isOpsStaff): ?>
   <a class="tab-btn" href="medivac.php"     style="text-decoration:none;">🏥 Medivac</a>
   <a class="tab-btn" href="lunch_boxes.php" style="text-decoration:none;">🍱 Lunch Boxes</a>
+  <a class="tab-btn" href="jeep_demand.php" style="text-decoration:none;">🚙 Jeep demand</a>
   <?php endif; ?>
   <a class="tab-btn" href="booking_followup.php" style="text-decoration:none;">📌 Booking follow-up</a>
 </div>
