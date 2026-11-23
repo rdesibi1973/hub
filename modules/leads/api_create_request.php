@@ -25,7 +25,9 @@ $initialRequest = trim($body['initial_request'] ?? '');
 $pax            = isset($body['pax']) ? (int)$body['pax'] : null;
 $email          = trim($body['email'] ?? $body['mail'] ?? ''); // Java sends "mail", web sends "email"
 $whatsapp       = trim($body['whatsapp_phone_number'] ?? $body['whatsapp'] ?? ''); // Java sends "whatsapp_phone_number", web sends "whatsapp"
-$notifyAgent    = (bool)($body['notify_agent']  ?? false); // ← checkbox from Java
+// Checkbox from Java; omitted → notify, except Roberto (agent 14) — notify_default_for_agent().
+$notifyAgent    = array_key_exists('notify_agent', $body) && $body['notify_agent'] !== null
+                ? (bool)$body['notify_agent'] : notify_default_for_agent($agentId);
 
 if (!$userId || !$agentId || $customerName === '' || $channel === '') {
     http_response_code(400); echo json_encode(['success'=>false,'message'=>'Missing required fields']); exit;

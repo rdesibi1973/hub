@@ -136,7 +136,14 @@ Same fields as the New Request form:
 `agency_id` **or** `agency_short`, `agent_id` **or** `agent` (default: the API user's agent),
 `email`, `whatsapp`, `source` (Email), `destination`, `period`, `pax`, `status` (Inquiry),
 `value_usd`, `commission_pct`, `date_paid`, `notes`, `date_received` (today),
-`notify_agent` (default **false**), `dup_override` (default false).
+`notify_agent` (default **true**, but **false** when the agent is Roberto, id 14, or there is no agent — since
+23 Nov 2026; before, the default was false), `dup_override` (default false).
+
+Notification ("New request assigned to you", `notify_agent_new_request()`): `"notify_agent": false` is respected;
+`true` with agent 14 still sends nothing (Roberto is never notified). The dry run shows `will_notify` (bool),
+`notify_to` (recipient e-mail), `notify_agent {id, name}` and `notify_reason` (when not notifying). After confirm,
+`notify` = `{sent, error, to, reason}` — `reason` when not sent: `explicit_false`, `agent_is_roberto`, `no_agent`,
+`no_email`, `self_assigned`, `mail_error: …`. To resend later: `notify_request_agent`.
 
 Creates the Dropbox folder `/2026/<Name>(<AgencyShort>-<Agent>)` + subfolders + `CustomerInfo.txt`,
 then the DB row (which also stores `channel` and, for agency requests, `agency_id`). A likely duplicate → **409** with `dup_candidates`; resend with `"dup_override": true`
@@ -277,8 +284,9 @@ agent select of Edit Request (`bs_reassign_request()` in `includes/reassign_serv
 - `request_id` **or** `request_ids` (array, max 50 — e.g. to move a seller's leftovers in one go)
 - `agent_id` **or** `agent` (agent id, Hub username, or agent name — exact, else a unique substring). Two agents are
   called Roberto: the name alone → **400** ambiguous with `candidates[]`; use `14` or `rdesibi`.
-- `notify` (default **false**): mail "Request reassigned to you" to the new seller (`notify_agent_reassigned()`; no mail
-  when the new seller is the API user's own agent).
+- `notify_agent` (alias `notify`; default **true**, **false** when the new seller is Roberto, id 14 — since 23 Nov 2026):
+  mail "Request reassigned to you" to the new seller (`notify_agent_reassigned()`; never to agent 14, nor when the new
+  seller is the API user's own agent). `unchanged: true` sends nothing — use `notify_request_agent`.
 - `retag_folder` (default false): rename the folder tag `(…-<old agent>)` → `(…-<new agent>)` with `folder_rename()`
   (same as `rename_folder`: booking gate, verify-after-write, CK tracker). Only the last `(…)` group changes; dates and
   status tags of `/001_Safari` folders stay. Rules as `create_request`: agency → `(Short-Agent)`, direct → `(Agent-Drct)`
@@ -299,15 +307,31 @@ Rules:
 - Open Booking follow-up lines with audience `sales` are **not** moved (this version): `warnings[]` gives their count.
 - Each request is handled on its own: all ok → 200; some failed → **422**; a single id that fails → its own code.
 
-Response: `{ok, dry_run, agent_to {id, name, active}, to_change|changed, unchanged, failed, results}`; each result is
+Response: `{ok, dry_run, agent_to {id, name, active}, will_notify, notify_to, notify_reason, to_change|changed, unchanged,
+failed, results}`; each result is
 `{id, ok, customer_name, folder, status, agent_from {id, name}, agent_to, unchanged, suggested_folder, warnings[]}` plus
 `effects[]` (dry run) or `done[]`, `folder_rename` (`{from, to}` | `{from, to, error}` | `null`) and `notify`
-(`{sent, error}` | `null`) on confirm; a failure has `error`.
+(`{sent, error, to, reason}` | `null`) on confirm; a failure has `error`.
 
 ```bash
 curl -sA "$UA" -H "$H" -X POST "$U?action=reassign_request" -d '{"request_id":3095,"agent":"rdesibi","retag_folder":true,"note":"Alessia left; client replied 19/11"}'   # dry run
 curl -sA "$UA" -H "$H" -X POST "$U?action=reassign_request" -d '{"request_id":3095,"agent":"rdesibi","retag_folder":true,"note":"Alessia left; client replied 19/11","confirm":true}'
 # → agent Alessia → Roberto, folder /2026/EnricoTonioli(Alessia-Drct) → /2026/EnricoTonioli(Roberto-Drct)
+```
+
+### `notify_request_agent` (POST)
+**Dry-run unless `"confirm": true`** (since 23 Nov 2026). Resends the "New request assigned to you" mail (the same one
+`create_request` sends, `notify_agent_new_request()`) to the request's current seller — e.g. when the notification was
+forgotten at creation.
+
+- `request_id`*, `note` (optional extra line in the mail, after the intro).
+- Dry run: `{request_id, agent {id, name}, to, subject, body}` (body preview).
+- Confirm: sends the mail and logs a timeline `note` "Notification sent to <agent>" → `{ok, sent: true, request_id, agent, to, subject}`.
+- **400** when the request has no seller, the seller is Roberto (id 14) or has no e-mail; **502** when the mail server refuses it.
+
+```bash
+curl -sA "$UA" -H "$H" -X POST "$U?action=notify_request_agent" -d '{"request_id":3511}'   # dry run
+curl -sA "$UA" -H "$H" -X POST "$U?action=notify_request_agent" -d '{"request_id":3511,"note":"Sorry, this one was not notified on Sunday.","confirm":true}'
 ```
 
 ### `pipeline_list` (GET)

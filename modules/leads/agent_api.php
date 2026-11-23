@@ -105,7 +105,7 @@ function agent_audit(PDO $db, string $action, $reqId, array $payload, string $re
                               'set_request_status', 'update_request', 'import_group_folder', 'move_group_folder', 'ck_request_check', 'memo_delete', 'create_agency', 'update_agency', 'save_agency_contact', 'delete_agency_contact',
                               'followup_scan', 'followup_update', 'followup_upsert', 'staff_mail_save_eml', 'staff_mail_reply', 'drafts_cleanup', 'iti_update_activity', 'sales_response_dismiss',
                               'ck_set_owners', 'ck_set_group_closed', 'ck_findings_upsert', 'iti_create_destination', 'iti_import_program', 'iti_supplier_blocklist', 'predeparture_email',
-                              'folder_ids_backfill', 'folders_orphans', 'archive_cancelled', 'gate_run', 'reassign_request', 'pipeline_move'], true) && empty($payload['confirm']);
+                              'folder_ids_backfill', 'folders_orphans', 'archive_cancelled', 'gate_run', 'reassign_request', 'notify_request_agent', 'pipeline_move'], true) && empty($payload['confirm']);
     // Mail: keep who/what in the log, not message bodies or attachment content.
     if (in_array($action, ['mail_get', 'mail_attachment', 'staff_mail_get', 'staff_mail_attachment', 'iti_document', 'iti_vouchers'], true) && $code === 200) {
         $res = json_decode($resultJson, true);
@@ -753,6 +753,13 @@ function agent_tl_resolve(PDO $db, array $in): array {
 }
 
 /** 'YYYY-MM-DD' or fail. */
+/** Optional boolean parameter: null when omitted / empty / not a boolean, else true / false ("0", "false", "no" = false). */
+function agent_bool_or_null(array $in, string $key): ?bool {
+    if (!array_key_exists($key, $in) || $in[$key] === null || $in[$key] === '') return null;
+    if (is_bool($in[$key])) return $in[$key];
+    return filter_var($in[$key], FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+}
+
 /** request_id or request_ids[] (≤ 50, duplicates dropped) → ids, or 400. */
 function agent_request_ids(array $in): array {
     $ids = [];
@@ -1042,15 +1049,23 @@ try {
             'initial_request' => $in['initial_request'] ?? '',
             'notes'           => $in['notes']           ?? '',
         ];
+        // notify_agent omitted → true, except for Roberto (agent 14) or no agent (Roberto, 23 Nov 2026).
+        require_once __DIR__ . '/notifications.php';
+        $notify = notify_plan($db, $agentId, agent_bool_or_null($in, 'notify_agent'));
         $res = bs_create_request($db, $v, [
             'dup_override'    => !empty($in['dup_override']),
-            'notify_agent'    => !empty($in['notify_agent']),    // default: no email to the agent
+            'notify_agent'    => $notify['will_notify'],
             'creator_user_id' => (int)$agentUser['id'],
             'dry_run'         => empty($in['confirm']),          // checks + folder name only
         ]);
         if ($res['ok'] && !empty($res['dry_run'])) {
             agent_out(['ok' => true, 'dry_run' => true, 'folder_name' => $res['folder_name'], 'dropbox_path' => $res['dropbox_path'],
-                       'values' => $res['values'], 'message' => 'Dry run — no folder, no request. Resend with "confirm": true to create.']);
+                       'values' => $res['values'], 'will_notify' => $notify['will_notify'], 'notify_to' => $notify['to'],
+                       'notify_agent' => $notify['agent'], 'notify_reason' => $notify['reason'],
+                       'message' => 'Dry run — no folder, no request. Resend with "confirm": true to create.']);
+        }
+        if ($res['ok'] && !$notify['will_notify']) {
+            $res['notify'] = ['sent' => false, 'error' => null, 'to' => null, 'reason' => $notify['reason']];
         }
         if (!$res['ok']) {
             $code = $res['error_code'] === 'duplicate' || $res['error_code'] === 'folder_exists' ? 409 : 400;
@@ -1366,7 +1381,13 @@ try {
         $ag  = ra_agent_resolve($db, $who);
         if (!$ag['ok']) agent_fail($ag['error'], $ag['code'], $ag['candidates'] ? ['candidates' => $ag['candidates']] : []);
         $dry = empty($in['confirm']);
-        $opt = ['dry_run' => $dry, 'notify' => !empty($in['notify']), 'retag_folder' => !empty($in['retag_folder']),
+        // notify_agent (alias notify) omitted → true, except for Roberto (agent 14) (Roberto, 23 Nov 2026).
+        require_once __DIR__ . '/notifications.php';
+        $newAgId  = (int)$ag['agent']['id'];
+        $explicit = agent_bool_or_null($in, 'notify_agent') ?? agent_bool_or_null($in, 'notify');
+        $doNotify = $newAgId !== NOTIFY_OWNER_AGENT_ID && ($explicit ?? notify_default_for_agent($newAgId));
+        $notifyTo = notify_agent_contact($db, $newAgId)['email'] ?? '';
+        $opt = ['dry_run' => $dry, 'notify' => $doNotify, 'retag_folder' => !empty($in['retag_folder']),
                 'allow_booked' => !empty($in['allow_booked']), 'note' => trim((string)($in['note'] ?? '')),
                 'editor_user_id' => (int)$agentUser['id']];
         if (!$dry) tl_schema($db);
@@ -1385,10 +1406,43 @@ try {
         $nFail = count($failCodes);
         $nSame = count(array_filter($results, fn($x) => !empty($x['unchanged'])));
         agent_out(['ok' => !$nFail, 'dry_run' => $dry, 'agent_to' => $ag['agent'],
+                   'will_notify' => $doNotify && $notifyTo !== '', 'notify_to' => $notifyTo !== '' ? $notifyTo : null,
+                   'notify_reason' => $doNotify ? ($notifyTo === '' ? 'no_email' : null)
+                                    : ($newAgId === NOTIFY_OWNER_AGENT_ID ? 'agent_is_roberto' : 'explicit_false'),
                    $dry ? 'to_change' : 'changed' => count($results) - $nFail - $nSame, 'unchanged' => $nSame, 'failed' => $nFail,
                    'results' => $results]
                   + ($dry ? ['message' => 'Dry run — nothing changed. Resend with "confirm": true.'] : []),
                   !$nFail ? 200 : (count($ids) === 1 ? $failCodes[0] : 422));
+    }
+
+    // ── notify_request_agent ─────────────────────────────────────────────────
+    // Resend the "new request assigned" mail to the request's seller (notifications.php, same mail as
+    // create_request). Refused for Roberto (agent 14) and for a seller without e-mail. Dry-run unless "confirm": true.
+    case 'notify_request_agent': {
+        agent_require_method('POST');
+        require_once __DIR__ . '/notifications.php';
+        $r    = agent_request($db, $in['request_id'] ?? 0);
+        $agId = (int)($r['agent_id'] ?? 0);
+        $c    = notify_agent_contact($db, $agId);
+        if (!$c) agent_fail('Request ' . $r['id'] . ' has no seller — assign one with reassign_request', 400);
+        if ($agId === NOTIFY_OWNER_AGENT_ID) agent_fail('The seller is Roberto (agent ' . NOTIFY_OWNER_AGENT_ID . ') — he is never notified', 400);
+        if ($c['email'] === '') agent_fail('Agent ' . $c['name'] . ' (' . $agId . ') has no e-mail address — notification not possible', 400);
+        $note = trim((string)($in['note'] ?? ''));
+        $mail = notify_new_request_mail($db, (int)$r['id'], $c['name'], (string)$r['customer_name'], $note);
+        $base = ['request_id' => (int)$r['id'], 'agent' => ['id' => $agId, 'name' => $c['name']], 'to' => $c['email'],
+                 'subject' => $mail['subject']];
+        if (empty($in['confirm'])) {
+            agent_out(['ok' => true, 'dry_run' => true] + $base + ['body' => $mail['body'],
+                       'message' => 'Dry run — nothing sent. Resend with "confirm": true.']);
+        }
+        $n = notify_agent_new_request($db, $agId, 0, (int)$r['id'], (string)$r['customer_name'],
+                                      (string)$r['practice_code'], true, $note);
+        if (empty($n['sent'])) agent_fail('Notification not sent: ' . ($n['error'] ?? $n['reason'] ?? 'unknown'), 502, ['notify' => $n]);
+        tl_schema($db);
+        timeline_log((int)$r['id'], 'note', 'Notification sent to ' . $c['name'],
+                     ['body' => 'New request mail resent to ' . $c['email'] . ($note !== '' ? "\nNote: " . $note : ''),
+                      'refs' => ['agent_to' => $agId]]);
+        agent_out(['ok' => true, 'sent' => true] + $base);
     }
 
     // ── pipeline_list ────────────────────────────────────────────────────────
@@ -4160,7 +4214,7 @@ try {
             'mail_folders', 'mail_list', 'mail_get', 'mail_attachment', 'mail_flag', 'mail_move', 'mail_draft', 'mail_send',
             'staff_mail_mailboxes', 'staff_mail_search', 'staff_mail_get', 'staff_mail_attachment', 'staff_mail_save_eml', 'staff_mail_reply', 'drafts_cleanup',
             'timeline_list', 'timeline_add', 'timeline_update', 'summary_set', 'request_resume', 'set_request_status',
-            'reassign_request', 'pipeline_list', 'pipeline_move', 'parked_wakeups',
+            'reassign_request', 'notify_request_agent', 'pipeline_list', 'pipeline_move', 'parked_wakeups',
             'folder_resolve', 'folder_ids_backfill', 'folders_orphans', 'archive_cancelled', 'grp_names_report',
             'payments_due', 'ck_status', 'ck_request_check', 'ck_set_owners', 'ck_set_group_closed', 'ck_findings_upsert', 'ck_findings_drafts', 'ops_movements', 'ops_lunch_boxes', 'ops_medivac', 'flight_tickets',
             'jeep_demand', 'jeep_demand_day', 'jeep_demand_scan',

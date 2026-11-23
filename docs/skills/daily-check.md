@@ -23,7 +23,7 @@ Count the Incoming Leads still to assign and list them, one line each (name, sou
 - Folder naming: fam trips use the agency name and "FamTrip" as client (never the staff name, never `-Drct`); trips including Kenya show Kenya in the name.
 - Alessia and Alessandra are different agents; Roberto De Sibi (id 14) is not Roberto Capri.
 - Creating / assigning requests (rule of 9 Nov 2026): once the seller is known (Roberto names him, or approves the proposed agent), create and assign directly with `create_request` and `"confirm": true` — no dry run, no further ok. Before that, always the duplicates check with `find_requests`; a likely duplicate (409 / `dup_candidates`) → stop and tell Roberto, never `dup_override` on your own.
-- Notification: always `notify_agent: true` (the API default is false: never omit it), except when the request is assigned to Roberto De Sibi himself (id 14) → `notify_agent: false`.
+- Notification: always `notify_agent: true` (API default true, false for agent 14 — pass it anyway), except when the request is assigned to Roberto De Sibi himself (id 14) → `notify_agent: false`.
 - Agency not in the Hub: `list_agencies` (try the short name and part of the name) first; if it is really missing, propose `create_agency` (name, type `savannah` / `promoservice` for Promoservice agencies / `lamprati`, email if known) — dry run, show Roberto the short name used in the folder tag, `confirm` after his ok; a 409 means it exists: use that id.
 
 ## 3. Payments / AfrAsia (if due)

@@ -23,10 +23,11 @@ function notify_agent_new_request(
     int    $requestId,
     string $customerName,
     string $practiceCode,
-    bool   $doNotify
+    bool   $doNotify,
+    string $note = ''
 ): array {
 
-    if (!$doNotify) return ['sent' => false, 'error' => null];
+    if (!$doNotify) return ['sent' => false, 'error' => null, 'to' => null, 'reason' => 'explicit_false'];
 
     // Resolve creator's agent_id so we can skip self-assignment silently
     $creatorAgentId = null;
@@ -39,40 +40,85 @@ function notify_agent_new_request(
 
     // Assigning to yourself — no notification needed
     if ($creatorAgentId !== null && $creatorAgentId === $assignedAgentId) {
-        return ['sent' => false, 'error' => null];
+        return ['sent' => false, 'error' => null, 'to' => null,
+                'reason' => $assignedAgentId === NOTIFY_OWNER_AGENT_ID ? 'agent_is_roberto' : 'self_assigned'];
     }
 
-    // Get agent name + email (email lives in users table, not agents)
-    $s = $db->prepare(
-        'SELECT a.name, u.email
-         FROM agents a
-         LEFT JOIN users u ON u.agent_id = a.id AND u.is_active = 1
-         WHERE a.id = ?
-         LIMIT 1'
-    );
-    $s->execute([$assignedAgentId]);
-    $agent = $s->fetch(PDO::FETCH_ASSOC);
+    $agent = notify_agent_contact($db, $assignedAgentId);
 
     // Notification was requested but agent has no email — surface as error
     if (!$agent || empty($agent['email'])) {
         $name = $agent['name'] ?? 'Unknown agent';
         error_log("[notify] SKIP — agent_id={$assignedAgentId} ({$name}) has no email. creator_user={$creatorUserId}");
         return [
-            'sent'  => false,
-            'error' => "Agent \"{$name}\" has no email address configured — notification not sent.",
+            'sent'   => false,
+            'error'  => "Agent \"{$name}\" has no email address configured — notification not sent.",
+            'to'     => null,
+            'reason' => 'no_email',
         ];
     }
 
-    $intro   = "A new request has been created and assigned to you.\n\n";
-    $subject = "New request assigned to you - {$customerName}";
-    $body    = build_assignment_email_body($db, $requestId, $agent['name'], $customerName, $intro);
-
-    $ok = send_notification_mail($agent['email'], $subject, $body,
+    $mail = notify_new_request_mail($db, $requestId, $agent['name'], $customerName, $note);
+    $ok = send_notification_mail($agent['email'], $mail['subject'], $mail['body'],
         "new request #{$requestId} ({$customerName})");
+    $err = $ok ? null : "Email server rejected the notification for {$agent['email']} (mail() returned false).";
     return [
-        'sent'  => $ok,
-        'error' => $ok ? null
-            : "Email server rejected the notification for {$agent['email']} (mail() returned false).",
+        'sent'   => $ok,
+        'error'  => $err,
+        'to'     => $agent['email'],
+        'reason' => $ok ? null : 'mail_error: ' . $err,
+    ];
+}
+
+/** Roberto De Sibi's agent id: never notified of requests assigned to him (Roberto, 23 Nov 2026). */
+if (!defined('NOTIFY_OWNER_AGENT_ID')) define('NOTIFY_OWNER_AGENT_ID', 14);
+
+/** Default of notify_agent when the caller omits it: the seller is told, except Roberto (or no agent). */
+function notify_default_for_agent(int $agentId): bool {
+    return $agentId > 0 && $agentId !== NOTIFY_OWNER_AGENT_ID;
+}
+
+/** Agent name + e-mail (the e-mail lives in users, not agents). null = agent not found. */
+function notify_agent_contact(PDO $db, int $agentId): ?array {
+    if ($agentId <= 0) return null;
+    $s = $db->prepare(
+        'SELECT a.id, a.name, u.email
+         FROM agents a
+         LEFT JOIN users u ON u.agent_id = a.id AND u.is_active = 1
+         WHERE a.id = ?
+         LIMIT 1'
+    );
+    $s->execute([$agentId]);
+    $row = $s->fetch(PDO::FETCH_ASSOC);
+    return $row ? ['id' => (int)$row['id'], 'name' => (string)$row['name'], 'email' => (string)($row['email'] ?? '')] : null;
+}
+
+/**
+ * Whether a "new request assigned" mail will go out, before sending (Agent API dry runs).
+ * $explicit: the caller's notify_agent (null = omitted → notify_default_for_agent()).
+ * → ['will_notify' => bool, 'to' => email|null, 'agent' => {id, name}|null,
+ *    'reason' => null | 'no_agent' | 'agent_is_roberto' | 'explicit_false' | 'no_email']
+ */
+function notify_plan(PDO $db, int $agentId, ?bool $explicit): array {
+    $c   = notify_agent_contact($db, $agentId);
+    $out = ['will_notify' => false, 'to' => ($c && $c['email'] !== '') ? $c['email'] : null,
+            'agent' => $c ? ['id' => $c['id'], 'name' => $c['name']] : null, 'reason' => null];
+    if (!$c)                                   $out['reason'] = 'no_agent';
+    elseif ($agentId === NOTIFY_OWNER_AGENT_ID) $out['reason'] = 'agent_is_roberto';
+    elseif ($explicit === false)               $out['reason'] = 'explicit_false';
+    elseif ($c['email'] === '')                $out['reason'] = 'no_email';
+    else                                       $out['will_notify'] = true;
+    return $out;
+}
+
+/** Subject + body of the "new request assigned" mail (sent by notify_agent_new_request(), previewed by the API). */
+function notify_new_request_mail(PDO $db, int $requestId, string $agentName, string $customerName, string $note = ''): array {
+    $intro = "A new request has been created and assigned to you.\n\n";
+    $note  = trim($note);
+    if ($note !== '') $intro .= $note . "\n\n";
+    return [
+        'subject' => "New request assigned to you - {$customerName}",
+        'body'    => build_assignment_email_body($db, $requestId, $agentName, $customerName, $intro),
     ];
 }
 
@@ -106,27 +152,21 @@ function notify_agent_reassigned(
         $s->execute([$editorUserId]);
         $row = $s->fetch(PDO::FETCH_ASSOC);
         if ($row && (int)$row['agent_id'] === $newAgentId) {
-            return ['sent' => false, 'error' => null];
+            return ['sent' => false, 'error' => null, 'to' => null,
+                    'reason' => $newAgentId === NOTIFY_OWNER_AGENT_ID ? 'agent_is_roberto' : 'self_assigned'];
         }
     }
 
-    // Agent name + email (email lives in users table, not agents)
-    $s = $db->prepare(
-        'SELECT a.name, u.email
-         FROM agents a
-         LEFT JOIN users u ON u.agent_id = a.id AND u.is_active = 1
-         WHERE a.id = ?
-         LIMIT 1'
-    );
-    $s->execute([$newAgentId]);
-    $agent = $s->fetch(PDO::FETCH_ASSOC);
+    $agent = notify_agent_contact($db, $newAgentId);
 
     if (!$agent || empty($agent['email'])) {
         $name = $agent['name'] ?? 'Unknown agent';
         error_log("[notify] SKIP reassign — agent_id={$newAgentId} ({$name}) has no email. editor_user={$editorUserId}");
         return [
-            'sent'  => false,
-            'error' => "Agent \"{$name}\" has no email address configured — reassignment notification not sent.",
+            'sent'   => false,
+            'error'  => "Agent \"{$name}\" has no email address configured — reassignment notification not sent.",
+            'to'     => null,
+            'reason' => 'no_email',
         ];
     }
 
@@ -136,10 +176,12 @@ function notify_agent_reassigned(
 
     $ok = send_notification_mail($agent['email'], $subject, $body,
         "reassigned request #{$requestId} ({$customerName})");
+    $err = $ok ? null : "Email server rejected the notification for {$agent['email']} (mail() returned false).";
     return [
-        'sent'  => $ok,
-        'error' => $ok ? null
-            : "Email server rejected the notification for {$agent['email']} (mail() returned false).",
+        'sent'   => $ok,
+        'error'  => $err,
+        'to'     => $agent['email'],
+        'reason' => $ok ? null : 'mail_error: ' . $err,
     ];
 }
 

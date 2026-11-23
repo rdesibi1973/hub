@@ -29,12 +29,13 @@ Quando aggiungi o cambi un'azione nell'API, aggiorna anche questo indice.
 | create_agency | POST D | `name*`, `short_name`, `type` (savannah/promoservice/lamprati), `email`, `address` | 409 se esiste | L78 |
 | update_agency | POST D | `agency_id*` + campi, `price_level`, `custom_markup` (min 12%) | | L94 |
 | save_agency_contact / delete_agency_contact | POST D | `agency_id*`, `contact_id`, `name`, `email`, `phone`, `primary` | | L112 |
-| create_request | POST D | `customer_name*`, `initial_request*`, `channel`, `agent_id`, `agency_id`, `email`, `period`, `pax`, `date_received`, `notify_agent` | | L130 |
-| update_request | POST D | `request_id`, campi | | L150 |
-| set_request_status | POST D | `request_id`, `status` | stato Parked: L216 | L179 |
-| parked_wakeups | GET | — | per il giro | L259 |
-| reassign_request | POST D | `request_id`, nuovo agente | rinomina cartella | L273 |
-| pipeline_list / pipeline_move | GET / POST D | `agent`… / `request_id`, colonna | | L313 / L336 |
+| create_request | POST D | `customer_name*`, `initial_request*`, `channel`, `agent_id`, `agency_id`, `email`, `period`, `pax`, `date_received`, `notify_agent` | `notify_agent` default true (false se agente 14); dry run mostra `will_notify` + `notify_to` | L130 |
+| update_request | POST D | `request_id`, campi | | L157 |
+| set_request_status | POST D | `request_id`, `status` | stato Parked: L223 | L186 |
+| parked_wakeups | GET | — | per il giro | L266 |
+| reassign_request | POST D | `request_id`, nuovo agente, `notify_agent` (default true, false se 14) | rinomina cartella | L280 |
+| notify_request_agent | POST D | `request_id*`, `note` | rimanda la mail "new request assigned" al venditore; 400 se agente 14 / senza e-mail | L322 |
+| pipeline_list / pipeline_move | GET / POST D | `agent`… / `request_id`, colonna | | L337 / L360 |
 | timeline_list / timeline_add / timeline_update | GET / POST | `request_id*`, `event_type*`, `title*`, `body`, `next_step` | timeline_add scrive subito (no confirm) | L2646 |
 | summary_set | POST D | `request_id*`, `summary*` (≤1500), `next_step`, `waiting_on` | | L2661 |
 
