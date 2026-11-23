@@ -82,6 +82,17 @@ $svcs = bc_services($calc);
 $fl = array_values(array_filter($svcs, fn($s) => $s['type'] === 'flight'))[0];
 $t('annotation attached to the row 20 flight, no extra service', count($svcs) === 4 && ($fl['annotations'][0]['row'] ?? 0) === 22
                                                                 && $fl['calc_invoice'] === ['Invoice$290'] && $fl['calc_checked'] === ['Glady'], $svcs);
+
+// ── Own arrangement nights are not a stay to book (Pemba own arrangement 23–30 Jun: no invoice) ──
+$calcOA = ['days' => [
+    $day(17, '2027-06-21', 'Arusha', 'Arusha Explorers'),
+    $day(18, '2027-06-22', 'Arusha', 'Arusha Explorers'),
+    $day(19, '2027-06-23', 'Pemba', 'Pemba own arrangement'),
+    $day(20, '2027-06-24', 'Pemba', 'Pemba own arrangement'),
+    $day(21, '2027-06-30', 'Departure', ''),
+], 'skipped_rows' => []];
+$staysOA = array_map(fn($s) => $s['name'], array_values(array_filter(bc_services($calcOA), fn($s) => $s['type'] === 'accommodation')));
+$t('own arrangement nights are not a stay', $staysOA === ['Arusha Explorers'], $staysOA);
 $calc2 = $calc;
 $calc2['skipped_rows'][0]['has_cost'] = true;
 $t('a row with a cost is not an annotation', empty(array_values(array_filter(bc_services($calc2), fn($s) => $s['type'] === 'flight'))[0]['annotations']));

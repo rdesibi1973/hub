@@ -42,6 +42,9 @@ const BC_OWN_ACTIVITY = '/\b(orangi|marera|kifaru|arusha explorers?)\b|natural w
 /** Hotel text that is not a stay (e.g. the departure day's note). */
 const BC_NOT_STAY = '/^(transfer|day ?room|n\/?a|-+)\b/i';
 
+/** Hotel text the client arranges himself ("Pemba own arrangement", "self arranged"): no supplier, no invoice to check. */
+const BC_OWN_ARRANGEMENT = '/\b(own|self)[\s-]*arr/i';
+
 /** Lower-case letters/digits only: "Orangi -FB" and "Orangi-FB" are the same hotel. */
 function bc_key(string $s): string {
     return preg_replace('/[^a-z0-9]+/', '', strtolower($s));
@@ -71,7 +74,7 @@ function bc_services(array $calc): array {
     foreach ($days as $i => $d) {
         // Accommodation: consecutive nights with the same hotel text. The last day is departure.
         $hotel = trim($d['hotel_text']);
-        $isStay = $hotel !== '' && $i < $n - 1 && !preg_match(BC_NOT_STAY, $hotel);
+        $isStay = $hotel !== '' && $i < $n - 1 && !preg_match(BC_NOT_STAY, $hotel) && !preg_match(BC_OWN_ARRANGEMENT, $hotel);
         $key = $isStay ? bc_key($hotel) : '';
         if ($stay !== null && $key !== $stay['key']) $close();
         if ($isStay) {
