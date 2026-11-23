@@ -250,7 +250,7 @@ include __DIR__ . '/../../includes/layout_header.php';
 <div class="page-header">
   <div>
     <h2>Itinerary program from Calc — <?= h($req['customer_name']) ?></h2>
-    <div class="sub">From the booking's Calc · Hub request #<?= $rid ?> · <?= h($req['practice_code']) ?></div>
+    <div class="sub"><?= strcasecmp(trim((string)$req['status']), 'Booked') === 0 ? 'Booked trip' : 'Quote (sales phase, ' . h($req['status']) . ')' ?> · from the request's Calc · Hub request #<?= $rid ?> · <?= h($req['practice_code']) ?></div>
   </div>
   <a href="../leads/request_view.php?id=<?= $rid ?>" class="btn btn-outline btn-sm">← Request</a>
 </div>

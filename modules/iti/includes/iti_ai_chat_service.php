@@ -1,7 +1,7 @@
 <?php
 /**
  * iti_ai_chat_service.php — the program assistant of "Itinerary program from Calc" (program_final.php),
- * trial from 23 Nov 2026. Endpoint: modules/iti/program_chat.php; panel: modules/iti/assets/program_chat.js.
+ * trial from 23 Nov 2026. For a quote in the sales phase (request not Booked) as for a booked trip. Endpoint: modules/iti/program_chat.php; panel: modules/iti/assets/program_chat.js.
  *
  * A chat that guides the seller from the Calc to the program. It does not build the program itself: it reads the
  * same plan as the page (iti_final_plan(), iti_final_precheck()), explains what to fix in the Calc, proposes
@@ -182,6 +182,8 @@ function iti_chat_snapshot(PDO $db, array $L, bool $isAdmin): array {
     foreach (iti_final_sellers($db) as $un => $nm) $sellers[] = array('username' => $un, 'name' => $nm);
     return array(
         'request_id' => $L['req']['id'], 'calc_file' => $calc['file'], 'sheet' => $calc['sheet'],
+        'stage' => iti_final_is_quote($calc) ? 'quote (sales phase, request status ' . $L['req']['status'] . ')' : 'booked',
+        'other_pax_sheets_priced' => count($calc['price_options'] ?? array()) > 1 ? array_map(function ($o) { return trim($o['sheet']); }, $calc['price_options']) : null,
         'adults' => (int)($pax['adults'] ?? 0), 'teenagers' => (int)($pax['teen'] ?? 0), 'children' => (int)($pax['child'] ?? 0),
         'rooms' => (string)($calc['room_config'] ?? ''), 'start' => $calc['start_date'], 'end' => $calc['end_date'], 'nights' => (int)$calc['nights'],
         'arrival_details_given' => trim((string)($calc['arrival'] ?? '')) !== '', 'departure_details_given' => trim((string)($calc['departure'] ?? '')) !== '',
@@ -203,8 +205,14 @@ function iti_chat_snapshot(PDO $db, array $L, bool $isAdmin): array {
 function iti_chat_system(): string {
     return <<<TXT
 You are the program assistant of Savannah Explorers, a safari operator in Arusha, Tanzania, inside their internal Hub.
-You help a seller turn the costing sheet of a confirmed booking (the "Calc", an Excel file) into the client's itinerary program.
+You help a seller turn the costing sheet of a request (the "Calc", an Excel file) into the client's itinerary program.
 The Hub builds the program itself from a sample program and the Calc; your job is to get the seller there quickly and without mistakes.
+The status says the stage:
+- "quote": the sales phase, the request is not booked yet. The program goes to the agency or client as a proposal. Room types,
+  guest names and flight details are often not known yet and that is fine: do not push the seller on them. Dates may be
+  likely ones (then the dates are "indicative"). A quote can carry the prices of several pax sheets (other_pax_sheets_priced).
+  Hotels, activities and transfers still have to be right: the client chooses on this program.
+- "booked": after the sale; the program must be complete and match what was booked.
 
 How the Hub works:
 - Each night of the Calc has a hotel text, activity texts and a PARK/OVERNIGHT label (the route of the day). Each text must be

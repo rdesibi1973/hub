@@ -21,7 +21,8 @@ outdated — this file wins where they disagree (PHP version, local lint).
   decide / map / check in the Calc; the assistant chat (Sonnet 5.5, `includes/iti_ai_chat_service.php`, endpoint `program_chat.php`,
   panel `assets/program_chat.js`, table `iti_ai_chats`) starts only with nothing to fix, proposes mappings / sample as cards the seller
   confirms (saved through `iti_final_map_text()`, same path as the page), memos Roberto on missing master data; limit per conversation
-  `ai_limit_chat`. Transcripts: Settings → AI.
+  `ai_limit_chat`. Transcripts: Settings → AI. Works for quotes in the sales phase too (`iti_final_is_quote()`: request not Booked —
+  no rooms / flight details asked) as for booked trips.
 - `modules/iti/` — itinerary builder. `includes/` (root) — config (server-only), auth, db, mail.
   **Shared ITI data** (logic `modules/iti/includes/iti_shared_service.php`, since 16 Nov 2026): aliases, lodges, activities,
   destinations, routes, airlines, imports and samples are changed on the Hub by an admin only (`iti_can_edit_shared()`,

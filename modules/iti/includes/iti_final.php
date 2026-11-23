@@ -708,6 +708,12 @@ function iti_final_single_rooms(string $rooms): int {
     return $n;
 }
 
+/** A Calc of a request not Booked yet: a program for the sales phase (quote), not after the sale. */
+function iti_final_is_quote(array $calc): bool {
+    $status = trim((string)($calc['request_status'] ?? ''));
+    return $status !== '' && strcasecmp($status, 'Booked') !== 0;
+}
+
 /**
  * What the seller must have filled in the Calc before an itinerary program is built from it.
  * 'errors' stop the program (dates not left at the template's); 'open_errors' too (pax, room types), unless
@@ -725,8 +731,7 @@ function iti_final_calc_review(array $calc): array {
     $errors = array(); $warnings = array(); $openErrors = array();
 
     // A quote (request not Booked yet, e.g. one pax sheet per group size): room types are not known yet.
-    $status = trim((string)($calc['request_status'] ?? ''));
-    $quote = $status !== '' && strcasecmp($status, 'Booked') !== 0;
+    $quote = iti_final_is_quote($calc);
     if (!$open && $a + $t + $c <= 0) $openErrors[] = 'Enter the number of adults, teenagers and children (B2:B4).';
     if (!$open && $rooms === '' && !$isRecap) {
         if ($quote) $warnings[] = 'No room types under ROOMS TYPE (quote, request not booked yet): the program goes without them.';
@@ -1566,7 +1571,8 @@ function iti_final_near_places(): array {
 }
 
 /**
- * Pre-check of a Calc before a program is built from it, and before any AI is used: everything the seller must
+ * Pre-check of a Calc before a program is built from it (a quote in the sales phase or a booked trip), and before
+ * any AI is used: everything the seller must
  * fix, decide or check, in one list. No AI, no cost. Built on iti_final_calc_review() (errors stop the program)
  * and iti_final_plan() (texts to map), plus checks of their own: guests' ages against adults / teenagers /
  * children, arrival / departure details, how the guests move when the hotel changes area, flight costs without a
@@ -1605,8 +1611,11 @@ function iti_final_precheck(array $calc, array $review, ?array $plan, bool $grou
                 . ': check B2:B4 and the teenager / child prices.');
         }
     }
-    if (trim((string)($calc['arrival'] ?? '')) === '') $add('warn', 'ARRIVAL DETAILS are empty in the Calc: the arrival transfer cannot be timed.');
-    if (trim((string)($calc['departure'] ?? '')) === '') $add('warn', 'DEPARTURE DETAILS are empty in the Calc: the departure transfer cannot be timed.');
+    // Flights of the guests: known after the sale; a quote goes without them (23 Nov 2026).
+    if (!iti_final_is_quote($calc)) {
+        if (trim((string)($calc['arrival'] ?? '')) === '') $add('warn', 'ARRIVAL DETAILS are empty in the Calc: the arrival transfer cannot be timed.');
+        if (trim((string)($calc['departure'] ?? '')) === '') $add('warn', 'DEPARTURE DETAILS are empty in the Calc: the departure transfer cannot be timed.');
+    }
     foreach ($review['warnings'] as $w) $add('warn', $w);
     foreach (($calc['warnings'] ?? array()) as $w) {
         if (strpos($w, 'Several Calc files') === 0) continue;   // the page has a file picker
