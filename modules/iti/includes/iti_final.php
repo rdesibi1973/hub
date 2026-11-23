@@ -1515,3 +1515,146 @@ function iti_final_list(PDO $db, int $requestId): array {
     $st->execute(array($requestId));
     return $st->fetchAll(PDO::FETCH_ASSOC);
 }
+
+/**
+ * The sample of a final program: chosen from the Calc content (iti_final_pick_sample()), or the one the user picked
+ * for this booking only ($sampleReq). Shared by program_final.php and the assistant (iti_ai_chat_service.php).
+ * Returns array('pick', 'auto' (sample row or null), 'sample' (row or null), 'one_off' (bool), 'code').
+ */
+function iti_final_sample_for(PDO $db, array $calc, string $lang, bool $isGroup, int $sampleReq): array {
+    $code = iti_final_code_from_calc($calc['file']);
+    $pick = iti_final_pick_sample($db, $calc, iti_final_plan($db, $calc, 0)['days'], $code, $lang, $isGroup);
+    $auto = $pick ? $pick['sample'] : null;
+    $sample = $auto; $oneOff = false;
+    if ($sampleReq && (!$auto || (int)$auto['id'] !== $sampleReq)) {
+        $st = $db->prepare("SELECT id, program_type, title_en, title_it, display_language, duration_days FROM iti_programs
+                             WHERE id = ? AND program_type = 'sample' AND status <> 'cancelled'");
+        $st->execute(array($sampleReq));
+        if ($r = $st->fetch(PDO::FETCH_ASSOC)) { $sample = $r; $oneOff = true; }
+    }
+    return array('pick' => $pick, 'auto' => $auto, 'sample' => $sample, 'one_off' => $oneOff, 'code' => $code);
+}
+
+/** The "data confirmed" token of program_final.php: valid for this file, sheet and version of the Calc only. */
+function iti_final_ok_token(array $calc): string {
+    return substr(md5($calc['file'] . '|' . $calc['sheet'] . '|' . ($calc['calc_rev'] ?? '')), 0, 12);
+}
+
+/**
+ * Maps a Calc text from program_final.php or the assistant. An admin saves the alias for every program; the staff
+ * map it for this booking only, pending the admin's approval (iti_alias_propose(), 16 Nov 2026). Returns the message.
+ * $targets: lodge_id, activity_id, transfer_route_id, flight_route_id (0 = none).
+ */
+function iti_final_map_text(string $type, string $text, array $targets, ?string $meal, int $requestId, bool $isAdmin, string $user): string {
+    $text = iti_alias_norm($text);
+    if ($text === '') throw new RuntimeException('Empty Calc text.');
+    $t = array();
+    foreach (array('lodge_id', 'activity_id', 'transfer_route_id', 'flight_route_id') as $k) $t[$k] = (int)($targets[$k] ?? 0);
+    if ($isAdmin) {
+        iti_alias_save($type, $text, $t, $meal, $user);
+        return 'Alias "' . $text . '" saved for every program.';
+    }
+    iti_alias_propose($type, $text, $t, $meal, $requestId);
+    return '"' . $text . '" mapped for this booking only. Roberto approves it before other programs use it.';
+}
+
+/** Areas next to each other (iti_final_places()): a lodge in one fits a Calc label naming the other. */
+function iti_final_near_places(): array {
+    return array('Karatu' => array('Ngorongoro', 'Manyara', 'Lake Eyasi'), 'Ngorongoro' => array('Karatu', 'Serengeti'),
+                 'Manyara' => array('Karatu', 'Tarangire'), 'Tarangire' => array('Manyara'), 'Lake Eyasi' => array('Karatu'),
+                 'Kilimanjaro' => array('Arusha'), 'Arusha' => array('Kilimanjaro'), 'Serengeti' => array('Ngorongoro'));
+}
+
+/**
+ * Pre-check of a Calc before a program is built from it, and before any AI is used: everything the seller must
+ * fix, decide or check, in one list. No AI, no cost. Built on iti_final_calc_review() (errors stop the program)
+ * and iti_final_plan() (texts to map), plus checks of their own: guests' ages against adults / teenagers /
+ * children, arrival / departure details, how the guests move when the hotel changes area, flight costs without a
+ * flight, and a lodge that is not where the Calc label says (a wrong mapping, 23 Nov 2026).
+ * Items: array('level' => fix|ask|map|warn, 'text', 'day' => day number or null).
+ *   fix  = to correct in the Calc in Dropbox (the assistant does not start while there is one);
+ *   ask  = to decide on the page (exact / indicative dates);
+ *   map  = Calc texts without a mapping (the assistant helps);
+ *   warn = to check, does not stop anything.
+ * Returns array('items', 'counts' => [level => n], 'ai_ok' => no fix item).
+ */
+function iti_final_precheck(array $calc, array $review, ?array $plan, bool $groupOpen = false): array {
+    $items = array();
+    $add = function (string $level, string $text, $day = null) use (&$items) { $items[] = array('level' => $level, 'text' => $text, 'day' => $day); };
+
+    foreach ($review['errors'] as $e) $add('fix', $e);
+    if (!$groupOpen) foreach ($review['open_errors'] as $e) $add('fix', $e . ' (A group departure still filling up? Tick it when you confirm the data below.)');
+    $add('ask', 'Dates: exact or indicative? The Calc does not say — it is asked when you confirm the data.');
+
+    // Guests' ages on the first day against B2:B4 (teenager 12–15, child under 12, as the price table says).
+    // Only when every guest is known with a date of birth and their number is the paying pax (no free Tour Leader).
+    $pax = $calc['pax'] ?? array();
+    $a = (int)($pax['adults'] ?? 0); $t = (int)($pax['teen'] ?? 0); $c = (int)($pax['child'] ?? 0);
+    $guests = $calc['guests'] ?? array();
+    $start = $calc['start_date'] ?? null;
+    if (!$groupOpen && $start && $guests && empty($calc['guests_tba']) && empty($pax['tl']) && count($guests) === $a + $t + $c) {
+        $byAge = array('adults' => 0, 'teen' => 0, 'child' => 0); $allDob = true;
+        foreach ($guests as $g) {
+            if (empty($g['dob'])) { $allDob = false; break; }
+            $age = (int)date_diff(date_create($g['dob']), date_create($start))->y;
+            $byAge[$age < 12 ? 'child' : ($age < 16 ? 'teen' : 'adults')]++;
+        }
+        if ($allDob && ($byAge['adults'] !== $a || $byAge['teen'] !== $t || $byAge['child'] !== $c)) {
+            $add('warn', 'By their dates of birth the guests are ' . $byAge['adults'] . ' adults / ' . $byAge['teen'] . ' teenagers (12–15) / '
+                . $byAge['child'] . ' children (under 12) on the first day, but B2:B4 say ' . $a . ' / ' . $t . ' / ' . $c
+                . ': check B2:B4 and the teenager / child prices.');
+        }
+    }
+    if (trim((string)($calc['arrival'] ?? '')) === '') $add('warn', 'ARRIVAL DETAILS are empty in the Calc: the arrival transfer cannot be timed.');
+    if (trim((string)($calc['departure'] ?? '')) === '') $add('warn', 'DEPARTURE DETAILS are empty in the Calc: the departure transfer cannot be timed.');
+    foreach ($review['warnings'] as $w) $add('warn', $w);
+    foreach (($calc['warnings'] ?? array()) as $w) {
+        if (strpos($w, 'Several Calc files') === 0) continue;   // the page has a file picker
+        $add('warn', $w);
+    }
+
+    if ($plan) {
+        $labels = array('lodge' => 'Hotel', 'activity' => 'Activity', 'route' => 'Route');
+        foreach (array('lodge', 'activity', 'route') as $type) {
+            foreach ($plan['unmapped'][$type] as $text) $add('map', $labels[$type] . ' "' . $text . '" is not mapped.');
+        }
+        $near = iti_final_near_places();
+        $days = $plan['days'];
+        foreach ($days as $i => $d) {
+            $n = $i + 1;
+            $prev = $i > 0 ? $days[$i - 1] : null;
+            $route = $d['route'];
+            // The hotel moves to another area (or the trip ends): the Calc must say how the guests get there.
+            $moves = $prev && $prev['dest_id'] && (($d['dest_id'] && $d['dest_id'] !== $prev['dest_id']) || $d['last']);
+            if ($moves) {
+                $where = $d['last'] ? 'the departure' : $d['lodge_name'];
+                if (!$route) {
+                    $add('warn', 'Day ' . $n . ': from ' . $prev['lodge_name'] . ' to ' . $where . ' but the Calc has no PARK/OVERNIGHT text — how do the guests get there?', $n);
+                } elseif ($route['state'] === 'ok' && !$route['transfer_route_id'] && !$route['flight_route_id']) {
+                    $add('warn', 'Day ' . $n . ': from ' . $prev['lodge_name'] . ' to ' . $where . ', but "' . $route['text'] . '" is mapped to no transfer and no flight — check the transfer.', $n);
+                }
+            }
+            if ($d['flight_cost'] !== null && $d['flight_cost'] > 0 && !($route && $route['flight_route_id'])) {
+                $add('warn', 'Day ' . $n . ': the Calc has a flight cost but "' . ($route ? $route['text'] : '—') . '" is not mapped to a flight — which flight is it?', $n);
+            }
+            // A lodge that is not where the label says: often a wrong mapping. Not on a day trip from the same lodge.
+            if ($d['lodge_id'] && $d['label'] !== '' && !($prev && $prev['lodge_id'] === $d['lodge_id'])) {
+                $li = iti_final_lodge_info(db(), (int)$d['lodge_id']);
+                $lp = $li ? iti_final_places($li['name'] . ' ' . $li['dest_name']) : array();
+                $cp = iti_final_places((string)$d['label']);
+                $fits = false;
+                foreach (array_keys($lp) as $p) {
+                    if (isset($cp[$p])) $fits = true;
+                    foreach ($near[$p] ?? array() as $q) if (isset($cp[$q])) $fits = true;
+                }
+                if ($lp && $cp && !$fits) {
+                    $add('warn', 'Day ' . $n . ': "' . $d['hotel_text'] . '" is mapped to ' . $d['lodge_name'] . ' (' . implode(', ', array_keys($lp)) . '), but the Calc says "'
+                        . $d['label'] . '" (' . implode(', ', array_keys($cp)) . ')' . (!empty($d['lodge_local']) ? ' — mapped for this booking only: is the mapping right?' : ' — check the hotel.'), $n);
+                }
+            }
+        }
+    }
+    $counts = array('fix' => 0, 'ask' => 0, 'map' => 0, 'warn' => 0);
+    foreach ($items as $it) $counts[$it['level']]++;
+    return array('items' => $items, 'counts' => $counts, 'ai_ok' => $counts['fix'] === 0);
+}

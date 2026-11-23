@@ -9,21 +9,24 @@
  * includes/config.php. Raw HTTP, as the server has no Composer packages.
  */
 
-/** USD per million tokens: input, output, cache read, cache write (Anthropic price list, Oct 2026). */
+/** USD per million tokens: input, output, cache read, cache write (Anthropic price list, Nov 2026). */
 const ITI_AI_PRICES = [
     'claude-opus-5-5'   => [4.00, 20.00, 0.20, 5.00],
     'claude-opus-5'     => [5.00, 25.00, 0.50, 6.25],
-    'claude-sonnet-5-5' => [2.00, 10.00, 0.20, 2.50],
+    'claude-sonnet-5-5' => [2.00, 10.00, 0.10, 2.50],
+    'claude-sonnet-5'   => [2.00, 10.00, 0.20, 2.50],   // the fallback of Sonnet 5.5
     'claude-haiku-5-5'  => [0.10, 0.50, 0.01, 0.125],
 ];
 /** A model missing from the list is counted at this rate, so the limits err on the safe side. */
 const ITI_AI_PRICE_UNKNOWN = [10.00, 50.00, 1.00, 12.50];
 
 const ITI_AI_MODEL = 'claude-opus-5-5';
+const ITI_AI_CHAT_MODEL = 'claude-sonnet-5-5';   // the program assistant (iti_ai_chat_service.php), trial from 23 Nov 2026
 
 const ITI_AI_DEFAULT_MONTH = '30';   // USD, whole Hub, calendar month
 const ITI_AI_DEFAULT_USER  = '10';   // USD, one person, calendar month
 const ITI_AI_DEFAULT_CLICK = '2';    // USD, one press of a button
+const ITI_AI_DEFAULT_CHAT  = '3';    // USD, one conversation of the program assistant
 
 /**
  * The AI buttons. where: calc = program from Calc page, program = program editor.
@@ -39,6 +42,9 @@ function iti_ai_actions(): array {
                           'help'  => 'Writes the texts of the days the sample does not cover, for you to review.'],
         'check_rules' => ['label' => 'Check client rules', 'where' => 'program', 'state' => 'planned',
                           'help'  => 'Checks prices, names and wording against the rules for client documents. Reports only, changes nothing.'],
+        // Program from Calc page: a chat panel of its own (iti_ai_chat_service.php), not a button of the card.
+        'program_chat' => ['label' => 'Program assistant', 'where' => 'chat', 'state' => 'live',
+                           'help'  => 'Chat that guides the seller from the Calc to the program: explains what to fix, proposes mappings and the sample for the seller to confirm.'],
         // Operations → Booking mail (passport_service.php); no button on the ITI pages.
         'read_passport' => ['label' => 'Read passport', 'where' => 'booking', 'state' => 'live',
                             'help'  => 'Reads name, date of birth, nationality and number from a passport, for a person to confirm.'],
@@ -82,6 +88,7 @@ function iti_ai_settings(): array {
         'month'   => (float)iti_setting('ai_limit_month', ITI_AI_DEFAULT_MONTH),
         'user'    => (float)iti_setting('ai_limit_user', ITI_AI_DEFAULT_USER),
         'click'   => (float)iti_setting('ai_limit_click', ITI_AI_DEFAULT_CLICK),
+        'chat'    => (float)iti_setting('ai_limit_chat', ITI_AI_DEFAULT_CHAT),
         'users'   => array_values(array_filter(array_map('intval', explode(',', iti_setting('ai_users'))))),
     ];
 }

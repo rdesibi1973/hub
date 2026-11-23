@@ -59,23 +59,14 @@ try {
 }
 if ($calc) $calc['request_id'] = $rid;   // the staff's mappings for this booking count as mapped (iti_alias_lookup())
 $isAdmin = is_admin();                   // maps for every program; the staff map for this booking only (16 Nov 2026)
-$code   = $calc ? iti_final_code_from_calc($calc['file']) : '';
 // The sample is chosen from the Calc CONTENT (its nights / lodges against each sample's days), not from the file
 // name: a Calc saved as 02 from 01 keeps the name but may be another trip (iti_final_pick_sample(), 16 Nov 2026).
-$pick = null;
-if ($calc) {
-    $pick = iti_final_pick_sample($db, $calc, iti_final_plan($db, $calc, 0)['days'], $code, $lang,
-                                  trim((string)($req['group_folder'] ?? '')) !== '');
-}
-$sampleAuto = $pick ? $pick['sample'] : null;
-$sample = $sampleAuto;
-$sampleOneOff = false;   // picked by the user for this booking only
-if ($calc && $sampleReq && (!$sampleAuto || (int)$sampleAuto['id'] !== $sampleReq)) {
-    $st = $db->prepare("SELECT id, program_type, title_en, title_it, display_language, duration_days FROM iti_programs
-                         WHERE id = ? AND program_type = 'sample' AND status <> 'cancelled'");
-    $st->execute([$sampleReq]);
-    if ($r = $st->fetch(PDO::FETCH_ASSOC)) { $sample = $r; $sampleOneOff = true; }
-}
+$sf = $calc ? iti_final_sample_for($db, $calc, $lang, trim((string)($req['group_folder'] ?? '')) !== '', $sampleReq) : null;
+$code         = $sf ? $sf['code'] : '';
+$pick         = $sf ? $sf['pick'] : null;
+$sampleAuto   = $sf ? $sf['auto'] : null;
+$sample       = $sf ? $sf['sample'] : null;
+$sampleOneOff = $sf ? $sf['one_off'] : false;   // picked by the user for this booking only
 
 // Step 1: several Calc files → the user picks one. Step 2: what was read is confirmed (pax, rooms, dates, prices).
 // Then sample, mappings, generate. The confirmation holds for this file, sheet and version of the Calc only.
@@ -83,7 +74,7 @@ $groupOpen    = !empty($_REQUEST['group_open']);   // group departure still fill
 if ($calc) $calc['group_open'] = $groupOpen;
 $review       = $calc ? iti_final_calc_review($calc) : null;
 $mustPickFile = $calc && count($calc['candidates'] ?? []) > 1 && $file === '';
-$okToken      = $calc ? substr(md5($calc['file'] . '|' . $calc['sheet'] . '|' . ($calc['calc_rev'] ?? '')), 0, 12) : '';
+$okToken      = $calc ? iti_final_ok_token($calc) : '';
 $datesMode    = in_array($_REQUEST['dates'] ?? '', ['exact', 'indicative'], true) ? $_REQUEST['dates'] : '';   // asked with the confirmation
 $sellers       = $calc ? iti_final_sellers($db) : [];         // the program goes under this seller; who generates it stays in generated_by
 $sellerDefault = $calc ? iti_final_request_seller($db, $rid) : '';
@@ -130,15 +121,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit) {
                 'flight_route_id'   => (int)($_POST['flight_route_id'] ?? 0),
             ];
             $meal = ($_POST['meal_basis'] ?? '') !== '' ? $_POST['meal_basis'] : null;
-            $text = iti_alias_norm((string)($_POST['alias'] ?? ''));
-            if ($isAdmin) {
-                // An alias applies to every future Calc with this text: only an admin saves it.
-                iti_alias_save($type, $text, $targets, $meal, $user);
-                iti_flash_set('success', 'Alias "' . $text . '" saved for every program.');
-            } else {
-                iti_alias_propose($type, $text, $targets, $meal, $rid);
-                iti_flash_set('success', '"' . $text . '" mapped for this booking only. Roberto approves it before other programs use it.');
-            }
+            // An alias applies to every future Calc with this text: only an admin saves it; the staff map for this booking.
+            iti_flash_set('success', iti_final_map_text($type, (string)($_POST['alias'] ?? ''), $targets, $meal, $rid, $isAdmin, $user));
         } elseif ($action === 'generate') {
             if (!$calc) throw new RuntimeException('The Calc could not be read: ' . $calcErr);
             if (!$dataOk) throw new RuntimeException('Confirm the data read from the Calc first.');
@@ -170,6 +154,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit) {
 }
 
 $plan   = $calc ? iti_final_plan($db, $calc, $sample ? (int)$sample['id'] : 0) : null;
+// Pre-check (no AI): everything to fix, decide, map or check, before anyone builds the program or spends AI tokens.
+$pre    = $calc ? iti_final_precheck($calc, $review, $plan, $groupOpen) : null;
+$aiChat = $calc && iti_ai_can_see();   // the program assistant (program_chat.php), trial from 23 Nov 2026
 $finals = iti_final_list($db, $rid);
 $active = null;
 foreach ($finals as $f) {   // the active final of THIS Calc file
@@ -318,6 +305,43 @@ include __DIR__ . '/../../includes/layout_header.php';
   <?= $fileForm($calc['candidates'], '') ?>
 </div>
 <?php elseif ($calc): ?>
+<?php
+  $preHead = ['fix' => ['Fix in the Calc first', 'var(--red)', '✖'], 'map' => ['To map', '#c62828', '•'],
+              'ask' => ['To decide', '#2f5597', '?'], 'warn' => ['To check', '#8a6d00', '⚠']];
+  $preBorder = $pre['counts']['fix'] ? 'var(--red)' : ($pre['counts']['map'] || $pre['counts']['warn'] ? '#f0ad00' : '#2e7d32');
+?>
+<div class="form-card" id="precheck" style="margin-bottom:18px;border-left:4px solid <?= $preBorder ?>;">
+  <div class="form-section-title">Pre-check of the Calc
+    <span style="font-weight:400;font-size:.8rem;color:var(--grey-mid);">
+      <?= $pre['counts']['fix'] ? $pre['counts']['fix'] . ' to fix in the Calc' : 'nothing to fix in the Calc' ?>
+      · <?= $pre['counts']['map'] ?> to map · <?= $pre['counts']['warn'] ?> to check
+    </span>
+  </div>
+  <?php foreach ($preHead as $lvl => $hd):
+    $its = array_values(array_filter($pre['items'], function ($it) use ($lvl) { return $it['level'] === $lvl; }));
+    if (!$its) continue; ?>
+    <div style="font-size:.78rem;font-weight:700;color:<?= $hd[1] ?>;margin:8px 0 2px;text-transform:uppercase;letter-spacing:.03em;"><?= h($hd[0]) ?></div>
+    <?php foreach ($its as $it): ?>
+      <div style="font-size:.85rem;line-height:1.5;color:<?= $lvl === 'fix' ? 'var(--red)' : 'inherit' ?>;<?= $lvl === 'fix' ? 'font-weight:600;' : '' ?>"><?= $hd[2] ?> <?= h($it['text']) ?></div>
+    <?php endforeach; ?>
+  <?php endforeach; ?>
+  <?php if ($pre['counts']['fix']): ?>
+    <div style="font-size:.82rem;margin-top:8px;">Correct the Calc in Dropbox, then <a href="<?= h($self . '&lang=' . $lang . ($groupOpen ? '&group_open=1' : '')) ?>">reload this page</a>.</div>
+  <?php endif; ?>
+</div>
+
+<?php if ($aiChat): ?>
+<div class="form-card" id="pchat" style="margin-bottom:18px;"
+     data-endpoint="program_chat.php" data-csrf="<?= h(csrf_token()) ?>" data-request="<?= $rid ?>"
+     data-file="<?= h($calc['file']) ?>" data-sheet="<?= h(trim((string)$calc['sheet'])) ?>" data-lang="<?= h($lang) ?>"
+     data-sample="<?= $sampleOneOff ? (int)$sample['id'] : 0 ?>" data-group-open="<?= $groupOpen ? 1 : 0 ?>"
+     data-ai-ok="<?= $pre['ai_ok'] ? 1 : 0 ?>">
+  <div class="form-section-title">✨ Program assistant <span class="badge" style="background:#fff8e1;color:#8a6d00;">test</span></div>
+  <div class="pchat-body" style="font-size:.85rem;color:var(--grey-mid);">Loading…</div>
+</div>
+<script src="assets/program_chat.js?v=1"></script>
+<?php endif; ?>
+
 <div class="form-card" style="margin-bottom:18px;">
   <div class="form-section-title">Calc — check what was read</div>
   <?php if ($multiCalc) echo $fileForm($calc['candidates'], $calc['file']); ?>
@@ -384,9 +408,8 @@ include __DIR__ . '/../../includes/layout_header.php';
     Guests: <?= h(implode(', ', array_map(function ($g) { return trim($g['title'] . ' ' . $g['name']); }, $gKnown))) ?>
     <?= $gTba || !$calc['guests'] ? '<em>' . ($gKnown ? '+ ' : '') . ($gTba ?: '') . ' TBA</em>' : '' ?><br>
     Arrival: <?= h($calc['arrival'] ?: '—') ?> · Departure: <?= h($calc['departure'] ?: '—') ?>
-    <?php foreach ($calc['warnings'] as $w): ?><div style="color:#8a6d00;">⚠ <?= h($w) ?></div><?php endforeach; ?>
-    <?php foreach ($review['warnings'] as $w): ?><div style="color:#8a6d00;">⚠ <?= h($w) ?></div><?php endforeach; ?>
-    <?php foreach (array_merge($review['errors'], $review['open_errors']) as $w): ?><div style="color:var(--red);font-weight:600;">✖ <?= h($w) ?></div><?php endforeach; ?>
+    <?php if ($pre['items']): ?><div style="font-size:.78rem;color:var(--grey-mid);margin-top:4px;">Problems and warnings of the Calc: in the <a href="#precheck">pre-check</a> above.</div><?php endif; ?>
+    <?php if ($review['open_errors'] && $groupOpen): ?><div style="font-size:.78rem;color:var(--grey-mid);">Group not final: <?= h(implode(' ', $review['open_errors'])) ?> — not needed yet.</div><?php endif; ?>
   </div>
   <div style="margin-top:12px;">
     <?php if ($review['errors']): ?>

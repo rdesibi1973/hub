@@ -27,10 +27,11 @@ $aiDis = $admin ? '' : 'disabled';
   <div class="form-group">
     <label class="check-label"><input type="checkbox" name="ai_enabled" value="1" <?= $aiSt['enabled'] ? 'checked' : '' ?> <?= $aiDis ?>> AI on (off stops every AI button at once)</label>
   </div>
-  <div class="form-grid" style="grid-template-columns:1fr 1fr 1fr;">
+  <div class="form-grid" style="grid-template-columns:1fr 1fr 1fr 1fr;">
     <div class="form-group"><label>Whole Hub, per month (USD)</label><input type="number" name="ai_limit_month" min="0" step="0.01" value="<?= h((string)$aiSt['month']) ?>" <?= $aiDis ?>></div>
     <div class="form-group"><label>Each person, per month (USD)</label><input type="number" name="ai_limit_user" min="0" step="0.01" value="<?= h((string)$aiSt['user']) ?>" <?= $aiDis ?>></div>
-    <div class="form-group"><label>One click (USD)</label><input type="number" name="ai_limit_click" min="0" step="0.01" value="<?= h((string)$aiSt['click']) ?>" <?= $aiDis ?>></div>
+    <div class="form-group"><label>One click / one chat message (USD)</label><input type="number" name="ai_limit_click" min="0" step="0.01" value="<?= h((string)$aiSt['click']) ?>" <?= $aiDis ?>></div>
+    <div class="form-group"><label>One assistant conversation (USD)</label><input type="number" name="ai_limit_chat" min="0" step="0.01" value="<?= h((string)$aiSt['chat']) ?>" <?= $aiDis ?>></div>
   </div>
   <?php if ($admin): ?>
   <div class="form-section-title" style="margin-top:14px;">Who sees the buttons being tested</div>
@@ -79,6 +80,30 @@ $aiDis = $admin ? '' : 'disabled';
   </table>
   <?php endif; ?>
 </div>
+
+<?php
+require_once __DIR__ . '/iti_ai_chat_service.php';
+$aiChats = [];
+try { $aiChats = iti_chat_recent($db, 20); } catch (Throwable $e) { error_log('iti_chat_recent: ' . $e->getMessage()); }
+?>
+<?php if ($aiChats): ?>
+<div class="form-card" style="margin-bottom:18px;padding:0;overflow:auto;">
+  <div class="form-section-title" style="padding:12px 14px 0;">Program assistant — latest conversations</div>
+  <table class="kv-table">
+    <thead><tr><th style="width:150px;">Started</th><th style="width:110px;">Who</th><th style="width:auto;">Request / Calc</th><th style="width:80px;">Messages</th><th style="width:70px;">USD</th><th style="width:90px;"></th></tr></thead>
+    <tbody>
+    <?php foreach ($aiChats as $c): ?>
+      <tr class="term-row">
+        <td><?= h($c['created_at']) ?></td><td><?= h($c['username'] ?? '—') ?></td>
+        <td>#<?= (int)$c['request_id'] ?> <?= h($c['customer_name'] ?? '') ?><div style="font-size:.72rem;color:var(--grey-mid);"><?= h($c['calc_file']) ?></div></td>
+        <td><?= (int)$c['turns'] ?></td><td><?= number_format((float)$c['cost_usd'], 2) ?></td>
+        <td><a href="program_chat.php?transcript=<?= (int)$c['id'] ?>">Read →</a></td>
+      </tr>
+    <?php endforeach; ?>
+    </tbody>
+  </table>
+</div>
+<?php endif; ?>
 
 <?php if ($aiRep['recent']): ?>
 <div class="form-card" style="padding:0;overflow:auto;">

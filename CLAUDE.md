@@ -17,6 +17,11 @@ outdated — this file wins where they disagree (PHP version, local lint).
 - `modules/memo/` — Memo Board; logic in `memo_lib.php` (follow-ups, next steps, routines).
 - **AI buttons of ITI** (logic `modules/iti/includes/iti_ai_service.php`, limits in ITI → Settings → AI): every new AI button calls
   `iti_ai_call()`, which checks the spending limits and records the real cost in `iti_ai_usage`; never a separate connection.
+  **Pre-check + Program assistant** (since 23 Nov 2026, trial): `iti_final_precheck()` (no AI) lists on program_final.php what to fix /
+  decide / map / check in the Calc; the assistant chat (Sonnet 5.5, `includes/iti_ai_chat_service.php`, endpoint `program_chat.php`,
+  panel `assets/program_chat.js`, table `iti_ai_chats`) starts only with nothing to fix, proposes mappings / sample as cards the seller
+  confirms (saved through `iti_final_map_text()`, same path as the page), memos Roberto on missing master data; limit per conversation
+  `ai_limit_chat`. Transcripts: Settings → AI.
 - `modules/iti/` — itinerary builder. `includes/` (root) — config (server-only), auth, db, mail.
   **Shared ITI data** (logic `modules/iti/includes/iti_shared_service.php`, since 16 Nov 2026): aliases, lodges, activities,
   destinations, routes, airlines, imports and samples are changed on the Hub by an admin only (`iti_can_edit_shared()`,

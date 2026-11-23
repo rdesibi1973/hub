@@ -191,7 +191,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // ---- AI limits and who sees the buttons being tested (admin only) ----
     if ($do === 'ai_save' && $admin) {
         iti_set_setting('ai_enabled', isset($_POST['ai_enabled']) ? '1' : '0');
-        foreach (['ai_limit_month', 'ai_limit_user', 'ai_limit_click'] as $k) {
+        foreach (['ai_limit_month', 'ai_limit_user', 'ai_limit_click', 'ai_limit_chat'] as $k) {
             iti_set_setting($k, (string)max(0, round((float)($_POST[$k] ?? 0), 2)));
         }
         iti_set_setting('ai_users', implode(',', array_map('intval', (array)($_POST['ai_users'] ?? []))));
