@@ -730,12 +730,13 @@ function iti_final_calc_review(array $calc): array {
     $open = !empty($calc['group_open']);   // group departure still filling up: participants and rooms not known yet
     $errors = array(); $warnings = array(); $openErrors = array();
 
-    // A quote (request not Booked yet, e.g. one pax sheet per group size): room types are not known yet.
-    $quote = iti_final_is_quote($calc);
+    // Room types are needed on a quote too (Roberto, 23 Nov 2026), except a quote priced on several pax sheets
+    // (one per group size: the rooms are not known and iti_final_generate() leaves them off).
+    $multiPrice = count($calc['price_options'] ?? array()) > 1;
     if (!$open && $a + $t + $c <= 0) $openErrors[] = 'Enter the number of adults, teenagers and children (B2:B4).';
     if (!$open && $rooms === '' && !$isRecap) {
-        if ($quote) $warnings[] = 'No room types under ROOMS TYPE (quote, request not booked yet): the program goes without them.';
-        else        $openErrors[] = 'Enter the room types in the cell under ROOMS TYPE.';
+        if ($multiPrice) $warnings[] = 'No room types under ROOMS TYPE: the quote is priced on several pax sheets, so the program goes without them.';
+        else             $openErrors[] = 'Enter the room types in the cell under ROOMS TYPE.';
     }
     // Rows of the day table with content but no date and no PARK/OVERNIGHT text (calc_read_file()), read with the rule
     // shared with booking_check and the booking gate (calc_skipped_kind(), 13 Nov 2026): only a lodge with a cost in J
@@ -1611,11 +1612,8 @@ function iti_final_precheck(array $calc, array $review, ?array $plan, bool $grou
                 . ': check B2:B4 and the teenager / child prices.');
         }
     }
-    // Flights of the guests: known after the sale; a quote goes without them (23 Nov 2026).
-    if (!iti_final_is_quote($calc)) {
-        if (trim((string)($calc['arrival'] ?? '')) === '') $add('warn', 'ARRIVAL DETAILS are empty in the Calc: the arrival transfer cannot be timed.');
-        if (trim((string)($calc['departure'] ?? '')) === '') $add('warn', 'DEPARTURE DETAILS are empty in the Calc: the departure transfer cannot be timed.');
-    }
+    // ARRIVAL / DEPARTURE DETAILS (the guests' own flights) are not checked: clients often buy them later, also after
+    // the booking is confirmed (Roberto, 23 Nov 2026).
     foreach ($review['warnings'] as $w) $add('warn', $w);
     foreach (($calc['warnings'] ?? array()) as $w) {
         if (strpos($w, 'Several Calc files') === 0) continue;   // the page has a file picker
