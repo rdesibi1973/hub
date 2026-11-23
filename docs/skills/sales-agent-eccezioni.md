@@ -5,7 +5,7 @@ Not a skill: the special cases of `sales-agent` (same folder). The core skill po
 ## §A. Hub and PC access
 
 Hub access: a `403 {"ok":false,"error":"Forbidden"}` means the `X-Agent-Key` header is missing or wrong, not that the Hub is unreachable — send the key from `api.txt` before concluding the Hub can't be reached (5 Nov 2026).
-The key (`api.txt`) can only be read from his PC: downloading it from Dropbox into the workspace is blocked. If the request for access to `C:\Dropbox` is refused, ask Roberto straight away to add the folder himself ("Add folder" in the Claude desktop app), and meanwhile prepare only what doesn't need the Hub (20 Nov 2026, SilviaMaccaro).
+The key (`api.txt`, Dropbox path `/Exchange/Savannah-Hub/hub/api.txt`) is read with the Dropbox connector: no access to the PC is needed. Don't use the Hub in the browser as a fallback: it asks for the login (22 Nov 2026, SophiaKusay; replaces the 20 Nov 2026 rule that the key could only be read from the PC).
 
 ## §B. Creating the request
 
