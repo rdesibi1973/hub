@@ -1106,6 +1106,7 @@ function followup_backfill(PDO $db): void {
     followup_rules_once_b($db);
     followup_rules_once_c($db);
     followup_rules_once_d($db);
+    followup_rules_once_e($db);
     try {
         followup_close_stale($db, date('Y-m-d'));   // every page view / scan: trips over, cancelled requests
     } catch (Throwable $e) {
@@ -1423,6 +1424,25 @@ function followup_rules_once_d(PDO $db): void {
         }
     } catch (Throwable $e) {
         error_log('followup_rules_once_d: ' . $e->getMessage());
+    }
+}
+
+/**
+ * Once (meta rules_2026_11e, 24 Nov 2026): open Claude-check lines about an activity the safari guide organises
+ * (followup_guide_activity_only(): "No booking for the Mto wa Mbu walk on 31 Jan") close — nothing to book.
+ * New ones are dropped by followup_ck_upsert().
+ */
+function followup_rules_once_e(PDO $db): void {
+    try {
+        if (followup_meta_get($db, 'rules_2026_11e') !== null) return;
+        followup_meta_set($db, 'rules_2026_11e', date('Y-m-d H:i:s'));
+        foreach ($db->query("SELECT * FROM booking_followups WHERE closed_at IS NULL AND type = 'ck'")->fetchAll(PDO::FETCH_ASSOC) as $l) {
+            if (followup_guide_activity_only((string)$l['doc_status_text'], (string)($l['service'] ?? ''), followup_service_type($l))) {
+                followup_close_line($db, $l, 'auto_resolved', 'activity organised by the safari guide: nothing to book');
+            }
+        }
+    } catch (Throwable $e) {
+        error_log('followup_rules_once_e: ' . $e->getMessage());
     }
 }
 
@@ -2275,6 +2295,8 @@ function followup_ck_upsert(PDO $db, int $requestId, array $ckRow, array $findin
         // Room type / bed layout only (24 Nov 2026): the lodge manager adapts the room, never a line.
         if (followup_room_layout_only($text)) { $ignored[] = ['finding' => $i, 'text' => $text, 'why' => 'room type / bed layout only: the lodge adapts the room']; continue; }
         $stype = strtolower(trim((string)($f['service_type'] ?? '')));
+        // Activity organised by the safari guide (Mto wa Mbu, Materuni, bomas, Eyasi…): nothing to book, never a line.
+        if (followup_guide_activity_only($text, (string)($f['service'] ?? ''), $stype)) { $ignored[] = ['finding' => $i, 'text' => $text, 'why' => 'activity organised by the safari guide: nothing to book']; continue; }
         if ($stype !== '' && !in_array($stype, FU_SERVICE_TYPES, true)) { $errors[] = ['finding' => $i, 'error' => 'service_type must be ' . implode(', ', FU_SERVICE_TYPES)]; continue; }
         $svc = mb_substr(trim(followup_strip_passport((string)($f['service'] ?? ''))), 0, 255);
         $sd = $date($f['service_date'] ?? null);
@@ -3136,28 +3158,6 @@ function followup_update(PDO $db, int $id, array $ch, array $user, bool $confirm
             'row' => followup_rows($db, ['ids' => [$id], 'status' => 'all'])[0] ?? null];
 }
 
-// ── Expiry extended by mail (manual override + proof .eml in mails/) ─────────
-
-const FU_PROOF_DIR = 'mails';                 // proof mails live in <booking>/mails/ (booking-check reads bookings/, not this)
-const FU_PROOF_MAX = 15 * 1024 * 1024;        // an uploaded / saved .eml
-
-/** Dropbox path of a line's booking folder, with the folder's current name when the CK scan knows it. */
-function followup_line_dir(PDO $db, array $row): string {
-    $folder = followup_folder_norm((string)$row['folder']);
-    try { $folder = followup_path_current($folder, followup_live_folders($db)); } catch (Throwable $e) { /* no ck_folders: keep the stored name */ }
-    return followup_folder_dir($folder);
-}
-
-/**
- * The proof as stored (relative to the booking folder) from "mails/x.eml" or a full Dropbox path inside $dir (a
- * status-tag rename of a folder on the way is accepted: same stem). null if outside the folder / not a file path.
- */
-function followup_proof_rel(string $dir, string $proof): ?string {
-    $p = trim(str_replace('\\', '/', $proof));
-    if ($p === '' || preg_match('#(^|/)\.\.?(/|$)#', $p)) return null;
-    if ($p[0] !== '/') return trim($p, '/') ?: null;
-    $ds = explode('/', trim($dir, '/'));
-    $ps = explode('/', trim($p, '/'));
 // ── Mail to the owner ("✉ Mail" on a line) ───────────────────────────────────
 
 /**
@@ -3242,6 +3242,28 @@ function followup_mail_owner(PDO $db, int $id, array $user, array $in, ?callable
             'note_saved' => !empty($upd['ok']), 'row' => $upd['row'] ?? ($out ?: null)];
 }
 
+// ── Expiry extended by mail (manual override + proof .eml in mails/) ─────────
+
+const FU_PROOF_DIR = 'mails';                 // proof mails live in <booking>/mails/ (booking-check reads bookings/, not this)
+const FU_PROOF_MAX = 15 * 1024 * 1024;        // an uploaded / saved .eml
+
+/** Dropbox path of a line's booking folder, with the folder's current name when the CK scan knows it. */
+function followup_line_dir(PDO $db, array $row): string {
+    $folder = followup_folder_norm((string)$row['folder']);
+    try { $folder = followup_path_current($folder, followup_live_folders($db)); } catch (Throwable $e) { /* no ck_folders: keep the stored name */ }
+    return followup_folder_dir($folder);
+}
+
+/**
+ * The proof as stored (relative to the booking folder) from "mails/x.eml" or a full Dropbox path inside $dir (a
+ * status-tag rename of a folder on the way is accepted: same stem). null if outside the folder / not a file path.
+ */
+function followup_proof_rel(string $dir, string $proof): ?string {
+    $p = trim(str_replace('\\', '/', $proof));
+    if ($p === '' || preg_match('#(^|/)\.\.?(/|$)#', $p)) return null;
+    if ($p[0] !== '/') return trim($p, '/') ?: null;
+    $ds = explode('/', trim($dir, '/'));
+    $ps = explode('/', trim($p, '/'));
     if (count($ps) <= count($ds)) return null;
     foreach ($ds as $i => $s) {
         if (strcasecmp($s, $ps[$i]) !== 0 && dropbox_folder_stem_safe($s) !== dropbox_folder_stem_safe($ps[$i])) return null;

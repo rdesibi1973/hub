@@ -20,6 +20,15 @@ Running log of notable changes and current build state. Module-level "active / p
 
 ---
 
+## 2026-11-24 — Booking follow-up: no Claude-check lines for activities organised by the guide
+
+- `booking_check` already left out the guide's activities (Mto wa Mbu, Materuni, bomas, Eyasi… since 14 Nov), but the
+  skill table still named "Mto wa Mbu walk" as a supplier booking, so a check could still report it ("No booking for the
+  Mto wa Mbu walk", VaniaLaRocca). The regex `BC_GUIDE_ACTIVITY` moved to `modules/leads/includes/guide_activities.php`
+  (shared); `followup_guide_activity_only()` (followup_classify.php) drops such findings in `followup_ck_upsert()`
+  (→ `ignored[]`) and open lines close once (`followup_rules_once_e()`, meta `rules_2026_11e`). Skill booking-check §4
+  Activity fixed. Test `tools/tests/followup_guide_activity_test.php`.
+
 ## 2026-11-24 — Booking follow-up: no Claude-check lines for room type / bed layout
 
 - A Claude-check finding that only asks for another room type or bed layout with the right pax ("Eyasi (3 Sngl) for the

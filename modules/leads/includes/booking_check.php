@@ -27,14 +27,9 @@ const BC_OWN_LODGES = '/\b(orangi|marera|kifaru|arusha explorers?)\b/i';
  */
 const BC_INTERNAL = '/^(emergency|medi ?vac|amref|lunch ?box|hot lunch|picnic|gates?\b|paid\b|maa?sai|olduvai|oldupai|napuro|(lake )?eyasi|(cathedral )?church visit|(short )?city tour|ok$|-+$)/i';
 
-/**
- * Cultural / local activities organised by the safari guide on the spot (Roberto, 14 Nov 2026):
- * town / city tour, lunch in town (Roberto, 20 Nov 2026: "lunch in town 20 pp", "town lunch", "lunch in Arusha town"),
- * Iraqw and Maasai bomas, Mto wa Mbu, Materuni, Lake Eyasi (Hadzabe, Datoga),
- * Lake Natron, Napuro, Lake Duluti (walk, canoe). Matched anywhere in the item ("Visit Iraqw boma", "Materuni waterfalls &
- * coffee"), transfers excepted: no supplier booking, so no document expected in invoices/.
- */
-const BC_GUIDE_ACTIVITY = '/\b(town tour|city tour|lunch in (\w+ )?town|town lunch|iraq[wk]|maa?sai|mto ?wa ?mbu|materuni|eyasi|hadza(be)?|datoga|natron|napuro|duluti)\b/i';
+// BC_GUIDE_ACTIVITY: activities organised by the safari guide (town tour, bomas, Mto wa Mbu, Materuni, Eyasi…), shared
+// with the Booking follow-up.
+require_once __DIR__ . '/guide_activities.php';
 
 /** Activities run by our own lodges ("Natural Walk" = Marera Walking and Iraqw families): no supplier booking. */
 const BC_OWN_ACTIVITY = '/\b(orangi|marera|kifaru|arusha explorers?)\b|natural walk/i';

@@ -16,6 +16,7 @@
  * Policy text ("All provisional bookings are strictly valid for 10 days …") is never a status.
  * No mbstring (the office PHP has none).
  */
+require_once __DIR__ . '/../../leads/includes/guide_activities.php';   // BC_GUIDE_ACTIVITY
 
 const FU_STATUS_WORDS = 'Provisional|Confirmed|Cancell?ed|Option|On\s*Request|Request(?:ed)?|Wait\s*-?\s*list(?:ed)?|Tentative|Unconfirmed|Quotation';
 const FU_MONTHS = ['jan' => 1, 'feb' => 2, 'mar' => 3, 'apr' => 4, 'may' => 5, 'jun' => 6, 'jul' => 7, 'aug' => 8,
@@ -336,5 +337,21 @@ function followup_room_layout_only(string $text): bool {
                  . '|check-?in|check-?out|arriv\w*|depart\w*|date|another lodge|different lodge|wrong lodge|full|release\w*|block)\b/', $t)) return false;
     $out = preg_replace('/\([^)]*\)/', ' ', $t);   // "(3 Sngl)" / "(1Dbl & 2Sngl)" describe one room
     if (preg_match_all('/\b(\d+)\s*(?:x\s*)?(?:' . $types . '|rooms?)\b/', $out, $m) && count(array_unique($m[1])) > 1) return false;
+    return true;
+}
+
+/**
+ * A check finding about an activity the safari guide organises on the spot (BC_GUIDE_ACTIVITY: Mto wa Mbu walk,
+ * Materuni, bomas, Eyasi, town tour… — Roberto, 14 Nov / 24 Nov 2026, VaniaLaRocca "No booking for the Mto wa Mbu
+ * walk"): nothing to book, never a line. True only when the text or service names such an activity, reads as an
+ * activity (walk, visit, tour, boma, waterfalls…) and is not about a stay, transfer, flight or money there
+ * ("Kisima Ngeda (Lake Eyasi) still provisional" is a lodge, kept). $stype = the finding's service_type, if any.
+ */
+function followup_guide_activity_only(string $text, string $service = '', string $stype = ''): bool {
+    if ($stype !== '' && $stype !== 'activity' && $stype !== 'other') return false;
+    $t = strtolower(trim($text . ' ' . $service));
+    if ($t === '' || !preg_match(BC_GUIDE_ACTIVITY, $t)) return false;
+    if (!preg_match('/\b(walk(?:ing)?|visits?|village|tours?|boma|waterfalls?|falls|coffee|canoe(?:ing)?|activit(?:y|ies)|excursion|cultural|hadza(?:be)?|datoga|bushmen|hunt\w*|lunch)\b/', $t)) return false;
+    if (preg_match('/\$|\b(?:transfers?|pick-?ups?|drop-?offs?|flights?|airport|lodge|camp|hotel|room|nights?|stay|check-?in|check-?out|invoiced|quoted|amount|usd|price|paid|payment|provisional)\b|\binvoice \d/', $t)) return false;
     return true;
 }
