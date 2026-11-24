@@ -1322,6 +1322,33 @@ function bg_tl_cost(float $cost, array $pp): array {
  * → ['services' => [svc + status OK|CHECK|MISSING|IN-HOUSE, evidence[], says[], notes[]], 'findings' => [..],
  *    'notes' => [..], 'unmatched' => [..], 'ignored' => [..], 'blocking' => n, 'warnings' => n, 'passed' => bool]
  */
+/**
+ * An activity line with no date billed on the same document as a stay covering $date (Tanzania Bush Camps P40376: "SUNDOWNER"
+ * next to the 1–3 Oct accommodation; TRA2809Y27, request 3434, 24 Nov 2026) → that line for the Calc activity of $date.
+ * Only lines not used yet; the first such document wins. → item keys.
+ */
+function bg_undated_activity(array $items, string $date): array {
+    $stayDocs = [];
+    foreach ($items as $it) {
+        if (($it['ds']['type'] ?? '') !== 'stay') continue;
+        $in = bg_date($it['ds']['check_in'] ?? null); $out = bg_date($it['ds']['check_out'] ?? null);
+        if ($in && $out && $in <= $date && $date <= $out) $stayDocs[$it['doc']] = true;
+    }
+    foreach (array_keys($stayDocs) as $doc) {
+        $hit = [];
+        foreach ($items as $k => $it) {
+            $ds = $it['ds'];
+            if ($it['doc'] !== $doc || $it['used'] || !in_array($ds['type'] ?? '', ['activity', 'other'], true)) continue;
+            if (bg_date($ds['service_date'] ?? null) || bg_date($ds['check_in'] ?? null)) continue;
+            if (($ds['type'] ?? '') === 'other' && !preg_match('/sundowner|bush (dinner|breakfast|lunch)|walk|drive|balloon|visit|excursion|activit/i',
+                                                              ($ds['description'] ?? '') . ' ' . ($ds['property'] ?? ''))) continue;
+            $hit[] = $k;
+        }
+        if ($hit) return $hit;
+    }
+    return [];
+}
+
 function bg_evaluate(array $snap, array $docs, ?callable $alias = null, ?callable $lodgeOf = null): array {
     $res = ['services' => [], 'findings' => [], 'notes' => [], 'unmatched' => [], 'ignored' => [], 'not_read' => [], 'blocking' => 0, 'warnings' => 0, 'passed' => false];
     $unreadable = 0;
@@ -1649,6 +1676,7 @@ function bg_evaluate(array $snap, array $docs, ?callable $alias = null, ?callabl
                 if (!in_array($ds['type'] ?? '', ['activity', 'other'], true)) continue;
                 if ((bg_date($ds['service_date'] ?? null) ?? bg_date($ds['check_in'] ?? null)) === $s['date']) $cand[] = $k;
             }
+            if (!$cand) $cand = bg_undated_activity($items, $s['date']);
             if (!$cand) { $add('activity_missing', 'No document in invoices/ for ' . $s['text'] . ' on ' . bg_dm($s['date']) . ': book it and save the confirmation.', $s); continue; }
             $ok = true; $net = 0.0; $known = true;
             foreach ($cand as $k) {

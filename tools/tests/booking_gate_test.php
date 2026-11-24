@@ -414,6 +414,16 @@ $t('ITI alias other lodge → booked_differs blocking, no AI call', !$res['passe
 // Mara 85; Calc alias "pure migration camp" → 77) is a list on the document side → same when the Calc lodge is one of them.
 $pure = fn(string $x, bool $doc = false) => ($doc && bg_lodge_norm($x) === 'pure migration camp') ? [77, 85]
     : (['pure migration mara' => 85, 'pure migration camp' => 77, 'tarangire pure' => 67][bg_lodge_norm($x)] ?? null);
+// TRA2809Y27 (request 3434, 24 Nov 2026): "SUNDOWNER" with no date on the camp's invoice, Calc Sundowner on a night of that stay.
+$bcSvcs = [$stay('Bush Camp Mara FB', '2027-01-15', '2027-01-17', 2, 1000),
+           ['type' => 'activity', 'text' => 'Sundowner', 'date' => '2027-01-16', 'cost' => 540.0, 'own' => false, 'rows' => [19]]];
+$bcLine = $dsStay('TANZANIA BUSHCAMPS (MOBILE) - Woga 5', null, null, ['type' => 'activity', 'rooms' => [], 'adults' => null, 'description' => 'SUNDOWNER', 'net_amount' => 500]);
+$bcStay = $dsStay('TANZANIA BUSHCAMPS (MOBILE) - Woga 5', '2027-01-15', '2027-01-17', ['net_amount' => 900]);
+$res = bg_evaluate($snap($bcSvcs), [$doc('invoices/Bush camp-INV.pdf', [$bcStay, $bcLine])], fn($p) => array_fill(0, count($p), 'same'));
+$t('undated sundowner on the camp invoice → the Calc activity, no activity_missing / doc_unmatched',
+   !array_intersect(['activity_missing!', 'doc_unmatched'], $issues($res)) && $res['services'][1]['evidence'] === ['invoices/Bush camp-INV.pdf'], $issues($res));
+$res = bg_evaluate($snap([$bcSvcs[0], ['date' => '2027-01-18'] + $bcSvcs[1]]), [$doc('invoices/Bush camp-INV.pdf', [$bcStay, $bcLine])], fn($p) => array_fill(0, count($p), 'same'));
+$t('undated sundowner, Calc activity outside the stay → still missing', in_array('activity_missing!', $issues($res), true), $issues($res));
 $t('generic twin name on the document → same / different by the list',
    bg_lodge_verdict('Pure Migration Mara FB', 'Pure Migration Camp', $pure) === 'same'
    && bg_lodge_verdict('Tarangire Pure FB', 'Pure Migration Camp', $pure) === 'different'

@@ -578,7 +578,7 @@ to that user. Documents already read (same Dropbox `content_hash`) are never sen
 | issue | blocks | audience | when |
 |---|---|---|---|
 | `calc_not_clean` | yes | sales | no Calc, Calc only as conflicted copy, several CONF sheets / old quotes |
-| `stay_missing` / `flight_missing` / `activity_missing` | yes | booking | no document (own lodges: no Orangi Collection SV) |
+| `stay_missing` / `flight_missing` / `activity_missing` | yes | booking | no document (own lodges: no Orangi Collection SV). An activity line with no date on the same document as a stay covering the Calc activity's day (a camp invoice with "SUNDOWNER") counts as that activity |
 | `stay_dates` | yes | booking | check-in / check-out / nights differ (split documents or one invoice for two blocks of the same lodge are fine) |
 | `stay_pax` / `flight_pax` / `activity_pax` | yes | booking | adults + children ≠ Calc pax (pax printed per room × rooms when that gives the Calc pax); with a free TL (`pax.tl`) paying pax **or** paying + TL are right; guide / driver rooms ("Driver/Guide Room", "Guide (FB)") are not guests |
 | `stay_pax` | yes | **sales** | same total, but children booked where the Calc has adults (teens count as adults): check ages with the seller |
