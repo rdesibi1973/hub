@@ -1247,9 +1247,10 @@ function iti_final_generate(PDO $db, int $requestId, array $calc, int $sampleId,
 
     $pax = $calc['pax'];
     // "Pumba Safari – Marco Ciaolo" in every language the sample has a title for.
-    $st = $db->prepare('SELECT customer_name FROM requests WHERE id = ?');
+    $st = $db->prepare('SELECT customer_name, group_folder FROM requests WHERE id = ?');
     $st->execute(array($requestId));
-    $customer = iti_final_customer_name($calc, (string)$st->fetchColumn());
+    $reqRow = $st->fetch(PDO::FETCH_ASSOC) ?: array();
+    $customer = iti_final_customer_name($calc, (string)($reqRow['customer_name'] ?? ''));
     $titles = array();
     foreach (ITI_LANGUAGES as $l) {
         if (!array_key_exists('title_' . $l, $sample)) continue;
@@ -1258,7 +1259,14 @@ function iti_final_generate(PDO $db, int $requestId, array $calc, int $sampleId,
     if (empty($titles['title_en'])) $titles['title_en'] = iti_final_title((string)$sample['title_en'], $customer) ?: (string)$sample['title_en'];
     $owner = iti_final_resolve_seller($db, $requestId, (string)($who['seller'] ?? ''), (string)($who['username'] ?? 'system'));
     $groupOpen = !empty($calc['group_open']);
-    $newId = iti_duplicate_program($sampleId, 'personal', $owner, $titles + ($groupOpen ? array('safari_type' => 'group') : array()) + array(
+    // Private or group comes from the BOOKING (a group folder / a departure still filling up), not from the sample:
+    // a private trip built on a group sample (Simba) printed "Guided group safari" (24 Nov 2026).
+    // Beach stay / trekking samples keep their own type.
+    $typeOver = array();
+    if (in_array((string)($sample['safari_type'] ?? ''), array('', 'private', 'group'), true)) {
+        $typeOver['safari_type'] = ($groupOpen || trim((string)($reqRow['group_folder'] ?? '')) !== '') ? 'group' : 'private';
+    }
+    $newId = iti_duplicate_program($sampleId, 'personal', $owner, $titles + $typeOver + array(
         'pax_open'         => $groupOpen ? 1 : 0,
         'lead_request_id'  => $requestId,
         'ref_number'       => iti_final_ref_number($db, $requestId, $calc),
