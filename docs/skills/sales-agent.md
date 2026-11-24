@@ -26,7 +26,7 @@ Memo: at the start create one `doing` memo (clear title with the folder name, li
 
 ## 2. Programme and prices
 
-**Availability of our own lodges** (Marera, Kifaru, Orangi Luxury, Arusha Explorers): before a proposal goes out, check the public ResRequest calendar in the built-in browser. A full lodge on a programme date → tell Roberto before generating the PDF / email. How to read the calendar: exceptions §C.
+**Availability of our own lodges** (Marera, Kifaru, Orangi Luxury, Arusha Explorers): don't check it for a proposal. The proposal goes out as it is; availability is checked at confirmation (booking team). Check the public ResRequest calendar only when Roberto asks for it — how to read it: exceptions §C (Roberto, 24 Nov 2026, Paola2paxLug27; replaces the check before every proposal).
 
 1. Pick the closest standard programme (Duma, DumaShort, Pumba, Simba, Kiboko, Gran Safari, Migrazione…) and say why. Stance: no North Serengeti in January, Manyara not recommended, Ndutu fine as a stop near the crater.
 2. `copy_program` → Word + Calc in the request folder (`NN_<folder>_<Prog>`). Pass `prognum` as a two-digit string (`"03"`): with `3` the Hub names the files `3_…` and they must be renamed (3 Nov 2026, Daniela2paxAgo27).
