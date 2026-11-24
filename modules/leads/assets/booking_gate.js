@@ -36,9 +36,9 @@
   Panel.prototype.render = function (d) {
     var self = this, el = this.el;
     if (!d || d.ok === false) { el.innerHTML = '<span style="color:#a33">⚠ ' + esc(d && d.error || 'error') + '</span>'; return; }
-    if (d.group) { el.innerHTML = '<span class="text-muted">— group folder: not checked by the booking gate</span>'; return; }
     var st = STYLE[d.state] || STYLE.none, run = d.run || {};
-    var h = '<span class="bg-badge" style="font-size:.72rem;font-weight:700;border-radius:6px;padding:2px 8px;color:' + st[0] + ';background:' + st[1] + '">' + st[2];
+    var h = (d.group_folder ? '<span style="font-size:.72rem;color:#6B4FA0;margin-right:6px" title="' + esc(d.group_folder)
+         + '">👥 group check (whole GRP: RECAP + the group folder\'s invoices/)</span>' : '') + '<span class="bg-badge" style="font-size:.72rem;font-weight:700;border-radius:6px;padding:2px 8px;color:' + st[0] + ';background:' + st[1] + '">' + st[2];
     if (d.state === 'running' || d.state === 'queued') h += ' (' + (run.docs_done || 0) + '/' + (run.docs_total || 0) + ')';
     if (d.state === 'blocked') h += ' (' + d.blocking.length + ')';
     if (d.state === 'passed' && d.warnings.length) h += ' · ' + d.warnings.length + ' warning' + (d.warnings.length > 1 ? 's' : '');

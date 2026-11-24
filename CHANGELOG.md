@@ -20,6 +20,17 @@ Running log of notable changes and current build state. Module-level "active / p
 
 ---
 
+## 2026-11-24 — Booking gate on GRP folders
+
+- GRP folders are gated too (they were out of scope in v1). One check per group, on the group parent: its single Calc read
+  on `RECAP` (whole group) against the parent's `invoices/` + `bookings/` (`bc_request(..., $wholeGroup)`). The run is shared
+  by every member (`bg_latest_run()` / `bg_latest_runs()` look across `bg_group_rids()`); report and staleness use the parent
+  (`bg_check_dir()`). BackOffice "Apply (group)" now calls the gate; the GRP rows show the check badge / run link; the request
+  panel says "group check"; Agent API `gate_run` no longer refuses groups.
+- Group block rule (skill booking-check, 25 Oct 2026): a stay / flight / activity booked for more pax than the RECAP — and the
+  amount of that service — is the note `group_block` until arrival − 60 days, then blocking with "release the unsold rooms /
+  seats". Fewer pax always block. Tests in `tools/tests/booking_gate_test.php`.
+
 ## 2026-11-22 — Jeep demand: custom period
 
 - Summary tab → "Custom period": any from / to (presets: last 30 days, next 90 days, high season Jul–Oct, Christmas

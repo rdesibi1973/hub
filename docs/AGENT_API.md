@@ -536,10 +536,10 @@ to that user. Documents already read (same Dropbox `content_hash`) are never sen
 - `gate_status` — `request_id`; optional `stale=0` (skip the Dropbox comparison). Returns `state`
   (`none|queued|running|passed|stale|blocked|error|overridden`), `allowed`, `reason`, `run {id, docs_total, docs_done,
   blocking_count, warning_count, tokens_in, tokens_out, cost_usd, model, …}`, `blocking[]`, `warnings[]` `{issue, label, text,
-  audience, service_date}`, `report_path`, `enforced`, `tag` (`PROVISIONAL` / `PROGRESS` / `DEPOSIT` / `BALANCE` / `BALANCE-CASH` / `PAID` / `CANCELLED` / `''`), `in_scope` (every private
-  folder; false for groups only).
+  audience, service_date}`, `report_path`, `enforced`, `tag` (`PROVISIONAL` / `PROGRESS` / `DEPOSIT` / `BALANCE` / `BALANCE-CASH` / `PAID` / `CANCELLED` / `''`), `in_scope` (always true:
+  groups too since 24 Nov 2026), `group_folder` (GRP member: the parent the shared check runs on, else null).
 - `gate_run` — `request_id`; dry-run unless `"confirm": true`. Queues a run (an active one is returned, `existing: true`);
-  no Calc / several CONF / old quotes → the run ends at once, blocked `calc_not_clean`. Groups → 409.
+  no Calc / several CONF / old quotes → the run ends at once, blocked `calc_not_clean`. A GRP member queues its group's check.
 - **The gate**: `rename_folder` and `update_folder_status` giving a private folder its first payment tag (`_DEPOSIT` / `_BALANCE` /
   `_BALANCE-CASH` / `_PAID`) — from `_PROGRESS`, and also from `_PROVISIONAL` or no tag, so there is no way round — **or a
   private folder leaving `_PROVISIONAL` for any other status** (a payment tag, no tag, `_CK` added — also from the CK tracker)
@@ -553,7 +553,14 @@ to that user. Documents already read (same Dropbox `content_hash`) are never sen
   `Booked`). Only the paths that know the destination apply it: `rename_folder` / BackOffice Rename with `current_path` (re-link of a
   folder already moved into `/2026`) and `reopen_cancelled` / request page "Reopen as quote" (`bg_reopen_quote_ok()`). The Java BackOffice endpoints (`api_rename_folder.php`, `api_update_status.php`)
   rename on disk first: they cannot refuse — timeline + memo to Roberto + a run started (`booking_gate_warning`).
-  A refused attempt with no usable run starts one. Later moves (DEPOSIT → BALANCE → PAID) are not gated. Groups are not gated (v1).
+  A refused attempt with no usable run starts one. Later moves (DEPOSIT → BALANCE → PAID) are not gated.
+- **GRP folders** (24 Nov 2026): one check per group, on the group parent — its single Calc read on `RECAP` (the whole group;
+  the per-participant sheets are not used) against the parent's `invoices/` + `bookings/`. The run is shared by every member
+  (any member's `gate_status` / `gate_run` / CK badge sees it); `booking-check.html` goes in the parent. BackOffice "Apply
+  (group)" and a member's own status change are gated the same way. A supplier block with more pax / rooms / seats than the
+  RECAP is `group_block` (a note) until the release date, arrival − 60 days, then blocking ("release the unsold rooms /
+  seats"); the invoice amount of that service follows the same rule. Fewer pax than the RECAP always block. The cancelled
+  rule and the reopen as a quote still do not apply to groups.
 - **Enforced** since 13 Nov 2026 (Roberto: block from day one). `define('BOOKING_GATE_ENFORCE', false)` in includes/config.php
   = shadow mode: runs, reports and lines work, the status change is allowed with a warning. **Force unlock**: Roberto (`rdesibi`) only, on the request page, reason required; not through the API.
 - **Formats read**: PDF, images (jpg / png / gif / webp), Word `.docx`, Excel `.xlsx` / `.xlsm` / `.xls` (old binary Excel
@@ -586,6 +593,7 @@ to that user. Documents already read (same Dropbox `content_hash`) are never sen
 | `client_flights_missing` | no | sales | ARRIVAL / DEPARTURE details empty |
 | `booking_provisional` | no | booking | correct but provisional (still blocks `_CK`) |
 | `doc_unmatched` | no | booking | a booked stay / flight / activity / transfer line inside the trip with no Calc service (e.g. an extra night): cancel it or add it to the Calc (also listed under "Documents not matched") |
+| `group_block` | no | booking | GRP: a block over the RECAP pax before arrival − 60 days (after it: the pax / amount issue blocks) |
 | `lodge_name_unsure` / `doc_unreadable` / `meal_plan_note` | no | booking | as named |
 
 ### Calc checks (also in Confirm preview, UI + API)

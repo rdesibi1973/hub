@@ -1869,7 +1869,6 @@ try {
         $r = agent_request($db, $in['request_id'] ?? 0);
         require_once __DIR__ . '/dropbox_helper.php';
         require_once __DIR__ . '/includes/booking_gate_service.php';
-        if (bg_is_group($r)) agent_fail('Group folders are not checked by the booking gate (v1).', 409);
         $cur = bg_status_out($db, (int)$r['id'], [], false);
         if (empty($in['confirm'])) {
             agent_out(['ok' => true, 'dry_run' => true, 'request_id' => (int)$r['id'], 'folder' => $cur['folder'], 'current' => $cur['run'],

@@ -245,7 +245,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array($act, ['change_status', 'r
 
         // Out of _PROGRESS: the booking check must have passed (includes/booking_gate_service.php).
         $gate = null;
-        if ($ok && !$isGrp) {
+        if ($ok) {   // a group too: one check on the parent, shared by the members (24 Nov 2026)
             require_once 'includes/booking_gate_service.php';
             $gate = booking_gate_check($db, (int)$r['id'], $folder, $newFolder, (int)($currentUser['id'] ?? 0) ?: null);
             if ($gate['refused']) { flash(booking_gate_message($gate), 'error'); $ok = false; }
@@ -888,7 +888,7 @@ include 'includes/header.php';
           <?php endforeach; ?>
           <?php $sPath = savannah_local_path($r); $sUrl = savannah_open_url($r); ?>
           <div style="margin-top:3px;font-family:'Open Sans',sans-serif">
-            <?php if (in_array($r['status'] ?? '', ['Booked', 'Provisional'], true) && !$isGrp && $folder !== '' && function_exists('bg_is_group') && !bg_is_group($r)):
+            <?php if (in_array($r['status'] ?? '', ['Booked', 'Provisional'], true) && $folder !== '' && function_exists('bg_is_group')):
                 $gr = $gateByReq[(int)$r['id']] ?? null;
                 $gSt = ['queued' => ['#1a3a5c', '⏳ Check running'], 'running' => ['#1a3a5c', '⏳ Check running'], 'passed' => ['#1A6B3A', '🟢 Check passed'],
                         'blocked' => ['#a33', '🔴 Check blocked'], 'error' => ['#a33', '⚠ Check error'], 'overridden' => ['#6B4FA0', '🔓 Check unlocked']][$gr['state'] ?? ''] ?? null; ?>

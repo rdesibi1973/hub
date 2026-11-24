@@ -172,6 +172,22 @@ $other = $doc('invoices/Kirurumu.pdf', [$dsStay('Kirurumu Tarangire Lodge', '202
 $res = bg_evaluate($snap($base), [$other, $okFlight], fn($p) => array_fill(0, count($p), 'different'));
 $t('booked lodge ≠ Calc → booked_differs blocking', !$res['passed'] && in_array('booked_differs!', $issues($res), true)
                                                    && strpos(implode(' ', array_column($res['findings'], 'text')), 'update the Calc') !== false, $issues($res));
+// GRP (24 Nov 2026): a group block over the Calc pax is a note until arrival − 60 days, then blocking; fewer pax always block.
+$grp = fn($today) => ['group' => true, 'today' => $today] + $snap($base);
+$res = bg_evaluate($grp('2026-10-01'), [$tt(['adults' => 6, 'rooms' => [['type' => 'Double', 'count' => 3]], 'net_amount' => 3000]), $okFlight]);
+$t('GRP block 6 pax vs Calc 2, before release → note, amount too, passed', $res['passed'] && in_array('group_block', $issues($res), true)
+   && !in_array('invoice_mismatch!', $issues($res), true) && $res['services'][0]['status'] === 'OK'
+   && strpos(implode(' ', array_column($res['findings'], 'text')), 'by 16 Nov 2026') !== false, [$issues($res), $res['services'][0]['status']]);
+$res = bg_evaluate($grp('2026-11-20'), [$tt(['adults' => 6, 'rooms' => [['type' => 'Double', 'count' => 3]]]), $okFlight]);
+$t('GRP block after release date → stay_pax blocking, "release"', !$res['passed'] && in_array('stay_pax!', $issues($res), true)
+   && strpos(implode(' ', array_column($res['findings'], 'text')), 'past its release date') !== false, $issues($res));
+$res = bg_evaluate($grp('2026-06-01'), [$tt(['adults' => 1, 'rooms' => [['type' => 'Single', 'count' => 1]]]), $okFlight]);
+$t('GRP fewer pax than the Calc → blocking', !$res['passed'] && in_array('stay_pax!', $issues($res), true), $issues($res));
+$res = bg_evaluate(['today' => '2026-06-01'] + $snap($base), [$tt(['adults' => 6, 'rooms' => [['type' => 'Double', 'count' => 3]]]), $okFlight]);
+$t('private folder: more pax still blocking', !$res['passed'] && in_array('stay_pax!', $issues($res), true), $issues($res));
+$t('GRP member vs group parent', bg_grp_member(['group_folder' => '09_02SEP_GRP0209Nyumbu_PROGRESS', 'practice_code' => 'AdolfoPiazza(Elkebir-Roberto)'])
+   && !bg_grp_member(['group_folder' => 'X_GRP', 'practice_code' => 'x_grp']) && !bg_grp_member(['practice_code' => '05_GRUPPO Diamante_PROGRESS']));
+
 $res = bg_evaluate($snap($base), [$other, $okFlight], fn($p) => array_fill(0, count($p), 'same'));
 $t('alias same → no booked_differs', $res['passed'], $issues($res));
 // Amount: +4 OK, +30 blocked.

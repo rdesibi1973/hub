@@ -16,7 +16,9 @@
  *   Override  bg_override()         Roberto (rdesibi) only, reason required, logged; not through the Agent API
  *
  * BOOKING_GATE_ENFORCE (includes/config.php; not defined = enforced, false = shadow mode): runs, reports and lines work, the status
- * change only warns. Group folders (GRP, Il Diamante / Panorama, GRUPPO) are not gated in v1.
+ * change only warns. GRP members (24 Nov 2026): one check for the whole group, on the group parent — its single Calc read on
+ * RECAP + its invoices/ / bookings/ — shared by every member (bg_grp_member(), bg_group_rids()); a group block over the pax
+ * is a note until the release date (bg_group_blocks()).
  * Passport numbers and dates of birth: never asked from the AI, stripped again in PHP before anything is stored.
  */
 require_once __DIR__ . '/booking_service.php';                        // req_folder_path, timeline_log
@@ -65,6 +67,7 @@ const BG_ISSUES = [
     'lodge_name_unsure'      => [false, 'booking', 'Check the lodge name'],
     'doc_unmatched'          => [false, 'booking', 'Booked service not in the Calc'],
     'doc_unreadable'         => [false, 'booking', 'Document could not be read'],
+    'group_block'            => [false, 'booking', 'Group block over the pax (release by arrival − 60 days)'],
 ];
 
 /**
@@ -242,11 +245,44 @@ function bg_reopen_quote_ok(array $r, string $newName, string $destPath): bool {
     return false;
 }
 
-/** Group folders are out of scope v1: GRP member / group parent, Il Diamante / Panorama, GRUPPO. */
+/**
+ * A group folder: GRP member / group parent, Il Diamante / Panorama, GRUPPO. Gated since 24 Nov 2026 (a GRP member on its
+ * parent: bg_grp_member()); still out of the cancelled-folder rule and of the reopen as a quote.
+ */
 function bg_is_group(array $r): bool {
     if (trim((string)($r['group_folder'] ?? '')) !== '') return true;
     // Programme before the code ("NyumbuGRP0209", not yet normalised to GRP0209Nyumbu) is a group too.
     return (bool)preg_match('/(^|[^A-Z]|DUMA|SIMBA|NYUMBU)GRP\d|GRUPPO|DIAMANTE|PANORAMA/i', (string)($r['practice_code'] ?? ''));
+}
+
+/**
+ * A GRP member: its folder sits inside a group parent (group_folder, not its own folder). The parent holds the one group
+ * Calc (RECAP + a sheet per participant) and invoices/ + bookings/: the check runs there, once for the whole group.
+ */
+function bg_grp_member(array $r): bool {
+    $g = trim((string)($r['group_folder'] ?? ''));
+    return $g !== '' && strcasecmp($g, trim((string)($r['practice_code'] ?? ''))) !== 0;
+}
+
+/** Requests sharing one check: every request of the same group parent for a GRP member, else the request alone. */
+function bg_group_rids(PDO $db, array $r): array {
+    if (!bg_grp_member($r)) return [(int)$r['id']];
+    $st = $db->prepare("SELECT id FROM requests WHERE group_folder = ?");
+    $st->execute([trim((string)$r['group_folder'])]);
+    $ids = array_map('intval', $st->fetchAll(PDO::FETCH_COLUMN));
+    if (!in_array((int)$r['id'], $ids, true)) $ids[] = (int)$r['id'];
+    return $ids;
+}
+
+/**
+ * The folder the check reads, where it is NOW (folder_heal: moved / renamed outside the Hub): the request's folder, or the
+ * group parent for a GRP member. '' when unknown. Needs dropbox_helper.php.
+ */
+function bg_check_dir(PDO $db, string $token, array $r): string {
+    require_once __DIR__ . '/folder_link_service.php';
+    $cur = req_folder_path(folder_heal($db, $token, $r));
+    if ($cur === '') return '';
+    return bg_grp_member($r) ? rtrim(dirname($cur), '/\\') : $cur;
 }
 
 /** May start a run: admin / manager, the booking team (booking_followup_edit), Roberto, or the request's seller. */
@@ -302,11 +338,12 @@ function bg_folder_state(string $token, string $dir, string $calcFile): array {
 
 // ── Runs ─────────────────────────────────────────────────────────────────────
 
+/** The latest run of the request — for a GRP member, the latest run of any member of its group (one check per group). */
 function bg_latest_run(PDO $db, int $rid): ?array {
     bg_schema($db);
-    $st = $db->prepare("SELECT * FROM booking_gate_runs WHERE request_id = ? ORDER BY id DESC LIMIT 1");
-    $st->execute([$rid]);
-    $r = $st->fetch(PDO::FETCH_ASSOC);
+    $rq = bg_request($db, $rid);
+    $in = implode(',', array_map('intval', $rq ? bg_group_rids($db, $rq) : [$rid]));
+    $r = $db->query("SELECT * FROM booking_gate_runs WHERE request_id IN ($in) ORDER BY id DESC LIMIT 1")->fetch(PDO::FETCH_ASSOC);
     return $r ?: null;
 }
 
@@ -315,12 +352,32 @@ function bg_latest_runs(PDO $db, array $rids): array {
     $rids = array_values(array_unique(array_filter(array_map('intval', $rids))));
     if (!$rids) return [];
     bg_schema($db);
-    $in = implode(',', $rids);
-    $out = [];
+    // GRP members share their group's run: widen to every member of those groups, then give each asked request its group's latest.
+    $grpOf = []; $members = [];
+    foreach ($db->query("SELECT id, practice_code, group_folder FROM requests WHERE id IN (" . implode(',', $rids) . ")")->fetchAll(PDO::FETCH_ASSOC) as $q) {
+        if (bg_grp_member($q)) $grpOf[(int)$q['id']] = trim((string)$q['group_folder']);
+    }
+    $all = $rids;
+    if ($grpOf) {
+        $gs = array_values(array_unique($grpOf));
+        $st = $db->prepare("SELECT id, group_folder FROM requests WHERE group_folder IN (" . implode(',', array_fill(0, count($gs), '?')) . ")");
+        $st->execute($gs);
+        foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $q) { $members[trim((string)$q['group_folder'])][] = (int)$q['id']; $all[] = (int)$q['id']; }
+    }
+    $in = implode(',', array_values(array_unique($all)));
+    $byReq = [];
     foreach ($db->query("SELECT r.id, r.request_id, r.state, r.started_at, r.finished_at, r.docs_total, r.docs_done, r.blocking_count,
                                 r.warning_count, r.report_path FROM booking_gate_runs r
                          JOIN (SELECT request_id, MAX(id) AS id FROM booking_gate_runs WHERE request_id IN ($in) GROUP BY request_id) m ON m.id = r.id")
-                ->fetchAll(PDO::FETCH_ASSOC) as $r) $out[(int)$r['request_id']] = $r;
+                ->fetchAll(PDO::FETCH_ASSOC) as $r) $byReq[(int)$r['request_id']] = $r;
+    $out = [];
+    foreach ($rids as $rid) {
+        $best = null;
+        foreach (isset($grpOf[$rid]) ? ($members[$grpOf[$rid]] ?? [$rid]) : [$rid] as $m) {
+            if (isset($byReq[$m]) && (!$best || (int)$byReq[$m]['id'] > (int)$best['id'])) $best = $byReq[$m];
+        }
+        if ($best) $out[$rid] = $best;
+    }
     return $out;
 }
 
@@ -334,13 +391,15 @@ function bg_run_active(?array $run): bool {
  * come from the cache. A Calc that cannot be read (no Calc, conflicted copy only, several CONF / old quotes)
  * finishes at once, blocked "Calc must be cleaned". Returns the run row (+ 'existing' when one was already running).
  * $trigger: manual | status_change | api | external. $ownerId: who gets the booking lines (null = CK booking owner).
- * @throws InvalidArgumentException (not found / group / no folder) | RuntimeException (Dropbox)
+ * GRP member: the group parent's Calc on RECAP (the whole group) against the parent's invoices/ + bookings/; the run is
+ * shared by every member (bg_latest_run()).
+ * @throws InvalidArgumentException (not found / no folder) | RuntimeException (Dropbox)
  */
 function bg_start_run(PDO $db, int $rid, ?int $userId, string $trigger = 'manual', ?int $ownerId = null): array {
     bg_schema($db);
     $r = bg_request($db, $rid);
     if (!$r) throw new InvalidArgumentException('Request ' . $rid . ' not found.');
-    if (bg_is_group($r)) throw new InvalidArgumentException('Group folders are not checked by the booking gate (v1).');
+    $grp = bg_grp_member($r);
     $last = bg_latest_run($db, $rid);
     if (bg_run_active($last)) return $last + ['existing' => true];
 
@@ -354,10 +413,11 @@ function bg_start_run(PDO $db, int $rid, ?int $userId, string $trigger = 'manual
         return (int)$db->lastInsertId();
     };
     try {
-        $bc = bc_request($db, $rid);
+        $bc = $grp ? bc_request($db, $rid, '', 'RECAP', true) : bc_request($db, $rid);
     } catch (InvalidArgumentException $e) {
         // The Calc cannot be read as it is: blocked at once (audience sales), nothing to send to the AI.
-        $snap = ['customer' => $r['customer_name'], 'folder' => req_folder_path($r), 'calc_error' => $e->getMessage()];
+        $own = req_folder_path($r);
+        $snap = ['customer' => $r['customer_name'], 'folder' => $grp && $own !== '' ? rtrim(dirname($own), '/\\') : $own, 'calc_error' => $e->getMessage(), 'group' => $grp];
         $id = $ins(['request_id' => $rid, 'trigger_src' => $trigger, 'started_by' => $userId, 'owner_user_id' => $owner, 'started_at' => $now,
                     'state' => 'running', 'folder' => $snap['folder'], 'snapshot_json' => json_encode($snap, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)]);
         bg_finish_run($db, $id);
@@ -368,6 +428,7 @@ function bg_start_run(PDO $db, int $rid, ?int $userId, string $trigger = 'manual
     $calc = $bc['calc'];
     $snap = [
         'customer' => $bc['customer'], 'folder' => $bc['folder'], 'local_folder' => $bc['local_folder'],
+        'group' => $grp, 'group_name' => $grp ? trim((string)$r['group_folder']) : '',
         'calc' => ['file' => $calc['file'], 'sheet' => $calc['sheet'], 'pax' => $calc['pax'], 'pax_text' => $calc['pax_text'] ?? '', 'jeeps' => $calc['jeeps'] ?? null, 'room_config' => $calc['room_config'],
                    'arrival' => $calc['arrival'], 'departure' => $calc['departure'], 'start_date' => $calc['start_date'],
                    'end_date' => $calc['end_date'], 'nights' => $calc['nights'], 'single_supp' => $calc['single_supp'] ?? null,
@@ -1485,7 +1546,7 @@ function bg_evaluate(array $snap, array $docs, ?callable $alias = null, ?callabl
         foreach ($cand as $k) {
             $ds = $items[$k]['ds'] + ['_file' => $items[$k]['file']];
             $p = $paxOf($ds);
-            if ($p !== null && !bg_pax_ok($p, $pp)) { $ok = false; $add('flight_pax', 'Flight booked for ' . $p . ' pax, the Calc has ' . bg_pax_text($pp) . '.', $s, ['source_file' => $items[$k]['file']]); }
+            if ($p !== null && !bg_pax_ok($p, $pp)) { $ok = false; $add('flight_pax', 'Flight booked for ' . $p . ' pax, the Calc has ' . bg_pax_text($pp) . '.', $s, ['source_file' => $items[$k]['file'], 'over' => $p > (int)$pp['guests']]); }
             if (($ds['status'] ?? '') === 'cancelled') $ok = false;
             $status($ds, $s);
         }
@@ -1542,7 +1603,7 @@ function bg_evaluate(array $snap, array $docs, ?callable $alias = null, ?callabl
                 $useItem($k, $i);
                 $ds = $items[$k]['ds'] + ['_file' => $items[$k]['file']];
                 $p = $paxOf($ds);
-                if ($p !== null && !bg_pax_ok($p, $pp)) { $ok = false; $add('activity_pax', $s['text'] . ' booked for ' . $p . ' pax, the Calc has ' . bg_pax_text($pp) . '.', $s, ['source_file' => $items[$k]['file']]); }
+                if ($p !== null && !bg_pax_ok($p, $pp)) { $ok = false; $add('activity_pax', $s['text'] . ' booked for ' . $p . ' pax, the Calc has ' . bg_pax_text($pp) . '.', $s, ['source_file' => $items[$k]['file'], 'over' => $p > (int)$pp['guests']]); }
                 $status($ds, $s);
                 $n = bg_net($ds); if ($n === null || !bg_usd($ds)) $known = false; else $net += $n;
             }
@@ -1601,17 +1662,44 @@ function bg_evaluate(array $snap, array $docs, ?callable $alias = null, ?callabl
         }
     }
     foreach ($calc['warnings'] ?? [] as $w) $res['notes'][] = $w;
+    if (!empty($snap['group'])) bg_group_blocks($res, $start, $snap['today'] ?? null);
 
-    // Status per service.
+    // Status per service (a group block before its release date is a note, not CHECK).
     foreach ($svcs as $i => $s) {
         if ($s['status'] === 'IN-HOUSE') continue;
         if ($s['type'] === 'accommodation' && $s['own'] && !$s['evidence']) { $svcs[$i]['status'] = 'MISSING'; continue; }
-        $mine = array_filter($res['findings'], fn($f) => $f['svc_idx'] === $i);
+        $mine = array_filter($res['findings'], fn($f) => $f['svc_idx'] === $i && $f['issue'] !== 'group_block');
         $missing = array_filter($mine, fn($f) => in_array($f['issue'], ['stay_missing', 'flight_missing', 'activity_missing', 'transfer_missing'], true));
         $svcs[$i]['status'] = $missing ? 'MISSING' : ($mine ? 'CHECK' : ($s['evidence'] ? 'OK' : 'MISSING'));
     }
     $res['services'] = $svcs;
     return bg_eval_close($res);
+}
+
+/**
+ * GRP folders (skill booking-check, Roberto 25 Oct 2026): a group block with more rooms / seats / pax than the group Calc is
+ * normal — held for participants still to come — until the release date, arrival − 60 days. Before it, an over-pax finding
+ * (and the invoice amount of that same service, which bills the whole block) becomes the info line group_block; from the
+ * release date it stays blocking, "release the unsold rooms / seats". Fewer pax than the Calc always blocks.
+ * $today: Y-m-d (tests), default today.
+ */
+function bg_group_blocks(array &$res, ?string $arrival, ?string $today = null): void {
+    if (!$arrival || !strtotime($arrival)) return;
+    $release = date('Y-m-d', strtotime($arrival . ' -60 days'));
+    $today = $today ?? date('Y-m-d');
+    $overSvc = [];
+    foreach ($res['findings'] as $f) if (!empty($f['over']) && $f['svc_idx'] !== null) $overSvc[$f['svc_idx']] = true;
+    foreach ($res['findings'] as &$f) {
+        $over = !empty($f['over']) || ($f['issue'] === 'invoice_mismatch' && $f['svc_idx'] !== null && isset($overSvc[$f['svc_idx']]));
+        if (!$over) continue;
+        if ($today < $release) {
+            $f = array_merge($f, ['issue' => 'group_block', 'blocking' => false, 'audience' => 'booking', 'label' => BG_ISSUES['group_block'][2],
+                                  'text' => $f['text'] . ' Group block (held for other participants): release the unsold rooms / seats by ' . date('j M Y', strtotime($release)) . '.']);
+        } else {
+            $f['text'] .= ' Group block past its release date (' . date('j M Y', strtotime($release)) . '): release the unsold rooms / seats.';
+        }
+    }
+    unset($f);
 }
 
 /** One stay against its matching document items: dates, self-consistency, pax, rooms, meal plan, status. */
@@ -1677,7 +1765,7 @@ function bg_eval_stay(array &$svcs, int $i, array $named, array &$items, callabl
         $roomsTxt = $dr ? implode(' + ', array_map(fn($r) => ($r['count'] ?? 1) . ' × ' . ($r['type'] ?? ''), $ds['rooms'])) : '';
         $need = ($p !== null && bg_pax_ok($p, $pp)) ? $p : $totalPax;   // beds for whom the document books (with or without the TL)
         if ($p !== null && !bg_pax_ok($p, $pp)) {
-            $add('stay_pax', $s['name'] . ': ' . $p . ' pax on the document, the Calc has ' . bg_pax_text($pp) . '.', $s, ['source_file' => $items[$k]['file']]);
+            $add('stay_pax', $s['name'] . ': ' . $p . ' pax on the document, the Calc has ' . bg_pax_text($pp) . '.', $s, ['source_file' => $items[$k]['file'], 'over' => $p > (int)$pp['guests']]);
         } elseif ($p !== null && $docKids !== $calcKids && $docKids > 0) {
             // Same total, children booked where the Calc has adults (or more children): ask the seller which is right.
             $add('stay_pax', $s['name'] . ' (' . basename($items[$k]['file']) . '): ' . (int)$ds['adults'] . ' adults + ' . $docKids . ' children, Calc: '
@@ -1838,8 +1926,7 @@ function bg_finish_run(PDO $db, int $id): void {
             $token = dropbox_get_access_token();
             $dir = $snap['folder'];
             try {
-                require_once __DIR__ . '/folder_link_service.php';
-                if ($r) { $cur = req_folder_path(folder_heal($db, $token, $r)); if ($cur !== '') $dir = $cur; }
+                if ($r) { $cur = bg_check_dir($db, $token, $r); if ($cur !== '') $dir = $cur; }   // GRP member: the group parent
             } catch (Throwable $e) { /* keep the collect-time path */ }
             if (!dropbox_path_exists($token, $dir)) throw new RuntimeException('folder not found at ' . $dir);
             $reportPath = rtrim($dir, '/') . '/booking-check.html';
@@ -2009,9 +2096,8 @@ function bg_state(PDO $db, int $rid, bool $checkStale = true): array {
             $token = dropbox_get_access_token();
             $dir = (string)$run['folder'];
             try {
-                require_once __DIR__ . '/folder_link_service.php';
                 $rq = bg_request($db, $rid);
-                if ($rq) { $cur = req_folder_path(folder_heal($db, $token, $rq)); if ($cur !== '') $dir = $cur; }
+                if ($rq) { $cur = bg_check_dir($db, $token, $rq); if ($cur !== '') $dir = $cur; }   // GRP member: the group parent
             } catch (Throwable $e) { /* keep the stored path */ }
             $fs = bg_folder_state($token, $dir, (string)$run['calc_file']);
             if ($run['calc_hash'] && $fs['calc_hash'] !== $run['calc_hash']) $out['stale_reason'] = 'the Calc changed after the check';
@@ -2064,7 +2150,7 @@ function booking_gate_check(PDO $db, int $rid, string $oldName, string $newName,
     try {
         bg_schema($db);
         $r = bg_request($db, $rid);
-        if (!$r || bg_is_group($r)) return $out;
+        if (!$r) return $out;
         $out['gated'] = true;
         $st = bg_state($db, $rid, true);
         $out['state'] = $st['state'] === 'passed' && $st['stale'] ? 'stale' : $st['state'];
@@ -2167,17 +2253,19 @@ function bg_status_out(PDO $db, int $rid, array $user = [], bool $checkStale = t
     $r = bg_request($db, $rid);
     if (!$r) return ['ok' => false, 'error' => 'Request not found'];
     $group = bg_is_group($r);
+    $member = bg_grp_member($r);
     $st = bg_state($db, $rid, $checkStale);
     $run = $st['run'];
     $folder = (string)($r['practice_code'] ?? '');
     // The report sits in the booking folder, whose name changes with every status tag: today's path, not the stored one.
     $rp = $run['report_path'] ?? null;
-    if ($rp && ($cur = req_folder_path($r)) !== '') $rp = rtrim($cur, '/') . '/booking-check.html';
+    if ($rp && ($cur = req_folder_path($r)) !== '') $rp = rtrim($member ? dirname($cur) : $cur, '/\\') . '/booking-check.html';   // GRP: in the parent
     return [
-        'ok' => true, 'request_id' => $rid, 'folder' => $folder, 'tag' => bg_tag($folder), 'group' => $group,
-        'in_scope' => !$group, 'enforced' => bg_enforce(),   // every private folder; groups only are out of scope (v1)
+        'ok' => true, 'request_id' => $rid, 'folder' => $folder, 'tag' => bg_tag($member ? (string)$r['group_folder'] : $folder), 'group' => $group,
+        'group_folder' => $member ? trim((string)$r['group_folder']) : null,   // GRP member: one check on the parent, shared by the group
+        'in_scope' => true, 'enforced' => bg_enforce(),   // every folder, groups too (24 Nov 2026)
         'state' => $st['state'] === 'passed' && $st['stale'] ? 'stale' : $st['state'],
-        'allowed' => $group ? true : $st['allowed'], 'stale' => $st['stale'], 'stale_reason' => $st['stale_reason'], 'reason' => $st['reason'],
+        'allowed' => $st['allowed'], 'stale' => $st['stale'], 'stale_reason' => $st['stale_reason'], 'reason' => $st['reason'],
         'run' => $run ? ['id' => (int)$run['id'], 'state' => $run['state'], 'trigger' => $run['trigger_src'], 'started_at' => $run['started_at'],
                          'finished_at' => $run['finished_at'], 'docs_total' => (int)$run['docs_total'], 'docs_done' => (int)$run['docs_done'],
                          'blocking_count' => (int)$run['blocking_count'], 'warning_count' => (int)$run['warning_count'], 'error' => $run['error'],
@@ -2186,8 +2274,8 @@ function bg_status_out(PDO $db, int $rid, array $user = [], bool $checkStale = t
                          'override_reason' => $run['override_reason'], 'override_at' => $run['override_at']] : null,
         'blocking' => $st['blocking'], 'warnings' => $st['warnings'],
         'report_path' => $rp, 'report_url' => $rp ? 'https://www.dropbox.com/home' . implode('/', array_map('rawurlencode', explode('/', dirname($rp)))) . '?preview=booking-check.html' : null,
-        'can_run' => $user ? bg_can_run($db, $user, $r) && !$group : false,
-        'can_override' => $user ? bg_can_override($user) && !$group : false,
+        'can_run' => $user ? bg_can_run($db, $user, $r) : false,
+        'can_override' => $user ? bg_can_override($user) : false,
     ];
 }
 

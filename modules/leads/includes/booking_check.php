@@ -199,9 +199,11 @@ function bc_evidence(string $token, string $dir, string $groupDir = ''): array {
 /**
  * Booking-check data of a Hub request: its Calc (a group calc is read on RECAP
  * unless $sheet is given), the services and the evidence files.
+ * $wholeGroup (booking gate on a GRP member, 24 Nov 2026): the folder is the one holding the Calc — the group parent — and
+ * its invoices/ + bookings/ are the evidence (scope own), with no separate group scope.
  * @throws InvalidArgumentException (no folder / no Calc / Calc not finalised) | RuntimeException (Dropbox)
  */
-function bc_request(PDO $db, int $requestId, string $file = '', string $sheet = ''): array {
+function bc_request(PDO $db, int $requestId, string $file = '', string $sheet = '', bool $wholeGroup = false): array {
     try {
         $calc = calc_read_request($db, $requestId, $file, $sheet);
     } catch (InvalidArgumentException $e) {
@@ -212,8 +214,8 @@ function bc_request(PDO $db, int $requestId, string $file = '', string $sheet = 
     $st->execute([$requestId]);
     $r = $st->fetch(PDO::FETCH_ASSOC);
 
-    $dir = $calc['folder'];
-    $groupDir = (!empty($r['group_folder']) && trim($r['group_folder']) !== trim((string)$r['practice_code'])) ? dirname($dir) : '';
+    $dir = $wholeGroup ? (string)($calc['calc_folder'] ?? $calc['folder']) : $calc['folder'];
+    $groupDir = (!$wholeGroup && !empty($r['group_folder']) && trim($r['group_folder']) !== trim((string)$r['practice_code'])) ? dirname($dir) : '';
     $services = bc_services($calc);
     $evidence = bc_evidence(dropbox_get_access_token(), $dir, $groupDir);
 
