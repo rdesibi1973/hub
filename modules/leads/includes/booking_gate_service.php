@@ -976,6 +976,8 @@ function bg_lodge_id(PDO $db, string $text, bool $doc = false) {
         $fits = [];
         foreach ($idx['name'] as $n => $id) if ($id && strpos($n, $t) !== false) $fits[$id] = true;
         if (count($fits) > 1) return array_keys($fits);
+        $co = bg_company_lodges($idx['name'], $t);
+        if ($co !== null) return $co;
     }
     foreach ([$idx['alias'][$raw] ?? null, $idx['alias'][$t] ?? null, $idx['name'][$t] ?? null] as $id) if ($id) return $id;
     if (strlen($t) < 8) return null;
@@ -986,6 +988,36 @@ function bg_lodge_id(PDO $db, string $text, bool $doc = false) {
         $hit = $id;
     }
     return $hit;
+}
+
+/**
+ * A document property that starts with a company shared by several ITI lodges named "Company – Camp" ("TANZANIA BUSHCAMPS
+ * (MOBILE) - Woga 5" vs the five "Tanzania Bush Camps – …"; TRA2809Y27, request 3434, 24 Nov 2026) → those lodge ids, narrowed
+ * to the camps whose own part has a distinctive word of the rest of the text ("… Mara River Camp" → Mara only). $names =
+ * normalized lodge name → id (0 = ambiguous). → int | int[] | null (no such company).
+ */
+function bg_company_lodges(array $names, string $t) {
+    $compact = fn(string $s) => preg_replace('/[^a-z0-9]+/', '', mb_strtolower($s, 'UTF-8'));
+    $generic = ['camp', 'camps', 'mobile', 'luxury', 'lodge', 'tented', 'river', 'central', 'the', 'and', 'safari', 'tent', 'tents', 'campsite'];
+    $tc = $compact($t);
+    $co = [];
+    foreach ($names as $n => $id) {
+        if (!$id || !preg_match('/^(.+?)\s+[–\-]\s+(.+)$/u', (string)$n, $m)) continue;
+        $p = $compact($m[1]);
+        if (strlen($p) >= 6) { $co[$p]['ids'][$id] = $m[2]; $co[$p]['words'] = $m[1]; }
+    }
+    foreach ($co as $p => $c) {
+        if (count($c['ids']) < 2 || strpos($tc, $p) !== 0) continue;
+        $words = array_filter(preg_split('/[^a-z0-9]+/', mb_strtolower($t, 'UTF-8')),
+                              fn($w) => strlen($w) >= 4 && !in_array($w, $generic, true) && strpos($p, $w) === false);
+        $narrow = [];
+        foreach ($c['ids'] as $id => $camp) {
+            foreach ($words as $w) if (preg_match('/\b' . preg_quote($w, '/') . '\b/u', mb_strtolower($camp, 'UTF-8'))) { $narrow[] = $id; break; }
+        }
+        $ids = $narrow ?: array_keys($c['ids']);
+        return count($ids) === 1 ? $ids[0] : $ids;
+    }
+    return null;
 }
 
 /**

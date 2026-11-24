@@ -424,6 +424,14 @@ $t('undated sundowner on the camp invoice → the Calc activity, no activity_mis
    !array_intersect(['activity_missing!', 'doc_unmatched'], $issues($res)) && $res['services'][1]['evidence'] === ['invoices/Bush camp-INV.pdf'], $issues($res));
 $res = bg_evaluate($snap([$bcSvcs[0], ['date' => '2027-01-18'] + $bcSvcs[1]]), [$doc('invoices/Bush camp-INV.pdf', [$bcStay, $bcLine])], fn($p) => array_fill(0, count($p), 'same'));
 $t('undated sundowner, Calc activity outside the stay → still missing', in_array('activity_missing!', $issues($res), true), $issues($res));
+// TRA2809Y27 (24 Nov 2026): "TANZANIA BUSHCAMPS (MOBILE) - Woga 5" = any of the five Tanzania Bush Camps; a camp word narrows.
+$tbc = [];
+foreach (['Tanzania Bush Camps – Ndutu Mobile Camp' => 72, 'Tanzania Bush Camps – Central Serengeti Simba' => 73, 'Tanzania Bush Camps – Central Serengeti Tembo' => 74,
+          'Tanzania Bush Camps – Mara River Camp' => 76, 'Tanzania Bush Camps – Korongo Luxury Camp' => 75, 'Mara Pure Migration Camp' => 85] as $n => $id) $tbc[bg_lodge_norm($n)] = $id;
+$co1 = bg_company_lodges($tbc, bg_lodge_norm('TANZANIA BUSHCAMPS (MOBILE) - Woga 5'));
+$t('company name: all its camps; camp word narrows; other names null',
+   is_array($co1) && count($co1) === 5 && bg_company_lodges($tbc, bg_lodge_norm('Tanzania Bush Camps Mara River Camp')) === 76
+   && bg_company_lodges($tbc, bg_lodge_norm('Tanzania bushcamps -TURNER 9')) !== null && bg_company_lodges($tbc, 'pure migration camp') === null, $co1);
 $t('generic twin name on the document → same / different by the list',
    bg_lodge_verdict('Pure Migration Mara FB', 'Pure Migration Camp', $pure) === 'same'
    && bg_lodge_verdict('Tarangire Pure FB', 'Pure Migration Camp', $pure) === 'different'
