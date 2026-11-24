@@ -351,7 +351,7 @@ function followup_guide_activity_only(string $text, string $service = '', string
     if ($stype !== '' && $stype !== 'activity' && $stype !== 'other') return false;
     $t = strtolower(trim($text . ' ' . $service));
     if ($t === '' || !preg_match(BC_GUIDE_ACTIVITY, $t)) return false;
-    if (!preg_match('/\b(walk(?:ing)?|visits?|village|tours?|boma|waterfalls?|falls|coffee|canoe(?:ing)?|activit(?:y|ies)|excursion|cultural|hadza(?:be)?|datoga|bushmen|hunt\w*|lunch)\b/', $t)) return false;
+    if (!preg_match('/\b(walk(?:ing)?|visits?|village|tours?|boma|waterfalls?|falls|coffee|shanga|plantations?|canoe(?:ing)?|activit(?:y|ies)|excursion|cultural|hadza(?:be)?|datoga|bushmen|hunt\w*|lunch)\b/', $t)) return false;
     if (preg_match('/\$|\b(?:transfers?|pick-?ups?|drop-?offs?|flights?|airport|lodge|camp|hotel|room|nights?|stay|check-?in|check-?out|invoiced|quoted|amount|usd|price|paid|payment|provisional)\b|\binvoice \d/', $t)) return false;
     return true;
 }

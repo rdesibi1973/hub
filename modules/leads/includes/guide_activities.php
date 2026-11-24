@@ -7,7 +7,9 @@
  *
  * Town / city tour, lunch in town (Roberto, 20 Nov 2026: "lunch in town 20 pp", "town lunch", "lunch in Arusha town"),
  * Iraqw and Maasai bomas, Mto wa Mbu, Materuni, Lake Eyasi (Hadzabe, Datoga), Lake Natron, Napuro, Lake Duluti (walk,
- * canoe). Matched anywhere in the item ("Visit Iraqw boma", "Materuni waterfalls & coffee"); transfers are excepted by
- * the callers.
+ * canoe), Shanga, coffee plantation / farm / tour (Roberto, 24 Nov 2026, VaniaLaRocca: "Shanga non si prenota e nemmeno
+ * la visita del coffee plantation"; "coffee" alone is not enough — Arusha Coffee Lodge is a lodge). Matched anywhere in
+ * the item ("Visit Iraqw boma", "Materuni waterfalls & coffee", "Shanga e poi vanno al Tarangire"); transfers are
+ * excepted by the callers.
  */
-const BC_GUIDE_ACTIVITY = '/\b(town tour|city tour|lunch in (\w+ )?town|town lunch|iraq[wk]|maa?sai|mto ?wa ?mbu|materuni|eyasi|hadza(be)?|datoga|natron|napuro|duluti)\b/i';
+const BC_GUIDE_ACTIVITY = '/\b(town tour|city tour|lunch in (\w+ )?town|town lunch|iraq[wk]|maa?sai|mto ?wa ?mbu|materuni|eyasi|hadza(be)?|datoga|natron|napuro|duluti|shanga|coffee (plantation|farm|tour|estate)s?)\b/i';
