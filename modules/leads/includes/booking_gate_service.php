@@ -434,7 +434,7 @@ function bg_start_run(PDO $db, int $rid, ?int $userId, string $trigger = 'manual
                    'end_date' => $calc['end_date'], 'nights' => $calc['nights'], 'single_supp' => $calc['single_supp'] ?? null,
                    'discount_teen' => $calc['discount_teen'] ?? null, 'discount_child' => $calc['discount_child'] ?? null,
                    'warnings' => $calc['warnings']],   // guests (names, DOB) deliberately left out
-        'services' => $bc['services'], 'evidence' => $bc['evidence'],
+        'services' => $bc['services'], 'guide_activities' => $bc['guide_activities'] ?? [], 'evidence' => $bc['evidence'],
     ];
     $docs = array_values(array_filter($bc['evidence'], fn($e) => empty($e['old']) && !preg_match('/passport|passaporto/i', $e['name'])));
     $id = $ins(['request_id' => $rid, 'trigger_src' => $trigger, 'started_by' => $userId, 'owner_user_id' => $owner, 'started_at' => $now,
@@ -1667,6 +1667,22 @@ function bg_evaluate(array $snap, array $docs, ?callable $alias = null, ?callabl
         $res['findings'][] = ['issue' => 'client_flights_missing', 'blocking' => false, 'audience' => 'sales', 'label' => BG_ISSUES['client_flights_missing'][2],
                               'text' => 'ARRIVAL / DEPARTURE details empty in the Calc: ask the client for the flight details.',
                               'service_date' => $start, 'service' => 'Client flights', 'service_type' => 'client_info', 'svc_idx' => null];
+    }
+    // A guide activity of the Calc (Mto wa Mbu, Materuni…: no service line, bc_guide_activities()) booked with a local
+    // supplier anyway: the confirmation belongs to that Calc day, not to "Booked service not in the Calc"
+    // (GiadaSandrini, 24 Nov 2026: Mto wa Mbu visit 18 Jun confirmed by Nickson). Only when the document names it.
+    foreach ($items as $k => $it) {
+        if ($it['used']) continue;
+        $ds = $it['ds'];
+        if (!in_array($ds['type'] ?? '', ['activity', 'other'], true)) continue;
+        $d = bg_date($ds['service_date'] ?? null) ?? bg_date($ds['check_in'] ?? null);
+        if (!$d || !preg_match(BC_GUIDE_ACTIVITY, ($ds['property'] ?? '') . ' ' . ($ds['supplier'] ?? '') . ' ' . ($ds['description'] ?? '') . ' ' . basename($it['file']))) continue;
+        $calcAct = array_values(array_filter($snap['guide_activities'] ?? [], fn($g) => ($g['date'] ?? '') === $d));
+        if (!$calcAct) continue;
+        $items[$k]['used'] = true;
+        $res['notes'][] = bg_dm($d) . ' ' . $calcAct[0]['text'] . ' (arranged by the guide in the Calc): booked with '
+                        . (($ds['supplier'] ?? '') ?: ($ds['property'] ?? '') ?: 'a supplier') . ', ' . basename($it['file'])
+                        . (($ds['status'] ?? '') !== '' ? ' — ' . $ds['status'] : '') . '.';
     }
     $custWords = bg_name_words((string)($snap['customer'] ?? ''));
     foreach ($items as $k => $it) {

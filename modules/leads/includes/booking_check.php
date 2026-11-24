@@ -117,6 +117,24 @@ function bc_services(array $calc): array {
     return $out;
 }
 
+/**
+ * The guide activities of the Calc (ACTIVITY DESC items matching BC_GUIDE_ACTIVITY, transfers excepted), skipped by
+ * bc_services(): [['date' => Y-m-d, 'text' => item]]. The booking gate uses them so that a supplier confirmation of
+ * such an activity on that day (GiadaSandrini, 24 Nov 2026: Mto wa Mbu visit 18 Jun booked with Nickson) is not
+ * "Booked service not in the Calc".
+ */
+function bc_guide_activities(array $calc): array {
+    $out = [];
+    foreach ($calc['days'] ?? [] as $d) {
+        foreach (preg_split('/\s*\+\s*/', (string)($d['activity_desc'] ?? '')) as $item) {
+            $item = trim($item);
+            if ($item === '' || preg_match('/transfer/i', $item) || !preg_match(BC_GUIDE_ACTIVITY, $item)) continue;
+            $out[] = ['date' => $d['date'], 'text' => $item];
+        }
+    }
+    return $out;
+}
+
 /** Supplier words that name an airline / a flight (a Calc annotation row "Flight link" belongs to a flight). */
 const BC_FLIGHT_WORDS = '/\b(flight|flights|air|airline|airlines|airways|aviation|auric|coastal|flightlink|flight ?link|precision|regional|safarilink|as ?salaam|air ?tanzania|zanair|tropical)\b/i';
 
@@ -229,6 +247,7 @@ function bc_request(PDO $db, int $requestId, string $file = '', string $sheet = 
         }
     }
     if ($notes) $calc['warnings'] = array_merge($calc['warnings'] ?? [], $notes);
+    $guide = bc_guide_activities($calc);
     unset($calc['days']);   // replaced by the services
     return [
         'request_id'    => (int)$requestId,
@@ -240,6 +259,7 @@ function bc_request(PDO $db, int $requestId, string $file = '', string $sheet = 
         'local_folder'  => 'C:\\Dropbox' . str_replace('/', '\\', $dir),
         'calc'          => $calc,
         'services'      => $services,
+        'guide_activities' => $guide,
         'evidence'      => $evidence,
         'summary'       => ['services' => $count, 'evidence_files' => count($evidence),
                             'stays_without_invoice_or_checked' => $noMark],
