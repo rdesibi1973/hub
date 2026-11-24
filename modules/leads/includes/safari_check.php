@@ -70,12 +70,15 @@ function sc_xlsx_sheet(string $path, ?string $sheetName = null): array {
     $relsXml = $read('xl/_rels/workbook.xml.rels');
     $target  = 'xl/worksheets/sheet1.xml';
     if ($wbXml !== false && $relsXml !== false) {
-        $nameToRid = [];
+        $nameToRid = []; $visible = [];
         if (preg_match_all('/<sheet\b[^>]*\/?>/', $wbXml, $m)) {
             foreach ($m[0] as $tag) {
                 $nm  = preg_match('/name="([^"]*)"/', $tag, $a) ? html_entity_decode($a[1], ENT_QUOTES | ENT_XML1, 'UTF-8') : '';
                 $rid = preg_match('/r:id="([^"]*)"/', $tag, $b) ? $b[1] : '';
-                if ($nm !== '' && $rid !== '') $nameToRid[$nm] = $rid;
+                if ($nm !== '' && $rid !== '') {
+                    $nameToRid[$nm] = $rid;
+                    if (!sc_sheet_tag_hidden($tag)) $visible[] = $nm;
+                }
             }
         }
         $ridToTarget = [];
@@ -88,7 +91,7 @@ function sc_xlsx_sheet(string $path, ?string $sheetName = null): array {
         }
         $pick = null;
         if ($sheetName !== null && isset($nameToRid[$sheetName])) $pick = $nameToRid[$sheetName];
-        elseif ($sheetName === null && $nameToRid)                $pick = $nameToRid[sc_default_sheet(array_keys($nameToRid))];
+        elseif ($sheetName === null && $nameToRid)                $pick = $nameToRid[sc_default_sheet($visible ?: array_keys($nameToRid))];   // hidden sheets: not the Calc
         if ($pick && isset($ridToTarget[$pick])) {
             $tgt = ltrim($ridToTarget[$pick], '/');
             $target = (strpos($tgt, 'xl/') === 0) ? $tgt : 'xl/' . $tgt;
@@ -137,8 +140,16 @@ function sc_cell(array $cells, string $col, int $row): string {
     return $cells[strtoupper($col) . $row] ?? '';
 }
 
-/** Worksheet names in workbook order. */
-function sc_xlsx_sheets(string $path): array {
+/** True for a <sheet …> tag of xl/workbook.xml hidden in Excel (state="hidden" / "veryHidden"). */
+function sc_sheet_tag_hidden(string $tag): bool {
+    return (bool)preg_match('/\bstate="(?:hidden|veryHidden)"/i', $tag);
+}
+
+/**
+ * Worksheet names in workbook order. Hidden sheets are left out unless $withHidden (Roberto, 24 Nov 2026: a sheet
+ * hidden in Excel — an old quote put aside — is not part of the Calc: not a pax sheet, not counted for CONF, not read).
+ */
+function sc_xlsx_sheets(string $path, bool $withHidden = false): array {
     $zip = new ZipArchive();
     if ($zip->open($path) !== true) return [];
     $wb = $zip->getFromName('xl/workbook.xml');
@@ -147,6 +158,7 @@ function sc_xlsx_sheets(string $path): array {
     $names = [];
     if (preg_match_all('/<sheet\b[^>]*\/?>/', $wb, $m)) {
         foreach ($m[0] as $tag) {
+            if (!$withHidden && sc_sheet_tag_hidden($tag)) continue;
             if (preg_match('/name="([^"]*)"/', $tag, $mm)) {
                 $names[] = html_entity_decode($mm[1], ENT_QUOTES | ENT_XML1, 'UTF-8');
             }

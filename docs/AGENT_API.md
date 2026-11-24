@@ -577,7 +577,7 @@ to that user. Documents already read (same Dropbox `content_hash`) are never sen
 
 | issue | blocks | audience | when |
 |---|---|---|---|
-| `calc_not_clean` | yes | sales | no Calc, Calc only as conflicted copy, several CONF sheets / old quotes |
+| `calc_not_clean` | yes | sales | no Calc, Calc only as conflicted copy, several CONF sheets / old quotes (sheets hidden in Excel are not counted) |
 | `stay_missing` / `flight_missing` / `activity_missing` | yes | booking | no document (own lodges: no Orangi Collection SV). An activity line with no date on the same document as a stay covering the Calc activity's day (a camp invoice with "SUNDOWNER") counts as that activity |
 | `stay_dates` | yes | booking | check-in / check-out / nights differ (split documents or one invoice for two blocks of the same lodge are fine) |
 | `stay_pax` / `flight_pax` / `activity_pax` | yes | booking | adults + children ≠ Calc pax (pax printed per room × rooms when that gives the Calc pax); with a free TL (`pax.tl`) paying pax **or** paying + TL are right; guide / driver rooms ("Driver/Guide Room", "Guide (FB)") are not guests |
@@ -1331,7 +1331,9 @@ draft sample 391 was saved from. Ask Roberto before confirming.
   {id, title, `chosen` (Calc content | Calc name (content not decisive) | by hand), `why`} and `sample_choice`
   {auto, how, why, reliable, hotels_mapped "n/m", ranking[] {id, title, fit %, days, why} (best 5)}.
 - **`sheet`**: the pax sheet the programme is built from. A quote Calc often has several pax sheets and none marked CONF:
-  without `sheet` → 400, and the message lists the sheets.
+  without `sheet` → 400, and the message lists the sheets. **Sheets hidden in Excel are not part of the Calc** (24 Nov 2026,
+  `sc_xlsx_sheets()`, and SafariCheck `visible_sheets()`): not listed, not counted for CONF, never read by default — one visible
+  pax sheet + hidden old quotes = a clean Calc. A hidden sheet named in `sheet` is still read.
 - **`price_sheets`** (quote for several group sizes): the price table gets one row per sheet, "Quota per persona, base N pax",
   smallest group first, with no total. The `sheet` is always included. A sheet whose nights or hotels differ from `sheet` is
   flagged in `calc.warnings` and `same_itinerary: false`, because it is another itinerary, not a price option. Never for GRP

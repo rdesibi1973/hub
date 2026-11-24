@@ -99,6 +99,8 @@ outdated — this file wins where they disagree (PHP version, local lint).
   parent `…_GRP{DDMM}{Duma|Simba|Nyumbu}(Agency-Agent)_START…`, programme once right after the code (DumaShort is private, not
   Duma). A new path that names / renames a group folder goes through `bo_grp_normalise()` / `bo_grp_insert()`; groups of
   another programme on the same code are different groups (`bo_grp_split()`). Report `grp_names_report` / `grp_names.php`.
+- **Calc sheets hidden in Excel** (24 Nov 2026) are not part of the Calc: `sc_xlsx_sheets()` (safari_check.php) leaves them out
+  (`true` as 2nd arg = all), SafariCheck `parse_excel.visible_sheets()` too. A new reader of a Calc's sheet list uses these.
 - `migrations/NNN_name.sql` — not applied by deploy. `docs/` — AGENT_API, FOLDER_NAMING,
   INFRASTRUCTURE, KB_Quotazioni_Safari.
 

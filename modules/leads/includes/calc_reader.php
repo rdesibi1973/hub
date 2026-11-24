@@ -174,7 +174,8 @@ function calc_read_file(string $path, string $wantSheet = ''): array {
     foreach ($sheets as $s) { if (stripos($s, 'PAX') !== false) $pax[] = $s; }
     $sheet = null;
     if (trim($wantSheet) !== '') {
-        foreach ($sheets as $s) { if (strcasecmp(trim($s), trim($wantSheet)) === 0) $sheet = $s; }
+        // A sheet named on purpose is read even when hidden in Excel (hidden sheets are otherwise not the Calc).
+        foreach (sc_xlsx_sheets($path, true) as $s) { if (strcasecmp(trim($s), trim($wantSheet)) === 0) $sheet = $s; }
         if ($sheet === null) throw new InvalidArgumentException('Sheet "' . $wantSheet . '" not found. Sheets: ' . implode(', ', array_map('trim', $sheets)));
     } elseif (count($pax) > 1) {
         // Old quotes are often kept next to the confirmed sheet, which the team
