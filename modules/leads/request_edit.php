@@ -112,13 +112,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!$errors) {
         foreach (['practice_code', 'group_folder'] as $fk) {
             $oldF = trim((string)($req[$fk] ?? '')); $newF = trim((string)($v[$fk] ?? ''));
-            if ($newF === '' || $newF === $oldF || !preg_match('/_CK(?=_|$)/i', $newF) || preg_match('/_CK(?=_|$)/i', $oldF)) continue;
+            if ($newF === '' || $newF === $oldF || !preg_match('/_CK(?=_|$)/i', $newF)) continue;
             require_once 'dropbox_helper.php';
             require_once 'includes/ck_pipeline.php';
+            if (preg_match('/_CK(?=_|$)/i', $oldF)) {   // _CK kept: refused only when put back to _PROVISIONAL (24 Nov 2026)
+                if (ck_name_is_provisional($newF) && !ck_name_is_provisional($oldF)) $errors[] = '_CK cannot stay on a ' . CK_FOLDER_PROVISIONAL_MSG . '.';
+                continue;
+            }
             $ckRow = ck_tracker_row_for($db, null, (int)$req['id']);
             $tok = null;
             try { $tok = dropbox_get_access_token(); } catch (Throwable $e) { /* open lines only */ }
-            $ckBlock = $ckRow ? ck_pipeline_block($db, $ckRow, $tok) : ['blocked' => false];
+            $ckBlock = $ckRow ? ck_pipeline_block($db, $ckRow, $tok, null, basename($newF))
+                              : (ck_name_is_provisional($newF) ? ['blocked' => true, 'by' => [CK_FOLDER_PROVISIONAL_MSG]] : ['blocked' => false]);
             if ($ckBlock['blocked']) $errors[] = '_CK cannot be set yet — ' . ck_pipeline_block_message($ckBlock) . '.';
             break;
         }

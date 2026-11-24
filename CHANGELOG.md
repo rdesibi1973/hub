@@ -20,6 +20,17 @@ Running log of notable changes and current build state. Module-level "active / p
 
 ---
 
+## 2026-11-24 — `_PROVISIONAL` folders: rooms count only in Booking follow-up, never `_CK`
+
+- Roberto (April11 Yeadimtravel, 12 rooms held before the agency sells the departure, moved `_DEPOSIT` → `_PROVISIONAL`):
+  without a room list the pax and room types are unknown. Every `_PROVISIONAL` folder (private or group) keeps in Booking
+  follow-up only supplier holds / expiry, group, gate and manual lines and the rooms-count issues (`followup_prov_keeps()`,
+  `followup_path_is_provisional()` in followup_service.php); the rest is skipped in `followup_apply()` and its open lines close
+  as `auto_resolved` there and in `followup_close_stale()`. They come back once the folder is confirmed.
+- `_CK` refused on a `_PROVISIONAL` folder (`ck_pipeline_block()` with the target name, `CK_FOLDER_PROVISIONAL_MSG`): CK tracker
+  "Set CK", BackOffice Rename / Agent API `rename_folder` (also a `_CK` folder renamed back to `_PROVISIONAL`), request edit.
+  No Claude check due on a `_PROVISIONAL` row (`needs_check` false): the booking gate runs when it leaves `_PROVISIONAL`.
+
 ## 2026-11-24 — Booking follow-up: no Claude-check lines for activities organised by the guide
 
 - `booking_check` already left out the guide's activities (Mto wa Mbu, Materuni, bomas, Eyasi… since 14 Nov), but the

@@ -638,11 +638,13 @@ function ck_set_marker(PDO $db, string $token, int $folderId, bool $on, ?int $us
     if ($on) {
         require_once __DIR__ . '/ck_pipeline.php';
         $tr = ck_tracker_row_for($db, $folderId, null);
-        $block = $tr ? ck_pipeline_block($db, $tr, $token) : ['blocked' => false];
+        $block = $tr ? ck_pipeline_block($db, $tr, $token)
+                     : (ck_name_is_provisional($old) ? ['blocked' => true, 'by' => [CK_FOLDER_PROVISIONAL_MSG]] : ['blocked' => false]);
         if ($block['blocked']) {
             return ['ok' => false, 'msg' => '⛔ No CK yet — ' . ck_pipeline_block_message($block) . '.', 'blocked_by' => $block['by']];
         }
-        // _CK on a private _PROVISIONAL folder: the booking check must have passed (booking_gate_service.php, 13 Nov 2026).
+        // A _PROVISIONAL folder never gets _CK (ck_pipeline_block() above, 24 Nov 2026); the booking gate still runs for
+        // the other private folders (booking_gate_service.php, 13 Nov 2026).
         $rq = $tr && !empty($tr['reqs']) && empty($tr['is_group']) ? (int)$tr['reqs'][0]['id'] : 0;
         if ($rq) {
             require_once __DIR__ . '/booking_gate_service.php';

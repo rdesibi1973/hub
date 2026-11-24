@@ -2314,12 +2314,14 @@ try {
         // _CK while a booking is still provisional or a group is not closed: refused (409, also on the dry run; no override — ck_pipeline.php).
         // Other open points in Booking follow-up: a warning only.
         require_once __DIR__ . '/includes/ck_pipeline.php';
-        if (ck_has_marker($v['new_name']) && !ck_has_marker(basename((string)$v['folder']))) {
-            $block = fs_ck_block($db, $v, dropbox_get_access_token());
+        if (ck_has_marker($v['new_name'])) {
+            $block = fs_ck_block($db, $v, dropbox_get_access_token());   // also a _CK folder renamed back to _PROVISIONAL
             if ($block['blocked']) {
                 agent_fail(ck_pipeline_block_message($block), 409,
                            $out + ['ck_blocked' => true, 'ck_blocked_by' => $block['by']]);
             }
+        }
+        if (ck_has_marker($v['new_name']) && !ck_has_marker(basename((string)$v['folder']))) {
             try {
                 $rowCk = ck_tracker_row_for($db, null, (int)$r['id']);
                 $open = $rowCk ? followup_open_for_row(followup_open_counts($db), $rowCk) : null;

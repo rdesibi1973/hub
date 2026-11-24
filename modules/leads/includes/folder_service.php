@@ -759,15 +759,27 @@ function fs_rename_record(PDO $db, int $requestId, bool $isGrp, string $folder, 
 
 /**
  * A rename that adds _CK ($v from fs_rename_validate) while the booking still has a provisional booking: the reasons
- * (ck_pipeline_block(): open follow-up lines + with $token the invoices/ documents read as provisional).
+ * (ck_pipeline_block(): the new name still _PROVISIONAL, open follow-up lines + with $token the invoices/ documents read
+ * as provisional). A _CK folder renamed back to _PROVISIONAL is refused too (24 Nov 2026).
  * → ['blocked' => bool, 'by' => [text]] (not adding _CK, or no CK tracker row: not blocked).
  */
 function fs_ck_block(PDO $db, array $v, ?string $token): array {
     require_once __DIR__ . '/ck_pipeline.php';
-    if (!ck_has_marker($v['new_name']) || ck_has_marker(basename((string)$v['folder']))) return ['blocked' => false, 'by' => []];
+    $old = basename((string)$v['folder']);
+    if (!ck_has_marker($v['new_name'])) return ['blocked' => false, 'by' => []];
+    if (ck_has_marker($old)) {
+        // _CK kept: refused only when the rename puts the folder back to _PROVISIONAL (no _CK on a provisional booking).
+        return ck_name_is_provisional($v['new_name']) && !ck_name_is_provisional($old)
+            ? ['blocked' => true, 'by' => [CK_FOLDER_PROVISIONAL_MSG], 'provisional' => true, 'group_open' => false]
+            : ['blocked' => false, 'by' => []];
+    }
     try {
         $row = ck_tracker_row_for($db, null, (int)$v['r']['id']);
-        return $row ? ck_pipeline_block($db, $row, $token) : ['blocked' => false, 'by' => []];
+        if (!$row) {   // no tracker row yet: the _PROVISIONAL tag alone still refuses
+            return ck_name_is_provisional($v['new_name']) ? ['blocked' => true, 'by' => [CK_FOLDER_PROVISIONAL_MSG], 'provisional' => true, 'group_open' => false]
+                                                          : ['blocked' => false, 'by' => []];
+        }
+        return ck_pipeline_block($db, $row, $token, null, $v['new_name']);
     } catch (Throwable $e) {
         error_log('fs_ck_block: ' . $e->getMessage());
         return ['blocked' => false, 'by' => []];

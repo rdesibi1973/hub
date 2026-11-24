@@ -1308,6 +1308,32 @@ function followup_close_cancelled(PDO $db, ?int $requestId, ?string $folder, str
     return $n;
 }
 
+// ── _PROVISIONAL folders: rooms count only (Roberto, 24 Nov 2026) ────────────
+// A _PROVISIONAL folder (rooms held for an agency departure, a private safari not confirmed yet) has no room list: the
+// exact pax and room types are not known. Booking follow-up keeps only the number of rooms, the supplier holds and their
+// expiry, the group lines, the booking gate (run when the folder leaves _PROVISIONAL: the full check) and manual lines.
+// Everything else (pax, room types, Word ≠ Excel, nights, basis, transfers, tickets, Claude check) is not reported and
+// its open lines close as auto_resolved; they come back by themselves once the folder has another tag.
+
+/** Line types a _PROVISIONAL folder keeps whatever the issue. */
+const FU_PROV_KEEP_TYPES = ['supplier', 'group', 'gate', 'manual'];
+/** Issues a _PROVISIONAL folder keeps from the other checks: rooms count, holds still provisional, group block. */
+const FU_PROV_KEEP_ISSUES = ['sc_rooms_differ', 'sc_grp_rooms_short', 'sc_grp_unsold', 'group_block', 'group_release',
+                             'provisional', 'provisional_expired', 'on_request', 'orangi_rooms_provisional', 'booking_provisional'];
+
+/** Does a stored folder path (any booking folder in it: a GRP parent too) carry the _PROVISIONAL tag? */
+function followup_path_is_provisional(?string $path): bool {
+    foreach (preg_split('#[/\\\\]+#', followup_folder_norm((string)$path)) as $seg) {
+        if ($seg !== '' && preg_match('/_PROVISIONAL(?:_CK)?$/i', $seg)) return true;
+    }
+    return false;
+}
+
+/** Is a line (candidate or stored) of type $type still reported on a _PROVISIONAL folder? */
+function followup_prov_keeps(string $type, array $l): bool {
+    return in_array($type, FU_PROV_KEEP_TYPES, true) || in_array((string)($l['issue'] ?? ''), FU_PROV_KEEP_ISSUES, true);
+}
+
 /**
  * Every page view / scan: close the open lines of a trip that is over (all types, SafariCheck included — no check runs
  * on them any more) and of a Cancelled / Lost request. A cancelled request whose folder an active request still uses
@@ -1335,6 +1361,13 @@ function followup_close_stale(PDO $db, string $today): array {
         $end = ($l['end_date'] ?? null) ?: ($l['start_date'] ?? null);
         if ($end && $end < $today) {
             followup_close_line($db, $l, 'auto_trip_ended', 'trip ended ' . $end);
+            $out['closed']++;
+            continue;
+        }
+        // _PROVISIONAL folder: rooms count only (no room list yet); the line comes back once the folder is confirmed.
+        if ((followup_path_is_provisional($cur) || ($reqFolder !== '' && followup_path_is_provisional($reqFolder)))
+            && !followup_prov_keeps((string)$l['type'], $l)) {
+            followup_close_line($db, $l, 'auto_resolved', 'folder _PROVISIONAL: only the number of rooms is checked until the room list');
             $out['closed']++;
             continue;
         }
@@ -1642,6 +1675,13 @@ function followup_apply(PDO $db, string $type, array $cand, array $scope, bool $
     $now = date('Y-m-d H:i:s');
     $tag = FU_TYPE_SOURCE[$type];
     $sum = followup_sum_init();
+    // _PROVISIONAL folders: only rooms count / holds / group lines (followup_prov_keeps()); the rest is not reported, so
+    // its open lines close below as no longer reported.
+    $provSkip = 0;
+    foreach ($cand as $k => $l) {
+        if (followup_path_is_provisional((string)($l['folder'] ?? '')) && !followup_prov_keeps($type, $l)) { unset($cand[$k]); $provSkip++; }
+    }
+    if ($provSkip) $sum['skipped_provisional'] = $provSkip;
     $only = isset($scope['only']) ? array_map('intval', (array)$scope['only']) : null;   // request_ids the run looked at (null = all)
     $inOnly = $only !== null ? " AND request_id IN (" . implode(',', $only ?: [0]) . ")" : '';
     if (isset($scope['only_folder'])) {
@@ -1881,6 +1921,7 @@ function followup_apply(PDO $db, string $type, array $cand, array $scope, bool $
             $reason = 'auto_cancelled';                                     // the folder (or its group) was renamed _CANCELLED
         }
         elseif (($old['end_date'] ?: $old['start_date']) && ($old['end_date'] ?: $old['start_date']) < $today) $reason = 'auto_trip_ended';
+        elseif (followup_path_is_provisional((string)$old['folder']) && !followup_prov_keeps($type, $old)) $reason = 'auto_resolved';   // rooms count only
         elseif ($type === 'supplier' && isset($scope['confirmed'][$key])) $reason = 'auto_confirmed';
         elseif ($type === 'ticket' && isset($scope['ok'][$rid])) $reason = 'auto_ticket_saved';
         // A group folder still checked whose line is no longer due (not closed yet, RECAP = sold): resolved; else the

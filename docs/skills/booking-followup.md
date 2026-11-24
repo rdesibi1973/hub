@@ -20,6 +20,7 @@ Hub access and fixed rules: as in the project instructions (dry run first, `"con
 | supplier / ticket | `unreadable` | scanned PDF without text, or a Calc that cannot be read: a human looks at it |
 | ticket | `ticket_missing` | domestic flight in the next 14 days, no ticket file in the booking folder |
 | group | `group_to_finalize` | GRP / Il Diamante SIC / agency group named GRUPPO (a `_PROVISIONAL` tag alone is a private safari, 13 Nov 2026) arriving within 60 days: client folders, Excel pax & rooms, supplier blocks, names TBA — release unsold rooms, confirm, room list, flights |
+| any | — | **`_PROVISIONAL` folder** (24 Nov 2026, private or group, no room list): only rooms count (`sc_rooms_differ`, GRP rooms), supplier holds / expiry, group, gate and manual lines; pax / room types / Word ≠ Excel / transfers / tickets / Claude check are not reported (open ones close `auto_resolved`). Never `_CK` while `_PROVISIONAL`. |
 | group | `group_znz_flight` | seats on the Zanzibar flight vs pax with ARK-ZNZ in the Calc ("N seat(s) to release" / "N pax without a seat"), expiry = ticketing time limit |
 
 Priority (computed): `1-URGENT` service ≤ 30 days, or expiry ≤ 7 days, or expired with service ≤ 90 days (tickets: ≤ 7 days); `2-HIGH` ≤ 90 days; `3-NORMAL` later.

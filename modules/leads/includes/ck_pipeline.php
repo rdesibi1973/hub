@@ -14,8 +14,8 @@
  * Check early, then again (Roberto, 25 Oct 2026): the first Claude check is due when the bookings are done (booked for
  * more than 7 days without a check), then again when the last check is older than 60 and 30 days before arrival
  * (next_check_reason first_check | recheck_60 | recheck_30).
- * _CK is blocked while a booking is provisional (open line with a provisional issue from any check, or a document in
- * invoices/ read as provisional by the last supplier scan) and, for a group, until it is marked closed
+ * _CK is blocked while a booking is provisional (folder tagged _PROVISIONAL — 24 Nov 2026 —, open line with a provisional
+ * issue from any check, or a document in invoices/ read as provisional by the last supplier scan) and, for a group, until it is marked closed
  * (ck_set_group_closed()) — no override; other open lines only warn.
  */
 require_once __DIR__ . '/ck_lib.php';
@@ -66,18 +66,29 @@ function ck_pipeline_block_text(?string $who, ?string $date, string $issue, ?str
          . ($expiry ? ', ' . ($expiry < $today ? 'expired ' : 'expires ') . date('j M', strtotime($expiry)) : '');
 }
 
+/** Refusal text of a folder still tagged _PROVISIONAL (Roberto, 24 Nov 2026: no _CK on a provisional booking). */
+const CK_FOLDER_PROVISIONAL_MSG = 'folder still _PROVISIONAL: confirm the booking first (room list, payment tag)';
+
+/** Does a folder name (the one it would have with _CK) carry the _PROVISIONAL tag? */
+function ck_name_is_provisional(string $name): bool {
+    return (bool)preg_match('/_PROVISIONAL(?=_|$)/i', basename(str_replace('\\', '/', trim($name))));
+}
+
 /**
- * Why _CK cannot be set on this tracker row: open lines with a provisional issue (any check) and — with a Dropbox
- * token — the documents now in invoices/ (not old/) that the last supplier scan read as provisional / on request.
+ * Why _CK cannot be set on this tracker row: the folder still tagged _PROVISIONAL ($targetName = the name the folder
+ * would have with _CK, a rename's new name; default its current name), open lines with a provisional issue (any check)
+ * and — with a Dropbox token — the documents now in invoices/ (not old/) that the last supplier scan read as
+ * provisional / on request.
  * → ['blocked' => bool, 'by' => [text], 'lines' => [line ids], 'files' => [invoices/…]]
  */
-function ck_pipeline_block(PDO $db, array $row, ?string $token = null, ?array $rowLines = null): array {
+function ck_pipeline_block(PDO $db, array $row, ?string $token = null, ?array $rowLines = null, ?string $targetName = null): array {
     $today = ck_now('Y-m-d');
     if ($rowLines === null) {
         $lines = ck_pipeline_lines($db, $today, array_map(fn($q) => (int)$q['id'], $row['reqs']));
         $rowLines = ck_pipeline_row_lines($lines, $row);
     }
     $by = []; $ids = []; $files = []; $seenFiles = [];
+    if (ck_name_is_provisional($targetName ?? (string)$row['folder_name'])) $by[] = CK_FOLDER_PROVISIONAL_MSG;
     foreach ($rowLines as $l) {
         if (!ck_pipeline_is_provisional($l)) continue;
         $issue = in_array($l['issue'], FU_PROVISIONAL_ISSUES, true) ? $l['issue']
@@ -126,8 +137,9 @@ function ck_pipeline_block(PDO $db, array $row, ?string $token = null, ?array $r
  * 31 Jul. Group not closed: mark it closed in the CK tracker first" (each part only when it applies).
  */
 function ck_pipeline_block_message(array $block): string {
-    $prov = array_values(array_filter($block['by'], fn($t) => $t !== CK_GROUP_OPEN_MSG));
+    $prov = array_values(array_filter($block['by'], fn($t) => $t !== CK_GROUP_OPEN_MSG && $t !== CK_FOLDER_PROVISIONAL_MSG));
     $parts = [];
+    if (in_array(CK_FOLDER_PROVISIONAL_MSG, $block['by'], true)) $parts[] = ucfirst(CK_FOLDER_PROVISIONAL_MSG);
     if ($prov) $parts[] = 'Still provisional: ' . implode('; ', $prov);
     if (!empty($block['group_open'])) $parts[] = CK_GROUP_OPEN_MSG;
     return implode('. ', $parts);
@@ -185,7 +197,8 @@ function ck_pipeline_annotate(PDO $db, array &$rows, ?string $today = null): voi
         else                                           $stage = 'confirmed';
         // Check early, then again: Claude check due?
         $reason = null;
-        if (!$r['other'] && $r['start_date'] && $r['to_arrival'] !== null && $r['to_arrival'] >= 0) {
+        // Not on a _PROVISIONAL folder: no room list yet, the booking gate checks it when it leaves _PROVISIONAL (24 Nov 2026).
+        if (!$r['other'] && $r['start_date'] && $r['to_arrival'] !== null && $r['to_arrival'] >= 0 && !ck_name_is_provisional((string)$r['folder_name'])) {
             if (!$lastClaude) {
                 $since = $r['booking_done_at'] ?: null;   // null: done before tracking started
                 if (!(int)$r['has_ck'] && $stage !== 'confirmed' && (!$since || $days($since, $today) > CK_PL_FIRST_CHECK_DAYS)) $reason = 'first_check';

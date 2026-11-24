@@ -754,6 +754,10 @@ A private folder from `_PROGRESS` to `_DEPOSIT` / `_BALANCE` / `_BALANCE-CASH` /
   follow-up line with a provisional issue from any check, or a document now in `invoices/` (not `old/`) read as provisional /
   on request by the last supplier scan (`ck_pipeline_block()`). The same rule in BackOffice → Rename…, the CK tracker "Set CK"
   and the request edit form. Other open lines: a warning ("Setting _CK with N open Booking follow-up line(s) …").
+- **`_CK` on a folder tagged `_PROVISIONAL` → 409** (24 Nov 2026, no override): "Folder still _PROVISIONAL: confirm the
+  booking first (room list, payment tag)" — adding `_CK` to a `_PROVISIONAL` name, or renaming a `_CK` folder back to
+  `_PROVISIONAL`. Same in the CK tracker "Set CK" and the request edit form; `ck_status` lists the row as `ck_blocked`, and no
+  Claude check is due on it (`needs_check` false): the booking gate checks it when it leaves `_PROVISIONAL`.
 - **Adding `_CK` to a group not marked closed → 409** "Group not closed: mark it closed in the CK tracker first" (no
   override; `ck_set_group_closed`). Both reasons in one message when both apply: "Still provisional: …. Group not closed: …".
 - **Warnings (dry run, never blocking):** date tag malformed (`START29OC`), START / MIDT / END not in
@@ -2319,6 +2323,14 @@ logic `modules/operations/includes/followup_service.php`, documents read by `fol
   `sc_flight`, `sc_dates`, `sc_pax`. Naming points ("Lodge not found in Word: …", "Lodge in Word not in Excel: …") and
   document-only points (prices, Word texts, sheets) stay in the CK tracker. Ticking a point in the SafariCheck report closes its
   line (`auto_resolved`, unless another check reports it).
+- **`_PROVISIONAL` folders: rooms count only** (Roberto, 24 Nov 2026 — rooms held, no room list: pax and room types not known).
+  Any folder tagged `_PROVISIONAL` (private or group; a GRP member under a `_PROVISIONAL` parent too) keeps only the lines of
+  type `supplier` (holds and their expiry), `group`, `gate`, `manual`, and from the other checks the issues `sc_rooms_differ`,
+  `sc_grp_rooms_short`, `sc_grp_unsold`, `group_block`, `group_release` and the "still provisional" ones
+  (`FU_PROV_KEEP_TYPES` / `FU_PROV_KEEP_ISSUES`, `followup_prov_keeps()`). Everything else (pax, room types, Word ≠ Excel, nights,
+  basis, transfers, tickets, Claude check) is not written (`skipped_provisional` in the run summary) and its open lines close
+  as `auto_resolved` (on the next run of that check, and on every page view / scan, `followup_close_stale()`); they come back by
+  themselves once the folder has another tag.
 - **Rules of 11 Nov 2026** (`docs/HUB_FOLLOWUP_RULES_HANDOFF.md`):
   - **Trip over / request gone** — on every scan and page view, every open line of a trip whose end (else start) is past
     closes (`auto_trip_ended`, SafariCheck and manual lines too), and the lines of a `Cancelled` / `Lost` request close
