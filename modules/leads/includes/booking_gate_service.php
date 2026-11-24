@@ -925,12 +925,18 @@ function bg_own_lodge(string $s): ?string {
  * taken as the stay.) Both texts mapped to an ITI lodge ($lodgeOf: text → lodge id | null, via iti_lodge_aliases / lodge
  * names) → same / different by the id; else both naming an Orangi Collection lodge → by that lodge; else null (unknown:
  * the caller falls back to the words / the AI alias).
+ * The document side ($lodgeOf($doc, true)) may be a list of ids: a generic supplier name that fits several lodges
+ * ("Pure Migration Camp" = Ndutu and Mara camps; TRA1607Y27, request 3430, 24 Nov 2026) → same when the Calc lodge is
+ * one of them.
  */
 function bg_lodge_verdict(string $calc, string $doc, ?callable $lodgeOf): ?string {
     if (trim($calc) === '' || trim($doc) === '') return null;
     if ($lodgeOf) {
-        $a = $lodgeOf($calc); $b = $lodgeOf($doc);
-        if ($a && $b) return $a === $b ? 'same' : 'different';
+        $a = $lodgeOf($calc); $b = $lodgeOf($doc, true);
+        if ($a && $b) {
+            if (is_array($a)) $a = count($a) === 1 ? reset($a) : null;
+            if ($a) return in_array($a, (array)$b, true) ? 'same' : 'different';
+        }
     }
     $a = bg_own_lodge($calc); $b = bg_own_lodge($doc);
     if ($a !== null && $b !== null) return $a === $b ? 'same' : 'different';
@@ -940,8 +946,12 @@ function bg_lodge_verdict(string $calc, string $doc, ?callable $lodgeOf): ?strin
 /**
  * ITI lodge id of a Calc / document lodge text, or null: Calc alias (as written, then without the meal basis), then the
  * exact lodge name, then a lodge name contained in the text or containing it (one lodge only, 8+ letters). Loaded once.
+ * $doc (a supplier document's property): a text that is no lodge name but is contained in the names of several lodges
+ * (the company name of seasonal twins, "Pure Migration Camp") → the list of their ids, before any alias — the aliases
+ * are Calc texts and may tie that generic name to one twin only.
+ * @return int|int[]|null
  */
-function bg_lodge_id(PDO $db, string $text): ?int {
+function bg_lodge_id(PDO $db, string $text, bool $doc = false) {
     static $idx = null;
     if ($idx === null) {
         $idx = ['alias' => [], 'name' => []];
@@ -962,6 +972,11 @@ function bg_lodge_id(PDO $db, string $text): ?int {
     $raw = trim(mb_strtolower(preg_replace('/[\s\x{00A0}]+/u', ' ', $text), 'UTF-8'));
     $t = bg_lodge_norm($text);
     if ($t === '') return null;
+    if ($doc && strlen($t) >= 8 && empty($idx['name'][$t])) {
+        $fits = [];
+        foreach ($idx['name'] as $n => $id) if ($id && strpos($n, $t) !== false) $fits[$id] = true;
+        if (count($fits) > 1) return array_keys($fits);
+    }
     foreach ([$idx['alias'][$raw] ?? null, $idx['alias'][$t] ?? null, $idx['name'][$t] ?? null] as $id) if ($id) return $id;
     if (strlen($t) < 8) return null;
     $hit = null;
@@ -1966,7 +1981,7 @@ function bg_finish_run(PDO $db, int $id): void {
     foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $d) {
         $docs[] = ['rel_path' => $d['rel_path'], 'status' => $d['status'], 'error' => $d['error'], 'data' => json_decode((string)$d['extracted_json'], true) ?: []];
     }
-    $res = bg_evaluate($snap, $docs, fn(array $pairs) => bg_alias_ai($db, $pairs, $rid), fn(string $t) => bg_lodge_id($db, $t));
+    $res = bg_evaluate($snap, $docs, fn(array $pairs) => bg_alias_ai($db, $pairs, $rid), fn(string $t, bool $doc = false) => bg_lodge_id($db, $t, $doc));
     $r = bg_request($db, $rid) ?: [];
 
     // Report in the folder (overwrite). A Dropbox failure does not stop the run.

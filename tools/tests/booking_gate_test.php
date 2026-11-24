@@ -410,6 +410,14 @@ $res = bg_evaluate($snap($base), [$doc('invoices/Elewana.pdf', [$dsStay('Elewana
 $t('ITI alias same lodge → OK, no AI call', $res['passed'] && $res['services'][0]['status'] === 'OK', $issues($res));
 $res = bg_evaluate($snap($base), [$other, $okFlight], $noAi, $iti);
 $t('ITI alias other lodge → booked_differs blocking, no AI call', !$res['passed'] && in_array('booked_differs!', $issues($res), true), $issues($res));
+// TRA1607Y27 (request 3430, 24 Nov 2026): generic supplier name of seasonal twins ("Pure Migration Camp" = Ndutu 77 and
+// Mara 85; Calc alias "pure migration camp" → 77) is a list on the document side → same when the Calc lodge is one of them.
+$pure = fn(string $x, bool $doc = false) => ($doc && bg_lodge_norm($x) === 'pure migration camp') ? [77, 85]
+    : (['pure migration mara' => 85, 'pure migration camp' => 77, 'tarangire pure' => 67][bg_lodge_norm($x)] ?? null);
+$t('generic twin name on the document → same / different by the list',
+   bg_lodge_verdict('Pure Migration Mara FB', 'Pure Migration Camp', $pure) === 'same'
+   && bg_lodge_verdict('Tarangire Pure FB', 'Pure Migration Camp', $pure) === 'different'
+   && bg_lodge_verdict('Pure Migration Mara FB', 'Tarangire Pure', $pure) === 'different');
 
 // CANCELLED: only back to PROGRESS (rule, refused even with a passed run)
 $t('CANCELLED → PROVISIONAL / DEPOSIT / PAID refused by rule; → PROGRESS allowed', bg_cancelled_move_refused($rv . 'CANCELLED', $rv . 'PROVISIONAL')
