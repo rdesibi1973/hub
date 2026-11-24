@@ -202,8 +202,28 @@ $t('commission deducted → OK', $res['passed'], $issues($res));
 $res = bg_evaluate($snap($base), [$tt(['status' => 'provisional', 'expiry_date' => '2026-12-01']), $okFlight]);
 $t('provisional → passed + booking_provisional', $res['passed'] && in_array('booking_provisional', $issues($res), true), $issues($res));
 // Pax, rooms, children billed as adults, doc inconsistent, meal plan.
+$res = bg_evaluate($snap($base), [$tt(['adults' => 3, 'rooms' => [['type' => 'Double', 'count' => 2]]]), $okFlight]);
+$t('3 pax in 2 DBL vs 2 in 1 DBL (rooms in excess) → stay_pax', in_array('stay_pax!', $issues($res), true), $issues($res));
+$res = bg_evaluate($snap($base), [$tt(['adults' => 3, 'rooms' => []]), $okFlight]);
+$t('3 pax vs 2, no rooms on the document → stay_pax', in_array('stay_pax!', $issues($res), true), $issues($res));
+// Rooms right, pax not (Roberto, 24 Nov 2026, GruppoCateJan27): warning, the room list comes later.
 $res = bg_evaluate($snap($base), [$tt(['adults' => 3]), $okFlight]);
-$t('3 pax vs 2 → stay_pax', in_array('stay_pax!', $issues($res), true), $issues($res));
+$t('3 pax in the Calc 1 DBL → stay_pax_note, passed', $res['passed'] && in_array('stay_pax_note', $issues($res), true) && !in_array('stay_pax!', $issues($res), true), $issues($res));
+$caSnap = $snap([$stay('Marera', '2027-01-29', '2027-01-31', 2, null, true)],
+                ['pax' => ['adults' => 5, 'teen' => 0, 'child' => 0, 'tl' => 1, 'total_guests' => 6], 'room_config' => '2 DBL + 2 SGL',
+                 'start_date' => '2027-01-28', 'end_date' => '2027-02-05']);
+$res = bg_evaluate($caSnap, [$doc('invoices/Orangi sv.pdf', [$dsStay('Marera View Lodge', '2027-01-29', '2027-01-31',
+                       ['adults' => 7, 'rooms' => [['type' => 'Double', 'count' => 2], ['type' => 'Single', 'count' => 2]]])], ['Cate'])]);
+$t('Cate: 7 pax, Calc 5 + 1 TL, same 4 rooms → stay_pax_note only', !in_array('stay_pax!', $issues($res), true) && in_array('stay_pax_note', $issues($res), true), $issues($res));
+$res = bg_evaluate($caSnap, [$doc('invoices/Orangi sv.pdf', [$dsStay('Marera View Lodge', '2027-01-29', '2027-01-31',
+                       ['adults' => 7, 'rooms' => [['type' => 'Double', 'count' => 3], ['type' => 'Single', 'count' => 2]]])], ['Cate'])]);
+$t('Cate: 5 rooms for the Calc 4 → stay_pax blocking', in_array('stay_pax!', $issues($res), true), $issues($res));
+$res = bg_evaluate($caSnap, [$doc('invoices/Orangi sv.pdf', [$dsStay('Marera View Lodge', '2027-01-29', '2027-01-31',
+                       ['adults' => 4, 'rooms' => [['type' => 'Double', 'count' => 2]]])], ['Cate'])]);
+$t('Cate: 4 pax in 2 DBL for 5 paying → stay_pax blocking', in_array('stay_pax!', $issues($res), true), $issues($res));
+$t('rooms fit without Calc rooms', bg_rooms_fit(['total' => 3, 'types' => ['dbl' => 3], 'capacity' => 6], ['total' => 0, 'types' => []], 6)
+   && !bg_rooms_fit(['total' => 4, 'types' => ['dbl' => 4], 'capacity' => 8], ['total' => 0, 'types' => []], 6)
+   && !bg_rooms_fit(['total' => 2, 'types' => ['dbl' => 1], 'capacity' => 4], ['total' => 2, 'types' => []], 3));
 $res = bg_evaluate($snap($base), [$tt(['rooms' => [['type' => 'Twin', 'count' => 1]]]), $okFlight]);
 $t('Twin vs DBL → note on the service only, no finding (20 Nov 2026)', $res['passed'] && !in_array('rooms_note', $issues($res), true)
    && strpos(implode(' ', $res['services'][0]['notes']), 'lodge assigns the beds') !== false, [$issues($res), $res['services'][0]['notes']]);
@@ -362,9 +382,10 @@ $res = bg_evaluate($bfSnap, $bfDocs(4750, array_merge($bfRooms, [$rm('Driver roo
 $t('3 guide rooms, 2 jeeps → guide_rooms warning, not blocking', in_array('guide_rooms', $issues($res), true) && !in_array('stay_pax!', $issues($res), true), $issues($res));
 $bfNoTl = $bfSnap; $bfNoTl['calc']['pax'] = ['adults' => 8, 'teen' => 0, 'child' => 0];
 $res = bg_evaluate($bfNoTl, $bfDocs());
-$t('same documents without a TL in the Calc → stay_pax and flight_pax block', in_array('stay_pax!', $issues($res), true) && in_array('flight_pax!', $issues($res), true), $issues($res));
+$t('same documents without a TL in the Calc → rooms = Calc: stay_pax_note; flight_pax and amounts block', in_array('stay_pax_note', $issues($res), true)
+   && !in_array('stay_pax!', $issues($res), true) && in_array('flight_pax!', $issues($res), true) && in_array('invoice_mismatch!', $issues($res), true), $issues($res));
 $res = bg_evaluate($bfSnap, [$doc('invoices/Sopa.pdf', [$dsStay('Tarangire Sopa', '2027-07-13', '2027-07-14', ['adults' => 10, 'rooms' => $bfRooms])], ['Bonfante'])]);
-$t('TL Calc, 10 on the document → stay_pax "8 paying + 1 TL"', in_array('stay_pax!', $issues($res), true)
+$t('TL Calc, 10 on the document in the Calc rooms → stay_pax_note "8 paying + 1 TL"', in_array('stay_pax_note', $issues($res), true)
    && strpos(implode(' ', array_column($res['findings'], 'text')), '8 paying + 1 TL') !== false, $issues($res));
 $res = bg_evaluate($bfSnap, [$doc('invoices/Sopa.pdf', [$dsStay('Tarangire Sopa', '2027-07-13', '2027-07-14', ['adults' => 8, 'rooms' => $bfRooms])], ['Bonfante'])]);
 $t('TL not billed by the supplier (8) → no stay_pax', !in_array('stay_pax!', $issues($res), true), $issues($res));

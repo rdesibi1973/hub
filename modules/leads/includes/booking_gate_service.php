@@ -63,6 +63,7 @@ const BG_ISSUES = [
     'booking_provisional'    => [false, 'booking', 'Booking provisional'],
     'meal_plan_note'         => [false, 'booking', 'Meal plan differs'],
     'rooms_note'             => [false, 'booking', 'Room types differ from the Calc'],
+    'stay_pax_note'          => [false, 'booking', 'Stay pax differ, rooms fit (align with the room list)'],
     'guide_rooms'            => [false, 'booking', 'More guide / driver rooms than jeeps'],
     'lodge_name_unsure'      => [false, 'booking', 'Check the lodge name'],
     'doc_unmatched'          => [false, 'booking', 'Booked service not in the Calc'],
@@ -1241,6 +1242,18 @@ function bg_rooms_same_types(array $a, array $b): bool {
 }
 
 /**
+ * Rooms booked that fit the Calc (Roberto, 24 Nov 2026): every room type readable, they hold the Calc's paying pax and they
+ * are not in excess — no more rooms than the Calc, or (Calc rooms not readable) one room fewer would no longer hold them.
+ * $dr from bg_rooms_doc() (null = no rooms on the document → false), $calc from bg_rooms_parse().
+ */
+function bg_rooms_fit(?array $dr, array $calc, int $pax): bool {
+    if (!$dr || $dr['total'] < 1 || $pax < 1 || array_sum($dr['types']) !== $dr['total'] || $dr['capacity'] < $pax) return false;
+    if ($calc['total'] > 0) return $dr['total'] <= $calc['total'];
+    $min = min(array_map('bg_room_capacity', array_keys($dr['types'])));
+    return $dr['capacity'] - $min < $pax;
+}
+
+/**
  * A booked family room (a double + singles, "(2 Dbl)") gives a Calc triple's guests the same beds: compared as a triple
  * (Colombo, request 2420, 18 Nov 2026 — Calc "1 triple", Orangi "Jambo (1Dbl & 2Sngl)" / Marera "Serengeti (2 Dbl)").
  */
@@ -1892,8 +1905,13 @@ function bg_eval_stay(array &$svcs, int $i, array $named, array &$items, callabl
         $docKids = (int)($ds['children'] ?? 0);
         $roomsTxt = $dr ? implode(' + ', array_map(fn($r) => ($r['count'] ?? 1) . ' × ' . ($r['type'] ?? ''), $ds['rooms'])) : '';
         $need = ($p !== null && bg_pax_ok($p, $pp)) ? $p : $totalPax;   // beds for whom the document books (with or without the TL)
-        if ($p !== null && !bg_pax_ok($p, $pp)) {
-            $add('stay_pax', $s['name'] . ': ' . $p . ' pax on the document, the Calc has ' . bg_pax_text($pp) . '.', $s, ['source_file' => $items[$k]['file'], 'over' => $p > (int)$pp['guests']]);
+        if ($p !== null && !bg_pax_ok($p, $pp) && bg_rooms_fit($dr, $calcRooms, (int)$totalPax)) {
+            // Rooms right, pax not (Roberto, 24 Nov 2026, GruppoCateJan27): groups book the rooms first and the final room
+            // list comes later — the pax are aligned then. Warning, not blocking; the invoice amount is still checked.
+            $add('stay_pax_note', $s['name'] . ': ' . $p . ' pax on the document, the Calc has ' . bg_pax_text($pp) . '; the rooms booked (' . $roomsTxt
+                 . ') fit the Calc — align the pax with the final room list.', $s, ['source_file' => $items[$k]['file']]);
+        } elseif ($p !== null && !bg_pax_ok($p, $pp)) {
+            $add('stay_pax',$s['name'] . ': ' . $p . ' pax on the document, the Calc has ' . bg_pax_text($pp) . '.', $s, ['source_file' => $items[$k]['file'], 'over' => $p > (int)$pp['guests']]);
         } elseif ($p !== null && $docKids !== $calcKids && $docKids > 0) {
             // Same total, children booked where the Calc has adults (or more children): ask the seller which is right.
             $add('stay_pax', $s['name'] . ' (' . basename($items[$k]['file']) . '): ' . (int)$ds['adults'] . ' adults + ' . $docKids . ' children, Calc: '
