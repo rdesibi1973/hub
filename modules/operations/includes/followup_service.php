@@ -2404,6 +2404,38 @@ function followup_gate_upsert(PDO $db, int $requestId, array $ckRow, array $find
 }
 
 /**
+ * A complete booking-gate run (every document read, Calc readable) is the newer booking check of that booking: the
+ * Claude check's open **booking** findings the gate does not report any more lose their claude_check source, and a
+ * line left with no source closes as auto_resolved (Roberto, 24 Nov 2026, VaniaLaRocca: Moyoni invoice corrected,
+ * gate passed, Claude-check line of 14 Nov still open). Lines the gate itself reports (gate_check source) stay; sales /
+ * accounts lines (client flights, names, payments) and the final-program / deposit / balance lines, which have their
+ * own closers, are left alone. A later Claude check reporting it again re-opens the line as usual.
+ * → [{id, closed: bool, text}].
+ */
+function followup_gate_supersede_ck(PDO $db, int $requestId, int $runId): array {
+    followup_schema($db);
+    $st = $db->prepare("SELECT * FROM booking_followups WHERE closed_at IS NULL AND request_id = ? AND COALESCE(audience, 'booking') = 'booking'
+                        AND (type = 'ck' OR sources LIKE ?)");
+    $st->execute([$requestId, '%"claude_check"%']);
+    $out = [];
+    foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $l) {
+        $src = followup_sources($l);
+        if (!isset($src['claude_check']) || isset($src['gate_check'])) continue;
+        $txt = ($l['service'] ?? '') . ' ' . ($l['doc_status_text'] ?? '');
+        if (preg_match(FU_CK_PROGRAM_RE, $txt)) continue;
+        if (preg_match(FU_CK_NOT_PAID_RE, $txt) && (preg_match(FU_CK_DEPOSIT_RE, $txt) || preg_match(FU_CK_BALANCE_RE, $txt))) continue;
+        $prev = $src['claude_check'];
+        unset($src['claude_check']);
+        $db->prepare("UPDATE booking_followups SET sources = ? WHERE id = ? AND closed_at IS NULL")->execute([followup_sources_json($src), (int)$l['id']]);
+        $why = 'not reported by the booking gate run ' . $runId . ' (all documents read)';
+        followup_event($db, (int)$l['id'], null, 'source', 'claude_check: ' . followup_issue_label((string)($prev['issue'] ?? '')), $why);
+        if (!$src) followup_close_line($db, $l, 'auto_resolved', 'Claude-check finding ' . $why);
+        $out[] = ['id' => (int)$l['id'], 'closed' => !$src, 'text' => mb_substr((string)$l['doc_status_text'], 0, 120)];
+    }
+    return $out;
+}
+
+/**
  * Open lines per request: [request_id => ['ck' => n, 'supplier' => n, 'ticket' => n, 'group' => n, 'safaricheck' => n,
  * 'manual' => n, 'total' => n, 'audience' => {booking, sales, accounts} (all types), 'ck_audience' => {…} (ck lines)]].
  */

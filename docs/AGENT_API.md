@@ -540,6 +540,10 @@ to that user. Documents already read (same Dropbox `content_hash`) are never sen
   groups too since 24 Nov 2026), `group_folder` (GRP member: the parent the shared check runs on, else null).
 - `gate_run` — `request_id`; dry-run unless `"confirm": true`. Queues a run (an active one is returned, `existing: true`);
   no Calc / several CONF / old quotes → the run ends at once, blocked `calc_not_clean`. A GRP member queues its group's check.
+- **Older Claude-check lines** (24 Nov 2026, `followup_gate_supersede_ck()`): a complete run (every document read, Calc readable)
+  removes the `claude_check` source from that booking's open **booking**-audience lines the gate does not report (no `gate_check`
+  source); a line left with no source closes `auto_resolved` (event "not reported by the booking gate run N"). Sales / accounts
+  lines and the final-program / deposit / balance lines are left alone; a later Claude check reporting it again re-opens the line.
 - **The gate**: `rename_folder` and `update_folder_status` giving a private folder its first payment tag (`_DEPOSIT` / `_BALANCE` /
   `_BALANCE-CASH` / `_PAID`) — from `_PROGRESS`, and also from `_PROVISIONAL` or no tag, so there is no way round — **or a
   private folder leaving `_PROVISIONAL` for any other status** (a payment tag, no tag, `_CK` added — also from the CK tracker)

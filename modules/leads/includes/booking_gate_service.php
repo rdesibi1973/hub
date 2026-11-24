@@ -2019,6 +2019,13 @@ function bg_finish_run(PDO $db, int $id): void {
             $f = array_map(fn($x) => array_diff_key($x, ['svc_idx' => 1, 'label' => 1]), $res['findings']);
             $sum = followup_gate_upsert($db, $rid, $ckRow, $f, ['run_id' => $id, 'report_path' => $reportPath, 'booking_owner_id' => $ownerId]);
             $res['followup'] = ['added' => count($sum['added']), 'merged' => count($sum['merged']), 'updated' => count($sum['updated']), 'closed' => count($sum['closed'])];
+            // A complete run (every document read, Calc readable) supersedes the older Claude-check booking lines it no longer reports.
+            $complete = empty($res['not_read']) && !array_filter($res['findings'], fn($x) => in_array($x['issue'], ['calc_not_clean', 'doc_unreadable'], true));
+            if ($complete) {
+                $sup = followup_gate_supersede_ck($db, $rid, $id);
+                $res['followup']['ck_superseded'] = count($sup);
+                $res['followup']['ck_closed'] = count(array_filter($sup, fn($x) => $x['closed']));
+            }
         } else {
             $res['notes'][] = 'No CK tracker row for this folder yet: findings not written to Booking follow-up (next run will).';
         }
