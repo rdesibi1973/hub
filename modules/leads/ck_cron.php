@@ -91,4 +91,15 @@ try {
 } catch (Throwable $e) {
     error_log('ck_cron jeeps: ' . $e->getMessage());
 }
+
+// Booking gate: lines "File type .X is not read by the gate" for a type it reads now → re-run that booking's check
+// (≤ 3 per run, the worker cron_booking_gate.php reads the documents; a GRP member re-runs its group's shared check).
+try {
+    @set_time_limit(90);
+    require_once __DIR__ . '/includes/booking_gate_service.php';
+    $gm = bg_reread_stale_unreadable(db());
+    if (strpos($gm, 'nothing stale') === false) error_log('ck_cron ' . $gm);
+} catch (Throwable $e) {
+    error_log('ck_cron gate re-read: ' . $e->getMessage());
+}
 ob_end_clean();

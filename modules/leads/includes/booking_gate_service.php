@@ -634,6 +634,43 @@ function bg_doc_content(string $name, string $bytes): array {
     throw new RuntimeException('File type .' . $ext . ' is not read by the gate: save it as PDF.');
 }
 
+/** Extensions bg_doc_content() reads: keep in step with it. */
+const BG_READABLE_EXT = ['pdf', 'jpg', 'jpeg', 'png', 'gif', 'webp', 'docx', 'xlsx', 'xlsm', 'xls', 'txt', 'csv', 'htm', 'html', 'eml', 'msg'];
+
+/**
+ * Open gate lines "File type .X is not read by the gate" whose type the gate reads now (.xls since 14 Nov 2026) stay
+ * open forever: lines are only replaced by a new run, and nobody re-runs the check of a folder already past PROGRESS.
+ * Re-run the check of those bookings (no owner → no memo; the run replaces / closes the lines). At most $max runs per
+ * call, a booking checked in the last 12 h is skipped. Called by ck_cron.php. → summary line.
+ */
+function bg_reread_stale_unreadable(PDO $db, int $max = 3): string {
+    bg_schema($db);
+    followup_schema($db);
+    $rows = $db->query("SELECT request_id, doc_status_text FROM booking_followups
+                        WHERE type = 'gate' AND issue = 'doc_unreadable' AND closed_at IS NULL AND request_id IS NOT NULL
+                          AND doc_status_text LIKE '%is not read by the gate%' ORDER BY last_seen_at")->fetchAll(PDO::FETCH_ASSOC);
+    $rids = [];
+    foreach ($rows as $l) {
+        if (preg_match('/File type \.([a-z0-9]+) is not read by the gate/i', (string)$l['doc_status_text'], $m)
+            && in_array(strtolower($m[1]), BG_READABLE_EXT, true)) $rids[(int)$l['request_id']] = true;
+    }
+    if (!$rids) return 'gate re-read: nothing stale';
+    $started = []; $skipped = 0; $errors = [];
+    foreach (array_keys($rids) as $rid) {
+        if (count($started) >= $max) break;
+        $last = bg_latest_run($db, $rid);
+        if ($last && strtotime((string)$last['started_at']) > time() - 12 * 3600) { $skipped++; continue; }
+        try {
+            $run = bg_start_run($db, $rid, null, 'external', null);
+            $started[] = $rid . '→run ' . (int)($run['id'] ?? 0);
+        } catch (Throwable $e) {
+            $errors[] = $rid . ': ' . $e->getMessage();
+        }
+    }
+    return 'gate re-read: ' . count($rids) . ' booking(s) with stale lines, started ' . ($started ? implode(', ', $started) : 'none')
+         . ($skipped ? ", $skipped checked < 12 h ago" : '') . ($errors ? ' — errors: ' . implode('; ', $errors) : '');
+}
+
 function bg_block_pdf(string $bytes): array {
     return ['type' => 'document', 'source' => ['type' => 'base64', 'media_type' => 'application/pdf', 'data' => base64_encode($bytes)]];
 }
