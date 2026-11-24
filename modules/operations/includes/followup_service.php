@@ -1105,6 +1105,7 @@ function followup_backfill(PDO $db): void {
     followup_rules_once($db);
     followup_rules_once_b($db);
     followup_rules_once_c($db);
+    followup_rules_once_d($db);
     try {
         followup_close_stale($db, date('Y-m-d'));   // every page view / scan: trips over, cancelled requests
     } catch (Throwable $e) {
@@ -1403,6 +1404,25 @@ function followup_rules_once_c(PDO $db): void {
         }
     } catch (Throwable $e) {
         error_log('followup_rules_once_c: ' . $e->getMessage());
+    }
+}
+
+/**
+ * Once (meta rules_2026_11d, 24 Nov 2026): open Claude-check lines that only ask for another room type / bed layout
+ * (followup_room_layout_only(): "Eyasi (3 Sngl) for the couple: change to a double room") close — the lodge manager
+ * adapts the room. New ones are dropped by followup_ck_upsert().
+ */
+function followup_rules_once_d(PDO $db): void {
+    try {
+        if (followup_meta_get($db, 'rules_2026_11d') !== null) return;
+        followup_meta_set($db, 'rules_2026_11d', date('Y-m-d H:i:s'));
+        foreach ($db->query("SELECT * FROM booking_followups WHERE closed_at IS NULL AND type = 'ck'")->fetchAll(PDO::FETCH_ASSOC) as $l) {
+            if (followup_room_layout_only((string)$l['doc_status_text'])) {
+                followup_close_line($db, $l, 'auto_resolved', 'room type / bed layout only: the lodge manager adapts the room');
+            }
+        }
+    } catch (Throwable $e) {
+        error_log('followup_rules_once_d: ' . $e->getMessage());
     }
 }
 
@@ -2243,7 +2263,7 @@ function followup_ck_upsert(PDO $db, int $requestId, array $ckRow, array $findin
                 'accounts' => $acc ? (int)$acc['id'] : null];
     $date = fn($v) => ($v && preg_match('/^\d{4}-\d{2}-\d{2}$/', (string)$v)) ? (string)$v : null;
     $report = trim((string)($meta['report_path'] ?? ''));
-    $cand = []; $errors = [];
+    $cand = []; $errors = []; $ignored = [];
     foreach ($findings as $i => $f) {
         if (!is_array($f)) { $errors[] = ['finding' => $i, 'error' => 'not an object']; continue; }
         $aud = (string)($f['audience'] ?? '');
@@ -2252,6 +2272,8 @@ function followup_ck_upsert(PDO $db, int $requestId, array $ckRow, array $findin
         if (!in_array($aud, FU_AUDIENCES, true)) { $errors[] = ['finding' => $i, 'error' => 'audience must be ' . implode(', ', FU_AUDIENCES)]; continue; }
         if (!preg_match('/^[a-z0-9_]{2,40}$/', $issue)) { $errors[] = ['finding' => $i, 'error' => 'issue: short code, a-z 0-9 _ (e.g. ' . implode(', ', array_keys(FU_CK_ISSUE_LABELS)) . ')']; continue; }
         if ($text === '') { $errors[] = ['finding' => $i, 'error' => 'text is required (what is wrong / what to do)']; continue; }
+        // Room type / bed layout only (24 Nov 2026): the lodge manager adapts the room, never a line.
+        if (followup_room_layout_only($text)) { $ignored[] = ['finding' => $i, 'text' => $text, 'why' => 'room type / bed layout only: the lodge adapts the room']; continue; }
         $stype = strtolower(trim((string)($f['service_type'] ?? '')));
         if ($stype !== '' && !in_array($stype, FU_SERVICE_TYPES, true)) { $errors[] = ['finding' => $i, 'error' => 'service_type must be ' . implode(', ', FU_SERVICE_TYPES)]; continue; }
         $svc = mb_substr(trim(followup_strip_passport((string)($f['service'] ?? ''))), 0, 255);
@@ -2303,7 +2325,7 @@ function followup_ck_upsert(PDO $db, int $requestId, array $ckRow, array $findin
             'unchanged' => $sum['unchanged'],
             'owners' => ['booking' => $owners['booking_owner']['username'] ?? null, 'sales' => $owners['ck_owner']['username'] ?? null,
                          'accounts' => $acc['username'] ?? null],
-            'errors' => $errors];
+            'ignored' => $ignored, 'errors' => $errors];
 }
 
 /**

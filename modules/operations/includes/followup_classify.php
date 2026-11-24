@@ -317,3 +317,24 @@ function followup_classify(string $text, string $file, array $trip = [], ?string
     }
     return $out;
 }
+
+/**
+ * A check finding that is only about the room type / bed layout (Roberto, 24 Nov 2026, VaniaLaRocca: "Eyasi (3 Sngl) for
+ * the couple: change to a double room"): the lodge manager adapts the room to the guests, moves beds — never a line.
+ * True only when the text names a room type or bed layout and nothing else is wrong in it (pax, nights, dates, amount,
+ * status, meals, a missing booking) and, outside brackets (bed layouts), it gives no two different room counts
+ * ("1 double booked, Calc has 2 doubles" is a missing room, not a layout).
+ */
+function followup_room_layout_only(string $text): bool {
+    $t = strtolower(trim($text));
+    if ($t === '') return false;
+    $types = 'double|twin|single|triple|family|dbl|twn|sgl|sngl|tpl|trpl|queen|king';
+    if (!preg_match('/\b(?:' . $types . ')\b[^.;\n]{0,25}?\b(?:rooms?|beds?)\b|\broom ?types?\b|\bbed(?:ding)? ?(?:layout|set-?up|configuration)\b'
+                  . '|\(\s*\d+\s*(?:' . $types . '|beds?)\b/', $t)) return false;
+    if (preg_match('/\$|\b(?:nights?|pax|adults?|child(?:ren)?|kids?|teens?|infants?|guests?|people|persons?|invoice\w*|amount|usd|price|cost|paid|payment'
+                 . '|provisional|on request|option|expir\w*|cancel\w*|missing|not booked|no booking|no document|meal|board|hb|fb|bb|b&b'
+                 . '|check-?in|check-?out|arriv\w*|depart\w*|date|another lodge|different lodge|wrong lodge|full|release\w*|block)\b/', $t)) return false;
+    $out = preg_replace('/\([^)]*\)/', ' ', $t);   // "(3 Sngl)" / "(1Dbl & 2Sngl)" describe one room
+    if (preg_match_all('/\b(\d+)\s*(?:x\s*)?(?:' . $types . '|rooms?)\b/', $out, $m) && count(array_unique($m[1])) > 1) return false;
+    return true;
+}

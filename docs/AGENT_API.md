@@ -2182,6 +2182,9 @@ what to do, ≤ 500 chars), source_file?, service_type?}` (`stay`, `flight`, `tr
   hand: send every finding. When a later check no longer reports it, `claude_check` leaves the line (`cleared[]`); the line
   closes only when no other check reports it.
 - Passport numbers: never in `text` (a "passport no. …" number is replaced by `[removed]`).
+- Room type / bed layout only (24 Nov 2026): a finding whose text only asks for another room type or bed layout with the
+  right pax ("Eyasi (3 Sngl) for the couple: change to a double room") is dropped — the lodge manager adapts the room — and
+  listed in `ignored[] {finding, text, why}` (`followup_room_layout_only()`).
 - → dry run: `would_add[]`, `would_merge[]`, `would_update[]`, `would_close[]`, `would_clear[]`, `would_reopen[]`; confirm:
   `add[]`, `merged[]`, `update[]`, `close[]`, `cleared[]`, `reopen[]` — each `{id?, request_id, folder, audience, service,
   service_date, issue, file, status (text), owner (username)}`; `unchanged`, `owners {booking, sales, accounts}`, `errors[]`

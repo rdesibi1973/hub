@@ -20,6 +20,14 @@ Running log of notable changes and current build state. Module-level "active / p
 
 ---
 
+## 2026-11-24 — Booking follow-up: no Claude-check lines for room type / bed layout
+
+- A Claude-check finding that only asks for another room type or bed layout with the right pax ("Eyasi (3 Sngl) for the
+  couple: change to a double room") is dropped — the lodge manager adapts the room, also moving beds (Roberto, VaniaLaRocca).
+  `followup_room_layout_only()` (followup_classify.php), used by `followup_ck_upsert()` (→ `ignored[]`); open lines of that
+  kind close once (`followup_rules_once_d()`, meta `rules_2026_11d`). Skill booking-check §4 Rooms updated. Test
+  `tools/tests/followup_room_layout_test.php`.
+
 ## 2026-11-24 — Booking follow-up: "✉ Mail" to the owner; gate re-reads stale "file type" lines
 
 - **✉ Mail** on every line the user can work (notes cell, next to Save): to the line's owner by default, or any active Hub
