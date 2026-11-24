@@ -190,6 +190,22 @@ $t('GRP member vs group parent', bg_grp_member(['group_folder' => '09_02SEP_GRP0
 
 $res = bg_evaluate($snap($base), [$other, $okFlight], fn($p) => array_fill(0, count($p), 'same'));
 $t('alias same → no booked_differs', $res['passed'], $issues($res));
+// SaraAlello (24 Nov 2026): confirmation "The Z Hotel" + invoice "The Z Hotel Zanzibar" for the same stay, Calc "Z Hotel - Rooftop
+// Suite Sea View HB": both names asked to the alias, both documents on the stay — the invoice is not "Booked service not in the Calc".
+$zb = $base; $zb[0] = $stay('Z Hotel - Rooftop Suite Sea View HB', '2027-01-15', '2027-01-17', 2, 1000.0);
+$zAsked = [];
+$res = bg_evaluate($snap($zb), [$doc('bookings/Z confirmation.eml', [$dsStay('The Z Hotel', '2027-01-15', '2027-01-17')]),
+                                 $doc('invoices/Z hotel - updated Inv.pdf', [$dsStay('The Z Hotel Zanzibar', '2027-01-15', '2027-01-17', ['net_amount' => 1000])]), $okFlight],
+                   function ($p) use (&$zAsked) { $zAsked = array_column($p, 1); return array_fill(0, count($p), 'same'); });
+$t('alias asked for each document name', $zAsked === ['The Z Hotel', 'The Z Hotel Zanzibar'], $zAsked);
+$t('Z Hotel: confirmation + invoice both on the stay, no doc_unmatched', !in_array('doc_unmatched', $issues($res), true) && !$res['unmatched']
+   && count($res['services'][0]['evidence']) === 2 && $res['services'][0]['status'] === 'OK', [$issues($res), $res['services'][0]['evidence']]);
+// One name the same property, the other a different one: the different one stays unmatched (warning), the stay is matched.
+$res = bg_evaluate($snap($zb), [$doc('bookings/Z confirmation.eml', [$dsStay('The Z Hotel', '2027-01-15', '2027-01-17', ['net_amount' => 1000])]),
+                                 $doc('invoices/Kendwa.pdf', [$dsStay('Kendwa Rocks', '2027-01-15', '2027-01-17')]), $okFlight],
+                   fn($p) => array_map(fn($x) => $x[1] === 'Kendwa Rocks' ? 'different' : 'same', $p));
+$t('mixed alias: stay matched, other property → doc_unmatched', in_array('doc_unmatched', $issues($res), true) && !in_array('booked_differs!', $issues($res), true)
+   && $res['services'][0]['evidence'] === ['bookings/Z confirmation.eml'], [$issues($res), $res['services'][0]['evidence']]);
 // Amount: +4 OK, +30 blocked.
 $res = bg_evaluate($snap($base), [$tt(['net_amount' => 1004]), $okFlight]);
 $t('invoice = Calc + 4 → OK', $res['passed'], $issues($res));

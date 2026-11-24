@@ -1548,27 +1548,44 @@ function bg_evaluate(array $snap, array $docs, ?callable $alias = null, ?callabl
             if (!$named) continue;
         }
         if (!$named && $over && !$s['own']) {
-            $aliasPairs[] = [$s['name'], $nameOf($over[0])];
-            $aliasWho[] = [$i, $over];
+            // One alias question per document name on these dates, not only the first document's (SaraAlello, 24 Nov 2026:
+            // "The Z Hotel" confirmation taken, "The Z Hotel Zanzibar" invoice of the same stay left as "Booked service not in the Calc").
+            $byName = [];
+            foreach ($over as $k) $byName[$nameOf($k)][] = $k;
+            $js = [];
+            foreach ($byName as $nm => $ks) { $js[] = [count($aliasPairs), $ks]; $aliasPairs[] = [$s['name'], (string)$nm]; }
+            $aliasWho[] = [$i, $js];
             continue;   // decided after the alias answers
         }
         bg_eval_stay($svcs, $i, $named, $items, $useItem, $add, $status, $paxOf, $pp, $calcKids, $calcRooms, $stayGroups, $svcs);
     }
     if ($aliasPairs) {
         $verdicts = $alias ? $alias($aliasPairs) : array_fill(0, count($aliasPairs), 'unsure');
-        foreach ($aliasWho as $j => [$i, $over]) {
-            $v = $verdicts[$j] ?? 'unsure';
+        foreach ($aliasWho as [$i, $js]) {
             $s = $svcs[$i];
-            $docName = $aliasPairs[$j][1];
-            if ($v === 'different') {
-                foreach ($over as $k) $useItem($k, $i);
+            $take = []; $unsure = []; $differ = [];
+            foreach ($js as [$j, $ks]) {
+                $v = $verdicts[$j] ?? 'unsure';
+                if ($v === 'different') { $differ[] = [$j, $ks]; continue; }
+                if ($v === 'unsure') $unsure[] = [$j, $ks];
+                foreach ($ks as $k) $take[] = $k;
+            }
+            if (!$take) {
+                // Every document on these dates is another property.
+                [$j, $ks] = $differ[0];
+                $docName = $aliasPairs[$j][1];
+                foreach ($differ as [, $dk]) foreach ($dk as $k) $useItem($k, $i);
                 $add('booked_differs', 'Calc says ' . $s['name'] . ', booked ' . $docName . ' (' . bg_dm($s['check_in']) . '–' . bg_dm($s['check_out'])
-                     . '): update the Calc and tell the seller (the client confirmed ' . $s['name'] . ').', $s, ['supplier' => $docName, 'source_file' => $items[$over[0]]['file']]);
+                     . '): update the Calc and tell the seller (the client confirmed ' . $s['name'] . ').', $s, ['supplier' => $docName, 'source_file' => $items[$ks[0]]['file']]);
                 continue;
             }
-            if ($v === 'unsure') $add('lodge_name_unsure', 'Calc says ' . $s['name'] . ', the document says ' . $docName . ' for the same dates: same property? If not, update the Calc.', $s,
-                                      ['supplier' => $docName, 'source_file' => $items[$over[0]]['file']]);
-            bg_eval_stay($svcs, $i, [$over[0]], $items, $useItem, $add, $status, $paxOf, $pp, $calcKids, $calcRooms, $stayGroups, $svcs);
+            // A document of another property next to the right one stays unmatched ("Booked service not in the Calc").
+            foreach ($unsure as [$j, $ks]) {
+                $docName = $aliasPairs[$j][1];
+                $add('lodge_name_unsure', 'Calc says ' . $s['name'] . ', the document says ' . $docName . ' for the same dates: same property? If not, update the Calc.', $s,
+                     ['supplier' => $docName, 'source_file' => $items[$ks[0]]['file']]);
+            }
+            bg_eval_stay($svcs, $i, $take, $items, $useItem, $add, $status, $paxOf, $pp, $calcKids, $calcRooms, $stayGroups, $svcs);
         }
     }
     // Amounts per supplier (one invoice may cover several Calc blocks): net ≤ Calc cost + 5 USD.
