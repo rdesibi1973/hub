@@ -20,6 +20,16 @@ Running log of notable changes and current build state. Module-level "active / p
 
 ---
 
+## 2026-11-24 — Booking follow-up: "✉ Mail" to the owner; gate re-reads stale "file type" lines
+
+- **✉ Mail** on every line the user can work (notes cell, next to Save): to the line's owner by default, or any active Hub
+  user; sent as the logged-in user (From / Reply-To / signature), the line's client / folder / issue / details and a link
+  added under the message. Saved as a note of the line ("✉ Mail to <name> <email> — subject: message", author = sender) and
+  in the request's notes (`email_sent`). Logic `followup_mail_owner()` (followup_service.php), endpoint `api/followup.php?action=mail`,
+  test `tools/tests/followup_mail_owner_test.php`.
+- **Booking gate**: open "File type .X is not read by the gate" lines for a type the gate reads now (.xls since 14 Nov) are
+  re-checked by `ck_cron.php` (`bg_reread_stale_unreadable()`, ≤ 3 runs per call, skips bookings checked < 12 h ago).
+
 ## 2026-11-24 — Booking gate on GRP folders
 
 - GRP folders are gated too (they were out of scope in v1). One check per group, on the group parent: its single Calc read

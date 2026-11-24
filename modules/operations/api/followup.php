@@ -5,7 +5,8 @@
  *   GET  ?action=events&id=N                     history of a line
  *   POST ?action=update  {id, take?, owner?, contacted_at?, staff_status?, notes?}
  *   POST ?action=scan    {type: supplier|ticket|all}       ("Run check now")
- *   POST ?action=add     {request_id, audience, text, service?, service_date?, due_date?, owner?}   ("Add line", the module)
+ *   POST ?action=mail    {id, message, subject?, to_user_id? (default: the line's owner)}   ("✉ Mail": sent as me, saved as a note)
+ *   POST ?action=add    {request_id, audience, text, service?, service_date?, due_date?, owner?}   ("Add line", the module)
  *   GET  ?action=mails&id=N                      .eml files in the line's booking folder mails/ ("Set expiry" proof)
  *   POST ?action=set_expiry {id, date ('' = clear), proof?: "mails/….eml", upload?: {name?, content_base64}}
  *                                                expiry confirmed by mail (module or admin; proof required, saved into mails/)
@@ -61,6 +62,10 @@ try {
             $up = ['name' => (string)($in['upload']['name'] ?? ''), 'content' => $content];
         }
         $res = followup_set_expiry($db, (int)($in['id'] ?? 0), ['date' => (string)($in['date'] ?? ''), 'proof' => (string)($in['proof'] ?? ''), 'upload' => $up], $user);
+        fu_json($res, $res['ok'] ? 200 : ($res['code'] ?? 400));
+    }
+    if ($action === 'mail') {     // "✉ Mail": followup_mail_owner() checks who may work the line, saves the note
+        $res = followup_mail_owner($db, (int)($in['id'] ?? 0), $user, array_intersect_key($in, array_flip(['to_user_id', 'subject', 'message'])));
         fu_json($res, $res['ok'] ? 200 : ($res['code'] ?? 400));
     }
     if ($action === 'add') {      // a line by hand: followup_manual_add() checks the module

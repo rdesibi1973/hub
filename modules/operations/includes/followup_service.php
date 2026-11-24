@@ -3136,6 +3136,90 @@ function followup_proof_rel(string $dir, string $proof): ?string {
     if ($p[0] !== '/') return trim($p, '/') ?: null;
     $ds = explode('/', trim($dir, '/'));
     $ps = explode('/', trim($p, '/'));
+// ── Mail to the owner ("✉ Mail" on a line) ───────────────────────────────────
+
+/**
+ * Report a line by mail (Roberto, 24 Nov 2026): to the line's owner by default, or another active Hub user
+ * ($in['to_user_id']). Sent as the logged-in user (From / Reply-To / signature, BCC to the sender as every Hub mail);
+ * the line, the folder and a link to the page are added under the message. Saved as a note of the line
+ * ("✉ Mail to <name> <email> — <subject>: <message>", author = the sender) and in the request's notes (email_sent).
+ * Who: whoever may work the line (followup_can_work()). $in: to_user_id?, subject?, message.
+ * Passport numbers are stripped from the message. → ['ok', 'to' => {id, name, email}, 'row'] | ['ok' => false, 'error', 'code'].
+ */
+function followup_mail_owner(PDO $db, int $id, array $user, array $in, ?callable $send = null): array {
+    followup_schema($db);
+    $st = $db->prepare("SELECT * FROM booking_followups WHERE id = ?");
+    $st->execute([$id]);
+    $row = $st->fetch(PDO::FETCH_ASSOC);
+    if (!$row) return ['ok' => false, 'error' => 'Line ' . $id . ' not found', 'code' => 404];
+    if (!followup_can_work($user, $row)) {
+        return ['ok' => false, 'error' => 'You can mail only about the lines you can work (module ' . FU_EDIT_PERMISSION . ' or owner)', 'code' => 403];
+    }
+    $toId = !empty($in['to_user_id']) ? (int)$in['to_user_id'] : ($row['owner_user_id'] !== null ? (int)$row['owner_user_id'] : 0);
+    if (!$toId) return ['ok' => false, 'error' => 'The line has no owner: choose who gets the mail', 'code' => 400];
+    $q = $db->prepare("SELECT id, username, full_name, email FROM users WHERE id = ? AND is_active = 1");
+    $q->execute([$toId]);
+    $to = $q->fetch(PDO::FETCH_ASSOC);
+    if (!$to) return ['ok' => false, 'error' => 'User ' . $toId . ' not found or not active', 'code' => 400];
+    if (!filter_var((string)$to['email'], FILTER_VALIDATE_EMAIL)) {
+        return ['ok' => false, 'error' => ($to['full_name'] ?: $to['username']) . ' has no email address in the Hub', 'code' => 400];
+    }
+    $q->execute([(int)$user['id']]);
+    $me = $q->fetch(PDO::FETCH_ASSOC);
+    if (!$me || !filter_var((string)$me['email'], FILTER_VALIDATE_EMAIL)) {
+        return ['ok' => false, 'error' => 'Your Hub user has no email address: the mail cannot be sent from you', 'code' => 400];
+    }
+    $msg = trim(followup_strip_passport((string)($in['message'] ?? '')));
+    if ($msg === '') return ['ok' => false, 'error' => 'Write the message', 'code' => 400];
+    $msg = mb_substr($msg, 0, 4000);
+
+    $out = followup_rows($db, ['ids' => [$id], 'status' => 'all'])[0] ?? [];
+    $client = (string)($out['customer'] ?? '') ?: (string)($out['folder_name'] ?? $row['folder'] ?? '');
+    $issue = (string)($out['issue_label'] ?? $row['issue']);
+    $subject = trim(followup_strip_passport((string)($in['subject'] ?? '')));
+    if ($subject === '') $subject = 'Booking follow-up — ' . $client . ' — ' . $issue;
+    $subject = mb_substr(preg_replace('/[\r\n]+/', ' ', $subject), 0, 200);
+
+    $e = fn($s) => htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8');
+    $link = 'https://hub.savannahexplorers.com/modules/operations/booking_followup.php'
+          . ($row['request_id'] ? '?request_id=' . (int)$row['request_id'] : '?q=' . rawurlencode($client));
+    $facts = array_filter([
+        'Client'   => $client,
+        'Folder'   => (string)($row['folder'] ?? ''),
+        'Service'  => trim(($row['service_date'] ? date('d M Y', strtotime($row['service_date'])) . ' — ' : '') . ($row['supplier'] ?: $row['service'] ?: '')),
+        'Issue'    => $issue,
+        'Details'  => (string)$row['doc_status_text'],
+        'File'     => (string)($row['source_file'] ?? ''),
+    ], fn($v) => trim($v) !== '');
+    $html = '<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#222;line-height:1.45">'
+          . '<p>' . nl2br($e($msg)) . '</p>'
+          . '<table style="border-collapse:collapse;font-size:13px;margin-top:10px">'
+          . implode('', array_map(fn($k, $v) => '<tr><td style="padding:2px 12px 2px 0;color:#777;vertical-align:top">' . $e($k) . '</td><td style="padding:2px 0">' . $e($v) . '</td></tr>', array_keys($facts), $facts))
+          . '</table><p style="margin-top:12px"><a href="' . $e($link) . '">Open in Booking follow-up</a></p></div>';
+
+    if ($send === null) {
+        require_once __DIR__ . '/../../leads/includes/mail_helper.php';
+        $send = fn(string $toAddr, string $subj, string $body, string $fromName, string $fromEmail) =>
+            send_hub_email($toAddr, $subj, $body, $fromName, $fromEmail, $fromEmail, [], (int)$user['id']);
+    }
+    $fromName = trim((string)$me['full_name']) ?: (string)$me['username'];
+    if (!$send((string)$to['email'], $subject, $html, $fromName, (string)$me['email'])) {
+        return ['ok' => false, 'error' => 'The mail could not be sent (server mail)', 'code' => 502];
+    }
+
+    $toName = trim((string)$to['full_name']) ?: (string)$to['username'];
+    $note = mb_substr('✉ Mail to ' . $toName . ' <' . $to['email'] . '> — ' . $subject . ': ' . $msg, 0, 2000);
+    $upd = followup_update($db, $id, ['notes' => $note], $user);
+    if ($row['request_id']) {
+        try {
+            require_once __DIR__ . '/../../leads/includes/mail_helper.php';
+            log_email_note($db, (int)$row['request_id'], (int)$user['id'], $subject, $html);
+        } catch (Throwable $ex) { error_log('followup_mail_owner request note: ' . $ex->getMessage()); }
+    }
+    return ['ok' => true, 'to' => ['id' => (int)$to['id'], 'name' => $toName, 'email' => $to['email']], 'subject' => $subject,
+            'note_saved' => !empty($upd['ok']), 'row' => $upd['row'] ?? ($out ?: null)];
+}
+
     if (count($ps) <= count($ds)) return null;
     foreach ($ds as $i => $s) {
         if (strcasecmp($s, $ps[$i]) !== 0 && dropbox_folder_stem_safe($s) !== dropbox_folder_stem_safe($ps[$i])) return null;

@@ -40,7 +40,8 @@
                reason: params.get('close_reason') || '',
                request: params.get('request_id') ? parseInt(params.get('request_id'), 10) : null,
                group: params.get('folder') || '', open: {},   // GRP member: the group's lines belong to the group's first request
-               exp: {}};   // "Set expiry" forms open: {id: {date, proof, name, file, files, err, busy}}
+               exp: {},    // "Set expiry" forms open: {id: {date, proof, name, file, files, err, busy}}
+               mail: {}};  // "✉ Mail" forms open: {id: {to, subject, message, err, busy}}
   var $ = function (id) { return document.getElementById(id); };
 
   function esc(s) {
@@ -347,6 +348,43 @@
       return '<li>' + (n.at ? '<span class="w">' + dmy(n.at) + (n.by ? ' · ' + esc(n.by) : '') + '</span>' : '') + esc(n.text) + '</li>';
     }).join('') + '</ul>';
   }
+  /** "✉ Mail" form (in the cell, like Set expiry: the list frame would cut a floating box). Sent as me, saved as a note. */
+  function mailForm(r) {
+    var m = state.mail[r.id];
+    if (!m) return '';
+    var users = D.users.filter(function (u) { return u.id !== D.me.id || u.id === r.owner_user_id; });
+    return '<div class="fu-exp fu-mail">' +
+      '<label>To<select data-m="to"><option value="">— choose —</option>' + users.map(function (u) {
+        return '<option value="' + u.id + '"' + (String(u.id) === String(m.to) ? ' selected' : '') + '>' + esc(u.name) + (u.id === r.owner_user_id ? ' (owner)' : '') + '</option>';
+      }).join('') + '</select></label>' +
+      '<label>Subject<input type="text" data-m="subject" maxlength="200" value="' + esc(m.subject) + '" placeholder="empty: Booking follow-up — ' + esc(r.customer || r.folder_name || '') + '"></label>' +
+      '<label>Message<textarea data-m="message" rows="4" maxlength="4000" placeholder="What the owner has to do">' + esc(m.message) + '</textarea></label>' +
+      '<span class="w" style="font-size:.66rem;color:var(--grey-mid)">The line (client, folder, issue, details) and a link are added under the message. Saved as a note.</span>' +
+      (m.err ? '<span class="fu-err">' + esc(m.err) + '</span>' : '') +
+      '<div class="fu-save"><button type="button" class="btn btn-primary btn-sm" data-msend="1"' + (m.busy ? ' disabled' : '') + '>' + (m.busy ? 'Sending…' : 'Send') + '</button>' +
+      '<button type="button" class="btn btn-outline btn-sm" data-mcancel="1"' + (m.busy ? ' disabled' : '') + '>Cancel</button></div></div>';
+  }
+  function openMail(r) {
+    state.mail[r.id] = {to: r.owner_user_id !== null ? String(r.owner_user_id) : '', subject: '', message: '', err: '', busy: false};
+    renderTable();
+    var ta = $('fu-table').querySelector('tr[data-id="' + r.id + '"] textarea[data-m="message"]');
+    if (ta) ta.focus();
+  }
+  function sendMail(r) {
+    var m = state.mail[r.id];
+    if (!m || m.busy) return;
+    if (!m.to) { m.err = 'Choose who gets the mail'; renderTable(); return; }
+    if (!m.message.trim()) { m.err = 'Write the message'; renderTable(); return; }
+    m.busy = true; m.err = ''; renderTable();
+    post('mail', {id: r.id, to_user_id: parseInt(m.to, 10), subject: m.subject, message: m.message}).then(function (d) {
+      if (!d.ok) { m.busy = false; m.err = d.error || 'Not sent'; renderTable(); return; }
+      delete state.mail[r.id];
+      if (d.row) replaceRow(d.row);
+      renderTable();
+      var nt = $('fu-table').querySelector('tr[data-id="' + r.id + '"] .fu-save');
+      if (nt) nt.insertAdjacentHTML('beforeend', '<span class="fu-saved">✓ mail sent to ' + esc(d.to.name) + (d.note_saved ? '' : ' (note not saved)') + '</span>');
+    }).catch(function (e) { m.busy = false; m.err = e.message; renderTable(); });
+  }
   function row(r) {
     var tr = document.createElement('tr');
     tr.dataset.id = r.id;
@@ -379,7 +417,9 @@
       ownerCell(r),
       statusCell(r),
       notesLog(r) + (edit ? '<textarea data-f="notes" aria-label="Add a note" placeholder="Add a note…"></textarea>' +
-                            '<div class="fu-save"><button type="button" class="btn btn-primary btn-sm" data-save="1">Save</button></div>' : ''),
+                            '<div class="fu-save"><button type="button" class="btn btn-primary btn-sm" data-save="1">Save</button>' +
+                            (state.mail[r.id] ? '' : '<button type="button" class="btn btn-outline btn-sm" data-mail="1" title="Mail this line to its owner (or someone else); saved as a note">✉ Mail</button>') +
+                            '</div>' + mailForm(r) : ''),
       (state.tab === 'closed'
         ? '<span style="white-space:nowrap">' + dmyhm(r.closed_at) + '</span><span class="fu-days">' + esc(r.close_reason_label || '') + ' — ' + esc(r.closed_by || '') + '</span>'
         : '') +
@@ -524,6 +564,9 @@
     var tr = b.closest('tr[data-id]');
     if (!tr) return;
     var id = parseInt(tr.dataset.id, 10);
+    if (b.dataset.mail) { openMail(rowOf(tr)); return; }
+    if (b.dataset.mcancel) { delete state.mail[id]; renderTable(); return; }
+    if (b.dataset.msend) { sendMail(rowOf(tr)); return; }
     if (b.dataset.exp) { openExpiry(rowOf(tr)); return; }
     if (b.dataset.xcancel) { delete state.exp[id]; renderTable(); return; }
     if (b.dataset.xsave) { saveExpiry(rowOf(tr), false); return; }
@@ -577,6 +620,13 @@
       f[x] = ev.target.value;
       var nm = x === 'date' && tr.querySelector('input[data-x="name"]');   // suggested name follows the date (no redraw: focus kept)
       if (nm) nm.placeholder = 'empty: ' + suggestName(rowOf(tr), f);
+    });
+  });
+  ['change', 'input'].forEach(function (type) {   // "✉ Mail" form fields → state.mail (no redraw: focus kept)
+    $('fu-table').addEventListener(type, function (ev) {
+      var k = ev.target.dataset.m, tr = k && ev.target.closest('tr[data-id]');
+      var m = tr && state.mail[parseInt(tr.dataset.id, 10)];
+      if (m) m[k] = ev.target.value;
     });
   });
   ['change', 'input'].forEach(function (type) {
