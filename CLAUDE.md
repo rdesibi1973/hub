@@ -42,7 +42,7 @@ outdated — this file wins where they disagree (PHP version, local lint).
   `includes/followup_service.php` + `followup_classify.php`, shared with the Agent API `followup_*` and
   `tools/followup_local_scan.php`, which reads the supplier PDFs on the office PC because BlueHost cannot).
   **`_PROVISIONAL` folders** (24 Nov 2026, private or group: no room list yet): follow-up keeps only rooms count, supplier holds /
-  expiry, group, gate and manual lines (`followup_prov_keeps()`); never `_CK` (`ck_pipeline_block()`, `CK_FOLDER_PROVISIONAL_MSG`).
+  expiry, group and manual lines, gate holds only (`followup_prov_keeps()`); never `_CK` (`ck_pipeline_block()`, `CK_FOLDER_PROVISIONAL_MSG`).
 - **Jeep demand** (`modules/operations/jeep_demand.php`, endpoint `api/jeep_demand.php`; logic `includes/jeep_service.php`, shared
   with the Agent API `jeep_demand` / `jeep_demand_day` / `jeep_demand_scan`; since 22 Nov 2026): jeeps per day = Calc JEEP ÷ Cost per
   Jeep, per `/001_Safari` folder (+ `00_YYYY` archives) in `ops_jeep_scan` / `ops_jeep_days` (keyed by Dropbox id; migration 087).

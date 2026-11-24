@@ -1311,15 +1311,17 @@ function followup_close_cancelled(PDO $db, ?int $requestId, ?string $folder, str
 // ── _PROVISIONAL folders: rooms count only (Roberto, 24 Nov 2026) ────────────
 // A _PROVISIONAL folder (rooms held for an agency departure, a private safari not confirmed yet) has no room list: the
 // exact pax and room types are not known. Booking follow-up keeps only the number of rooms, the supplier holds and their
-// expiry, the group lines, the booking gate (run when the folder leaves _PROVISIONAL: the full check) and manual lines.
+// expiry, the group lines and manual lines; from the booking gate only holds (provisional, no document, cancelled) and the
+// group block — its pax / room-type points stay in the gate panel / report, shown when the folder is confirmed.
 // Everything else (pax, room types, Word ≠ Excel, nights, basis, transfers, tickets, Claude check) is not reported and
 // its open lines close as auto_resolved; they come back by themselves once the folder has another tag.
 
 /** Line types a _PROVISIONAL folder keeps whatever the issue. */
-const FU_PROV_KEEP_TYPES = ['supplier', 'group', 'gate', 'manual'];
-/** Issues a _PROVISIONAL folder keeps from the other checks: rooms count, holds still provisional, group block. */
+const FU_PROV_KEEP_TYPES = ['supplier', 'group', 'manual'];
+/** Issues a _PROVISIONAL folder keeps from the other checks: rooms count, holds still provisional / missing / cancelled, group block. */
 const FU_PROV_KEEP_ISSUES = ['sc_rooms_differ', 'sc_grp_rooms_short', 'sc_grp_unsold', 'group_block', 'group_release',
-                             'provisional', 'provisional_expired', 'on_request', 'orangi_rooms_provisional', 'booking_provisional'];
+                             'provisional', 'provisional_expired', 'on_request', 'orangi_rooms_provisional', 'booking_provisional',
+                             'stay_missing', 'booking_cancelled'];
 
 /** Does a stored folder path (any booking folder in it: a GRP parent too) carry the _PROVISIONAL tag? */
 function followup_path_is_provisional(?string $path): bool {

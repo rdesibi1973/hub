@@ -34,6 +34,8 @@ Running log of notable changes and current build state. Module-level "active / p
   follow-up only supplier holds / expiry, group, gate and manual lines and the rooms-count issues (`followup_prov_keeps()`,
   `followup_path_is_provisional()` in followup_service.php); the rest is skipped in `followup_apply()` and its open lines close
   as `auto_resolved` there and in `followup_close_stale()`. They come back once the folder is confirmed.
+- Booking gate lines on a `_PROVISIONAL` folder: only holds (`booking_provisional`, `stay_missing`, `booking_cancelled`) and
+  `group_block`; the pax / room-type points stay in the gate panel / report (GruppoCate, Rivolta).
 - `_CK` refused on a `_PROVISIONAL` folder (`ck_pipeline_block()` with the target name, `CK_FOLDER_PROVISIONAL_MSG`): CK tracker
   "Set CK", BackOffice Rename / Agent API `rename_folder` (also a `_CK` folder renamed back to `_PROVISIONAL`), request edit.
   No Claude check due on a `_PROVISIONAL` row (`needs_check` false): the booking gate runs when it leaves `_PROVISIONAL`.

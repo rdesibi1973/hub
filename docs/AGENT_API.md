@@ -2325,10 +2325,11 @@ logic `modules/operations/includes/followup_service.php`, documents read by `fol
   line (`auto_resolved`, unless another check reports it).
 - **`_PROVISIONAL` folders: rooms count only** (Roberto, 24 Nov 2026 — rooms held, no room list: pax and room types not known).
   Any folder tagged `_PROVISIONAL` (private or group; a GRP member under a `_PROVISIONAL` parent too) keeps only the lines of
-  type `supplier` (holds and their expiry), `group`, `gate`, `manual`, and from the other checks the issues `sc_rooms_differ`,
-  `sc_grp_rooms_short`, `sc_grp_unsold`, `group_block`, `group_release` and the "still provisional" ones
+  type `supplier` (holds and their expiry), `group`, `manual`, and from the other checks (booking gate included) the issues
+  `sc_rooms_differ`, `sc_grp_rooms_short`, `sc_grp_unsold`, `group_block`, `group_release`, `stay_missing`, `booking_cancelled`
+  and the "still provisional" ones
   (`FU_PROV_KEEP_TYPES` / `FU_PROV_KEEP_ISSUES`, `followup_prov_keeps()`). Everything else (pax, room types, Word ≠ Excel, nights,
-  basis, transfers, tickets, Claude check) is not written (`skipped_provisional` in the run summary) and its open lines close
+  basis, transfers, tickets, Claude check, the gate's pax / room-type points — still in the gate panel / report) is not written (`skipped_provisional` in the run summary) and its open lines close
   as `auto_resolved` (on the next run of that check, and on every page view / scan, `followup_close_stale()`); they come back by
   themselves once the folder has another tag.
 - **Rules of 11 Nov 2026** (`docs/HUB_FOLLOWUP_RULES_HANDOFF.md`):
