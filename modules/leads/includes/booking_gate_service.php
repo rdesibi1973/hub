@@ -1141,7 +1141,8 @@ function bg_room_type(string $s): string {
     $s = strtolower($s);
     if (preg_match('/double\s*\/\s*twin|twin\s*\/\s*double|dbl\s*\/\s*twn|twn\s*\/\s*dbl/', $s)) return 'dbl_twn';
     if (preg_match('/\b(fam|family|villa|quad|quadruple)/', $s)) return 'fam';
-    if (preg_match('/(dbl|double)/', $s) && preg_match('/(sngl|sgl|single|twin|twn)/', $s)) return 'fam';   // one room, double + singles
+    // One room, double + singles; a queen / king bed is a double ("Nyumbu (1Queen+2Single)", Orangi, LuisVicens 24 Nov 2026).
+    if (preg_match('/(dbl|double|queen|king)/', $s) && preg_match('/(sngl|sgl|single|twin|twn)/', $s)) return 'fam';
     // Double-size beds in the bracketed bed layout (Orangi, Spagnoletto 22 Nov 2026): "Tembo (1Dbl&1Queen)" = two big beds = family,
     // "Kiboko (3 Queen size beds)" = three big beds = family (holds 4; compared with a Calc triple as a triple, bg_rooms_fam_as_tpl()).
     // "Twiga (2 Queen)" stays a twin (Bonfante 14 Nov 2026).
@@ -1325,9 +1326,11 @@ function bg_calc_pax(array $calc): array {
     $txt = strtolower((string)($calc['pax_text'] ?? ''));
     if ($txt === '' || (int)$pax['teen'] + (int)$pax['child'] > 0) return [$pax, null];
     $d = ['adults' => 0, 'teen' => 0, 'child' => 0]; $hit = false;
-    if (preg_match_all('/(\d+)\s*(adult\w*|adl\w*|ad\b|adt\w*|teen\w*|ragazz\w*|young\w*|chd\w*|child\w*|kids?\b|bambin\w*|bimb\w*|inf\w*)/', $txt, $m, PREG_SET_ORDER)) {
+    // "2 adults + 2 girls aged 12 and 10" (LuisVicens, 24 Nov 2026): girls / boys / daughters / sons / figli are children.
+    if (preg_match_all('/(\d+)\s*(adult\w*|adl\w*|ad\b|adt\w*|teen\w*|ragazz\w*|young\w*|chd\w*|child\w*|kids?\b|bambin\w*|bimb\w*|inf\w*'
+                       . '|girls?\b|boys?\b|daughters?\b|sons?\b|figli\w*|niñ\w*|hij\w*|enfants?\b|kinder\b)/u', $txt, $m, PREG_SET_ORDER)) {
         foreach ($m as $x) {
-            $k = preg_match('/^(teen|ragazz|young)/', $x[2]) ? 'teen' : (preg_match('/^(chd|child|kid|bambin|bimb|inf)/', $x[2]) ? 'child' : 'adults');
+            $k = preg_match('/^(teen|ragazz|young)/', $x[2]) ? 'teen' : (preg_match('/^(chd|child|kid|bambin|bimb|inf|girl|boy|daughter|son|figli|niñ|hij|enfant|kinder)/u', $x[2]) ? 'child' : 'adults');
             $d[$k] += (int)$x[1]; $hit = true;
         }
     }
@@ -1420,7 +1423,9 @@ function bg_evaluate(array $snap, array $docs, ?callable $alias = null, ?callabl
     if ($paxNote !== null) $res['notes'][] = $paxNote;
     $totalPax = (int)$pax['adults'] + (int)$pax['teen'] + (int)$pax['child'];   // paying pax (B1)
     // Free Tour Leader (TL handoff, 14 Nov 2026): a document may count paying pax or paying + TL; jeeps = guide rooms allowed.
-    $pp = ['paying' => $totalPax, 'tl' => (int)($pax['tl'] ?? 0), 'guests' => $totalPax + (int)($pax['tl'] ?? 0), 'jeeps' => (int)($calc['jeeps'] ?? 0)];
+    $pp = ['paying' => $totalPax, 'tl' => (int)($pax['tl'] ?? 0), 'guests' => $totalPax + (int)($pax['tl'] ?? 0), 'jeeps' => (int)($calc['jeeps'] ?? 0),
+           'minors' => (int)$pax['teen'] + (int)$pax['child'],                          // teens may be booked as children at a lodge
+           'hdr_kids' => (int)($calc['pax']['teen'] ?? 0) + (int)($calc['pax']['child'] ?? 0)];   // priced with a teen / child discount
     $calcKids = (int)$pax['child'];   // teens count as adults at the lodges (Rivolta handoff, 13 Nov 2026)
     $calcRooms = bg_rooms_parse((string)($calc['room_config'] ?? ''));
     $hasSingle = !empty($calcRooms['types']['sgl']);
@@ -1917,12 +1922,13 @@ function bg_eval_stay(array &$svcs, int $i, array $named, array &$items, callabl
                  . ') fit the Calc — align the pax with the final room list.', $s, ['source_file' => $items[$k]['file']]);
         } elseif ($p !== null && !bg_pax_ok($p, $pp)) {
             $add('stay_pax',$s['name'] . ': ' . $p . ' pax on the document, the Calc has ' . bg_pax_text($pp) . '.', $s, ['source_file' => $items[$k]['file'], 'over' => $p > (int)$pp['guests']]);
-        } elseif ($p !== null && $docKids !== $calcKids && $docKids > 0) {
-            // Same total, children booked where the Calc has adults (or more children): ask the seller which is right.
+        } elseif ($p !== null && !$s['own'] && $docKids > max($calcKids, (int)($pp['minors'] ?? 0))) {
+            // Same total, more children booked than the Calc's minors: ask the seller which is right. Teens booked as children
+            // are fine, and our own lodges (Orangi SV) are never asked (Roberto, LuisVicens 24 Nov 2026).
             $add('stay_pax', $s['name'] . ' (' . basename($items[$k]['file']) . '): ' . (int)$ds['adults'] . ' adults + ' . $docKids . ' children, Calc: '
                  . ($totalPax - $calcKids) . ' adults' . ($calcKids ? ' + ' . $calcKids . ' children' : '') . ': check the ages with the seller, then fix the booking or the Calc.',
                  $s, ['source_file' => $items[$k]['file'], 'audience' => 'sales']);
-        } elseif ($p !== null && !$s['own'] && $calcKids > 0 && $docKids === 0) {
+        } elseif ($p !== null && !$s['own'] && $calcKids > 0 && $docKids === 0 && (int)($pp['hdr_kids'] ?? 1) > 0) {   // a discount was given
             $add('child_as_adult', $s['name'] . ': ' . $calcKids . ' child(ren) billed as adults — ask for the child rate (the client got a child discount).', $s, ['source_file' => $items[$k]['file']]);
         }
         // Rooms (Rivolta, 13 Nov 2026): with a final room list double / twin / single / triple differences do not block; the rooms
