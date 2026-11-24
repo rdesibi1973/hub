@@ -898,7 +898,7 @@ include __DIR__ . '/../../includes/layout_header.php';
         $saveFmt = iti_terms_variant_for_request($db, (int)$program['lead_request_id']) === 'direct' ? 'PDF' : 'Word';
         $saveRef = trim((string)($program['ref_number'] ?? '')); ?>
     <form method="POST" action="program_edit.php?id=<?= $id ?>" style="display:inline;"
-          <?= $active_tab === 'days' ? 'onsubmit="return confirm(\'Changes to the open day that are not saved yet are NOT in the document — press 💾 Save first. Continue?\')"' : '' ?>>
+          <?= $active_tab === 'days' ? 'onsubmit="return itiSaveDbxOk()"' : '' ?>>
       <input type="hidden" name="_sub" value="save_dropbox">
       <input type="hidden" name="tab" value="<?= h($active_tab) ?>">
       <button class="btn btn-green btn-sm" <?= $saveRef === '' ? 'disabled' : '' ?>
@@ -2342,6 +2342,26 @@ function toggleOA(checked) {
 // The header SAVE saves the days AND the Program Details panel when it was changed;
 // leaving the page with unsaved details asks first.
 var progDetailsDirty = false;
+// Open day changed since the page loaded (typed, picked, or a button pressed inside its form):
+// only then "Save PDF to Dropbox" asks first — the document is built from what is saved.
+var dayDirty = false;
+(function() {
+    var mark = function(e) {
+        if (e.target && e.target.closest && e.target.closest('[id^="day-save-form-"]')) dayDirty = true;
+    };
+    document.addEventListener('input', mark, true);
+    document.addEventListener('change', mark, true);
+    document.addEventListener('click', function(e) {
+        if (e.target && e.target.closest && e.target.closest('[id^="day-save-form-"] button')) mark(e);
+    }, true);
+})();
+function itiSaveDbxOk() {
+    if (!dayDirty && !progDetailsDirty) return true;
+    var ok = confirm('You changed ' + (dayDirty ? 'the open day' : 'Program Details') + ' without saving: those changes are NOT in the document. '
+                   + 'Cancel, press 💾 Save, then Save to Dropbox again — or OK to save the document without them.');
+    if (ok) progDetailsDirty = false;   // already answered: no second "leave page?" prompt
+    return ok;
+}
 (function() {
     var f = document.getElementById('prog-details-form');
     if (!f) return;
