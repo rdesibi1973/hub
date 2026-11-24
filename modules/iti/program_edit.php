@@ -660,6 +660,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         iti_flash_set('success','Program unpublished.');
         iti_redirect("program_edit.php?id={$id}&tab=info");
     }
+    // ── Client document into the request's Dropbox folder, as Generate does (program_final.php) ──
+    // <Ref. Number>.pdf for a direct client, .docx for an agency, replacing the previous one: after editing a
+    // generated program the staff used the download buttons (named after the title) and lost the 01_ name.
+    if ($sub === 'save_dropbox') {
+        $tab = preg_replace('/[^a-z_]/', '', (string)($_POST['tab'] ?? 'days')) ?: 'days';
+        try {
+            if (($program['program_type'] ?? '') !== 'personal') throw new RuntimeException('Only personal programs are saved in a booking folder.');
+            if ($program['status'] === 'cancelled') throw new RuntimeException('The program is cancelled.');
+            $sv = iti_ps_save_client_document($db, $id);
+            iti_flash_set('success', ($sv['format'] === 'docx' ? 'Word' : 'PDF') . ' saved in Dropbox: ' . $sv['path']
+                . ($sv['overwritten'] ? ' (replaced the previous file; Dropbox keeps the old version)' : '') . '.');
+        } catch (Throwable $e) {
+            iti_flash_set('error', 'Document NOT saved in Dropbox: ' . $e->getMessage());
+        }
+        iti_redirect("program_edit.php?id={$id}&tab={$tab}");
+    }
     if ($sub === 'cancel_program') {
         $db->prepare("UPDATE iti_programs SET status='cancelled', is_published=0 WHERE id=?")->execute([$id]);
         iti_flash_set('success','Program cancelled.');
@@ -875,6 +891,19 @@ include __DIR__ . '/../../includes/layout_header.php';
     <form method="POST" action="program_edit.php?id=<?= $id ?>" style="display:inline;">
       <input type="hidden" name="_sub" value="publish">
       <button class="btn btn-red btn-sm">🚀 Publish</button>
+    </form>
+    <?php endif; ?>
+    <?php if ($is_personal && (int)($program['lead_request_id'] ?? 0) > 0 && $program['status'] !== 'cancelled'):
+        require_once __DIR__ . '/includes/iti_terms.php';
+        $saveFmt = iti_terms_variant_for_request($db, (int)$program['lead_request_id']) === 'direct' ? 'PDF' : 'Word';
+        $saveRef = trim((string)($program['ref_number'] ?? '')); ?>
+    <form method="POST" action="program_edit.php?id=<?= $id ?>" style="display:inline;"
+          <?= $active_tab === 'days' ? 'onsubmit="return confirm(\'Changes to the open day that are not saved yet are NOT in the document — press 💾 Save first. Continue?\')"' : '' ?>>
+      <input type="hidden" name="_sub" value="save_dropbox">
+      <input type="hidden" name="tab" value="<?= h($active_tab) ?>">
+      <button class="btn btn-green btn-sm" <?= $saveRef === '' ? 'disabled' : '' ?>
+              title="<?= $saveRef === '' ? 'Set the Ref. Number in Program Details first (it is the file name)'
+                       : h('Saves this program as it is now in the booking folder as ' . $saveRef . '.' . ($saveFmt === 'PDF' ? 'pdf' : 'docx') . ' (replaces the previous one; Dropbox keeps the old version). The download buttons name the file after the title.') ?>">💾 Save <?= $saveFmt ?> to Dropbox</button>
     </form>
     <?php endif; ?>
     <a href="export_mag_word.php?id=<?= $id ?>" class="btn btn-outline btn-sm">⬇ Word</a>

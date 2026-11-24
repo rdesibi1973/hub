@@ -135,7 +135,7 @@ class ItiSaveException extends RuntimeException {
 /**
  * Upload a generated programme file ($f from iti_export_file() / voucher_render_file(): name, format, content)
  * to Dropbox, by default into the folder of the programme's request. Shared by the Agent API
- * (iti_document / iti_vouchers with save / request_id / folder_path) and program_edit.php ("Save PDF to Dropbox").
+ * (iti_document / iti_vouchers with save / request_id / folder_path) and iti_ps_save_client_document().
  * $opt: folder_path (full Dropbox path), request_id (that request's folder), save_as (file name), overwrite.
  * An existing file is kept unless overwrite (409); Dropbox keeps the replaced version in its history.
  * Logged on the request timeline. Returns ['path', 'name', 'overwritten', 'request_id'].
@@ -198,7 +198,8 @@ function iti_ps_save_file(PDO $db, int $pid, array $f, array $opt = array()): ar
 /**
  * The client document of a personal programme into its request's Dropbox folder, as <Ref. Number>.pdf for a
  * direct client (folder "(…-Drct)") or <Ref. Number>.docx for an agency (the editable copy). Replaces a file
- * of the same name (Dropbox keeps the old version). Called by program_final.php after Generate / Regenerate.
+ * of the same name (Dropbox keeps the old version). Called by program_final.php after Generate / Regenerate and by
+ * program_edit.php "Save PDF / Word to Dropbox" (after the program was edited by hand).
  * Throws on a missing request / Ref. Number, supplier names in an imported programme, or Dropbox errors.
  * Returns iti_ps_save_file()'s array + 'format' (pdf / docx) and 'variant' (direct / agency).
  */
