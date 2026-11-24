@@ -141,6 +141,7 @@ class ItiSaveException extends RuntimeException {
  * Logged on the request timeline. Returns ['path', 'name', 'overwritten', 'request_id'].
  */
 function iti_ps_save_file(PDO $db, int $pid, array $f, array $opt = array()): array {
+    require_once __DIR__ . '/../../leads/dropbox_constants.php';   // DROPBOX_* keys: not every caller loads them (program_edit.php)
     require_once __DIR__ . '/../../leads/dropbox_helper.php';
     require_once __DIR__ . '/../../leads/includes/booking_service.php';   // req_folder_path(), timeline_log()
     $p   = iti_get_program($pid);
