@@ -711,7 +711,8 @@ function fs_rename_preview(PDO $db, array $v, string $token, bool $withCalc = tr
         try {
             $xlsx = sc_fetch_calc_xlsx($token, $curPath);
             if ($xlsx) {
-                $trip = sc_trip_dates(sc_xlsx_cells($xlsx));
+                $sh = sc_xlsx_sheet($xlsx);
+                $trip = sc_trip_dates($sh['v'], $sh['f']);   // formulas too: a Calc never re-saved in Excel has no saved dates after A17
                 @unlink($xlsx);
                 $out['calc_dates'] = ['start' => $trip['start'], 'end' => $trip['end']];
                 if ($trip['start'] && $nd['start_date'] && $trip['start'] !== $nd['start_date']) {

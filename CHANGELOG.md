@@ -20,6 +20,13 @@ Running log of notable changes and current build state. Module-level "active / p
 
 ---
 
+## 2026-11-24 — Rename / confirm date check follows the DATE formulas
+
+- A Calc written by a tool and never re-saved in Excel has a saved value only in A17; A18+ are `=SUM(A17+1)` formulas with
+  no saved value, so the rename check read the trip as one day ("Calc end 11 Apr ≠ END 18 Apr", April11 Yeadimtravel).
+  `sc_trip_dates()` takes the formulas (`sc_xlsx_sheet()['f']`) and follows `=A17+1` / `=SUM(A17+1)` / shared children;
+  used by the rename check (`fs_rename_plan`) and the confirm Excel checks. `calc_verify()` still reads saved values only.
+
 ## 2026-11-24 — `_PROVISIONAL` folders: rooms count only in Booking follow-up, never `_CK`
 
 - Roberto (April11 Yeadimtravel, 12 rooms held before the agency sells the departure, moved `_DEPOSIT` → `_PROVISIONAL`):

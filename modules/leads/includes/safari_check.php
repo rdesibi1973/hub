@@ -200,9 +200,13 @@ function sc_parse_xlsx_date(string $v): ?string {
 /**
  * The day-by-day itinerary dates from the calc sheet's DATE column.
  * Finds the "DATE" table header, then reads the contiguous run of dated rows.
+ * $formulas (sc_xlsx_sheet()['f']): a DATE cell with no saved value (Calc written by a tool, never re-saved in Excel)
+ * but a formula "=A17+1" / "=SUM(A17+1)" on a date already read is followed (April11 Yeadimtravel, 24 Nov 2026: only
+ * A17 saved → the trip read as one day); a shared-formula child ("=(shared)") is the row above + 1.
+ * Without $formulas: saved values only (calc_verify() checks exactly that).
  * @return array{start:?string, end:?string, all:string[]}  (Y-m-d)
  */
-function sc_trip_dates(array $cells): array {
+function sc_trip_dates(array $cells, array $formulas = []): array {
     $dateCol = null; $headerRow = 0;
     foreach ($cells as $ref => $val) {
         if (strcasecmp(trim($val), 'DATE') === 0) {
@@ -212,12 +216,20 @@ function sc_trip_dates(array $cells): array {
     }
     if ($dateCol === null) { $dateCol = 'A'; $headerRow = 16; }
 
-    $dates = [];
+    $dates = []; $byRow = [];
     for ($r = $headerRow + 1, $misses = 0; $r < $headerRow + 60; $r++) {
         $raw = sc_cell($cells, $dateCol, $r);
         if ($raw !== '' && stripos($raw, 'total') === 0) break;
         $d = ($raw !== '') ? sc_parse_xlsx_date($raw) : null;
-        if ($d !== null) { $dates[] = $d; $misses = 0; }
+        if ($d === null && $raw === '' && ($f = $formulas[strtoupper($dateCol) . $r] ?? null) !== null) {
+            if (preg_match('/^=\s*(?:SUM\(\s*)?\$?([A-Z]{1,3})\$?(\d+)\s*([+-])\s*(\d+)\s*\)?\s*$/i', $f, $m)
+                && strtoupper($m[1]) === strtoupper($dateCol) && isset($byRow[(int)$m[2]])) {
+                $d = date('Y-m-d', strtotime($byRow[(int)$m[2]] . ' ' . $m[3] . (int)$m[4] . ' days'));
+            } elseif ($f === '=(shared)' && isset($byRow[$r - 1])) {
+                $d = date('Y-m-d', strtotime($byRow[$r - 1] . ' +1 day'));
+            }
+        }
+        if ($d !== null) { $dates[] = $d; $byRow[$r] = $d; $misses = 0; }
         elseif ($dates) { if (++$misses >= 2) break; }   // tolerate a single blank line inside the table
     }
     sort($dates);
@@ -463,7 +475,8 @@ function sc_run_checks(array $ctx): array {
     }
 
     try {
-        $cells = sc_xlsx_cells($path);
+        $sheetFull = sc_xlsx_sheet($path);
+        $cells = $sheetFull['v'];
     } catch (Throwable $e) {
         $res[] = ['level' => 'info', 'msg' => 'Could not read the Excel (' . $e->getMessage() . ') — Excel checks skipped.'];
         return $res;
@@ -486,7 +499,7 @@ function sc_run_checks(array $ctx): array {
         $res[] = ['level' => 'warn', 'msg' => 'No RECAP tab in the Excel — confirm this really is a group before creating/adding a GRP.'];
     }
 
-    $trip = sc_trip_dates($cells);
+    $trip = sc_trip_dates($cells, $sheetFull['f']);
 
     // 1) Excel trip dates are in the future.
     if ($trip['start'] === null) {
