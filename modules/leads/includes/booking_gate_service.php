@@ -1574,8 +1574,13 @@ function bg_evaluate(array $snap, array $docs, ?callable $alias = null, ?callabl
         $net = 0.0; $seen = []; $noAmt = false; $usd = true; $nca = false; $concession = null;
         foreach ($g['items'] as $k) {
             $ds = $items[$k]['ds'];
-            $sig = $items[$k]['doc'] . '|' . ($ds['reference'] ?? '') . '|' . ($ds['check_in'] ?? '')
-                 . (($ds['type'] ?? '') === 'stay' ? '' : '|x|' . ($ds['service_date'] ?? '') . '|' . ($ds['description'] ?? ''));   // a meal extra is not a copy of the room line
+            // The same supplier reference in two documents (invoice .xls + its PDF proforma, Butiama 2026/NOV/1223,
+            // BandiniQuercioli) is one invoice: a stay line with a reference is keyed by reference + dates, not by file.
+            $ref = trim((string)($ds['reference'] ?? ''));
+            $isStay = ($ds['type'] ?? '') === 'stay';
+            $sig = ($isStay && $ref !== '' ? 'ref|' . strtolower($ref) . '|' . ($ds['check_out'] ?? '') : $items[$k]['doc'] . '|' . $ref)
+                 . '|' . ($ds['check_in'] ?? '')
+                 . ($isStay ? '' : '|x|' . ($ds['service_date'] ?? '') . '|' . ($ds['description'] ?? ''));   // a meal extra is not a copy of the room line
             if (isset($seen[$sig])) continue;
             $seen[$sig] = true;
             $n = bg_net($ds);
