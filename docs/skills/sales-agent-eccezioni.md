@@ -6,6 +6,8 @@ Not a skill: the special cases of `sales-agent` (same folder). The core skill po
 
 Hub access: a `403 {"ok":false,"error":"Forbidden"}` means the `X-Agent-Key` header is missing or wrong, not that the Hub is unreachable — send the key from `api.txt` before concluding the Hub can't be reached (5 Nov 2026).
 The key (`api.txt`, Dropbox path `/Exchange/Savannah-Hub/hub/api.txt`) is read with the Dropbox connector: no access to the PC is needed. Don't use the Hub in the browser as a fallback: it asks for the login (22 Nov 2026, SophiaKusay; replaces the 20 Nov 2026 rule that the key could only be read from the PC).
+Access to `C:\Dropbox` refused or not yet granted: the reply draft `.eml` is built in the workspace and sent to Roberto in the chat (SendUserFile), with the programme Word attached when it goes with the quote; as soon as the folder is connected, save it in `Exchange\Draft-mail\` and a copy in the request's `mails\` subfolder (`device_commit_files`) (23 Nov 2026, Cutter4paxFeb27).
+Before writing a reply, read the agency's whole thread (Gmail `get_thread`) to find its latest message — the request may have changed since the last draft (23 Nov 2026, Cutter4paxFeb27: Luisa's Elewana Pioneer mail came after the Namiri draft). The Gmail connector gives no Message-ID: take In-Reply-To / References from the previous draft in `mails\` or `old\` (§I) and tell Roberto the draft hangs on an earlier message of the thread.
 
 ## §B. Creating the request
 
