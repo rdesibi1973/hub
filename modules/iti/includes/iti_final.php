@@ -248,12 +248,33 @@ function iti_final_suggest_sample(PDO $db, array $samples, string $code, array $
 if (!defined('ITI_FINAL_PICK_MIN_FIT'))  define('ITI_FINAL_PICK_MIN_FIT', 0.7);
 if (!defined('ITI_FINAL_PICK_MARGIN'))   define('ITI_FINAL_PICK_MARGIN', 5);
 if (!defined('ITI_FINAL_PICK_CODE_GAP')) define('ITI_FINAL_PICK_CODE_GAP', 10);
+/**
+ * Points off per park the guests sleep in that the sample never visits, or the sample sleeps in and the Calc never
+ * names (25 Nov 2026: a Simba + Zanzibar with two Ndutu nights got Duma Short + Zanzibar, no Serengeti at all, 73% alike
+ * on the shared Arusha / Karatu / beach nights, ahead of Simba + Zanzibar at 62% only for its two extra beach nights).
+ */
+if (!defined('ITI_FINAL_AREA_PENALTY'))  define('ITI_FINAL_AREA_PENALTY', 15);
+
+/**
+ * Safari areas a text names, for the park check of iti_final_pick_sample(): iti_final_places() without the gateway
+ * towns (Arusha, Kilimanjaro, Dar es Salaam, Nairobi), Karatu counted as Ngorongoro (the crater lodges are there).
+ * Returns [area => true].
+ */
+function iti_final_area_list(string $text): array {
+    $out = array();
+    foreach (array_keys(iti_final_places($text)) as $a) {
+        if (in_array($a, array('Arusha', 'Kilimanjaro', 'Dar es Salaam', 'Nairobi'), true)) continue;
+        $out[$a === 'Karatu' ? 'Ngorongoro' : $a] = true;
+    }
+    return $out;
+}
 
 /**
  * The sample of a Calc, chosen from the Calc's CONTENT (16 Nov 2026), not from its file name: a Calc saved as 02
  * from 01 keeps the name but may be another trip. Every active sample is scored on how many Calc nights it matches
  * (iti_final_match_sample(): same lodge, same destination or a lodge within ITI_FINAL_NEAR_KM), then:
  *   season of the title vs the Calc start month (fits +2 points, outside −10), private vs group (other type −15),
+ *   each park where one sleeps and the other never goes (−ITI_FINAL_AREA_PENALTY: Ndutu nights never take Duma Short),
  *   the sample tagged with the file's code (+3: a tie-break only), the language (+0.5); points out of 100 = % alike.
  * Chosen when the best matches ≥ ITI_FINAL_PICK_MIN_FIT of the itinerary. When fewer than half the Calc nights have a
  * mapped lodge the content says little: the code's sample (if any) is used for now, 'reliable' false — the choice is
@@ -289,11 +310,30 @@ function iti_final_pick_sample(PDO $db, array $calc, array $planDays, string $co
         foreach ($planDays as $d) if (!empty($d['lodge_id']) && isset($mtn[(int)$d['lodge_id']])) $n++;
         $calcTrek = $n * 2 > $nights;
     }
+    // Parks where the guests sleep (iti_final_area_list()): a sample that never goes there is another trip.
+    $calcNight = array(); $calcAll = array();
+    foreach ($planDays as $d) {
+        $calcAll += iti_final_area_list((string)$d['label']);
+        if ($d['lodge_id'] && ($li = iti_final_lodge_info($db, (int)$d['lodge_id']))) $calcNight += iti_final_area_list((string)$li['dest_name']);
+    }
+    $calcAll += $calcNight;
     $rank = array();
     foreach ($samples as $s) {
-        $m = iti_final_match_sample($db, $planDays, iti_final_sample_days($db, (int)$s['id']));
+        $sd = iti_final_sample_days($db, (int)$s['id']);
+        $m = iti_final_match_sample($db, $planDays, $sd);
         $fit = $m['max'] ? $m['score'] / $m['max'] : 0;
         $pts = 100 * $fit; $why = array(round(100 * $fit) . '% of the itinerary alike');
+        $sNight = array(); $sAll = array();
+        foreach ($sd as $x) {
+            $sAll += iti_final_area_list(implode(' ', array_keys($x['places'] ?? array())));
+            if ($x['end_lodge_id'] && ($li = iti_final_lodge_info($db, (int)$x['end_lodge_id']))) $sNight += iti_final_area_list((string)$li['dest_name']);
+        }
+        $sAll += $sNight;
+        $off = array_merge(array_keys(array_diff_key($calcNight, $sAll)), array_keys(array_diff_key($sNight, $calcAll)));
+        if ($off) {
+            $pts -= ITI_FINAL_AREA_PENALTY * count($off);
+            $why[] = 'not the same parks (' . implode(', ', $off) . ')';
+        }
         $months = iti_final_title_months($s['title_it'] . ' ' . $s['title_en']);
         if ($months && $startMonth) {
             if (in_array($startMonth, $months, true)) { $pts += 2; $why[] = 'season fits'; }
@@ -1463,6 +1503,16 @@ function iti_final_generate(PDO $db, int $requestId, array $calc, int $sampleId,
             $prevLodge = $d['lodge_id'];
             $prevCustom = $d['lodge_id'] ? null : $d['lodge_custom'];
         }
+        // The subtitle's places: a dropped sample place → the Calc's place of the same area (Central Serengeti → Ndutu).
+        $droppedDest = array(); $keptDest = array(); $addedDest = array();
+        foreach ($copied as $j => $row) {
+            if (!$row['destination_id']) continue;
+            if (isset($used[$j])) $keptDest[(int)$row['destination_id']] = true; else $droppedDest[(int)$row['destination_id']] = true;
+        }
+        foreach ($plan['days'] as $d) if ($d['sample_index'] === null && $d['dest_id']) $addedDest[(int)$d['dest_id']] = true;
+        iti_final_subtitle_places($db, (int)$newId, array_keys(array_diff_key($droppedDest, $keptDest, $addedDest)),
+                                  array_keys(array_diff_key($addedDest, $keptDest)));
+
         // Safety net: one programme day per Calc day row, never a day silently lost.
         $st = $db->prepare('SELECT COUNT(*) FROM iti_program_days WHERE program_id = ?');
         $st->execute(array($newId));
@@ -1519,6 +1569,63 @@ function iti_final_generate(PDO $db, int $requestId, array $calc, int $sampleId,
                  array('body' => 'Calc: ' . (isset($calc['file']) ? $calc['file'] : '?') . ($old ? "\nReplaces program #" . implode(', #', (array)$old) : ''),
                        'refs' => array('program_id' => $newId, 'calc_file' => isset($calc['file']) ? $calc['file'] : null)));
     return array('program_id' => $newId, 'superseded' => $old, 'plan' => $plan);
+}
+
+/**
+ * The sample's subtitle lists its places ("Arusha - Karatu - Tarangire National Park - Central Serengeti - …"). When the
+ * Calc sleeps elsewhere in the same area (Ndutu instead of Central Serengeti), the place the final no longer visits is
+ * swapped for the Calc's in the subtitle of every language (25 Nov 2026). Only a dropped place ($dropped: destinations of
+ * sample days left out, used by no other day) of the same area (iti_final_places()) as an added one ($added) is swapped;
+ * the English name is replaced by the English name, the language's by the language's. Never throws.
+ */
+function iti_final_subtitle_places(PDO $db, int $programId, array $dropped, array $added): void {
+    if (!$dropped || !$added) return;
+    try {
+        $cols = iti_table_columns('iti_programs');
+        $langs = array();
+        foreach (ITI_LANGUAGES as $l) if (in_array('subtitle_' . $l, $cols, true)) $langs[] = $l;
+        if (!$langs) return;
+        $names = function ($id) use ($db) {
+            $st = $db->prepare('SELECT * FROM iti_destinations WHERE id = ?');
+            $st->execute(array($id));
+            return $st->fetch(PDO::FETCH_ASSOC) ?: null;
+        };
+        $st = $db->prepare('SELECT subtitle_' . implode(', subtitle_', $langs) . ' FROM iti_programs WHERE id = ?');
+        $st->execute(array($programId));
+        $sub = $st->fetch(PDO::FETCH_ASSOC);
+        if (!$sub) return;
+        $orig = $sub;
+        $old = array();
+        foreach ($dropped as $id) if ($r = $names($id)) $old[] = $r;
+        foreach ($added as $id) {
+            $new = $names($id);
+            if (!$new) continue;
+            $area = iti_final_first_place(iti_final_places((string)$new['name_en']));
+            if ($area === '') continue;
+            foreach ($old as $k => $o) {
+                if (iti_final_first_place(iti_final_places((string)$o['name_en'])) !== $area) continue;
+                foreach ($langs as $l) {
+                    $s = (string)$sub['subtitle_' . $l];
+                    foreach (array_unique(array($l, 'en')) as $nl) {
+                        $from = trim((string)($o['name_' . $nl] ?? '')); $to = trim((string)($new['name_' . $nl] ?? '')) ?: trim((string)$new['name_en']);
+                        if ($from !== '' && $to !== '' && mb_stripos($s, $to) === false && mb_strpos($s, $from) !== false) { $s = str_replace($from, $to, $s); break; }
+                    }
+                    $sub['subtitle_' . $l] = $s;
+                }
+                unset($old[$k]);
+                break;
+            }
+        }
+        if ($sub === $orig) return;
+        $set = array();
+        foreach ($langs as $l) $set[] = 'subtitle_' . $l . ' = ?';
+        $vals = array();
+        foreach ($langs as $l) $vals[] = $sub['subtitle_' . $l];
+        $vals[] = $programId;
+        $db->prepare('UPDATE iti_programs SET ' . implode(', ', $set) . ' WHERE id = ?')->execute($vals);
+    } catch (Throwable $e) {
+        error_log('iti_final_subtitle_places #' . $programId . ': ' . $e->getMessage());
+    }
 }
 
 /** Final programmes of a request, newest first (active = not superseded). */

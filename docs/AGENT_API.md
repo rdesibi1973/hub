@@ -1387,7 +1387,11 @@ file is superseded) → `program_id`, `program`. 409 when the Calc cannot be rea
 How the plan and the final are built (`modules/iti/includes/iti_final.php`, same on the Hub page "Create Itinerary Program
 from Excel Calc"):
 - **Sample choice**: from the Calc content (`iti_final_pick_sample()`, see above). The Hub shows the reason and the next
-  closest samples with their %, and the picker lists the closest first.
+  closest samples with their %, and the picker lists the closest first. Each park where the Calc sleeps and the sample
+  never goes (or the sample sleeps and the Calc never names) costs 15 points (`ITI_FINAL_AREA_PENALTY`, Karatu = Ngorongoro,
+  gateway towns ignored; why: "not the same parks (Serengeti)"): two Ndutu nights never take Duma Short + Zanzibar.
+- **Subtitle places**: a sample place the final no longer visits is swapped in the subtitle for the Calc's place of the same
+  area (Central Serengeti → Ndutu; `iti_final_subtitle_places()`). The intro text is the sample's, unchanged.
 - **Sample lodges kept only as text** ("Mara Pure Migration (Jul - Oct)") are read through the lodge aliases, else the closest
   lodge name, so the day still matches; the plan flags them ("link the lodge in the sample").
 - **Places check** (23 Oct 2026): the Calc label ("Znz-Home", "Karatu-Ark-ZNZ") and the sample day (titles + destination)
