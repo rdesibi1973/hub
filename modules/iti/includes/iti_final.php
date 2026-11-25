@@ -257,13 +257,14 @@ if (!defined('ITI_FINAL_AREA_PENALTY'))  define('ITI_FINAL_AREA_PENALTY', 15);
 
 /**
  * Safari areas a text names, for the park check of iti_final_pick_sample(): iti_final_places() without the gateway
- * towns (Arusha, Kilimanjaro, Dar es Salaam, Nairobi), Karatu counted as Ngorongoro (the crater lodges are there).
+ * towns (Arusha, Kilimanjaro, Dar es Salaam, Nairobi) and Zanzibar (a beach extension is added from the Calc to a
+ * safari sample: Grande Migrazione Inverno + Zanzibar nights), Karatu counted as Ngorongoro (the crater lodges are there).
  * Returns [area => true].
  */
 function iti_final_area_list(string $text): array {
     $out = array();
     foreach (array_keys(iti_final_places($text)) as $a) {
-        if (in_array($a, array('Arusha', 'Kilimanjaro', 'Dar es Salaam', 'Nairobi'), true)) continue;
+        if (in_array($a, array('Arusha', 'Kilimanjaro', 'Dar es Salaam', 'Nairobi', 'Zanzibar'), true)) continue;
         $out[$a === 'Karatu' ? 'Ngorongoro' : $a] = true;
     }
     return $out;
@@ -1613,7 +1614,15 @@ function iti_final_subtitle_places(PDO $db, int $programId, array $dropped, arra
                     $sub['subtitle_' . $l] = $s;
                 }
                 unset($old[$k]);
-                break;
+                continue 2;
+            }
+            // No place of that area in the sample (Zanzibar nights after a safari-only sample): appended to a
+            // " - " list that names nothing of the area yet.
+            foreach ($langs as $l) {
+                $s = trim((string)$sub['subtitle_' . $l]);
+                $to = trim((string)($new['name_' . $l] ?? '')) ?: trim((string)$new['name_en']);
+                if ($s === '' || $to === '' || strpos($s, ' - ') === false || isset(iti_final_places($s)[$area]) || mb_stripos($s, $to) !== false) continue;
+                $sub['subtitle_' . $l] = $s . ' - ' . $to;
             }
         }
         if ($sub === $orig) return;
