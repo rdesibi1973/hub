@@ -133,6 +133,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array($_POST['action'] ?? '', $N
 // Each folder is dispatched as its own GitHub run, so several checks run in
 // parallel and a new one can be started while others are still running.
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'run_check' && !empty($_POST['ajax'])) {
+    ob_start();   // warnings must not break the JSON (the page showed "Unexpected token '<'")
     $ids = array_values(array_unique(array_filter(array_map('intval',
                explode(',', (string)($_POST['ck_ids'] ?? $_POST['ck_id'] ?? ''))))));
     $out = [];
@@ -143,6 +144,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'run_c
             $out[$cid] = ['ok' => false, 'msg' => $e->getMessage()];
         }
     }
+    ob_end_clean();
     header('Content-Type: application/json');
     echo json_encode(['ok' => (bool)$ids, 'results' => (object)$out, 'at' => date('H:i', strtotime(ck_now()))]);
     exit;
@@ -212,6 +214,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array($_POST['action'] ?? '', ['
 
 // ── Status poll (JS): is a running check finished? ────────────────────────────
 if (isset($_GET['status'])) {
+    ob_start();
     $ids = array_values(array_filter(array_map('intval', explode(',', (string)($_GET['ids'] ?? '')))));
     $out = [];
     if ($ids) {
@@ -230,6 +233,7 @@ if (isset($_GET['status'])) {
             ];
         }
     }
+    ob_end_clean();
     header('Content-Type: application/json');
     echo json_encode($out);
     exit;
@@ -766,6 +770,17 @@ include 'includes/send_modal.php';
 </div>
 
 <script>
+// Reads a JSON reply; an HTML page instead (login page after the session expired,
+// a server error page) becomes a clear message, not "Unexpected token '<'".
+function ckJson(r) {
+  return r.text().then(function (t) {
+    try { return JSON.parse(t); } catch (e) {}
+    if (r.redirected || /name=["']?password|login/i.test(t.slice(0, 4000)))
+      throw new Error('Session expired — reload the page (and log in again), then retry.');
+    throw new Error('Server error' + (r.status && r.status !== 200 ? ' (HTTP ' + r.status + ')' : '') +
+                    ' — reload the page and retry; if it happens again, tell Roberto.');
+  });
+}
 // ── Notes on a folder: manual notes + emails sent from this page ──────────────
 var notesId = 0, notesById = {};
 var CURRENT_USER = <?= json_encode($cu['full_name'] ?? '') ?>;
@@ -776,7 +791,7 @@ function notesPost(params) {
     method: 'POST', credentials: 'same-origin',
     headers: {'Content-Type': 'application/x-www-form-urlencoded'},
     body: new URLSearchParams(params).toString()
-  }).then(function (r) { return r.json(); });
+  }).then(ckJson);
 }
 document.querySelector('#notesOverlay .modal-box').addEventListener('click', function (e) { e.stopPropagation(); });
 function closeNotes() { document.getElementById('notesOverlay').style.display = 'none'; }
@@ -925,7 +940,7 @@ function fallbackCopy(t, el) {
     var ids = Object.keys(running);
     if (!ids.length) { clearInterval(timer); timer = null; return; }
     fetch('ck_tracker.php?status=1&ids=' + ids.join(','), {credentials: 'same-origin'})
-      .then(function (r) { return r.json(); })
+      .then(ckJson)
       .then(function (st) {
         ids.forEach(function (id) {
           var s = st[id], r = running[id];
@@ -940,7 +955,7 @@ function fallbackCopy(t, el) {
           }
         });
       })
-      .catch(function () {});
+      .catch(function (e) { ids.forEach(function (id) { note(id, '⚠ ' + esc(e.message), '#a33'); }); });
   }
   function watch(id, prev, since) {
     running[id] = {prev: prev, since: since || Date.now()};
@@ -952,7 +967,7 @@ function fallbackCopy(t, el) {
     fd.append('action', 'run_check'); fd.append('ajax', '1'); fd.append('ck_ids', ids.join(','));
     ids.forEach(function (id) { setBusy(id, true); note(id, '⏳ starting check…'); });
     fetch('ck_tracker.php', {method: 'POST', body: fd, credentials: 'same-origin'})
-      .then(function (r) { return r.json(); })
+      .then(ckJson)
       .then(function (d) {
         ids.forEach(function (id) {
           var res = (d.results || {})[id] || {ok: false, msg: 'not started'};
