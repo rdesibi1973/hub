@@ -1141,6 +1141,9 @@ function bg_room_type(string $s): string {
     $s = strtolower($s);
     if (preg_match('/double\s*\/\s*twin|twin\s*\/\s*double|dbl\s*\/\s*twn|twn\s*\/\s*dbl/', $s)) return 'dbl_twn';
     if (preg_match('/\b(fam|family|villa|quad|quadruple)/', $s)) return 'fam';
+    // "dbl twin" / "double or twin" side by side = a double or twin room, not a double + single bed layout (Calc "1 dbl + 1 dbl
+    // twin", LuigiQuinto 25 Nov 2026). Bed layouts list counts or "&" between the beds ("1Dbl & 2Sngl"), never adjacent words.
+    if (preg_match('/\b(dbl|double)\s*(?:-|or)?\s*(twn|twin)\b|\b(twn|twin)\s*(?:-|or)?\s*(dbl|double)\b/', $s)) return 'dbl_twn';
     // One room, double + singles; a queen / king bed is a double ("Nyumbu (1Queen+2Single)", Orangi, LuisVicens 24 Nov 2026).
     if (preg_match('/(dbl|double|queen|king)/', $s) && preg_match('/(sngl|sgl|single|twin|twn)/', $s)) return 'fam';
     // Double-size beds in the bracketed bed layout (Orangi, Spagnoletto 22 Nov 2026): "Tembo (1Dbl&1Queen)" = two big beds = family,
