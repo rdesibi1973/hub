@@ -254,6 +254,12 @@ if (!defined('ITI_FINAL_PICK_CODE_GAP')) define('ITI_FINAL_PICK_CODE_GAP', 10);
  * on the shared Arusha / Karatu / beach nights, ahead of Simba + Zanzibar at 62% only for its two extra beach nights).
  */
 if (!defined('ITI_FINAL_AREA_PENALTY'))  define('ITI_FINAL_AREA_PENALTY', 15);
+/**
+ * Discount for the clients of the blogger Eleonora Ongaro (Roberto, 25 Nov 2026): USD per person off the program prices,
+ * ticked when the Calc data is confirmed (program_final.php) or "promo_ongaro": 1 (Agent API). See iti_final_price_table().
+ */
+if (!defined('ITI_FINAL_PROMO_NAME'))    define('ITI_FINAL_PROMO_NAME', 'Eleonora Ongaro');
+if (!defined('ITI_FINAL_PROMO_PP'))      define('ITI_FINAL_PROMO_PP', 100);
 /** Beach extensions (iti_final_places() areas): no park in the sample check, named in the intro when the Calc sleeps there. */
 if (!defined('ITI_FINAL_BEACH_AREAS'))   define('ITI_FINAL_BEACH_AREAS', array('Zanzibar', 'Mafia', 'Pemba'));
 
@@ -846,8 +852,29 @@ function iti_final_calc_review(array $calc): array {
  * discount in the label), the single supplement when the rooms have singles, then the total (F10, bold).
  * [] when the Calc has no price to customer.
  * Rows [{label, price, currency, bold?}] as iti_doc_data() reads price_table_json.
+ * $calc['promo_pp'] > 0 (the Eleonora Ongaro discount, ITI_FINAL_PROMO_PP): every per-person price is that much lower, the
+ * total by that × the paying pax (the single supplement unchanged), and a last row without price says so.
  */
 function iti_final_price_table(array $calc, string $lang): array {
+    $promo = (float)($calc['promo_pp'] ?? 0);
+    if ($promo <= 0) return iti_final_price_table_base($calc, $lang);
+    $less = function ($v) use ($promo) { return ($v !== null && $v > 0) ? max(0, $v - $promo) : $v; };
+    foreach (array('price_to_customer', 'price_teen', 'price_child') as $k) if (array_key_exists($k, $calc)) $calc[$k] = $less($calc[$k]);
+    foreach ($calc['price_options'] ?? array() as $i => $o) $calc['price_options'][$i]['price_to_customer'] = $less($o['price_to_customer'] ?? null);
+    $pax = $calc['pax'] ?? array();
+    $n = (int)($pax['adults'] ?? 0) + (int)($pax['teen'] ?? 0) + (int)($pax['child'] ?? 0);
+    if (!empty($calc['price_total']) && $calc['price_total'] > 0) $calc['price_total'] = max(0, $calc['price_total'] - $promo * $n);
+    $rows = iti_final_price_table_base($calc, $lang);
+    if (!$rows) return $rows;
+    $note = array('it' => 'Sconto %s: %d USD a persona, già applicato', 'en' => '%s discount: USD %d per person, already applied',
+                  'fr' => 'Remise %s : %d USD par personne, déjà appliquée', 'es' => 'Descuento %s: %d USD por persona, ya aplicado',
+                  'de' => '%s-Rabatt: %d USD pro Person, bereits abgezogen');
+    $rows[] = array('label' => sprintf($note[$lang] ?? $note['en'], ITI_FINAL_PROMO_NAME, round($promo)), 'currency' => 'USD');
+    return $rows;
+}
+
+/** iti_final_price_table() without the promotion. */
+function iti_final_price_table_base(array $calc, string $lang): array {
     $L = array(
         'it' => array('Adulto', 'Ragazzo (12–15 anni)', 'Bambino (sotto i 12 anni)', 'Totale pratica', array('adulto', 'adulti'), array('ragazzo', 'ragazzi'), array('bambino', 'bambini'), 'Supplemento camera singola', 'sconto'),
         'en' => array('Adult', 'Teenager (12–15)', 'Child (under 12)', 'Total booking', array('adult', 'adults'), array('teenager', 'teenagers'), array('child', 'children'), 'Single room supplement', 'discount'),

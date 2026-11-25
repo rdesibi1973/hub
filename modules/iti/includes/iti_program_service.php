@@ -698,6 +698,7 @@ function iti_ps_calc_plan(PDO $db, int $rid, array $in): array {
     $calc = calc_read_request($db, $rid, (string)($in['file'] ?? ''), (string)($in['sheet'] ?? ''), $ps);
     $calc['dates_indicative'] = in_array($in['dates_indicative'] ?? 0, [1, true, '1'], true);   // the Calc does not say: asked, as on the Hub page
     $calc['group_open'] = in_array($in['group_open'] ?? 0, [1, true, '1'], true);               // group departure: participants and rooms not final yet
+    $calc['promo_pp'] = in_array($in['promo_ongaro'] ?? 0, [1, true, '1'], true) ? ITI_FINAL_PROMO_PP : 0;   // Eleonora Ongaro discount (iti_final_price_table())
     $calc['request_id'] = $rid;   // the staff's pending mappings for this booking count as mapped (iti_alias_lookup())
     $lang = in_array($in['lang'] ?? '', ITI_PS_LANGS, true) ? $in['lang'] : 'it';
     $code = iti_final_code_from_calc($calc['file']);

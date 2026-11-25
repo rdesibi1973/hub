@@ -1356,6 +1356,9 @@ a hotel is warned ("no departure day"). The generation also refuses (nothing sav
 **Group departure still filling up:** `group_open: 1` (Hub: the tick on the confirmation step) lifts the pax and room types requirement (`review.open_errors`);
 dates stay required. The program then has `pax_open` 1, safari type group, no participants, no room types and no total: only the price list per person (adult, teen and
 child with discount, single supplement). Regenerate without it when the group is final.
+**Eleonora Ongaro discount:** `promo_ongaro: 1` (Hub: the tick on the confirmation step, 25 Nov 2026) for the clients of the blogger:
+every per-person price in `price_table` is 100 USD lower (`ITI_FINAL_PROMO_PP`), the total by 100 × the paying pax (single supplement
+unchanged), plus a last row without price "Sconto Eleonora Ongaro: 100 USD a persona, già applicato". The Calc itself is not changed.
 **Day trip:** a day added from the Calc in the same lodge as the night before keeps its route when the route starts where the lodge is (Karatu → Lake Eyasi, lodge in Karatu); the day text is then the description of the place reached.
 **Activity of the place (17 Nov 2026):** a day added from the Calc whose Calc activities include a catalogue activity tied to
 the day's destination (or to the place reached on a day trip) gets that activity's description as day text, not the
