@@ -2357,6 +2357,11 @@ logic `modules/operations/includes/followup_service.php`, documents read by `fol
   - Once (meta `rules_2026_11f`, `followup_rules_once_f()`): the open lines are cleaned up by these rules.
   - The page opens on URGENT + HIGH lines (deadline within 30 days); the NORMAL ones are behind "▾ Show N NORMAL lines"
     (all shown with a priority filter, a search, or one booking / group).
+- **`_PROGRESS` folders: booking checks wait for the first payment** (Roberto, 25 Nov 2026 — confirmed, not paid: documents
+  still missing by nature). Kept: types `supplier` (holds, expiry), `ticket`, `group`, `manual`, and booking-gate lines of a run
+  started by a refused status change (`details.gate_trigger` = `status_change`; older lines: the run's `trigger_src`).
+  Booking gate run by hand / API, Claude check and SafariCheck lines are not written (`skipped_progress`) and their open lines
+  close `auto_resolved` (`followup_folder_keeps()`, `followup_close_stale()`); the gate checks the folder when it leaves `_PROGRESS`.
 - **Rules of 11 Nov 2026** (`docs/HUB_FOLLOWUP_RULES_HANDOFF.md`):
   - **Trip over / request gone** — on every scan and page view, every open line of a trip whose end (else start) is past
     closes (`auto_trip_ended`, SafariCheck and manual lines too), and the lines of a `Cancelled` / `Lost` request close

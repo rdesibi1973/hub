@@ -2134,7 +2134,8 @@ function bg_finish_run(PDO $db, int $id): void {
                 if ($un = $u->fetchColumn()) ck_set_owners($db, $ckRow, ['booking_owner' => $un], $ownerId, true);
             }
             $f = array_map(fn($x) => array_diff_key($x, ['svc_idx' => 1, 'label' => 1]), $res['findings']);
-            $sum = followup_gate_upsert($db, $rid, $ckRow, $f, ['run_id' => $id, 'report_path' => $reportPath, 'booking_owner_id' => $ownerId]);
+            $sum = followup_gate_upsert($db, $rid, $ckRow, $f, ['run_id' => $id, 'report_path' => $reportPath, 'booking_owner_id' => $ownerId,
+                                                            'trigger' => (string)($run['trigger_src'] ?? '')]);
             $res['followup'] = ['added' => count($sum['added']), 'merged' => count($sum['merged']), 'updated' => count($sum['updated']), 'closed' => count($sum['closed'])];
             // A complete run (every document read, Calc readable) supersedes the older Claude-check booking lines it no longer reports.
             $complete = empty($res['not_read']) && !array_filter($res['findings'], fn($x) => in_array($x['issue'], ['calc_not_clean', 'doc_unreadable'], true));

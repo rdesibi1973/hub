@@ -43,6 +43,8 @@ outdated — this file wins where they disagree (PHP version, local lint).
   `tools/followup_local_scan.php`, which reads the supplier PDFs on the office PC because BlueHost cannot).
   **`_PROVISIONAL` folders** (24 Nov 2026, private or group: no room list yet): follow-up keeps only rooms count, supplier holds /
   expiry, group and manual lines, gate holds only (`followup_prov_keeps()`); never `_CK` (`ck_pipeline_block()`, `CK_FOLDER_PROVISIONAL_MSG`).
+  **`_PROGRESS` folders** (25 Nov 2026): only supplier / ticket / group / manual lines and gate lines of a refused status change
+  (`followup_progress_keeps()`); the gate checks the folder when it leaves `_PROGRESS`.
   **Shorter list** (25 Nov 2026): a line closed by staff stays closed for every check until the finding changes (`followup_same_finding()`);
   one "provisional" line per supplier document (`followup_doc_id()`); `FU_PROV_UNTIL_PAID` (Heart and Soul) = provisional without expiry is no line;
   group Orangi "rooms still provisional" / SafariCheck "GRP unsold rooms" are no line before arrival − 60 days (`followup_group_rooms_wait()`).

@@ -1406,6 +1406,60 @@ function followup_prov_keeps(string $type, array $l): bool {
     return in_array($type, FU_PROV_KEEP_TYPES, true) || in_array((string)($l['issue'] ?? ''), FU_PROV_KEEP_ISSUES, true);
 }
 
+// ── _PROGRESS folders: booking checks wait for the first payment (Roberto, 25 Nov 2026) ──
+// A _PROGRESS folder was just confirmed and is not paid yet: documents are still missing by nature (RobertaGiuliani:
+// "Stay missing — no document for Pure Ndutu"). The booking gate checks it when the folder leaves _PROGRESS (first
+// payment tag, booking_gate_check()) and its result is in the gate panel / report meanwhile; the follow-up list keeps
+// only the supplier holds and their expiry, tickets, group and manual lines. Booking gate, Claude check and SafariCheck
+// lines are not written and their open lines close as auto_resolved; they come back with the next check after the move.
+
+/** Line types a _PROGRESS folder keeps. */
+const FU_PROGRESS_KEEP_TYPES = ['supplier', 'ticket', 'group', 'manual'];
+
+/** Does a stored folder path (any booking folder in it) carry the _PROGRESS tag? */
+function followup_path_is_progress(?string $path): bool {
+    foreach (preg_split('#[/\\\\]+#', followup_folder_norm((string)$path)) as $seg) {
+        if ($seg !== '' && preg_match('/_PROGRESS$/i', $seg)) return true;
+    }
+    return false;
+}
+
+/** Folder rule of a line: false = a line of type $type is not reported on this folder (_PROVISIONAL / _PROGRESS). */
+function followup_folder_keeps(string $type, array $l, ?string $path = null): bool {
+    $path = $path ?? (string)($l['folder'] ?? '');
+    if (followup_path_is_provisional($path) && !followup_prov_keeps($type, $l)) return false;
+    if (followup_path_is_progress($path) && !followup_progress_keeps($type, $l)) return false;
+    return true;
+}
+
+/** A gate line written before 25 Nov 2026 has no details.gate_trigger: taken from its run (booking_gate_runs.trigger_src). */
+function followup_gate_trigger_fill(PDO $db, array $l): array {
+    if (($l['type'] ?? '') !== 'gate') return $l;
+    $d = json_decode((string)($l['details'] ?? ''), true) ?: [];
+    if (isset($d['gate_trigger']) || empty($d['gate_run_id'])) return $l;
+    try {
+        $st = $db->prepare("SELECT trigger_src FROM booking_gate_runs WHERE id = ?");
+        $st->execute([(int)$d['gate_run_id']]);
+        $d['gate_trigger'] = (string)$st->fetchColumn();
+    } catch (Throwable $e) {
+        return $l;
+    }
+    $l['details'] = json_encode($d, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    return $l;
+}
+
+/**
+ * Kept on a _PROGRESS folder: FU_PROGRESS_KEEP_TYPES, and the booking gate's lines of a run started by a refused status
+ * change (details.gate_trigger status_change): the team tried to add the payment tag, the folder stays _PROGRESS until
+ * they fix what the gate found. A gate run by hand on a _PROGRESS folder stays in the gate panel / report.
+ */
+function followup_progress_keeps(string $type, array $l): bool {
+    if (in_array($type, FU_PROGRESS_KEEP_TYPES, true)) return true;
+    if ($type !== 'gate') return false;
+    $d = is_array($l['details'] ?? null) ? $l['details'] : (json_decode((string)($l['details'] ?? ''), true) ?: []);
+    return ($d['gate_trigger'] ?? '') === 'status_change';
+}
+
 /**
  * Every page view / scan: close the open lines of a trip that is over (all types, SafariCheck included — no check runs
  * on them any more) and of a Cancelled / Lost request. A cancelled request whose folder an active request still uses
@@ -1440,6 +1494,13 @@ function followup_close_stale(PDO $db, string $today): array {
         if ((followup_path_is_provisional($cur) || ($reqFolder !== '' && followup_path_is_provisional($reqFolder)))
             && !followup_prov_keeps((string)$l['type'], $l)) {
             followup_close_line($db, $l, 'auto_resolved', 'folder _PROVISIONAL: only the number of rooms is checked until the room list');
+            $out['closed']++;
+            continue;
+        }
+        // _PROGRESS folder (confirmed, not paid yet): booking gate / Claude check / SafariCheck lines wait for the first payment.
+        if ((followup_path_is_progress($cur) || ($reqFolder !== '' && followup_path_is_progress($reqFolder)))
+            && !followup_progress_keeps((string)$l['type'], followup_gate_trigger_fill($db, $l))) {
+            followup_close_line($db, $l, 'auto_resolved', 'folder _PROGRESS: the booking checks run when it gets its first payment tag');
             $out['closed']++;
             continue;
         }
@@ -1849,6 +1910,8 @@ function followup_apply(PDO $db, string $type, array $cand, array $scope, bool $
     $provSkip = 0;
     foreach ($cand as $k => $l) {
         if (followup_path_is_provisional((string)($l['folder'] ?? '')) && !followup_prov_keeps($type, $l)) { unset($cand[$k]); $provSkip++; }
+        // _PROGRESS: not paid yet, the booking checks wait for the first payment (its open lines close below).
+        elseif (!followup_folder_keeps($type, $l)) { unset($cand[$k]); $sum['skipped_progress'] = ($sum['skipped_progress'] ?? 0) + 1; }
         // Heart and Soul & co: provisional until paid, no expiry → normal, not reported (its open lines close below).
         elseif ($type !== 'manual' && followup_prov_until_paid($l)) { unset($cand[$k]); $sum['skipped_until_paid'] = ($sum['skipped_until_paid'] ?? 0) + 1; }
         // Group rooms not sold yet, before the 60-day release: provisional on purpose (its open lines close below).
@@ -2151,6 +2214,7 @@ function followup_apply(PDO $db, string $type, array $cand, array $scope, bool $
         elseif (followup_prov_until_paid($old)) $reason = 'auto_resolved';                            // Heart and Soul & co: held until paid
         elseif (followup_group_rooms_wait($old, $today)) $reason = 'auto_resolved';                   // group rooms not sold yet, before 60 days
         elseif (followup_path_is_provisional((string)$old['folder']) && !followup_prov_keeps($type, $old)) $reason = 'auto_resolved';   // rooms count only
+        elseif (!followup_folder_keeps((string)$old['type'], $old)) $reason = 'auto_resolved';        // _PROGRESS: checks wait for the payment
         elseif ($type === 'supplier' && isset($scope['confirmed'][$key])) $reason = 'auto_confirmed';
         elseif ($type === 'ticket' && isset($scope['ok'][$rid])) $reason = 'auto_ticket_saved';
         // A group folder still checked whose line is no longer due (not closed yet, RECAP = sold): resolved; else the
@@ -2663,6 +2727,7 @@ function followup_gate_upsert(PDO $db, int $requestId, array $ckRow, array $find
             continue;
         }
         $details = ['blocking' => $blocking, 'gate_run_id' => isset($meta['run_id']) ? (int)$meta['run_id'] : null];
+        if (!empty($meta['trigger'])) $details['gate_trigger'] = (string)$meta['trigger'];   // _PROGRESS keeps status_change runs only
         if (!empty($meta['report_path'])) $details['report_path'] = (string)$meta['report_path'];
         $cand[$key] = ['type' => 'gate', 'audience' => $aud, 'dedupe_key' => $key, 'request_id' => $requestId,
                        'folder' => $ckRow['folder_name'], 'start_date' => $ckRow['start_date'], 'end_date' => $ckRow['end_date'],
