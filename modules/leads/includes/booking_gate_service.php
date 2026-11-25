@@ -903,6 +903,14 @@ function bg_same_name(string $calc, string $doc): bool {
     $a = bc_key((string)$calc); $b = bc_key($doc);
     if ($a === '' || $b === '') return false;
     if (strlen($a) >= 4 && (strpos($b, $a) !== false || strpos($a, $b) !== false)) return true;
+    // "Name - room type" in the Calc ("Z Hotel - Rooftop Suite Sea View HB" / "The Z Hotel Zanzibar", SaraAlello 25 Nov 2026:
+    // "Z" is one letter and "Hotel" generic, so the words alone never met): the name before the dash, two words at least
+    // (one word, "Arusha - …", is too vague), contained in the document's name.
+    $parts = preg_split('/\s+[-–]\s+/u', trim((string)$calc), 2);
+    if (count($parts) === 2 && count(preg_split('/\s+/', trim($parts[0]))) >= 2) {
+        $n = bc_key($parts[0]);
+        if (strlen($n) >= 5 && strpos($b, $n) !== false) return true;
+    }
     return followup_supplier_same((string)$calc, $doc);
 }
 
