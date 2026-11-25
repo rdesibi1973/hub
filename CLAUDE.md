@@ -45,7 +45,7 @@ outdated — this file wins where they disagree (PHP version, local lint).
   expiry, group and manual lines, gate holds only (`followup_prov_keeps()`); never `_CK` (`ck_pipeline_block()`, `CK_FOLDER_PROVISIONAL_MSG`).
   **Shorter list** (25 Nov 2026): a line closed by staff stays closed for every check until the finding changes (`followup_same_finding()`);
   one "provisional" line per supplier document (`followup_doc_id()`); `FU_PROV_UNTIL_PAID` (Heart and Soul) = provisional without expiry is no line;
-  group Orangi "rooms still provisional" is no line before arrival − 60 days (`followup_group_rooms_wait()`).
+  group Orangi "rooms still provisional" / SafariCheck "GRP unsold rooms" are no line before arrival − 60 days (`followup_group_rooms_wait()`).
 - **Jeep demand** (`modules/operations/jeep_demand.php`, endpoint `api/jeep_demand.php`; logic `includes/jeep_service.php`, shared
   with the Agent API `jeep_demand` / `jeep_demand_day` / `jeep_demand_scan`; since 22 Nov 2026): jeeps per day = Calc JEEP ÷ Cost per
   Jeep, per `/001_Safari` folder (+ `00_YYYY` archives) in `ops_jeep_scan` / `ops_jeep_days` (keyed by Dropbox id; migration 087).

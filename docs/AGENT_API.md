@@ -2349,9 +2349,11 @@ logic `modules/operations/includes/followup_service.php`, documents read by `fol
   - **Provisional until paid** (`FU_PROV_UNTIL_PAID`: Heart and Soul) — a provisional document of these suppliers **without an
     expiry date** raises no line (the rooms are held until paid, and we pay at the end; summary `skipped_until_paid`); its open
     lines close `auto_resolved`. With an expiry printed it is a hold like any other.
-  - **Group rooms not sold yet** — an Orangi voucher "rooms still provisional" (`orangi_rooms_provisional`) in a group folder
-    (GRP / Diamante / GRUPPO, `followup_group_kind()`) is no line before the group release (arrival − 60 days,
-    `followup_group_rooms_wait()`; summary `skipped_group_rooms`): the group fills up and is reduced to the rooms sold at 60 days.
+  - **Group rooms not sold yet** — an Orangi voucher "rooms still provisional" (`orangi_rooms_provisional`) and SafariCheck
+    "GRP unsold rooms" (`sc_grp_unsold`) in a group folder (GRP / Diamante / GRUPPO, `followup_group_kind()`; `FU_GROUP_WAIT_ISSUES`)
+    are no line before the group release (arrival − 60 days, `followup_group_rooms_wait()`; summary `skipped_group_rooms`): the
+    group fills up and is reduced to the rooms sold at 60 days. "GRP rooms short" (fewer booked than sold) stays a line.
+    Once: `rules_2026_11g` closes the open ones.
   - Once (meta `rules_2026_11f`, `followup_rules_once_f()`): the open lines are cleaned up by these rules.
   - The page opens on URGENT + HIGH lines (deadline within 30 days); the NORMAL ones are behind "▾ Show N NORMAL lines"
     (all shown with a priority filter, a search, or one booking / group).

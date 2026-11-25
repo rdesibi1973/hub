@@ -1024,13 +1024,15 @@ function followup_prov_until_paid(array $l): bool {
 }
 
 /**
- * Orangi voucher "rooms still provisional" in a group folder (GRP / Diamante / GRUPPO) before the group release
- * (arrival − FU_GROUP_RELEASE_DAYS): the rooms not sold yet stay provisional on purpose — the group fills up and is
- * reduced to the rooms sold at 60 days. Not a line until then (Roberto, 25 Nov 2026, AdolfoPiazza GRP: 1 double
- * confirmed + 2 provisional, September); the group check takes over at 60 days.
+ * Group rooms not sold yet, in a group folder (GRP / Diamante / GRUPPO) before the group release (arrival −
+ * FU_GROUP_RELEASE_DAYS): normal — the group fills up and is reduced to the rooms sold at 60 days, the others released.
+ * Not a line until then (Roberto, 25 Nov 2026): the Orangi voucher "rooms still provisional" (AdolfoPiazza GRP: 1 double
+ * confirmed + 2 provisional) and SafariCheck "GRP unsold rooms" (AlbertoBacis GRP: booked 3, sold 0). The group check
+ * takes over at 60 days. "GRP rooms short" (fewer booked than sold) stays: that one is a real problem.
  */
+const FU_GROUP_WAIT_ISSUES = ['orangi_rooms_provisional', 'sc_grp_unsold'];
 function followup_group_rooms_wait(array $l, string $today): bool {
-    if (($l['issue'] ?? '') !== 'orangi_rooms_provisional' || empty($l['start_date'])) return false;
+    if (!in_array($l['issue'] ?? '', FU_GROUP_WAIT_ISSUES, true) || empty($l['start_date'])) return false;
     $top = explode('/', followup_folder_norm((string)($l['folder'] ?? '')));
     $inGroup = false;
     foreach ($top as $seg) if ($seg !== '' && followup_group_kind($seg)) { $inGroup = true; break; }
@@ -1174,6 +1176,7 @@ function followup_backfill(PDO $db): void {
     followup_rules_once_d($db);
     followup_rules_once_e($db);
     followup_rules_once_f($db);
+    followup_rules_once_g($db);
     try {
         followup_close_stale($db, date('Y-m-d'));   // every page view / scan: trips over, cancelled requests
     } catch (Throwable $e) {
@@ -1603,6 +1606,26 @@ function followup_rules_once_f(PDO $db): void {
         }
     } catch (Throwable $e) {
         error_log('followup_rules_once_f: ' . $e->getMessage());
+    }
+}
+
+/**
+ * Once (meta rules_2026_11g, 25 Nov 2026): open "GRP unsold rooms" / group "rooms still provisional" lines before the
+ * group release close (followup_group_rooms_wait(); rules_2026_11f already closed the Orangi ones).
+ */
+function followup_rules_once_g(PDO $db): void {
+    try {
+        if (followup_meta_get($db, 'rules_2026_11g') !== null) return;
+        followup_meta_set($db, 'rules_2026_11g', date('Y-m-d H:i:s'));
+        $today = date('Y-m-d');
+        $st = $db->query("SELECT * FROM booking_followups WHERE closed_at IS NULL AND issue IN ('" . implode("','", FU_GROUP_WAIT_ISSUES) . "')");
+        foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $l) {
+            if (followup_group_rooms_wait($l, $today)) {
+                followup_close_line($db, $l, 'auto_resolved', 'group rooms not sold yet: the group closes 60 days before arrival');
+            }
+        }
+    } catch (Throwable $e) {
+        error_log('followup_rules_once_g: ' . $e->getMessage());
     }
 }
 
