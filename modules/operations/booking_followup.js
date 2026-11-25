@@ -248,6 +248,12 @@
   function recheckKey(kind, r) { return kind + ':' + (kind === 'ck' ? r.ck_id : r.request_id); }
   function recheckCell(r) {
     var kind = recheckKind(r);
+    // Supplier PDFs are read on a PC, not on the server (BlueHost cannot): it runs every morning; during the day, on request.
+    if (!kind && !r.closed_at && srcs(r).indexOf('supplier_scan') >= 0) {
+      return '<span class="fu-recheck fu-rescan" title="The supplier documents are read on a PC (the server cannot read PDFs). ' +
+             'The scan runs every morning; to read them again now, run tools\\followup_local_scan_confirm.bat (double click) on Roberto\'s or Glady\'s PC, then reload this page.">' +
+             '↻ To re-read now: run <code>followup_local_scan_confirm.bat</code> on Roberto\'s or Glady\'s PC</span>';
+    }
     if (!kind) return '';
     var s = state.recheck[recheckKey(kind, r)];
     if (s && s.busy) return '<span class="fu-recheck"><span class="fu-days">' + esc(s.msg) + '</span></span>';

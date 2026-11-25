@@ -108,6 +108,8 @@ table.fu-table tr.dirty td{background:#FFF8E1}
 .fu-recheck{margin-top:5px;display:block}
 .fu-recheck .btn{padding:2px 8px;font-size:.66rem}
 .fu-recheck .fu-days{white-space:normal}
+.fu-rescan{font-size:.64rem;color:var(--grey-dk);line-height:1.3;max-width:190px}
+.fu-rescan code{font-size:.62rem;word-break:break-all}
 .fu-src{font-size:.64rem;background:var(--off-white);color:var(--grey-dk);border-radius:8px;padding:1px 6px;white-space:nowrap;cursor:help}
 .fu-add{background:var(--white);border-radius:10px;box-shadow:0 1px 8px rgba(0,0,0,.08);padding:14px 16px;margin-bottom:16px;display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px;align-items:end}
 .fu-add[hidden]{display:none}
