@@ -41,7 +41,8 @@
                request: params.get('request_id') ? parseInt(params.get('request_id'), 10) : null,
                group: params.get('folder') || '', open: {},   // GRP member: the group's lines belong to the group's first request
                exp: {},    // "Set expiry" forms open: {id: {date, proof, name, file, files, err, busy}}
-               mail: {}};  // "✉ Mail" forms open: {id: {to, subject, message, err, busy}}
+               mail: {},   // "✉ Mail" forms open: {id: {to, subject, message, err, busy}}
+               recheck: {}};   // "↻ Recheck" of a booking gate line: {request_id: {busy, msg, err}}
   var $ = function (id) { return document.getElementById(id); };
 
   function esc(s) {
@@ -227,6 +228,56 @@
     }).join('') + '</span>';
   }
   /** Same rules as followup_update(): the booking team or the line's owner work it; reassign = admin, owner, or the team on a line nobody owns. */
+  /**
+   * "↻ Recheck" next to a line the booking gate reports: re-runs the booking gate of that booking (booking_gate.php
+   * run + nudge, as the request view panel), then reloads the list — the lines the new run no longer reports close.
+   * Who may run it: booking_gate.php decides (booking team, manager, the seller, Roberto).
+   */
+  function isGate(r) { return r.type === 'gate' || srcs(r).indexOf('gate_check') >= 0; }
+  function recheckCell(r) {
+    if (!isGate(r) || !r.request_id || r.closed_at) return '';
+    var s = state.recheck[r.request_id];
+    if (s && s.busy) return '<span class="fu-recheck"><span class="fu-days">' + esc(s.msg) + '</span></span>';
+    return '<span class="fu-recheck"><button type="button" class="btn btn-outline btn-sm" data-recheck="1" ' +
+           'title="Re-run the booking check of this booking now: it reads invoices/ + bookings/ again and closes the lines it no longer finds">↻ Recheck</button>' +
+           (s && s.msg ? '<span class="' + (s.err ? 'fu-err' : 'fu-saved') + '">' + esc(s.msg) + '</span>' : '') + '</span>';
+  }
+  function gatePost(action, rid) {
+    var fd = new FormData();
+    fd.append('action', action); fd.append('request_id', rid); fd.append('csrf', window.FU_CSRF || '');
+    return fetch('../leads/booking_gate.php', {method: 'POST', body: fd, credentials: 'same-origin'})
+      .then(function (x) { return x.json().catch(function () { return {ok: false, error: 'HTTP ' + x.status}; }); });
+  }
+  function recheck(r) {
+    var rid = r.request_id, t0 = Date.now();
+    var set = function (busy, msg, err) { state.recheck[rid] = {busy: busy, msg: msg, err: !!err}; renderTable(); };
+    var active = function (d) { return d.run && (d.run.state === 'queued' || d.run.state === 'running'); };
+    var fail = function (e) { set(false, '⚠ ' + (e && e.message || e || 'Check failed'), true); };
+    var done = function (d) {
+      var run = d.run || {};
+      var res = run.error ? '⚠ ' + run.error
+              : '✓ checked ' + (run.finished_at ? run.finished_at.substr(11, 5) : '') + ': ' + (run.blocking_count || 0) + ' blocking, ' + (run.warning_count || 0) + ' warning(s)';
+      fetch(API + '?action=list', {credentials: 'same-origin'}).then(function (x) { return x.json(); }).then(function (l) {
+        if (l.ok) { D.rows = l.rows; D.closed = l.closed; D.stats = l.stats; D.runs = l.runs; }
+        state.recheck[rid] = {busy: false, msg: res, err: !!run.error};
+        // Every line of the booking closed: say it at the top (no row left to show the result on).
+        if (!D.rows.some(function (x) { return x.request_id === rid && isGate(x); })) {
+          var m = $('fu-msg'); m.className = 'fu-msg'; m.style.display = 'block';
+          m.textContent = res + ' — ' + (r.customer || r.folder_name || ('request ' + rid)) + ': no booking check line left open.';
+        }
+        syncFilters(); render();
+      }).catch(fail);
+    };
+    var step = function (d) {
+      if (!d.ok) return fail(d.error);
+      if (!active(d)) return done(d);
+      if (Date.now() - t0 > 15 * 60 * 1000) return set(false, 'Still running — reload the page later to see the result', true);
+      set(true, '⏳ reading documents ' + (d.run.docs_done || 0) + '/' + (d.run.docs_total || 0) + '…');
+      gatePost('nudge', rid).then(step).catch(fail);   // reads the next document now, no wait for the cron
+    };
+    set(true, '⏳ starting the booking check…');
+    gatePost('run', rid).then(step).catch(fail);
+  }
   function canWork(r) { return D.me.can_edit || r.owner_user_id === D.me.id; }
   function canReassign(r) { return D.me.is_admin || r.owner_user_id === D.me.id || (r.owner_user_id === null && D.me.can_edit); }
   /** Owner: any active user (D.users); "Take" for the booking team on a line nobody owns. */
@@ -407,7 +458,7 @@
         (r.transfer_alert ? '<br><span class="badge badge-issue exp fu-tr30" title="Transfer not confirmed and the service is close: also listed in Provisional">Transfer ≤ ' +
                             (D.transfer_alert_days || 30) + ' d</span>' : '') +
         (r.audience && r.audience !== 'booking' || r.type === 'ck' ? '<br><span class="badge badge-aud ' + esc(r.audience) + '" title="Routed to">' + esc(AUD[r.audience] || r.audience) + '</span>' : '') +
-        sourceChips(r),
+        sourceChips(r) + recheckCell(r),
       esc(r.doc_status_text || '') + (r.booked_by ? '<span class="fu-days">booked by ' + esc(r.booked_by) + '</span>' : '') + expiryCell(r),
       (r.file_open_url ? '<span class="fu-folder fu-file"><a href="' + esc(r.file_url) + '" target="_blank" rel="noopener" title="Open in Dropbox (web)">☁</a> ' +
         '<a href="' + esc(r.file_open_url) + '" title="Open on this PC — ' + esc(r.source_file) + '">📄 ' + esc(r.source_file.replace(/^invoices\//, '')) + '</a></span>'
@@ -564,6 +615,7 @@
     var tr = b.closest('tr[data-id]');
     if (!tr) return;
     var id = parseInt(tr.dataset.id, 10);
+    if (b.dataset.recheck) { recheck(rowOf(tr)); return; }
     if (b.dataset.mail) { openMail(rowOf(tr)); return; }
     if (b.dataset.mcancel) { delete state.mail[id]; renderTable(); return; }
     if (b.dataset.msend) { sendMail(rowOf(tr)); return; }
