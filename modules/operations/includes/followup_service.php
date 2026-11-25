@@ -3090,6 +3090,19 @@ function followup_page_data(PDO $db, array $user): array {
     $closed = array_values(array_filter(followup_rows($db, ['status' => 'closed']),
                                         fn($r) => $r['closed_at'] >= date('Y-m-d H:i:s', time() - 120 * 86400)));
     $recent = array_filter($closed, fn($r) => $r['closed_at'] >= date('Y-m-d H:i:s', time() - 7 * 86400));
+    // CK tracker row of each open line's booking folder: the page's "↻ Re-run CK check" on SafariCheck lines.
+    $ck = [];
+    try {
+        foreach ($db->query("SELECT id, folder_name FROM ck_folders WHERE gone = 0")->fetchAll(PDO::FETCH_ASSOC) as $f) {
+            $ck[dropbox_folder_stem_safe((string)$f['folder_name'])] = (int)$f['id'];
+        }
+    } catch (Throwable $e) { /* no CK table yet: no button */ }
+    foreach ($open as &$o) {
+        $seg = explode('/', trim((string)($o['folder'] ?? ''), '/'));
+        $top = strcasecmp($seg[0], '001_Safari') === 0 ? ($seg[1] ?? '') : $seg[0];
+        $o['ck_id'] = $top !== '' ? ($ck[dropbox_folder_stem_safe($top)] ?? null) : null;
+    }
+    unset($o);
     return ['rows' => $open, 'closed' => $closed, 'stats' => followup_stats($open, $recent), 'runs' => followup_last_runs($db),
             'me' => ['id' => (int)$user['id'], 'can_edit' => followup_can_edit($user), 'is_admin' => followup_is_admin($user)],
             'users' => followup_owner_users($db), 'source_labels' => FU_SOURCE_LABELS, 'reason_labels' => FU_REASON_LABELS,

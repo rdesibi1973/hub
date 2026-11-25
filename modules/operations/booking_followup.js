@@ -229,18 +229,78 @@
   }
   /** Same rules as followup_update(): the booking team or the line's owner work it; reassign = admin, owner, or the team on a line nobody owns. */
   /**
-   * "↻ Recheck" next to a line the booking gate reports: re-runs the booking gate of that booking (booking_gate.php
-   * run + nudge, as the request view panel), then reloads the list — the lines the new run no longer reports close.
-   * Who may run it: booking_gate.php decides (booking team, manager, the seller, Roberto).
+   * One re-run button per open line, for the check that raised it (the line's type):
+   *   gate / ck (Booking gate, Claude check — the gate replaces Claude-check lines) → "↻ Re-run booking gate":
+   *     booking_gate.php run + nudge, as the request view panel;
+   *   safaricheck → "↻ Re-run CK check": the CK tracker's SafariCheck (GitHub, about 2 minutes), polled until its new result.
+   * Then the list reloads: lines the new run no longer reports are closed. Supplier / ticket / group scan lines: "Run check now".
+   * Who may run: booking_gate.php / ck_tracker.php decide.
    */
-  function isGate(r) { return r.type === 'gate' || srcs(r).indexOf('gate_check') >= 0; }
+  function isGate(r) { return r.type === 'gate' || r.type === 'ck'; }
+  function recheckKind(r) {
+    if (r.closed_at || !r.request_id) return '';
+    if (isGate(r)) return 'gate';
+    if (r.type === 'safaricheck') return r.ck_id ? 'ck' : '';
+    var s = srcs(r);   // a scan line another check also reports: that check's button
+    if (s.indexOf('gate_check') >= 0 || s.indexOf('claude_check') >= 0) return 'gate';
+    return s.indexOf('safaricheck') >= 0 && r.ck_id ? 'ck' : '';
+  }
+  function recheckKey(kind, r) { return kind + ':' + (kind === 'ck' ? r.ck_id : r.request_id); }
   function recheckCell(r) {
-    if (!isGate(r) || !r.request_id || r.closed_at) return '';
-    var s = state.recheck[r.request_id];
+    var kind = recheckKind(r);
+    if (!kind) return '';
+    var s = state.recheck[recheckKey(kind, r)];
     if (s && s.busy) return '<span class="fu-recheck"><span class="fu-days">' + esc(s.msg) + '</span></span>';
-    return '<span class="fu-recheck"><button type="button" class="btn btn-outline btn-sm" data-recheck="1" ' +
-           'title="Re-run the booking check of this booking now: it reads invoices/ + bookings/ again and closes the lines it no longer finds">↻ Recheck</button>' +
-           (s && s.msg ? '<span class="' + (s.err ? 'fu-err' : 'fu-saved') + '">' + esc(s.msg) + '</span>' : '') + '</span>';
+    var btn = kind === 'gate'
+      ? '<button type="button" class="btn btn-outline btn-sm" data-recheck="gate" title="Re-run the booking gate of this booking now: it reads invoices/ + bookings/ again and closes the lines it no longer finds">↻ Re-run booking gate</button>'
+      : '<button type="button" class="btn btn-outline btn-sm" data-recheck="ck" title="Re-run the SafariCheck (CK) of this folder now — about 2 minutes; lines it no longer finds are closed">↻ Re-run CK check</button>';
+    return '<span class="fu-recheck">' + btn + (s && s.msg ? '<span class="' + (s.err ? 'fu-err' : 'fu-saved') + '">' + esc(s.msg) + '</span>' : '') + '</span>';
+  }
+  /** After a re-run: reload the lines; the result goes on the line, or at the top when none of them is left open. */
+  function recheckDone(kind, r, res, err) {
+    var key = recheckKey(kind, r);
+    return fetch(API + '?action=list', {credentials: 'same-origin'}).then(function (x) { return x.json(); }).then(function (l) {
+      if (l.ok) { D.rows = l.rows; D.closed = l.closed; D.stats = l.stats; D.runs = l.runs; }
+      state.recheck[key] = {busy: false, msg: res, err: !!err};
+      if (!D.rows.some(function (x) { return recheckKind(x) === kind && recheckKey(kind, x) === key; })) {
+        var m = $('fu-msg'); m.className = 'fu-msg' + (err ? ' err' : ''); m.style.display = 'block';
+        m.textContent = res + ' — ' + (r.customer || r.folder_name || ('request ' + r.request_id)) + ': no ' + (kind === 'ck' ? 'CK check' : 'booking gate') + ' line left open.';
+      }
+      syncFilters(); render();
+    });
+  }
+  function recheckCk(r) {
+    var key = recheckKey('ck', r), id = r.ck_id, t0 = Date.now(), prev = null;
+    var set = function (busy, msg, err) { state.recheck[key] = {busy: busy, msg: msg, err: !!err}; renderTable(); };
+    var fail = function (e) { set(false, '⚠ ' + (e && e.message || e || 'Check failed'), true); };
+    var status = function () {
+      return fetch('../leads/ck_tracker.php?status=1&ids=' + id, {credentials: 'same-origin'}).then(function (x) { return x.json(); })
+        .then(function (st) { return st[id] || null; });
+    };
+    var poll = function () {
+      status().then(function (s) {
+        if (s && (!s.running || s.check !== prev)) {
+          if (s.check && s.check !== prev) {
+            return recheckDone('ck', r, '✓ CK checked ' + s.at + ': ' + s.red + ' red, ' + s.yellow + ' to check', !!s.error).catch(fail);
+          }
+          return fail('the CK check did not finish — try again');
+        }
+        if (Date.now() - t0 > 12 * 60000) return fail('the CK check did not finish — try again');
+        setTimeout(poll, 15000);
+      }).catch(fail);
+    };
+    set(true, '⏳ starting the CK check…');
+    status().then(function (s) {
+      prev = s ? s.check : 0;
+      var fd = new FormData();
+      fd.append('action', 'run_check'); fd.append('ajax', '1'); fd.append('ck_ids', id);
+      return fetch('../leads/ck_tracker.php', {method: 'POST', body: fd, credentials: 'same-origin'}).then(function (x) { return x.json(); });
+    }).then(function (d) {
+      var res = (d.results || {})[id] || {ok: false, msg: 'not started'};
+      if (!res.ok) return fail(res.msg || 'could not start the CK check');
+      set(true, '⏳ CK check running (about 2 minutes)…');
+      setTimeout(poll, 15000);
+    }).catch(fail);
   }
   function gatePost(action, rid) {
     var fd = new FormData();
@@ -249,24 +309,15 @@
       .then(function (x) { return x.json().catch(function () { return {ok: false, error: 'HTTP ' + x.status}; }); });
   }
   function recheck(r) {
-    var rid = r.request_id, t0 = Date.now();
-    var set = function (busy, msg, err) { state.recheck[rid] = {busy: busy, msg: msg, err: !!err}; renderTable(); };
+    var rid = r.request_id, t0 = Date.now(), key = recheckKey('gate', r);
+    var set = function (busy, msg, err) { state.recheck[key] = {busy: busy, msg: msg, err: !!err}; renderTable(); };
     var active = function (d) { return d.run && (d.run.state === 'queued' || d.run.state === 'running'); };
     var fail = function (e) { set(false, '⚠ ' + (e && e.message || e || 'Check failed'), true); };
     var done = function (d) {
       var run = d.run || {};
       var res = run.error ? '⚠ ' + run.error
-              : '✓ checked ' + (run.finished_at ? run.finished_at.substr(11, 5) : '') + ': ' + (run.blocking_count || 0) + ' blocking, ' + (run.warning_count || 0) + ' warning(s)';
-      fetch(API + '?action=list', {credentials: 'same-origin'}).then(function (x) { return x.json(); }).then(function (l) {
-        if (l.ok) { D.rows = l.rows; D.closed = l.closed; D.stats = l.stats; D.runs = l.runs; }
-        state.recheck[rid] = {busy: false, msg: res, err: !!run.error};
-        // Every line of the booking closed: say it at the top (no row left to show the result on).
-        if (!D.rows.some(function (x) { return x.request_id === rid && isGate(x); })) {
-          var m = $('fu-msg'); m.className = 'fu-msg'; m.style.display = 'block';
-          m.textContent = res + ' — ' + (r.customer || r.folder_name || ('request ' + rid)) + ': no booking check line left open.';
-        }
-        syncFilters(); render();
-      }).catch(fail);
+              : '✓ booking gate ' + (run.finished_at ? run.finished_at.substr(11, 5) : '') + ': ' + (run.blocking_count || 0) + ' blocking, ' + (run.warning_count || 0) + ' warning(s)';
+      recheckDone('gate', r, res, !!run.error).catch(fail);
     };
     var step = function (d) {
       if (!d.ok) return fail(d.error);
@@ -615,7 +666,7 @@
     var tr = b.closest('tr[data-id]');
     if (!tr) return;
     var id = parseInt(tr.dataset.id, 10);
-    if (b.dataset.recheck) { recheck(rowOf(tr)); return; }
+    if (b.dataset.recheck) { if (b.dataset.recheck === 'ck') recheckCk(rowOf(tr)); else recheck(rowOf(tr)); return; }
     if (b.dataset.mail) { openMail(rowOf(tr)); return; }
     if (b.dataset.mcancel) { delete state.mail[id]; renderTable(); return; }
     if (b.dataset.msend) { sendMail(rowOf(tr)); return; }
