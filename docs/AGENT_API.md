@@ -2334,6 +2334,27 @@ logic `modules/operations/includes/followup_service.php`, documents read by `fol
   basis, transfers, tickets, Claude check, the gate's pax / room-type points — still in the gate panel / report) is not written (`skipped_provisional` in the run summary) and its open lines close
   as `auto_resolved` (on the next run of that check, and on every page view / scan, `followup_close_stale()`); they come back by
   themselves once the folder has another tag.
+- **Shorter list (Roberto, 25 Nov 2026)**:
+  - **Closed by staff stays closed, every check** — a line staff closed (`staff_status` resolved / not relevant) is not re-opened by
+    the next run reporting the same thing (supplier and ticket lines too, not only CK / SafariCheck / gate); it re-opens only when
+    the finding changes: another issue (provisional → `provisional_expired` when the expiry passes), text or expiry date.
+    A new finding of another check that says what staff already closed (same document still provisional with the same expiry,
+    or the same issue on the same service — `followup_same_finding()`) joins that closed line as a source and it stays
+    closed (summary `merged[]` with `into_closed`). A line closed with a note "duplicate of …" is not such a judgement.
+  - **One "provisional" line per supplier document** — "still provisional" findings (`FU_PROVISIONAL_ISSUES`) on the same file
+    of the same booking folder (`followup_doc_id()`: folder stem + file name) are one line, whatever the check and however
+    many stays the document covers (the booking gate reports one per Calc stay): a run folds its own into one (the others'
+    lines close `auto_merged`), and a new one joins another check's open line of that document. A confirmed document clears
+    the provisional sources of that document's lines too.
+  - **Provisional until paid** (`FU_PROV_UNTIL_PAID`: Heart and Soul) — a provisional document of these suppliers **without an
+    expiry date** raises no line (the rooms are held until paid, and we pay at the end; summary `skipped_until_paid`); its open
+    lines close `auto_resolved`. With an expiry printed it is a hold like any other.
+  - **Group rooms not sold yet** — an Orangi voucher "rooms still provisional" (`orangi_rooms_provisional`) in a group folder
+    (GRP / Diamante / GRUPPO, `followup_group_kind()`) is no line before the group release (arrival − 60 days,
+    `followup_group_rooms_wait()`; summary `skipped_group_rooms`): the group fills up and is reduced to the rooms sold at 60 days.
+  - Once (meta `rules_2026_11f`, `followup_rules_once_f()`): the open lines are cleaned up by these rules.
+  - The page opens on URGENT + HIGH lines (deadline within 30 days); the NORMAL ones are behind "▾ Show N NORMAL lines"
+    (all shown with a priority filter, a search, or one booking / group).
 - **Rules of 11 Nov 2026** (`docs/HUB_FOLLOWUP_RULES_HANDOFF.md`):
   - **Trip over / request gone** — on every scan and page view, every open line of a trip whose end (else start) is past
     closes (`auto_trip_ended`, SafariCheck and manual lines too), and the lines of a `Cancelled` / `Lost` request close

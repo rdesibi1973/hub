@@ -72,7 +72,14 @@ const FU_SOURCE_LABELS = ['supplier_scan' => 'Supplier scan', 'ticket_scan' => '
                           'safaricheck' => 'SafariCheck', 'claude_check' => 'Claude check', 'manual' => 'Manual', 'gate_check' => 'Booking gate'];
 /** Issues meaning "a booking is still provisional": they block the _CK (ck_pipeline_block()) and close on a confirmed document. */
 const FU_PROVISIONAL_ISSUES = ['provisional', 'provisional_expired', 'on_request', 'orangi_rooms_provisional', 'booking_provisional'];
-const FU_SERVICE_TYPES = ['stay', 'flight', 'transfer', 'activity', 'payment', 'invoice', 'client_info', 'dates', 'group', 'other'];
+/**
+ * Suppliers whose invoice stays "provisional" with no expiry until they are paid, and we pay them at the end: the rooms
+ * are held, so a provisional document of theirs without an expiry date is normal and raises no line (Heart and Soul,
+ * Roberto 25 Nov 2026). With an expiry printed it is a real hold again. Matched on followup_norm() of supplier /
+ * service / file name (followup_prov_until_paid()).
+ */
+const FU_PROV_UNTIL_PAID = ['heartandsoul', 'heartsoul'];
+const FU_SERVICE_TYPES =['stay', 'flight', 'transfer', 'activity', 'payment', 'invoice', 'client_info', 'dates', 'group', 'other'];
 const FU_DUE_URGENT = 7;                // priority: due overdue or ≤ 7 days → 1-URGENT, ≤ 30 → 2-HIGH, later → 3-NORMAL
 const FU_DUE_HIGH   = 30;
 const FU_PAY_DAYS   = 30;               // supplier payment: days before check-in (Orangi Collection always; others unless the document says)
@@ -987,6 +994,65 @@ function followup_service_match(array $a, array $b): bool {
 }
 
 /**
+ * The supplier document a line is about: the booking folder's stem (status tags off) + the file name, normalised;
+ * '' without a file. By folder, not request: a _PROVISIONAL group's supplier lines have no request, its gate lines do.
+ */
+function followup_doc_id(array $l): string {
+    $f = trim(str_replace('\\', '/', (string)($l['source_file'] ?? '')));
+    $folder = followup_folder_norm((string)($l['folder'] ?? ''));
+    if ($f === '' || $folder === '') return '';
+    return dropbox_folder_stem_safe(basename($folder)) . '|' . followup_norm(basename($f));
+}
+
+/**
+ * Two "still provisional" findings on the same supplier document: one line per document, whichever check reports it
+ * and for however many stays of that document (the booking gate reports one per Calc stay, the supplier scan one per
+ * document — Rivolta: 5 lines for one Orangi PDF; Roberto, 25 Nov 2026).
+ */
+function followup_same_doc_prov(array $a, array $b): bool {
+    if (!in_array($a['issue'] ?? '', FU_PROVISIONAL_ISSUES, true) || !in_array($b['issue'] ?? '', FU_PROVISIONAL_ISSUES, true)) return false;
+    $d = followup_doc_id($a);
+    return $d !== '' && $d === followup_doc_id($b);
+}
+
+/** A "provisional" finding without expiry on a supplier that holds the rooms until paid (FU_PROV_UNTIL_PAID): not a line. */
+function followup_prov_until_paid(array $l): bool {
+    if (!in_array($l['issue'] ?? '', ['provisional', 'on_request', 'booking_provisional'], true) || !empty($l['expiry_date'])) return false;
+    $who = followup_norm(($l['supplier'] ?? '') . ' ' . ($l['service'] ?? '') . ' ' . basename(str_replace('\\', '/', (string)($l['source_file'] ?? ''))));
+    foreach (FU_PROV_UNTIL_PAID as $s) if (strpos($who, $s) !== false) return true;
+    return false;
+}
+
+/**
+ * Orangi voucher "rooms still provisional" in a group folder (GRP / Diamante / GRUPPO) before the group release
+ * (arrival − FU_GROUP_RELEASE_DAYS): the rooms not sold yet stay provisional on purpose — the group fills up and is
+ * reduced to the rooms sold at 60 days. Not a line until then (Roberto, 25 Nov 2026, AdolfoPiazza GRP: 1 double
+ * confirmed + 2 provisional, September); the group check takes over at 60 days.
+ */
+function followup_group_rooms_wait(array $l, string $today): bool {
+    if (($l['issue'] ?? '') !== 'orangi_rooms_provisional' || empty($l['start_date'])) return false;
+    $top = explode('/', followup_folder_norm((string)($l['folder'] ?? '')));
+    $inGroup = false;
+    foreach ($top as $seg) if ($seg !== '' && followup_group_kind($seg)) { $inGroup = true; break; }
+    return $inGroup && $today < date('Y-m-d', strtotime($l['start_date'] . ' -' . FU_GROUP_RELEASE_DAYS . ' days'));
+}
+
+/**
+ * A new finding says what staff already judged on a line they closed (Resolved / Not relevant): the same document
+ * still provisional with the same expiry (and not expired since), or the same issue on the same service.
+ * Then it joins that line and the line stays closed (Roberto, 25 Nov 2026: a closed alert must not come back).
+ */
+function followup_same_finding(array $closed, array $l): bool {
+    // Closed as a duplicate of another line ("Duplicate of line 443"): not a judgement on the finding.
+    if (preg_match('/duplicat|doppi|same as (?:line )?#?\d/i', (string)($closed['notes'] ?? ''))) return false;
+    if (followup_same_doc_prov($closed, $l)) {
+        return (string)($closed['expiry_date'] ?? '') === (string)($l['expiry_date'] ?? '')
+            && (($closed['issue'] ?? '') === 'provisional_expired') === (($l['issue'] ?? '') === 'provisional_expired');
+    }
+    return followup_service_match($closed, $l) && ($closed['issue'] ?? '') === ($l['issue'] ?? '');
+}
+
+/**
  * The line's deadline: the earliest of
  *   provisional expiry printed on the document (expiry_date; the ticketing limit on a group ZNZ flight line),
  *   supplier payment of a stay: check-in − 30 days (Orangi Collection always; other lodges: the days read in the
@@ -1107,6 +1173,7 @@ function followup_backfill(PDO $db): void {
     followup_rules_once_c($db);
     followup_rules_once_d($db);
     followup_rules_once_e($db);
+    followup_rules_once_f($db);
     try {
         followup_close_stale($db, date('Y-m-d'));   // every page view / scan: trips over, cancelled requests
     } catch (Throwable $e) {
@@ -1482,6 +1549,83 @@ function followup_rules_once_e(PDO $db): void {
 }
 
 /**
+ * Once (meta rules_2026_11f, 25 Nov 2026 — the list never got shorter):
+ *   - open "provisional, no expiry" lines of a supplier that holds the rooms until paid close (FU_PROV_UNTIL_PAID);
+ *   - an open "provisional" line on a document staff already closed with the same finding (followup_same_finding())
+ *     joins that line and closes (GruppoCateJan27: gate lines Resolved with a note, then a supplier-scan line opened);
+ *   - the other open "provisional" lines of one document merge into one (the line staff work on — note, status,
+ *     owner — else the supplier-scan one, else the oldest): Rivolta had 5 lines for one Orangi PDF.
+ */
+function followup_rules_once_f(PDO $db): void {
+    try {
+        if (followup_meta_get($db, 'rules_2026_11f') !== null) return;
+        followup_meta_set($db, 'rules_2026_11f', date('Y-m-d H:i:s'));
+        $today = date('Y-m-d');
+        $groups = [];
+        foreach ($db->query("SELECT * FROM booking_followups WHERE type <> 'manual' AND source_file IS NOT NULL
+                             AND (closed_at IS NULL OR (close_reason = 'manual' AND staff_status IN ('resolved', 'not_relevant'))) ORDER BY id")
+                    ->fetchAll(PDO::FETCH_ASSOC) as $l) {
+            $end = ($l['end_date'] ?? null) ?: ($l['start_date'] ?? null);
+            if ($end && $end < $today) continue;                                   // followup_close_stale() closes them
+            if ($l['closed_at'] === null && followup_prov_until_paid($l)) {
+                followup_close_line($db, $l, 'auto_resolved', 'provisional until paid, no expiry: rooms held');
+                continue;
+            }
+            if ($l['closed_at'] === null && followup_group_rooms_wait($l, $today)) {
+                followup_close_line($db, $l, 'auto_resolved', 'group rooms not sold yet: the group closes 60 days before arrival');
+                continue;
+            }
+            if (!in_array($l['issue'], FU_PROVISIONAL_ISSUES, true) || ($d = followup_doc_id($l)) === '') continue;
+            $groups[$d][] = $l;
+        }
+        foreach ($groups as $ls) {
+            $open = array_values(array_filter($ls, fn($l) => $l['closed_at'] === null));
+            $closed = array_values(array_filter($ls, fn($l) => $l['closed_at'] !== null));
+            $left = [];
+            foreach ($open as $l) {
+                $into = null;
+                foreach ($closed as $c) if (followup_same_finding($c, $l)) { $into = $c; break; }
+                if ($into) followup_merge_line($db, $into, $l, 'already closed by staff on line #' . $into['id']
+                                                               . ($into['notes'] ? ': ' . mb_substr((string)$into['notes'], 0, 120) : ''));
+                else $left[] = $l;
+            }
+            if (count($left) < 2) continue;
+            usort($left, fn($a, $b) => [($a['notes'] ?? '') === '' ? 1 : 0, $a['staff_status'] === 'open' ? 1 : 0, $a['owner_user_id'] === null ? 1 : 0,
+                                        $a['type'] === 'supplier' ? 0 : 1, (int)$a['id']]
+                                   <=> [($b['notes'] ?? '') === '' ? 1 : 0, $b['staff_status'] === 'open' ? 1 : 0, $b['owner_user_id'] === null ? 1 : 0,
+                                        $b['type'] === 'supplier' ? 0 : 1, (int)$b['id']]);
+            $keep = array_shift($left);
+            foreach ($left as $l) {
+                followup_merge_line($db, $keep, $l, 'same document still provisional as line #' . $keep['id']);
+                // Later merges see what the kept line has become (sources, owner, note).
+                $keep = $db->query("SELECT * FROM booking_followups WHERE id = " . (int)$keep['id'])->fetch(PDO::FETCH_ASSOC) ?: $keep;
+            }
+        }
+    } catch (Throwable $e) {
+        error_log('followup_rules_once_f: ' . $e->getMessage());
+    }
+}
+
+/**
+ * Line $d joins line $keep (open, or closed by staff): its sources are added (a check already on $keep keeps its own
+ * key), an open $keep without owner / note takes $d's, and $d closes as auto_merged.
+ */
+function followup_merge_line(PDO $db, array $keep, array $d, string $why): void {
+    $src = followup_sources($keep);
+    foreach (followup_sources($d) as $t => $e) if (!isset($src[$t])) $src[$t] = $e;
+    $set = ['sources = ?']; $args = [followup_sources_json($src)];
+    if ($keep['closed_at'] === null) {
+        if ($keep['owner_user_id'] === null && $d['owner_user_id'] !== null) { $set[] = 'owner_user_id = ?'; $args[] = (int)$d['owner_user_id']; }
+        if (($keep['notes'] ?? '') === '' && ($d['notes'] ?? '') !== '') { $set[] = 'notes = ?'; $args[] = $d['notes']; }
+    }
+    $args[] = (int)$keep['id'];
+    $db->prepare("UPDATE booking_followups SET " . implode(', ', $set) . " WHERE id = ?")->execute($args);
+    followup_close_line($db, $d, 'auto_merged', $why);
+    followup_event($db, (int)$keep['id'], null, 'source', null, 'merged line #' . $d['id'] . ' (' . $d['type'] . ': '
+                   . mb_substr((string)$d['doc_status_text'], 0, 120) . ')' . ($keep['closed_at'] !== null ? ' — stays closed' : ''));
+}
+
+/**
  * Once (meta rules_2026_11b): open SafariCheck transfer lines without a date get the date of their title read in the
  * widest trip window (ck_sc_window(): Excel + Word), then an undated Excel note joins the booking's only dated transfer
  * line, then same-day transfers merge again (followup_merge_transfers()).
@@ -1682,6 +1826,10 @@ function followup_apply(PDO $db, string $type, array $cand, array $scope, bool $
     $provSkip = 0;
     foreach ($cand as $k => $l) {
         if (followup_path_is_provisional((string)($l['folder'] ?? '')) && !followup_prov_keeps($type, $l)) { unset($cand[$k]); $provSkip++; }
+        // Heart and Soul & co: provisional until paid, no expiry → normal, not reported (its open lines close below).
+        elseif ($type !== 'manual' && followup_prov_until_paid($l)) { unset($cand[$k]); $sum['skipped_until_paid'] = ($sum['skipped_until_paid'] ?? 0) + 1; }
+        // Group rooms not sold yet, before the 60-day release: provisional on purpose (its open lines close below).
+        elseif ($type !== 'manual' && followup_group_rooms_wait($l, $today)) { unset($cand[$k]); $sum['skipped_group_rooms'] = ($sum['skipped_group_rooms'] ?? 0) + 1; }
     }
     if ($provSkip) $sum['skipped_provisional'] = $provSkip;
     $only = isset($scope['only']) ? array_map('intval', (array)$scope['only']) : null;   // request_ids the run looked at (null = all)
@@ -1734,7 +1882,41 @@ function followup_apply(PDO $db, string $type, array $cand, array $scope, bool $
         $st->execute([$type]);
         foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) $pool[(int)$r['request_id']][(int)$r['id']] = $r;
     }
-    $docFields = ['audience', 'request_id', 'folder', 'start_date', 'end_date', 'service_date', 'supplier', 'supplier_ref', 'service',
+    // One "provisional" line per supplier document (25 Nov 2026): this run's own provisional findings on the same
+    // document fold into one (the line that already exists, else the first stay); the others' lines close as
+    // auto_merged below. Then lines of other checks on that document — open, or closed by staff — are looked up by
+    // document (followup_doc_id()), and lines closed by staff by service too (followup_same_finding()).
+    $collapsed = [];   // key folded away => the key it folded into
+    $byDoc = [];
+    foreach ($cand as $k => $l) {
+        if ($type !== 'manual' && in_array($l['issue'] ?? '', FU_PROVISIONAL_ISSUES, true) && ($d = followup_doc_id($l)) !== '') $byDoc[$d][] = $k;
+    }
+    foreach ($byDoc as $keys) {
+        if (count($keys) < 2) continue;
+        usort($keys, function ($x, $y) use ($cand, $have) {
+            $rank = fn($k) => isset($have[$k]) ? ($have[$k]['closed_at'] === null ? 0 : 1) : 2;
+            return [$rank($x), ($cand[$x]['service_date'] ?? null) ?: '9999', $x] <=> [$rank($y), ($cand[$y]['service_date'] ?? null) ?: '9999', $y];
+        });
+        $keep = array_shift($keys);
+        foreach ($keys as $k) {
+            if ((FU_ISSUE_RANK[$cand[$k]['issue']] ?? 99) < (FU_ISSUE_RANK[$cand[$keep]['issue']] ?? 99)) $cand[$keep]['issue'] = $cand[$k]['issue'];
+            $collapsed[$k] = $keep;
+            unset($cand[$k]);
+        }
+    }
+    $docPool = [];         // document => lines of other checks: open, or closed by staff
+    $staffClosed = [];     // request => lines of other checks closed by staff
+    if ($cand && $type !== 'manual') {
+        $st = $db->prepare("SELECT * FROM booking_followups WHERE type <> ? AND (closed_at IS NULL
+                              OR (close_reason = 'manual' AND staff_status IN ('resolved', 'not_relevant')))
+                            AND (COALESCE(end_date, start_date) IS NULL OR COALESCE(end_date, start_date) >= ?)");
+        $st->execute([$type, $today]);
+        foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            if (($d = followup_doc_id($r)) !== '') $docPool[$d][(int)$r['id']] = $r;
+            if ($r['closed_at'] !== null && !empty($r['request_id'])) $staffClosed[(int)$r['request_id']][(int)$r['id']] = $r;
+        }
+    }
+    $docFields =['audience', 'request_id', 'folder', 'start_date', 'end_date', 'service_date', 'supplier', 'supplier_ref', 'service',
                   'source_file', 'issue', 'doc_status_text', 'expiry_date', 'booked_by', 'details'];
     $logged = ['issue', 'doc_status_text', 'expiry_date', 'source_file', 'service_date'];
     $srcLabel = fn(array $l) => $tag . ': ' . followup_issue_label((string)$l['issue']) . (!empty($l['doc_status_text']) ? ' — ' . mb_substr((string)$l['doc_status_text'], 0, 200) : '');
@@ -1745,11 +1927,11 @@ function followup_apply(PDO $db, string $type, array $cand, array $scope, bool $
                                    && !($old['close_reason'] === 'auto_cancelled'
                                         && folder_path_is_cancelled((string)(($new['folder'] ?? '') !== '' ? $new['folder'] : $old['folder'])))
                                    && !($old['type'] === 'group' && $old['close_reason'] === 'manual');
-    // A check finding (CK check, SafariCheck, booking gate) closed by staff (Resolved, usually with a note: "flight own
-    // arrangement") is their judgement on that finding: the next run reporting the same thing must not re-open it
-    // (20 Nov 2026). It re-opens only when the finding itself changes (another issue or text).
-    $staffAccepted = fn(array $old, bool $findingChanged) => in_array($type, ['ck', 'safaricheck', 'gate'], true)
-                                   && $old['close_reason'] === 'manual' && !$findingChanged;
+    // A finding closed by staff (Resolved / Not relevant, usually with a note: "flight own arrangement", "we confirm or
+    // cancel the group end of Nov") is their judgement on it: the next run reporting the same thing must not re-open it
+    // (CK / SafariCheck / gate since 20 Nov 2026; every check since 25 Nov 2026 — supplier, ticket lines came back on each
+    // scan). It re-opens only when the finding itself changes: another issue (provisional → expired), text or expiry.
+    $staffAccepted = fn(array $old, bool $findingChanged) => $type !== 'manual' && $old['close_reason'] === 'manual' && !$findingChanged;
     $reopenSql = function (array $old, array &$set) {
         $set[] = 'closed_at = NULL'; $set[] = 'closed_by = NULL'; $set[] = 'close_reason = NULL';
         if ($old['staff_status'] === 'resolved') $set[] = "staff_status = 'open'";
@@ -1797,16 +1979,35 @@ function followup_apply(PDO $db, string $type, array $cand, array $scope, bool $
                 if (isset(followup_sources($p)[$tag])) continue;            // this check already reports something else on it
                 if (followup_service_match($p, $l)) { $target = $p; break; }
             }
+            // The same document still provisional, open on another check's line (one line per document).
+            $doc = in_array($l['issue'] ?? '', FU_PROVISIONAL_ISSUES, true) ? followup_doc_id($l) : '';
+            if (!$target && $doc !== '') {
+                foreach ($docPool[$doc] ?? [] as $p) {
+                    if ($p['closed_at'] === null && !isset(followup_sources($p)[$tag]) && followup_same_doc_prov($p, $l)) { $target = $p; break; }
+                }
+            }
+            // What staff already closed with their judgement (Resolved / Not relevant): joins it, stays closed.
+            if (!$target) {
+                $closedLines = array_filter(($docPool[$doc] ?? []) + ($staffClosed[(int)($l['request_id'] ?? 0)] ?? []), fn($p) => $p['closed_at'] !== null);
+                foreach ($closedLines as $p) {
+                    if (followup_same_finding($p, $l)) { $target = $p; break; }
+                }
+            }
             if ($target) {
                 $tid = (int)$target['id'];
                 $src = followup_sources($target);
                 $src[$tag] = $entry;
-                $pool[(int)$target['request_id']][$tid]['sources'] = followup_sources_json($src);
+                $json = followup_sources_json($src);
+                if (isset($pool[(int)$target['request_id']][$tid])) $pool[(int)$target['request_id']][$tid]['sources'] = $json;
+                foreach ($docPool as $d => $ps) if (isset($ps[$tid])) $docPool[$d][$tid]['sources'] = $json;
+                foreach ($staffClosed as $r => $ps) if (isset($ps[$tid])) $staffClosed[$r][$tid]['sources'] = $json;
+                $isClosed = $target['closed_at'] !== null;
                 $sum['merged'][] = followup_brief(['id' => $tid] + $l) + ['into' => $tid, 'into_type' => $target['type'],
-                                                                         'into_issue' => $target['issue'], 'sources' => array_keys($src)];
+                                                                         'into_issue' => $target['issue'], 'sources' => array_keys($src)]
+                                   + ($isClosed ? ['into_closed' => $target['staff_status']] : []);
                 if ($confirm) {
-                    $db->prepare("UPDATE booking_followups SET sources = ?, last_seen_at = ? WHERE id = ?")->execute([followup_sources_json($src), $now, $tid]);
-                    followup_event($db, $tid, null, 'source', null, $srcLabel($l));
+                    $db->prepare("UPDATE booking_followups SET sources = ?, last_seen_at = ? WHERE id = ?")->execute([$json, $now, $tid]);
+                    followup_event($db, $tid, null, 'source', null, $srcLabel($l) . ($isClosed ? ' (line closed by staff: stays closed)' : ''));
                 }
                 continue;
             }
@@ -1879,7 +2080,7 @@ function followup_apply(PDO $db, string $type, array $cand, array $scope, bool $
                   'due_date' => $due['due_date'], 'due_reason' => $due['due_reason']] as $f => $v) {
             if ((string)$v !== (string)($old[$f] ?? '')) $meta[$f] = $v;
         }
-        $reopen = $mayReopen($old, $l) && !$staffAccepted($old, isset($diff['issue']) || isset($diff['doc_status_text']));
+        $reopen = $mayReopen($old, $l) && !$staffAccepted($old, isset($diff['issue']) || isset($diff['doc_status_text']) || isset($diff['expiry_date']));
         if ($old['closed_at'] !== null && !$reopen) {                      // stays closed
             if ($confirm) $db->prepare("UPDATE booking_followups SET last_seen_at = ? WHERE id = ?")->execute([$now, $id]);
             $sum['unchanged']++;
@@ -1923,6 +2124,9 @@ function followup_apply(PDO $db, string $type, array $cand, array $scope, bool $
             $reason = 'auto_cancelled';                                     // the folder (or its group) was renamed _CANCELLED
         }
         elseif (($old['end_date'] ?: $old['start_date']) && ($old['end_date'] ?: $old['start_date']) < $today) $reason = 'auto_trip_ended';
+        elseif (isset($collapsed[$key])) $reason = 'auto_merged';                                     // same document's provisional: one line
+        elseif (followup_prov_until_paid($old)) $reason = 'auto_resolved';                            // Heart and Soul & co: held until paid
+        elseif (followup_group_rooms_wait($old, $today)) $reason = 'auto_resolved';                   // group rooms not sold yet, before 60 days
         elseif (followup_path_is_provisional((string)$old['folder']) && !followup_prov_keeps($type, $old)) $reason = 'auto_resolved';   // rooms count only
         elseif ($type === 'supplier' && isset($scope['confirmed'][$key])) $reason = 'auto_confirmed';
         elseif ($type === 'ticket' && isset($scope['ok'][$rid])) $reason = 'auto_ticket_saved';
@@ -1954,7 +2158,11 @@ function followup_apply(PDO $db, string $type, array $cand, array $scope, bool $
             $db->prepare("UPDATE booking_followups SET closed_at = ?, closed_by = 'system', close_reason = ?, sources = ? WHERE id = ? AND closed_at IS NULL")
                ->execute([$now, $reason, followup_sources_json($src), (int)$old['id']]);
             followup_event($db, (int)$old['id'], null, 'closed', null,
-                           $reason . ($reason === 'auto_confirmed' ? ' — ' . $scope['confirmed'][$key] : '') . ($tag !== FU_TYPE_SOURCE[$old['type']] ? ' (' . $tag . ')' : ''));
+                           $reason . ($reason === 'auto_confirmed' ? ' — ' . $scope['confirmed'][$key] : '')
+                           . ($reason === 'auto_merged' ? ' — one provisional line per document (' . basename((string)$old['source_file']) . ')' : '')
+                           . ($reason === 'auto_resolved' && followup_prov_until_paid($old) ? ' — provisional until paid, no expiry: rooms held' : '')
+                           . ($reason === 'auto_resolved' && followup_group_rooms_wait($old, $today) ? ' — group rooms not sold yet: the group closes 60 days before arrival' : '')
+                           . ($tag !== FU_TYPE_SOURCE[$old['type']] ? ' (' . $tag . ')' : ''));
         }
     }
     return $sum;
@@ -1974,7 +2182,8 @@ function followup_clear_confirmed(PDO $db, array $docs, bool $confirm, string $t
     $now = date('Y-m-d H:i:s');
     foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $l) {
         foreach ($byReq[(int)$l['request_id']] as $k => $d) {
-            if (!followup_service_match($l, $d + ['audience' => 'booking'])) continue;
+            $sameDoc = ($di = followup_doc_id($l)) !== '' && $di === followup_doc_id($d);   // one provisional line per document
+            if (!$sameDoc && !followup_service_match($l, $d + ['audience' => 'booking'])) continue;
             $src = followup_sources($l);
             $gone = array_keys(array_filter($src, fn($e) => in_array($e['issue'] ?? '', FU_PROVISIONAL_ISSUES, true)));
             if (!$gone) break;

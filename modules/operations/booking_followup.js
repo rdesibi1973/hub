@@ -42,7 +42,8 @@
                group: params.get('folder') || '', open: {},   // GRP member: the group's lines belong to the group's first request
                exp: {},    // "Set expiry" forms open: {id: {date, proof, name, file, files, err, busy}}
                mail: {},   // "✉ Mail" forms open: {id: {to, subject, message, err, busy}}
-               recheck: {}};   // "↻ Recheck" of a booking gate line: {request_id: {busy, msg, err}}
+               recheck: {},    // re-run of a line's check: {kind:id: {busy, msg, err}}
+               showNormal: false};   // NORMAL lines shown (the list opens on URGENT + HIGH)   // "↻ Recheck" of a booking gate line: {request_id: {busy, msg, err}}
   var $ = function (id) { return document.getElementById(id); };
 
   function esc(s) {
@@ -563,13 +564,22 @@
       pending[tr.dataset.id] = ['owner', 'staff_status', 'notes', 'due_date'].map(function (f) { var el = field(tr, f); return el ? [f, el.value] : null; }).filter(Boolean);
     });
     var list = sortRows(all().filter(function (r) { return inTab(r, state.tab) && passes(r); }));
+    // The list opens on URGENT + HIGH (deadline within 30 days); NORMAL lines wait behind one button. A priority filter,
+    // a search or one booking / group shows everything (25 Nov 2026: too many lines to keep up with).
+    var later = [];
+    if (state.tab !== 'closed' && !state.prio && !state.q && !state.request && !state.group && !state.showNormal) {
+      later = list.filter(function (r) { return r.priority === '3-NORMAL'; });
+      list = list.filter(function (r) { return r.priority !== '3-NORMAL'; });
+    }
     var head = ['Priority / deadline', state.tab === 'groups' ? 'Arrival' : 'Service', 'Client / folder',
                 state.tab === 'tickets' ? 'Flight' : state.tab === 'groups' ? 'Group' : state.tab === 'provisional' ? 'Supplier' : 'Supplier / service',
                 'Issue / found by', state.tab === 'groups' ? 'What we found' : state.tab === 'docs' || state.tab === 'transfers' ? 'What to do' : 'Document status',
                 'File', 'Owner', 'Status', 'Notes', state.tab === 'closed' ? 'Closed' : 'Checked'];
     t.innerHTML = '<thead><tr>' + head.map(function (h) { return '<th>' + h + '</th>'; }).join('') + '</tr></thead>';
     var body = document.createElement('tbody');
-    if (!list.length) {
+    if (!list.length && later.length) {
+      body.innerHTML = '<tr><td colspan="' + head.length + '" class="fu-empty">Nothing URGENT or HIGH here.</td></tr>';
+    } else if (!list.length) {
       body.innerHTML = '<tr><td colspan="' + head.length + '" class="fu-empty">' +
         (all().length ? 'Nothing here with these filters.' : 'No open items. The check fills this list (tickets every morning, supplier documents every Monday).') + '</td></tr>';
     }
@@ -577,6 +587,19 @@
       body.appendChild(row(r));
       if (state.open[r.id]) body.appendChild(histRow(r, state.open[r.id], head.length));
     });
+    if (later.length) {
+      var more = document.createElement('tr');
+      more.className = 'fu-more';
+      more.innerHTML = '<td colspan="' + head.length + '"><button type="button" class="btn btn-outline btn-sm" data-shownormal="1">▾ Show ' + later.length +
+                       ' NORMAL line' + (later.length === 1 ? '' : 's') + '</button> <span class="fu-days" style="display:inline">deadline more than 30 days away</span></td>';
+      body.appendChild(more);
+    } else if (state.showNormal && state.tab !== 'closed' && !state.prio && !state.q && !state.request && !state.group &&
+               list.some(function (r) { return r.priority === '3-NORMAL'; })) {
+      var less = document.createElement('tr');
+      less.className = 'fu-more';
+      less.innerHTML = '<td colspan="' + head.length + '"><button type="button" class="btn btn-outline btn-sm" data-shownormal="0">▴ URGENT + HIGH only</button></td>';
+      body.appendChild(less);
+    }
     t.appendChild(body);
     Object.keys(pending).forEach(function (id) {
       var tr = body.querySelector('tr[data-id="' + id + '"]');
@@ -669,6 +692,7 @@
   $('fu-table').addEventListener('click', function (ev) {
     var b = ev.target.closest('button');
     if (!b) return;
+    if (b.dataset.shownormal) { state.showNormal = b.dataset.shownormal === '1'; renderTable(); return; }
     var tr = b.closest('tr[data-id]');
     if (!tr) return;
     var id = parseInt(tr.dataset.id, 10);
