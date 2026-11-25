@@ -254,6 +254,8 @@ if (!defined('ITI_FINAL_PICK_CODE_GAP')) define('ITI_FINAL_PICK_CODE_GAP', 10);
  * on the shared Arusha / Karatu / beach nights, ahead of Simba + Zanzibar at 62% only for its two extra beach nights).
  */
 if (!defined('ITI_FINAL_AREA_PENALTY'))  define('ITI_FINAL_AREA_PENALTY', 15);
+/** Beach extensions (iti_final_places() areas): no park in the sample check, named in the intro when the Calc sleeps there. */
+if (!defined('ITI_FINAL_BEACH_AREAS'))   define('ITI_FINAL_BEACH_AREAS', array('Zanzibar', 'Mafia', 'Pemba'));
 
 /**
  * Safari areas a text names, for the park check of iti_final_pick_sample(): iti_final_places() without the gateway
@@ -264,7 +266,7 @@ if (!defined('ITI_FINAL_AREA_PENALTY'))  define('ITI_FINAL_AREA_PENALTY', 15);
 function iti_final_area_list(string $text): array {
     $out = array();
     foreach (array_keys(iti_final_places($text)) as $a) {
-        if (in_array($a, array('Arusha', 'Kilimanjaro', 'Dar es Salaam', 'Nairobi', 'Zanzibar'), true)) continue;
+        if (in_array($a, array('Arusha', 'Kilimanjaro', 'Dar es Salaam', 'Nairobi'), true) || in_array($a, ITI_FINAL_BEACH_AREAS, true)) continue;
         $out[$a === 'Karatu' ? 'Ngorongoro' : $a] = true;
     }
     return $out;
@@ -508,6 +510,8 @@ function iti_final_places(string $text): array {
         'Lake Eyasi'    => '/\beyasi\b/u',
         'Lake Natron'   => '/\bnatron\b/u',
         'Zanzibar'      => '/\b(znz|zanzibar|zanzíbar|sansibar|stone ?town|nungwi|kendwa|kiwengwa|matemwe|pwani|paje|jambiani|michamvi|uroa)\b/u',
+        'Mafia'         => '/\bmafia\b/u',
+        'Pemba'         => '/\bpemba\b/u',
         'Dar es Salaam' => '/\bdar\b/u',
         'Nairobi'       => '/\b(nairobi|nbo)\b/u',
         'Amboseli'      => '/\bamboseli\b/u',
@@ -1513,6 +1517,15 @@ function iti_final_generate(PDO $db, int $requestId, array $calc, int $sampleId,
         foreach ($plan['days'] as $d) if ($d['sample_index'] === null && $d['dest_id']) $addedDest[(int)$d['dest_id']] = true;
         iti_final_subtitle_places($db, (int)$newId, array_keys(array_diff_key($droppedDest, $keptDest, $addedDest)),
                                   array_keys(array_diff_key($addedDest, $keptDest)));
+        // Beach nights of the Calc (Zanzibar, Mafia, Pemba) named in the intro when the sample does not.
+        $beach = array();
+        foreach ($plan['days'] as $d) {
+            if (!$d['lodge_id'] || !($li = iti_final_lodge_info($db, (int)$d['lodge_id']))) continue;
+            foreach (array_keys(iti_final_places((string)$li['dest_name'])) as $a) {
+                if (in_array($a, ITI_FINAL_BEACH_AREAS, true)) $beach[$a] = true;
+            }
+        }
+        iti_final_intro_beach($db, (int)$newId, array_keys($beach));
 
         // Safety net: one programme day per Calc day row, never a day silently lost.
         $st = $db->prepare('SELECT COUNT(*) FROM iti_program_days WHERE program_id = ?');
@@ -1580,7 +1593,7 @@ function iti_final_generate(PDO $db, int $requestId, array $calc, int $sampleId,
  * the English name is replaced by the English name, the language's by the language's. Never throws.
  */
 function iti_final_subtitle_places(PDO $db, int $programId, array $dropped, array $added): void {
-    if (!$dropped || !$added) return;
+    if (!$added) return;
     try {
         $cols = iti_table_columns('iti_programs');
         $langs = array();
@@ -1634,6 +1647,64 @@ function iti_final_subtitle_places(PDO $db, int $programId, array $dropped, arra
         $db->prepare('UPDATE iti_programs SET ' . implode(', ', $set) . ' WHERE id = ?')->execute($vals);
     } catch (Throwable $e) {
         error_log('iti_final_subtitle_places #' . $programId . ': ' . $e->getMessage());
+    }
+}
+
+/**
+ * A sample intro in language $lang with a beach extension it does not name yet ($place: Zanzibar, Mafia, Pemba — 25 Nov
+ * 2026, Grande Migrazione Inverno + Zanzibar nights in the Calc): "Estensione mare a Zanzibar." before "Safari in breve:"
+ * and the place added to the "- Destinazioni: …" line ("Tarangire, Serengeti Ndutu e Ngorongoro." → "Tarangire,
+ * Serengeti Ndutu, Ngorongoro e Zanzibar."). Either part is skipped when its marker is not in the text. Text only.
+ */
+function iti_final_intro_add_beach(string $intro, string $lang, string $place): string {
+    static $L = array(
+        'it' => array('Safari in breve:',         'Estensione mare a %s. ',      'Destinazioni:', 'e'),
+        'en' => array('The safari at a glance:',  'Beach extension in %s. ',     'Destinations:', 'and'),
+        'fr' => array('Le safari en bref :',      'Extension balnéaire à %s. ',  'Destinations :', 'et'),
+        'es' => array('El safari en breve:',      'Extensión de playa en %s. ',  'Destinos:', 'y'),
+        'de' => array('Die Safari im Überblick:', 'Badeverlängerung auf %s. ',   'Reiseziele:', 'und'),
+    );
+    static $names = array('es' => array('Zanzibar' => 'Zanzíbar'), 'de' => array('Zanzibar' => 'Sansibar'));
+    if (trim($intro) === '' || !isset($L[$lang])) return $intro;
+    $area = iti_final_first_place(iti_final_places($place));
+    if ($area !== '' && isset(iti_final_places($intro)[$area])) return $intro;   // already named
+    list($marker, $sentence, $label, $and) = $L[$lang];
+    $name = $names[$lang][$place] ?? $place;
+    if (($p = mb_strpos($intro, $marker)) !== false) {
+        $intro = mb_substr($intro, 0, $p) . sprintf($sentence, $name) . mb_substr($intro, $p);
+    }
+    $intro = (string)preg_replace_callback('/^(\s*-?\s*' . preg_quote($label, '/') . '\s*)(.+?)(\.?)[ \t]*$/mu',
+        function ($m) use ($and, $name) {
+            $list = $m[2];
+            if (($k = mb_strrpos($list, ' ' . $and . ' ')) !== false) $list = mb_substr($list, 0, $k) . ', ' . mb_substr($list, $k + mb_strlen($and) + 2);
+            return $m[1] . $list . ' ' . $and . ' ' . $name . ($m[3] !== '' ? $m[3] : '.');
+        }, $intro, 1);
+    return $intro;
+}
+
+/** The final's intro in every language names the Calc's beach extensions ($places, iti_final_intro_add_beach()). Never throws. */
+function iti_final_intro_beach(PDO $db, int $programId, array $places): void {
+    if (!$places) return;
+    try {
+        $cols = iti_table_columns('iti_programs');
+        $langs = array();
+        foreach (ITI_LANGUAGES as $l) if (in_array('intro_' . $l, $cols, true)) $langs[] = $l;
+        if (!$langs) return;
+        $st = $db->prepare('SELECT intro_' . implode(', intro_', $langs) . ' FROM iti_programs WHERE id = ?');
+        $st->execute(array($programId));
+        $row = $st->fetch(PDO::FETCH_ASSOC);
+        if (!$row) return;
+        $set = array(); $vals = array();
+        foreach ($langs as $l) {
+            $v = (string)$row['intro_' . $l]; $new = $v;
+            foreach ($places as $p) $new = iti_final_intro_add_beach($new, $l, $p);
+            if ($new !== $v) { $set[] = 'intro_' . $l . ' = ?'; $vals[] = $new; }
+        }
+        if (!$set) return;
+        $vals[] = $programId;
+        $db->prepare('UPDATE iti_programs SET ' . implode(', ', $set) . ' WHERE id = ?')->execute($vals);
+    } catch (Throwable $e) {
+        error_log('iti_final_intro_beach #' . $programId . ': ' . $e->getMessage());
     }
 }
 
