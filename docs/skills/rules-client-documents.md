@@ -13,6 +13,7 @@ When a rule changes, change it here (with the date) and not in a skill.
 - **Private group quoted for several group sizes** (one Calc pax sheet per size, e.g. 10 / 11 / 12 pax): one price row per size, "Quota per persona, base N pax", smallest group first, no total. Never for GRP group departures (7 Nov 2026).
 - Prices are whole numbers (ITI prints no decimals): teen and child prices are rounded to a whole number so the Calc, the Word and the email show the same figure.
 - ZNZ / Pemba transfers are per car, on their own line after the per-person total.
+- Zanzibar transfers airport – hotel – airport cost the same for every hotel on the island (only Stone Town hotels may cost less). When the hotel is not known yet (e.g. a quote without the Zanzibar hotel), keep the transfer in the price and don't write that it depends on the hotel's area or that it will be checked (Roberto, 26 Nov 2026, Folli).
 
 ## 2. Links and attachments
 
