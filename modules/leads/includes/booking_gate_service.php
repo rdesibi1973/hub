@@ -26,7 +26,7 @@ require_once __DIR__ . '/booking_check.php';                          // bc_requ
 require_once __DIR__ . '/ck_lib.php';                                 // ck_tracker_row_for, ck_owners_resolve, ck_set_owners
 require_once __DIR__ . '/../../operations/includes/followup_service.php';   // followup_gate_upsert, supplier matching
 
-const BG_EXTRACT_VERSION   = 3;          // bump when the extraction request changes: cached documents are read again (2: room lines, total pax; 3: meal extras)
+const BG_EXTRACT_VERSION   = 4;          // bump when the extraction request changes: cached documents are read again (2: room lines, total pax; 3: meal extras; 4: driver / guide rooms)
 const BG_TOLERANCE         = 5.0;        // USD per invoice over the Calc cost still OK
 const BG_OVERRIDE_USER     = 'rdesibi';  // Roberto De Sibi (not "roberto" = Roberto Capri)
 const BG_TICK_SECONDS      = 45;         // a worker tick starts no new document after this
@@ -830,6 +830,9 @@ function bg_extract_system(): string {
          . 'or nights × rooms (unit price per person / per room per night: "Pearl Suites for 2 adults for 3 nights", Qty 6 → nights_billed 3). rooms: one entry per room line; type = the room name exactly as '
          . 'printed, bed layout included (e.g. "Jambo (1Dbl & 2Sngl)", "Executive Family Room", "Tusker Villa", "Twin"); count = the number of '
          . 'rooms on that line (Rm / quantity column). A bed layout such as "1Dbl & 2Sngl" describes ONE room: never split it into several rooms. '
+         . 'A line for the safari driver / guide\'s accommodation ("DRIVER GUIDE", "Driver room", "Guide FB", "Driver accommodation") is a rooms '
+         . 'entry of the same stay with that text as type (count = drivers / guides billed, 1 if not printed), its price part of the stay\'s amount_total; '
+         . 'the driver / guide is NEVER counted in adults / children. '
          . 'adults / children = the TOTAL guests of that service, all its rooms together (e.g. Rm 2 with Ad 2 per room = 4 adults); children = '
          . 'anyone billed or listed as a child. meal_plan of a stay = the board of the room rate as printed (rate type "PL STO B&B" → "B&B"). '
          . 'Meals billed apart from the room (an "Extras" line "Dinner", "Lunch", "HB supplement", "Full board supplement"): one extra '
@@ -1948,10 +1951,23 @@ function bg_eval_stay(array &$svcs, int $i, array $named, array &$items, callabl
         foreach ($ds['rooms'] ?? [] as $r) {
             if (bg_guide_room((string)($r['type'] ?? ''))) $guideN += max(1, (int)($r['count'] ?? 1)); else $guest[] = $r;
         }
+        if (!$guideN) {
+            // Driver / guide line printed on the document but not read as a room line (Pure Tarangire, ChiaraChissotti 26 Nov
+            // 2026: "CHIARA CHISSOTTI 2" + "DRIVER GUIDE" read as one stay of 3 adults): same rule as a guide room.
+            // Only when it explains the extra pax: a description merely naming the guide changes nothing.
+            $gl = bg_doc_guide_lines($items, $k, $di, $do);
+            $gp = $paxOf($ds);
+            if ($gl['n'] && $gp !== null && !bg_pax_ok($gp, $pp) && bg_pax_ok($gp - $gl['n'], $pp)) {
+                $guideN = $gl['n'];
+                foreach ($gl['keys'] as $xk) { $useItem($xk, $i); $extraKeys[$xk] = $xk; }
+            }
+        }
         if ($guideN) {
+            $guideOnly = !empty($ds['rooms']) && !$guest;   // an item of the driver / guide room alone: no guests to compare
             $ds['rooms'] = $guest;
             $gp = $paxOf($ds);
-            if ($gp !== null && !bg_pax_ok($gp, $pp) && bg_pax_ok($gp - $guideN, $pp)) $ds['adults'] = max(0, (int)$ds['adults'] - $guideN);
+            if ($guideOnly && $gp !== null && $gp <= $guideN) { $ds['adults'] = null; $ds['children'] = null; }
+            elseif ($gp !== null && !bg_pax_ok($gp, $pp) && bg_pax_ok($gp - $guideN, $pp)) $ds['adults'] = max(0, (int)$ds['adults'] - $guideN);
             $gTxt = $guideN . ' guide / driver room' . ($guideN > 1 ? 's' : '');
             if ($pp['jeeps'] > 0 && $guideN > $pp['jeeps']) {
                 $add('guide_rooms', $s['name'] . ': ' . $gTxt . ' booked, the Calc has ' . $pp['jeeps'] . ' jeep' . ($pp['jeeps'] > 1 ? 's' : '') . ': check with the supplier.',
@@ -2062,6 +2078,33 @@ function bg_eval_stay(array &$svcs, int $i, array $named, array &$items, callabl
         foreach ($extraKeys as $k) $stayGroups[$gk]['items'][$k] = $k;
         $stayGroups[$gk]['svcs'][] = $i;
     }
+}
+
+/**
+ * Driver / guide accommodation printed on the document of stay item $k but not read as a room line: the stay's own
+ * description ("... DRIVER GUIDE"), or another item of the same file (type other / stay, no guest rooms) for the driver /
+ * guide, dated inside the stay or undated. Fees for the guide (park, concession) are not accommodation.
+ * → ['n' => drivers / guides, 'keys' => those other items (their price belongs to the stay)].
+ */
+function bg_doc_guide_lines(array $items, int $k, ?string $in, ?string $out): array {
+    $fee = '/\b(park|concession|conservation|crater|fees?|levy|permit|entry|tax)\b/i';
+    $file = $items[$k]['file']; $n = 0; $keys = [];
+    $own = (string)($items[$k]['ds']['description'] ?? '');
+    if (bg_guide_room($own) && !preg_match($fee, $own)) $n = 1;
+    foreach ($items as $j => $it) {
+        if ($j === $k || $it['file'] !== $file || !empty($it['used'])) continue;
+        $ds = $it['ds'];
+        if (!in_array($ds['type'] ?? '', ['other', 'stay'], true)) continue;
+        $guestRooms = array_filter($ds['rooms'] ?? [], fn($r) => !bg_guide_room((string)($r['type'] ?? '')));
+        if ($guestRooms) continue;
+        $d = trim(($ds['description'] ?? '') . ' ' . implode(' ', array_map(fn($r) => (string)($r['type'] ?? ''), $ds['rooms'] ?? [])));
+        if (!bg_guide_room($d) || preg_match($fee, $d)) continue;
+        $sd = bg_date($ds['service_date'] ?? null) ?? bg_date($ds['check_in'] ?? null);
+        if ($sd && $in && $out && ($sd < $in || $sd > $out)) continue;
+        $keys[] = $j;
+    }
+    if ($keys) $n = max($n, count($keys));
+    return ['n' => $n, 'keys' => $keys];
 }
 
 function bg_rooms_text(array $r): string {
