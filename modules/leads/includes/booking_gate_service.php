@@ -833,7 +833,8 @@ function bg_extract_system(): string {
          . 'adults / children = the TOTAL guests of that service, all its rooms together (e.g. Rm 2 with Ad 2 per room = 4 adults); children = '
          . 'anyone billed or listed as a child. meal_plan of a stay = the board of the room rate as printed (rate type "PL STO B&B" → "B&B"). '
          . 'Meals billed apart from the room (an "Extras" line "Dinner", "Lunch", "HB supplement", "Full board supplement"): one extra '
-         . 'service of type "other" each, property = the lodge, description = the line as printed, service_date, amount_total. '
+         . 'service of type "other" each, property = the lodge, description = the line as printed, service_date, amount_total; the same for '
+         . 'any other supplement / surcharge on its own price line (festive, peak, single supplement). The stay\'s amount_total = its room lines only. '
          . 'Flights: every leg with origin and destination airport as printed and STD / STA times. amount_total = total of that service as '
          . 'printed; commission = commission amount if a commission line is shown; net_amount = amount after commission; amount_due = the amount '
          . 'still to pay as printed ("DUE AMOUNT", "Amount due", "Balance due"), null if not printed. status: confirmed, '
@@ -2012,6 +2013,13 @@ function bg_eval_stay(array &$svcs, int $i, array $named, array &$items, callabl
                 $dm = $xm['rank'];
             }
         }
+        // Meal / supplement lines billed apart on the same document are part of the supplier's amount whatever the meal
+        // plan (Zanzibar Pearl, 26 Nov 2026: 756 room + 180 "Half Board Supplement" = 936, read as 756): a supplement on its
+        // own line must not hide an invoice above the Calc.
+        foreach (bg_stay_extras($items, $k, $di, $do) as $xk) {
+            if (isset($extraKeys[$xk])) continue;
+            $useItem($xk, $i); $extraKeys[$xk] = $xk;
+        }
         if ($cm !== null && $dm !== null && $dm < $cm) {
             $low = $dm <= 1 || $cm - $dm >= 2;   // FB on the Calc with HB booked can be fine; BB / RO never
             $add($low ? 'stay_meal_plan' : 'meal_plan_note', $s['name'] . ': ' . $ds['meal_plan'] . ' booked, the Calc says ' . bg_meal_label($cm) . '.', $s, ['source_file' => $items[$k]['file']]);
@@ -2068,6 +2076,28 @@ function bg_meal_label(int $r): string { return ['RO', 'BB', 'HB', 'FB', 'AI'][$
  * or undated): dinner or HB supplement → HB, lunch + dinner or FB supplement → FB. ['rank' => ?int, 'keys' => item keys, 'text'].
  * A stay item whose own meal_plan already says so is handled by the caller; here only other items of the same file.
  */
+/**
+ * Lines of the same document as stay item $k billed apart from the room, to add to the stay's amount: meals (dinner, lunch,
+ * HB / FB) and supplements / surcharges (festive, peak, single), dated inside the document's stay or undated. Not another
+ * room block, not a lodge activity (bush dinner, sundowner: bg_undated_activity()), not fees / taxes (concession, park,
+ * levy: where they belong is decided elsewhere). Item keys not yet used.
+ */
+function bg_stay_extras(array $items, int $k, ?string $in, ?string $out): array {
+    $file = $items[$k]['file']; $keys = [];
+    foreach ($items as $j => $it) {
+        if ($j === $k || $it['file'] !== $file || !empty($it['used'])) continue;
+        $ds = $it['ds'];
+        if (($ds['type'] ?? '') !== 'other') continue;
+        $d = trim(($ds['description'] ?? '') . ' ' . ($ds['meal_plan'] ?? ''));
+        if ($d === '' || !preg_match('/dinner|lunch|half[\s-]*board|full[\s-]*board|\b(hb|fb)\b|supplement|surcharge/i', $d)) continue;
+        if (preg_match('/bush|sundowner|picnic|concession|park|conservation|levy|tax|vat\b|visa|permit/i', $d)) continue;
+        $sd = bg_date($ds['service_date'] ?? null) ?? bg_date($ds['check_in'] ?? null);
+        if ($sd && $in && $out && ($sd < $in || $sd > $out)) continue;
+        $keys[] = $j;
+    }
+    return $keys;
+}
+
 function bg_meal_extras(array $items, int $k, ?string $in, ?string $out): array {
     $file = $items[$k]['file']; $lunch = $dinner = false; $rank = null; $keys = []; $txt = [];
     foreach ($items as $j => $it) {
