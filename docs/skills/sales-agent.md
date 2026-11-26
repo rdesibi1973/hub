@@ -72,7 +72,7 @@ Where the draft goes, subject, greeting/closing, signature and general style: fo
 - "La quota include:" ("trasferimenti durante il safari"…) / "Non include:" (the exclusions of `rules-client-documents` §5; beach transfers named precisely…).
 - Domestic flights: "Le tariffe e disponibilità dei voli interni sono soggette a disponibilità al momento della prenotazione".
 - Prices, links, names never shown, group / private wording, "program" in English: `rules-client-documents`.
-- Only when the programme is attached: "Programma safari dettagliato allegato (considera la quota netta per il gruppo di N pax)." Group departures (GRP): "Programma safari dettagliato allegato (quota netta per persona)." (23 Oct 2026, DiCredico).
+- Agencies: the programme Word (`<ref_number>.docx`) is ALWAYS attached to the proposal / offer email, without asking (Roberto, 25 Nov 2026, Folli). Closing sentence: "Programma safari dettagliato allegato (considera la quota netta per il gruppo di N pax)." Group departures (GRP): "Programma safari dettagliato allegato (quota netta per persona)." (23 Oct 2026, DiCredico).
 - Group programmes: before attaching, check the group wording (`rules-client-documents` §4).
 - An agency sends us a programme we already quoted to its client as a direct: Roberto evaluates case by case — don't answer with prices before his decision (16 Oct 2026).
 - Don't mention international flights unless asked; don't offer to "verify availability and block everything" on a loose ok.
