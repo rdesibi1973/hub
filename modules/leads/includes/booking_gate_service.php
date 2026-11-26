@@ -1685,7 +1685,7 @@ function bg_evaluate(array $snap, array $docs, ?callable $alias = null, ?callabl
         $legs = array_values(array_filter($legs, fn($l) => !bg_date($l['date'] ?? null) || $l['date'] === $s['date']));
         $from = $legs ? bg_airport_code($legs[0]['from_airport'] ?? null) : null;
         $to = $legs ? bg_airport_code(end($legs)['to_airport'] ?? null) : null;
-        $ok = true;
+        $ok = true; $partial = false;
         $f0 = $items[$cand[0]]['file'];
         $bookedTxt = $legs ? implode(' → ', array_merge([($legs[0]['from_airport'] ?? '?')], array_map(fn($l) => $l['to_airport'] ?? '?', $legs))) : '?';
         $flNo = $legs ? trim(implode(' / ', array_unique(array_filter(array_map(fn($l) => $l['flight_no'] ?? '', $legs))))) : '';
@@ -1708,7 +1708,12 @@ function bg_evaluate(array $snap, array $docs, ?callable $alias = null, ?callabl
         foreach ($cand as $k) {
             $ds = $items[$k]['ds'] + ['_file' => $items[$k]['file']];
             $p = $paxOf($ds);
-            if ($p !== null && !bg_pax_ok($p, $pp)) { $ok = false; $add('flight_pax', 'Flight booked for ' . $p . ' pax, the Calc has ' . bg_pax_text($pp) . '.', $s, ['source_file' => $items[$k]['file'], 'over' => $p > (int)$pp['guests']]); }
+            if ($p !== null && $p > 0 && $p < (int)$pp['paying'] && !empty($snap['group'])) {
+                // GRP: seats are bought as participants confirm (Roberto, 26 Nov 2026: Flightlink wants a deposit and holds no
+                // extra seats, 2 of the 6 fly to ZNZ for now) — fewer seats than the group Calc is a note, never a block.
+                $partial = true;
+                $svcs[$i]['notes'][] = 'Group: flight booked for ' . $p . ' of ' . bg_pax_text($pp) . ' pax — the other seats are bought as participants confirm.';
+            } elseif ($p !== null && !bg_pax_ok($p, $pp)) { $ok = false; $add('flight_pax', 'Flight booked for ' . $p . ' pax, the Calc has ' . bg_pax_text($pp) . '.', $s, ['source_file' => $items[$k]['file'], 'over' => $p > (int)$pp['guests']]); }
             if (($ds['status'] ?? '') === 'cancelled') $ok = false;
             $status($ds, $s);
         }
@@ -1720,10 +1725,12 @@ function bg_evaluate(array $snap, array $docs, ?callable $alias = null, ?callabl
             $flightDocs[$key]['items'][$k] = true;
             $flightDocs[$key]['svcs'][$i] = true;
             if (!$ok) $flightDocs[$key]['blocked'] = true;
+            if ($partial) $flightDocs[$key]['partial'] = true;
         }
     }
     foreach ($flightDocs as $g) {
         if (!empty($g['blocked'])) continue;   // the amount is checked only once route, pax and status are right
+        if (!empty($g['partial'])) { $svcs[array_key_first($g['svcs'])]['notes'][] = 'Flight amount not checked (group: only part of the seats booked).'; continue; }
         $net = 0.0; $known = true; $usd = true;
         foreach (array_keys($g['items']) as $k) { $n = bg_net($items[$k]['ds']); if ($n === null) $known = false; else $net += $n; if (!bg_usd($items[$k]['ds'])) $usd = false; }
         $cost = 0.0;

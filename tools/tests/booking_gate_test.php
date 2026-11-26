@@ -183,6 +183,16 @@ $t('GRP block after release date → stay_pax blocking, "release"', !$res['passe
    && strpos(implode(' ', array_column($res['findings'], 'text')), 'past its release date') !== false, $issues($res));
 $res = bg_evaluate($grp('2026-06-01'), [$tt(['adults' => 1, 'rooms' => [['type' => 'Single', 'count' => 1]]]), $okFlight]);
 $t('GRP fewer pax than the Calc → blocking', !$res['passed'] && in_array('stay_pax!', $issues($res), true), $issues($res));
+// GRP flight with fewer seats than the Calc (Roberto, 26 Nov 2026: Flightlink deposit, no extra seats held) → note, not a block.
+$grp6 = ['group' => true, 'today' => '2026-06-01'] + $snap($base, ['pax' => ['adults' => 6, 'teen' => 0, 'child' => 0], 'room_config' => '3 DBL']);
+$res = bg_evaluate($grp6, [$tt(['adults' => 6, 'rooms' => [['type' => 'Double', 'count' => 3]]]), $doc('invoices/flight.pdf', [['adults' => 2] + $dsFlight('ARK', 'ZNZ', 300, 'confirmed')])]);
+$t('GRP flight 2 of 6 seats → no flight_pax, note', !in_array('flight_pax!', $issues($res), true) && !in_array('invoice_mismatch!', $issues($res), true)
+   && strpos(implode(' ', $res['services'][1]['notes']), '2 of 6') !== false, [$issues($res), $res['services'][1]['notes'] ?? null]);
+$res = bg_evaluate(['today' => '2026-06-01'] + $snap($base, ['pax' => ['adults' => 6, 'teen' => 0, 'child' => 0], 'room_config' => '3 DBL']),
+                   [$tt(['adults' => 6, 'rooms' => [['type' => 'Double', 'count' => 3]]]), $doc('invoices/flight.pdf', [['adults' => 2] + $dsFlight('ARK', 'ZNZ', 300, 'confirmed')])]);
+$t('private folder: flight 2 of 6 still blocking', in_array('flight_pax!', $issues($res), true), $issues($res));
+$t('Mara day trip is a guide activity', (bool)preg_match(BC_GUIDE_ACTIVITY, 'Mara day trip') && (bool)preg_match(BC_GUIDE_ACTIVITY, 'Mara river day-trip')
+   && !preg_match(BC_GUIDE_ACTIVITY, 'Mara River Camp'));
 $res = bg_evaluate(['today' => '2026-06-01'] + $snap($base), [$tt(['adults' => 6, 'rooms' => [['type' => 'Double', 'count' => 3]]]), $okFlight]);
 $t('private folder: more pax still blocking', !$res['passed'] && in_array('stay_pax!', $issues($res), true), $issues($res));
 $t('GRP member vs group parent', bg_grp_member(['group_folder' => '09_02SEP_GRP0209Nyumbu_PROGRESS', 'practice_code' => 'AdolfoPiazza(Elkebir-Roberto)'])

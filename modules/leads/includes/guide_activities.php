@@ -10,6 +10,7 @@
  * canoe), Shanga, coffee plantation / farm / tour (Roberto, 24 Nov 2026, VaniaLaRocca: "Shanga non si prenota e nemmeno
  * la visita del coffee plantation"; "coffee" alone is not enough — Arusha Coffee Lodge is a lodge). Matched anywhere in
  * the item ("Visit Iraqw boma", "Materuni waterfalls & coffee", "Shanga e poi vanno al Tarangire"); transfers are
- * excepted by the callers.
+ * excepted by the callers. Mara day trip (Roberto, 26 Nov 2026, GRP: "non c'è prenotazione, li porterà la nostra guida"):
+ * a game drive with our own jeep and guide, nothing to book ("Mara (river) day trip" only — "Mara" alone may be a camp).
  */
-const BC_GUIDE_ACTIVITY = '/\b(town tour|city tour|lunch in (\w+ )?town|town lunch|iraq[wk]|maa?sai|mto ?wa ?mbu|materuni|eyasi|hadza(be)?|datoga|natron|napuro|duluti|shanga|coffee (plantation|farm|tour|estate)s?)\b/i';
+const BC_GUIDE_ACTIVITY = '/\b(town tour|city tour|lunch in (\w+ )?town|town lunch|iraq[wk]|maa?sai|mto ?wa ?mbu|materuni|eyasi|hadza(be)?|datoga|natron|napuro|duluti|shanga|coffee (plantation|farm|tour|estate)s?|mara (river )?day[ -]?trip)\b/i';
