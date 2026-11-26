@@ -607,7 +607,7 @@ include 'includes/header.php';
               <input type="hidden" name="action" value="<?= $gc ? 'group_reopen' : 'group_close' ?>">
               <input type="hidden" name="ck_id" value="<?= $id ?>">
               <input type="hidden" name="return_qs" value="<?= h(http_build_query($qsKeep)) ?>">
-              <button class="ck-btn run" type="submit"><?= $gc ? '↩ Reopen group' : '👥 Group closed' ?></button>
+              <button class="ck-btn run" type="submit"><?= $gc ? '↩ Reopen group' : '✓ Mark group closed' ?></button>
             </form>
           <?php endif; ?>
         <?php endif; ?>
