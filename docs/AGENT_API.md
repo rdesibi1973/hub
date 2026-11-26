@@ -1058,6 +1058,12 @@ file `…_GUIDE_<LANG>.pdf`; `guide_docx` (or `guide_word`) = the same guide she
 `no_prices?` (`1` / `true`, 18 Nov 2026): `pdf` / `docx` without the "price per person" block (table + the language's price notes);
 inclusions / exclusions, tip note and terms stay, and they start at the top of their page. The program's data is not changed.
 Reply `file.no_prices: true`; with `guide` / `guide_docx` it is ignored (`file.note` "guide has no prices already").
+`neutral?` (`1` / `true`, 26 Nov 2026, **`format=pdf` only**, else 400): white-label PDF the agency forwards to its own client —
+no prices / price notes, no Savannah logo, footer, contacts, T&C or digital-itinerary link; "Savannah Explorers / Holidays"
+(with the preposition before it), `@savannahexplorers…` addresses and our links are taken out of the printed texts (the word
+"savannah" alone stays; photos untouched). Inclusions / exclusions and the tip note stay. Named `<Title>_<LANG>.pdf`, never the
+`ref_number` (it holds the agency's name); `save_as` still works. Reply `file.neutral: true`, `file.scrubbed` = mentions removed
+(> 0 → read the PDF before it goes out). Hub: program page → "📄 PDF neutro (cliente agenzia)" (`export_mag_word.php?…&format=pdf&neutral=1`).
 The guide sheet (21 Oct 2026) has only the safari part: Zanzibar / beach nights and the departure day after them are left
 out (the day the clients fly to the sea stays, without the beach hotel); day 1 shows the arrival flight
 (`iti_program_booking.arrival_details`, from the Calc — only programs generated from a Calc have it).
@@ -1078,6 +1084,7 @@ curl -sH "$H" "$U?action=iti_document&program_id=412&format=pdf" | jq -r .file.c
 curl -sH "$H" "$U?action=iti_document&program_id=412&format=docx&lang=en&save=1"      # → booking folder, <ref_number>.docx
 curl -sH "$H" "$U?action=iti_document&program_id=412&format=guide&save=1"            # guide sheet → booking folder
 curl -sH "$H" "$U?action=iti_document&program_id=412&format=pdf&no_prices=1&save=1"  # → <ref>_SenzaPrezzi.pdf
+curl -sH "$H" "$U?action=iti_document&program_id=412&format=pdf&neutral=1"          # white label → <Title>_<LANG>.pdf
 ```
 
 #### `iti_create_personal` (POST)

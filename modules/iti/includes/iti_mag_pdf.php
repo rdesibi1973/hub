@@ -121,7 +121,7 @@ td{vertical-align:top}
 .terms h1,.terms h2,.terms h3{font-family:"DejaVu Sans",sans-serif;font-size:9pt;font-weight:bold;margin:8px 0 3px}
 .nobrk{page-break-inside:avoid}
 </style></head><body>
-<div id="foot"><?= h($foot) ?></div>
+<?php if (empty($D['neutral'])): ?><div id="foot"><?= h($foot) ?></div><?php endif; /* white-label PDF for the agency's client: no Savannah footer */ ?>
 
 <?php /* ── Cover ── */ ?>
 <?php if ($D['logo']) echo iti_mp_img($D['logo'], 300, $tmp, 'width:60pt;margin:0 0 14pt'); ?>
@@ -282,13 +282,17 @@ td{vertical-align:top}
 </tr></table>
 <?php endif; ?>
 
-<?php /* ── Contacts, terms ── */ ?>
+<?php /* ── Contacts, terms (none of them in the white-label PDF: iti_export_neutralise()) ── */ ?>
+<?php if ($D['contacts'] || $pub !== '' || $D['terms'] !== ''): ?>
 <div class="brk"></div>
+<?php endif; ?>
+<?php if ($D['contacts']): ?>
 <h2><?= h($T['contacts']) ?></h2>
 <table class="contacts">
 <tr class="hd"><td class="th"><?= h($T['ref']) ?></td><td class="th"><?= h($T['phone']) ?></td><td class="th"><?= h($T['email']) ?></td></tr>
 <?php foreach ($D['contacts'] as $c): ?><tr><td><?= h((string)$c['name']) ?></td><td><?= h((string)$c['phone']) ?></td><td><?= h((string)$c['email']) ?></td></tr><?php endforeach; ?>
 </table>
+<?php endif; ?>
 <?php if ($pub !== ''): ?><p style="margin-top:12px"><a href="<?= h($pub) ?>" style="display:inline-block;background:#B3241C;color:#fff;text-decoration:none;font-weight:bold;font-size:9pt;padding:4pt 11pt"><?= h($M['online_btn']) ?> →</a></p><?php endif; ?>
 <?php if ($D['terms'] !== ''): ?>
 <h3 style="margin-top:18px"><?= h($T['terms']) ?></h3>

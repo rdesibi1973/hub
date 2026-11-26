@@ -2045,17 +2045,24 @@ try {
         $fmt = (string)($in['format'] ?? 'pdf');
         $noPrices = !empty($in['no_prices']) && !in_array(strtolower(trim((string)$in['no_prices'])), ['false', 'no', 'off'], true);
         $isGuide  = in_array(strtolower(trim($fmt)), ['guide', 'guide_docx', 'guide_word'], true);
+        // neutral: white-label PDF for the agency's end client (no prices, Savannah logo / contacts / T&C / names) → <Title>_<LANG>.pdf.
+        $neutral  = !empty($in['neutral']) && !in_array(strtolower(trim((string)$in['neutral'])), ['false', 'no', 'off'], true);
+        if ($neutral && $isGuide) agent_fail('neutral is for the client programme (format pdf), not the guide sheet', 400);
         try {
             iti_im_guard_document($db, $pid, (string)($in['lang'] ?? ''));   // imported programme: no supplier name in what is printed (422)
-            $f = iti_export_file($pid, (string)($in['lang'] ?? ''), $fmt, ['no_prices' => $noPrices && !$isGuide]);
+            $f = iti_export_file($pid, (string)($in['lang'] ?? ''), $fmt, ['no_prices' => $noPrices && !$isGuide, 'neutral' => $neutral]);
         } catch (ItiImportException $e) { agent_fail($e->getMessage(), $e->http, $e->data); }
         catch (InvalidArgumentException $e) { agent_fail($e->getMessage(), stripos($e->getMessage(), 'not found') !== false ? 404 : 400); }
         catch (Throwable $e) { agent_fail('Document not generated: ' . $e->getMessage(), 500); }
         $extra = ['format' => $f['format'], 'lang' => $f['lang']];
         if ($noPrices && $isGuide) $extra['note'] = 'guide has no prices already';
         elseif ($noPrices)         $extra['no_prices'] = true;
-        $refName = iti_ps_document_name((array)iti_get_program($pid), $fmt, $noPrices && !$isGuide);
-        if ($refName !== null) {
+        if ($neutral) { $extra['neutral'] = true; $extra['scrubbed'] = (int)($f['scrubbed'] ?? 0); }
+        unset($f['neutral'], $f['scrubbed']);
+        $refName = $neutral ? null : iti_ps_document_name((array)iti_get_program($pid), $fmt, $noPrices && !$isGuide);
+        if ($neutral) {
+            // keeps <Title>_<LANG>.pdf: the ref_number holds the agency's name and the client would see it
+        } elseif ($refName !== null) {
             $f['name'] = $refName;
         } elseif ((!empty($in['save']) || (int)($in['request_id'] ?? 0) > 0 || trim((string)($in['folder_path'] ?? '')) !== '')
                   && trim((string)($in['save_as'] ?? '')) === '') {
