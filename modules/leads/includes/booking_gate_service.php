@@ -826,7 +826,8 @@ function bg_extract_system(): string {
          . 'Your job is extraction only: copy what the document says into the schema, one object per service (one per stay / night block, '
          . 'per flight booking, per transfer, per activity). Do not judge, compare or correct anything. Unknown or not printed → empty '
          . 'string for texts, null for numbers, empty array for lists. Dates as YYYY-MM-DD (the trip year is near the document date). nights_header = nights stated in the '
-         . 'header / summary; nights_billed = quantity of nights on the price lines. rooms: one entry per room line; type = the room name exactly as '
+         . 'header / summary; nights_billed = number of nights billed on the price lines, NOT the raw Qty when the Qty counts nights × persons '
+         . 'or nights × rooms (unit price per person / per room per night: "Pearl Suites for 2 adults for 3 nights", Qty 6 → nights_billed 3). rooms: one entry per room line; type = the room name exactly as '
          . 'printed, bed layout included (e.g. "Jambo (1Dbl & 2Sngl)", "Executive Family Room", "Tusker Villa", "Twin"); count = the number of '
          . 'rooms on that line (Rm / quantity column). A bed layout such as "1Dbl & 2Sngl" describes ONE room: never split it into several rooms. '
          . 'adults / children = the TOTAL guests of that service, all its rooms together (e.g. Rm 2 with Ad 2 per room = 4 adults); children = '
@@ -867,6 +868,24 @@ function bg_ai_extract(array $content, string $fileName, int $requestId): array 
     $data['_usage'] = ['in' => (int)($u['input_tokens'] ?? 0) + (int)($u['cache_read_input_tokens'] ?? 0) + (int)($u['cache_creation_input_tokens'] ?? 0),
                        'out' => (int)($u['output_tokens'] ?? 0), 'cost' => iti_ai_usd($served, $u), 'model' => $served];
     return $data;
+}
+
+/**
+ * Nights billed on a stay document. A Qty of nights × persons or nights × rooms (price per person / room per night:
+ * Zanzibar Pearl "for 2 adults for 3 nights", Qty 6) is the stay's nights, not more nights (26 Nov 2026).
+ * $span = arrival → departure nights of the document; null when the document prints no billed nights.
+ */
+function bg_billed_nights(array $ds, ?int $span): ?int {
+    if (!isset($ds['nights_billed']) || $ds['nights_billed'] === null) return null;
+    $b = (int)$ds['nights_billed'];
+    if ($span && $span > 0 && $b > $span && $b % $span === 0) {
+        $k = intdiv($b, $span);
+        $pax = (int)($ds['adults'] ?? 0) + (int)($ds['children'] ?? 0);
+        $rooms = 0;
+        foreach ($ds['rooms'] ?? [] as $r) $rooms += max(1, (int)($r['count'] ?? 1));
+        if ($k === $pax || $k === $rooms) return $span;
+    }
+    return $b;
 }
 
 /** "" (the schema's "not printed" for texts) → null, in every nested object; list items "" dropped. */
@@ -1918,7 +1937,7 @@ function bg_eval_stay(array &$svcs, int $i, array $named, array &$items, callabl
         if ($di === $in && $do === $out) $exact = true;
         // The document must agree with itself: header nights = arrival → departure = nights billed.
         $n = ($di && $do) ? bg_days($di, $do) : null;
-        $h = isset($ds['nights_header']) ? $ds['nights_header'] : null; $b = isset($ds['nights_billed']) ? $ds['nights_billed'] : null;
+        $h = isset($ds['nights_header']) ? $ds['nights_header'] : null; $b = bg_billed_nights($ds, $n);
         if ($n !== null && (($h !== null && (int)$h !== $n) || ($b !== null && (int)$b !== $n))) {
             $add('doc_inconsistent', $items[$k]['file'] . ': ' . bg_dm($di) . '–' . bg_dm($do) . ' = ' . $n . ' nights, ' . ($h !== null ? 'header ' . $h . ' nights' : '')
                  . ($h !== null && $b !== null ? ', ' : '') . ($b !== null ? 'billed ' . $b . ' nights' : '') . ': ask the supplier for a corrected document.', $s, ['source_file' => $items[$k]['file']]);
@@ -2017,7 +2036,7 @@ function bg_eval_stay(array &$svcs, int $i, array $named, array &$items, callabl
                 if (!$di || !$do || $di > $in || $do < $out) continue;
                 $n = 0; $edges = [];
                 foreach ($svcs as $o) if ($o['type'] === 'accommodation' && bg_same_name($o['name'], $s['name']) && $o['check_in'] >= $di && $o['check_out'] <= $do) { $n += $o['nights']; $edges[] = $o['check_in']; }
-                $billed = isset($ds['nights_billed']) && $ds['nights_billed'] !== null ? (int)$ds['nights_billed'] : bg_days($di, $do);
+                $billed = bg_billed_nights($ds, bg_days($di, $do)) ?? bg_days($di, $do);
                 if ($billed === $n && in_array($di, $edges, true)) $ok = true;
             }
         }
