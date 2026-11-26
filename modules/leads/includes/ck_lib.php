@@ -482,8 +482,8 @@ function ck_is_group_folder(string $name, bool $hasGroupRequests = false): bool 
 }
 
 /**
- * Mark a group closed ($closed) or reopen it. Only group rows; logged in ck_events. Who: ck_can_set_owners() (admin,
- * the row's CK owner or booking owner) — the caller checks. → ['ok', 'dry_run', 'changed', 'group_closed', …] or ['ok' => false, 'error'].
+ * Mark a group closed ($closed) or reopen it. Only group rows; logged in ck_events. Who: ck_can_close_group() (admin,
+ * the row's CK owner or booking owner, the booking team) — the caller checks. → ['ok', 'dry_run', 'changed', 'group_closed', …] or ['ok' => false, 'error'].
  */
 function ck_set_group_closed(PDO $db, array $row, bool $closed, ?int $userId, bool $confirm): array {
     ck_ensure_schema($db);
@@ -888,6 +888,25 @@ function ck_can_set_owners(PDO $db, array $user, array $row): bool {
     $o = ck_owners_resolve($db, $row);
     $uid = (int)($user['id'] ?? 0);
     return $uid > 0 && in_array($uid, [(int)($o['ck_owner']['user_id'] ?? 0), (int)($o['booking_owner']['user_id'] ?? 0)], true);
+}
+
+// The booking team closes / reopens any group (Roberto, 26 Nov 2026): a user whose account email is one of these
+// mailboxes, or whose username / first name is one of these names.
+const CK_BOOKING_TEAM_EMAILS = ['glady@savannahexplorers.com', 'operations@savannahexplorers.com'];
+const CK_BOOKING_TEAM_NAMES  = ['glady', 'lydia'];
+
+/** Is this user (session user or users row) in the booking team? */
+function ck_is_booking_team(PDO $db, array $user): bool {
+    $u = ck_users($db)[(int)($user['id'] ?? 0)] ?? null;
+    if (!$u || (int)$u['is_active'] !== 1) return false;
+    if (in_array(strtolower(trim((string)$u['email'])), CK_BOOKING_TEAM_EMAILS, true)) return true;
+    $names = [strtolower(trim((string)$u['username'])), strtolower((string)strtok(trim((string)$u['full_name']), ' '))];
+    return (bool)array_intersect($names, CK_BOOKING_TEAM_NAMES);
+}
+
+/** Who may mark a group closed / reopen it: ck_can_set_owners() or the booking team, on any group. */
+function ck_can_close_group(PDO $db, array $user, array $row): bool {
+    return ck_can_set_owners($db, $user, $row) || ck_is_booking_team($db, $user);
 }
 
 /**

@@ -2173,14 +2173,15 @@ provisional or a group is not closed**, a warning for other open lines).
 - **Groups: `_CK` only after "Group closed"** (Roberto, 25 Oct 2026; migration 075): `is_group` = a GRPnnnn folder, Il Diamante /
   Panorama, a name with `GRUPPO`, or a folder Hub requests use as `group_folder` (`ck_is_group_folder()`). A `_PROVISIONAL`
   tag alone is a private safari, not a group (Roberto, 13 Nov 2026). Until a person marks it closed (final pax and room list, unsold rooms / seats released) —
-  CK tracker button "👥 Group closed" or `ck_set_group_closed` — `ck_blocked_by[]` includes "Group not closed: mark it closed in
+  CK tracker button "✓ Mark group closed" or `ck_set_group_closed` — `ck_blocked_by[]` includes "Group not closed: mark it closed in
   the CK tracker first". `group_closed_at` / `group_closed_by` = when / who; reopening clears them. Private files are not affected.
 - `ck_ready: true` = a booking check was sent (`ck_findings_upsert`), nothing provisional and no line of the booking open.
 
 ### `ck_set_group_closed` (POST)
 `request_id` or `ck_folder_id` + `closed` (`true` = group closed, `false` = reopen). **Dry run unless `"confirm": true`.** Group
 rows only (409 "Not a group folder" otherwise). Logged in `ck_events` (`group_closed` / `group_reopened`, who / when). The key
-acts with admin rights; on the CK tracker the button is for admin, the row's CK owner and booking owner. → `{ok, dry_run,
+acts with admin rights; on the CK tracker the button is for admin, the row's CK owner and booking owner, and the booking team (Glady, Lydia:
+`CK_BOOKING_TEAM_EMAILS` / `_NAMES`, `ck_can_close_group()`) on any group. → `{ok, dry_run,
 ck_folder_id, folder, changed, group_closed, group_closed_at}`.
 
 ### `ck_set_owners` (POST)

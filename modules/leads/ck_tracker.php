@@ -14,7 +14,7 @@
  * Pipeline (includes/ck_pipeline.php): stage confirmed → booked → issues → ready → ck, the open Booking follow-up lines
  * of every check, the nearest deadline (row colour: red = an urgent line, amber = a high one, else the SafariCheck
  * colour), the Claude check due (view "To check"). _CK is refused while a booking is still provisional, and on a
- * group until it is marked "Group closed" (admin, CK owner or booking owner).
+ * group until it is marked "Group closed" (admin, CK owner, booking owner or the booking team: ck_can_close_group()).
  */
 require_once 'config.php';
 require_once 'dropbox_helper.php';
@@ -176,10 +176,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'set_o
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array($_POST['action'] ?? '', ['ck_on', 'ck_off', 'run_check', 'group_close', 'group_reopen'], true)) {
     try {
         if ($_POST['action'] === 'group_close' || $_POST['action'] === 'group_reopen') {
-            // Admin, the row's CK owner or booking owner (ck_can_set_owners()).
+            // Admin, the row's CK owner or booking owner, the booking team (ck_can_close_group()).
             $row = ck_tracker_row_for($db, (int)($_POST['ck_id'] ?? 0), null);
             if (!$row) flash('Folder not found.', 'error');
-            elseif (!ck_can_set_owners($db, $cu, $row)) flash('Only an admin, the CK owner or the booking owner can close / reopen a group.', 'error');
+            elseif (!ck_can_close_group($db, $cu, $row)) flash('Only an admin, the CK owner, the booking owner or the booking team can close / reopen a group.', 'error');
             else {
                 $res = ck_set_group_closed($db, $row, $_POST['action'] === 'group_close', $uid, true);
                 flash($res['ok'] ? ($_POST['action'] === 'group_close' ? '👥 Group closed: ' : '👥 Group reopened: ') . $row['folder_name'] : $res['error'],
@@ -261,6 +261,7 @@ foreach ($rows as &$r) {
     $r['owners'] = ck_owners_resolve($db, $r);
     $r['open']   = followup_open_for_row($openCounts, $r);
     $r['can_owners'] = ck_can_set_owners($db, $cu, $r);
+    $r['can_group']  = $r['is_group'] && ck_can_close_group($db, $cu, $r);
 }
 unset($r);
 // Pipeline: stage, open lines of every check, nearest deadline, _CK block, Claude check due.
@@ -600,7 +601,7 @@ include 'includes/header.php';
         <?php if ($r['is_group']): $gc = !empty($r['group_closed_at']); ?>
           <div class="ck-group<?= $gc ? ' closed' : '' ?>" title="<?= $gc ? 'Final pax and room list, unsold rooms / seats released' : 'No _CK until the group is closed: final pax and room list, unsold rooms / seats released' ?>">
             👥 <?= $gc ? 'Group closed' . ($r['group_closed_by_name'] ? ' by ' . h($r['group_closed_by_name']) : '') . ' · ' . h($fmtD($r['group_closed_at'])) : 'Group open' ?></div>
-          <?php if ($r['can_owners']): ?>
+          <?php if ($r['can_group']): ?>
             <form method="post" style="margin-top:3px" onsubmit="return confirm(<?= h(json_encode($gc
                 ? 'Reopen the group ' . $r['folder_name'] . '?' . "\n\nIt cannot get _CK until it is closed again."
                 : 'Mark the group ' . $r['folder_name'] . ' as closed?' . "\n\nFinal pax and room list done, unsold rooms / seats released.")) ?>)">
