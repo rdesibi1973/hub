@@ -302,7 +302,8 @@ function bg_svc_key(array $s): string {
  * in some client sheets but not in all of them — or whose Calc label names a participant ("Zanzibar (Bonfante)") — belongs
  * to those participants; a service in every sheet, or in none (texts differ), is the group's and blocks everybody as before.
  * One client sheet only, or a sheet that cannot be read: no scoping.
- * → ['member_sheet' => [request id => sheet], 'svc_sheets' => [service index => [sheet, …]]] (kept in the run snapshot)
+ * → ['member_sheet' => [request id => sheet], 'svc_sheets' => [service index => [sheet, …]], 'sheet_pax' => [sheet => paying pax]]
+ * (kept in the run snapshot; a service of some participants is checked against their pax — FlavioMarioni, 27 Nov 2026).
  */
 function bg_member_scope(PDO $db, array $bc, array $r): array {
     $out = ['member_sheet' => [], 'svc_sheets' => []];
@@ -319,7 +320,12 @@ function bg_member_scope(PDO $db, array $bc, array $r): array {
             $clients = calc_group_client_sheets($sheets);
             if (count($clients) < 2) return $out;
             $keys = [];
-            foreach ($clients as $sh) $keys[$sh] = array_flip(array_map('bg_svc_key', bc_services(calc_read_file($tmp, $sh))));
+            foreach ($clients as $sh) {
+                $sc = calc_read_file($tmp, $sh);
+                $keys[$sh] = array_flip(array_map('bg_svc_key', bc_services($sc)));
+                $sp = bg_calc_pax($sc)[0];
+                $out['sheet_pax'][$sh] = (int)$sp['adults'] + (int)$sp['teen'] + (int)$sp['child'];   // paying pax of that sheet
+            }
             $st = $db->prepare("SELECT id, customer_name FROM requests WHERE group_folder = ?");
             $st->execute([trim((string)$r['group_folder'])]);
             $words = [];
@@ -1571,6 +1577,17 @@ function bg_evaluate(array $snap, array $docs, ?callable $alias = null, ?callabl
     $svcs = $snap['services'];
     foreach ($svcs as $i => &$s) { $s['_i'] = $i; $s['evidence'] = []; $s['says'] = []; $s['notes'] = []; $s['status'] = null; }
     unset($s);
+    // GRP: a RECAP service of some participants only (FlavioMarioni 27 Nov 2026: "Arusha Explorers BB (Marioni 1 SGL)") is
+    // checked against those participants' pax (bg_member_scope(): their sheets), not the whole group's.
+    $scope = $snap['member_scope'] ?? [];
+    foreach ($scope['svc_sheets'] ?? [] as $si => $shs) {
+        if (!isset($svcs[$si])) continue;
+        $n = 0;
+        foreach ($shs as $sh) { if (!isset($scope['sheet_pax'][$sh])) { $n = 0; break; } $n += (int)$scope['sheet_pax'][$sh]; }
+        if ($n <= 0 || $n === $totalPax) continue;
+        $svcs[$si]['_pp'] = ['paying' => $n, 'tl' => 0, 'guests' => $n, 'jeeps' => $pp['jeeps'], 'minors' => 99, 'hdr_kids' => 0];
+        $svcs[$si]['notes'][] = 'Group: ' . $n . ' pax for this service (' . implode(', ', array_map('trim', $shs)) . ').';
+    }
     $say = function (array $ds): string {
         $p = [];
         if (!empty($ds['property']) || !empty($ds['supplier'])) $p[] = $ds['property'] ?: $ds['supplier'];
@@ -1870,7 +1887,8 @@ function bg_evaluate(array $snap, array $docs, ?callable $alias = null, ?callabl
                 $useItem($k, $i);
                 $ds = $items[$k]['ds'] + ['_file' => $items[$k]['file']];
                 $p = $paxOf($ds);
-                if ($p !== null && !bg_pax_ok($p, $pp)) { $ok = false; $add('activity_pax', $s['text'] . ' booked for ' . $p . ' pax, the Calc has ' . bg_pax_text($pp) . '.', $s, ['source_file' => $items[$k]['file'], 'over' => $p > (int)$pp['guests']]); }
+                $spp = $s['_pp'] ?? $pp;   // GRP activity of some participants: their pax
+                if ($p !== null && !bg_pax_ok($p, $spp)) { $ok = false; $add('activity_pax', $s['text'] . ' booked for ' . $p . ' pax, the Calc has ' . bg_pax_text($spp) . '.', $s, ['source_file' => $items[$k]['file'], 'over' => $p > (int)$spp['guests']]); }
                 $status($ds, $s);
                 $n = bg_net($ds); if ($n === null || !bg_usd($ds)) $known = false; else $net += $n;
             }
@@ -1989,6 +2007,9 @@ function bg_group_blocks(array &$res, ?string $arrival, ?string $today = null): 
 function bg_eval_stay(array &$svcs, int $i, array $named, array &$items, callable $useItem, callable $add, callable $status, callable $paxOf,
                       array $pp, int $calcKids, array $calcRooms, array &$stayGroups, array $all): void {
     $s = $svcs[$i];
+    if (!empty($s['_pp'])) {   // GRP service of some participants: their pax; the group's room list does not apply
+        $pp = $s['_pp']; $calcKids = 0; $calcRooms = bg_rooms_parse('');
+    }
     $totalPax = $pp['paying'];
     if (!$named) {
         // Same lodge on other dates?
@@ -2007,6 +2028,28 @@ function bg_eval_stay(array &$svcs, int $i, array $named, array &$items, callabl
     $in = $s['check_in']; $out = $s['check_out'];
     $exact = false; $ranges = [];
     $extraKeys = [];   // meals billed apart on the same document: part of the supplier's amount (Benni: 452 room + 112 dinner = 564)
+    // One document per party for the same stay (FlavioMarioni 27 Nov 2026: Orangi SV for Florio 2 pax + SV for Marioni 1 pax,
+    // Calc 3): when no document alone has the Calc's pax but the documents together do, pax and rooms are checked once on the
+    // sum (first document), not on each.
+    $split = null;
+    $byFile = [];
+    foreach ($named as $k) $byFile[$items[$k]['file']][] = $k;
+    if (count($byFile) > 1) {
+        $sum = ['adults' => 0, 'children' => 0, 'rooms' => []]; $ok = true;
+        foreach ($byFile as $ks) {
+            $fp = null;
+            foreach ($ks as $k) { $x = $paxOf($items[$k]['ds']); if ($x !== null) $fp = max((int)$fp, $x); }   // a document's pax (lines of one booking repeat it)
+            if ($fp === null || bg_pax_ok($fp, $pp)) { $ok = false; break; }
+            $ds0 = $items[$ks[0]]['ds'];
+            foreach ($ks as $k) if ($paxOf($items[$k]['ds']) === $fp) { $ds0 = $items[$k]['ds']; break; }
+            $sum['adults'] += (int)($ds0['adults'] ?? 0); $sum['children'] += (int)($ds0['children'] ?? 0);
+            foreach ($ds0['rooms'] ?? [] as $r) $sum['rooms'][] = $r;
+        }
+        if ($ok && bg_pax_ok($sum['adults'] + $sum['children'], $pp)) {
+            $split = ['first' => $named[0], 'sum' => $sum];
+            $svcs[$i]['notes'][] = count($byFile) . ' documents for this stay (one per party): pax and rooms checked on their sum (' . ($sum['adults'] + $sum['children']) . ' pax).';
+        }
+    }
     foreach ($named as $k) {
         $useItem($k, $i);
         $ds = $items[$k]['ds'] + ['_file' => $items[$k]['file']];
@@ -2050,6 +2093,12 @@ function bg_eval_stay(array &$svcs, int $i, array $named, array &$items, callabl
                 $svcs[$i]['notes'][] = $gTxt . ' on the document — not counted as guests' . ($pp['jeeps'] ? ' (' . $pp['jeeps'] . ' jeep' . ($pp['jeeps'] > 1 ? 's' : '') . ')' : '') . '.';
             }
         }
+        $checkPax = !$split || $k === $split['first'];   // split by party: pax and rooms once, on the sum
+        if ($split && $checkPax) {
+            $ds['adults'] = $split['sum']['adults']; $ds['children'] = $split['sum']['children'];
+            $ds['rooms'] = array_values(array_filter($split['sum']['rooms'], fn($r) => !bg_guide_room((string)($r['type'] ?? ''))));
+        }
+        if (!$checkPax) { $ds['adults'] = null; $ds['children'] = null; $ds['rooms'] = []; }
         $dr = !empty($ds['rooms']) ? bg_rooms_doc($ds['rooms']) : null;
         // Pax printed per room ("Rm 2, Ad 2" = 4 adults): rooms × pax when that gives the Calc's pax.
         if ($dr && $dr['total'] > 1 && $paxOf($ds) !== null && !bg_pax_ok($paxOf($ds), $pp) && bg_pax_ok($paxOf($ds) * $dr['total'], $pp)) {

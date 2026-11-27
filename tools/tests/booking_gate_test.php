@@ -23,7 +23,8 @@ $t('PROGRESS → PAID gated', bg_transition_gated($p . 'PROGRESS', $p . 'PAID'))
 $t('DEPOSIT → BALANCE not gated', !bg_transition_gated($p . 'DEPOSIT', $p . 'BALANCE'));
 $t('PROGRESS → CANCELLED not gated', !bg_transition_gated($p . 'PROGRESS', $p . 'CANCELLED'));
 $t('PROGRESS → PROVISIONAL not gated', !bg_transition_gated($p . 'PROGRESS', $p . 'PROVISIONAL'));
-$t('no way round: PROVISIONAL / no tag → DEPOSIT gated', bg_transition_gated($p . 'PROVISIONAL', $p . 'DEPOSIT') && bg_transition_gated(rtrim($p, '_'), $p . 'DEPOSIT'));
+// Only PROGRESS / PROVISIONAL sources (Roberto, 27 Nov 2026): no tag → DEPOSIT is free (accountant; GRP participants carry a tag now).
+$t('PROVISIONAL → DEPOSIT gated, no tag → DEPOSIT free', bg_transition_gated($p . 'PROVISIONAL', $p . 'DEPOSIT') && !bg_transition_gated(rtrim($p, '_'), $p . 'DEPOSIT'));
 $t('BALANCE → PAID, DEPOSIT_CK → BALANCE_CK not gated', !bg_transition_gated($p . 'BALANCE', $p . 'PAID') && !bg_transition_gated($p . 'DEPOSIT_CK', $p . 'BALANCE_CK'));
 $t('enforced by default (no constant)', bg_enforce());
 // Leaving PROVISIONAL (Roberto, 13 Nov 2026; Rivolta, request 3091)
@@ -31,7 +32,8 @@ $rv = '08_18AUG_AlessandroRivolta(Nuru-Drct)_START18AUG_END29AUG2027_';
 $t('PROVISIONAL / CANCELLED are tags', bg_tag($rv . 'PROVISIONAL') === 'PROVISIONAL' && bg_tag($rv . 'CANCELLED') === 'CANCELLED' && bg_tag($rv . 'DEPOSIT_CANCELLED') === 'CANCELLED');
 $t('toward PROGRESS always free (from PROVISIONAL, CANCELLED, DEPOSIT)', !bg_transition_gated($rv . 'PROVISIONAL', $rv . 'PROGRESS')
    && !bg_transition_gated($rv . 'CANCELLED', $rv . 'PROGRESS') && !bg_transition_gated($rv . 'DEPOSIT', $rv . 'PROGRESS'));
-$t('CANCELLED → DEPOSIT gated, CANCELLED → PROVISIONAL free', bg_transition_gated($rv . 'CANCELLED', $rv . 'DEPOSIT') && !bg_transition_gated($rv . 'CANCELLED', $rv . 'PROVISIONAL'));
+// CANCELLED → DEPOSIT: not a gated transition any more, refused by the cancelled-folder rule instead.
+$t('CANCELLED → DEPOSIT refused by rule, CANCELLED → PROVISIONAL free', bg_cancelled_move_refused($rv . 'CANCELLED', $rv . 'DEPOSIT') && !bg_transition_gated($rv . 'CANCELLED', $rv . 'PROVISIONAL'));
 $t('PROVISIONAL → DEPOSIT gated', bg_transition_gated($rv . 'PROVISIONAL', $rv . 'DEPOSIT'));
 $t('PROVISIONAL → _CK added gated', bg_transition_gated($rv . 'PROVISIONAL', $rv . 'PROVISIONAL_CK'));
 $t('PROVISIONAL → tag removed gated', bg_transition_gated($rv . 'PROVISIONAL', rtrim($rv, '_')));
@@ -157,6 +159,23 @@ $t('cache: flight without amount_due re-read, others kept', bg_cache_stale(['ser
    && !bg_cache_stale(['services' => [['type' => 'flight', 'amount_due' => null]]]) && !bg_cache_stale(['services' => [['type' => 'stay']]]));
 
 // Plain booking: stays + flight right, one Zanzibar transfer missing → passed with 1 warning.
+// GRP Florio (2 pax DBL) + Marioni (1 pax SGL), 27 Nov 2026: one Orangi SV per party for the same stay → checked on the sum;
+// a stay of Marioni only (member_scope) → checked against his 1 pax.
+$fmCalc = ['pax' => ['adults' => 3, 'teen' => 0, 'child' => 0], 'room_config' => '1 DBL + 1 SGL', 'start_date' => '2026-12-21', 'end_date' => '2026-12-29'];
+$fmSvcs = [$stay('Arusha Explorers BB (Marioni 1 SGL)', '2026-12-21', '2026-12-22', 1, null, true),
+           $stay('Marera View Lodge (1 DBL + 1 SGL)', '2026-12-23', '2026-12-24', 1, null, true)];
+$fmSnap = $snap($fmSvcs, $fmCalc) + ['group' => true, 'member_scope' => ['svc_sheets' => [0 => ['1PAX Flavio Marioni']],
+          'sheet_pax' => ['2PAX Fabrizio Florio' => 2, '1PAX Flavio Marioni' => 1], 'member_sheet' => []]];
+$sgl = ['rooms' => [['type' => 'Single', 'count' => 1]], 'adults' => 1, 'supplier' => 'The Orangi Collection'];
+$fmDocs = [$doc('invoices/The Orangi Collection - sv.pdf', [$dsStay('Marera View Lodge', '2026-12-23', '2026-12-24', ['supplier' => 'The Orangi Collection'])]),
+           $doc('invoices/The Orangi Collection - sv - SEPRIO.pdf', [$dsStay('Arusha Explorers', '2026-12-21', '2026-12-22', $sgl),
+                                                                    $dsStay('Marera View Lodge', '2026-12-23', '2026-12-24', $sgl)])];
+$res = bg_evaluate($fmSnap, $fmDocs);
+$fmPax = array_values(array_filter($res['findings'], fn($f) => in_array($f['issue'], ['stay_pax', 'stay_rooms'], true)));
+$t('GRP split by party: 2 + 1 pax = Calc 3, Marioni-only stay = 1 pax → no pax / rooms finding', !$fmPax, array_column($fmPax, 'text'));
+$res = bg_evaluate($fmSnap, [$fmDocs[0]]);   // Marioni's SV missing: Florio's 2 pax alone vs 3 still blocks
+$t('GRP: one party\'s document alone still blocks on pax', in_array('stay_pax!', $issues($res), true), $issues($res));
+
 $base = [$stay('Tarangire Treetops', '2027-01-15', '2027-01-17', 2, 1000.0), $flightSvc,
          ['type' => 'transfer', 'date' => '2027-01-18', 'text' => 'Transfer ZNZ airport - Nungwi', 'route' => 'ZNZ', 'rows' => [20]]];
 $tt = fn($over = []) => $doc('invoices/Treetops.pdf', [$dsStay('Tarangire Treetops', '2027-01-15', '2027-01-17', $over + ['net_amount' => 1000])]);
