@@ -91,7 +91,7 @@ function bc_services(array $calc): array {
         }
         // Transfers / activities: each "+"-separated ACTIVITY DESC item, in-house items skipped.
         $actCostUsed = false;
-        foreach (preg_split('/\s*\+\s*/', $d['activity_desc']) as $item) {
+        foreach (bc_activity_items((string)$d['activity_desc']) as $item) {
             $item = trim($item);
             if ($item === '' || preg_match(BC_INTERNAL, $item)) continue;
             $isTransfer = (bool)preg_match('/transfer/i', $item);
@@ -126,13 +126,22 @@ function bc_services(array $calc): array {
 function bc_guide_activities(array $calc): array {
     $out = [];
     foreach ($calc['days'] ?? [] as $d) {
-        foreach (preg_split('/\s*\+\s*/', (string)($d['activity_desc'] ?? '')) as $item) {
+        foreach (bc_activity_items((string)($d['activity_desc'] ?? '')) as $item) {
             $item = trim($item);
             if ($item === '' || preg_match('/transfer/i', $item) || !preg_match(BC_GUIDE_ACTIVITY, $item)) continue;
             $out[] = ['date' => $d['date'], 'text' => $item];
         }
     }
     return $out;
+}
+
+/**
+ * The "+"-separated items of a Calc ACTIVITY DESC cell. A "+" inside brackets is a note, not a new service
+ * (JessicaBonfante, 27 Nov 2026: "… + ZNZ airport transfers A/R (60+60, return 26/01 RIU Palace Swahili - ZNZ airport)"
+ * gave a fake activity "60, return 26/01 …" that blocked the gate).
+ */
+function bc_activity_items(string $desc): array {
+    return preg_split('/\s*\+\s*(?![^()]*\))/', $desc);
 }
 
 /** Supplier words that name an airline / a flight (a Calc annotation row "Flight link" belongs to a flight). */
