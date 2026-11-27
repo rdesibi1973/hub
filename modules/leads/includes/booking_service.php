@@ -124,12 +124,16 @@ function bs_request_folder_name(PDO $db, string $customerName, string $channel, 
 
     $agencyNome = '';
     if ($channel === 'agency' && $agencyId) {
-        $agencyStmt = $db->prepare("SELECT nome, short_name FROM agencies WHERE id = ? LIMIT 1");
+        $agencyStmt = $db->prepare("SELECT nome, short_name, type FROM agencies WHERE id = ? LIMIT 1");
         $agencyStmt->execute([$agencyId]);
         $agencyRow = $agencyStmt->fetch(PDO::FETCH_ASSOC);
         if ($agencyRow) {
             $raw        = $agencyRow['short_name'] ?: $agencyRow['nome'];
             $agencyNome = preg_replace('/[^\w\-]/', '', $raw);
+            // The type's suffix always (-PS Promoservice, -LAM Lamprati), also when the short name was stored without it
+            // (27 Nov 2026: 56 agencies, e.g. Gate65 → "(Gate65-Roberto)"); same rule as api_create_request.php.
+            $sfx = ['promoservice' => '-PS', 'lamprati' => '-LAM'][$agencyRow['type'] ?? ''] ?? '';
+            $agencyNome = preg_replace('/-PS$|-LAM$/', '', $agencyNome) . $sfx;
         }
     }
 
