@@ -79,7 +79,10 @@ outdated — this file wins where they disagree (PHP version, local lint).
 - **Booking gate** (logic `modules/leads/includes/booking_gate_service.php`, panel `assets/booking_gate.js` + endpoint
   `booking_gate.php`, worker `cron_booking_gate.php`, Agent API `gate_status` / `gate_run`): AI booking check before a folder
   leaves `_PROGRESS` (first payment tag) or `_PROVISIONAL` (any status but `_CANCELLED` / `_PROGRESS`; toward `_PROGRESS` is always free).
-  Only those two sources are gated (27 Nov 2026): no tag (GRP member folders) and DEPOSIT → BALANCE / BALANCE-CASH / PAID are free (accountant). A new path that renames a private folder out of `_PROGRESS` calls `booking_gate_check()` first and refuses
+  Only those two sources are gated (27 Nov 2026): no tag and DEPOSIT → BALANCE / BALANCE-CASH / PAID are free (accountant).
+  GRP participants carry their own sub-folder tag (27 Nov 2026): new ones `_PROGRESS` (`bo_grp_member_name()`), old untagged ones
+  via Agent API `grp_member_tags` (`includes/grp_member_service.php`); a member is blocked only on its own / the group's services,
+  not on another participant's (`bg_member_scope()` in the run snapshot, applied in `bg_state()`). A new path that renames a private folder out of `_PROGRESS` calls `booking_gate_check()` first and refuses
   on `refused`. `_CANCELLED` only → `_PROGRESS`, or back to `/<year>/<Customer>(<Agency>-<Agent>)` as a quote (not Booked, not a group;
   callers pass `dest_path` — `bg_reopen_quote_ok()`; Agent API `reopen_cancelled`, request page "Reopen as quote", `folder_reopen_quote()`). GRP members (24 Nov 2026): one shared check on the group parent (Calc on RECAP + the parent's invoices/ / bookings/;
   `bg_grp_member()`, `bg_group_rids()`, `bg_check_dir()`), a block over the pax is `group_block` until arrival − 60 days. Issue → blocking table `BG_ISSUES` (also in `docs/AGENT_API.md`). Enforced since 13 Nov 2026; `define('BOOKING_GATE_ENFORCE', false)` in includes/config.php = shadow mode (warns only).

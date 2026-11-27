@@ -286,6 +286,79 @@ function bg_check_dir(PDO $db, string $token, array $r): string {
     return bg_grp_member($r) ? rtrim(dirname($cur), '/\\') : $cur;
 }
 
+/** A Calc service compared across the sheets of a group Calc: type, dates and text (names in brackets left out). */
+function bg_svc_key(array $s): string {
+    $n = fn($t) => preg_replace('/[^a-z0-9]+/', '', strtolower(preg_replace('/\([^)]*\)/', '', (string)$t)));
+    switch ($s['type'] ?? '') {
+        case 'accommodation': return 'A|' . ($s['check_in'] ?? '') . '|' . ($s['check_out'] ?? '') . '|' . $n($s['name'] ?? '');
+        case 'flight':        return 'F|' . ($s['date'] ?? '') . '|' . $n($s['route'] ?? '');
+        default:              return 'T|' . ($s['type'] ?? '') . '|' . ($s['date'] ?? '') . '|' . $n($s['text'] ?? '');
+    }
+}
+
+/**
+ * GRP (Roberto, 27 Nov 2026): which participants each RECAP service belongs to, so that a client who joins a group with
+ * services of his own (sea in Zanzibar…) is blocked on his services, not on another participant's. A RECAP service found
+ * in some client sheets but not in all of them — or whose Calc label names a participant ("Zanzibar (Bonfante)") — belongs
+ * to those participants; a service in every sheet, or in none (texts differ), is the group's and blocks everybody as before.
+ * One client sheet only, or a sheet that cannot be read: no scoping.
+ * → ['member_sheet' => [request id => sheet], 'svc_sheets' => [service index => [sheet, …]]] (kept in the run snapshot)
+ */
+function bg_member_scope(PDO $db, array $bc, array $r): array {
+    $out = ['member_sheet' => [], 'svc_sheets' => []];
+    $path = (string)($bc['calc']['calc_path'] ?? '');
+    if ($path === '') return $out;
+    try {
+        require_once __DIR__ . '/calc_reader.php';
+        $dl = calc_dbx_download(dropbox_get_access_token(), $path);
+        if ($dl === null) return $out;
+        $tmp = tempnam(sys_get_temp_dir(), 'bgms_');
+        file_put_contents($tmp, $dl['bytes']);
+        try {
+            $sheets = sc_xlsx_sheets($tmp);
+            $clients = calc_group_client_sheets($sheets);
+            if (count($clients) < 2) return $out;
+            $keys = [];
+            foreach ($clients as $sh) $keys[$sh] = array_flip(array_map('bg_svc_key', bc_services(calc_read_file($tmp, $sh))));
+            $st = $db->prepare("SELECT id, customer_name FROM requests WHERE group_folder = ?");
+            $st->execute([trim((string)$r['group_folder'])]);
+            $words = [];
+            foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $m) {
+                $g = calc_group_sheet($sheets, (string)$m['customer_name']);
+                if (!empty($g['whole'])) continue;
+                $out['member_sheet'][(int)$m['id']] = $g['sheet'];
+                $words[$g['sheet']] = bg_name_words((string)$m['customer_name']);
+            }
+            foreach ($bc['services'] as $i => $s) {
+                $k = bg_svc_key($s);
+                $in = array_values(array_filter($clients, fn($sh) => isset($keys[$sh][$k])));
+                if (!$in && preg_match_all('/\(([^)]*)\)/', ($s['route'] ?? '') . ' ' . ($s['name'] ?? '') . ' ' . ($s['text'] ?? ''), $mm)) {
+                    $label = bg_name_words(implode(' ', $mm[1]));
+                    foreach ($words as $sh => $w) if ($w && array_intersect($w, $label)) $in[] = $sh;
+                }
+                if ($in && count($in) < count($clients)) $out['svc_sheets'][$i] = array_values(array_unique($in));
+            }
+        } finally {
+            @unlink($tmp);
+        }
+    } catch (Throwable $e) {
+        error_log('bg_member_scope(' . ($r['id'] ?? '?') . '): ' . $e->getMessage());
+        return ['member_sheet' => [], 'svc_sheets' => []];   // no scoping: every item blocks every participant, as before
+    }
+    return $out;
+}
+
+/** Services of a GRP run that belong to other participants only, for request $rid: [service index => "sheet, sheet"]. */
+function bg_member_foreign_svcs(array $scope, int $rid): array {
+    $mine = $scope['member_sheet'][$rid] ?? null;
+    if ($mine === null) return [];
+    $out = [];
+    foreach ($scope['svc_sheets'] ?? [] as $i => $sheets) {
+        if (!in_array($mine, $sheets, true)) $out[(int)$i] = implode(', ', array_map('trim', $sheets));
+    }
+    return $out;
+}
+
 /** May start a run: admin / manager, the booking team (booking_followup_edit), Roberto, or the request's seller. */
 function bg_can_run(PDO $db, array $user, array $r): bool {
     if (!empty($user['agent_api'])) return true;
@@ -437,6 +510,7 @@ function bg_start_run(PDO $db, int $rid, ?int $userId, string $trigger = 'manual
                    'warnings' => $calc['warnings']],   // guests (names, DOB) deliberately left out
         'services' => $bc['services'], 'guide_activities' => $bc['guide_activities'] ?? [], 'evidence' => $bc['evidence'],
     ];
+    if ($grp) $snap['member_scope'] = bg_member_scope($db, $bc, $r);   // whose services are whose (bg_state())
     $docs = array_values(array_filter($bc['evidence'], fn($e) => empty($e['old']) && !preg_match('/passport|passaporto/i', $e['name'])));
     $id = $ins(['request_id' => $rid, 'trigger_src' => $trigger, 'started_by' => $userId, 'owner_user_id' => $owner, 'started_at' => $now,
                 'state' => 'queued', 'folder' => $bc['folder'], 'calc_file' => $calc['file'], 'calc_sheet' => $calc['sheet'],
@@ -2376,11 +2450,24 @@ function bg_state(PDO $db, int $rid, bool $checkStale = true): array {
     $out = ['run' => $run, 'state' => $run ? $run['state'] : 'none', 'stale' => false, 'stale_reason' => null, 'allowed' => false, 'blocking' => [], 'warnings' => []];
     if (!$run) { $out['reason'] = 'Booking check not run.'; return $out; }
     $res = json_decode((string)$run['result_json'], true) ?: [];
+    // GRP member: a blocking item on a service of other participants only (their extension…) does not stop this one.
+    $others = [];
+    $rq0 = bg_request($db, $rid);
+    if ($rq0 && bg_grp_member($rq0)) {
+        $snap = json_decode((string)($run['snapshot_json'] ?? ''), true) ?: [];
+        $others = bg_member_foreign_svcs($snap['member_scope'] ?? [], $rid);
+    }
+    $demoted = 0;
     foreach ($res['findings'] ?? [] as $f) {
         $x = ['issue' => $f['issue'], 'label' => $f['label'], 'text' => $f['text'], 'audience' => $f['audience'], 'service_date' => $f['service_date']];
+        if ($f['blocking'] && ($f['svc_idx'] ?? null) !== null && isset($others[$f['svc_idx']])) {
+            $x['text'] = '(Not this participant — ' . $others[$f['svc_idx']] . ') ' . $x['text'];
+            $f['blocking'] = false; $demoted++;
+        }
         if ($f['blocking']) $out['blocking'][] = $x; else $out['warnings'][] = $x;
     }
-    if (in_array($run['state'], ['passed', 'blocked'], true) && $checkStale && $run['folder'] && $run['evidence_fingerprint']) {
+    if ($demoted && $run['state'] === 'blocked' && !$out['blocking']) $out['state'] = 'passed';   // for this participant
+    if (in_array($run['state'], ['passed', 'blocked'], true) && $checkStale && $run['folder'] && $run['evidence_fingerprint']) {   // run state: the files
         try {
             require_once __DIR__ . '/../dropbox_helper.php';
             // The folder where the booking is NOW: its name changes with every status tag (PROGRESS → DEPOSIT…) and it may
@@ -2399,7 +2486,7 @@ function bg_state(PDO $db, int $rid, bool $checkStale = true): array {
         }
         $out['stale'] = $out['stale_reason'] !== null;
     }
-    $out['allowed'] = ($run['state'] === 'passed' && !$out['stale']) || $run['state'] === 'overridden';
+    $out['allowed'] = ($out['state'] === 'passed' && !$out['stale']) || $run['state'] === 'overridden';
     $out['reason'] = bg_reason($out);
     return $out;
 }
@@ -2553,7 +2640,7 @@ function bg_status_out(PDO $db, int $rid, array $user = [], bool $checkStale = t
     $rp = $run['report_path'] ?? null;
     if ($rp && ($cur = req_folder_path($r)) !== '') $rp = rtrim($member ? dirname($cur) : $cur, '/\\') . '/booking-check.html';   // GRP: in the parent
     return [
-        'ok' => true, 'request_id' => $rid, 'folder' => $folder, 'tag' => bg_tag($member ? (string)$r['group_folder'] : $folder), 'group' => $group,
+        'ok' => true, 'request_id' => $rid, 'folder' => $folder, 'tag' => bg_tag($folder) !== '' || !$member ? bg_tag($folder) : bg_tag((string)$r['group_folder']), 'group' => $group,   // member: its own tag (27 Nov 2026), else the parent's
         'group_folder' => $member ? trim((string)$r['group_folder']) : null,   // GRP member: one check on the parent, shared by the group
         'in_scope' => true, 'enforced' => bg_enforce(),   // every folder, groups too (24 Nov 2026)
         'state' => $st['state'] === 'passed' && $st['stale'] ? 'stale' : $st['state'],

@@ -122,7 +122,7 @@ function agent_audit(PDO $db, string $action, $reqId, array $payload, string $re
                               'set_request_status', 'update_request', 'import_group_folder', 'move_group_folder', 'ck_request_check', 'memo_delete', 'create_agency', 'update_agency', 'save_agency_contact', 'delete_agency_contact',
                               'followup_scan', 'followup_update', 'followup_upsert', 'staff_mail_save_eml', 'staff_mail_reply', 'drafts_cleanup', 'iti_update_activity', 'sales_response_dismiss',
                               'ck_set_owners', 'ck_set_group_closed', 'ck_findings_upsert', 'iti_create_destination', 'iti_import_program', 'iti_supplier_blocklist', 'predeparture_email',
-                              'folder_ids_backfill', 'folders_orphans', 'archive_cancelled', 'gate_run', 'reassign_request', 'notify_request_agent', 'pipeline_move',
+                              'folder_ids_backfill', 'folders_orphans', 'archive_cancelled', 'grp_member_tags', 'gate_run', 'reassign_request', 'notify_request_agent', 'pipeline_move',
                               'set_commission_split', 'commission_backfill'], true) && empty($payload['confirm']);
     // Mail: keep who/what in the log, not message bodies or attachment content.
     if (in_array($action, ['mail_get', 'mail_attachment', 'staff_mail_get', 'staff_mail_attachment', 'iti_document', 'iti_vouchers', 'commissions_report'], true) && $code === 200) {
@@ -3690,6 +3690,21 @@ try {
         agent_out(['ok' => true] + $res + (empty($in['confirm']) ? ['message' => 'Dry run — nothing moved. Resend with "confirm": true.'] : []));
     }
 
+    // GRP participants whose sub-folder has no status tag → the tag of their payment_status, else _PROGRESS
+    // (includes/grp_member_service.php, 27 Nov 2026). Dry run lists them; "confirm": true renames.
+    case 'grp_member_tags': {
+        if (!empty($in['confirm'])) agent_require_method('POST');
+        @set_time_limit(180);
+        require_once __DIR__ . '/includes/grp_member_service.php';
+        require_once __DIR__ . '/dropbox_helper.php';
+        $ids = $in['request_ids'] ?? [];
+        if (is_string($ids)) $ids = array_filter(array_map('trim', explode(',', $ids)));
+        $res = grp_member_tags($db, dropbox_get_access_token(), ['request_ids' => (array)$ids, 'tags' => (array)($in['tags'] ?? []),
+                    'confirm' => !empty($in['confirm'])]);
+        if (!empty($res['error'])) agent_fail($res['error'], 400);
+        agent_out(['ok' => true] + $res + (empty($in['confirm']) ? ['message' => 'Dry run — nothing renamed. Resend with "confirm": true (optionally request_ids, tags {id: TAG}).'] : []));
+    }
+
     // ── Back office (read-only): logic in includes/payments_service.php, includes/ck_lib.php,
     //    ../operations/includes/ops_service.php — the same data as the Hub pages.
     case 'payments_due': {
@@ -4396,7 +4411,7 @@ try {
             'staff_mail_mailboxes', 'staff_mail_search', 'staff_mail_get', 'staff_mail_attachment', 'staff_mail_save_eml', 'staff_mail_reply', 'drafts_cleanup',
             'timeline_list', 'timeline_add', 'timeline_update', 'summary_set', 'request_resume', 'set_request_status',
             'reassign_request', 'notify_request_agent', 'pipeline_list', 'pipeline_move', 'parked_wakeups',
-            'folder_resolve', 'folder_ids_backfill', 'folders_orphans', 'archive_cancelled', 'grp_names_report',
+            'folder_resolve', 'folder_ids_backfill', 'folders_orphans', 'archive_cancelled', 'grp_names_report', 'grp_member_tags',
             'payments_due', 'ck_status', 'ck_request_check', 'ck_set_owners', 'ck_set_group_closed', 'ck_findings_upsert', 'ck_findings_drafts', 'ops_movements', 'ops_lunch_boxes', 'ops_medivac', 'flight_tickets',
             'jeep_demand', 'jeep_demand_day', 'jeep_demand_scan',
             'followup_list', 'followup_scan', 'followup_update', 'followup_upsert', 'mail_security_status',

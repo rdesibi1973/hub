@@ -715,6 +715,17 @@ function bo_confirmed_name(string $custname, string $start, string $mid, string 
 
 // bo_grp_insert() ("_GRP{code}{Programme}" before the first '(', normalised) lives in grp_program_service.php.
 
+/**
+ * A GRP participant's own sub-folder at confirmation (Create GRP / Add to GRP): the customer folder + _PROGRESS
+ * (Roberto, 27 Nov 2026). A client joining a group already at DEPOSIT may have services of his own (sea in Zanzibar…):
+ * his PROGRESS → first payment tag goes through the booking gate, which blocks on his own services only. Members in
+ * PROGRESS do not count for the parent's tag (grp_client_tag()).
+ */
+function bo_grp_member_name(string $folder): string {
+    $base = preg_replace('/(_(BALANCE-CASH|BALANCE|DEPOSIT|PROGRESS|PROVISIONAL|PAID|CANCELLED|BOOKED))?(_CK)?$/i', '', trim($folder));
+    return $base . '_PROGRESS';
+}
+
 /** Valid GRP code = 4 digits DDMM, day 1-31, month 1-12 (mirrors the Java check). */
 function bo_grp_code_valid(string $code): bool {
     if (!preg_match('/^\d{4}$/', $code)) return false;
@@ -827,8 +838,8 @@ function bs_confirm_plan(PDO $db, int $reqId, array $in): array {
     $folderProgs = $grpAction !== 'NONE' ? bo_grp_programs_in($oldFolder) : [];
     $progPre = bo_grp_resolve_program($progIn, $folderProgs, []);
     if ($grpAction === 'ADD') {
-        // No dates: the customer folder keeps its name and moves into the existing GRP.
-        $plan['member_name'] = $oldFolder;
+        // No dates: the customer folder keeps its name (+ _PROGRESS) and moves into the existing GRP.
+        $plan['member_name'] = bo_grp_member_name($oldFolder);
         if ($grpCode === '')                  $errs[] = 'Enter the GRP code (DDMM) to find the existing group.';
         elseif (!bo_grp_code_valid($grpCode)) $errs[] = 'GRP code must be 4 digits DDMM (e.g. 2306 = 23 Jun).';
     } else {
@@ -840,7 +851,7 @@ function bs_confirm_plan(PDO $db, int $reqId, array $in): array {
         $buildErr = [];
         $plan['new_name'] = bo_confirmed_name($custForName, $fStart, $fMid, $fMid2, $fEnd, $destSuffix, $months, $buildErr);
         $errs = array_merge($errs, $buildErr);
-        if ($plan['new_name'] !== null) { $plan['pd'] = parse_folder_dates($plan['new_name']); $plan['sub_name'] = $oldFolder; }
+        if ($plan['new_name'] !== null) { $plan['pd'] = parse_folder_dates($plan['new_name']); $plan['sub_name'] = bo_grp_member_name($oldFolder); }
     }
     if (isset($lostErr)) array_unshift($errs, $lostErr);   // Lost and reopen not agreed: nothing moves
     $plan['grp_code'] = $grpCode;
@@ -1359,7 +1370,7 @@ function bs_rollback_run(PDO $db, int $reqId, bool $commit): array {
         if ($act === 'CREATE') {
             // Move the member's loose files back to the group root, drop the empty
             // subfolder, then move the (renamed) group folder back to its source.
-            $sub     = trim($pre['sub'] ?? $member);
+            $sub     = $member !== '' ? $member : trim($pre['sub'] ?? '');   // its name today (tag changed since: _PROGRESS → _DEPOSIT)
             $subPath = $curPath . '/' . $sub;
             foreach (dropbox_list_files($token, $subPath) as $fn) {
                 try { dropbox_move_folder($token, $subPath . '/' . $fn, $curPath . '/' . $fn); }

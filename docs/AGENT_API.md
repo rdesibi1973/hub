@@ -628,6 +628,18 @@ to that user. Documents already read (same Dropbox `content_hash`) are never sen
   folder already moved into `/2026`) and `reopen_cancelled` / request page "Reopen as quote" (`bg_reopen_quote_ok()`). The Java BackOffice endpoints (`api_rename_folder.php`, `api_update_status.php`)
   rename on disk first: they cannot refuse — timeline + memo to Roberto + a run started (`booking_gate_warning`).
   A refused attempt with no usable run starts one. Later moves (DEPOSIT → BALANCE → PAID) are not gated.
+- **GRP participants carry their own tag** (27 Nov 2026): Create GRP / Add to GRP name the participant's sub-folder
+  `<Customer>(<Agency>-<Agent>)_PROGRESS` (`bo_grp_member_name()`); its PROGRESS → first payment tag is gated like a private
+  folder, and a member in PROGRESS / PROVISIONAL does not count for the parent's tag (`grp_client_tag()`). The shared group run
+  keeps in its snapshot `member_scope` = which client sheets each RECAP service is in (`bg_member_scope()`: same type / dates /
+  text in some sheets but not all, or a Calc label naming the participant "Zanzibar (Bonfante)"): for a member, a blocking item
+  on a service of **other** participants only becomes a warning "(Not this participant — sheet)" and the member's state can be
+  `passed` while the run is `blocked`. Services in every sheet or in none (texts differ) stay the group's and block everybody.
+- `grp_member_tags` (GET dry run / POST with `"confirm": true`; `includes/grp_member_service.php`): participants (Booked, sub-folder
+  inside a group parent) whose sub-folder has no status tag → `[{request_id, customer, folder, group_folder, group_tag,
+  payment_status, tag, new_name}]`, tag = their `payment_status` (Deposit → DEPOSIT …) else PROGRESS. Optional `request_ids`
+  (array or comma list) and `tags` `{request_id: TAG}` to override. Confirm renames the sub-folders (ids kept), updates
+  `practice_code` / `dropbox_url` (payment_status untouched), timeline note → `renamed[]`, `errors[]`.
 - **GRP folders** (24 Nov 2026): one check per group, on the group parent — its single Calc read on `RECAP` (the whole group;
   the per-participant sheets are not used) against the parent's `invoices/` + `bookings/`. The run is shared by every member
   (any member's `gate_status` / `gate_run` / CK badge sees it); `booking-check.html` goes in the parent. BackOffice "Apply

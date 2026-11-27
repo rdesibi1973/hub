@@ -34,10 +34,12 @@ function grp_split_tag(string $name): array {
     return [$name, '', $ck];
 }
 
-/** Payment tag of one client: its sub-folder tag, else its payment_status; '' if none counts. */
+/** Payment tag of one client: its sub-folder tag, else its payment_status; '' if none counts (PROGRESS / PROVISIONAL: never). */
 function grp_client_tag(array $req): string {
     if (($req['status'] ?? '') === 'Cancelled' || ($req['payment_status'] ?? '') === 'Cancelled') return '';
     $tag = grp_split_tag(trim($req['practice_code'] ?? ''))[1];
+    // A participant still in PROGRESS / PROVISIONAL (joined later, own services being booked) does not count yet.
+    if ($tag === 'PROGRESS' || $tag === 'PROVISIONAL') return '';
     if (!array_key_exists($tag, GRP_PAY_RANK)) {
         $tag = strtoupper(trim($req['payment_status'] ?? ''));
     }
