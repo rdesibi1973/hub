@@ -177,19 +177,19 @@ function bg_has_ck(string $name): bool {
 
 /**
  * Gated moves (the booking check must have passed):
- *  - a folder without a payment tag (PROGRESS, no tag, …) getting DEPOSIT / BALANCE / BALANCE-CASH / PAID — what tells the
- *    seller to send the confirmation (Roberto, 13 Nov 2026: no way round through another tag);
+ *  - a PROGRESS folder getting DEPOSIT / BALANCE / BALANCE-CASH / PAID — what tells the seller to send the confirmation;
  *  - a folder leaving PROVISIONAL for any other status — a payment tag, no tag, or _CK added — except CANCELLED and
  *    PROGRESS (Roberto, 13 Nov 2026; Rivolta, request 3091).
- * Free: toward PROGRESS from any status (the bookings are still being made), between payment tags (DEPOSIT → BALANCE →
- * PAID), to CANCELLED, renames that keep the tag.
+ * Only from PROGRESS / PROVISIONAL (Roberto, 27 Nov 2026): the accountant changes the payment status and must never be
+ * stopped by the bookings. Free: from no tag (GRP member folders carry none — JessicaBonfante, member → BALANCE refused),
+ * between payment tags (DEPOSIT → BALANCE → PAID), toward PROGRESS from any status, to CANCELLED, renames keeping the tag.
  */
 function bg_transition_gated(string $oldName, string $newName): bool {
     $pay = ['DEPOSIT', 'BALANCE', 'BALANCE-CASH', 'PAID'];
     $from = bg_tag($oldName); $to = bg_tag($newName);
     if ($to === 'CANCELLED') return false;
     if ($to === 'PROGRESS' && !bg_has_ck($newName)) return false;   // toward PROGRESS: always free, from any status (Roberto, 13 Nov 2026)
-    if (in_array($to, $pay, true) && !in_array($from, $pay, true)) return true;
+    if ($from === 'PROGRESS') return in_array($to, $pay, true);
     return $from === 'PROVISIONAL' && ($to !== 'PROVISIONAL' || (bg_has_ck($newName) && !bg_has_ck($oldName)));
 }
 

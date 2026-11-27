@@ -614,7 +614,8 @@ to that user. Documents already read (same Dropbox `content_hash`) are never sen
   source); a line left with no source closes `auto_resolved` (event "not reported by the booking gate run N"). Sales / accounts
   lines and the final-program / deposit / balance lines are left alone; a later Claude check reporting it again re-opens the line.
 - **The gate**: `rename_folder` and `update_folder_status` giving a private folder its first payment tag (`_DEPOSIT` / `_BALANCE` /
-  `_BALANCE-CASH` / `_PAID`) — from `_PROGRESS`, and also from `_PROVISIONAL` or no tag, so there is no way round — **or a
+  `_BALANCE-CASH` / `_PAID`) — from `_PROGRESS` only (Roberto, 27 Nov 2026: from no tag — e.g. a GRP member folder — or between
+  payment tags the accountant is never stopped) — **or a
   private folder leaving `_PROVISIONAL` for any other status** (a payment tag, no tag, `_CK` added — also from the CK tracker)
   except `_CANCELLED`; **toward `_PROGRESS` is always free, from any status** (Roberto, 13 Nov 2026) → **409 also on the dry run** (`booking_gate` in the body) unless the latest run is `passed` and not
   out of date (Calc or evidence changed since) or `overridden`. **A `_CANCELLED` private folder can only go back to `_PROGRESS`**:
