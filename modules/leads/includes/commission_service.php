@@ -279,10 +279,10 @@ function comm_tag_type(?string $tag): string {
     return '';
 }
 
-/** Agency tag of a request's folder ("Short-PS-Agent"), '' if none. */
+/** Agency tag of a request's folder ("Short-PS-Agent"; a GRP member: its own subfolder's tag), '' if none. */
 function comm_folder_tag(array $r): string {
     require_once __DIR__ . '/folder_parser.php';
-    return function_exists('folder_agency') ? folder_agency($r) : '';
+    return function_exists('folder_own_agency') ? folder_own_agency($r) : '';
 }
 
 /**

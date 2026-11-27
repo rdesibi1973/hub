@@ -94,6 +94,21 @@ function folder_agency(array $row): string {
 }
 
 /**
+ * The booking's own agency tag: for a GRP member whose subfolder carries its own "(Agency-Agent)" tag
+ * (e.g. "MarcoLao(IlTuareg-LAM-Roberto)_PAID" inside a "(GoWorld-Roberto)" group), that tag — a member's agency
+ * and its -PS / -LAM come from its subfolder, not the group (Roberto, 27 Nov 2026). Otherwise folder_agency().
+ * Operations tags (TREK…) stay on folder_agency(): they live on the group parent.
+ */
+function folder_own_agency(array $row): string {
+    $gf = trim($row['group_folder'] ?? '');
+    $pc = trim($row['practice_code'] ?? '');
+    if ($gf !== '' && $pc !== '' && $pc !== $gf && preg_match('/\(([^)]+)\)/', $pc, $m)) {
+        return $m[1];
+    }
+    return folder_agency($row);
+}
+
+/**
  * Derive payment_status from folder name suffix tags.
  * Used as fallback when payment_status column is null/empty.
  * Check longest tags first to avoid BALANCE matching inside BALANCE-CASH.

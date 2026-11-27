@@ -119,7 +119,7 @@ function agent_audit(PDO $db, string $action, $reqId, array $payload, string $re
                               'iti_create_lodge', 'iti_set_days', 'iti_add_day', 'iti_delete_day', 'iti_update_inclusions', 'iti_update_standard_inclusion',
                               'iti_create_flight_route', 'iti_create_activity', 'iti_create_transfer_route', 'iti_update_transfer_route', 'iti_save_as_sample',
                               'create_request', 'add_flight_rates', 'timeline_update', 'summary_set', 'rename_folder', 'reopen_cancelled',
-                              'set_request_status', 'update_request', 'import_group_folder', 'move_group_folder', 'ck_request_check', 'memo_delete', 'create_agency', 'update_agency', 'save_agency_contact', 'delete_agency_contact',
+                              'set_request_status', 'update_request', 'import_group_folder', 'move_group_folder', 'ck_request_check', 'memo_delete', 'create_agency', 'update_agency', 'merge_agency', 'save_agency_contact', 'delete_agency_contact',
                               'followup_scan', 'followup_update', 'followup_upsert', 'staff_mail_save_eml', 'staff_mail_reply', 'drafts_cleanup', 'iti_update_activity', 'sales_response_dismiss',
                               'ck_set_owners', 'ck_set_group_closed', 'ck_findings_upsert', 'iti_create_destination', 'iti_import_program', 'iti_supplier_blocklist', 'predeparture_email',
                               'folder_ids_backfill', 'folders_orphans', 'archive_cancelled', 'grp_member_tags', 'gate_run', 'reassign_request', 'notify_request_agent', 'pipeline_move',
@@ -297,7 +297,7 @@ function agent_request_out(array $r): array {
         'id'            => (int)$r['id'],
         'customer_name' => $r['customer_name'],
         'agent'         => $r['agent_name'] ?? null,
-        'agency'        => function_exists('folder_agency') ? folder_agency($r) : null,
+        'agency'        => function_exists('folder_own_agency') ? folder_own_agency($r) : null,   // GRP member: its subfolder's tag
         'status'        => $r['status'],
         'payment_status'=> $r['payment_status'] ?? null,
         'folder'        => $r['practice_code'],
@@ -926,6 +926,17 @@ try {
                        'message' => 'Dry run — nothing created. Folder tag will be (' . $a['short_name'] . '-<Agent>). Resend with "confirm": true.']);
         }
         agent_out(['ok' => true, 'created' => true, 'agency' => $out]);
+    }
+
+    // ── merge_agency ─────────────────────────────────────────────────────────
+    // Duplicate agency → the one to keep (agency_merge() in includes/agency_service.php). Dry-run unless "confirm": true.
+    case 'merge_agency': {
+        agent_require_method('POST');
+        $res = agency_merge($db, (int)($in['from_agency_id'] ?? 0), (int)($in['into_agency_id'] ?? 0), empty($in['confirm']));
+        if (!$res['ok']) agent_fail($res['error'], ['same' => 400, 'not_found' => 404][$res['error_code']] ?? 500);
+        unset($res['error'], $res['error_code']);
+        agent_out($res + (empty($in['confirm']) ? ['dry_run' => true, 'message' => 'Dry run — nothing saved. Resend with "confirm": true.']
+                                                 : ['merged' => true]));
     }
 
     // ── update_agency ────────────────────────────────────────────────────────
@@ -4394,7 +4405,7 @@ try {
 
     default:
         agent_fail('Unknown action "' . $agentAction . '"', 400, ['actions' => [
-            'find_requests', 'list_agencies', 'create_agency', 'update_agency', 'save_agency_contact', 'delete_agency_contact', 'create_request', 'update_request', 'import_group_folder', 'move_group_folder', 'list_standard_programs',
+            'find_requests', 'list_agencies', 'create_agency', 'update_agency', 'merge_agency', 'save_agency_contact', 'delete_agency_contact', 'create_request', 'update_request', 'import_group_folder', 'move_group_folder', 'list_standard_programs',
             'copy_program', 'get_rates', 'fill_calc', 'read_calc', 'booking_check', 'gate_status', 'gate_run', 'confirm_preview', 'confirm_booking', 'send_booking_email',
             'rollback_booking', 'reopen_cancelled', 'iti_programs', 'iti_texts', 'iti_save_texts', 'update_rate', 'replace_flight_rates',
             'iti_lodges', 'iti_lodge', 'iti_destinations', 'iti_destination', 'iti_lodge_photos', 'iti_destination_photo',

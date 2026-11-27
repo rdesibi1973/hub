@@ -115,6 +115,8 @@ outdated — this file wins where they disagree (PHP version, local lint).
   (`referrer_from`, history `agency_contact_referrer_log`); `requests.agency_contact_id` = the consultant (matched by email on create).
   Resolution `comm_resolve()`: snapshot → contact → agency → folder tag. Frozen at confirmation (`comm_snapshot()` in `bs_confirm_commit()`
   and `gi_import()`, cleared by rollback); a new path that books a request calls `comm_snapshot()`. `agencies.type` / `-PS` stay as they are.
+  A GRP member's agency / `-PS` / `-LAM` = its own subfolder tag, not the group's (`folder_own_agency()`; `folder_agency()` stays the
+  parent's for operations tags). Duplicate agencies: `agency_merge()` (Agent API `merge_agency`; moves requests + contacts, deactivates).
 - **Calc sheets hidden in Excel** (24 Nov 2026) are not part of the Calc: `sc_xlsx_sheets()` (safari_check.php) leaves them out
   (`true` as 2nd arg = all), SafariCheck `parse_excel.visible_sheets()` too. A new reader of a Calc's sheet list uses these.
 - `migrations/NNN_name.sql` — not applied by deploy. `docs/` — AGENT_API, FOLDER_NAMING,

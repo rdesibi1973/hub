@@ -118,6 +118,20 @@ curl -sA "$UA" -H "$H" -X POST "$U?action=update_agency" -d '{"agency_id":164,"a
 curl -sA "$UA" -H "$H" -X POST "$U?action=update_agency" -d '{"agency_id":164,"address":"Via Roma 1, 00100 Roma","confirm":true}'
 ```
 
+### `merge_agency` (POST)
+Duplicate agency → the one to keep (`agency_merge()` in `includes/agency_service.php`, since 27 Nov 2026). **Dry-run unless
+`"confirm": true`.** `from_agency_id`* (the duplicate), `into_agency_id`* (kept). Its requests, contacts (made non-primary) and
+`agency_contact_referrer_log` rows move to the kept agency; an empty `email` / `address` of the kept agency is filled from the
+duplicate; the duplicate is deactivated (`active` false, never deleted). Each moved request gets a timeline event
+"Agency merged: <from> → <to>". Frozen commission splits and folder names are not changed (`warnings[]` when types or short names differ).
+→ `{from, into, requests [{id, customer_name, status}], contacts [{id, name, email}], fill {field: value}, warnings, dry_run | merged}`.
+Same id twice → 400; unknown id → 404.
+
+```bash
+curl -sA "$UA" -H "$H" -X POST "$U?action=merge_agency" -d '{"from_agency_id":149,"into_agency_id":222}'                  # dry run
+curl -sA "$UA" -H "$H" -X POST "$U?action=merge_agency" -d '{"from_agency_id":149,"into_agency_id":222,"confirm":true}'
+```
+
 ### `save_agency_contact` (POST)
 Adds or edits a contact of an agency, same as the contacts on the Agencies page (`agency_contact_save()` in
 `includes/agency_service.php`). **Dry-run unless `"confirm": true`.** `agency_id`*, `contact_id` (edit; omit to add),
@@ -215,6 +229,10 @@ A **split** is `[{referrer_id, rate}]` (rate in %). The split of a request: snap
 (`-PS` / `-LAM`) when the request has no `agency_id` → none. `commission_split` in `find_requests`, `request_resume`, `create_request`,
 `confirm_booking` = `{agency_contact, split[{referrer_id, referrer, rate}], label, total, source (snapshot|contact|agency|type|folder_tag|none),
 provisional, warning, snapshot_at}`. A rollback of the confirmation drops the frozen split (a manual one stays).
+**GRP member (27 Nov 2026):** its agency and `-PS` / `-LAM` come from its own subfolder tag (`MarcoLao(IlTuareg-LAM-Roberto)` inside a
+`(GoWorld-Roberto)` group = Il Tuareg, Lamprati), not from the group parent (`folder_own_agency()` in `folder_parser.php`); the request's
+`agency` field, the folder-tag warning and `update_request`'s rename hint read the member's subfolder. A Lamprati client with no agency
+(`DanieleSandri_GRP0301(Daniela-LAM)`) = `channel` direct + split Lamprati.
 
 #### `list_commercial_referrers` (GET)
 → `referrers[] {id, name, kind rep|internal, default_rate, on_penalties, period month|semester, agency_type, active}`,

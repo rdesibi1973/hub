@@ -184,6 +184,68 @@ function agency_update(PDO $db, int $id, array $f, bool $dryRun = false): array 
     return $res;
 }
 
+/**
+ * Merge duplicate agency $fromId into $intoId (27 Nov 2026, Mister Holiday #149 → MRH GROUP SRL #222): its requests,
+ * contacts and referrer-log rows move to $intoId, an empty email / address of $intoId is filled from $fromId, and $fromId is
+ * deactivated (never deleted). Frozen commission splits and folder names are not touched (`warnings`).
+ * Returns ok, error, error_code (same|not_found|db), from, into {id, nome, short_name, type}, requests [{id, customer_name,
+ * status}], contacts [{id, name, email}], fill {field: value}, warnings[].
+ */
+function agency_merge(PDO $db, int $fromId, int $intoId, bool $dryRun = true): array {
+    $res = ['ok' => false, 'error' => null, 'error_code' => null, 'requests' => [], 'contacts' => [], 'fill' => [], 'warnings' => []];
+    if ($fromId <= 0 || $intoId <= 0 || $fromId === $intoId) {
+        return array_merge($res, ['error' => 'Give two different agencies (from_agency_id, into_agency_id).', 'error_code' => 'same']);
+    }
+    $st = $db->prepare('SELECT id, nome, short_name, type, attiva, address, email FROM agencies WHERE id = ?');
+    $ag = [];
+    foreach (['from' => $fromId, 'into' => $intoId] as $k => $id) {
+        $st->execute([$id]);
+        $ag[$k] = $st->fetch(PDO::FETCH_ASSOC);
+        if (!$ag[$k]) return array_merge($res, ['error' => 'Agency ' . $id . ' not found.', 'error_code' => 'not_found']);
+        $res[$k] = ['id' => (int)$ag[$k]['id'], 'nome' => $ag[$k]['nome'], 'short_name' => $ag[$k]['short_name'],
+                    'type' => $ag[$k]['type'], 'active' => (bool)$ag[$k]['attiva']];
+    }
+    $st = $db->prepare('SELECT id, customer_name, status FROM requests WHERE agency_id = ? ORDER BY id');
+    $st->execute([$fromId]);
+    foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) $res['requests'][] = ['id' => (int)$r['id'], 'customer_name' => $r['customer_name'], 'status' => $r['status']];
+    $st = $db->prepare('SELECT id, name, email FROM agency_contacts WHERE agency_id = ? ORDER BY id');
+    $st->execute([$fromId]);
+    foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $c) $res['contacts'][] = ['id' => (int)$c['id'], 'name' => $c['name'], 'email' => $c['email']];
+    foreach (['email', 'address'] as $k) {
+        if (trim((string)$ag['into'][$k]) === '' && trim((string)$ag['from'][$k]) !== '') $res['fill'][$k] = $ag['from'][$k];
+    }
+    if ($ag['from']['type'] !== $ag['into']['type']) {
+        $res['warnings'][] = 'Types differ (' . $ag['from']['type'] . ' → ' . $ag['into']['type'] . '): confirmed bookings keep their frozen commission split — check them with set_commission_split.';
+    }
+    if ($res['requests'] && $ag['from']['short_name'] !== $ag['into']['short_name']) {
+        $res['warnings'][] = 'Folders are not renamed: old folders keep the (' . $ag['from']['short_name'] . '-Agent) tag.';
+    }
+    if ($dryRun) return array_merge($res, ['ok' => true]);
+
+    try {
+        $db->beginTransaction();
+        $db->prepare('UPDATE requests SET agency_id = ? WHERE agency_id = ?')->execute([$intoId, $fromId]);
+        $db->prepare('UPDATE agency_contacts SET agency_id = ?, is_primary = 0 WHERE agency_id = ?')->execute([$intoId, $fromId]);
+        try { $db->prepare('UPDATE agency_contact_referrer_log SET agency_id = ? WHERE agency_id = ?')->execute([$intoId, $fromId]); }
+        catch (PDOException $ig) { /* table not created yet (commission_service.php comm_schema) */ }
+        foreach ($res['fill'] as $k => $v) $db->prepare("UPDATE agencies SET $k = ? WHERE id = ?")->execute([$v, $intoId]);
+        $db->prepare('UPDATE agencies SET attiva = 0 WHERE id = ?')->execute([$fromId]);
+        $db->commit();
+    } catch (PDOException $e) {
+        if ($db->inTransaction()) $db->rollBack();
+        error_log('agency_merge: ' . $e->getMessage());
+        return array_merge($res, ['error' => 'Database error while merging the agencies.', 'error_code' => 'db']);
+    }
+    if ($res['requests'] && function_exists('timeline_log')) {
+        foreach ($res['requests'] as $r) {
+            try { timeline_log($r['id'], 'status_change', 'Agency merged: ' . $ag['from']['nome'] . ' → ' . $ag['into']['nome']); }
+            catch (Throwable $ig) {}
+        }
+    }
+    $res['ok'] = true;
+    return $res;
+}
+
 // ── Contacts (agency_contacts) ───────────────────────────────────────────────
 
 /** Contacts of the given agencies, primary first: [agency_id => [rows]] (+ commercial referrer columns, commission_service.php). */

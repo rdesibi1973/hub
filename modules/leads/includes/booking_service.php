@@ -197,12 +197,15 @@ function bs_folder_name_error(string $name): string {
 /**
  * After an agency change: does the folder's (Agency-Agent) tag still name that agency?
  * $r = request row (practice_code, group_folder, agent_id). Checks the last (…) group of
- * the folder (group: the parent). Returns null when it matches (or nothing to compare),
- * else ['message' => …, 'suggested_name' => folder name with the tag rebuilt].
+ * the folder; a GRP member: its own subfolder when that has a tag (the member's agency comes from
+ * there, not from the group — 27 Nov 2026), else the parent. Returns null when it matches (or nothing
+ * to compare), else ['message' => …, 'suggested_name' => folder name with the tag rebuilt].
  * The folder itself is not renamed here: that is rename_folder / BackOffice "Rename…".
  */
 function bs_agency_tag_hint(PDO $db, array $r, $agencyId): ?array {
-    $folder = trim((string)($r['group_folder'] ?? '')) ?: trim((string)($r['practice_code'] ?? ''));
+    $pc = trim((string)($r['practice_code'] ?? ''));
+    $gf = trim((string)($r['group_folder'] ?? ''));
+    $folder = ($gf !== '' && $pc !== $gf && strpos($pc, '(') !== false) ? $pc : ($gf ?: $pc);
     if ($folder === '' || !(int)$agencyId) return null;
     $st = $db->prepare("SELECT nome, short_name FROM agencies WHERE id = ?");
     $st->execute([(int)$agencyId]);
