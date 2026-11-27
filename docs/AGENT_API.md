@@ -229,9 +229,11 @@ Commissions page only.
 paid_date, period (YYYY-MM, or YYYY-H1/H2 for Lamprati), currency, invoices, invoice_total, credit_notes, penalty, penalty_excluded, base,
 referrer, rate, commission, split, split_source, provisional, note (no invoice / not fully paid)`; `totals[] {referrer, currency, bookings,
 base, commission, by_period[]}`; `warnings[]` (bookings of an agency that needs the consultant and has none).
-Base = invoices not Cancelled − credit notes (credit applied to an invoice of the same request stays in, as `value_usd`). For a
-referrer with `on_penalties` false (Promoservice) the penalty is left out: a cancelled booking (status Cancelled / `_CANCELLED`) is all
-penalty, on a live booking the invoice lines named "penalty / penale / cancellation fee". Only bookings (confirmed / Booked / Cancelled).
+Base = **paid** invoices not Cancelled (an invoice with nothing paid is left out, named in `note`) − credit notes (credit applied to an
+invoice of the same request stays in, as `value_usd`). For a referrer with `on_penalties` false (Promoservice) a cancelled booking
+(status Cancelled / `_CANCELLED`) is all penalty → base 0; a cancellation line inside a live trip stays in the base (as paid so far).
+Only bookings (confirmed / Booked / Cancelled). `warnings[]` also flags a request whose own folder tag disagrees with its agency
+(`-PS` folder on a non-Promoservice agency, e.g. a GRP member stored with the group's agency; or a Promoservice agency without `-PS`).
 
 #### `set_commission_split` (POST D)
 `request_id*`, `split*` (list, preset key, or `null` = drop the frozen split: back to consultant / agency default), `reason*`.

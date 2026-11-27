@@ -17,10 +17,10 @@
  *  - The snapshot is taken by Confirm Safari (bs_confirm_commit()) and the group import; afterwards the
  *    booking keeps its split even if the contact's referrer changes. Roberto can change it
  *    (comm_set_request_split(), timeline "Commission split changed").
- *  - Base = invoices (not Cancelled) − credit notes (credit applied to an invoice of the same request stays in,
- *    same formula as sync_request_value()). A referrer with on_penalties = 0 (Promoservice) gets nothing on
- *    cancellation penalties: a cancelled booking (status Cancelled / _CANCELLED) is all penalty; on a live booking
- *    invoice lines named "penalty / penale / cancellation fee" are left out.
+ *  - Base = paid invoices (not Cancelled; an invoice with nothing paid is left out) − credit notes (credit applied to
+ *    an invoice of the same request stays in, same formula as sync_request_value()). A referrer with on_penalties = 0
+ *    (Promoservice) gets nothing on a cancelled booking (status Cancelled / _CANCELLED = all penalty); a cancellation
+ *    line inside a live trip stays in the base (Roberto, 27 Nov 2026).
  *  - Lamprati counts per semester (commercial_referrers.period = semester).
  *  - agencies.type (savannah | promoservice | lamprati) stays for the folder suffix and old reports; a default split
  *    that does not match it gets a warning, the type is never changed from here.
@@ -33,7 +33,6 @@
 if (!defined('COMM_NEW_CONSULTANT_CUTOFF')) define('COMM_NEW_CONSULTANT_CUTOFF', '2026-12-01');
 
 const COMM_BASIS = ['booked', 'travel', 'paid'];
-const COMM_PENALTY_LIKE = ['%penalt%', '%penale%', '%cancellation fee%', '%cancellation charge%'];
 
 /** Tables and columns, created / added once per PHP request (MySQL: no ADD COLUMN IF NOT EXISTS). */
 function comm_schema(PDO $db): void {
@@ -571,7 +570,33 @@ function comm_resolve(PDO $db, array $r, bool $ignoreSnapshot = false): array {
     $out['split'] = comm_split_out($db, $split);
     $out['label'] = comm_split_label($db, $split);
     $out['total'] = comm_split_total($split);
+    if (($tw = comm_tag_warning($db, $r, $split)) !== null) $out['warning'] = trim(($out['warning'] ?? '') . ' ' . $tw);
     return $out;
+}
+
+/**
+ * The request's own folder tag (practice_code "(Short-PS-Agent)", for a GRP member its subfolder) against its split:
+ * "-PS" folder whose agency gives no Promoservice (e.g. a member stored with the group's agency), or a Promoservice /
+ * Lamprati agency whose folder has no suffix. Warning text or null.
+ */
+function comm_tag_warning(PDO $db, array $r, array $split): ?string {
+    if (!preg_match('/\(([^)]+)\)/', (string)($r['practice_code'] ?? ''), $m)) return null;
+    $tag = $m[1];
+    $tagType = comm_tag_type($tag);
+    $refs = comm_referrers($db);
+    $types = [];
+    foreach ($split as $e) if (!empty($refs[$e['referrer_id']]['agency_type'])) $types[] = $refs[$e['referrer_id']]['agency_type'];
+    $agency = comm_agency($db, (int)($r['agency_id'] ?? 0));
+    $suffix = ['promoservice' => '-PS', 'lamprati' => '-LAM'];
+    if ($tagType !== '' && !in_array($tagType, $types, true)) {
+        return 'The folder says ' . $suffix[$tagType] . ' but the request\'s agency (' . ($agency['nome'] ?? 'none') . ') gives no '
+             . $tagType . ' commission — check the agency of the request.';
+    }
+    if ($tagType === '' && $agency && isset($suffix[$agency['type']]) && in_array($agency['type'], $types, true) && stripos($tag, 'Drct') === false) {
+        return 'Agency ' . $agency['nome'] . ' is ' . $agency['type'] . ' but the folder has no ' . $suffix[$agency['type']]
+             . ' — check the agency type or the folder.';
+    }
+    return null;
 }
 
 /** Request row with the columns comm_resolve() needs. */
@@ -738,23 +763,22 @@ function comm_report(PDO $db, array $opt): array {
     // Money per request and currency.
     $ids = array_keys($reqs);
     $in  = implode(',', array_fill(0, count($ids), '?'));
-    $money = [];   // [rid][cur] = {invoices[], total, cn, penalty_lines, open, last_paid}
+    $money = [];   // [rid][cur] = {invoices[], unpaid[], total, cn, open, last_paid}
     $slot = function ($rid, $cur) use (&$money) {
-        if (!isset($money[$rid][$cur])) $money[$rid][$cur] = ['invoices' => [], 'total' => 0.0, 'cn' => 0.0, 'penalty_lines' => 0.0, 'open' => 0.0, 'last_paid' => null];
+        if (!isset($money[$rid][$cur])) $money[$rid][$cur] = ['invoices' => [], 'unpaid' => [], 'total' => 0.0, 'cn' => 0.0, 'open' => 0.0, 'last_paid' => null];
         return $cur;
     };
-    $st = $db->prepare("SELECT i.id, i.request_id, i.invoice_number, i.currency, i.total, i.balance_due,
-                               (SELECT MAX(p.payment_date) FROM invoice_payments p WHERE p.invoice_id = i.id AND p.cancelled_at IS NULL) AS last_paid,
-                               (SELECT COALESCE(SUM(it.line_total),0) FROM invoice_items it WHERE it.invoice_id = i.id AND ("
-                               . implode(' OR ', array_fill(0, count(COMM_PENALTY_LIKE), 'it.description LIKE ?')) . ")) AS penalty_lines
+    $st = $db->prepare("SELECT i.id, i.request_id, i.invoice_number, i.currency, i.total, i.balance_due, i.amount_paid,
+                               (SELECT MAX(p.payment_date) FROM invoice_payments p WHERE p.invoice_id = i.id AND p.cancelled_at IS NULL) AS last_paid
                         FROM invoices i WHERE i.status <> 'Cancelled' AND i.request_id IN ($in)");
-    $st->execute(array_merge(COMM_PENALTY_LIKE, $ids));
+    $st->execute($ids);
     foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $i) {
         $rid = (int)$i['request_id']; $cur = $slot($rid, $i['currency'] ?: 'USD');
         $m = &$money[$rid][$cur];
+        // Only paid invoices count (Roberto, 27 Nov 2026): one with nothing paid yet is left out and named in the note.
+        if ((float)$i['total'] > 0 && (float)$i['amount_paid'] <= 0) { $m['unpaid'][] = $i['invoice_number']; unset($m); continue; }
         $m['invoices'][] = $i['invoice_number'];
         $m['total'] += (float)$i['total'];
-        $m['penalty_lines'] += (float)$i['penalty_lines'];
         $m['open'] += max(0.0, (float)$i['balance_due']);
         if ($i['last_paid'] !== null && ($m['last_paid'] === null || $i['last_paid'] > $m['last_paid'])) $m['last_paid'] = $i['last_paid'];
         unset($m);
@@ -783,12 +807,18 @@ function comm_report(PDO $db, array $opt): array {
         if (!$split) continue;
         $cancelled = comm_is_cancelled($r);
         $booked = $r['confirmation_date'] ?: $r['date_received'];
-        $curs = $money[$rid] ?? ['USD' => ['invoices' => [], 'total' => 0.0, 'cn' => 0.0, 'penalty_lines' => 0.0, 'open' => 0.0, 'last_paid' => null]];
+        $curs = $money[$rid] ?? ['USD' => ['invoices' => [], 'unpaid' => [], 'total' => 0.0, 'cn' => 0.0, 'open' => 0.0, 'last_paid' => null]];
         foreach ($curs as $cur => $m) {
             $paidDate = ($m['total'] > 0 && $m['open'] < 0.01) ? $m['last_paid'] : null;
             if ($basis === 'paid' && ($paidDate === null || $paidDate < $from || $paidDate > $to)) continue;
             $net = round($m['total'] - $m['cn'], 2);
-            $penalty = $cancelled ? $net : round(min($m['penalty_lines'], max(0.0, $net)), 2);
+            // Penalty = a cancelled booking only. A cancellation line inside a live trip ("Pemba cancellation fees")
+            // stays in the base, as paid to Promoservice so far (Roberto, 27 Nov 2026).
+            $penalty = $cancelled ? $net : 0.0;
+            $notes = [];
+            if (!$m['invoices']) $notes[] = $m['unpaid'] ? 'nothing paid yet' : 'no invoice';
+            elseif ($m['open'] >= 0.01) $notes[] = 'not fully paid';
+            if ($m['unpaid'] && $m['invoices']) $notes[] = 'unpaid left out: ' . implode(', ', $m['unpaid']);
             $dateKey = $basis === 'travel' ? $r['start_date'] : ($basis === 'paid' ? $paidDate : $booked);
             foreach ($split as $e) {
                 $ref = $refs[$e['referrer_id']] ?? null;
@@ -803,7 +833,7 @@ function comm_report(PDO $db, array $opt): array {
                         'credit_notes' => round($m['cn'], 2), 'penalty' => $penalty, 'penalty_excluded' => $excl && $penalty != 0.0,
                         'base' => $base, 'referrer_id' => $e['referrer_id'], 'referrer' => $e['referrer'], 'rate' => $e['rate'],
                         'commission' => round($base * $e['rate'] / 100, 2), 'split' => $res['label'], 'split_source' => $res['source'],
-                        'provisional' => $res['provisional'], 'note' => !$m['invoices'] ? 'no invoice' : ($m['open'] >= 0.01 ? 'not fully paid' : null)];
+                        'provisional' => $res['provisional'], 'note' => $notes ? implode('; ', $notes) : null];
                 $out['rows'][] = $row;
                 $k = $e['referrer_id'] . '|' . $cur;
                 if (!isset($out['totals'][$k])) {
