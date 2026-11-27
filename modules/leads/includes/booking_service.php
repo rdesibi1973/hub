@@ -229,7 +229,8 @@ function bs_agency_tag_hint(PDO $db, array $r, $agencyId): ?array {
  *
  * $v keys: date_received, customer_name, email, whatsapp, source, channel, agency_id,
  *          agent_id, destination, period, pax, status, value_usd, commission_pct,
- *          commission_usd, date_paid, initial_request, notes  (strings, '' = empty)
+ *          commission_usd, date_paid, initial_request, notes  (strings, '' = empty);
+ *          optional agency_contact_id (consultant; else matched by email — commission_service.php)
  * $opt:    dropbox_skip (bool), dup_override (bool), notify_agent (bool),
  *          creator_user_id (int), dry_run (bool),
  *          direct_tag (string, replaces "Drct" for channel direct — Incoming blog referral),
@@ -237,7 +238,8 @@ function bs_agency_tag_hint(PDO $db, array $r, $agencyId): ?array {
  *          initial_request_optional (bool — Incoming leads may arrive without text)
  *
  * Returns ['ok'=>bool, 'errors'=>[], 'error_code'=>''|'validation'|'duplicate'|'folder_exists'|'dropbox',
- *          'dup_candidates'=>[], 'request_id', 'folder_name', 'dropbox_path', 'notify'=>['sent','error']].
+ *          'dup_candidates'=>[], 'request_id', 'folder_name', 'dropbox_path', 'notify'=>['sent','error'],
+ *          'agency_contact_id', 'warnings'=>[] (e.g. "Which consultant?")].
  * Validation of caller-specific rules (staff restrictions, status list) stays with the caller.
  */
 function bs_create_request(PDO $db, array $v, array $opt = []): array {
@@ -268,6 +270,10 @@ function bs_create_request(PDO $db, array $v, array $opt = []): array {
     }
     if (!$v['agent_id'])        $errors[] = 'Please select an agent.';
     if ($v['channel'] === 'agency' && !$v['agency_id']) $errors[] = 'Please select an agency.';
+    if ((int)($v['agency_contact_id'] ?? 0) > 0) {
+        require_once __DIR__ . '/commission_service.php';
+        if ($ce = comm_contact_check($db, $v['channel'] === 'agency' ? (int)$v['agency_id'] : 0, (int)$v['agency_contact_id'])) $errors[] = $ce;
+    }
     $directTag = trim((string)($opt['direct_tag'] ?? '')) ?: 'Drct';
     if (!preg_match('/^[A-Za-z0-9]+$/', $directTag)) $errors[] = 'Invalid folder tag.';
     $folderOverride = trim((string)($opt['folder_name'] ?? ''));
@@ -382,6 +388,23 @@ function bs_create_request(PDO $db, array $v, array $opt = []): array {
     if ($folderMeta) {
         require_once __DIR__ . '/folder_link_service.php';
         folder_id_store($db, $out['request_id'], $folderMeta);
+    }
+    // Agency contact (consultant) → commission split (commission_service.php): given, else matched by the email.
+    if ($v['channel'] === 'agency' && $v['agency_id']) {
+        try {
+            require_once __DIR__ . '/commission_service.php';
+            comm_schema($db);
+            $cid = (int)($v['agency_contact_id'] ?? 0);
+            if ($cid && comm_contact_check($db, (int)$v['agency_id'], $cid)) $cid = 0;
+            if (!$cid && $v['email'] !== '') $cid = (int)comm_contact_for_email($db, (int)$v['agency_id'], $v['email']);
+            if ($cid) $db->prepare("UPDATE requests SET agency_contact_id = ? WHERE id = ?")->execute([$cid, $out['request_id']]);
+            $out['agency_contact_id'] = $cid ?: null;
+            if (!$cid && comm_agency_needs_contact($db, (int)$v['agency_id'])) {
+                $out['warnings'][] = 'Which consultant? This agency has consultants with their own commercial referrer — set the agency contact on the request.';
+            }
+        } catch (Throwable $e) {
+            error_log('bs_create_request contact: ' . $e->getMessage());
+        }
     }
     assign_touch($db, $out['request_id']);
     $out['ok'] = true;
@@ -1101,6 +1124,10 @@ function bs_confirm_commit(PDO $db, array $plan, bool $proceed): array {
         $res['msg'] .= ' (was Parked)';
     }
     if ($res['ok'] && !empty($plan['r']['id'])) {
+        // Commission split frozen at confirmation (contact → agency default): commission_service.php.
+        require_once __DIR__ . '/commission_service.php';
+        $snap = comm_snapshot($db, (int)$plan['r']['id'], 'confirm');
+        $res['commission_split'] = $snap ? ['split' => $snap['split'], 'label' => $snap['label'], 'source' => $snap['source']] : null;
         timeline_log((int)$plan['r']['id'], 'confirmation', 'Booking confirmed — ' . $res['folder'],
                      ['body' => ($res['group_folder'] ? 'Group: ' . $res['group_folder'] . "\n" : '') . 'Previous folder: ' . $plan['old_folder'],
                       'refs' => ['dropbox_path' => $res['dropbox_path']]]);
@@ -1237,6 +1264,8 @@ function bo_rollback_db(PDO $db, int $id, string $name, string $path, array $pre
              confirmation_date=NULL, pre_confirm_json=NULL
          WHERE id=?"
     )->execute([$name, ($group !== '' ? $group : null), bo_url_from_path($path), $status, ($pay !== '' ? $pay : null), $id]);
+    require_once __DIR__ . '/commission_service.php';
+    comm_snapshot_clear($db, $id);   // the split taken at confirmation goes; a manual one (Roberto) stays
     // Confirmed from Parked and rolled back: Parked again, parked from now (the old date was cleared at confirm).
     if ($status === PK_STATUS) {
         pk_schema($db);

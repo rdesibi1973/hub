@@ -44,6 +44,15 @@ $fullFields = ['practice_code','group_folder','date_received','customer_name','e
                'destination','period','pax','status','payment_status','value_usd','commission_pct','commission_usd',
                'date_paid','start_date','initial_request','dropbox_url','notes'];
 $agencies = $isRestricted ? [] : $db->query("SELECT id, nome, short_name FROM agencies ORDER BY nome")->fetchAll();
+// Agency contacts (consultant who sent the request) → commission split: commission_service.php.
+require_once __DIR__ . '/includes/commission_service.php';
+comm_schema($db);
+$agencyContacts = $isRestricted ? [] : $db->query("SELECT id, agency_id, name, email FROM agency_contacts ORDER BY is_primary DESC, name ASC")->fetchAll();
+if (!$isRestricted) {
+    $st = $db->prepare("SELECT agency_contact_id FROM requests WHERE id = ?");
+    $st->execute([$id]);
+    $req['agency_contact_id'] = $st->fetchColumn() ?: null;
+}
 
 // Fields editable by staff (restricted set — no financials, no agent reassignment)
 $staffFields = ['customer_name','email','whatsapp','source','destination','period','pax',
@@ -94,6 +103,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($v['agency_id'] !== '' && $v['channel'] === '') $v['channel'] = 'agency';
         if ($v['channel'] === 'agency' && $v['agency_id'] === '') $errors[] = 'Please select an agency (channel Agency).';
         if ($v['channel'] !== 'agency') $v['agency_id'] = '';
+        $v['agency_contact_id'] = $v['agency_id'] !== '' ? (int)($_POST['agency_contact_id'] ?? 0) : 0;
+        if ($v['agency_contact_id'] && ($ce = comm_contact_check($db, (int)$v['agency_id'], $v['agency_contact_id']))) $errors[] = $ce;
         if (!$errors && $v['agency_id'] !== '' && (string)$v['agency_id'] !== (string)($req['agency_id'] ?? '')) {
             $agencyHint = bs_agency_tag_hint($db, ['practice_code' => $v['practice_code'], 'group_folder' => $v['group_folder'],
                                                    'agent_id' => $v['agent_id']], $v['agency_id']);
@@ -378,6 +389,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             ]);
 
             assign_touch($db, (int)$id);   // records assigned_at if agent_id changed (also when unassigned)
+            comm_request_contact_set($db, (int)$id, (int)($v['agency_contact_id'] ?? 0) ?: null);   // consultant (checked above)
 
             // ── Reassigned: timeline event + mail to the new agent (includes/reassign_service.php, shared with the API) ──
             $oldAgentId = (int)($req['agent_id'] ?? 0);
@@ -500,6 +512,33 @@ include 'includes/header.php';
         </select>
         <div style="font-size:.7rem;color:var(--grey-mid);margin-top:3px">Changing the agency does not rename the folder — use BackOffice “Rename…”.</div>
       </div>
+
+      <div class="form-group" id="contact_group" style="<?= ($v['channel'] ?? '')==='agency'?'':'display:none' ?>">
+        <label>Consultant <span style="font-weight:400;color:var(--grey-mid)">(agency contact — sets the commission referrer)</span></label>
+        <select name="agency_contact_id" id="contact_select">
+          <option value="">— Not set —</option>
+          <?php foreach ($agencyContacts as $ac): ?>
+            <option value="<?= (int)$ac['id'] ?>" data-agency="<?= (int)$ac['agency_id'] ?>" <?= (string)($v['agency_contact_id'] ?? '')===(string)$ac['id']?'selected':'' ?>><?= h($ac['name']) ?><?= $ac['email'] ? ' · ' . h($ac['email']) : '' ?></option>
+          <?php endforeach; ?>
+        </select>
+      </div>
+      <script>
+      // Only the contacts of the selected agency.
+      (function () {
+        var ag = document.getElementById('agency_select'), cs = document.getElementById('contact_select');
+        if (!ag || !cs) return;
+        function filt() {
+          Array.prototype.forEach.call(cs.options, function (o) {
+            if (!o.value) return;
+            var on = o.getAttribute('data-agency') === ag.value;
+            o.hidden = !on; o.disabled = !on;
+            if (!on && o.selected) cs.value = '';
+          });
+        }
+        ag.addEventListener('change', filt);
+        filt();
+      })();
+      </script>
       <?php endif; ?>
 
       <div class="form-group">
@@ -699,6 +738,8 @@ function toggleAgency() {
   const agency = document.getElementById('channel_select').value === 'agency';
   document.getElementById('agency_group').style.display = agency ? '' : 'none';
   document.getElementById('agency_select').required = agency;
+  var cg = document.getElementById('contact_group');
+  if (cg) cg.style.display = agency ? '' : 'none';
 }
 toggleAgency();
 

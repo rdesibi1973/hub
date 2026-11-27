@@ -31,7 +31,7 @@ without driving the web UI.
 | HTTPS only | Plain HTTP → 403. |
 | Rate limit | 60 calls/min → 429. |
 | Audit | Every call (including failures and dry-runs) → `agent_audit_log` (action, request_id, user, HTTP code, dry_run, payload, result, IP). |
-| Dry-run by default | `update_request`, `confirm_booking`, `send_booking_email`, `rollback_booking`, `rename_folder`, `reopen_cancelled`, `import_group_folder`, `move_group_folder`, `set_request_status`, `reassign_request`, `pipeline_move`, `cancel_invoice_payment`, `cancel_invoice`, `restore_invoice`, `update_folder_status`, `import_zoho_invoice`, `create_invoice`, `update_invoice`, `send_invoice_email`, `memo_delete`, `create_agency`, `update_agency`, `save_agency_contact`, `delete_agency_contact`, `mail_send`, `mail_move`, `ck_request_check`, `ck_set_owners`, `ck_findings_upsert`, `followup_scan`, `followup_update`, `followup_upsert`, `staff_mail_save_eml`, `staff_mail_reply`, `drafts_cleanup`, `folder_ids_backfill`, `folders_orphans` (memo) and `archive_cancelled` (among others) do nothing unless the body has `"confirm": true`. |
+| Dry-run by default | `update_request`, `confirm_booking`, `send_booking_email`, `rollback_booking`, `rename_folder`, `reopen_cancelled`, `import_group_folder`, `move_group_folder`, `set_request_status`, `reassign_request`, `pipeline_move`, `cancel_invoice_payment`, `cancel_invoice`, `restore_invoice`, `update_folder_status`, `import_zoho_invoice`, `create_invoice`, `update_invoice`, `send_invoice_email`, `memo_delete`, `create_agency`, `update_agency`, `save_agency_contact`, `delete_agency_contact`, `mail_send`, `mail_move`, `ck_request_check`, `ck_set_owners`, `ck_findings_upsert`, `followup_scan`, `followup_update`, `followup_upsert`, `staff_mail_save_eml`, `staff_mail_reply`, `drafts_cleanup`, `folder_ids_backfill`, `folders_orphans` (memo), `archive_cancelled`, `set_commission_split` and `commission_backfill` (among others) do nothing unless the body has `"confirm": true`. |
 | No deletes | No delete endpoint (mail included), except `memo_delete`, which is soft (`deleted_at`, the row stays). Undo a confirm with `rollback_booking` (or BackOffice → Rollback). |
 | Mailbox | The key also reads `info@` (`mail_*`): keep `api.txt` as private as the mailbox password. |
 
@@ -74,6 +74,11 @@ curl -sH "$H" "$U?action=find_requests&status=Quoted,Hot-Quoted&agent=rdesibi&ch
 `q` → `[{id, name, short_name, type, active, address, email, price_level {level, markup, label}, contacts[]}]` (inactive agencies included);
 `price_level.level` = `rack` | `sto` (default) | `stospec` | `custom` (`markup` = fraction, e.g. 0.15) — the level to quote this agency at;
 `contacts[]` = `{id, agency_id, name, role, email, phone, primary, notes}`, primary first.
+Commercial referrer (since 27 Nov 2026, see [Commercial referrers](#commercial-referrers-and-commissions)): `referrer_split {split[], label, source
+agency|type, warning}` = the agency default (`source: type` = not stored yet, from `type`); `needs_contact` (more than one contact and
+some with their own referrer → requests need the consultant); each contact adds `referrer_split` (`null` = agency default, `[]` = none),
+`referrer_label`, `referrer_from`, `referrer_note`, `confirmed_bookings`, `first_booking`, `bookings_before_cutoff` (bookings before
+`COMM_NEW_CONSULTANT_CUTOFF`, 0 = a "new" consultant).
 
 ### `create_agency` (POST)
 Adds an agency, same as Agencies → Add in the Hub (`agency_create()` in `includes/agency_service.php`, also used by
@@ -103,6 +108,10 @@ nothing different → `{unchanged: true}`. Changing the short name does **not** 
 old `(Short-Agent)` tag (`warning`).
 `price_level` (`rack` | `sto` | `stospec` | `custom`) + `custom_markup` (0.15 or 15 = 15 %; never below 12 % → 400; `custom_markup`
 alone implies `custom`) → `changes.price_level {from, to}` and `agency.price_level`.
+`referrer_split` (agency default commercial referrer): a list `[{referrer_id | referrer, rate?}]` (rate omitted = the referrer's
+default), a preset key from `list_commercial_referrers` (`r1`, `ps_el`, `none`…), or `null` / `"default"` = from `type` again →
+`changes.referrer_split {from, to}`, `agency.referrer_split`; a split that does not match `type` (folder suffix) gives a `warning` — the
+type is never changed by it. Logged in `agency_contact_referrer_log`.
 
 ```bash
 curl -sA "$UA" -H "$H" -X POST "$U?action=update_agency" -d '{"agency_id":164,"address":"Via Roma 1, 00100 Roma"}'                 # dry run
@@ -118,6 +127,10 @@ non-primary. Adding a contact whose email, or name (ignoring case and punctuatio
 → **409** with `existing[]` — edit that one instead. Invalid email → 400; unknown agency / contact → 404.
 → `{dry_run: true, contact, changes: {field: {from, to}}}`; with `confirm` → `{created: true | updated: true, contact: {id, …}}`;
 nothing different → `{unchanged: true}`. Existing contacts and their ids: `contacts[]` in `list_agencies`.
+Commercial referrer of the consultant: `referrer_split` (same forms as in `update_agency`; `null` / `"default"` = agency default),
+`referrer_from` (`YYYY-MM-DD`; omitted when the split changes = today), `referrer_note`. Each change is logged
+(`agency_contact_referrer_log`: who, when, from → to). A split totalling more than the agency default → `warnings[]` (not blocking:
+only with Roberto's ok). Bookings already confirmed keep their frozen split.
 
 ### `delete_agency_contact` (POST)
 `contact_id`* → `{dry_run: true, contact}`; with `"confirm": true` → `{deleted: true, contact}`.
@@ -137,7 +150,10 @@ Same fields as the New Request form:
 `email`, `whatsapp`, `source` (Email), `destination`, `period`, `pax`, `status` (Inquiry),
 `value_usd`, `commission_pct`, `date_paid`, `notes`, `date_received` (today),
 `notify_agent` (default **true**, but **false** when the agent is Roberto, id 14, or there is no agent — since
-23 Nov 2026; before, the default was false), `dup_override` (default false).
+23 Nov 2026; before, the default was false), `dup_override` (default false),
+`agency_contact_id` (the consultant who sent it, from `contacts[]` of `list_agencies`; omitted → the contact whose email is the
+request `email`; a contact of another agency → 400). Dry run and result show `commission_split` (provisional) and `warnings[]` —
+"Which consultant?" when the agency has consultants with their own referrer (LabTravel) and none is set.
 
 Notification ("New request assigned to you", `notify_agent_new_request()`): `"notify_agent": false` is respected;
 `true` with agent 14 still sends nothing (Roberto is never notified). The dry run shows `will_notify` (bool),
@@ -157,7 +173,9 @@ approve, Edit Request and the Java `api_create_request.php`). The folder name ke
 ### `update_request` (POST)
 **Dry-run unless `"confirm": true`** (since 9 Oct 2026; before, it wrote at the first call).
 `request_id` + any of `customer_name, email, whatsapp, source, destination, period, start_date, pax, value_usd,
-commission_pct, date_paid, initial_request, notes, agency_id, channel` (top level or inside `fields`; `""` / `null` clears).
+commission_pct, date_paid, initial_request, notes, agency_id, channel, agency_contact_id` (top level or inside `fields`; `""` / `null` clears).
+`agency_contact_id` must be a contact of the request's agency (a new `agency_id` without it drops a contact of the old agency);
+on a confirmed booking it does not change the frozen commission split (`warnings[]` → `set_commission_split`).
 `commission_usd` is recomputed when `value_usd` or `commission_pct` change. Status / folder are **not**
 editable here (use `set_request_status` below, `confirm_booking` / BackOffice, `rename_folder`).
 The seller is **not** changed here either: `agent_id` / `agent` → **400** "use reassign_request" (one way to do it,
@@ -181,6 +199,55 @@ Dry run → `{dry_run: true, changes: {field: {from, to}}, ignored, warnings, re
 curl -sA "$UA" -H "$H" -X POST "$U?action=update_request" -d '{"request_id":3023,"pax":4,"value_usd":15780}'                 # dry run
 curl -sA "$UA" -H "$H" -X POST "$U?action=update_request" -d '{"request_id":3023,"pax":4,"value_usd":15780,"confirm":true}'
 curl -sA "$UA" -H "$H" -X POST "$U?action=update_request" -d '{"request_id":2923,"agency_id":54,"customer_name":"LucaDeSanctis"}'   # dry run
+```
+
+### Commercial referrers and commissions
+Since 27 Nov 2026 (logic `includes/commission_service.php`, page Commissions `commissions.php`, migration 088 — the tables are also
+created on first use). The commission goes to whoever brought the agency in and follows it:
+**Promoservice** 5 % (no commission on cancellation penalties), **Lamprati** 3 % (counted per semester; already in the agency net
+price), **Elena Perfetti** 5 % on the agencies she brings. LabTravel / Euphemia (`EuphemiaLabTravel-PS`) is one agency of autonomous
+consultants: consultants who already worked with Savannah via Promoservice stay Promoservice 5 %, new ones (no booking before
+`COMM_NEW_CONSULTANT_CUTOFF`, default 2026-12-01 — to be confirmed by Roberto) are Promoservice 2.5 + Elena 2.5 (preset `ps_el`).
+Folder names keep `-PS`: the split lives in the Hub data only.
+
+A **split** is `[{referrer_id, rate}]` (rate in %). The split of a request: snapshot (`requests.commission_split_json`, frozen at
+`confirm_booking` / group import) → its consultant (`agency_contact_id`, from `referrer_from`) → the agency default → the folder tag
+(`-PS` / `-LAM`) when the request has no `agency_id` → none. `commission_split` in `find_requests`, `request_resume`, `create_request`,
+`confirm_booking` = `{agency_contact, split[{referrer_id, referrer, rate}], label, total, source (snapshot|contact|agency|type|folder_tag|none),
+provisional, warning, snapshot_at}`. A rollback of the confirmation drops the frozen split (a manual one stays).
+
+#### `list_commercial_referrers` (GET)
+→ `referrers[] {id, name, kind rep|internal, default_rate, on_penalties, period month|semester, agency_type, active}`,
+`presets {key: {label, split}}` (usable as `referrer_split` / `split`), `new_consultant_cutoff`. Referrers are edited by Roberto on the
+Commissions page only.
+
+#### `commissions_report` (GET)
+`referrer_id` (omit = all), `from`, `to` (default: this year), `basis` = `booked` (confirmation date, else date received — default)
+| `travel` (start date) | `paid` (date of the last payment, fully paid bookings only), `format` = `json` (default) | `csv` | `xlsx`
+(→ `file {name, size, content_base64}`: decode to a file, never print it).
+→ `rows[]` one per booking × currency × referrer: `request_id, folder, agency, contact, status, cancelled, booked_date, travel_date,
+paid_date, period (YYYY-MM, or YYYY-H1/H2 for Lamprati), currency, invoices, invoice_total, credit_notes, penalty, penalty_excluded, base,
+referrer, rate, commission, split, split_source, provisional, note (no invoice / not fully paid)`; `totals[] {referrer, currency, bookings,
+base, commission, by_period[]}`; `warnings[]` (bookings of an agency that needs the consultant and has none).
+Base = invoices not Cancelled − credit notes (credit applied to an invoice of the same request stays in, as `value_usd`). For a
+referrer with `on_penalties` false (Promoservice) the penalty is left out: a cancelled booking (status Cancelled / `_CANCELLED`) is all
+penalty, on a live booking the invoice lines named "penalty / penale / cancellation fee". Only bookings (confirmed / Booked / Cancelled).
+
+#### `set_commission_split` (POST D)
+`request_id*`, `split*` (list, preset key, or `null` = drop the frozen split: back to consultant / agency default), `reason*`.
+Roberto's decision only. Timeline `status_change` "Commission split changed: <from> → <to>" + reason.
+→ `{dry_run, from, to, changed, commission_split, request}`.
+
+#### `commission_backfill` (GET dry run / POST D)
+Data setup after deploy: agencies with no stored default get the one of their `type` (savannah → none), confirmed bookings with no
+frozen split get the **agency default** (not the consultant: LabTravel history = Promoservice 5 %). Dry run → counts per split
+(`agencies.by_label`, `bookings.by_label`, `bookings.sample[]`); `"confirm": true` writes. Same as Commissions → Backfill.
+
+```bash
+curl -sA "$UA" -H "$H" "$U?action=list_agencies&q=LabTravel"
+curl -sA "$UA" -H "$H" -X POST "$U?action=save_agency_contact" -d '{"agency_id":77,"contact_id":412,"referrer_split":"ps_el","referrer_from":"2026-12-03","referrer_note":"new consultant via Elena"}'   # dry run
+curl -sA "$UA" -H "$H" "$U?action=commissions_report&referrer_id=1&from=2026-01-01&to=2026-12-31"
+curl -sA "$UA" -H "$H" -X POST "$U?action=set_commission_split" -d '{"request_id":3101,"split":[{"referrer_id":1,"rate":5}],"reason":"existing consultant"}'   # dry run
 ```
 
 ### `set_request_status` (POST)
@@ -643,7 +710,8 @@ programme written once, right after the code; the member sub-folder keeps `Clien
 Same input + `"confirm": true`. Without it → dry-run (= preview). With blocking issues → 409
 unless `"force": true`. Moves the folder to `001_Safari`, renames it
 `MM_DDMON_<folder>_STARTddMON[_MIDTddMON]_ENDddMONyyyy_PROGRESS`, status → Booked,
-snapshot stored for Rollback.
+snapshot stored for Rollback. The commission split is frozen now (consultant → agency default) and returned as
+`commission_split {split, label, source}` (see [Commercial referrers](#commercial-referrers-and-commissions)).
 **Lost request** (Roberto, 18 Oct 2026): preview and confirm fail (400, `hint`) unless `"reopen_lost": true` — ask the
 seller first. With it, the preview shows `reopen` ("Lost (reason) → Quoted, then confirmed") and the confirm reopens the
 request exactly like the status menu (Lost → Quoted, Lost reason/note cleared, timeline) before moving the folder; if the

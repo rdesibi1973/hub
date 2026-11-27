@@ -2,11 +2,15 @@
 require_once 'config.php';
 require_once __DIR__ . '/includes/agency_service.php';
 require_once __DIR__ . '/includes/price_level_service.php';
+require_once __DIR__ . '/includes/commission_service.php';
 $pageTitle = 'Agencies';
 $db = db();
 price_level_schema($db);   // agencies.price_level / custom_markup
 requireLogin();
 if (isLeadsRestricted()) { header('Location: requests.php'); exit; }
+comm_schema($db);          // referrer columns (commission_service.php)
+$commView = comm_can_view();
+$commEdit = comm_can_edit();
 
 $errors  = [];
 $success = '';
@@ -57,6 +61,45 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                     'is_primary' => isset($_POST['c_primary']) ? 1 : 0]);
         if ($res['ok']) $success = $action === 'contact_add' ? 'Contact added.' : 'Contact updated.';
         else            $errors[] = $res['error'];
+        // New contact: its commercial referrer (admin; default = agency default) — commission_service.php.
+        if ($res['ok'] && $action === 'contact_add' && $commEdit && ($_POST['ref_preset'] ?? 'default') !== 'default') {
+            [$split, $err] = comm_split_from_form($db, (string)$_POST['ref_preset'], (array)($_POST['ref_rate'] ?? []));
+            if ($err) $errors[] = 'Contact added, referrer not set: ' . $err;
+            else {
+                $cr = comm_contact_set($db, (int)$res['contact']['id'], $split, (string)($_POST['ref_from'] ?? ''), (string)($_POST['ref_note'] ?? ''));
+                if (!$cr['ok']) $errors[] = $cr['error'];
+                elseif ($cr['warnings']) $success .= ' ⚠ ' . implode(' ', $cr['warnings']);
+            }
+        }
+    }
+
+    // CONTACT REFERRER (commercial referrer of one consultant) — admin only, logged in agency_contact_referrer_log
+    if ($action === 'contact_referrer') {
+        if (!$commEdit) $errors[] = 'Only an admin can change the commercial referrer.';
+        else {
+            [$split, $err] = comm_split_from_form($db, (string)($_POST['ref_preset'] ?? 'default'), (array)($_POST['ref_rate'] ?? []));
+            if ($err) $errors[] = $err;
+            else {
+                $cr = comm_contact_set($db, (int)($_POST['contact_id'] ?? 0), $split, (string)($_POST['ref_from'] ?? ''), (string)($_POST['ref_note'] ?? ''));
+                if (!$cr['ok']) $errors[] = $cr['error'];
+                else $success = ($cr['changes'] ? 'Referrer saved: ' . $cr['contact']['referrer_label'] . '.' : 'Referrer unchanged.')
+                              . ($cr['warnings'] ? ' ⚠ ' . implode(' ', $cr['warnings']) : '');
+            }
+        }
+    }
+
+    // AGENCY DEFAULT REFERRER — admin only
+    if ($action === 'agency_referrer') {
+        if (!$commEdit) $errors[] = 'Only an admin can change the commercial referrer.';
+        else {
+            [$split, $err] = comm_split_from_form($db, (string)($_POST['ref_preset'] ?? 'default'), (array)($_POST['ref_rate'] ?? []));
+            if ($err) $errors[] = $err;
+            else {
+                $ar = comm_agency_set($db, (int)($_POST['agency_id'] ?? 0), $split);
+                if (!$ar['ok']) $errors[] = $ar['error'];
+                else $success = 'Agency default referrer: ' . $ar['referrer_split']['label'] . '.' . ($ar['warnings'] ? ' ⚠ ' . implode(' ', $ar['warnings']) : '');
+            }
+        }
     }
 
     // CONTACT DELETE
@@ -104,6 +147,38 @@ if ($agencyIds) {
     }
 }
 
+// ── Commercial referrers (commission_service.php) ─────────────────
+$commPresets = $commView ? comm_presets($db) : [];
+$commRefs    = $commView ? comm_referrers($db, false) : [];
+$histId      = $commView ? (int)($_GET['history'] ?? 0) : 0;
+$history     = $histId ? comm_referrer_history($db, $histId) : [];
+$histName    = '';
+foreach ($agencies as $ag) if ((int)$ag['id'] === $histId) $histName = $ag['nome'];
+$fmtRate = function ($r) { return rtrim(rtrim(number_format((float)$r, 2, '.', ''), '0'), '.'); };
+/** Selector preset + custom rates (+ from / note for contacts). $split null = agency default. */
+$refFields = function (string $uid, ?array $split, bool $isAgency, ?string $from = null, ?string $note = null) use ($db, $commPresets, $commRefs, $fmtRate) {
+    $cur = comm_preset_of($db, $split);
+    $h = '<select name="ref_preset" onchange="refPreset(this)" style="font-size:.78rem;padding:3px 5px;">';
+    foreach ($commPresets as $k => $p) {
+        $lab = $k === 'default' ? ($isAgency ? 'From agency type' : 'Agency default') : $p['label'];
+        $h .= '<option value="' . h($k) . '"' . ($k === $cur ? ' selected' : '') . '>' . h($lab) . '</option>';
+    }
+    $h .= '</select><span class="ref-custom" style="' . ($cur === 'custom' ? '' : 'display:none') . '">';
+    foreach ($commRefs as $rf) {
+        $v = '';
+        foreach ((array)$split as $e) if ($e['referrer_id'] === $rf['id']) $v = $fmtRate($e['rate']);
+        $h .= ' <label style="font-size:.74rem;white-space:nowrap">' . h($rf['name']) . ' <input type="number" name="ref_rate[' . (int)$rf['id'] . ']" value="' . h($v)
+            . '" step="0.5" min="0" max="30" style="width:52px;padding:2px 4px;font-size:.78rem"> %</label>';
+    }
+    $h .= '</span>';
+    if (!$isAgency) {
+        $h .= ' <label style="font-size:.74rem;white-space:nowrap" title="Date the referrer applies from (empty = today when it changes)">from <input type="date" name="ref_from" value="' . h((string)$from)
+            . '" style="font-size:.76rem;padding:2px 4px"></label>'
+            . ' <input type="text" name="ref_note" value="' . h((string)$note) . '" placeholder="Referrer note" style="width:150px;padding:3px 6px;font-size:.76rem;border:1.5px solid var(--grey-lt);border-radius:5px">';
+    }
+    return $h;
+};
+
 include 'includes/header.php';
 ?>
 
@@ -122,6 +197,26 @@ include 'includes/header.php';
 <?php endif; ?>
 <?php if ($errors): ?>
   <div class="flash flash-error"><?= implode('<br>', array_map('h', $errors)) ?></div>
+<?php endif; ?>
+
+<?php if ($histId): ?>
+<div class="form-card" style="margin-bottom:20px;">
+  <div class="form-section-title" style="margin-top:0">Commercial referrer history — <?= h($histName ?: ('agency ' . $histId)) ?>
+    <a href="agencies.php<?= $search !== '' ? '?q=' . urlencode($search) : '' ?>" style="font-size:.75rem;font-weight:400;margin-left:8px;">close</a></div>
+  <?php if (!$history): ?>
+    <div style="font-size:.82rem;color:var(--grey-mid)">No change recorded yet.</div>
+  <?php else: ?>
+  <table style="font-size:.8rem">
+    <thead><tr><th>When</th><th>Who</th><th>Contact</th><th>From</th><th>To</th><th>Applies from</th><th>Note</th></tr></thead>
+    <tbody>
+    <?php foreach ($history as $hl): ?>
+      <tr><td style="white-space:nowrap"><?= h(substr($hl['at'], 0, 16)) ?></td><td><?= h((string)$hl['actor']) ?></td><td><?= h($hl['contact']) ?></td>
+          <td><?= h($hl['from']) ?></td><td><strong><?= h($hl['to']) ?></strong></td><td><?= h((string)$hl['to_date']) ?></td><td><?= h((string)$hl['note']) ?></td></tr>
+    <?php endforeach; ?>
+    </tbody>
+  </table>
+  <?php endif; ?>
+</div>
 <?php endif; ?>
 
 <!-- ADD FORM -->
@@ -213,6 +308,9 @@ include 'includes/header.php';
               <?php if (!empty($c['notes'])): ?>
                 <span style="color:var(--grey-mid);display:block;font-size:.74rem;"><?= h($c['notes']) ?></span>
               <?php endif; ?>
+              <?php if ($commView && ($cSplit = comm_split_parse($c['referrer_split_json'] ?? null)) !== null): ?>
+                <span title="Commercial referrer of this consultant<?= !empty($c['referrer_from']) ? ' since ' . h($c['referrer_from']) : '' ?>" style="display:inline-block;font-size:.7rem;background:#E3EEFB;color:#1F5FA8;border-radius:8px;padding:0 6px;"><?= h(comm_split_label($db, $cSplit)) ?></span>
+              <?php endif; ?>
             </div>
           <?php endforeach; endif; ?>
         </td>
@@ -272,9 +370,28 @@ include 'includes/header.php';
         <td colspan="7" style="background:var(--grey-bg,#f7f7f7);padding:14px 16px;">
           <div style="font-weight:600;font-size:.82rem;margin-bottom:10px;">Contacts &mdash; <?= h($ag['nome']) ?></div>
 
-          <?php $cs = $contactsByAgency[$ag['id']] ?? []; ?>
+          <?php $cs = $contactsByAgency[$ag['id']] ?? [];
+                $cBook = ($commView && $cs) ? comm_contact_bookings($db, (int)$ag['id']) : [];
+                [$agSplit, $agSrc] = $commView ? comm_agency_default($db, $ag) : [[], 'type']; ?>
+          <?php if ($commView): ?>
+            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:10px;padding:6px 8px;background:#fff;border:1px solid var(--grey-lt);border-radius:6px;font-size:.8rem;">
+              <strong>Referente commerciale (agency default):</strong>
+              <span class="badge" style="background:#E3EEFB;color:#1F5FA8"><?= h(comm_split_label($db, $agSplit)) ?></span>
+              <?php if ($agSrc === 'type'): ?><span style="color:var(--grey-mid)">(from type <?= h($ag['type'] ?? 'savannah') ?>)</span><?php endif; ?>
+              <?php if ($w = comm_agency_type_warning($db, $ag, $agSplit)): ?><span style="color:#B45309">⚠ <?= h($w) ?></span><?php endif; ?>
+              <?php if ($commEdit): ?>
+                <form method="POST" style="display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap;margin-left:8px;">
+                  <input type="hidden" name="action" value="agency_referrer">
+                  <input type="hidden" name="agency_id" value="<?= $ag['id'] ?>">
+                  <?= $refFields('ag' . $ag['id'], comm_split_parse($ag['referrer_split_json'] ?? null), true) ?>
+                  <button type="submit" class="btn btn-outline btn-sm">Save</button>
+                </form>
+              <?php endif; ?>
+              <a href="agencies.php?q=<?= urlencode($ag['nome']) ?>&amp;history=<?= $ag['id'] ?>" style="margin-left:auto;font-size:.75rem;">History</a>
+            </div>
+          <?php endif; ?>
           <?php foreach ($cs as $c): ?>
-            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px;">
+            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:<?= $commView ? '2' : '8' ?>px;">
               <form method="POST" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
                 <input type="hidden" name="action" value="contact_edit">
                 <input type="hidden" name="agency_id" value="<?= $ag['id'] ?>">
@@ -293,6 +410,24 @@ include 'includes/header.php';
                 <button type="submit" class="btn btn-outline btn-sm" style="color:#C0211B;border-color:#C0211B;">Delete</button>
               </form>
             </div>
+            <?php if ($commView):
+              $cSplit = comm_split_parse($c['referrer_split_json'] ?? null);
+              $bk = $cBook[(int)$c['id']] ?? ['count' => 0, 'first' => null, 'before_cutoff' => 0]; ?>
+            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:0 0 10px 12px;font-size:.78rem;color:var(--grey-dark);">
+              <span>↳ Referente: <strong><?= h($cSplit === null ? 'agency default (' . comm_split_label($db, $agSplit) . ')' : comm_split_label($db, $cSplit)) ?></strong><?= $cSplit !== null && !empty($c['referrer_from']) ? ' since ' . h(date('d M Y', strtotime($c['referrer_from']))) : '' ?></span>
+              <span style="color:var(--grey-mid)" title="Confirmed bookings of this consultant (by contact on the request, else by its email)">· <?= (int)$bk['count'] ?> booking<?= $bk['count'] == 1 ? '' : 's' ?><?= $bk['first'] ? ' since ' . h(date('M Y', strtotime($bk['first']))) : '' ?><?= $bk['count'] && !$bk['before_cutoff'] ? ' · new since ' . h(date('d M Y', strtotime(COMM_NEW_CONSULTANT_CUTOFF))) : '' ?></span>
+              <?php if ($commEdit): ?>
+                <form method="POST" style="display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap;">
+                  <input type="hidden" name="action" value="contact_referrer">
+                  <input type="hidden" name="contact_id" value="<?= $c['id'] ?>">
+                  <?= $refFields('c' . $c['id'], $cSplit, false, $c['referrer_from'] ?? null, $c['referrer_note'] ?? null) ?>
+                  <button type="submit" class="btn btn-outline btn-sm">Save referrer</button>
+                </form>
+              <?php elseif (!empty($c['referrer_note'])): ?>
+                <span style="color:var(--grey-mid)">· <?= h($c['referrer_note']) ?></span>
+              <?php endif; ?>
+            </div>
+            <?php endif; ?>
           <?php endforeach; ?>
 
           <!-- ADD CONTACT -->
@@ -305,6 +440,10 @@ include 'includes/header.php';
             <input type="email" name="c_email" placeholder="Email" style="width:180px;padding:5px 8px;border:1.5px solid var(--grey-lt);border-radius:5px;font-size:.82rem;">
             <input type="text" name="c_notes" placeholder="Notes" style="width:180px;padding:5px 8px;border:1.5px solid var(--grey-lt);border-radius:5px;font-size:.82rem;">
             <label style="display:flex;align-items:center;gap:4px;font-size:.78rem;white-space:nowrap;"><input type="checkbox" name="c_primary"> Primary</label>
+            <?php if ($commEdit): ?>
+              <span style="font-size:.76rem;white-space:nowrap;<?= ($ag['type'] ?? 'savannah') !== 'savannah' ? 'font-weight:600;color:#1F5FA8' : '' ?>" title="Who brought this consultant in (commission). Agency default unless told otherwise.">Referente:</span>
+              <?= $refFields('new' . $ag['id'], null, false) ?>
+            <?php endif; ?>
             <button type="submit" class="btn btn-red btn-sm">+ Add contact</button>
           </form>
         </td>
@@ -323,6 +462,12 @@ function toggleEdit(id, show) {
       else                   el.style.display = show ? 'none' : 'flex';
     });
   });
+}
+
+// Referrer selector: custom rates only for "Custom…".
+function refPreset(sel) {
+  var box = sel.parentNode.querySelector('.ref-custom');
+  if (box) box.style.display = sel.value === 'custom' ? '' : 'none';
 }
 
 function toggleContacts(id) {

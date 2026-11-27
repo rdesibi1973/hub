@@ -23,6 +23,7 @@ define('DB_FAIL_JSON', true);
 require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/includes/booking_service.php';
 require_once __DIR__ . '/includes/agency_service.php';   // create_agency (shared with Agencies → Add)
+require_once __DIR__ . '/includes/commission_service.php';   // referrers, commission split, commissions_report
 require_once __DIR__ . '/includes/folder_service.php';   // rename_folder (shared with BackOffice "Rename…")
 require_once __DIR__ . '/includes/folder_link_service.php';   // dropbox_id: folder_resolve, backfill, orphans, archive_cancelled
 require_once __DIR__ . '/includes/group_import_service.php';   // import_group_folder / move_group_folder (shared with import_folder.php)
@@ -86,10 +87,26 @@ function agent_ensure_schema(PDO $db): void {
     $done = true;
 }
 
-/** An agency_contacts row as the API returns it. */
+/** An agency_contacts row as the API returns it (+ commercial referrer: null = agency default; commission_service.php). */
 function agent_agency_contact(array $c): array {
-    return ['id' => (int)$c['id'], 'agency_id' => (int)$c['agency_id'], 'name' => $c['name'], 'role' => $c['role'],
+    $out = ['id' => $c['id'] !== null ? (int)$c['id'] : null, 'agency_id' => (int)$c['agency_id'], 'name' => $c['name'], 'role' => $c['role'],
             'email' => $c['email'], 'phone' => $c['phone'], 'primary' => (bool)$c['is_primary'], 'notes' => $c['notes']];
+    if (array_key_exists('referrer_split_json', $c)) {
+        $s = comm_split_parse($c['referrer_split_json']);
+        $out['referrer_split'] = comm_split_out(db(), $s);
+        $out['referrer_label'] = comm_split_label(db(), $s);
+        $out['referrer_from']  = $c['referrer_from'] ?? null;
+        $out['referrer_note']  = $c['referrer_note'] ?? null;
+    }
+    return $out;
+}
+
+/** referrer_split given by the caller: null / "default" = agency default, else comm_split_check() (list or preset key). */
+function agent_split_in(PDO $db, $v): ?array {
+    if ($v === null || $v === 'default' || $v === '') return null;
+    [$split, $err] = comm_split_check($db, $v);
+    if ($err) agent_fail($err, 400, ['referrers' => array_values(array_map('comm_referrer_out', comm_referrers($db)))]);
+    return $split;
 }
 
 function agent_audit(PDO $db, string $action, $reqId, array $payload, string $resultJson, int $code): void {
@@ -105,9 +122,10 @@ function agent_audit(PDO $db, string $action, $reqId, array $payload, string $re
                               'set_request_status', 'update_request', 'import_group_folder', 'move_group_folder', 'ck_request_check', 'memo_delete', 'create_agency', 'update_agency', 'save_agency_contact', 'delete_agency_contact',
                               'followup_scan', 'followup_update', 'followup_upsert', 'staff_mail_save_eml', 'staff_mail_reply', 'drafts_cleanup', 'iti_update_activity', 'sales_response_dismiss',
                               'ck_set_owners', 'ck_set_group_closed', 'ck_findings_upsert', 'iti_create_destination', 'iti_import_program', 'iti_supplier_blocklist', 'predeparture_email',
-                              'folder_ids_backfill', 'folders_orphans', 'archive_cancelled', 'gate_run', 'reassign_request', 'notify_request_agent', 'pipeline_move'], true) && empty($payload['confirm']);
+                              'folder_ids_backfill', 'folders_orphans', 'archive_cancelled', 'gate_run', 'reassign_request', 'notify_request_agent', 'pipeline_move',
+                              'set_commission_split', 'commission_backfill'], true) && empty($payload['confirm']);
     // Mail: keep who/what in the log, not message bodies or attachment content.
-    if (in_array($action, ['mail_get', 'mail_attachment', 'staff_mail_get', 'staff_mail_attachment', 'iti_document', 'iti_vouchers'], true) && $code === 200) {
+    if (in_array($action, ['mail_get', 'mail_attachment', 'staff_mail_get', 'staff_mail_attachment', 'iti_document', 'iti_vouchers', 'commissions_report'], true) && $code === 200) {
         $res = json_decode($resultJson, true);
         $m   = $res['message'] ?? $res['attachment'] ?? $res['file'] ?? [];
         $resultJson = json_encode(['ok' => true, 'logged' => 'content omitted', 'uid' => $m['uid'] ?? null,
@@ -823,6 +841,7 @@ try {
         if (!$where) agent_fail('Give at least one filter: q, status, agent, channel or year');
         $limit = max(1, min(100, (int)($in['limit'] ?? 50)));
         pk_schema($db);   // parked_at / parked_from in r.*
+        comm_schema($db); // agency_contact_id / commission_split_json in r.*
         $st = $db->prepare("SELECT r.*, a.name AS agent_name, ag.nome AS agency_name
                             FROM requests r LEFT JOIN agents a ON a.id = r.agent_id LEFT JOIN agencies ag ON ag.id = r.agency_id
                             WHERE " . implode(' AND ', $where) . " ORDER BY r.id DESC LIMIT " . $limit);
@@ -839,6 +858,8 @@ try {
                 'last_activity_at' => $a['last_activity_at'], 'has_summary' => $a['has_summary'],
                 'parked_at'        => $r['parked_at'] ?? null, 'parked_from' => $r['parked_from'] ?? null,
                 'parked_wake_after' => $r['parked_wake_after'] ?? null,
+                'agency_contact_id' => !empty($r['agency_contact_id']) ? (int)$r['agency_contact_id'] : null,
+                'commission_split'  => comm_request_out($db, $r),
             ];
         }
         agent_out(['ok' => true, 'count' => count($rows), 'requests' => $rows]);
@@ -851,7 +872,8 @@ try {
         $like = '%' . $q . '%';
         require_once __DIR__ . '/includes/price_level_service.php';
         price_level_schema($db);
-        $st = $db->prepare("SELECT id, nome, short_name, type, attiva, address, email, price_level, custom_markup FROM agencies
+        comm_schema($db);
+        $st = $db->prepare("SELECT id, nome, short_name, type, attiva, address, email, price_level, custom_markup, referrer_split_json FROM agencies
                             WHERE nome LIKE ? OR short_name LIKE ? ORDER BY nome LIMIT 50");
         $st->execute([$like, $like]);
         $rows     = $st->fetchAll(PDO::FETCH_ASSOC);
@@ -860,10 +882,21 @@ try {
         foreach ($rows as $a) {
             $lvl = array_key_exists((string)$a['price_level'], PRICE_LEVELS) ? $a['price_level'] : 'sto';
             $mk  = $lvl === 'custom' && $a['custom_markup'] !== null ? (float)$a['custom_markup'] : null;
+            [$agSplit, $agSrc] = comm_agency_default($db, $a);
+            $book = !empty($contacts[(int)$a['id']]) ? comm_contact_bookings($db, (int)$a['id']) : [];
+            $cOut = [];
+            foreach ($contacts[(int)$a['id']] ?? [] as $c) {
+                $b = $book[(int)$c['id']] ?? ['count' => 0, 'first' => null, 'before_cutoff' => 0];
+                $cOut[] = agent_agency_contact($c) + ['confirmed_bookings' => $b['count'], 'first_booking' => $b['first'],
+                                                      'bookings_before_cutoff' => $b['before_cutoff']];
+            }
             $out[] = ['id' => (int)$a['id'], 'name' => $a['nome'], 'short_name' => $a['short_name'], 'type' => $a['type'],
                       'active' => (bool)$a['attiva'], 'address' => $a['address'], 'email' => $a['email'],
                       'price_level' => ['level' => $lvl, 'markup' => $mk, 'label' => price_level_label($lvl, $mk)],
-                      'contacts' => array_map('agent_agency_contact', $contacts[(int)$a['id']] ?? [])];
+                      'referrer_split' => ['split' => comm_split_out($db, $agSplit), 'label' => comm_split_label($db, $agSplit), 'source' => $agSrc,
+                                           'warning' => comm_agency_type_warning($db, $a, $agSplit)],
+                      'needs_contact' => comm_agency_needs_contact($db, (int)$a['id']),
+                      'contacts' => $cOut];
         }
         agent_out(['ok' => true, 'agencies' => $out]);
     }
@@ -910,11 +943,28 @@ try {
             if (array_key_exists($k, $src)) $f[$col] = $src[$k];
         }
         if (array_key_exists('custom_markup', $f) && !array_key_exists('price_level', $f)) $f['price_level'] = 'custom';
-        if (!$f) agent_fail('Nothing to change — give name, short_name, type, active, address, email and/or price_level (rack | sto | stospec | custom + custom_markup)');
+        // Commercial referrer of the agency (default for its contacts): commission_service.php.
+        $refRes = null;
+        if (array_key_exists('referrer_split', $src)) {
+            $refRes = comm_agency_set($db, $id, agent_split_in($db, $src['referrer_split']), empty($in['confirm']));
+            if (!$refRes['ok']) agent_fail($refRes['error'], 404);
+        }
+        if (!$f && $refRes) {
+            if (!$refRes['changes']) agent_out(['ok' => true, 'unchanged' => true, 'referrer_split' => $refRes['referrer_split'], 'warnings' => $refRes['warnings']]);
+            agent_out(['ok' => true, empty($in['confirm']) ? 'dry_run' : 'updated' => true, 'changes' => $refRes['changes'],
+                       'referrer_split' => $refRes['referrer_split'], 'warnings' => $refRes['warnings']]
+                      + (empty($in['confirm']) ? ['message' => 'Dry run — nothing saved. Resend with "confirm": true.'] : []));
+        }
+        if (!$f) agent_fail('Nothing to change — give name, short_name, type, active, address, email, price_level (rack | sto | stospec | custom + custom_markup) and/or referrer_split');
         if (array_key_exists('attiva', $f) && !is_bool($f['attiva']) && !in_array($f['attiva'], [0, 1, '0', '1'], true)) {
             agent_fail('active must be true or false');
         }
         $res = agency_update($db, $id, $f, empty($in['confirm']));
+        if ($res['ok'] && $refRes) {
+            $res['changes'] += $refRes['changes'];
+            $res['referrer_split'] = $refRes['referrer_split'];
+            $res['referrer_warnings'] = $refRes['warnings'];
+        }
         if (!$res['ok']) {
             $dups = [];
             foreach ($res['duplicates'] as $d) $dups[] = ['id' => $d['id'], 'name' => $d['nome'], 'short_name' => $d['short_name'], 'type' => $d['type']];
@@ -925,6 +975,7 @@ try {
         $out = ['id' => $a['id'], 'name' => $a['nome'], 'short_name' => $a['short_name'], 'type' => $a['type'],
                 'active' => (bool)$a['attiva'], 'address' => $a['address'], 'email' => $a['email']];
         if (isset($res['price_level'])) $out['price_level'] = $res['price_level'];
+        if (isset($res['referrer_split'])) $out['referrer_split'] = $res['referrer_split'];
         $changes = [];
         foreach ($res['changes'] as $k => $c) {
             $changes[['nome' => 'name', 'attiva' => 'active'][$k] ?? $k] = $k === 'attiva'
@@ -932,6 +983,7 @@ try {
         }
         $warn = isset($changes['short_name'])
             ? 'Short name changes: existing Dropbox folders keep the old tag (' . $changes['short_name']['from'] . '-…) and are not renamed.' : null;
+        if (!empty($res['referrer_warnings'])) $warn = trim(($warn ?? '') . ' ' . implode(' ', $res['referrer_warnings']));
         if (!$changes) agent_out(['ok' => true, 'unchanged' => true, 'agency' => $out]);
         if (empty($in['confirm'])) {
             agent_out(['ok' => true, 'dry_run' => true, 'agency' => $out, 'changes' => $changes, 'warning' => $warn,
@@ -953,11 +1005,27 @@ try {
         foreach (['name' => 'name', 'role' => 'role', 'email' => 'email', 'phone' => 'phone', 'notes' => 'notes', 'primary' => 'is_primary'] as $k => $col) {
             if (array_key_exists($k, $src)) $f[$col] = $src[$k];
         }
-        if ($contactId && !$f) agent_fail('Nothing to change — give name, role, email, phone, notes and/or primary');
+        // Commercial referrer of the consultant (commission_service.php): referrer_split (null / "default" = agency default),
+        // referrer_from (YYYY-MM-DD), referrer_note — logged in agency_contact_referrer_log.
+        $hasRef = array_key_exists('referrer_split', $src) || array_key_exists('referrer_from', $src) || array_key_exists('referrer_note', $src);
+        $refSplit = null;
+        if ($hasRef) {
+            if (array_key_exists('referrer_split', $src)) $refSplit = agent_split_in($db, $src['referrer_split']);
+            elseif ($contactId) { $cc = comm_contact($db, $contactId); $refSplit = $cc ? comm_split_parse($cc['referrer_split_json']) : null; }
+        }
+        if ($contactId && !$f && !$hasRef) agent_fail('Nothing to change — give name, role, email, phone, notes, primary and/or referrer_split / referrer_from / referrer_note');
         if (array_key_exists('is_primary', $f) && !is_bool($f['is_primary']) && !in_array($f['is_primary'], [0, 1, '0', '1'], true)) {
             agent_fail('primary must be true or false');
         }
-        $res = agency_contact_save($db, $agencyId, $contactId, $f, empty($in['confirm']));
+        if ($contactId && !$f) {
+            $res = ['ok' => true, 'contact' => null, 'changes' => []];
+            $st = $db->prepare('SELECT * FROM agency_contacts WHERE id = ? AND agency_id = ?');
+            $st->execute([$contactId, $agencyId]);
+            $res['contact'] = $st->fetch(PDO::FETCH_ASSOC);
+            if (!$res['contact']) agent_fail('Contact ' . $contactId . ' not found for agency ' . $agencyId . '.', 404, ['error_code' => 'not_found']);
+        } else {
+            $res = agency_contact_save($db, $agencyId, $contactId, $f, empty($in['confirm']));
+        }
         if (!$res['ok']) {
             agent_fail($res['error'], ['not_found' => 404, 'duplicate' => 409, 'db' => 500][$res['error_code']] ?? 400,
                        ['error_code' => $res['error_code'], 'existing' => array_map('agent_agency_contact', $res['duplicates'])]);
@@ -970,13 +1038,33 @@ try {
             $changes[$k === 'is_primary' ? 'primary' : $k] = $k === 'is_primary'
                 ? ['from' => $ch['from'] === null ? null : (bool)$ch['from'], 'to' => (bool)$ch['to']] : $ch;
         }
+        $refWarn = [];
+        if ($hasRef) {
+            $from = array_key_exists('referrer_from', $src) ? (string)$src['referrer_from'] : null;
+            $note = array_key_exists('referrer_note', $src) ? (string)$src['referrer_note'] : null;
+            if ($from !== null && trim($from) !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', trim($from))) agent_fail('referrer_from must be YYYY-MM-DD');
+            if ($c['id'] === null) {   // dry run of a new contact: the referrer it would get
+                $out['referrer_split'] = comm_split_out($db, $refSplit);
+                $out['referrer_label'] = comm_split_label($db, $refSplit);
+                if ($refSplit !== null) $changes['referrer_split'] = ['from' => null, 'to' => $out['referrer_label']];
+            } else {
+                $rr = comm_contact_set($db, (int)$c['id'], $refSplit, $from, $note, empty($in['confirm']));
+                if (!$rr['ok']) agent_fail($rr['error'], 400);
+                $changes += $rr['changes'];
+                $refWarn = $rr['warnings'];
+                $out['referrer_split'] = $rr['contact']['referrer_split'];
+                $out['referrer_label'] = $rr['contact']['referrer_label'];
+                $out['referrer_from']  = $rr['contact']['referrer_from'];
+                $out['referrer_note']  = $rr['contact']['referrer_note'];
+            }
+        }
         $verb = $contactId ? 'updated' : 'created';
         if ($contactId && !$changes) agent_out(['ok' => true, 'unchanged' => true, 'contact' => $out]);
         if (empty($in['confirm'])) {
-            agent_out(['ok' => true, 'dry_run' => true, 'contact' => $out, 'changes' => $changes,
+            agent_out(['ok' => true, 'dry_run' => true, 'contact' => $out, 'changes' => $changes, 'warnings' => $refWarn,
                        'message' => 'Dry run — nothing saved. Resend with "confirm": true.']);
         }
-        agent_out(['ok' => true, $verb => true, 'contact' => $out, 'changes' => $changes]);
+        agent_out(['ok' => true, $verb => true, 'contact' => $out, 'changes' => $changes, 'warnings' => $refWarn]);
     }
 
     // ── delete_agency_contact ────────────────────────────────────────────────
@@ -1048,6 +1136,8 @@ try {
             'date_paid'       => $in['date_paid']       ?? '',
             'initial_request' => $in['initial_request'] ?? '',
             'notes'           => $in['notes']           ?? '',
+            // Consultant (agency contact) → commission split; omitted = matched by email (commission_service.php).
+            'agency_contact_id' => (string)(int)($in['agency_contact_id'] ?? 0),
         ];
         // notify_agent omitted → true, except for Roberto (agent 14) or no agent (Roberto, 23 Nov 2026).
         require_once __DIR__ . '/notifications.php';
@@ -1059,9 +1149,15 @@ try {
             'dry_run'         => empty($in['confirm']),          // checks + folder name only
         ]);
         if ($res['ok'] && !empty($res['dry_run'])) {
+            // Consultant + commission split the request would get (contact given, else matched by email).
+            $cid = (int)$v['agency_contact_id'];
+            if (!$cid && $channel === 'agency' && $agencyId && trim((string)$v['email']) !== '') $cid = (int)comm_contact_for_email($db, $agencyId, (string)$v['email']);
+            $cm = comm_request_out($db, ['id' => 0, 'agency_id' => $channel === 'agency' ? $agencyId : null, 'agency_contact_id' => $cid ?: null,
+                                         'practice_code' => $res['folder_name'], 'group_folder' => null]);
             agent_out(['ok' => true, 'dry_run' => true, 'folder_name' => $res['folder_name'], 'dropbox_path' => $res['dropbox_path'],
                        'values' => $res['values'], 'will_notify' => $notify['will_notify'], 'notify_to' => $notify['to'],
-                       'notify_agent' => $notify['agent'], 'notify_reason' => $notify['reason'],
+                       'notify_agent' => $notify['agent'], 'notify_reason' => $notify['reason'], 'commission_split' => $cm,
+                       'warnings' => array_values(array_filter([$cm['warning']])),
                        'message' => 'Dry run — no folder, no request. Resend with "confirm": true to create.']);
         }
         if ($res['ok'] && !$notify['will_notify']) {
@@ -1078,8 +1174,10 @@ try {
             ]);
         }
         $agentReqId = $res['request_id'];
+        $cmRow = comm_request_row($db, (int)$res['request_id']);
         agent_out(['ok' => true, 'request_id' => $res['request_id'], 'folder_name' => $res['folder_name'],
-                   'dropbox_path' => $res['dropbox_path'], 'notify' => $res['notify']]);
+                   'dropbox_path' => $res['dropbox_path'], 'notify' => $res['notify'],
+                   'commission_split' => $cmRow ? comm_request_out($db, $cmRow) : null, 'warnings' => $res['warnings'] ?? []]);
     }
 
     // ── update_request ───────────────────────────────────────────────────────
@@ -1090,9 +1188,10 @@ try {
     // Dry-run (changes {field: {from, to}}) unless "confirm": true.
     case 'update_request': {
         agent_require_method('POST');
+        comm_schema($db);   // requests.agency_contact_id
         $r = agent_request($db, $in['request_id'] ?? 0);
         $allowed = ['customer_name','email','whatsapp','source','destination','period','start_date','pax',
-                    'value_usd','commission_pct','date_paid','initial_request','notes','agency_id','channel'];
+                    'value_usd','commission_pct','date_paid','initial_request','notes','agency_id','channel','agency_contact_id'];
         $fields = isset($in['fields']) && is_array($in['fields']) ? $in['fields'] : $in;
         // One way to change the seller: reassign_request (checks, timeline, folder tag).
         if (array_key_exists('agent_id', $fields) || array_key_exists('agent', $fields)) {
@@ -1134,6 +1233,15 @@ try {
                 $new['agency_id'] = null;   // leaving the agency channel
             }
         }
+        // Consultant (agency contact, commission_service.php): a contact of the request's agency; leaving the agency drops it.
+        $agencyNow = array_key_exists('agency_id', $new) ? $new['agency_id'] : ($r['agency_id'] ?? null);
+        if (array_key_exists('agency_contact_id', $new) && $new['agency_contact_id'] !== null) {
+            if (!ctype_digit($new['agency_contact_id'])) agent_fail('agency_contact_id must be a number — see contacts[] in list_agencies');
+            if ($ce = comm_contact_check($db, $agencyNow !== null ? (int)$agencyNow : null, (int)$new['agency_contact_id'])) agent_fail($ce);
+        } elseif (!array_key_exists('agency_contact_id', $new) && !empty($r['agency_contact_id'])
+                  && comm_contact_check($db, $agencyNow !== null ? (int)$agencyNow : null, (int)$r['agency_contact_id'])) {
+            $new['agency_contact_id'] = null;
+        }
         // Keep commission_usd consistent with value × pct.
         if (array_key_exists('value_usd', $new) || array_key_exists('commission_pct', $new)) {
             $val = array_key_exists('value_usd', $new) ? $new['value_usd'] : $r['value_usd'];
@@ -1159,6 +1267,11 @@ try {
             if ($folderStart !== null && $folderStart !== $changes['start_date']['to']) {
                 $warnings[] = 'The folder name still says START ' . $folderStart . ': rename it with rename_folder (the Booked list, CK tracker and Travel info read the date from the folder). The Calc is not changed either.';
             }
+        }
+        if (isset($changes['agency_contact_id']) || isset($changes['agency_id'])) {
+            $cmAfter = comm_request_out($db, array_merge($r, array_map(function ($c) { return $c['to']; }, $changes)));
+            if ($cmAfter['warning']) $warnings[] = $cmAfter['warning'];
+            if (!$cmAfter['provisional']) $warnings[] = 'This booking keeps its frozen commission split (' . $cmAfter['label'] . ') — change it with set_commission_split if needed.';
         }
         if (empty($in['confirm'])) {
             agent_out(['ok' => true, 'dry_run' => true, 'changes' => $changes, 'ignored' => $ignored, 'warnings' => $warnings,
@@ -1623,7 +1736,7 @@ try {
         if (!$res['ok']) agent_fail($res['msg'], 409, $preview);
         $out = ['ok' => true, 'dry_run' => false, 'message' => $res['msg'], 'folder' => $res['folder'],
                 'group_folder' => $res['group_folder'], 'dropbox_path' => $res['dropbox_path'],
-                'status' => 'Booked', 'checks' => $checks];
+                'status' => 'Booked', 'checks' => $checks, 'commission_split' => $res['commission_split'] ?? null];
         if ($mailSend) {
             // Rebuilt from the confirmed folder names; a mail failure does not undo the confirm.
             $email = agent_booking_email($db, $r, $plan['grp_action'], (string)$res['folder'], (string)$res['group_folder'], $mailEdit);
@@ -3520,7 +3633,8 @@ try {
     case 'request_resume': {
         $r = agent_tl_resolve($db, $in);
         require_once __DIR__ . '/dropbox_helper.php';   // Calc files in the folder (tl_resume heals a moved folder first)
-        agent_out(['ok' => true] + tl_resume($db, $r));
+        $cmRow = comm_request_row($db, (int)$r['id']);
+        agent_out(['ok' => true] + tl_resume($db, $r) + ['commission_split' => $cmRow ? comm_request_out($db, $cmRow) : null]);
     }
 
     // ── Dropbox folder link by folder id (logic includes/folder_link_service.php) ──
@@ -4204,6 +4318,65 @@ try {
         agent_out(['ok' => true, 'dry_run' => false, 'message' => $res['msg']] + $preview);
     }
 
+    // ── Commercial referrers / commissions (logic includes/commission_service.php) ──
+    // Referrers with their ids, default rates, penalties rule and period; presets usable as referrer_split.
+    case 'list_commercial_referrers': {
+        $presets = [];
+        foreach (comm_presets($db) as $k => $p) {
+            if ($k !== 'default' && $k !== 'custom') $presets[$k] = ['label' => $p['label'], 'split' => comm_split_out($db, $p['split'])];
+        }
+        agent_out(['ok' => true, 'referrers' => array_values(array_map('comm_referrer_out', comm_referrers($db))), 'presets' => $presets,
+                   'new_consultant_cutoff' => COMM_NEW_CONSULTANT_CUTOFF]);
+    }
+
+    // Commissions per booking and referrer (Commissions page): referrer_id, from, to, basis booked|travel|paid,
+    // format json|csv|xlsx (csv / xlsx as base64 in file{}).
+    case 'commissions_report': {
+        $basis = (string)($in['basis'] ?? 'booked');
+        if (!in_array($basis, COMM_BASIS, true)) agent_fail('basis must be ' . implode(', ', COMM_BASIS));
+        $from = isset($in['from']) && $in['from'] !== '' ? agent_iso_date($in['from'], 'from') : date('Y') . '-01-01';
+        $to   = isset($in['to']) && $in['to'] !== '' ? agent_iso_date($in['to'], 'to') : date('Y') . '-12-31';
+        $refId = (int)($in['referrer_id'] ?? 0);
+        if ($refId && !isset(comm_referrers($db)[$refId])) agent_fail('referrer_id ' . $refId . ' not found — use list_commercial_referrers', 404);
+        @set_time_limit(120);
+        $rep = comm_report($db, ['referrer_id' => $refId, 'from' => $from, 'to' => $to, 'basis' => $basis]);
+        $fmt = strtolower((string)($in['format'] ?? 'json'));
+        if ($fmt === 'csv' || $fmt === 'xlsx') {
+            $bin = $fmt === 'csv' ? comm_report_csv($rep) : comm_report_xlsx($rep);
+            agent_out(['ok' => true, 'totals' => $rep['totals'], 'count' => count($rep['rows']),
+                       'file' => ['name' => 'commissions_' . $from . '_' . $to . '.' . $fmt, 'size' => strlen($bin), 'content_base64' => base64_encode($bin)]]);
+        }
+        if ($fmt !== 'json') agent_fail('format must be json, csv or xlsx');
+        agent_out(['ok' => true, 'count' => count($rep['rows'])] + $rep);
+    }
+
+    // Roberto changes a booking's split (snapshot): split[] (or a preset key, or null = back to consultant / agency default),
+    // reason required, timeline "Commission split changed". Dry-run unless "confirm": true.
+    case 'set_commission_split': {
+        agent_require_method('POST');
+        $r = agent_request($db, $in['request_id'] ?? 0);
+        if (!array_key_exists('split', $in)) agent_fail('split is required: a list of {referrer_id, rate}, a preset key, or null (back to consultant / agency default)');
+        if (trim((string)($in['reason'] ?? '')) === '') agent_fail('reason is required');
+        $split = agent_split_in($db, $in['split']);
+        $res = comm_set_request_split($db, (int)$r['id'], $split, (string)$in['reason'], empty($in['confirm']));
+        if (!$res['ok']) agent_fail($res['error']);
+        $out = ['ok' => true, 'request' => agent_request_out($r), 'from' => $res['from'], 'to' => $res['to'], 'changed' => $res['changed'],
+                'commission_split' => comm_request_out($db, array_merge(comm_request_row($db, (int)$r['id']) ?: $r,
+                                       empty($in['confirm']) ? ['commission_split_json' => $split === null ? null : comm_split_encode($split)] : []))];
+        if (empty($in['confirm'])) agent_out(['dry_run' => true] + $out + ['message' => $res['changed'] ? 'Dry run — nothing saved. Resend with "confirm": true.' : 'Nothing would change.']);
+        agent_out(['dry_run' => false] + $out);
+    }
+
+    // Data setup: agencies without a default ← their type; confirmed bookings without a snapshot ← the agency default.
+    // Dry run = counts per split; "confirm": true writes.
+    case 'commission_backfill': {
+        if (!empty($in['confirm'])) agent_require_method('POST');
+        @set_time_limit(180);
+        $res = comm_backfill($db, empty($in['confirm']), (int)($in['limit'] ?? 2000));
+        agent_out(['ok' => true, 'dry_run' => empty($in['confirm'])] + $res
+                  + (empty($in['confirm']) ? ['message' => 'Dry run — nothing written. Resend with "confirm": true.'] : []));
+    }
+
     default:
         agent_fail('Unknown action "' . $agentAction . '"', 400, ['actions' => [
             'find_requests', 'list_agencies', 'create_agency', 'update_agency', 'save_agency_contact', 'delete_agency_contact', 'create_request', 'update_request', 'import_group_folder', 'move_group_folder', 'list_standard_programs',
@@ -4229,6 +4402,7 @@ try {
             'followup_list', 'followup_scan', 'followup_update', 'followup_upsert', 'mail_security_status',
             'sales_response_status', 'sales_response_dismiss', 'dropbox_conflicts', 'dropbox_conflicts_run',
             'predeparture_list', 'predeparture_email',
+            'list_commercial_referrers', 'commissions_report', 'set_commission_split', 'commission_backfill',
         ]]);
     }
 } catch (Throwable $e) {

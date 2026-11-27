@@ -186,12 +186,14 @@ function agency_update(PDO $db, int $id, array $f, bool $dryRun = false): array 
 
 // ── Contacts (agency_contacts) ───────────────────────────────────────────────
 
-/** Contacts of the given agencies, primary first: [agency_id => [rows]]. */
+/** Contacts of the given agencies, primary first: [agency_id => [rows]] (+ commercial referrer columns, commission_service.php). */
 function agency_contacts(PDO $db, array $agencyIds): array {
     $agencyIds = array_values(array_unique(array_map('intval', $agencyIds)));
     if (!$agencyIds) return [];
+    require_once __DIR__ . '/commission_service.php';
+    comm_schema($db);
     $in = implode(',', array_fill(0, count($agencyIds), '?'));
-    $st = $db->prepare("SELECT id, agency_id, name, role, email, phone, is_primary, notes FROM agency_contacts
+    $st = $db->prepare("SELECT id, agency_id, name, role, email, phone, is_primary, notes, referrer_split_json, referrer_from, referrer_note FROM agency_contacts
                         WHERE agency_id IN ($in) ORDER BY is_primary DESC, name ASC");
     $st->execute($agencyIds);
     $out = [];

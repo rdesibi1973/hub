@@ -50,12 +50,27 @@ foreach ($agencies as $a) {
     }
 }
 
-// Agency list for the searchable picker (id / display name / short code / emails).
+// Agency contacts (consultants) for the "Consultant" select — commission split per contact (commission_service.php).
+require_once __DIR__ . '/includes/commission_service.php';
+$agencyContacts = [];
+try {
+    comm_schema($db);
+    foreach ($db->query("SELECT id, agency_id, name, email, is_primary, referrer_split_json FROM agency_contacts ORDER BY is_primary DESC, name ASC")->fetchAll() as $c) {
+        $agencyContacts[(int)$c['agency_id']][] = ['id' => (int)$c['id'], 'name' => $c['name'], 'email' => (string)$c['email'],
+                                                   'own' => $c['referrer_split_json'] !== null];
+    }
+} catch (PDOException $e) { /* agency_contacts missing: no consultant select */ }
+
+// Agency list for the searchable picker (id / display name / short code / emails / contacts).
 $agencyJs = array_map(fn($a) => [
-    'id'     => (int)$a['id'],
-    'nome'   => $a['nome'],
-    'short'  => $a['short_name'] ?: $a['nome'],
-    'emails' => array_values($agencyEmails[(int)$a['id']] ?? []),
+    'id'       => (int)$a['id'],
+    'nome'     => $a['nome'],
+    'short'    => $a['short_name'] ?: $a['nome'],
+    'emails'   => array_values($agencyEmails[(int)$a['id']] ?? []),
+    'contacts' => $agencyContacts[(int)$a['id']] ?? [],
+    // >1 contact and some with their own referrer (LabTravel): a request without consultant gets a warning
+    'needs_contact' => count($agencyContacts[(int)$a['id']] ?? []) > 1
+                       && count(array_filter($agencyContacts[(int)$a['id']] ?? [], fn($c) => $c['own'])) > 0,
 ], $agencies);
 
 $errors = [];
@@ -68,6 +83,7 @@ $v = [
     'source'          => 'Email',
     'channel'         => 'agency',
     'agency_id'       => '',
+    'agency_contact_id' => '',
     'agent_id'        => '',
     'destination'     => '',
     'period'          => '',
@@ -153,6 +169,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                       . ($notif['sent'] ? " — ✉ Notification sent to agent." : '');
             flash($flashMsg);
             if ($notif['error']) flash('⚠ ' . htmlspecialchars($notif['error']), 'error');
+            foreach ($res['warnings'] ?? [] as $w) flash('⚠ ' . htmlspecialchars($w), 'error');
 
             header('Location: request_view.php?id=' . $res['request_id']);
             exit;
@@ -260,6 +277,15 @@ include 'includes/header.php';
           <div id="agency_list" role="listbox"
                style="position:absolute;z-index:30;left:0;right:0;top:100%;margin-top:2px;max-height:230px;overflow:auto;background:#fff;border:1px solid var(--grey-lt);border-radius:6px;box-shadow:0 6px 18px rgba(0,0,0,.12);display:none"></div>
         </div>
+      </div>
+
+      <div class="form-group" id="contactRow" style="display:none">
+        <label for="agency_contact_id">Consultant <span style="font-weight:400;color:var(--grey-mid)">(agency contact who sent it)</span></label>
+        <select id="agency_contact_id" name="agency_contact_id" data-sel="<?= h($v['agency_contact_id']) ?>" onchange="contactWarn()">
+          <option value="">— Not set —</option>
+        </select>
+        <div id="contact-warning" style="display:none;margin-top:6px;font-size:.8rem;color:#B45309;font-weight:600">
+          Which consultant? This agency has consultants with their own commercial referrer.</div>
       </div>
 
       <div class="form-group">
@@ -810,6 +836,7 @@ function selectAgency(id) {
   if (search) search.value = a.nome;
   if (list) list.style.display = 'none';
   applyAgencyEmails(a);
+  applyContacts(a);
   updateFolderPreview();
 }
 
@@ -819,6 +846,47 @@ function clearAgency() {
   if (search) search.value = '';
   if (list) list.style.display = 'none';
   applyAgencyEmails(null);
+  applyContacts(null);
+}
+
+// ── Consultant (agency contact) → commission split (commission_service.php) ──
+// Options = the agency's contacts; pre-selected from the Email field when it is one contact's address.
+let contactAuto = '';
+function currentAgency() {
+  const id = parseInt(document.getElementById('agency_id').value, 10);
+  return id ? window.AGENCIES.find(x => x.id === id) : null;
+}
+function applyContacts(a) {
+  const row = document.getElementById('contactRow');
+  const sel = document.getElementById('agency_contact_id');
+  if (!row || !sel) return;
+  const cs = (a && a.contacts) || [];
+  const keep = sel.value || sel.dataset.sel || '';
+  sel.dataset.sel = '';
+  sel.innerHTML = '<option value="">— Not set —</option>' + cs.map(c =>
+    '<option value="' + c.id + '">' + escAg(c.name) + (c.email ? ' · ' + escAg(c.email) : '') + '</option>').join('');
+  if (keep && cs.some(c => String(c.id) === String(keep))) sel.value = keep;
+  row.style.display = cs.length ? 'block' : 'none';
+  contactAuto = '';
+  matchContactByEmail();
+  contactWarn();
+}
+function matchContactByEmail() {
+  const sel = document.getElementById('agency_contact_id');
+  const a = currentAgency();
+  if (!sel || !a || !a.contacts) return;
+  if (sel.value && sel.value !== contactAuto) return;   // picked by hand: never overwritten
+  const em = document.getElementById('email').value.trim().toLowerCase();
+  const hits = em ? a.contacts.filter(c => (c.email || '').toLowerCase().split(/[,;\s]+/).includes(em)) : [];
+  sel.value = hits.length === 1 ? String(hits[0].id) : '';
+  contactAuto = sel.value;
+  contactWarn();
+}
+function contactWarn() {
+  const a = currentAgency();
+  const sel = document.getElementById('agency_contact_id');
+  const w = document.getElementById('contact-warning');
+  if (w) w.style.display = (a && a.needs_contact && sel && !sel.value) ? 'block' : 'none';
 }
 
 // ── Agency emails → Email field ───────────────────────────────────────────────
@@ -866,6 +934,7 @@ function renderAgencyEmailChips(emails) {
       field.value = this.dataset.email;
       agencyAutoEmail = field.value;   // picked from the agency list → replaceable on agency change
       renderAgencyEmailChips(emails);
+      matchContactByEmail();
     });
   });
 }
@@ -875,6 +944,7 @@ document.getElementById('email').addEventListener('input', function () {
   const id = parseInt(document.getElementById('agency_id').value, 10);
   const a  = id ? window.AGENCIES.find(x => x.id === id) : null;
   renderAgencyEmailChips((a && a.emails) || []);
+  matchContactByEmail();
 });
 
 function agencyKeydown(e) {
@@ -953,7 +1023,7 @@ updateChannel();
 (function () {
   const id = parseInt(document.getElementById('agency_id').value, 10);
   const a  = id ? window.AGENCIES.find(x => x.id === id) : null;
-  if (a) applyAgencyEmails(a);
+  if (a) { applyAgencyEmails(a); applyContacts(a); }
 })();
 onDropboxSkipChange();
 </script>

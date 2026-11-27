@@ -695,6 +695,86 @@ include 'includes/header.php';
     </div>
     <?php endif; ?>
 
+    <?php // Consultant + commission split (commission_service.php): provisional before confirmation, the snapshot after.
+    require_once __DIR__ . '/includes/commission_service.php';
+    if (comm_can_view()):
+      try { $cm = comm_resolve($db, comm_request_row($db, (int)$r['id']) ?: $r); } catch (Throwable $e) { $cm = null; }
+      if ($cm): ?>
+    <?php if (($r['channel'] ?? '') === 'agency' || $cm['contact']): ?>
+    <div class="detail-label">Consultant</div>
+    <div class="detail-value">
+      <?= $cm['contact'] ? h($cm['contact']['name']) : '<span class="text-muted">—</span>' ?>
+      <?php if ($canEdit): ?><a href="request_edit.php?id=<?= (int)$r['id'] ?>" style="font-size:.75rem;margin-left:6px;">change</a><?php endif; ?>
+    </div>
+    <?php endif; ?>
+    <div class="detail-label">Commission</div>
+    <div class="detail-value" id="comm-box">
+      <span class="badge" style="<?= $cm['split'] ? 'background:#E3EEFB;color:#1F5FA8' : 'background:#e2e8f0;color:#475569' ?>"><?= h($cm['label']) ?></span>
+      <span style="font-size:.75rem;color:var(--grey-mid);margin-left:6px;">
+        <?= $cm['provisional'] ? 'provisional — from the ' . h(['contact' => 'consultant', 'agency' => 'agency default', 'type' => 'agency type', 'folder_tag' => 'folder tag', 'none' => 'no agency'][$cm['source']] ?? $cm['source']) . ', frozen at confirmation'
+                               : 'frozen ' . h(substr((string)($cm['snapshot_at'] ?? ''), 0, 10)) . (($cm['snapshot_src'] ?? '') === 'manual' ? ' (set by hand)' : '') ?>
+      </span>
+      <?php if (comm_can_edit()): ?>
+        <button type="button" class="btn btn-outline btn-sm" style="margin-left:6px;font-size:.72rem;padding:1px 8px" onclick="commOpen()">Change</button>
+      <?php endif; ?>
+      <?php if ($cm['warning']): ?><div style="margin-top:4px;font-size:.8rem;color:#B45309;font-weight:600">⚠ <?= h($cm['warning']) ?></div><?php endif; ?>
+      <?php if (comm_can_edit()): $cmPresets = comm_presets($db); $cmRefs = comm_referrers($db, false); ?>
+      <div id="comm-form" style="display:none;margin-top:8px;padding:10px;border:1px solid var(--grey-lt);border-radius:6px;background:#fafafa;font-size:.82rem;">
+        <select id="comm-preset" onchange="commPreset()" style="font-size:.82rem;padding:3px 5px;">
+          <?php foreach ($cmPresets as $pk => $pv): ?>
+            <option value="<?= h($pk) ?>" data-split="<?= h(json_encode($pv['split'])) ?>"><?= h($pk === 'default' ? 'Consultant / agency default (no snapshot)' : $pv['label']) ?></option>
+          <?php endforeach; ?>
+        </select>
+        <span id="comm-custom" style="display:none">
+          <?php foreach ($cmRefs as $rf): ?>
+            <label style="margin-left:8px;white-space:nowrap"><?= h($rf['name']) ?> <input type="number" step="0.5" min="0" max="30" data-ref="<?= (int)$rf['id'] ?>" class="comm-rate" style="width:58px;padding:2px 4px"> %</label>
+          <?php endforeach; ?>
+        </span>
+        <div style="margin-top:6px;display:flex;gap:6px;align-items:center">
+          <input type="text" id="comm-reason" placeholder="Reason (required)" style="flex:1;padding:4px 6px;border:1px solid var(--grey-lt);border-radius:5px">
+          <button type="button" class="btn btn-red btn-sm" onclick="commSave()">Save</button>
+          <button type="button" class="btn btn-outline btn-sm" onclick="document.getElementById('comm-form').style.display='none'">Cancel</button>
+        </div>
+        <div id="comm-msg" style="margin-top:4px;color:#C0211B;display:none"></div>
+      </div>
+      <script>
+      var COMM_CUR = <?= json_encode(array_map(fn($e) => ['referrer_id' => $e['referrer_id'], 'rate' => $e['rate']], $cm['split'])) ?>;
+      var COMM_HAS_SNAP = <?= $cm['source'] === 'snapshot' ? 'true' : 'false' ?>;
+      function commOpen() {
+        var sel = document.getElementById('comm-preset'), cur = JSON.stringify(COMM_CUR), hit = 'custom';
+        if (!COMM_HAS_SNAP) hit = 'default';
+        // compare as JS JSON (PHP writes 5.0, JS 5)
+        else Array.prototype.forEach.call(sel.options, function (o) { if (o.value !== 'default' && o.value !== 'custom' && JSON.stringify(JSON.parse(o.getAttribute('data-split'))) === cur) hit = o.value; });
+        sel.value = hit;
+        document.querySelectorAll('.comm-rate').forEach(function (i) {
+          var e = COMM_CUR.filter(function (x) { return String(x.referrer_id) === i.getAttribute('data-ref'); })[0];
+          i.value = e ? e.rate : '';
+        });
+        commPreset();
+        document.getElementById('comm-form').style.display = 'block';
+      }
+      function commPreset() {
+        document.getElementById('comm-custom').style.display = document.getElementById('comm-preset').value === 'custom' ? '' : 'none';
+      }
+      function commSave() {
+        var pk = document.getElementById('comm-preset').value, split;
+        if (pk === 'default') split = null;
+        else if (pk === 'custom') {
+          split = [];
+          document.querySelectorAll('.comm-rate').forEach(function (i) { if (i.value !== '' && parseFloat(i.value) > 0) split.push({referrer_id: parseInt(i.getAttribute('data-ref'), 10), rate: parseFloat(i.value)}); });
+        } else split = JSON.parse(document.querySelector('#comm-preset option[value="' + pk + '"]').getAttribute('data-split'));
+        var msg = document.getElementById('comm-msg');
+        var body = new URLSearchParams({request_id: '<?= (int)$r['id'] ?>', split: JSON.stringify(split), reason: document.getElementById('comm-reason').value});
+        fetch('commission_split.php', {method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: body})
+          .then(function (res) { return res.json(); })
+          .then(function (j) { if (!j.ok) throw new Error(j.error || 'Not saved.'); location.reload(); })
+          .catch(function (e) { msg.textContent = e.message; msg.style.display = 'block'; });
+      }
+      </script>
+      <?php endif; ?>
+    </div>
+    <?php endif; endif; ?>
+
     <div class="detail-label">Status</div>
     <div class="detail-value">
       <?php if ($canEdit): ?>

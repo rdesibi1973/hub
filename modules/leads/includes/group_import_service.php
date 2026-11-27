@@ -222,6 +222,10 @@ function gi_import(PDO $db, array $v, string $mode, int $targetId = 0): int {
     timeline_log($reqId, 'confirmation', 'Group folder imported' . ($mode === 'update' ? ' (existing request updated)' : ''),
                  ['body' => $folder . "\n" . implode(' · ', $bits),
                   'refs' => ['dropbox_path' => GI_SAFARI_DIR . '/' . $folder]]);
+    if ($status === 'Booked') {   // commission split frozen like at Confirm Safari (commission_service.php)
+        require_once __DIR__ . '/commission_service.php';
+        comm_snapshot($db, $reqId, 'group_import');
+    }
     return $reqId;
 }
 

@@ -147,6 +147,9 @@ header {
   <a href="reports.php"   class="<?= $cur==='reports.php' ? 'active':'' ?>">Reports</a>
   <a href="agents.php"    class="<?= $cur==='agents.php' ? 'active':'' ?>">Agents</a>
   <a href="agencies.php"  class="<?= $cur==='agencies.php' ? 'active':'' ?>">Agencies</a>
+  <?php if (in_array(current_user()['role_name'] ?? '', ['admin', 'manager', 'accountant'], true)): ?>
+  <a href="commissions.php" class="<?= $cur==='commissions.php' ? 'active':'' ?>">Commissions</a>
+  <?php endif; ?>
   <?php if ($isMgr):
     $stagingCount = (int)db()->query("SELECT COUNT(*) FROM lead_staging")->fetchColumn();
   ?>

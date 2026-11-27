@@ -25,12 +25,16 @@ Quando aggiungi o cambi un'azione nell'API, aggiorna anche questo indice.
 |---|---|---|---|---|
 | find_requests | GET | `q`, `status` (lista), `agent` (14 / `rdesibi` = Roberto De Sibi), `channel`, `year`, `limit` | controllo doppioni prima di create_request | L54 |
 | request_resume | GET | `request_id` o `q` | tutto per riprendere una pratica (request, timeline, summary, file) | L2665 |
-| list_agencies | GET | `q` | id, short_name, `price_level` (rack/sto/stospec/custom), contacts[] | L73 |
+| list_agencies | GET | `q` | id, short_name, `price_level` (rack/sto/stospec/custom), `referrer_split`, `needs_contact`, contacts[] (con referente + prenotazioni) | L73 |
 | create_agency | POST D | `name*`, `short_name`, `type` (savannah/promoservice/lamprati), `email`, `address` | 409 se esiste | L78 |
-| update_agency | POST D | `agency_id*` + campi, `price_level`, `custom_markup` (min 12%) | | L94 |
-| save_agency_contact / delete_agency_contact | POST D | `agency_id*`, `contact_id`, `name`, `email`, `phone`, `primary` | | L112 |
-| create_request | POST D | `customer_name*`, `initial_request*`, `channel`, `agent_id`, `agency_id`, `email`, `period`, `pax`, `date_received`, `notify_agent` | `notify_agent` default true (false se agente 14); dry run mostra `will_notify` + `notify_to` | L130 |
-| update_request | POST D | `request_id`, campi | | L157 |
+| update_agency | POST D | `agency_id*` + campi, `price_level`, `custom_markup` (min 12%), `referrer_split` | | L94 |
+| save_agency_contact / delete_agency_contact | POST D | `agency_id*`, `contact_id`, `name`, `email`, `phone`, `primary`, `referrer_split`, `referrer_from`, `referrer_note` | referente commerciale del consulente | L112 |
+| create_request | POST D | `customer_name*`, `initial_request*`, `channel`, `agent_id`, `agency_id`, `agency_contact_id`, `email`, `period`, `pax`, `date_received`, `notify_agent` | `notify_agent` default true (false se agente 14); dry run mostra `will_notify` + `notify_to`, `commission_split`; warning "Which consultant?" | L130 |
+| update_request | POST D | `request_id`, campi, `agency_contact_id` | | L157 |
+| list_commercial_referrers | GET | — | Promoservice / Lamprati / Elena: id, aliquote, preset (`ps_el` = 2.5+2.5) | L219 (intro L204) |
+| commissions_report | GET | `referrer_id`, `from`, `to`, `basis` (booked/travel/paid), `format` (json/csv/xlsx) | provvigioni per prenotazione: fatture − credit note, penali escluse per Promoservice; Lamprati per semestre | L224 |
+| set_commission_split | POST D | `request_id*`, `split*` (lista / preset / null), `reason*` | solo su decisione di Roberto; timeline | L236 |
+| commission_backfill | GET prova / POST D | `limit` | split di default alle agenzie + split congelato alle prenotazioni confermate | L241 |
 | set_request_status | POST D | `request_id`, `status` | stato Parked: L223 | L186 |
 | parked_wakeups | GET | — | per il giro | L266 |
 | reassign_request | POST D | `request_id`, nuovo agente, `notify_agent` (default true, false se 14) | rinomina cartella | L280 |
