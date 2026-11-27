@@ -570,7 +570,10 @@ function comm_resolve(PDO $db, array $r, bool $ignoreSnapshot = false): array {
     $out['split'] = comm_split_out($db, $split);
     $out['label'] = comm_split_label($db, $split);
     $out['total'] = comm_split_total($split);
-    if (($tw = comm_tag_warning($db, $r, $split)) !== null) $out['warning'] = trim(($out['warning'] ?? '') . ' ' . $tw);
+    // A split set by hand (Roberto) is a decision: no folder-tag warning on it.
+    if (($out['snapshot_src'] ?? '') !== 'manual' && ($tw = comm_tag_warning($db, $r, $split)) !== null) {
+        $out['warning'] = trim(($out['warning'] ?? '') . ' ' . $tw);
+    }
     return $out;
 }
 
