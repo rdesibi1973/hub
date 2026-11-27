@@ -23,6 +23,7 @@ Memo: at the start create one `doing` memo (clear title with the folder name, li
 - Summarise: client / agency, pax (adults, teens 12–15, children under 12), dates, budget, wishes.
 - `find_requests` (name, email, agency) for duplicates. A possible match → stop and show Roberto. Otherwise → `create_request` **directly with `"confirm": true`** (no dry run; Roberto, 31 Oct 2026) with agency, agent, date, pax, period, initial request, `notify_agent: true` — **always** (API default true, false for agent 14 — pass it anyway): the seller must always be notified, except Roberto De Sibi (id 14). Forgotten? Resend with `notify_request_agent`. If the API answers 409 duplicate (`dup_candidates`, also "possible"), stop and show Roberto the candidates; never add `dup_override` without his ok. Any other error: stop and say so. Report folder, `request_id` and `notify.sent`.
 - Agent id, agency not in the Hub, folder naming: exceptions §B.
+- `initial_request` = the customer's original message, complete, word for word — never a summary. If the request already exists (e.g. from a HubSpot form) and the customer also writes by email, append the email word for word below what is there, with date and subject (`update_request`), and forward it to the seller (27 Nov 2026, MaricaCoppolaRega).
 
 ## 2. Programme and prices
 
