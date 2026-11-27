@@ -618,8 +618,8 @@ dates, pax, rooms, meal plan, legs, amounts — never passport numbers or dates 
 A run: collect (Calc services + `invoices/` / `bookings/` files) → documents read by `cron_booking_gate.php` (cron-job.org every
 minute, token as `ck_cron.php`) or by the open panel → evaluation → `booking-check.html` in the folder (overwritten) → Booking
 follow-up lines type `gate` (source `gate_check`, `details.blocking`), booking lines owned by the user who tried the status
-change / ran the check (the CK booking owner is set to that user when empty), sales → CK owner, accounts → Roberto → a memo
-to that user. Documents already read (same Dropbox `content_hash`) are never sent again; tokens and cost per run.
+change / ran the check (the CK booking owner is set to that user when empty), sales → CK owner, accounts → Roberto. **No memo**
+(Roberto, 27 Nov 2026): the result is on the request panel, `booking-check.html`, Booking follow-up, CK badge and timeline. Documents already read (same Dropbox `content_hash`) are never sent again; tokens and cost per run.
 - `gate_status` — `request_id`; optional `stale=0` (skip the Dropbox comparison). Returns `state`
   (`none|queued|running|passed|stale|blocked|error|overridden`), `allowed`, `reason`, `run {id, docs_total, docs_done,
   blocking_count, warning_count, tokens_in, tokens_out, cost_usd, model, …}`, `blocking[]`, `warnings[]` `{issue, label, text,
@@ -644,7 +644,7 @@ to that user. Documents already read (same Dropbox `content_hash`) are never sen
   status tag or `_CK`); (3) the request is not a group and its Hub status is `Cancelled`, `Quoted`, `Hot-Quoted` or `Inquiry` (never
   `Booked`). Only the paths that know the destination apply it: `rename_folder` / BackOffice Rename with `current_path` (re-link of a
   folder already moved into `/2026`) and `reopen_cancelled` / request page "Reopen as quote" (`bg_reopen_quote_ok()`). The Java BackOffice endpoints (`api_rename_folder.php`, `api_update_status.php`)
-  rename on disk first: they cannot refuse — timeline + memo to Roberto + a run started (`booking_gate_warning`).
+  rename on disk first: they cannot refuse — timeline + a run started (`booking_gate_warning`).
   A refused attempt with no usable run starts one. Later moves (DEPOSIT → BALANCE → PAID) are not gated.
 - **GRP participants carry their own tag** (27 Nov 2026): Create GRP / Add to GRP name the participant's sub-folder
   `<Customer>(<Agency>-<Agent>)_PROGRESS` (`bo_grp_member_name()`); its PROGRESS → first payment tag is gated like a private

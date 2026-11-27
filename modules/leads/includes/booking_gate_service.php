@@ -721,7 +721,7 @@ const BG_READABLE_EXT = ['pdf', 'jpg', 'jpeg', 'png', 'gif', 'webp', 'docx', 'xl
 /**
  * Open gate lines "File type .X is not read by the gate" whose type the gate reads now (.xls since 14 Nov 2026) stay
  * open forever: lines are only replaced by a new run, and nobody re-runs the check of a folder already past PROGRESS.
- * Re-run the check of those bookings (no owner → no memo; the run replaces / closes the lines). At most $max runs per
+ * Re-run the check of those bookings (the run replaces / closes the lines). At most $max runs per
  * call, a booking checked in the last 12 h is skipped. Called by ck_cron.php. → summary line.
  */
 function bg_reread_stale_unreadable(PDO $db, int $max = 3): string {
@@ -2382,39 +2382,7 @@ function bg_finish_run(PDO $db, int $id): void {
     $lines = array_map(fn($x) => '- ' . $x['label'] . ': ' . $x['text'], array_filter($res['findings'], fn($x) => $x['blocking']));
     timeline_log($rid, $res['passed'] ? 'note' : 'issue', 'Booking check ' . ($res['passed'] ? 'passed' : 'blocked: ' . $res['blocking'] . ' item(s)')
                  . ($res['warnings'] ? ' · ' . $res['warnings'] . ' warning(s)' : ''), ['body' => implode("\n", $lines)]);
-    bg_notify($db, bg_run($db, $id), $r, $res);
-}
-
-/** Memo on the booking person's board (the run's owner, else its starter) when a run finishes. Never throws. */
-function bg_notify(PDO $db, array $run, array $r, array $res): void {
-    $uid = $run['owner_user_id'] ?: $run['started_by'];
-    if (!$uid) return;
-    try {
-        require_once __DIR__ . '/../../memo/memo_lib.php';
-        memo_schema($db);
-        $e = fn($s) => htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8');
-        $title = 'Booking check ' . ($res['passed'] ? 'passed' : 'blocked (' . $res['blocking'] . ')') . ' — ' . ($r['customer_name'] ?? ('request ' . $run['request_id']));
-        $html = '<p>' . ($res['passed'] ? 'The booking check passed: the folder can leave PROGRESS.' : 'The booking check found blocking items: fix them and press "Re-run check".') . '</p>';
-        $bl = array_filter($res['findings'], fn($x) => $x['blocking']);
-        if ($bl) $html .= '<ul>' . implode('', array_map(fn($x) => '<li><b>' . $e($x['label']) . '</b>: ' . $e($x['text']) . '</li>', $bl)) . '</ul>';
-        if ($res['warnings']) $html .= '<p>' . (int)$res['warnings'] . ' warning(s) (transfers, client info, provisional): see Booking follow-up.</p>';
-        $html .= '<p><a href="../leads/request_view.php?id=' . (int)$run['request_id'] . '">Open the request</a></p>';
-        $key = 'gate:' . (int)$run['request_id'];
-        $now = bg_now();
-        $st = $db->prepare("SELECT id FROM memos WHERE user_id = ? AND ext_key = ? AND deleted_at IS NULL AND status NOT IN ('done','archived') ORDER BY id DESC LIMIT 1");
-        $st->execute([(int)$uid, $key]);
-        $mid = (int)($st->fetchColumn() ?: 0);
-        if ($mid) {
-            $db->prepare("UPDATE memos SET title = ?, body = ?, updated_at = ? WHERE id = ?")->execute([mb_substr($title, 0, 250), $html, $now, $mid]);
-        } else {
-            $db->prepare("INSERT INTO memos (user_id, title, body, type, status, priority, pinned, color, due_date, reminder_at, reminder_emails,
-                              reminder_sent, recur_rule, sort_order, request_id, source, ext_key, created_at, updated_at)
-                          VALUES (?, ?, ?, 'todo', 'open', ?, 0, NULL, ?, NULL, NULL, 0, 'none', 0, ?, 'gate', ?, ?, ?)")
-               ->execute([(int)$uid, mb_substr($title, 0, 250), $html, $res['passed'] ? 'normal' : 'high', date('Y-m-d'), (int)$run['request_id'], $key, $now, $now]);
-        }
-    } catch (Throwable $e) {
-        error_log('bg_notify: ' . $e->getMessage());
-    }
+    // No memo (Roberto, 27 Nov 2026): the result is on the request panel, booking-check.html, Booking follow-up, CK badge, timeline.
 }
 
 // ── Report ───────────────────────────────────────────────────────────────────
@@ -2624,18 +2592,11 @@ function booking_gate_message(array $g): string {
 
 /**
  * A folder renamed outside the Hub's own rename (Java BackOffice → api_rename_folder / api_update_status): it cannot
- * be refused any more, so a gated move without a passed check is written in the timeline, a memo goes to Roberto
- * and a run is started. → the booking_gate_check() result.
+ * be refused any more, so a gated move without a passed check is written in the timeline and a run is started
+ * (no memo since 27 Nov 2026). → the booking_gate_check() result.
  */
 function booking_gate_after_external(PDO $db, int $rid, string $oldName, string $newName): array {
-    $g = booking_gate_check($db, $rid, $oldName, $newName, null, 'external');
-    if ($g['gated'] && $g['reason'] !== '' && $g['state'] !== 'passed' && $g['state'] !== 'overridden') {
-        require_once __DIR__ . '/folder_link_service.php';
-        fl_memo_upsert($db, 'gate-external:' . $rid, 'Folder moved out of PROGRESS without a passed booking check',
-                       '<p>' . htmlspecialchars($newName, ENT_QUOTES, 'UTF-8') . ' was renamed outside the Hub (Java BackOffice / Dropbox).</p><p>'
-                       . htmlspecialchars($g['reason'], ENT_QUOTES, 'UTF-8') . '</p>', $rid, 'high');
-    }
-    return $g;
+    return booking_gate_check($db, $rid, $oldName, $newName, null, 'external');
 }
 
 /** Force unlock: Roberto (rdesibi) only, reason ≥ 10 characters; timeline + agent_audit_log. */

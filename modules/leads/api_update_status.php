@@ -111,7 +111,7 @@ if ($updateStatus) {
     $msg = "Folder updated";
 }
 
-// Booking gate (after the fact, see api_rename_folder.php): timeline + memo + a check started.
+// Booking gate (after the fact, see api_rename_folder.php): timeline + a check started.
 $gateWarn = null;
 try {
     require_once 'includes/booking_gate_service.php';

@@ -279,7 +279,7 @@ if ($matchedViaGroupFolder) {
 }
 
 // Booking gate: the Java BackOffice has already renamed the folder on disk, so a move out of _PROGRESS without a
-// passed booking check cannot be refused here — it is written in the timeline, a memo goes to Roberto and a check starts.
+// passed booking check cannot be refused here — it is written in the timeline and a check starts (no memo).
 $gateWarn = null;
 if (!$matchedViaGroupFolder) {
     try {
