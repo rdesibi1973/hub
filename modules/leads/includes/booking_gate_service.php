@@ -1689,6 +1689,18 @@ function bg_evaluate(array $snap, array $docs, ?callable $alias = null, ?callabl
         }
         $named = array_values(array_filter($over, fn($k) => $verdict[$k] === 'same' || ($verdict[$k] === null && bg_same_name($s['name'], $nameOf($k)))));
         $diff = array_values(array_filter($over, fn($k) => $verdict[$k] === 'different'));
+        // Another Calc stay on the same nights (split RECAP stay, bg_split_stays(): Florio at Airport Planet, Marioni at
+        // Arusha Explorers) explains a document of its own lodge: not "another lodge booked" for this one.
+        if ($diff) {
+            $diff = array_values(array_filter($diff, function ($k) use ($svcs, $i, $in, $out, $nameOf, $lodgeOf) {
+                foreach ($svcs as $j => $o) {
+                    if ($j === $i || $o['type'] !== 'accommodation' || !($o['check_in'] < $out && $o['check_out'] > $in)) continue;
+                    $v = bg_lodge_verdict($o['name'], $nameOf($k), $lodgeOf);
+                    if ($v === 'same' || ($v === null && bg_same_name($o['name'], $nameOf($k)))) return false;
+                }
+                return true;
+            }));
+        }
         if ($s['own'] && !$named) {
             // Orangi Collection SV: one line per night block, "The Orangi Collection" as supplier — only lines naming no other lodge.
             $named = array_values(array_filter($over, function ($k) use ($items, $nameOf, $s, $verdict) {
