@@ -297,6 +297,35 @@ function bg_svc_key(array $s): string {
 }
 
 /**
+ * One Calc hotel text naming two lodges for different participants — RECAP "Airport Planet Lodge HB (Florio) + Arusha
+ * Explorers HB (Marioni)" (FabrizioFlorio GRP2212, 28 Nov 2026) — is two stays on the same nights, one per part, each
+ * then scoped to its participants by bg_member_scope() (pax, rooms, cost from their sheets). Split only on a "+" outside
+ * brackets and only when every part names someone in brackets: "Arusha Explorers HB (Florio 1 DBL + Marioni 1 SGL)" and
+ * "Marera View Lodge (1 DBL + 1 SGL)" stay one stay. The parts carry no cost (unknown split) unless bg_member_scope() finds it.
+ */
+function bg_split_stays(array $svcs): array {
+    $out = [];
+    foreach ($svcs as $s) {
+        if (($s['type'] ?? '') !== 'accommodation') { $out[] = $s; continue; }
+        $parts = []; $cur = ''; $depth = 0;
+        foreach (preg_split('//u', (string)$s['name'], -1, PREG_SPLIT_NO_EMPTY) as $ch) {
+            if ($ch === '(') $depth++;
+            elseif ($ch === ')') $depth = max(0, $depth - 1);
+            if ($ch === '+' && $depth === 0) { $parts[] = trim($cur); $cur = ''; continue; }
+            $cur .= $ch;
+        }
+        $parts[] = trim($cur);
+        $ok = count($parts) >= 2;
+        foreach ($parts as $p) if (!preg_match('/^[^()]*[a-z]{3}[^()]*\([^)]*[a-z][^)]*\)/i', $p)) $ok = false;
+        if (!$ok) { $out[] = $s; continue; }
+        foreach ($parts as $p) {
+            $out[] = ['name' => $p, 'own' => (bool)preg_match(BC_OWN_LODGES, $p), 'cost' => null, 'split_from' => $s['name']] + $s;
+        }
+    }
+    return $out;
+}
+
+/**
  * GRP (Roberto, 27 Nov 2026): which participants each RECAP service belongs to, so that a client who joins a group with
  * services of his own (sea in Zanzibar…) is blocked on his services, not on another participant's. A RECAP service found
  * in some client sheets but not in all of them — or whose Calc label names a participant ("Zanzibar (Bonfante)") — belongs
@@ -322,7 +351,8 @@ function bg_member_scope(PDO $db, array $bc, array $r): array {
             $keys = [];
             foreach ($clients as $sh) {
                 $sc = calc_read_file($tmp, $sh);
-                $keys[$sh] = array_flip(array_map('bg_svc_key', bc_services($sc)));
+                $keys[$sh] = [];
+                foreach (bc_services($sc) as $cs) $keys[$sh][bg_svc_key($cs)] = $cs;
                 $sp = bg_calc_pax($sc)[0];
                 $out['sheet_pax'][$sh] = (int)$sp['adults'] + (int)$sp['teen'] + (int)$sp['child'];   // paying pax of that sheet
             }
@@ -343,6 +373,16 @@ function bg_member_scope(PDO $db, array $bc, array $r): array {
                     foreach ($words as $sh => $w) if ($w && array_intersect($w, $label)) $in[] = $sh;
                 }
                 if ($in && count($in) < count($clients)) $out['svc_sheets'][$i] = array_values(array_unique($in));
+                // A split RECAP stay (bg_split_stays()) has no cost of its own: the sum of its participants' sheets (column J).
+                if (!empty($s['split_from']) && $in) {
+                    $c = 0.0; $known = true;
+                    foreach (array_unique($in) as $sh) {
+                        $cs = $keys[$sh][$k] ?? null;
+                        if ($cs === null || $cs['cost'] === null) { $known = false; break; }
+                        $c += (float)$cs['cost'];
+                    }
+                    if ($known) $out['svc_cost'][$i] = $c;
+                }
             }
         } finally {
             @unlink($tmp);
@@ -503,6 +543,7 @@ function bg_start_run(PDO $db, int $rid, ?int $userId, string $trigger = 'manual
         bg_finish_run($db, $id);
         return bg_run($db, $id);
     }
+    $bc['services'] = bg_split_stays($bc['services']);
     $token = dropbox_get_access_token();
     $fs = bg_folder_state($token, $bc['folder'], (string)$bc['calc']['file']);
     $calc = $bc['calc'];
@@ -516,7 +557,10 @@ function bg_start_run(PDO $db, int $rid, ?int $userId, string $trigger = 'manual
                    'warnings' => $calc['warnings']],   // guests (names, DOB) deliberately left out
         'services' => $bc['services'], 'guide_activities' => $bc['guide_activities'] ?? [], 'evidence' => $bc['evidence'],
     ];
-    if ($grp) $snap['member_scope'] = bg_member_scope($db, $bc, $r);   // whose services are whose (bg_state())
+    if ($grp) {
+        $snap['member_scope'] = bg_member_scope($db, $bc, $r);   // whose services are whose (bg_state())
+        foreach ($snap['member_scope']['svc_cost'] ?? [] as $si => $c) if (isset($snap['services'][$si])) $snap['services'][$si]['cost'] = $c;
+    }
     $docs = array_values(array_filter($bc['evidence'], fn($e) => empty($e['old']) && !preg_match('/passport|passaporto/i', $e['name'])));
     $id = $ins(['request_id' => $rid, 'trigger_src' => $trigger, 'started_by' => $userId, 'owner_user_id' => $owner, 'started_at' => $now,
                 'state' => 'queued', 'folder' => $bc['folder'], 'calc_file' => $calc['file'], 'calc_sheet' => $calc['sheet'],
@@ -1293,6 +1337,9 @@ function bg_room_capacity(string $type): int {
  */
 function bg_rooms_parse(string $s): array {
     $types = []; $total = 0;
+    // A note in brackets with a colon is about one lodge, not the room's bed layout (ElenaManfroni 28 Nov 2026: Calc
+    // "3 DBL + 2 TPL (Orangi Lux: 6 DBL)" read as 2 family rooms of 6 double beds).
+    $s = preg_replace('/\s*\([^()]*:[^()]*\)/', '', $s);
     $s = preg_replace('/\s*(?:\bwith\b|\bw\/)\s*(?:[^,;+()]*?\bbeds?\b|[^,;+()]*)/i', '', $s);
     $s = preg_replace('/\s*\((?:\s*(?:\d+|x|dbls?|doubles?|sgls?|sngls?|singles?|twin|queens?|kings?|size|separate|beds?|and|&|\+|,)\s*)+\)/i', '', $s);
     foreach (preg_split('/\s*(?:\+|,|&|\band\b|;)\s*/i', $s) as $part) {
@@ -2026,6 +2073,18 @@ function bg_eval_stay(array &$svcs, int $i, array $named, array &$items, callabl
         return;
     }
     $in = $s['check_in']; $out = $s['check_out'];
+    // Day room of the same lodge on the departure day (bc_services() day_room): booked as one more night (Orangi SV
+    // FlavioMarioni 27–29 Dec for "Arusha Explorers HB" 27 Dec + "day room" 28 Dec) — the document may end a day later.
+    if (!empty($s['day_room']) && $out && bg_same_name($s['name'], (string)$s['day_room'])) {
+        $out2 = date('Y-m-d', strtotime($out . ' +1 day'));
+        foreach ($named as $k) {
+            if (bg_date($items[$k]['ds']['check_out'] ?? null) === $out2) {
+                $out = $out2;
+                $svcs[$i]['notes'][] = 'Day room on ' . bg_dm($s['check_out']) . ' booked as one more night (to ' . bg_dm($out2) . ').';
+                break;
+            }
+        }
+    }
     $exact = false; $ranges = [];
     $extraKeys = [];   // meals billed apart on the same document: part of the supplier's amount (Benni: 452 room + 112 dinner = 564)
     // One document per party for the same stay (FlavioMarioni 27 Nov 2026: Orangi SV for Florio 2 pax + SV for Marioni 1 pax,

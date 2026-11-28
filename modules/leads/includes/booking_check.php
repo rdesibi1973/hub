@@ -109,6 +109,13 @@ function bc_services(array $calc): array {
         }
     }
     $close();
+    // A day room on the departure day ("Arusha Explorers HB day room (Marioni)") is booked with the lodge as one more night:
+    // kept on the stay ending that day (day_room = the text), so that the booking gate accepts the extra night.
+    $lastDay = $n ? $days[$n - 1] : null;
+    if ($lastDay && preg_match('/day[\s-]*room/i', (string)$lastDay['hotel_text'])) {
+        foreach ($out as &$o) if ($o['type'] === 'accommodation' && $o['check_out'] === $lastDay['date']) $o['day_room'] = trim((string)$lastDay['hotel_text']);
+        unset($o);
+    }
     bc_attach_annotations($out, $calc['skipped_rows'] ?? []);
     usort($out, function ($a, $b) {
         $da = $a['type'] === 'accommodation' ? $a['check_in'] : $a['date'];
