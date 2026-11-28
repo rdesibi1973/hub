@@ -2430,6 +2430,18 @@ function bg_finish_run(PDO $db, int $id): void {
             $sum = followup_gate_upsert($db, $rid, $ckRow, $f, ['run_id' => $id, 'report_path' => $reportPath, 'booking_owner_id' => $ownerId,
                                                             'trigger' => (string)($run['trigger_src'] ?? '')]);
             $res['followup'] = ['added' => count($sum['added']), 'merged' => count($sum['merged']), 'updated' => count($sum['updated']), 'closed' => count($sum['closed'])];
+            // GRP: the run is the whole group's, its lines go on the member that ran it — the open gate lines of the other
+            // members come from an older run of the same check and close (FlavioMarioni 28 Nov 2026: lines of a run started
+            // from Marioni stayed open after a passed run started from Florio).
+            if ($r && bg_grp_member($r)) {
+                foreach (bg_group_rids($db, $r) as $oid) {
+                    if ($oid === $rid) continue;
+                    $oRow = ck_tracker_row_for($db, null, $oid);
+                    if (!$oRow) continue;
+                    $os = followup_gate_upsert($db, $oid, $oRow, [], ['run_id' => $id, 'trigger' => (string)($run['trigger_src'] ?? '')]);
+                    $res['followup']['closed'] += count($os['closed']);
+                }
+            }
             // A complete run (every document read, Calc readable) supersedes the older Claude-check booking lines it no longer reports.
             $complete = empty($res['not_read']) && !array_filter($res['findings'], fn($x) => in_array($x['issue'], ['calc_not_clean', 'doc_unreadable'], true));
             if ($complete) {
