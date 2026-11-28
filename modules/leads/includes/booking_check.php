@@ -23,9 +23,10 @@ const BC_OWN_LODGES = '/\b(orangi|marera|kifaru|arusha explorers?)\b/i';
 /**
  * ACTIVITY DESC items handled in-house, not booked with a supplier: Maasai visits, Napuro
  * waterfalls and Lake Eyasi activities are arranged by the safari guide, Olduvai is paid
- * with the Ngorongoro permit.
+ * with the Ngorongoro permit. Hampers (anywhere in the item, e.g. "Christmas hampers") need no voucher
+ * or invoice (Roberto, 28 Nov 2026).
  */
-const BC_INTERNAL = '/^(emergency|medi ?vac|amref|lunch ?box|hot lunch|picnic|gates?\b|paid\b|maa?sai|olduvai|oldupai|napuro|(lake )?eyasi|(cathedral )?church visit|(short )?city tour|ok$|-+$)/i';
+const BC_INTERNAL = '/^(emergency|medi ?vac|amref|lunch ?box|hot lunch|picnic|gates?\b|paid\b|maa?sai|olduvai|oldupai|napuro|(lake )?eyasi|(cathedral )?church visit|(short )?city tour|ok$|-+$)|\bhampers?\b/i';
 
 // BC_GUIDE_ACTIVITY: activities organised by the safari guide (town tour, bomas, Mto wa Mbu, Materuni, Eyasi…), shared
 // with the Booking follow-up.
